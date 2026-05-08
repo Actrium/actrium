@@ -5,7 +5,7 @@ import {
   getTypographyStyle,
   scrollToBottomButton,
 } from '../../../theme/tokens';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 
@@ -47,7 +47,10 @@ export const ScrollToBottomButton: React.FC<ScrollToBottomButtonProps> = ({
   );
 };
 
-const makeStyles = (colors: ColorTokens) => StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
   container: {
     alignSelf: 'center',
   },
@@ -58,7 +61,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     backgroundColor: colors.bgToBottom,
     alignItems: 'center',
     justifyContent: 'center',
-    ...HOST_SHADOWS.floatingButton,
+    ...hostShadows.floatingButton,
   },
   buttonPressed: {
     opacity: 0.7,
@@ -70,3 +73,4 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     fontWeight: '600',
   },
 });
+};

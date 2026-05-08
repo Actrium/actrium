@@ -34,7 +34,7 @@ import {
   DropdownMenuText,
 } from '../shared/DropdownMenu';
 import { useMessageStore, type SelectionMode } from '../../store/useMessageStore';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { triggerHaptic } from '../../utils/haptics';
 
 import { FeedbackFormModal } from './FeedbackFormModal';
@@ -74,6 +74,7 @@ interface ChatBubbleProps {
   msgId?: string;
   tabId?: string;
   appId?: string;
+  selectionMode?: SelectionMode;
   selectionKey?: string;
   isSelected?: boolean;
   onToggleSelection?: () => void;
@@ -95,6 +96,7 @@ export default function ChatBubble({
   msgId,
   tabId,
   appId,
+  selectionMode = 'none',
   selectionKey,
   isSelected = false,
   onToggleSelection,
@@ -120,7 +122,6 @@ export default function ChatBubble({
 
   const { activePlayback, setActivePlayback, clearPlayback } =
     useVoicePlaybackStore();
-  const selectionMode: SelectionMode = useMessageStore((s) => s.selectionMode);
   const enterSelectionMode = useMessageStore((s) => s.enterSelectionMode);
 
   const [isCopied, setIsCopied] = React.useState(false);
@@ -741,8 +742,10 @@ export default function ChatBubble({
   );
 }
 
-const makeStyles = (colors: ColorTokens) =>
-  StyleSheet.create({
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
     toolbarContainer: {
       flexDirection: 'row',
       alignItems: 'center',
@@ -928,7 +931,7 @@ const makeStyles = (colors: ColorTokens) =>
       padding: 10,
       width: 228,
       gap: 8,
-      ...HOST_SHADOWS.menuSurface,
+      ...hostShadows.menuSurface,
     },
     moreMenuItem: {
       flexDirection: 'row',
@@ -947,3 +950,4 @@ const makeStyles = (colors: ColorTokens) =>
       fontWeight: '500',
     },
   });
+};

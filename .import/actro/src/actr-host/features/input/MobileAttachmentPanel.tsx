@@ -72,37 +72,6 @@ export const getMobileAttachmentPanelHeight = (bottomInset: number) =>
   PANEL_DOT_SIZE +
   getMobileAttachmentPanelBottomPadding(bottomInset);
 
-const withOpacity = (color: string, opacity: number) => {
-  const normalized = color.trim();
-  const clampedOpacity = Math.max(0, Math.min(1, opacity));
-
-  if (normalized.startsWith('#')) {
-    let hex = normalized.slice(1);
-    if (hex.length === 3) {
-      hex = hex
-        .split('')
-        .map((char) => char + char)
-        .join('');
-    }
-    if (hex.length === 6) {
-      const r = parseInt(hex.slice(0, 2), 16);
-      const g = parseInt(hex.slice(2, 4), 16);
-      const b = parseInt(hex.slice(4, 6), 16);
-      return `rgba(${r}, ${g}, ${b}, ${clampedOpacity})`;
-    }
-  }
-
-  const rgbMatch = normalized.match(
-    /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*[\d.]+\s*)?\)$/,
-  );
-  if (rgbMatch) {
-    const [, r, g, b] = rgbMatch;
-    return `rgba(${r}, ${g}, ${b}, ${clampedOpacity})`;
-  }
-
-  return color;
-};
-
 export default function MobileAttachmentPanel({
   expanded,
   showSearchEntry,
@@ -303,7 +272,11 @@ export default function MobileAttachmentPanel({
                   activeOpacity={0.8}
                   onPress={item.onPress}
                 >
-                  <Icon type={item.icon} size={22} color="#252525" />
+                  <Icon
+                    type={item.icon}
+                    size={22}
+                    color={colors.iconMobileAttachment}
+                  />
                   <AppText
                     style={styles.primaryText}
                     numberOfLines={1}
@@ -335,7 +308,11 @@ export default function MobileAttachmentPanel({
                     <Icon
                       type={item.icon}
                       size={22}
-                      color={item.active ? '#597EF7' : '#292929'}
+                      color={
+                        item.active
+                          ? colors.iconMobileAttachmentActive
+                          : colors.iconMobileAttachment
+                      }
                     />
                   </View>
                   <View style={styles.secondaryTextBlock}>
@@ -403,14 +380,14 @@ const makeStyles = (colors: ColorTokens, panelBottomPadding: number) =>
       flex: 1,
       height: PANEL_ROW_HEIGHT,
       borderRadius: 30,
-      backgroundColor: '#EAEAEA',
+      backgroundColor: colors.bgMobileAttachmentItem,
       alignItems: 'center',
       justifyContent: 'center',
     },
     primaryText: {
       fontSize: PRIMARY_TEXT_FONT_SIZE,
       lineHeight: PRIMARY_TEXT_LINE_HEIGHT,
-      color: '#252525',
+      color: colors.textMobileAttachmentPrimary,
       marginTop: 4,
       fontWeight: '500',
     },
@@ -424,13 +401,13 @@ const makeStyles = (colors: ColorTokens, panelBottomPadding: number) =>
       flexShrink: 0,
       height: PANEL_ROW_HEIGHT,
       borderRadius: 30,
-      backgroundColor: '#EAEAEA',
+      backgroundColor: colors.bgMobileAttachmentItem,
       flexDirection: 'row',
       alignItems: 'center',
       paddingHorizontal: 18,
     },
     secondaryItemActive: {
-      backgroundColor: '#E9F0FC',
+      backgroundColor: colors.bgMobileAttachmentItemActive,
     },
     secondaryIconWrap: {
       width: 28,
@@ -445,20 +422,20 @@ const makeStyles = (colors: ColorTokens, panelBottomPadding: number) =>
     secondaryTitle: {
       fontSize: SECONDARY_TITLE_FONT_SIZE,
       lineHeight: SECONDARY_TITLE_LINE_HEIGHT,
-      color: '#292929',
+      color: colors.textMobileAttachmentSecondary,
       fontWeight: '500',
     },
     secondaryTitleActive: {
-      color: '#597EF7',
+      color: colors.textMobileAttachmentActive,
     },
     secondarySubtitle: {
       fontSize: SECONDARY_SUBTITLE_FONT_SIZE,
       lineHeight: SECONDARY_SUBTITLE_LINE_HEIGHT,
-      color: '#8F8F8F',
+      color: colors.textMobileAttachmentSubtitle,
       marginTop: 2,
     },
     secondarySubtitleActive: {
-      color: withOpacity('#597EF7', 0.5),
+      color: colors.textMobileAttachmentActiveSubtitle,
     },
     pagerDots: {
       flexDirection: 'row',

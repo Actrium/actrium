@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { AppText } from '../../../components';
 import { dropdownMenu, getTypographyStyle, spacing } from '../../../theme/tokens';
-import { HOST_SHADOWS } from '../../styles/shadows';
+import { getHostShadows } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import { triggerHaptic } from '../../utils/haptics';
@@ -93,6 +93,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
 }) => {
   const [isOpen, setIsOpen] = React.useState(false);
   const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const [triggerRect, setTriggerRect] = React.useState<TriggerRect | null>(null);
   const [menuSize, setMenuSize] = React.useState({
     width: estimatedWidth,
@@ -404,6 +405,7 @@ export const DropdownMenuItem: React.FC<{
   isActive?: boolean;
 }> = ({ onPress, children, isActive }) => {
   const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   return (
     <Pressable
       onPress={onPress}
@@ -428,6 +430,7 @@ export const DropdownMenuText: React.FC<{
   color?: string;
 }> = ({ children, color }) => {
   const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   return (
     <AppText variant='menuLabel' style={[styles.dropdownText, { color: color ?? colors.textMenuLabel }]}>
       {children}
@@ -439,6 +442,7 @@ export const DropdownMenuSubText: React.FC<{
   children: string;
 }> = ({ children }) => {
   const colors = useColors();
+  const styles = React.useMemo(() => makeStyles(colors), [colors]);
   return (
     <AppText variant='caption1' style={[styles.dropdownSubText, { color: colors.textTertiary }]}>
       {children}
@@ -446,40 +450,44 @@ export const DropdownMenuSubText: React.FC<{
   );
 };
 
-const styles = StyleSheet.create({
-  modalBackdrop: {
-    flex: 1,
-  },
-  dropdown: {
-    position: 'absolute',
-    borderRadius: 34,
-    padding: dropdownMenu.padding,
-    gap: spacing.sm,
-    ...HOST_SHADOWS.menuSurface,
-  },
-  dropdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.md,
-    gap: spacing.sm,
-    borderRadius: 34,
-    justifyContent: 'space-between',
-  },
-  dropdownItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.md,
-  },
-  dropdownText: {
-    ...getTypographyStyle('menuLabel'),
-    fontWeight: '500',
-    flexShrink: 1,
-  },
-  dropdownSubText: {
-    ...getTypographyStyle('caption1'),
-    marginTop: spacing.xxxs,
-    fontWeight: '400',
-    flexShrink: 1,
-  },
-});
+const makeStyles = (colors: ColorTokens) => {
+  const hostShadows = getHostShadows(colors);
+
+  return StyleSheet.create({
+    modalBackdrop: {
+      flex: 1,
+    },
+    dropdown: {
+      position: 'absolute',
+      borderRadius: 34,
+      padding: dropdownMenu.padding,
+      gap: spacing.sm,
+      ...hostShadows.menuSurface,
+    },
+    dropdownItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: spacing.lg,
+      paddingVertical: spacing.md,
+      gap: spacing.sm,
+      borderRadius: 34,
+      justifyContent: 'space-between',
+    },
+    dropdownItemContent: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: spacing.md,
+    },
+    dropdownText: {
+      ...getTypographyStyle('menuLabel'),
+      fontWeight: '500',
+      flexShrink: 1,
+    },
+    dropdownSubText: {
+      ...getTypographyStyle('caption1'),
+      marginTop: spacing.xxxs,
+      fontWeight: '400',
+      flexShrink: 1,
+    },
+  });
+};

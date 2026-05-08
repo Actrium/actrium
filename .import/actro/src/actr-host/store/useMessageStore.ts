@@ -3,7 +3,7 @@ import { IMessage } from '../../repository/MessageRepository';
 import { MessageRepository } from '../../repository/MessageRepository';
 import { cleanupVoiceMessageFile } from '../utils/VoiceMessageStorage';
 
-type MessagePart = 'attachments' | 'question' | 'answer';
+export type MessagePart = 'attachments' | 'question' | 'answer';
 
 // 中文注释：选择模式类型，'none' 未进入选择模式，'delete' 为删除多选，'share' 为分享多选。
 export type SelectionMode = 'none' | 'delete' | 'share';
