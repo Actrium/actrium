@@ -23,7 +23,7 @@ If you do not agree, you will not be able to use the features of this applicatio
 "blackTab" = "Nouvel onglet";
 
 /* Menu appui long */
-"bookmark" = "Favori";
-"unbookmark" = "Retirer des favoris";
+"bookmark" = "Signet";
+"unbookmark" = "Supprimer le signet";
 "closeTab" = "Fermer l'onglet";
 "closeOtherTabs" = "Fermer les autres onglets";

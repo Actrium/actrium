@@ -24,6 +24,6 @@ If you do not agree, you will not be able to use the features of this applicatio
 
 /* Long Press Menu */
 "bookmark" = "Bookmark";
-"unbookmark" = "Remove Bookmark";
+"unbookmark" = "Unbookmark";
 "closeTab" = "Close Tab";
 "closeOtherTabs" = "Close Other Tabs";

@@ -23,7 +23,7 @@ If you do not agree, you will not be able to use the features of this applicatio
 "blackTab" = "Новая вкладка";
 
 /* Меню долгого нажатия */
-"bookmark" = "В закладки";
-"unbookmark" = "Убрать из закладок";
+"bookmark" = "Закладка";
+"unbookmark" = "Удалить закладку";
 "closeTab" = "Закрыть вкладку";
-"closeOtherTabs" = "Закрыть другие вкладки";
+"closeOtherTabs" = "Закрыть остальные вкладки";
