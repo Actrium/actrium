@@ -9,6 +9,7 @@ import {
   PermissionsAndroid,
   Platform,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ViewShot from 'react-native-view-shot';
 import { CameraRoll } from '@react-native-camera-roll/camera-roll';
 import { useTranslation } from 'react-i18next';
@@ -22,13 +23,16 @@ import type { ColorTokens } from '../../../../theme/colors';
 import {
   getTypographyStyle,
   inputArea,
+  selectionActionBar,
   spacing,
 } from '../../../../theme/tokens';
+import { isTablet } from '../../../../utils/device';
 import ChatShareBubble from './ChatShareBubble';
 
 interface ChatSharePreviewModalProps {
   visible: boolean;
-  message: IMessage | null;
+  // 中文注释：支持多消息分享，按数组顺序渲染到分享图中。
+  messages: IMessage[];
   appName?: string;
   appUrl?: string;
   onClose: () => void;
@@ -49,10 +53,12 @@ interface ShareAttachmentLike {
 
 const SHARE_QR_QUIET_ZONE_MODULES = 4;
 const SHARE_QR_TARGET_SIZE = 88;
+const FOOTER_TOP_SPACE =
+  (selectionActionBar.height - inputArea.minHeight) / 2;
 
 export default function ChatSharePreviewModal({
   visible,
-  message,
+  messages,
   appName,
   appUrl,
   onClose,
@@ -60,13 +66,25 @@ export default function ChatSharePreviewModal({
 }: ChatSharePreviewModalProps) {
   const { t } = useTranslation();
   const colors = useColors();
-  const styles = React.useMemo(() => makeStyles(colors), [colors]);
+  const insets = useSafeAreaInsets();
+  const bottomPadding = isTablet
+    ? 0
+    : Math.max(insets.bottom, selectionActionBar.phoneMinBottomPadding);
+  const footerHeight = isTablet
+    ? selectionActionBar.height
+    : FOOTER_TOP_SPACE + inputArea.minHeight + bottomPadding;
+  const styles = React.useMemo(
+    () => makeStyles(colors, bottomPadding, footerHeight),
+    [bottomPadding, colors, footerHeight],
+  );
   const { width, height } = useWindowDimensions();
   const viewShotRef = React.useRef<ViewShot>(null);
   const [previewUri, setPreviewUri] = React.useState<string | null>(null);
   const [isCapturing, setIsCapturing] = React.useState(false);
   const [isSaving, setIsSaving] = React.useState(false);
   const [cardLayoutReady, setCardLayoutReady] = React.useState(false);
+  const [shouldRenderCaptureHost, setShouldRenderCaptureHost] =
+    React.useState(false);
   const [captureAttempt, setCaptureAttempt] = React.useState(0);
   const [containerHeight, setContainerHeight] = React.useState(height);
   const [previewAspectRatio, setPreviewAspectRatio] = React.useState<
@@ -78,30 +96,35 @@ export default function ChatSharePreviewModal({
   const [attachmentImageReadyCount, setAttachmentImageReadyCount] = React.useState(0);
   const settledAttachmentKeysRef = React.useRef<Set<string>>(new Set());
 
+  // 中文注释：遍历所有消息的附件，收集需要等待加载完成的图片 key。
   const expectedAttachmentImageKeys = React.useMemo(() => {
-    if (!message?.attachments) return [];
+    const keys: string[] = [];
+    for (const msg of messages) {
+      if (!msg?.attachments) continue;
 
-    try {
-      const parsed = JSON.parse(message.attachments) as ShareAttachmentLike[];
-      return parsed
-        .filter((item) => {
-          if (
-            item?.attachment_type !== 'image' &&
-            item?.attachment_type !== 'location'
-          ) {
-            return false;
-          }
-          return Boolean(item.local_url || item.cdn_url);
-        })
-        .map((item, index) => item.id || `${item.attachment_type}-${index}`);
-    } catch (error) {
-      console.error(
-        '[ChatSharePreviewModal] Failed to parse attachments for share preview:',
-        error,
-      );
-      return [];
+      try {
+        const parsed = JSON.parse(msg.attachments) as ShareAttachmentLike[];
+        const msgKeys = parsed
+          .filter((item) => {
+            if (
+              item?.attachment_type !== 'image' &&
+              item?.attachment_type !== 'location'
+            ) {
+              return false;
+            }
+            return Boolean(item.local_url || item.cdn_url);
+          })
+          .map((item, index) => item.id || `${msg.message_id}-${item.attachment_type}-${index}`);
+        keys.push(...msgKeys);
+      } catch (error) {
+        console.error(
+          '[ChatSharePreviewModal] Failed to parse attachments for share preview:',
+          error,
+        );
+      }
     }
-  }, [message?.attachments]);
+    return keys;
+  }, [messages]);
   const expectedAttachmentImageCount = expectedAttachmentImageKeys.length;
 
   const handleAttachmentImageSettled = React.useCallback(
@@ -122,6 +145,7 @@ export default function ChatSharePreviewModal({
       setIsCapturing(false);
       setIsSaving(false);
       setCardLayoutReady(false);
+      setShouldRenderCaptureHost(false);
       setCaptureAttempt(0);
       setShareQrMatrix(null);
       setAttachmentImageReadyCount(0);
@@ -130,12 +154,34 @@ export default function ChatSharePreviewModal({
   }, [visible]);
 
   React.useEffect(() => {
-    settledAttachmentKeysRef.current.clear();
-    setAttachmentImageReadyCount(0);
-  }, [message?.message_id, message?.attachments]);
+    if (!visible) return;
+
+    let frameId: number | null = null;
+    frameId = requestAnimationFrame(() => {
+      // 中文注释：先让弹窗外壳完成首帧渲染，再挂载隐藏截图区域，避免大段消息布局阻塞弹窗出现。
+      setShouldRenderCaptureHost(true);
+    });
+
+    return () => {
+      if (frameId !== null) {
+        cancelAnimationFrame(frameId);
+      }
+    };
+  }, [visible]);
+
+  // 中文注释：消息列表变化时重置附件图片加载计数。
+  const messagesKey = React.useMemo(
+    () => messages.map((m) => m.message_id).join(','),
+    [messages],
+  );
 
   React.useEffect(() => {
-    if (!visible || !message || !cardLayoutReady) return;
+    settledAttachmentKeysRef.current.clear();
+    setAttachmentImageReadyCount(0);
+  }, [messagesKey]);
+
+  React.useEffect(() => {
+    if (!visible || messages.length === 0 || !cardLayoutReady) return;
     if (attachmentImageReadyCount < expectedAttachmentImageCount) return;
 
     let cancelled = false;
@@ -195,7 +241,7 @@ export default function ChatSharePreviewModal({
     cardLayoutReady,
     captureAttempt,
     expectedAttachmentImageCount,
-    message,
+    messagesKey,
     onClose,
     t,
     visible,
@@ -229,23 +275,42 @@ export default function ChatSharePreviewModal({
       const hasPermission = await ensureAndroidPhotoPermission();
       if (!hasPermission) {
         GlobalAlert.alert(
-          t('common.error'),
+          t('actr.chat.shareSavePermissionDeniedTitle'),
           t('actr.chat.shareSavePermissionDenied'),
         );
         return;
       }
       await CameraRoll.saveAsset(previewUri, { type: 'photo' });
       onSaved?.();
+      onClose();
     } catch (error) {
       console.error('[ChatSharePreviewModal] Failed to save image:', error);
-      GlobalAlert.alert(t('common.error'), t('actr.chat.shareSaveFailed'));
+      const errorMessage =
+        error instanceof Error
+          ? error.message
+          : typeof error === 'string'
+            ? error
+            : '';
+      const normalizedMessage = errorMessage.toLowerCase();
+      const isPermissionError =
+        normalizedMessage.includes('permission') ||
+        normalizedMessage.includes('denied') ||
+        normalizedMessage.includes('not authorized');
+      if (isPermissionError) {
+        GlobalAlert.alert(
+          t('actr.chat.shareSavePermissionDeniedTitle'),
+          t('actr.chat.shareSavePermissionDenied'),
+        );
+      } else {
+        GlobalAlert.alert(t('common.error'), t('actr.chat.shareSaveFailed'));
+      }
     } finally {
       setIsSaving(false);
     }
-  }, [ensureAndroidPhotoPermission, isSaving, onSaved, previewUri, t]);
+  }, [ensureAndroidPhotoPermission, isSaving, onClose, onSaved, previewUri, t]);
 
   const previewWidth = Math.max(width - 68, 0);
-  const previewHeight = Math.max(containerHeight - 90 - 30 - 118, 0);
+  const previewHeight = Math.max(containerHeight - 90 - 30 - footerHeight, 0);
   const captureImageHeight = Math.max(containerHeight, 0);
   const captureOptions = React.useMemo(
     () => ({
@@ -424,106 +489,118 @@ export default function ChatSharePreviewModal({
             </Pressable>
           </View>
         </View>
-        {/* 图片绘制区域 */}
-        <View style={styles.captureHost} pointerEvents='none'>
-          <View collapsable={false}>
-            <ViewShot
-              ref={viewShotRef}
-              style={[styles.captureCard, { width }]}
-              options={captureOptions}
-            >
-              <View
-                style={[styles.captureFrame, { minHeight: captureImageHeight }]}
-                onLayout={() => {
-                  // 中文注释：卡片每次重新布局后递增计数，驱动重新截图，避免屏幕宽度变化时仍复用旧图。
-                  setCardLayoutReady(true);
-                  setCaptureAttempt((value) => value + 1);
-                }}
+        {shouldRenderCaptureHost ? (
+          // 图片绘制区域
+          <View style={styles.captureHost} pointerEvents='none'>
+            <View collapsable={false}>
+              <ViewShot
+                ref={viewShotRef}
+                style={[styles.captureCard, { width }]}
+                options={captureOptions}
               >
-                <View style={styles.captureContent}>
-                  {message?.attachments ? (
-                    <ChatShareBubble
-                      type='question'
-                      attachments={message.attachments}
-                      onAttachmentImageSettled={handleAttachmentImageSettled}
-                    />
-                  ) : null}
-                  {message?.question_content || message?.question_voice_payload ? (
-                    <ChatShareBubble
-                      type='question'
-                      content={message.question_content}
-                      voicePayload={message.question_voice_payload}
-                    />
-                  ) : null}
-                  {message?.answer_content || message?.answer_voice_payload ? (
-                    <ChatShareBubble
-                      type='answer'
-                      content={message.answer_content}
-                      voicePayload={message.answer_voice_payload}
-                    />
-                  ) : null}
-                </View>
-                <View style={styles.captureFooter}>
-                  <View style={styles.captureFooterDivider} />
-                  <View style={styles.captureFooterTextBlock}>
-                    <AppText style={styles.captureFooterTitle}>
-                      {t('actr.chat.shareAiFooter')}
-                    </AppText>
-                    <AppText style={styles.captureFooterDesc}>
-                      {t('actr.chat.shareAiDisclaimer')}
-                    </AppText>
+                <View
+                  style={[styles.captureFrame, { minHeight: captureImageHeight }]}
+                  onLayout={() => {
+                    // 中文注释：卡片每次重新布局后递增计数，驱动重新截图，避免屏幕宽度变化时仍复用旧图。
+                    setCardLayoutReady(true);
+                    setCaptureAttempt((value) => value + 1);
+                  }}
+                >
+                  <View style={styles.captureContent}>
+                    {/* 中文注释：遍历所有待分享消息，按聊天顺序渲染到分享图截图中。 */}
+                    {messages.map((msg) => (
+                      <React.Fragment key={msg.message_id}>
+                        {msg.attachments ? (
+                          <ChatShareBubble
+                            type='question'
+                            attachments={msg.attachments}
+                            onAttachmentImageSettled={handleAttachmentImageSettled}
+                          />
+                        ) : null}
+                        {msg.question_content || msg.question_voice_payload ? (
+                          <ChatShareBubble
+                            type='question'
+                            content={msg.question_content}
+                            voicePayload={msg.question_voice_payload}
+                          />
+                        ) : null}
+                        {msg.answer_content || msg.answer_voice_payload ? (
+                          <ChatShareBubble
+                            type='answer'
+                            content={msg.answer_content}
+                            voicePayload={msg.answer_voice_payload}
+                          />
+                        ) : null}
+                      </React.Fragment>
+                    ))}
                   </View>
-                  <View style={styles.captureFooterLogoBox}>
-                    {shareQrRender ? (
-                      <View style={styles.captureQrContainer}>
-                        <View
-                          style={[
-                            styles.captureQrGrid,
-                            {
-                              width: shareQrRender.gridSize,
-                              height: shareQrRender.gridSize,
-                            },
-                          ]}
-                        >
-                          {shareQrRender.cells.map((cell, index) => (
-                            <View
-                              key={index}
-                              style={[
-                                styles.captureQrCell,
-                                {
-                                  width: shareQrRender.moduleSize,
-                                  height: shareQrRender.moduleSize,
-                                  backgroundColor:
-                                    cell === 1 ? '#111111' : '#FFFFFF',
-                                },
-                              ]}
-                            />
-                          ))}
-                        </View>
-                      </View>
-                    ) : (
-                      <AppText style={styles.captureFooterFallbackText}>
-                        URL
+                  <View style={styles.captureFooter}>
+                    <View style={styles.captureFooterDivider} />
+                    <View style={styles.captureFooterTextBlock}>
+                      <AppText style={styles.captureFooterTitle}>
+                        {t('actr.chat.shareAiFooter')}
                       </AppText>
-                    )}
+                      <AppText style={styles.captureFooterDesc}>
+                        {t('actr.chat.shareAiDisclaimer')}
+                      </AppText>
+                    </View>
+                    <View style={styles.captureFooterLogoBox}>
+                      {shareQrRender ? (
+                        <View style={styles.captureQrContainer}>
+                          <View
+                            style={[
+                              styles.captureQrGrid,
+                              {
+                                width: shareQrRender.gridSize,
+                                height: shareQrRender.gridSize,
+                              },
+                            ]}
+                          >
+                            {shareQrRender.cells.map((cell, index) => (
+                              <View
+                                key={index}
+                                style={[
+                                  styles.captureQrCell,
+                                  {
+                                    width: shareQrRender.moduleSize,
+                                    height: shareQrRender.moduleSize,
+                                    backgroundColor:
+                                      cell === 1 ? '#111111' : '#FFFFFF',
+                                  },
+                                ]}
+                              />
+                            ))}
+                          </View>
+                        </View>
+                      ) : (
+                        <AppText style={styles.captureFooterFallbackText}>
+                          URL
+                        </AppText>
+                      )}
+                    </View>
                   </View>
                 </View>
-              </View>
-            </ViewShot>
+              </ViewShot>
+            </View>
           </View>
-        </View>
+        ) : null}
       </View>
     </View>
   );
 }
 
-const makeStyles = (colors: ColorTokens) =>
+const makeStyles = (
+  colors: ColorTokens,
+  bottomPadding: number,
+  footerHeight: number,
+) =>
   StyleSheet.create({
     backdrop: {
       ...StyleSheet.absoluteFillObject,
       backgroundColor: colors.bgChatPage,
       justifyContent: 'flex-start',
-      zIndex: 1000,
+      zIndex: 2000,
+      elevation: 2000,
     },
     modalContainer: {
       flex: 1,
@@ -556,11 +633,12 @@ const makeStyles = (colors: ColorTokens) =>
       ...getTypographyStyle('footnote'),
     },
     footer: {
-      height: 118,
-      justifyContent: 'center',
+      height: footerHeight,
+      justifyContent: isTablet ? 'center' : 'flex-end',
       width: '100%',
       paddingLeft: 16,
       paddingRight: 16,
+      paddingBottom: bottomPadding,
       backgroundColor: 'transparent',
     },
     footerRow: {

@@ -5,17 +5,17 @@ import { chatBubbleToolbar } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import { WaveForm } from '../shared/WaveForm';
-import {
-  useVoicePlaybackStore,
+import { useVoicePlaybackStore,
   type VoicePlaybackPart,
 } from '../../store/useVoicePlaybackStore';
+import { type SelectionMode } from '../../store/useMessageStore';
 import { stopVoiceMessagePlayback } from '../../utils/VoiceMessageStorage';
 
 interface ReadAloudActionButtonProps {
   appId?: string;
   msgId?: string;
   part: VoicePlaybackPart;
-  selectionMode: boolean;
+  selectionMode: SelectionMode;
 }
 
 interface UseReadAloudActionOptions {
@@ -172,10 +172,10 @@ export function ReadAloudActionButton({
       style={[
         styles.toolbarButton,
         readAloudStatus === 'playing' && styles.toolbarButtonPlaying,
-        selectionMode && styles.toolbarButtonDisabled,
+        selectionMode !== 'none' && styles.toolbarButtonDisabled,
       ]}
       onPress={handlePress}
-      disabled={readAloudStatus !== 'idle' || selectionMode}
+      disabled={readAloudStatus !== 'idle' || selectionMode !== 'none'}
       hitSlop={8}
     >
       {readAloudStatus === 'loading' && (

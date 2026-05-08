@@ -33,7 +33,7 @@ import {
   IMessage,
   Progress,
 } from '../../../repository/MessageRepository';
-import { useMessageStore } from '../../store/useMessageStore';
+import { useMessageStore, type SelectionMode } from '../../store/useMessageStore';
 import { useAppStore } from '../../store/useAppStore';
 import ChatBubble from './ChatBubble';
 import { FeedbackFormModal } from './FeedbackFormModal';
@@ -44,6 +44,7 @@ import { useTab } from '../../contexts/TabContext';
 import { useInputStore } from '../../store/useInputStore';
 import { IAttachmentItem } from '../../types/attachment';
 import { DeleteButton } from '../shared/DeleteButton';
+import { ShareConfirmButton } from '../shared/ShareConfirmButton';
 import { ScrollToBottomButton } from '../shared/ScrollToBottomButton';
 import { Checkbox } from '../shared/Checkbox';
 import { AppSessionService } from '../../../services/AppSessionService';
@@ -90,7 +91,7 @@ interface MessageRowProps {
   appId: string;
   messageId: string;
   layoutTokens: ReturnType<typeof getHostLayoutTokens>;
-  selectionMode: boolean;
+  selectionMode: SelectionMode;
   selectedParts: Set<'attachments' | 'question' | 'answer'>;
   isLatest: boolean;
   toggleSelection: (
@@ -100,7 +101,6 @@ interface MessageRowProps {
   handleEdit: (msg: IMessage) => void;
   handleCopy: (text: string) => void;
   handleFeedback?: (msgId: string) => void;
-  handleShare?: (msg: IMessage) => void;
   styles: ReturnType<typeof makeStyles>;
 }
 
@@ -119,7 +119,6 @@ const MessageRow = React.memo(function MessageRow({
   handleEdit,
   handleCopy,
   handleFeedback,
-  handleShare,
   styles,
 }: MessageRowProps) {
   const { t } = useTranslation();
@@ -136,7 +135,7 @@ const MessageRow = React.memo(function MessageRow({
 
   React.useEffect(() => {
     const animation = Animated.timing(selectionProgress, {
-      toValue: selectionMode ? 1 : 0,
+      toValue: selectionMode !== 'none' ? 1 : 0,
       duration: SELECTION_ANIMATION_DURATION,
       useNativeDriver: false,
     });
@@ -187,7 +186,7 @@ const MessageRow = React.memo(function MessageRow({
                 attachments={item.attachments}
                 containerStyle={{ marginBottom: 4 }}
                 onEdit={
-                  isLatest && !selectionMode && !item.is_edited
+                  isLatest && selectionMode === 'none' && !item.is_edited
                     ? () => handleEdit(item)
                     : undefined
                 }
@@ -222,7 +221,7 @@ const MessageRow = React.memo(function MessageRow({
                 content={item.question_content}
                 voicePayload={item.question_voice_payload}
                 onEdit={
-                  isLatest && !selectionMode && item.question_type !== 'voice' && !item.is_edited
+                  isLatest && selectionMode === 'none' && item.question_type !== 'voice' && !item.is_edited
                     ? () => handleEdit(item)
                     : undefined
                 }
@@ -232,11 +231,6 @@ const MessageRow = React.memo(function MessageRow({
                     : undefined
                 }
                 onFeedback={() => handleFeedback?.(item.message_id)}
-                onShare={
-                  item.answer_content || item.answer_type === 'voice'
-                    ? () => handleShare?.(item)
-                    : undefined
-                }
                 selectionKey={`${item.message_id}:question`}
                 isSelected={selectedParts.has('question')}
                 onToggleSelection={() =>
@@ -278,7 +272,6 @@ const MessageRow = React.memo(function MessageRow({
                   : undefined
               }
               onFeedback={() => handleFeedback?.(item.message_id)}
-              onShare={() => handleShare?.(item)}
               selectionKey={`${item.message_id}:answer`}
               isSelected={selectedParts.has('answer')}
               onToggleSelection={() =>
@@ -356,7 +349,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showLoadMoreHeader, setShowLoadMoreHeader] = useState(false);
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
-  const [shareMessage, setShareMessage] = useState<IMessage | null>(null);
+  // 中文注释：分享模式确认后收集的待分享消息列表，非空时打开分享预览。
+  const [shareMessages, setShareMessages] = useState<IMessage[]>([]);
   const { keyboardInset, isKeyboardVisible, dismissKeyboard } =
     useKeyboardInset();
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
@@ -366,6 +360,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const previousMessageCountRef = useRef(messageIds.length);
   const forceScrollToBottomUntilRef = useRef(0);
   const firstMessageIdRef = useRef<string | undefined>(messageIds[0]);
+  const deferredExitSelectionFrameRef = useRef<number | null>(null);
 
   // 正序列表下通过 scrollToEnd 回到底部。
   const scrollToBottom = useCallback(() => {
@@ -554,6 +549,10 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         clearInput(tab.id);
         removeTabIdMap(tab.id);
       }
+      if (deferredExitSelectionFrameRef.current !== null) {
+        cancelAnimationFrame(deferredExitSelectionFrameRef.current);
+        deferredExitSelectionFrameRef.current = null;
+      }
     };
   }, [tab.id]);
 
@@ -705,7 +704,6 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           handleEdit={handleEdit}
           handleCopy={handleCopy}
           handleFeedback={setFeedbackMessageId}
-          handleShare={setShareMessage}
           styles={styles}
         />
       );
@@ -720,7 +718,6 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       toggleSelection,
       handleEdit,
       handleCopy,
-      setShareMessage,
       styles,
     ],
   );
@@ -741,6 +738,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   }, [isLoadingMore, showLoadMoreHeader, t, colors, styles]);
 
   // 计算选中的数量
+  // 中文注释：part 计数（选中了多少个部分），用于删除按钮文案。
   const selectedCount = useMemo(() => {
     let count = 0;
     for (const parts of Object.values(selectedItems)) {
@@ -781,6 +779,46 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       ],
     );
   }, [tab.id, deleteSelectedMessages, exitSelectionMode, t]);
+
+  // 中文注释：点击"生成预览图"时先打开预览层，再延后一帧退出选择模式，避免列表退出动画阻塞弹窗首帧。
+  const handleShareConfirm = useCallback(() => {
+    const byId = useMessageStore.getState().messageById[tab.id] || {};
+    const orderedIds = useMessageStore.getState().messageIds[tab.id] || [];
+    const currentSelectedItems = useMessageStore.getState().selectedItems;
+
+    // 中文注释：按消息在列表中的原始顺序排列，保证分享图内容顺序与聊天一致。
+    const orderedMessages: IMessage[] = [];
+    for (const id of orderedIds) {
+      const parts = currentSelectedItems[id];
+      if (!parts || parts.size === 0) continue;
+      const message = byId[id];
+      if (!message) continue;
+
+      // 中文注释：根据选中的 part 构建部分消息，只包含用户选中的内容。
+      const partial: IMessage = { ...message };
+      if (!parts.has('attachments')) partial.attachments = undefined;
+      if (!parts.has('question')) {
+        partial.question_content = '';
+        partial.question_voice_payload = undefined;
+      }
+      if (!parts.has('answer')) {
+        partial.answer_content = '';
+        partial.answer_voice_payload = undefined;
+      }
+      orderedMessages.push(partial);
+    }
+
+    setShareMessages(orderedMessages);
+    if (deferredExitSelectionFrameRef.current !== null) {
+      cancelAnimationFrame(deferredExitSelectionFrameRef.current);
+    }
+    deferredExitSelectionFrameRef.current = requestAnimationFrame(() => {
+      deferredExitSelectionFrameRef.current = requestAnimationFrame(() => {
+        deferredExitSelectionFrameRef.current = null;
+        exitSelectionMode();
+      });
+    });
+  }, [tab.id, exitSelectionMode]);
 
   const handleContentScrollBeginDrag = useCallback(() => {
     dismissKeyboard();
@@ -1002,7 +1040,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       )}
 
       {/* 回到底部按钮 */}
-      {!selectionMode && (
+      {selectionMode === 'none' && (
         <Animated.View
           style={[
             styles.scrollToBottomContainer,
@@ -1020,8 +1058,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         </Animated.View>
       )}
 
-      {/* 删除按钮 - 底部 footer 布局，参考 ChatSharePreviewModal */}
-      {selectionMode && (
+      {/* 中文注释：选择模式底部操作栏，根据模式渲染不同的确认按钮。 */}
+      {selectionMode === 'delete' && (
         <View
           style={[
             styles.deleteButtonContainer,
@@ -1031,6 +1069,19 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           <DeleteButton
             selectedCount={selectedCount}
             onPress={handleDeletePress}
+            onCancel={exitSelectionMode}
+          />
+        </View>
+      )}
+      {selectionMode === 'share' && (
+        <View
+          style={[
+            styles.deleteButtonContainer,
+            { bottom: 0 },
+          ]}
+        >
+          <ShareConfirmButton
+            onPress={handleShareConfirm}
             onCancel={exitSelectionMode}
           />
         </View>
@@ -1045,11 +1096,11 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       />
 
       <ChatSharePreviewModal
-        visible={!!shareMessage}
-        message={shareMessage}
+        visible={shareMessages.length > 0}
+        messages={shareMessages}
         appName={appInfo?.instance_name || appInfo?.app_name}
         appUrl={appInfo?.url}
-        onClose={() => setShareMessage(null)}
+        onClose={() => setShareMessages([])}
         onSaved={() => {
           toastRef.current?.show(t('actr.chat.shareSaveSuccess'));
         }}
