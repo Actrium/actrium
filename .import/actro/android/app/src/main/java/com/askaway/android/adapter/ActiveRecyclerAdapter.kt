@@ -1,6 +1,7 @@
 package com.askaway.android.adapter
 
 import android.view.LayoutInflater
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import androidx.core.content.ContextCompat
@@ -16,6 +17,7 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
     var onItemClick: ((ActiveModel, View) -> Unit)? = null
     var onDeleteClick: ((ActiveModel) -> Unit)? = null
     var onMarkClick: ((ActiveModel) -> Unit)? = null
+    var onItemLongClick: ((ActiveModel, Int, Int) -> Unit)? = null
 
     fun updateData(newList: List<ActiveModel>) {
         items.clear()
@@ -29,7 +31,7 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
     }
 
     override fun onBindViewHolder(holder: ActiveViewHolder, position: Int) {
-        holder.bind(items[position], onItemClick, onDeleteClick, onMarkClick)
+        holder.bind(items[position], onItemClick, onDeleteClick, onMarkClick, onItemLongClick)
     }
 
     override fun getItemCount(): Int = items.size
@@ -43,7 +45,8 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
             item: ActiveModel,
             onItemClick: ((ActiveModel, View) -> Unit)?,
             onDeleteClick: ((ActiveModel) -> Unit)?,
-            onMarkClick: ((ActiveModel) -> Unit)?
+            onMarkClick: ((ActiveModel) -> Unit)?,
+            onItemLongClick: ((ActiveModel, Int, Int) -> Unit)?
         ) {
             binding.tvAppName.text = item.name
 
@@ -67,6 +70,18 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
             binding.ivMark.isVisible = item.name.isNotEmpty()
 
             binding.root.setOnClickListener { onItemClick?.invoke(item, binding.root) }
+            // 记录触点位置，供长按回调使用
+            var touchX = 0
+            var touchY = 0
+            binding.root.setOnTouchListener { _, event ->
+                touchX = event.rawX.toInt()
+                touchY = event.rawY.toInt()
+                false
+            }
+            binding.root.setOnLongClickListener {
+                onItemLongClick?.invoke(item, touchX, touchY)
+                true
+            }
             binding.ivDelete.setOnClickListener { onDeleteClick?.invoke(item) }
             binding.vUnreadBadge.visibility = if (item.hasUnread) View.VISIBLE else View.GONE
 
