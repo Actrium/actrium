@@ -17,6 +17,7 @@ import { getTypographyStyle } from '../../../theme/tokens';
 import { HOST_SHADOWS } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
+import type { PhoneAttachmentPanelController } from '../chat/hooks/usePhoneAttachmentPanelController';
 
 const { NativeLogger } = NativeModules;
 
@@ -24,12 +25,14 @@ interface ActrInputProps {
   appId: string;
   variant?: 'pad' | 'mobile';
   showTopToast?: (message: string) => void;
+  mobileAttachmentController?: PhoneAttachmentPanelController;
 }
 
 export default function ActrInput({
   appId,
   variant,
   showTopToast,
+  mobileAttachmentController,
 }: ActrInputProps) {
   const { tab } = useTab();
   const { width } = useWindowDimensions();
@@ -54,28 +57,30 @@ export default function ActrInput({
     clearInputInStore(tab.id);
   };
 
-  const [showMapModal, setShowMapModal] = useState(false);
-  const {
-    attachments,
-    removeAttachment,
-    handleConfirmLocation,
-    takePhoto,
-    pickImage,
-    pickDocument,
-  } = useAttachmentManager(tab.id);
+  const [showMapModalLocal, setShowMapModalLocal] = useState(false);
+  const attachmentManager = useAttachmentManager(tab.id);
+  const toolboxState = useInputToolboxState(appId);
 
-  const {
-    isWebSearchActive,
-    setIsWebSearchActive,
-    isLocationActive,
-    setIsLocationActive,
-    isEnterForNewLine,
-    setIsEnterForNewLine,
-    showSearchEntry,
-    showLocationEntry,
-    showNewlineEntry,
-    toolboxProps,
-  } = useInputToolboxState(appId);
+  const attachments = mobileAttachmentController?.attachments ?? attachmentManager.attachments;
+  const removeAttachment = mobileAttachmentController?.removeAttachment ?? attachmentManager.removeAttachment;
+  const handleConfirmLocation =
+    mobileAttachmentController?.handleConfirmLocation ?? attachmentManager.handleConfirmLocation;
+  const takePhoto = mobileAttachmentController?.takePhoto ?? attachmentManager.takePhoto;
+  const pickImage = mobileAttachmentController?.pickImage ?? attachmentManager.pickImage;
+  const pickDocument = mobileAttachmentController?.pickDocument ?? attachmentManager.pickDocument;
+  const showMapModal = mobileAttachmentController?.showMapModal ?? showMapModalLocal;
+  const setShowMapModal =
+    mobileAttachmentController?.setShowMapModal ?? setShowMapModalLocal;
+
+  const isWebSearchActive =
+    mobileAttachmentController?.isWebSearchActive ?? toolboxState.isWebSearchActive;
+  const isEnterForNewLine =
+    mobileAttachmentController?.isEnterForNewLine ?? toolboxState.isEnterForNewLine;
+  const showSearchEntry =
+    mobileAttachmentController?.showSearchEntry ?? toolboxState.showSearchEntry;
+  const showNewlineEntry =
+    mobileAttachmentController?.showNewlineEntry ?? toolboxState.showNewlineEntry;
+  const toolboxProps = toolboxState.toolboxProps;
 
   const {
     showLoginModal,
@@ -101,6 +106,11 @@ export default function ActrInput({
     setInputText(tab.id, '');
   };
 
+  // 中文注释：Pad 端位置入口统一走这里，保持“打开位置选择器”是单一动作语义。
+  const handleOpenPadLocationPicker = React.useCallback(() => {
+    setShowMapModal(true);
+  }, [setShowMapModal]);
+
   // 稳定的 handleSend ref，传给 StableTextInput 避免因回调变化触发子组件重渲染
   const handleSendRef = useRef(handleSend);
   handleSendRef.current = handleSend;
@@ -121,15 +131,7 @@ export default function ActrInput({
   });
 
   return (
-    <View
-      style={[
-        styles.rootContainer,
-        {
-          paddingBottom: layoutTokens.inputBottomPadding,
-          // backgroundColor: isMobileVariant ? colors.bgInputMobile : colors.bgInputMobile,
-        },
-      ]}
-    >
+    <View style={styles.rootContainer}>
       {isVoiceRecording && (
         <VoiceRecordingOverlay
           isCancelling={isCancellingVoice}
@@ -147,19 +149,16 @@ export default function ActrInput({
           }}
           attachments={attachments}
           removeAttachment={removeAttachment}
-          setShowMapModal={setShowMapModal}
-          showSearchEntry={showSearchEntry}
-          showLocationEntry={showLocationEntry}
-          showNewlineEntry={showNewlineEntry}
-          isWebSearchActive={isWebSearchActive}
-          setIsWebSearchActive={setIsWebSearchActive}
-          isLocationActive={isLocationActive}
-          setIsLocationActive={setIsLocationActive}
+          isAttachmentPanelOpen={
+            mobileAttachmentController?.isAttachmentPanelOpen
+          }
           isEnterForNewLine={isEnterForNewLine}
-          setIsEnterForNewLine={setIsEnterForNewLine}
-          takePhoto={takePhoto}
-          pickImage={pickImage}
-          pickDocument={pickDocument}
+          onToggleAttachmentPanel={
+            mobileAttachmentController?.toggleAttachmentPanel
+          }
+          onCloseAttachmentPanel={
+            mobileAttachmentController?.closeAttachmentPanel
+          }
           handleVoiceStart={handleVoiceStart}
           handleVoiceChangeState={handleVoiceChangeState}
           handleVoiceEnd={handleVoiceEnd}
@@ -197,7 +196,7 @@ export default function ActrInput({
           takePhoto={takePhoto}
           pickImage={pickImage}
           pickDocument={pickDocument}
-          setShowMapModal={setShowMapModal}
+          onPickLocation={handleOpenPadLocationPicker}
           handleSend={handleSend}
           handleAudio={handleAudio}
           inputText={inputText}
@@ -209,14 +208,16 @@ export default function ActrInput({
         />
       )}
 
-      <LocationPicker
-        visible={showMapModal}
-        onClose={() => setShowMapModal(false)}
-        onSelect={(data) => {
-          handleConfirmLocation(data);
-          setShowMapModal(false);
-        }}
-      />
+      {!mobileAttachmentController && (
+        <LocationPicker
+          visible={showMapModal}
+          onClose={() => setShowMapModal(false)}
+          onSelect={(data) => {
+            handleConfirmLocation(data);
+            setShowMapModal(false);
+          }}
+        />
+      )}
 
       {showLoginModal && authParams && (
         <LoginModal

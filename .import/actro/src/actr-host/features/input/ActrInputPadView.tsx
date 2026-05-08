@@ -18,7 +18,7 @@ interface ActrInputPadViewProps {
   takePhoto: () => void;
   pickImage: () => void;
   pickDocument: () => void;
-  setShowMapModal: (visible: boolean) => void;
+  onPickLocation: () => void;
   handleSend: () => void;
   handleAudio: () => void;
   inputText: string;
@@ -44,7 +44,7 @@ export default function ActrInputPadView(props: ActrInputPadViewProps) {
     takePhoto,
     pickImage,
     pickDocument,
-    setShowMapModal,
+    onPickLocation,
     handleSend,
     handleAudio,
     inputText,
@@ -121,7 +121,7 @@ export default function ActrInputPadView(props: ActrInputPadViewProps) {
           onPickCamera={takePhoto}
           onPickImage={pickImage}
           onPickFile={pickDocument}
-          onPickLocation={() => setShowMapModal(true)}
+          onPickLocation={onPickLocation}
           onSend={handleSend}
           onAudio={handleAudio}
           showAudioButton={!inputText}
