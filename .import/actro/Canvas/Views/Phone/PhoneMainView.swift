@@ -72,7 +72,6 @@ struct PhoneMainView: View {
         }
         .accentColor(.blue)
         .background(Color.black)
-        .environment(\.colorScheme, .dark)
         .onChange(of: selectedTab) { oldValue, newValue in
             // 离开搜索页时，清空搜索框文本
             if oldValue == .search {
@@ -153,7 +152,6 @@ struct PhoneMainView: View {
         }
         .sheet(item: $fullscreenTab) { tab in
             PhoneBrowserView(tab: tab, viewModel: viewModel, historyVM: historyVM)
-                // .interactiveDismissDisabled(true)
                 .ignoresSafeArea()
                 .asNavigationTransition(id: tab.id, in: animation)
                 .onAppear {
