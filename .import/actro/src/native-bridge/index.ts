@@ -4,23 +4,23 @@ export type { TabFullscreenEvent } from './tab/TabEvents';
 export { openTab, exitFullscreen } from './tab/TabModule';
 
 // Login
-export { LoginBridge } from './login';
-export type { LoginType, LoginResultEvent } from './login';
+export { LoginBridge } from './login/LoginBridge';
+export type { LoginType, LoginResultEvent } from './login/LoginBridge';
 
 // Extension
-export { ExtensionEvents } from './extension';
-export type { ExtensionPanelVisibleChangeEvent } from './extension';
+export { ExtensionEvents } from './extension/ExtensionEvents';
+export type { ExtensionPanelVisibleChangeEvent } from './extension/ExtensionEvents';
 
 // Container
-export { ContainerEvents } from './container';
-export type { ContainerSizeChangeEvent } from './container';
+export { ContainerEvents } from './container/ContainerEvents';
+export type { ContainerSizeChangeEvent } from './container/ContainerEvents';
 
 // Global Search
-export { GlobalSearchEvents } from './globalsearch';
-export type { SearchInputChangedEvent } from './globalsearch';
+export { GlobalSearchEvents } from './globalsearch/GlobalSearchEvents';
+export type { SearchInputChangedEvent } from './globalsearch/GlobalSearchEvents';
 
 // Email
-export { EmailBridge } from './email';
+export { EmailBridge } from './email/EmailBridge';
 
 // Speech
-export { setLanguage, feedAudio, stop } from './speech';
+export { setLanguage, feedAudio, stop } from './speech/SpeechBridge';

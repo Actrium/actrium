@@ -1,1 +1,1 @@
-export { default } from './ActrInputInner';
+export { default } from './ActrInput.shared';
