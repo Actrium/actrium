@@ -8,6 +8,6 @@
     <string name="menu_bookmark">Закладка</string>
     <string name="menu_close_tab">Закрыть вкладку</string>
     <string name="menu_close_other_tabs">Закрыть остальные вкладки</string>
-    <string name="menu_cancel_bookmark">Убрать из закладок</string>
+    <string name="menu_cancel_bookmark">Удалить закладку</string>
 </resources>
 
