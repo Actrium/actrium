@@ -62,7 +62,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
         />
         {showLeftButton ? (
           <HostIconButton
-            iconType='extension_menu'
+            iconType="extension_menu"
             iconSize={20}
             onPress={onLeftPress}
             disabled={leftDisabled}
@@ -70,7 +70,7 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             backgroundColor={headerButtonBackgroundColor}
             activeBackgroundColor={colors.bgChatHeaderBtn}
             iconColor={colors.iconChatHeader}
-            activeIconColor='#fff'
+            activeIconColor="#fff"
           />
         ) : (
           <View style={styles.headerButtonPlaceholder} />
@@ -90,16 +90,16 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
         </View>
         {hasAppId ? (
           <HostIconButton
-            iconType='history'
+            iconType="history"
             iconSize={22}
             onPress={() => {}}
-            style={styles.headerButton}
+            style={[styles.headerButton, { opacity: 0 }]}
             backgroundColor={headerButtonBackgroundColor}
             iconColor={colors.iconChatHeader}
           />
         ) : onRightPress ? (
           <HostIconButton
-            iconType='close'
+            iconType="close"
             iconSize={16}
             onPress={onRightPress}
             style={styles.headerButton}
