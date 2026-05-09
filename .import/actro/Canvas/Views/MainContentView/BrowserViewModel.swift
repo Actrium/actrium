@@ -548,6 +548,16 @@ class BrowserViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Unread Status
+
+    /// 清除指定 tab 的未读红点状态
+    func clearUnread(for tabId: UUID) {
+        guard let index = tabs.firstIndex(where: { $0.id == tabId }),
+              tabs[index].hasUnreadMessage else { return }
+        tabs[index].hasUnreadMessage = false
+        saveTabs()
+    }
+
     // MARK: - Tab Group Management
 
     /// Create a new tab group
