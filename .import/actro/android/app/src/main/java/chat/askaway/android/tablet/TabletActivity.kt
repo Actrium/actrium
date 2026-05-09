@@ -362,6 +362,14 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         super.onResume()
         val application = application as MainApplication
         application.reactNativeHost.reactInstanceManager.onHostResume(this, this)
+        // 同步当前配置到 RN AppearanceModule，确保深色模式切换后被感知
+        application.reactNativeHost.reactInstanceManager.onConfigurationChanged(this, resources.configuration)
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        val application = application as MainApplication
+        application.reactNativeHost.reactInstanceManager.onConfigurationChanged(this, newConfig)
     }
 
     override fun onNewIntent(intent: Intent) {
