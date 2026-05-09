@@ -17,7 +17,6 @@ struct ContentView: View {
             } else {
                 // 内容区域
                 ZStack {
-                    Color.black.ignoresSafeArea()
                     ChromeStyleTabView(viewModel: viewModel, historyVM: historyVM)
                     if let systemType = viewModel.currentSystemTabType {
                         SystemAppView(systemType: systemType, viewModel: viewModel, historyVM: historyVM)
