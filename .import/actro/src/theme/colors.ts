@@ -250,7 +250,7 @@ export const lightColors: ColorTokens = {
 
   // extensionPanel
   extensionPanelBg: '#F2F2F6',
-  extensionPanelBorder: '#999',
+  extensionPanelBorder: '#DADADE',
   extensionPanelSkeletonBg: '#F2F2F6',
   extensionPanelSkeletonBlock: '#e7e7e7',
 
