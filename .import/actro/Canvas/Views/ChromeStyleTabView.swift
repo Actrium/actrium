@@ -91,6 +91,8 @@ struct ChromeStyleTabView: View {
             onBackToOverview: {
                 // 退出前先截取当前 tab 内容区域的快照
                 if let currentTab = viewModel.tabs.first(where: { $0.id == viewModel.currentTabId }), !currentTab.title.isEmpty {
+                    // 返回 Overview 前清除当前 tab 未读状态
+                    viewModel.clearUnread(for: currentTab.id)
                     takeSnapshot(for: currentTab) {
                         viewModel.canvasMode = .overview
                         focusedTab = nil
@@ -615,9 +617,46 @@ struct ChromeTabFocusView: View {
                     .id(tab.id)
                     .onAppear {
                         viewWidth = geometry.size.width
+                        // Tab 进入全屏视图，通知 RN 侧清除未读状态
+                        NotificationCenter.default.post(
+                            name: .tabEnteredFullscreenFromNative,
+                            object: nil,
+                            userInfo: [
+                                "tabId": tab.id.uuidString,
+                                "title": tab.title
+                            ]
+                        )
+                    }
+                    .onDisappear {
+                        // Tab 退出全屏视图
+                        NotificationCenter.default.post(
+                            name: .tabExitedFullscreenFromNative,
+                            object: nil,
+                            userInfo: [
+                                "tabId": tab.id.uuidString
+                            ]
+                        )
                     }
                     .onChange(of: geometry.size.width) { _, newWidth in
                         viewWidth = newWidth
+                    }
+                    .onChange(of: tab.id) { oldTabId, newTabId in
+                        // Focus 模式下切换 tab 时，先退出旧 tab，再进入新 tab
+                        NotificationCenter.default.post(
+                            name: .tabExitedFullscreenFromNative,
+                            object: nil,
+                            userInfo: [
+                                "tabId": oldTabId.uuidString
+                            ]
+                        )
+                        NotificationCenter.default.post(
+                            name: .tabEnteredFullscreenFromNative,
+                            object: nil,
+                            userInfo: [
+                                "tabId": newTabId.uuidString,
+                                "title": tab.title
+                            ]
+                        )
                     }
                 }
             }
