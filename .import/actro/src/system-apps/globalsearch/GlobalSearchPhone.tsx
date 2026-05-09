@@ -4,7 +4,7 @@ import {
   ScrollView,
   StyleSheet,
 } from 'react-native';
-import { GlobalSearchEvents } from '../../native-bridge/globalsearch';
+import { GlobalSearchEvents } from '../../native-bridge';
 
 interface GlobalSearchPhoneProps {
   renderResults: () => React.ReactNode;

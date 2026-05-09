@@ -138,7 +138,7 @@ export class ActrConnection {
     } catch (error: any) {
       this.reason = error.message || error;
 
-      console.error(error.message || error);
+      console.error(`[ActrConnection:${this.appId}] Initialize failed:`, error.message || error);
       this.isInitialized = false;
       throw error;
     }

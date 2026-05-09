@@ -143,7 +143,7 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     top: 0,
     bottom: 0,
     width: 1,
-    backgroundColor: '#DADADE',
+    backgroundColor: colors.extensionPanelBorder,
   },
   skeletonContainer: {
     flex: 1,
