@@ -226,6 +226,7 @@
                     android:orientation="horizontal">
 
                     <ImageView
+                        android:id="@+id/ivSearchIcon"
                         android:layout_width="22dp"
                         android:layout_height="22dp"
                         android:layout_marginStart="16dp"

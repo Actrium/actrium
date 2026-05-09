@@ -22,7 +22,9 @@ import android.view.WindowInsets
 import android.view.animation.DecelerateInterpolator
 import androidx.activity.viewModels
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.app.AppCompatDelegate
 import androidx.core.content.ContextCompat
+import androidx.core.widget.TextViewCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -75,9 +77,12 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     private var isFromDeepLink = false
     private var originalSearchWidth = 0
     private var originalNavWidth = 0
+    private var currentNightMode = 0
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        currentNightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
 
         // 设置沉浸式，使内容能够延伸到状态栏区域，同时处理状态栏字体颜色
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -693,6 +698,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                 val screenshotPath = binding.flRNContent.screenshot("$tabId.jpg")
                 if (screenshotPath != null) {
                     viewModel.updateScreenshot(tabId, screenshotPath)
+                    val position = activeRecyclerAdapter.findPositionById(tabId)
+                    if (position != -1) {
+                        activeRecyclerAdapter.notifyItemChanged(position)
+                    }
                 }
             }
         }
@@ -768,6 +777,11 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        val newNightMode = newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK
+        if (currentNightMode != newNightMode) {
+            currentNightMode = newNightMode
+            applyThemeToViews()
+        }
         val application = application as MainApplication
         application.reactNativeHost.reactInstanceManager.onConfigurationChanged(this, newConfig)
     }
@@ -776,6 +790,70 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
         super.onNewIntent(intent)
         setIntent(intent)
         handleDeepLink(intent)
+    }
+
+    /**
+     * 根据 uiMode 变化刷新所有原生视图的颜色和背景
+     * 当 configChanges 包含 uiMode 时，Activity 不会 recreate，
+     * 已渲染的 View 保留旧的颜色值，需要手动从更新后的 resources 重新读取
+     */
+    private fun applyThemeToViews() {
+        val isDark = (currentNightMode == Configuration.UI_MODE_NIGHT_YES)
+
+        // 更新状态栏图标颜色：浅色模式用深色图标，深色模式用浅色图标
+        WindowCompat.getInsetsController(window, window.decorView).isAppearanceLightStatusBars = !isDark
+
+        // 重新应用导航栏背景（引用 @color/nav_bg，浅色=白色，深色=灰色）
+        (binding.rgNavigation.parent as? View)?.background =
+            ContextCompat.getDrawable(this, R.drawable.bottom_nav_bg)
+        binding.flNavIndicator.background =
+            ContextCompat.getDrawable(this, R.drawable.bottom_nav_indicator)
+
+        // 重新应用 RadioButton 的文字颜色和图标 tint（引用 @color/nav_text_selector）
+        val navTextSelector = ContextCompat.getColorStateList(this, R.color.nav_text_selector)
+        listOf(binding.navTag, binding.navActivity, binding.navSettings).forEach { rb ->
+            rb.setTextColor(navTextSelector)
+            TextViewCompat.setCompoundDrawableTintList(rb, navTextSelector)
+        }
+
+        // 重新应用搜索图标背景和 tint（引用 @drawable/bottom_nav_bg, @color/labels_vibrant_controls_primary）
+        binding.ivSearch.background = ContextCompat.getDrawable(this, R.drawable.bottom_nav_bg)
+        binding.ivSearch.imageTintList =
+            ContextCompat.getColorStateList(this, R.color.labels_vibrant_controls_primary)
+
+        // 重新应用搜索模式相关视图
+        binding.flNavButton.background = ContextCompat.getDrawable(this, R.drawable.bottom_nav_bg)
+        binding.llEdit.background = ContextCompat.getDrawable(this, R.drawable.bottom_nav_bg)
+        binding.ivSearchIcon.imageTintList =
+            ContextCompat.getColorStateList(this, R.color.labels_vibrant_controls_primary)
+
+        // 如果当前在搜索模式，更新 ivNav 颜色
+        if (isSearchMode) {
+            val labelColor = ContextCompat.getColor(this, R.color.labels_vibrant_controls_primary)
+            val checkedId = binding.rgNavigation.checkedRadioButtonId
+            val iconRes = when (checkedId) {
+                R.id.navTag -> R.drawable.nav_tag_selector
+                R.id.navSettings -> R.drawable.nav_settings_selector
+                else -> R.drawable.nav_activity_selector
+            }
+            val topDrawable = ContextCompat.getDrawable(this, iconRes)
+            topDrawable?.setTint(labelColor)
+            binding.ivNav.setCompoundDrawablesWithIntrinsicBounds(null, topDrawable, null, null)
+            binding.ivNav.setTextColor(labelColor)
+        }
+
+        // 刷新 RecyclerView 列表项
+        activeRecyclerAdapter.notifyDataSetChanged()
+    }
+
+    companion object {
+        /**
+         * 切换深色/浅色模式
+         * @param mode AppCompatDelegate.MODE_NIGHT_FOLLOW_SYSTEM / MODE_NIGHT_NO / MODE_NIGHT_YES
+         */
+        fun switchTheme(mode: Int) {
+            AppCompatDelegate.setDefaultNightMode(mode)
+        }
     }
 
     /**

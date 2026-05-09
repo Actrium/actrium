@@ -90,6 +90,12 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
             binding.root.visibility = if (isShown) View.VISIBLE else View.INVISIBLE
             binding.tvAppName.text = item.name
 
+            // 重新应用主题相关颜色（configChanges 包含 uiMode 时 View 不会自动更新颜色）
+            binding.root.background = ContextCompat.getDrawable(binding.root.context, R.drawable.item_active_bg)
+            binding.llAppBottom.background = ContextCompat.getDrawable(binding.root.context, R.drawable.app_bottom_bg)
+            binding.tvAppName.setTextColor(ContextCompat.getColor(binding.root.context, R.color.title_text))
+            binding.ivDelete.setColorFilter(ContextCompat.getColor(binding.root.context, R.color.icon_1))
+
             // 统一使用 Coil 加载，让它自动处理视图复用
             if (item.icon.isEmpty()) {
                 binding.ivAppIcon.load(R.drawable.app_default)
