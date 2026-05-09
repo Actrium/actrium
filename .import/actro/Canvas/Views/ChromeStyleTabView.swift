@@ -23,8 +23,12 @@ struct ChromeStyleTabView: View {
     var body: some View {
         GeometryReader { geometry in
             overviewView
+                .background(Color.black)
                 .fullScreenCover(item: $focusedTab) { tab in
                     focusSheetContent(tab: tab)
+                        .ignoresSafeArea(.all, edges: .bottom)
+                        .interactiveDismissDisabled(true)
+                        .asNavigationTransition(id: tab.id, in: animation)
                 }
                 .onAppear {
                     syncFocusedTabWithCanvasMode()
@@ -87,7 +91,6 @@ struct ChromeStyleTabView: View {
             initialTabId: tab.id,
             viewModel: viewModel,
             historyVM: historyVM,
-            animation: animation,
             onBackToOverview: {
                 // 退出前先截取当前 tab 内容区域的快照
                 if let currentTab = viewModel.tabs.first(where: { $0.id == viewModel.currentTabId }), !currentTab.title.isEmpty {
@@ -103,9 +106,6 @@ struct ChromeStyleTabView: View {
                 }
             }
         )
-        .ignoresSafeArea(.all, edges: .bottom)
-        .interactiveDismissDisabled(true)
-        .asNavigationTransition(id: tab.id, in: animation)
         .onAppear {
             // fullScreenCover 弹出后，将 pending 的新标签页正式加入列表显示
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -234,7 +234,6 @@ struct ChromeTabOverviewView: View {
             // 卡片网格
             cardGridView
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .environment(\.colorScheme, .dark)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(systemType: .settings, viewModel: viewModel)
@@ -565,7 +564,6 @@ struct ChromeTabFocusView: View {
     let initialTabId: UUID
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
-    var animation: Namespace.ID
     let onBackToOverview: () -> Void
 
     @State private var hoveredTabId: UUID?
