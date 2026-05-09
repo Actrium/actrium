@@ -126,7 +126,18 @@ log_success "前置检查完成"
 
 log_step "清理旧构建"
 
+# 全局清理
+log_info "清理旧构建和依赖..."
 rm -rf "$BUILD_DIR"
+rm -rf "$PROJECT_ROOT/Subsystem/node_modules"
+rm -rf "$PROJECT_ROOT/Pods"
+
+# 清理 Watchman 和 Metro 缓存
+if command -v watchman &> /dev/null; then
+    log_info "清理 Watchman 缓存..."
+    watchman watch-del-all
+fi
+
 mkdir -p "$BUILD_DIR"
 
 log_success "清理完成"
@@ -161,12 +172,15 @@ log_step "安装 React Native 依赖"
 
 cd "$PROJECT_ROOT/Subsystem"
 
-if command -v npm &> /dev/null; then
-    log_info "使用 npm 安装依赖..."
-    npm install
+if command -v yarn &> /dev/null; then
+    log_info "使用 yarn 安装依赖..."
+    yarn install
 elif command -v bun &> /dev/null; then
-    log_info "npm 未安装，使用 bun 安装依赖..."
+    log_info "yarn 未安装，使用 bun 安装依赖..."
     bun install
+else
+    log_error "yarn 和 bun 均未安装，请先安装其中之一"
+    exit 1
 fi
 
 cd "$PROJECT_ROOT"
