@@ -8,6 +8,6 @@
     <string name="menu_bookmark">Signet</string>
     <string name="menu_close_tab">Fermer l\'onglet</string>
     <string name="menu_close_other_tabs">Fermer les autres onglets</string>
-    <string name="menu_cancel_bookmark">Retirer le signet</string>
+    <string name="menu_cancel_bookmark">Supprimer le signet</string>
 </resources>
 
