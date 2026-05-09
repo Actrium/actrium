@@ -81,6 +81,9 @@ object ViewAnimationHelper {
 
             targetView.visibility = View.VISIBLE
 
+            // 启用硬件图层，确保内容以全分辨率缓存，避免放大时变虚
+            targetView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
             val set = AnimatorSet()
 
             // 动画裁剪边界（带圆角）
@@ -105,6 +108,8 @@ object ViewAnimationHelper {
                     targetView.clipToOutline = false
                     targetView.outlineProvider = ViewOutlineProvider.BOUNDS
                     targetView.invalidateOutline()
+                    // 动画结束后恢复默认图层类型
+                    targetView.setLayerType(View.LAYER_TYPE_NONE, null)
                 }
             })
             set.start()
@@ -170,6 +175,9 @@ object ViewAnimationHelper {
             targetView.clipToOutline = true
             targetView.clipBounds = null
 
+            // 启用硬件图层，确保缩小动画期间内容保持清晰
+            targetView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
             val set = AnimatorSet()
 
             val clipAnimator = ValueAnimator.ofFloat(0f, verticalInset)
@@ -203,6 +211,8 @@ object ViewAnimationHelper {
                     targetView.invalidateOutline()
                     targetView.pivotX = 0f
                     targetView.pivotY = 0f
+                    // 动画结束后恢复默认图层类型
+                    targetView.setLayerType(View.LAYER_TYPE_NONE, null)
                 }
             })
 
@@ -272,6 +282,9 @@ object ViewAnimationHelper {
         targetView.clipToOutline = true
         targetView.clipBounds = null
 
+        // 启用硬件图层，确保缩小动画期间内容保持清晰
+        targetView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
         val set = AnimatorSet()
 
         val clipAnimator = ValueAnimator.ofFloat(0f, verticalInset)
@@ -304,6 +317,8 @@ object ViewAnimationHelper {
                 targetView.invalidateOutline()
                 targetView.pivotX = 0f
                 targetView.pivotY = 0f
+                // 动画结束后恢复默认图层类型
+                targetView.setLayerType(View.LAYER_TYPE_NONE, null)
             }
         })
 

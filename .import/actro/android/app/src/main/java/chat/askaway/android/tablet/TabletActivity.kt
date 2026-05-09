@@ -58,6 +58,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
     // Grid → Tab 动画时传入的 sourceView
     private var pendingGridSourceView: View? = null
+    private var pendingGridActiveModel: ActiveModel? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -162,12 +163,15 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
         // Grid adapter 的点击事件
         gridAdapter.onItemClick = { position, sourceView ->
-            // 保存 sourceView 供动画使用
+            // 保存 sourceView 和 ActiveModel 供动画使用
             pendingGridSourceView = sourceView
+            val appList = viewModel.tabletUseCase.value?.appList
+            if (appList != null && position < appList.size) {
+                pendingGridActiveModel = appList[position]
+            }
             // 在网格模式下点击，切换到 TAB 模式
             viewModel.changeDisplayMode(PageMode.TAB)
             // 更新当前选中的 app
-            val appList = viewModel.tabletUseCase.value?.appList
             if (appList != null && position < appList.size) {
                 viewModel.changeActiveModel(appList[position].id)
             }
@@ -522,12 +526,18 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             viewModel.enterFullScreen()
             // TAB 模式
             val sourceView = pendingGridSourceView
+            val activeModel = pendingGridActiveModel
             pendingGridSourceView = null
+            pendingGridActiveModel = null
 
             if (sourceView != null && sourceView.isAttachedToWindow) {
                 // Grid → Tab 动画
-                // 1. 截取 sourceView 的截图设置到 ivTransition 上
-                val bitmap = captureViewBitmap(sourceView)
+                // 1. 从截图文件加载全分辨率 bitmap，避免从小尺寸 view 截图导致放大变虚
+                val bitmap = if (activeModel?.screenshot?.isNotEmpty() == true) {
+                    decodeScreenshotFile(activeModel.screenshot)
+                } else {
+                    captureViewBitmap(sourceView)
+                }
                 if (bitmap != null) {
                     binding.ivTransition.setImageBitmap(bitmap)
 
@@ -651,6 +661,18 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                     Log.e("TabletActivity", "Failed to capture screenshot for ${item.id}", e)
                 }
             }
+        }
+    }
+
+    /**
+     * 从截图文件加载全分辨率 Bitmap，用于 Grid → Tab 放大动画
+     */
+    private fun decodeScreenshotFile(path: String): Bitmap? {
+        return try {
+            android.graphics.BitmapFactory.decodeFile(path)
+        } catch (e: Exception) {
+            Log.e("TabletActivity", "Failed to decode screenshot file", e)
+            null
         }
     }
 
