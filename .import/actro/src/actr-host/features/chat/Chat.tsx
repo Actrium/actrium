@@ -79,6 +79,7 @@ import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import ChatSharePreviewModal from './share/ChatSharePreviewModal';
 import { usePhoneAttachmentPanelController } from './hooks/usePhoneAttachmentPanelController';
+import { useReadAloudPlaybackController } from './hooks/useReadAloudPlayback';
 
 const PAGE_SIZE = 20;
 const EMPTY_MESSAGE_IDS: string[] = [];
@@ -280,6 +281,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   if (showTemporaryMock) {
     return <TemporarySupramarkMockChat />;
   }
+
+  useReadAloudPlaybackController();
 
   const { t } = useTranslation();
   const { tab } = useTab();
