@@ -8,7 +8,10 @@ packages:
   - 'packages/features/containers/*'
   - 'packages/features/diagrams/*'
   - 'packages/features/cards/*'
-  - 'examples/*'
+  # examples/* — explicit per-example listing because react-native is
+  # parked pending a native FFI rewrite (see examples/react-native/README.md).
+  - 'examples/react-web'
+  - 'examples/react-web-csr'
   # Vendored wasm-bindgen wrapper packages from subtree-merged crates.
   # Resolves @kookyleo/{plantuml,d2,mermaid}-little-web and
   # @kookyleo/graphviz-anywhere-{web,rn} to in-tree paths instead of
