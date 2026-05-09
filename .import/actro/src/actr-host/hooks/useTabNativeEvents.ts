@@ -4,6 +4,7 @@ import { useBookmarkStore } from '../store/useBookmarkStore';
 import { useTabIdMapStore } from '../store/useTabIdMapStore';
 import { useUnreadStore } from '../store/useUnreadStore';
 import { useAuth } from '../../hooks/auth';
+import { stopAllVoicePlayback } from '../features/chat/hooks/useReadAloudPlayback';
 
 /**
  * 监听与当前 tab 相关的原生事件：
@@ -42,6 +43,7 @@ export function useTabNativeEvents(tabId: string) {
       if (!nextAppId) return;
 
       console.log('退出 Tab，执行消息更新操作');
+      await stopAllVoicePlayback(`tab-exit:${tabId}`);
     });
 
     const unsubscribe3 = TabEvents.onTabBookmarkChanged(async (event) => {

@@ -12,6 +12,7 @@ import {
   TouchableWithoutFeedback,
   Keyboard,
   Alert,
+  Platform,
 } from 'react-native';
 import { Icon } from '../../../components';
 import { useTranslation } from 'react-i18next';
@@ -53,10 +54,10 @@ import {
 } from '../../utils/VoiceMessageStorage';
 import {
   ReadAloudActionButton,
-  useReadAloudAction,
 } from './ReadAloudActionButton';
+import { useReadAloudPlayback } from './hooks/useReadAloudPlayback';
 
-const SHOW_AI_READ_ALOUD_ENTRY = false;
+const SHOW_AI_READ_ALOUD_ENTRY = Platform.OS === 'ios';
 
 interface ChatBubbleProps {
   content?: string;
@@ -173,11 +174,17 @@ export default function ChatBubble({
     }
   }, [isCopied]);
 
-  const readAloudAction = useReadAloudAction({
+  const readAloudAction = useReadAloudPlayback({
     appId,
     msgId,
     part: bubblePart,
+    text: content,
   });
+  const shouldShowReadAloudEntry =
+    SHOW_AI_READ_ALOUD_ENTRY &&
+    !isQuestion &&
+    !!content?.trim() &&
+    readAloudAction.isSupported;
 
   const handleVoiceBubblePress = React.useCallback(async () => {
     if (!msgId || !parsedVoicePayload) return;
@@ -235,12 +242,13 @@ export default function ChatBubble({
         icon: <Icon type="share" size={16} />,
       });
     }
-    // 中文注释：AI 朗读能力保留在独立组件/动作里，当前仅关闭入口显示，不影响后续单独恢复。
-    if (SHOW_AI_READ_ALOUD_ENTRY && !isQuestion) {
+    if (shouldShowReadAloudEntry) {
       options.push({
         label: t('actr.chat.readAloud'),
-        onPress: readAloudAction.handlePress,
-        icon: <Icon type="voice" size={16} />,
+        onPress: () => {
+          void readAloudAction.handlePress();
+        },
+        icon: <Icon type='voice' size={16} />,
       });
     }
     if (!isQuestion) {
@@ -276,6 +284,7 @@ export default function ChatBubble({
     isQuestion,
     onEdit,
     onCopy,
+    shouldShowReadAloudEntry,
     readAloudAction.handlePress,
     msgId,
     tabId,
@@ -581,12 +590,13 @@ export default function ChatBubble({
               size={chatBubbleToolbar.iconSize}
             />
           </Pressable>
-          {SHOW_AI_READ_ALOUD_ENTRY ? (
+          {shouldShowReadAloudEntry ? (
             <ReadAloudActionButton
-              appId={appId}
-              msgId={msgId}
-              part={bubblePart}
+              status={readAloudAction.readAloudStatus}
               selectionMode={selectionMode}
+              onPress={() => {
+                void readAloudAction.handlePress();
+              }}
             />
           ) : null}
           <DropdownMenu

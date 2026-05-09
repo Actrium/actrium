@@ -4,6 +4,7 @@ import {
   type SpeechRecognitionErrorEvent,
   type SpeechRecognitionTranscriptEvent,
 } from '../../../utils';
+import { stopAllVoicePlayback } from '../../chat/hooks/useReadAloudPlayback';
 
 interface UseActrSpeechRecognitionControllerParams {
   processMessageSend: (content: string) => Promise<unknown>;
@@ -87,6 +88,10 @@ export function useActrSpeechRecognitionController(
   }, [processMessageSend, resetRecognitionState, updateTranscript]);
 
   const handleVoiceStart = useCallback(async () => {
+    // 中文注释：按住说话开始前先收口当前所有播放源，
+    // 避免语音识别、语音消息播放、TTS 朗读同时占用音频会话导致状态和实际音频输出不一致。
+    await stopAllVoicePlayback('speech-recognition-start');
+
     sessionIdRef.current += 1;
     activeSessionIdRef.current = sessionIdRef.current;
     lastTranscriptRef.current = '';
@@ -116,7 +121,13 @@ export function useActrSpeechRecognitionController(
       console.warn(
         '[useActrSpeechRecognitionController] speech recognition permission denied or unavailable',
       );
+      return;
     }
+
+    console.log(
+      '[useActrSpeechRecognitionController] speech recognition session started:',
+      activeSessionIdRef.current,
+    );
   }, [resetRecognitionState, setVoiceRecording]);
 
   const handleVoiceEnd = useCallback(
