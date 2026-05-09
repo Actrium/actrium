@@ -24,3 +24,15 @@ export { EmailBridge } from './email/EmailBridge';
 
 // Speech
 export { setLanguage, feedAudio, stop } from './speech/SpeechBridge';
+
+// TTS
+export {
+  speak,
+  pause,
+  resume,
+  stop as stopTTS,
+  getAvailableLanguages,
+} from './tts/TTSBridge';
+export type { TTSSpeakOptions } from './tts/TTSBridge';
+export type { TTSEventPayload, TTSFinishEvent } from './tts/TTSEvents';
+export { TTSEvents } from './tts/TTSEvents';
