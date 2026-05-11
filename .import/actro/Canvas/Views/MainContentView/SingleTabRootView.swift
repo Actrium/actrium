@@ -244,10 +244,9 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             }
         }
 
-        // Single tab mode - 包装成数组以兼容旧版 JS 逻辑
+        // Single tab mode — 只传 tab 单对象，不再冗余包装成 tabs 数组
         var props: [String: Any] = [
             "singleTabMode": true,
-            "tabs": [tabDict],
             "tab": tabDict,
             "currentTabId": tab.id.uuidString,
             "isLeftPanelVisible": viewModel.isLeftPanelVisible(for: tab.id),
