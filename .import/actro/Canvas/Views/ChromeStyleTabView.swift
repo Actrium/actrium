@@ -509,6 +509,10 @@ struct ChromeTabCardView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .background(Color.black)
+        .onAppear {
+            // 内存警告回收快照后，卡片出现时按需从磁盘加载
+            viewModel.loadSnapshotIfNeeded(for: tab.id)
+        }
         .contextMenu {
             if tab.title != TM.active.blackTab() {
                 Button {

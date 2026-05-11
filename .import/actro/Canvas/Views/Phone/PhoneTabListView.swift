@@ -208,6 +208,10 @@ struct PhoneTabCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
         .asMatchedTransitionSource(id: tab.id, in: animation)
+        .onAppear {
+            // 内存警告回收快照后，卡片出现时按需从磁盘加载
+            viewModel.loadSnapshotIfNeeded(for: tab.id)
+        }
         .contextMenu {
             if tab.title != TM.active.blackTab() {
                 Button {
