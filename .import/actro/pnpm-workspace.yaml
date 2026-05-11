@@ -8,9 +8,11 @@ packages:
   - 'packages/features/containers/*'
   - 'packages/features/diagrams/*'
   - 'packages/features/cards/*'
-  # examples/* — explicit per-example listing because react-native is
-  # parked pending a native FFI rewrite (see examples/react-native/README.md).
-  - 'examples/react-web'
+  # examples/* — explicit per-example listing. react-native unblocked
+  # in 2026-05 by the cross-target graphviz-anywhere 0.2.1 + the
+  # @kookyleo/supramark-<engine>-native-rn wrappers (this workspace
+  # tree picks them up via crates/*/packages/react-native below).
+  - 'examples/react-native'
   - 'examples/react-web-csr'
   # Vendored wasm-bindgen wrapper packages from subtree-merged crates.
   # Resolves @kookyleo/{plantuml,d2,mermaid}-little-web and
