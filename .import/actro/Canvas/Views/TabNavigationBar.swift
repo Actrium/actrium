@@ -133,7 +133,7 @@ struct FocusModeNavigationBar: View {
         Button(action: onBackToOverview) {
             Image(systemName: "rectangle.grid.2x2.fill")
                 .font(.system(size: 16))
-                .foregroundColor(.primary)
+                .foregroundColor(.black)
                 .frame(width: 44, height: tabHeight)
         }
         .buttonStyle(.plain)
@@ -201,7 +201,7 @@ struct FocusModeNavigationBar: View {
         }) {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(.black)
                 .frame(width: tabHeight, height: tabHeight)
         }
         .buttonStyle(.plain)
@@ -238,7 +238,7 @@ struct FocusModeNavigationBar: View {
         }) {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(.black)
                 .frame(width: tabHeight, height: tabHeight)
         }
         .buttonStyle(.plain)
@@ -251,7 +251,7 @@ struct FocusModeNavigationBar: View {
         }) {
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 16))
-                .foregroundColor(.primary)
+                .foregroundColor(.black)
                 .frame(width: 44, height: tabHeight)
         }
         .buttonStyle(.plain)
@@ -365,7 +365,7 @@ struct TabItemView: View {
         HStack(spacing: 8) {
             Text(tab.title.isEmpty ? TM.active.blackTab() : tab.title)
                 .font(.system(size: 13))
-                .foregroundColor(isActive ? .primary : .secondary)
+                .foregroundColor(isActive ? .black : Color(hex: "#9E9EA7"))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -373,7 +373,7 @@ struct TabItemView: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12))
-                    .foregroundColor(isActive ? .primary : .secondary)
+                    .foregroundColor(isActive ? .black : Color(hex: "#9E9EA7"))
             }
             .buttonStyle(.plain)
         }
