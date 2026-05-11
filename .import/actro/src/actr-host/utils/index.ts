@@ -185,12 +185,13 @@ export function extractAppIdFromUrl(url: string): string | null {
  * ActrLoader - .actr 文件加载器
  */
 export { ActrLoader } from './ActrLoader';
+export { DevActrLoader, ENABLE_DEV_LOCAL_ACTR_SCRIPT } from './ActrLoader.dev';
 export type { ActrManifest, ActrPackage, ActrLoaderOptions } from './ActrLoader.types';
 
 // 创建默认实例
-import { ActrLoader } from './ActrLoader';
-export const actrLoader = new ActrLoader({
-  enableCache: true,
+import { createActrLoader } from './ActrLoader.dev';
+export const actrLoader = createActrLoader({
+  enableCache: false,
   cacheExpiry: 10 * 60 * 1000, // 10分钟
   timeout: 30000, // 30秒
   verifyIntegrity: false,

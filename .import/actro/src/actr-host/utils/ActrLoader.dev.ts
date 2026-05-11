@@ -1,0 +1,89 @@
+import { NativeModules } from 'react-native';
+import { ActrLoader } from './ActrLoader';
+import type {
+  ActrLoaderOptions,
+  ActrManifest,
+  ActrPackage,
+} from './ActrLoader.types';
+
+export const ENABLE_DEV_LOCAL_ACTR_SCRIPT = true;
+
+const DEV_LOCAL_ACTR_SCRIPT_PORT = 3000;
+const DEV_LOCAL_ACTR_SCRIPT_FILE = 'unified-app.js';
+
+function isDevRuntime(): boolean {
+  return typeof (globalThis as any).__DEV__ === 'boolean'
+    ? !!(globalThis as any).__DEV__
+    : true;
+}
+
+function resolveMetroHost(): string {
+  try {
+    const sourceCode = NativeModules.SourceCode;
+    const scriptURL: string | undefined =
+      sourceCode?.getConstants?.()?.scriptURL ?? sourceCode?.scriptURL;
+    const match = scriptURL?.match(/^https?:\/\/([^:/]+)/);
+    if (match?.[1]) {
+      return match[1];
+    }
+  } catch {
+    // 开发环境读取 SourceCode 失败时，回退到本机模拟器常用地址。
+  }
+
+  return 'localhost';
+}
+
+function resolveDevLocalScriptUrl(): string {
+  return `http://${resolveMetroHost()}:${DEV_LOCAL_ACTR_SCRIPT_PORT}/${DEV_LOCAL_ACTR_SCRIPT_FILE}`;
+}
+
+function createDevManifest(sourceUrl: string): ActrManifest {
+  return {
+    name: 'dev-local-actr-script',
+    version: '0.0.0-dev',
+    entry: DEV_LOCAL_ACTR_SCRIPT_FILE,
+    description: `Loaded from ${sourceUrl}`,
+  };
+}
+
+export class DevActrLoader extends ActrLoader {
+  async load(url: string): Promise<ActrPackage> {
+    if (!ENABLE_DEV_LOCAL_ACTR_SCRIPT || !isDevRuntime()) {
+      return super.load(url);
+    }
+
+    const sourceUrl = resolveDevLocalScriptUrl();
+    try {
+      const response = await fetch(sourceUrl);
+
+      if (!response.ok) {
+        throw new Error(
+          `Failed to fetch dev local actr script: ${response.status} ${response.statusText}`,
+        );
+      }
+
+      const unifiedScript = await response.text();
+      console.log(
+        `[DevActrLoader] Loaded dev local script from ${sourceUrl}, script size: ${unifiedScript.length} bytes`,
+      );
+
+      return {
+        manifest: createDevManifest(sourceUrl),
+        unifiedScript,
+        sourceUrl,
+      };
+    } catch (error) {
+      console.warn(
+        `[DevActrLoader] Failed to load dev local script, fallback to .actr: ${sourceUrl}`,
+        error,
+      );
+      return super.load(url);
+    }
+  }
+}
+
+export function createActrLoader(options: ActrLoaderOptions = {}): ActrLoader {
+  return ENABLE_DEV_LOCAL_ACTR_SCRIPT && isDevRuntime()
+    ? new DevActrLoader(options)
+    : new ActrLoader(options);
+}
