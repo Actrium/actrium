@@ -35,7 +35,7 @@ import {
   logDevToolsRenderOp,
   updateDevToolsComponentTree,
 } from '../../libs/devTools';
-import { EventHandler } from '../../libs/eventHandler';
+import { EventHandler } from 'askit';
 import { LAYOUT } from '../../constants';
 import { evaluateTabGate, extractPanelsByPanelId } from '../../utils';
 import Main from './views.index';
@@ -53,6 +53,7 @@ import { exitFullscreen } from '../../../native-bridge';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
+import { useExtensionEvent } from './useExtensionEvent';
 
 const log = logger.child('ActrApp');
 const nerror = (msg: string) => log.error(msg);
@@ -145,6 +146,8 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     centerAnimValue,
     onVisibilityChange: handlePhonePanelVisibleChange,
   });
+
+  const handlers = useExtensionEvent(tab.id)
 
   React.useEffect(() => {
     isActiveRef.current = isActive;
@@ -250,9 +253,11 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         currentEngine.register(hostComponents);
 
         // Generic message handler with DevTools logging
+        // 注册来自 Guest 的消息处理器，所有消息都会被记录到 DevTools
         const unsubscribeMessage = EventHandler.setup(currentEngine, {
           tabId: tab.id,
           onLog: logDevToolsMessage,
+          handlers
         });
 
         // Render operation handler with DevTools logging

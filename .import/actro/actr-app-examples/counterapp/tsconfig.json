@@ -12,8 +12,8 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "rill/let": ["../../../../rill/src/guest/let/index.ts"],
-      "askit": ["../../../../askit/src/index.guest.ts"]
+      "rill/let": ["../../../rill/src/guest/let/index.ts"],
+      "askit": ["../../../askit/src/index.guest.ts"]
     }
   },
   "include": ["src/**/*", "../../src/actr-host/main"],
