@@ -1,5 +1,18 @@
-import { useState } from 'react';
-import { ScrollView, View, Text, TouchableOpacity, StyleSheet } from 'rill/let';
+import { useEventBridge, useHttp } from 'askit';
+import { useEffect, useState } from 'react';
+import {
+  ScrollView,
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Image,
+} from 'rill/let';
+import { HostToGuestEventPayloads } from 'askit/contracts';
+
+const clearIconSource = require('../../assets/clear.png');
+const feedbackIconSource = require('../../assets/feedback.png');
+const aboutIconSource = require('../../assets/about.png');
 
 interface StatsProps {}
 
@@ -12,88 +25,108 @@ interface LanguageOption {
 
 interface ActionOption {
   id: string;
-  icon: string;
+  iconSource: any;
   label: string;
-  filledIcon?: boolean;
+  handler?: () => void;
 }
 
-const initialStatsData = {
-  title: '慕田峪长城智能问答',
-  favoriteCount: '1234',
-  favoriteLabel: '收藏',
-  usedCount: '12345678',
-  usedLabel: '用过',
-  creatorPrefix: '创建者：',
-  creatorName: '慕田峪长城景区官方',
-  shareLabel: '分享',
-  introTitle: '介绍',
-  intro:
-    '我是Mu Ai，知无不答！依托前沿人工智能，融合个性化服务，为您定制特色行程，高效解答问题，全程相伴畅玩景区。',
-  languageTitle: '选择语种',
-  selectedLanguageId: 'en',
-  supportedLanguages: [
-    {
-      id: 'en',
-      label: 'Welcome',
-      backgroundColor: '#F4ECEA',
-      color: '#D95B4F',
-    },
-    {
-      id: 'zhHans',
-      label: '欢迎',
-      backgroundColor: '#F5EDED',
-      color: '#E45C4E',
-    },
-    {
-      id: 'ja',
-      label: 'いらっしゃいませ',
-      backgroundColor: '#ECF3F8',
-      color: '#2E7B8B',
-    },
-    {
-      id: 'fr',
-      label: 'accfaueillir',
-      backgroundColor: '#F8EEF4',
-      color: '#E16586',
-    },
-    {
-      id: 'ko',
-      label: '환영',
-      backgroundColor: '#EEF2FF',
-      color: '#005DFF',
-    },
-    {
-      id: 'zhHant',
-      label: '歡迎',
-      backgroundColor: '#F8F0F0',
-      color: '#D95B4F',
-    },
-    {
-      id: 'es',
-      label: 'bienvenido',
-      backgroundColor: '#F8F5F2',
-      color: '#DB9432',
-    },
-    {
-      id: 'ru',
-      label: 'добропожаловать',
-      backgroundColor: '#F0EEF7',
-      color: '#6B5BAA',
-    },
-  ],
-  actions: [
-    { id: 'clearHistory', icon: '⌫', label: '清除对话记录' },
-    { id: 'feedback', icon: '☹', label: '吐个槽' },
-    { id: 'about', icon: '!', label: '关于 MU AI', filledIcon: true },
-  ],
-};
+const supportedLanguages: LanguageOption[] = [
+  {
+    id: 'en',
+    label: 'Welcome',
+    backgroundColor: '#F4ECEA',
+    color: '#D95B4F',
+  },
+  {
+    id: 'zhHans',
+    label: '欢迎',
+    backgroundColor: '#F5EDED',
+    color: '#E45C4E',
+  },
+  {
+    id: 'ja',
+    label: 'いらっしゃいませ',
+    backgroundColor: '#ECF3F8',
+    color: '#2E7B8B',
+  },
+  {
+    id: 'fr',
+    label: 'accfaueillir',
+    backgroundColor: '#F8EEF4',
+    color: '#E16586',
+  },
+  {
+    id: 'ko',
+    label: '환영',
+    backgroundColor: '#EEF2FF',
+    color: '#005DFF',
+  },
+  {
+    id: 'zhHant',
+    label: '歡迎',
+    backgroundColor: '#F8F0F0',
+    color: '#D95B4F',
+  },
+  {
+    id: 'es',
+    label: 'bienvenido',
+    backgroundColor: '#F8F5F2',
+    color: '#DB9432',
+  },
+  {
+    id: 'ru',
+    label: 'добропожаловать',
+    backgroundColor: '#F0EEF7',
+    color: '#6B5BAA',
+  },
+];
 
 function onLanguageChangePlaceholder(language: LanguageOption) {
   void language;
 }
 
 export default function Stats({}: StatsProps) {
-  const [statsData, setStatsData] = useState(initialStatsData);
+  const [lang, setLang] = useState<string>('zhHans' as any);
+  const [statsData, setStatsData] = useState<
+    HostToGuestEventPayloads['SEND_APP_INFO']
+  >({} as any);
+  const { request: getAppInfo } = useEventBridge(
+    'GET_APP_INFO',
+    'SEND_APP_INFO',
+  );
+  const { request: clearChatHistory } = useEventBridge(
+    'CLEAR_CHAT_HISTORY',
+    'CLEAR_CHAT_HISTORY_RESULT',
+  );
+
+  const handleClearHistory = () => {
+    clearChatHistory({
+      requestId: 'stats_page_clear_history_001',
+    }).then((result) => {
+      if (result.success) {
+        console.log('聊天记录已清除');
+      }
+    });
+  };
+
+  const actions = [
+    {
+      id: 'clearHistory',
+      iconSource: clearIconSource,
+      label: '清除对话记录',
+      handler: handleClearHistory,
+    },
+    { id: 'feedback', iconSource: feedbackIconSource, label: '吐个槽' },
+    { id: 'about', iconSource: aboutIconSource, label: '关于 MU AI' },
+  ] satisfies ActionOption[];
+
+  useEffect(() => {
+    getAppInfo({
+      requestId: 'stats_page_001',
+    }).then((appInfo) => {
+      setStatsData(appInfo);
+    });
+  }, []);
 
   const handleLanguagePress = (language: LanguageOption) => {
     setStatsData((current) => ({
@@ -101,6 +134,7 @@ export default function Stats({}: StatsProps) {
       selectedLanguageId: language.id,
     }));
     onLanguageChangePlaceholder(language);
+    setLang(language.id);
   };
 
   return (
@@ -108,44 +142,45 @@ export default function Stats({}: StatsProps) {
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
-        id='sidebar'
+        id="sidebar"
       >
         <View style={styles.profileSection}>
-          <View style={styles.logo}>
+          <View style={styles.logoBox}>
+            <Image source={{ uri: statsData.logo }} style={styles.logo} />
           </View>
 
-          <Text style={styles.title}>{statsData.title}</Text>
+          <Text style={styles.title}>{statsData.appName}</Text>
 
           <View style={styles.statsRow}>
             <Text style={styles.metricValue}>{statsData.favoriteCount}</Text>
-            <Text style={styles.metricLabel}>{statsData.favoriteLabel}</Text>
+            <Text style={styles.metricLabel}>收藏</Text>
             <Text style={[styles.metricValue, styles.metricGap]}>
               {statsData.usedCount}
             </Text>
-            <Text style={styles.metricLabel}>{statsData.usedLabel}</Text>
+            <Text style={styles.metricLabel}>用过</Text>
           </View>
 
           <Text style={styles.creator}>
-            {statsData.creatorPrefix}
-            {statsData.creatorName}
+            创建者
+            {statsData.author}
           </Text>
 
           <TouchableOpacity style={styles.shareButton} onPress={() => {}}>
             <Text style={styles.shareIcon}>↗</Text>
-            <Text style={styles.shareText}>{statsData.shareLabel}</Text>
+            <Text style={styles.shareText}>分享</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{statsData.introTitle}</Text>
-          <Text style={styles.aboutText}>{statsData.intro}</Text>
+          <Text style={styles.sectionTitle}>介绍</Text>
+          <Text style={styles.aboutText}>123</Text>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{statsData.languageTitle}</Text>
+          <Text style={styles.sectionTitle}>选择语种</Text>
           <View style={styles.languageGrid}>
-            {statsData.supportedLanguages.map((language) => {
-              const isSelected = language.id === statsData.selectedLanguageId;
+            {supportedLanguages.map((language) => {
+              const isSelected = language.id === lang;
 
               return (
                 <TouchableOpacity
@@ -175,20 +210,16 @@ export default function Stats({}: StatsProps) {
         </View>
 
         <View style={styles.actionList}>
-          {statsData.actions.map((action) => (
+          {actions.map((action) => (
             <TouchableOpacity
               key={action.id}
-              onPress={() => {}}
+              onPress={action.handler || (() => {})}
               style={styles.actionItem}
             >
-              <Text
-                style={[
-                  styles.actionIcon,
-                  action.filledIcon && styles.actionIconFilled,
-                ]}
-              >
-                {action.icon}
-              </Text>
+              <Image
+                source={action.iconSource}
+                style={styles.actionIcon}
+              />
               <Text style={styles.actionText}>{action.label}</Text>
             </TouchableOpacity>
           ))}
@@ -217,13 +248,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 52,
   },
+  logoBox: {
+    borderRadius: 33,
+    // backgroundColor: '#C5924F',
+    overflow: 'hidden',
+    marginBottom: 24,
+  },
   logo: {
     width: 66,
     height: 66,
-    borderRadius: 33,
-    backgroundColor: '#C5924F',
-    overflow: 'hidden',
-    marginBottom: 24,
   },
   title: {
     color: '#252525',
@@ -323,22 +356,8 @@ const styles = StyleSheet.create({
     marginBottom: 21,
   },
   actionIcon: {
-    width: 17,
-    color: '#202124',
-    fontSize: 17,
-    fontWeight: '500',
-    lineHeight: 20,
-    marginRight: 18,
-    textAlign: 'center',
-  },
-  actionIconFilled: {
-    width: 17,
-    height: 17,
-    borderRadius: 8.5,
-    backgroundColor: '#000000',
-    color: '#FFFFFF',
-    fontSize: 12,
-    lineHeight: 17,
+    width: 20,
+    height: 20,
     marginRight: 18,
   },
   actionText: {

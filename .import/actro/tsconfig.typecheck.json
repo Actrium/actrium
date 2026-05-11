@@ -2,9 +2,9 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "paths": {
-      "askit": ["./types/external-modules.d.ts"],
-      "askit/core": ["./types/external-modules.d.ts"],
-      "askit/contracts": ["./types/external-modules.d.ts"],
+      "askit": ["../askit/src/index.host.ts"],
+      "askit/core": ["../askit/src/core/index.ts"],
+      "askit/contracts": ["../askit/src/contracts/index.ts"],
       "rill": ["./types/external-modules.d.ts"],
       "rill/host/preset": ["./types/external-modules.d.ts"],
       "@supramark/core": ["./types/external-modules.d.ts"],
@@ -23,5 +23,5 @@
     }
   },
   "include": ["index.ts", "src", "types"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "../rill/src/guest", "../rill/src/cli", "../rill/src/sandbox", "../rill/src/devtools"]
 }
