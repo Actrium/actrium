@@ -121,20 +121,21 @@ class BrowserViewModel: ObservableObject {
         return imagesDirectoryURL.appendingPathComponent("\(tabId.uuidString).jpg")
     }
 
-    /// Save a tab snapshot to disk
+    /// Save a tab snapshot to disk — 缩略图使用较低压缩质量以减少磁盘占用
     private func saveSnapshot(_ image: UIImage, for tabId: UUID) {
         let fileURL = snapshotURL(for: tabId)
-        if let jpegData = image.jpegData(compressionQuality: 0.8) {
+        // 缩略图尺寸小，0.5 的压缩质量视觉上无明显差异，但体积更小
+        if let jpegData = image.jpegData(compressionQuality: 0.5) {
             do {
                 try jpegData.write(to: fileURL)
-                logger.debug("💾 [BrowserViewModel] 已保存截图: \(tabId.uuidString.prefix(8))")
+                logger.debug("💾 [BrowserViewModel] 已保存截图(降采样): \(tabId.uuidString.prefix(8)), 大小: \(jpegData.count) bytes")
             } catch {
                 logger.error("❌ [BrowserViewModel] 保存截图失败: \(error)")
             }
         }
     }
 
-    /// Load a tab snapshot from disk
+    /// Load a tab snapshot from disk — 加载后降采样，确保内存副本始终为缩略图
     private func loadSnapshot(for tabId: UUID) -> UIImage? {
         let fileURL = snapshotURL(for: tabId)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -142,7 +143,12 @@ class BrowserViewModel: ObservableObject {
         }
         do {
             let data = try Data(contentsOf: fileURL)
-            return UIImage(data: data)
+            if let image = UIImage(data: data) {
+                // 磁盘可能保存了旧版全分辨率截图，降采样后返回
+                // 保持宽高比降采样，避免拉伸
+                return image.downsampled(toWidth: Self.snapshotTargetWidth)
+            }
+            return nil
         } catch {
             logger.error("❌ [BrowserViewModel] 加载截图失败: \(error)")
             return nil
@@ -280,11 +286,19 @@ class BrowserViewModel: ObservableObject {
         saveTabs()
     }
 
-    /// Save tab snapshot when set
+    /// Save tab snapshot when set — 降采样后再存储，大幅减少内存占用
     func setTabSnapshot(_ image: UIImage, for tabId: UUID) {
-        tabSnapshots[tabId] = image
-        saveSnapshot(image, for: tabId)
+        // 卡片预览只需要小缩略图，按宽度降采样，保持原始宽高比
+        let thumbnail = image.downsampled(toWidth: Self.snapshotTargetWidth)
+        tabSnapshots[tabId] = thumbnail
+        // 磁盘副本也保存降采样版本，减少 I/O 体积
+        saveSnapshot(thumbnail, for: tabId)
     }
+
+    /// 快照降采样目标宽度（@1x pt）
+    /// iPhone 卡片宽约 344pt，iPad 卡片更宽。
+    /// 400pt @1x 在两个平台上清晰度足够，单张内存约 50KB。
+    static let snapshotTargetWidth: CGFloat = 400
 
     /// Open or get a system tab (History, Bookmarks, Settings)
     /// System tabs are managed separately from regular tabs
@@ -528,19 +542,12 @@ class BrowserViewModel: ObservableObject {
         saveTabs()
     }
     
-    /// Save tabs to UserDefaults (only essential fields) and snapshots to disk
+    /// Save tabs to UserDefaults (only essential fields)
     func saveTabs() {
         let persistedTabs = tabs.map { PersistedTab(from: $0) }
         do {
             let data = try JSONEncoder().encode(persistedTabs)
             UserDefaults.standard.set(data, forKey: tabsKey)
-
-            // Save snapshots for all tabs
-            for tab in tabs {
-                if let snapshot = tabSnapshots[tab.id] {
-                    saveSnapshot(snapshot, for: tab.id)
-                }
-            }
 
             logger.debug("💾 [BrowserViewModel] 已保存 \(persistedTabs.count) 个标签页")
         } catch {
