@@ -223,6 +223,12 @@ importers:
       '@supramark/feature-diagram-vega-lite':
         specifier: workspace:*
         version: link:../../packages/features/diagrams/vega-lite
+      '@supramark/feature-emoji':
+        specifier: workspace:*
+        version: link:../../packages/features/main/emoji
+      '@supramark/feature-footnote':
+        specifier: workspace:*
+        version: link:../../packages/features/main/footnote
       '@supramark/feature-gfm':
         specifier: workspace:*
         version: link:../../packages/features/main/gfm
@@ -232,6 +238,9 @@ importers:
       '@supramark/feature-map':
         specifier: workspace:*
         version: link:../../packages/features/containers/map
+      '@supramark/feature-math':
+        specifier: workspace:*
+        version: link:../../packages/features/main/math
       '@supramark/rn':
         specifier: workspace:*
         version: link:../../packages/renderers/rn
