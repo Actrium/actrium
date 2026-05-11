@@ -240,7 +240,7 @@ class TabModule: NSObject {
             // 查找并更新 tab
             if let index = viewModel.tabs.firstIndex(where: { $0.id == uuid }) {
                 viewModel.tabs[index].hasUnreadMessage = hasUnread
-                viewModel.saveTabs()
+                viewModel.scheduleSaveTabs()
                 resolve(true)
             } else {
                 reject("TAB_NOT_FOUND", "Tab with ID \(tabId) not found", nil)
@@ -266,7 +266,7 @@ class TabModule: NSObject {
             // 查找并更新 tab
             if let index = viewModel.tabs.firstIndex(where: { $0.id == uuid }) {
                 viewModel.tabs[index].isBookmarked = isBookmarked
-                viewModel.saveTabs()
+                viewModel.scheduleSaveTabs()
                 resolve(true)
             } else {
                 reject("TAB_NOT_FOUND", "Tab with ID \(tabId) not found", nil)
@@ -305,7 +305,7 @@ class TabModule: NSObject {
                 if let urlString = options["appUrl"] as? String, let newURL = URL(string: urlString) {
                     viewModel.tabs[index].url = newURL
                 }
-                viewModel.saveTabs()
+                viewModel.scheduleSaveTabs()
                 resolve(true)
             } else {
                 reject("TAB_NOT_FOUND", "Tab with ID \(tabId) not found", nil)
