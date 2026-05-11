@@ -26,10 +26,7 @@ struct PhoneMainView: View {
                 PhoneSystemAppView(
                     systemType: .bookmarks,
                     viewModel: viewModel,
-                    historyVM: historyVM,
-                    onSelect: { tab in
-                        fullscreenTab = tab
-                    }
+                    historyVM: historyVM
                 )
             }
             
@@ -44,10 +41,7 @@ struct PhoneMainView: View {
                 PhoneSystemAppView(
                     systemType: .settings,
                     viewModel: viewModel,
-                    historyVM: historyVM,
-                    onSelect: { tab in
-                        fullscreenTab = tab
-                    }
+                    historyVM: historyVM
                 )
             }
             
@@ -57,10 +51,7 @@ struct PhoneMainView: View {
                     PhoneSystemAppView(
                         systemType: .globalSearch,
                         viewModel: viewModel,
-                        historyVM: historyVM,
-                        onSelect: { tab in
-                            fullscreenTab = tab
-                        }
+                        historyVM: historyVM
                     )
                 }
                 .searchable(text: $searchText)

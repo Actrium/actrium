@@ -46,16 +46,19 @@ struct OverviewNavigationBar: View {
             .padding(.leading, viewModel.multipleWindowMode ? 0 : 65)
 
             // 中间：活跃 / 书签 切换（SwitchButton 风格）
-            SegmentedToggle(selectedTab: $selectedTab,
-                           option1: TM.active.activity(),
-                           option2: TM.active.bookmarks(),
-                           onOption1: {
-                               viewModel.currentSystemTabType = nil
-                           },
-                           onOption2: {
-                               viewModel.openSystemTab(.bookmarks, additionalProps: nil, replaceAdditionalProps: true)
-                               viewModel.currentSystemTabType = .bookmarks
-                           })
+            SegmentedToggle(
+                selectedTab: $selectedTab,
+                option1: TM.active.activity(),
+                option2: TM.active.bookmarks(),
+                onOption1: {
+                    viewModel.currentSystemTabType = nil
+                },
+                onOption2: {
+                    viewModel.reloadSystemTab(.bookmarks)
+                    viewModel.openSystemTab(.bookmarks, additionalProps: nil, replaceAdditionalProps: true)
+                    viewModel.currentSystemTabType = .bookmarks
+                }
+            )
         }
         .frame(height: height)
         .background(Color.black)
@@ -165,10 +168,28 @@ struct FocusModeNavigationBar: View {
     }
 
     private var staticTabsWithAddButton: some View {
-        HStack(spacing: 0) {
-            tabsContent
-            addTabButton
-            Spacer()
+        ZStack(alignment: .topLeading) {
+            HStack(spacing: 0) {
+                tabsContent
+                addTabButton
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+
+            // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
+            if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe {
+                let cornerSize: CGFloat = 19
+                let cornerColor: Color = Color(hex: "#F2F2F6")
+                // 左下反圆角
+                BottomLeftInverseCorner(radius: cornerSize, color: cornerColor)
+                    .frame(width: cornerSize, height: cornerSize)
+                    .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
+
+                // 右下反圆角
+                BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
+                    .frame(width: cornerSize, height: cornerSize)
+                    .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
+            }
         }
         .frame(maxWidth: .infinity)
     }
