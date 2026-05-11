@@ -475,7 +475,7 @@ struct ChromeTabCardView: View {
                 // Title
                 Text(tab.title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Color(hex: "#ECECED"))
+                    .foregroundColor(theme.isDarkMode ? Color(hex: "#ECECED") : Color(hex: "#404040"))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
