@@ -9,7 +9,7 @@
     "packages/renderers/*",
     "packages/features/*",
     "packages/features/*/*",
-    "examples/react-web",
+    "examples/react-native",
     "examples/react-web-csr",
     "crates/*/packages/web",
     "crates/*/packages/react-native",
