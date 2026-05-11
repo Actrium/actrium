@@ -1,5 +1,5 @@
 // Canvas/Subsystem/src/api/https.ts
-import HostHttpHandler from '../actr-host/libs/httpHandler';
+import { HostHttpHandler } from 'askit';
 
 /**
  * 业务层最终拿到的结果
@@ -13,7 +13,7 @@ export interface IBusinessResult<T> {
 
 export const http = {
   async get<T>(url: string, headers?: any): Promise<IBusinessResult<T>> {
-    const res = await HostHttpHandler.handleRequest<any>({
+    const res = await HostHttpHandler.handleRequest({
       requestId: '',
       url,
       method: 'GET',
@@ -26,9 +26,9 @@ export const http = {
   async post<T>(
     url: string,
     body?: any,
-    headers?: any
+    headers?: any,
   ): Promise<IBusinessResult<T>> {
-    const res = await HostHttpHandler.handleRequest<any>({
+    const res = await HostHttpHandler.handleRequest({
       requestId: '',
       url,
       method: 'POST',
@@ -42,9 +42,9 @@ export const http = {
   async delete<T>(
     url: string,
     body?: any,
-    headers?: any
+    headers?: any,
   ): Promise<IBusinessResult<T>> {
-    const res = await HostHttpHandler.handleRequest<any>({
+    const res = await HostHttpHandler.handleRequest({
       requestId: '',
       url,
       method: 'DELETE',
