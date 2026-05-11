@@ -125,11 +125,35 @@ importers:
         specifier: ^2.1.8
         version: 2.1.9(@types/node@24.10.4)(@vitest/ui@2.1.9)(happy-dom@20.9.0)(jsdom@26.1.0)(lightningcss@1.30.2)(terser@5.44.1)
 
+  crates/mermaid-little/packages/react-native:
+    dependencies:
+      '@supramark/engines':
+        specifier: workspace:*
+        version: link:../../../../packages/engines
+      react:
+        specifier: '*'
+        version: 19.2.3
+      react-native:
+        specifier: '*'
+        version: 0.84.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.2(typescript@5.9.3))(@types/react@19.2.7)(react@19.2.3)
+
   crates/mermaid-little/packages/web:
     devDependencies:
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
+
+  crates/plantuml-little/packages/react-native:
+    dependencies:
+      '@supramark/engines':
+        specifier: workspace:*
+        version: link:../../../../packages/engines
+      react:
+        specifier: '*'
+        version: 19.2.3
+      react-native:
+        specifier: '*'
+        version: 0.84.1(@babel/core@7.28.5)(@react-native-community/cli@20.0.2(typescript@5.9.3))(@types/react@19.2.7)(react@19.2.3)
 
   crates/plantuml-little/packages/web:
     dependencies:
@@ -175,6 +199,12 @@ importers:
       '@kookyleo/supramark-d2-native-rn':
         specifier: workspace:*
         version: link:../../crates/d2-little/packages/react-native
+      '@kookyleo/supramark-mermaid-native-rn':
+        specifier: workspace:*
+        version: link:../../crates/mermaid-little/packages/react-native
+      '@kookyleo/supramark-plantuml-native-rn':
+        specifier: workspace:*
+        version: link:../../crates/plantuml-little/packages/react-native
       '@supramark/core':
         specifier: workspace:*
         version: link:../../packages/core
