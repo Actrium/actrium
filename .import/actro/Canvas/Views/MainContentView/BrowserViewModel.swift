@@ -158,6 +158,15 @@ class BrowserViewModel: ObservableObject {
         }
     }
 
+    /// 按需加载快照：内存中无快照时从磁盘读取。
+    /// 内存警告回收 tabSnapshots 后，卡片视图 onAppear 调用此方法恢复缩略图。
+    func loadSnapshotIfNeeded(for tabId: UUID) {
+        guard tabSnapshots[tabId] == nil else { return }
+        if let snapshot = loadSnapshot(for: tabId) {
+            tabSnapshots[tabId] = snapshot
+        }
+    }
+
     /// Delete a tab snapshot from disk
     private func deleteSnapshot(for tabId: UUID) {
         let fileURL = snapshotURL(for: tabId)
@@ -582,6 +591,31 @@ class BrowserViewModel: ObservableObject {
               tabs[index].hasUnreadMessage else { return }
         tabs[index].hasUnreadMessage = false
         scheduleSaveTabs()
+    }
+
+    // MARK: - Memory Pressure Handling
+
+    /// 系统内存警告时自动回收资源：
+    /// 1. 释放所有非活跃 Tab 的 RootView（最大的内存消耗项，每个约 40MB）
+    /// 2. 释放快照内存副本（磁盘副本保留，标签列表滚动时按需从磁盘加载）
+    func handleMemoryWarning() {
+        let activeTabId = currentTabId
+        var releasedCount = 0
+
+        // 1. 释放所有非活跃 Tab 的 RootView
+        for tab in tabs where tab.id != activeTabId {
+            CanvasReactNativeHost.shared.removeViewForTab(tabId: tab.id)
+            releasedCount += 1
+        }
+
+        // 2. 释放快照内存副本（磁盘副本保留，按需加载）
+        let snapshotCount = tabSnapshots.count
+        tabSnapshots.removeAll()
+
+        // 立即持久化，确保数据安全
+        saveTabs()
+
+        logger.warning("⚠️ [BrowserViewModel] 内存警告回收：释放 \(releasedCount) 个后台 RootView，清除 \(snapshotCount) 个内存快照")
     }
 
     // MARK: - Tab Group Management

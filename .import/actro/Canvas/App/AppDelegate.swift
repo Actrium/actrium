@@ -8,7 +8,7 @@ class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey : Any]? = nil) -> Bool {
         return true
     }
-    
+
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey : Any] = [:]) -> Bool {
         appLogger.debug("接收到 URL：\(url)")
         // 微信回调路径包含 weChatAppId，需优先交给微信处理；
@@ -17,5 +17,12 @@ class AppDelegate: NSObject, UIApplicationDelegate {
             return WeChatManager.shared.handleOpenURL(url)
         }
         return false
+    }
+
+    func applicationDidReceiveMemoryWarning(_ application: UIApplication) {
+        appLogger.warning("⚠️ [AppDelegate] 收到系统内存警告，触发自动回收")
+        Task { @MainActor in
+            BrowserViewModel.active?.handleMemoryWarning()
+        }
     }
 }
