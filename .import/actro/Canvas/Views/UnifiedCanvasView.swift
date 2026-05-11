@@ -1085,7 +1085,7 @@ private struct TabCardView: View {
                     // 立即更新本地状态（UI 响应）
                     if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
                         viewModel.tabs[index].isBookmarked = newBookmarkStatus
-                        viewModel.saveTabs() // 持久化变更
+                        viewModel.scheduleSaveTabs() // 持久化变更
                     }
 
                     // 发送通知给 RN 侧处理实际的收藏逻辑

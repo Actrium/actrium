@@ -95,7 +95,7 @@ struct PhoneTabCardView: View {
         let newBookmarkStatus = !tab.isBookmarked
         if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
             viewModel.tabs[index].isBookmarked = newBookmarkStatus
-            viewModel.saveTabs()
+            viewModel.scheduleSaveTabs()
         }
         NotificationCenter.default.post(
             name: .tabBookmarkChangedFromNative,

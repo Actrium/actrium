@@ -22,7 +22,7 @@ class BrowserViewModel: ObservableObject {
 
     @Published var tabs: [Tab] = [] {
         didSet {
-            saveTabs()
+            scheduleSaveTabs()
         }
     }
     @Published var currentTabId: UUID?
@@ -32,6 +32,9 @@ class BrowserViewModel: ObservableObject {
     // MARK: - Persistence
     private let tabsKey = "persistedTabs"
     private var cancellables = Set<AnyCancellable>()
+
+    /// 持久化防抖：属性变更（标题、红点、收藏等）高频触发时，合并为延迟保存
+    private var saveTabsWorkItem: DispatchWorkItem?
     
     /// Current fullscreen tab ID (for iPhone only, excluding system tabs)
     @Published var fullscreenTabId: UUID?
@@ -542,8 +545,13 @@ class BrowserViewModel: ObservableObject {
         saveTabs()
     }
     
-    /// Save tabs to UserDefaults (only essential fields)
+    /// Save tabs to UserDefaults (only essential fields) — 立即保存
+    /// 仅用于结构性变更（增删 Tab、重排等），属性变更请使用 scheduleSaveTabs()
     func saveTabs() {
+        // 取消待执行的防抖任务，避免重复保存
+        saveTabsWorkItem?.cancel()
+        saveTabsWorkItem = nil
+
         let persistedTabs = tabs.map { PersistedTab(from: $0) }
         do {
             let data = try JSONEncoder().encode(persistedTabs)
@@ -555,6 +563,17 @@ class BrowserViewModel: ObservableObject {
         }
     }
 
+    /// 防抖保存：2 秒内多次调用只执行最后一次。
+    /// 适用于高频属性变更（标题、红点、收藏等），避免每次修改都触发磁盘 I/O。
+    func scheduleSaveTabs() {
+        saveTabsWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.saveTabs()
+        }
+        saveTabsWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
+    }
+
     // MARK: - Unread Status
 
     /// 清除指定 tab 的未读红点状态
@@ -562,7 +581,7 @@ class BrowserViewModel: ObservableObject {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }),
               tabs[index].hasUnreadMessage else { return }
         tabs[index].hasUnreadMessage = false
-        saveTabs()
+        scheduleSaveTabs()
     }
 
     // MARK: - Tab Group Management
@@ -1002,7 +1021,7 @@ class BrowserViewModel: ObservableObject {
             userInfo: userInfo
         )
 
-        saveTabs()
+        scheduleSaveTabs()
     }
 
     func closeOtherTabs(keepTabId: UUID) {
