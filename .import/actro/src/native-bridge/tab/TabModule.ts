@@ -7,6 +7,7 @@ export interface TabSummary {
   title: string;
   icon: string;
   appUrl: string;
+  status?: 'alive' | 'dead';
 }
 
 // 打开 tab（for phone）
@@ -116,14 +117,16 @@ export const updateTabInfo = async ({
   title,
   icon,
   appUrl,
+  status = 'alive',
 }: {
   tabId: string;
   title: string;
   icon: string;
   appUrl: string;
+  status?: 'alive' | 'dead';
 }): Promise<boolean> => {
   try {
-    return TabModule.updateTabInfo({ tabId, title, icon, appUrl });
+    return TabModule.updateTabInfo({ tabId, title, icon, appUrl, status });
   } catch (e) {
     console.error(e);
   }

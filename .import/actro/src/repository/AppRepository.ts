@@ -9,25 +9,31 @@ export class AppRepository {
     try {
       const defaultLang = appInfo.info?.default_language || 'en';
       const langContent = appInfo.language_contents?.[defaultLang];
+      const appStatus = appInfo.app_status ?? 'alive';
+      const normalizedAppInfo: AppInfo = {
+        ...appInfo,
+        app_status: appStatus,
+      };
 
       const sql = `
         INSERT OR REPLACE INTO apps 
-        (app_id, app_name, instance_name, full_description, full_title, logo, url, details, last_opened) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (app_id, app_status, app_name, instance_name, full_description, full_title, logo, url, details, last_opened) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
       await db.executeSql(sql, [
-        appInfo.app_id,
-        appInfo.app_name,
-        appInfo.instance_name,
+        normalizedAppInfo.app_id,
+        appStatus,
+        normalizedAppInfo.app_name,
+        normalizedAppInfo.instance_name,
         langContent?.description || '',
         langContent?.title || '',
-        appInfo.info?.logo || '',
-        appInfo.url || '', // 保存原始 URL
-        JSON.stringify(appInfo),
+        normalizedAppInfo.info?.logo || '',
+        normalizedAppInfo.url || '', // 保存原始 URL
+        JSON.stringify(normalizedAppInfo),
         Date.now(),
       ]);
-      console.log(`[AppRepository] App ${appInfo.app_id} saved to SQLite`);
+      console.log(`[AppRepository] App ${normalizedAppInfo.app_id} saved to SQLite`);
     } catch (error) {
       console.error('[AppRepository] Failed to save app info', error);
     }
@@ -38,12 +44,16 @@ export class AppRepository {
    */
   static async getApp(appId: string): Promise<AppInfo | null> {
     try {
-      const rows = await db.selectAll<{ details: string }>(
-        'SELECT details FROM apps WHERE app_id = ?',
+      const rows = await db.selectAll<{ details: string; app_status: 'alive' | 'dead' | null }>(
+        'SELECT details, app_status FROM apps WHERE app_id = ?',
         [appId]
       );
       if (rows.length > 0) {
-        return JSON.parse(rows[0].details);
+        const parsed = JSON.parse(rows[0].details) as AppInfo;
+        return {
+          ...parsed,
+          app_status: rows[0].app_status ?? parsed.app_status ?? 'alive',
+        };
       }
       return null;
     } catch (error) {
@@ -63,6 +73,39 @@ export class AppRepository {
       ]);
     } catch (error) {
       console.error('[AppRepository] Failed to update last_opened', error);
+    }
+  }
+
+  /**
+   * 更新应用可用状态
+   */
+  static async updateAppStatus(
+    appId: string,
+    appStatus: 'alive' | 'dead',
+  ): Promise<boolean> {
+    try {
+      const app = await AppRepository.getApp(appId);
+      if (!app) {
+        return false;
+      }
+
+      const normalizedApp = {
+        ...app,
+        app_status: appStatus,
+      };
+
+      await db.executeSql(
+        `
+          UPDATE apps
+          SET app_status = ?, details = ?
+          WHERE app_id = ?
+        `,
+        [appStatus, JSON.stringify(normalizedApp), appId],
+      );
+      return true;
+    } catch (error) {
+      console.error('[AppRepository] Failed to update app_status', error);
+      return false;
     }
   }
 }

@@ -28,6 +28,9 @@ import { useBookmarkStore } from '../../store/useBookmarkStore';
 import { getTypographyStyle, loadApp, spacing } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
+import { AppRepository } from '../../../repository/AppRepository';
+import { updateTabInfo } from '../../../native-bridge/tab/TabModule';
+import { useAppStore } from '../../store/useAppStore';
 
 type LoadRequestSource = 'preset' | 'scan' | 'input';
 
@@ -176,6 +179,10 @@ export const useLoadApp = () => {
           url,
         );
         if (!initResult.ok) {
+          if (initResult.reason === 'APP_NOT_FOUND') {
+            await useAppStore.getState().updateAppStatus(appId, 'dead');
+          }
+
           // 只有宿主透传的 preset appUrl 才允许走"历史会话兜回 Chat"；
           // 手输和扫码仍保持现有语义，避免把真实无效地址误恢复成旧会话。
           if (source === 'preset' && initResult.reason === 'APP_NOT_FOUND') {
@@ -186,7 +193,17 @@ export const useLoadApp = () => {
               );
 
             if (hasHistory) {
+              const localAppInfo = await AppRepository.getApp(appId);
               GlobalAlert.alert(t('actr.app.notExist'));
+              // 中文注释：预设恢复命中历史消息但线上应用已不存在时，
+              // tab 仍保留本地历史展示能力，同时显式把 native tab 状态标成 dead。
+              void updateTabInfo({
+                tabId: tabCtx.tab.id,
+                title: localAppInfo?.instance_name || tabCtx.tab.title,
+                icon: localAppInfo?.info?.logo || '',
+                appUrl: url,
+                status: 'dead',
+              });
               setTabIdMap(tabCtx.tab.id, appId, url);
               return;
             }

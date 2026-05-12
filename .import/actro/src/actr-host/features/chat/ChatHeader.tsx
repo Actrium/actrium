@@ -10,6 +10,7 @@ import { AppText } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
+import { useAppStore } from '../../store/useAppStore';
 
 interface ChatHeaderProps {
   onLeftPress: () => void;
@@ -38,6 +39,11 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
     const topInset = includeSafeTopInset ? topInsetRaw : 0;
     const hasAppId = Boolean(appId);
     const { showOfflineHint } = useNetworkStatus();
+    const appStatus = useAppStore((state) =>
+      appId ? state.apps[appId]?.app_status : undefined,
+    );
+    const shouldShowDeadHint =
+      hasAppId && !showOfflineHint && appStatus === 'dead';
 
     const colors = useColors();
     const colorScheme = useColorScheme();
@@ -86,18 +92,25 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
             <AppText style={styles.networkErrorText}>
               {t('common.networkError')}
             </AppText>
+          ) : shouldShowDeadHint ? (
+            <AppText style={styles.deadStatusText}>已停止服务</AppText>
           ) : null}
         </View>
         {hasAppId ? (
-          <View />
-          // <HostIconButton
-          //   iconType="history"
-          //   iconSize={22}
-          //   onPress={() => {}}
-          //   style={styles.headerButton}
-          //   backgroundColor={headerButtonBackgroundColor}
-          //   iconColor={colors.iconChatHeader}
-          // />
+          <HostIconButton
+            iconType="history"
+            iconSize={22}
+            onPress={() => {}}
+            style={[
+              styles.headerButton,
+              {
+                opacity: 0,
+                pointerEvents: 'none',
+              },
+            ]}
+            backgroundColor={headerButtonBackgroundColor}
+            iconColor={colors.iconChatHeader}
+          />
         ) : onRightPress ? (
           <HostIconButton
             iconType="close"
@@ -154,6 +167,11 @@ const makeStyles = (colors: ColorTokens) => ({
       maxWidth: '100%',
     },
     networkErrorText: {
+      marginTop: 2,
+      ...getTypographyStyle('caption1'),
+      color: colors.danger,
+    },
+    deadStatusText: {
       marginTop: 2,
       ...getTypographyStyle('caption1'),
       color: colors.danger,
