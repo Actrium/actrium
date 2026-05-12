@@ -146,11 +146,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
           estimatedWidth={228}
           minWidth={228}
           anchorMode='start'
-          trigger={
-            <View style={styles.actionCircle}>
-              <Icon type="link" />
-            </View>
-          }
+          trigger={<Icon type="link" size={34} />}
         >
           {(close) => (
             <>
@@ -219,7 +215,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
             anchorMode='end'
             trigger={
               <View style={styles.actionCircle}>
-                <AppText style={styles.actionPillText}>•••</AppText>
+                <Icon type='more' />
               </View>
             }
           >
@@ -294,11 +290,8 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
 
       <View style={styles.rightActions}>
         {showAudioButton && (
-          <View
-            {...panResponder.panHandlers}
-            style={styles.audioSwitch}
-          >
-            <Icon type="audio" style={{ height: 22 }} />
+          <View {...panResponder.panHandlers}>
+            <Icon type="audio" size={34} />
           </View>
         )}
         <TouchableOpacity style={styles.sendButton} onPress={onSend}>
@@ -362,15 +355,6 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     ...getTypographyStyle('body'),
     color: colors.textIconPrimary,
     fontWeight: '400',
-  },
-  audioSwitch: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: colors.bgActionButton,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
   },
   sendButton: {
     width: 34,
