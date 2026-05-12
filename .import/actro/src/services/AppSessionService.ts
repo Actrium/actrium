@@ -141,7 +141,7 @@ export class AppSessionService {
           }
 
           // 🆕 2. 加载并解析 .actr 包
-          const actrPackage = await actrLoader.load(guestUrl);
+          const actrPackage = await actrLoader.load(guestUrl, appId);
 
           // 如果哈希校验通过，或者即使失败也尝试运行（取决于业务决策，这里保持校验逻辑）
           if (sha256 === guestHashCode) {

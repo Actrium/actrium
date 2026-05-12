@@ -35,8 +35,20 @@ const LocalEngineView: React.FC<{
   onError?: (error: Error) => void;
   fallback?: React.ReactNode;
   renderError?: (error: Error) => React.ReactNode;
-}> = ({ engine, bundleUrl, containerHeight, containerWidth, style, onLoad, onError, fallback, renderError }) => {
-  const [state, setState] = React.useState<'loading' | 'loaded' | 'error'>('loading');
+}> = ({
+  engine,
+  bundleUrl,
+  containerHeight,
+  containerWidth,
+  style,
+  onLoad,
+  onError,
+  fallback,
+  renderError,
+}) => {
+  const [state, setState] = React.useState<'loading' | 'loaded' | 'error'>(
+    'loading',
+  );
   const [error, setError] = React.useState<Error | null>(null);
   const [content, setContent] = React.useState<React.ReactElement | null>(null);
   const mountedRef = React.useRef(true);
@@ -78,7 +90,10 @@ const LocalEngineView: React.FC<{
           onLoad?.();
         }
       } catch (err: unknown) {
-        nerror('[LocalEngineView] ❌ 加载失败: ' + (err instanceof Error ? err.message : String(err)));
+        nerror(
+          '[LocalEngineView] ❌ 加载失败: ' +
+            (err instanceof Error ? err.message : String(err)),
+        );
         if (mountedRef.current) {
           const loadError = err instanceof Error ? err : new Error(String(err));
           setError(loadError);
@@ -93,7 +108,15 @@ const LocalEngineView: React.FC<{
     return () => {
       mountedRef.current = false;
     };
-  }, [engine, bundleUrl, containerHeight, containerWidth, handleUpdate, onLoad, onError]);
+  }, [
+    engine,
+    bundleUrl,
+    containerHeight,
+    containerWidth,
+    handleUpdate,
+    onLoad,
+    onError,
+  ]);
 
   // 渲染 - 使用 RN 原生组件用于内部 UI
   if (state === 'loading') {
@@ -104,10 +127,12 @@ const LocalEngineView: React.FC<{
     return <RNView style={[{ flex: 1 }, style]}>{renderError?.(error)}</RNView>;
   }
 
-  return content || (
-    <RNView style={[{ flex: 1, backgroundColor: '#1a1a2a' }, style]}>
-      <RNText style={{ color: '#888' }}>Loading...</RNText>
-    </RNView>
+  return (
+    content || (
+      <RNView style={[{ flex: 1, backgroundColor: '#1a1a2a' }, style]}>
+        <RNText style={{ color: '#888' }}>Loading...</RNText>
+      </RNView>
+    )
   );
 };
 
@@ -115,7 +140,18 @@ const LocalEngineView: React.FC<{
 const EngineView = LocalEngineView;
 
 import type { ComponentMap } from 'rill';
-import { ThemeView, StepList, UserAvatar, ChatBubble, MyTouchableOpacity, DropdownMenu, DropdownMenuItem, DropdownMenuText, DropdownMenuSubText } from 'askit';
+import {
+  ThemeView,
+  StepList,
+  UserAvatar,
+  ChatBubble,
+  MyTouchableOpacity,
+  DropdownMenu,
+  DropdownMenuItem,
+  DropdownMenuText,
+  DropdownMenuSubText,
+  GlobalAlert,
+} from 'askit';
 import { createEngineAdapter } from 'askit/core';
 
 const log = logger.child('BundleView');
@@ -142,28 +178,59 @@ export const hostComponents: ComponentMap = {
   View: View as unknown as React.ComponentType<Record<string, unknown>>,
   Text: Text as unknown as React.ComponentType<Record<string, unknown>>,
   Image: Image as unknown as React.ComponentType<Record<string, unknown>>,
-  ScrollView: WrappedScrollView as unknown as React.ComponentType<Record<string, unknown>>,
-  TouchableOpacity: TouchableOpacity as unknown as React.ComponentType<Record<string, unknown>>,
+  ScrollView: WrappedScrollView as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
+  TouchableOpacity: TouchableOpacity as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
   Button: Button as unknown as React.ComponentType<Record<string, unknown>>,
-  ActivityIndicator: ActivityIndicator as unknown as React.ComponentType<Record<string, unknown>>,
-  TextInput: TextInput as unknown as React.ComponentType<Record<string, unknown>>,
+  ActivityIndicator: ActivityIndicator as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
+  TextInput: TextInput as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
   FlatList: FlatList as unknown as React.ComponentType<Record<string, unknown>>,
   Switch: Switch as unknown as React.ComponentType<Record<string, unknown>>,
   // Askit 组件
-  ThemeView: ThemeView as unknown as React.ComponentType<Record<string, unknown>>,
+  ThemeView: ThemeView as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
   StepList: StepList as unknown as React.ComponentType<Record<string, unknown>>,
-  UserAvatar: UserAvatar as unknown as React.ComponentType<Record<string, unknown>>,
-  ChatBubble: ChatBubble as unknown as React.ComponentType<Record<string, unknown>>,
-  MyTouchableOpacity: MyTouchableOpacity as unknown as React.ComponentType<Record<string, unknown>>,
-  DropdownMenu: DropdownMenu as unknown as React.ComponentType<Record<string, unknown>>,
-  DropdownMenuItem: DropdownMenuItem as unknown as React.ComponentType<Record<string, unknown>>,
-  DropdownMenuText: DropdownMenuText as unknown as React.ComponentType<Record<string, unknown>>,
-  DropdownMenuSubText: DropdownMenuSubText as unknown as React.ComponentType<Record<string, unknown>>,
+  UserAvatar: UserAvatar as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
+  ChatBubble: ChatBubble as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
+  MyTouchableOpacity: MyTouchableOpacity as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
+  DropdownMenu: DropdownMenu as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
+  DropdownMenuItem: DropdownMenuItem as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
+  DropdownMenuText: DropdownMenuText as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
+  DropdownMenuSubText: DropdownMenuSubText as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
+  GlobalAlert: GlobalAlert as unknown as React.ComponentType<
+    Record<string, unknown>
+  >,
   // Panel 架构组件
   // PanelMarker: PanelMarker as unknown as React.ComponentType<Record<string, unknown>>,
 };
 
-export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, containerWidth = 240 }) => {
+export const BundleView: React.FC<Props> = ({
+  script,
+  containerHeight = 977,
+  containerWidth = 240,
+}) => {
   // Engine 和 adapter 状态
   const [engine, setEngine] = React.useState<Engine | null>(null);
   const [isLoading, setIsLoading] = React.useState(true);
@@ -184,8 +251,10 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
           debug: false,
           logger: {
             log: () => {},
-            warn: (...args: unknown[]) => log.warning(args.map(a => String(a)).join(' ')),
-            error: (...args: unknown[]) => nerror(args.map(a => String(a)).join(' ')),
+            warn: (...args: unknown[]) =>
+              log.warning(args.map((a) => String(a)).join(' ')),
+            error: (...args: unknown[]) =>
+              nerror(args.map((a) => String(a)).join(' ')),
           },
         });
         currentEngine.register(hostComponents);
@@ -219,9 +288,18 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
   // 加载中 - 使用 RN 原生组件用于内部 UI
   if (isLoading) {
     return (
-      <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
+      <RNView
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#1a1a2a',
+        }}
+      >
         <RNActivityIndicator size="large" color="#007AFF" />
-        <RNText style={{ color: '#888', fontSize: 14, marginTop: 16 }}>初始化 Engine...</RNText>
+        <RNText style={{ color: '#888', fontSize: 14, marginTop: 16 }}>
+          初始化 Engine...
+        </RNText>
       </RNView>
     );
   }
@@ -229,12 +307,38 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
   // 加载错误
   if (loadError) {
     return (
-      <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
-        <RNText style={{ color: '#ff6b6b', fontSize: 18, fontWeight: '600', marginBottom: 12 }}>
+      <RNView
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: 16,
+          backgroundColor: '#1a1a1a',
+        }}
+      >
+        <RNText
+          style={{
+            color: '#ff6b6b',
+            fontSize: 18,
+            fontWeight: '600',
+            marginBottom: 12,
+          }}
+        >
           Engine 初始化失败
         </RNText>
-        <RNText style={{ color: '#ccc', fontSize: 14, textAlign: 'center', marginBottom: 8 }}>{loadError.message}</RNText>
-        <RNText style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>{loadError.stack?.substring(0, 200)}</RNText>
+        <RNText
+          style={{
+            color: '#ccc',
+            fontSize: 14,
+            textAlign: 'center',
+            marginBottom: 8,
+          }}
+        >
+          {loadError.message}
+        </RNText>
+        <RNText style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>
+          {loadError.stack?.substring(0, 200)}
+        </RNText>
       </RNView>
     );
   }
@@ -242,36 +346,82 @@ export const BundleView: React.FC<Props> = ({ script, containerHeight = 977, con
   // Engine 未就绪
   if (!engine) {
     return (
-      <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
+      <RNView
+        style={{
+          flex: 1,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: '#1a1a2a',
+        }}
+      >
         <RNActivityIndicator size="large" color="#007AFF" />
-        <RNText style={{ color: '#888', fontSize: 14, marginTop: 16 }}>准备 Engine...</RNText>
+        <RNText style={{ color: '#888', fontSize: 14, marginTop: 16 }}>
+          准备 Engine...
+        </RNText>
       </RNView>
     );
   }
 
   return (
-    <EngineView containerHeight={containerHeight} containerWidth={containerWidth}
+    <EngineView
+      containerHeight={containerHeight}
+      containerWidth={containerWidth}
       key={script}
       engine={engine}
       bundleUrl={script}
       style={{ flex: 1 }}
       onLoad={() => {}}
-      onError={error => {
+      onError={(error) => {
         nerror('[BundleView] load failed: ' + error.message);
       }}
       fallback={
-        <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#1a1a2a' }}>
+        <RNView
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: '#1a1a2a',
+          }}
+        >
           <RNActivityIndicator size="large" color="#007AFF" />
-          <RNText style={{ color: '#888', fontSize: 14, marginTop: 16 }}>加载插件中...</RNText>
+          <RNText style={{ color: '#888', fontSize: 14, marginTop: 16 }}>
+            加载插件中...
+          </RNText>
         </RNView>
       }
-      renderError={error => (
-        <RNView style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 16, backgroundColor: '#1a1a1a' }}>
-          <RNText style={{ color: '#ff6b6b', fontSize: 18, fontWeight: '600', marginBottom: 12 }}>
+      renderError={(error) => (
+        <RNView
+          style={{
+            flex: 1,
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 16,
+            backgroundColor: '#1a1a1a',
+          }}
+        >
+          <RNText
+            style={{
+              color: '#ff6b6b',
+              fontSize: 18,
+              fontWeight: '600',
+              marginBottom: 12,
+            }}
+          >
             插件运行异常
           </RNText>
-          <RNText style={{ color: '#ccc', fontSize: 14, textAlign: 'center', marginBottom: 8 }}>{error.message}</RNText>
-          <RNText style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>{error.stack?.substring(0, 200)}</RNText>
+          <RNText
+            style={{
+              color: '#ccc',
+              fontSize: 14,
+              textAlign: 'center',
+              marginBottom: 8,
+            }}
+          >
+            {error.message}
+          </RNText>
+          <RNText style={{ color: '#666', fontSize: 12, textAlign: 'center' }}>
+            {error.stack?.substring(0, 200)}
+          </RNText>
         </RNView>
       )}
     />
