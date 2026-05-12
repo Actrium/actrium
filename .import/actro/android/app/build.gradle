@@ -110,22 +110,29 @@ android {
 //            }
 //        }
     }
+    def isCI = System.getenv("CI") == "true"
+
     signingConfigs {
-        debug {
-            storeFile file('../AskAway.jks')
-            storePassword 'AskAway2025'
-            keyAlias 'askaway'
-            keyPassword 'AskAway2025'
+        release {
+            if (isCI) {
+                storeFile file(System.getenv("KEYSTORE_PATH") ?: '../AskAway.jks')
+                storePassword System.getenv("KEYSTORE_PASSWORD") ?: ''
+                keyAlias System.getenv("KEY_ALIAS") ?: ''
+                keyPassword System.getenv("KEY_PASSWORD") ?: ''
+            } else {
+                storeFile file(localProperties.getProperty('KEYSTORE_PATH') ?: '../AskAway.jks')
+                storePassword localProperties.getProperty('KEYSTORE_PASSWORD') ?: ''
+                keyAlias localProperties.getProperty('KEY_ALIAS') ?: ''
+                keyPassword localProperties.getProperty('KEY_PASSWORD') ?: ''
+            }
         }
     }
     buildTypes {
         debug {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
@@ -184,4 +191,7 @@ dependencies {
     implementation("androidx.room:room-runtime:2.8.0-beta01")
     implementation("androidx.room:room-ktx:2.8.0-beta01")
     ksp("androidx.room:room-compiler:2.8.0-beta01")
+    implementation 'com.alphacephei:vosk-android:0.3.75@aar'
+    implementation 'com.hankcs:hanlp:portable-1.8.6'
+    implementation 'net.java.dev.jna:jna:5.14.0@aar'
 }

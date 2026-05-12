@@ -6,4 +6,8 @@
     <string name="search">Search...</string>
     <string name="goback">Back</string>
     <string name="blank_tab">New Tab</string>
+    <string name="menu_bookmark">Bookmark</string>
+    <string name="menu_close_tab">Close Tab</string>
+    <string name="menu_close_other_tabs">Close Other Tabs</string>
+    <string name="menu_cancel_bookmark">Unbookmark</string>
 </resources>

@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:background="@drawable/popup_menu_bg"
+    android:gravity="center_vertical"
+    android:orientation="vertical"
+    android:paddingHorizontal="16dp"
+    android:paddingVertical="10dp">
+
+    <LinearLayout
+        android:id="@+id/llFav"
+        android:layout_width="206dp"
+        android:layout_height="40dp"
+        android:gravity="start|center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/ivFav"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:src="@drawable/menu_fav" />
+
+        <TextView
+            android:id="@+id/tvFav"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/menu_bookmark" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:id="@+id/llClose"
+        android:layout_width="206dp"
+        android:layout_height="40dp"
+        android:gravity="start|center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:id="@+id/ivClose"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:padding="2dp"
+            android:src="@drawable/menu_close" />
+
+        <TextView
+            android:id="@+id/tvClose"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/menu_close_tab" />
+    </LinearLayout>
+
+    <View
+        android:id="@+id/vDivider"
+        android:layout_width="206dp"
+        android:layout_height="1dp"
+        android:background="#E6E6E6" />
+
+    <LinearLayout
+        android:id="@+id/llCloseOther"
+        android:layout_width="206dp"
+        android:layout_height="40dp"
+        android:gravity="start|center_vertical"
+        android:orientation="horizontal">
+
+        <ImageView
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:padding="2dp"
+            android:src="@drawable/menu_close" />
+
+        <TextView
+            android:id="@+id/tvCloseOther"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/menu_close_other_tabs" />
+    </LinearLayout>
+</LinearLayout>

@@ -50,6 +50,7 @@ class RNGridContainer @JvmOverloads constructor(
     fun addRNView(view: ReactRootView) {
         rnViews.add(view)
         addView(view)
+        val s = ""
         if (!isGridMode) {
             view.visibility = if (rnViews.size - 1 == currentIndex) View.VISIBLE else View.GONE
         }

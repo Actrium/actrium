@@ -34,6 +34,7 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
     var containerHeight = 800
     var containerWidth = 1000
     var currentDisplayModel = PageMode.TAB
+    var isFromDeepLink = false
     val pageBundle = Bundle()
     private var activeRepository: ActiveRepository? = null
 
@@ -54,10 +55,20 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
                 try {
                     val savedList = repository.loadActiveList()
                     if (savedList.isNotEmpty()) {
-                        val bundle = TabBundleUtils.genBundle(savedList[0], savedList, containerHeight, containerWidth)
-                        _tabletUseCase.value = _tabletUseCase.value?.copy(appList = savedList, currentApp = bundle)
+                        if (isFromDeepLink) {
+                            // deeplink 进入：合并已保存的列表，但保留 deeplink 创建的 currentApp 不变
+                            val currentAppList = _tabletUseCase.value?.appList ?: emptyList()
+                            val mergedList = savedList.filter { saved ->
+                                currentAppList.none { it.id == saved.id }
+                            } + currentAppList
+                            _tabletUseCase.value = _tabletUseCase.value?.copy(appList = mergedList)
+                        } else {
+                            val bundle = TabBundleUtils.genBundle(savedList[0], savedList, containerHeight, containerWidth)
+                            _tabletUseCase.value = _tabletUseCase.value?.copy(appList = savedList, currentApp = bundle)
+                        }
                         Log.d("MainViewModel", "Loaded ${savedList.size} items from database")
-                    }else{
+                    } else if (!isFromDeepLink) {
+                        // 非 deeplink 进入且列表为空时自动创建
                         _tabletUseCase.value = _tabletUseCase.value?.copy(autoCreate = true)
                     }
                 } catch (e: Exception) {
@@ -67,7 +78,7 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
         }
     }
 
-    fun cancelCreate(){
+    fun cancelCreate() {
         _tabletUseCase.value = _tabletUseCase.value?.copy(autoCreate = false)
     }
 
@@ -133,13 +144,13 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
         }
     }
 
-    fun addApp(params: Map<String, Any?>? = null) {
-        Log.e("TabletViewModel", "addApp:${params}")
+    fun addApp(params: Map<String, Any?>? = null, appId: String? = null) {
+        Log.e("TabletViewModel", "addApp:${params}, ${appId}")
         val tabModel = AppModel(id = UUID.randomUUID().toString())
         var appUrl = ""
-        var mode = _tabletUseCase.value?.pageMode?:PageMode.TAB
-        if(params!=null && params.keys.contains("appUrl")){
-            appUrl= params["appUrl"] as? String?:""
+        var mode = _tabletUseCase.value?.pageMode ?: PageMode.TAB
+        if (params != null && params.keys.contains("appUrl")) {
+            appUrl = params["appUrl"] as? String ?: ""
             mode = PageMode.TAB
         }
         appList.add(tabModel)
@@ -148,10 +159,13 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
             name = "",
             icon = "",
             screenshot = "",
-            url= appUrl
+            url = appUrl
         )
         val bundle = tabModel.genReactNativeBundle(appList, containerHeight, containerWidth)
         bundle.addMap(params)
+        if (appId != null) {
+            bundle.putString("appId", appId)
+        }
         hideBookmark()
         _tabletUseCase.value = _tabletUseCase.value!!.copy(
             appList = _tabletUseCase.value!!.appList + activeModel,
@@ -162,11 +176,11 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
 
     fun changeActiveModel(id: String) {
         Log.e("TabletViewModel", "changeActiveModel:${id}")
-        val appList = _tabletUseCase.value?.appList?:emptyList()
+        val appList = _tabletUseCase.value?.appList ?: emptyList()
         val index = appList.indexOfFirst { it.id == id }
         if (index != -1) {
             val activeModel = appList[index]
-            val bundle = TabBundleUtils.genBundle(activeModel, appList,  containerHeight, containerWidth)
+            val bundle = TabBundleUtils.genBundle(activeModel, appList, containerHeight, containerWidth)
             _tabletUseCase.value = _tabletUseCase.value?.copy(
                 currentApp = bundle
             )
@@ -183,7 +197,7 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
     }
 
     fun removeActiveModel(id: String) {
-        val appList = (_tabletUseCase.value?.appList?:emptyList()).toMutableList()
+        val appList = (_tabletUseCase.value?.appList ?: emptyList()).toMutableList()
         val index = appList.indexOfFirst { it.id == id }
         if (index != -1) {
             appList.removeAt(index)
@@ -227,7 +241,7 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
         }
     }
 
-    fun changeSize(width: Int, height:Int) {
+    fun changeSize(width: Int, height: Int) {
         EventBus.getDefault().post(
             NativeModuleEvent(
                 NativeModuleEvent.EVENT_CONTAINER_SIZE_CHANGE,
