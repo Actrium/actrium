@@ -12,7 +12,7 @@ import ru from './locales/ru.json';
 import zhHans from './locales/zh-Hans.json';
 import zhHant from './locales/zh-Hant.json';
 
-const resources = {
+export const resources = {
   en: { translation: en },
   es: { translation: es },
   fr: { translation: fr },

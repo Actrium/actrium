@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   View,
   Text,
@@ -85,7 +91,6 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
 
-
   // 🆕 通过 tab.id 获取 appId
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
 
@@ -147,7 +152,9 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     onVisibilityChange: handlePhonePanelVisibleChange,
   });
 
-  const handlers = useExtensionEvent(tab.id)
+  const handlers = useExtensionEvent(tab.id, {
+    closePhonePanel,
+  });
 
   React.useEffect(() => {
     isActiveRef.current = isActive;
@@ -257,7 +264,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
         const unsubscribeMessage = EventHandler.setup(currentEngine, {
           tabId: tab.id,
           onLog: logDevToolsMessage,
-          handlers
+          handlers,
         });
 
         // Render operation handler with DevTools logging
@@ -414,7 +421,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
     isTablet && styles.threeColumnPad,
   ];
   const sheetTopOffset = topInsetRaw;
-  
+
   const main = React.useMemo(
     () => <Main />,
     [propsContainerWidth, propsContainerHeight],
@@ -439,7 +446,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   if (isActive && isLoading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size='large' color={colors.brandPrimary} />
+        <ActivityIndicator size="large" color={colors.brandPrimary} />
         <AppText style={styles.loadingText}>
           初始化 Single Engine (usePanels mode)...
         </AppText>
@@ -458,7 +465,7 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
 
   const tabContent = (
     <View style={styles.screen}>
-      <View style={[threeColumnStyle, { marginTop: sheetTopOffset}]}>
+      <View style={[threeColumnStyle, { marginTop: sheetTopOffset }]}>
         {/* 左侧面板 - 基准宽度，窗口变小时允许收缩 */}
         {/* {isLeftPanelVisible && (
           <View
@@ -515,87 +522,92 @@ const ActrTabView: React.FC<ActrTabViewProps> = ({
   return (
     <TabProvider tab={tab}>
       {/* Pad 不需要侧滑手势，直接跳过 GestureDetector，避免手势层吞掉点击。 */}
-      {isTablet ? tabContent : <GestureDetector gesture={panelGesture}>{tabContent}</GestureDetector>}
+      {isTablet ? (
+        tabContent
+      ) : (
+        <GestureDetector gesture={panelGesture}>{tabContent}</GestureDetector>
+      )}
     </TabProvider>
   );
 };
 
 export default ActrTabView;
 
-const makeStyles = (colors: ColorTokens) => StyleSheet.create({
-  threeColumn: {
-    flex: 1,
-    flexDirection: 'row',
-    backgroundColor: colors.bgColumn,
-    minWidth: 0,
-  },
-  threeColumnAndroidPhone: {
-    overflow: 'hidden',
-    borderTopLeftRadius: 38,
-    borderTopRightRadius: 38,
-  },
-  threeColumnPad: {
-    borderTopLeftRadius: 0,
-    borderTopRightRadius: 0,
-  },
-  screen: {
-    flex: 1,
-    backgroundColor: colors.bgScreen,
-  },
-  leftPanel: {
-    borderRightWidth: 1,
-    borderRightColor: LAYOUT.BORDER_COLOR,
-    flexShrink: 1,
-    minWidth: LAYOUT.LEFT_PANEL_MIN_WIDTH,
-  },
-  centerColumn: {
-    flex: 1,
-    backgroundColor: colors.bgColumn,
-    minWidth: LAYOUT.CENTER_MIN_WIDTH,
-    justifyContent: 'space-between',
-  },
-  dismissOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 10,
-  },
-  container: {
-    flex: 1,
-    position: 'relative',
-  },
-  empty: {
-    flex: 1,
-    backgroundColor: colors.bgEmpty,
-  },
-  stateContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 16,
-    backgroundColor: colors.bgBlocked,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: colors.bgLoading,
-  },
-  errorText: {
-    color: colors.textError,
-    ...getTypographyStyle('statusTitle'),
-    marginBottom: spacing.md,
-  },
-  errorDetail: {
-    color: colors.textSecondary,
-    fontSize: 13,
-    textAlign: 'center',
-  },
-  loadingText: {
-    color: colors.textLoading,
-    ...getTypographyStyle('body'),
-    marginTop: spacing.lg,
-  },
-  tabHost: {
-    flex: 1,
-    position: 'relative',
-  },
-});
+const makeStyles = (colors: ColorTokens) =>
+  StyleSheet.create({
+    threeColumn: {
+      flex: 1,
+      flexDirection: 'row',
+      backgroundColor: colors.bgColumn,
+      minWidth: 0,
+    },
+    threeColumnAndroidPhone: {
+      overflow: 'hidden',
+      borderTopLeftRadius: 38,
+      borderTopRightRadius: 38,
+    },
+    threeColumnPad: {
+      borderTopLeftRadius: 0,
+      borderTopRightRadius: 0,
+    },
+    screen: {
+      flex: 1,
+      backgroundColor: colors.bgScreen,
+    },
+    leftPanel: {
+      borderRightWidth: 1,
+      borderRightColor: LAYOUT.BORDER_COLOR,
+      flexShrink: 1,
+      minWidth: LAYOUT.LEFT_PANEL_MIN_WIDTH,
+    },
+    centerColumn: {
+      flex: 1,
+      backgroundColor: colors.bgColumn,
+      minWidth: LAYOUT.CENTER_MIN_WIDTH,
+      justifyContent: 'space-between',
+    },
+    dismissOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      zIndex: 10,
+    },
+    container: {
+      flex: 1,
+      position: 'relative',
+    },
+    empty: {
+      flex: 1,
+      backgroundColor: colors.bgEmpty,
+    },
+    stateContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 16,
+      backgroundColor: colors.bgBlocked,
+    },
+    loadingContainer: {
+      flex: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: colors.bgLoading,
+    },
+    errorText: {
+      color: colors.textError,
+      ...getTypographyStyle('statusTitle'),
+      marginBottom: spacing.md,
+    },
+    errorDetail: {
+      color: colors.textSecondary,
+      fontSize: 13,
+      textAlign: 'center',
+    },
+    loadingText: {
+      color: colors.textLoading,
+      ...getTypographyStyle('body'),
+      marginTop: spacing.lg,
+    },
+    tabHost: {
+      flex: 1,
+      position: 'relative',
+    },
+  });
