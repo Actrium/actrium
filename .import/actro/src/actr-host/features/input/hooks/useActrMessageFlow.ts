@@ -441,12 +441,6 @@ export function useActrMessageFlow(
       //   return;
       // }
 
-      const trimmedContent = content.trim();
-      if (!trimmedContent && !isVoice) {
-        // GlobalAlert.alert(t('common.hint'), t('actr.input.emptyTextAlert'));
-        return;
-      }
-
       // 实时读取最新的附件和编辑状态，避免闭包陷阱
       const currentInputState = useInputStore.getState().inputs[tabId];
       const attachmentsSnapshot = currentInputState?.attachments
@@ -454,6 +448,12 @@ export function useActrMessageFlow(
         : [];
       const editingMessageIdSnapshot =
         currentInputState?.editingMessageId || null;
+
+      const trimmedContent = content.trim();
+      // 有附件时允许空文本发送
+      if (!trimmedContent && !isVoice && attachmentsSnapshot.length === 0) {
+        return;
+      }
 
       if (editingMessageIdSnapshot) {
         const messageIdToDelete = editingMessageIdSnapshot;
