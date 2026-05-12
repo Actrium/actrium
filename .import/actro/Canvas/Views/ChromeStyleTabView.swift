@@ -28,7 +28,7 @@ struct ChromeStyleTabView: View {
                     focusSheetContent(tab: tab)
                         .ignoresSafeArea(.all, edges: .bottom)
                         .interactiveDismissDisabled(true)
-                        .asNavigationTransition(id: tab.id, in: animation)
+                        .asNavigationTransition(id: viewModel.currentTabId ?? tab.id, in: animation)
                 }
                 .onAppear {
                     syncFocusedTabWithCanvasMode()
