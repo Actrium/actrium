@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { AppInfo } from '../../api/types';
+import { AppRepository } from '../../repository/AppRepository';
 
 interface AppState {
   // Key is appId
@@ -10,6 +11,10 @@ interface AppState {
   guestLoadingStatus: Record<string, boolean>;
 
   setAppInfo: (appId: string, info: AppInfo) => void;
+  updateAppStatus: (
+    appId: string,
+    status: 'alive' | 'dead',
+  ) => Promise<void>;
   setGuestScript: (appId: string, script: string) => void;
   getGuestScript: (appId: string) => string | undefined;
   setGuestLoadingStatus: (appId: string, status: boolean) => void;
@@ -26,6 +31,29 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((state) => ({
       apps: { ...state.apps, [appId]: info },
     })),
+
+  updateAppStatus: async (appId, status) => {
+    const hasDbRecord = await AppRepository.updateAppStatus(appId, status);
+    const currentApp = get().apps[appId];
+
+    if (!currentApp && !hasDbRecord) {
+      return;
+    }
+
+    if (!currentApp) {
+      return;
+    }
+
+    set((state) => ({
+      apps: {
+        ...state.apps,
+        [appId]: {
+          ...state.apps[appId],
+          app_status: status,
+        },
+      },
+    }));
+  },
 
   setGuestScript: (appId, script) =>
     set((state) => ({
