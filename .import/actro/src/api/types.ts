@@ -13,6 +13,7 @@ export interface PresetInfo {
 
 export interface AppInfo {
   app_id: string;
+  app_status?: 'alive' | 'dead';
   manifest_version: string; // 配置文件版本
   app_name: string; // 应用名称
   instance_name: string; // 实例名称

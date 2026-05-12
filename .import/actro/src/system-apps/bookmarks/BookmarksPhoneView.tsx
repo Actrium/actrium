@@ -64,6 +64,13 @@ export default function BookmarksPhoneView({
       ),
     [groups],
   );
+  const getDisplayName = React.useCallback((item: TBookmarkItem) => {
+    // 中文注释：dead 状态只作为名字后缀展示，避免改动书签列表的原始排序和点击行为。
+    if (item.app_status === 'dead') {
+      return `${item.instance_name}（已停止服务）`;
+    }
+    return item.instance_name;
+  }, []);
 
   const handleRemoveBookmark = React.useCallback(
     async (item: TBookmarkItem) => {
@@ -101,7 +108,7 @@ export default function BookmarksPhoneView({
             <Image source={{ uri: item.logo! }} style={styles.listItemLogo} />
 
             <AppText style={styles.listItemName} numberOfLines={1}>
-              {item.instance_name}
+              {getDisplayName(item)}
             </AppText>
           </TouchableOpacity>
         </SwipeRemoveActionRow>
