@@ -74,6 +74,13 @@ export default function BookmarksPadView({
     [t],
   );
 
+  const handleOpenBookmark = React.useCallback(
+    (item: TBookmarkItem) => {
+      openBookmark(item);
+    },
+    [openBookmark],
+  );
+
   if (isLoading) {
     return (
       <View style={styles.container}>
@@ -130,16 +137,12 @@ export default function BookmarksPadView({
       >
         <View style={styles.grid}>
           {flatBookmarks.map((item) => (
-            <TouchableOpacity
-              key={item.id}
-              style={[styles.card, { width: cardWidth }]}
-              activeOpacity={0.8}
-              onPress={() => openBookmark(item)}
-            >
+            <View key={item.id} style={[styles.card, { width: cardWidth }]}>
               <DropdownMenu
                 width={longPressMenu.width}
                 estimatedWidth={longPressMenu.width}
                 anchorMode='end'
+                onTriggerPress={() => handleOpenBookmark(item)}
                 trigger={
                   <View style={styles.cardInner}>
                     <Image source={{ uri: item.logo! }} style={styles.cardLogo} />
@@ -154,7 +157,7 @@ export default function BookmarksPadView({
                   <>
                     <DropdownMenuItem
                       onPress={() => {
-                        close(() => openBookmark(item));
+                        close(() => handleOpenBookmark(item));
                       }}
                     >
                       <Icon type='enter' size={16} />
@@ -180,7 +183,7 @@ export default function BookmarksPadView({
                   </>
                 )}
               </DropdownMenu>
-            </TouchableOpacity>
+            </View>
           ))}
         </View>
       </ScrollView>

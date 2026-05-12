@@ -89,14 +89,15 @@ export const ChatHeader: React.FC<ChatHeaderProps> = React.memo(
           ) : null}
         </View>
         {hasAppId ? (
-          <HostIconButton
-            iconType="history"
-            iconSize={22}
-            onPress={() => {}}
-            style={[styles.headerButton, { opacity: 0 }]}
-            backgroundColor={headerButtonBackgroundColor}
-            iconColor={colors.iconChatHeader}
-          />
+          <View />
+          // <HostIconButton
+          //   iconType="history"
+          //   iconSize={22}
+          //   onPress={() => {}}
+          //   style={styles.headerButton}
+          //   backgroundColor={headerButtonBackgroundColor}
+          //   iconColor={colors.iconChatHeader}
+          // />
         ) : onRightPress ? (
           <HostIconButton
             iconType="close"
