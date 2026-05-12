@@ -225,7 +225,7 @@ export default function ChatBubble({
         icon: <Icon type="edit" size={16} />,
       });
     }
-    if (onCopy) {
+    if (onCopy && !attachments?.length) {
       options.push({
         label: t('common.copy'),
         onPress: onCopy,
@@ -721,8 +721,22 @@ export default function ChatBubble({
     >
       <View style={bubbleFrameStyle}>
         {hasAttachments ? (
-          // 中文注释：附件气泡不再包外层 Pressable，避免与内部横向 ScrollView 竞争 responder。
-          <View>{bubbleContent}</View>
+          // 中文注释：附件气泡用 avoidPressable 模式的 LongPressMenu，内部用 RNGH 手势系统检测长按，
+          // 不拦截 ScrollView 的滚动手势。选择模式下用 Pressable 包裹以支持点击切换选中。
+          selectionMode !== 'none' ? (
+            <Pressable
+              onPress={onToggleSelection}
+              style={({ pressed }) => [pressed && styles.bubblePressed]}
+            >
+              {bubbleContent}
+            </Pressable>
+          ) : menuOptions.length > 0 ? (
+            <LongPressMenu options={menuOptions} avoidPressable>
+              {bubbleContent}
+            </LongPressMenu>
+          ) : (
+            <View>{bubbleContent}</View>
+          )
         ) : (
           <Pressable
             onPress={handleBubblePress}
@@ -732,7 +746,7 @@ export default function ChatBubble({
           >
             {(() => {
               const shouldShowMenu =
-                selectionMode === 'none' && menuOptions.length > 0 && !hasAttachments;
+                selectionMode === 'none' && menuOptions.length > 0;
               if (shouldShowMenu) {
                 return (
                   <LongPressMenu
