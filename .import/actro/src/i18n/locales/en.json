@@ -226,6 +226,7 @@
       "loadError": "Failed to load bookmarks",
       "empty": "No bookmarks",
       "emptyHint": "Bookmarked apps will appear here",
+      "emptyHintAction": "Bookmark apps from the active page",
       "openInNewTab": "Open in New Tab",
       "copyUrl": "Copy App URL",
       "copySuccess": "Copied",

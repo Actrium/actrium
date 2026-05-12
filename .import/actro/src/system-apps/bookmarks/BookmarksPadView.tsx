@@ -20,6 +20,7 @@ import { Toast, type ToastRef } from '../../actr-host/features/shared/Toast';
 import { getTypographyStyle, spacing, radius, longPressMenu } from '../../theme/tokens';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
+import { BookmarkEmptyState } from './BookmarkEmptyState';
 
 // Pad 端固定展示 4 列，但宽度必须按真实可用空间计算，不能再写死设计稿百分比。
 const BOOKMARK_GRID_COLUMNS = 4;
@@ -108,10 +109,7 @@ export default function BookmarksPadView({
   if (!hasBookmarks) {
     return (
       <View style={styles.container}>
-        <View style={styles.centerContainer}>
-          <AppText style={styles.emptyText}>{t('actr.bookmark.empty')}</AppText>
-          <AppText style={styles.emptySubText}>{t('actr.bookmark.emptyHint')}</AppText>
-        </View>
+        <BookmarkEmptyState />
       </View>
     );
   }
@@ -261,14 +259,5 @@ const styles = StyleSheet.create({
     ...getTypographyStyle('subhead'),
     color: '#fff',
     fontWeight: '500',
-  },
-  emptyText: {
-    ...getTypographyStyle('title3'),
-    color: '#8E8E93',
-    marginBottom: spacing.sm,
-  },
-  emptySubText: {
-    ...getTypographyStyle('body'),
-    color: '#636366',
   },
 });

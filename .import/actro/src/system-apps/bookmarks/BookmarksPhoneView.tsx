@@ -10,12 +10,13 @@ import {
 import { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { AppText } from '../../components';
+import { AppText, Icon } from '../../components';
 import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import type { TBookmarkItem } from '../../repository/BookmarkRepository';
 import { SwipeRemoveActionRow } from '../components/SwipeRemoveActionRow';
 import type { UseBookmarksPageResult } from './useBookmarksPage';
 import { PhoneNavigationBar } from '../../components/PhoneNavigationBar';
+import { BookmarkEmptyState } from './BookmarkEmptyState';
 
 type TFlatBookmarkItem = TBookmarkItem & {
   isLastInGroup: boolean;
@@ -142,12 +143,7 @@ export default function BookmarksPhoneView({
     return (
       <View style={styles.container}>
         {headerNode}
-        <View style={styles.centerContainer}>
-          <AppText style={styles.emptyText}>{t('actr.bookmark.empty')}</AppText>
-          <AppText style={styles.emptySubText}>
-            {t('actr.bookmark.emptyHint')}
-          </AppText>
-        </View>
+        <BookmarkEmptyState />
       </View>
     );
   }
@@ -264,14 +260,5 @@ const styles = StyleSheet.create({
     ...getTypographyStyle('subhead'),
     color: '#fff',
     fontWeight: '500',
-  },
-  emptyText: {
-    ...getTypographyStyle('title3'),
-    color: '#8E8E93',
-    marginBottom: spacing.sm,
-  },
-  emptySubText: {
-    ...getTypographyStyle('body'),
-    color: '#636366',
   },
 });

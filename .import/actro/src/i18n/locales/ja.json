@@ -226,6 +226,7 @@
       "loadError": "ブックマークの読み込みに失敗しました",
       "empty": "ブックマークなし",
       "emptyHint": "お気に入りのアプリがここに表示されます",
+      "emptyHintAction": "アクティブページからアプリをお気に入りに追加",
       "openInNewTab": "新しいタブで開く",
       "copyUrl": "アプリのURLをコピー",
       "copySuccess": "コピーしました",
