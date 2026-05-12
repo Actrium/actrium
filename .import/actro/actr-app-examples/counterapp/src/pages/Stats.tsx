@@ -1,4 +1,4 @@
-import { useEventBridge, useHttp } from 'askit';
+import { GlobalAlert, useEventBridge } from 'askit';
 import { useEffect, useState } from 'react';
 import {
   ScrollView,
@@ -13,6 +13,7 @@ import { HostToGuestEventPayloads } from 'askit/contracts';
 const clearIconSource = require('../../assets/clear.png');
 const feedbackIconSource = require('../../assets/feedback.png');
 const aboutIconSource = require('../../assets/about.png');
+const shareIconSource = require('../../assets/share.png');
 
 interface StatsProps {}
 
@@ -26,6 +27,7 @@ interface LanguageOption {
 interface ActionOption {
   id: string;
   iconSource: any;
+  iconAspectRatio: number;
   label: string;
   handler?: () => void;
 }
@@ -38,7 +40,7 @@ const supportedLanguages: LanguageOption[] = [
     color: '#D95B4F',
   },
   {
-    id: 'zhHans',
+    id: 'zh-Hans',
     label: '欢迎',
     backgroundColor: '#F5EDED',
     color: '#E45C4E',
@@ -62,7 +64,7 @@ const supportedLanguages: LanguageOption[] = [
     color: '#005DFF',
   },
   {
-    id: 'zhHant',
+    id: 'zh-Hant',
     label: '歡迎',
     backgroundColor: '#F8F0F0',
     color: '#D95B4F',
@@ -81,15 +83,13 @@ const supportedLanguages: LanguageOption[] = [
   },
 ];
 
-function onLanguageChangePlaceholder(language: LanguageOption) {
-  void language;
-}
-
 export default function Stats({}: StatsProps) {
   const [lang, setLang] = useState<string>('zhHans' as any);
+  const [languages, setLanguages] = useState<LanguageOption[]>([]);
   const [statsData, setStatsData] = useState<
     HostToGuestEventPayloads['SEND_APP_INFO']
   >({} as any);
+  const [showClearAlert, setShowClearAlert] = useState(false);
   const { request: getAppInfo } = useEventBridge(
     'GET_APP_INFO',
     'SEND_APP_INFO',
@@ -98,33 +98,56 @@ export default function Stats({}: StatsProps) {
     'CLEAR_CHAT_HISTORY',
     'CLEAR_CHAT_HISTORY_RESULT',
   );
+  const { request: closeExtension } = useEventBridge(
+    'CLOSE_EXTENSION',
+    'CLOSE_EXTENSION_RESULT',
+  );
+  const { request: getLanguages } = useEventBridge(
+    'GET_LANGUAGE_LIST',
+    'LANGUAGE_LIST',
+  );
+  const { request: setAppLanguage } = useEventBridge(
+    'SET_APP_LANGUAGE',
+    'SET_APP_LANGUAGE_RESULT',
+  );
+  const { request: sendEmail } = useEventBridge(
+    'SEND_EMAIL',
+    'SEND_EMAIL_RESULT',
+  );
 
   const handleClearHistory = () => {
+    setShowClearAlert(true);
+  };
+
+  const handleConfirmClear = () => {
     clearChatHistory({
       requestId: 'stats_page_clear_history_001',
     }).then((result) => {
       if (result.success) {
-        console.log('聊天记录已清除');
+        setShowClearAlert(false);
+        closeExtension({
+          requestId: 'stats_page_close_extension_001',
+        });
       }
     });
   };
-
-  const actions = [
-    {
-      id: 'clearHistory',
-      iconSource: clearIconSource,
-      label: '清除对话记录',
-      handler: handleClearHistory,
-    },
-    { id: 'feedback', iconSource: feedbackIconSource, label: '吐个槽' },
-    { id: 'about', iconSource: aboutIconSource, label: '关于 MU AI' },
-  ] satisfies ActionOption[];
 
   useEffect(() => {
     getAppInfo({
       requestId: 'stats_page_001',
     }).then((appInfo) => {
       setStatsData(appInfo);
+    });
+
+    getLanguages({
+      requestId: 'stats_page_002',
+    }).then((result) => {
+      const languages = result.languages as string[];
+
+      setLanguages(
+        supportedLanguages.filter(({ id }) => languages.includes(id)),
+      );
+      setLang(result.current);
     });
   }, []);
 
@@ -133,12 +156,61 @@ export default function Stats({}: StatsProps) {
       ...current,
       selectedLanguageId: language.id,
     }));
-    onLanguageChangePlaceholder(language);
+
     setLang(language.id);
+    setAppLanguage({
+      requestId: 'set-language',
+      language: language.id,
+    });
   };
+
+  const handleFeedback = () => {
+    sendEmail({
+      requestId: 'send',
+      to: 'support@askaway.chat',
+      subject: 'actr feedback'
+    });
+  };
+
+  const actions = [
+    {
+      id: 'clearHistory',
+      iconSource: clearIconSource,
+      iconAspectRatio: 56 / 70,
+      label: '清除对话记录',
+      handler: handleClearHistory,
+    },
+    {
+      id: 'feedback',
+      iconSource: feedbackIconSource,
+      iconAspectRatio: 1,
+      label: '吐个槽',
+      handler: handleFeedback,
+    },
+    {
+      id: 'about',
+      iconSource: aboutIconSource,
+      iconAspectRatio: 1,
+      label: '关于 MU AI',
+    },
+  ] satisfies ActionOption[];
 
   return (
     <View style={styles.guestContainer}>
+      <GlobalAlert
+        visible={showClearAlert}
+        title="清除对话记录"
+        message="确定要清除所有对话记录吗？此操作不可恢复。"
+        buttons={[
+          {
+            text: '取消',
+            style: 'cancel',
+            onPress: () => setShowClearAlert(false),
+          },
+          { text: '清除', style: 'destructive', onPress: handleConfirmClear },
+        ]}
+        onDismiss={() => setShowClearAlert(false)}
+      />
       <ScrollView
         style={styles.container}
         contentContainerStyle={styles.contentContainer}
@@ -166,20 +238,26 @@ export default function Stats({}: StatsProps) {
           </Text>
 
           <TouchableOpacity style={styles.shareButton} onPress={() => {}}>
-            <Text style={styles.shareIcon}>↗</Text>
+            <Image
+              source={shareIconSource}
+              style={[styles.shareIcon, { aspectRatio: 1 }]}
+            />
+
             <Text style={styles.shareText}>分享</Text>
           </TouchableOpacity>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>介绍</Text>
-          <Text style={styles.aboutText}>123</Text>
+          <Text style={styles.aboutText}>
+            {statsData.languageContents?.[lang]?.description}
+          </Text>
         </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>选择语种</Text>
           <View style={styles.languageGrid}>
-            {supportedLanguages.map((language) => {
+            {languages.map((language) => {
               const isSelected = language.id === lang;
 
               return (
@@ -218,7 +296,10 @@ export default function Stats({}: StatsProps) {
             >
               <Image
                 source={action.iconSource}
-                style={styles.actionIcon}
+                style={[
+                  styles.actionIcon,
+                  { aspectRatio: action.iconAspectRatio },
+                ]}
               />
               <Text style={styles.actionText}>{action.label}</Text>
             </TouchableOpacity>
@@ -294,7 +375,7 @@ const styles = StyleSheet.create({
   },
   shareButton: {
     height: 42,
-    paddingHorizontal: 24,
+    paddingHorizontal: 18,
     borderRadius: 14,
     backgroundColor: '#34A8FB',
     flexDirection: 'row',
@@ -303,10 +384,11 @@ const styles = StyleSheet.create({
   },
   shareIcon: {
     color: '#FFFFFF',
-    fontSize: 27,
-    fontWeight: '700',
-    marginRight: 8,
-    marginTop: 2,
+    tintColor: '#fff',
+    marginRight: 6,
+    height: 16,
+    resizeMode: 'contain',
+    paddingHorizontal: 8,
   },
   shareText: {
     color: '#FFFFFF',
@@ -356,9 +438,10 @@ const styles = StyleSheet.create({
     marginBottom: 21,
   },
   actionIcon: {
-    width: 20,
-    height: 20,
-    marginRight: 18,
+    // 限制图标高度，并结合每个资源的宽高比自动计算宽度
+    height: 17,
+    marginRight: 13,
+    resizeMode: 'contain',
   },
   actionText: {
     color: '#202124',

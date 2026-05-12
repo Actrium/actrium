@@ -6,7 +6,9 @@
  * 2. 解压 zip 包
  * 3. 解析 manifest.json
  * 4. 读取入口文件（unified-app.js）
- * 5. 返回可以直接传给 ActrTabView 的数据
+ * 5. 复制图片资源到持久化目录
+ * 6. 替换脚本中的相对路径为绝对 file:// URI
+ * 7. 返回可以直接传给 ActrTabView 的数据
  */
 
 import RNFS from 'react-native-fs';
@@ -16,6 +18,27 @@ import type {
   ActrPackage,
   ActrLoaderOptions,
 } from './ActrLoader.types';
+import { ASSET_EXTENSIONS } from './ActrLoader.types';
+
+/** 规范化路径：去除多余的连续斜杠，保留开头的协议斜杠 */
+function normalizePath(p: string): string {
+  return p.replace(/(?<!^\/)\/+/g, '/');
+}
+
+/** 计算相对路径：从 absolutePath 中去掉 baseDir 前缀，更健壮地处理斜杠差异 */
+function relativePathFrom(absolutePath: string, baseDir: string): string {
+  const normAbs = normalizePath(absolutePath);
+  const normBase = normalizePath(baseDir);
+  // 确保 baseDir 不以 / 结尾，避免相对路径以 / 开头
+  const strippedBase = normBase.endsWith('/') ? normBase.slice(0, -1) : normBase;
+  const prefixLen = strippedBase.length;
+  const rel = normAbs.slice(prefixLen);
+  // 去掉开头的 /
+  return rel.startsWith('/') ? rel.slice(1) : rel;
+}
+
+/** 资源持久化存储的根目录 */
+const ASSETS_ROOT_DIR = normalizePath(`${RNFS.DocumentDirectoryPath}/actr-assets`);
 
 export class ActrLoader {
   private cache = new Map<
@@ -36,9 +59,10 @@ export class ActrLoader {
   /**
    * 从 URL 加载 .actr 文件
    * @param url .actr 文件的 URL 地址
+   * @param appId 应用 ID，用于资源存储目录命名
    * @returns 解析后的包数据
    */
-  async load(url: string): Promise<ActrPackage> {
+  async load(url: string, appId: string): Promise<ActrPackage> {
     console.log(`[ActrLoader] 开始加载: ${url}`);
 
     // 检查缓存
@@ -66,12 +90,23 @@ export class ActrLoader {
       );
 
       // 4. 读取入口文件
-      const unifiedScript = await this.readEntryFile(workDir, manifest.entry);
+      let unifiedScript = await this.readEntryFile(workDir, manifest.entry);
       console.log(
         `[ActrLoader] 读取入口文件: ${manifest.entry} (${unifiedScript.length} bytes)`,
       );
 
-      // 5. 清理临时文件（使用根目录）
+      // 5. 复制图片资源到持久化目录，并替换脚本中的相对路径
+      const assetDir = `${ASSETS_ROOT_DIR}/${appId}`;
+      const assetFileNames = await this.copyAssets(workDir, assetDir);
+
+      if (assetFileNames.length > 0) {
+        unifiedScript = this.rewriteAssetPaths(unifiedScript, assetDir, assetFileNames);
+        console.log(
+          `[ActrLoader] 已替换 ${assetFileNames.length} 个资源路径`,
+        );
+      }
+
+      // 6. 清理临时文件（使用根目录）
       await this.cleanup(zipPath, rootDir);
 
       const result: ActrPackage = {
@@ -97,7 +132,7 @@ export class ActrLoader {
    */
   private async downloadFile(url: string): Promise<string> {
     const fileName = `actr_${Date.now()}.zip`;
-    const downloadPath = `${RNFS.TemporaryDirectoryPath}/${fileName}`;
+    const downloadPath = normalizePath(`${RNFS.TemporaryDirectoryPath}/${fileName}`);
 
     console.log(`[ActrLoader] 开始下载: ${url} -> ${downloadPath}`);
 
@@ -122,7 +157,7 @@ export class ActrLoader {
   private async extractZip(
     zipPath: string,
   ): Promise<{ workDir: string; rootDir: string }> {
-    const extractDir = `${RNFS.TemporaryDirectoryPath}/actr_${Date.now()}`;
+    const extractDir = normalizePath(`${RNFS.TemporaryDirectoryPath}/actr_${Date.now()}`);
 
     console.log(`[ActrLoader] 开始解压:`);
 
@@ -248,6 +283,132 @@ export class ActrLoader {
   }
 
   /**
+   * 递归扫描目录，收集所有图片资源文件的相对路径
+   */
+  private async scanAssetFiles(dir: string, baseDir: string): Promise<string[]> {
+    const results: string[] = [];
+    let items: RNFS.ReadDirItem[];
+
+    try {
+      items = await RNFS.readDir(dir);
+    } catch {
+      return results;
+    }
+
+    for (const item of items) {
+      if (item.isDirectory()) {
+        const subResults = await this.scanAssetFiles(item.path, baseDir);
+        results.push(...subResults);
+      } else if (item.isFile()) {
+        const ext = item.name.substring(item.name.lastIndexOf('.')).toLowerCase();
+        if (ASSET_EXTENSIONS.includes(ext)) {
+          // 返回相对于 baseDir 的路径
+          const relativePath = relativePathFrom(item.path, baseDir);
+          results.push(relativePath);
+        }
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * 复制图片资源到持久化目录
+   * 如果目标目录已存在则先清空，再复制
+   * @returns 成功复制的文件名列表（不含目录前缀）
+   */
+  private async copyAssets(
+    workDir: string,
+    assetDir: string,
+  ): Promise<string[]> {
+    // 扫描解压目录中的所有图片资源
+    const relativePaths = await this.scanAssetFiles(workDir, workDir);
+
+    if (relativePaths.length === 0) {
+      return [];
+    }
+
+    console.log(
+      `[ActrLoader] 发现 ${relativePaths.length} 个图片资源`,
+    );
+
+    // 如果目标目录已存在，先清空
+    const dirExists = await RNFS.exists(assetDir);
+    if (dirExists) {
+      await RNFS.unlink(assetDir);
+      console.log(`[ActrLoader] 已清空旧资源目录: ${assetDir}`);
+    }
+
+    // 创建目标目录
+    await RNFS.mkdir(assetDir);
+
+    // 逐个复制资源文件
+    const copiedFileNames: string[] = [];
+
+    for (const relativePath of relativePaths) {
+      const srcPath = `${workDir}/${relativePath}`;
+      const fileName = relativePath.split('/').pop()!;
+      const destPath = `${assetDir}/${fileName}`;
+
+      try {
+        // 确保源文件存在
+        const srcExists = await RNFS.exists(srcPath);
+        if (!srcExists) {
+          console.warn(`[ActrLoader] 资源文件不存在，跳过: ${srcPath}`);
+          continue;
+        }
+
+        await RNFS.copyFile(srcPath, destPath);
+        copiedFileNames.push(fileName);
+      } catch (error) {
+        console.warn(
+          `[ActrLoader] 复制资源失败: ${srcPath} -> ${destPath}`,
+          error,
+        );
+      }
+    }
+
+    console.log(
+      `[ActrLoader] 资源复制完成: ${copiedFileNames.length}/${relativePaths.length}`,
+    );
+
+    return copiedFileNames;
+  }
+
+  /**
+   * 替换脚本中的相对路径为 file:// URI
+   *
+   * Bun build 产物中的格式:
+   *   module2.exports = "./clear-653n4c11.png";
+   * 替换为:
+   *   module2.exports = {uri:"file:///path/to/actr-assets/{appId}/clear-653n4c11.png"};
+   *
+   * 图片文件名带 content hash，误替换风险极低
+   */
+  private rewriteAssetPaths(
+    script: string,
+    assetDir: string,
+    assetFileNames: string[],
+  ): string {
+    let result = script;
+
+    for (const fileName of assetFileNames) {
+      // 匹配 "./{fileName}" 或 "../{fileName}" 等相对路径字符串
+      const pattern = new RegExp(
+        `"((?:\\.\\.?/)*)${escapeRegExp(fileName)}"`,
+        'g',
+      );
+
+      const absoluteUri = `file://${assetDir}/${fileName}`;
+      const replacement = `{uri:"${absoluteUri}"}`;
+
+      result = result.replace(pattern, replacement);
+    }
+
+    return result;
+  }
+
+  /**
    * 清理临时文件
    */
   private async cleanup(zipPath: string, extractDir: string): Promise<void> {
@@ -283,4 +444,11 @@ export class ActrLoader {
       console.log(`[ActrLoader] 已清除所有缓存`);
     }
   }
+}
+
+/**
+ * 转义正则表达式特殊字符
+ */
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
