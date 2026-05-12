@@ -83,7 +83,7 @@ export default function GlobalSearchPad({
       <ScrollView
         contentContainerStyle={[
           styles.scrollContent,
-          { paddingBottom: shouldApplyKeyboardInset ? keyboardInset : 0 },
+          // { paddingBottom: shouldApplyKeyboardInset ? keyboardInset : 0 },
         ]}
         keyboardShouldPersistTaps='handled'
       >
@@ -205,7 +205,6 @@ const styles = StyleSheet.create({
     position: 'relative',
     height: globalSearch.inputHeight,
     backgroundColor: '#FFF',
-    ...HOST_SHADOWS.inputPill,
     flexDirection: 'row',
     alignItems: 'center',
   },
@@ -236,6 +235,5 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     alignItems: 'center',
     justifyContent: 'center',
-    ...HOST_SHADOWS.inputPill,
   },
 });
