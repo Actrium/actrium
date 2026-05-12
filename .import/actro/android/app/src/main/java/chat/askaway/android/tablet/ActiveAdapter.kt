@@ -1,5 +1,6 @@
 package chat.askaway.android.tablet
 
+import android.graphics.Color
 import android.os.Build
 import android.util.Log
 import android.view.LayoutInflater
@@ -43,8 +44,12 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
 
         val selectedPosition = items.indexOfFirst { it.id == currentId }
 
+        val selectedColor = Color.parseColor("#F2F2F6")
+
         if (item.id == currentId) {
             holder.binding.llContent.setBackgroundResource(R.drawable.tablet_tab_bg_selected)
+            holder.binding.vBridgeLeft.fillColor = selectedColor
+            holder.binding.vBridgeRight.fillColor = selectedColor
             holder.binding.rcvBottomLeft.visibility = View.GONE
             holder.binding.rcvBottomRight.visibility = View.GONE
             // 选中项：显示桥接View填补与邻居item之间的间距
@@ -55,11 +60,19 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
         } else {
             holder.binding.llContent.setBackgroundResource(R.drawable.tablet_tab_bg_normal)
             // 前一个item的右下角显示凹圆角
-            holder.binding.rcvBottomRight.visibility =
-                if (position == selectedPosition - 1) View.VISIBLE else View.GONE
+            if (position == selectedPosition - 1) {
+                holder.binding.rcvBottomRight.fillColor = selectedColor
+                holder.binding.rcvBottomRight.visibility = View.VISIBLE
+            } else {
+                holder.binding.rcvBottomRight.visibility = View.GONE
+            }
             // 后一个item的左下角显示凹圆角
-            holder.binding.rcvBottomLeft.visibility =
-                if (position == selectedPosition + 1) View.VISIBLE else View.GONE
+            if (position == selectedPosition + 1) {
+                holder.binding.rcvBottomLeft.fillColor = selectedColor
+                holder.binding.rcvBottomLeft.visibility = View.VISIBLE
+            } else {
+                holder.binding.rcvBottomLeft.visibility = View.GONE
+            }
             // 非选中项不显示桥接View
             holder.binding.vBridgeLeft.visibility = View.GONE
             holder.binding.vBridgeRight.visibility = View.GONE
