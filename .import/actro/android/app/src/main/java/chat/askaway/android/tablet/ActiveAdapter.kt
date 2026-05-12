@@ -1,12 +1,12 @@
 package chat.askaway.android.tablet
 
-import android.graphics.Color
 import android.os.Build
 import android.util.Log
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.DecelerateInterpolator
+import androidx.core.graphics.toColorInt
 import androidx.recyclerview.widget.RecyclerView
 import com.askaway.android.R
 import com.askaway.android.databinding.ItemTabletAppBinding
@@ -25,10 +25,38 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
         }
 
     fun updateData(newList: List<ActiveModel>) {
+        // 检测新增的 item id
+        val existingIds = items.map { it.id }.toSet()
+        val newItems = newList.filter { it.id !in existingIds }
+
         items.clear()
         items.addAll(newList)
-        notifyDataSetChanged()
+        if (newItems.isEmpty()) {
+            notifyDataSetChanged()
+        } else {
+            notifyDataSetChanged()
+            // 对新增 item 记录需要动画的 position
+            newItems.forEach { newItem ->
+                val pos = items.indexOfFirst { it.id == newItem.id }
+                if (pos >= 0) {
+                    pendingAnimatePositions.add(pos)
+                }
+            }
+        }
     }
+
+    /**
+     * 添加新 item 并播放入场动画（从底部滑入）
+     */
+    fun addItemWithAnimation(item: ActiveModel) {
+        items.add(item)
+        val insertPosition = items.size - 1
+        notifyItemInserted(insertPosition)
+        pendingAnimatePositions.add(insertPosition)
+    }
+
+    /** 需要播放入场动画的 position 集合 */
+    private val pendingAnimatePositions = mutableSetOf<Int>()
 
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ActiveViewHolder {
@@ -42,9 +70,25 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
         holder.bind(item, onItemClick, onDeleteClick, onItemLongClick)
         holder.binding.ivDel.visibility = View.VISIBLE
 
+        // 新增 item 入场动画：从底部滑入
+        if (position in pendingAnimatePositions) {
+            pendingAnimatePositions.remove(position)
+            holder.itemView.translationY = holder.itemView.height.toFloat()
+            holder.itemView.alpha = 0f
+            holder.itemView.animate()
+                .translationY(0f)
+                .alpha(1f)
+                .setDuration(300)
+                .setInterpolator(DecelerateInterpolator())
+                .start()
+        } else {
+            holder.itemView.translationY = 0f
+            holder.itemView.alpha = 1f
+        }
+
         val selectedPosition = items.indexOfFirst { it.id == currentId }
 
-        val selectedColor = Color.parseColor("#F2F2F6")
+        val selectedColor = "#F2F2F6".toColorInt()
 
         if (item.id == currentId) {
             holder.binding.llContent.setBackgroundResource(R.drawable.tablet_tab_bg_selected)
