@@ -30,39 +30,64 @@ struct PhoneTabListView: View {
             .ignoresSafeArea(edges: .top)
             .zIndex(10)
             
+            if viewModel.tabs.isEmpty {
+                // 空列表占位：在 ZStack 中居中，不受 ScrollView 影响
+                VStack {
+                    Spacer()
+                    VStack(spacing: 43) {
+                        Image("active_black")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 52)
+                        
+                        Text("您打开的应用会显示在此处\n点击上面\"+\"打开应用")
+                            .font(.system(size: 20))
+                            .foregroundColor(Color(hex: "#565656"))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(3)
+                    }
+                    Spacer()
+                }
+                .ignoresSafeArea()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.red)
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
                     // 顶部间距：适应自定义导航栏
                     Color.clear.frame(height: UIApplication.shared.statusBarHeight + 66 + 26)
 
-                    LazyVStack(spacing: 16) {
-                        ForEach(viewModel.tabs) { tab in
-                            PhoneTabCardView(
-                                tab: tab,
-                                viewModel: viewModel,
-                                historyVM: historyVM,
-                                animation: animation,
-                                onSelect: {
-                                    // 立即切换 ID，确保 UI 响应（蓝色边框）
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        viewModel.currentTabId = tab.id
+                    if !viewModel.tabs.isEmpty {
+                        LazyVStack(spacing: 16) {
+                            ForEach(viewModel.tabs) { tab in
+                                PhoneTabCardView(
+                                    tab: tab,
+                                    viewModel: viewModel,
+                                    historyVM: historyVM,
+                                    animation: animation,
+                                    onSelect: {
+                                        // 立即切换 ID，确保 UI 响应（蓝色边框）
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            viewModel.currentTabId = tab.id
+                                        }
+                                        // 延迟一小会儿后进入全屏，让用户看到选中效果
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                            onSelect(tab)
+                                        }
+                                    },
+                                    onClose: {
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                            viewModel.closeTab(id: tab.id)
+                                        }
                                     }
-                                    // 延迟一小会儿后进入全屏，让用户看到选中效果
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        onSelect(tab)
-                                    }
-                                },
-                                onClose: {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                        viewModel.closeTab(id: tab.id)
-                                    }
-                                }
-                            )
-                            .id(tab.id)
+                                )
+                                .id(tab.id)
+                            }
+                            Color.clear.frame(height: 80).id("bottomSpacer")
                         }
-                        Color.clear.frame(height: 80).id("bottomSpacer")
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
                 }
                 .ignoresSafeArea()
                 .onChange(of: viewModel.tabs.count) { oldCount, newCount in
