@@ -38,6 +38,9 @@ class BrowserViewModel: ObservableObject {
     
     /// Current fullscreen tab ID (for iPhone only, excluding system tabs)
     @Published var fullscreenTabId: UUID?
+
+    /// 标记下次 onDisappear 截图是否应跳过（RN 退出全屏时已提前截图）
+    var skipNextDisappearSnapshot = false
     
     // MARK: - System Tabs (单独管理，不混入 tabs 数组)
     @Published var systemTabs: [SystemTabType: Tab] = [:]
