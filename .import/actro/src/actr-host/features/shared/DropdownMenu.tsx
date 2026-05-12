@@ -35,6 +35,7 @@ interface DropdownMenuProps {
     | ((close: (callback?: () => void, options?: { delayMs?: number }) => void) => React.ReactNode);
   triggerType?: 'press' | 'longPress';
   disabled?: boolean;
+  onTriggerPress?: () => void;
   onBeforeOpen?: () => void;
   style?: StyleProp<ViewStyle>;
   triggerStyle?: StyleProp<ViewStyle>;
@@ -76,6 +77,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
   children,
   triggerType = 'press',
   disabled = false,
+  onTriggerPress,
   onBeforeOpen,
   style,
   triggerStyle,
@@ -327,7 +329,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
     <View ref={triggerRef} collapsable={false} style={style}>
       <Pressable
         delayLongPress={350}
-        onPress={triggerType === 'press' ? toggle : () => {}}
+        onPress={triggerType === 'press' ? toggle : onTriggerPress}
         onLongPress={triggerType === 'longPress' ? toggle : undefined}
         disabled={disabled}
         style={({ pressed }) => [
