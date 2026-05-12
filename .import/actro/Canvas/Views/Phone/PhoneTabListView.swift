@@ -50,7 +50,6 @@ struct PhoneTabListView: View {
                 }
                 .ignoresSafeArea()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color.red)
             }
 
             ScrollViewReader { proxy in
