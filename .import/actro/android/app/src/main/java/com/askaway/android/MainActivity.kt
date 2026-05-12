@@ -97,13 +97,15 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
             val systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars())
             val navBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars())
             val imeBars = insets.getInsets(WindowInsetsCompat.Type.ime())
-            // 仅应用左右的内边距，保留顶部不做处理，以实现内容延伸到状态栏
-            v.setPadding(systemBars.left, 0, systemBars.right, 0)
-            // 键盘弹出时 IME inset 已包含虚拟按键高度（adjustKeyboard 会将其作为 padding），
-            // 此时不需要再给 flNavBar 额外加 margin，否则虚拟按键高度被重复计算导致间距过大
+            // 应用左、右、底部的内边距，保留顶部不做处理，以实现内容延伸到状态栏
+            // 底部 padding 确保整个布局位于虚拟按键上方
+            v.setPadding(systemBars.left, 0, systemBars.right, navBars.bottom)
+            // 根布局的 paddingBottom 已处理虚拟按键高度，flNavBar 不再需要额外 bottomMargin，
+            // 否则间距会重复计算（padding + margin = 两倍虚拟按键高度）
+            // 键盘弹出时 IME inset 已包含虚拟按键高度（adjustKeyboard 会将其作为 padding）
             val isImeVisible = imeBars.bottom > 0
             binding.flNavBar.updateLayoutParams<ViewGroup.MarginLayoutParams> {
-                bottomMargin = if (isImeVisible) 0 else navBars.bottom
+                bottomMargin = 0
             }
             insets
         }
