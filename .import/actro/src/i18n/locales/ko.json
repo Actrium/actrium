@@ -226,6 +226,7 @@
       "loadError": "북마크 로드 실패",
       "empty": "북마크 없음",
       "emptyHint": "즐겨찾기한 앱이 여기에 표시됩니다",
+      "emptyHintAction": "활성 페이지에서 앱을 즐겨찾기에 추가",
       "openInNewTab": "새 탭에서 열기",
       "copyUrl": "앱 URL 복사",
       "copySuccess": "복사됨",

@@ -226,6 +226,7 @@
       "loadError": "Échec du chargement des favoris",
       "empty": "Aucun favori",
       "emptyHint": "Les applications favorites s'afficheront ici",
+      "emptyHintAction": "Ajoutez des apps en favoris depuis la page active",
       "openInNewTab": "Ouvrir dans un nouvel onglet",
       "copyUrl": "Copier l'URL de l'appli",
       "copySuccess": "Copié",
