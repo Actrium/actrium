@@ -99,6 +99,7 @@ export class AppSessionService {
       if (url) {
         appRes.data.url = url;
       }
+      appRes.data.app_status = 'alive';
 
       // 更新 native 处 tab 信息
       void updateTabInfo({

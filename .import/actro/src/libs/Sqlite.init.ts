@@ -1,6 +1,6 @@
 import { db } from './Sqlite';
 
-const LATEST_DB_VERSION = 3;
+const LATEST_DB_VERSION = 4;
 
 type UserVersionRow = {
   user_version: number;
@@ -38,6 +38,7 @@ const createBaseSchema = async () => {
   await db.executeSql(`
     CREATE TABLE IF NOT EXISTS apps (
       app_id TEXT PRIMARY KEY,
+      app_status TEXT DEFAULT 'alive', -- 应用可用状态 (alive/dead)
       app_name TEXT,                  -- 应用名称
       instance_name TEXT,             -- 实例名称
       full_description TEXT,          -- 完整描述
@@ -171,6 +172,11 @@ const detectLegacyVersion = async () => {
     return 1;
   }
 
+  const hasAppStatus = await hasColumn('apps', 'app_status');
+  if (!hasAppStatus) {
+    return 3;
+  }
+
   return LATEST_DB_VERSION;
 };
 
@@ -220,6 +226,20 @@ const runMigrations = async (fromVersion: number) => {
       true,
     );
     currentVersion = 3;
+    await setUserVersion(currentVersion);
+  }
+
+  if (currentVersion < 4) {
+    // 中文注释：为历史 apps 表补齐应用状态字段，旧数据默认回填为 normal。
+    const appStatusExists = await hasColumn('apps', 'app_status');
+    if (!appStatusExists) {
+      await db.executeSql(
+        `ALTER TABLE apps ADD COLUMN app_status TEXT DEFAULT 'alive';`,
+        [],
+        true,
+      );
+    }
+    currentVersion = 4;
     await setUserVersion(currentVersion);
   }
 

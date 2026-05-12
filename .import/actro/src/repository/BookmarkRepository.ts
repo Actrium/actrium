@@ -10,6 +10,7 @@ export type TBookmarkItem = {
   // 以下是 JOIN apps 表后得到的字段
   app_name: string | null; // 对应 apps.app_name
   instance_name: string | null; // 对应 apps.instance_name
+  app_status: 'alive' | 'dead' | null; // 对应 apps.app_status
   logo: string | null; // 对应 apps.logo
   url: string | null;  // 对应 apps.url
   last_question: string | null; // 最近一条消息的提问
@@ -50,6 +51,7 @@ export class BookmarkRepository {
           bi.sort_order,
           a.app_name,
           a.instance_name,
+          a.app_status,
           a.logo,
           a.url,
           (SELECT question_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_question,
@@ -166,6 +168,7 @@ export class BookmarkRepository {
           bi.sort_order,
           a.app_name,
           a.instance_name,
+          a.app_status,
           a.logo,
           a.url,
           (SELECT question_content FROM app_chat_history WHERE app_id = bi.app_id ORDER BY question_time DESC, message_id DESC LIMIT 1) as last_question,
