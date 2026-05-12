@@ -226,6 +226,7 @@
       "loadError": "Error al cargar marcadores",
       "empty": "Sin marcadores",
       "emptyHint": "Las aplicaciones favoritas aparecerán aquí",
+      "emptyHintAction": "Añade apps a favoritos desde la página activa",
       "openInNewTab": "Abrir en nueva pestaña",
       "copyUrl": "Copiar URL de la app",
       "copySuccess": "Copiado",
