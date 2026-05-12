@@ -12,10 +12,13 @@ class AskAwayPackage : ReactPackage {
             TabModule(reactContext),
             UserInfoModule(reactContext),
             EmailModule(reactContext),
+            AsrModule(reactContext),
         )
     }
 
-    override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<in Nothing, in Nothing>> {
-        return emptyList()
+    override fun createViewManagers(reactContext: ReactApplicationContext): List<ViewManager<*, *>> {
+        return listOf(
+            PhoneNavigationBarViewManager(reactContext)
+        )
     }
 }

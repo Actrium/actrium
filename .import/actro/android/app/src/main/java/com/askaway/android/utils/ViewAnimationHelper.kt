@@ -1,11 +1,14 @@
 package com.askaway.android.utils
 
+import android.animation.AnimatorListenerAdapter
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
 import android.animation.ValueAnimator
+import android.graphics.Outline
 import android.graphics.Rect
 import android.util.Log
 import android.view.View
+import android.view.ViewOutlineProvider
 import android.view.animation.DecelerateInterpolator
 
 object ViewAnimationHelper {
@@ -27,6 +30,7 @@ object ViewAnimationHelper {
             targetView.pivotX = 0f
             targetView.pivotY = 0f
             targetView.clipBounds = null
+            targetView.clipToOutline = false
 
             // 确保可见性为 INVISIBLE（而非 GONE），以便 getLocationInWindow 正常工作
             if (targetView.visibility == View.GONE) {
@@ -62,24 +66,32 @@ object ViewAnimationHelper {
             targetView.scaleX = scale
             targetView.scaleY = scale
 
-            // 4. 设置裁剪 (显示底部)
+            // 4. 使用 ViewOutlineProvider 设置圆角裁剪（底下为圆角）
             val startVisibleHeight = sourceView.height.toFloat() / scale
-            val startRect = Rect(0, 0, targetView.width, startVisibleHeight.toInt())
-            targetView.clipBounds = startRect
+            val cornerRadiusPx = 38 * targetView.resources.displayMetrics.density
+
+            val animOutlineProvider = object : ViewOutlineProvider() {
+                var clipHeight = startVisibleHeight.toInt()
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, 0, view.width, clipHeight, cornerRadiusPx)
+                }
+            }
+            targetView.outlineProvider = animOutlineProvider
+            targetView.clipToOutline = true
 
             targetView.visibility = View.VISIBLE
 
+            // 启用硬件图层，确保内容以全分辨率缓存，避免放大时变虚
+            targetView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
             val set = AnimatorSet()
 
-            // 动画裁剪边界
-            val clipAnimator = ValueAnimator.ofInt(startRect.bottom, targetView.height)
+            // 动画裁剪边界（带圆角）
+            val clipAnimator = ValueAnimator.ofInt(startVisibleHeight.toInt(), targetView.height)
             clipAnimator.addUpdateListener { animation ->
                 val valHeight = animation.animatedValue as Int
-                if (valHeight >= targetView.height - 1) {
-                    targetView.clipBounds = null
-                } else {
-                    targetView.clipBounds = Rect(0, 0, targetView.width, valHeight)
-                }
+                animOutlineProvider.clipHeight = valHeight
+                targetView.invalidateOutline()
             }
 
             set.playTogether(
@@ -89,8 +101,17 @@ object ViewAnimationHelper {
                 ObjectAnimator.ofFloat(targetView, "scaleY", scale, 1f),
                 clipAnimator
             )
-            set.duration = 350
+            set.duration = 250
             set.interpolator = DecelerateInterpolator()
+            set.addListener(object : AnimatorListenerAdapter() {
+                override fun onAnimationEnd(animation: android.animation.Animator) {
+                    targetView.clipToOutline = false
+                    targetView.outlineProvider = ViewOutlineProvider.BOUNDS
+                    targetView.invalidateOutline()
+                    // 动画结束后恢复默认图层类型
+                    targetView.setLayerType(View.LAYER_TYPE_NONE, null)
+                }
+            })
             set.start()
         } else {
             // --- 默认底部滑入动画 ---
@@ -117,6 +138,7 @@ object ViewAnimationHelper {
      * @param onAnimationEnd 动画结束后的回调
      */
     fun animateHide(targetView: View, sourceView: View?, onAnimationEnd: () -> Unit) {
+        Log.e("ViewAnimationHelper", "animateHide ${sourceView}  ${sourceView?.isAttachedToWindow}")
         if (sourceView != null && sourceView.isAttachedToWindow) {
             val sourceLoc = IntArray(2)
             sourceView.getLocationInWindow(sourceLoc)
@@ -140,15 +162,30 @@ object ViewAnimationHelper {
             val endX = (sourceLoc[0] - targetLoc[0]).toFloat()
             val endY = baseEndY - verticalInset * scale
 
+            val cornerRadiusPx = 38 * targetView.resources.displayMetrics.density
+
+            val animOutlineProvider = object : ViewOutlineProvider() {
+                var clipTop = 0
+                var clipBottom = height
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setRoundRect(0, clipTop, view.width, clipBottom, cornerRadiusPx)
+                }
+            }
+            targetView.outlineProvider = animOutlineProvider
+            targetView.clipToOutline = true
+            targetView.clipBounds = null
+
+            // 启用硬件图层，确保缩小动画期间内容保持清晰
+            targetView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
             val set = AnimatorSet()
 
             val clipAnimator = ValueAnimator.ofFloat(0f, verticalInset)
             clipAnimator.addUpdateListener { animation ->
                 val inset = animation.animatedValue as Float
-                // Clip from both top and bottom
-                val top = inset.toInt()
-                val bottom = (height - inset).toInt()
-                targetView.clipBounds = Rect(1, top, width, bottom)
+                animOutlineProvider.clipTop = inset.toInt()
+                animOutlineProvider.clipBottom = (height - inset).toInt()
+                targetView.invalidateOutline()
             }
             Log.e("ViewAnimationHelper", "animateHide: endX=$endX, endY=$endY, scale=$scale, verticalInset=$verticalInset")
             set.playTogether(
@@ -158,9 +195,9 @@ object ViewAnimationHelper {
                 ObjectAnimator.ofFloat(targetView, "scaleY", 1f, scale),
                 clipAnimator
             )
-            set.duration = 250
+            set.duration = 180
             set.interpolator = DecelerateInterpolator()
-            set.addListener(object : android.animation.AnimatorListenerAdapter() {
+            set.addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
                     onAnimationEnd()
                     // Reset properties
@@ -169,8 +206,13 @@ object ViewAnimationHelper {
                     targetView.scaleX = 1f
                     targetView.scaleY = 1f
                     targetView.clipBounds = null
+                    targetView.clipToOutline = false
+                    targetView.outlineProvider = ViewOutlineProvider.BOUNDS
+                    targetView.invalidateOutline()
                     targetView.pivotX = 0f
                     targetView.pivotY = 0f
+                    // 动画结束后恢复默认图层类型
+                    targetView.setLayerType(View.LAYER_TYPE_NONE, null)
                 }
             })
 
@@ -190,7 +232,7 @@ object ViewAnimationHelper {
             )
             set.duration = 300
             set.interpolator = DecelerateInterpolator()
-            set.addListener(object : android.animation.AnimatorListenerAdapter() {
+            set.addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: android.animation.Animator) {
                     onAnimationEnd()
                     // Reset
@@ -202,6 +244,87 @@ object ViewAnimationHelper {
             })
             set.start()
         }
+    }
+
+    /**
+     * 执行隐藏动画（基于目标 Rect 计算收起位置）
+     *
+     * @param targetView 需要隐藏的视图（如 flReactNative）
+     * @param targetRect 目标位置和尺寸（在 window 坐标系中）
+     * @param cornerRadiusDp 目标圆角（dp）
+     * @param onAnimationEnd 动画结束后的回调
+     */
+    fun animateHide(targetView: View, targetRect: Rect, cornerRadiusDp: Float, onAnimationEnd: () -> Unit) {
+        val targetLoc = IntArray(2)
+        targetView.getLocationInWindow(targetLoc)
+
+        val width = targetView.width
+        val height = targetView.height
+        val scale = targetRect.width().toFloat() / width
+
+        val endVisibleHeight = targetRect.height().toFloat() / scale
+        val verticalInset = (height - endVisibleHeight) / 2f
+
+        val baseEndY = (targetRect.top - targetLoc[1]).toFloat()
+        val endX = (targetRect.left - targetLoc[0]).toFloat()
+        val endY = baseEndY - verticalInset * scale
+
+        val cornerRadiusPx = cornerRadiusDp * targetView.resources.displayMetrics.density
+
+        val animOutlineProvider = object : ViewOutlineProvider() {
+            var clipTop = 0
+            var clipBottom = height
+            override fun getOutline(view: View, outline: Outline) {
+                outline.setRoundRect(0, clipTop, view.width, clipBottom, cornerRadiusPx)
+            }
+        }
+        targetView.outlineProvider = animOutlineProvider
+        targetView.clipToOutline = true
+        targetView.clipBounds = null
+
+        // 启用硬件图层，确保缩小动画期间内容保持清晰
+        targetView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+
+        val set = AnimatorSet()
+
+        val clipAnimator = ValueAnimator.ofFloat(0f, verticalInset)
+        clipAnimator.addUpdateListener { animation ->
+            val inset = animation.animatedValue as Float
+            animOutlineProvider.clipTop = inset.toInt()
+            animOutlineProvider.clipBottom = (height - inset).toInt()
+            targetView.invalidateOutline()
+        }
+
+        set.playTogether(
+            ObjectAnimator.ofFloat(targetView, "translationX", 0f, endX),
+            ObjectAnimator.ofFloat(targetView, "translationY", 0f, endY),
+            ObjectAnimator.ofFloat(targetView, "scaleX", 1f, scale),
+            ObjectAnimator.ofFloat(targetView, "scaleY", 1f, scale),
+            clipAnimator
+        )
+        set.duration = 180
+        set.interpolator = DecelerateInterpolator()
+        set.addListener(object : AnimatorListenerAdapter() {
+            override fun onAnimationEnd(animation: android.animation.Animator) {
+                onAnimationEnd()
+                targetView.translationX = 0f
+                targetView.translationY = 0f
+                targetView.scaleX = 1f
+                targetView.scaleY = 1f
+                targetView.clipBounds = null
+                targetView.clipToOutline = false
+                targetView.outlineProvider = ViewOutlineProvider.BOUNDS
+                targetView.invalidateOutline()
+                targetView.pivotX = 0f
+                targetView.pivotY = 0f
+                // 动画结束后恢复默认图层类型
+                targetView.setLayerType(View.LAYER_TYPE_NONE, null)
+            }
+        })
+
+        targetView.pivotX = 0f
+        targetView.pivotY = 0f
+        set.start()
     }
 }
 

@@ -17,6 +17,7 @@
 
     <!-- 底部操作栏：56dp高，灰色背景 -->
     <LinearLayout
+        android:id="@+id/llAppBottom"
         android:layout_width="match_parent"
         android:layout_height="56dp"
         android:layout_gravity="bottom"

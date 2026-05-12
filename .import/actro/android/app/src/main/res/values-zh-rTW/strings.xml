@@ -5,5 +5,9 @@
     <string name="search">搜尋...</string>
     <string name="goback">返回</string>
     <string name="blank_tab">新分頁</string>
+    <string name="menu_bookmark">收藏</string>
+    <string name="menu_close_tab">關閉分頁</string>
+    <string name="menu_close_other_tabs">關閉其他分頁</string>
+    <string name="menu_cancel_bookmark">取消收藏</string>
 </resources>
 
