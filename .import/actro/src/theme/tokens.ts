@@ -122,7 +122,7 @@ export const inputArea = {
   // 输入框内小型图标按钮容器尺寸（加号、麦克风、清除等）
   smallButtonSize: selectTokenValue({ ios: 32, android: 28 }),
   // 输入框内小型图标尺寸
-  smallIconSize: selectTokenValue({ ios: 20, android: 18 }),
+  smallIconSize: selectTokenValue({ ios: 22, android: 20 }),
   // 输入框内中型图标尺寸（链接、语音、键盘等）
   mediumIconSize: selectTokenValue({ ios: 22, android: 20 }),
   // 输入框内大型图标尺寸（语音按钮等）
