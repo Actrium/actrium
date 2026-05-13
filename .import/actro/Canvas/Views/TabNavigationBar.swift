@@ -62,6 +62,11 @@ struct OverviewNavigationBar: View {
         }
         .frame(height: height)
         .background(Color.black)
+        .onChange(of: viewModel.canvasMode) { newMode in
+            if case .overview = newMode {
+                selectedTab = viewModel.currentSystemTabType == .bookmarks ? .bookmarks : .active
+            }
+        }
     }
 }
 

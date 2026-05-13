@@ -47,6 +47,8 @@ class BrowserViewModel: ObservableObject {
 
     // MARK: - System Tab Management
     @Published var currentSystemTabType: SystemTabType? = nil
+    /// 记录打开全局搜索前的系统标签类型，关闭搜索时恢复
+    var previousSystemTabType: SystemTabType? = nil
 
     // MARK: - Tab Groups
     @Published var tabGroups: [TabGroup] = []
