@@ -15,6 +15,12 @@ const { request: clearChatHistory } = useEventBridge(
     'CLEAR_CHAT_HISTORY',
     'CLEAR_CHAT_HISTORY_RESULT',
   );
+
+const result = await clearChatHistory({
+  requestId: 'xxx', // 需要唯一
+  ... // 其他参数，和 ask.contracts.v1.json 中 CLEAR_CHAT_HISTORY payload 相对应
+})
+// 返回的 result 类型和  ask.contracts.v1.json 中 CLEAR_CHAT_HISTORY_RESULT payload 相对应
 ```
 
 

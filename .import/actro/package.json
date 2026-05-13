@@ -7,6 +7,7 @@
     "start": "react-native start --verbose --reset-cache",
     "log": "bun log-server.ts",
     "dev": "node scripts/dev-start.js",
+    "generate:actr:signature": "node scripts/generate-actr-signature.js",
     "typecheck": "tsc -p tsconfig.typecheck.json --noEmit",
     "typecheck:all": "tsc --noEmit",
     "lint:logs": "node scripts/check-logs.js",
