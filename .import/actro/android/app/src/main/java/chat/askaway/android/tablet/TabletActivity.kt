@@ -70,6 +70,13 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.rvApp.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         binding.rvApp.adapter = adapter
 
+        // 选中项变化时，滚动 RecyclerView 使其完全可见
+        adapter.onSelectedChanged = { position ->
+            binding.rvApp.post {
+                binding.rvApp.smoothScrollToPosition(position)
+            }
+        }
+
         // 初始化内容区域 adapter
         gridAdapter = GridContentAdapter()
 
