@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
   useWindowDimensions,
 } from 'react-native';
+import Animated, { LinearTransition, FadeOut } from 'react-native-reanimated';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useTranslation } from 'react-i18next';
 import { AppText, Icon, GlobalAlertModal } from '../../components';
@@ -142,7 +143,12 @@ export default function BookmarksPadView({
       >
         <View style={styles.grid}>
           {flatBookmarks.map((item) => (
-            <View key={item.id} style={[styles.card, { width: cardWidth }]}>
+            <Animated.View
+              key={item.id}
+              layout={LinearTransition}
+              exiting={FadeOut.duration(200)}
+              style={[styles.card, { width: cardWidth }]}
+            >
               <DropdownMenu
                 width={longPressMenu.width}
                 estimatedWidth={longPressMenu.width}
@@ -188,7 +194,7 @@ export default function BookmarksPadView({
                   </>
                 )}
               </DropdownMenu>
-            </View>
+            </Animated.View>
           ))}
         </View>
       </ScrollView>
