@@ -46,33 +46,43 @@ export const usePhoneAttachmentPanelController = (
     toggleEnterForNewLine,
   } = useInputToolboxState(appId);
 
+  const prevAttachmentsRef = React.useRef(attachments);
+
   const closeAttachmentPanel = React.useCallback(() => {
     setIsAttachmentPanelOpen(false);
   }, []);
+
+  // 选中附件后自动关闭面板，取消选择则保持打开
+  React.useEffect(() => {
+    if (!isAttachmentPanelOpen) {
+      prevAttachmentsRef.current = attachments;
+      return;
+    }
+    if (prevAttachmentsRef.current !== attachments) {
+      prevAttachmentsRef.current = attachments;
+      closeAttachmentPanel();
+    }
+  }, [attachments, isAttachmentPanelOpen, closeAttachmentPanel]);
 
   const toggleAttachmentPanel = React.useCallback(() => {
     setIsAttachmentPanelOpen((prev) => !prev);
   }, []);
 
   const handlePickCamera = React.useCallback(() => {
-    closeAttachmentPanel();
     takePhoto();
-  }, [closeAttachmentPanel, takePhoto]);
+  }, [takePhoto]);
 
   const handlePickImage = React.useCallback(() => {
-    closeAttachmentPanel();
     pickImage();
-  }, [closeAttachmentPanel, pickImage]);
+  }, [pickImage]);
 
   const handlePickDocument = React.useCallback(() => {
-    closeAttachmentPanel();
     pickDocument();
-  }, [closeAttachmentPanel, pickDocument]);
+  }, [pickDocument]);
 
   const handlePickLocation = React.useCallback(() => {
-    closeAttachmentPanel();
     setShowMapModal(true);
-  }, [closeAttachmentPanel]);
+  }, []);
 
   const handleToggleWebSearch = React.useCallback(() => {
     closeAttachmentPanel();
