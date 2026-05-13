@@ -27,3 +27,6 @@ If you do not agree, you will not be able to use the features of this applicatio
 "unbookmark" = "북마크 해제";
 "closeTab" = "탭 닫기";
 "closeOtherTabs" = "다른 탭 닫기";
+
+/* 탭 상태 */
+"serverClosed" = "서비스 종료";

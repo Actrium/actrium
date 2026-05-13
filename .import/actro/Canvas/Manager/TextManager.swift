@@ -36,6 +36,10 @@ class TextManager: ObservableObject {
     var tabContextMenu: TabContextMenu {
         return TabContextMenu()
     }
+
+    var tabStatus: TabStatusText {
+        return TabStatusText()
+    }
 }
 
 /// MARK: - 文案键枚举
@@ -60,6 +64,9 @@ enum TextKey: String {
     case unbookmark
     case closeTab
     case closeOtherTabs
+
+    // 标签状态
+    case serverClosed
 }
 
 // MARK: - 场景文案结构体
@@ -87,6 +94,11 @@ struct TabContextMenu {
     func unbookmark() -> String { return TextManager.shared.text(.unbookmark) }
     func closeTab() -> String { return TextManager.shared.text(.closeTab) }
     func closeOtherTabs() -> String { return TextManager.shared.text(.closeOtherTabs) }
+}
+
+/// 标签状态相关文案
+struct TabStatusText {
+    func serverClosed() -> String { return TextManager.shared.text(.serverClosed) }
 }
 
 // MARK: - SwiftUI文本扩展

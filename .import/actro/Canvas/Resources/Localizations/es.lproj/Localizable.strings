@@ -27,3 +27,6 @@ If you do not agree, you will not be able to use the features of this applicatio
 "unbookmark" = "Quitar marcador";
 "closeTab" = "Cerrar pestaña";
 "closeOtherTabs" = "Cerrar otras pestañas";
+
+/* Estado de pestaña */
+"serverClosed" = "Servidor cerrado";

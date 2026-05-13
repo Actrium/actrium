@@ -168,9 +168,8 @@ struct PhoneTabCardView: View {
                         .frame(width: iconWidth, height: iconWidth)
                         .overlay {
                             if tab.status == .dead {
-                                Image(systemName: "exclamationmark.circle")
-                                    .font(.system(size: iconWidth * 0.6))
-                                    .foregroundColor(.white.opacity(0.9))
+                                Image("service_stop")
+                                    .font(.system(size: iconWidth))
                             } else if let icon = tab.icon, let url = URL(string: icon) {
                                 KFImage(url)
                                     .resizable()
@@ -199,7 +198,7 @@ struct PhoneTabCardView: View {
                 .frame(width: iconWidth, height: iconWidth)
                 
                 // 标题
-                Text(tab.title)
+                Text(tab.status == .dead ? "\(tab.title)(\(TM.tabStatus.serverClosed()))" : tab.title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(theme.isDarkMode ? Color(hex: "#ECECED") : Color(hex: "#404040"))
                     .lineLimit(1)

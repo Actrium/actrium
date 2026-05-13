@@ -27,3 +27,6 @@
 "unbookmark" = "取消收藏";
 "closeTab" = "關閉分頁";
 "closeOtherTabs" = "關閉其他分頁";
+
+/* 分頁狀態 */
+"serverClosed" = "已停運";
