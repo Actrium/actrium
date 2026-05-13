@@ -40,7 +40,7 @@ struct PhoneTabListView: View {
                             .aspectRatio(contentMode: .fit)
                             .frame(height: 52)
                         
-                        Text("您打开的应用会显示在此处\n点击上面\"+\"打开应用")
+                        Text("\(TM.emptyActive.title())\n\(TM.emptyActive.subtitle())")
                             .font(.system(size: 20))
                             .foregroundColor(Color(hex: "#565656"))
                             .multilineTextAlignment(.center)

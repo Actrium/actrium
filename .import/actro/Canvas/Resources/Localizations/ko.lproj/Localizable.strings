@@ -30,3 +30,7 @@ If you do not agree, you will not be able to use the features of this applicatio
 
 /* 탭 상태 */
 "serverClosed" = "서비스 종료";
+
+/* 빈 데이터 페이지 */
+"emptyActiveTitle" = "앱이 여기에 표시";
+"emptyActiveSubtitle" = "위의 \"+\" 누르기";

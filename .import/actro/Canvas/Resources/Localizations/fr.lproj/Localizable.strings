@@ -30,3 +30,7 @@ If you do not agree, you will not be able to use the features of this applicatio
 
 /* Statut de l'onglet */
 "serverClosed" = "Serveur fermé";
+
+/* Page vide */
+"emptyActiveTitle" = "Apps s'affichent ici";
+"emptyActiveSubtitle" = "Cliquez sur \"+\" en haut";
