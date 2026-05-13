@@ -416,6 +416,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       title: resolvedAppInfo.instance_name,
       icon: resolvedAppInfo.info?.logo || '',
       appUrl: resolvedAppInfo.url || '',
+      status: resolvedAppInfo.app_status
     });
   }, [appId, appInfo, setAppInfo, tab.appUrl, tab.id]);
 
