@@ -190,7 +190,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         }
 
         gridAdapter.onDeleteClick = { tabId ->
-            deleteTab(tabId)
+            gridAdapter.removeItemWithAnimation(tabId) {
+                deleteTab(tabId)
+            }
         }
         gridAdapter.onMarkClick = { activeModel ->
             viewModel.toggleMarkStatus(activeModel)
