@@ -436,6 +436,11 @@ export function useActrMessageFlow(
         return;
       }
 
+      if (appInfo.app_status !== 'alive') {
+        GlobalAlert.alert(t('actr.app.notExist'));
+        return;
+      }
+
       // if (connection?.reason) {
       //   GlobalAlert.alert(t('actr.auth.serviceInitFailed'), connection.reason);
       //   return;

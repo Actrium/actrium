@@ -681,6 +681,15 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     };
   }, [layoutTokens.isTablet]);
 
+
+  const handleFeedback = (msgId: string) => {
+    if (appInfo?.app_status !== 'alive') {
+      GlobalAlert.alert(t('actr.app.notExist'));
+      return;
+    }
+    setFeedbackMessageId(msgId)
+  }
+
   const renderItem = useCallback(
     ({ item: messageId, index }: { item: string; index: number }) => {
       return (
@@ -693,7 +702,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           toggleSelection={toggleSelection}
           handleEdit={handleEdit}
           handleCopy={handleCopy}
-          handleFeedback={setFeedbackMessageId}
+          handleFeedback={(msgId) => handleFeedback(msgId)}
           styles={styles}
         />
       );
@@ -701,6 +710,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     [
       tab.id,
       appId,
+      appInfo?.app_status,
       layoutTokens,
       messageIds.length,
       toggleSelection,

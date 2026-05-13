@@ -23,6 +23,7 @@ export function AuthGateOverlay({
   checkInputAuth,
 }: AuthGateOverlayProps) {
   const userInfo = useUserStore((state) => state.userInfo);
+  const appStatus = useAppStore(state => state.apps[appId]?.app_status)
   const allowAnonymousAccess = useAppStore(
     (state) => state.apps[appId]?.allow_anonymous_access,
   );
@@ -31,7 +32,7 @@ export function AuthGateOverlay({
   );
   const isLoggedIn = !!userInfo?.user?.cn;
   const shouldBlockInput =
-    !allowAnonymousAccess && (!isLoggedIn || authStatus !== 'authorized');
+    !allowAnonymousAccess && (!isLoggedIn || authStatus !== 'authorized') && appStatus === 'alive';
 
   const handlePress = React.useCallback(async () => {
     if (!checkInputAuth) {
