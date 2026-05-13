@@ -278,11 +278,16 @@ struct ChromeTabOverviewView: View {
                                 tab: tab,
                                 viewModel: viewModel,
                                 onSelect: { onSelectTab(tab.id) },
-                                onClose: { onCloseTab(tab.id) }
+                                onClose: {
+                                    withAnimation(.easeOut(duration: 0.25)) {
+                                        onCloseTab(tab.id)
+                                    }
+                                }
                             )
                             .aspectRatio(cardAspectRatio, contentMode: .fit)
                             .asMatchedTransitionSource(id: tab.id, in: animation)
                             .opacity(isHovering ? 0.5 : 1.0)
+                            .transition(.scale(scale: 0.8).combined(with: .opacity))
                             .draggable(tab.id.uuidString) {
                                 ChromeTabDragPreviewView(tab: tab)
                             }
