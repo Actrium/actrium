@@ -35,6 +35,7 @@ import {
   DropdownMenuText,
 } from '../shared/DropdownMenu';
 import { useMessageStore, type SelectionMode } from '../../store/useMessageStore';
+import { isTablet } from '../../../utils/device';
 import { getHostShadows } from '../../styles/shadows';
 import { triggerHaptic } from '../../utils/haptics';
 
@@ -797,7 +798,7 @@ const makeStyles = (colors: ColorTokens) => {
       width: '100%',
     },
     questionBubbleFrame: {
-      maxWidth: 316,
+      maxWidth: isTablet ? 632 : 316,
       alignSelf: 'flex-end',
     },
     answerBubbleFrame: {
