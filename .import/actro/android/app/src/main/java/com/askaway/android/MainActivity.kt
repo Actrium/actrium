@@ -238,8 +238,10 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                     break
                 }
             }
-            // 移除当前 item
-            viewModel.removeActiveModel(activeModel.id)
+            // 播放删除动画，动画结束后再更新 ViewModel
+            activeRecyclerAdapter.removeItemWithAnimation(activeModel.id) {
+                viewModel.removeActiveModel(activeModel.id)
+            }
             // 不再在这里 finish，由 updateData 回调判断
         }
 
