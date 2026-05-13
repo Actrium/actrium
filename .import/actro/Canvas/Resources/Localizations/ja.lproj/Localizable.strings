@@ -30,3 +30,7 @@ If you do not agree, you will not be able to use the features of this applicatio
 
 /* タブステータス */
 "serverClosed" = "サービス終了";
+
+/* 空データページ */
+"emptyActiveTitle" = "アプリがここに表示";
+"emptyActiveSubtitle" = "上の「+」をタップ";

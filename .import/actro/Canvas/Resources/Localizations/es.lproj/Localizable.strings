@@ -30,3 +30,7 @@ If you do not agree, you will not be able to use the features of this applicatio
 
 /* Estado de pestaña */
 "serverClosed" = "Servidor cerrado";
+
+/* Página vacía */
+"emptyActiveTitle" = "Las apps aparecen aquí";
+"emptyActiveSubtitle" = "Pulsa \"+\" arriba";

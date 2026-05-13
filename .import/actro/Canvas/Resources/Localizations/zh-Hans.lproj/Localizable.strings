@@ -30,3 +30,7 @@
 
 /* 标签状态 */
 "serverClosed" = "已停服";
+
+/* 空数据页 */
+"emptyActiveTitle" = "您打开的应用会显示在此处";
+"emptyActiveSubtitle" = "点击上面 \"+\" 打开应用";

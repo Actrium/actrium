@@ -40,6 +40,10 @@ class TextManager: ObservableObject {
     var tabStatus: TabStatusText {
         return TabStatusText()
     }
+
+    var emptyActive: EmptyActiveText {
+        return EmptyActiveText()
+    }
 }
 
 /// MARK: - 文案键枚举
@@ -67,6 +71,10 @@ enum TextKey: String {
 
     // 标签状态
     case serverClosed
+
+    // 空数据页
+    case emptyActiveTitle
+    case emptyActiveSubtitle
 }
 
 // MARK: - 场景文案结构体
@@ -99,6 +107,12 @@ struct TabContextMenu {
 /// 标签状态相关文案
 struct TabStatusText {
     func serverClosed() -> String { return TextManager.shared.text(.serverClosed) }
+}
+
+/// 空数据页相关文案
+struct EmptyActiveText {
+    func title() -> String { return TextManager.shared.text(.emptyActiveTitle) }
+    func subtitle() -> String { return TextManager.shared.text(.emptyActiveSubtitle) }
 }
 
 // MARK: - SwiftUI文本扩展
