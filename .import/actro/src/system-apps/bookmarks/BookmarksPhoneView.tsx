@@ -1,12 +1,12 @@
 import React from 'react';
 import {
   View,
-  FlatList,
   StyleSheet,
   Image,
   ActivityIndicator,
   TouchableOpacity,
 } from 'react-native';
+import Animated, { LinearTransition } from 'react-native-reanimated';
 import { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { useTranslation } from 'react-i18next';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -159,7 +159,8 @@ export default function BookmarksPhoneView({
     <View style={styles.container}>
       {headerNode}
 
-      <FlatList
+      <Animated.FlatList
+        itemLayoutAnimation={LinearTransition}
         style={styles.content}
         contentContainerStyle={[
           styles.scrollContent,

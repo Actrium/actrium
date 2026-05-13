@@ -23,7 +23,7 @@ interface BookmarkState {
   isLoaded: boolean;
   isLoading: boolean;
   error: Error | null;
-  loadBookmarks: (force?: boolean) => Promise<TBookmarkGroup[]>;
+  loadBookmarks: (force?: boolean, silent?: boolean) => Promise<TBookmarkGroup[]>;
   addBookmark: (params: AddBookmarkParams) => Promise<void>;
   removeBookmarkById: (id: number) => Promise<void>;
   removeBookmarkByAppId: (appId: string) => Promise<void>;
@@ -74,7 +74,7 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
   isLoading: false,
   error: null,
 
-  loadBookmarks: async (force = false) => {
+  loadBookmarks: async (force = false, silent = false) => {
     const state = get();
     if (!force && state.isLoaded) {
       return state.groups;
@@ -84,11 +84,14 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
       return loadBookmarksPromise;
     }
 
-    set((prev) => ({
-      ...prev,
-      isLoading: true,
-      error: null,
-    }));
+    // 静默刷新时不设 isLoading，避免列表被卸载导致退出动画中断
+    if (!silent) {
+      set((prev) => ({
+        ...prev,
+        isLoading: true,
+        error: null,
+      }));
+    }
 
     loadBookmarksPromise = BookmarkRepository.getBookmarksHierarchy()
       .then((groups) => {
@@ -98,11 +101,13 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
       .catch((error) => {
         const normalizedError =
           error instanceof Error ? error : new Error('Failed to load bookmarks');
-        set((prev) => ({
-          ...prev,
-          isLoading: false,
-          error: normalizedError,
-        }));
+        if (!silent) {
+          set((prev) => ({
+            ...prev,
+            isLoading: false,
+            error: normalizedError,
+          }));
+        }
         throw normalizedError;
       })
       .finally(() => {
@@ -125,7 +130,8 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
   removeBookmarkById: async (id) => {
     const bookmark = Object.values(get().itemsByAppId).find((item) => item.id === id);
     await BookmarkRepository.removeBookmarkById(id);
-    await get().loadBookmarks(true);
+    // 静默刷新：不设 isLoading，保持列表挂载以支持删除过渡动画
+    await get().loadBookmarks(true, true);
     if (bookmark?.app_id) {
       await get().syncNativeBookmarkStatusByAppId({
         appId: bookmark.app_id,
@@ -135,7 +141,8 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
 
   removeBookmarkByAppId: async (appId) => {
     await BookmarkRepository.removeBookmarkByAppId(appId);
-    await get().loadBookmarks(true);
+    // 静默刷新：不设 isLoading，保持列表挂载以支持删除过渡动画
+    await get().loadBookmarks(true, true);
     await get().syncNativeBookmarkStatusByAppId({ appId });
   },
 
