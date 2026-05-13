@@ -124,7 +124,8 @@ struct ReactNativeRootRepresentable: UIViewRepresentable {
             var dict: [String: Any] = [
                 "id": tab.id.uuidString,
                 "title": tab.title,
-                "backgroundColor": tab.backgroundColor
+                "backgroundColor": tab.backgroundColor,
+                "status": tab.status.rawValue
             ]
 
             // Add icon and appUrl if available

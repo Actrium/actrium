@@ -296,16 +296,20 @@ class TabModule: NSObject {
             
             // 查找并更新 tab
             if let index = viewModel.tabs.firstIndex(where: { $0.id == uuid }) {
+                var updatedTab = viewModel.tabs[index]
                 if let icon = options["icon"] as? String {
-                    viewModel.tabs[index].icon = icon
+                    updatedTab.icon = icon
                 }
                 if let title = options["title"] as? String {
-                    viewModel.tabs[index].title = title
+                    updatedTab.title = title
                 }
                 if let urlString = options["appUrl"] as? String, let newURL = URL(string: urlString) {
-                    viewModel.tabs[index].url = newURL
+                    updatedTab.url = newURL
                 }
-                viewModel.scheduleSaveTabs()
+                if let statusString = options["status"] as? String, let status = TabStatus(rawValue: statusString) {
+                    updatedTab.status = status
+                }
+                viewModel.tabs[index] = updatedTab
                 resolve(true)
             } else {
                 reject("TAB_NOT_FOUND", "Tab with ID \(tabId) not found", nil)
@@ -350,7 +354,8 @@ class TabModule: NSObject {
             let tabsArray: [[String: Any]] = viewModel.tabs.map { tab in
                 var tabDict: [String: Any] = [
                     "tabId": tab.id.uuidString,
-                    "title": tab.title
+                    "title": tab.title,
+                    "status": tab.status.rawValue
                 ]
                 if let icon = tab.icon {
                     tabDict["icon"] = icon

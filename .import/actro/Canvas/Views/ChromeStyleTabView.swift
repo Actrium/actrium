@@ -63,7 +63,6 @@ struct ChromeStyleTabView: View {
 
     private var overviewView: some View {
         ChromeTabOverviewView(
-            tabs: viewModel.tabsSortedBySlotPosition().map { $0.tab },
             viewModel: viewModel,
             historyVM: historyVM,
             animation: animation,
@@ -185,7 +184,6 @@ struct ChromeStyleTabView: View {
 
 // MARK: - Overview View (Tab Grid)
 struct ChromeTabOverviewView: View {
-    let tabs: [Tab]
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
     var animation: Namespace.ID
@@ -274,7 +272,7 @@ struct ChromeTabOverviewView: View {
                         ), count: columns),
                         spacing: lineSpacing
                     ) {
-                        ForEach(tabs) { tab in
+                        ForEach(viewModel.tabs) { tab in
                             let isHovering = hoveringOverTabId == tab.id
                             ChromeTabCardView(
                                 tab: tab,
@@ -445,7 +443,11 @@ struct ChromeTabCardView: View {
                         .fill(Color(hslString: tab.backgroundColor))
                         .frame(width: iconWidth, height: iconWidth)
                         .overlay {
-                            if let icon = tab.icon, let url = URL(string: icon) {
+                            if tab.status == .dead {
+                                Image(systemName: "exclamationmark.circle")
+                                    .font(.system(size: iconWidth * 0.6))
+                                    .foregroundColor(.white.opacity(0.9))
+                            } else if let icon = tab.icon, let url = URL(string: icon) {
                                 KFImage(url)
                                     .resizable()
                                     .scaledToFit()

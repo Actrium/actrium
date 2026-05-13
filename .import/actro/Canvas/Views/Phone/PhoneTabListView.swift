@@ -167,7 +167,11 @@ struct PhoneTabCardView: View {
                         .fill(Color(hslString: tab.backgroundColor))
                         .frame(width: iconWidth, height: iconWidth)
                         .overlay {
-                            if let icon = tab.icon, let url = URL(string: icon) {
+                            if tab.status == .dead {
+                                Image(systemName: "exclamationmark.circle")
+                                    .font(.system(size: iconWidth * 0.6))
+                                    .foregroundColor(.white.opacity(0.9))
+                            } else if let icon = tab.icon, let url = URL(string: icon) {
                                 KFImage(url)
                                     .resizable()
                                     .scaledToFit()
