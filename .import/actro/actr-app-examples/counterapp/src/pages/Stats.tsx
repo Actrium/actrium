@@ -187,12 +187,12 @@ export default function Stats({}: StatsProps) {
       label: '吐个槽',
       handler: handleFeedback,
     },
-    {
-      id: 'about',
-      iconSource: aboutIconSource,
-      iconAspectRatio: 1,
-      label: '关于 MU AI',
-    },
+    // {
+    //   id: 'about',
+    //   iconSource: aboutIconSource,
+    //   iconAspectRatio: 1,
+    //   label: '关于 MU AI',
+    // },
   ] satisfies ActionOption[];
 
   return (
@@ -223,16 +223,16 @@ export default function Stats({}: StatsProps) {
 
           <Text style={styles.title}>{statsData.appName}</Text>
 
-          <View style={styles.statsRow}>
+          {/* <View style={styles.statsRow}>
             <Text style={styles.metricValue}>{statsData.favoriteCount}</Text>
             <Text style={styles.metricLabel}>收藏</Text>
             <Text style={[styles.metricValue, styles.metricGap]}>
               {statsData.usedCount}
             </Text>
             <Text style={styles.metricLabel}>用过</Text>
-          </View>
+          </View> */}
 
-          <Text style={styles.creator}>
+          {/* <Text style={styles.creator}>
             创建者
             {statsData.author}
           </Text>
@@ -244,7 +244,7 @@ export default function Stats({}: StatsProps) {
             />
 
             <Text style={styles.shareText}>分享</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
         </View>
 
         <View style={styles.section}>
