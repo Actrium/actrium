@@ -325,6 +325,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                     viewModel.activeList.collect { activeModels ->
                         Log.d("MainActivity", "activeList changed: " + activeModels.size)
                         activeRecyclerAdapter.updateData(activeModels)
+                        binding.llEmptyView.visibility = if (activeModels.isEmpty()) View.VISIBLE else View.GONE
                     }
                 }
             }
@@ -389,15 +390,22 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
                 binding.flBookmark.visibility = View.GONE
                 binding.llActive.visibility = View.VISIBLE
                 binding.flSet.visibility = View.GONE
+                // 根据 activeList 是否为空决定空白视图显隐
+                binding.llEmptyView.visibility = if (viewModel.isActiveListEmpty()) View.VISIBLE else View.GONE
             }
 
             R.id.navSettings -> if (showPage) showSet()
+        }
+        // 切换到非活动页时隐藏空白视图
+        if (checkedId != R.id.navActivity) {
+            binding.llEmptyView.visibility = View.GONE
         }
     }
 
     private fun showBookmark(sourceBundle: Bundle? = null) {
         binding.flBookmark.visibility = View.VISIBLE
         binding.llActive.visibility = View.GONE
+        binding.llEmptyView.visibility = View.GONE
         binding.flSet.visibility = View.GONE
         val bundle = sourceBundle ?: ReactNativeBundle.getBookmarkBundle()
         if (binding.flBookmark.childCount == 0) {
@@ -412,6 +420,7 @@ class MainActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permiss
     private fun showSet(sourceBundle: Bundle? = null) {
         binding.flBookmark.visibility = View.GONE
         binding.llActive.visibility = View.GONE
+        binding.llEmptyView.visibility = View.GONE
         binding.flSet.visibility = View.VISIBLE
         val bundle = sourceBundle ?: ReactNativeBundle.getSetBundle()
         if (binding.flSet.childCount == 0) {
