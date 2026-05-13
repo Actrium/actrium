@@ -18,10 +18,17 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
     var onItemClick: ((ActiveModel) -> Unit)? = null
     var onDeleteClick: ((ActiveModel) -> Unit)? = null
     var onItemLongClick: ((ActiveModel, Int, Int) -> Unit)? = null
+    /** 选中项变化时的回调，参数为选中项的 position */
+    var onSelectedChanged: ((Int) -> Unit)? = null
+
     var currentId: String? = ""
         set(value) {
             field = value
             notifyDataSetChanged()
+            val pos = items.indexOfFirst { it.id == value }
+            if (pos >= 0) {
+                onSelectedChanged?.invoke(pos)
+            }
         }
 
     fun updateData(newList: List<ActiveModel>) {
