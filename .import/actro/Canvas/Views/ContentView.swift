@@ -30,7 +30,12 @@ struct ContentView: View {
                 .background(Color.black)
                 .onReceive(NotificationCenter.default.publisher(for: .exitSearchFromRN)) { _ in
                     withAnimation {
-                        viewModel.currentSystemTabType = nil
+                        if let previous = viewModel.previousSystemTabType {
+                            viewModel.currentSystemTabType = previous
+                            viewModel.previousSystemTabType = nil
+                        } else {
+                            viewModel.currentSystemTabType = nil
+                        }
                     }
                 }
                 .onOpenURL { url in
@@ -137,6 +142,7 @@ struct SearchBar: View {
                 .background(Color.white)
                 .cornerRadius(24)
                 .onTapGesture {
+                    viewModel.previousSystemTabType = viewModel.currentSystemTabType
                     viewModel.openSystemTab(.globalSearch, additionalProps: nil, replaceAdditionalProps: true)
                     viewModel.currentSystemTabType = .globalSearch
                 }
