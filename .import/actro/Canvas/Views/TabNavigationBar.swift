@@ -379,7 +379,7 @@ struct TabItemView: View {
 
     private var tabContent: some View {
         HStack(spacing: 8) {
-            Text(tab.title.isEmpty ? TM.active.blackTab() : tab.title)
+            Text(tab.title.isEmpty ? TM.active.blackTab() : (tab.status == .dead ? "\(tab.title)(\(TM.tabStatus.serverClosed()))" : tab.title))
                 .font(.system(size: 13))
                 .foregroundColor(isActive ? .black : Color(hex: "#9E9EA7"))
                 .lineLimit(1)

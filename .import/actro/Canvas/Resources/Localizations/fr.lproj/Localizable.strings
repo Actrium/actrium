@@ -27,3 +27,6 @@ If you do not agree, you will not be able to use the features of this applicatio
 "unbookmark" = "Supprimer le signet";
 "closeTab" = "Fermer l'onglet";
 "closeOtherTabs" = "Fermer les autres onglets";
+
+/* Statut de l'onglet */
+"serverClosed" = "Serveur fermé";

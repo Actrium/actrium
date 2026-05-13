@@ -27,3 +27,6 @@
 "unbookmark" = "取消收藏";
 "closeTab" = "关闭页签";
 "closeOtherTabs" = "关闭其他页签";
+
+/* 标签状态 */
+"serverClosed" = "已停服";
