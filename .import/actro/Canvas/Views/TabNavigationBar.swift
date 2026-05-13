@@ -149,7 +149,7 @@ struct FocusModeNavigationBar: View {
                 ZStack(alignment: .topLeading) {
                     HStack(spacing: 0) {
                         tabsContent
-                        Color.clear.frame(width: 150)
+                        Color.clear.frame(width: 120)
                             .id("trailingSpacer")
                     }
                     // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）

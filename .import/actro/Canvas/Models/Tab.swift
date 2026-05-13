@@ -2,6 +2,13 @@ import Foundation
 
 private let logger = AppLogger.app
 
+/// Tab status
+enum TabStatus: String, Codable {
+    case alive
+    case dead
+    case unknown
+}
+
 /// System tab types for built-in pages (like Chrome's chrome://history)
 enum SystemTabType: String, Codable {
     case history
@@ -87,6 +94,9 @@ struct Tab: Identifiable {
     /// Tab bookmark status (managed by RN side)
     var isBookmarked: Bool
 
+    /// Tab status: alive or dead
+    var status: TabStatus
+
     init(
         id: UUID = UUID(),
         title: String,
@@ -109,7 +119,8 @@ struct Tab: Identifiable {
         backgroundColor: String? = nil,
         additionalProps: [String: Any]? = nil,
         hasUnreadMessage: Bool = false,
-        isBookmarked: Bool = false
+        isBookmarked: Bool = false,
+        status: TabStatus = .unknown
     ) {
         self.id = id
         self.title = title
@@ -133,6 +144,7 @@ struct Tab: Identifiable {
         self.additionalProps = additionalProps
         self.hasUnreadMessage = hasUnreadMessage
         self.isBookmarked = isBookmarked
+        self.status = status
     }
 
     /// 生成随机的十六进制颜色字符串（深色调）
@@ -192,8 +204,9 @@ struct PersistedTab: Identifiable, Codable {
     var appId: String?
     var hasUnreadMessage: Bool
     var isBookmarked: Bool
+    var status: TabStatus
 
-    init(id: UUID, title: String, icon: String?, appUrl: URL?, appId: String? = nil, hasUnreadMessage: Bool = false, isBookmarked: Bool = false) {
+    init(id: UUID, title: String, icon: String?, appUrl: URL?, appId: String? = nil, hasUnreadMessage: Bool = false, isBookmarked: Bool = false, status: TabStatus = .unknown) {
         self.id = id
         self.title = title
         self.icon = icon
@@ -201,6 +214,7 @@ struct PersistedTab: Identifiable, Codable {
         self.appId = appId
         self.hasUnreadMessage = hasUnreadMessage
         self.isBookmarked = isBookmarked
+        self.status = status
     }
 
     init(from tab: Tab) {
@@ -211,5 +225,6 @@ struct PersistedTab: Identifiable, Codable {
         self.appId = tab.appId
         self.hasUnreadMessage = tab.hasUnreadMessage
         self.isBookmarked = tab.isBookmarked
+        self.status = tab.status
     }
 }

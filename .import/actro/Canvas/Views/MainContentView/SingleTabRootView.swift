@@ -153,7 +153,8 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             "id": tab.id.uuidString,
             "title": tab.title,
             "backgroundColor": tab.backgroundColor,
-            "reloadKey": tab.reloadNonce
+            "reloadKey": tab.reloadNonce,
+            "status": tab.status.rawValue
         ]
 
         // Add icon and appUrl if available
