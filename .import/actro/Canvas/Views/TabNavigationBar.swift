@@ -77,6 +77,9 @@ struct FocusModeNavigationBar: View {
     /// 导航栏背景色
     private let barColor: Color = Color(hex: "#E0E0E0")
 
+    /// 记录上一次标签数量，用于判断是否为新增标签
+    @State private var previousTabCount: Int = 0
+
     // 计算是否需要滚动
     private var needsScrolling: Bool {
         let tabAreaWidth = availableWidth - 44 - 44 - tabHeight // 减去左侧按钮、右侧按钮、新建按钮
@@ -141,30 +144,44 @@ struct FocusModeNavigationBar: View {
     }
 
     private var scrollingTabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            ZStack(alignment: .topLeading) {
-                HStack(spacing: 0) {
-                    tabsContent
-                    Color.clear.frame(width: 100)
-                }
-                // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
-                if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe {
-                    let cornerSize: CGFloat = 19
-                    let cornerColor: Color = Color(hex: "#F2F2F6")
-                    // 左下反圆角：右边缘对齐选中 tab 左边缘，底部对齐导航栏底部
-                    BottomLeftInverseCorner(radius: cornerSize, color: cornerColor)
-                        .frame(width: cornerSize, height: cornerSize)
-                        .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                ZStack(alignment: .topLeading) {
+                    HStack(spacing: 0) {
+                        tabsContent
+                        Color.clear.frame(width: 150)
+                            .id("trailingSpacer")
+                    }
+                    // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
+                    if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe {
+                        let cornerSize: CGFloat = 19
+                        let cornerColor: Color = Color(hex: "#F2F2F6")
+                        // 左下反圆角：右边缘对齐选中 tab 左边缘，底部对齐导航栏底部
+                        BottomLeftInverseCorner(radius: cornerSize, color: cornerColor)
+                            .frame(width: cornerSize, height: cornerSize)
+                            .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
 
-                    // 右下反圆角：左边缘对齐选中 tab 右边缘，底部对齐导航栏底部
-                    BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
-                        .frame(width: cornerSize, height: cornerSize)
-                        .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
+                        // 右下反圆角：左边缘对齐选中 tab 右边缘，底部对齐导航栏底部
+                        BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
+                            .frame(width: cornerSize, height: cornerSize)
+                            .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity)
+            .background(barColor)
+            .onChange(of: viewModel.currentTabId) { newTabId in
+                let isTabAdded = viewModel.tabs.count > previousTabCount
+                previousTabCount = viewModel.tabs.count
+                guard newTabId != nil, isTabAdded else { return }
+                withAnimation {
+                    proxy.scrollTo("trailingSpacer", anchor: .trailing)
+                }
+            }
+            .onAppear {
+                previousTabCount = viewModel.tabs.count
+            }
         }
-        .frame(maxWidth: .infinity)
-        .background(barColor)
     }
 
     private var staticTabsWithAddButton: some View {
@@ -174,7 +191,6 @@ struct FocusModeNavigationBar: View {
                 addTabButton
                 Spacer()
             }
-            .frame(maxWidth: .infinity)
 
             // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
             if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe {
