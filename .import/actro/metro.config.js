@@ -19,6 +19,8 @@ defaultConfig.resolver.sourceExts = [
 const subsystemPath = path.resolve(__dirname, 'Subsystem');
 const supermarkRoot = path.resolve(__dirname, '..', 'supermark');
 const loomRoot = path.resolve(__dirname, '..', 'loom');
+const askitRoot = path.resolve(__dirname, '..', 'askit');
+const rillRoot = path.resolve(__dirname, '..', 'rill');
 const loomShimsDir = path.resolve(__dirname, 'loom', 'src', 'actr-host', 'shims');
 const loomNodeModules = path.resolve(__dirname, 'loom', 'node_modules');
 const yarnLinkRoot = path.resolve(process.env.HOME || '', '.config', 'yarn', 'link');
@@ -28,6 +30,8 @@ const config = {
     // 中文注释：当前项目内的 loom 是软链，Metro 需要监听其真实目录。
     loomRoot,
     supermarkRoot,
+    askitRoot,
+    rillRoot,
     yarnLinkRoot,
   ],
   resolver: {
@@ -48,9 +52,14 @@ const config = {
       /Subsystem\/node_modules\/react-native\/.*/,
       /..\/loom\/node_modules\/react\/.*/,
       /..\/loom\/node_modules\/react-native\/.*/,
-      // 屏蔽 supermark 中的 react / react-native
+      // 屏蔽 supermark 中的 react / react-native（含 bun .bun 目录下的副本）
       new RegExp(`${supermarkRoot}/node_modules/react/.*`),
       new RegExp(`${supermarkRoot}/node_modules/react-native/.*`),
+      new RegExp(`${supermarkRoot}/node_modules/\\.bun/.*\\/react/.*`),
+      new RegExp(`${supermarkRoot}/node_modules/\\.bun/.*\\/react-native/.*`),
+      // 屏蔽 supermark 子包内嵌 node_modules 中的 react / react-native
+      new RegExp(`${supermarkRoot}/packages/.*/node_modules/react/.*`),
+      new RegExp(`${supermarkRoot}/packages/.*/node_modules/react-native/.*`),
     ],
     resolveRequest: (context, moduleName, platform) => {
       // ---- RN 不兼容模块的 shim 替换 ----
@@ -68,6 +77,36 @@ const config = {
           type: 'sourceFile',
           filePath: path.resolve(supermarkRoot, 'packages/core/src/index.rn.ts'),
         };
+      }
+
+      // ---- askit 从源码目录解析，避免 file: 依赖不同步 ----
+      if (moduleName === 'askit') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(askitRoot, 'src/index.host.ts'),
+        };
+      }
+      if (moduleName === 'askit/core') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(askitRoot, 'src/core/index.ts'),
+        };
+      }
+      if (moduleName === 'askit/contracts') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(askitRoot, 'src/contracts/index.ts'),
+        };
+      }
+
+      // ---- rill 从源码目录解析 ----
+      if (moduleName === 'rill') {
+        return {
+          type: 'sourceFile',
+          filePath: path.resolve(rillRoot, 'src/host/index.ts'),
+        };
+      }
+
       // ---- @supramark/* 包统一从源码目录解析 ----
       // yarn file: 依赖是物理拷贝，源码更新后 node_modules 副本不会同步。
       // 让 Metro 直接从 supermarkRoot 解析，确保始终使用最新源码（含图片等资源）。
@@ -87,8 +126,7 @@ const config = {
       //     const entryFile = fullName === 'core' ? 'src/index.rn.ts' : 'src/index.ts';
       //     return { type: 'sourceFile', filePath: path.resolve(sourceDir, entryFile) };
       //   }
-        // 子路径导入（如 @supramark/feature-admonition/web）暂走默认解析
-      }
+      // 子路径导入（如 @supramark/feature-admonition/web）暂走默认解析
 
       // ---- supramark peer dependency: pako ----
       // pako 没有 main 字段（只有 exports），Metro 可能无法正确解析入口。
