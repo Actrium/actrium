@@ -31,31 +31,76 @@ class ActiveAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     var currentId: String? = ""
         set(value) {
+            if (field == value) return
+            val oldDataPos = items.indexOfFirst { it.id == field }
             field = value
-            notifyDataSetChanged()
-            val pos = items.indexOfFirst { it.id == value }
-            if (pos >= 0) {
-                onSelectedChanged?.invoke(pos)
+            val newDataPos = items.indexOfFirst { it.id == value }
+
+            // 收集需要刷新的 adapter position，避免 notifyDataSetChanged 导致抖动
+            val changedPositions = mutableSetOf<Int>()
+            // 左右虚拟 item
+            if (oldDataPos == 0 || newDataPos == 0) changedPositions.add(0)
+            if (oldDataPos == items.size - 1 || newDataPos == items.size - 1) {
+                if (items.isNotEmpty()) changedPositions.add(items.size + 1)
+            }
+            // 旧选中项及其邻居
+            if (oldDataPos >= 0) {
+                changedPositions.add(oldDataPos + 1)
+                if (oldDataPos > 0) changedPositions.add(oldDataPos)
+                if (oldDataPos < items.size - 1) changedPositions.add(oldDataPos + 2)
+            }
+            // 新选中项及其邻居
+            if (newDataPos >= 0) {
+                changedPositions.add(newDataPos + 1)
+                if (newDataPos > 0) changedPositions.add(newDataPos)
+                if (newDataPos < items.size - 1) changedPositions.add(newDataPos + 2)
+            }
+            changedPositions.forEach { pos ->
+                if (pos in 0 until itemCount) notifyItemChanged(pos)
+            }
+
+            if (newDataPos >= 0) {
+                onSelectedChanged?.invoke(newDataPos)
             }
         }
 
     fun updateData(newList: List<ActiveModel>) {
-        // 检测新增的 item id
-        val existingIds = items.map { it.id }.toSet()
+        val oldIds = items.map { it.id }
+        val newIds = newList.map { it.id }
+
+        if (oldIds == newIds) {
+            // 数据列表 id 顺序没变，检测内容是否有变化
+            var contentChanged = false
+            for (i in items.indices) {
+                if (items[i] != newList[i]) {
+                    contentChanged = true
+                    break
+                }
+            }
+            items.clear()
+            items.addAll(newList)
+            if (contentChanged) {
+                // 只刷新内容变化的 item，避免全量刷新导致抖动
+                for (i in newList.indices) {
+                    notifyItemChanged(i + 1) // +1 偏移
+                }
+            }
+            return
+        }
+
+        // 有增删变化，记录新增 item 用于入场动画
+        val existingIds = oldIds.toSet()
         val newItems = newList.filter { it.id !in existingIds }
 
         items.clear()
         items.addAll(newList)
-        if (newItems.isEmpty()) {
-            notifyDataSetChanged()
-        } else {
-            notifyDataSetChanged()
-            // 对新增 item 记录需要动画的 position（转换为 adapter position）
-            newItems.forEach { newItem ->
-                val dataPos = items.indexOfFirst { it.id == newItem.id }
-                if (dataPos >= 0) {
-                    pendingAnimatePositions.add(dataPos + 1) // +1 偏移，因为前面有 left pad
-                }
+        notifyDataSetChanged()
+
+        // 对新增 item 记录需要动画的 position（转换为 adapter position）
+        newItems.forEach { newItem ->
+            val dataPos = items.indexOfFirst { it.id == newItem.id }
+            if (dataPos >= 0) {
+                pendingAnimatePositions.add(dataPos + 1) // +1 偏移，因为前面有 left pad
             }
         }
     }
