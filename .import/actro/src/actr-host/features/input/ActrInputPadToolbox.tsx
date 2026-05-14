@@ -146,7 +146,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
           estimatedWidth={228}
           minWidth={228}
           anchorMode='start'
-          trigger={<Icon type="link" size={34} />}
+          trigger={<Icon type="link_pad" disableTint size={34} />}
         >
           {(close) => (
             <>
@@ -291,7 +291,7 @@ export const ActrInputPadToolbox: React.FC<ActrInputPadToolboxProps> = ({
       <View style={styles.rightActions}>
         {showAudioButton && (
           <View {...panResponder.panHandlers}>
-            <Icon type="audio" size={34} />
+            <Icon type="audio_pad" disableTint size={34} />
           </View>
         )}
         <TouchableOpacity style={styles.sendButton} onPress={onSend}>
