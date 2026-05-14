@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   StyleSheet,
@@ -9,7 +9,12 @@ import {
   GestureResponderEvent,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+  runOnJS,
+} from 'react-native-reanimated';
 import { AppText } from '../../../components';
 import {
   getTypographyStyle,
@@ -64,6 +69,15 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   const triggerRef = useRef<View>(null);
   const pressLocationRef = useRef<{ x: number; y: number } | null>(null);
 
+  const backdropOpacity = useSharedValue(0);
+  const menuOpacityAnim = useSharedValue(0);
+  const backdropAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: backdropOpacity.value,
+  }));
+  const menuAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: menuOpacityAnim.value,
+  }));
+
   const handleLongPressTrigger = useCallback(
     (absoluteX: number, absoluteY: number) => {
       if (disabled) return;
@@ -79,6 +93,8 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
           },
         );
         setMenuSize((prev) => ({ ...prev, height: 0 }));
+        backdropOpacity.value = 0;
+        menuOpacityAnim.value = 0;
         setVisible(true);
       });
     },
@@ -137,15 +153,32 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
         },
       );
       setMenuSize((prev) => ({ ...prev, height: 0 }));
+      backdropOpacity.value = 0;
+      menuOpacityAnim.value = 0;
       setVisible(true);
     });
   };
 
   const close = () => {
+    backdropOpacity.value = withTiming(0, { duration: 150 });
+    menuOpacityAnim.value = withTiming(0, { duration: 150 }, (isFinished) => {
+      if (isFinished) {
+        runOnJS(cleanupAfterClose)();
+      }
+    });
+  };
+
+  const cleanupAfterClose = () => {
     setVisible(false);
     setPressLocation(null);
     pressLocationRef.current = null;
   };
+
+  useEffect(() => {
+    if (visible) {
+      backdropOpacity.value = withTiming(1, { duration: 200 });
+    }
+  }, [visible]);
 
   const renderMenu = () => {
     if (!pressLocation) return null;
@@ -178,25 +211,23 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
       Math.max(pressLocation.x - menuWidth / 2, horizontalMargin),
       screenWidth - horizontalMargin - menuWidth,
     );
-    const menuOpacity = menuSize.height > 0 ? 1 : 0;
-
     return (
       <Modal
         visible={visible}
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={close}
       >
         <TouchableWithoutFeedback onPress={close}>
-          <View style={styles.modalBackdrop}>
-            <View
+          <Animated.View style={[styles.modalBackdrop, backdropAnimatedStyle]}>
+            <Animated.View
               style={[
                 styles.menuContainer,
+                menuAnimatedStyle,
                 {
                   top,
                   left,
                   width: menuWidth,
-                  opacity: menuOpacity,
                 },
               ]}
               onLayout={(event) => {
@@ -206,6 +237,9 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
                   Math.abs(height - menuSize.height) > 1
                 ) {
                   setMenuSize({ width, height });
+                }
+                if (height > 0) {
+                  menuOpacityAnim.value = withTiming(1, { duration: 150 });
                 }
               }}
             >
@@ -237,8 +271,8 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
                   </AppText>
                 </Pressable>
               ))}
-            </View>
-          </View>
+            </Animated.View>
+          </Animated.View>
         </TouchableWithoutFeedback>
       </Modal>
     );
@@ -268,7 +302,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
           }}
           onPressIn={handlePressIn}
           onLongPress={handleLongPress}
-          delayLongPress={400}
+          delayLongPress={200}
           unstable_pressDelay={100}
           style={({ pressed }) => ({
             opacity: pressed ? 0.8 : 1,
