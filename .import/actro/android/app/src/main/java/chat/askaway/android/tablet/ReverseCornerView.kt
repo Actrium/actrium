@@ -55,7 +55,7 @@ class ReverseCornerView @JvmOverloads constructor(
         set(value) { field = value; rebuildPath() }
 
     /** 填充颜色 */
-    var fillColor: Int = Color.RED
+    var fillColor: Int = Color.WHITE
         set(value) { field = value; paint.color = value; invalidate() }
 
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
