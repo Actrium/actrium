@@ -113,7 +113,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
             if (newWidth > 0 && newHeight > 0) {
                 Log.e("TabletActivity", "newWidth:${newWidth}, newHeight:${newHeight}")
 
-                val marginHorizontalPx = (viewModel.containerWidth * resources.displayMetrics.density * 0.1).toInt()
+                val marginHorizontalPx = (viewModel.containerWidth * resources.displayMetrics.density * 0.05).toInt()
 
                 gridAdapter.containerWidth = newWidth
                 gridAdapter.containerHeight = newHeight
@@ -156,7 +156,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.flTabContent.post {
             val w = binding.flTabContent.width
             val h = binding.flTabContent.height
-            val marginHorizontalPx = (viewModel.containerWidth * resources.displayMetrics.density * 0.1).toInt()
+            val marginHorizontalPx = (viewModel.containerWidth * resources.displayMetrics.density * 0.05).toInt()
 
             gridAdapter.containerWidth = w
             gridAdapter.containerHeight = h
