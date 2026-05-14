@@ -21,6 +21,7 @@ export interface PhoneAttachmentPanelController {
   showNewlineEntry: boolean;
   toggleWebSearch: () => void;
   toggleEnterForNewLine: () => void;
+  focusInputRequestId: number;
 }
 
 export const usePhoneAttachmentPanelController = (
@@ -29,6 +30,7 @@ export const usePhoneAttachmentPanelController = (
 ): PhoneAttachmentPanelController => {
   const [showMapModal, setShowMapModal] = React.useState(false);
   const [isAttachmentPanelOpen, setIsAttachmentPanelOpen] = React.useState(false);
+  const [focusInputRequestId, setFocusInputRequestId] = React.useState(0);
   const {
     attachments,
     removeAttachment,
@@ -61,6 +63,7 @@ export const usePhoneAttachmentPanelController = (
     if (prevAttachmentsRef.current !== attachments) {
       prevAttachmentsRef.current = attachments;
       closeAttachmentPanel();
+      setFocusInputRequestId((value) => value + 1);
     }
   }, [attachments, isAttachmentPanelOpen, closeAttachmentPanel]);
 
@@ -113,5 +116,6 @@ export const usePhoneAttachmentPanelController = (
     showNewlineEntry,
     toggleWebSearch: handleToggleWebSearch,
     toggleEnterForNewLine: handleToggleEnterForNewLine,
+    focusInputRequestId,
   };
 };
