@@ -193,7 +193,6 @@ struct FocusModeNavigationBar: View {
         ZStack(alignment: .topLeading) {
             HStack(spacing: 0) {
                 tabsContent
-                addTabButton
                 Spacer()
             }
 
@@ -282,43 +281,45 @@ struct FocusModeNavigationBar: View {
     // 标签页内容
     @ViewBuilder
     private var tabsContent: some View {
-        ForEach(viewModel.tabs) { tab in
+        ForEach(Array(viewModel.tabs.enumerated()), id: \.element.id) { index, tab in
             TabItemView(
-                tab: tab,
-                isActive: tab.id == viewModel.currentTabId,
-                isHovered: tab.id == hoveredTabId,
+                tab: viewModel.tabs[index],
+                isActive: viewModel.tabs[index].id == viewModel.currentTabId,
+                isHovered: viewModel.tabs[index].id == hoveredTabId,
                 width: calculateTabWidth(),
                 tabHeight: tabHeight,
                 tabsCount: viewModel.tabs.count,
                 onSelect: {
-                    viewModel.switchToTab(id: tab.id)
+                    viewModel.switchToTab(id: viewModel.tabs[index].id)
                 },
                 onClose: {
-                    viewModel.closeTab(id: tab.id)
+                    viewModel.closeTab(id: viewModel.tabs[index].id)
                 },
                 onToggleBookmark: {
-                    let newBookmarkStatus = !tab.isBookmarked
-                    if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
-                        viewModel.tabs[index].isBookmarked = newBookmarkStatus
-                        viewModel.scheduleSaveTabs()
-                    }
+                    let newBookmarkStatus = !viewModel.tabs[index].isBookmarked
+                    viewModel.tabs[index].isBookmarked = newBookmarkStatus
+                    viewModel.scheduleSaveTabs()
                     NotificationCenter.default.post(
                         name: .tabBookmarkChangedFromNative,
                         object: nil,
                         userInfo: [
-                            "tabId": tab.id.uuidString,
+                            "tabId": viewModel.tabs[index].id.uuidString,
                             "isBookmarked": newBookmarkStatus
                         ]
                     )
                 },
                 onCloseOtherTabs: {
-                    viewModel.closeOtherTabs(keepTabId: tab.id)
+                    viewModel.closeOtherTabs(keepTabId: viewModel.tabs[index].id)
                 }
             )
             .onHover { hovering in
-                hoveredTabId = hovering ? tab.id : nil
+                hoveredTabId = hovering ? viewModel.tabs[index].id : nil
             }
             .transition(.move(edge: .leading).combined(with: .opacity))
+            
+            if index == viewModel.tabs.count - 1, !needsScrolling {
+                addTabButton
+            }
         }
     }
 }
