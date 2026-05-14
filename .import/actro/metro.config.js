@@ -52,9 +52,14 @@ const config = {
       /Subsystem\/node_modules\/react-native\/.*/,
       /..\/loom\/node_modules\/react\/.*/,
       /..\/loom\/node_modules\/react-native\/.*/,
-      // 屏蔽 supermark 中的 react / react-native
+      // 屏蔽 supermark 中的 react / react-native（含 bun .bun 目录下的副本）
       new RegExp(`${supermarkRoot}/node_modules/react/.*`),
       new RegExp(`${supermarkRoot}/node_modules/react-native/.*`),
+      new RegExp(`${supermarkRoot}/node_modules/\\.bun/.*\\/react/.*`),
+      new RegExp(`${supermarkRoot}/node_modules/\\.bun/.*\\/react-native/.*`),
+      // 屏蔽 supermark 子包内嵌 node_modules 中的 react / react-native
+      new RegExp(`${supermarkRoot}/packages/.*/node_modules/react/.*`),
+      new RegExp(`${supermarkRoot}/packages/.*/node_modules/react-native/.*`),
     ],
     resolveRequest: (context, moduleName, platform) => {
       // ---- RN 不兼容模块的 shim 替换 ----
