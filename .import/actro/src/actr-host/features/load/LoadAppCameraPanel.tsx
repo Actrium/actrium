@@ -6,7 +6,6 @@ import {
   Linking,
   Platform,
   StyleSheet,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
@@ -16,36 +15,29 @@ import {
   useCodeScanner,
 } from 'react-native-vision-camera';
 import { TabEvents } from '../../../native-bridge/tab/TabEvents';
-import { AppText, GlobalAlert, Icon } from '../../../components';
+import { AppText, GlobalAlert } from '../../../components';
 import { getTypographyStyle, spacing } from '../../../theme/tokens';
-import { getHostShadows } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 
 type LoadAppCameraPanelProps = {
   tabId: string;
+  cameraDesiredActive: boolean;
   cameraActive: boolean;
   onCameraActiveChange: (active: boolean) => void;
-  onBeforeOpenCamera?: () => void;
   onAfterOpenCameraPermissionDenied?: () => void;
   onAfterCameraPermissionGranted?: () => void | Promise<void>;
-  onScanUrl: (url: string) => void;
-  /** 打开相机扫码按钮高度，默认 Android 44 / iOS 48 */
-  openCameraBtnHeight?: number;
-  /** 打开相机扫码按钮图标大小，默认 24 */
-  openCameraBtnIconSize?: number;
+  onScanUrl: (url: string) => boolean | void;
 };
 
 export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   tabId,
+  cameraDesiredActive,
   cameraActive,
   onCameraActiveChange,
-  onBeforeOpenCamera,
   onAfterOpenCameraPermissionDenied,
   onAfterCameraPermissionGranted,
   onScanUrl,
-  openCameraBtnHeight,
-  openCameraBtnIconSize,
 }) => {
   const { t } = useTranslation();
   const colors = useColors();
@@ -61,6 +53,8 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   // 一次打开相机只允许一次有效扫码，
   // 避免同一二维码帧触发多次 onCodeScanned 回调。
   const scanLockedRef = useRef(false);
+  const autoOpenAttemptedRef = useRef(false);
+  const cameraDesiredActiveRef = useRef(cameraDesiredActive);
   const scanLineAnim = useRef(new Animated.Value(0)).current;
   const scanLineLoopRef = useRef<Animated.CompositeAnimation | null>(null);
   const isSupported = Platform.OS === 'ios' || Platform.OS === 'android';
@@ -88,16 +82,22 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   }, [scanLineAnim]);
 
   useEffect(() => {
-    // 相机关闭后解锁，确保下一次用户主动扫码仍可正常触发。
-    if (!cameraActive) {
+    cameraDesiredActiveRef.current = cameraDesiredActive;
+  }, [cameraDesiredActive]);
+
+  useEffect(() => {
+    // 相机关闭且仍然需要保持扫码时，不能立刻解锁，
+    // 否则扫码成功后的加载间隙可能被同一帧二维码再次触发。
+    if (cameraActive || !cameraDesiredActive) {
       scanLockedRef.current = false;
     }
-  }, [cameraActive]);
+  }, [cameraActive, cameraDesiredActive]);
 
   useEffect(() => {
     // 退出全屏时要关闭相机，重置状态
     const unsubscribe = TabEvents.onTabExitedFullscreen((event) => {
       if (event.tabId !== tabId) return;
+      autoOpenAttemptedRef.current = false;
       onCameraActiveChange(false);
       setRequesting(false);
     });
@@ -142,8 +142,6 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
   }, [cameraActive, device, scanLineAnim, scanTravelDistance, stopScanLineAnimation]);
 
   const handleOpenCamera = useCallback(async () => {
-    onBeforeOpenCamera?.();
-
     if (!isSupported) {
       GlobalAlert.alert('当前平台不支持扫码', '请手动输入 URL 加载应用');
       return;
@@ -167,6 +165,9 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
       }
 
       if (status === 'granted') {
+        if (!cameraDesiredActiveRef.current) {
+          return;
+        }
         // 权限通过后再判断设备是否可用，避免“没权限导致 device 为空”被误判成初始化异常。
         if (!device) {
           console.error('[LoadAppCameraPanel] Camera device unavailable after permission granted');
@@ -191,11 +192,24 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
     isSupported,
     onAfterCameraPermissionGranted,
     onAfterOpenCameraPermissionDenied,
-    onBeforeOpenCamera,
     onCameraActiveChange,
     showCameraPermissionAlert,
     t,
   ]);
+
+  useEffect(() => {
+    if (!cameraDesiredActive) {
+      autoOpenAttemptedRef.current = false;
+      scanLockedRef.current = false;
+      setRequesting(false);
+      return;
+    }
+
+    if (cameraActive || requesting || autoOpenAttemptedRef.current) return;
+
+    autoOpenAttemptedRef.current = true;
+    void handleOpenCamera();
+  }, [cameraActive, cameraDesiredActive, handleOpenCamera, requesting]);
 
   const codeScanner = useCodeScanner({
     codeTypes: ['qr'],
@@ -207,8 +221,11 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
       // 避免后续 URL 解析和会话初始化挤占 JS 后出现最后几帧卡顿。
       scanLockedRef.current = true;
       stopScanLineAnimation();
+      const shouldReopenCamera = onScanUrl(scannedValue) === true;
+      if (shouldReopenCamera) {
+        autoOpenAttemptedRef.current = false;
+      }
       onCameraActiveChange(false);
-      onScanUrl(scannedValue);
     },
   });
 
@@ -226,23 +243,7 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
                 {t('actr.app.requestCameraPermission')}
               </AppText>
             </>
-          ) : (
-            <TouchableOpacity
-              style={[
-                styles.openCameraBtn,
-                openCameraBtnHeight != null ? { height: openCameraBtnHeight } : null,
-              ]}
-              onPress={handleOpenCamera}
-              activeOpacity={0.7}
-            >
-              {/* 中文注释：这里改为相机图标入口，视觉上和扫码框保持一致，不再显示按钮文案。 */}
-              <Icon
-                type='camera'
-                size={openCameraBtnIconSize ?? 24}
-                color={colors.textOpenCameraBtn}
-              />
-            </TouchableOpacity>
-          )}
+          ) : null}
         </View>
       </View>
     );
@@ -303,8 +304,6 @@ export const LoadAppCameraPanel: React.FC<LoadAppCameraPanelProps> = ({
 };
 
 const makeStyles = (colors: ColorTokens) => {
-  const hostShadows = getHostShadows(colors);
-
   return StyleSheet.create({
   rootContainer: {
     flex: 1,
@@ -319,14 +318,6 @@ const makeStyles = (colors: ColorTokens) => {
     ...getTypographyStyle('helperText'),
     color: colors.textSecondary,
     textAlign: 'center',
-  },
-  openCameraBtn: {
-    paddingHorizontal: 30,
-    backgroundColor: colors.bgLoadDark,
-    borderRadius: Platform.OS === 'android' ? 30 : 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...hostShadows.headerButton,
   },
   cameraContainer: {
     flex: 1,

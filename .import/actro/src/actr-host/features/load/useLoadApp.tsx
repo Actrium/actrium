@@ -30,6 +30,7 @@ import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import { AppRepository } from '../../../repository/AppRepository';
 import { updateTabInfo } from '../../../native-bridge/tab/TabModule';
+import { TabEvents } from '../../../native-bridge/tab/TabEvents';
 import { useAppStore } from '../../store/useAppStore';
 
 type LoadRequestSource = 'preset' | 'scan' | 'input';
@@ -85,10 +86,12 @@ export const useLoadApp = () => {
   const sharedStyles = React.useMemo(() => makeSharedStyles(colors), [colors]);
   const tabCtx = useTab();
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraDesiredActive, setCameraDesiredActive] = useState(false);
   const [inputExpanded, setInputExpanded] = useState(false);
   const [inputFocused, setInputFocused] = useState(false);
   const [inputValue, setInputValue] = useState('');
   const [isResolving, setIsResolving] = useState(false);
+  const [tabFullscreenActive, setTabFullscreenActive] = useState(true);
   const [loadRequest, setLoadRequest] = useState<LoadRequest | null>(null);
   const { keyboardInset, dismissKeyboard } = useKeyboardInset();
   const isResolvingRef = useRef(false);
@@ -108,6 +111,10 @@ export const useLoadApp = () => {
   const { ensureNetworkPermission } = useNetworkPermission();
 
   const showLoading = loadRequest != null || isResolving;
+  const shouldRequestCamera =
+    tabFullscreenActive &&
+    !showLoading &&
+    (isTablet ? !inputFocused : !inputExpanded);
 
   useEffect(() => {
     // 中文注释：仅当 Phone 端切到输入框展开态时再主动聚焦，
@@ -120,6 +127,36 @@ export const useLoadApp = () => {
       clearTimeout(timer);
     };
   }, [inputExpanded, isTablet]);
+
+  useEffect(() => {
+    // 中文注释：相机期望状态只由页面可交互条件驱动，
+    // 真正打开相机仍交给 CameraPanel 做权限和设备检查。
+    setCameraDesiredActive(shouldRequestCamera);
+    if (!shouldRequestCamera) {
+      setCameraActive(false);
+    }
+  }, [shouldRequestCamera]);
+
+  useEffect(() => {
+    const unsubscribeEntered = TabEvents.onTabEnteredFullscreen((event) => {
+      if (event.tabId !== tabCtx.tab.id) return;
+      // 中文注释：重新进入全屏时恢复条件判断，由上面的 shouldRequestCamera 统一决定是否开相机。
+      setTabFullscreenActive(true);
+    });
+
+    const unsubscribeExited = TabEvents.onTabExitedFullscreen((event) => {
+      if (event.tabId !== tabCtx.tab.id) return;
+      // 中文注释：退出全屏要立刻关闭相机并清掉期望状态，避免后台 tab 继续占用摄像头。
+      setTabFullscreenActive(false);
+      setCameraDesiredActive(false);
+      setCameraActive(false);
+    });
+
+    return () => {
+      unsubscribeEntered();
+      unsubscribeExited();
+    };
+  }, [tabCtx.tab.id]);
 
   const renderLoadingView = () => (
     <View style={sharedStyles.loadingContainer}>
@@ -334,7 +371,7 @@ export const useLoadApp = () => {
   const handleScannedUrl = useCallback(
     (rawUrl: string) => {
       const url = rawUrl.trim();
-      if (!url) return;
+      if (!url) return true;
 
       const appId = extractAppIdFromUrl(url);
       if (!appId) {
@@ -344,7 +381,7 @@ export const useLoadApp = () => {
         setTimeout(() => {
           GlobalAlert.alert(t('actr.app.invalidUrl'));
         }, INVALID_SCAN_ALERT_DELAY_MS);
-        return;
+        return true;
       }
 
       // 合法二维码仍然等相机关闭和扫码层收起完成一帧后再继续，
@@ -352,6 +389,7 @@ export const useLoadApp = () => {
       InteractionManager.runAfterInteractions(() => {
         void enqueueLoadRequest(url, 'scan');
       });
+      return false;
     },
     [enqueueLoadRequest, t],
   );
@@ -419,6 +457,7 @@ export const useLoadApp = () => {
 
   return {
     cameraActive,
+    cameraDesiredActive,
     setCameraActive,
     inputExpanded,
     setInputExpanded,
