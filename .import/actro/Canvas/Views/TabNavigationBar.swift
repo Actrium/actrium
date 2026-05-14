@@ -159,18 +159,22 @@ struct FocusModeNavigationBar: View {
                             .id("trailingSpacer")
                     }
                     // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
-                    if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe {
+                    if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe, let currentTabId = viewModel.currentTabId {
                         let cornerSize: CGFloat = 19
                         let cornerColor: Color = Color(hex: "#F2F2F6")
                         // 左下反圆角：右边缘对齐选中 tab 左边缘，底部对齐导航栏底部
                         BottomLeftInverseCorner(radius: cornerSize, color: cornerColor)
                             .frame(width: cornerSize, height: cornerSize)
                             .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
+                            .id("leftCorner_\(currentTabId)")
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
 
                         // 右下反圆角：左边缘对齐选中 tab 右边缘，底部对齐导航栏底部
                         BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
                             .frame(width: cornerSize, height: cornerSize)
                             .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
+                            .id("rightCorner_\(currentTabId)")
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
                     }
                 }
             }
@@ -199,18 +203,22 @@ struct FocusModeNavigationBar: View {
             }
 
             // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
-            if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe {
+            if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe, let currentTabId = viewModel.currentTabId {
                 let cornerSize: CGFloat = 19
                 let cornerColor: Color = Color(hex: "#F2F2F6")
                 // 左下反圆角
                 BottomLeftInverseCorner(radius: cornerSize, color: cornerColor)
                     .frame(width: cornerSize, height: cornerSize)
                     .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
+                    .id("leftCorner_\(currentTabId)")
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
 
                 // 右下反圆角
                 BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
                     .frame(width: cornerSize, height: cornerSize)
                     .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
+                    .id("rightCorner_\(currentTabId)")
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .frame(maxWidth: .infinity)
@@ -218,8 +226,10 @@ struct FocusModeNavigationBar: View {
 
     private var addTabButton: some View {
         Button(action: {
-            let newTab = viewModel.addNewTab()
-            viewModel.switchToTab(id: newTab.id)
+            withAnimation(.easeOut(duration: 0.3)) {
+                let newTab = viewModel.addNewTab()
+                viewModel.switchToTab(id: newTab.id)
+            }
         }) {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .medium))
@@ -255,8 +265,10 @@ struct FocusModeNavigationBar: View {
 
     private var scrollingAddTabButton: some View {
         Button(action: {
-            let newTab = viewModel.addNewTab(focus: false)
-            viewModel.switchToTab(id: newTab.id)
+            withAnimation(.easeOut(duration: 0.3)) {
+                let newTab = viewModel.addNewTab(focus: false)
+                viewModel.switchToTab(id: newTab.id)
+            }
         }) {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .medium))
@@ -317,7 +329,7 @@ struct FocusModeNavigationBar: View {
             .onHover { hovering in
                 hoveredTabId = hovering ? viewModel.tabs[index].id : nil
             }
-            .transition(.move(edge: .leading).combined(with: .opacity))
+            .transition(.move(edge: .bottom).combined(with: .opacity))
             
             if index == viewModel.tabs.count - 1, !needsScrolling {
                 addTabButton
