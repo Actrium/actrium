@@ -27,3 +27,10 @@
 "unbookmark" = "取消收藏";
 "closeTab" = "关闭页签";
 "closeOtherTabs" = "关闭其他页签";
+
+/* 标签状态 */
+"serverClosed" = "已停服";
+
+/* 空数据页 */
+"emptyActiveTitle" = "您打开的应用会显示在此处";
+"emptyActiveSubtitle" = "点击上面 \"+\" 打开应用";

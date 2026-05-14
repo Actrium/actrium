@@ -46,19 +46,27 @@ struct OverviewNavigationBar: View {
             .padding(.leading, viewModel.multipleWindowMode ? 0 : 65)
 
             // 中间：活跃 / 书签 切换（SwitchButton 风格）
-            SegmentedToggle(selectedTab: $selectedTab,
-                           option1: TM.active.activity(),
-                           option2: TM.active.bookmarks(),
-                           onOption1: {
-                               viewModel.currentSystemTabType = nil
-                           },
-                           onOption2: {
-                               viewModel.openSystemTab(.bookmarks, additionalProps: nil, replaceAdditionalProps: true)
-                               viewModel.currentSystemTabType = .bookmarks
-                           })
+            SegmentedToggle(
+                selectedTab: $selectedTab,
+                option1: TM.active.activity(),
+                option2: TM.active.bookmarks(),
+                onOption1: {
+                    viewModel.currentSystemTabType = nil
+                },
+                onOption2: {
+                    viewModel.reloadSystemTab(.bookmarks)
+                    viewModel.openSystemTab(.bookmarks, additionalProps: nil, replaceAdditionalProps: true)
+                    viewModel.currentSystemTabType = .bookmarks
+                }
+            )
         }
         .frame(height: height)
         .background(Color.black)
+        .onChange(of: viewModel.canvasMode) { newMode in
+            if case .overview = newMode {
+                selectedTab = viewModel.currentSystemTabType == .bookmarks ? .bookmarks : .active
+            }
+        }
     }
 }
 
@@ -73,6 +81,9 @@ struct FocusModeNavigationBar: View {
 
     /// 导航栏背景色
     private let barColor: Color = Color(hex: "#E0E0E0")
+
+    /// 记录上一次标签数量，用于判断是否为新增标签
+    @State private var previousTabCount: Int = 0
 
     // 计算是否需要滚动
     private var needsScrolling: Bool {
@@ -92,8 +103,8 @@ struct FocusModeNavigationBar: View {
     private var selectedTabLeftX: CGFloat? {
         guard let index = selectedTabIndex else { return nil }
         let tabWidth = calculateTabWidth()
-        // index * (tabWidth + 2) + 1(padding)
-        return CGFloat(index) * (tabWidth + 2) + 1
+        // index * (tabWidth + 2) + 1(padding) + 19(leading)
+        return CGFloat(index) * (tabWidth + 2) + 1 + 19
     }
 
     var body: some View {
@@ -130,7 +141,7 @@ struct FocusModeNavigationBar: View {
         Button(action: onBackToOverview) {
             Image(systemName: "rectangle.grid.2x2.fill")
                 .font(.system(size: 16))
-                .foregroundColor(.primary)
+                .foregroundColor(.black)
                 .frame(width: 44, height: tabHeight)
         }
         .buttonStyle(.plain)
@@ -138,49 +149,91 @@ struct FocusModeNavigationBar: View {
     }
 
     private var scrollingTabs: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            ZStack(alignment: .topLeading) {
-                HStack(spacing: 0) {
-                    tabsContent
-                    Color.clear.frame(width: 100)
-                }
-                // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
-                if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe {
-                    let cornerSize: CGFloat = 19
-                    let cornerColor: Color = Color(hex: "#F2F2F6")
-                    // 左下反圆角：右边缘对齐选中 tab 左边缘，底部对齐导航栏底部
-                    BottomLeftInverseCorner(radius: cornerSize, color: cornerColor)
-                        .frame(width: cornerSize, height: cornerSize)
-                        .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                ZStack(alignment: .topLeading) {
+                    HStack(spacing: 0) {
+                        Color.clear.frame(width: 19)
+                        tabsContent
+                        Color.clear.frame(width: 120)
+                            .id("trailingSpacer")
+                    }
+                    // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
+                    if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe, let currentTabId = viewModel.currentTabId {
+                        let cornerSize: CGFloat = 19
+                        let cornerColor: Color = Color(hex: "#F2F2F6")
+                        // 左下反圆角：右边缘对齐选中 tab 左边缘，底部对齐导航栏底部
+                        BottomLeftInverseCorner(radius: cornerSize, color: cornerColor)
+                            .frame(width: cornerSize, height: cornerSize)
+                            .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
+                            .id("leftCorner_\(currentTabId)")
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
 
-                    // 右下反圆角：左边缘对齐选中 tab 右边缘，底部对齐导航栏底部
-                    BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
-                        .frame(width: cornerSize, height: cornerSize)
-                        .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
+                        // 右下反圆角：左边缘对齐选中 tab 右边缘，底部对齐导航栏底部
+                        BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
+                            .frame(width: cornerSize, height: cornerSize)
+                            .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
+                            .id("rightCorner_\(currentTabId)")
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                 }
             }
+            .frame(maxWidth: .infinity)
+            .background(barColor)
+            .onChange(of: viewModel.currentTabId) { newTabId in
+                let isTabAdded = viewModel.tabs.count > previousTabCount
+                previousTabCount = viewModel.tabs.count
+                guard newTabId != nil, isTabAdded else { return }
+                withAnimation {
+                    proxy.scrollTo("trailingSpacer", anchor: .trailing)
+                }
+            }
+            .onAppear {
+                previousTabCount = viewModel.tabs.count
+            }
         }
-        .frame(maxWidth: .infinity)
-        .background(barColor)
     }
 
     private var staticTabsWithAddButton: some View {
-        HStack(spacing: 0) {
-            tabsContent
-            addTabButton
-            Spacer()
+        ZStack(alignment: .topLeading) {
+            HStack(spacing: 0) {
+                Color.clear.frame(width: 19)
+                tabsContent
+                Spacer()
+            }
+
+            // 选中 tab 底部的两个反圆角遮罩（盖在 tab 上层）
+            if let leftX = selectedTabLeftX, let tabWidth = calculateTabWidthSafe, let currentTabId = viewModel.currentTabId {
+                let cornerSize: CGFloat = 19
+                let cornerColor: Color = Color(hex: "#F2F2F6")
+                // 左下反圆角
+                BottomLeftInverseCorner(radius: cornerSize, color: cornerColor)
+                    .frame(width: cornerSize, height: cornerSize)
+                    .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
+                    .id("leftCorner_\(currentTabId)")
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+
+                // 右下反圆角
+                BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
+                    .frame(width: cornerSize, height: cornerSize)
+                    .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
+                    .id("rightCorner_\(currentTabId)")
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
         }
         .frame(maxWidth: .infinity)
     }
 
     private var addTabButton: some View {
         Button(action: {
-            let newTab = viewModel.addNewTab()
-            viewModel.switchToTab(id: newTab.id)
+            withAnimation(.easeOut(duration: 0.3)) {
+                let newTab = viewModel.addNewTab()
+                viewModel.switchToTab(id: newTab.id)
+            }
         }) {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(.black)
                 .frame(width: tabHeight, height: tabHeight)
         }
         .buttonStyle(.plain)
@@ -212,12 +265,14 @@ struct FocusModeNavigationBar: View {
 
     private var scrollingAddTabButton: some View {
         Button(action: {
-            let newTab = viewModel.addNewTab(focus: false)
-            viewModel.switchToTab(id: newTab.id)
+            withAnimation(.easeOut(duration: 0.3)) {
+                let newTab = viewModel.addNewTab(focus: false)
+                viewModel.switchToTab(id: newTab.id)
+            }
         }) {
             Image(systemName: "plus")
                 .font(.system(size: 14, weight: .medium))
-                .foregroundColor(.primary)
+                .foregroundColor(.black)
                 .frame(width: tabHeight, height: tabHeight)
         }
         .buttonStyle(.plain)
@@ -230,7 +285,7 @@ struct FocusModeNavigationBar: View {
         }) {
             Image(systemName: "line.3.horizontal")
                 .font(.system(size: 16))
-                .foregroundColor(.primary)
+                .foregroundColor(.black)
                 .frame(width: 44, height: tabHeight)
         }
         .buttonStyle(.plain)
@@ -240,43 +295,45 @@ struct FocusModeNavigationBar: View {
     // 标签页内容
     @ViewBuilder
     private var tabsContent: some View {
-        ForEach(viewModel.tabs) { tab in
+        ForEach(Array(viewModel.tabs.enumerated()), id: \.element.id) { index, tab in
             TabItemView(
-                tab: tab,
-                isActive: tab.id == viewModel.currentTabId,
-                isHovered: tab.id == hoveredTabId,
+                tab: viewModel.tabs[index],
+                isActive: viewModel.tabs[index].id == viewModel.currentTabId,
+                isHovered: viewModel.tabs[index].id == hoveredTabId,
                 width: calculateTabWidth(),
                 tabHeight: tabHeight,
                 tabsCount: viewModel.tabs.count,
                 onSelect: {
-                    viewModel.switchToTab(id: tab.id)
+                    viewModel.switchToTab(id: viewModel.tabs[index].id)
                 },
                 onClose: {
-                    viewModel.closeTab(id: tab.id)
+                    viewModel.closeTab(id: viewModel.tabs[index].id)
                 },
                 onToggleBookmark: {
-                    let newBookmarkStatus = !tab.isBookmarked
-                    if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
-                        viewModel.tabs[index].isBookmarked = newBookmarkStatus
-                        viewModel.saveTabs()
-                    }
+                    let newBookmarkStatus = !viewModel.tabs[index].isBookmarked
+                    viewModel.tabs[index].isBookmarked = newBookmarkStatus
+                    viewModel.scheduleSaveTabs()
                     NotificationCenter.default.post(
                         name: .tabBookmarkChangedFromNative,
                         object: nil,
                         userInfo: [
-                            "tabId": tab.id.uuidString,
+                            "tabId": viewModel.tabs[index].id.uuidString,
                             "isBookmarked": newBookmarkStatus
                         ]
                     )
                 },
                 onCloseOtherTabs: {
-                    viewModel.closeOtherTabs(keepTabId: tab.id)
+                    viewModel.closeOtherTabs(keepTabId: viewModel.tabs[index].id)
                 }
             )
             .onHover { hovering in
-                hoveredTabId = hovering ? tab.id : nil
+                hoveredTabId = hovering ? viewModel.tabs[index].id : nil
             }
-            .transition(.move(edge: .leading).combined(with: .opacity))
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+            
+            if index == viewModel.tabs.count - 1, !needsScrolling {
+                addTabButton
+            }
         }
     }
 }
@@ -342,9 +399,9 @@ struct TabItemView: View {
 
     private var tabContent: some View {
         HStack(spacing: 8) {
-            Text(tab.title.isEmpty ? TM.active.blackTab() : tab.title)
+            Text(tab.title.isEmpty ? TM.active.blackTab() : (tab.status == .dead ? "\(tab.title)(\(TM.tabStatus.serverClosed()))" : tab.title))
                 .font(.system(size: 13))
-                .foregroundColor(isActive ? .primary : .secondary)
+                .foregroundColor(isActive ? .black : Color(hex: "#9E9EA7"))
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -352,7 +409,7 @@ struct TabItemView: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 12))
-                    .foregroundColor(isActive ? .primary : .secondary)
+                    .foregroundColor(isActive ? .black : Color(hex: "#9E9EA7"))
             }
             .buttonStyle(.plain)
         }

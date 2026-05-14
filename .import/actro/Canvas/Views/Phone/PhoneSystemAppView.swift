@@ -6,7 +6,6 @@ struct PhoneSystemAppView: View {
     let systemType: SystemTabType
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel
-    var onSelect: (Tab) -> Void
     
     @State private var systemTab: Tab?
     

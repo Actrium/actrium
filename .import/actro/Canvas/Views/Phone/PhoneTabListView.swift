@@ -30,39 +30,63 @@ struct PhoneTabListView: View {
             .ignoresSafeArea(edges: .top)
             .zIndex(10)
             
+            if viewModel.tabs.isEmpty {
+                // 空列表占位：在 ZStack 中居中，不受 ScrollView 影响
+                VStack {
+                    Spacer()
+                    VStack(spacing: 43) {
+                        Image("active_black")
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 52)
+                        
+                        Text("\(TM.emptyActive.title())\n\(TM.emptyActive.subtitle())")
+                            .font(.system(size: 20))
+                            .foregroundColor(Color(hex: "#565656"))
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(3)
+                    }
+                    Spacer()
+                }
+                .ignoresSafeArea()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+
             ScrollViewReader { proxy in
                 ScrollView {
                     // 顶部间距：适应自定义导航栏
                     Color.clear.frame(height: UIApplication.shared.statusBarHeight + 66 + 26)
 
-                    LazyVStack(spacing: 16) {
-                        ForEach(viewModel.tabs) { tab in
-                            PhoneTabCardView(
-                                tab: tab,
-                                viewModel: viewModel,
-                                historyVM: historyVM,
-                                animation: animation,
-                                onSelect: {
-                                    // 立即切换 ID，确保 UI 响应（蓝色边框）
-                                    withAnimation(.easeInOut(duration: 0.2)) {
-                                        viewModel.currentTabId = tab.id
+                    if !viewModel.tabs.isEmpty {
+                        LazyVStack(spacing: 16) {
+                            ForEach(viewModel.tabs) { tab in
+                                PhoneTabCardView(
+                                    tab: tab,
+                                    viewModel: viewModel,
+                                    historyVM: historyVM,
+                                    animation: animation,
+                                    onSelect: {
+                                        // 立即切换 ID，确保 UI 响应（蓝色边框）
+                                        withAnimation(.easeInOut(duration: 0.2)) {
+                                            viewModel.currentTabId = tab.id
+                                        }
+                                        // 延迟一小会儿后进入全屏，让用户看到选中效果
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                            onSelect(tab)
+                                        }
+                                    },
+                                    onClose: {
+                                        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                                            viewModel.closeTab(id: tab.id)
+                                        }
                                     }
-                                    // 延迟一小会儿后进入全屏，让用户看到选中效果
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                        onSelect(tab)
-                                    }
-                                },
-                                onClose: {
-                                    withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-                                        viewModel.closeTab(id: tab.id)
-                                    }
-                                }
-                            )
-                            .id(tab.id)
+                                )
+                                .id(tab.id)
+                            }
+                            Color.clear.frame(height: 80).id("bottomSpacer")
                         }
-                        Color.clear.frame(height: 80).id("bottomSpacer")
+                        .padding(.horizontal, 16)
                     }
-                    .padding(.horizontal, 16)
                 }
                 .ignoresSafeArea()
                 .onChange(of: viewModel.tabs.count) { oldCount, newCount in
@@ -95,7 +119,7 @@ struct PhoneTabCardView: View {
         let newBookmarkStatus = !tab.isBookmarked
         if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
             viewModel.tabs[index].isBookmarked = newBookmarkStatus
-            viewModel.saveTabs()
+            viewModel.scheduleSaveTabs()
         }
         NotificationCenter.default.post(
             name: .tabBookmarkChangedFromNative,
@@ -143,7 +167,10 @@ struct PhoneTabCardView: View {
                         .fill(Color(hslString: tab.backgroundColor))
                         .frame(width: iconWidth, height: iconWidth)
                         .overlay {
-                            if let icon = tab.icon, let url = URL(string: icon) {
+                            if tab.status == .dead {
+                                Image("service_stop")
+                                    .font(.system(size: iconWidth))
+                            } else if let icon = tab.icon, let url = URL(string: icon) {
                                 KFImage(url)
                                     .resizable()
                                     .scaledToFit()
@@ -171,7 +198,7 @@ struct PhoneTabCardView: View {
                 .frame(width: iconWidth, height: iconWidth)
                 
                 // 标题
-                Text(tab.title)
+                Text(tab.status == .dead ? "\(tab.title)(\(TM.tabStatus.serverClosed()))" : tab.title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(theme.isDarkMode ? Color(hex: "#ECECED") : Color(hex: "#404040"))
                     .lineLimit(1)
@@ -208,6 +235,10 @@ struct PhoneTabCardView: View {
         .clipShape(RoundedRectangle(cornerRadius: 22))
         .shadow(color: Color.black.opacity(0.1), radius: 8, x: 0, y: 2)
         .asMatchedTransitionSource(id: tab.id, in: animation)
+        .onAppear {
+            // 内存警告回收快照后，卡片出现时按需从磁盘加载
+            viewModel.loadSnapshotIfNeeded(for: tab.id)
+        }
         .contextMenu {
             if tab.title != TM.active.blackTab() {
                 Button {
@@ -240,7 +271,7 @@ struct PhoneBrowserView: View {
     let tab: Tab
     @ObservedObject var viewModel: BrowserViewModel
     var historyVM: HistoryViewModel
-    
+
     var body: some View {
         GeometryReader { geometry in
             SingleTabRootView(
@@ -273,6 +304,104 @@ struct PhoneBrowserView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color.black)
+            .background(
+                SheetWillDismissObserver(tabId: tab.id, viewModel: viewModel)
+            )
         }
+    }
+}
+
+// MARK: - Sheet 手势关闭时的截图桥接
+
+/// 通过 UIAdaptivePresentationControllerDelegate 在 sheet 手势关闭开始时（willDismiss）
+/// 同步截取快照，此时页面仍完整可见。
+private struct SheetWillDismissObserver: UIViewRepresentable {
+    let tabId: UUID
+    let viewModel: BrowserViewModel
+
+    func makeUIView(context: Context) -> UIView {
+        let view = ObserverView()
+        view.delegate = context.coordinator
+        // 延迟到下一个 RunLoop，确保 UIViewController 已挂载到视图层级
+        DispatchQueue.main.async {
+            guard let vc = view.findHostingViewController() else { return }
+            vc.presentationController?.delegate = context.coordinator
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(tabId: tabId, viewModel: viewModel)
+    }
+
+    /// 自定义 UIView 子类，持有 delegate 引用以防止被释放
+    private class ObserverView: UIView {
+        weak var delegate: Coordinator?
+    }
+
+    class Coordinator: NSObject, UIAdaptivePresentationControllerDelegate {
+        let tabId: UUID
+        let viewModel: BrowserViewModel
+
+        init(tabId: UUID, viewModel: BrowserViewModel) {
+            self.tabId = tabId
+            self.viewModel = viewModel
+        }
+
+        /// 手势关闭开始时触发，此时 sheet 画面仍完整可见
+        func presentationControllerWillDismiss(_ presentationController: UIPresentationController) {
+            // RN 退出流程已提前截图时跳过
+            guard !viewModel.skipNextDisappearSnapshot else {
+                viewModel.skipNextDisappearSnapshot = false
+                return
+            }
+            guard let tab = viewModel.tabs.first(where: { $0.id == tabId }),
+                  !tab.title.isEmpty else {
+                return
+            }
+            captureSnapshotSync(for: tab)
+        }
+
+        private func captureSnapshotSync(for tab: Tab) {
+            guard let window = UIApplication.shared.connectedScenes
+                .filter({ $0.activationState == .foregroundActive })
+                .compactMap({ $0 as? UIWindowScene })
+                .first?.windows
+                .filter({ $0.isKeyWindow }).first else {
+                return
+            }
+
+            let renderer = UIGraphicsImageRenderer(bounds: window.bounds)
+            let fullImage = renderer.image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: false)
+            }
+
+            let screenWidth = window.bounds.width
+            let screenHeight = window.bounds.height
+            let cropHeight = screenWidth * 0.54 - 56
+            let cropY = (screenHeight - cropHeight) / 2
+
+            let cropRect = CGRect(x: 0, y: cropY, width: screenWidth, height: cropHeight)
+
+            if let croppedImage = fullImage.cropped(to: cropRect) {
+                viewModel.setTabSnapshot(croppedImage, for: tab.id)
+            } else {
+                viewModel.setTabSnapshot(fullImage, for: tab.id)
+            }
+        }
+    }
+}
+
+private extension UIView {
+    /// 沿 responder chain 向上查找所属的 UIViewController
+    func findHostingViewController() -> UIViewController? {
+        var responder: UIResponder? = self
+        while let r = responder {
+            if let vc = r as? UIViewController { return vc }
+            responder = r.next
+        }
+        return nil
     }
 }
