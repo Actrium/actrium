@@ -167,14 +167,20 @@ struct FocusModeNavigationBar: View {
                             .frame(width: cornerSize, height: cornerSize)
                             .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
                             .id("leftCorner_\(currentTabId)")
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .identity
+                            ))
 
                         // 右下反圆角：左边缘对齐选中 tab 右边缘，底部对齐导航栏底部
                         BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
                             .frame(width: cornerSize, height: cornerSize)
                             .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
                             .id("rightCorner_\(currentTabId)")
-                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                            .transition(.asymmetric(
+                                insertion: .move(edge: .bottom).combined(with: .opacity),
+                                removal: .identity
+                            ))
                     }
                 }
             }
@@ -184,8 +190,10 @@ struct FocusModeNavigationBar: View {
                 let isTabAdded = viewModel.tabs.count > previousTabCount
                 previousTabCount = viewModel.tabs.count
                 guard newTabId != nil, isTabAdded else { return }
-                withAnimation {
-                    proxy.scrollTo("trailingSpacer", anchor: .trailing)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    withAnimation {
+                        proxy.scrollTo("trailingSpacer", anchor: .trailing)
+                    }
                 }
             }
             .onAppear {
@@ -211,14 +219,20 @@ struct FocusModeNavigationBar: View {
                     .frame(width: cornerSize, height: cornerSize)
                     .offset(x: leftX - cornerSize, y: tabHeight - cornerSize + 2)
                     .id("leftCorner_\(currentTabId)")
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .identity
+                    ))
 
                 // 右下反圆角
                 BottomRightInverseCorner(radius: cornerSize, color: cornerColor)
                     .frame(width: cornerSize, height: cornerSize)
                     .offset(x: leftX + tabWidth, y: tabHeight - cornerSize + 2)
                     .id("rightCorner_\(currentTabId)")
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .bottom).combined(with: .opacity),
+                        removal: .identity
+                    ))
             }
         }
         .frame(maxWidth: .infinity)
