@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSmoothScroller
 import androidx.recyclerview.widget.RecyclerView
 import chat.askaway.android.utils.TabBundleUtils
 import com.askaway.android.model.ActiveModel
@@ -69,12 +70,24 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         adapter = ActiveAdapter()
         binding.rvApp.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         binding.rvApp.adapter = adapter
+        // 去除弹性（overscroll）效果，避免滚动到边界时的回弹抖动
+        binding.rvApp.overScrollMode = View.OVER_SCROLL_NEVER
 
         // 选中项变化时，滚动 RecyclerView 使其完全可见
-        // position 为数据 position，+1 转为 adapter position（前面有 left pad）
+        // 使用自定义 SmoothScroller，让目标 item 对齐到距左边缘 18dp 处，
+        // 确保前一个 item 的反圆角始终可见
         adapter.onSelectedChanged = { position ->
             binding.rvApp.post {
-                binding.rvApp.smoothScrollToPosition(position + 1)
+                val layoutManager = binding.rvApp.layoutManager as? LinearLayoutManager ?: return@post
+                val offsetPx = (18 * resources.displayMetrics.density).toInt()
+                val smoothScroller = object : LinearSmoothScroller(this@TabletActivity) {
+                    override fun getHorizontalSnapPreference(): Int = SNAP_TO_START
+                    override fun calculateDtToFit(
+                        viewStart: Int, viewEnd: Int, boxStart: Int, boxEnd: Int, snapPreference: Int
+                    ): Int = boxStart + offsetPx - viewStart
+                }
+                smoothScroller.targetPosition = position + 1
+                layoutManager.startSmoothScroll(smoothScroller)
             }
         }
 
