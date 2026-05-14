@@ -1,10 +1,10 @@
 package chat.askaway.android.tablet
 
-import android.os.Build
 import android.graphics.Bitmap
+import android.os.VibrationEffect
+import android.os.Vibrator
 import android.util.Log
 import android.view.LayoutInflater
-import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
@@ -19,6 +19,10 @@ import com.askaway.android.R
 import com.askaway.android.model.ActiveModel
 
 class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+    init {
+        setHasStableIds(true)
+    }
 
     companion object {
         private const val VIEW_TYPE_CONTENT = 0
@@ -37,10 +41,139 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     var spacingPx = 0
     var marginHorizontalPx = 0
 
+    private var recyclerView: RecyclerView? = null
+
+    // 正在播放删除动画的 item id 集合，动画期间 updateItems 跳过 notifyDataSetChanged
+    private val animatingDeleteIds = mutableSetOf<String>()
+
+    override fun onAttachedToRecyclerView(recyclerView: RecyclerView) {
+        super.onAttachedToRecyclerView(recyclerView)
+        this.recyclerView = recyclerView
+    }
+
+    override fun onDetachedFromRecyclerView(recyclerView: RecyclerView) {
+        super.onDetachedFromRecyclerView(recyclerView)
+        this.recyclerView = null
+    }
+
     fun updateItems(newItems: List<ActiveModel>) {
+        val isAnimating = animatingDeleteIds.isNotEmpty()
         items.clear()
         items.addAll(newItems)
+        if (isAnimating) {
+            // 动画期间只更新数据，不刷新视图
+            return
+        }
         notifyDataSetChanged()
+    }
+
+    override fun getItemId(position: Int): Long {
+        return if (position < items.size) items[position].id.hashCode().toLong() else RecyclerView.NO_ID
+    }
+
+    /**
+     * 删除 item 并播放动画：后方 item 平移到新位置
+     * 策略：先移除数据并刷新布局（无动画），再将受影响的 item 偏移回原位并动画滑入
+     */
+    fun removeItemWithAnimation(id: String, onAnimationEnd: (() -> Unit)? = null) {
+        val position = items.indexOfFirst { it.id == id }
+        if (position == -1) {
+            onAnimationEnd?.invoke()
+            return
+        }
+
+        animatingDeleteIds.add(id)
+
+        val viewHolder = recyclerView?.findViewHolderForAdapterPosition(position)
+        val itemView = viewHolder?.itemView
+
+        if (itemView == null) {
+            items.removeAt(position)
+            animatingDeleteIds.remove(id)
+            notifyDataSetChanged()
+            onAnimationEnd?.invoke()
+            return
+        }
+
+        // 删除前：记录每个可见 item 的位置（通过 itemId 映射，布局后 ViewHolder 可能复用）
+        val layoutManager = recyclerView?.layoutManager as? androidx.recyclerview.widget.GridLayoutManager
+        val firstVisible = layoutManager?.findFirstVisibleItemPosition() ?: 0
+        val lastVisible = layoutManager?.findLastVisibleItemPosition() ?: -1
+
+        // 记录删除位置之后每个 item 的原始位置，key = itemId
+        val oldPositions = mutableMapOf<Long, IntArray>()  // itemId -> [left, top]
+        for (i in position..lastVisible.coerceAtLeast(0)) {
+            val vh = recyclerView?.findViewHolderForAdapterPosition(i) ?: continue
+            oldPositions[vh.itemId] = intArrayOf(vh.itemView.left, vh.itemView.top)
+        }
+
+        // 禁用默认 ItemAnimator
+        val originalAnimator = recyclerView?.itemAnimator
+        recyclerView?.itemAnimator = null
+
+        // 先移除数据并刷新，RecyclerView 会把后方 item 直接排到正确位置
+        items.removeAt(position)
+        notifyDataSetChanged()
+
+        // 等布局完成后，对受影响的 item 做平移动画
+        recyclerView?.post {
+            val newLayoutManager = recyclerView?.layoutManager ?: return@post
+            val newFirstVisible = (newLayoutManager as? androidx.recyclerview.widget.GridLayoutManager)
+                ?.findFirstVisibleItemPosition() ?: 0
+            val newLastVisible = (newLayoutManager as? androidx.recyclerview.widget.GridLayoutManager)
+                ?.findLastVisibleItemPosition() ?: -1
+
+            // 先找到第一个有位移记录的 item，获取参考位移量（用于屏幕外新进入的 item）
+            var refDx = 0f
+            var refDy = 0f
+            for (i in maxOf(position, newFirstVisible)..newLastVisible.coerceAtLeast(0)) {
+                val vh = recyclerView?.findViewHolderForAdapterPosition(i) ?: continue
+                val oldPos = oldPositions[vh.itemId]
+                if (oldPos != null) {
+                    val dx = oldPos[0] - vh.itemView.left
+                    val dy = oldPos[1] - vh.itemView.top
+                    if (dx != 0 || dy != 0) {
+                        refDx = dx.toFloat()
+                        refDy = dy.toFloat()
+                        break
+                    }
+                }
+            }
+
+            for (i in maxOf(position, newFirstVisible)..newLastVisible.coerceAtLeast(0)) {
+                val vh = recyclerView?.findViewHolderForAdapterPosition(i) ?: continue
+                val child = vh.itemView
+                val oldPos = oldPositions[vh.itemId]
+                val dx: Float
+                val dy: Float
+                if (oldPos != null) {
+                    // 删除前有记录，用精确偏移
+                    dx = (oldPos[0] - child.left).toFloat()
+                    dy = (oldPos[1] - child.top).toFloat()
+                } else {
+                    // 屏幕外新进入的 item，用参考位移量
+                    dx = refDx
+                    dy = refDy
+                }
+                if (dx != 0f || dy != 0f) {
+                    child.translationX = dx
+                    child.translationY = dy
+                    child.animate()
+                        .translationX(0f)
+                        .translationY(0f)
+                        .setDuration(250L)
+                        .start()
+                }
+            }
+
+            // 动画结束后恢复 ItemAnimator
+            recyclerView?.postDelayed({
+                animatingDeleteIds.remove(id)
+                recyclerView?.itemAnimator = originalAnimator
+            }, 260L)
+
+            onAnimationEnd?.invoke()
+        }
     }
 
     override fun getItemCount(): Int = items.size + 1
@@ -70,6 +203,10 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     }
 
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        // 重置动画属性，防止 ViewHolder 复用时残留
+        holder.itemView.translationX = 0f
+        holder.itemView.translationY = 0f
+        holder.itemView.alpha = 1f
         when (holder) {
             is AddButtonViewHolder -> {
                 holder.itemView.setOnClickListener {
@@ -94,13 +231,8 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 }
                 holder.ivScreenshot.setOnLongClickListener {
                     // 长按震动反馈
-                    val vibrator = holder.ivScreenshot.context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as android.os.Vibrator
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        vibrator.vibrate(android.os.VibrationEffect.createOneShot(30, android.os.VibrationEffect.DEFAULT_AMPLITUDE))
-                    } else {
-                        @Suppress("DEPRECATION")
-                        vibrator.vibrate(30)
-                    }
+                    val vibrator = holder.ivScreenshot.context.getSystemService(android.content.Context.VIBRATOR_SERVICE) as Vibrator
+                    vibrator.vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE))
                     onItemLongClick?.invoke(item, touchX, touchY)
                     true
                 }

@@ -9,5 +9,6 @@
     <string name="menu_close_tab">タブを閉じる</string>
     <string name="menu_close_other_tabs">その他のタブを閉じる</string>
     <string name="menu_cancel_bookmark">ブックマークを解除</string>
+    <string name="active_empty_text">アプリがここに表示\n上の「+」をタップ</string>
 </resources>
 

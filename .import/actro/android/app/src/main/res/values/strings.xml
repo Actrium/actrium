@@ -10,4 +10,5 @@
     <string name="menu_close_tab">Close Tab</string>
     <string name="menu_close_other_tabs">Close Other Tabs</string>
     <string name="menu_cancel_bookmark">Unbookmark</string>
+    <string name="active_empty_text">Apps will show here\nTap \"+\" above</string>
 </resources>

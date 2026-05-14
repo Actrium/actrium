@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSmoothScroller
 import androidx.recyclerview.widget.RecyclerView
 import chat.askaway.android.utils.TabBundleUtils
 import com.askaway.android.model.ActiveModel
@@ -69,6 +70,26 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         adapter = ActiveAdapter()
         binding.rvApp.layoutManager = LinearLayoutManager(this, LinearLayoutManager.HORIZONTAL, false)
         binding.rvApp.adapter = adapter
+        // 去除弹性（overscroll）效果，避免滚动到边界时的回弹抖动
+        binding.rvApp.overScrollMode = View.OVER_SCROLL_NEVER
+
+        // 选中项变化时，滚动 RecyclerView 使其完全可见
+        // 使用自定义 SmoothScroller，让目标 item 对齐到距左边缘 18dp 处，
+        // 确保前一个 item 的反圆角始终可见
+        adapter.onSelectedChanged = { position ->
+            binding.rvApp.post {
+                val layoutManager = binding.rvApp.layoutManager as? LinearLayoutManager ?: return@post
+                val offsetPx = (18 * resources.displayMetrics.density).toInt()
+                val smoothScroller = object : LinearSmoothScroller(this@TabletActivity) {
+                    override fun getHorizontalSnapPreference(): Int = SNAP_TO_START
+                    override fun calculateDtToFit(
+                        viewStart: Int, viewEnd: Int, boxStart: Int, boxEnd: Int, snapPreference: Int
+                    ): Int = boxStart + offsetPx - viewStart
+                }
+                smoothScroller.targetPosition = position + 1
+                layoutManager.startSmoothScroll(smoothScroller)
+            }
+        }
 
         // 初始化内容区域 adapter
         gridAdapter = GridContentAdapter()
@@ -183,7 +204,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         }
 
         gridAdapter.onDeleteClick = { tabId ->
-            deleteTab(tabId)
+            gridAdapter.removeItemWithAnimation(tabId) {
+                deleteTab(tabId)
+            }
         }
         gridAdapter.onMarkClick = { activeModel ->
             viewModel.toggleMarkStatus(activeModel)
@@ -494,17 +517,23 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
     private fun updateAddButtonPosition() {
         val layoutManager = binding.rvApp.layoutManager as? LinearLayoutManager ?: return
-        val itemCount = adapter.itemCount
+        val dataCount = adapter.dataItemCount
 
-        if (itemCount == 0) {
-            // 如果没有 item，将 ivAdd 放在起始位置
+        if (dataCount == 0) {
+            // 如果没有数据 item，将 ivAdd 放在起始位置
             binding.ivAdd.translationX = 0f
             return
         }
 
-        // 获取最后一个可见的 item
-        val lastVisiblePosition = layoutManager.findLastVisibleItemPosition()
-        val lastItemView = layoutManager.findViewByPosition(lastVisiblePosition)
+        // 最后一个真实数据 item 的 adapter position = dataCount（前面有 left pad）
+        val lastDataPosition = dataCount
+        // 优先找最后一个真实数据 item，若不可见则回退到最后可见的 item
+        val targetPosition = if (layoutManager.findViewByPosition(lastDataPosition) != null) {
+            lastDataPosition
+        } else {
+            layoutManager.findLastVisibleItemPosition()
+        }
+        val lastItemView = layoutManager.findViewByPosition(targetPosition)
 
         if (lastItemView != null) {
             // 计算最后一个 item 的右边缘位置
