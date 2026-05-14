@@ -20,9 +20,6 @@ export type TabBookmarkEvent = {
 };
 
 type Unsubscribe = () => void;
-type LocalTabExitListener = (event: TabFullscreenEvent) => void;
-
-const willExitFullscreenListeners = new Set<LocalTabExitListener>();
 
 export const TabEvents = {
   // 进入 tab 事件

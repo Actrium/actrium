@@ -23,9 +23,8 @@ const inputBorderRadius = 24;
 const LoadAppPad = () => {
   const {
     cameraActive,
+    cameraDesiredActive,
     setCameraActive,
-    setInputExpanded,
-    inputRef,
     dismissKeyboard,
     ensureNetworkPermission,
     handleScannedUrl,
@@ -100,14 +99,9 @@ const LoadAppPad = () => {
             >
               <LoadAppCameraPanel
                 tabId={tabCtx.tab.id}
-                openCameraBtnHeight={50}
+                cameraDesiredActive={cameraDesiredActive}
                 cameraActive={cameraActive}
                 onCameraActiveChange={setCameraActive}
-                onBeforeOpenCamera={() => {
-                  setInputExpanded(false);
-                  inputRef.current?.blur();
-                  dismissKeyboard();
-                }}
                 onAfterCameraPermissionGranted={() => {
                   void ensureNetworkPermission();
                 }}
