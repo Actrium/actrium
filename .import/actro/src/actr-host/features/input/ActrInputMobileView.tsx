@@ -47,6 +47,7 @@ interface ActrInputMobileViewProps {
   attachments: any[];
   removeAttachment: (id: string) => void;
   isAttachmentPanelOpen?: boolean;
+  focusInputRequestId?: number;
   isEnterForNewLine: boolean;
   onToggleAttachmentPanel?: () => void;
   onCloseAttachmentPanel?: () => void;
@@ -119,6 +120,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     attachments,
     removeAttachment,
     isAttachmentPanelOpen = false,
+    focusInputRequestId,
     isEnterForNewLine,
     onToggleAttachmentPanel,
     onCloseAttachmentPanel,
@@ -170,6 +172,18 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
       mobileTextInputRef.current?.focus();
     }, 0);
   }, []);
+
+  React.useEffect(() => {
+    if (!focusInputRequestId) {
+      return;
+    }
+
+    setMobileInputMode('text');
+    setIsInputFocused(true);
+    requestAnimationFrame(() => {
+      mobileTextInputRef.current?.focus();
+    });
+  }, [focusInputRequestId]);
 
   const openAttachmentMenu = React.useCallback(() => {
     if (!isAttachmentPanelOpen) {

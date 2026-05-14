@@ -152,6 +152,7 @@ export default function ActrInput({
           isAttachmentPanelOpen={
             mobileAttachmentController?.isAttachmentPanelOpen
           }
+          focusInputRequestId={mobileAttachmentController?.focusInputRequestId}
           isEnterForNewLine={isEnterForNewLine}
           onToggleAttachmentPanel={
             mobileAttachmentController?.toggleAttachmentPanel
