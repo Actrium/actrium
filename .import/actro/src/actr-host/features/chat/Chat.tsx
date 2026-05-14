@@ -938,6 +938,11 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           keyboardShouldPersistTaps='never'
           keyboardDismissMode='on-drag'
           maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+          // 性能优化：减少屏幕外渲染范围，限制每批渲染数量
+          windowSize={5}
+          removeClippedSubviews={true}
+          maxToRenderPerBatch={5}
+          updateCellsBatchingPeriod={50}
         />
       )}
     </Reanimated.View>
