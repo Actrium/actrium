@@ -103,8 +103,8 @@ struct FocusModeNavigationBar: View {
     private var selectedTabLeftX: CGFloat? {
         guard let index = selectedTabIndex else { return nil }
         let tabWidth = calculateTabWidth()
-        // index * (tabWidth + 2) + 1(padding)
-        return CGFloat(index) * (tabWidth + 2) + 1
+        // index * (tabWidth + 2) + 1(padding) + 19(leading)
+        return CGFloat(index) * (tabWidth + 2) + 1 + 19
     }
 
     var body: some View {
@@ -153,6 +153,7 @@ struct FocusModeNavigationBar: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 ZStack(alignment: .topLeading) {
                     HStack(spacing: 0) {
+                        Color.clear.frame(width: 19)
                         tabsContent
                         Color.clear.frame(width: 120)
                             .id("trailingSpacer")
@@ -192,6 +193,7 @@ struct FocusModeNavigationBar: View {
     private var staticTabsWithAddButton: some View {
         ZStack(alignment: .topLeading) {
             HStack(spacing: 0) {
+                Color.clear.frame(width: 19)
                 tabsContent
                 Spacer()
             }
