@@ -79,14 +79,27 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         adapter.onSelectedChanged = { position ->
             binding.rvApp.post {
                 val layoutManager = binding.rvApp.layoutManager as? LinearLayoutManager ?: return@post
+                val adapterPosition = position + 1
                 val offsetPx = (18 * resources.displayMetrics.density).toInt()
+                // 判断目标 item 是否已经完全可见：
+                // 1. 左边缘距可见区域 >= offsetPx（反圆角完全可见）
+                // 2. 右边缘未超出可见区域（item 未被右侧裁切）
+                val childView = layoutManager.findViewByPosition(adapterPosition)
+                if (childView != null) {
+                    val leftEdge = childView.left - binding.rvApp.paddingLeft
+                    val rightEdge = childView.right
+                    val visibleRight = binding.rvApp.width - binding.rvApp.paddingRight
+                    if (leftEdge >= offsetPx && rightEdge <= visibleRight) {
+                        return@post
+                    }
+                }
                 val smoothScroller = object : LinearSmoothScroller(this@TabletActivity) {
                     override fun getHorizontalSnapPreference(): Int = SNAP_TO_START
                     override fun calculateDtToFit(
                         viewStart: Int, viewEnd: Int, boxStart: Int, boxEnd: Int, snapPreference: Int
                     ): Int = boxStart + offsetPx - viewStart
                 }
-                smoothScroller.targetPosition = position + 1
+                smoothScroller.targetPosition = adapterPosition
                 layoutManager.startSmoothScroll(smoothScroller)
             }
         }
