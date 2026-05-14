@@ -10,15 +10,23 @@ import androidx.core.graphics.toColorInt
 import androidx.recyclerview.widget.RecyclerView
 import com.askaway.android.R
 import com.askaway.android.databinding.ItemTabletAppBinding
+import com.askaway.android.databinding.ItemTabletAppLeftPadBinding
+import com.askaway.android.databinding.ItemTabletAppRightPadBinding
 import com.askaway.android.model.ActiveModel
 
-class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
+class ActiveAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+
+    companion object {
+        private const val TYPE_LEFT_PAD = 0
+        private const val TYPE_NORMAL = 1
+        private const val TYPE_RIGHT_PAD = 2
+    }
 
     private val items = mutableListOf<ActiveModel>()
     var onItemClick: ((ActiveModel) -> Unit)? = null
     var onDeleteClick: ((ActiveModel) -> Unit)? = null
     var onItemLongClick: ((ActiveModel, Int, Int) -> Unit)? = null
-    /** 选中项变化时的回调，参数为选中项的 position */
+    /** 选中项变化时的回调，参数为选中项在真实数据中的 position */
     var onSelectedChanged: ((Int) -> Unit)? = null
 
     var currentId: String? = ""
@@ -42,11 +50,11 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
             notifyDataSetChanged()
         } else {
             notifyDataSetChanged()
-            // 对新增 item 记录需要动画的 position
+            // 对新增 item 记录需要动画的 position（转换为 adapter position）
             newItems.forEach { newItem ->
-                val pos = items.indexOfFirst { it.id == newItem.id }
-                if (pos >= 0) {
-                    pendingAnimatePositions.add(pos)
+                val dataPos = items.indexOfFirst { it.id == newItem.id }
+                if (dataPos >= 0) {
+                    pendingAnimatePositions.add(dataPos + 1) // +1 偏移，因为前面有 left pad
                 }
             }
         }
@@ -57,23 +65,84 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
      */
     fun addItemWithAnimation(item: ActiveModel) {
         items.add(item)
-        val insertPosition = items.size - 1
+        val insertPosition = items.size // adapter position = 数据 size（因为前面有 left pad）
         notifyItemInserted(insertPosition)
         pendingAnimatePositions.add(insertPosition)
     }
 
-    /** 需要播放入场动画的 position 集合 */
+    /** 需要播放入场动画的 position 集合（存储的是 adapter position） */
     private val pendingAnimatePositions = mutableSetOf<Int>()
 
-
-    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): ActiveViewHolder {
-        val binding = ItemTabletAppBinding.inflate(LayoutInflater.from(parent.context), parent, false)
-        return ActiveViewHolder(binding)
+    override fun getItemViewType(position: Int): Int {
+        if (items.isEmpty()) return TYPE_NORMAL
+        return when (position) {
+            0 -> TYPE_LEFT_PAD
+            items.size + 1 -> TYPE_RIGHT_PAD
+            else -> TYPE_NORMAL
+        }
     }
 
-    override fun onBindViewHolder(holder: ActiveViewHolder, position: Int) {
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): RecyclerView.ViewHolder {
+        val inflater = LayoutInflater.from(parent.context)
+        return when (viewType) {
+            TYPE_LEFT_PAD -> LeftPadViewHolder(
+                ItemTabletAppLeftPadBinding.inflate(inflater, parent, false)
+            )
+            TYPE_RIGHT_PAD -> RightPadViewHolder(
+                ItemTabletAppRightPadBinding.inflate(inflater, parent, false)
+            )
+            else -> ActiveViewHolder(
+                ItemTabletAppBinding.inflate(inflater, parent, false)
+            )
+        }
+    }
+
+    override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
+        when (holder) {
+            is LeftPadViewHolder -> bindLeftPad(holder, position)
+            is RightPadViewHolder -> bindRightPad(holder, position)
+            is ActiveViewHolder -> bindNormal(holder, position)
+        }
+    }
+
+    override fun getItemCount(): Int {
+        if (items.isEmpty()) return 0
+        return items.size + 2 // 左右各一个虚拟 item
+    }
+
+    /** 数据 item 的数量（不含虚拟 item） */
+    val dataItemCount: Int get() = items.size
+
+    private fun bindLeftPad(holder: LeftPadViewHolder, position: Int) {
+        val selectedPosition = items.indexOfFirst { it.id == currentId }
+        val selectedColor = "#F2F2F6".toColorInt()
+
+        // 选中原来第一个 item 时（selectedPosition == 0），左侧虚拟 item 显示 rcvBottomRight
+        if (selectedPosition == 0) {
+            holder.binding.rcvBottomRight.fillColor = selectedColor
+            holder.binding.rcvBottomRight.visibility = View.VISIBLE
+        } else {
+            holder.binding.rcvBottomRight.visibility = View.GONE
+        }
+    }
+
+    private fun bindRightPad(holder: RightPadViewHolder, position: Int) {
+        val selectedPosition = items.indexOfFirst { it.id == currentId }
+        val selectedColor = "#F2F2F6".toColorInt()
+
+        // 选中原来最后一个 item 时，右侧虚拟 item 显示 rcvBottomLeft
+        if (selectedPosition == items.size - 1) {
+            holder.binding.rcvBottomLeft.fillColor = selectedColor
+            holder.binding.rcvBottomLeft.visibility = View.VISIBLE
+        } else {
+            holder.binding.rcvBottomLeft.visibility = View.GONE
+        }
+    }
+
+    private fun bindNormal(holder: ActiveViewHolder, position: Int) {
         Log.e("ActiveAdapter", "onBindViewHolder")
-        val item = items[position]
+        val dataPosition = position - 1 // 减去左侧虚拟 item 的偏移
+        val item = items[dataPosition]
         holder.bind(item, onItemClick, onDeleteClick, onItemLongClick)
         holder.binding.ivDel.visibility = View.VISIBLE
 
@@ -104,21 +173,20 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
             holder.binding.rcvBottomLeft.visibility = View.GONE
             holder.binding.rcvBottomRight.visibility = View.GONE
             // 选中项：显示桥接View填补与邻居item之间的间距
-            holder.binding.vBridgeLeft.visibility =
-                if (selectedPosition > 0) View.VISIBLE else View.GONE
-            holder.binding.vBridgeRight.visibility =
-                if (selectedPosition < itemCount - 1) View.VISIBLE else View.GONE
+            // 左右虚拟 item 保证真实 item 始终有邻居，桥接 View 始终显示
+            holder.binding.vBridgeLeft.visibility = View.VISIBLE
+            holder.binding.vBridgeRight.visibility = View.VISIBLE
         } else {
             holder.binding.llContent.setBackgroundResource(R.drawable.tablet_tab_bg_normal)
             // 前一个item的右下角显示凹圆角
-            if (position == selectedPosition - 1) {
+            if (dataPosition == selectedPosition - 1) {
                 holder.binding.rcvBottomRight.fillColor = selectedColor
                 holder.binding.rcvBottomRight.visibility = View.VISIBLE
             } else {
                 holder.binding.rcvBottomRight.visibility = View.GONE
             }
             // 后一个item的左下角显示凹圆角
-            if (position == selectedPosition + 1) {
+            if (dataPosition == selectedPosition + 1) {
                 holder.binding.rcvBottomLeft.fillColor = selectedColor
                 holder.binding.rcvBottomLeft.visibility = View.VISIBLE
             } else {
@@ -130,7 +198,9 @@ class ActiveAdapter : RecyclerView.Adapter<ActiveAdapter.ActiveViewHolder>() {
         }
     }
 
-    override fun getItemCount(): Int = items.size
+    class LeftPadViewHolder(val binding: ItemTabletAppLeftPadBinding) : RecyclerView.ViewHolder(binding.root)
+
+    class RightPadViewHolder(val binding: ItemTabletAppRightPadBinding) : RecyclerView.ViewHolder(binding.root)
 
     class ActiveViewHolder(val binding: ItemTabletAppBinding) : RecyclerView.ViewHolder(binding.root) {
         fun bind(

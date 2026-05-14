@@ -36,12 +36,14 @@
                 <FrameLayout
                     android:layout_width="0dp"
                     android:layout_height="match_parent"
-                    android:layout_weight="1">
+                    android:layout_weight="1"
+                    android:clipChildren="false">
 
                     <androidx.recyclerview.widget.RecyclerView
                         android:id="@+id/rvApp"
                         android:layout_width="wrap_content"
                         android:layout_height="match_parent"
+                        android:clipChildren="false"
                         android:clipToPadding="false"
                         android:paddingEnd="44dp" />
 

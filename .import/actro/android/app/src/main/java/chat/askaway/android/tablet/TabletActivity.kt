@@ -71,9 +71,10 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         binding.rvApp.adapter = adapter
 
         // 选中项变化时，滚动 RecyclerView 使其完全可见
+        // position 为数据 position，+1 转为 adapter position（前面有 left pad）
         adapter.onSelectedChanged = { position ->
             binding.rvApp.post {
-                binding.rvApp.smoothScrollToPosition(position)
+                binding.rvApp.smoothScrollToPosition(position + 1)
             }
         }
 
@@ -503,17 +504,23 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
     private fun updateAddButtonPosition() {
         val layoutManager = binding.rvApp.layoutManager as? LinearLayoutManager ?: return
-        val itemCount = adapter.itemCount
+        val dataCount = adapter.dataItemCount
 
-        if (itemCount == 0) {
-            // 如果没有 item，将 ivAdd 放在起始位置
+        if (dataCount == 0) {
+            // 如果没有数据 item，将 ivAdd 放在起始位置
             binding.ivAdd.translationX = 0f
             return
         }
 
-        // 获取最后一个可见的 item
-        val lastVisiblePosition = layoutManager.findLastVisibleItemPosition()
-        val lastItemView = layoutManager.findViewByPosition(lastVisiblePosition)
+        // 最后一个真实数据 item 的 adapter position = dataCount（前面有 left pad）
+        val lastDataPosition = dataCount
+        // 优先找最后一个真实数据 item，若不可见则回退到最后可见的 item
+        val targetPosition = if (layoutManager.findViewByPosition(lastDataPosition) != null) {
+            lastDataPosition
+        } else {
+            layoutManager.findLastVisibleItemPosition()
+        }
+        val lastItemView = layoutManager.findViewByPosition(targetPosition)
 
         if (lastItemView != null) {
             // 计算最后一个 item 的右边缘位置
