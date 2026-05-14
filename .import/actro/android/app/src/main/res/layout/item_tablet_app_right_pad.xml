@@ -15,5 +15,6 @@
         android:layout_gravity="bottom|start"
         android:layout_marginStart="-2dp"
         android:visibility="gone"
-        app:reverseDirection="bottomLeft" />
+        app:reverseDirection="bottomLeft"
+        app:fillColor="#F2F2F6" />
 </FrameLayout>

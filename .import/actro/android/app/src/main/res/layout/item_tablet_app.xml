@@ -45,7 +45,8 @@
         android:layout_marginStart="-18dp"
         android:layout_gravity="bottom|start"
         android:visibility="visible"
-        app:reverseDirection="bottomRight" />
+        app:reverseDirection="bottomRight"
+        app:fillColor="#F2F2F6" />
 
     <chat.askaway.android.tablet.ReverseCornerView
         android:id="@+id/vBridgeRight"
@@ -54,7 +55,8 @@
         android:layout_marginEnd="-18dp"
         android:layout_gravity="bottom|end"
         android:visibility="visible"
-        app:reverseDirection="bottomLeft" />
+        app:reverseDirection="bottomLeft"
+        app:fillColor="#F2F2F6" />
 
     <chat.askaway.android.tablet.ReverseCornerView
         android:id="@+id/rcvBottomLeft"
@@ -63,7 +65,8 @@
         android:layout_marginStart="-2dp"
         android:layout_gravity="bottom|start"
         android:visibility="gone"
-        app:reverseDirection="bottomLeft" />
+        app:reverseDirection="bottomLeft"
+        app:fillColor="#F2F2F6" />
 
     <chat.askaway.android.tablet.ReverseCornerView
         android:id="@+id/rcvBottomRight"
@@ -72,5 +75,6 @@
         android:layout_marginEnd="-2dp"
         android:layout_gravity="bottom|end"
         android:visibility="gone"
-        app:reverseDirection="bottomRight" />
+        app:reverseDirection="bottomRight"
+        app:fillColor="#F2F2F6" />
 </FrameLayout>

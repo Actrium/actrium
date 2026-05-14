@@ -6,7 +6,6 @@ import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
-import androidx.core.graphics.toColorInt
 import androidx.recyclerview.widget.RecyclerView
 import com.askaway.android.R
 import com.askaway.android.databinding.ItemTabletAppBinding
@@ -160,28 +159,18 @@ class ActiveAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
     private fun bindLeftPad(holder: LeftPadViewHolder, position: Int) {
         val selectedPosition = items.indexOfFirst { it.id == currentId }
-        val selectedColor = "#F2F2F6".toColorInt()
 
         // 选中原来第一个 item 时（selectedPosition == 0），左侧虚拟 item 显示 rcvBottomRight
-        if (selectedPosition == 0) {
-            holder.binding.rcvBottomRight.fillColor = selectedColor
-            holder.binding.rcvBottomRight.visibility = View.VISIBLE
-        } else {
-            holder.binding.rcvBottomRight.visibility = View.GONE
-        }
+        holder.binding.rcvBottomRight.visibility =
+            if (selectedPosition == 0) View.VISIBLE else View.GONE
     }
 
     private fun bindRightPad(holder: RightPadViewHolder, position: Int) {
         val selectedPosition = items.indexOfFirst { it.id == currentId }
-        val selectedColor = "#F2F2F6".toColorInt()
 
         // 选中原来最后一个 item 时，右侧虚拟 item 显示 rcvBottomLeft
-        if (selectedPosition == items.size - 1) {
-            holder.binding.rcvBottomLeft.fillColor = selectedColor
-            holder.binding.rcvBottomLeft.visibility = View.VISIBLE
-        } else {
-            holder.binding.rcvBottomLeft.visibility = View.GONE
-        }
+        holder.binding.rcvBottomLeft.visibility =
+            if (selectedPosition == items.size - 1) View.VISIBLE else View.GONE
     }
 
     private fun bindNormal(holder: ActiveViewHolder, position: Int) {
@@ -209,12 +198,8 @@ class ActiveAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
         val selectedPosition = items.indexOfFirst { it.id == currentId }
 
-        val selectedColor = "#F2F2F6".toColorInt()
-
         if (item.id == currentId) {
             holder.binding.llContent.setBackgroundResource(R.drawable.tablet_tab_bg_selected)
-            holder.binding.vBridgeLeft.fillColor = selectedColor
-            holder.binding.vBridgeRight.fillColor = selectedColor
             holder.binding.rcvBottomLeft.visibility = View.GONE
             holder.binding.rcvBottomRight.visibility = View.GONE
             // 选中项：显示桥接View填补与邻居item之间的间距
@@ -225,14 +210,12 @@ class ActiveAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             holder.binding.llContent.setBackgroundResource(R.drawable.tablet_tab_bg_normal)
             // 前一个item的右下角显示凹圆角
             if (dataPosition == selectedPosition - 1) {
-                holder.binding.rcvBottomRight.fillColor = selectedColor
                 holder.binding.rcvBottomRight.visibility = View.VISIBLE
             } else {
                 holder.binding.rcvBottomRight.visibility = View.GONE
             }
             // 后一个item的左下角显示凹圆角
             if (dataPosition == selectedPosition + 1) {
-                holder.binding.rcvBottomLeft.fillColor = selectedColor
                 holder.binding.rcvBottomLeft.visibility = View.VISIBLE
             } else {
                 holder.binding.rcvBottomLeft.visibility = View.GONE
