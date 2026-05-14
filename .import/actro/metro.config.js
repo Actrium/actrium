@@ -44,6 +44,8 @@ const config = {
     extraNodeModules: {
       'react': path.resolve(__dirname, 'node_modules/react'),
       'react-native': path.resolve(__dirname, 'node_modules/react-native'),
+      'react-reconciler': path.resolve(__dirname, 'node_modules/react-reconciler'),
+      'scheduler': path.resolve(__dirname, 'node_modules/scheduler'),
     },
     // 避免多个 node_modules 导致的模块重复
     blockList: [
@@ -62,6 +64,33 @@ const config = {
       new RegExp(`${supermarkRoot}/packages/.*/node_modules/react-native/.*`),
     ],
     resolveRequest: (context, moduleName, platform) => {
+      // ---- 保证 rill/askit 中的 React 相关模块解析到主项目副本 ----
+      // rill/askit 是物理拷贝，自带了 node_modules/react 等依赖，
+      // 如果不重定向，askit 内部的 import { useRef } from 'react' 会解析到自己的 react 副本，
+      // 导致 React 实例不一致，出现 "Invalid hook call" 错误。
+      const originPath = context.originModulePath || '';
+      const isFromLinkedPackage =
+        originPath.includes('/node_modules/rill/') ||
+        originPath.includes('/node_modules/askit/');
+
+      if (isFromLinkedPackage) {
+        if (moduleName === 'react') {
+          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'react', 'index.js') };
+        }
+        if (moduleName === 'react/jsx-runtime') {
+          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'react', 'jsx-runtime.js') };
+        }
+        if (moduleName === 'react/jsx-dev-runtime') {
+          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'react', 'jsx-dev-runtime.js') };
+        }
+        if (moduleName === 'react-reconciler') {
+          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'react-reconciler', 'index.js') };
+        }
+        if (moduleName === 'scheduler') {
+          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'scheduler', 'index.js') };
+        }
+      }
+
       // ---- RN 不兼容模块的 shim 替换 ----
       // @viz-js/viz 使用 import.meta + WASM，Hermes 不支持，用 shim 让其 fallback 到 Kroki 服务端渲染
       if (moduleName === '@viz-js/viz') {
