@@ -20,14 +20,13 @@ import type { ColorTokens } from '../../../theme/colors';
 
 const scanAreaSize = 252;
 const scanFrameOffset = 4;
-const openCameraBtnHeight = 60;
-const openCameraBtnIconSize = 34;
 const androidInputTextStyle: TextStyle =
   Platform.OS === 'android' ? { textAlignVertical: 'center', includeFontPadding: false } : {};
 
 const LoadAppPhone = () => {
   const {
     cameraActive,
+    cameraDesiredActive,
     setCameraActive,
     inputExpanded,
     setInputExpanded,
@@ -84,13 +83,9 @@ const LoadAppPhone = () => {
                       <View style={styles.scanBox}>
                         <LoadAppCameraPanel
                           tabId={tabCtx.tab.id}
+                          cameraDesiredActive={cameraDesiredActive}
                           cameraActive={cameraActive}
                           onCameraActiveChange={setCameraActive}
-                          onBeforeOpenCamera={() => {
-                            setInputExpanded(false);
-                            inputRef.current?.blur();
-                            dismissKeyboard();
-                          }}
                           onAfterOpenCameraPermissionDenied={() => {
                             setCameraActive(false);
                             setInputExpanded(true);
@@ -99,8 +94,6 @@ const LoadAppPhone = () => {
                             void ensureNetworkPermission();
                           }}
                           onScanUrl={handleScannedUrl}
-                          openCameraBtnHeight={openCameraBtnHeight}
-                          openCameraBtnIconSize={openCameraBtnIconSize}
                         />
                       </View>
                       {/* scan.png 叠加在扫码区外层，类似外边框 */}
@@ -262,7 +255,7 @@ const makeStyles = (colors: ColorTokens) => {
     phoneInputRow: {
       width: '100%',
       minHeight: loadApp.inputHeight + 16,
-      paddingHorizontal: 26,
+      paddingHorizontal: 10,
       paddingTop: 6,
       paddingBottom: 10,
     },
