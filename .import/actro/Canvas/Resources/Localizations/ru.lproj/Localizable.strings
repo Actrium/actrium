@@ -27,3 +27,10 @@ If you do not agree, you will not be able to use the features of this applicatio
 "unbookmark" = "Удалить закладку";
 "closeTab" = "Закрыть вкладку";
 "closeOtherTabs" = "Закрыть остальные вкладки";
+
+/* Статус вкладки */
+"serverClosed" = "Сервис закрыт";
+
+/* Пустая страница */
+"emptyActiveTitle" = "Приложения здесь";
+"emptyActiveSubtitle" = "Нажмите \"+\" вверху";

@@ -28,7 +28,7 @@ struct ChromeStyleTabView: View {
                     focusSheetContent(tab: tab)
                         .ignoresSafeArea(.all, edges: .bottom)
                         .interactiveDismissDisabled(true)
-                        .asNavigationTransition(id: tab.id, in: animation)
+                        .asNavigationTransition(id: viewModel.currentTabId ?? tab.id, in: animation)
                 }
                 .onAppear {
                     syncFocusedTabWithCanvasMode()
@@ -63,7 +63,6 @@ struct ChromeStyleTabView: View {
 
     private var overviewView: some View {
         ChromeTabOverviewView(
-            tabs: viewModel.tabsSortedBySlotPosition().map { $0.tab },
             viewModel: viewModel,
             historyVM: historyVM,
             animation: animation,
@@ -185,7 +184,6 @@ struct ChromeStyleTabView: View {
 
 // MARK: - Overview View (Tab Grid)
 struct ChromeTabOverviewView: View {
-    let tabs: [Tab]
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
     var animation: Namespace.ID
@@ -274,17 +272,22 @@ struct ChromeTabOverviewView: View {
                         ), count: columns),
                         spacing: lineSpacing
                     ) {
-                        ForEach(tabs) { tab in
+                        ForEach(viewModel.tabs) { tab in
                             let isHovering = hoveringOverTabId == tab.id
                             ChromeTabCardView(
                                 tab: tab,
                                 viewModel: viewModel,
                                 onSelect: { onSelectTab(tab.id) },
-                                onClose: { onCloseTab(tab.id) }
+                                onClose: {
+                                    withAnimation(.easeOut(duration: 0.25)) {
+                                        onCloseTab(tab.id)
+                                    }
+                                }
                             )
                             .aspectRatio(cardAspectRatio, contentMode: .fit)
                             .asMatchedTransitionSource(id: tab.id, in: animation)
                             .opacity(isHovering ? 0.5 : 1.0)
+                            .transition(.scale(scale: 0.8).combined(with: .opacity))
                             .draggable(tab.id.uuidString) {
                                 ChromeTabDragPreviewView(tab: tab)
                             }
@@ -363,7 +366,7 @@ struct ChromeTabDragPreviewView: View {
                 }
                 .frame(width: iconWidth, height: iconWidth)
 
-                Text(tab.title)
+                Text(tab.status == .dead ? "\(tab.title)(\(TM.tabStatus.serverClosed()))" : tab.title)
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(Color(hex: "#ECECED"))
                     .lineLimit(1)
@@ -395,7 +398,7 @@ struct ChromeTabCardView: View {
         let newBookmarkStatus = !tab.isBookmarked
         if let index = viewModel.tabs.firstIndex(where: { $0.id == tab.id }) {
             viewModel.tabs[index].isBookmarked = newBookmarkStatus
-            viewModel.saveTabs()
+            viewModel.scheduleSaveTabs()
         }
         NotificationCenter.default.post(
             name: .tabBookmarkChangedFromNative,
@@ -445,7 +448,10 @@ struct ChromeTabCardView: View {
                         .fill(Color(hslString: tab.backgroundColor))
                         .frame(width: iconWidth, height: iconWidth)
                         .overlay {
-                            if let icon = tab.icon, let url = URL(string: icon) {
+                            if tab.status == .dead {
+                                Image("service_stop")
+                                    .font(.system(size: iconWidth))
+                            } else if let icon = tab.icon, let url = URL(string: icon) {
                                 KFImage(url)
                                     .resizable()
                                     .scaledToFit()
@@ -473,9 +479,9 @@ struct ChromeTabCardView: View {
                 .frame(width: iconWidth, height: iconWidth)
 
                 // Title
-                Text(tab.title)
+                Text(tab.status == .dead ? "\(tab.title)(\(TM.tabStatus.serverClosed()))" : tab.title)
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(Color(hex: "#ECECED"))
+                    .foregroundColor(theme.isDarkMode ? Color(hex: "#ECECED") : Color(hex: "#404040"))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
@@ -509,6 +515,10 @@ struct ChromeTabCardView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .background(Color.black)
+        .onAppear {
+            // 内存警告回收快照后，卡片出现时按需从磁盘加载
+            viewModel.loadSnapshotIfNeeded(for: tab.id)
+        }
         .contextMenu {
             if tab.title != TM.active.blackTab() {
                 Button {

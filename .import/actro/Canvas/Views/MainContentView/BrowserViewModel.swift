@@ -22,7 +22,7 @@ class BrowserViewModel: ObservableObject {
 
     @Published var tabs: [Tab] = [] {
         didSet {
-            saveTabs()
+            scheduleSaveTabs()
         }
     }
     @Published var currentTabId: UUID?
@@ -32,15 +32,23 @@ class BrowserViewModel: ObservableObject {
     // MARK: - Persistence
     private let tabsKey = "persistedTabs"
     private var cancellables = Set<AnyCancellable>()
+
+    /// 持久化防抖：属性变更（标题、红点、收藏等）高频触发时，合并为延迟保存
+    private var saveTabsWorkItem: DispatchWorkItem?
     
     /// Current fullscreen tab ID (for iPhone only, excluding system tabs)
     @Published var fullscreenTabId: UUID?
+
+    /// 标记下次 onDisappear 截图是否应跳过（RN 退出全屏时已提前截图）
+    var skipNextDisappearSnapshot = false
     
     // MARK: - System Tabs (单独管理，不混入 tabs 数组)
     @Published var systemTabs: [SystemTabType: Tab] = [:]
 
     // MARK: - System Tab Management
     @Published var currentSystemTabType: SystemTabType? = nil
+    /// 记录打开全局搜索前的系统标签类型，关闭搜索时恢复
+    var previousSystemTabType: SystemTabType? = nil
 
     // MARK: - Tab Groups
     @Published var tabGroups: [TabGroup] = []
@@ -121,20 +129,21 @@ class BrowserViewModel: ObservableObject {
         return imagesDirectoryURL.appendingPathComponent("\(tabId.uuidString).jpg")
     }
 
-    /// Save a tab snapshot to disk
+    /// Save a tab snapshot to disk — 缩略图使用较低压缩质量以减少磁盘占用
     private func saveSnapshot(_ image: UIImage, for tabId: UUID) {
         let fileURL = snapshotURL(for: tabId)
-        if let jpegData = image.jpegData(compressionQuality: 0.8) {
+        // 缩略图尺寸小，0.5 的压缩质量视觉上无明显差异，但体积更小
+        if let jpegData = image.jpegData(compressionQuality: 0.5) {
             do {
                 try jpegData.write(to: fileURL)
-                logger.debug("💾 [BrowserViewModel] 已保存截图: \(tabId.uuidString.prefix(8))")
+                logger.debug("💾 [BrowserViewModel] 已保存截图(降采样): \(tabId.uuidString.prefix(8)), 大小: \(jpegData.count) bytes")
             } catch {
                 logger.error("❌ [BrowserViewModel] 保存截图失败: \(error)")
             }
         }
     }
 
-    /// Load a tab snapshot from disk
+    /// Load a tab snapshot from disk — 加载后降采样，确保内存副本始终为缩略图
     private func loadSnapshot(for tabId: UUID) -> UIImage? {
         let fileURL = snapshotURL(for: tabId)
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
@@ -142,10 +151,24 @@ class BrowserViewModel: ObservableObject {
         }
         do {
             let data = try Data(contentsOf: fileURL)
-            return UIImage(data: data)
+            if let image = UIImage(data: data) {
+                // 磁盘可能保存了旧版全分辨率截图，降采样后返回
+                // 保持宽高比降采样，避免拉伸
+                return image.downsampled(toWidth: Self.snapshotTargetWidth)
+            }
+            return nil
         } catch {
             logger.error("❌ [BrowserViewModel] 加载截图失败: \(error)")
             return nil
+        }
+    }
+
+    /// 按需加载快照：内存中无快照时从磁盘读取。
+    /// 内存警告回收 tabSnapshots 后，卡片视图 onAppear 调用此方法恢复缩略图。
+    func loadSnapshotIfNeeded(for tabId: UUID) {
+        guard tabSnapshots[tabId] == nil else { return }
+        if let snapshot = loadSnapshot(for: tabId) {
+            tabSnapshots[tabId] = snapshot
         }
     }
 
@@ -186,7 +209,8 @@ class BrowserViewModel: ObservableObject {
                     url: persistedTab.appUrl,
                     appId: persistedTab.appId,
                     hasUnreadMessage: persistedTab.hasUnreadMessage,
-                    isBookmarked: persistedTab.isBookmarked
+                    isBookmarked: persistedTab.isBookmarked,
+                    status: persistedTab.status
                 )
             }
 
@@ -280,11 +304,19 @@ class BrowserViewModel: ObservableObject {
         saveTabs()
     }
 
-    /// Save tab snapshot when set
+    /// Save tab snapshot when set — 降采样后再存储，大幅减少内存占用
     func setTabSnapshot(_ image: UIImage, for tabId: UUID) {
-        tabSnapshots[tabId] = image
-        saveSnapshot(image, for: tabId)
+        // 卡片预览只需要小缩略图，按宽度降采样，保持原始宽高比
+        let thumbnail = image.downsampled(toWidth: Self.snapshotTargetWidth)
+        tabSnapshots[tabId] = thumbnail
+        // 磁盘副本也保存降采样版本，减少 I/O 体积
+        saveSnapshot(thumbnail, for: tabId)
     }
+
+    /// 快照降采样目标宽度（@1x pt）
+    /// iPhone 卡片宽约 344pt，iPad 卡片更宽。
+    /// 400pt @1x 在两个平台上清晰度足够，单张内存约 50KB。
+    static let snapshotTargetWidth: CGFloat = 400
 
     /// Open or get a system tab (History, Bookmarks, Settings)
     /// System tabs are managed separately from regular tabs
@@ -528,24 +560,33 @@ class BrowserViewModel: ObservableObject {
         saveTabs()
     }
     
-    /// Save tabs to UserDefaults (only essential fields) and snapshots to disk
+    /// Save tabs to UserDefaults (only essential fields) — 立即保存
+    /// 仅用于结构性变更（增删 Tab、重排等），属性变更请使用 scheduleSaveTabs()
     func saveTabs() {
+        // 取消待执行的防抖任务，避免重复保存
+        saveTabsWorkItem?.cancel()
+        saveTabsWorkItem = nil
+
         let persistedTabs = tabs.map { PersistedTab(from: $0) }
         do {
             let data = try JSONEncoder().encode(persistedTabs)
             UserDefaults.standard.set(data, forKey: tabsKey)
 
-            // Save snapshots for all tabs
-            for tab in tabs {
-                if let snapshot = tabSnapshots[tab.id] {
-                    saveSnapshot(snapshot, for: tab.id)
-                }
-            }
-
             logger.debug("💾 [BrowserViewModel] 已保存 \(persistedTabs.count) 个标签页")
         } catch {
             logger.error("❌ [BrowserViewModel] 保存标签页失败: \(error)")
         }
+    }
+
+    /// 防抖保存：2 秒内多次调用只执行最后一次。
+    /// 适用于高频属性变更（标题、红点、收藏等），避免每次修改都触发磁盘 I/O。
+    func scheduleSaveTabs() {
+        saveTabsWorkItem?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.saveTabs()
+        }
+        saveTabsWorkItem = workItem
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: workItem)
     }
 
     // MARK: - Unread Status
@@ -555,7 +596,32 @@ class BrowserViewModel: ObservableObject {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }),
               tabs[index].hasUnreadMessage else { return }
         tabs[index].hasUnreadMessage = false
+        scheduleSaveTabs()
+    }
+
+    // MARK: - Memory Pressure Handling
+
+    /// 系统内存警告时自动回收资源：
+    /// 1. 释放所有非活跃 Tab 的 RootView（最大的内存消耗项，每个约 40MB）
+    /// 2. 释放快照内存副本（磁盘副本保留，标签列表滚动时按需从磁盘加载）
+    func handleMemoryWarning() {
+        let activeTabId = currentTabId
+        var releasedCount = 0
+
+        // 1. 释放所有非活跃 Tab 的 RootView
+        for tab in tabs where tab.id != activeTabId {
+            CanvasReactNativeHost.shared.removeViewForTab(tabId: tab.id)
+            releasedCount += 1
+        }
+
+        // 2. 释放快照内存副本（磁盘副本保留，按需加载）
+        let snapshotCount = tabSnapshots.count
+        tabSnapshots.removeAll()
+
+        // 立即持久化，确保数据安全
         saveTabs()
+
+        logger.warning("⚠️ [BrowserViewModel] 内存警告回收：释放 \(releasedCount) 个后台 RootView，清除 \(snapshotCount) 个内存快照")
     }
 
     // MARK: - Tab Group Management
@@ -995,7 +1061,7 @@ class BrowserViewModel: ObservableObject {
             userInfo: userInfo
         )
 
-        saveTabs()
+        scheduleSaveTabs()
     }
 
     func closeOtherTabs(keepTabId: UUID) {

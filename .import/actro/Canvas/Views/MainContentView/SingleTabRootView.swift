@@ -153,7 +153,8 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             "id": tab.id.uuidString,
             "title": tab.title,
             "backgroundColor": tab.backgroundColor,
-            "reloadKey": tab.reloadNonce
+            "reloadKey": tab.reloadNonce,
+            "status": tab.status.rawValue
         ]
 
         // Add icon and appUrl if available
@@ -244,10 +245,9 @@ struct SingleTabRootRepresentable: UIViewRepresentable {
             }
         }
 
-        // Single tab mode - 包装成数组以兼容旧版 JS 逻辑
+        // Single tab mode — 只传 tab 单对象，不再冗余包装成 tabs 数组
         var props: [String: Any] = [
             "singleTabMode": true,
-            "tabs": [tabDict],
             "tab": tabDict,
             "currentTabId": tab.id.uuidString,
             "isLeftPanelVisible": viewModel.isLeftPanelVisible(for: tab.id),
