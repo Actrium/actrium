@@ -61,6 +61,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     private var pendingGridSourceView: View? = null
     private var pendingGridActiveModel: ActiveModel? = null
 
+    // 追踪当前处于全屏状态的 tabId，避免重复调用 enterFullScreen / exitFullScreen
+    private var currentFullScreenTabId: String? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityTabletBinding.inflate(layoutInflater)
@@ -573,7 +576,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         }
 
         if (mode == PageMode.TAB) {
-            viewModel.enterFullScreen()
             // TAB 模式
             val sourceView = pendingGridSourceView
             val activeModel = pendingGridActiveModel
@@ -599,6 +601,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
                     // 3. flTabContent 先设置为 INVISIBLE（需要测量尺寸但不显示）
                     binding.flTabContent.visibility = View.INVISIBLE
+                    updateFullScreenState()
 
                     // 4. ivTransition 开始动画（从 Grid item 位置放大到全屏）
                     binding.ivTransition.visibility = View.VISIBLE
@@ -613,6 +616,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         binding.ivTransition.postDelayed({
                             binding.ivTransition.visibility = View.GONE
                             binding.flTabContent.visibility = View.VISIBLE
+                            updateFullScreenState()
                         }, 260)
                     }
                 } else {
@@ -622,6 +626,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                     binding.rlTitleGrid.visibility = View.GONE
                     binding.llSearch.visibility = View.GONE
                     binding.rvGridContent.visibility = View.GONE
+                    updateFullScreenState()
                 }
             } else {
                 // 无 sourceView，直接切换
@@ -630,9 +635,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 binding.rlTitleGrid.visibility = View.GONE
                 binding.llSearch.visibility = View.GONE
                 binding.rvGridContent.visibility = View.GONE
+                updateFullScreenState()
             }
         } else {
-            viewModel.exitFullScreen()
             // GRID 模式 - Tab → Grid 动画
 
             // 1. 截取当前 Tab 的 ReactRootView 截图设置到 ivTransition 上
@@ -654,6 +659,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
                 // 4. 隐藏 flTabContent
                 binding.flTabContent.visibility = View.GONE
+                updateFullScreenState()
 
                 // 5. 先让 rvGridContent 布局完成
                 binding.rvGridContent.visibility = View.VISIBLE
@@ -675,6 +681,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 binding.flTabContent.visibility = View.GONE
                 binding.rvGridContent.visibility = View.VISIBLE
                 binding.ivTransition.visibility = View.GONE
+                updateFullScreenState()
             }
         }
     }
@@ -817,6 +824,36 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         for (i in 0 until flTabContent.childCount) {
             val child = flTabContent.getChildAt(i)
             child.visibility = if (child.tag == tabId) View.VISIBLE else View.GONE
+        }
+        updateFullScreenState()
+    }
+
+    /**
+     * 根据当前 flTabContent 及其子 View 的可见性，更新全屏状态。
+     * 当某个 tab 的 ReactRootView 在 flTabContent 中可见且 flTabContent 本身可见时，
+     * 调用 enterFullScreen；当 tab 不再可见时，调用 exitFullScreen。
+     */
+    private fun updateFullScreenState() {
+        val flTabContent = binding.flTabContent
+        val isTabContentVisible = flTabContent.visibility == View.VISIBLE
+
+        // 查找当前在 flTabContent 中可见的 tab
+        var visibleTabId: String? = null
+        if (isTabContentVisible) {
+            for (i in 0 until flTabContent.childCount) {
+                val child = flTabContent.getChildAt(i)
+                if (child.visibility == View.VISIBLE) {
+                    visibleTabId = child.tag as? String
+                    break
+                }
+            }
+        }
+
+        // 状态发生变化时才调用，避免重复发送事件
+        if (visibleTabId != currentFullScreenTabId) {
+            currentFullScreenTabId?.let { viewModel.exitFullScreen(it) }
+            visibleTabId?.let { viewModel.enterFullScreen(it) }
+            currentFullScreenTabId = visibleTabId
         }
     }
 

@@ -370,22 +370,24 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
         }
     }
 
-    fun enterFullScreen() {
-        val tabId = _tabletUseCase.value?.currentApp?.getString("currentTabId") ?: return
+    fun enterFullScreen(tabId: String? = null) {
+        Log.e("TabletViewModel", "enterFullScreen:${tabId}")
+        val id = tabId ?: _tabletUseCase.value?.currentApp?.getString("currentTabId") ?: return
         EventBus.getDefault().post(
             NativeModuleEvent(
                 NativeModuleEvent.EVENT_TAB_ENTERED_FULLSCREEN,
-                mapOf("tabId" to tabId)
+                mapOf("tabId" to id)
             )
         )
     }
 
-    fun exitFullScreen() {
-        val tabId = _tabletUseCase.value?.currentApp?.getString("currentTabId") ?: return
+    fun exitFullScreen(tabId: String? = null) {
+        Log.e("TabletViewModel", "exitFullScreen:${tabId}")
+        val id = tabId ?: _tabletUseCase.value?.currentApp?.getString("currentTabId") ?: return
         EventBus.getDefault().post(
             NativeModuleEvent(
                 NativeModuleEvent.EVENT_TAB_EXITED_FULLSCREEN,
-                mapOf("tabId" to tabId)
+                mapOf("tabId" to id)
             )
         )
     }
