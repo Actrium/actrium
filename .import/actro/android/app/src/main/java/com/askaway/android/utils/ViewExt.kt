@@ -39,17 +39,29 @@ fun View.adjustKeyboard() {
     }
 }
 
-fun View.screenshot(fileName: String): String? {
+/**
+ * 截取 View 的 Bitmap 并保存到缓存文件。
+ *
+ * @param fileName  缓存文件名
+ * @param scaleFactor 缩放因子，默认 0.5f（宽高各缩小一半，像素量降为 1/4），适合 Grid 缩略图和过渡动画
+ * @param quality    JPEG 压缩质量 0-100，默认 70
+ */
+fun View.screenshot(fileName: String, scaleFactor: Float = 0.5f, quality: Int = 70): String? {
     try {
         if (width <= 0 || height <= 0) return null
-        val bitmap = createBitmap(width, height, Bitmap.Config.RGB_565)
+        val bitmapWidth = (width * scaleFactor).toInt().coerceAtLeast(1)
+        val bitmapHeight = (height * scaleFactor).toInt().coerceAtLeast(1)
+        val bitmap = createBitmap(bitmapWidth, bitmapHeight, Bitmap.Config.RGB_565)
         val canvas = Canvas(bitmap)
+        if (scaleFactor != 1f) {
+            canvas.scale(scaleFactor, scaleFactor)
+        }
         draw(canvas)
         val cacheDir = context.cacheDir
         val file = File(cacheDir, fileName)
 
         FileOutputStream(file).use { out ->
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, out)
         }
         return file.absolutePath
     } catch (e: Exception) {

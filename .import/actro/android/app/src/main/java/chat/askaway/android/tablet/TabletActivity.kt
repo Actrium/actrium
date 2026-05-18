@@ -30,7 +30,12 @@ import com.askaway.android.core.ReactNativeBundle
 import com.askaway.android.databinding.ActivityTabletBinding
 import com.askaway.android.utils.ViewAnimationHelper
 import com.askaway.android.utils.adjustKeyboard
-import com.askaway.android.utils.screenshot
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.modules.core.PermissionAwareActivity
@@ -706,18 +711,37 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
      */
     private fun captureScreenshots() {
         val appList = viewModel.tabletUseCase.value?.appList ?: return
+
+        // 在 UI 线程逐个截取 Bitmap（draw 必须在 UI 线程），
+        // 截完一张立刻提交到 IO 线程压缩保存，降低内存峰值
+        val saveJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
         for (item in appList) {
             val reactRootView = reactViewMap[item.id]
             if (reactRootView != null && reactRootView.width > 0 && reactRootView.height > 0) {
                 try {
-                    val screenshotPath = reactRootView.screenshot("${item.id}.jpg")
-                    if (screenshotPath != null) {
-                        item.screenshot = screenshotPath
-                    }
+                    val bitmap = captureViewBitmap(reactRootView, scaleFactor = 0.5f) ?: continue
+                    saveJobs.add(lifecycleScope.async<Unit>(Dispatchers.IO) {
+                        try {
+                            val file = File(cacheDir, "${item.id}.jpg")
+                            FileOutputStream(file).use { out ->
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 70, out)
+                            }
+                            item.screenshot = file.absolutePath
+                        } catch (e: Exception) {
+                            Log.e("TabletActivity", "Failed to save screenshot for ${item.id}", e)
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    })
                 } catch (e: Exception) {
                     Log.e("TabletActivity", "Failed to capture screenshot for ${item.id}", e)
                 }
             }
+        }
+
+        // 等待所有保存完成（不阻塞 UI 线程）
+        lifecycleScope.launch {
+            saveJobs.awaitAll()
         }
     }
 
@@ -735,13 +759,19 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
     /**
      * 截取 View 的 Bitmap
+     * @param scaleFactor 缩放因子，1f 为原始分辨率，0.5f 为宽高各缩小一半
      */
-    private fun captureViewBitmap(view: View): Bitmap? {
+    private fun captureViewBitmap(view: View, scaleFactor: Float = 1f): Bitmap? {
         if (view.width <= 0 || view.height <= 0) return null
         return try {
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            val w = (view.width * scaleFactor).toInt().coerceAtLeast(1)
+            val h = (view.height * scaleFactor).toInt().coerceAtLeast(1)
+            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
             bitmap.density = resources.displayMetrics.densityDpi
             val canvas = android.graphics.Canvas(bitmap)
+            if (scaleFactor != 1f) {
+                canvas.scale(scaleFactor, scaleFactor)
+            }
             view.draw(canvas)
             bitmap
         } catch (e: Exception) {
