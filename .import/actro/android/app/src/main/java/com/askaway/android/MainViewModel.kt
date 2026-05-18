@@ -13,6 +13,7 @@ import com.askaway.android.event.ReactModuleEvent
 import com.askaway.android.global.Params
 import com.askaway.android.model.ActiveModel
 import com.askaway.android.model.AppModel
+import com.askaway.android.model.AppStatus
 import com.askaway.android.utils.addMap
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -151,6 +152,7 @@ class MainViewModel(
                 val title = event.params["title"] as? String
                 val icon = event.params["icon"] as? String
                 val url = event.params["appUrl"] as? String
+                val status = event.params["status"] as? String
                 if (tabId != null) {
                     val index = _activeList.value.indexOfFirst { it.id == tabId }
                     if (index != -1) {
@@ -160,7 +162,8 @@ class MainViewModel(
                                 if (i == index) oldItem.copy(
                                     name = title ?: oldItem.name,
                                     icon = icon ?: oldItem.icon,
-                                    url = url ?: oldItem.url
+                                    url = url ?: oldItem.url,
+                                    status = status?.let { AppStatus.fromValue(it) } ?: oldItem.status
                                 ) else item
                             }
                         }

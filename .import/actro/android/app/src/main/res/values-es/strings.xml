@@ -10,4 +10,5 @@
     <string name="menu_close_other_tabs">Cerrar otras pestañas</string>
     <string name="menu_cancel_bookmark">Quitar marcador</string>
     <string name="active_empty_text">Las apps aparecen aquí\nPulsa \"+\" arriba</string>
+    <string name="server_closed">Servidor cerrado</string>
 </resources>
