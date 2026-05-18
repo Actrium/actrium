@@ -14,6 +14,7 @@ import com.askaway.android.event.ReactModuleEvent
 import com.askaway.android.global.Params
 import com.askaway.android.model.ActiveModel
 import com.askaway.android.model.AppModel
+import com.askaway.android.model.AppStatus
 import com.askaway.android.utils.addMap
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -129,6 +130,7 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
         val title = params["title"] as? String
         val icon = params["icon"] as? String
         val url = params["appUrl"] as? String
+        val status = params["status"] as? String
         if (tabId != null) {
             _tabletUseCase.value?.let { useCase ->
                 val appList = useCase.appList.toMutableList()
@@ -136,7 +138,12 @@ class TabletViewModel(val applicationContext: Context) : ViewModel() {
                 if (index != -1) {
                     val oldItem = appList[index]
                     appList[index] =
-                        oldItem.copy(name = title ?: oldItem.name, icon = icon ?: oldItem.icon, url = url ?: oldItem.url)
+                        oldItem.copy(
+                            name = title ?: oldItem.name,
+                            icon = icon ?: oldItem.icon,
+                            url = url ?: oldItem.url,
+                            status = status?.let { AppStatus.fromValue(it) } ?: oldItem.status
+                        )
                     Log.e("TabletViewModel", "${appList[index]}")
                 }
                 _tabletUseCase.value = _tabletUseCase.value?.copy(appList = appList)

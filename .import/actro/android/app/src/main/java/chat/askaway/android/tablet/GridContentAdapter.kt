@@ -17,6 +17,7 @@ import androidx.core.view.isVisible
 import androidx.recyclerview.widget.RecyclerView
 import com.askaway.android.R
 import com.askaway.android.model.ActiveModel
+import com.askaway.android.model.AppStatus
 
 class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
@@ -281,7 +282,11 @@ class GridContentAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
                 ivMark.isVisible = false
             } else {
                 ivMark.isVisible = true
-                tvName.text = item.name
+                tvName.text = if (item.status == AppStatus.DEAD) {
+                    "${item.name}(${itemView.context.getString(R.string.server_closed)})"
+                } else {
+                    item.name
+                }
                 if (item.isMarked) {
                     ivMark.setColorFilter(ContextCompat.getColor(ivMark.context, R.color.yellow))
                 } else {

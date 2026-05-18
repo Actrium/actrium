@@ -11,7 +11,9 @@ import com.askaway.android.R
 import com.askaway.android.databinding.ItemTabletAppBinding
 import com.askaway.android.databinding.ItemTabletAppLeftPadBinding
 import com.askaway.android.databinding.ItemTabletAppRightPadBinding
+import coil.load
 import com.askaway.android.model.ActiveModel
+import com.askaway.android.model.AppStatus
 
 class ActiveAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
 
@@ -240,7 +242,22 @@ class ActiveAdapter : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
             if (item.name.isEmpty()) {
                 binding.tvAppName.setText(R.string.blank_tab)
             } else {
-                binding.tvAppName.text = item.name
+                binding.tvAppName.text = if (item.status == AppStatus.DEAD) {
+                    "${item.name}(${binding.root.context.getString(R.string.server_closed)})"
+                } else {
+                    item.name
+                }
+            }
+
+            if (item.status == AppStatus.DEAD) {
+                binding.ivAppIcon.load(R.drawable.close_icon)
+            } else if (item.icon.isEmpty()) {
+                binding.ivAppIcon.load(R.drawable.app_default)
+            } else {
+                binding.ivAppIcon.load(item.icon) {
+                    placeholder(R.drawable.app_default)
+                    error(R.drawable.app_default)
+                }
             }
             binding.ivDel.setOnClickListener { onDeleteClick?.invoke(item) }
             binding.root.setOnClickListener { onItemClick?.invoke(item) }
