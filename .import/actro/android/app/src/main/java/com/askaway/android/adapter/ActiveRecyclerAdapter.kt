@@ -12,6 +12,7 @@ import coil.load
 import com.askaway.android.R
 import com.askaway.android.databinding.ItemActiveBinding
 import com.askaway.android.model.ActiveModel
+import com.askaway.android.model.AppStatus
 
 class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveViewHolder>() {
     private val items = mutableListOf<ActiveModel>()
@@ -163,7 +164,11 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
         ) {
             // 新增 item 延时显示前隐藏
             binding.root.visibility = if (isShown) View.VISIBLE else View.INVISIBLE
-            binding.tvAppName.text = item.name
+            binding.tvAppName.text = if (item.status == AppStatus.DEAD) {
+                "${item.name}(${binding.root.context.getString(R.string.server_closed)})"
+            } else {
+                item.name
+            }
 
             // 重新应用主题相关颜色（configChanges 包含 uiMode 时 View 不会自动更新颜色）
             binding.root.background = ContextCompat.getDrawable(binding.root.context, R.drawable.item_active_bg)
@@ -172,7 +177,9 @@ class ActiveRecyclerAdapter : RecyclerView.Adapter<ActiveRecyclerAdapter.ActiveV
             binding.ivDelete.setColorFilter(ContextCompat.getColor(binding.root.context, R.color.icon_1))
 
             // 统一使用 Coil 加载，让它自动处理视图复用
-            if (item.icon.isEmpty()) {
+            if (item.status == AppStatus.DEAD) {
+                binding.ivAppIcon.load(R.drawable.close_icon)
+            } else if (item.icon.isEmpty()) {
                 binding.ivAppIcon.load(R.drawable.app_default)
             } else {
                 binding.ivAppIcon.load(item.icon) {

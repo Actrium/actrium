@@ -10,5 +10,6 @@
     <string name="menu_close_other_tabs">Fermer les autres onglets</string>
     <string name="menu_cancel_bookmark">Supprimer le signet</string>
     <string name="active_empty_text">Apps s\'affichent ici\nCliquez sur \"+\" en haut</string>
+    <string name="server_closed">Serveur fermé</string>
 </resources>
 
