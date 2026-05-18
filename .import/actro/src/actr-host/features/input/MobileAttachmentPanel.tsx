@@ -1,15 +1,21 @@
 import React from 'react';
 import {
-  GestureResponderEvent,
-  PanResponder,
-  PanResponderGestureState,
   Platform,
-  ScrollView,
   StyleSheet,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
+import {
+  Gesture,
+  GestureDetector,
+} from 'react-native-gesture-handler';
+import Animated, {
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AppText, Icon } from '../../../components';
 import { useColors } from '../../../theme/useColors';
@@ -52,6 +58,11 @@ const PANEL_ROW_HEIGHT = 60;
 const PANEL_DOT_MARGIN_TOP = 18;
 const PANEL_DOT_SIZE = 8;
 const SECONDARY_ITEM_GAP = 12;
+const PAGE_COUNT = 2;
+const PAGE_SWIPE_ACTIVATE_OFFSET_X = 10;
+const PAGE_SWIPE_FAIL_OFFSET_Y = 8;
+const PAGE_SWIPE_VELOCITY_THRESHOLD = 500;
+const PAGE_SWIPE_ANIMATION_DURATION = 220;
 // 中文注释：安卓字体渲染偏大，这里单独收窄附件面板文案字号与行高。
 const PRIMARY_TEXT_FONT_SIZE = Platform.OS === 'android' ? 10 : 12;
 const PRIMARY_TEXT_LINE_HEIGHT = Platform.OS === 'android' ? 14 : 16;
@@ -71,6 +82,11 @@ export const getMobileAttachmentPanelHeight = (bottomInset: number) =>
   PANEL_DOT_MARGIN_TOP +
   PANEL_DOT_SIZE +
   getMobileAttachmentPanelBottomPadding(bottomInset);
+
+function clamp(value: number, min: number, max: number) {
+  'worklet';
+  return Math.min(Math.max(value, min), max);
+}
 
 export default function MobileAttachmentPanel({
   expanded,
@@ -95,12 +111,8 @@ export default function MobileAttachmentPanel({
   );
   const [panelWidth, setPanelWidth] = React.useState(0);
   const [page, setPage] = React.useState(0);
-  const pagerRef = React.useRef<ScrollView | null>(null);
-  const pageRef = React.useRef(0);
-
-  React.useEffect(() => {
-    pageRef.current = page;
-  }, [page]);
+  const translateX = useSharedValue(0);
+  const gestureStartTranslateX = useSharedValue(0);
 
   const firstPageActions = React.useMemo<PrimaryAction[]>(
     () => [
@@ -177,76 +189,89 @@ export default function MobileAttachmentPanel({
   }, [panelWidth]);
 
   React.useEffect(() => {
-    if (!expanded) {
-      return;
-    }
     setPage(0);
-    requestAnimationFrame(() => {
-      pagerRef.current?.scrollTo({ x: 0, animated: false });
-    });
-  }, [expanded]);
+    translateX.value = 0;
+  }, [expanded, translateX]);
 
-  const handleScrollEnd = React.useCallback(
-    (event: any) => {
+  const animateToPage = React.useCallback(
+    (nextPage: number) => {
       if (panelWidth <= 0) {
+        setPage(0);
+        translateX.value = 0;
         return;
       }
-      const nextPage = Math.round(
-        event.nativeEvent.contentOffset.x / panelWidth,
-      );
-      setPage(nextPage);
+
+      const clampedPage = Math.min(Math.max(nextPage, 0), PAGE_COUNT - 1);
+      setPage(clampedPage);
+      translateX.value = withTiming(-clampedPage * panelWidth, {
+        duration: PAGE_SWIPE_ANIMATION_DURATION,
+      });
     },
-    [panelWidth],
+    [panelWidth, translateX],
   );
 
-  const panResponder = React.useMemo(
+  React.useEffect(() => {
+    animateToPage(0);
+  }, [animateToPage, panelWidth]);
+
+  const panGesture = React.useMemo(
     () =>
-      PanResponder.create({
-        onStartShouldSetPanResponder: () => false,
-        onStartShouldSetPanResponderCapture: () => false,
-        onMoveShouldSetPanResponder: (
-          _: GestureResponderEvent,
-          gestureState: PanResponderGestureState,
-        ) =>
-          Math.abs(gestureState.dx) > 8 &&
-          Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
-        onMoveShouldSetPanResponderCapture: (
-          _: GestureResponderEvent,
-          gestureState: PanResponderGestureState,
-        ) =>
-          Math.abs(gestureState.dx) > 8 &&
-          Math.abs(gestureState.dx) > Math.abs(gestureState.dy),
-        onPanResponderRelease: (
-          _: GestureResponderEvent,
-          gestureState: PanResponderGestureState,
-        ) => {
+      Gesture.Pan()
+        .activeOffsetX([
+          -PAGE_SWIPE_ACTIVATE_OFFSET_X,
+          PAGE_SWIPE_ACTIVATE_OFFSET_X,
+        ])
+        .failOffsetY([
+          -PAGE_SWIPE_FAIL_OFFSET_Y,
+          PAGE_SWIPE_FAIL_OFFSET_Y,
+        ])
+        .onStart(() => {
+          gestureStartTranslateX.value = translateX.value;
+        })
+        .onUpdate((event) => {
           if (panelWidth <= 0) {
             return;
           }
 
-          const swipeThreshold = 36;
-          let nextPage = pageRef.current;
-
-          if (gestureState.dx <= -swipeThreshold) {
-            nextPage = Math.min(1, pageRef.current + 1);
-          } else if (gestureState.dx >= swipeThreshold) {
-            nextPage = Math.max(0, pageRef.current - 1);
+          // 中文注释：分页位移完全由手势驱动，拖动过程直接更新容器平移，避免 Android ScrollView 在抬手阶段停在中间。
+          translateX.value = clamp(
+            gestureStartTranslateX.value + event.translationX,
+            -panelWidth * (PAGE_COUNT - 1),
+            0,
+          );
+        })
+        .onEnd((event) => {
+          if (panelWidth <= 0) {
+            runOnJS(setPage)(0);
+            translateX.value = 0;
+            return;
           }
 
-          pagerRef.current?.scrollTo({
-            x: nextPage * panelWidth,
-            animated: true,
+          const progress = -translateX.value / panelWidth;
+          let nextPage = Math.round(progress);
+
+          if (event.velocityX <= -PAGE_SWIPE_VELOCITY_THRESHOLD) {
+            nextPage = Math.min(PAGE_COUNT - 1, Math.ceil(progress));
+          } else if (event.velocityX >= PAGE_SWIPE_VELOCITY_THRESHOLD) {
+            nextPage = Math.max(0, Math.floor(progress));
+          }
+
+          const clampedPage = Math.min(Math.max(nextPage, 0), PAGE_COUNT - 1);
+          translateX.value = withTiming(-clampedPage * panelWidth, {
+            duration: PAGE_SWIPE_ANIMATION_DURATION,
           });
-          setPage(nextPage);
-        },
-      }),
-    [panelWidth],
+          runOnJS(setPage)(clampedPage);
+        }),
+    [gestureStartTranslateX, panelWidth, translateX],
   );
+
+  const pagerAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: translateX.value }],
+  }));
 
   return (
     <View
       style={styles.panel}
-      {...panResponder.panHandlers}
       onLayout={(event) => {
         const nextWidth = event.nativeEvent.layout.width;
         if (Math.abs(nextWidth - panelWidth) > 1) {
@@ -255,93 +280,90 @@ export default function MobileAttachmentPanel({
       }}
     >
       <View style={styles.body}>
-        <ScrollView
-          ref={pagerRef}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          bounces={false}
-          onMomentumScrollEnd={handleScrollEnd}
-        >
-          <View style={[styles.page, { width: panelWidth || undefined }]}>
-            <View style={styles.firstPageRow}>
-              {firstPageActions.map((item) => (
-                <TouchableOpacity
-                  key={item.key}
-                  style={styles.primaryItem}
-                  activeOpacity={0.8}
-                  onPress={item.onPress}
-                >
-                  <Icon
-                    type={item.icon}
-                    size={22}
-                    color={colors.iconMobileAttachment}
-                  />
-                  <AppText
-                    style={styles.primaryText}
-                    numberOfLines={1}
-                    ellipsizeMode="tail"
-                  >
-                    {item.label}
-                  </AppText>
-                </TouchableOpacity>
-              ))}
-            </View>
-          </View>
+        <GestureDetector gesture={panGesture}>
+          <View style={styles.pagerViewport}>
+            <Animated.View style={[styles.pagerTrack, pagerAnimatedStyle]}>
+              <View style={[styles.page, { width: panelWidth || undefined }]}>
+                <View style={styles.firstPageRow}>
+                  {firstPageActions.map((item) => (
+                    <TouchableOpacity
+                      key={item.key}
+                      style={styles.primaryItem}
+                      activeOpacity={0.8}
+                      onPress={item.onPress}
+                    >
+                      <Icon
+                        type={item.icon}
+                        size={22}
+                        color={colors.iconMobileAttachment}
+                      />
+                      <AppText
+                        style={styles.primaryText}
+                        numberOfLines={1}
+                        ellipsizeMode="tail"
+                      >
+                        {item.label}
+                      </AppText>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
 
-          <View style={[styles.page, { width: panelWidth || undefined }]}>
-            <View style={styles.secondPageRow}>
-              {secondPageActions.map((item) => (
-                <TouchableOpacity
-                  key={item.key}
-                  style={[
-                    styles.secondaryItem,
-                    secondaryItemWidth != null && {
-                      width: secondaryItemWidth,
-                    },
-                    item.active && styles.secondaryItemActive,
-                  ]}
-                  activeOpacity={0.8}
-                  onPress={item.onPress}
-                >
-                  <View style={styles.secondaryIconWrap}>
-                    <Icon
-                      type={item.icon}
-                      size={22}
-                      color={
-                        item.active
-                          ? colors.iconMobileAttachmentActive
-                          : colors.iconMobileAttachment
-                      }
-                    />
-                  </View>
-                  <View style={styles.secondaryTextBlock}>
-                    <AppText
+              <View style={[styles.page, { width: panelWidth || undefined }]}>
+                <View style={styles.secondPageRow}>
+                  {secondPageActions.map((item) => (
+                    <TouchableOpacity
+                      key={item.key}
                       style={[
-                        styles.secondaryTitle,
-                        item.active && styles.secondaryTitleActive,
+                        styles.secondaryItem,
+                        secondaryItemWidth != null && {
+                          width: secondaryItemWidth,
+                        },
+                        item.active && styles.secondaryItemActive,
                       ]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
+                      activeOpacity={0.8}
+                      onPress={item.onPress}
                     >
-                      {item.title}
-                    </AppText>
-                    <AppText
-                      style={[
-                        styles.secondarySubtitle,
-                        item.active && styles.secondarySubtitleActive,
-                      ]}
-                      numberOfLines={1}
-                      ellipsizeMode="tail"
-                    >
-                      {item.subtitle}
-                    </AppText>
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
+                      <View style={styles.secondaryIconWrap}>
+                        <Icon
+                          type={item.icon}
+                          size={22}
+                          color={
+                            item.active
+                              ? colors.iconMobileAttachmentActive
+                              : colors.iconMobileAttachment
+                          }
+                        />
+                      </View>
+                      <View style={styles.secondaryTextBlock}>
+                        <AppText
+                          style={[
+                            styles.secondaryTitle,
+                            item.active && styles.secondaryTitleActive,
+                          ]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {item.title}
+                        </AppText>
+                        <AppText
+                          style={[
+                            styles.secondarySubtitle,
+                            item.active && styles.secondarySubtitleActive,
+                          ]}
+                          numberOfLines={1}
+                          ellipsizeMode="tail"
+                        >
+                          {item.subtitle}
+                        </AppText>
+                      </View>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </Animated.View>
           </View>
-        </ScrollView>
+        </GestureDetector>
 
         <View style={styles.pagerDots}>
           {[0, 1].map((pageIndex) => (
@@ -367,6 +389,13 @@ const makeStyles = (colors: ColorTokens, panelBottomPadding: number) =>
       paddingBottom: panelBottomPadding,
     },
     body: {},
+    pagerViewport: {
+      overflow: 'hidden',
+    },
+    pagerTrack: {
+      flexDirection: 'row',
+      width: '200%',
+    },
     page: {
       width: '100%',
       paddingHorizontal: PAGE_HORIZONTAL_PADDING,
