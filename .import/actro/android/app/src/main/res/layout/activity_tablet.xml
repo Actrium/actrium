@@ -161,6 +161,7 @@
                 android:id="@+id/flTabContent"
                 android:layout_gravity="center_horizontal"
                 android:layout_width="match_parent"
+                android:background="#F2F2F6"
                 android:layout_height="match_parent" />
 
             <androidx.recyclerview.widget.RecyclerView
