@@ -272,7 +272,7 @@ struct ChromeTabOverviewView: View {
                         ), count: columns),
                         spacing: lineSpacing
                     ) {
-                        ForEach(viewModel.tabsSortedBySlotPosition().map { $0.tab }) { tab in
+                        ForEach(viewModel.tabs) { tab in
                             let isHovering = hoveringOverTabId == tab.id
                             ChromeTabCardView(
                                 tab: tab,
