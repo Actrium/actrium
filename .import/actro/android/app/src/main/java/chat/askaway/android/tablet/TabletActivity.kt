@@ -798,7 +798,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 // 如果已经有 parent，先移除
                 (reactRootView.parent as? ViewGroup)?.removeView(reactRootView)
                 reactRootView.tag = item.id
-                reactRootView.visibility = View.GONE
+                reactRootView.visibility = View.INVISIBLE
                 flTabContent.addView(
                     reactRootView, index, FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
@@ -823,7 +823,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         val flTabContent = binding.flTabContent
         for (i in 0 until flTabContent.childCount) {
             val child = flTabContent.getChildAt(i)
-            child.visibility = if (child.tag == tabId) View.VISIBLE else View.GONE
+            child.visibility = if (child.tag == tabId) View.VISIBLE else View.INVISIBLE
         }
         updateFullScreenState()
     }
