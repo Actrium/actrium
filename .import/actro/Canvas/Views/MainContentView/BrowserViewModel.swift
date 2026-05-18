@@ -1006,15 +1006,25 @@ class BrowserViewModel: ObservableObject {
             return
         }
 
-        guard let pos1 = tabSlotPositions[id1],
-              let pos2 = tabSlotPositions[id2] else {
-            logger.warning(" Cannot swap: slot position not found")
+        guard let index1 = tabs.firstIndex(where: { $0.id == id1 }),
+              let index2 = tabs.firstIndex(where: { $0.id == id2 }) else {
+            logger.warning(" Cannot swap: tab not found in tabs array")
             return
         }
 
-        tabSlotPositions[id1] = pos2
-        tabSlotPositions[id2] = pos1
-        logger.debug("🔄 Swapped slot positions: \(pos1) ↔ \(pos2)")
+        // 交换 tabs 数组中元素的位置
+        tabs.swapAt(index1, index2)
+
+        // 同步更新 slot positions
+        if let pos1 = tabSlotPositions[id1], let pos2 = tabSlotPositions[id2] {
+            tabSlotPositions[id1] = pos2
+            tabSlotPositions[id2] = pos1
+        } else {
+            // slot positions 缺失时重新初始化
+            initializeSlotPositions()
+        }
+
+        logger.debug("🔄 Swapped tabs at indices: \(index1) ↔ \(index2)")
     }
 
     /// Get tabs sorted by their slot position
