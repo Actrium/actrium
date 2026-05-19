@@ -70,6 +70,8 @@
       "micPermissionRequest": "Demander la permission du micro",
       "misTouchDiscard": "Annulé (touche accidentelle)",
       "recordingFailed": "Échec de l'enregistrement",
+      "speechRecognitionPermissionTitle": "Aucune autorisation",
+      "speechRecognitionPermissionMsg": "Activez la reconnaissance vocale dans Réglages puis réessayez",
       "voiceSessionFailed": "Impossible de démarrer la session vocale, veuillez réessayer",
       "recordingStartFailed": "Impossible de démarrer l'enregistrement, veuillez réessayer",
       "userCancel": "Envoi annulé par l'utilisateur",

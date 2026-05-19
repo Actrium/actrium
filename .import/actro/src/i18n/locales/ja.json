@@ -70,6 +70,8 @@
       "micPermissionRequest": "マイクの権限をリクエスト",
       "misTouchDiscard": "誤操作により破棄されました",
       "recordingFailed": "録音に失敗しました",
+      "speechRecognitionPermissionTitle": "権限がありません",
+      "speechRecognitionPermissionMsg": "設定で音声認識の権限を有効にしてから再試行してください",
       "voiceSessionFailed": "音声セッションを開始できません。再試行してください。",
       "recordingStartFailed": "録音を開始できません。再試行してください。",
       "userCancel": "ユーザーにより送信がキャンセルされました",

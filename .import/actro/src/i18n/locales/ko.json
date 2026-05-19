@@ -70,6 +70,8 @@
       "micPermissionRequest": "마이크 권한 요청",
       "misTouchDiscard": "오터치로 취소됨",
       "recordingFailed": "녹음 실패",
+      "speechRecognitionPermissionTitle": "권한 없음",
+      "speechRecognitionPermissionMsg": "설정에서 음성 인식 권한을 켠 뒤 다시 시도해 주세요",
       "voiceSessionFailed": "음성 세션을 시작할 수 없습니다. 다시 시도해 주세요.",
       "recordingStartFailed": "녹음을 시작할 수 없습니다. 다시 시도해 주세요.",
       "userCancel": "사용자가 전송을 취소했습니다",
