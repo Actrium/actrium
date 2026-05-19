@@ -30,7 +30,12 @@ import com.askaway.android.core.ReactNativeBundle
 import com.askaway.android.databinding.ActivityTabletBinding
 import com.askaway.android.utils.ViewAnimationHelper
 import com.askaway.android.utils.adjustKeyboard
-import com.askaway.android.utils.screenshot
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
+import java.io.File
+import java.io.FileOutputStream
 import com.facebook.react.ReactRootView
 import com.facebook.react.modules.core.DefaultHardwareBackBtnHandler
 import com.facebook.react.modules.core.PermissionAwareActivity
@@ -60,6 +65,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
     // Grid → Tab 动画时传入的 sourceView
     private var pendingGridSourceView: View? = null
     private var pendingGridActiveModel: ActiveModel? = null
+
+    // 追踪当前处于全屏状态的 tabId，避免重复调用 enterFullScreen / exitFullScreen
+    private var currentFullScreenTabId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -573,7 +581,6 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         }
 
         if (mode == PageMode.TAB) {
-            viewModel.enterFullScreen()
             // TAB 模式
             val sourceView = pendingGridSourceView
             val activeModel = pendingGridActiveModel
@@ -599,6 +606,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
                     // 3. flTabContent 先设置为 INVISIBLE（需要测量尺寸但不显示）
                     binding.flTabContent.visibility = View.INVISIBLE
+                    updateFullScreenState()
 
                     // 4. ivTransition 开始动画（从 Grid item 位置放大到全屏）
                     binding.ivTransition.visibility = View.VISIBLE
@@ -613,6 +621,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                         binding.ivTransition.postDelayed({
                             binding.ivTransition.visibility = View.GONE
                             binding.flTabContent.visibility = View.VISIBLE
+                            updateFullScreenState()
                         }, 260)
                     }
                 } else {
@@ -622,6 +631,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                     binding.rlTitleGrid.visibility = View.GONE
                     binding.llSearch.visibility = View.GONE
                     binding.rvGridContent.visibility = View.GONE
+                    updateFullScreenState()
                 }
             } else {
                 // 无 sourceView，直接切换
@@ -630,9 +640,9 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 binding.rlTitleGrid.visibility = View.GONE
                 binding.llSearch.visibility = View.GONE
                 binding.rvGridContent.visibility = View.GONE
+                updateFullScreenState()
             }
         } else {
-            viewModel.exitFullScreen()
             // GRID 模式 - Tab → Grid 动画
 
             // 1. 截取当前 Tab 的 ReactRootView 截图设置到 ivTransition 上
@@ -654,6 +664,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
                 // 4. 隐藏 flTabContent
                 binding.flTabContent.visibility = View.GONE
+                updateFullScreenState()
 
                 // 5. 先让 rvGridContent 布局完成
                 binding.rvGridContent.visibility = View.VISIBLE
@@ -675,6 +686,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 binding.flTabContent.visibility = View.GONE
                 binding.rvGridContent.visibility = View.VISIBLE
                 binding.ivTransition.visibility = View.GONE
+                updateFullScreenState()
             }
         }
     }
@@ -699,18 +711,37 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
      */
     private fun captureScreenshots() {
         val appList = viewModel.tabletUseCase.value?.appList ?: return
+
+        // 在 UI 线程逐个截取 Bitmap（draw 必须在 UI 线程），
+        // 截完一张立刻提交到 IO 线程压缩保存，降低内存峰值
+        val saveJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
         for (item in appList) {
             val reactRootView = reactViewMap[item.id]
             if (reactRootView != null && reactRootView.width > 0 && reactRootView.height > 0) {
                 try {
-                    val screenshotPath = reactRootView.screenshot("${item.id}.jpg")
-                    if (screenshotPath != null) {
-                        item.screenshot = screenshotPath
-                    }
+                    val bitmap = captureViewBitmap(reactRootView, scaleFactor = 0.5f) ?: continue
+                    saveJobs.add(lifecycleScope.async<Unit>(Dispatchers.IO) {
+                        try {
+                            val file = File(cacheDir, "${item.id}.jpg")
+                            FileOutputStream(file).use { out ->
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 70, out)
+                            }
+                            item.screenshot = file.absolutePath
+                        } catch (e: Exception) {
+                            Log.e("TabletActivity", "Failed to save screenshot for ${item.id}", e)
+                        } finally {
+                            bitmap.recycle()
+                        }
+                    })
                 } catch (e: Exception) {
                     Log.e("TabletActivity", "Failed to capture screenshot for ${item.id}", e)
                 }
             }
+        }
+
+        // 等待所有保存完成（不阻塞 UI 线程）
+        lifecycleScope.launch {
+            saveJobs.awaitAll()
         }
     }
 
@@ -728,13 +759,19 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
 
     /**
      * 截取 View 的 Bitmap
+     * @param scaleFactor 缩放因子，1f 为原始分辨率，0.5f 为宽高各缩小一半
      */
-    private fun captureViewBitmap(view: View): Bitmap? {
+    private fun captureViewBitmap(view: View, scaleFactor: Float = 1f): Bitmap? {
         if (view.width <= 0 || view.height <= 0) return null
         return try {
-            val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+            val w = (view.width * scaleFactor).toInt().coerceAtLeast(1)
+            val h = (view.height * scaleFactor).toInt().coerceAtLeast(1)
+            val bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.RGB_565)
             bitmap.density = resources.displayMetrics.densityDpi
             val canvas = android.graphics.Canvas(bitmap)
+            if (scaleFactor != 1f) {
+                canvas.scale(scaleFactor, scaleFactor)
+            }
             view.draw(canvas)
             bitmap
         } catch (e: Exception) {
@@ -791,7 +828,7 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
                 // 如果已经有 parent，先移除
                 (reactRootView.parent as? ViewGroup)?.removeView(reactRootView)
                 reactRootView.tag = item.id
-                reactRootView.visibility = View.GONE
+                reactRootView.visibility = View.INVISIBLE
                 flTabContent.addView(
                     reactRootView, index, FrameLayout.LayoutParams(
                         FrameLayout.LayoutParams.MATCH_PARENT,
@@ -816,7 +853,37 @@ class TabletActivity : AppCompatActivity(), DefaultHardwareBackBtnHandler, Permi
         val flTabContent = binding.flTabContent
         for (i in 0 until flTabContent.childCount) {
             val child = flTabContent.getChildAt(i)
-            child.visibility = if (child.tag == tabId) View.VISIBLE else View.GONE
+            child.visibility = if (child.tag == tabId) View.VISIBLE else View.INVISIBLE
+        }
+        updateFullScreenState()
+    }
+
+    /**
+     * 根据当前 flTabContent 及其子 View 的可见性，更新全屏状态。
+     * 当某个 tab 的 ReactRootView 在 flTabContent 中可见且 flTabContent 本身可见时，
+     * 调用 enterFullScreen；当 tab 不再可见时，调用 exitFullScreen。
+     */
+    private fun updateFullScreenState() {
+        val flTabContent = binding.flTabContent
+        val isTabContentVisible = flTabContent.visibility == View.VISIBLE
+
+        // 查找当前在 flTabContent 中可见的 tab
+        var visibleTabId: String? = null
+        if (isTabContentVisible) {
+            for (i in 0 until flTabContent.childCount) {
+                val child = flTabContent.getChildAt(i)
+                if (child.visibility == View.VISIBLE) {
+                    visibleTabId = child.tag as? String
+                    break
+                }
+            }
+        }
+
+        // 状态发生变化时才调用，避免重复发送事件
+        if (visibleTabId != currentFullScreenTabId) {
+            currentFullScreenTabId?.let { viewModel.exitFullScreen(it) }
+            visibleTabId?.let { viewModel.enterFullScreen(it) }
+            currentFullScreenTabId = visibleTabId
         }
     }
 

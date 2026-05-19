@@ -24,6 +24,8 @@ const rillRoot = path.resolve(__dirname, '..', 'rill');
 const loomShimsDir = path.resolve(__dirname, 'loom', 'src', 'actr-host', 'shims');
 const loomNodeModules = path.resolve(__dirname, 'loom', 'node_modules');
 const yarnLinkRoot = path.resolve(process.env.HOME || '', '.config', 'yarn', 'link');
+const rillNodeModules = path.resolve(__dirname, '..', 'rill', 'node_modules');
+const askitNodeModules = path.resolve(__dirname, '..', 'askit', 'node_modules');
 
 const config = {
   watchFolders: [
@@ -33,11 +35,15 @@ const config = {
     askitRoot,
     rillRoot,
     yarnLinkRoot,
+    rillRoot,
+    askitRoot,
   ],
   resolver: {
     unstable_enableSymlinks: true,
     nodeModulesPaths: [
       loomNodeModules,
+      rillNodeModules,
+      askitNodeModules,
       path.resolve(__dirname, 'node_modules'),
     ],
     // 确保 react 和 react-native 使用主项目的版本，避免冲突
@@ -62,16 +68,57 @@ const config = {
       // 屏蔽 supermark 子包内嵌 node_modules 中的 react / react-native
       new RegExp(`${supermarkRoot}/packages/.*/node_modules/react/.*`),
       new RegExp(`${supermarkRoot}/packages/.*/node_modules/react-native/.*`),
+      // 屏蔽 rill 中的 react
+      new RegExp(`${rillRoot}/node_modules/react/.*`),
+      // 屏蔽 askit 中的 react / react-native
+      new RegExp(`${askitRoot}/node_modules/react/.*`),
+      new RegExp(`${askitRoot}/node_modules/react-native/.*`),
     ],
     resolveRequest: (context, moduleName, platform) => {
+      // ---- rill/askit 从源码目录解析 ----
+      // yarn file: 依赖是物理拷贝，源码更新后 node_modules 副本不会同步。
+      // 让 Metro 直接从 rillRoot/askitRoot 解析，确保始终使用最新源码。
+      if (moduleName === 'rill') {
+        return { type: 'sourceFile', filePath: path.resolve(rillRoot, 'src', 'host', 'index.ts') };
+      }
+      if (moduleName === 'rill/let') {
+        return { type: 'sourceFile', filePath: path.resolve(rillRoot, 'src', 'guest', 'let', 'index.ts') };
+      }
+      if (moduleName === 'rill/host/preset') {
+        return { type: 'sourceFile', filePath: path.resolve(rillRoot, 'src', 'host', 'preset', 'index.ts') };
+      }
+      if (moduleName === 'rill/sandbox') {
+        return { type: 'sourceFile', filePath: path.resolve(rillRoot, 'src', 'sandbox', 'index.ts') };
+      }
+      if (moduleName === 'rill/sandbox/native') {
+        return { type: 'sourceFile', filePath: path.resolve(rillRoot, 'src', 'sandbox', 'native', 'index.ts') };
+      }
+      if (moduleName === 'rill/sandbox/web') {
+        return { type: 'sourceFile', filePath: path.resolve(rillRoot, 'src', 'sandbox', 'web', 'index.ts') };
+      }
+      if (moduleName === 'rill/devtools') {
+        return { type: 'sourceFile', filePath: path.resolve(rillRoot, 'src', 'devtools', 'index.ts') };
+      }
+      if (moduleName === 'askit') {
+        return { type: 'sourceFile', filePath: path.resolve(askitRoot, 'src', 'index.host.ts') };
+      }
+      if (moduleName === 'askit/core') {
+        return { type: 'sourceFile', filePath: path.resolve(askitRoot, 'src', 'core', 'index.ts') };
+      }
+      if (moduleName === 'askit/contracts') {
+        return { type: 'sourceFile', filePath: path.resolve(askitRoot, 'src', 'contracts', 'index.ts') };
+      }
+
       // ---- 保证 rill/askit 中的 React 相关模块解析到主项目副本 ----
-      // rill/askit 是物理拷贝，自带了 node_modules/react 等依赖，
+      // rill/askit 源码目录自带了 node_modules/react 等依赖，
       // 如果不重定向，askit 内部的 import { useRef } from 'react' 会解析到自己的 react 副本，
       // 导致 React 实例不一致，出现 "Invalid hook call" 错误。
       const originPath = context.originModulePath || '';
       const isFromLinkedPackage =
         originPath.includes('/node_modules/rill/') ||
-        originPath.includes('/node_modules/askit/');
+        originPath.includes('/node_modules/askit/') ||
+        originPath.startsWith(rillRoot + path.sep) ||
+        originPath.startsWith(askitRoot + path.sep);
 
       if (isFromLinkedPackage) {
         if (moduleName === 'react') {
@@ -139,22 +186,23 @@ const config = {
       // ---- @supramark/* 包统一从源码目录解析 ----
       // yarn file: 依赖是物理拷贝，源码更新后 node_modules 副本不会同步。
       // 让 Metro 直接从 supermarkRoot 解析，确保始终使用最新源码（含图片等资源）。
-      // if (moduleName.startsWith('@supramark/')) {
-      //   const fullName = moduleName.slice('@supramark/'.length);
-      //   if (!fullName.includes('/')) {
-      //     // 顶层包导入（不含子路径如 /web）
-      //     let sourceDir;
-      //     if (fullName === 'core') {
-      //       sourceDir = path.resolve(supermarkRoot, 'packages', 'core');
-      //     } else if (fullName.startsWith('feature-')) {
-      //       sourceDir = path.resolve(supermarkRoot, 'packages', 'features', fullName);
-      //     } else {
-      //       sourceDir = path.resolve(supermarkRoot, 'packages', 'renderers', fullName);
-      //     }
-      //     // core 使用 RN 专用入口 index.rn.ts，其余使用 src/index.ts
-      //     const entryFile = fullName === 'core' ? 'src/index.rn.ts' : 'src/index.ts';
-      //     return { type: 'sourceFile', filePath: path.resolve(sourceDir, entryFile) };
-      //   }
+      if (moduleName.startsWith('@supramark/')) {
+        const fullName = moduleName.slice('@supramark/'.length);
+        if (!fullName.includes('/')) {
+          // 顶层包导入（不含子路径如 /web）
+          let sourceDir;
+          if (fullName === 'core') {
+            sourceDir = path.resolve(supermarkRoot, 'packages', 'core');
+          } else if (fullName.startsWith('feature-')) {
+            sourceDir = path.resolve(supermarkRoot, 'packages', 'features', fullName);
+          } else {
+            sourceDir = path.resolve(supermarkRoot, 'packages', 'renderers', fullName);
+          }
+          // core 使用 RN 专用入口 index.rn.ts，其余使用 src/index.ts
+          const entryFile = fullName === 'core' ? 'src/index.rn.ts' : 'src/index.ts';
+          return { type: 'sourceFile', filePath: path.resolve(sourceDir, entryFile) };
+        }
+      }
       // 子路径导入（如 @supramark/feature-admonition/web）暂走默认解析
 
       // ---- supramark peer dependency: pako ----
