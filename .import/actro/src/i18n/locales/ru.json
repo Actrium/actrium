@@ -70,6 +70,8 @@
       "micPermissionRequest": "Запросить разрешение на микрофон",
       "misTouchDiscard": "Отменено (случайное касание)",
       "recordingFailed": "Ошибка записи",
+      "speechRecognitionPermissionTitle": "Нет доступа",
+      "speechRecognitionPermissionMsg": "Включите распознавание речи в настройках и повторите попытку",
       "voiceSessionFailed": "Не удалось запустить голосовую сессию, попробуйте еще раз",
       "recordingStartFailed": "Не удалось начать запись, попробуйте еще раз",
       "userCancel": "Отправка отменена пользователем",

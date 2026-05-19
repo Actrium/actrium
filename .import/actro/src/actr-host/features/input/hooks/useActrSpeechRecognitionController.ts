@@ -1,10 +1,13 @@
 import React, { useCallback, useRef, useState } from 'react';
+import { Linking } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import {
   speechRecognitionService,
   type SpeechRecognitionErrorEvent,
   type SpeechRecognitionTranscriptEvent,
 } from '../../../utils';
 import { stopAllVoicePlayback } from '../../chat/hooks/useReadAloudPlayback';
+import { GlobalAlert } from '../../../../components';
 
 interface UseActrSpeechRecognitionControllerParams {
   processMessageSend: (content: string) => Promise<unknown>;
@@ -22,6 +25,7 @@ interface UseActrSpeechRecognitionControllerResult {
 export function useActrSpeechRecognitionController(
   params: UseActrSpeechRecognitionControllerParams,
 ): UseActrSpeechRecognitionControllerResult {
+  const { t } = useTranslation();
   const { processMessageSend } = params;
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const [isCancellingVoice, setIsCancellingVoice] = useState(false);
@@ -121,6 +125,20 @@ export function useActrSpeechRecognitionController(
       console.warn(
         '[useActrSpeechRecognitionController] speech recognition permission denied or unavailable',
       );
+      GlobalAlert.alert(
+        t('actr.voice.speechRecognitionPermissionTitle'),
+        t('actr.voice.speechRecognitionPermissionMsg'),
+        [
+          { text: t('common.cancel'), style: 'cancel' },
+          {
+            text: t('actr.voice.goToSettings'),
+            variant: 'primary',
+            // 中文注释：语音识别启动失败时统一从业务层引导去系统设置，
+            // 避免不同平台分别弹原生权限框，导致交互和视觉不一致。
+            onPress: () => Linking.openSettings(),
+          },
+        ],
+      );
       return;
     }
 
@@ -128,7 +146,7 @@ export function useActrSpeechRecognitionController(
       '[useActrSpeechRecognitionController] speech recognition session started:',
       activeSessionIdRef.current,
     );
-  }, [resetRecognitionState, setVoiceRecording]);
+  }, [resetRecognitionState, setVoiceRecording, t]);
 
   const handleVoiceEnd = useCallback(
     async (isCancelled: boolean) => {
