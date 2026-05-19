@@ -70,6 +70,8 @@
       "micPermissionRequest": "Solicitar permiso de micrófono",
       "misTouchDiscard": "Descartado (toque accidental)",
       "recordingFailed": "Error de grabación",
+      "speechRecognitionPermissionTitle": "Sin permiso",
+      "speechRecognitionPermissionMsg": "Activa el reconocimiento de voz en Ajustes y vuelve a intentarlo",
       "voiceSessionFailed": "No se pudo iniciar la sesión de voz, intenta de nuevo",
       "recordingStartFailed": "No se pudo iniciar la grabación, intenta de nuevo",
       "userCancel": "Envío cancelado por el usuario",

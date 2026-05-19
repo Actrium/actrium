@@ -70,6 +70,8 @@
       "micPermissionRequest": "請求麥克風權限",
       "misTouchDiscard": "誤觸丟棄",
       "recordingFailed": "錄音失敗",
+      "speechRecognitionPermissionTitle": "無權限",
+      "speechRecognitionPermissionMsg": "請在系統設定中開啟語音辨識權限後再試",
       "voiceSessionFailed": "無法啟動語音會話，請重試",
       "recordingStartFailed": "無法啟動錄製，請重試",
       "userCancel": "用戶取消發送",

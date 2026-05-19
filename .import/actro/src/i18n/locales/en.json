@@ -70,6 +70,8 @@
       "micPermissionRequest": "Request microphone permission",
       "misTouchDiscard": "Discarded (accidental touch)",
       "recordingFailed": "Recording failed",
+      "speechRecognitionPermissionTitle": "Permission Required",
+      "speechRecognitionPermissionMsg": "Please enable speech recognition in Settings and try again",
       "voiceSessionFailed": "Unable to start voice session, please try again",
       "recordingStartFailed": "Unable to start recording, please try again",
       "userCancel": "User cancelled sending",
