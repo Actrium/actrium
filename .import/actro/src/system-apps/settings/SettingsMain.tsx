@@ -2,6 +2,8 @@ import {
   ScrollView,
   StyleSheet,
   Image,
+  Platform,
+  StatusBar,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -38,7 +40,13 @@ export const SettingsMain = ({
   const userInfo = useUserStore((state) => state.userInfo);
   const isLoggedIn = !!userInfo;
   const hasNativeNavigationBar = !!PhoneNavigationBar;
-  const navigationBarHeight = hasNativeNavigationBar ? insets.top + 66 : 0;
+  // 中文注释：Android pad 上 insets.top 为 0，原生导航栏标题被系统状态栏遮挡，
+  // 用 StatusBar.currentHeight 补偿。Android phone 和 iOS 不受影响。
+  const isAndroidPad = Platform.OS === 'android' && isTablet;
+  const statusBarHeight = isAndroidPad ? (StatusBar.currentHeight ?? 0) : 0;
+  const navigationBarHeight = hasNativeNavigationBar
+    ? (isAndroidPad ? statusBarHeight : insets.top) + 66
+    : 0;
 
   return (
     <View style={styles.container}>
@@ -47,7 +55,12 @@ export const SettingsMain = ({
         <PhoneNavigationBar
           title='AskAway'
           showLargeTitle={true}
-          style={[styles.headerOverlay, { height: navigationBarHeight }]}
+          style={[
+            styles.headerOverlay,
+            { height: navigationBarHeight },
+            // 中文注释：Android pad 上原生导航栏需要顶部留出状态栏空间，让标题渲染在状态栏下方。
+            isAndroidPad ? { paddingTop: statusBarHeight } : {},
+          ]}
         />
       ) : null}
 
