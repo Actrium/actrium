@@ -1,6 +1,4 @@
 import {
-  Alert,
-  Linking,
   NativeEventEmitter,
   NativeModules,
   PermissionsAndroid,
@@ -106,12 +104,6 @@ export class SpeechRecognitionService {
       }
 
       this.state = 'error';
-
-      // 中文注释：权限被拒绝后直接引导去系统设置，避免业务层只感知到静默失败。
-      Alert.alert('需要麦克风权限', '需要麦克风权限才能使用语音输入', [
-        { text: '取消', style: 'cancel' },
-        { text: '去设置', onPress: () => Linking.openSettings() },
-      ]);
       return false;
     } catch (error) {
       this.state = 'error';

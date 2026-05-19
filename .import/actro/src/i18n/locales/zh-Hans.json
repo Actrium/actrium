@@ -70,6 +70,8 @@
       "micPermissionRequest": "请求麦克风权限",
       "misTouchDiscard": "误触丢弃",
       "recordingFailed": "录音失败",
+      "speechRecognitionPermissionTitle": "无权限",
+      "speechRecognitionPermissionMsg": "请在系统设置中开启语音识别权限后再试",
       "voiceSessionFailed": "无法启动语音会话，请重试",
       "recordingStartFailed": "无法启动录制，请重试",
       "userCancel": "用户取消发送",
