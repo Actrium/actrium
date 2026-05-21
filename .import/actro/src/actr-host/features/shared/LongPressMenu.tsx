@@ -24,7 +24,10 @@ import {
 import { getHostShadows } from '../../styles/shadows';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import { triggerHaptic } from '../../utils/haptics';
 
 interface MenuOption {
@@ -78,27 +81,68 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     opacity: menuOpacityAnim.value,
   }));
 
+  const resolveWindowPressLocation = useCallback(
+    (
+      pageX: number | undefined,
+      pageY: number | undefined,
+      fallback?: { x: number; y: number },
+      onResolved?: (position: { x: number; y: number }) => void,
+    ) => {
+      triggerRef.current?.measureInWindow((windowX, windowY, width, height) => {
+        triggerRef.current?.measure((_x, _y, _width, _height, pageLeft, pageTop) => {
+          if (pageX !== undefined && pageY !== undefined) {
+            // 中文注释：page 坐标和 Modal 所在的 window 坐标并不总是同一个原点，
+            // 用宿主容器同时测出两套坐标后求偏移量，才能把触点稳定映射到菜单坐标系。
+            const resolvedPosition = {
+              x: pageX + (windowX - pageLeft),
+              y: pageY + (windowY - pageTop),
+            };
+            pressLocationRef.current = resolvedPosition;
+            onResolved?.(resolvedPosition);
+            return;
+          }
+
+          const resolvedPosition = fallback ?? {
+            x: windowX + width / 2,
+            y: windowY + height / 2,
+          };
+          pressLocationRef.current = resolvedPosition;
+          onResolved?.(resolvedPosition);
+        });
+      });
+    },
+    [],
+  );
+
   const handleLongPressTrigger = useCallback(
-    (absoluteX: number, absoluteY: number) => {
+    (pageX?: number, pageY?: number) => {
       if (disabled) return;
 
-      pressLocationRef.current = { x: absoluteX, y: absoluteY };
       triggerHaptic('impactHeavy');
 
+      resolveWindowPressLocation(
+        pageX,
+        pageY,
+        pressLocationRef.current ?? undefined,
+        (resolvedPressLocation) => {
+          setPressLocation(resolvedPressLocation);
+        },
+      );
       triggerRef.current?.measureInWindow((x, y, width, height) => {
-        setPressLocation(
-          pressLocationRef.current ?? {
+        if (!pressLocationRef.current) {
+          pressLocationRef.current = {
             x: x + width / 2,
             y: y + height / 2,
-          },
-        );
+          };
+          setPressLocation(pressLocationRef.current);
+        }
         setMenuSize((prev) => ({ ...prev, height: 0 }));
         backdropOpacity.value = 0;
         menuOpacityAnim.value = 0;
         setVisible(true);
       });
     },
-    [disabled],
+    [disabled, resolveWindowPressLocation],
   );
 
   const rngLongPressGesture = React.useMemo(
@@ -121,42 +165,26 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
         nativeEvent.pageX !== undefined &&
         nativeEvent.pageY !== undefined
       ) {
-        pressLocationRef.current = {
-          x: nativeEvent.pageX,
-          y: nativeEvent.pageY,
-        };
-      } else if (
-        nativeEvent.locationX !== undefined &&
-        nativeEvent.locationY !== undefined
-      ) {
-        // 如果是相对位置，需要转换为绝对位置
-        triggerRef.current?.measureInWindow((x, y) => {
-          pressLocationRef.current = {
-            x: x + nativeEvent.locationX,
-            y: y + nativeEvent.locationY,
-          };
-        });
+        resolveWindowPressLocation(
+          nativeEvent.pageX,
+          nativeEvent.pageY,
+        );
       }
     }
   };
 
-  const handleLongPress = () => {
+  const handleLongPress = (event: GestureResponderEvent) => {
     if (disabled) return;
 
-    triggerHaptic('impactHeavy');
+    const nativeEvent = event?.nativeEvent;
+    const pageX = nativeEvent?.pageX;
+    const pageY = nativeEvent?.pageY;
 
-    triggerRef.current?.measureInWindow((x, y, width, height) => {
-      setPressLocation(
-        pressLocationRef.current ?? {
-          x: x + width / 2,
-          y: y + height / 2,
-        },
-      );
-      setMenuSize((prev) => ({ ...prev, height: 0 }));
-      backdropOpacity.value = 0;
-      menuOpacityAnim.value = 0;
-      setVisible(true);
-    });
+    if (pageX !== undefined && pageY !== undefined) {
+      resolveWindowPressLocation(pageX, pageY);
+    }
+
+    handleLongPressTrigger(pageX, pageY);
   };
 
   const close = () => {
@@ -187,12 +215,18 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     const screenWidth = Dimensions.get('window').width;
     const horizontalMargin = 20;
     const verticalMargin = 20;
+    const menuVisualSafeBuffer = 12;
+    const safeAreaContentHeight = Math.max(
+      screenHeight - insets.top - insets.bottom,
+      0,
+    );
     const topBoundary = Math.max(
-      insets.top + verticalMargin,
+      verticalMargin + menuVisualSafeBuffer,
       verticalMargin,
     );
     const bottomBoundary =
-      screenHeight - Math.max(insets.bottom + verticalMargin, verticalMargin);
+      safeAreaContentHeight -
+      Math.max(verticalMargin + menuVisualSafeBuffer, verticalMargin);
 
     const menuWidth = longPressMenu.width;
     const estimatedMenuHeight =
@@ -200,9 +234,11 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
       options.length * (spacing.md * 2 + 24) +
       Math.max(0, options.length - 1) * spacing.xxs;
     const menuHeight = menuSize.height || estimatedMenuHeight;
+    const safeAreaRelativePressY = pressLocation.y - insets.top;
 
-    // 中文注释：菜单纵向以手指位置为垂直中心，再约束不超出屏幕安全区域。
-    const centeredTop = pressLocation.y - menuHeight / 2;
+    // 中文注释：Modal 内容层先被 SafeAreaView 限制在安全区内，
+    // 这里再把触点 Y 转成安全区内部坐标，避免菜单进入刘海/灵动岛区域。
+    const centeredTop = safeAreaRelativePressY - menuHeight / 2;
     const maxTop = Math.max(topBoundary, bottomBoundary - menuHeight);
     const top = Math.min(Math.max(centeredTop, topBoundary), maxTop);
 
@@ -219,60 +255,67 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
         onRequestClose={close}
       >
         <TouchableWithoutFeedback onPress={close}>
-          <Animated.View style={[styles.modalBackdrop, backdropAnimatedStyle]}>
+          <SafeAreaView
+            style={styles.modalSafeArea}
+            edges={['top', 'bottom', 'left', 'right']}
+          >
             <Animated.View
-              style={[
-                styles.menuContainer,
-                menuAnimatedStyle,
-                {
-                  top,
-                  left,
-                  width: menuWidth,
-                },
-              ]}
-              onLayout={(event) => {
-                const { width, height } = event.nativeEvent.layout;
-                if (
-                  Math.abs(width - menuSize.width) > 1 ||
-                  Math.abs(height - menuSize.height) > 1
-                ) {
-                  setMenuSize({ width, height });
-                }
-                if (height > 0) {
-                  menuOpacityAnim.value = withTiming(1, { duration: 150 });
-                }
-              }}
+              style={[styles.modalBackdrop, backdropAnimatedStyle]}
             >
-              {options.map((option, index) => (
-                <Pressable
-                  key={index}
-                  style={({ pressed }) => [
-                    styles.menuItem,
-                    pressed && styles.menuItemPressed,
-                  ]}
-                  onPress={() => {
-                    option.onPress({
-                      top,
-                      left,
-                      width: menuWidth,
-                    });
-                    close();
-                  }}
-                >
-                  {option.icon}
-                  <AppText
-                    variant="menuLabel"
-                    style={[
-                      styles.menuText,
-                      option.textColor && { color: option.textColor },
+              <Animated.View
+                style={[
+                  styles.menuContainer,
+                  menuAnimatedStyle,
+                  {
+                    top,
+                    left,
+                    width: menuWidth,
+                  },
+                ]}
+                onLayout={(event) => {
+                  const { width, height } = event.nativeEvent.layout;
+                  if (
+                    Math.abs(width - menuSize.width) > 1 ||
+                    Math.abs(height - menuSize.height) > 1
+                  ) {
+                    setMenuSize({ width, height });
+                  }
+                  if (height > 0) {
+                    menuOpacityAnim.value = withTiming(1, { duration: 150 });
+                  }
+                }}
+              >
+                {options.map((option, index) => (
+                  <Pressable
+                    key={index}
+                    style={({ pressed }) => [
+                      styles.menuItem,
+                      pressed && styles.menuItemPressed,
                     ]}
+                    onPress={() => {
+                      option.onPress({
+                        top: top + insets.top,
+                        left,
+                        width: menuWidth,
+                      });
+                      close();
+                    }}
                   >
-                    {option.label}
-                  </AppText>
-                </Pressable>
-              ))}
+                    {option.icon}
+                    <AppText
+                      variant="menuLabel"
+                      style={[
+                        styles.menuText,
+                        option.textColor && { color: option.textColor },
+                      ]}
+                    >
+                      {option.label}
+                    </AppText>
+                  </Pressable>
+                ))}
+              </Animated.View>
             </Animated.View>
-          </Animated.View>
+          </SafeAreaView>
         </TouchableWithoutFeedback>
       </Modal>
     );
@@ -320,6 +363,9 @@ const makeStyles = (colors: ColorTokens) => {
   const hostShadows = getHostShadows(colors);
 
   return StyleSheet.create({
+    modalSafeArea: {
+      flex: 1,
+    },
     modalBackdrop: {
       flex: 1,
       backgroundColor: 'rgba(0,0,0,0.1)',

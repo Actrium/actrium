@@ -1,5 +1,11 @@
 import React, { useRef, useState } from 'react';
-import { View, StyleSheet, NativeModules, useWindowDimensions } from 'react-native';
+import {
+  View,
+  StyleSheet,
+  NativeModules,
+  useWindowDimensions,
+  type LayoutChangeEvent,
+} from 'react-native';
 import LocationPicker from '../extension/LocationPicker';
 import { useAttachmentManager } from '../../hooks/useAttachmentManager';
 import { useInputToolboxState } from '../../hooks/useInputToolboxState';
@@ -26,6 +32,7 @@ interface ActrInputProps {
   variant?: 'pad' | 'mobile';
   showTopToast?: (message: string) => void;
   mobileAttachmentController?: PhoneAttachmentPanelController;
+  onLayout?: (event: LayoutChangeEvent) => void;
 }
 
 export default function ActrInput({
@@ -33,6 +40,7 @@ export default function ActrInput({
   variant,
   showTopToast,
   mobileAttachmentController,
+  onLayout,
 }: ActrInputProps) {
   const { tab } = useTab();
   const { width } = useWindowDimensions();
@@ -131,7 +139,7 @@ export default function ActrInput({
   });
 
   return (
-    <View style={styles.rootContainer}>
+    <View style={styles.rootContainer} onLayout={onLayout}>
       {isVoiceRecording && (
         <VoiceRecordingOverlay
           isCancelling={isCancellingVoice}
