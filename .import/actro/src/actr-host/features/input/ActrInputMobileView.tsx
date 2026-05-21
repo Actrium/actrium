@@ -403,12 +403,20 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   }, [editingMessageId]);
   const shouldShowExitTabButton = !isEditing && !isInputFocused;
   const authOverlayRightInset = shouldShowExitTabButton ? 58 : 0;
-  // 输入框距离底部的高度
-  const extraBottomPadding = isKeyboardVisible
-    ? Math.max(insets.bottom / 2, 10)
-    : isAndroid
-      ? Math.max(insets.bottom, selectionActionBar.phoneMinBottomPadding)
-      : insets.bottom;
+  // 中文注释：Android Phone 端依赖宿主 windowSoftInputMode 整体顶起视图，
+  // 底部占位在键盘显示前后必须保持稳定，否则 keyboardDidShow 后会因为 padding 缩小再次下沉。
+  const androidBottomPadding = Math.max(
+    insets.bottom,
+    selectionActionBar.phoneMinBottomPadding,
+  );
+  // 中文注释：输入区距离底部的最终留白；
+  // iOS 键盘态保留较小的底边呼吸位，Android 键盘态保持和非键盘态一致，避免二次跳动。
+  const extraBottomPadding =
+    isKeyboardVisible && !isAndroid
+      ? Math.max(insets.bottom / 2, 10)
+      : isAndroid
+        ? androidBottomPadding
+        : insets.bottom;
 
   return (
     <View
