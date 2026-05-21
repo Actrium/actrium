@@ -315,6 +315,7 @@ export class ActrConnection {
   async uploadAttachment(
     streamId: string,
     data: {
+      fileName: string;
       fieldData: Uint8Array;
     },
   ): Promise<string> {
@@ -322,7 +323,7 @@ export class ActrConnection {
       console.error(`[ActrConnection:${this.appId}] Not initialized. Cannot upload attachment.`);
       return '';
     }
-    console.log('发送附件', data.fieldData.length);
+    console.log('发送附件', data.fileName, data.fieldData.length);
 
     try {
       const res = await ActrNativeBridge.uploadAttachment({
@@ -331,6 +332,7 @@ export class ActrConnection {
         fileData: Utils.uint8ArrayToBase64(data.fieldData),
         actorType: this.actorType,
         tabId: this.tabId,
+        filename: data.fileName
       });
 
       if (res.statusCode !== 0) {
