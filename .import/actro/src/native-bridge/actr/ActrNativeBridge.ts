@@ -21,6 +21,7 @@ export const ActrNativeBridge = ActrBridge as {
     fileData: string;
     actorType: string;
     tabId: string;
+    filename: string;
   }) => Promise<{ id: string; errorMessage: string; statusCode: number }>;
   shutdownService: (params: {
     actorType: string;
