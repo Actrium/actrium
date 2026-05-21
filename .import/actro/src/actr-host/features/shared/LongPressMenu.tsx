@@ -30,9 +30,10 @@ import {
 } from 'react-native-safe-area-context';
 import { triggerHaptic } from '../../utils/haptics';
 
-interface MenuOption {
+export interface MenuOption {
   label: string;
-  onPress: (position?: { top: number; left: number; width: number }) => void;
+  onPress: (position?: { x: number; y: number }) => void;
+  invokeAfterClose?: boolean;
   icon?: React.ReactNode;
   textColor?: string;
 }
@@ -71,6 +72,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   });
   const triggerRef = useRef<View>(null);
   const pressLocationRef = useRef<{ x: number; y: number } | null>(null);
+  const pendingActionRef = useRef<(() => void) | null>(null);
 
   const backdropOpacity = useSharedValue(0);
   const menuOpacityAnim = useSharedValue(0);
@@ -187,7 +189,10 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     handleLongPressTrigger(pageX, pageY);
   };
 
-  const close = () => {
+  const closeMenu = (callback?: () => void) => {
+    if (callback) {
+      pendingActionRef.current = callback;
+    }
     backdropOpacity.value = withTiming(0, { duration: 150 });
     menuOpacityAnim.value = withTiming(0, { duration: 150 }, (isFinished) => {
       if (isFinished) {
@@ -196,10 +201,19 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     });
   };
 
+  const handleBackdropPress = () => {
+    closeMenu();
+  };
+
   const cleanupAfterClose = () => {
     setVisible(false);
     setPressLocation(null);
     pressLocationRef.current = null;
+    if (pendingActionRef.current) {
+      const pendingAction = pendingActionRef.current;
+      pendingActionRef.current = null;
+      pendingAction();
+    }
   };
 
   useEffect(() => {
@@ -252,9 +266,9 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
         visible={visible}
         transparent
         animationType="none"
-        onRequestClose={close}
+        onRequestClose={handleBackdropPress}
       >
-        <TouchableWithoutFeedback onPress={close}>
+        <TouchableWithoutFeedback onPress={handleBackdropPress}>
           <SafeAreaView
             style={styles.modalSafeArea}
             edges={['top', 'bottom', 'left', 'right']}
@@ -293,12 +307,18 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
                       pressed && styles.menuItemPressed,
                     ]}
                     onPress={() => {
-                      option.onPress({
-                        top: top + insets.top,
-                        left,
-                        width: menuWidth,
-                      });
-                      close();
+                      const pressPosition =
+                        pressLocationRef.current ?? undefined;
+                      // 中文注释：二级菜单需要等一级菜单完全收起后再打开，
+                      // 否则两个 Modal 的蒙版会在同一时刻重叠，导致后开的菜单看不到且后续触摸被吞掉。
+                      if (option.invokeAfterClose) {
+                        closeMenu(() => {
+                          option.onPress(pressPosition);
+                        });
+                        return;
+                      }
+                      option.onPress(pressPosition);
+                      closeMenu();
                     }}
                   >
                     {option.icon}
