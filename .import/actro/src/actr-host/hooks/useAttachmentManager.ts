@@ -160,8 +160,8 @@ export const useAttachmentManager = (tabId: string) => {
           attachment_type: type,
           local_url: localUrl,
           cdn_url: '',
-          type: res.type,
-          name: fileName,
+          file_type: res.type,
+          file_name: fileName,
           aspect_ratio: res.width && res.height ? res.width / res.height : 1,
         };
       }),

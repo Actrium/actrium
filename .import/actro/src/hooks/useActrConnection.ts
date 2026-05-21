@@ -192,6 +192,7 @@ export function useActrConnection({
     const ids = await Promise.all(
       attachments.map(async (item) =>
         connection!.uploadAttachment(Utils.generateId(), {
+          fileName: item.file_name || 'unknown',
           fieldData: await Utils.readFileAsBinary(item.local_url),
         }),
       ),
