@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ViewStyle,
-  Image,
   ScrollView,
   Pressable,
   ActivityIndicator,
@@ -39,7 +38,6 @@ import { isTablet } from '../../../utils/device';
 import { getHostShadows } from '../../styles/shadows';
 import { triggerHaptic } from '../../utils/haptics';
 
-import { FeedbackFormModal } from './FeedbackFormModal';
 import { IAttachmentItem } from '../../types/attachment';
 import { Supramark } from '@supramark/rn';
 import type { SupramarkStyles } from '@supramark/rn';
@@ -66,7 +64,6 @@ interface ChatBubbleProps {
   type: 'question' | 'answer';
   isLoading?: boolean;
   progress?: number;
-  numberOfLines?: number;
   containerStyle?: ViewStyle;
   attachments?: string;
   onEdit?: () => void;
@@ -77,10 +74,302 @@ interface ChatBubbleProps {
   tabId?: string;
   appId?: string;
   selectionMode?: SelectionMode;
-  selectionKey?: string;
-  isSelected?: boolean;
   onToggleSelection?: () => void;
 }
+
+interface ChatBubbleBodyProps {
+  content?: string;
+  isAttachmentOnly: boolean;
+  isQuestion: boolean;
+  isVoiceBubble: boolean;
+  isVoiceBubblePlaying: boolean;
+  parsedAttachments: IAttachmentItem[];
+  parsedVoicePayload: ReturnType<typeof parseVoicePayload>;
+  shouldShowLoadingBubble: boolean;
+  shouldShowLatestAnswerToolbar: boolean;
+  selectionMode: SelectionMode;
+  isCopied: boolean;
+  styles: ReturnType<typeof makeStyles>;
+  colors: ColorTokens;
+  getDisplayFileName: (item: IAttachmentItem) => string;
+  getDisplayFileType: (item: IAttachmentItem) => string;
+  markdownSupramarkStyles: SupramarkStyles;
+  t: ReturnType<typeof useTranslation>['t'];
+  onCopy?: () => void;
+  onFeedback?: () => void;
+  onEnterShareSelection?: () => void;
+  onEnterDeleteSelection?: () => void;
+  onReadAloudPress?: () => void;
+  readAloudStatus: React.ComponentProps<typeof ReadAloudActionButton>['status'];
+  shouldShowReadAloudEntry: boolean;
+  setIsCopied: React.Dispatch<React.SetStateAction<boolean>>;
+}
+
+const ChatBubbleBody = React.memo(function ChatBubbleBody({
+  content,
+  isAttachmentOnly,
+  isQuestion,
+  isVoiceBubble,
+  isVoiceBubblePlaying,
+  parsedAttachments,
+  parsedVoicePayload,
+  shouldShowLoadingBubble,
+  shouldShowLatestAnswerToolbar,
+  selectionMode,
+  isCopied,
+  styles,
+  colors,
+  getDisplayFileName,
+  getDisplayFileType,
+  markdownSupramarkStyles,
+  t,
+  onCopy,
+  onFeedback,
+  onEnterShareSelection,
+  onEnterDeleteSelection,
+  onReadAloudPress,
+  readAloudStatus,
+  shouldShowReadAloudEntry,
+  setIsCopied,
+}: ChatBubbleBodyProps) {
+  return (
+    <View
+      style={[
+        isAttachmentOnly
+          ? styles.attachmentBareBubble
+          : isQuestion
+            ? styles.questionBubble
+            : styles.answerBubble,
+      ]}
+    >
+      {parsedAttachments.length > 0 && (
+        <View
+          style={[styles.attachmentsContainer, !content && { marginBottom: 0 }]}
+          pointerEvents="box-none"
+        >
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.attachmentsScrollView}
+            contentContainerStyle={styles.attachmentsScrollContent}
+            scrollEnabled
+            scrollEventThrottle={16}
+            // 中文注释：附件区域需要保留横向滚动能力，改为在自身触摸/拖动开始时收键盘，避免外层 Pressable 抢手势。
+            onTouchStart={Keyboard.dismiss}
+            onScrollBeginDrag={Keyboard.dismiss}
+          >
+            {parsedAttachments.map((item: IAttachmentItem, idx: number) => {
+              const isLast = idx === parsedAttachments.length - 1;
+              const itemStyle = [
+                item.aspect_ratio ? { aspectRatio: item.aspect_ratio } : null,
+                !isLast && { marginRight: 8 },
+              ];
+
+              if (item.attachment_type === 'image') {
+                return (
+                  <SmartImage
+                    key={`img-${idx}`}
+                    cdnUrl={item.cdn_url}
+                    localUrl={item.local_url}
+                    style={[styles.attachmentImage, itemStyle]}
+                    resizeMode="cover"
+                  />
+                );
+              }
+              if (item.attachment_type === 'file') {
+                return (
+                  <View
+                    key={`file-${idx}`}
+                    style={[
+                      styles.attachmentFileBlock,
+                      !isLast && { marginRight: 8 },
+                    ]}
+                  >
+                    <View style={styles.attachmentFileInfo}>
+                      <Text
+                        style={styles.attachmentFileName}
+                        numberOfLines={2}
+                        ellipsizeMode="tail"
+                      >
+                        {getDisplayFileName(item)}
+                      </Text>
+                      <View style={styles.attachmentFileMetaRow}>
+                        <Icon type="file" size={12} color="#34A8FB" />
+                        <AppText style={styles.attachmentFileType}>
+                          {getDisplayFileType(item)}
+                        </AppText>
+                      </View>
+                    </View>
+                  </View>
+                );
+              }
+              if (item.attachment_type === 'location') {
+                return (
+                  <View
+                    key={`loc-${idx}`}
+                    style={[
+                      { position: 'relative' },
+                      !isLast && { marginRight: 8 },
+                    ]}
+                  >
+                    {item.local_url || item.cdn_url ? (
+                      <SmartImage
+                        cdnUrl={item.cdn_url}
+                        localUrl={item.local_url}
+                        style={[
+                          styles.attachmentImage,
+                          item.aspect_ratio
+                            ? { aspectRatio: item.aspect_ratio }
+                            : null,
+                        ]}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={styles.locationPlaceholder}>
+                        <Icon type="geolocation" size={20} color="#34A8FB" />
+                        <Text style={styles.locationPlaceholderText}>
+                          {item.latitude?.toFixed(4)},{' '}
+                          {item.longitude?.toFixed(4)}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              }
+              return null;
+            })}
+          </ScrollView>
+        </View>
+      )}
+      {shouldShowLoadingBubble ? (
+        // 中文注释：等待回答中的占位态也走 answer 气泡本体，保证 icon 和文案始终落在同一气泡结构里。
+        <View style={styles.loadingBubbleContent}>
+          <ActivityIndicator size="small" color={colors.textHeading} />
+          <AppText style={styles.loadingText}>
+            {t('actr.chat.thinking')}
+          </AppText>
+        </View>
+      ) : isVoiceBubble && parsedVoicePayload ? (
+        <View
+          style={[
+            styles.voiceBubbleCard,
+            isVoiceBubblePlaying && styles.voiceBubbleCardPlaying,
+          ]}
+        >
+          <View style={styles.voiceBubbleMain}>
+            <Icon type="voice" size={18} color={colors.textMenuLabel} />
+            <Text style={styles.voiceDurationText}>
+              {formatVoiceDuration(parsedVoicePayload.duration_ms)}
+            </Text>
+          </View>
+          <AppText style={styles.voiceHintText}>
+            {isVoiceBubblePlaying ? '播放中' : '点击播放语音'}
+          </AppText>
+        </View>
+      ) : content ? (
+        <View style={styles.markdownContainer}>
+          <Supramark
+            markdown={content}
+            config={SUPRAMARK_FULL_CONFIG}
+            containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
+            // 中文注释：宿主与 supermark 工作区各自持有一份 react-native 类型定义，
+            // 这里做局部类型桥接，避免样式对象在 TS 层被误判为不兼容。
+            styles={markdownSupramarkStyles}
+          />
+        </View>
+      ) : null}
+      {!isQuestion && shouldShowLatestAnswerToolbar && (
+        <View style={styles.toolbarContainer}>
+          <Pressable
+            style={[
+              styles.toolbarButton,
+              selectionMode !== 'none' && styles.toolbarButtonDisabled,
+            ]}
+            onPress={() => {
+              if (selectionMode !== 'none') return;
+              setTimeout(() => {
+                onCopy?.();
+                setIsCopied(true);
+              }, 0);
+            }}
+            disabled={selectionMode !== 'none'}
+            hitSlop={8}
+          >
+            <Icon
+              type={isCopied ? 'success' : 'copy'}
+              size={chatBubbleToolbar.iconSize}
+            />
+          </Pressable>
+          {shouldShowReadAloudEntry ? (
+            <ReadAloudActionButton
+              status={readAloudStatus}
+              selectionMode={selectionMode}
+              onPress={() => {
+                void onReadAloudPress?.();
+              }}
+            />
+          ) : null}
+          <DropdownMenu
+            width={longPressMenu.width}
+            estimatedWidth={longPressMenu.width}
+            anchorMode="end"
+            trigger={
+              <View style={styles.toolbarButton}>
+                <Icon type="more" size={chatBubbleToolbar.iconSize} />
+              </View>
+            }
+            disabled={selectionMode !== 'none'}
+          >
+            {(close) => (
+              <>
+                {/* 中文注释：工具栏下拉菜单中的分享入口，进入分享选择模式。
+                    使用 close(callback) 将 enterSelectionMode 推迟到菜单关闭动画完成后执行，
+                    避免与 DropdownMenu 内部 Reanimated 动画产生 useInsertionEffect 冲突。 */}
+                {onEnterShareSelection ? (
+                  <DropdownMenuItem
+                    onPress={() => {
+                      close(() => {
+                        onEnterShareSelection();
+                      });
+                    }}
+                  >
+                    <Icon type="share" size={16} />
+                    <DropdownMenuText>{t('actr.chat.share')}</DropdownMenuText>
+                  </DropdownMenuItem>
+                ) : null}
+                <DropdownMenuItem
+                  onPress={() => {
+                    close(() => {
+                      onFeedback?.();
+                    });
+                  }}
+                >
+                  <Icon type="suggest" size={16} />
+                  <DropdownMenuText>{t('actr.chat.feedback')}</DropdownMenuText>
+                </DropdownMenuItem>
+                {/* 中文注释：工具栏下拉菜单中的删除入口，同样使用 close(callback) 避免时序冲突。 */}
+                {onEnterDeleteSelection ? (
+                  <DropdownMenuItem
+                    onPress={() => {
+                      close(() => {
+                        onEnterDeleteSelection();
+                      });
+                    }}
+                  >
+                    <Icon type="delete" size={16} color={colors.danger} />
+                    <DropdownMenuText color={colors.danger}>
+                      {t('common.delete')}
+                    </DropdownMenuText>
+                  </DropdownMenuItem>
+                ) : null}
+              </>
+            )}
+          </DropdownMenu>
+        </View>
+      )}
+    </View>
+  );
+});
 
 export default function ChatBubble({
   content,
@@ -88,7 +377,6 @@ export default function ChatBubble({
   type,
   isLoading = false,
   progress,
-  numberOfLines,
   containerStyle,
   attachments,
   onEdit,
@@ -99,8 +387,6 @@ export default function ChatBubble({
   tabId,
   appId,
   selectionMode = 'none',
-  selectionKey,
-  isSelected = false,
   onToggleSelection,
 }: ChatBubbleProps) {
   const { t } = useTranslation();
@@ -115,8 +401,6 @@ export default function ChatBubble({
     () => parseVoicePayload(voicePayload),
     [voicePayload],
   );
-  const isVoiceQuestion = isQuestion && !!parsedVoicePayload;
-  const isVoiceAnswer = !isQuestion && !!parsedVoicePayload;
   const isVoiceBubble = !!parsedVoicePayload;
   const bubbleFrameStyle = isQuestion
     ? styles.questionBubbleFrame
@@ -410,254 +694,50 @@ export default function ChatBubble({
     },
     [getDisplayFileName],
   );
+  const handleEnterShareSelection = React.useCallback(() => {
+    if (!msgId || !tabId) return;
+    enterSelectionMode(msgId, tabId, undefined, 'share');
+  }, [enterSelectionMode, msgId, tabId]);
+
+  const handleEnterDeleteSelection = React.useCallback(() => {
+    if (!msgId || !tabId) return;
+    const defaultPart = attachments && !content ? 'attachments' : undefined;
+    enterSelectionMode(msgId, tabId, defaultPart, 'delete');
+  }, [attachments, content, enterSelectionMode, msgId, tabId]);
+
+  const bubbleBody = (
+    <ChatBubbleBody
+      content={content}
+      isAttachmentOnly={isAttachmentOnly}
+      isQuestion={isQuestion}
+      isVoiceBubble={isVoiceBubble}
+      isVoiceBubblePlaying={isVoiceBubblePlaying}
+      parsedAttachments={parsedAttachments}
+      parsedVoicePayload={parsedVoicePayload}
+      shouldShowLoadingBubble={shouldShowLoadingBubble}
+      shouldShowLatestAnswerToolbar={shouldShowLatestAnswerToolbar}
+      selectionMode={selectionMode}
+      isCopied={isCopied}
+      styles={styles}
+      colors={colors}
+      getDisplayFileName={getDisplayFileName}
+      getDisplayFileType={getDisplayFileType}
+      markdownSupramarkStyles={markdownSupramarkStyles}
+      t={t}
+      onCopy={onCopy}
+      onFeedback={onFeedback}
+      onEnterShareSelection={msgId && tabId ? handleEnterShareSelection : undefined}
+      onEnterDeleteSelection={msgId && tabId ? handleEnterDeleteSelection : undefined}
+      onReadAloudPress={readAloudAction.handlePress}
+      readAloudStatus={readAloudAction.readAloudStatus}
+      shouldShowReadAloudEntry={shouldShowReadAloudEntry}
+      setIsCopied={setIsCopied}
+    />
+  );
 
   const bubbleContent = (
-    <View
-      style={[
-        isAttachmentOnly
-          ? styles.attachmentBareBubble
-          : isQuestion
-            ? styles.questionBubble
-            : styles.answerBubble,
-      ]}
-    >
-      {/* Render Attachments */}
-      {parsedAttachments.length > 0 && (
-        <View
-          style={[styles.attachmentsContainer, !content && { marginBottom: 0 }]}
-          pointerEvents="box-none"
-        >
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            style={styles.attachmentsScrollView}
-            contentContainerStyle={styles.attachmentsScrollContent}
-            scrollEnabled
-            scrollEventThrottle={16}
-            // 中文注释：附件区域需要保留横向滚动能力，改为在自身触摸/拖动开始时收键盘，避免外层 Pressable 抢手势。
-            onTouchStart={Keyboard.dismiss}
-            onScrollBeginDrag={Keyboard.dismiss}
-          >
-            {parsedAttachments.map((item: IAttachmentItem, idx: number) => {
-              const isLast = idx === parsedAttachments.length - 1;
-              const itemStyle = [
-                item.aspect_ratio ? { aspectRatio: item.aspect_ratio } : null,
-                !isLast && { marginRight: 8 },
-              ];
-
-              if (item.attachment_type === 'image') {
-                return (
-                  <SmartImage
-                    key={`img-${idx}`}
-                    cdnUrl={item.cdn_url}
-                    localUrl={item.local_url}
-                    style={[styles.attachmentImage, itemStyle]}
-                    resizeMode="cover"
-                  />
-                );
-              } else if (item.attachment_type === 'file') {
-                return (
-                  <View
-                    key={`file-${idx}`}
-                    style={[
-                      styles.attachmentFileBlock,
-                      !isLast && { marginRight: 8 },
-                    ]}
-                  >
-                    <View style={styles.attachmentFileInfo}>
-                      <Text
-                        style={styles.attachmentFileName}
-                        numberOfLines={2}
-                        ellipsizeMode="tail"
-                      >
-                        {getDisplayFileName(item)}
-                      </Text>
-                      <View style={styles.attachmentFileMetaRow}>
-                        <Icon type="file" size={12} color="#34A8FB" />
-                        <AppText style={styles.attachmentFileType}>
-                          {getDisplayFileType(item)}
-                        </AppText>
-                      </View>
-                    </View>
-                  </View>
-                );
-              } else if (item.attachment_type === 'location') {
-                return (
-                  <View
-                    key={`loc-${idx}`}
-                    style={[
-                      { position: 'relative' },
-                      !isLast && { marginRight: 8 },
-                    ]}
-                  >
-                    {item.local_url || item.cdn_url ? (
-                      <>
-                        <SmartImage
-                          cdnUrl={item.cdn_url}
-                          localUrl={item.local_url}
-                          style={[
-                            styles.attachmentImage,
-                            item.aspect_ratio
-                              ? { aspectRatio: item.aspect_ratio }
-                              : null,
-                          ]}
-                          resizeMode="cover"
-                        />
-                      </>
-                    ) : (
-                      <View style={styles.locationPlaceholder}>
-                        <Icon type="geolocation" size={20} color="#34A8FB" />
-                        <Text style={styles.locationPlaceholderText}>
-                          {item.latitude?.toFixed(4)},{' '}
-                          {item.longitude?.toFixed(4)}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                );
-              }
-              return null;
-            })}
-          </ScrollView>
-        </View>
-      )}
-      {shouldShowLoadingBubble ? (
-        // 中文注释：等待回答中的占位态也走 answer 气泡本体，保证 icon 和文案始终落在同一气泡结构里。
-        <View style={styles.loadingBubbleContent}>
-          <ActivityIndicator size="small" color={colors.textHeading} />
-          <AppText style={styles.loadingText}>
-            {t('actr.chat.thinking')}
-          </AppText>
-        </View>
-      ) : isVoiceBubble && parsedVoicePayload ? (
-        <View
-          style={[
-            styles.voiceBubbleCard,
-            isVoiceBubblePlaying && styles.voiceBubbleCardPlaying,
-          ]}
-        >
-          <View style={styles.voiceBubbleMain}>
-            <Icon type="voice" size={18} color={colors.textMenuLabel} />
-            <Text style={styles.voiceDurationText}>
-              {formatVoiceDuration(parsedVoicePayload.duration_ms)}
-            </Text>
-          </View>
-          <AppText style={styles.voiceHintText}>
-            {isVoiceBubblePlaying ? '播放中' : '点击播放语音'}
-          </AppText>
-        </View>
-      ) : content ? (
-        numberOfLines ? (
-          <AppText
-            variant="messageBody"
-            style={[isQuestion ? styles.questionText : styles.answerText]}
-            numberOfLines={numberOfLines}
-          >
-            {content}
-          </AppText>
-        ) : (
-          <View style={styles.markdownContainer}>
-            <Supramark
-              markdown={content}
-              config={SUPRAMARK_FULL_CONFIG}
-              containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
-              // 中文注释：宿主与 supermark 工作区各自持有一份 react-native 类型定义，
-              // 这里做局部类型桥接，避免样式对象在 TS 层被误判为不兼容。
-              styles={markdownSupramarkStyles}
-            />
-          </View>
-        )
-      ) : null}
-
-      {!isQuestion && shouldShowLatestAnswerToolbar && (
-        <View style={styles.toolbarContainer}>
-          <Pressable
-            style={[
-              styles.toolbarButton,
-              selectionMode !== 'none' && styles.toolbarButtonDisabled,
-            ]}
-            onPress={() => {
-              if (selectionMode !== 'none') return;
-              setTimeout(() => {
-                onCopy?.();
-                setIsCopied(true);
-              }, 0);
-            }}
-            disabled={selectionMode !== 'none'}
-            hitSlop={8}
-          >
-            <Icon
-              type={isCopied ? 'success' : 'copy'}
-              size={chatBubbleToolbar.iconSize}
-            />
-          </Pressable>
-          {shouldShowReadAloudEntry ? (
-            <ReadAloudActionButton
-              status={readAloudAction.readAloudStatus}
-              selectionMode={selectionMode}
-              onPress={() => {
-                void readAloudAction.handlePress();
-              }}
-            />
-          ) : null}
-          <DropdownMenu
-            width={longPressMenu.width}
-            estimatedWidth={longPressMenu.width}
-            anchorMode="end"
-            trigger={
-              <View style={styles.toolbarButton}>
-                <Icon type="more" size={chatBubbleToolbar.iconSize} />
-              </View>
-            }
-            disabled={selectionMode !== 'none'}
-          >
-            {(close) => (
-              <>
-                {/* 中文注释：工具栏下拉菜单中的分享入口，进入分享选择模式。
-                    使用 close(callback) 将 enterSelectionMode 推迟到菜单关闭动画完成后执行，
-                    避免与 DropdownMenu 内部 Reanimated 动画产生 useInsertionEffect 冲突。 */}
-                {msgId && tabId ? (
-                  <DropdownMenuItem
-                    onPress={() => {
-                      close(() => {
-                        enterSelectionMode(msgId, tabId, undefined, 'share');
-                      });
-                    }}
-                  >
-                    <Icon type="share" size={16} />
-                    <DropdownMenuText>{t('actr.chat.share')}</DropdownMenuText>
-                  </DropdownMenuItem>
-                ) : null}
-                <DropdownMenuItem
-                  onPress={() => {
-                    close(() => {
-                      onFeedback?.();
-                    });
-                  }}
-                >
-                  <Icon type="suggest" size={16} />
-                  <DropdownMenuText>{t('actr.chat.feedback')}</DropdownMenuText>
-                </DropdownMenuItem>
-                {/* 中文注释：工具栏下拉菜单中的删除入口，同样使用 close(callback) 避免时序冲突。 */}
-                <DropdownMenuItem
-                  onPress={() => {
-                    if (msgId && tabId) {
-                      close(() => {
-                        enterSelectionMode(msgId, tabId, undefined, 'delete');
-                      });
-                    }
-                  }}
-                >
-                  <Icon type="delete" size={16} color={colors.danger} />
-                  <DropdownMenuText color={colors.danger}>
-                    {t('common.delete')}
-                  </DropdownMenuText>
-                </DropdownMenuItem>
-              </>
-            )}
-          </DropdownMenu>
-        </View>
-      )}
+    <>
+      {bubbleBody}
       <Modal visible={showMoreMenu} transparent animationType="fade">
         <TouchableWithoutFeedback
           onPress={() => {
@@ -697,21 +777,34 @@ export default function ChatBubble({
           </View>
         </TouchableWithoutFeedback>
       </Modal>
-    </View>
+    </>
   );
 
-  const handleBubblePress = () => {
+  const handleNormalPress = () => {
     Keyboard.dismiss();
-    if (selectionMode !== 'none' && onToggleSelection) {
-      onToggleSelection();
-      return;
-    }
 
     // 中文注释：语音气泡的点击与长按统一走外层容器，避免内层 Pressable 抢占长按菜单手势。
     if (isVoiceBubble) {
       void handleVoiceBubblePress();
     }
   };
+
+  const bubbleShell = menuOptions.length > 0 ? (
+    <LongPressMenu
+      options={menuOptions}
+      avoidPressable={hasAttachments}
+      disabled={selectionMode !== 'none'}
+      onPress={!hasAttachments && isVoiceBubble ? handleNormalPress : undefined}
+    >
+      {bubbleContent}
+    </LongPressMenu>
+  ) : !hasAttachments ? (
+    <Pressable onPress={isVoiceBubble ? handleNormalPress : undefined}>
+      {bubbleContent}
+    </Pressable>
+  ) : (
+    <View>{bubbleContent}</View>
+  );
 
   return (
     <View
@@ -721,47 +814,16 @@ export default function ChatBubble({
       ]}
     >
       <View style={bubbleFrameStyle}>
-        {hasAttachments ? (
-          // 中文注释：附件气泡用 avoidPressable 模式的 LongPressMenu，内部用 RNGH 手势系统检测长按，
-          // 不拦截 ScrollView 的滚动手势。选择模式下用 Pressable 包裹以支持点击切换选中。
-          selectionMode !== 'none' ? (
-            <Pressable
-              onPress={onToggleSelection}
-              style={({ pressed }) => [pressed && styles.bubblePressed]}
-            >
-              {bubbleContent}
-            </Pressable>
-          ) : menuOptions.length > 0 ? (
-            <LongPressMenu options={menuOptions} avoidPressable>
-              {bubbleContent}
-            </LongPressMenu>
-          ) : (
-            <View>{bubbleContent}</View>
-          )
-        ) : (
+        {bubbleShell}
+        {selectionMode !== 'none' && onToggleSelection ? (
           <Pressable
-            onPress={handleBubblePress}
             style={({ pressed }) => [
-              selectionMode !== 'none' && pressed && styles.bubblePressed,
+              styles.selectionOverlay,
+              pressed && styles.bubblePressed,
             ]}
-          >
-            {(() => {
-              const shouldShowMenu =
-                selectionMode === 'none' && menuOptions.length > 0;
-              if (shouldShowMenu) {
-                return (
-                  <LongPressMenu
-                    options={menuOptions}
-                    onPress={isVoiceBubble ? handleBubblePress : undefined}
-                  >
-                    {bubbleContent}
-                  </LongPressMenu>
-                );
-              }
-              return bubbleContent;
-            })()}
-          </Pressable>
-        )}
+            onPress={onToggleSelection}
+          />
+        ) : null}
       </View>
     </View>
   );
@@ -792,18 +854,29 @@ const makeStyles = (colors: ColorTokens) => {
       alignItems: 'flex-end',
       marginBottom: 12,
       width: '100%',
+      minWidth: 0,
     },
     answerWrapper: {
       alignItems: 'flex-start',
       width: '100%',
+      minWidth: 0,
+      flexShrink: 1,
     },
     questionBubbleFrame: {
       maxWidth: isTablet ? 632 : 316,
       alignSelf: 'flex-end',
+      minWidth: 0,
     },
     answerBubbleFrame: {
       maxWidth: '100%',
       alignSelf: 'flex-start',
+      minWidth: 0,
+      flexShrink: 1,
+    },
+    selectionOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      borderRadius: 20,
+      zIndex: 2,
     },
     questionBubble: {
       backgroundColor: colors.bgBubbleQuestion,
@@ -854,14 +927,6 @@ const makeStyles = (colors: ColorTokens) => {
       ...getTypographyStyle('footnote'),
       color: colors.textSecondary,
     },
-    questionText: {
-      color: colors.textHeading,
-      ...getTypographyStyle('messageBody'),
-    },
-    answerText: {
-      color: colors.textHeading,
-      ...getTypographyStyle('messageBody'),
-    },
     attachmentBareBubble: {
       paddingHorizontal: 0,
       paddingVertical: 0,
@@ -871,6 +936,7 @@ const makeStyles = (colors: ColorTokens) => {
     markdownContainer: {
       flexShrink: 1,
       width: '100%',
+      minWidth: 0,
     },
     attachmentsContainer: {
       marginBottom: 8,
