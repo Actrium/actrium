@@ -38,7 +38,13 @@ export const ShareConfirmButton: React.FC<ShareConfirmButtonProps> = ({
   return (
     <View style={styles.footer}>
       <LinearGradient
-        colors={[colors.bgDeleteGradientStart, colors.bgDeleteGradientEnd]}
+        // 中文注释：前 1/3 区域完成透明到实体背景的过渡，后 2/3 保持纯色不再继续渐变。
+        colors={[
+          colors.bgDeleteGradientStart,
+          colors.bgDeleteGradientEnd,
+          colors.bgDeleteGradientEnd,
+        ]}
+        locations={[0, 0.33, 1]}
         style={styles.footerGradient}
       />
       <View style={styles.footerRow}>
@@ -104,7 +110,7 @@ const makeStyles = (colors: ColorTokens, bottomPadding: number) =>
       justifyContent: 'center',
     },
     cancelButton: {
-      backgroundColor: colors.bgSurface,
+      backgroundColor: colors.bgChatPage,
     },
     shareButton: {
       backgroundColor: colors.accentBlue,
