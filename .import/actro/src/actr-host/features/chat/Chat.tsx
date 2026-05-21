@@ -110,6 +110,32 @@ interface MessageRowProps {
 
 const SELECTION_CHECKBOX_SLOT_WIDTH = 30;
 
+const DeleteSelectionBar = React.memo(function DeleteSelectionBar({
+  onPress,
+  onCancel,
+}: {
+  onPress: () => void;
+  onCancel: () => void;
+}) {
+  const selectedCount = useMessageStore(
+    useCallback((state) => {
+      let count = 0;
+      for (const parts of Object.values(state.selectedItems)) {
+        count += parts.size;
+      }
+      return count;
+    }, []),
+  );
+
+  return (
+    <DeleteButton
+      selectedCount={selectedCount}
+      onPress={onPress}
+      onCancel={onCancel}
+    />
+  );
+});
+
 const MessageRow = React.memo(function MessageRow({
   tabId,
   appId,
@@ -178,8 +204,6 @@ const MessageRow = React.memo(function MessageRow({
                 tabId={tabId}
                 appId={appId}
                 selectionMode={selectionMode}
-                selectionKey={`${item.message_id}:attachments`}
-                isSelected={selectedParts.has('attachments')}
                 onToggleSelection={() =>
                   toggleSelection(item.message_id, 'attachments')
                 }
@@ -217,8 +241,6 @@ const MessageRow = React.memo(function MessageRow({
                     : undefined
                 }
                 onFeedback={() => handleFeedback?.(item.message_id)}
-                selectionKey={`${item.message_id}:question`}
-                isSelected={selectedParts.has('question')}
                 onToggleSelection={() =>
                   toggleSelection(item.message_id, 'question')
                 }
@@ -240,33 +262,33 @@ const MessageRow = React.memo(function MessageRow({
                 />
               </View>
             ) : null}
-            <ChatBubble
-              type='answer'
-              msgId={item.message_id}
-              tabId={tabId}
-              appId={appId}
-              content={item.answer_content}
-              voicePayload={item.answer_voice_payload}
-              selectionMode={selectionMode}
-              isLoading={
-                isLatest &&
-                (item.progress === Progress.pending ||
-                  item.progress === Progress.processing)
-              }
-              progress={item.progress}
-              isLatest={isLatest}
-              onCopy={
-                item.answer_type !== 'voice'
-                  ? () => handleCopy(item.answer_content)
-                  : undefined
-              }
-              onFeedback={() => handleFeedback?.(item.message_id)}
-              selectionKey={`${item.message_id}:answer`}
-              isSelected={selectedParts.has('answer')}
-              onToggleSelection={() =>
-                toggleSelection(item.message_id, 'answer')
-              }
-            />
+            <View style={styles.answerBubbleWrapper}>
+              <ChatBubble
+                type='answer'
+                msgId={item.message_id}
+                tabId={tabId}
+                appId={appId}
+                content={item.answer_content}
+                voicePayload={item.answer_voice_payload}
+                selectionMode={selectionMode}
+                isLoading={
+                  isLatest &&
+                  (item.progress === Progress.pending ||
+                    item.progress === Progress.processing)
+                }
+                progress={item.progress}
+                isLatest={isLatest}
+                onCopy={
+                  item.answer_type !== 'voice'
+                    ? () => handleCopy(item.answer_content)
+                    : undefined
+                }
+                onFeedback={() => handleFeedback?.(item.message_id)}
+                onToggleSelection={() =>
+                  toggleSelection(item.message_id, 'answer')
+                }
+              />
+            </View>
           </View>
         ) : null}
       </View>
@@ -313,7 +335,6 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const updateMessage = useMessageStore((state) => state.updateMessage);
   const cleanMessage = useMessageStore((state) => state.cleanMessage);
   const selectionMode = useMessageStore((state) => state.selectionMode);
-  const selectedItems = useMessageStore((state) => state.selectedItems);
   const toggleSelection = useMessageStore((state) => state.toggleSelection);
   const exitSelectionMode = useMessageStore((state) => state.exitSelectionMode);
   const deleteSelectedMessages = useMessageStore(
@@ -768,16 +789,6 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     );
   }, [isLoadingMore, showLoadMoreHeader, t, colors, styles]);
 
-  // 计算选中的数量
-  // 中文注释：part 计数（选中了多少个部分），用于删除按钮文案。
-  const selectedCount = useMemo(() => {
-    let count = 0;
-    for (const parts of Object.values(selectedItems)) {
-      count += parts.size;
-    }
-    return count;
-  }, [selectedItems]);
-
   // 处理删除按钮点击
   const handleDeletePress = useCallback(() => {
     GlobalAlert.alert(
@@ -1101,8 +1112,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
             { bottom: 0 },
           ]}
         >
-          <DeleteButton
-            selectedCount={selectedCount}
+          <DeleteSelectionBar
             onPress={handleDeletePress}
             onCancel={exitSelectionMode}
           />
@@ -1247,6 +1257,11 @@ const makeStyles = (colors: ColorTokens) => ({
     questionBubbleWrapper: {
       flex: 1,
       alignItems: 'flex-end',
+      minWidth: 0,
+    },
+    answerBubbleWrapper: {
+      flex: 1,
+      alignItems: 'flex-start',
       minWidth: 0,
     },
     checkboxContainer: {
