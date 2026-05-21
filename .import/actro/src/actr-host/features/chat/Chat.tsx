@@ -734,6 +734,15 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       paddingBottom: Math.max(-keyboardHeight.value, 0),
     };
   }, [layoutTokens.isTablet]);
+  const isEmptyState =
+    hasLoadedInitialMessages && messageIds.length === 0 && !isLoadingMore;
+  // 中文注释：iOS Phone 空态下，内容区会先跟随 keyboard-controller 上移，
+  // 随后输入区底部安全区留白又从 insets.bottom 切到较小值，导致居中空态被二次拉回。
+  // 这里把输入区收缩掉的那段高度补回给空态容器，避免出现“先上后下 / 先下后上”的抖动。
+  const emptyStateBottomCompensation =
+    Platform.OS === 'ios' && !layoutTokens.isTablet && isKeyboardVisible
+      ? Math.max(insets.bottom - Math.max(insets.bottom / 2, 10), 0)
+      : 0;
 
 
   const handleFeedback = (msgId: string) => {
@@ -947,8 +956,13 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       onTouchMove={handleContentTouchMove}
       onTouchEnd={handleContentTouchEnd}
     >
-      {hasLoadedInitialMessages && messageIds.length === 0 && !isLoadingMore ? (
-        <View style={{ flex: 1 }}>
+      {isEmptyState ? (
+        <View
+          style={{
+            flex: 1,
+            paddingBottom: emptyStateBottomCompensation,
+          }}
+        >
           <ChatEmpty />
         </View>
       ) : (
