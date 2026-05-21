@@ -18,6 +18,7 @@ import {
   NativeScrollEvent,
   Platform,
   GestureResponderEvent,
+  LayoutChangeEvent,
 } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import Clipboard from '@react-native-clipboard/clipboard';
@@ -341,6 +342,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
   // 中文注释：分享模式确认后收集的待分享消息列表，非空时打开分享预览。
   const [shareMessages, setShareMessages] = useState<IMessage[]>([]);
+  const [inputDockHeight, setInputDockHeight] = useState(0);
+  const [inputDockMinHeight, setInputDockMinHeight] = useState(0);
   const { keyboardInset, isKeyboardVisible, dismissKeyboard } =
     useKeyboardInset();
   const { height: keyboardHeight } = useReanimatedKeyboardAnimation();
@@ -356,6 +359,33 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const scrollToBottom = useCallback(() => {
     flatListRef.current?.scrollToEnd({ animated: true });
   }, []);
+
+  useEffect(() => {
+    setInputDockHeight(0);
+    setInputDockMinHeight(0);
+  }, [layoutTokens.isTablet]);
+
+  const handleInputLayout = useCallback((event: LayoutChangeEvent) => {
+    const nextHeight = Math.round(event.nativeEvent.layout.height);
+    if (nextHeight <= 0) return;
+
+    setInputDockHeight((prev) => (
+      Math.abs(prev - nextHeight) > 1 ? nextHeight : prev
+    ));
+    setInputDockMinHeight((prev) => {
+      if (prev <= 0) return nextHeight;
+      return Math.min(prev, nextHeight);
+    });
+  }, []);
+
+  // 中文注释：输入区在多行文本或附件预览下会变高，按钮只补偿超出基线的增量，避免遮挡输入区。
+  const scrollToBottomBottomOffset = useMemo(() => {
+    const baseOffset = layoutTokens.isTablet
+      ? scrollToBottomButton.bottomOffsetPad
+      : scrollToBottomButton.bottomOffset;
+    const extraOffset = Math.max(0, inputDockHeight - inputDockMinHeight);
+    return baseOffset + extraOffset;
+  }, [inputDockHeight, inputDockMinHeight, layoutTokens.isTablet]);
 
   const handleContentSizeChange = useCallback(() => {
     if (selectionMode !== 'none') return;
@@ -627,6 +657,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       <ActrInput
         appId={appId}
         showTopToast={showTopToast}
+        onLayout={handleInputLayout}
         mobileAttachmentController={
           layoutTokens.isTablet ? undefined : phoneAttachmentPanelController
         }
@@ -634,6 +665,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     );
   }, [
     appId,
+    handleInputLayout,
     layoutTokens.isTablet,
     phoneAttachmentPanelController,
     showTopToast,
@@ -1048,8 +1080,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         <Animated.View
           style={[
             styles.scrollToBottomContainer,
-            // Pad 端按钮额外上移 40，避免与更高的输入区视觉距离过近。
-            layoutTokens.isTablet && styles.scrollToBottomContainerPad,
+            { bottom: scrollToBottomBottomOffset },
             !layoutTokens.isTablet && {
               transform: [{ translateY: attachmentPanelTranslateY }],
             },
@@ -1176,13 +1207,9 @@ const makeStyles = (colors: ColorTokens) => ({
       position: 'absolute',
       left: 0,
       right: 0,
-      bottom: scrollToBottomButton.bottomOffset,
       alignItems: 'center',
       zIndex: 99,
       pointerEvents: 'box-none',
-    },
-    scrollToBottomContainerPad: {
-      bottom: scrollToBottomButton.bottomOffsetPad,
     },
     chatScrollView: {
       flex: 1,
