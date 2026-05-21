@@ -10,9 +10,8 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Keyboard,
-  Alert,
-  Platform,
 } from 'react-native';
+import Animated from 'react-native-reanimated';
 import { Icon } from '../../../components';
 import { useTranslation } from 'react-i18next';
 import { SmartImage } from '../shared/SmartImage';
@@ -27,16 +26,14 @@ import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 
 import { LongPressMenu } from '../shared/LongPressMenu';
-import { useVoicePlaybackStore } from '../../store/useVoicePlaybackStore';
 import {
   DropdownMenu,
   DropdownMenuItem,
   DropdownMenuText,
 } from '../shared/DropdownMenu';
-import { useMessageStore, type SelectionMode } from '../../store/useMessageStore';
+import { type SelectionMode } from '../../store/useMessageStore';
 import { isTablet } from '../../../utils/device';
 import { getHostShadows } from '../../styles/shadows';
-import { triggerHaptic } from '../../utils/haptics';
 
 import { IAttachmentItem } from '../../types/attachment';
 import { Supramark } from '@supramark/rn';
@@ -48,15 +45,11 @@ import {
 import {
   formatVoiceDuration,
   parseVoicePayload,
-  playVoiceMessageFile,
-  stopVoiceMessagePlayback,
 } from '../../utils/VoiceMessageStorage';
 import {
   ReadAloudActionButton,
 } from './ReadAloudActionButton';
-import { useReadAloudPlayback } from './hooks/useReadAloudPlayback';
-
-const SHOW_AI_READ_ALOUD_ENTRY = Platform.OS === 'ios';
+import { useChatBubbleEvents } from './hooks/useChatBubbleEvents';
 
 interface ChatBubbleProps {
   content?: string;
@@ -102,7 +95,7 @@ interface ChatBubbleBodyProps {
   onReadAloudPress?: () => void;
   readAloudStatus: React.ComponentProps<typeof ReadAloudActionButton>['status'];
   shouldShowReadAloudEntry: boolean;
-  setIsCopied: React.Dispatch<React.SetStateAction<boolean>>;
+  onToolbarCopy?: () => void;
 }
 
 const ChatBubbleBody = React.memo(function ChatBubbleBody({
@@ -130,7 +123,7 @@ const ChatBubbleBody = React.memo(function ChatBubbleBody({
   onReadAloudPress,
   readAloudStatus,
   shouldShowReadAloudEntry,
-  setIsCopied,
+  onToolbarCopy,
 }: ChatBubbleBodyProps) {
   return (
     <View
@@ -286,11 +279,7 @@ const ChatBubbleBody = React.memo(function ChatBubbleBody({
               selectionMode !== 'none' && styles.toolbarButtonDisabled,
             ]}
             onPress={() => {
-              if (selectionMode !== 'none') return;
-              setTimeout(() => {
-                onCopy?.();
-                setIsCopied(true);
-              }, 0);
+              onToolbarCopy?.();
             }}
             disabled={selectionMode !== 'none'}
             hitSlop={8}
@@ -405,179 +394,41 @@ export default function ChatBubble({
   const bubbleFrameStyle = isQuestion
     ? styles.questionBubbleFrame
     : styles.answerBubbleFrame;
-
-  const { activePlayback, setActivePlayback, clearPlayback } =
-    useVoicePlaybackStore();
-  const enterSelectionMode = useMessageStore((s) => s.enterSelectionMode);
-
-  const [isCopied, setIsCopied] = React.useState(false);
-  const [showMoreMenu, setShowMoreMenu] = React.useState(false);
-  const [moreMenuPosition, setMoreMenuPosition] = React.useState<{
-    top: number;
-    left: number;
-    width: number;
-  } | null>(null);
-
-  const bubblePart = type;
-  const isCurrentPlaybackTarget =
-    activePlayback.messageId === msgId &&
-    activePlayback.part === bubblePart &&
-    activePlayback.appId === (appId ?? null);
-  const isVoiceBubblePlaying =
-    isCurrentPlaybackTarget && activePlayback.mode === 'voice_message';
-  const beginPlayback = React.useCallback(
-    (status: 'loading' | 'playing' = 'playing') => {
-      if (!msgId) return;
-      // 中文注释：切换全局播放目标前先停掉本地语音文件播放，保证新的播放态和实际音频输出一致。
-      stopVoiceMessagePlayback();
-      setActivePlayback({
-        appId: appId ?? null,
-        messageId: msgId,
-        part: bubblePart,
-        mode: 'voice_message',
-        status,
-      });
-    },
-    [appId, bubblePart, msgId, setActivePlayback],
-  );
-
-  const clearPlaybackIfCurrent = React.useCallback(() => {
-    const playback = useVoicePlaybackStore.getState().activePlayback;
-    const isSamePlayback =
-      playback.messageId === msgId &&
-      playback.part === bubblePart &&
-      playback.appId === (appId ?? null);
-    if (isSamePlayback) {
-      clearPlayback();
-    }
-  }, [appId, bubblePart, clearPlayback, msgId]);
-
-  React.useEffect(() => {
-    if (isCopied) {
-      const timer = setTimeout(() => setIsCopied(false), 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [isCopied]);
-
-  const readAloudAction = useReadAloudPlayback({
-    appId,
-    msgId,
-    part: bubblePart,
-    text: content,
-  });
-  const shouldShowReadAloudEntry =
-    SHOW_AI_READ_ALOUD_ENTRY &&
-    !isQuestion &&
-    !!content?.trim() &&
-    readAloudAction.isSupported;
-
-  const handleVoiceBubblePress = React.useCallback(async () => {
-    if (!msgId || !parsedVoicePayload) return;
-
-    if (isVoiceBubblePlaying) {
-      stopVoiceMessagePlayback();
-      clearPlaybackIfCurrent();
-      return;
-    }
-
-    try {
-      beginPlayback();
-      await playVoiceMessageFile(voicePayload);
-    } catch (error) {
-      Alert.alert(
-        t('common.hint'),
-        error instanceof Error ? error.message : t('common.error'),
-      );
-    } finally {
-      clearPlaybackIfCurrent();
-    }
-  }, [
-    beginPlayback,
-    clearPlaybackIfCurrent,
+  const {
+    handleEnterDeleteSelection,
+    handleEnterShareSelection,
+    handleMoreMenuBackdropPress,
+    handleMoreMenuFeedbackPress,
+    handleMoreMenuLayout,
+    handleNormalPress,
+    handleToolbarCopy,
+    isCopied,
     isVoiceBubblePlaying,
-    msgId,
-    parsedVoicePayload,
-    t,
-    voicePayload,
-  ]);
-
-  const menuOptions = React.useMemo(() => {
-    const options = [];
-    if (isQuestion && onEdit) {
-      options.push({
-        label: t('common.edit'),
-        onPress: onEdit,
-        icon: <Icon type="edit" size={16} />,
-      });
-    }
-    if (onCopy && !attachments?.length) {
-      options.push({
-        label: t('common.copy'),
-        onPress: onCopy,
-        icon: <Icon type="copy" size={16} />,
-      });
-    }
-    // 中文注释：分享入口进入分享选择模式，用户多选后点击确认才生成分享图。
-    if (msgId && tabId) {
-      options.push({
-        label: t('actr.chat.share'),
-        onPress: () => {
-          enterSelectionMode(msgId, tabId, undefined, 'share');
-        },
-        icon: <Icon type="share" size={16} />,
-      });
-    }
-    if (shouldShowReadAloudEntry) {
-      options.push({
-        label: t('actr.chat.readAloud'),
-        onPress: () => {
-          void readAloudAction.handlePress();
-        },
-        icon: <Icon type='voice' size={16} />,
-      });
-    }
-    if (!isQuestion) {
-      options.push({
-        label: t('common.more'),
-        onPress: (position: any) => {
-          setMoreMenuPosition(position);
-          setTimeout(() => {
-            triggerHaptic('impactHeavy');
-            setShowMoreMenu(true);
-          }, 300);
-        },
-        icon: <Icon type="more" size={16} />,
-      });
-    }
-
-    // 中文注释：删除入口进入删除选择模式，显式传入 'delete'。
-    if (msgId && tabId) {
-      const defaultPart =
-        attachments && !content ? 'attachments' : undefined;
-      options.push({
-        label: t('common.delete'),
-        onPress: () => {
-          enterSelectionMode(msgId, tabId, defaultPart, 'delete');
-        },
-        icon: <Icon type="delete" size={16} color={colors.danger} />,
-        textColor: colors.danger,
-      });
-    }
-    return options;
-  }, [
-    t,
-    isQuestion,
-    onEdit,
-    onCopy,
+    menuOptions,
+    moreMenuAnimatedStyle,
+    moreMenuBackdropAnimatedStyle,
+    readAloudStatus,
+    resolvedMoreMenuStyle,
     shouldShowReadAloudEntry,
-    readAloudAction.handlePress,
-    msgId,
-    tabId,
-    enterSelectionMode,
+    showMoreMenu,
+    triggerReadAloud,
+  } = useChatBubbleEvents({
+    appId,
     attachments,
-    content,
     colors,
-  ]);
+    content,
+    isQuestion,
+    msgId,
+    onCopy,
+    onEdit,
+    onFeedback,
+    parsedVoicePayload,
+    selectionMode,
+    t,
+    tabId,
+    type,
+    voicePayload,
+  });
 
   const parsedAttachments = React.useMemo(() => {
     if (!attachments) return [];
@@ -694,17 +545,6 @@ export default function ChatBubble({
     },
     [getDisplayFileName],
   );
-  const handleEnterShareSelection = React.useCallback(() => {
-    if (!msgId || !tabId) return;
-    enterSelectionMode(msgId, tabId, undefined, 'share');
-  }, [enterSelectionMode, msgId, tabId]);
-
-  const handleEnterDeleteSelection = React.useCallback(() => {
-    if (!msgId || !tabId) return;
-    const defaultPart = attachments && !content ? 'attachments' : undefined;
-    enterSelectionMode(msgId, tabId, defaultPart, 'delete');
-  }, [attachments, content, enterSelectionMode, msgId, tabId]);
-
   const bubbleBody = (
     <ChatBubbleBody
       content={content}
@@ -728,66 +568,56 @@ export default function ChatBubble({
       onFeedback={onFeedback}
       onEnterShareSelection={msgId && tabId ? handleEnterShareSelection : undefined}
       onEnterDeleteSelection={msgId && tabId ? handleEnterDeleteSelection : undefined}
-      onReadAloudPress={readAloudAction.handlePress}
-      readAloudStatus={readAloudAction.readAloudStatus}
+      onReadAloudPress={triggerReadAloud}
+      readAloudStatus={readAloudStatus}
       shouldShowReadAloudEntry={shouldShowReadAloudEntry}
-      setIsCopied={setIsCopied}
+      onToolbarCopy={handleToolbarCopy}
     />
   );
 
   const bubbleContent = (
     <>
       {bubbleBody}
-      <Modal visible={showMoreMenu} transparent animationType="fade">
+      <Modal
+        visible={showMoreMenu}
+        transparent
+        animationType="none"
+        onRequestClose={handleMoreMenuBackdropPress}
+      >
         <TouchableWithoutFeedback
-          onPress={() => {
-            setShowMoreMenu(false);
-            setMoreMenuPosition(null);
-          }}
+          onPress={handleMoreMenuBackdropPress}
         >
-          <View style={styles.moreMenuBackdrop}>
-            <View
-              style={[
-                styles.moreMenuContainer,
-                moreMenuPosition && {
-                  top: moreMenuPosition.top,
-                  left: moreMenuPosition.left,
-                  width: moreMenuPosition.width,
-                  position: 'absolute',
-                },
-              ]}
-            >
-              <Pressable
-                style={({ pressed }) => [
-                  styles.moreMenuItem,
-                  pressed && styles.moreMenuItemPressed,
+          <Animated.View
+            style={[styles.moreMenuBackdrop, moreMenuBackdropAnimatedStyle]}
+          >
+            {resolvedMoreMenuStyle ? (
+              <Animated.View
+                style={[
+                  styles.moreMenuContainer,
+                  resolvedMoreMenuStyle,
+                  moreMenuAnimatedStyle,
                 ]}
-                onPress={() => {
-                  setShowMoreMenu(false);
-                  setMoreMenuPosition(null);
-                  setTimeout(() => onFeedback?.(), 100);
-                }}
+                onLayout={handleMoreMenuLayout}
               >
-                <Icon type="suggest" size={16} />
-                <AppText style={styles.moreMenuText}>
-                  {t('actr.chat.feedback')}
-                </AppText>
-              </Pressable>
-            </View>
-          </View>
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.moreMenuItem,
+                    pressed && styles.moreMenuItemPressed,
+                  ]}
+                  onPress={handleMoreMenuFeedbackPress}
+                >
+                  <Icon type="suggest" size={16} />
+                  <AppText style={styles.moreMenuText}>
+                    {t('actr.chat.feedback')}
+                  </AppText>
+                </Pressable>
+              </Animated.View>
+            ) : null}
+          </Animated.View>
         </TouchableWithoutFeedback>
       </Modal>
     </>
   );
-
-  const handleNormalPress = () => {
-    Keyboard.dismiss();
-
-    // 中文注释：语音气泡的点击与长按统一走外层容器，避免内层 Pressable 抢占长按菜单手势。
-    if (isVoiceBubble) {
-      void handleVoiceBubblePress();
-    }
-  };
 
   const bubbleShell = menuOptions.length > 0 ? (
     <LongPressMenu
