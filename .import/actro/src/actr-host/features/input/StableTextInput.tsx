@@ -27,6 +27,8 @@ interface StableTextInputProps {
   desktopInputStyle: StyleProp<TextStyle>;
   mobileInputStyle: StyleProp<TextStyle>;
   editable?: boolean;
+  /** 中文注释：输入框挂载后是否立即请求焦点，用于编辑态在 Android 上稳定唤起软键盘。 */
+  autoFocus?: boolean;
   autoGrowMaxLines?: number;
   autoGrowLineHeight?: number;
 }
@@ -43,6 +45,7 @@ export const StableTextInput = React.memo(function StableTextInput({
   desktopInputStyle,
   mobileInputStyle,
   editable = true,
+  autoFocus = false,
   autoGrowMaxLines,
   autoGrowLineHeight,
 }: StableTextInputProps) {
@@ -259,6 +262,8 @@ export const StableTextInput = React.memo(function StableTextInput({
         ref={inputRef}
         style={inputStyle}
         editable={editable}
+        autoFocus={autoFocus}
+        showSoftInputOnFocus={true}
         placeholder=''
         multiline={true}
         scrollEnabled={
