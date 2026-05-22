@@ -77,7 +77,7 @@ export function useActrSpeechRecognitionController(
         void processMessageSend(transcript);
       },
       onError: (error: SpeechRecognitionErrorEvent) => {
-        console.error(
+        console.log(
           '[useActrSpeechRecognitionController] speech recognition error:',
           error.error,
           error.message,
