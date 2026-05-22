@@ -7,6 +7,7 @@ import {
   TouchableWithoutFeedback,
   Dimensions,
   GestureResponderEvent,
+  InteractionManager,
 } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
@@ -193,8 +194,8 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     if (callback) {
       pendingActionRef.current = callback;
     }
-    backdropOpacity.value = withTiming(0, { duration: 150 });
-    menuOpacityAnim.value = withTiming(0, { duration: 150 }, (isFinished) => {
+    backdropOpacity.value = withTiming(0, { duration: 100 });
+    menuOpacityAnim.value = withTiming(0, { duration: 100 }, (isFinished) => {
       if (isFinished) {
         runOnJS(cleanupAfterClose)();
       }
@@ -212,7 +213,12 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     if (pendingActionRef.current) {
       const pendingAction = pendingActionRef.current;
       pendingActionRef.current = null;
-      pendingAction();
+      // 中文注释：等待 Modal 的 visible=false 提交并让原生关闭交互完成后，再执行会抢焦点的动作。
+      requestAnimationFrame(() => {
+        InteractionManager.runAfterInteractions(() => {
+          pendingAction();
+        });
+      });
     }
   };
 

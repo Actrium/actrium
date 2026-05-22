@@ -669,9 +669,9 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   );
 
   const handleCancelEdit = useCallback(() => {
-    setEditingMessageId(tab.id, null);
+    // 中文注释：一次性清空文本、附件和编辑 ID，避免 Android 先退出编辑态再清文本造成焦点中间态。
     clearInput(tab.id);
-  }, [tab.id, setEditingMessageId, clearInput]);
+  }, [tab.id, clearInput]);
 
   const input = useMemo(() => {
     return (
@@ -1002,6 +1002,13 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
           updateCellsBatchingPeriod={50}
         />
       )}
+      {/* 中文注释：编辑态蒙版只覆盖消息列表区域，避免拦截底部输入框和取消编辑按钮。 */}
+      {!!editingMessageId && (
+        <Pressable
+          style={styles.editModeOverlay}
+          onPress={handleCancelEdit}
+        />
+      )}
     </Reanimated.View>
   );
 
@@ -1090,14 +1097,6 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
             </View>
           </KeyboardStickyView>
         </>
-      )}
-
-      {/* 编辑模式蒙版 - 点击退出编辑状态 */}
-      {!!editingMessageId && (
-        <Pressable
-          style={styles.editModeOverlay}
-          onPress={handleCancelEdit}
-        />
       )}
 
       {/* 回到底部按钮 */}

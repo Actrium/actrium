@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Animated,
+  Keyboard,
   PanResponder,
   Platform,
   StyleSheet,
@@ -140,13 +141,20 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   >('text');
   const [isInputFocused, setIsInputFocused] = React.useState(false);
   const mobileTextInputRef = React.useRef<TextInput | null>(null);
+  // 中文注释：退出编辑态后补发收键盘请求，处理 Android 原生焦点切换慢于 React 状态更新的情况。
+  const dismissKeyboardAfterEditExitTimeoutRef =
+    React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const hasInputText = inputText.length > 0;
+  const isEditing = !!editingMessageId;
   // mobile 状态机：
   // text: 常规输入
   // voice_hold: 整条输入区切为“长按讲话”模式
   const shouldEnableInputHoldToTalk =
-    mobileInputMode === 'text' && !hasInputText && !isInputFocused;
+    !isEditing &&
+    mobileInputMode === 'text' &&
+    !hasInputText &&
+    !isInputFocused;
   const shouldShowVoiceSwitchButton =
     mobileInputMode === 'text' && !hasInputText && !isInputFocused;
 
@@ -385,21 +393,39 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   );
 
   const hasAttachments = attachments.length > 0;
-  const isEditing = !!editingMessageId;
 
   // 进入编辑模式时自动聚焦输入框，唤起键盘和光标
   // 退出编辑模式时自动失焦输入框
   const prevEditingMessageIdRef = React.useRef(editingMessageId);
   React.useEffect(() => {
+    if (dismissKeyboardAfterEditExitTimeoutRef.current) {
+      clearTimeout(dismissKeyboardAfterEditExitTimeoutRef.current);
+      dismissKeyboardAfterEditExitTimeoutRef.current = null;
+    }
+
     if (editingMessageId) {
       setMobileInputMode('text');
-      setTimeout(() => {
-        mobileTextInputRef.current?.focus();
-      }, 100);
+      setIsInputFocused(true);
     } else if (prevEditingMessageIdRef.current) {
+      setMobileInputMode('text');
+      setIsInputFocused(false);
       mobileTextInputRef.current?.blur();
+      // 中文注释：Android 上编辑态输入框会按 key 重建，ref.blur 可能打到新输入框，需显式收起系统键盘。
+      Keyboard.dismiss();
+      if (Platform.OS === 'android') {
+        dismissKeyboardAfterEditExitTimeoutRef.current = setTimeout(() => {
+          dismissKeyboardAfterEditExitTimeoutRef.current = null;
+          Keyboard.dismiss();
+        }, 120);
+      }
     }
     prevEditingMessageIdRef.current = editingMessageId;
+    return () => {
+      if (dismissKeyboardAfterEditExitTimeoutRef.current) {
+        clearTimeout(dismissKeyboardAfterEditExitTimeoutRef.current);
+        dismissKeyboardAfterEditExitTimeoutRef.current = null;
+      }
+    };
   }, [editingMessageId]);
   const shouldShowExitTabButton = !isEditing && !isInputFocused;
   const authOverlayRightInset = shouldShowExitTabButton ? 58 : 0;
@@ -485,12 +511,15 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
                     <View style={styles.mobileTextInputWrap}>
                       <StableTextInput
+                        // 中文注释：编辑态按消息 ID 重建输入框，让 Android 使用挂载期 autoFocus 稳定唤起软键盘。
+                        key={editingMessageId ? `editing-${editingMessageId}` : 'compose'}
                         tabId={tab.id}
                         hasAttachments={attachments.length > 0}
                         isEnterForNewLine={isEnterForNewLine}
                         handleSendRef={handleSendRef}
                         mobileMode={true}
                         editable={!shouldEnableInputHoldToTalk}
+                        autoFocus={isEditing}
                         inputRefExternal={mobileTextInputRef}
                         onFocus={() => {
                           setMobileInputMode('text');
