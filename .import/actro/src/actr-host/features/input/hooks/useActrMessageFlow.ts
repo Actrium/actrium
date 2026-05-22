@@ -17,6 +17,10 @@ import {
   saveVoiceMessageWav,
 } from '../../../utils/VoiceMessageStorage';
 import type { IAttachmentItem } from '../../../types/attachment';
+import {
+  triggerHaptic,
+  triggerLongVibration,
+} from '../../../../../src/actr-host/utils/haptics';
 
 interface UseActrMessageFlowParams {
   appId: string;
@@ -153,6 +157,14 @@ export function useActrMessageFlow(
       const newContent = (currentMsg.answer_content || '') + data.message;
       const isFailed = data.status === 3;
 
+      if (isFailed) {
+        // 失败消息 长震动
+        triggerLongVibration(300);
+      } else if (!currentMsg.answer_content) {
+        // 首次收到消息，震动
+        triggerHaptic('impactHeavy');
+      }
+
       updateMessage(
         tabId,
         currentMsg.message_id,
@@ -173,6 +185,11 @@ export function useActrMessageFlow(
             useUnreadStore.getState().incrementUnread(tabId);
           }
         });
+        // 完成结束，震动
+        triggerHaptic('impactHeavy');
+        setTimeout(() => {
+          triggerHaptic('impactHeavy');
+        }, 50);
       }
     },
     [tabId, updateMessage],
