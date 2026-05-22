@@ -56,12 +56,9 @@ export default function ActrInput({
   );
   const clearInputInStore = useInputStore((state) => state.clearInput);
   const setInputText = useInputStore((state) => state.setInputText);
-  const setEditingMessageId = useInputStore(
-    (state) => state.setEditingMessageId,
-  );
 
   const handleCancelEdit = () => {
-    setEditingMessageId(tab.id, null);
+    // 中文注释：一次性清空文本、附件和编辑 ID，避免 Android 先退出编辑态再清文本造成焦点中间态。
     clearInputInStore(tab.id);
   };
 

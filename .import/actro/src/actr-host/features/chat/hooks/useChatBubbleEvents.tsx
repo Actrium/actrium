@@ -253,6 +253,8 @@ export const useChatBubbleEvents = ({
       options.push({
         label: t('common.edit'),
         onPress: onEdit,
+        // 中文注释：Android 上需要等长按菜单 Modal 完全关闭后再聚焦输入框，否则系统键盘可能不会响应程序化 focus。
+        invokeAfterClose: true,
         icon: <Icon type="edit" size={16} />,
       });
     }
