@@ -1,4 +1,4 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { GlobalAlert } from '../../../../components';
 import { useTranslation } from 'react-i18next';
 import { useMessageStore } from '../../../store/useMessageStore';
@@ -38,6 +38,15 @@ interface AnswerVoiceBufferState {
   receivedSequences: number[];
   endSequence?: number;
 }
+
+interface AnswerTextBufferState {
+  pendingText: string;
+  flushTimer: ReturnType<typeof setTimeout> | null;
+  hasTriggeredStartHaptic: boolean;
+}
+
+// 中文注释：文本流式分片在这个时间窗内合并后再写入 store，避免每个 chunk 都触发整段聊天区重渲染。
+const TEXT_MESSAGE_FLUSH_DELAY_MS = 48;
 
 interface UseActrMessageFlowResult {
   showLoginModal: boolean;
@@ -108,6 +117,10 @@ export function useActrMessageFlow(
   const answerVoiceBuffersRef = useRef<Record<string, AnswerVoiceBufferState>>(
     {},
   );
+  // 中文注释：为每条文本回答维护独立缓冲区和定时器，把高频流式分片合并成低频 UI 刷新。
+  const answerTextBuffersRef = useRef<Record<string, AnswerTextBufferState>>(
+    {},
+  );
 
   const handleAuthStatus = useCallback(
     (status: AuthStatus, clientId: string): boolean => {
@@ -141,6 +154,88 @@ export function useActrMessageFlow(
     return handleAuthStatus(status, clientId);
   }, [checkAuth, handleAuthStatus]);
 
+  // 中文注释：清理指定回答文本缓冲区上的定时 flush，避免重复调度或遗留失效 timer。
+  const clearAnswerTextBufferTimer = useCallback((messageId: string) => {
+    const buffer = answerTextBuffersRef.current[messageId];
+    if (!buffer?.flushTimer) return;
+
+    clearTimeout(buffer.flushTimer);
+    buffer.flushTimer = null;
+  }, []);
+
+  // 中文注释：按 messageId 获取或创建文本回答缓冲区，用于暂存尚未合并进 store 的流式分片。
+  const getOrCreateAnswerTextBuffer = useCallback(
+    (messageId: string): AnswerTextBufferState => {
+      const existingBuffer = answerTextBuffersRef.current[messageId];
+      if (existingBuffer) return existingBuffer;
+
+      const newBuffer: AnswerTextBufferState = {
+        pendingText: '',
+        flushTimer: null,
+        hasTriggeredStartHaptic: false,
+      };
+      answerTextBuffersRef.current[messageId] = newBuffer;
+      return newBuffer;
+    },
+    [],
+  );
+
+  // 中文注释：将某条回答当前缓冲的文本分片一次性合并到 store；
+  // 中间态走低频刷新，结束态/失败态走立即落盘，并在终态后回收缓冲区。
+  const flushAnswerTextBuffer = useCallback(
+    (
+      messageId: string,
+      options?: {
+        isFinished?: boolean;
+        isFailed?: boolean;
+      },
+    ) => {
+      const buffer = answerTextBuffersRef.current[messageId];
+      if (!buffer) return;
+
+      // 中文注释：flush 一旦开始就先回收当前 timer，避免消息已被移除时留下失效定时器引用。
+      clearAnswerTextBufferTimer(messageId);
+
+      const currentMsg = useMessageStore
+        .getState()
+        .getMessage(tabId, messageId);
+      if (!currentMsg) {
+        // 中文注释：消息不在 store 中通常意味着会话已切走、消息被删或组件已进入清理流程，
+        // 此时直接丢弃缓冲内容并回收终态引用，避免后续分片继续挂在无效 buffer 上。
+        if (options?.isFinished || options?.isFailed) {
+          delete answerTextBuffersRef.current[messageId];
+        }
+        return;
+      }
+
+      if (!buffer.pendingText && !options?.isFinished && !options?.isFailed) {
+        return;
+      }
+
+      const mergedContent = (currentMsg.answer_content || '') + buffer.pendingText;
+      const progress = options?.isFailed ? 3 : options?.isFinished ? 2 : 1;
+      buffer.pendingText = '';
+
+      updateMessage(
+        tabId,
+        currentMsg.message_id,
+        {
+          answer_type: 'text',
+          answer_time: Date.now(),
+          answer_content: mergedContent,
+          progress,
+        },
+        Boolean(options?.isFinished),
+      );
+
+      // 中文注释：终态消息写回 store 后立即回收缓冲区，避免旧分片状态残留到下一轮回答。
+      if (options?.isFinished || options?.isFailed) {
+        delete answerTextBuffersRef.current[messageId];
+      }
+    },
+    [clearAnswerTextBufferTimer, tabId, updateMessage],
+  );
+
   const onReceiveMessage = useCallback(
     (data: TActrMessageResponse) => {
       const messageId = data.message_id;
@@ -154,30 +249,30 @@ export function useActrMessageFlow(
       }
 
       const isFinished = data.isEnd || data.status === 2;
-      const newContent = (currentMsg.answer_content || '') + data.message;
       const isFailed = data.status === 3;
+      const buffer = getOrCreateAnswerTextBuffer(messageId);
 
-      if (isFailed) {
-        // 失败消息 长震动
-        triggerLongVibration(300);
-      } else if (!currentMsg.answer_content) {
-        // 首次收到消息，震动
-        triggerHaptic('impactHeavy');
+      if (data.message) {
+        buffer.pendingText += data.message;
       }
 
-      updateMessage(
-        tabId,
-        currentMsg.message_id,
-        {
-          answer_type: 'text',
-          answer_time: Date.now(),
-          answer_content: newContent,
-          progress: isFailed ? 3 : isFinished ? 2 : 1,
-        },
-        isFinished,
-      );
+      // 中文注释：首个文本分片只触发一次轻震，避免缓冲窗口内因 store 尚未更新导致重复触发。
+      if (!isFailed && !buffer.hasTriggeredStartHaptic) {
+        triggerHaptic('impactHeavy');
+        buffer.hasTriggeredStartHaptic = true;
+      }
 
-      if (data.isEnd) {
+      if (isFailed) {
+        // 中文注释：失败态要立刻落盘并清理缓冲，避免错误消息还滞留在延时队列里。
+        triggerLongVibration(300);
+        flushAnswerTextBuffer(messageId, { isFailed: true });
+        return;
+      }
+
+      // 中文注释：结束分片不再等待定时器，直接合并剩余文本并写入最终态。
+      if (isFinished) {
+        flushAnswerTextBuffer(messageId, { isFinished: true });
+
         getCurrentFullscreenTab().then((currentTabId) => {
           if (currentTabId === tabId) {
             updateMessage(tabId, currentMsg.message_id, { is_read: 1 }, true);
@@ -185,15 +280,32 @@ export function useActrMessageFlow(
             useUnreadStore.getState().incrementUnread(tabId);
           }
         });
-        // 完成结束，震动
         triggerHaptic('impactHeavy');
         setTimeout(() => {
           triggerHaptic('impactHeavy');
         }, 50);
+        return;
+      }
+
+      // 中文注释：流式中间态只在一个短时间窗后集中刷新一次，降低消息洪峰时的 UI/原生桥压力。
+      if (!buffer.flushTimer) {
+        buffer.flushTimer = setTimeout(() => {
+          flushAnswerTextBuffer(messageId);
+        }, TEXT_MESSAGE_FLUSH_DELAY_MS);
       }
     },
-    [tabId, updateMessage],
+    [flushAnswerTextBuffer, getOrCreateAnswerTextBuffer, tabId, updateMessage],
   );
+
+  useEffect(() => {
+    // 中文注释：hook 卸载时统一清理所有文本缓冲区定时器和缓存，避免切 tab 或组件销毁后继续回写旧分片。
+    return () => {
+      Object.keys(answerTextBuffersRef.current).forEach((messageId) => {
+        clearAnswerTextBufferTimer(messageId);
+        delete answerTextBuffersRef.current[messageId];
+      });
+    };
+  }, [clearAnswerTextBufferTimer]);
 
   const getOrCreateAnswerVoiceBuffer = useCallback(
     (messageId: string): AnswerVoiceBufferState => {
