@@ -29,6 +29,7 @@ export type TActrMessageResponse = {
   message: string | Uint8Array;
   status: number;
   isEnd: boolean;
+  isAbort: boolean;
   sequence?: number;
 };
 
