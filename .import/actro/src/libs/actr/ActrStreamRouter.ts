@@ -157,9 +157,10 @@ export class ActrStreamRouter {
         data.metadata?.[0]?.value === 'true' &&
         data.metadata?.[0]?.key === 'eos';
       
-      const isAbort = 
-        data.metadata?.[0]?.value === 'true' &&
-        data.metadata?.[0]?.key === 'aos';
+      // FIXME 先不处理 abort
+      const isAbort = false;
+        // data.metadata?.[0]?.value === 'true' &&
+        // data.metadata?.[0]?.key === 'aos';
 
       if (isAbort) {
         console.log(`[ActrStreamRouter:${reg.connectionId}]: Abort message`, data)
