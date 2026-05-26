@@ -163,7 +163,7 @@ export class AppSessionService {
           // 加载失败不影响其他功能
         }
       } else {
-        console.warn('[AppSessionService] actr_url is empty');
+        console.log('[AppSessionService] actr_url is empty');
       }
 
       // 2. 获取 Token
