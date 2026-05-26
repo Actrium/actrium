@@ -21,6 +21,7 @@ const DEV_LOCAL_ACTR_SCRIPT_FILE = 'unified-app.js';
 const DEV_LOCAL_ACTR_PACKAGE_FILE = 'counterapp.actr';
 
 function isDevRuntime(): boolean {
+  return false
   return typeof (globalThis as any).__DEV__ === 'boolean'
     ? !!(globalThis as any).__DEV__
     : true;
