@@ -111,6 +111,7 @@ export class ActrStreamRouter {
         message: payload.message,
         status,
         isEnd,
+        isAbort: false
       }),
     );
 
@@ -155,10 +156,13 @@ export class ActrStreamRouter {
       const isEnd =
         data.metadata?.[0]?.value === 'true' &&
         data.metadata?.[0]?.key === 'eos';
+      
+      const isAbort = 
+        data.metadata?.[0]?.value === 'true' &&
+        data.metadata?.[0]?.key === 'aos';
 
-      if (isEnd) {
-        this.sendCloseStream(data.streamID, actorType, tabId);
-        this.clearStreamMap(streamMap);
+      if (isAbort) {
+        console.log(`[ActrStreamRouter:${reg.connectionId}]: Abort message`, data)
       }
 
       switch (reg.type) {
@@ -171,6 +175,7 @@ export class ActrStreamRouter {
               status: data.status,
               sequence: data.sequence,
               isEnd,
+              isAbort
             }),
           );
           break;
@@ -183,6 +188,7 @@ export class ActrStreamRouter {
               status: data.status,
               sequence: data.sequence,
               isEnd,
+              isAbort
             }),
           );
           break;
@@ -193,6 +199,12 @@ export class ActrStreamRouter {
             'streamId not found',
           );
           break;
+      }
+
+      // 中文注释：用户取消和正常结束都属于流终态；先把终态消息分发给业务层，再统一关闭原生 stream 并清理本地映射。
+      if (isEnd || isAbort) {
+        this.sendCloseStream(data.streamID, actorType, tabId);
+        this.clearStreamMap(streamMap);
       }
     } catch (error) {
       console.error(`[ActrStreamRouter] handleIncomingMessage error:`, error);

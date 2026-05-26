@@ -188,6 +188,7 @@ export function useActrMessageFlow(
       options?: {
         isFinished?: boolean;
         isFailed?: boolean;
+        isAborted?: boolean;
       },
     ) => {
       const buffer = answerTextBuffersRef.current[messageId];
@@ -202,18 +203,35 @@ export function useActrMessageFlow(
       if (!currentMsg) {
         // 中文注释：消息不在 store 中通常意味着会话已切走、消息被删或组件已进入清理流程，
         // 此时直接丢弃缓冲内容并回收终态引用，避免后续分片继续挂在无效 buffer 上。
-        if (options?.isFinished || options?.isFailed) {
+        if (options?.isFinished || options?.isFailed || options?.isAborted) {
           delete answerTextBuffersRef.current[messageId];
         }
         return;
       }
 
-      if (!buffer.pendingText && !options?.isFinished && !options?.isFailed) {
+      if (
+        !buffer.pendingText &&
+        !options?.isFinished &&
+        !options?.isFailed &&
+        !options?.isAborted
+      ) {
         return;
       }
 
       const mergedContent = (currentMsg.answer_content || '') + buffer.pendingText;
-      const progress = options?.isFailed ? 3 : options?.isFinished ? 2 : 1;
+      // 中文注释：文本回答终态沿用 isEnd 的收口逻辑，但用户取消要单独落成 canceled，避免和失败态混淆。
+      const progress = options?.isFailed
+        ? 3
+        : options?.isAborted
+          ? 4
+          : options?.isFinished
+            ? 2
+            : 1;
+      // 中文注释：失败、结束、取消都属于最终态，终态 flush 时要立即持久化到数据库。
+      const shouldPersistTerminalState =
+        Boolean(options?.isFinished) ||
+        Boolean(options?.isFailed) ||
+        Boolean(options?.isAborted);
       buffer.pendingText = '';
 
       updateMessage(
@@ -225,11 +243,11 @@ export function useActrMessageFlow(
           answer_content: mergedContent,
           progress,
         },
-        Boolean(options?.isFinished),
+        shouldPersistTerminalState,
       );
 
       // 中文注释：终态消息写回 store 后立即回收缓冲区，避免旧分片状态残留到下一轮回答。
-      if (options?.isFinished || options?.isFailed) {
+      if (shouldPersistTerminalState) {
         delete answerTextBuffersRef.current[messageId];
       }
     },
@@ -250,6 +268,8 @@ export function useActrMessageFlow(
 
       const isFinished = data.isEnd || data.status === 2;
       const isFailed = data.status === 3;
+      // 中文注释：isAbort 表示用户主动取消，本地收口流程与 isEnd 一致，但最终 progress 要保存为 canceled。
+      const isAborted = data.isAbort;
       const buffer = getOrCreateAnswerTextBuffer(messageId);
 
       if (data.message) {
@@ -266,6 +286,24 @@ export function useActrMessageFlow(
         // 中文注释：失败态要立刻落盘并清理缓冲，避免错误消息还滞留在延时队列里。
         triggerLongVibration(300);
         flushAnswerTextBuffer(messageId, { isFailed: true });
+        return;
+      }
+
+      // 中文注释：取消态和结束态一样立即收口，不再等待定时器，只是最终 progress 会落成 canceled。
+      if (isAborted) {
+        flushAnswerTextBuffer(messageId, { isAborted: true });
+
+        getCurrentFullscreenTab().then((currentTabId) => {
+          if (currentTabId === tabId) {
+            updateMessage(tabId, currentMsg.message_id, { is_read: 1 }, true);
+          } else {
+            useUnreadStore.getState().incrementUnread(tabId);
+          }
+        });
+        triggerHaptic('impactHeavy');
+        setTimeout(() => {
+          triggerHaptic('impactHeavy');
+        }, 50);
         return;
       }
 
