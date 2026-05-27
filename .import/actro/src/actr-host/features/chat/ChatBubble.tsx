@@ -622,7 +622,7 @@ export default function ChatBubble({
   const bubbleShell = menuOptions.length > 0 ? (
     <LongPressMenu
       options={menuOptions}
-      avoidPressable={hasAttachments}
+      avoidPressable={hasAttachments || !!content}
       disabled={selectionMode !== 'none'}
       onPress={!hasAttachments && isVoiceBubble ? handleNormalPress : undefined}
     >
