@@ -28,14 +28,11 @@ import {
   spacing,
   inputArea,
   iconSize,
-  selectionActionBar,
 } from '../../../theme/tokens';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
 import { triggerHaptic } from '../../utils/haptics';
-import { useKeyboardInset } from '../../../hooks/useKeyboardInset';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { isAndroid, isIOS } from '../../../../src/utils/device';
+import { useChatBottomInsets } from '../../hooks/useChatBottomInsets';
 
 type ActrInputMobileSharedStyles = Pick<
   ActrInputStyles,
@@ -113,8 +110,12 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const totalUnread = useUnreadStore((state) => state.totalUnread);
-  const { isKeyboardVisible } = useKeyboardInset();
-  const insets = useSafeAreaInsets();
+  // 中文注释：Mobile 输入区底部留白与提示文案位置统一从聊天底部 hook 获取，保持与 Chat2 列表补偿同步。
+  const {
+    isKeyboardVisible,
+    mobileInputBottomPadding,
+    mobileFloatingTextBottom,
+  } = useChatBottomInsets(false);
   const {
     sharedStyles,
     appId,
@@ -429,27 +430,12 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   }, [editingMessageId]);
   const shouldShowExitTabButton = !isEditing && !isInputFocused;
   const authOverlayRightInset = shouldShowExitTabButton ? 58 : 0;
-  // 中文注释：Android Phone 端依赖宿主 windowSoftInputMode 整体顶起视图，
-  // 底部占位在键盘显示前后必须保持稳定，否则 keyboardDidShow 后会因为 padding 缩小再次下沉。
-  const androidBottomPadding = Math.max(
-    insets.bottom,
-    selectionActionBar.phoneMinBottomPadding,
-  );
-  // 中文注释：输入区距离底部的最终留白；
-  // iOS 键盘态保留较小的底边呼吸位，Android 键盘态保持和非键盘态一致，避免二次跳动。
-  const extraBottomPadding =
-    isKeyboardVisible && !isAndroid
-      ? Math.max(insets.bottom / 2, 10)
-      : isAndroid
-        ? androidBottomPadding
-        : insets.bottom;
-
   return (
     <View
       style={[
         styles.mobileSafeArea,
         {
-          paddingBottom: extraBottomPadding,
+          paddingBottom: mobileInputBottomPadding,
         },
       ]}
     >
@@ -683,10 +669,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
           style={[
             styles.mobileFloatingText,
             {
-              // ios 底部安全区高度不固定, 24 是输入框高度的一半，10是字体高度，安卓没有安全区
-              bottom: isIOS
-                ? (extraBottomPadding - 24 + 10) / 2
-                : (extraBottomPadding - selectionActionBar.phoneMinBottomPadding) / 2,
+              bottom: mobileFloatingTextBottom,
             },
           ]}
         >

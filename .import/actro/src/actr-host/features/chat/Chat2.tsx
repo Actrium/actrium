@@ -20,7 +20,6 @@ import {
 } from 'react-native';
 import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
 import { useColors } from '../../../theme/useColors';
 import type { ColorTokens } from '../../../theme/colors';
@@ -39,13 +38,11 @@ import {
 } from '../../store/useMessageStore';
 import { useInputStore } from '../../store/useInputStore';
 import { useAppStore } from '../../store/useAppStore';
-import { useKeyboardInset } from '../../../hooks/useKeyboardInset';
+import { useChatBottomInsets } from '../../hooks/useChatBottomInsets';
 import ActrInput from '../input/ActrInput';
 import ChatBubble from './ChatBubble';
 import ChatEmpty from './ChatEmpty';
-import MobileAttachmentPanel, {
-  getMobileAttachmentPanelHeight,
-} from '../input/MobileAttachmentPanel';
+import MobileAttachmentPanel from '../input/MobileAttachmentPanel';
 import LocationPicker from '../extension/LocationPicker';
 import { usePhoneAttachmentPanelController } from './hooks/usePhoneAttachmentPanelController';
 import { useChatSelectionActions } from './hooks/useChatSelectionActions';
@@ -99,7 +96,6 @@ export default function Chat2({ appId }: Chat2Props) {
   const { t } = useTranslation();
   const { tab } = useTab();
   const { width } = useWindowDimensions();
-  const insets = useSafeAreaInsets();
   const colors = useColors();
   const styles = useMemo(() => makeStyles(colors), [colors]);
   const layoutTokens = useMemo(() => getHostLayoutTokens(width), [width]);
@@ -164,7 +160,15 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== Hooks ====================
 
-  const { keyboardInset, isKeyboardVisible } = useKeyboardInset();
+  // 中文注释：聊天页底部结构统一从 hook 读取，避免列表、输入栏、空态和附件面板各自重复计算平台补偿。
+  const {
+    keyboardInset,
+    isKeyboardVisible,
+    listKeyboardPadding,
+    tabletKeyboardMarginBottom,
+    emptyStateBottomCompensation,
+    attachmentPanelHeight,
+  } = useChatBottomInsets(layoutTokens.isTablet);
 
   // 中文注释：删除/分享选择操作 hook，封装删除确认弹窗、分享预览数据构建、延后退出选择模式。
   const {
@@ -184,27 +188,8 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== Keyboard ====================
 
-  // 中文注释：iOS Phone 键盘弹起时给列表内容区补 paddingBottom，避免最新消息被键盘遮挡。
-  // Android 由 KeyboardProvider 的 useResizeMode 自动设 adjustResize，容器已缩小，不需要额外 padding。
-  const keyboardAwareBottomPadding =
-    Platform.OS === 'ios' && !layoutTokens.isTablet && isKeyboardVisible
-      ? keyboardInset
-      : 0;
-
-  // 中文注释：iOS Pad 用 marginBottom 推升输入框，让列表自然收缩。
-  // Android Pad 由 adjustResize 缩容器处理，不需要额外 marginBottom。
-  const tabletKeyboardMarginBottom =
-    Platform.OS === 'ios' && layoutTokens.isTablet ? keyboardInset : 0;
-
   const isEmptyState =
     hasLoadedInitialMessages && messageIds.length === 0 && !isLoadingMore;
-  // 中文注释：iOS Phone 空态下，键盘弹起后输入区底部留白会从完整 safe bottom
-  // 收缩成更小的键盘态留白，导致居中的空态内容被额外向下拉回。
-  // 这里把输入区收缩掉的那段高度补回给空态容器，避免空态在键盘弹起时下沉约 10pt。
-  const emptyStateBottomCompensation =
-    Platform.OS === 'ios' && !layoutTokens.isTablet && isKeyboardVisible
-      ? Math.max(insets.bottom - Math.max(insets.bottom / 2, 10), 0)
-      : 0;
 
   // ==================== 附件面板 ====================
 
@@ -212,12 +197,6 @@ export default function Chat2({ appId }: Chat2Props) {
   const attachmentPanelController = usePhoneAttachmentPanelController(
     appId,
     tab.id,
-  );
-
-  // 中文注释：附件面板固定高度，用于动画位移量计算。
-  const attachmentPanelHeight = useMemo(
-    () => getMobileAttachmentPanelHeight(insets.bottom),
-    [insets.bottom],
   );
 
   // 中文注释：附件面板展开/收起时，内容区整体上移/回位的动画值。
@@ -504,7 +483,24 @@ export default function Chat2({ appId }: Chat2Props) {
     ],
   );
 
-  // 中文注释：消息列表区域，包含加载态、空态和 LegendList。
+  // 中文注释：空态组件，带底部补偿，用于 LegendList 的 ListEmptyComponent。
+  const listEmptyComponent = useMemo(
+    () => (
+      <View
+        style={{
+          flex: 1,
+          paddingBottom: emptyStateBottomCompensation,
+        }}
+      >
+        <ChatEmpty />
+      </View>
+    ),
+    [emptyStateBottomCompensation],
+  );
+
+  // 中文注释：消息列表区域，包含加载态和 LegendList。
+  // 中文注释：始终渲染 LegendList，用 ListEmptyComponent 处理空态，
+  // 避免 LegendList 卸载/重新挂载时原生 ScrollView 复用导致布局异常。
   const contentNode = (
     <View
       style={styles.listContainer}
@@ -515,15 +511,6 @@ export default function Chat2({ appId }: Chat2Props) {
       {!hasLoadedInitialMessages ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="small" color={colors.textHeading} />
-        </View>
-      ) : isEmptyState ? (
-        <View
-          style={{
-            flex: 1,
-            paddingBottom: emptyStateBottomCompensation,
-          }}
-        >
-          <ChatEmpty />
         </View>
       ) : (
         <LegendList
@@ -541,7 +528,7 @@ export default function Chat2({ appId }: Chat2Props) {
               paddingBottom:
                 layoutTokens.chatListBottomPadding +
                 24 + // 中文注释：补偿输入区 marginTop:-24 的向上重叠，确保消息与输入框有足够间距。
-                keyboardAwareBottomPadding,
+                listKeyboardPadding,
             },
           ]}
           ListHeaderComponent={
@@ -551,6 +538,7 @@ export default function Chat2({ appId }: Chat2Props) {
               </View>
             ) : null
           }
+          ListEmptyComponent={listEmptyComponent}
           initialScrollAtEnd
           // 中文注释：尾部新增消息时只让 maintainScrollAtEnd 接管贴底，
           // 避免与 maintainVisibleContentPosition 的 data 锚定同时改 scroll 造成超长消息错位。
@@ -563,12 +551,13 @@ export default function Chat2({ appId }: Chat2Props) {
             },
           }}
           // 中文注释：保留 size 稳定能力处理滚动中的高度变化，但关闭 data 锚定，
-          // 避免在“回答已完成后再追加新消息”时对超长上一条消息做错误位置恢复。
+          // 避免在"回答已完成后再追加新消息"时对超长上一条消息做错误位置恢复。
           maintainVisibleContentPosition={{ size: true }}
           alignItemsAtEnd
           // 中文注释：当前消息行包含本地布局缓存和复杂交互状态，先显式关闭 recycleItems，
           // 避免 LegendList v3 beta 复用 row 时把旧实例状态带到新消息上。
           recycleItems={false}
+          drawDistance={350}
           onStartReached={handleStartReached}
           onStartReachedThreshold={0.5}
           onScroll={handleScroll}
