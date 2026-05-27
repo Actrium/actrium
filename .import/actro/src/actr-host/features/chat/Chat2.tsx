@@ -149,6 +149,9 @@ export default function Chat2({ appId }: Chat2Props) {
   const rowHeightCacheRef = useRef<Map<string, number>>(new Map());
   // 中文注释：标记首屏消息是否已做过贴底滚动，避免重复。
   const hasAppliedInitialBottomLockRef = useRef(false);
+  // 中文注释：首屏贴底稳定期内暂时禁止更新"滚动到底部"按钮，
+  // 避免估算高度阶段的 onScroll 中间态把已在底部的列表误判为"离底部较远"。
+  const suppressScrollToBottomVisibilityRef = useRef(true);
   // 中文注释：记录内容区触摸起点，用于区分短按和拖动来决定是否关闭附件面板。
   const contentTouchStartRef = useRef<{
     time: number;
@@ -290,6 +293,10 @@ export default function Chat2({ appId }: Chat2Props) {
     const distanceToBottom =
       contentSize.height - (contentOffset.y + layoutMeasurement.height);
     isNearBottomRef.current = distanceToBottom <= BOTTOM_THRESHOLD;
+    // 中文注释：首屏贴底尚未稳定前，先跳过按钮显隐更新；
+    // 否则 initialScrollAtEnd/scrollToEnd 基于估高触发的中间态 onScroll
+    // 会让按钮在首次加载时错误出现。
+    if (suppressScrollToBottomVisibilityRef.current) return;
     setIsScrollToBottomVisible(distanceToBottom > SCROLL_TO_BOTTOM_THRESHOLD);
   }, []);
 
@@ -362,6 +369,7 @@ export default function Chat2({ appId }: Chat2Props) {
     setHasLoadedInitialMessages(false);
     hasAppliedInitialBottomLockRef.current = false;
     isNearBottomRef.current = true;
+    suppressScrollToBottomVisibilityRef.current = true;
     setIsScrollToBottomVisible(false);
     rowHeightCacheRef.current.clear();
   }, [tab.id]);
@@ -384,10 +392,16 @@ export default function Chat2({ appId }: Chat2Props) {
     });
 
     // 中文注释：延迟 500ms 再补一次贴底，等大部分行完成真实布局后修正位置。
-    setTimeout(() => {
+    const settleTimer = setTimeout(() => {
       isNearBottomRef.current = true;
+      suppressScrollToBottomVisibilityRef.current = false;
+      setIsScrollToBottomVisible(false);
       void listRef.current?.scrollToEnd({ animated: false });
     }, 500);
+
+    return () => {
+      clearTimeout(settleTimer);
+    };
   }, [hasLoadedInitialMessages, messageIds.length]);
 
   // ==================== 编辑态 ====================
