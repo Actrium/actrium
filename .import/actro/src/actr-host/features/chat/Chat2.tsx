@@ -198,6 +198,13 @@ export default function Chat2({ appId }: Chat2Props) {
 
   const isEmptyState =
     hasLoadedInitialMessages && messageIds.length === 0 && !isLoadingMore;
+  // 中文注释：iOS Phone 空态下，键盘弹起后输入区底部留白会从完整 safe bottom
+  // 收缩成更小的键盘态留白，导致居中的空态内容被额外向下拉回。
+  // 这里把输入区收缩掉的那段高度补回给空态容器，避免空态在键盘弹起时下沉约 10pt。
+  const emptyStateBottomCompensation =
+    Platform.OS === 'ios' && !layoutTokens.isTablet && isKeyboardVisible
+      ? Math.max(insets.bottom - Math.max(insets.bottom / 2, 10), 0)
+      : 0;
 
   // ==================== 附件面板 ====================
 
@@ -510,7 +517,12 @@ export default function Chat2({ appId }: Chat2Props) {
           <ActivityIndicator size="small" color={colors.textHeading} />
         </View>
       ) : isEmptyState ? (
-        <View style={{ flex: 1 }}>
+        <View
+          style={{
+            flex: 1,
+            paddingBottom: emptyStateBottomCompensation,
+          }}
+        >
           <ChatEmpty />
         </View>
       ) : (
