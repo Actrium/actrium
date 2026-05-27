@@ -75,6 +75,7 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
       <RNScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={styles.attachmentList}
         style={styles.attachmentScroll}
       >
