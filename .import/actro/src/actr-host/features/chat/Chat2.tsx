@@ -683,6 +683,8 @@ export default function Chat2({ appId }: Chat2Props) {
         <LocationPicker
           visible={attachmentPanelController.showMapModal}
           onClose={() => attachmentPanelController.setShowMapModal(false)}
+          // 中文注释：Phone 端附件定位选择器贴底展示，和底部附件面板保持同一交互方向。
+          presentation='bottom'
           onSelect={(data) => {
             attachmentPanelController.handleConfirmLocation(data);
             attachmentPanelController.setShowMapModal(false);
