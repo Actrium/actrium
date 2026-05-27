@@ -24,6 +24,8 @@ import type { ColorTokens } from '../../../theme/colors';
 interface LocationPickerProps {
   visible: boolean;
   onClose: () => void;
+  // 中文注释：根据调用场景切换地图选择器的弹层锚点，Phone 端贴底展示，Pad 端保持居中。
+  presentation?: 'center' | 'bottom';
   onSelect: (data: {
     latitude: number;
     longitude: number;
@@ -34,6 +36,7 @@ interface LocationPickerProps {
 const LocationPicker: React.FC<LocationPickerProps> = ({
   visible,
   onClose,
+  presentation = 'center',
   onSelect,
 }) => {
   const { t } = useTranslation();
@@ -254,7 +257,15 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       <TouchableWithoutFeedback onPress={onClose}>
         <View style={styles.modalOverlay}>
           <TouchableWithoutFeedback>
-            <View style={styles.mapModalContent}>
+            <View
+              style={[
+                styles.mapModalContent,
+                // 中文注释：Phone 端改成底部抽屉式承载地图，Pad 端继续使用居中卡片。
+                presentation === 'bottom'
+                  ? styles.mapModalContentBottom
+                  : styles.mapModalContentCenter,
+              ]}
+            >
               <ViewShot
                 ref={mapShotRef}
                 style={styles.mapContainer}
@@ -311,58 +322,69 @@ const makeStyles = (colors: ColorTokens) => {
   const hostShadows = getHostShadows(colors);
 
   return StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: colors.bgOverlay,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  mapModalContent: {
-    width: 400,
-    height: 400,
-    backgroundColor: colors.bgSurface,
-    borderRadius: 34,
-    overflow: 'hidden',
-    ...hostShadows.mapSurface,
-  },
-  mapContainer: {
-    flex: 1,
-  },
-  map: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  centerMarkerContainer: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: 'center',
-    alignItems: 'center',
-    // 确保图标在地图正中心，稍微往上偏一点点符合视觉习惯
-  },
-  centerMarker: {
-    marginTop: -24,
-  },
-  mapActionOverlay: {
-    position: 'absolute',
-    bottom: spacing.xxl,
-    left: 0,
-    right: 0,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmButton: {
-    backgroundColor: colors.accentBlue,
-    width: 140,
-    height: 48,
-    borderRadius: 34,
-    justifyContent: 'center',
-    alignItems: 'center',
-    ...hostShadows.mapActionButton,
-  },
-  confirmButtonText: {
-    color: colors.textInverse,
-    ...getTypographyStyle('bodyInput'),
-    fontWeight: 'bold',
-  },
-});
+    modalOverlay: {
+      flex: 1,
+      backgroundColor: colors.bgOverlay,
+      justifyContent: 'center',
+      alignItems: 'center',
+    },
+    mapModalContent: {
+      height: 400,
+      backgroundColor: colors.bgSurface,
+      overflow: 'hidden',
+      ...hostShadows.mapSurface,
+    },
+    mapModalContentCenter: {
+      width: 400,
+      borderRadius: 34,
+    },
+    mapModalContentBottom: {
+      width: '100%',
+      alignSelf: 'stretch',
+      marginTop: 'auto',
+      borderTopLeftRadius: 34,
+      borderTopRightRadius: 34,
+      borderBottomLeftRadius: 0,
+      borderBottomRightRadius: 0,
+    },
+    mapContainer: {
+      flex: 1,
+    },
+    map: {
+      ...StyleSheet.absoluteFillObject,
+    },
+    centerMarkerContainer: {
+      ...StyleSheet.absoluteFillObject,
+      justifyContent: 'center',
+      alignItems: 'center',
+      // 确保图标在地图正中心，稍微往上偏一点点符合视觉习惯
+    },
+    centerMarker: {
+      marginTop: -24,
+    },
+    mapActionOverlay: {
+      position: 'absolute',
+      bottom: spacing.xxl,
+      left: 0,
+      right: 0,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    confirmButton: {
+      backgroundColor: colors.accentBlue,
+      width: 140,
+      height: 48,
+      borderRadius: 34,
+      justifyContent: 'center',
+      alignItems: 'center',
+      ...hostShadows.mapActionButton,
+    },
+    confirmButtonText: {
+      color: colors.textInverse,
+      ...getTypographyStyle('bodyInput'),
+      fontWeight: 'bold',
+    },
+  });
 };
 
 export default LocationPicker;
