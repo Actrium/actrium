@@ -8,11 +8,6 @@
 // For information on using the generated types, please see the documentation:
 //   https://github.com/apple/swift-protobuf/
 
-#if canImport(FoundationEssentials)
-import FoundationEssentials
-#else
-import Foundation
-#endif
 import SwiftProtobuf
 
 // If the compiler emits an error on this type, it is because this file
@@ -76,6 +71,45 @@ public enum Ask_AttachmentType: SwiftProtobuf.Enum, Swift.CaseIterable {
 
 }
 
+/// Attachment upload final status
+public enum Ask_AttachmentUploadStatus: SwiftProtobuf.Enum, Swift.CaseIterable {
+  public typealias RawValue = Int
+  case unknown // = 0
+  case completed // = 1
+  case failed // = 2
+  case UNRECOGNIZED(Int)
+
+  public init() {
+    self = .unknown
+  }
+
+  public init?(rawValue: Int) {
+    switch rawValue {
+    case 0: self = .unknown
+    case 1: self = .completed
+    case 2: self = .failed
+    default: self = .UNRECOGNIZED(rawValue)
+    }
+  }
+
+  public var rawValue: Int {
+    switch self {
+    case .unknown: return 0
+    case .completed: return 1
+    case .failed: return 2
+    case .UNRECOGNIZED(let i): return i
+    }
+  }
+
+  // The compiler won't synthesize support with the UNRECOGNIZED case.
+  public static let allCases: [Ask_AttachmentUploadStatus] = [
+    .unknown,
+    .completed,
+    .failed,
+  ]
+
+}
+
 /// Prompt and reply message definitions
 public struct Ask_UsrPromptRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
@@ -96,11 +130,11 @@ public struct Ask_UsrPromptRequest: Sendable {
 
   /// Optional location context
   public var location: Ask_Location {
-    get {_location ?? Ask_Location()}
+    get {return _location ?? Ask_Location()}
     set {_location = newValue}
   }
   /// Returns true if `location` has been explicitly set.
-  public var hasLocation: Bool {self._location != nil}
+  public var hasLocation: Bool {return self._location != nil}
   /// Clears the value of `location`. Subsequent reads from it will return its default value.
   public mutating func clearLocation() {self._location = nil}
 
@@ -143,8 +177,8 @@ public struct Ask_AssistantReply: Sendable {
   public init() {}
 }
 
-/// Attachment upload request
-public struct Ask_AttachRequest: Sendable {
+/// Attachment upload preparation request
+public struct Ask_PrepareAttachmentUploadRequest: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -158,16 +192,28 @@ public struct Ask_AttachRequest: Sendable {
   /// Attachment type
   public var type: Ask_AttachmentType = .unknown
 
-  /// Raw file bytes
-  public var data: Data = Data()
+  /// DataStream ID used to upload file chunks
+  public var streamID: String = String()
+
+  /// Checksum of the original file bytes
+  public var checksum: String = String()
+
+  /// Checksum algorithm, for example "md5" or "sha256"
+  public var checksumAlgorithm: String = String()
+
+  /// Original file size in bytes
+  public var sizeBytes: UInt64 = 0
+
+  /// Client-registered stream for upload result
+  public var resultStreamID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
 }
 
-/// Attachment upload response
-public struct Ask_AttachResponse: Sendable {
+/// Attachment upload preparation response
+public struct Ask_PrepareAttachmentUploadResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
@@ -175,7 +221,30 @@ public struct Ask_AttachResponse: Sendable {
   /// Attachment ID (matches request id)
   public var id: String = String()
 
-  /// Status code (0 means success)
+  /// Status code (0 means stream handler registered)
+  public var statusCode: Int32 = 0
+
+  /// Error message (if any)
+  public var errorMessage: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Attachment upload final result sent through result_stream_id
+public struct Ask_AttachmentUploadResult: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Attachment ID (matches request id)
+  public var id: String = String()
+
+  /// Final upload status
+  public var status: Ask_AttachmentUploadStatus = .unknown
+
+  /// Status code (0 means completed)
   public var statusCode: Int32 = 0
 
   /// Error message (if any)
@@ -214,12 +283,36 @@ public struct Ask_Location: Sendable {
 fileprivate let _protobuf_package = "ask"
 
 extension Ask_AttachmentType: SwiftProtobuf._ProtoNameProviding {
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0ATTACHMENT_TYPE_UNKNOWN\0\u{1}IMAGE\0\u{1}DOCUMENT\0\u{1}AUDIO\0\u{1}VIDEO\0\u{2}_\u{1}OTHER\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "ATTACHMENT_TYPE_UNKNOWN"),
+    1: .same(proto: "IMAGE"),
+    2: .same(proto: "DOCUMENT"),
+    3: .same(proto: "AUDIO"),
+    4: .same(proto: "VIDEO"),
+    99: .same(proto: "OTHER"),
+  ]
+}
+
+extension Ask_AttachmentUploadStatus: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    0: .same(proto: "ATTACHMENT_UPLOAD_STATUS_UNKNOWN"),
+    1: .same(proto: "COMPLETED"),
+    2: .same(proto: "FAILED"),
+  ]
 }
 
 extension Ask_UsrPromptRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".UsrPromptRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}question_id\0\u{3}session_id\0\u{1}text\0\u{3}voice_stream_id\0\u{1}location\0\u{3}attachment_ids\0\u{3}text_response_stream_id\0\u{3}voice_response_stream_id\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "question_id"),
+    2: .standard(proto: "session_id"),
+    3: .same(proto: "text"),
+    4: .standard(proto: "voice_stream_id"),
+    5: .same(proto: "location"),
+    6: .standard(proto: "attachment_ids"),
+    7: .standard(proto: "text_response_stream_id"),
+    8: .standard(proto: "voice_response_stream_id"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -288,7 +381,13 @@ extension Ask_UsrPromptRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 extension Ask_AssistantReply: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".AssistantReply"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}question_id\0\u{3}session_id\0\u{1}text\0\u{3}status_code\0\u{3}error_message\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .standard(proto: "question_id"),
+    2: .standard(proto: "session_id"),
+    3: .same(proto: "text"),
+    4: .standard(proto: "status_code"),
+    5: .standard(proto: "error_message"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -336,9 +435,18 @@ extension Ask_AssistantReply: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
   }
 }
 
-extension Ask_AttachRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".AttachRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}filename\0\u{1}type\0\u{1}data\0")
+extension Ask_PrepareAttachmentUploadRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PrepareAttachmentUploadRequest"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "id"),
+    2: .same(proto: "filename"),
+    3: .same(proto: "type"),
+    4: .standard(proto: "stream_id"),
+    5: .same(proto: "checksum"),
+    6: .standard(proto: "checksum_algorithm"),
+    7: .standard(proto: "size_bytes"),
+    8: .standard(proto: "result_stream_id"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -349,7 +457,11 @@ extension Ask_AttachRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
       case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.filename) }()
       case 3: try { try decoder.decodeSingularEnumField(value: &self.type) }()
-      case 4: try { try decoder.decodeSingularBytesField(value: &self.data) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.streamID) }()
+      case 5: try { try decoder.decodeSingularStringField(value: &self.checksum) }()
+      case 6: try { try decoder.decodeSingularStringField(value: &self.checksumAlgorithm) }()
+      case 7: try { try decoder.decodeSingularUInt64Field(value: &self.sizeBytes) }()
+      case 8: try { try decoder.decodeSingularStringField(value: &self.resultStreamID) }()
       default: break
       }
     }
@@ -365,25 +477,45 @@ extension Ask_AttachRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplem
     if self.type != .unknown {
       try visitor.visitSingularEnumField(value: self.type, fieldNumber: 3)
     }
-    if !self.data.isEmpty {
-      try visitor.visitSingularBytesField(value: self.data, fieldNumber: 4)
+    if !self.streamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.streamID, fieldNumber: 4)
+    }
+    if !self.checksum.isEmpty {
+      try visitor.visitSingularStringField(value: self.checksum, fieldNumber: 5)
+    }
+    if !self.checksumAlgorithm.isEmpty {
+      try visitor.visitSingularStringField(value: self.checksumAlgorithm, fieldNumber: 6)
+    }
+    if self.sizeBytes != 0 {
+      try visitor.visitSingularUInt64Field(value: self.sizeBytes, fieldNumber: 7)
+    }
+    if !self.resultStreamID.isEmpty {
+      try visitor.visitSingularStringField(value: self.resultStreamID, fieldNumber: 8)
     }
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Ask_AttachRequest, rhs: Ask_AttachRequest) -> Bool {
+  public static func ==(lhs: Ask_PrepareAttachmentUploadRequest, rhs: Ask_PrepareAttachmentUploadRequest) -> Bool {
     if lhs.id != rhs.id {return false}
     if lhs.filename != rhs.filename {return false}
     if lhs.type != rhs.type {return false}
-    if lhs.data != rhs.data {return false}
+    if lhs.streamID != rhs.streamID {return false}
+    if lhs.checksum != rhs.checksum {return false}
+    if lhs.checksumAlgorithm != rhs.checksumAlgorithm {return false}
+    if lhs.sizeBytes != rhs.sizeBytes {return false}
+    if lhs.resultStreamID != rhs.resultStreamID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
 }
 
-extension Ask_AttachResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
-  public static let protoMessageName: String = _protobuf_package + ".AttachResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{3}status_code\0\u{3}error_message\0")
+extension Ask_PrepareAttachmentUploadResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".PrepareAttachmentUploadResponse"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "id"),
+    2: .standard(proto: "status_code"),
+    3: .standard(proto: "error_message"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -412,8 +544,58 @@ extension Ask_AttachResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
     try unknownFields.traverse(visitor: &visitor)
   }
 
-  public static func ==(lhs: Ask_AttachResponse, rhs: Ask_AttachResponse) -> Bool {
+  public static func ==(lhs: Ask_PrepareAttachmentUploadResponse, rhs: Ask_PrepareAttachmentUploadResponse) -> Bool {
     if lhs.id != rhs.id {return false}
+    if lhs.statusCode != rhs.statusCode {return false}
+    if lhs.errorMessage != rhs.errorMessage {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Ask_AttachmentUploadResult: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".AttachmentUploadResult"
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "id"),
+    2: .same(proto: "status"),
+    3: .standard(proto: "status_code"),
+    4: .standard(proto: "error_message"),
+  ]
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.status) }()
+      case 3: try { try decoder.decodeSingularInt32Field(value: &self.statusCode) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.errorMessage) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    if self.status != .unknown {
+      try visitor.visitSingularEnumField(value: self.status, fieldNumber: 2)
+    }
+    if self.statusCode != 0 {
+      try visitor.visitSingularInt32Field(value: self.statusCode, fieldNumber: 3)
+    }
+    if !self.errorMessage.isEmpty {
+      try visitor.visitSingularStringField(value: self.errorMessage, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Ask_AttachmentUploadResult, rhs: Ask_AttachmentUploadResult) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.status != rhs.status {return false}
     if lhs.statusCode != rhs.statusCode {return false}
     if lhs.errorMessage != rhs.errorMessage {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
@@ -423,7 +605,12 @@ extension Ask_AttachResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImple
 
 extension Ask_Location: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".Location"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}latitude\0\u{1}longitude\0\u{1}address\0\u{3}place_name\0")
+  public static let _protobuf_nameMap: SwiftProtobuf._NameMap = [
+    1: .same(proto: "latitude"),
+    2: .same(proto: "longitude"),
+    3: .same(proto: "address"),
+    4: .standard(proto: "place_name"),
+  ]
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
