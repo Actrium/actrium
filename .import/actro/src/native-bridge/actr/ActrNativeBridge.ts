@@ -15,14 +15,28 @@ export const ActrNativeBridge = ActrBridge as {
     params: Record<string, unknown>,
     data: string,
   ) => Promise<string>;
-  uploadAttachment: (params: {
-    streamId: string;
-    type: number;
-    fileData: string;
-    actorType: string;
+  prepareAttachmentUpload: (params: {
     tabId: string;
+    id: string;
     filename: string;
+    type: number;
+    streamId: string;
+    checksum: string;
+    checksumAlgorithm: string;
+    sizeBytes: number;
+    resultStreamId: string;
   }) => Promise<{ id: string; errorMessage: string; statusCode: number }>;
+  sendAttachmentChunk: (
+    params: {
+      tabId: string;
+      sessionId: string;
+      attachmentId: string;
+      chunkId: string;
+      streamId: string;
+      metadata: { key: string; value: string }[];
+    },
+    chunkData: string,
+  ) => Promise<{ streamID: string; status: number; message: string }>;
   shutdownService: (params: {
     actorType: string;
     tabId: string;
