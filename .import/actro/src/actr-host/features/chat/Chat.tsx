@@ -1168,6 +1168,8 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         <LocationPicker
           visible={phoneAttachmentPanelController.showMapModal}
           onClose={() => phoneAttachmentPanelController.setShowMapModal(false)}
+          // 中文注释：Phone 端附件定位选择器贴底展示，和底部附件面板保持同一交互方向。
+          presentation='bottom'
           onSelect={(data) => {
             phoneAttachmentPanelController.handleConfirmLocation(data);
             phoneAttachmentPanelController.setShowMapModal(false);
