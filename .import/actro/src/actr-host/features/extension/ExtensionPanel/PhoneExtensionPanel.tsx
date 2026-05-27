@@ -120,7 +120,6 @@ const PhoneExtensionPanel: React.FC<PhoneExtensionPanelProps> = ({
         panelAnimStyle,
       ]}
     >
-      <View style={styles.borderRight} />
       {content || <SkeletonPlaceholder colors={colors} />}
     </Animated.View>
   );
@@ -135,15 +134,9 @@ const makeStyles = (colors: ColorTokens) => StyleSheet.create({
     height: '100%',
     flexShrink: 1,
     backgroundColor: colors.bgChatPage,
+    borderRightWidth: 1,
+    borderRightColor: colors.extensionPanelBorder,
     overflow: 'hidden',
-  },
-  borderRight: {
-    position: 'absolute',
-    right: 0,
-    top: 0,
-    bottom: 0,
-    width: 1,
-    backgroundColor: colors.extensionPanelBorder,
   },
   skeletonContainer: {
     flex: 1,
