@@ -42,17 +42,27 @@ export enum AttachmentType {
   OTHER = 99,
 }
 
-export type TAttachRequest = {
-  id: string;
-  filename: string;
-  type: AttachmentType;
-  data: Uint8Array;
+export enum AttachmentUploadStatus {
+  UNKNOWN = 0,
+  COMPLETED = 1,
+  FAILED = 2,
+}
+
+export type TAttachmentUploadRequest = {
+  attachmentId: string;
+  sessionId: string;
+  fileName: string;
+  filePath: string;
 };
 
-export type TAttachResponse = {
+export type TAttachmentUploadResult = {
   id: string;
+  status: AttachmentUploadStatus;
   errorMessage: string;
   statusCode: number;
+  metadata?: { value: string; key: string }[];
+  sequence?: number;
+  timestampMs?: number;
 };
 
 export type TLocation = {
