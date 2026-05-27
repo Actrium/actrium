@@ -22,8 +22,14 @@ RCT_EXTERN_METHOD(sendVoiceChunk:(NSDictionary *)params
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 
-/// Upload attachment
-RCT_EXTERN_METHOD(uploadAttachment:(NSDictionary *)params
+/// Prepare attachment upload
+RCT_EXTERN_METHOD(prepareAttachmentUpload:(NSDictionary *)params
+                  resolve:(RCTPromiseResolveBlock)resolve
+                  reject:(RCTPromiseRejectBlock)reject)
+
+/// Send attachment chunk
+RCT_EXTERN_METHOD(sendAttachmentChunk:(NSDictionary *)params
+                  chunkData:(NSString *)chunkData
                   resolve:(RCTPromiseResolveBlock)resolve
                   reject:(RCTPromiseRejectBlock)reject)
 // MARK: - ActrService Methods
