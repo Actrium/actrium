@@ -155,7 +155,7 @@ export function useActrConnection({
 
     try {
       const attachmentIds = attachments?.length
-        ? await uploadAttachment(attachments)
+        ? await uploadAttachment(attachments, session_id)
         : [];
 
       const reqMessage = {
@@ -188,12 +188,16 @@ export function useActrConnection({
    */
   const uploadAttachment = async (
     attachments: IAttachmentItem[],
+    sessionId: string,
   ): Promise<string[]> => {
     const ids = await Promise.all(
       attachments.map(async (item) =>
-        connection!.uploadAttachment(Utils.generateId(), {
+        connection!.uploadAttachment({
+          // 中文注释：prepare/result 协议都以 attachmentId 作为唯一键，这里优先复用输入态附件 ID 与宿主对齐。
+          attachmentId: item.id || Utils.generateId(),
+          sessionId,
           fileName: item.file_name || 'unknown',
-          fieldData: await Utils.readFileAsBinary(item.local_url),
+          filePath: item.local_url,
         }),
       ),
     );
@@ -215,7 +219,7 @@ export function useActrConnection({
     location?: TLocation;
   }) => {
     const attachmentIds = attachments?.length
-      ? await uploadAttachment(attachments)
+      ? await uploadAttachment(attachments, session_id)
       : [];
 
     const req = {
