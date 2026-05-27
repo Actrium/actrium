@@ -18,7 +18,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { LegendList, type LegendListRef } from '@legendapp/list';
+import { LegendList, type LegendListRef } from '@legendapp/list/react-native';
 import { KeyboardStickyView } from 'react-native-keyboard-controller';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from 'react-i18next';
@@ -59,6 +59,7 @@ import { ScrollToBottomButton } from '../shared/ScrollToBottomButton';
 import { Toast, ToastRef } from '../shared/Toast';
 import { FeedbackFormModal } from './FeedbackFormModal';
 import ChatSharePreviewModal from './share/ChatSharePreviewModal';
+import { estimateMessageRowHeight } from './estimateMessageRowHeight';
 
 // ==================== 常量 ====================
 
@@ -66,15 +67,15 @@ import ChatSharePreviewModal from './share/ChatSharePreviewModal';
 const PAGE_SIZE = 20;
 // 中文注释：空数组复用，避免 selector 每次返回新引用触发重渲染。
 const EMPTY_MESSAGE_IDS: string[] = [];
+// 中文注释：空消息映射复用，避免 selector 每次返回新对象触发重渲染。
+const EMPTY_MESSAGES_BY_ID: Record<string, IMessage> = {};
 // 中文注释：选中部分空集合复用，避免每个 MessageRow 返回新 Set 引用触发重渲染。
 const EMPTY_SELECTED_PARTS = new Set<'attachments' | 'question' | 'answer'>();
 // 中文注释：距底部小于该值视为"贴近底部"，键盘弹起或异步内容撑高时自动贴底。
 const BOTTOM_THRESHOLD = 80;
 // 中文注释：距底部超过该值时显示"滚动到底部"按钮。
 const SCROLL_TO_BOTTOM_THRESHOLD = 100;
-// 中文注释：行高估算范围，避免个别超高卡片拉偏整体估值。
-const MIN_ESTIMATED_ITEM_SIZE = 120;
-const MAX_ESTIMATED_ITEM_SIZE = 280;
+// 中文注释：列表兜底估高，仅在逐条估高函数未命中时使用。
 const INITIAL_ESTIMATED_ITEM_SIZE = 160;
 // 中文注释：附件面板展开/收起动画时长（毫秒）。
 const ATTACHMENT_PANEL_OPEN_DURATION = 220;
@@ -86,10 +87,9 @@ const CONTENT_TAP_MAX_MOVE = 8;
 // 中文注释：选择模式下左侧 checkbox 的槽位宽度。
 const SELECTION_CHECKBOX_SLOT_WIDTH = 30;
 
-// 中文注释：LegendList 滚动事件兼容类型，统一 RN 原生和 Reanimated 扁平化事件。
-type LegendScrollEvent =
-  | NativeSyntheticEvent<NativeScrollEvent>
-  | (NativeScrollEvent & { eventName?: string });
+// 中文注释：v3 onScroll 统一使用 RN 原生 NativeSyntheticEvent<NativeScrollEvent> 类型，
+// 不再需要 v2 的 Reanimated 扁平化事件兼容。
+type LegendScrollEvent = NativeSyntheticEvent<NativeScrollEvent>;
 
 interface Chat2Props {
   appId: string;
@@ -112,6 +112,12 @@ export default function Chat2({ appId }: Chat2Props) {
       [tab.id],
     ),
   );
+  const messagesById = useMessageStore(
+    useCallback(
+      (state) => state.messageById[tab.id] || EMPTY_MESSAGES_BY_ID,
+      [tab.id],
+    ),
+  );
   const appendOldMessages = useMessageStore((state) => state.appendOldMessages);
   const editingMessageId = useInputStore(
     (state) => state.inputs[tab.id]?.editingMessageId,
@@ -129,9 +135,6 @@ export default function Chat2({ appId }: Chat2Props) {
   const [hasLoadedInitialMessages, setHasLoadedInitialMessages] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  const [estimatedItemSize, setEstimatedItemSize] = useState(
-    INITIAL_ESTIMATED_ITEM_SIZE,
-  );
   // 中文注释：反馈弹窗当前对应的消息 ID，非空时打开弹窗。
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
   // 中文注释：滚动位置距底部超过阈值时为 true，控制"滚动到底部"按钮的显示。
@@ -257,7 +260,7 @@ export default function Chat2({ appId }: Chat2Props) {
   });
 
   // 中文注释：触顶时加载更早的历史消息，追加到 store 头部。
-  const handleStartReached = useCallback(async () => {
+  const handleStartReached = useCallback(async (_info: { distanceFromStart: number }) => {
     if (isLoadingMore || !hasMore || messageIds.length === 0) return;
 
     setIsLoadingMore(true);
@@ -283,8 +286,7 @@ export default function Chat2({ appId }: Chat2Props) {
   // 中文注释：实时追踪滚动位置，判断是否贴近底部，用于键盘弹起和异步内容撑高时自动贴底；
   // 同时更新"滚动到底部"按钮的可见性。
   const handleScroll = useCallback((event: LegendScrollEvent) => {
-    const nativeEvent = 'nativeEvent' in event ? event.nativeEvent : event;
-    const { contentOffset, contentSize, layoutMeasurement } = nativeEvent;
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceToBottom =
       contentSize.height - (contentOffset.y + layoutMeasurement.height);
     isNearBottomRef.current = distanceToBottom <= BOTTOM_THRESHOLD;
@@ -309,29 +311,9 @@ export default function Chat2({ appId }: Chat2Props) {
     if (!isKeyboardVisible || !isNearBottomRef.current) return;
 
     requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({ animated: false });
+      void listRef.current?.scrollToEnd({ animated: false });
     });
   }, [isKeyboardVisible, keyboardInset]);
-
-  // ==================== 行高估算 ====================
-
-  // 中文注释：根据已缓存的真实行高动态调整 estimatedItemSize，
-  // 让 LegendList 的虚拟化计算更准确，减少空白占位抖动。
-  const updateEstimatedItemSize = useCallback(() => {
-    const heights = messageIds
-      .map((id) => rowHeightCacheRef.current.get(id))
-      .filter((v): v is number => typeof v === 'number' && v > 0);
-    if (heights.length === 0) return;
-
-    const avg = heights.reduce((s, v) => s + v, 0) / heights.length;
-    const next = Math.max(
-      MIN_ESTIMATED_ITEM_SIZE,
-      Math.min(MAX_ESTIMATED_ITEM_SIZE, Math.round(avg)),
-    );
-    setEstimatedItemSize((prev) =>
-      Math.abs(prev - next) > 4 ? next : prev,
-    );
-  }, [messageIds]);
 
   // 中文注释：消息行高度变化回调，缓存高度并更新估算值；
   // 贴近底部时重新贴底，避免异步内容撑高后留白。
@@ -341,15 +323,36 @@ export default function Chat2({ appId }: Chat2Props) {
       if (Math.abs(prev - height) <= 1) return;
 
       rowHeightCacheRef.current.set(messageId, height);
-      updateEstimatedItemSize();
 
       if (isNearBottomRef.current) {
         requestAnimationFrame(() => {
-          listRef.current?.scrollToEnd({ animated: false });
+          void listRef.current?.scrollToEnd({ animated: false });
         });
       }
     },
-    [updateEstimatedItemSize],
+    [],
+  );
+
+  // 中文注释：逐条返回消息行估高；已测量的行直接复用真实高度，未测量的行按回答内容结构保守估算。
+  const getEstimatedItemSize = useCallback(
+    (messageId: string) => {
+      const measuredHeight = rowHeightCacheRef.current.get(messageId);
+      if (measuredHeight && measuredHeight > 0) {
+        return measuredHeight;
+      }
+
+      const message = messagesById[messageId];
+      if (!message) {
+        return INITIAL_ESTIMATED_ITEM_SIZE;
+      }
+
+      return estimateMessageRowHeight(
+        message,
+        messageIds[messageIds.length - 1] === messageId,
+        layoutTokens.isTablet,
+      );
+    },
+    [layoutTokens.isTablet, messageIds, messagesById],
   );
 
   // ==================== 生命周期 ====================
@@ -361,7 +364,6 @@ export default function Chat2({ appId }: Chat2Props) {
     isNearBottomRef.current = true;
     setIsScrollToBottomVisible(false);
     rowHeightCacheRef.current.clear();
-    setEstimatedItemSize(INITIAL_ESTIMATED_ITEM_SIZE);
   }, [tab.id]);
 
   // 中文注释：首屏消息到位后，强制保持 isNearBottomRef = true，
@@ -378,13 +380,13 @@ export default function Chat2({ appId }: Chat2Props) {
     isNearBottomRef.current = true;
 
     requestAnimationFrame(() => {
-      listRef.current?.scrollToEnd({ animated: false });
+      void listRef.current?.scrollToEnd({ animated: false });
     });
 
     // 中文注释：延迟 500ms 再补一次贴底，等大部分行完成真实布局后修正位置。
     setTimeout(() => {
       isNearBottomRef.current = true;
-      listRef.current?.scrollToEnd({ animated: false });
+      void listRef.current?.scrollToEnd({ animated: false });
     }, 500);
   }, [hasLoadedInitialMessages, messageIds.length]);
 
@@ -399,7 +401,7 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // 中文注释：点击"滚动到底部"按钮，平滑滚动到列表底部。
   const handleScrollToBottom = useCallback(() => {
-    listRef.current?.scrollToEnd({ animated: true });
+    void listRef.current?.scrollToEnd({ animated: true });
   }, []);
 
   // 中文注释：记录内容区触摸起点，用于区分短按和拖动。
@@ -523,10 +525,24 @@ export default function Chat2({ appId }: Chat2Props) {
               </View>
             ) : null
           }
-          initialScrollIndex={messageIds.length - 1}
-          maintainScrollAtEnd
-          maintainVisibleContentPosition
+          initialScrollAtEnd
+          // 中文注释：尾部新增消息时只让 maintainScrollAtEnd 接管贴底，
+          // 避免与 maintainVisibleContentPosition 的 data 锚定同时改 scroll 造成超长消息错位。
+          maintainScrollAtEnd={{
+            animated: false,
+            on: {
+              dataChange: true,
+              itemLayout: true,
+              layout: true,
+            },
+          }}
+          // 中文注释：保留 size 稳定能力处理滚动中的高度变化，但关闭 data 锚定，
+          // 避免在“回答已完成后再追加新消息”时对超长上一条消息做错误位置恢复。
+          maintainVisibleContentPosition={{ size: true }}
           alignItemsAtEnd
+          // 中文注释：当前消息行包含本地布局缓存和复杂交互状态，先显式关闭 recycleItems，
+          // 避免 LegendList v3 beta 复用 row 时把旧实例状态带到新消息上。
+          recycleItems={false}
           onStartReached={handleStartReached}
           onStartReachedThreshold={0.5}
           onScroll={handleScroll}
@@ -534,7 +550,8 @@ export default function Chat2({ appId }: Chat2Props) {
           keyboardShouldPersistTaps="never"
           keyboardDismissMode="none"
           scrollEventThrottle={16}
-          estimatedItemSize={estimatedItemSize}
+          estimatedItemSize={INITIAL_ESTIMATED_ITEM_SIZE}
+          getEstimatedItemSize={getEstimatedItemSize}
         />
       )}
       {!!editingMessageId && (
@@ -876,6 +893,7 @@ const MessageRow = React.memo(function MessageRow({
     <View
       style={[
         styles.messageListWrapper,
+        styles.messageListWrapperGuard,
         {
           maxWidth: layoutTokens.contentMaxWidth,
           paddingHorizontal: layoutTokens.messageHorizontalPadding,
@@ -883,7 +901,7 @@ const MessageRow = React.memo(function MessageRow({
       ]}
       onLayout={handleRowLayout}
     >
-      <View style={styles.messageGroup}>
+      <View style={[styles.messageGroup, styles.messageGroupGuard]}>
         {item.attachments &&
           renderBubbleWithCheckbox(
             'attachments',
@@ -1034,8 +1052,20 @@ const makeStyles = (colors: ColorTokens) =>
       width: '100%',
       alignSelf: 'center',
     },
+    // 中文注释：必须保留这一层透明边框；移除后超长表格消息在列表里会出现气泡重叠，当前原因未定位。
+    messageListWrapperGuard: {
+      borderWidth: 1,
+      borderColor: 'transparent',
+      backgroundColor: 'transparent',
+    },
     messageGroup: {
       marginBottom: spacing.md,
+    },
+    // 中文注释：必须保留这一层透明边框；单独去掉后重叠问题会复现，当前原因未定位。
+    messageGroupGuard: {
+      borderWidth: 1,
+      borderColor: 'transparent',
+      backgroundColor: 'transparent',
     },
     // 中文注释：选择模式下每个气泡行的布局，左侧 checkbox + 右侧气泡。
     bubbleWithCheckbox: {
