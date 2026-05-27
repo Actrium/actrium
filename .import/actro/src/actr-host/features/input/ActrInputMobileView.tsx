@@ -430,6 +430,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   }, [editingMessageId]);
   const shouldShowExitTabButton = !isEditing && !isInputFocused;
   const authOverlayRightInset = shouldShowExitTabButton ? 58 : 0;
+  // 中文注释：附件选择区展开时隐藏底部 AI 提示文案，避免与附件面板在同一垂直区域叠加。
+  const shouldShowFloatingText = !isKeyboardVisible && !isAttachmentPanelOpen;
   return (
     <View
       style={[
@@ -662,8 +664,8 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
         </View>
       </View>
 
-      {/* 中文注释：键盘弹起时隐藏附加文案，避免与输入态内容同时堆叠。 */}
-      {!isKeyboardVisible && (
+      {/* 中文注释：键盘弹起或附件选择区展开时隐藏附加文案，避免底部元素同时堆叠。 */}
+      {shouldShowFloatingText && (
         <View
           pointerEvents="none"
           style={[
