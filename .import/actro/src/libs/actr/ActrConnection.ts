@@ -1,13 +1,20 @@
 import { Buffer } from 'buffer';
+import RNFS from 'react-native-fs';
 import {
+  AttachmentType,
+  AttachmentUploadStatus,
   TActrMessageRequest,
   TActrMessageResponse,
+  TAttachmentUploadRequest,
   TActrVoiceRequest,
 } from './ActrConnection.type';
 import { ActrNativeBridge } from '../../native-bridge/actr/ActrNativeBridge';
 import { Utils } from '../../utils/utils';
 import { ActrStreamRouter, TActrStreamMap } from './ActrStreamRouter';
 import { errorNote } from './LocalTestMessage';
+
+// 中文注释：附件上传按 48KB 固定分片，RN 与 native 依赖同一切片大小约定保证 chunk 顺序与边界一致。
+const ATTACHMENT_CHUNK_SIZE = 48 * 1024;
 
 /**
  * Actr 连接管理类
@@ -312,57 +319,132 @@ export class ActrConnection {
     }
   }
 
-  async uploadAttachment(
-    streamId: string,
-    data: {
-      fileName: string;
-      fieldData: Uint8Array;
-    },
-  ): Promise<string> {
+  // 中文注释：附件上传必须先等待 native 返回 attachmentResult.completed，再把 attachmentId 带进文本/语音消息。
+  async uploadAttachment(data: TAttachmentUploadRequest): Promise<string> {
     if (!this.isInitialized) {
-      console.error(`[ActrConnection:${this.appId}] Not initialized. Cannot upload attachment.`);
-      return '';
+      throw new Error(`[ActrConnection:${this.appId}] Not initialized.`);
     }
-    console.log('发送附件', data.fileName, data.fieldData.length);
+
+    const router = ActrStreamRouter.getInstance();
+    const chunkStreamId = Utils.generateId();
+    const resultStreamId = Utils.generateId();
+    const normalizedFilePath = data.filePath.replace('file://', '');
+    let hasPreparedResultStream = false;
 
     try {
-      const res = await ActrNativeBridge.uploadAttachment({
-        streamId,
-        type: 2,
-        fileData: Utils.uint8ArrayToBase64(data.fieldData),
-        actorType: this.actorType,
+      const fileStat = await RNFS.stat(normalizedFilePath);
+      const checksum = await RNFS.hash(normalizedFilePath, 'md5');
+      const sizeBytes = Number(fileStat.size);
+
+      console.log(
+        `[ActrConnection:${this.appId}] Start upload attachment ${data.fileName}, size=${sizeBytes}`,
+      );
+
+      const prepareResult = await ActrNativeBridge.prepareAttachmentUpload({
         tabId: this.tabId,
-        filename: data.fileName
+        id: data.attachmentId,
+        filename: data.fileName,
+        type: AttachmentType.DOCUMENT,
+        streamId: chunkStreamId,
+        checksum,
+        checksumAlgorithm: 'md5',
+        sizeBytes,
+        resultStreamId,
       });
 
-      if (res.statusCode !== 0) {
-        console.error(
-          `[ActrConnection:${this.appId}] Upload attachment failed: ${res.statusCode}, ${JSON.stringify(res)}`,
+      // 中文注释：prepare 成功只表示 native 已注册上传/结果流，非 0 说明附件上传流程连入口都没建立成功。
+      if (prepareResult.statusCode !== 0) {
+        throw new Error(
+          prepareResult.errorMessage ||
+            `Prepare attachment upload failed: ${prepareResult.statusCode}`,
+        );
+      }
+      console.log(
+        `[ActrConnection:${this.appId}] Attachment upload prepared ${data.fileName}, ` +
+          `attachmentId=${prepareResult.id}, chunkStreamId=${chunkStreamId}, resultStreamId=${resultStreamId}`,
+      );
+      hasPreparedResultStream = true;
+      const attachmentResultPromise = router.waitForAttachmentResult(
+        resultStreamId,
+        this,
+      );
+
+      // 中文注释：总分片数用于日志对齐 native 收包进度，便于定位卡在哪个 chunk。
+      const totalChunks = Math.ceil(sizeBytes / ATTACHMENT_CHUNK_SIZE);
+      let chunkIndex = 0;
+      for (let position = 0; position < sizeBytes; position += ATTACHMENT_CHUNK_SIZE) {
+        // 中文注释：同一附件的 chunkId 由 1 开始顺序递增，native 侧会按 chunkId 还原上传顺序。
+        chunkIndex += 1;
+        const chunkLength = Math.min(ATTACHMENT_CHUNK_SIZE, sizeBytes - position);
+        // 中文注释：最后一个附件分片显式携带 eos，通知 native/服务端该附件的数据流已经结束。
+        const chunkMetadata =
+          chunkIndex === totalChunks
+            ? [
+                {
+                  key: 'eos',
+                  value: 'true',
+                },
+              ]
+            : [];
+        console.log(
+          `[ActrConnection:${this.appId}] Send attachment chunk ${data.fileName} ` +
+            `${chunkIndex}/${totalChunks}, offset=${position}, bytes=${chunkLength}, ` +
+            `metadata=${JSON.stringify(chunkMetadata)}`,
+        );
+        const chunkBase64 = await RNFS.read(
+          normalizedFilePath,
+          chunkLength,
+          position,
+          'base64',
+        );
+        const chunkResult = await ActrNativeBridge.sendAttachmentChunk(
+          {
+            tabId: this.tabId,
+            sessionId: data.sessionId,
+            attachmentId: data.attachmentId,
+            chunkId: String(chunkIndex),
+            streamId: chunkStreamId,
+            metadata: chunkMetadata,
+          },
+          chunkBase64,
+        );
+        console.log(
+          `[ActrConnection:${this.appId}] Attachment chunk sent ${data.fileName} ` +
+            `${chunkIndex}/${totalChunks}, status=${chunkResult.status}, ` +
+            `metadata=${JSON.stringify(chunkMetadata)}`,
+        );
+        // 中文注释：chunk 响应是 native 对单片发送的同步确认，非 0 时直接终止整条附件上传链路。
+        if (chunkResult.status !== 0) {
+          throw new Error(
+            chunkResult.message || `Send attachment chunk failed: ${chunkResult.status}`,
+          );
+        }
+      }
+
+      const attachmentResult = await attachmentResultPromise;
+      // 中文注释：只有收到 attachmentResult.completed 且 statusCode=0，附件 ID 才能安全透传给文本/语音消息。
+      if (
+        attachmentResult.status !== AttachmentUploadStatus.COMPLETED ||
+        attachmentResult.statusCode !== 0
+      ) {
+        throw new Error(
+          attachmentResult.errorMessage ||
+            `Attachment upload failed: ${attachmentResult.statusCode}`,
         );
       }
 
-      return res.id;
+      return attachmentResult.id;
     } catch (e: any) {
+      // 中文注释：只有 prepare 成功后 native 才真正持有 result stream，失败清理也只针对这类已注册流。
+      if (hasPreparedResultStream) {
+        router.cancelAttachmentResultWait(resultStreamId, this);
+      }
       console.error(
         `[ActrConnection:${this.appId}] Upload attachment failed:`,
         e.message || e,
       );
-      return '';
+      throw e;
     }
-  }
-
-  async uploadAttachmentSlice(
-    streamId: string,
-    data: {
-      fieldData: Uint8Array;
-    },
-  ): Promise<string> {
-    if (!this.isInitialized) {
-      throw new Error(`[ActrConnection:${this.appId}] Not initialized.`);
-    }
-    console.log('发送附件', data.fieldData.length);
-
-    return '';
   }
 
   async disconnect() {

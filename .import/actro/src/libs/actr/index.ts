@@ -10,8 +10,8 @@ export type {
   TActrMessageRequest,
   TActrMessageResponse,
   TActrVoiceRequest,
-  TAttachRequest,
-  TAttachResponse,
+  TAttachmentUploadRequest,
+  TAttachmentUploadResult,
   TLocation,
 } from './ActrConnection.type';
-export { AttachmentType } from './ActrConnection.type';
+export { AttachmentType, AttachmentUploadStatus } from './ActrConnection.type';

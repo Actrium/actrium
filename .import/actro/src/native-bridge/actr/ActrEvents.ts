@@ -5,10 +5,15 @@ const eventEmitter = new NativeEventEmitter(ActrBridge);
 
 export type ActrStreamMessageEvent = {
   streamID: string;
-  message: string;
+  message?: string;
   status: number;
+  type?: string;
+  id?: string;
+  statusCode?: number;
+  errorMessage?: string;
   metadata?: { value: string; key: string }[];
   sequence?: number; // 语音包顺序
+  timestampMs?: number;
 };
 
 type Unsubscribe = () => void;
