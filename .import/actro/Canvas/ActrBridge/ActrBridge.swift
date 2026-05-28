@@ -389,12 +389,10 @@ extension ActrBridge {
         }
     }
     
-    /// Upload attachment
-    /// - Parameters:
-    ///   - dict: Dictionary containing 'id', 'filename', 'type'
-    ///   - fileData: Base64 encoded file data
+    /// Prepare attachment upload
+    /// - Parameter dict: Dictionary containing tabId, id, filename, type, streamId, checksum, checksumAlgorithm, sizeBytes, resultStreamId
     @objc
-    public func uploadAttachment(
+    public func prepareAttachmentUpload(
         _ dict: [String: Any],
         resolve: @escaping RCTPromiseResolveBlock,
         reject: @escaping RCTPromiseRejectBlock
@@ -405,26 +403,88 @@ extension ActrBridge {
                 reject("NOT_CONNECTED", "ActrBridge not initialized for tabId", nil)
                 return
             }
-            
+
             do {
-                guard let tmpData = dict["fileData"] as? String, let binaryData = Data(base64Encoded: tmpData) else {
-                    reject("INVALID_INPUT", "Invalid fileData (Base64 decode failed)", nil)
-                    return
-                }
-                
-                var request = Ask_AttachRequest()
+                var request = DataStreamApp_PrepareAttachmentUploadMessage()
                 request.id = dict["id"] as? String ?? UUID().uuidString
-                request.filename = dict["filename"] as? String ?? "file"
-                
+                request.filename = dict["filename"] as? String ?? ""
                 let typeInt = dict["type"] as? Int ?? 0
                 request.type = Ask_AttachmentType(rawValue: typeInt) ?? .unknown
-                request.data = binaryData
-                
+                request.streamID = dict["streamId"] as? String ?? ""
+                request.checksum = dict["checksum"] as? String ?? ""
+                request.checksumAlgorithm = dict["checksumAlgorithm"] as? String ?? ""
+                request.sizeBytes = dict["sizeBytes"] as? UInt64 ?? 0
+                request.resultStreamID = dict["resultStreamId"] as? String ?? ""
+
+                if request.streamID.isEmpty {
+                    reject("INVALID_INPUT", "Missing required field (streamId)", nil)
+                    return
+                }
+
                 let response = try await instance.actr.call(request)
                 resolve([
                     "id": response.id,
                     "statusCode": response.statusCode,
                     "errorMessage": response.errorMessage
+                ])
+            } catch {
+                reject("ACTR_ERROR", error.localizedDescription, error)
+            }
+        }
+    }
+
+    /// Send attachment chunk
+    /// - Parameters:
+    ///   - dict: Dictionary containing tabId, sessionId, attachmentId, chunkId, streamId, metadata
+    ///   - chunkData: Base64 encoded chunk data
+    @objc
+    public func sendAttachmentChunk(
+        _ dict: [String: Any],
+        chunkData: String,
+        resolve: @escaping RCTPromiseResolveBlock,
+        reject: @escaping RCTPromiseRejectBlock
+    ) {
+        Task { @MainActor in
+            guard let tabId = dict["tabId"] as? String,
+                  let instance = actorInstances[tabId] else {
+                reject("NOT_CONNECTED", "ActrBridge not initialized for tabId", nil)
+                return
+            }
+
+            do {
+                guard let streamID = dict["streamId"] as? String else {
+                    reject("INVALID_INPUT", "Missing streamId", nil)
+                    return
+                }
+
+                var request = DataStreamApp_AttachmentChunkMessage()
+                request.streamID = streamID
+                request.sessionID = dict["sessionId"] as? String ?? ""
+                request.attachmentID = dict["attachmentId"] as? String ?? ""
+                request.chunkID = dict["chunkId"] as? String ?? ""
+
+                // Parse metadata if present
+                if let metadataArray = dict["metadata"] as? [[String: String]] {
+                    var metadataDict: [String: String] = [:]
+                    for entry in metadataArray {
+                        if let key = entry["key"], let value = entry["value"] {
+                            metadataDict[key] = value
+                        }
+                    }
+                    request.metadata = metadataDict
+                }
+
+                guard let binaryData = Data(base64Encoded: chunkData) else {
+                    reject("INVALID_INPUT", "Invalid chunkData base64", nil)
+                    return
+                }
+                request.chunkData = binaryData
+
+                let response = try await instance.actr.call(request)
+                resolve([
+                    "streamID": response.streamID,
+                    "status": response.status,
+                    "message": response.message
                 ])
             } catch {
                 reject("ACTR_ERROR", error.localizedDescription, error)
@@ -474,6 +534,7 @@ extension ActrBridge {
 enum StreamType: String {
     case text
     case voice
+    case attachmentResult
 }
 
 private actor StreamPrintCallback: Actr.DataStreamCallback {
@@ -488,24 +549,45 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
     }
     
     func onStream(chunk: Actr.DataStream, sender: ActrId) async throws {
+        // Convert metadata to dictionary array
+        let metadataArray = chunk.metadata.map { entry in
+            return ["key": entry.key, "value": entry.value]
+        }
+
+        // 推送到 RN
+        guard let bridge = ActrBridge.shared() else {
+            let errorMsg = "[StreamPrintCallback] Failed to get ActrBridge instance to send event"
+            throw ActrError.StateError(msg: errorMsg)
+        }
+
+        if streamType == .attachmentResult {
+            // Deserialize as Ask_AttachmentUploadResult
+            if let result = try? Ask_AttachmentUploadResult(serializedBytes: chunk.payload) {
+                var body: [String: Any] = [
+                    "streamID": self.streamId,
+                    "type": self.streamType.rawValue,
+                    "id": result.id,
+                    "status": result.status.rawValue,
+                    "statusCode": result.statusCode,
+                    "errorMessage": result.errorMessage,
+                    "metadata": metadataArray,
+                    "sequence": chunk.sequence
+                ]
+                if let timestampMs = chunk.timestampMs {
+                    body["timestampMs"] = timestampMs
+                }
+                bridge.sendStreamEventToRN(body: body)
+                return
+            }
+        }
+
         let message: String
         if streamType == .voice {
             message = chunk.payload.base64EncodedString()
         } else {
             message = String(data: chunk.payload, encoding: .utf8) ?? ""
         }
-        
-        // Convert metadata to dictionary array
-        let metadataArray = chunk.metadata.map { entry in
-            return ["key": entry.key, "value": entry.value]
-        }
-        
-        // 推送到 RN
-        guard let bridge = ActrBridge.shared() else {
-            let errorMsg = "[StreamPrintCallback] Failed to get ActrBridge instance to send event"
-            throw ActrError.StateError(msg: errorMsg)
-        }
-        
+
         var body: [String: Any] = [
             "streamID": self.streamId,
             "type": self.streamType.rawValue,
@@ -514,11 +596,11 @@ private actor StreamPrintCallback: Actr.DataStreamCallback {
             "metadata": metadataArray,
             "sequence": chunk.sequence
         ]
-        
+
         if let timestampMs = chunk.timestampMs {
             body["timestampMs"] = timestampMs
         }
-        
+
         bridge.sendStreamEventToRN(body: body)
     }
 }
@@ -715,10 +797,93 @@ public final class AskLocalServiceHandlerImpl: AskLocalServiceHandler {
         var resp = DataStreamApp_VoiceChunkMessageResponse()
         resp.streamID = req.streamID
         resp.status = 0
-        
+
         return resp
     }
-    
+
+    /// RPC method: PrepareAttachmentUpload
+    public func prepareAttachmentUpload(
+        req: DataStreamApp_PrepareAttachmentUploadMessage,
+        ctx: Context
+    ) async throws -> DataStreamApp_PrepareAttachmentUploadMessageResponse {
+        logger.info("[AskLocalServiceHandlerImpl] Received PrepareAttachmentUpload request: id=\(req.id)")
+
+        var askRequest = Ask_PrepareAttachmentUploadRequest()
+        askRequest.id = req.id
+        askRequest.filename = req.filename
+        askRequest.type = req.type
+        askRequest.streamID = req.streamID
+        askRequest.checksum = req.checksum
+        askRequest.checksumAlgorithm = req.checksumAlgorithm
+        askRequest.sizeBytes = req.sizeBytes
+        askRequest.resultStreamID = req.resultStreamID
+
+        serverActId = try await ctx.discover(targetType: targetType)
+        guard let targetId = serverActId else {
+            throw ActrError.StateError(msg: "Server ActId not initialized")
+        }
+
+        // Register result stream for receiving AttachmentUploadResult
+        if !req.resultStreamID.isEmpty {
+            let callback = StreamPrintCallback(streamId: req.resultStreamID, type: .attachmentResult, onMessage: nil)
+            self.activeStreams[req.resultStreamID] = StreamInfo(callback: callback, ctx: ctx)
+            let _ = try await ctx.registerStream(
+                streamId: req.resultStreamID,
+                callback: callback
+            )
+            logger.info("[AskLocalServiceHandlerImpl] Attachment result stream registered: \(req.resultStreamID)")
+        }
+
+        let responseData = try await ctx.callRaw(
+            target: targetId,
+            routeKey: Ask_PrepareAttachmentUploadRequest.routeKey,
+            payloadType: .rpcReliable,
+            payload: try askRequest.serializedData(),
+            timeoutMs: 20000
+        )
+
+        let reply = try Ask_PrepareAttachmentUploadResponse(serializedBytes: responseData)
+
+        var resp = DataStreamApp_PrepareAttachmentUploadMessageResponse()
+        resp.id = reply.id
+        resp.statusCode = reply.statusCode
+        resp.errorMessage = reply.errorMessage
+
+        return resp
+    }
+
+    /// RPC method: SendAttachmentChunk
+    public func sendAttachmentChunk(
+        req: DataStreamApp_AttachmentChunkMessage,
+        ctx: Context
+    ) async throws -> DataStreamApp_AttachmentChunkMessageResponse {
+        logger.info("[AskLocalServiceHandlerImpl] Received sendAttachmentChunk: streamId=\(req.streamID), attachmentId=\(req.attachmentID), chunkId=\(req.chunkID)")
+
+        guard let targetId = self.serverActId else {
+            throw ActrError.StateError(msg: "Server ActId not initialized")
+        }
+
+        let seq = UInt64(req.chunkID) ?? 0
+
+        let metadataEntries = req.metadata.map { MetadataEntry(key: $0.key, value: $0.value) }
+
+        let chunk = DataStream(
+            streamId: req.streamID,
+            sequence: seq,
+            payload: req.chunkData,
+            metadata: metadataEntries,
+            timestampMs: Int64(Date().timeIntervalSince1970 * 1000)
+        )
+
+        try await ctx.sendDataStream(target: targetId, chunk: chunk)
+
+        var resp = DataStreamApp_AttachmentChunkMessageResponse()
+        resp.streamID = req.streamID
+        resp.status = 0
+
+        return resp
+    }
+
 }
 
 extension AskLocalServiceWorkload: Workload where T == AskLocalServiceHandlerImpl {
