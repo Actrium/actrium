@@ -10,8 +10,8 @@ extension Ask_UsrPromptRequest: RpcRequest {
 
     public static var routeKey: String { "ask.AskService.Prompt" }
 }
-extension Ask_AttachRequest: RpcRequest {
-    public typealias Response = Ask_AttachResponse
+extension Ask_PrepareAttachmentUploadRequest: RpcRequest {
+    public typealias Response = Ask_PrepareAttachmentUploadResponse
 
-    public static var routeKey: String { "ask.AskService.Attach" }
+    public static var routeKey: String { "ask.AskService.PrepareAttachmentUpload" }
 }
