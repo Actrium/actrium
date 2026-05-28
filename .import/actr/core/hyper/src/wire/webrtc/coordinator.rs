@@ -228,6 +228,65 @@ impl WebRtcCoordinator {
         self.negotiator.set_vnet(vnet);
     }
 
+    /// Close a cached WebRTC DataChannel for integration tests.
+    ///
+    /// This keeps production APIs from exposing WebRTC internals while allowing
+    /// regression tests to trigger the real `RTCDataChannel::on_close` path.
+    #[cfg(feature = "test-utils")]
+    pub async fn close_data_channel_for_test(
+        &self,
+        peer_id: &ActrId,
+        payload_type: PayloadType,
+    ) -> ActorResult<u64> {
+        let idx = payload_type as usize;
+        if idx >= 4 {
+            return Err(ActrError::Internal(format!(
+                "PayloadType does not use a WebRTC DataChannel: {payload_type:?}"
+            )));
+        }
+
+        let (session_id, webrtc_conn) = {
+            let peers = self.peers.read().await;
+            let state = peers.get(peer_id).ok_or_else(|| {
+                ActrError::Internal(format!(
+                    "Peer connection not found for test close: {peer_id}"
+                ))
+            })?;
+            (state.session_id, state.webrtc_conn.clone())
+        };
+
+        let channels = webrtc_conn.data_channels().await;
+        let channel = channels
+            .get(idx)
+            .and_then(Clone::clone)
+            .ok_or_else(|| {
+                ActrError::Internal(format!(
+                    "DataChannel not found for test close: peer={peer_id}, payload_type={payload_type:?}"
+                ))
+            })?;
+
+        channel
+            .close()
+            .await
+            .map_err(|e| ActrError::Internal(format!("Failed to close DataChannel: {e}")))?;
+
+        Ok(session_id)
+    }
+
+    /// Check whether the current WebRTC connection to a peer still has an open DataChannel.
+    #[cfg(feature = "test-utils")]
+    pub async fn has_open_data_channel_for_test(&self, peer_id: &ActrId) -> ActorResult<bool> {
+        let webrtc_conn = {
+            let peers = self.peers.read().await;
+            peers.get(peer_id).map(|state| state.webrtc_conn.clone())
+        };
+        let Some(webrtc_conn) = webrtc_conn else {
+            return Ok(false);
+        };
+
+        Ok(webrtc_conn.has_open_data_channel().await)
+    }
+
     /// Get the event sender for sharing with WebRtcConnection instances
     pub fn event_sender(&self) -> tokio::sync::broadcast::Sender<ConnectionEvent> {
         self.event_broadcaster.sender()
@@ -311,7 +370,7 @@ impl WebRtcCoordinator {
                             // Extract peer_id and check if cleanup is needed
                             // Key: compare event.session_id with current PeerState.session_id
                             // to avoid stale events from old connections triggering cleanup on new ones
-                            let peer_id_to_cleanup = match &event {
+                            let peer_session_to_cleanup = match &event {
                                 ConnectionEvent::DataChannelClosed {
                                     peer_id,
                                     session_id,
@@ -327,7 +386,7 @@ impl WebRtcCoordinator {
                                                 payload_type,
                                                 session_id
                                             );
-                                            Some(peer_id.clone())
+                                            Some((peer_id.clone(), *session_id))
                                         }
                                         Some(state) => {
                                             tracing::debug!(
@@ -360,7 +419,7 @@ impl WebRtcCoordinator {
                                                 peer_id,
                                                 session_id
                                             );
-                                            Some(peer_id.clone())
+                                            Some((peer_id.clone(), *session_id))
                                         }
                                         Some(state) => {
                                             tracing::debug!(
@@ -396,7 +455,7 @@ impl WebRtcCoordinator {
                                                     peer_id,
                                                     session_id
                                                 );
-                                                Some(peer_id.clone())
+                                                Some((peer_id.clone(), *session_id))
                                             }
                                             Some(ps) => {
                                                 tracing::debug!(
@@ -423,8 +482,15 @@ impl WebRtcCoordinator {
                             };
 
                             // Cleanup outside the match to avoid holding read lock
-                            if let Some(peer_id) = peer_id_to_cleanup {
-                                coord.cleanup_cancelled_connection(&peer_id).await;
+                            if let Some((peer_id, session_id)) = peer_session_to_cleanup {
+                                coord
+                                    .cleanup_connection_if_session(
+                                        &peer_id,
+                                        session_id,
+                                        true,
+                                        "connection event",
+                                    )
+                                    .await;
                             }
                         } else {
                             // Coordinator dropped, exit
@@ -461,6 +527,7 @@ impl WebRtcCoordinator {
     ///
     /// # Arguments
     /// - `peer_id`: The peer ID to wait for
+    /// - `expected_session_id`: The WebRTC session that is allowed to satisfy readiness
     /// - `event_broadcaster`: Event broadcaster to subscribe to
     /// - `webrtc_conn`: The WebRTC connection to check (for quick check)
     /// - `timeout`: Maximum time to wait for DataChannel to open
@@ -470,6 +537,7 @@ impl WebRtcCoordinator {
     /// - `false` if timeout expires without any DataChannel opening
     async fn wait_for_data_channel_open_event(
         peer_id: &ActrId,
+        expected_session_id: u64,
         event_broadcaster: &ConnectionEventBroadcaster,
         webrtc_conn: &super::connection::WebRtcConnection,
         timeout: Duration,
@@ -497,12 +565,16 @@ impl WebRtcCoordinator {
                 }
                 res = event_rx.recv() => {
                     match res {
-                        Ok(ConnectionEvent::DataChannelOpened { peer_id, payload_type, .. })
-                            if peer_id == target_peer =>
+                        Ok(ConnectionEvent::DataChannelOpened {
+                            peer_id,
+                            session_id,
+                            payload_type,
+                        }) if peer_id == target_peer && session_id == expected_session_id =>
                         {
                             tracing::info!(
-                                "✅ DataChannel opened for peer {} (payload_type={:?}, event-driven)",
+                                "✅ DataChannel opened for peer {} (session_id={}, payload_type={:?}, event-driven)",
                                 peer_id,
+                                session_id,
                                 payload_type
                             );
                             return true;
@@ -530,6 +602,14 @@ impl WebRtcCoordinator {
             timeout
         );
         false
+    }
+
+    async fn is_active_session(&self, peer_id: &ActrId, session_id: u64) -> bool {
+        self.peers
+            .read()
+            .await
+            .get(peer_id)
+            .is_some_and(|state| state.session_id == session_id)
     }
 
     /// Start health check task to clean up stale connections
@@ -1330,6 +1410,7 @@ impl WebRtcCoordinator {
         // 5. Set ICE candidate callback (local ICE candidate collection)
         let coordinator = Arc::downgrade(self);
         let target_id = target.clone();
+        let candidate_session_id = webrtc_conn.session_id();
         #[cfg(feature = "opentelemetry")]
         let root_context_map = self.root_context_map.clone();
         peer_connection_arc.on_ice_candidate(Box::new(
@@ -1341,6 +1422,18 @@ impl WebRtcCoordinator {
                 Box::pin(async move {
                     if let Some(cand) = candidate {
                         if let Some(coord) = coordinator.upgrade() {
+                            if !coord
+                                .is_active_session(&target_id, candidate_session_id)
+                                .await
+                            {
+                                tracing::debug!(
+                                    "⏭️ Ignoring ICE Candidate from stale local session: peer={}, session_id={}",
+                                    target_id,
+                                    candidate_session_id
+                                );
+                                return;
+                            }
+
                             let candidate_json = match cand.to_json() {
                                 Ok(json) => json.candidate,
                                 Err(e) => {
@@ -1504,6 +1597,7 @@ impl WebRtcCoordinator {
         let webrtc_conn_for_state = webrtc_conn.clone();
         let coord_weak_for_state = Arc::downgrade(self);
         let from_id_for_state = from.clone();
+        let state_session_id = webrtc_conn.session_id();
         peer_connection_arc.on_peer_connection_state_change(Box::new(
             move |state: RTCPeerConnectionState| {
                 let webrtc_conn = webrtc_conn_for_state.clone();
@@ -1517,8 +1611,16 @@ impl WebRtcCoordinator {
                     if let Some(coord) = coord_weak.upgrade() {
                         let mut peers = coord.peers.write().await;
                         if let Some(peer_state) = peers.get_mut(&peer_id) {
-                            peer_state.current_state = state;
-                            peer_state.last_state_change = std::time::Instant::now();
+                            if peer_state.session_id == state_session_id {
+                                peer_state.current_state = state;
+                                peer_state.last_state_change = std::time::Instant::now();
+                            } else {
+                                tracing::debug!(
+                                    "⏭️ Ignoring stale answerer PeerConnection state for peer {}, session_id={}",
+                                    peer_id,
+                                    state_session_id
+                                );
+                            }
                         }
                         drop(peers); // Release lock
                     }
@@ -1545,6 +1647,18 @@ impl WebRtcCoordinator {
                 let payload_type = PayloadType::from_str_name(label);
 
                 if let Some(coord) = coord_weak.upgrade() {
+                    let session_id = conn.session_id();
+                    if !coord.is_active_session(&peer_id, session_id).await {
+                        tracing::debug!(
+                            "⏭️ Ignoring DataChannel from stale session: peer={}, session_id={}, label={}, channel_id={}",
+                            peer_id,
+                            session_id,
+                            label,
+                            channel_id
+                        );
+                        return;
+                    }
+
                     let ready_tx = {
                         let mut neg = coord.peer_negotiation.lock().await;
                         neg.get_mut(&peer_id).and_then(|s| s.ready_tx.take())
@@ -1658,6 +1772,7 @@ impl WebRtcCoordinator {
         // 5. Set ICE candidate callback (local ICE candidate collection)
         let coordinator = Arc::downgrade(self);
         let target_id = from.clone();
+        let candidate_session_id = webrtc_conn.session_id();
         #[cfg(feature = "opentelemetry")]
         let root_context_map = self.root_context_map.clone();
         peer_connection_arc.on_ice_candidate(Box::new(
@@ -1669,6 +1784,18 @@ impl WebRtcCoordinator {
                 Box::pin(async move {
                     if let Some(cand) = candidate {
                         if let Some(coord) = coordinator.upgrade() {
+                            if !coord
+                                .is_active_session(&target_id, candidate_session_id)
+                                .await
+                            {
+                                tracing::debug!(
+                                    "⏭️ Ignoring ICE Candidate from stale local session: peer={}, session_id={}",
+                                    target_id,
+                                    candidate_session_id
+                                );
+                                return;
+                            }
+
                             // Convert RTCIceCandidate to JSON string (webrtc crate's standard method)
                             let candidate_json = match cand.to_json() {
                                 Ok(json) => json.candidate,
@@ -1806,6 +1933,7 @@ impl WebRtcCoordinator {
         let peers = Arc::clone(&self.peers);
         let from_id = from.clone();
         let webrtc_conn_for_wait = webrtc_conn.clone();
+        let wait_session_id = webrtc_conn.session_id();
         let event_broadcaster = self.event_broadcaster.clone();
 
         tokio::spawn(async move {
@@ -1815,6 +1943,7 @@ impl WebRtcCoordinator {
             // DataChannel can only open after ICE is Connected, so no need to poll ICE state separately
             if Self::wait_for_data_channel_open_event(
                 &from_id,
+                wait_session_id,
                 &event_broadcaster,
                 &webrtc_conn_for_wait,
                 DATA_CHANNEL_READY_TIMEOUT,
@@ -1826,8 +1955,10 @@ impl WebRtcCoordinator {
                 // Mark ICE restart attempt complete
                 let mut peers_guard = peers.write().await;
                 if let Some(s) = peers_guard.get_mut(&from_id) {
-                    s.ice_restart_inflight = false;
-                    s.ice_restart_attempts = 0;
+                    if s.session_id == wait_session_id {
+                        s.ice_restart_inflight = false;
+                        s.ice_restart_attempts = 0;
+                    }
                 }
                 if let Some(tx) = ready_tx {
                     let _ = tx.send(());
@@ -3774,6 +3905,7 @@ impl WebRtcCoordinator {
         target: ActrId,
     ) {
         let coord = Arc::downgrade(self);
+        let session_id = webrtc_conn.session_id();
         peer_connection.on_peer_connection_state_change(Box::new(
             move |state: RTCPeerConnectionState| {
                 let coord = coord.clone();
@@ -3786,16 +3918,27 @@ impl WebRtcCoordinator {
                     tracing::info!("📡 PeerConnection state for {} -> {:?}", target, state);
 
                     // Update state tracking for health check
+                    let mut is_active_session = false;
                     if let Some(c) = coord.upgrade() {
                         let mut peers = c.peers.write().await;
                         if let Some(peer_state) = peers.get_mut(&target) {
-                            peer_state.current_state = state;
-                            peer_state.last_state_change = std::time::Instant::now();
+                            if peer_state.session_id == session_id {
+                                peer_state.current_state = state;
+                                peer_state.last_state_change = std::time::Instant::now();
+                                is_active_session = true;
+                            } else {
+                                tracing::debug!(
+                                    "⏭️ Ignoring stale offerer PeerConnection state for peer {}, session_id={}",
+                                    target,
+                                    session_id
+                                );
+                            }
                         }
                         drop(peers); // Release lock before potentially long-running operations
                     }
 
-                    if matches!(
+                    if is_active_session
+                        && matches!(
                         state,
                         RTCPeerConnectionState::Disconnected | RTCPeerConnectionState::Failed
                     ) {
