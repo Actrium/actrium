@@ -549,7 +549,25 @@ async fn handle_actr_relay(
         }
     }
 
+    if let Some(actr_relay::Payload::IceRestartRequest(_)) = relay.payload.as_ref() {
+        state
+            .ice_restart_request_count
+            .fetch_add(1, Ordering::SeqCst);
+    }
+
     if state.pause_forwarding.load(Ordering::Acquire) {
+        return;
+    }
+
+    if let Some(actr_relay::Payload::IceCandidate(_)) = relay.payload.as_ref()
+        && state
+            .ice_candidate_drop_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                if count > 0 { Some(count - 1) } else { None }
+            })
+            .is_ok()
+    {
+        tracing::warn!("🧪 Dropping test ICE candidate relay");
         return;
     }
 
