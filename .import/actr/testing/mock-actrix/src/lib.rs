@@ -44,7 +44,9 @@ pub struct MockActrixServer {
     is_running: Arc<AtomicBool>,
     message_count: Arc<AtomicU32>,
     ice_restart_offer_count: Arc<AtomicU32>,
+    ice_restart_request_count: Arc<AtomicU32>,
     pause_forwarding: Arc<AtomicBool>,
+    ice_candidate_drop_count: Arc<AtomicU32>,
     connection_count: Arc<AtomicU32>,
     disconnection_count: Arc<AtomicU32>,
 }
@@ -81,7 +83,9 @@ impl MockActrixServer {
 
         let message_count = state.message_count.clone();
         let ice_restart_offer_count = state.ice_restart_offer_count.clone();
+        let ice_restart_request_count = state.ice_restart_request_count.clone();
         let pause_forwarding = state.pause_forwarding.clone();
+        let ice_candidate_drop_count = state.ice_candidate_drop_count.clone();
         let connection_count = state.connection_count.clone();
         let disconnection_count = state.disconnection_count.clone();
 
@@ -118,7 +122,9 @@ impl MockActrixServer {
             is_running,
             message_count,
             ice_restart_offer_count,
+            ice_restart_request_count,
             pause_forwarding,
+            ice_candidate_drop_count,
             connection_count,
             disconnection_count,
         })
@@ -209,12 +215,38 @@ impl MockActrixServer {
         self.pause_forwarding.store(false, Ordering::Release);
     }
 
+    /// Drop the next N ICE candidate relay messages.
+    ///
+    /// This is a test-only hook for reproducing a post-cleanup negotiation
+    /// where SDP arrives but trickle ICE is interrupted.
+    pub fn drop_next_ice_candidates(&self, count: u32) {
+        tracing::warn!(
+            "🧪 Dropping the next {} ICE candidate relay message(s)",
+            count
+        );
+        self.ice_candidate_drop_count.store(count, Ordering::SeqCst);
+    }
+
+    /// Drop the next N ICE candidate relay messages for a bounded duration.
+    pub fn drop_next_ice_candidates_for(&self, count: u32, duration: std::time::Duration) {
+        self.drop_next_ice_candidates(count);
+        let ice_candidate_drop_count = self.ice_candidate_drop_count.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(duration).await;
+            ice_candidate_drop_count.store(0, Ordering::SeqCst);
+        });
+    }
+
     pub fn message_count(&self) -> u32 {
         self.message_count.load(Ordering::Relaxed)
     }
 
     pub fn ice_restart_count(&self) -> u32 {
         self.ice_restart_offer_count.load(Ordering::SeqCst)
+    }
+
+    pub fn ice_restart_request_count(&self) -> u32 {
+        self.ice_restart_request_count.load(Ordering::SeqCst)
     }
 
     pub fn connection_count(&self) -> u32 {
@@ -228,6 +260,8 @@ impl MockActrixServer {
     pub fn reset_counters(&self) {
         self.message_count.store(0, Ordering::Relaxed);
         self.ice_restart_offer_count.store(0, Ordering::SeqCst);
+        self.ice_restart_request_count.store(0, Ordering::SeqCst);
+        self.ice_candidate_drop_count.store(0, Ordering::SeqCst);
         self.connection_count.store(0, Ordering::SeqCst);
         self.disconnection_count.store(0, Ordering::SeqCst);
     }

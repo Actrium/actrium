@@ -27,6 +27,7 @@ use std::sync::{
     Arc, OnceLock,
     atomic::{AtomicBool, AtomicU64, Ordering},
 };
+use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
@@ -56,6 +57,9 @@ const RESPONSE_TIMEOUT_SECS: u64 = 15;
 // WebSocket-level keepalive to detect silent half-open connections
 const PING_INTERVAL_SECS: u64 = 5;
 const PONG_TIMEOUT_SECS: u64 = 10;
+const SIGNALING_SEND_TIMEOUT_SECS: u64 = 5;
+const DISCONNECT_LOCK_TIMEOUT_SECS: u64 = 5;
+const DISCONNECT_CLOSE_TIMEOUT_SECS: u64 = 1;
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // configurationType
@@ -151,8 +155,31 @@ pub trait SignalingClient: Send + Sync {
     /// Connecttosignaling server
     async fn connect(&self) -> NetworkResult<()>;
 
+    /// Perform a single explicit connection attempt.
+    ///
+    /// Network recovery events use this path so a failed restore attempt can
+    /// return quickly instead of sleeping inside the normal reconnect backoff.
+    async fn connect_once(&self) -> NetworkResult<()> {
+        self.connect().await
+    }
+
     /// DisconnectConnect
     async fn disconnect(&self) -> NetworkResult<()>;
+
+    /// Probe whether the existing signaling WebSocket is truly alive.
+    ///
+    /// The default implementation only checks local state. WebSocket-backed
+    /// clients override this with an active Ping/Pong probe to catch half-open
+    /// sockets before network recovery decides whether to reconnect.
+    async fn probe_alive(&self, _timeout: Duration) -> NetworkResult<()> {
+        if self.is_connected() {
+            Ok(())
+        } else {
+            Err(NetworkError::ConnectionError(
+                "Signaling client is not connected".to_string(),
+            ))
+        }
+    }
 
     /// Deprecated: Registration now happens via AIS HTTP; this WS path is no longer used.
     /// Kept for backward compatibility; will be removed in a future release.
@@ -340,6 +367,10 @@ pub struct WebSocketSignalingClient {
     envelope_counter: tokio::sync::Mutex<u64>,
     /// Pending reply waiters (reply_for -> oneshot)
     pending_replies: Arc<tokio::sync::Mutex<HashMap<String, oneshot::Sender<SignalingEnvelope>>>>,
+    /// Pending WebSocket Pong waiters (ping payload -> oneshot)
+    pending_pongs: Arc<tokio::sync::Mutex<HashMap<Vec<u8>, oneshot::Sender<()>>>>,
+    /// Monotonic probe payload counter.
+    probe_counter: AtomicU64,
     /// Inbound envelope channel for unmatched messages (ActrRelay / push)
     inbound_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<SignalingEnvelope>>>,
     inbound_tx: tokio::sync::Mutex<mpsc::UnboundedSender<SignalingEnvelope>>,
@@ -375,6 +406,8 @@ impl WebSocketSignalingClient {
             stats: Arc::new(AtomicSignalingStats::default()),
             envelope_counter: tokio::sync::Mutex::new(0),
             pending_replies: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            pending_pongs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+            probe_counter: AtomicU64::new(0),
             inbound_rx: Arc::new(tokio::sync::Mutex::new(inbound_rx)),
             inbound_tx: tokio::sync::Mutex::new(inbound_tx),
             receiver_task: Arc::new(tokio::sync::Mutex::new(None)),
@@ -472,7 +505,12 @@ impl WebSocketSignalingClient {
                     tracing::warn!(
                         "❌ Reconnect attempt {attempt} failed: {e}, retrying in {delay:?}"
                     );
-                    tokio::time::sleep(delay).await;
+                    tokio::select! {
+                        _ = tokio::time::sleep(delay) => {}
+                        _ = self.reconnect_notify.notified() => {
+                            tracing::debug!("Explicit reconnect request interrupted reconnect backoff");
+                        }
+                    }
                 }
             }
         }
@@ -480,7 +518,12 @@ impl WebSocketSignalingClient {
         // All retries exhausted — enter cooldown, then allow future wakeups
         tracing::error!("Reconnect failed after {attempt} attempts, entering cooldown");
         let cooldown = std::time::Duration::from_secs(cfg.max_delay.max(1) * 2);
-        tokio::time::sleep(cooldown).await;
+        tokio::select! {
+            _ = tokio::time::sleep(cooldown) => {}
+            _ = self.reconnect_notify.notified() => {
+                tracing::debug!("Explicit reconnect request interrupted reconnect cooldown");
+            }
+        }
         // After cooldown, the loop returns to notify.notified() and can be woken again
     }
 
@@ -561,9 +604,38 @@ impl WebSocketSignalingClient {
 
     /// Reset inbound channel for a fresh session (useful after disconnects).
     async fn reset_inbound_channel(&self) {
+        self.drop_pending_replies("inbound channel reset").await;
+        self.drop_pending_pongs("inbound channel reset").await;
+
         let (tx, rx) = mpsc::unbounded_channel();
         *self.inbound_tx.lock().await = tx;
         *self.inbound_rx.lock().await = rx;
+    }
+
+    async fn drop_pending_replies(&self, reason: &'static str) {
+        let dropped = {
+            let mut pending = self.pending_replies.lock().await;
+            let dropped = pending.len();
+            pending.clear();
+            dropped
+        };
+
+        if dropped > 0 {
+            tracing::debug!(reason, dropped, "Dropping pending signaling reply waiters");
+        }
+    }
+
+    async fn drop_pending_pongs(&self, reason: &'static str) {
+        let dropped = {
+            let mut pending = self.pending_pongs.lock().await;
+            let dropped = pending.len();
+            pending.clear();
+            dropped
+        };
+
+        if dropped > 0 {
+            tracing::debug!(reason, dropped, "Dropping pending signaling pong waiters");
+        }
     }
 
     /// Build signaling URL with actor identity and Ed25519 credential params for authentication.
@@ -598,6 +670,31 @@ impl WebSocketSignalingClient {
         url
     }
 
+    fn redact_signaling_url_for_log(url: &Url) -> String {
+        let mut redacted = url.clone();
+        let pairs: Vec<(String, String)> = redacted
+            .query_pairs()
+            .map(|(key, value)| {
+                let redacted_value = match key.to_ascii_lowercase().as_str() {
+                    "claims" | "signature" | "token" | "authorization" | "bearer"
+                    | "access_token" | "api_key" => "REDACTED".to_string(),
+                    _ => value.into_owned(),
+                };
+                (key.into_owned(), redacted_value)
+            })
+            .collect();
+
+        redacted.set_query(None);
+        if !pairs.is_empty() {
+            let mut query = redacted.query_pairs_mut();
+            for (key, value) in pairs {
+                query.append_pair(&key, &value);
+            }
+        }
+
+        redacted.to_string()
+    }
+
     /// Establish a single signaling WebSocket connection attempt, honoring connection_timeout.
     ///
     /// This does not perform any retry logic; callers that want retries should wrap this.
@@ -610,7 +707,10 @@ impl WebSocketSignalingClient {
 
         let url = self.build_url_with_identity().await;
         let timeout_secs = self.config.connection_timeout;
-        tracing::debug!("Establishing connection to URL: {}", url.as_str());
+        tracing::debug!(
+            "Establishing connection to URL: {}",
+            Self::redact_signaling_url_for_log(&url)
+        );
         // After disconnection, data written to the buffer will continue to be sent once the network recovers
         let config = WebSocketConfig::default().write_buffer_size(0);
         // Connect with an optional timeout. A timeout of 0 means "no timeout".
@@ -679,7 +779,12 @@ impl WebSocketSignalingClient {
                 .await;
             if delay > std::time::Duration::ZERO {
                 tracing::info!("Retry signaling connect after {delay:?} (attempt {attempt})");
-                tokio::time::sleep(delay).await;
+                tokio::select! {
+                    _ = tokio::time::sleep(delay) => {}
+                    _ = self.reconnect_notify.notified() => {
+                        tracing::debug!("Explicit reconnect request interrupted signaling connect backoff");
+                    }
+                }
             }
 
             match self.establish_connection_once().await {
@@ -758,6 +863,7 @@ impl WebSocketSignalingClient {
         let connected = self.connected.clone();
         let event_tx = self.event_tx.clone();
         let last_pong = self.last_pong.clone();
+        let pending_pongs = self.pending_pongs.clone();
         let reconnect_notify = self.reconnect_notify.clone();
         let reconnect_enabled = self.config.reconnect_config.enabled;
         let handle = tokio::spawn(async move {
@@ -807,9 +913,12 @@ impl WebSocketSignalingClient {
                             }
                         }
                     }
-                    Ok(tokio_tungstenite::tungstenite::Message::Pong(_)) => {
+                    Ok(tokio_tungstenite::tungstenite::Message::Pong(payload)) => {
                         tracing::debug!("Received pong");
                         last_pong.store(current_unix_secs(), Ordering::Release);
+                        if let Some(sender) = pending_pongs.lock().await.remove(&payload.to_vec()) {
+                            let _ = sender.send(());
+                        }
                     }
                     Ok(tokio_tungstenite::tungstenite::Message::Ping(_)) => {
                         tracing::debug!("Received ping");
@@ -827,15 +936,19 @@ impl WebSocketSignalingClient {
             }
 
             tracing::warn!("Stream terminated");
-            // Stream terminated → mark disconnected and wake reconnect manager
-            stats.disconnections.fetch_add(1, Ordering::Relaxed);
-            connected.store(false, Ordering::Release);
-            let _ = event_tx.send(SignalingEvent::Disconnected {
-                reason: DisconnectReason::StreamEnded,
-            });
-            if reconnect_enabled {
-                reconnect_notify.notify_one();
+            // If explicit disconnect already marked the client disconnected,
+            // do not start an automatic reconnect cycle for the intentional
+            // close. The disconnect path publishes its own Manual event.
+            if connected.swap(false, Ordering::AcqRel) {
+                stats.disconnections.fetch_add(1, Ordering::Relaxed);
+                let _ = event_tx.send(SignalingEvent::Disconnected {
+                    reason: DisconnectReason::StreamEnded,
+                });
+                if reconnect_enabled {
+                    reconnect_notify.notify_one();
+                }
             }
+            pending_pongs.lock().await.clear();
         });
 
         *self.receiver_task.lock().await = Some(handle);
@@ -872,21 +985,37 @@ impl WebSocketSignalingClient {
                 // Send ping; mark disconnect on failure.
                 let mut sink_guard = sink.lock().await;
                 if let Some(sink) = sink_guard.as_mut() {
-                    if let Err(e) = sink
-                        .send(tokio_tungstenite::tungstenite::Message::Ping(
+                    match tokio::time::timeout(
+                        std::time::Duration::from_secs(SIGNALING_SEND_TIMEOUT_SECS),
+                        sink.send(tokio_tungstenite::tungstenite::Message::Ping(
                             Vec::new().into(),
-                        ))
-                        .await
+                        )),
+                    )
+                    .await
                     {
-                        tracing::warn!("Signaling ping send failed: {e}");
-                        connected.store(false, Ordering::Release);
-                        let _ = event_tx.send(SignalingEvent::Disconnected {
-                            reason: DisconnectReason::PingSendFailed,
-                        });
-                        if reconnect_enabled {
-                            reconnect_notify.notify_one();
+                        Ok(Ok(())) => {}
+                        Ok(Err(e)) => {
+                            tracing::warn!("Signaling ping send failed: {e}");
+                            connected.store(false, Ordering::Release);
+                            let _ = event_tx.send(SignalingEvent::Disconnected {
+                                reason: DisconnectReason::PingSendFailed,
+                            });
+                            if reconnect_enabled {
+                                reconnect_notify.notify_one();
+                            }
+                            break;
                         }
-                        break;
+                        Err(_) => {
+                            tracing::warn!("Signaling ping send timed out");
+                            connected.store(false, Ordering::Release);
+                            let _ = event_tx.send(SignalingEvent::Disconnected {
+                                reason: DisconnectReason::PingSendFailed,
+                            });
+                            if reconnect_enabled {
+                                reconnect_notify.notify_one();
+                            }
+                            break;
+                        }
                     }
                 } else {
                     tracing::warn!("Signaling not connected");
@@ -1040,31 +1169,157 @@ impl SignalingClient for WebSocketSignalingClient {
         }
     }
 
+    async fn connect_once(&self) -> NetworkResult<()> {
+        if self.connected.load(Ordering::Acquire) {
+            tracing::debug!("Already connected, skipping connect_once()");
+            return Ok(());
+        }
+
+        match self
+            .connecting
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+        {
+            Ok(_) => {}
+            Err(_) => {
+                if self.connected.load(Ordering::Acquire) {
+                    tracing::debug!("Already connected, skipping connect_once()");
+                    return Ok(());
+                }
+
+                tracing::debug!(
+                    "Another connection attempt in progress, waiting for state change..."
+                );
+                return self.wait_for_connection_result().await;
+            }
+        }
+
+        if self.connected.load(Ordering::Acquire) {
+            tracing::debug!("Connection completed by another task while acquiring lock");
+            self.connecting.store(false, Ordering::Release);
+            return Ok(());
+        }
+
+        tracing::debug!(
+            "Acquired connection lock, establishing one signaling connection attempt..."
+        );
+
+        let result = self.establish_connection_once().await;
+        self.connecting.store(false, Ordering::Release);
+
+        match result {
+            Ok(()) => {
+                self.start_receiver().await;
+                self.start_ping_task().await;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.event_tx.send(SignalingEvent::Disconnected {
+                    reason: DisconnectReason::ConnectionFailed(e.to_string()),
+                });
+                tracing::error!("Connection attempt failed: {e}");
+                Err(e)
+            }
+        }
+    }
+
     async fn disconnect(&self) -> NetworkResult<()> {
-        // fetch exit sink and stream
-        let mut sink_guard = self.ws_sink.lock().await;
-        let mut stream_guard = self.ws_stream.lock().await;
+        self.drop_pending_replies("signaling disconnect").await;
+        self.drop_pending_pongs("signaling disconnect").await;
+        self.connected.store(false, Ordering::Release);
 
-        // Close sink
-        if let Some(mut sink) = sink_guard.take() {
-            let _ = sink.close().await;
-        }
-
-        // clear blank stream
-        stream_guard.take();
-
-        // Stop receiver task if running
-        if let Some(handle) = self.receiver_task.lock().await.take() {
+        // Stop background tasks before taking the WebSocket sink/stream locks.
+        // A ping or receiver task can be inside a socket operation while holding
+        // one of those locks; aborting first keeps disconnect from waiting on
+        // the task it is about to shut down.
+        let ping_handle = match tokio::time::timeout(
+            std::time::Duration::from_secs(DISCONNECT_LOCK_TIMEOUT_SECS),
+            self.ping_task.lock(),
+        )
+        .await
+        {
+            Ok(mut task_guard) => task_guard.take(),
+            Err(_) => {
+                tracing::warn!("Timed out waiting for signaling ping task lock during disconnect");
+                None
+            }
+        };
+        if let Some(handle) = ping_handle {
             handle.abort();
         }
-        // Stop ping task if running
-        if let Some(handle) = self.ping_task.lock().await.take() {
+
+        let receiver_handle = match tokio::time::timeout(
+            std::time::Duration::from_secs(DISCONNECT_LOCK_TIMEOUT_SECS),
+            self.receiver_task.lock(),
+        )
+        .await
+        {
+            Ok(mut task_guard) => task_guard.take(),
+            Err(_) => {
+                tracing::warn!(
+                    "Timed out waiting for signaling receiver task lock during disconnect"
+                );
+                None
+            }
+        };
+        if let Some(handle) = receiver_handle {
             handle.abort();
+        }
+
+        // Fetch and close the sink without holding the mutex during the close
+        // await. The lock itself is bounded because a stalled send can hold it
+        // on broken mobile network transitions.
+        let sink = match tokio::time::timeout(
+            std::time::Duration::from_secs(DISCONNECT_LOCK_TIMEOUT_SECS),
+            self.ws_sink.lock(),
+        )
+        .await
+        {
+            Ok(mut sink_guard) => sink_guard.take(),
+            Err(_) => {
+                tracing::warn!(
+                    "Timed out waiting for signaling WebSocket sink lock during disconnect"
+                );
+                None
+            }
+        };
+
+        if let Some(mut sink) = sink {
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(DISCONNECT_CLOSE_TIMEOUT_SECS),
+                sink.close(),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => {
+                    tracing::warn!("Signaling WebSocket close failed during disconnect: {}", e);
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        "Signaling WebSocket close timed out during disconnect; continuing cleanup"
+                    );
+                }
+            }
+        }
+
+        match tokio::time::timeout(
+            std::time::Duration::from_secs(DISCONNECT_LOCK_TIMEOUT_SECS),
+            self.ws_stream.lock(),
+        )
+        .await
+        {
+            Ok(mut stream_guard) => {
+                stream_guard.take();
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "Timed out waiting for signaling WebSocket stream lock during disconnect"
+                );
+            }
         }
 
         self.reset_inbound_channel().await;
 
-        self.connected.store(false, Ordering::Release);
         self.stats.disconnections.fetch_add(1, Ordering::Relaxed);
 
         // Invoke hook synchronously, then broadcast for other subscribers
@@ -1074,6 +1329,66 @@ impl SignalingClient for WebSocketSignalingClient {
         });
 
         Ok(())
+    }
+
+    async fn probe_alive(&self, timeout: Duration) -> NetworkResult<()> {
+        if !self.connected.load(Ordering::Acquire) {
+            return Err(NetworkError::ConnectionError(
+                "Signaling client is not connected".to_string(),
+            ));
+        }
+
+        let probe_id = self.probe_counter.fetch_add(1, Ordering::Relaxed) + 1;
+        let payload =
+            format!("actr-signaling-probe-{probe_id}-{}", current_unix_secs()).into_bytes();
+        let (tx, rx) = oneshot::channel();
+        self.pending_pongs.lock().await.insert(payload.clone(), tx);
+
+        let send_result = {
+            let mut sink_guard = self.ws_sink.lock().await;
+            match sink_guard.as_mut() {
+                Some(sink) => sink
+                    .send(tokio_tungstenite::tungstenite::Message::Ping(
+                        payload.clone().into(),
+                    ))
+                    .await
+                    .map_err(|e| {
+                        NetworkError::ConnectionError(format!("Signaling probe ping failed: {e}"))
+                    }),
+                None => Err(NetworkError::ConnectionError(
+                    "Signaling probe failed: WebSocket sink is not available".to_string(),
+                )),
+            }
+        };
+
+        if let Err(e) = send_result {
+            self.pending_pongs.lock().await.remove(&payload);
+            self.connected.store(false, Ordering::Release);
+            let _ = self.event_tx.send(SignalingEvent::Disconnected {
+                reason: DisconnectReason::PingSendFailed,
+            });
+            return Err(e);
+        }
+
+        match tokio::time::timeout(timeout, rx).await {
+            Ok(Ok(())) => {
+                self.last_pong.store(current_unix_secs(), Ordering::Release);
+                Ok(())
+            }
+            Ok(Err(_)) => {
+                self.pending_pongs.lock().await.remove(&payload);
+                Err(NetworkError::ConnectionError(
+                    "Signaling probe pong waiter dropped".to_string(),
+                ))
+            }
+            Err(_) => {
+                self.pending_pongs.lock().await.remove(&payload);
+                Err(NetworkError::TimeoutError(format!(
+                    "Timed out waiting for signaling probe pong after {}ms",
+                    timeout.as_millis()
+                )))
+            }
+        }
     }
 
     #[cfg_attr(feature = "opentelemetry", tracing::instrument(skip_all))]
@@ -1360,7 +1675,21 @@ impl SignalingClient for WebSocketSignalingClient {
             let mut buf = Vec::new();
             envelope.encode(&mut buf)?;
             let msg = tokio_tungstenite::tungstenite::Message::Binary(buf.into());
-            sink.send(msg).await?;
+            match tokio::time::timeout(
+                std::time::Duration::from_secs(SIGNALING_SEND_TIMEOUT_SECS),
+                sink.send(msg),
+            )
+            .await
+            {
+                Ok(Ok(())) => {}
+                Ok(Err(e)) => return Err(e.into()),
+                Err(_) => {
+                    self.connected.store(false, Ordering::Release);
+                    return Err(NetworkError::ConnectionError(
+                        "Signaling WebSocket send timed out".to_string(),
+                    ));
+                }
+            }
 
             self.stats.messages_sent.fetch_add(1, Ordering::Relaxed);
             tracing::debug!("Stats: {:?}", self.stats.snapshot());
@@ -1686,6 +2015,25 @@ mod tests {
         assert_eq!(stats.messages_sent, 0);
         assert_eq!(stats.messages_received, 0);
         assert_eq!(stats.errors, 0);
+    }
+
+    #[test]
+    fn test_signaling_url_log_redacts_credential_query_params() {
+        let url = Url::parse(
+            "wss://example.com/signaling?actor_id=abc&key_id=7&claims=claims-value&signature=signature-value&token=token-value",
+        )
+        .unwrap();
+
+        let redacted = WebSocketSignalingClient::redact_signaling_url_for_log(&url);
+
+        assert!(redacted.contains("actor_id=abc"));
+        assert!(redacted.contains("key_id=7"));
+        assert!(redacted.contains("claims=REDACTED"));
+        assert!(redacted.contains("signature=REDACTED"));
+        assert!(redacted.contains("token=REDACTED"));
+        assert!(!redacted.contains("claims-value"));
+        assert!(!redacted.contains("signature-value"));
+        assert!(!redacted.contains("token-value"));
     }
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
