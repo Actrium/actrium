@@ -434,6 +434,7 @@ cli_dependency_names = {
 
 dependency_version_names = {
     "actr-web-abi",
+    "actr-pack",
 }
 
 workspace_dependency_names = {
