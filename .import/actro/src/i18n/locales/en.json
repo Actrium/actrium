@@ -25,7 +25,7 @@
   "actr": {
     "appTitle": "Askaway Subsystem",
     "input": {
-      "placeholder": "Please enter or hold to speak",
+      "placeholder": "Please enter",
       "holdToSpeak": "Hold to speak",
       "webSearch": "Web Search",
       "webSearchTip": "Use online search when asking",

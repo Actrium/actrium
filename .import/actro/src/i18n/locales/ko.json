@@ -25,7 +25,7 @@
   "actr": {
     "appTitle": "Askaway Subsystem",
     "input": {
-      "placeholder": "내용을 입력하거나 길게 눌러 말하기",
+      "placeholder": "입력해 주세요",
       "holdToSpeak": "길게 눌러 말하기",
       "webSearch": "웹 검색",
       "webSearchTip": "질문 시 온라인 검색 사용",

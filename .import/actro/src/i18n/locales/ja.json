@@ -25,7 +25,7 @@
   "actr": {
     "appTitle": "Askaway Subsystem",
     "input": {
-      "placeholder": "入力するか、長押しして話す",
+      "placeholder": "入力してください",
       "holdToSpeak": "長押しして話す",
       "webSearch": "ウェブ検索",
       "webSearchTip": "質問時にオンライン検索を使用する",

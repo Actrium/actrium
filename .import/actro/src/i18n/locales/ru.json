@@ -25,7 +25,7 @@
   "actr": {
     "appTitle": "Askaway Subsystem",
     "input": {
-      "placeholder": "Введите текст или удерживайте для записи",
+      "placeholder": "Пожалуйста, введите",
       "holdToSpeak": "Удерживать для записи",
       "webSearch": "Поиск в сети",
       "webSearchTip": "Использовать поиск в сети при вопросе",

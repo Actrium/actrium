@@ -25,7 +25,7 @@
   "actr": {
     "appTitle": "Askaway Subsystem",
     "input": {
-      "placeholder": "请输入或按住说话",
+      "placeholder": "请输入",
       "holdToSpeak": "按住说话",
       "webSearch": "联网搜索",
       "webSearchTip": "提问时在线搜索",

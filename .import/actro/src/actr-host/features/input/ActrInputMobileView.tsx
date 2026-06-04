@@ -156,8 +156,9 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
     mobileInputMode === 'text' &&
     !hasInputText &&
     !isInputFocused;
+  // 语音切换按钮：只要输入框没有文本（包含空格）就显示，不受聚焦状态影响
   const shouldShowVoiceSwitchButton =
-    mobileInputMode === 'text' && !hasInputText && !isInputFocused;
+    mobileInputMode === 'text' && !hasInputText;
 
   // 仅在显式切到 voice_hold 时展示语音面板。
   // 默认文本态直接长按录音时，不在手势过程中切换布局，避免 responder 丢失 release/terminate。
