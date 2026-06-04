@@ -566,6 +566,7 @@ export default function Chat2({ appId }: Chat2Props) {
           keyboardDismissMode="none"
           scrollEventThrottle={16}
           estimatedItemSize={INITIAL_ESTIMATED_ITEM_SIZE}
+          // @ts-ignore
           getEstimatedItemSize={getEstimatedItemSize}
         />
       )}
