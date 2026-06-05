@@ -28,6 +28,7 @@ members = [
     "crates/mermaid-little/packages/web",
     "crates/mermaid-little/packages/native",
     "crates/vison/vison-core",
+    "crates/code-highlight",
 ]
 
 # Crates we deliberately keep outside the unified workspace:
