@@ -257,6 +257,11 @@
       "privacyPolicy": "Политика конфиденциальности",
       "icp": "Регистрация ICP",
       "account": "Аккаунт",
+      "notification": "Уведомления",
+      "notificationTask": "Уведомления о задачах",
+      "notificationAccountSecurity": "Уведомления об аккаунте и безопасности",
+      "notificationSystemUpdate": "Уведомления об обновлениях системы",
+      "notificationOperation": "Маркетинговые уведомления",
       "feedbackSubject": "#ОтзывыО"
     }
   }
