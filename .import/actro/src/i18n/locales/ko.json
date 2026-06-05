@@ -257,6 +257,11 @@
       "privacyPolicy": "개인정보 처리방침",
       "icp": "ICP 등록",
       "account": "계정",
+      "notification": "알림",
+      "notificationTask": "작업 알림",
+      "notificationAccountSecurity": "계정 및 보안 알림",
+      "notificationSystemUpdate": "시스템 업데이트 알림",
+      "notificationOperation": "운영 알림",
       "feedbackSubject": "#피드백_관하여"
     }
   }

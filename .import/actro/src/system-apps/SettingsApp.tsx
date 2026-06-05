@@ -1,13 +1,14 @@
 /**
  * Settings System App - Built-in settings page
  */
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { View, StyleSheet, useWindowDimensions } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Animated, BackHandler, Easing, Platform, View, StyleSheet, useWindowDimensions } from 'react-native';
 import { useTranslation } from 'react-i18next';
 import DeviceInfo from 'react-native-device-info';
 import { SettingsMain } from './settings/SettingsMain';
 import { AccountDetail } from './settings/AccountDetail';
 import { AboutAskAway } from './settings/AboutAskAway';
+import { NotificationSettingsPage } from './settings/NotificationSettings';
 import { LoginModal } from './auth/LoginModal';
 import { useUserStore } from '../actr-host/store/useUserStore';
 import { useAuthTaskStore } from '../actr-host/store/useAuthTaskStore';
@@ -17,7 +18,10 @@ import { AuthRepository } from '../repository/AuthRepository';
 import { authApi, CURRENT_ENV } from '../api/auth';
 
 const SETTINGS_CLIENT_ID = '02094310-3454-4929-80b5-8ee85d09f34b';
-export type SettingsPage = 'main' | 'accountDetail' | 'aboutAskAway';
+export type SettingsPage = 'main' | 'accountDetail' | 'aboutAskAway' | 'notificationSettings';
+
+// 页面切换动画时长
+const SLIDE_DURATION = 300;
 
 interface SettingsAppProps {
   systemAppPayload?: Record<string, unknown>;
@@ -46,7 +50,7 @@ const parseSettingsDeepLinkPayload = (
 
   return {
     page:
-      page === 'main' || page === 'accountDetail' || page === 'aboutAskAway'
+      page === 'main' || page === 'accountDetail' || page === 'aboutAskAway' || page === 'notificationSettings'
         ? page
         : undefined,
     aboutPage:
@@ -75,6 +79,12 @@ export default function SettingsApp({
     undefined,
   );
   const [loginModalVisible, setLoginModalVisible] = useState(false);
+
+  // 页面切换动画
+  const [overlayPage, setOverlayPage] = useState<SettingsPage | null>(null);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const isAnimating = useRef(false);
+
   const clearUser = useUserStore((state) => state.clearUser);
   const userInfo = useUserStore((state) => state.userInfo);
   const sessionToken = useUserStore((state) => state.sessionToken);
@@ -149,7 +159,8 @@ export default function SettingsApp({
   }, [setSessionToken, setUserInfo]);
 
   useEffect(() => {
-    if (!deepLink.page) {
+    // 中文注释：动画进行中跳过深链跳转，避免状态冲突。
+    if (!deepLink.page || isAnimating.current) {
       return;
     }
 
@@ -199,36 +210,134 @@ export default function SettingsApp({
     [t, sessionToken, clearUser, clearAuthorizationCache],
   );
 
+  // 从右侧滑入新页面
+  const navigateTo = useCallback((page: SettingsPage) => {
+    if (isAnimating.current) return;
+    isAnimating.current = true;
+
+    slideAnim.setValue(width);
+    setOverlayPage(page);
+
+    Animated.timing(slideAnim, {
+      toValue: 0,
+      duration: SLIDE_DURATION,
+      useNativeDriver: true,
+      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+    }).start(({ finished }) => {
+      if (finished) {
+        setCurrentPage(page);
+        setOverlayPage(null);
+      }
+      isAnimating.current = false;
+    });
+  }, [width, slideAnim]);
+
+  // 当前页面向右侧滑出
+  const goBack = useCallback(() => {
+    if (isAnimating.current || currentPage === 'main') return;
+    isAnimating.current = true;
+
+    const page = currentPage;
+    slideAnim.setValue(0);
+    setOverlayPage(page);
+    setCurrentPage('main');
+
+    Animated.timing(slideAnim, {
+      toValue: width,
+      duration: SLIDE_DURATION,
+      useNativeDriver: true,
+      easing: Easing.bezier(0.25, 0.1, 0.25, 1),
+    }).start(({ finished }) => {
+      if (finished) {
+        setOverlayPage(null);
+      }
+      isAnimating.current = false;
+    });
+  }, [currentPage, width, slideAnim]);
+
+  // 中文注释：Android 上拦截系统返回键，二级页面时触发 goBack 并阻止退出应用。
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const subscription = BackHandler.addEventListener(
+      'hardwareBackPress',
+      () => {
+        if (currentPage !== 'main') {
+          goBack();
+          return true;
+        }
+        return false;
+      },
+    );
+    return () => subscription.remove();
+  }, [currentPage, goBack]);
+
+  // 渲染页面内容
+  const renderPage = (page: SettingsPage) => {
+    switch (page) {
+      case 'main':
+        return (
+          <SettingsMain
+            onAccountPress={() => navigateTo('accountDetail')}
+            onAboutPress={() => {
+              setAboutInitialPage(undefined);
+              navigateTo('aboutAskAway');
+            }}
+            onNotificationPress={() => navigateTo('notificationSettings')}
+            onFeedbackPress={handleFeedbackPress}
+            onLoginPress={handleLoginPress}
+            onLogout={handleLogout}
+            appVersionText={appVersionText}
+            isTablet={isTablet}
+          />
+        );
+      case 'accountDetail':
+        return (
+          <AccountDetail
+            onBack={goBack}
+            onDeleteAccount={handleDeleteAccount}
+            onLogout={handleLogout}
+            isTablet={isTablet}
+          />
+        );
+      case 'aboutAskAway':
+        return (
+          <AboutAskAway
+            onBack={goBack}
+            isTablet={isTablet}
+            initialPage={aboutInitialPage}
+          />
+        );
+      case 'notificationSettings':
+        return (
+          <NotificationSettingsPage
+            onBack={goBack}
+            isTablet={isTablet}
+          />
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <View style={styles.container}>
-      {currentPage === 'main' && (
-        <SettingsMain
-          onAccountPress={() => setCurrentPage('accountDetail')}
-          onAboutPress={() => {
-            setAboutInitialPage(undefined);
-            setCurrentPage('aboutAskAway');
-          }}
-          onFeedbackPress={handleFeedbackPress}
-          onLoginPress={handleLoginPress}
-          onLogout={handleLogout}
-          appVersionText={appVersionText}
-          isTablet={isTablet}
-        />
-      )}
-      {currentPage === 'accountDetail' && (
-        <AccountDetail
-          onBack={() => setCurrentPage('main')}
-          onDeleteAccount={handleDeleteAccount}
-          onLogout={handleLogout}
-          isTablet={isTablet}
-        />
-      )}
-      {currentPage === 'aboutAskAway' && (
-        <AboutAskAway
-          onBack={() => setCurrentPage('main')}
-          isTablet={isTablet}
-          initialPage={aboutInitialPage}
-        />
+      {/* 底层页面 */}
+      {renderPage(currentPage)}
+
+      {/* 动画覆盖层：新页面从右侧滑入 / 当前页面向右侧滑出 */}
+      {overlayPage && (
+        <Animated.View
+          style={[
+            StyleSheet.absoluteFillObject,
+            {
+              transform: [{ translateX: slideAnim }],
+              backgroundColor: '#000',
+              zIndex: 20,
+            },
+          ]}
+        >
+          {renderPage(overlayPage)}
+        </Animated.View>
       )}
 
       {loginModalVisible && (

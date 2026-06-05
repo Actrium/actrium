@@ -257,6 +257,11 @@
       "privacyPolicy": "隐私政策",
       "icp": "ICP 备案",
       "account": "账号",
+      "notification": "消息通知",
+      "notificationTask": "任务通知",
+      "notificationAccountSecurity": "账号与安全通知",
+      "notificationSystemUpdate": "系统更新通知",
+      "notificationOperation": "运营通知",
       "feedbackSubject": "#吐个槽关于"
     }
   }

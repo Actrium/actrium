@@ -19,6 +19,7 @@ import { PhoneNavigationBar } from '../../components/PhoneNavigationBar';
 interface SettingsMainProps {
   onAccountPress: () => void;
   onAboutPress: () => void;
+  onNotificationPress: () => void;
   onFeedbackPress: () => void;
   onLoginPress: () => void;
   onLogout: () => void;
@@ -29,6 +30,7 @@ interface SettingsMainProps {
 export const SettingsMain = ({
   onAccountPress,
   onAboutPress,
+  onNotificationPress,
   onFeedbackPress,
   onLoginPress,
   onLogout,
@@ -120,6 +122,12 @@ export const SettingsMain = ({
             label={t('actr.settings.aboutAskAway')}
             value={appVersionText}
             onPress={onAboutPress}
+          />
+          <View style={styles.itemDivider} />
+          <SettingsItem
+            icon='notification'
+            label={t('actr.settings.notification')}
+            onPress={onNotificationPress}
           />
         </View>
 
