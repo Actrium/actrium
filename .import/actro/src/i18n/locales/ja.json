@@ -257,6 +257,11 @@
       "privacyPolicy": "プライバシーポリシー",
       "icp": "ICP 登録",
       "account": "アカウント",
+      "notification": "通知",
+      "notificationTask": "タスク通知",
+      "notificationAccountSecurity": "アカウントとセキュリティ通知",
+      "notificationSystemUpdate": "システム更新通知",
+      "notificationOperation": "運営通知",
       "feedbackSubject": "#フィードバックについて"
     }
   }
