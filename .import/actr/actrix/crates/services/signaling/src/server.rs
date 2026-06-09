@@ -967,6 +967,41 @@ async fn resolve_client_id_by_actor_id(
     Ok(client_id)
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum RelaySourceConnectionStatus {
+    Current,
+    ClientMissing,
+    ClientActorMismatch,
+    ActorIndexMissing,
+    Displaced { current_client_id: String },
+}
+
+async fn relay_source_connection_status(
+    client_id: &str,
+    source: &ActrId,
+    server: &SignalingServerHandle,
+) -> RelaySourceConnectionStatus {
+    let clients_guard = server.clients.read().await;
+    let Some(client) = clients_guard.get(client_id) else {
+        return RelaySourceConnectionStatus::ClientMissing;
+    };
+
+    if client.actor_id.as_ref() != Some(source) {
+        return RelaySourceConnectionStatus::ClientActorMismatch;
+    }
+
+    let actor_index = server.actor_id_index.read().await;
+    match actor_index.get(source) {
+        Some(current_client_id) if current_client_id == client_id => {
+            RelaySourceConnectionStatus::Current
+        }
+        Some(current_client_id) => RelaySourceConnectionStatus::Displaced {
+            current_client_id: current_client_id.clone(),
+        },
+        None => RelaySourceConnectionStatus::ActorIndexMissing,
+    }
+}
+
 /// 处理 ActrRelay（WebRTC 信令中继）
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id, actr_id = %relay.source.to_string_repr(), target_id = %relay.target.to_string_repr())))]
 async fn handle_actr_relay(
@@ -1078,6 +1113,17 @@ async fn handle_actr_relay(
             Some(request_envelope_id),
         )
         .await?;
+        return Ok(());
+    }
+
+    let connection_status = relay_source_connection_status(client_id, &source, server).await;
+    if connection_status != RelaySourceConnectionStatus::Current {
+        platform::recording::warn!(
+            "Dropping ActrRelay from non-current WebSocket: client_id={}, source={}, status={:?}",
+            client_id,
+            source.to_string_repr(),
+            connection_status
+        );
         return Ok(());
     }
 
@@ -2115,6 +2161,79 @@ mod tests {
         assert!(
             !server.actor_id_index.read().await.contains_key(&actor_id),
             "connection cleanup should clear the old actor index"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relay_source_connection_status_allows_current_client() {
+        let server = create_test_server_handle();
+        let actor_id = create_test_actr_id(1);
+
+        server.clients.write().await.insert(
+            "client".to_string(),
+            create_test_client_with_id("client", actor_id.clone(), None),
+        );
+        server
+            .actor_id_index
+            .write()
+            .await
+            .insert(actor_id.clone(), "client".to_string());
+
+        assert_eq!(
+            relay_source_connection_status("client", &actor_id, &server).await,
+            RelaySourceConnectionStatus::Current
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relay_source_connection_status_rejects_displaced_client() {
+        let server = create_test_server_handle();
+        let actor_id = create_test_actr_id(1);
+
+        {
+            let mut clients = server.clients.write().await;
+            clients.insert(
+                "old-client".to_string(),
+                create_test_client_with_id("old-client", actor_id.clone(), None),
+            );
+            clients.insert(
+                "new-client".to_string(),
+                create_test_client_with_id("new-client", actor_id.clone(), None),
+            );
+        }
+        server
+            .actor_id_index
+            .write()
+            .await
+            .insert(actor_id.clone(), "new-client".to_string());
+
+        assert_eq!(
+            relay_source_connection_status("old-client", &actor_id, &server).await,
+            RelaySourceConnectionStatus::Displaced {
+                current_client_id: "new-client".to_string()
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn test_relay_source_connection_status_rejects_actor_mismatch() {
+        let server = create_test_server_handle();
+        let client_actor = create_test_actr_id(1);
+        let relay_source = create_test_actr_id(2);
+
+        server.clients.write().await.insert(
+            "client".to_string(),
+            create_test_client_with_id("client", client_actor, None),
+        );
+        server
+            .actor_id_index
+            .write()
+            .await
+            .insert(relay_source.clone(), "client".to_string());
+
+        assert_eq!(
+            relay_source_connection_status("client", &relay_source, &server).await,
+            RelaySourceConnectionStatus::ClientActorMismatch
         );
     }
 
