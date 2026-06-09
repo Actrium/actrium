@@ -93,6 +93,7 @@
     "react-native-maps": "1.20.1",
     "react-native-nitro-modules": "^0.33.2",
     "react-native-nitro-sound": "^0.2.10",
+    "react-native-permissions": "^5.5.2",
     "react-native-reanimated": "^3.18.0",
     "react-native-safe-area-context": "^5.7.0",
     "react-native-sqlite-storage": "^6.0.1",
