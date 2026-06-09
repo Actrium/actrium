@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  AppState,
   Platform,
   ScrollView,
   StyleSheet,
@@ -13,7 +14,7 @@ import { AppText } from '../../components';
 import { getTypographyStyle, spacing, controlHeight } from '../../theme/tokens';
 import { SettingsBackHeader } from './SettingsBackHeader';
 import { useSettingsStore } from '../../store/useSettingsStore';
-import type { NotificationKey, NotificationSettings } from '../../store/useSettingsStore';
+import type { NotificationSubKey, NotificationSubSettings } from '../../store/useSettingsStore';
 
 interface NotificationSettingsProps {
   onBack: () => void;
@@ -21,15 +22,15 @@ interface NotificationSettingsProps {
 }
 
 interface NotificationItem {
-  key: NotificationKey;
+  key: NotificationSubKey;
   labelKey: string;
 }
 
 const NOTIFICATION_ITEMS: NotificationItem[] = [
   { key: 'task', labelKey: 'actr.settings.notificationTask' },
-  // { key: 'accountSecurity', labelKey: 'actr.settings.notificationAccountSecurity' },
-  // { key: 'systemUpdate', labelKey: 'actr.settings.notificationSystemUpdate' },
-  // { key: 'operation', labelKey: 'actr.settings.notificationOperation' },
+  { key: 'accountSecurity', labelKey: 'actr.settings.notificationAccountSecurity' },
+  { key: 'systemUpdate', labelKey: 'actr.settings.notificationSystemUpdate' },
+  { key: 'operation', labelKey: 'actr.settings.notificationOperation' },
 ];
 
 export const NotificationSettingsPage = ({
@@ -39,9 +40,33 @@ export const NotificationSettingsPage = ({
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const notification = useSettingsStore((state) => state.settings.notification);
-  const updateNotificationSetting = useSettingsStore(
-    (state) => state.updateNotificationSetting,
+  const updateNotificationSubSetting = useSettingsStore(
+    (state) => state.updateNotificationSubSetting,
   );
+  const setNotificationEnabled = useSettingsStore(
+    (state) => state.setNotificationEnabled,
+  );
+  const requestNotificationEnable = useSettingsStore(
+    (state) => state.requestNotificationEnable,
+  );
+  const checkNotificationPermission = useSettingsStore(
+    (state) => state.checkNotificationPermission,
+  );
+
+  // 每次进入通知设置页时检查权限，无权限自动关闭总开关
+  React.useEffect(() => {
+    checkNotificationPermission();
+  }, [checkNotificationPermission]);
+
+  // 用户从系统设置页返回后重新同步权限状态
+  React.useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        checkNotificationPermission();
+      }
+    });
+    return () => subscription.remove();
+  }, [checkNotificationPermission]);
   const isIOS = Platform.OS === 'ios';
   const headerHeight = isIOS ? insets.top + 56 : 0;
   const headerPaddingTop = isIOS ? insets.top + 12 : 0;
@@ -66,25 +91,48 @@ export const NotificationSettingsPage = ({
           />
         ) : null}
 
+        {/* 所有通知总开关 - 独立卡片 */}
         <View style={styles.card}>
-          {NOTIFICATION_ITEMS.map((item, index) => (
-            <React.Fragment key={item.key}>
-              {index > 0 && <View style={styles.divider} />}
-              <View style={styles.row}>
-                <AppText style={styles.label}>
-                  {t(item.labelKey as any)}
-                </AppText>
-                <Switch
-                  value={notification[item.key as keyof NotificationSettings]}
-                  onValueChange={(value: boolean) =>
-                    updateNotificationSetting(item.key, value)
-                  }
-                  trackColor={{ false: '#3A3A3C', true: '#34C759' }}
-                />
-              </View>
-            </React.Fragment>
-          ))}
+          <View style={styles.row}>
+            <AppText style={styles.label}>
+              {t('actr.settings.notificationAll' as any)}
+            </AppText>
+            <Switch
+              value={notification.enabled}
+              onValueChange={(value: boolean) => {
+                if (value) {
+                  requestNotificationEnable();
+                } else {
+                  setNotificationEnabled(false);
+                }
+              }}
+              trackColor={{ false: '#3A3A3C', true: '#34C759' }}
+            />
+          </View>
         </View>
+
+        {/* 子项通知 - 总开关开启时才显示 */}
+        {notification.enabled && (
+          <View style={styles.card}>
+            {NOTIFICATION_ITEMS.map((item, index) => (
+              <React.Fragment key={item.key}>
+                {index > 0 && <View style={styles.divider} />}
+                <View style={styles.row}>
+                  <AppText style={styles.label}>
+                    {t(item.labelKey as any)}
+                  </AppText>
+                  <Switch
+                    value={notification.sub[item.key as keyof NotificationSubSettings]}
+                    onValueChange={(value: boolean) =>
+                      updateNotificationSubSetting(item.key, value)
+                    }
+                    trackColor={{ false: '#3A3A3C', true: '#34C759' }}
+                  />
+                </View>
+              </React.Fragment>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       {isIOS ? (
