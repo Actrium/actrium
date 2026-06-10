@@ -229,10 +229,17 @@ export function Typewriter({
     }
   }, [content, enabled, startLoop, stopLoop]);
 
-  // 组件卸载时清理定时器
+  // 组件卸载时清理定时器；
+  // 如果 typewriter 还在运行（cursor 还没追上 content），触发 onComplete 兜底，
+  // 保证滚走卸载时外部回调（如震动）不丢失。
   useEffect(() => {
     return () => {
+      const wasRunning =
+        isRunningRef.current || cursorRef.current < contentRef.current.length;
       stopLoop();
+      if (wasRunning) {
+        onCompleteRef.current?.();
+      }
     };
   }, [stopLoop]);
 
