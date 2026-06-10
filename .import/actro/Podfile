@@ -12,8 +12,15 @@ $VCEnableFrameProcessors = false
 
 # Require react_native_pods via a stable absolute path.
 require File.join(subsystem_path, 'node_modules', 'react-native', 'scripts', 'react_native_pods')
+# react-native-permissions setup 脚本
+require File.join(subsystem_path, 'node_modules', 'react-native-permissions', 'scripts', 'setup')
 
 prepare_react_native_project!
+
+# 只编译通知权限模块
+setup_permissions([
+  'Notifications',
+])
 
 target 'Canvas' do
   platform :ios, '17.0'
@@ -48,6 +55,9 @@ target 'Canvas' do
   pod 'react-native-keyboard-controller', :path => 'Subsystem/node_modules/react-native-keyboard-controller'
   pod 'RNReactNativeHapticFeedback', :path => 'Subsystem/node_modules/react-native-haptic-feedback'
   pod 'ExpoSpeechRecognition', :path => 'Subsystem/node_modules/@boomsi/rn-speech-recognition/ios'
+
+  # react-native-permissions 核心库（通知权限处理器由 setup_permissions 自动挂载）
+  pod 'RNPermissions', :path => 'Subsystem/node_modules/react-native-permissions'
   # pod 'react-native-worklets-core', :path => 'Subsystem/node_modules/react-native-worklets-core'
 
   # 微信 SDK
