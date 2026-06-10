@@ -323,11 +323,10 @@ export default function Chat2({ appId }: Chat2Props) {
 
       rowHeightCacheRef.current.set(messageId, height);
 
-      if (isNearBottomRef.current) {
-        requestAnimationFrame(() => {
-          void listRef.current?.scrollToEnd({ animated: false });
-        });
-      }
+      // 中文注释：不再手动 scrollToEnd。
+      // maintainScrollAtEnd.itemLayout 已配置 animated: true，
+      // 会自动在行高变化时平滑贴底；手动 scrollToEnd 会与它冲突，
+      // 导致内容不满一屏时出现"先上跳后下滑"的视觉闪跳。
     },
     [],
   );
@@ -537,6 +536,9 @@ export default function Chat2({ appId }: Chat2Props) {
                 24 + // 中文注释：补偿输入区 marginTop:-24 的向上重叠，确保消息与输入框有足够间距。
                 listKeyboardPadding,
             },
+            // 中文注释：空态时内容容器撑满视口，让 ChatEmpty 的 flex:1 + justifyContent:center 能居中；
+            // 有消息时不撑满，消息从顶部开始排列，避免 alignItemsAtEnd 的 flex-end 在内容超越视口时失效跳帧。
+            isEmptyState ? { flexGrow: 1 } : undefined,
           ]}
           ListHeaderComponent={
             isLoadingMore ? (
@@ -550,7 +552,7 @@ export default function Chat2({ appId }: Chat2Props) {
           // 中文注释：尾部新增消息时只让 maintainScrollAtEnd 接管贴底，
           // 避免与 maintainVisibleContentPosition 的 data 锚定同时改 scroll 造成超长消息错位。
           maintainScrollAtEnd={{
-            animated: false,
+            animated: true,
             on: {
               dataChange: true,
               itemLayout: true,
@@ -560,7 +562,6 @@ export default function Chat2({ appId }: Chat2Props) {
           // 中文注释：保留 size 稳定能力处理滚动中的高度变化，但关闭 data 锚定，
           // 避免在"回答已完成后再追加新消息"时对超长上一条消息做错误位置恢复。
           maintainVisibleContentPosition={{ size: true }}
-          alignItemsAtEnd
           // 中文注释：当前消息行包含本地布局缓存和复杂交互状态，先显式关闭 recycleItems，
           // 避免 LegendList v3 beta 复用 row 时把旧实例状态带到新消息上。
           recycleItems={false}

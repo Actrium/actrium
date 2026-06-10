@@ -859,10 +859,10 @@
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
 
-"@legendapp/list@3.0.0-beta.56":
-  version "3.0.0-beta.56"
-  resolved "https://registry.npmmirror.com/@legendapp/list/-/list-3.0.0-beta.56.tgz#c593fa4dde6fdf924b37d5efcd1ac0459487fd7d"
-  integrity sha512-FcaZLq5n818/2D0VkZCmc4Y/V18/EKLLiYLRZxHgYrgaP+NtHvJ7fp+ZXpo6ae/bWLom0kCK2cM7FiIaWQLEcQ==
+"@legendapp/list@3.0.4":
+  version "3.0.4"
+  resolved "https://registry.npmmirror.com/@legendapp/list/-/list-3.0.4.tgz#8cf5fd03bacbe80d8d4ee6e923a23158d1609098"
+  integrity sha512-Qev7LQ1yXihIRBiOH8d0t3EE1U2GpPYKPj/Odx8R+Zoc4gx5xI+kA/78gAnR9j5jqAUaaKXX46o+2felkjeP7Q==
   dependencies:
     use-sync-external-store "^1.5.0"
 
