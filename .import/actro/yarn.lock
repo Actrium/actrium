@@ -4662,6 +4662,11 @@ react-native-nitro-sound@^0.2.10:
   dependencies:
     "@react-native-community/slider" "^5.0.1"
 
+react-native-permissions@^5.5.2:
+  version "5.5.2"
+  resolved "https://registry.npmmirror.com/react-native-permissions/-/react-native-permissions-5.5.2.tgz#407e05455a3d65105a2efe164c0c8b7c9600c24f"
+  integrity sha512-wd7fSOv+sPriCdVEgEEoRGhqXhnoM7JuNqXAFFzBQXe8d/1ZoWiQi4h66xeEJVckmblGo1IJkzBiaKgPrNz85w==
+
 react-native-reanimated@^3.18.0:
   version "3.19.5"
   resolved "https://registry.npmmirror.com/react-native-reanimated/-/react-native-reanimated-3.19.5.tgz"

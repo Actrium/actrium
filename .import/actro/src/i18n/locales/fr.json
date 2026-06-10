@@ -258,6 +258,7 @@
       "icp": "Enregistrement ICP",
       "account": "Compte",
       "notification": "Notifications",
+      "notificationAll": "Notifications",
       "notificationTask": "Notifications de tâches",
       "notificationAccountSecurity": "Notifications de compte et sécurité",
       "notificationSystemUpdate": "Notifications de mise à jour système",
