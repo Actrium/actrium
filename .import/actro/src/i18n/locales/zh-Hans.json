@@ -258,6 +258,7 @@
       "icp": "ICP 备案",
       "account": "账号",
       "notification": "消息通知",
+      "notificationAll": "通知",
       "notificationTask": "任务通知",
       "notificationAccountSecurity": "账号与安全通知",
       "notificationSystemUpdate": "系统更新通知",

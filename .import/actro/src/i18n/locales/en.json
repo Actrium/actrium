@@ -258,6 +258,7 @@
       "icp": "ICP Filing",
       "account": "Account",
       "notification": "Notifications",
+      "notificationAll": "Notifications",
       "notificationTask": "Task Notifications",
       "notificationAccountSecurity": "Account & Security Notifications",
       "notificationSystemUpdate": "System Update Notifications",

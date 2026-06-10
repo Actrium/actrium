@@ -15,6 +15,7 @@ import { getTypographyStyle, spacing } from '../../theme/tokens';
 import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
 import { PhoneNavigationBar } from '../../components/PhoneNavigationBar';
+import { opacity } from 'react-native-reanimated/lib/typescript/Colors';
 
 interface SettingsMainProps {
   onAccountPress: () => void;
@@ -55,7 +56,7 @@ export const SettingsMain = ({
       {/* Page Title */}
       {hasNativeNavigationBar ? (
         <PhoneNavigationBar
-          title='AskAway'
+          title="AskAway"
           showLargeTitle={true}
           style={[
             styles.headerOverlay,
@@ -99,33 +100,33 @@ export const SettingsMain = ({
             <AppText
               style={styles.accountName}
               numberOfLines={1}
-              ellipsizeMode='tail'
+              ellipsizeMode="tail"
             >
               {isLoggedIn
                 ? userInfo.user.display_name || t('actr.settings.account')
                 : t('actr.auth.login')}
             </AppText>
           </View>
-          <Icon type='next' size={16} color='#fff' />
+          <Icon type="next" size={16} color="#fff" />
         </TouchableOpacity>
 
         {/* Settings Groups */}
         <View style={styles.groupCard}>
           <SettingsItem
-            icon='feedback'
+            icon="feedback"
             label={t('actr.settings.feedback')}
             onPress={onFeedbackPress}
           />
           <View style={styles.itemDivider} />
           <SettingsItem
-            icon='askaway_gery'
+            icon="askaway_gery"
             label={t('actr.settings.aboutAskAway')}
             value={appVersionText}
             onPress={onAboutPress}
           />
           <View style={styles.itemDivider} />
           <SettingsItem
-            icon='notification'
+            icon="feedback"
             label={t('actr.settings.notification')}
             onPress={onNotificationPress}
           />
@@ -135,8 +136,8 @@ export const SettingsMain = ({
         {isLoggedIn && (
           <View style={styles.logoutCard}>
             <SettingsItem
-              icon='logout'
-              iconColor='#FF383C'
+              icon="logout"
+              iconColor="#FF383C"
               label={t('actr.settings.logout')}
               showChevron={false}
               destructive={true}
@@ -186,7 +187,7 @@ const styles = StyleSheet.create({
   accountInfo: {
     flex: 1,
     marginLeft: spacing.lg,
-    marginRight: spacing.xl
+    marginRight: spacing.xl,
   },
   accountName: {
     ...getTypographyStyle('title2'),

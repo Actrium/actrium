@@ -258,6 +258,7 @@
       "icp": "ICP 備案",
       "account": "帳號",
       "notification": "訊息通知",
+      "notificationAll": "通知",
       "notificationTask": "任務通知",
       "notificationAccountSecurity": "帳號與安全通知",
       "notificationSystemUpdate": "系統更新通知",

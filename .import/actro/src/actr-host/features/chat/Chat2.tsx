@@ -49,6 +49,7 @@ import { useChatSelectionActions } from './hooks/useChatSelectionActions';
 import { useChatBubbleActions } from './hooks/useChatBubbleActions';
 import { useChatInit } from './hooks/useChatInit';
 import { useReadAloudPlaybackController } from './hooks/useReadAloudPlayback';
+import { useSettingsStore } from '../../../store/useSettingsStore';
 import { DeleteButton } from '../shared/DeleteButton';
 import { ShareConfirmButton } from '../shared/ShareConfirmButton';
 import { Checkbox } from '../shared/Checkbox';
@@ -185,6 +186,11 @@ export default function Chat2({ appId }: Chat2Props) {
     toastRef,
     setFeedbackMessageId,
   });
+
+  // 中文注释：首次进入聊天页时检查通知权限，未请求过则主动弹系统权限申请弹窗。
+  useEffect(() => {
+    useSettingsStore.getState().syncNotificationPermission();
+  }, []);
 
   // ==================== Keyboard ====================
 
@@ -517,6 +523,7 @@ export default function Chat2({ appId }: Chat2Props) {
           ref={listRef}
           data={messageIds}
           renderItem={renderItem}
+          // @ts-ignore
           keyExtractor={(item) => item}
           style={styles.legendList}
           contentContainerStyle={[
