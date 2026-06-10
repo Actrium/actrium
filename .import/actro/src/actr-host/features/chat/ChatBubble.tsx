@@ -51,6 +51,7 @@ import {
   ReadAloudActionButton,
 } from './ReadAloudActionButton';
 import { useChatBubbleEvents } from './hooks/useChatBubbleEvents';
+import { triggerHaptic } from '../../utils/haptics';
 
 interface ChatBubbleProps {
   content?: string;
@@ -411,11 +412,21 @@ export default function ChatBubble({
   const [isTypingComplete, setIsTypingComplete] = React.useState(
     progress === 2,
   );
+  // 中文注释：content 变化时重置打字完成标记，但仅对流式消息（typewriterEnabled=true）重置，
+  // 历史消息（typewriterEnabled=false）全文直显、没有动画要等，不应重置为 false 后无法恢复。
   React.useEffect(() => {
-    setIsTypingComplete(false);
-  }, [content]);
+    if (typewriterEnabled) {
+      setIsTypingComplete(false);
+    }
+  }, [content, typewriterEnabled]);
   const handleTypewriterComplete = React.useCallback(() => {
     setIsTypingComplete(true);
+    // 中文注释：Typewriter 视觉追完时触发两下震动，对齐触觉与视觉，
+    // 而不是在数据层收到 isEnd 时立刻震（那时文字可能还没显示完）。
+    triggerHaptic('impactHeavy');
+    setTimeout(() => {
+      triggerHaptic('impactHeavy');
+    }, 50);
   }, []);
   const shouldShowLoadingBubble =
     !isQuestion && isLoading && !content && !voicePayload;
