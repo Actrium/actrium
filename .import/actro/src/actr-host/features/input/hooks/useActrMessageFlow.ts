@@ -290,6 +290,7 @@ export function useActrMessageFlow(
       }
 
       // 中文注释：取消态和结束态一样立即收口，不再等待定时器，只是最终 progress 会落成 canceled。
+      // 震动已移到 ChatBubble 的 Typewriter onComplete，对齐视觉完成时机。
       if (isAborted) {
         flushAnswerTextBuffer(messageId, { isAborted: true });
 
@@ -300,14 +301,12 @@ export function useActrMessageFlow(
             useUnreadStore.getState().incrementUnread(tabId);
           }
         });
-        triggerHaptic('impactHeavy');
-        setTimeout(() => {
-          triggerHaptic('impactHeavy');
-        }, 50);
         return;
       }
 
       // 中文注释：结束分片不再等待定时器，直接合并剩余文本并写入最终态。
+      // 震动已移到 ChatBubble 的 Typewriter onComplete，对齐视觉完成时机，
+      // 不再在数据层收到 isEnd 时立刻触发（那时打字动画可能还没追完）。
       if (isFinished) {
         flushAnswerTextBuffer(messageId, { isFinished: true });
 
@@ -318,10 +317,6 @@ export function useActrMessageFlow(
             useUnreadStore.getState().incrementUnread(tabId);
           }
         });
-        triggerHaptic('impactHeavy');
-        setTimeout(() => {
-          triggerHaptic('impactHeavy');
-        }, 50);
         return;
       }
 
