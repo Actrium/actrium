@@ -991,7 +991,20 @@
     "@babel/parser" "^7.28.6"
     "@babel/types" "^7.28.6"
 
-"@babel/traverse--for-generate-function-map@npm:@babel/traverse@^7.25.3", "@babel/traverse@^7.25.3", "@babel/traverse@^7.27.1", "@babel/traverse@^7.28.5", "@babel/traverse@^7.28.6", "@babel/traverse@^7.29.0":
+"@babel/traverse--for-generate-function-map@npm:@babel/traverse@^7.25.3":
+  version "7.29.0"
+  resolved "https://registry.npmjs.org/@babel/traverse/-/traverse-7.29.0.tgz"
+  integrity sha512-4HPiQr0X7+waHfyXPZpWPfWL/J7dcN1mx9gL6WdQVMbPnF3+ZhSMs8tCxN7oHddJE9fhNE7+lxdnlyemKfJRuA==
+  dependencies:
+    "@babel/code-frame" "^7.29.0"
+    "@babel/generator" "^7.29.0"
+    "@babel/helper-globals" "^7.28.0"
+    "@babel/parser" "^7.29.0"
+    "@babel/template" "^7.28.6"
+    "@babel/types" "^7.29.0"
+    debug "^4.3.1"
+
+"@babel/traverse@^7.25.3", "@babel/traverse@^7.27.1", "@babel/traverse@^7.28.5", "@babel/traverse@^7.28.6", "@babel/traverse@^7.29.0":
   version "7.29.0"
   resolved "https://registry.npmjs.org/@babel/traverse/-/traverse-7.29.0.tgz"
   integrity sha512-4HPiQr0X7+waHfyXPZpWPfWL/J7dcN1mx9gL6WdQVMbPnF3+ZhSMs8tCxN7oHddJE9fhNE7+lxdnlyemKfJRuA==
@@ -1369,6 +1382,13 @@
   dependencies:
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
+
+"@legendapp/list@3.0.4":
+  version "3.0.4"
+  resolved "https://registry.npmmirror.com/@legendapp/list/-/list-3.0.4.tgz#8cf5fd03bacbe80d8d4ee6e923a23158d1609098"
+  integrity sha512-Qev7LQ1yXihIRBiOH8d0t3EE1U2GpPYKPj/Odx8R+Zoc4gx5xI+kA/78gAnR9j5jqAUaaKXX46o+2felkjeP7Q==
+  dependencies:
+    use-sync-external-store "^1.5.0"
 
 "@nicolo-ribaudo/eslint-scope-5-internals@5.1.1-v1":
   version "5.1.1-v1"
@@ -6648,6 +6668,11 @@ react-native-nitro-sound@^0.2.10:
   dependencies:
     "@react-native-community/slider" "^5.0.1"
 
+react-native-permissions@^5.5.2:
+  version "5.5.2"
+  resolved "https://registry.npmmirror.com/react-native-permissions/-/react-native-permissions-5.5.2.tgz#407e05455a3d65105a2efe164c0c8b7c9600c24f"
+  integrity sha512-wd7fSOv+sPriCdVEgEEoRGhqXhnoM7JuNqXAFFzBQXe8d/1ZoWiQi4h66xeEJVckmblGo1IJkzBiaKgPrNz85w==
+
 react-native-reanimated@^3.18.0:
   version "3.19.5"
   resolved "https://registry.npmjs.org/react-native-reanimated/-/react-native-reanimated-3.19.5.tgz"
@@ -7715,7 +7740,7 @@ uri-js@^4.2.2:
   dependencies:
     punycode "^2.1.0"
 
-use-sync-external-store@^1.6.0:
+use-sync-external-store@^1.5.0, use-sync-external-store@^1.6.0:
   version "1.6.0"
   resolved "https://registry.npmjs.org/use-sync-external-store/-/use-sync-external-store-1.6.0.tgz"
   integrity sha512-Pp6GSwGP/NrPIrxVFAIkOQeyw8lFenOHijQWkUTrDvrF4ALqylP2C/KCkeS9dpUM3KvYRQhna5vt7IL95+ZQ9w==
