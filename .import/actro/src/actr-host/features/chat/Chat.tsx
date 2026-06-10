@@ -417,8 +417,10 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       Date.now() < forceScrollToBottomUntilRef.current;
     if (!shouldKeepBottom) return;
 
+    // 中文注释：animated: true 使内容撑高后的贴底滚动平滑过渡，
+    // 配合 Typewriter 的 LayoutAnimation 消除底部闪跳。
     requestAnimationFrame(() => {
-      flatListRef.current?.scrollToEnd({ animated: false });
+      flatListRef.current?.scrollToEnd({ animated: true });
     });
   }, [selectionMode]);
 

@@ -38,6 +38,7 @@ import { getHostShadows } from '../../styles/shadows';
 import { IAttachmentItem } from '../../types/attachment';
 import { Supramark } from '@supramark/rn';
 import type { SupramarkStyles } from '@supramark/rn';
+import { Typewriter } from './Typewriter';
 import {
   SUPRAMARK_CONTAINER_RENDERERS,
   SUPRAMARK_FULL_CONFIG,
@@ -87,6 +88,8 @@ interface ChatBubbleBodyProps {
   getDisplayFileName: (item: IAttachmentItem) => string;
   getDisplayFileType: (item: IAttachmentItem) => string;
   markdownSupramarkStyles: SupramarkStyles;
+  typewriterEnabled: boolean;
+  onTypewriterComplete?: () => void;
   t: ReturnType<typeof useTranslation>['t'];
   onCopy?: () => void;
   onFeedback?: () => void;
@@ -115,6 +118,8 @@ const ChatBubbleBody = React.memo(function ChatBubbleBody({
   getDisplayFileName,
   getDisplayFileType,
   markdownSupramarkStyles,
+  typewriterEnabled,
+  onTypewriterComplete,
   t,
   onCopy,
   onFeedback,
@@ -261,14 +266,27 @@ const ChatBubbleBody = React.memo(function ChatBubbleBody({
         </View>
       ) : content ? (
         <View style={styles.markdownContainer}>
-          <Supramark
-            markdown={content}
-            config={SUPRAMARK_FULL_CONFIG}
-            containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
-            // 中文注释：宿主与 supermark 工作区各自持有一份 react-native 类型定义，
-            // 这里做局部类型桥接，避免样式对象在 TS 层被误判为不兼容。
-            styles={markdownSupramarkStyles}
-          />
+          {isQuestion ? (
+            <Supramark
+              markdown={content}
+              config={SUPRAMARK_FULL_CONFIG}
+              containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
+              styles={markdownSupramarkStyles}
+            />
+          ) : (
+            <Typewriter
+              content={content}
+              styles={markdownSupramarkStyles}
+              // 中文注释：typewriterEnabled 在挂载时一次性确定：
+              // 流式消息 → true，逐字推进直到自然追上 content；
+              // 旧消息 → false，直接显示全文。
+              enabled={typewriterEnabled}
+              charsPerTick={2}
+              tickIntervalMs={30}
+              lineBreakDelayMs={100}
+              onComplete={onTypewriterComplete}
+            />
+          )}
         </View>
       ) : null}
       {!isQuestion && shouldShowLatestAnswerToolbar && (
@@ -382,10 +400,30 @@ export default function ChatBubble({
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const isQuestion = type === 'question';
+  // 中文注释：打字机 enabled 在挂载时一次性确定，之后不再变化。
+  // 旧消息（progress 已为 2）→ enabled=false，直接显示全文；
+  // 流式消息（progress < 2）→ enabled=true，Typewriter 逐字推进直到自然追上，
+  // 不会因为 progress 变为 2 而中途倾倒文本。
+  const [typewriterEnabled] = React.useState(() => progress !== 2);
+  // 中文注释：追踪打字动画是否完成。
+  // 每次 content 变化都重置为 false（Typewriter 还没追上新内容），
+  // 等 Typewriter 追上后通过 onComplete 回调重新设为 true。
+  const [isTypingComplete, setIsTypingComplete] = React.useState(
+    progress === 2,
+  );
+  React.useEffect(() => {
+    setIsTypingComplete(false);
+  }, [content]);
+  const handleTypewriterComplete = React.useCallback(() => {
+    setIsTypingComplete(true);
+  }, []);
   const shouldShowLoadingBubble =
     !isQuestion && isLoading && !content && !voicePayload;
+  // 中文注释：工具栏需要同时满足两个条件才显示：
+  // 1. 消息接收完成（progress === 2）
+  // 2. 打字动画完成（isTypingComplete），避免动画还在进行时就出现工具栏
   const shouldShowLatestAnswerToolbar =
-    !isQuestion && isLatest && !shouldShowLoadingBubble && progress === 2;
+    !isQuestion && isLatest && !shouldShowLoadingBubble && progress === 2 && isTypingComplete;
   const parsedVoicePayload = React.useMemo(
     () => parseVoicePayload(voicePayload),
     [voicePayload],
@@ -563,6 +601,8 @@ export default function ChatBubble({
       getDisplayFileName={getDisplayFileName}
       getDisplayFileType={getDisplayFileType}
       markdownSupramarkStyles={markdownSupramarkStyles}
+      typewriterEnabled={typewriterEnabled}
+      onTypewriterComplete={handleTypewriterComplete}
       t={t}
       onCopy={onCopy}
       onFeedback={onFeedback}
