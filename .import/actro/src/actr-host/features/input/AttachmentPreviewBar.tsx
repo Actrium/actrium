@@ -84,7 +84,7 @@ export const AttachmentPreviewBar: React.FC<AttachmentPreviewBarProps> = ({
             key={item.id}
             style={[
               styles.attachmentItem,
-              // 中文注释：图片附件维持固定高度，并按原始比例撑开；过窄时由最小宽度兜住，避免竖图缩成一条。
+              // 图片附件维持固定高度，并按原始比例撑开；过窄时由最小宽度兜住，避免竖图缩成一条。
               item.attachment_type === 'image'
                 ? [
                     styles.imageAttachmentItem,

@@ -138,7 +138,7 @@ export const DropdownMenu: React.FC<DropdownMenuProps> = ({
         closeImmediately(callback);
         return;
       }
-      // 中文注释：仅对显式指定的菜单项延迟收起，避免影响点外部或其他操作项的即时关闭行为。
+      // 仅对显式指定的菜单项延迟收起，避免影响点外部或其他操作项的即时关闭行为。
       closeDelayTimerRef.current = setTimeout(() => {
         closeDelayTimerRef.current = null;
         closeImmediately(callback);

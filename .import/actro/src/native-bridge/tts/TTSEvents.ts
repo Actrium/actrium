@@ -40,7 +40,7 @@ export const TTSEvents = {
   onTTSResume: (callback: (event: TTSEventPayload) => void): Unsubscribe =>
     addListener('onTTSResume', callback),
 
-  // 中文注释：finish 事件需要保留 cancelled 标记，供上层区分自然播放完成与主动 stop/cancel。
+  // finish 事件需要保留 cancelled 标记，供上层区分自然播放完成与主动 stop/cancel。
   onTTSFinish: (callback: (event: TTSFinishEvent) => void): Unsubscribe =>
     addListener('onTTSFinish', callback),
 

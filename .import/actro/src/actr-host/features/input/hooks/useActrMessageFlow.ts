@@ -45,7 +45,7 @@ interface AnswerTextBufferState {
   hasTriggeredStartHaptic: boolean;
 }
 
-// 中文注释：文本流式分片在这个时间窗内合并后再写入 store，避免每个 chunk 都触发整段聊天区重渲染。
+// 文本流式分片在这个时间窗内合并后再写入 store，避免每个 chunk 都触发整段聊天区重渲染。
 const TEXT_MESSAGE_FLUSH_DELAY_MS = 48;
 
 interface UseActrMessageFlowResult {
@@ -117,7 +117,7 @@ export function useActrMessageFlow(
   const answerVoiceBuffersRef = useRef<Record<string, AnswerVoiceBufferState>>(
     {},
   );
-  // 中文注释：为每条文本回答维护独立缓冲区和定时器，把高频流式分片合并成低频 UI 刷新。
+  // 为每条文本回答维护独立缓冲区和定时器，把高频流式分片合并成低频 UI 刷新。
   const answerTextBuffersRef = useRef<Record<string, AnswerTextBufferState>>(
     {},
   );
@@ -129,7 +129,7 @@ export function useActrMessageFlow(
       }
 
       if (status === 'not_logged_in') {
-        // 中文注释：Pad 和 Phone 统一使用当前页登录弹窗，不再跳转登录 tab。
+        // Pad 和 Phone 统一使用当前页登录弹窗，不再跳转登录 tab。
         setAuthParams({ clientId, appId });
         setShowLoginModal(true);
         return false;
@@ -154,7 +154,7 @@ export function useActrMessageFlow(
     return handleAuthStatus(status, clientId);
   }, [checkAuth, handleAuthStatus]);
 
-  // 中文注释：清理指定回答文本缓冲区上的定时 flush，避免重复调度或遗留失效 timer。
+  // 清理指定回答文本缓冲区上的定时 flush，避免重复调度或遗留失效 timer。
   const clearAnswerTextBufferTimer = useCallback((messageId: string) => {
     const buffer = answerTextBuffersRef.current[messageId];
     if (!buffer?.flushTimer) return;
@@ -163,7 +163,7 @@ export function useActrMessageFlow(
     buffer.flushTimer = null;
   }, []);
 
-  // 中文注释：按 messageId 获取或创建文本回答缓冲区，用于暂存尚未合并进 store 的流式分片。
+  // 按 messageId 获取或创建文本回答缓冲区，用于暂存尚未合并进 store 的流式分片。
   const getOrCreateAnswerTextBuffer = useCallback(
     (messageId: string): AnswerTextBufferState => {
       const existingBuffer = answerTextBuffersRef.current[messageId];
@@ -180,7 +180,7 @@ export function useActrMessageFlow(
     [],
   );
 
-  // 中文注释：将某条回答当前缓冲的文本分片一次性合并到 store；
+  // 将某条回答当前缓冲的文本分片一次性合并到 store；
   // 中间态走低频刷新，结束态/失败态走立即落盘，并在终态后回收缓冲区。
   const flushAnswerTextBuffer = useCallback(
     (
@@ -194,14 +194,14 @@ export function useActrMessageFlow(
       const buffer = answerTextBuffersRef.current[messageId];
       if (!buffer) return;
 
-      // 中文注释：flush 一旦开始就先回收当前 timer，避免消息已被移除时留下失效定时器引用。
+      // flush 一旦开始就先回收当前 timer，避免消息已被移除时留下失效定时器引用。
       clearAnswerTextBufferTimer(messageId);
 
       const currentMsg = useMessageStore
         .getState()
         .getMessage(tabId, messageId);
       if (!currentMsg) {
-        // 中文注释：消息不在 store 中通常意味着会话已切走、消息被删或组件已进入清理流程，
+        // 消息不在 store 中通常意味着会话已切走、消息被删或组件已进入清理流程，
         // 此时直接丢弃缓冲内容并回收终态引用，避免后续分片继续挂在无效 buffer 上。
         if (options?.isFinished || options?.isFailed || options?.isAborted) {
           delete answerTextBuffersRef.current[messageId];
@@ -219,7 +219,7 @@ export function useActrMessageFlow(
       }
 
       const mergedContent = (currentMsg.answer_content || '') + buffer.pendingText;
-      // 中文注释：文本回答终态沿用 isEnd 的收口逻辑，但用户取消要单独落成 canceled，避免和失败态混淆。
+      // 文本回答终态沿用 isEnd 的收口逻辑，但用户取消要单独落成 canceled，避免和失败态混淆。
       const progress = options?.isFailed
         ? 3
         : options?.isAborted
@@ -227,7 +227,7 @@ export function useActrMessageFlow(
           : options?.isFinished
             ? 2
             : 1;
-      // 中文注释：失败、结束、取消都属于最终态，终态 flush 时要立即持久化到数据库。
+      // 失败、结束、取消都属于最终态，终态 flush 时要立即持久化到数据库。
       const shouldPersistTerminalState =
         Boolean(options?.isFinished) ||
         Boolean(options?.isFailed) ||
@@ -246,7 +246,7 @@ export function useActrMessageFlow(
         shouldPersistTerminalState,
       );
 
-      // 中文注释：终态消息写回 store 后立即回收缓冲区，避免旧分片状态残留到下一轮回答。
+      // 终态消息写回 store 后立即回收缓冲区，避免旧分片状态残留到下一轮回答。
       if (shouldPersistTerminalState) {
         delete answerTextBuffersRef.current[messageId];
       }
@@ -268,7 +268,7 @@ export function useActrMessageFlow(
 
       const isFinished = data.isEnd || data.status === 2;
       const isFailed = data.status === 3;
-      // 中文注释：isAbort 表示用户主动取消，本地收口流程与 isEnd 一致，但最终 progress 要保存为 canceled。
+      // isAbort 表示用户主动取消，本地收口流程与 isEnd 一致，但最终 progress 要保存为 canceled。
       const isAborted = data.isAbort;
       const buffer = getOrCreateAnswerTextBuffer(messageId);
 
@@ -276,20 +276,20 @@ export function useActrMessageFlow(
         buffer.pendingText += data.message;
       }
 
-      // 中文注释：首个文本分片只触发一次轻震，避免缓冲窗口内因 store 尚未更新导致重复触发。
+      // 首个文本分片只触发一次轻震，避免缓冲窗口内因 store 尚未更新导致重复触发。
       if (!isFailed && !buffer.hasTriggeredStartHaptic) {
         triggerHaptic('impactHeavy');
         buffer.hasTriggeredStartHaptic = true;
       }
 
       if (isFailed) {
-        // 中文注释：失败态要立刻落盘并清理缓冲，避免错误消息还滞留在延时队列里。
+        // 失败态要立刻落盘并清理缓冲，避免错误消息还滞留在延时队列里。
         triggerLongVibration(300);
         flushAnswerTextBuffer(messageId, { isFailed: true });
         return;
       }
 
-      // 中文注释：取消态和结束态一样立即收口，不再等待定时器，只是最终 progress 会落成 canceled。
+      // 取消态和结束态一样立即收口，不再等待定时器，只是最终 progress 会落成 canceled。
       // 震动已移到 ChatBubble 的 Typewriter onComplete，对齐视觉完成时机。
       if (isAborted) {
         flushAnswerTextBuffer(messageId, { isAborted: true });
@@ -304,7 +304,7 @@ export function useActrMessageFlow(
         return;
       }
 
-      // 中文注释：结束分片不再等待定时器，直接合并剩余文本并写入最终态。
+      // 结束分片不再等待定时器，直接合并剩余文本并写入最终态。
       // 震动已移到 ChatBubble 的 Typewriter onComplete，对齐视觉完成时机，
       // 不再在数据层收到 isEnd 时立刻触发（那时打字动画可能还没追完）。
       if (isFinished) {
@@ -320,7 +320,7 @@ export function useActrMessageFlow(
         return;
       }
 
-      // 中文注释：流式中间态只在一个短时间窗后集中刷新一次，降低消息洪峰时的 UI/原生桥压力。
+      // 流式中间态只在一个短时间窗后集中刷新一次，降低消息洪峰时的 UI/原生桥压力。
       if (!buffer.flushTimer) {
         buffer.flushTimer = setTimeout(() => {
           flushAnswerTextBuffer(messageId);
@@ -331,7 +331,7 @@ export function useActrMessageFlow(
   );
 
   useEffect(() => {
-    // 中文注释：hook 卸载时统一清理所有文本缓冲区定时器和缓存，避免切 tab 或组件销毁后继续回写旧分片。
+    // hook 卸载时统一清理所有文本缓冲区定时器和缓存，避免切 tab 或组件销毁后继续回写旧分片。
     return () => {
       Object.keys(answerTextBuffersRef.current).forEach((messageId) => {
         clearAnswerTextBufferTimer(messageId);
@@ -402,7 +402,7 @@ export function useActrMessageFlow(
           .getState()
           .getMessage(tabId, messageId);
 
-        // 中文注释：回答语音可能先于问题语音消息入列，先缓存更新，等问题消息补入后再合并。
+        // 回答语音可能先于问题语音消息入列，先缓存更新，等问题消息补入后再合并。
         if (!currentMsg) {
           pendingVoiceMessageUpdatesRef.current[messageId] = {
             ...(pendingVoiceMessageUpdatesRef.current[messageId] || {}),

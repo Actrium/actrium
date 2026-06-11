@@ -11,7 +11,7 @@ const Main = () => {
   const { tab } = useTab();
   const appId = useTabIdMapStore((state) => state.tabIdMap[tab.id]);
 
-  // 中文注释：没有 appId 时先走 LoadApp（扫码页），扫码完成后自动跳回并带上 appId。
+  // 没有 appId 时先走 LoadApp（扫码页），扫码完成后自动跳回并带上 appId。
   if (!appId) {
     return <LoadApp />;
   }

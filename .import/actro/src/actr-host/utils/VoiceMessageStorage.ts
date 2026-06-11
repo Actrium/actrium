@@ -63,7 +63,7 @@ const createWavBytes = (
   const blockAlign = channels * (bitsPerSample / 8);
   const dataLength = pcmData.length;
 
-  // 中文注释：统一补齐标准 WAV 头，保证 iOS / Android 都能直接播放本地文件。
+  // 统一补齐标准 WAV 头，保证 iOS / Android 都能直接播放本地文件。
   view.setUint32(0, 0x52494646, false);
   view.setUint32(4, 36 + dataLength, true);
   view.setUint32(8, 0x57415645, false);
@@ -110,7 +110,7 @@ export const parseVoicePayload = (
 
 export const formatVoiceDuration = (durationMs: number): string => {
   const totalSeconds = Math.max(1, Math.round(durationMs / 1000));
-  // 中文注释：气泡里统一按秒展示，和常见语音消息样式保持一致，例如 3"。
+  // 气泡里统一按秒展示，和常见语音消息样式保持一致，例如 3"。
   return `${totalSeconds}"`;
 };
 

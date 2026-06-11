@@ -68,7 +68,7 @@ export class AppSessionService {
       // 1. 获取并保存 App 信息
       const appRes = await getAppInfo(appId);
 
-      // 中文注释：后端会把“应用不存在”放在业务错误码里返回，
+      // 后端会把“应用不存在”放在业务错误码里返回，
       // 这类响应虽然 success=false，但语义不是网络错误，需要先单独识别。
       if (AppSessionService.isAppNotFoundResponse(appRes)) {
         return {
@@ -78,7 +78,7 @@ export class AppSessionService {
         };
       }
 
-      // 中文注释：剩余的 success=false 才按链路失败处理，
+      // 剩余的 success=false 才按链路失败处理，
       // 例如网络异常、HTTP 非 2xx、权限链路未决等场景。
       if (!appRes?.success) {
         return {

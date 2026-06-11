@@ -5,7 +5,7 @@ import { cleanupVoiceMessageFile } from '../utils/VoiceMessageStorage';
 
 export type MessagePart = 'attachments' | 'question' | 'answer';
 
-// 中文注释：选择模式类型，'none' 未进入选择模式，'delete' 为删除多选，'share' 为分享多选。
+// 选择模式类型，'none' 未进入选择模式，'delete' 为删除多选，'share' 为分享多选。
 export type SelectionMode = 'none' | 'delete' | 'share';
 
 interface MessageState {
@@ -26,7 +26,7 @@ interface MessageState {
   ) => void;
   deleteMessage: (tabId: string, messageId: string) => void;
   cleanMessage: (tabId: string) => void;
-  // 中文注释：选择模式，支持删除和分享两种用途。
+  // 选择模式，支持删除和分享两种用途。
   selectionMode: SelectionMode;
   selectedItems: Record<string, Set<MessagePart>>;
   enterSelectionMode: (
@@ -67,7 +67,7 @@ const cleanupMessageVoiceFiles = async (
 ) => {
   if (!message) return;
 
-  // 中文注释：消息删除或局部删除时，统一在这里回收提问/回答对应的本地语音文件，避免不同入口遗漏。
+  // 消息删除或局部删除时，统一在这里回收提问/回答对应的本地语音文件，避免不同入口遗漏。
   if (message.question_voice_payload) {
     await cleanupVoiceMessageFile(message.question_voice_payload);
   }

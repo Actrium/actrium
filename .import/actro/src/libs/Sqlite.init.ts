@@ -203,7 +203,7 @@ const runMigrations = async (fromVersion: number) => {
   }
 
   if (currentVersion < 3) {
-    // 中文注释：旧库可能已经存在同一 app_id 的重复书签，
+    // 旧库可能已经存在同一 app_id 的重复书签，
     // 先保留最早一条记录并删除其余重复项，再补唯一索引，避免升级时建索引失败。
     await db.executeSql(
       `
@@ -230,7 +230,7 @@ const runMigrations = async (fromVersion: number) => {
   }
 
   if (currentVersion < 4) {
-    // 中文注释：为历史 apps 表补齐应用状态字段，旧数据默认回填为 normal。
+    // 为历史 apps 表补齐应用状态字段，旧数据默认回填为 normal。
     const appStatusExists = await hasColumn('apps', 'app_status');
     if (!appStatusExists) {
       await db.executeSql(

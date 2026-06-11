@@ -80,7 +80,7 @@ const LoadAppPad = () => {
               styles.LoadAppContainer,
               {
                 gap: containerGap,
-                // 中文注释：Pad 端主体是整块居中内容，键盘弹起后需要把“中心点”整体上移，
+                // Pad 端主体是整块居中内容，键盘弹起后需要把“中心点”整体上移，
                 // 仅加底部 padding 不会改变居中块的位置，所以这里按键盘高度的一半上移主体。
                 transform: [{ translateY: -(effectiveKeyboardInset / 2) }],
               },

@@ -383,49 +383,49 @@ const iosTypography: Record<TypographyVariant, TypographyToken> = {
     lineHeight: 22,
     fontWeight: '400',
   },
-  // 中文注释：面板中的辅助说明文案当前使用 16 号字，这里单独建档，避免和正文、输入文案混用。
+  // 面板中的辅助说明文案当前使用 16 号字，这里单独建档，避免和正文、输入文案混用。
   helperText: {
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '400',
   },
-  // 中文注释：加载中提示当前使用 15 号字，独立成档位，后续状态文案统一复用。
+  // 加载中提示当前使用 15 号字，独立成档位，后续状态文案统一复用。
   statusBody: {
     fontSize: 15,
     lineHeight: 20,
     fontWeight: '400',
   },
-  // 中文注释：主操作按钮文案当前是 17 号半粗体，这里单独定义，避免硬套到菜单标题。
+  // 主操作按钮文案当前是 17 号半粗体，这里单独定义，避免硬套到菜单标题。
   actionLabel: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '600',
   },
-  // 中文注释：扫码入口按钮的文案比通用主按钮更轻一点，单独成档，避免和其它 CTA 共用后一起变大。
+  // 扫码入口按钮的文案比通用主按钮更轻一点，单独成档，避免和其它 CTA 共用后一起变大。
   scanActionLabel: {
     fontSize: 16,
     lineHeight: 20,
     fontWeight: '600',
   },
-  // 中文注释：聊天消息正文单独建档，避免和输入框、菜单共用尺寸后互相牵连。
+  // 聊天消息正文单独建档，避免和输入框、菜单共用尺寸后互相牵连。
   messageBody: {
     fontSize: 16,
     lineHeight: 22,
     fontWeight: '400',
   },
-  // 中文注释：书签预览等小号消息正文保持更紧凑的行高节奏。
+  // 书签预览等小号消息正文保持更紧凑的行高节奏。
   messageBodySmall: {
     fontSize: 11,
     lineHeight: 15,
     fontWeight: '400',
   },
-  // 中文注释：菜单标题、按钮文案、占位文案里反复出现 17/22，这里单独收口成一档，避免继续散落裸值。
+  // 菜单标题、按钮文案、占位文案里反复出现 17/22，这里单独收口成一档，避免继续散落裸值。
   menuLabel: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '400',
   },
-  // 中文注释：长按菜单文案比通用菜单标题小一号，单独建档避免直接硬套 body 导致降太多。
+  // 长按菜单文案比通用菜单标题小一号，单独建档避免直接硬套 body 导致降太多。
   longPressMenuLabel: {
     fontSize: 17,
     lineHeight: 22,
@@ -436,49 +436,49 @@ const iosTypography: Record<TypographyVariant, TypographyToken> = {
     lineHeight: 26,
     fontWeight: '600',
   },
-  // 中文注释：Pad 输入框正文当前就是 17/24，这里保持原值不变，只把语义收口。
+  // Pad 输入框正文当前就是 17/24，这里保持原值不变，只把语义收口。
   editorInput: {
     fontSize: 17,
     lineHeight: 24,
     fontWeight: '400',
   },
-  // 中文注释：Phone 输入框和 placeholder 当前就是 17/22，这里单独保留，避免和其它 16 号输入字混用。
+  // Phone 输入框和 placeholder 当前就是 17/22，这里单独保留，避免和其它 16 号输入字混用。
   editorInputCompact: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '400',
   },
-  // 中文注释：LoadApp 的 URL 输入框是单行 17 号字，单独建档，后续安卓校准只影响这类地址输入。
+  // LoadApp 的 URL 输入框是单行 17 号字，单独建档，后续安卓校准只影响这类地址输入。
   urlInput: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '400',
   },
-  // 中文注释：全局搜索输入框与 placeholder 使用统一字号，避免搜索页和其它输入框共用语义后互相牵连。
+  // 全局搜索输入框与 placeholder 使用统一字号，避免搜索页和其它输入框共用语义后互相牵连。
   searchInput: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '400',
   },
-  // 中文注释：搜索分组标题单独建档，避免和通用 caption 混用导致层级变化。
+  // 搜索分组标题单独建档，避免和通用 caption 混用导致层级变化。
   searchGroupTitle: {
     fontSize: 13,
     lineHeight: 18,
     fontWeight: '400',
   },
-  // 中文注释：搜索结果项名称保持当前 17 号节奏，但独立成档便于系统页单独校准。
+  // 搜索结果项名称保持当前 17 号节奏，但独立成档便于系统页单独校准。
   searchResultName: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '400',
   },
-  // 中文注释：无结果标题沿用结果项字号但提高字重，避免页面里继续写裸值。
+  // 无结果标题沿用结果项字号但提高字重，避免页面里继续写裸值。
   searchEmptyTitle: {
     fontSize: 17,
     lineHeight: 22,
     fontWeight: '500',
   },
-  // 中文注释：无结果说明文案单独收口，和普通辅助文案解耦。
+  // 无结果说明文案单独收口，和普通辅助文案解耦。
   searchEmptyDescription: {
     fontSize: 14,
     lineHeight: 20,
@@ -504,20 +504,20 @@ const iosTypography: Record<TypographyVariant, TypographyToken> = {
     lineHeight: 32,
     fontWeight: '700',
   },
-  // 中文注释：这个档位对应系统页当前已经在线上使用的 34 号大标题，
+  // 这个档位对应系统页当前已经在线上使用的 34 号大标题，
   // 这里保持原字号不变，只补齐行高，避免接入 AppText 后被默认 body 行高裁切。
   pageTitle: {
     fontSize: 34,
     lineHeight: 41,
     fontWeight: '400',
   },
-  // 中文注释：对话空态标题在 Phone 上使用 36，保持现有视觉大小，只补齐行高。
+  // 对话空态标题在 Phone 上使用 36，保持现有视觉大小，只补齐行高。
   emptyTitleCompact: {
     fontSize: 36,
     lineHeight: 44,
     fontWeight: '300',
   },
-  // 中文注释：对话空态标题在 Pad 上使用 60，保持现有视觉大小，只补齐行高。
+  // 对话空态标题在 Pad 上使用 60，保持现有视觉大小，只补齐行高。
   emptyTitle: {
     fontSize: 60,
     lineHeight: 72,
@@ -671,7 +671,7 @@ const androidTypography: Record<TypographyVariant, TypographyToken> = {
     lineHeight: 30,
     fontWeight: '700',
   },
-  // 中文注释：Android 的标题字形更撑，这里统一比 iOS 小 2 号。
+  // Android 的标题字形更撑，这里统一比 iOS 小 2 号。
   pageTitle: {
     fontSize: 32,
     lineHeight: 41,

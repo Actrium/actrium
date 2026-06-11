@@ -64,7 +64,7 @@ export default function GlobalSearchPad({
   const handleCloseSearch = useCallback(() => {
     dismissKeyboard();
 
-    // 中文注释：Pad 端退出搜索前先给键盘一点收起时间，
+    // Pad 端退出搜索前先给键盘一点收起时间，
     // 避免关闭页面和键盘动画同帧触发时出现宿主抢占导致的闪动。
     if (isKeyboardVisible) {
       setTimeout(() => {
@@ -83,7 +83,7 @@ export default function GlobalSearchPad({
           contentContainerStyle={[
             styles.scrollContent,
             {
-              // 中文注释：内容区底部预留输入栏占位，
+              // 内容区底部预留输入栏占位，
               // 避免底部搜索结果被绝对定位的输入栏遮住。
               paddingBottom: inputOccupiedHeight + keyboardGap,
             },
@@ -95,7 +95,7 @@ export default function GlobalSearchPad({
               style={[
                 styles.resultsArea,
                 {
-                  // 中文注释：搜索结果列表横向边距对齐 settings 一级页，
+                  // 搜索结果列表横向边距对齐 settings 一级页，
                   // Pad 用 40，不再额外缩成 500 宽。
                   width: Math.max(
                     screenWidth - resultsHorizontalPadding * 2,
@@ -121,7 +121,7 @@ export default function GlobalSearchPad({
           style={[
             styles.padInputDock,
             {
-              // 中文注释：当前页面所在宿主在 iOS 上已经会随键盘压缩可用高度，
+              // 当前页面所在宿主在 iOS 上已经会随键盘压缩可用高度，
               // 这里不再额外叠加 keyboardInset，避免输入栏被重复抬高。
               bottom: inputDockBottom,
             },

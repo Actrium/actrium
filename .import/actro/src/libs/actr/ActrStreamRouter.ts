@@ -35,7 +35,7 @@ type TAttachmentResultWaiter = {
   timeout: ReturnType<typeof setTimeout>;
 };
 
-// 中文注释：附件结果流没有 eos 收口，RN 侧主动加超时，避免 native/服务端异常时 promise 长时间悬空。
+// 附件结果流没有 eos 收口，RN 侧主动加超时，避免 native/服务端异常时 promise 长时间悬空。
 const ATTACHMENT_RESULT_TIMEOUT_MS = 30000;
 
 /**
@@ -99,7 +99,7 @@ export class ActrStreamRouter {
     this.streamRegistry.delete(responseStreamId);
   }
 
-  // 中文注释：为单个附件上传注册最终结果等待器，收到 attachmentResult 终态后再继续发送文本/语音请求。
+  // 为单个附件上传注册最终结果等待器，收到 attachmentResult 终态后再继续发送文本/语音请求。
   waitForAttachmentResult(
     streamId: string,
     connection: ActrConnection,
@@ -111,7 +111,7 @@ export class ActrStreamRouter {
     }
 
     return new Promise<TAttachmentUploadResult>((resolve, reject) => {
-      // 中文注释：每个 resultStreamId 只服务当前这次附件上传，超时后直接报错，避免发送链路无限等待。
+      // 每个 resultStreamId 只服务当前这次附件上传，超时后直接报错，避免发送链路无限等待。
       const timeout = setTimeout(() => {
         this.attachmentResultWaiters.delete(streamId);
         this.sendCloseStream(streamId, connection.getActorType(), connection.getTabId());
@@ -129,7 +129,7 @@ export class ActrStreamRouter {
     });
   }
 
-  // 中文注释：附件上传中途失败时，主动撤销等待器并关闭 native result stream，避免遗留无主回调。
+  // 附件上传中途失败时，主动撤销等待器并关闭 native result stream，避免遗留无主回调。
   cancelAttachmentResultWait(
     streamId: string,
     connection: ActrConnection,
@@ -190,7 +190,7 @@ export class ActrStreamRouter {
       }
     }
     for (const [streamId, waiter] of this.attachmentResultWaiters) {
-      // 中文注释：连接被释放时，中断仍在等待的附件上传结果，避免上层发送逻辑一直挂起。
+      // 连接被释放时，中断仍在等待的附件上传结果，避免上层发送逻辑一直挂起。
       if (waiter.connectionId === connection.getAppId()) {
         clearTimeout(waiter.timeout);
         this.attachmentResultWaiters.delete(streamId);
@@ -204,7 +204,7 @@ export class ActrStreamRouter {
 
   private handleMessage(data: ActrStreamMessageEvent) {
     try {
-      // 中文注释：附件上传结果由独立 resultStreamId 回推，不参与文本/语音消息的 streamRegistry 分发。
+      // 附件上传结果由独立 resultStreamId 回推，不参与文本/语音消息的 streamRegistry 分发。
       if (data.type === 'attachmentResult') {
         this.handleAttachmentResultMessage(data);
         return;
@@ -276,7 +276,7 @@ export class ActrStreamRouter {
           break;
       }
 
-      // 中文注释：用户取消和正常结束都属于流终态；先把终态消息分发给业务层，再统一关闭原生 stream 并清理本地映射。
+      // 用户取消和正常结束都属于流终态；先把终态消息分发给业务层，再统一关闭原生 stream 并清理本地映射。
       if (isEnd || isAbort) {
         this.sendCloseStream(data.streamID, actorType, tabId);
         this.clearStreamMap(streamMap);
@@ -286,7 +286,7 @@ export class ActrStreamRouter {
     }
   }
 
-  // 中文注释：attachmentResult 不走文本/语音注册表，单独按 resultStreamId 唤醒对应附件上传 promise。
+  // attachmentResult 不走文本/语音注册表，单独按 resultStreamId 唤醒对应附件上传 promise。
   private handleAttachmentResultMessage(data: ActrStreamMessageEvent) {
     console.log(
       `[ActrStreamRouter: attachment] Received attachmentResult:`,

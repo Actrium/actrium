@@ -153,7 +153,7 @@ const ChatBubbleBody = React.memo(function ChatBubbleBody({
             contentContainerStyle={styles.attachmentsScrollContent}
             scrollEnabled
             scrollEventThrottle={16}
-            // 中文注释：附件区域需要保留横向滚动能力，改为在自身触摸/拖动开始时收键盘，避免外层 Pressable 抢手势。
+            // 附件区域需要保留横向滚动能力，改为在自身触摸/拖动开始时收键盘，避免外层 Pressable 抢手势。
             onTouchStart={Keyboard.dismiss}
             onScrollBeginDrag={Keyboard.dismiss}
           >
@@ -241,7 +241,7 @@ const ChatBubbleBody = React.memo(function ChatBubbleBody({
         </View>
       )}
       {shouldShowLoadingBubble ? (
-        // 中文注释：等待回答中的占位态也走 answer 气泡本体，保证 icon 和文案始终落在同一气泡结构里。
+        // 等待回答中的占位态也走 answer 气泡本体，保证 icon 和文案始终落在同一气泡结构里。
         <View style={styles.loadingBubbleContent}>
           <ActivityIndicator size="small" color={colors.textHeading} />
           <AppText style={styles.loadingText}>
@@ -278,7 +278,7 @@ const ChatBubbleBody = React.memo(function ChatBubbleBody({
             <Typewriter
               content={content}
               styles={markdownSupramarkStyles}
-              // 中文注释：typewriterEnabled 在挂载时一次性确定：
+              // typewriterEnabled 在挂载时一次性确定：
               // 流式消息 → true，逐字推进直到自然追上 content；
               // 旧消息 → false，直接显示全文。
               enabled={typewriterEnabled}
@@ -401,18 +401,18 @@ export default function ChatBubble({
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const isQuestion = type === 'question';
-  // 中文注释：打字机 enabled 在挂载时一次性确定，之后不再变化。
+  // 打字机 enabled 在挂载时一次性确定，之后不再变化。
   // 旧消息（progress 已为 2）→ enabled=false，直接显示全文；
   // 流式消息（progress < 2）→ enabled=true，Typewriter 逐字推进直到自然追上，
   // 不会因为 progress 变为 2 而中途倾倒文本。
   const [typewriterEnabled] = React.useState(() => progress !== 2);
-  // 中文注释：追踪打字动画是否完成。
+  // 追踪打字动画是否完成。
   // 每次 content 变化都重置为 false（Typewriter 还没追上新内容），
   // 等 Typewriter 追上后通过 onComplete 回调重新设为 true。
   const [isTypingComplete, setIsTypingComplete] = React.useState(
     progress === 2,
   );
-  // 中文注释：content 变化时重置打字完成标记，但仅对流式消息（typewriterEnabled=true）重置，
+  // content 变化时重置打字完成标记，但仅对流式消息（typewriterEnabled=true）重置，
   // 历史消息（typewriterEnabled=false）全文直显、没有动画要等，不应重置为 false 后无法恢复。
   React.useEffect(() => {
     if (typewriterEnabled) {
@@ -421,7 +421,7 @@ export default function ChatBubble({
   }, [content, typewriterEnabled]);
   const handleTypewriterComplete = React.useCallback(() => {
     setIsTypingComplete(true);
-    // 中文注释：Typewriter 视觉追完时触发两下震动，对齐触觉与视觉，
+    // Typewriter 视觉追完时触发两下震动，对齐触觉与视觉，
     // 而不是在数据层收到 isEnd 时立刻震（那时文字可能还没显示完）。
     triggerHaptic('impactHeavy');
     setTimeout(() => {
@@ -430,7 +430,7 @@ export default function ChatBubble({
   }, []);
   const shouldShowLoadingBubble =
     !isQuestion && isLoading && !content && !voicePayload;
-  // 中文注释：工具栏需要同时满足两个条件才显示：
+  // 工具栏需要同时满足两个条件才显示：
   // 1. 消息接收完成（progress === 2）
   // 2. 打字动画完成（isTypingComplete），避免动画还在进行时就出现工具栏
   const shouldShowLatestAnswerToolbar =

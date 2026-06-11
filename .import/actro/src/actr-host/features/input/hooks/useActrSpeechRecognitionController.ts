@@ -29,6 +29,8 @@ export function useActrSpeechRecognitionController(
   const { processMessageSend } = params;
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
   const [isCancellingVoice, setIsCancellingVoice] = useState(false);
+  // 保存语音识别期间的实时音量，驱动录音浮层波形高度。
+  const [metering, setMetering] = useState(0);
   const isVoiceRecordingRef = useRef(false);
   const isCancellingVoiceRef = useRef(false);
   const sessionIdRef = useRef(0);
@@ -46,6 +48,7 @@ export function useActrSpeechRecognitionController(
     setVoiceRecording(false);
     isCancellingVoiceRef.current = false;
     setIsCancellingVoice(false);
+    setMetering(0);
     activeSessionIdRef.current = null;
     lastTranscriptRef.current = '';
     fallbackTranscriptRef.current = '';
@@ -66,6 +69,10 @@ export function useActrSpeechRecognitionController(
     const unsubscribe = speechRecognitionService.subscribe({
       onPartialResult: updateTranscript,
       onFinalResult: updateTranscript,
+      // 把底层识别流的实时音量同步到 React state，供录音浮层刷新波形。
+      onMetering: (nextMetering: number) => {
+        setMetering(nextMetering);
+      },
       onEnd: () => {
         const shouldSubmit = shouldSubmitOnEndRef.current;
         const transcript =
@@ -92,7 +99,7 @@ export function useActrSpeechRecognitionController(
   }, [processMessageSend, resetRecognitionState, updateTranscript]);
 
   const handleVoiceStart = useCallback(async () => {
-    // 中文注释：按住说话开始前先收口当前所有播放源，
+    // 按住说话开始前先收口当前所有播放源，
     // 避免语音识别、语音消息播放、TTS 朗读同时占用音频会话导致状态和实际音频输出不一致。
     await stopAllVoicePlayback('speech-recognition-start');
 
@@ -103,6 +110,7 @@ export function useActrSpeechRecognitionController(
     shouldSubmitOnEndRef.current = false;
     isCancellingVoiceRef.current = false;
     setIsCancellingVoice(false);
+    setMetering(0);
     setVoiceRecording(true);
 
     // 简体中文：zh-CN
@@ -118,6 +126,11 @@ export function useActrSpeechRecognitionController(
       continuous: true,
       interimResults: true,
       addsPunctuation: true,
+      // 开启原生音量事件，驱动 VoiceRecordingOverlay 的真实波形。
+      volumeChangeEventOptions: {
+        enabled: true,
+        intervalMillis: 80,
+      },
     });
 
     if (!started) {
@@ -133,7 +146,7 @@ export function useActrSpeechRecognitionController(
           {
             text: t('actr.voice.goToSettings'),
             variant: 'primary',
-            // 中文注释：语音识别启动失败时统一从业务层引导去系统设置，
+            // 语音识别启动失败时统一从业务层引导去系统设置，
             // 避免不同平台分别弹原生权限框，导致交互和视觉不一致。
             onPress: () => Linking.openSettings(),
           },
@@ -168,7 +181,7 @@ export function useActrSpeechRecognitionController(
         return;
       }
 
-      // 中文注释：停止识别前先缓存一份当前转写，避免部分机型 stop 后未补发 final 结果时丢字。
+      // 停止识别前先缓存一份当前转写，避免部分机型 stop 后未补发 final 结果时丢字。
       const { finalText, partialText } = speechRecognitionService.getCurrentTranscript();
       fallbackTranscriptRef.current =
         finalText || partialText || lastTranscriptRef.current;
@@ -195,7 +208,7 @@ export function useActrSpeechRecognitionController(
   return {
     isVoiceRecording,
     isCancellingVoice,
-    metering: 0,
+    metering,
     handleVoiceStart,
     handleVoiceEnd,
     handleVoiceChangeState,

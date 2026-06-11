@@ -90,7 +90,7 @@ export const GlobalAlert = {
 };
 
 export const GlobalAlertHost: React.FC = () => {
-  // 中文注释：GlobalAlert 依赖当前 React 树里的宿主节点渲染，适合普通页面上的全局提示队列；
+  // GlobalAlert 依赖当前 React 树里的宿主节点渲染，适合普通页面上的全局提示队列；
   // 但它的层级仍然受宿主挂载位置限制，遇到更高层的原生 Modal 时，视觉上可能被 Modal 压住。
   const [current, setCurrent] = React.useState<AlertRequest | null>(null);
   const maskOpacity = React.useRef(new Animated.Value(0)).current;
