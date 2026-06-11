@@ -47,6 +47,7 @@ declare module '@supramark/core' {
 
 declare module '@supramark/rn' {
   export const Supramark: React.ComponentType<any>;
+  export type SupramarkContentStyle = Record<string, any>;
   export type SupramarkStyles = Record<string, any>;
 }
 
