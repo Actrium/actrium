@@ -1,9 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, useColorScheme } from 'react-native';
 import { AppText, Icon } from '../../../../components';
 import { SmartImage } from '../../shared/SmartImage';
 import { Supramark } from '@supramark/rn';
-import type { SupramarkStyles } from '@supramark/rn';
+import type { SupramarkContentStyle } from '@supramark/rn';
 import {
   getTypographyStyle,
   typography,
@@ -36,8 +36,11 @@ export default function ChatShareBubble({
   onAttachmentImageSettled,
 }: ChatShareBubbleProps) {
   const colors = useColors();
+  const colorScheme = useColorScheme();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const isQuestion = type === 'question';
+  // Supramark 主题需要由分享视图显式传入，不能只依赖外层颜色 token。
+  const supramarkTheme = colorScheme === 'dark' ? 'dark' : 'light';
   const parsedVoicePayload = React.useMemo(
     () => parseVoicePayload(voicePayload),
     [voicePayload],
@@ -56,70 +59,15 @@ export default function ChatShareBubble({
   const isAttachmentOnly = parsedAttachments.length > 0 && !content;
   const hasAttachments = parsedAttachments.length > 0;
   const messageTypography = typography.messageBody;
-  const markdownTextStyle = React.useMemo(
+  // 分享气泡只向 Supramark 传递正文 token，结构样式由 Supramark 主题自己控制。
+  const markdownContentStyle = React.useMemo(
     () => ({
       color: colors.textHeading,
+      headingColor: colors.textHeading,
       fontSize: messageTypography.fontSize,
       lineHeight: messageTypography.lineHeight,
-    }),
+    }) satisfies SupramarkContentStyle,
     [colors.textHeading, messageTypography.fontSize, messageTypography.lineHeight],
-  );
-  const markdownParagraphStyle = React.useMemo(
-    () => ({
-      ...markdownTextStyle,
-      marginBottom: 0,
-    }),
-    [markdownTextStyle],
-  );
-  const markdownHeadingStyles = React.useMemo(
-    () => ({
-      h1: {
-        ...getTypographyStyle('title2'),
-        color: colors.textHeading,
-        marginBottom: 12,
-      },
-      h2: {
-        ...getTypographyStyle('title3'),
-        color: colors.textHeading,
-        marginBottom: 10,
-      },
-      h3: {
-        ...getTypographyStyle('bodyInput'),
-        color: colors.textHeading,
-        fontWeight: '600',
-        marginBottom: 8,
-      },
-      h4: {
-        ...getTypographyStyle('bodyInput'),
-        color: colors.textHeading,
-        fontWeight: '600',
-        marginBottom: 6,
-      },
-      h5: {
-        ...getTypographyStyle('subhead'),
-        color: colors.textHeading,
-        fontWeight: '600',
-        marginBottom: 4,
-      },
-      h6: {
-        ...getTypographyStyle('footnote'),
-        color: colors.textHeading,
-        fontWeight: '600',
-        marginBottom: 4,
-      },
-    }),
-    [colors.textHeading],
-  );
-  const markdownSupramarkStyles = React.useMemo(
-    () =>
-      ({
-        paragraph: markdownParagraphStyle,
-        ...markdownHeadingStyles,
-        listItemText: markdownTextStyle,
-        inlineCode: markdownTextStyle,
-        code: markdownTextStyle,
-      }) as unknown as SupramarkStyles,
-    [markdownHeadingStyles, markdownParagraphStyle, markdownTextStyle],
   );
 
   const getDisplayFileName = React.useCallback((item: IAttachmentItem): string => {
@@ -293,7 +241,8 @@ export default function ChatShareBubble({
                 config={SUPRAMARK_FULL_CONFIG}
                 containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
                 // 分享卡片沿用聊天正文渲染配置，保证截图样式与对话页一致。
-                styles={markdownSupramarkStyles}
+                contentStyle={markdownContentStyle}
+                theme={supramarkTheme}
               />
             </View>
           ) : null}
