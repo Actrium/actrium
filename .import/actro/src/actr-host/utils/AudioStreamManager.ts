@@ -54,7 +54,7 @@ export class AudioStreamManager {
 
       if (!this.hasAttachedDataListener) {
         this.hasAttachedDataListener = true;
-        // 中文注释：底层库没有暴露 removeListener，多次 start 时这里必须只注册一次 data 监听，避免重复喂音频。
+        // 底层库没有暴露 removeListener，多次 start 时这里必须只注册一次 data 监听，避免重复喂音频。
         LiveAudioStream.on('data', (data: string) => {
           // data 是 base64 编码的音频数据
           console.log(`[AudioStream] 收到音频切片: ${data.length} bytes`);

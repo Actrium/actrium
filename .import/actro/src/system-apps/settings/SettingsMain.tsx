@@ -43,7 +43,7 @@ export const SettingsMain = ({
   const userInfo = useUserStore((state) => state.userInfo);
   const isLoggedIn = !!userInfo;
   const hasNativeNavigationBar = !!PhoneNavigationBar;
-  // 中文注释：Android pad 上 insets.top 为 0，原生导航栏标题被系统状态栏遮挡，
+  // Android pad 上 insets.top 为 0，原生导航栏标题被系统状态栏遮挡，
   // 用 StatusBar.currentHeight 补偿。Android phone 和 iOS 不受影响。
   const isAndroidPad = Platform.OS === 'android' && isTablet;
   const statusBarHeight = isAndroidPad ? (StatusBar.currentHeight ?? 0) : 0;
@@ -61,7 +61,7 @@ export const SettingsMain = ({
           style={[
             styles.headerOverlay,
             { height: navigationBarHeight },
-            // 中文注释：Android pad 上原生导航栏需要顶部留出状态栏空间，让标题渲染在状态栏下方。
+            // Android pad 上原生导航栏需要顶部留出状态栏空间，让标题渲染在状态栏下方。
             isAndroidPad ? { paddingTop: statusBarHeight } : {},
           ]}
         />
@@ -71,7 +71,7 @@ export const SettingsMain = ({
         style={styles.content}
         contentContainerStyle={[
           styles.scrollContent,
-          // 中文注释：iOS 原生导航条改为覆盖层后，需要把首屏可读区的顶部留白转移到滚动内容内部。
+          // iOS 原生导航条改为覆盖层后，需要把首屏可读区的顶部留白转移到滚动内容内部。
           { paddingTop: hasNativeNavigationBar ? navigationBarHeight + 24 : 0 },
           { paddingHorizontal: isTablet ? 40 : 16 },
         ]}

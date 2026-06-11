@@ -96,7 +96,7 @@ const withOpacity = (color: string, opacity: number) => {
   return color;
 };
 
-// 中文注释：放大加号按钮的点击热区，但不改变按钮本身的视觉尺寸。
+// 放大加号按钮的点击热区，但不改变按钮本身的视觉尺寸。
 const mobilePlusButtonHitSlop = {
   top: 10,
   bottom: 10,
@@ -110,7 +110,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   const colors = useColors();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const totalUnread = useUnreadStore((state) => state.totalUnread);
-  // 中文注释：Mobile 输入区底部留白与提示文案位置统一从聊天底部 hook 获取，保持与 Chat2 列表补偿同步。
+  // Mobile 输入区底部留白与提示文案位置统一从聊天底部 hook 获取，保持与 Chat2 列表补偿同步。
   const {
     isKeyboardVisible,
     mobileInputBottomPadding,
@@ -142,7 +142,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   >('text');
   const [isInputFocused, setIsInputFocused] = React.useState(false);
   const mobileTextInputRef = React.useRef<TextInput | null>(null);
-  // 中文注释：退出编辑态后补发收键盘请求，处理 Android 原生焦点切换慢于 React 状态更新的情况。
+  // 退出编辑态后补发收键盘请求，处理 Android 原生焦点切换慢于 React 状态更新的情况。
   const dismissKeyboardAfterEditExitTimeoutRef =
     React.useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -412,7 +412,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
       setMobileInputMode('text');
       setIsInputFocused(false);
       mobileTextInputRef.current?.blur();
-      // 中文注释：Android 上编辑态输入框会按 key 重建，ref.blur 可能打到新输入框，需显式收起系统键盘。
+      // Android 上编辑态输入框会按 key 重建，ref.blur 可能打到新输入框，需显式收起系统键盘。
       Keyboard.dismiss();
       if (Platform.OS === 'android') {
         dismissKeyboardAfterEditExitTimeoutRef.current = setTimeout(() => {
@@ -431,7 +431,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
   }, [editingMessageId]);
   const shouldShowExitTabButton = !isEditing && !isInputFocused;
   const authOverlayRightInset = shouldShowExitTabButton ? 58 : 0;
-  // 中文注释：附件选择区展开时隐藏底部 AI 提示文案，避免与附件面板在同一垂直区域叠加。
+  // 附件选择区展开时隐藏底部 AI 提示文案，避免与附件面板在同一垂直区域叠加。
   const shouldShowFloatingText = !isKeyboardVisible && !isAttachmentPanelOpen;
   return (
     <View
@@ -500,7 +500,7 @@ export default function ActrInputMobileView(props: ActrInputMobileViewProps) {
 
                     <View style={styles.mobileTextInputWrap}>
                       <StableTextInput
-                        // 中文注释：编辑态按消息 ID 重建输入框，让 Android 使用挂载期 autoFocus 稳定唤起软键盘。
+                        // 编辑态按消息 ID 重建输入框，让 Android 使用挂载期 autoFocus 稳定唤起软键盘。
                         key={editingMessageId ? `editing-${editingMessageId}` : 'compose'}
                         tabId={tab.id}
                         hasAttachments={attachments.length > 0}

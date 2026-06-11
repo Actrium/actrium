@@ -125,7 +125,7 @@ export default function SettingsApp({
     let cancelled = false;
 
     const ensureUserInfo = async () => {
-      // 中文注释：设置页只在首次挂载时尝试一次恢复展示态，
+      // 设置页只在首次挂载时尝试一次恢复展示态，
       // 后续 userInfo/sessionToken 的变化不再反向触发恢复，避免清理登录态时把旧用户补回来。
       const currentUserInfo = useUserStore.getState().userInfo;
       if (currentUserInfo) {
@@ -159,7 +159,7 @@ export default function SettingsApp({
   }, [setSessionToken, setUserInfo]);
 
   useEffect(() => {
-    // 中文注释：动画进行中跳过深链跳转，避免状态冲突。
+    // 动画进行中跳过深链跳转，避免状态冲突。
     if (!deepLink.page || isAnimating.current) {
       return;
     }
@@ -255,7 +255,7 @@ export default function SettingsApp({
     });
   }, [currentPage, width, slideAnim]);
 
-  // 中文注释：Android 上拦截系统返回键，二级页面时触发 goBack 并阻止退出应用。
+  // Android 上拦截系统返回键，二级页面时触发 goBack 并阻止退出应用。
   useEffect(() => {
     if (Platform.OS !== 'android') return;
     const subscription = BackHandler.addEventListener(

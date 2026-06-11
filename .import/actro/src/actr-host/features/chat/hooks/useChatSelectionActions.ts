@@ -10,7 +10,7 @@ interface UseChatSelectionActionsParams {
   toastRef: React.RefObject<ToastRef | null>;
 }
 
-// 中文注释：提取删除/分享确认逻辑为 hook，供 ChatLegend 和 Chat 复用。
+// 提取删除/分享确认逻辑为 hook，供 ChatLegend 和 Chat 复用。
 // Chat.tsx 中这段逻辑散落在组件内部（handleDeletePress / handleShareConfirm / shareMessages state /
 // deferredExitSelectionFrameRef），提取后避免逻辑漂移。
 export function useChatSelectionActions({
@@ -23,13 +23,13 @@ export function useChatSelectionActions({
     (state) => state.deleteSelectedMessages,
   );
 
-  // 中文注释：分享预览弹窗的数据源，非空时打开弹窗。
+  // 分享预览弹窗的数据源，非空时打开弹窗。
   const [shareMessages, setShareMessages] = useState<IMessage[]>([]);
 
-  // 中文注释：延后退出选择模式的动画帧 ID，用于取消和清理。
+  // 延后退出选择模式的动画帧 ID，用于取消和清理。
   const deferredExitFrameRef = useRef<number | null>(null);
 
-  // 中文注释：弹出确认对话框，确认后删除选中消息。
+  // 弹出确认对话框，确认后删除选中消息。
   const handleDeletePress = useCallback(() => {
     GlobalAlert.alert(
       t('actr.chat.deleteConfirmTitle'),
@@ -46,7 +46,7 @@ export function useChatSelectionActions({
           text: t('common.delete'),
           style: 'destructive',
           onPress: () => {
-            // 中文注释：setTimeout(0) 避免阻塞 Alert 关闭动画。
+            // setTimeout(0) 避免阻塞 Alert 关闭动画。
             setTimeout(() => {
               deleteSelectedMessages(tabId).catch((error) => {
                 console.error(
@@ -62,13 +62,13 @@ export function useChatSelectionActions({
     );
   }, [tabId, deleteSelectedMessages, exitSelectionMode, t, toastRef]);
 
-  // 中文注释：构建部分消息数组（只包含选中的 part），打开分享预览弹窗，延后退出选择模式。
+  // 构建部分消息数组（只包含选中的 part），打开分享预览弹窗，延后退出选择模式。
   const handleShareConfirm = useCallback(() => {
     const byId = useMessageStore.getState().messageById[tabId] || {};
     const orderedIds = useMessageStore.getState().messageIds[tabId] || [];
     const currentSelectedItems = useMessageStore.getState().selectedItems;
 
-    // 中文注释：按消息在列表中的原始顺序排列，保证分享图内容顺序与聊天一致。
+    // 按消息在列表中的原始顺序排列，保证分享图内容顺序与聊天一致。
     const orderedMessages: IMessage[] = [];
     for (const id of orderedIds) {
       const parts = currentSelectedItems[id];
@@ -76,7 +76,7 @@ export function useChatSelectionActions({
       const message = byId[id];
       if (!message) continue;
 
-      // 中文注释：根据选中的 part 构建部分消息，只包含用户选中的内容。
+      // 根据选中的 part 构建部分消息，只包含用户选中的内容。
       const partial: IMessage = { ...message };
       if (!parts.has('attachments')) partial.attachments = undefined;
       if (!parts.has('question')) {
@@ -92,7 +92,7 @@ export function useChatSelectionActions({
 
     setShareMessages(orderedMessages);
 
-    // 中文注释：延后两帧退出选择模式，避免列表退出动画阻塞分享弹窗首帧渲染。
+    // 延后两帧退出选择模式，避免列表退出动画阻塞分享弹窗首帧渲染。
     if (deferredExitFrameRef.current !== null) {
       cancelAnimationFrame(deferredExitFrameRef.current);
     }
@@ -104,7 +104,7 @@ export function useChatSelectionActions({
     });
   }, [tabId, exitSelectionMode]);
 
-  // 中文注释：选中项计数，供 DeleteButton 显示 "删除(N)"。
+  // 选中项计数，供 DeleteButton 显示 "删除(N)"。
   const selectedCount = useMessageStore(
     useCallback((state) => {
       let count = 0;
@@ -115,7 +115,7 @@ export function useChatSelectionActions({
     }, []),
   );
 
-  // 中文注释：tab 卸载时清理残留的延后退出动画帧，防止内存泄漏。
+  // tab 卸载时清理残留的延后退出动画帧，防止内存泄漏。
   useEffect(() => {
     return () => {
       if (deferredExitFrameRef.current !== null) {

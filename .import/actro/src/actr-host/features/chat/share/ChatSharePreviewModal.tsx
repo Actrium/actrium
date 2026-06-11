@@ -31,7 +31,7 @@ import ChatShareBubble from './ChatShareBubble';
 
 interface ChatSharePreviewModalProps {
   visible: boolean;
-  // 中文注释：支持多消息分享，按数组顺序渲染到分享图中。
+  // 支持多消息分享，按数组顺序渲染到分享图中。
   messages: IMessage[];
   appName?: string;
   appUrl?: string;
@@ -96,7 +96,7 @@ export default function ChatSharePreviewModal({
   const [attachmentImageReadyCount, setAttachmentImageReadyCount] = React.useState(0);
   const settledAttachmentKeysRef = React.useRef<Set<string>>(new Set());
 
-  // 中文注释：遍历所有消息的附件，收集需要等待加载完成的图片 key。
+  // 遍历所有消息的附件，收集需要等待加载完成的图片 key。
   const expectedAttachmentImageKeys = React.useMemo(() => {
     const keys: string[] = [];
     for (const msg of messages) {
@@ -158,7 +158,7 @@ export default function ChatSharePreviewModal({
 
     let frameId: number | null = null;
     frameId = requestAnimationFrame(() => {
-      // 中文注释：先让弹窗外壳完成首帧渲染，再挂载隐藏截图区域，避免大段消息布局阻塞弹窗出现。
+      // 先让弹窗外壳完成首帧渲染，再挂载隐藏截图区域，避免大段消息布局阻塞弹窗出现。
       setShouldRenderCaptureHost(true);
     });
 
@@ -169,7 +169,7 @@ export default function ChatSharePreviewModal({
     };
   }, [visible]);
 
-  // 中文注释：消息列表变化时重置附件图片加载计数。
+  // 消息列表变化时重置附件图片加载计数。
   const messagesKey = React.useMemo(
     () => messages.map((m) => m.message_id).join(','),
     [messages],
@@ -189,7 +189,7 @@ export default function ChatSharePreviewModal({
     const captureCard = async () => {
       setIsCapturing(true);
       try {
-        // 中文注释：分享卡片里包含 Markdown 和图片附件，延后一帧再截图，避免首帧布局尚未稳定。
+        // 分享卡片里包含 Markdown 和图片附件，延后一帧再截图，避免首帧布局尚未稳定。
         await new Promise((resolve) => setTimeout(resolve, 160));
         const uri = await viewShotRef.current?.capture?.();
         if (!cancelled && uri) {
@@ -317,7 +317,7 @@ export default function ChatSharePreviewModal({
       format: 'png' as const,
       quality: 1,
       result: 'tmpfile' as const,
-      // 中文注释：iOS 长内容截图时 drawViewHierarchyInRect 容易失败，这里切到 renderInContext 提高稳定性。
+      // iOS 长内容截图时 drawViewHierarchyInRect 容易失败，这里切到 renderInContext 提高稳定性。
       useRenderInContext: Platform.OS === 'ios',
     }),
     [],
@@ -326,7 +326,7 @@ export default function ChatSharePreviewModal({
     previewAspectRatio && previewAspectRatio > 0
       ? Math.min(previewHeight, previewWidth / previewAspectRatio)
       : previewHeight;
-  // 中文注释：二维码内容只接受明确存在的 URL，空字符串不参与渲染，避免生成无意义二维码。
+  // 二维码内容只接受明确存在的 URL，空字符串不参与渲染，避免生成无意义二维码。
   const shareQrValue = React.useMemo(() => {
     const nextUrl = appUrl?.trim();
     return nextUrl ? nextUrl : null;
@@ -336,7 +336,7 @@ export default function ChatSharePreviewModal({
 
     const totalModules =
       shareQrMatrix.size + SHARE_QR_QUIET_ZONE_MODULES * 2;
-    // 中文注释：二维码模块必须尽量落在整数像素上，避免截图后出现半像素插值导致扫码失败。
+    // 二维码模块必须尽量落在整数像素上，避免截图后出现半像素插值导致扫码失败。
     const moduleSize = Math.max(
       2,
       Math.floor(SHARE_QR_TARGET_SIZE / totalModules),
@@ -382,13 +382,13 @@ export default function ChatSharePreviewModal({
     }
 
     try {
-      // 中文注释：React Native 运行时默认不保证存在 TextEncoder，这里在二维码生成前按需补齐，避免影响其它模块初始化顺序。
+      // React Native 运行时默认不保证存在 TextEncoder，这里在二维码生成前按需补齐，避免影响其它模块初始化顺序。
       if (typeof global.TextEncoder === 'undefined') {
         global.TextEncoder = PolyfillTextEncoder as typeof TextEncoder;
       }
-      // 中文注释：直接生成二维码矩阵并用普通 View 绘制，避免依赖浏览器 canvas 或额外原生 SVG 组件。
+      // 直接生成二维码矩阵并用普通 View 绘制，避免依赖浏览器 canvas 或额外原生 SVG 组件。
       const qrCode = QRCode.create(shareQrValue, {
-        // 中文注释：分享图场景优先保证二维码尺寸可读，使用较低纠错级别换取更小矩阵密度。
+        // 分享图场景优先保证二维码尺寸可读，使用较低纠错级别换取更小矩阵密度。
         errorCorrectionLevel: 'L',
       });
       setShareQrMatrix({
@@ -414,7 +414,7 @@ export default function ChatSharePreviewModal({
       onLayout={(event) => {
         const nextHeight = event.nativeEvent.layout.height;
         if (nextHeight > 0 && nextHeight !== containerHeight) {
-          // 中文注释：分享层挂在 Chat 页内部时，可用高度不一定等于窗口高度，必须以实际布局高度计算图片区。
+          // 分享层挂在 Chat 页内部时，可用高度不一定等于窗口高度，必须以实际布局高度计算图片区。
           setContainerHeight(nextHeight);
         }
       }}
@@ -501,7 +501,7 @@ export default function ChatSharePreviewModal({
                 <View
                   style={[styles.captureFrame, { minHeight: captureImageHeight }]}
                   onLayout={() => {
-                    // 中文注释：卡片每次重新布局后递增计数，驱动重新截图，避免屏幕宽度变化时仍复用旧图。
+                    // 卡片每次重新布局后递增计数，驱动重新截图，避免屏幕宽度变化时仍复用旧图。
                     setCardLayoutReady(true);
                     setCaptureAttempt((value) => value + 1);
                   }}

@@ -84,7 +84,7 @@ export const StableTextInput = React.memo(function StableTextInput({
       if (!inputRef.current) return;
 
       if (text.length === 0) {
-        // 中文注释：multiline 输入框在部分机型上只调 clear 仍可能残留旧内容，这里补一次原生 text 同步。
+        // multiline 输入框在部分机型上只调 clear 仍可能残留旧内容，这里补一次原生 text 同步。
         inputRef.current.clear();
         inputRef.current.setNativeProps({ text: '' });
         return;
@@ -148,7 +148,7 @@ export const StableTextInput = React.memo(function StableTextInput({
   }, [inputRefExternal]);
 
   React.useEffect(() => {
-    // 中文注释：首次挂载时，如果前一次同步发生在原生 TextInput ref 尚未就绪之前，
+    // 首次挂载时，如果前一次同步发生在原生 TextInput ref 尚未就绪之前，
     // 那次 setNativeProps 会被跳过；这里在 ref 建立后补做一次同步，确保显示文本与 store 一致。
     syncNativeText(localTextRef.current);
   }, [syncNativeText]);
@@ -239,7 +239,7 @@ export const StableTextInput = React.memo(function StableTextInput({
   );
 
   const shouldShowPlaceholder = isEmpty;
-  // 中文注释：键盘动作语义跟随“是否回车换行”，确保状态名、按钮高亮和真实输入行为一致。
+  // 键盘动作语义跟随“是否回车换行”，确保状态名、按钮高亮和真实输入行为一致。
   const enterKeyHint = isEnterForNewLine ? 'enter' : 'send';
   const returnKeyType = isEnterForNewLine ? 'default' : 'send';
   const submitBehavior = isEnterForNewLine ? 'newline' : 'blurAndSubmit';

@@ -18,7 +18,7 @@ export default function GlobalSearchPhone({
   onSearchQueryChange,
 }: GlobalSearchPhoneProps) {
   useEffect(() => {
-    // 中文注释：Phone 端搜索框由宿主承接，
+    // Phone 端搜索框由宿主承接，
     // RN 页面只同步 Native 输入事件并刷新结果区域。
     const unsubscribe = GlobalSearchEvents.onSearchInputChanged((event) => {
       onSearchQueryChange(event.inputText ?? '');

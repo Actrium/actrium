@@ -5,6 +5,7 @@ import {
   Platform,
 } from 'react-native';
 import { createAudioStream, type AudioStreamManager } from '../AudioStreamManager';
+import { calculatePcmMetering } from '../AudioMetering';
 import { Utils } from '../../../utils/utils';
 import {
   feedAudio,
@@ -198,7 +199,11 @@ export class SpeechRecognitionService {
         return;
       }
 
-      // 中文注释：安卓 ASR 需要持续喂入 base64 PCM 数据，这里把 Uint8Array 统一转回原生桥要求的格式。
+      // 复用送往 ASR 的同一份 PCM 切片计算音量，避免额外开启麦克风流。
+      const metering = calculatePcmMetering(chunk);
+      this.callbacks.forEach((callbacks) => callbacks.onMetering?.(metering));
+
+      // 安卓 ASR 需要持续喂入 base64 PCM 数据，这里把 Uint8Array 统一转回原生桥要求的格式。
       const base64Audio = Utils.uint8ArrayToBase64(chunk);
       void feedAudio(base64Audio).catch((error) => {
         console.error('[SpeechRecognitionService.android] feedAudio failed:', error);

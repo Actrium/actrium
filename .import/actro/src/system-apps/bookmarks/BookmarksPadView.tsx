@@ -48,7 +48,7 @@ export default function BookmarksPadView({
     [groups],
   );
   const getDisplayName = React.useCallback((item: TBookmarkItem) => {
-    // 中文注释：当应用已经标记为 dead 时，仅在名字后追加状态后缀，不影响原始名称展示。
+    // 当应用已经标记为 dead 时，仅在名字后追加状态后缀，不影响原始名称展示。
     if (item.app_status === 'dead') {
       return `${item.instance_name}（已停止服务）`;
     }

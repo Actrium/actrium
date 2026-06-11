@@ -4,7 +4,7 @@ import type { ColorTokens } from '../../theme/colors';
 const LIGHT_SHADOW_COLOR = '#CCCCCC';
 
 function hexToRgba(hexColor: string, opacity: number) {
-  // 中文注释：Android boxShadow 需要把主题里的十六进制阴影色合成带透明度的 rgba。
+  // Android boxShadow 需要把主题里的十六进制阴影色合成带透明度的 rgba。
   const hex = hexColor.replace('#', '');
   const r = parseInt(hex.slice(0, 2), 16);
   const g = parseInt(hex.slice(2, 4), 16);
@@ -27,7 +27,7 @@ function createHostShadow(params: {
       shadowRadius: blurRadius,
     },
     android: {
-      // 中文注释：Android 统一走 boxShadow，保持复用入口一致，同时避开 elevation 的下坠感。
+      // Android 统一走 boxShadow，保持复用入口一致，同时避开 elevation 的下坠感。
       boxShadow: `0px ${offsetY}px ${blurRadius}px ${hexToRgba(shadowColor, opacity)}`,
     },
     default: {
