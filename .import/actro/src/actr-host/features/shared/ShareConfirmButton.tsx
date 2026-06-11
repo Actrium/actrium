@@ -19,7 +19,7 @@ interface ShareConfirmButtonProps {
   onCancel: () => void;
 }
 
-// 中文注释：分享选择模式底部操作栏，包含取消和生成预览图按钮。
+// 分享选择模式底部操作栏，包含取消和生成预览图按钮。
 export const ShareConfirmButton: React.FC<ShareConfirmButtonProps> = ({
   onPress,
   onCancel,
@@ -38,7 +38,7 @@ export const ShareConfirmButton: React.FC<ShareConfirmButtonProps> = ({
   return (
     <View style={styles.footer}>
       <LinearGradient
-        // 中文注释：前 1/3 区域完成透明到实体背景的过渡，后 2/3 保持纯色不再继续渐变。
+        // 前 1/3 区域完成透明到实体背景的过渡，后 2/3 保持纯色不再继续渐变。
         colors={[
           colors.bgDeleteGradientStart,
           colors.bgDeleteGradientEnd,

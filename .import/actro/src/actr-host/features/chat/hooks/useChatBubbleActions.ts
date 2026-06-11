@@ -30,7 +30,7 @@ export function useChatBubbleActions({
   const clearInput = useInputStore((state) => state.clearInput);
   const appInfo = useAppStore((state) => state.apps[appId]);
 
-  // 中文注释：编辑消息，将文本和附件回填到输入框。
+  // 编辑消息，将文本和附件回填到输入框。
   const handleEdit = useCallback(
     (msg: IMessage) => {
       setStoreText(tabId, msg.question_content || '');
@@ -61,7 +61,7 @@ export function useChatBubbleActions({
     [tabId, setStoreText, setStoreAttachments, setEditingMessageId],
   );
 
-  // 中文注释：复制文本到剪贴板并弹出 Toast 提示。
+  // 复制文本到剪贴板并弹出 Toast 提示。
   const handleCopy = useCallback(
     (text: string) => {
       if (!text) return;
@@ -76,12 +76,12 @@ export function useChatBubbleActions({
     [t, toastRef],
   );
 
-  // 中文注释：取消编辑，一次性清空文本、附件和编辑 ID。
+  // 取消编辑，一次性清空文本、附件和编辑 ID。
   const handleCancelEdit = useCallback(() => {
     clearInput(tabId);
   }, [tabId, clearInput]);
 
-  // 中文注释：打开反馈弹窗；app 非活跃状态时弹全局提示。
+  // 打开反馈弹窗；app 非活跃状态时弹全局提示。
   const handleFeedback = useCallback(
     (msgId: string) => {
       if (appInfo?.app_status !== 'alive') {

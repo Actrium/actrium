@@ -94,7 +94,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
       triggerRef.current?.measureInWindow((windowX, windowY, width, height) => {
         triggerRef.current?.measure((_x, _y, _width, _height, pageLeft, pageTop) => {
           if (pageX !== undefined && pageY !== undefined) {
-            // 中文注释：page 坐标和 Modal 所在的 window 坐标并不总是同一个原点，
+            // page 坐标和 Modal 所在的 window 坐标并不总是同一个原点，
             // 用宿主容器同时测出两套坐标后求偏移量，才能把触点稳定映射到菜单坐标系。
             const resolvedPosition = {
               x: pageX + (windowX - pageLeft),
@@ -161,7 +161,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   const handlePressIn = (event: GestureResponderEvent) => {
     if (disabled) return;
 
-    // 中文注释：优先记录手指落点，后续菜单以这个锚点定位，而不是依赖整个气泡的位置。
+    // 优先记录手指落点，后续菜单以这个锚点定位，而不是依赖整个气泡的位置。
     const nativeEvent = event?.nativeEvent;
     if (nativeEvent) {
       if (
@@ -213,7 +213,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     if (pendingActionRef.current) {
       const pendingAction = pendingActionRef.current;
       pendingActionRef.current = null;
-      // 中文注释：等待 Modal 的 visible=false 提交并让原生关闭交互完成后，再执行会抢焦点的动作。
+      // 等待 Modal 的 visible=false 提交并让原生关闭交互完成后，再执行会抢焦点的动作。
       requestAnimationFrame(() => {
         InteractionManager.runAfterInteractions(() => {
           pendingAction();
@@ -256,13 +256,13 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
     const menuHeight = menuSize.height || estimatedMenuHeight;
     const safeAreaRelativePressY = pressLocation.y - insets.top;
 
-    // 中文注释：Modal 内容层先被 SafeAreaView 限制在安全区内，
+    // Modal 内容层先被 SafeAreaView 限制在安全区内，
     // 这里再把触点 Y 转成安全区内部坐标，避免菜单进入刘海/灵动岛区域。
     const centeredTop = safeAreaRelativePressY - menuHeight / 2;
     const maxTop = Math.max(topBoundary, bottomBoundary - menuHeight);
     const top = Math.min(Math.max(centeredTop, topBoundary), maxTop);
 
-    // 中文注释：横向以手指位置居中，同时保证菜单留在屏幕可见区域内。
+    // 横向以手指位置居中，同时保证菜单留在屏幕可见区域内。
     const left = Math.min(
       Math.max(pressLocation.x - menuWidth / 2, horizontalMargin),
       screenWidth - horizontalMargin - menuWidth,
@@ -315,7 +315,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
                     onPress={() => {
                       const pressPosition =
                         pressLocationRef.current ?? undefined;
-                      // 中文注释：二级菜单需要等一级菜单完全收起后再打开，
+                      // 二级菜单需要等一级菜单完全收起后再打开，
                       // 否则两个 Modal 的蒙版会在同一时刻重叠，导致后开的菜单看不到且后续触摸被吞掉。
                       if (option.invokeAfterClose) {
                         closeMenu(() => {
@@ -348,7 +348,7 @@ export const LongPressMenu: React.FC<LongPressMenuProps> = ({
   };
 
   if (avoidPressable) {
-    // 中文注释：用 RNGH 手势系统检测长按，不包裹 Pressable，避免抢夺 ScrollView 等内部组件的滚动手势。
+    // 用 RNGH 手势系统检测长按，不包裹 Pressable，避免抢夺 ScrollView 等内部组件的滚动手势。
     return (
       <>
         <GestureDetector gesture={rngLongPressGesture}>

@@ -27,7 +27,7 @@ log.debug('console.assert type (after guard): ' + typeof console.assert);
 import { initDatabase } from './src/libs/Sqlite.init';
 initDatabase();
 
-// 中文注释：关闭 Reanimated strict 模式警告，@legendapp/list/keyboard 内部在渲染期读取 shared value 会触发此警告。
+// 关闭 Reanimated strict 模式警告，@legendapp/list/keyboard 内部在渲染期读取 shared value 会触发此警告。
 import { configureReanimatedLogger } from 'react-native-reanimated';
 configureReanimatedLogger({ strict: false });
 

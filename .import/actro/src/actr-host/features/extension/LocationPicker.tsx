@@ -24,7 +24,7 @@ import type { ColorTokens } from '../../../theme/colors';
 interface LocationPickerProps {
   visible: boolean;
   onClose: () => void;
-  // 中文注释：根据调用场景切换地图选择器的弹层锚点，Phone 端贴底展示，Pad 端保持居中。
+  // 根据调用场景切换地图选择器的弹层锚点，Phone 端贴底展示，Pad 端保持居中。
   presentation?: 'center' | 'bottom';
   onSelect: (data: {
     latitude: number;
@@ -57,7 +57,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
   // 当弹窗打开时，尝试获取当前位置
   React.useEffect(() => {
     if (visible) {
-      // 中文注释：每次重新打开弹窗都重置当前实例的地图状态，确保不同 tab 的新实例不会沿用旧 region。
+      // 每次重新打开弹窗都重置当前实例的地图状态，确保不同 tab 的新实例不会沿用旧 region。
       setMapRegion(null);
       currentRegionRef.current = null;
       if (Platform.OS === 'android') {
@@ -156,7 +156,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
       return;
     }
 
-    // 中文注释：iOS 已授权后再次调用 requestAuthorization 不保证继续回调；
+    // iOS 已授权后再次调用 requestAuthorization 不保证继续回调；
     // 这里不能 await 它，否则新 tab 的首次打开可能一直卡住，后续 getCurrentPosition 根本不会执行。
     geolocation.requestAuthorization(
       () => {},
@@ -260,7 +260,7 @@ const LocationPicker: React.FC<LocationPickerProps> = ({
             <View
               style={[
                 styles.mapModalContent,
-                // 中文注释：Phone 端改成底部抽屉式承载地图，Pad 端继续使用居中卡片。
+                // Phone 端改成底部抽屉式承载地图，Pad 端继续使用居中卡片。
                 presentation === 'bottom'
                   ? styles.mapModalContentBottom
                   : styles.mapModalContentCenter,

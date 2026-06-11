@@ -61,31 +61,35 @@ import { estimateMessageRowHeight } from './estimateMessageRowHeight';
 
 // ==================== 常量 ====================
 
-// 中文注释：每页加载的消息数量。
+// 每页加载的消息数量。
 const PAGE_SIZE = 20;
-// 中文注释：空数组复用，避免 selector 每次返回新引用触发重渲染。
+// 空数组复用，避免 selector 每次返回新引用触发重渲染。
 const EMPTY_MESSAGE_IDS: string[] = [];
-// 中文注释：空消息映射复用，避免 selector 每次返回新对象触发重渲染。
+// 空消息映射复用，避免 selector 每次返回新对象触发重渲染。
 const EMPTY_MESSAGES_BY_ID: Record<string, IMessage> = {};
-// 中文注释：选中部分空集合复用，避免每个 MessageRow 返回新 Set 引用触发重渲染。
+// 选中部分空集合复用，避免每个 MessageRow 返回新 Set 引用触发重渲染。
 const EMPTY_SELECTED_PARTS = new Set<'attachments' | 'question' | 'answer'>();
-// 中文注释：距底部小于该值视为"贴近底部"，键盘弹起或异步内容撑高时自动贴底。
+// 距底部小于该值视为"贴近底部"，键盘弹起或异步内容撑高时自动贴底。
 const BOTTOM_THRESHOLD = 80;
-// 中文注释：距底部超过该值时显示"滚动到底部"按钮。
+// 距底部超过该值时显示"滚动到底部"按钮。
 const SCROLL_TO_BOTTOM_THRESHOLD = 100;
-// 中文注释：列表兜底估高，仅在逐条估高函数未命中时使用。
+// 首屏加载冷却期内，距底部超过该值才显示按钮，防止布局修正误触发。
+const SCROLL_TO_BOTTOM_COOLDOWN_THRESHOLD = 300;
+// 首屏加载后的冷却期时长（毫秒），期间提高按钮显示阈值。
+const SCROLL_TO_BOTTOM_COOLDOWN_MS = 1500;
+// 列表兜底估高，仅在逐条估高函数未命中时使用。
 const INITIAL_ESTIMATED_ITEM_SIZE = 160;
-// 中文注释：附件面板展开/收起动画时长（毫秒）。
+// 附件面板展开/收起动画时长（毫秒）。
 const ATTACHMENT_PANEL_OPEN_DURATION = 220;
 const ATTACHMENT_PANEL_CLOSE_DURATION = 180;
-// 中文注释：内容区短按关闭附件区时，允许识别为点击的最长按压时长。
+// 内容区短按关闭附件区时，允许识别为点击的最长按压时长。
 const CONTENT_TAP_MAX_DURATION = 220;
-// 中文注释：内容区短按关闭附件区时，允许识别为点击的最大位移。
+// 内容区短按关闭附件区时，允许识别为点击的最大位移。
 const CONTENT_TAP_MAX_MOVE = 8;
-// 中文注释：选择模式下左侧 checkbox 的槽位宽度。
+// 选择模式下左侧 checkbox 的槽位宽度。
 const SELECTION_CHECKBOX_SLOT_WIDTH = 30;
 
-// 中文注释：v3 onScroll 统一使用 RN 原生 NativeSyntheticEvent<NativeScrollEvent> 类型，
+// v3 onScroll 统一使用 RN 原生 NativeSyntheticEvent<NativeScrollEvent> 类型，
 // 不再需要 v2 的 Reanimated 扁平化事件兼容。
 type LegendScrollEvent = NativeSyntheticEvent<NativeScrollEvent>;
 
@@ -120,11 +124,11 @@ export default function Chat2({ appId }: Chat2Props) {
     (state) => state.inputs[tab.id]?.editingMessageId,
   );
   const clearInput = useInputStore((state) => state.clearInput);
-  // 中文注释：选择模式状态，'none' | 'delete' | 'share'，用于底部操作栏渲染判断。
+  // 选择模式状态，'none' | 'delete' | 'share'，用于底部操作栏渲染判断。
   const selectionMode = useMessageStore((state) => state.selectionMode);
-  // 中文注释：退出选择模式，清空所有选中项。
+  // 退出选择模式，清空所有选中项。
   const exitSelectionMode = useMessageStore((state) => state.exitSelectionMode);
-  // 中文注释：app 信息，用于反馈弹窗判断 app 是否存活。
+  // app 信息，用于反馈弹窗判断 app 是否存活。
   const appInfo = useAppStore((state) => state.apps[appId]);
 
   // ==================== State ====================
@@ -132,36 +136,39 @@ export default function Chat2({ appId }: Chat2Props) {
   const [hasLoadedInitialMessages, setHasLoadedInitialMessages] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
-  // 中文注释：反馈弹窗当前对应的消息 ID，非空时打开弹窗。
+  // 反馈弹窗当前对应的消息 ID，非空时打开弹窗。
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
-  // 中文注释：滚动位置距底部超过阈值时为 true，控制"滚动到底部"按钮的显示。
+  // 滚动位置距底部超过阈值时为 true，控制"滚动到底部"按钮的显示。
   const [isScrollToBottomVisible, setIsScrollToBottomVisible] = useState(false);
 
   // ==================== Refs ====================
 
   const listRef = useRef<LegendListRef>(null);
-  // 中文注释：标记当前滚动位置是否贴近底部。
+  // 标记当前滚动位置是否贴近底部。
   const isNearBottomRef = useRef(true);
-  // 中文注释：缓存每条消息的行高，用于动态调整估算行高。
+  // 缓存每条消息的行高，用于动态调整估算行高。
   const rowHeightCacheRef = useRef<Map<string, number>>(new Map());
-  // 中文注释：标记首屏消息是否已做过贴底滚动，避免重复。
+  // 标记首屏消息是否已做过贴底滚动，避免重复。
   const hasAppliedInitialBottomLockRef = useRef(false);
-  // 中文注释：首屏贴底稳定期内暂时禁止更新"滚动到底部"按钮，
+  // 首屏贴底稳定期内暂时禁止更新"滚动到底部"按钮，
   // 避免估算高度阶段的 onScroll 中间态把已在底部的列表误判为"离底部较远"。
   const suppressScrollToBottomVisibilityRef = useRef(true);
-  // 中文注释：记录内容区触摸起点，用于区分短按和拖动来决定是否关闭附件面板。
+  // 首屏加载后的冷却期截止时间戳，期间提高按钮显示阈值，
+  // 防止布局修正期间的 onScroll 中间态误触发按钮。
+  const scrollToBottomCooldownUntilRef = useRef(0);
+  // 记录内容区触摸起点，用于区分短按和拖动来决定是否关闭附件面板。
   const contentTouchStartRef = useRef<{
     time: number;
     x: number;
     y: number;
     moved: boolean;
   } | null>(null);
-  // 中文注释：Toast 引用，用于复制/删除/分享等操作的提示。
+  // Toast 引用，用于复制/删除/分享等操作的提示。
   const toastRef = useRef<ToastRef>(null);
 
   // ==================== Hooks ====================
 
-  // 中文注释：聊天页底部结构统一从 hook 读取，避免列表、输入栏、空态和附件面板各自重复计算平台补偿。
+  // 聊天页底部结构统一从 hook 读取，避免列表、输入栏、空态和附件面板各自重复计算平台补偿。
   const {
     keyboardInset,
     isKeyboardVisible,
@@ -171,7 +178,7 @@ export default function Chat2({ appId }: Chat2Props) {
     attachmentPanelHeight,
   } = useChatBottomInsets(layoutTokens.isTablet);
 
-  // 中文注释：删除/分享选择操作 hook，封装删除确认弹窗、分享预览数据构建、延后退出选择模式。
+  // 删除/分享选择操作 hook，封装删除确认弹窗、分享预览数据构建、延后退出选择模式。
   const {
     handleDeletePress,
     handleShareConfirm,
@@ -179,7 +186,7 @@ export default function Chat2({ appId }: Chat2Props) {
     setShareMessages,
   } = useChatSelectionActions({ tabId: tab.id, toastRef });
 
-  // 中文注释：气泡操作 hook，封装编辑、复制、反馈等操作。
+  // 气泡操作 hook，封装编辑、复制、反馈等操作。
   const { handleEdit, handleCopy, handleFeedback } = useChatBubbleActions({
     tabId: tab.id,
     appId,
@@ -187,7 +194,7 @@ export default function Chat2({ appId }: Chat2Props) {
     setFeedbackMessageId,
   });
 
-  // 中文注释：首次进入聊天页时检查通知权限，未请求过则主动弹系统权限申请弹窗。
+  // 首次进入聊天页时检查通知权限，未请求过则主动弹系统权限申请弹窗。
   useEffect(() => {
     useSettingsStore.getState().syncNotificationPermission();
   }, []);
@@ -199,16 +206,16 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== 附件面板 ====================
 
-  // 中文注释：附件面板控制器，管理面板开关状态、附件选中/移除、各类选取操作。
+  // 附件面板控制器，管理面板开关状态、附件选中/移除、各类选取操作。
   const attachmentPanelController = usePhoneAttachmentPanelController(
     appId,
     tab.id,
   );
 
-  // 中文注释：附件面板展开/收起时，内容区整体上移/回位的动画值。
+  // 附件面板展开/收起时，内容区整体上移/回位的动画值。
   const attachmentPanelTranslateY = useRef(new Animated.Value(0)).current;
 
-  // 中文注释：Phone 模式下，附件面板展开时整体内容上移，收起时回位。
+  // Phone 模式下，附件面板展开时整体内容上移，收起时回位。
   // Pad 模式不展示附件面板，不需要动画。
   useEffect(() => {
     if (layoutTokens.isTablet) {
@@ -234,12 +241,12 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== 初始化生命周期 ====================
 
-  // 中文注释：朗读控制器，注册原生 TTS 事件监听，仅在 iOS 生效。
+  // 朗读控制器，注册原生 TTS 事件监听，仅在 iOS 生效。
   // ChatBubble 内部通过 useReadAloudPlayback 驱动朗读交互，
   // 此处调用确保原生事件回调在整个 Chat2 生命周期内生效。
   useReadAloudPlaybackController();
 
-  // 中文注释：聊天页初始化生命周期 hook，统一管理四个职责：
+  // 聊天页初始化生命周期 hook，统一管理四个职责：
   // 1. 加载首屏消息 + 强制最后一条消息完成态
   // 2. App 信息回退（接口失败时从 SQLite 恢复）
   // 3. 同步书签状态到 Native tab 收藏标识
@@ -254,7 +261,7 @@ export default function Chat2({ appId }: Chat2Props) {
     }, []),
   });
 
-  // 中文注释：触顶时加载更早的历史消息，追加到 store 头部。
+  // 触顶时加载更早的历史消息，追加到 store 头部。
   const handleStartReached = useCallback(async (_info: { distanceFromStart: number }) => {
     if (isLoadingMore || !hasMore || messageIds.length === 0) return;
 
@@ -278,21 +285,27 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== 滚动追踪 ====================
 
-  // 中文注释：实时追踪滚动位置，判断是否贴近底部，用于键盘弹起和异步内容撑高时自动贴底；
+  // 实时追踪滚动位置，判断是否贴近底部，用于键盘弹起和异步内容撑高时自动贴底；
   // 同时更新"滚动到底部"按钮的可见性。
   const handleScroll = useCallback((event: LegendScrollEvent) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     const distanceToBottom =
       contentSize.height - (contentOffset.y + layoutMeasurement.height);
     isNearBottomRef.current = distanceToBottom <= BOTTOM_THRESHOLD;
-    // 中文注释：首屏贴底尚未稳定前，先跳过按钮显隐更新；
+    // 首屏贴底尚未稳定前，先跳过按钮显隐更新；
     // 否则 initialScrollAtEnd/scrollToEnd 基于估高触发的中间态 onScroll
     // 会让按钮在首次加载时错误出现。
     if (suppressScrollToBottomVisibilityRef.current) return;
-    setIsScrollToBottomVisible(distanceToBottom > SCROLL_TO_BOTTOM_THRESHOLD);
+    // 冷却期内使用更高阈值，防止布局修正期间 onScroll 中间态误触发按钮；
+    // 用户真正向上滚动时 distanceToBottom 会很大，仍能正确显示。
+    const inCooldown = Date.now() < scrollToBottomCooldownUntilRef.current;
+    const threshold = inCooldown
+      ? SCROLL_TO_BOTTOM_COOLDOWN_THRESHOLD
+      : SCROLL_TO_BOTTOM_THRESHOLD;
+    setIsScrollToBottomVisible(distanceToBottom > threshold);
   }, []);
 
-  // 中文注释：用户开始拖拽滚动时，如果附件面板处于展开状态则自动收起，
+  // 用户开始拖拽滚动时，如果附件面板处于展开状态则自动收起，
   // 避免列表滚动和底部附件面板并存的不协调体验。
   const handleScrollBeginDrag = useCallback(() => {
     if (!layoutTokens.isTablet && attachmentPanelController.isAttachmentPanelOpen) {
@@ -302,7 +315,7 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== 键盘处理 ====================
 
-  // 中文注释：键盘弹起时，贴近底部则 scrollToEnd 贴底。
+  // 键盘弹起时，贴近底部则 scrollToEnd 贴底。
   // iOS：键盘 overlay，容器不变，scrollToEnd 补偿贴底。
   // Android：adjustResize 缩容器，KeyboardProvider 包裹后 LegendList 的 maintainScrollAtEnd
   // 应在 handleLayout 时自动贴底，这里兜底补一次。
@@ -314,7 +327,7 @@ export default function Chat2({ appId }: Chat2Props) {
     });
   }, [isKeyboardVisible, keyboardInset]);
 
-  // 中文注释：消息行高度变化回调，缓存高度并更新估算值；
+  // 消息行高度变化回调，缓存高度并更新估算值；
   // 贴近底部时重新贴底，避免异步内容撑高后留白。
   const handleRowHeightChange = useCallback(
     (messageId: string, height: number) => {
@@ -323,7 +336,7 @@ export default function Chat2({ appId }: Chat2Props) {
 
       rowHeightCacheRef.current.set(messageId, height);
 
-      // 中文注释：不再手动 scrollToEnd。
+      // 不再手动 scrollToEnd。
       // maintainScrollAtEnd.itemLayout 已配置 animated: true，
       // 会自动在行高变化时平滑贴底；手动 scrollToEnd 会与它冲突，
       // 导致内容不满一屏时出现"先上跳后下滑"的视觉闪跳。
@@ -331,7 +344,7 @@ export default function Chat2({ appId }: Chat2Props) {
     [],
   );
 
-  // 中文注释：逐条返回消息行估高；已测量的行直接复用真实高度，未测量的行按回答内容结构保守估算。
+  // 逐条返回消息行估高；已测量的行直接复用真实高度，未测量的行按回答内容结构保守估算。
   const getEstimatedItemSize = useCallback(
     (messageId: string) => {
       const measuredHeight = rowHeightCacheRef.current.get(messageId);
@@ -355,17 +368,18 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== 生命周期 ====================
 
-  // 中文注释：tab 切换时重置所有滚动和估算状态。
+  // tab 切换时重置所有滚动和估算状态。
   useEffect(() => {
     setHasLoadedInitialMessages(false);
     hasAppliedInitialBottomLockRef.current = false;
     isNearBottomRef.current = true;
     suppressScrollToBottomVisibilityRef.current = true;
+    scrollToBottomCooldownUntilRef.current = 0;
     setIsScrollToBottomVisible(false);
     rowHeightCacheRef.current.clear();
   }, [tab.id]);
 
-  // 中文注释：首屏消息到位后，强制保持 isNearBottomRef = true，
+  // 首屏消息到位后，强制保持 isNearBottomRef = true，
   // 让后续 handleRowHeightChange 持续贴底，直到真实布局稳定。
   // 原因：scrollToEnd 基于估算高度计算终点，onScroll 可能误判为"不在底部"，
   // 导致行高上报后不再触发贴底，首屏消息距输入框太近。
@@ -375,18 +389,20 @@ export default function Chat2({ appId }: Chat2Props) {
     }
     hasAppliedInitialBottomLockRef.current = true;
 
-    // 中文注释：初始阶段强制标记为贴近底部，确保行高变化时能持续贴底。
+    // 初始阶段强制标记为贴近底部，确保行高变化时能持续贴底。
     isNearBottomRef.current = true;
 
     requestAnimationFrame(() => {
       void listRef.current?.scrollToEnd({ animated: false });
     });
 
-    // 中文注释：延迟 500ms 再补一次贴底，等大部分行完成真实布局后修正位置。
+    // 延迟 500ms 再补一次贴底，等大部分行完成真实布局后修正位置。
     const settleTimer = setTimeout(() => {
       isNearBottomRef.current = true;
       suppressScrollToBottomVisibilityRef.current = false;
       setIsScrollToBottomVisible(false);
+      // 启动冷却期，期间提高按钮显示阈值，防止布局修正的 onScroll 中间态误触发按钮。
+      scrollToBottomCooldownUntilRef.current = Date.now() + SCROLL_TO_BOTTOM_COOLDOWN_MS;
       void listRef.current?.scrollToEnd({ animated: false });
     }, 500);
 
@@ -397,19 +413,19 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== 编辑态 ====================
 
-  // 中文注释：退出编辑模式，清空输入框文本、附件和编辑消息 ID。
+  // 退出编辑模式，清空输入框文本、附件和编辑消息 ID。
   const handleCancelEdit = useCallback(() => {
     clearInput(tab.id);
   }, [tab.id, clearInput]);
 
   // ==================== 附件面板交互 ====================
 
-  // 中文注释：点击"滚动到底部"按钮，平滑滚动到列表底部。
+  // 点击"滚动到底部"按钮，平滑滚动到列表底部。
   const handleScrollToBottom = useCallback(() => {
     void listRef.current?.scrollToEnd({ animated: true });
   }, []);
 
-  // 中文注释：记录内容区触摸起点，用于区分短按和拖动。
+  // 记录内容区触摸起点，用于区分短按和拖动。
   const handleContentTouchStart = useCallback(
     (event: GestureResponderEvent) => {
       const { pageX, pageY } = event.nativeEvent;
@@ -423,7 +439,7 @@ export default function Chat2({ appId }: Chat2Props) {
     [],
   );
 
-  // 中文注释：手指移动时更新触摸状态，避免把拖动误判成短按点击。
+  // 手指移动时更新触摸状态，避免把拖动误判成短按点击。
   const handleContentTouchMove = useCallback(
     (event: GestureResponderEvent) => {
       const touchState = contentTouchStartRef.current;
@@ -440,7 +456,7 @@ export default function Chat2({ appId }: Chat2Props) {
     [],
   );
 
-  // 中文注释：内容区触摸结束时，只有短按动作才收起附件面板，
+  // 内容区触摸结束时，只有短按动作才收起附件面板，
   // 长按和拖动都不触发，避免误伤消息长按能力。
   const handleContentTouchEnd = useCallback(() => {
     const touchState = contentTouchStartRef.current;
@@ -488,7 +504,7 @@ export default function Chat2({ appId }: Chat2Props) {
     ],
   );
 
-  // 中文注释：空态组件，带底部补偿，用于 LegendList 的 ListEmptyComponent。
+  // 空态组件，带底部补偿，用于 LegendList 的 ListEmptyComponent。
   const listEmptyComponent = useMemo(
     () => (
       <View
@@ -503,8 +519,8 @@ export default function Chat2({ appId }: Chat2Props) {
     [emptyStateBottomCompensation],
   );
 
-  // 中文注释：消息列表区域，包含加载态和 LegendList。
-  // 中文注释：始终渲染 LegendList，用 ListEmptyComponent 处理空态，
+  // 消息列表区域，包含加载态和 LegendList。
+  // 始终渲染 LegendList，用 ListEmptyComponent 处理空态，
   // 避免 LegendList 卸载/重新挂载时原生 ScrollView 复用导致布局异常。
   const contentNode = (
     <View
@@ -533,10 +549,10 @@ export default function Chat2({ appId }: Chat2Props) {
                 : CHAT_HEADER_HEIGHT + 12,
               paddingBottom:
                 layoutTokens.chatListBottomPadding +
-                24 + // 中文注释：补偿输入区 marginTop:-24 的向上重叠，确保消息与输入框有足够间距。
+                24 + // 补偿输入区 marginTop:-24 的向上重叠，确保消息与输入框有足够间距。
                 listKeyboardPadding,
             },
-            // 中文注释：空态时内容容器撑满视口，让 ChatEmpty 的 flex:1 + justifyContent:center 能居中；
+            // 空态时内容容器撑满视口，让 ChatEmpty 的 flex:1 + justifyContent:center 能居中；
             // 有消息时不撑满，消息从顶部开始排列，避免 alignItemsAtEnd 的 flex-end 在内容超越视口时失效跳帧。
             isEmptyState ? { flexGrow: 1 } : undefined,
           ]}
@@ -549,7 +565,7 @@ export default function Chat2({ appId }: Chat2Props) {
           }
           ListEmptyComponent={listEmptyComponent}
           initialScrollAtEnd
-          // 中文注释：尾部新增消息时只让 maintainScrollAtEnd 接管贴底，
+          // 尾部新增消息时只让 maintainScrollAtEnd 接管贴底，
           // 避免与 maintainVisibleContentPosition 的 data 锚定同时改 scroll 造成超长消息错位。
           maintainScrollAtEnd={{
             animated: true,
@@ -559,10 +575,10 @@ export default function Chat2({ appId }: Chat2Props) {
               layout: true,
             },
           }}
-          // 中文注释：保留 size 稳定能力处理滚动中的高度变化，但关闭 data 锚定，
+          // 保留 size 稳定能力处理滚动中的高度变化，但关闭 data 锚定，
           // 避免在"回答已完成后再追加新消息"时对超长上一条消息做错误位置恢复。
           maintainVisibleContentPosition={{ size: true }}
-          // 中文注释：当前消息行包含本地布局缓存和复杂交互状态，先显式关闭 recycleItems，
+          // 当前消息行包含本地布局缓存和复杂交互状态，先显式关闭 recycleItems，
           // 避免 LegendList v3 beta 复用 row 时把旧实例状态带到新消息上。
           recycleItems={false}
           drawDistance={350}
@@ -596,10 +612,10 @@ export default function Chat2({ appId }: Chat2Props) {
     </View>
   );
 
-  // 中文注释：输入框区域，Phone 模式传入附件面板控制器。
+  // 输入框区域，Phone 模式传入附件面板控制器。
   const inputNode = (
     <KeyboardStickyView
-      // 中文注释：iOS Phone 用 KeyboardStickyView 跟随键盘吸附；
+      // iOS Phone 用 KeyboardStickyView 跟随键盘吸附；
       // Android Phone 由 adjustResize 缩容器，输入框自然在键盘上方，不需要额外推升；
       // Pad 用 marginBottom 推升。
       enabled={Platform.OS === 'ios' && !layoutTokens.isTablet}
@@ -621,7 +637,7 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== Phone 布局 ====================
 
-  // 中文注释：Phone 模式下，内容区 + 输入框 + 附件面板三个兄弟一起 translateY，
+  // Phone 模式下，内容区 + 输入框 + 附件面板三个兄弟一起 translateY，
   // 展开附件面板时整体上移，收起时回位。
   if (!layoutTokens.isTablet) {
     return (
@@ -692,7 +708,7 @@ export default function Chat2({ appId }: Chat2Props) {
         <LocationPicker
           visible={attachmentPanelController.showMapModal}
           onClose={() => attachmentPanelController.setShowMapModal(false)}
-          // 中文注释：Phone 端附件定位选择器贴底展示，和底部附件面板保持同一交互方向。
+          // Phone 端附件定位选择器贴底展示，和底部附件面板保持同一交互方向。
           presentation='bottom'
           onSelect={(data) => {
             attachmentPanelController.handleConfirmLocation(data);
@@ -726,7 +742,7 @@ export default function Chat2({ appId }: Chat2Props) {
 
   // ==================== Pad 布局 ====================
 
-  // 中文注释：Pad 模式无附件面板，直接排列内容区和输入框。
+  // Pad 模式无附件面板，直接排列内容区和输入框。
   return (
     <View style={styles.root}>
       {contentNode}
@@ -776,7 +792,7 @@ export default function Chat2({ appId }: Chat2Props) {
 
 // ==================== DeleteSelectionBar ====================
 
-// 中文注释：删除确认栏组件，显示已选中数量和删除/取消按钮。
+// 删除确认栏组件，显示已选中数量和删除/取消按钮。
 // 独立提取为 React.memo，避免父组件重渲染时不必要的刷新。
 const DeleteSelectionBar = React.memo(function DeleteSelectionBar({
   onPress,
@@ -785,7 +801,7 @@ const DeleteSelectionBar = React.memo(function DeleteSelectionBar({
   onPress: () => void;
   onCancel: () => void;
 }) {
-  // 中文注释：直接从 store 订阅选中项计数，不受父组件渲染频率影响。
+  // 直接从 store 订阅选中项计数，不受父组件渲染频率影响。
   const selectedCount = useMessageStore(
     useCallback((state) => {
       let count = 0;
@@ -819,7 +835,7 @@ interface MessageRowProps {
   styles: ReturnType<typeof makeStyles>;
 }
 
-// 中文注释：单条消息行组件，从 store 读取消息数据并渲染问/答气泡。
+// 单条消息行组件，从 store 读取消息数据并渲染问/答气泡。
 // 用 React.memo 避免无关消息更新时重渲染。
 // 选择模式下，每个气泡左侧显示 Checkbox，气泡点击切换该部分选中状态。
 const MessageRow = React.memo(function MessageRow({
@@ -848,13 +864,13 @@ const MessageRow = React.memo(function MessageRow({
       [tabId, messageId],
     ),
   );
-  // 中文注释：选择模式状态，直接从 store 读取，Zustand 细粒度订阅驱动重渲染，
+  // 选择模式状态，直接从 store 读取，Zustand 细粒度订阅驱动重渲染，
   // 绕过 LegendList 的 renderItem 缓存，确保 Checkbox 即时显示/隐藏。
   const selectionMode = useMessageStore((state) => state.selectionMode);
-  // 中文注释：切换某条消息某个部分的选中状态，直接从 store 读取，
+  // 切换某条消息某个部分的选中状态，直接从 store 读取，
   // 避免通过 prop 传递导致 renderItem 依赖项膨胀。
   const toggleSelection = useMessageStore((state) => state.toggleSelection);
-  // 中文注释：当前消息各部分的选中状态，用于 Checkbox 勾选。
+  // 当前消息各部分的选中状态，用于 Checkbox 勾选。
   const selectedParts = useMessageStore(
     useCallback(
       (state) => state.selectedItems[messageId] || EMPTY_SELECTED_PARTS,
@@ -864,7 +880,7 @@ const MessageRow = React.memo(function MessageRow({
 
   const lastReportedHeightRef = useRef(0);
 
-  // 中文注释：行布局变化时上报高度，用于动态调整估算行高。
+  // 行布局变化时上报高度，用于动态调整估算行高。
   const handleRowLayout = useCallback(
     (event: LayoutChangeEvent) => {
       const nextHeight = Math.round(event.nativeEvent.layout.height);
@@ -885,7 +901,7 @@ const MessageRow = React.memo(function MessageRow({
 
   const isSelectionMode = selectionMode !== 'none';
 
-  // 中文注释：渲染单个气泡（含 checkbox），选择模式下左侧显示 Checkbox，
+  // 渲染单个气泡（含 checkbox），选择模式下左侧显示 Checkbox，
   // 非选择模式下正常排列。每个气泡对应一个 MessagePart（attachments/question/answer）。
   // isQuestion 控制 bubbleContentWrapper 的对齐方向：question 右对齐，answer 左对齐。
   const renderBubbleWithCheckbox = (
@@ -1043,7 +1059,7 @@ const makeStyles = (colors: ColorTokens) =>
     },
     inputInner: {
       width: '100%',
-      // 中文注释：输入区向上重叠 24px，让渐变遮罩与内容区无缝衔接；
+      // 输入区向上重叠 24px，让渐变遮罩与内容区无缝衔接；
       // 列表 paddingBottom 已补偿此值，确保消息与输入框之间有足够间距。
       marginTop: -24,
     },
@@ -1061,7 +1077,7 @@ const makeStyles = (colors: ColorTokens) =>
       backgroundColor: 'transparent',
       zIndex: 50,
     },
-    // 中文注释："滚动到底部"按钮的定位容器，居底部居中，不拦截列表滚动事件。
+    // "滚动到底部"按钮的定位容器，居底部居中，不拦截列表滚动事件。
     scrollToBottomContainer: {
       position: 'absolute',
       left: 0,
@@ -1078,7 +1094,7 @@ const makeStyles = (colors: ColorTokens) =>
       width: '100%',
       alignSelf: 'center',
     },
-    // 中文注释：必须保留这一层透明边框；移除后超长表格消息在列表里会出现气泡重叠，当前原因未定位。
+    // 必须保留这一层透明边框；移除后超长表格消息在列表里会出现气泡重叠，当前原因未定位。
     messageListWrapperGuard: {
       borderWidth: 1,
       borderColor: 'transparent',
@@ -1087,54 +1103,54 @@ const makeStyles = (colors: ColorTokens) =>
     messageGroup: {
       marginBottom: spacing.md,
     },
-    // 中文注释：必须保留这一层透明边框；单独去掉后重叠问题会复现，当前原因未定位。
+    // 必须保留这一层透明边框；单独去掉后重叠问题会复现，当前原因未定位。
     messageGroupGuard: {
       borderWidth: 1,
       borderColor: 'transparent',
       backgroundColor: 'transparent',
     },
-    // 中文注释：选择模式下每个气泡行的布局，左侧 checkbox + 右侧气泡。
+    // 选择模式下每个气泡行的布局，左侧 checkbox + 右侧气泡。
     bubbleWithCheckbox: {
       flexDirection: 'row',
       alignItems: 'flex-start',
       marginBottom: spacing.xxs,
       width: '100%',
     },
-    // 中文注释：checkbox 槽位，固定宽度，与气泡顶部对齐。
+    // checkbox 槽位，固定宽度，与气泡顶部对齐。
     checkboxContainer: {
       width: SELECTION_CHECKBOX_SLOT_WIDTH,
       paddingTop: 14,
       alignItems: 'flex-start',
     },
-    // 中文注释：气泡内容区域，flex:1 占满 checkbox 以外的剩余宽度，默认不设 alignItems。
+    // 气泡内容区域，flex:1 占满 checkbox 以外的剩余宽度，默认不设 alignItems。
     bubbleContentWrapper: {
       flex: 1,
       minWidth: 0,
     },
-    // 中文注释：question/attachments 气泡右对齐。
+    // question/attachments 气泡右对齐。
     bubbleAlignEnd: {
       alignItems: 'flex-end',
     },
-    // 中文注释：answer 气泡左对齐。
+    // answer 气泡左对齐。
     bubbleAlignStart: {
       alignItems: 'flex-start',
     },
-    // 中文注释：Phone 模式下内容区的动画容器，flex:1 撑满剩余空间。
+    // Phone 模式下内容区的动画容器，flex:1 撑满剩余空间。
     phoneContentMotion: {
       flex: 1,
     },
-    // 中文注释：Phone 模式下输入框的动画容器，宽度撑满。
+    // Phone 模式下输入框的动画容器，宽度撑满。
     phoneInputMotion: {
       width: '100%',
     },
-    // 中文注释：附件面板浮层，默认隐藏在屏幕底部，展开时随 translateY 上移露出。
+    // 附件面板浮层，默认隐藏在屏幕底部，展开时随 translateY 上移露出。
     attachmentPanelOverlay: {
       position: 'absolute',
       left: 0,
       right: 0,
       zIndex: 90,
     },
-    // 中文注释：选择模式底部操作栏容器，固定在底部。
+    // 选择模式底部操作栏容器，固定在底部。
     selectionActionBar: {
       position: 'absolute',
       left: 0,

@@ -102,20 +102,20 @@ export async function stopAllVoicePlayback(
     });
   }
 
-  // 中文注释：本地语音消息播放和原生 TTS 是两条独立音频通道，
+  // 本地语音消息播放和原生 TTS 是两条独立音频通道，
   // 这里先统一停止本地语音文件播放，避免后续录音/切 tab 时仍有残留声音输出。
   stopVoiceMessagePlayback();
-  // 中文注释：pendingPlayback 表示“上一段真正结束后准备接管播放的目标”，
+  // pendingPlayback 表示“上一段真正结束后准备接管播放的目标”，
   // 主动全量停止时必须一起清掉，避免 stop 完又被 finish 事件重新拉起下一条。
   clearPendingPlayback();
-  // 中文注释：activePlayback 是当前 UI 播放态的唯一来源，
+  // activePlayback 是当前 UI 播放态的唯一来源，
   // 主动停止后立即清空，保证按钮状态和真实播放器状态同步回 idle。
   clearPlayback();
   resetNativePlaybackTracking();
 
   if (activePlayback.mode === 'read_aloud' && activePlayback.status !== 'idle') {
     try {
-      // 中文注释：只有当前活跃源是 read_aloud 时才需要通知 native 停止 AVSpeechSynthesizer，
+      // 只有当前活跃源是 read_aloud 时才需要通知 native 停止 AVSpeechSynthesizer，
       // 否则只清 JS store 会导致原生仍继续播报。
       await stopTTS();
     } catch (error) {
@@ -132,7 +132,7 @@ function shouldConsumeIdleEvent(activePlayback: IVoicePlaybackState): boolean {
     return false;
   }
 
-  // 中文注释：active 处于 loading 时，可能正夹在“外部播放结束 -> 当前消息 start”之间，
+  // active 处于 loading 时，可能正夹在“外部播放结束 -> 当前消息 start”之间，
   // 这时先到的 finish/pause/error 事件不一定属于当前消息，不能直接把当前气泡打回 idle。
   return hasObservedNativeStartForActive || isStoppingCurrentReadAloud;
 }
@@ -142,7 +142,7 @@ async function startReadAloudPlayback(target: ReadAloudTarget): Promise<void> {
   const { setActivePlayback, clearPendingPlayback } =
     useVoicePlaybackStore.getState();
 
-  // 中文注释：真正发起原生 speak 前先把全局 active 目标切过去，
+  // 真正发起原生 speak 前先把全局 active 目标切过去，
   // 这样 onTTSStart / onTTSFinish 回来时，JS 侧已经能准确知道当前归属。
   setActivePlayback(playbackState);
   clearPendingPlayback();
@@ -276,7 +276,7 @@ export function useReadAloudPlaybackController(): void {
         activePlayback,
         pendingPlayback,
       });
-      // 中文注释：原生 finish/cancel 才代表上一段朗读已经真正释放播报器，
+      // 原生 finish/cancel 才代表上一段朗读已经真正释放播报器，
       // 因此切换到 pending 目标必须在这个事件里推进，不能在 stop() 返回后提前 speak。
       clearPlayback();
       resetNativePlaybackTracking();
@@ -374,7 +374,7 @@ export function useReadAloudPlayback(target: ReadAloudTarget) {
     const { activePlayback: currentActivePlayback } =
       useVoicePlaybackStore.getState();
 
-    // 中文注释：再次点击已经排队等待接管的目标时，只撤销排队，不影响当前仍在播的内容。
+    // 再次点击已经排队等待接管的目标时，只撤销排队，不影响当前仍在播的内容。
     if (
       isReadAloudPlayback(pendingPlayback) &&
       isSameReadAloudTarget(pendingPlayback, target)
@@ -425,7 +425,7 @@ export function useReadAloudPlayback(target: ReadAloudTarget) {
     }
 
     if (isReadAloudPlayback(currentActivePlayback)) {
-      // 中文注释：有其它朗读正在播时，先把最新点击目标记到 pending，
+      // 有其它朗读正在播时，先把最新点击目标记到 pending，
       // 等当前播放收到原生 finish/cancel 事件后，再由 controller 推进到下一段。
       console.log('[useReadAloudPlayback] queue pending playback target:', {
         currentActivePlayback,

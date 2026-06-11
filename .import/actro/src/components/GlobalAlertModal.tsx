@@ -36,7 +36,7 @@ export const GlobalAlertModal: React.FC<GlobalAlertModalProps> = ({
   options,
   onClose,
 }) => {
-  // 中文注释：GlobalAlertModal 基于原生 Modal，显示层级高于普通 React 树里的 GlobalAlertHost；
+  // GlobalAlertModal 基于原生 Modal，显示层级高于普通 React 树里的 GlobalAlertHost；
   // 只要把 visible/内容状态提升到共享容器，它同样可以跨页面复用，甚至在 A 页面触发、B 页面承载显示。
   // 目前用于 登录的协议确认
   const maskOpacity = React.useRef(new Animated.Value(0)).current;
@@ -141,7 +141,7 @@ export const GlobalAlertModal: React.FC<GlobalAlertModalProps> = ({
                       onPress={() => handlePressButton(button)}
                       style={({ pressed }) => [
                         styles.button,
-                        // 中文注释：主操作沿用 GlobalAlert 的视觉语义，避免登录确认按钮样式退回系统默认。
+                        // 主操作沿用 GlobalAlert 的视觉语义，避免登录确认按钮样式退回系统默认。
                         button.variant === 'primary' ? styles.buttonPrimary : undefined,
                         isTwoButtons ? styles.buttonHalf : styles.buttonFull,
                         pressed ? styles.buttonPressed : undefined,

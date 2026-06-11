@@ -93,7 +93,7 @@ export const FeedbackFormModal: React.FC<FeedbackFormModalProps> = ({
     outputRange: [600, 0],
   });
 
-  // 中文注释：Android 的 Modal 场景下不做 KeyboardAvoidingView 避让，
+  // Android 的 Modal 场景下不做 KeyboardAvoidingView 避让，
   // 避免键盘弹起时触发整块弹窗先上跳再回落的闪动。
   const shouldUseKeyboardAvoidingView = Platform.OS === 'ios';
 

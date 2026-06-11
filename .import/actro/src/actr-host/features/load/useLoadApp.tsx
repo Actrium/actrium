@@ -117,7 +117,7 @@ export const useLoadApp = () => {
     (isTablet ? !inputFocused : !inputExpanded);
 
   useEffect(() => {
-    // 中文注释：仅当 Phone 端切到输入框展开态时再主动聚焦，
+    // 仅当 Phone 端切到输入框展开态时再主动聚焦，
     // 并且等扫码区淡出完成后再触发键盘，避免淡出阶段发生布局重算。
     if (!inputExpanded || isTablet) return;
     const timer = setTimeout(() => {
@@ -129,7 +129,7 @@ export const useLoadApp = () => {
   }, [inputExpanded, isTablet]);
 
   useEffect(() => {
-    // 中文注释：相机期望状态只由页面可交互条件驱动，
+    // 相机期望状态只由页面可交互条件驱动，
     // 真正打开相机仍交给 CameraPanel 做权限和设备检查。
     setCameraDesiredActive(shouldRequestCamera);
     if (!shouldRequestCamera) {
@@ -140,13 +140,13 @@ export const useLoadApp = () => {
   useEffect(() => {
     const unsubscribeEntered = TabEvents.onTabEnteredFullscreen((event) => {
       if (event.tabId !== tabCtx.tab.id) return;
-      // 中文注释：重新进入全屏时恢复条件判断，由上面的 shouldRequestCamera 统一决定是否开相机。
+      // 重新进入全屏时恢复条件判断，由上面的 shouldRequestCamera 统一决定是否开相机。
       setTabFullscreenActive(true);
     });
 
     const unsubscribeExited = TabEvents.onTabExitedFullscreen((event) => {
       if (event.tabId !== tabCtx.tab.id) return;
-      // 中文注释：退出全屏要立刻关闭相机并清掉期望状态，避免后台 tab 继续占用摄像头。
+      // 退出全屏要立刻关闭相机并清掉期望状态，避免后台 tab 继续占用摄像头。
       setTabFullscreenActive(false);
       setCameraDesiredActive(false);
       setCameraActive(false);
@@ -232,7 +232,7 @@ export const useLoadApp = () => {
             if (hasHistory) {
               const localAppInfo = await AppRepository.getApp(appId);
               GlobalAlert.alert(t('actr.app.notExist'));
-              // 中文注释：预设恢复命中历史消息但线上应用已不存在时，
+              // 预设恢复命中历史消息但线上应用已不存在时，
               // tab 仍保留本地历史展示能力，同时显式把 native tab 状态标成 dead。
               void updateTabInfo({
                 tabId: tabCtx.tab.id,

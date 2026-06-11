@@ -42,7 +42,7 @@ export const AccountDetail = ({
         style={styles.content}
         contentContainerStyle={[
           styles.scrollContent,
-          // 中文注释：头部可视高度调整为 44 后，正文顶部仍保持原来的视觉起点，不跟着一起上移。
+          // 头部可视高度调整为 44 后，正文顶部仍保持原来的视觉起点，不跟着一起上移。
           { paddingTop: contentTopPadding },
           {
             paddingHorizontal: isTablet ? 40 : 16,

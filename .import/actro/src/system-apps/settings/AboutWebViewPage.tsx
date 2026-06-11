@@ -32,7 +32,7 @@ export const AboutWebViewPage = ({ page, onBack }: AboutWebViewPageProps) => {
           <SettingsBackHeader onBack={onBack} marginBottom={0} />
         </View>
       ) : (
-        // 中文注释：Android 继续沿用原来的固定头部高度，先只按 iOS 标准调整二级页。
+        // Android 继续沿用原来的固定头部高度，先只按 iOS 标准调整二级页。
         <View
           style={{
             ...styles.header,

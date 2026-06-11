@@ -140,7 +140,7 @@ export function Typewriter({
     const nextCharIsLineBreak =
       nextCursor < target.length && target[nextCursor] === '\n';
 
-    // 中文注释：跨过换行符或即将到达换行符时，气泡高度即将变化，
+    // 跨过换行符或即将到达换行符时，气泡高度即将变化，
     // 用 LayoutAnimation 让高度增长和列表滚动平滑过渡，避免底部闪跳。
     if (crossedLineBreak || nextCharIsLineBreak) {
       LayoutAnimation.configureNext(LAYOUT_ANIMATION_CONFIG);
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
   },
 });
 
-// 中文注释：气泡高度变化时的布局过渡动画配置。
+// 气泡高度变化时的布局过渡动画配置。
 // - update 不指定 property，使布局变化（高度、位置）做帧动画平滑过渡，
 //   而非 opacity 交叉淡入（opacity 模式下 Flexbox 重排会瞬间跳动）。
 // - create/delete 保留 opacity 效果，新视图淡入、旧视图淡出。

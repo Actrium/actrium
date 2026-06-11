@@ -115,7 +115,7 @@ export const useChatBubbleEvents = ({
   const beginPlayback = React.useCallback(
     (status: 'loading' | 'playing' = 'playing') => {
       if (!msgId) return;
-      // 中文注释：切换全局播放目标前先停掉本地语音文件播放，保证新的播放态和实际音频输出一致。
+      // 切换全局播放目标前先停掉本地语音文件播放，保证新的播放态和实际音频输出一致。
       stopVoiceMessagePlayback();
       setActivePlayback({
         appId: appId ?? null,
@@ -229,7 +229,7 @@ export const useChatBubbleEvents = ({
   ]);
 
   const handleNormalPress = React.useCallback(() => {
-    // 中文注释：语音气泡的点击与长按统一走外层容器，避免内层 Pressable 抢占长按菜单手势。
+    // 语音气泡的点击与长按统一走外层容器，避免内层 Pressable 抢占长按菜单手势。
     Keyboard.dismiss();
     if (parsedVoicePayload) {
       void handleVoiceBubblePress();
@@ -253,7 +253,7 @@ export const useChatBubbleEvents = ({
       options.push({
         label: t('common.edit'),
         onPress: onEdit,
-        // 中文注释：Android 上需要等长按菜单 Modal 完全关闭后再聚焦输入框，否则系统键盘可能不会响应程序化 focus。
+        // Android 上需要等长按菜单 Modal 完全关闭后再聚焦输入框，否则系统键盘可能不会响应程序化 focus。
         invokeAfterClose: true,
         icon: <Icon type="edit" size={16} />,
       });
@@ -333,7 +333,7 @@ export const useChatBubbleEvents = ({
     const topBoundary = insets.top + verticalMargin;
     const bottomBoundary = screenHeight - insets.bottom - verticalMargin;
 
-    // 中文注释：二级菜单也以原始触点为锚点居中，和一级长按菜单保持同一套定位语义。
+    // 二级菜单也以原始触点为锚点居中，和一级长按菜单保持同一套定位语义。
     const top = Math.min(
       Math.max(moreMenuPosition.y - moreMenuSize.height / 2, topBoundary),
       Math.max(topBoundary, bottomBoundary - moreMenuSize.height),

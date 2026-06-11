@@ -1,4 +1,5 @@
 import { NativeEventEmitter, NativeModules, type NativeModule } from 'react-native';
+import { calculateNativeVolumeMetering } from '../AudioMetering';
 import type {
   SpeechRecognitionCallbacks,
   SpeechRecognitionErrorEvent,
@@ -12,6 +13,10 @@ import type {
 type SpeechRecognitionResultEvent = {
   isFinal: boolean;
   results: SpeechRecognitionResultItem[];
+};
+
+type SpeechRecognitionVolumeChangeEvent = {
+  value?: number;
 };
 
 type ExpoSpeechRecognitionModuleLike = {
@@ -167,7 +172,7 @@ export class SpeechRecognitionService {
         return null;
       }
 
-      // 中文注释：事件订阅通过 NativeEventEmitter 提供，方法调用仍直接落到原生模块对象。
+      // 事件订阅通过 NativeEventEmitter 提供，方法调用仍直接落到原生模块对象。
       this.nativeEventEmitter = new NativeEventEmitter(
         nativeModule as unknown as NativeModule,
       );
@@ -225,6 +230,11 @@ export class SpeechRecognitionService {
           callbacks.onPartialResult?.(transcriptEvent),
         );
       }),
+      expoModule.addListener('volumechange', (rawEvent) => {
+        const event = rawEvent as SpeechRecognitionVolumeChangeEvent;
+        const metering = calculateNativeVolumeMetering(event.value ?? 0);
+        this.callbacks.forEach((callbacks) => callbacks.onMetering?.(metering));
+      }),
       expoModule.addListener('error', (rawError) => {
         const error = rawError as SpeechRecognitionErrorEvent;
         this.state = 'error';
@@ -253,7 +263,7 @@ export class SpeechRecognitionService {
   private toTranscriptEvent(
     event: SpeechRecognitionResultEvent,
   ): SpeechRecognitionTranscriptEvent {
-    // 中文注释：统一取第一候选文本，避免上层每次处理 alternatives 数组。
+    // 统一取第一候选文本，避免上层每次处理 alternatives 数组。
     const text = event.results[0]?.transcript?.trim() ?? '';
     return {
       text,

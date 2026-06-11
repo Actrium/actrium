@@ -58,7 +58,7 @@ export default function ActrInput({
   const setInputText = useInputStore((state) => state.setInputText);
 
   const handleCancelEdit = () => {
-    // 中文注释：一次性清空文本、附件和编辑 ID，避免 Android 先退出编辑态再清文本造成焦点中间态。
+    // 一次性清空文本、附件和编辑 ID，避免 Android 先退出编辑态再清文本造成焦点中间态。
     clearInputInStore(tab.id);
   };
 
@@ -111,7 +111,7 @@ export default function ActrInput({
     setInputText(tab.id, '');
   };
 
-  // 中文注释：Pad 端位置入口统一走这里，保持“打开位置选择器”是单一动作语义。
+  // Pad 端位置入口统一走这里，保持“打开位置选择器”是单一动作语义。
   const handleOpenPadLocationPicker = React.useCallback(() => {
     setShowMapModal(true);
   }, [setShowMapModal]);
