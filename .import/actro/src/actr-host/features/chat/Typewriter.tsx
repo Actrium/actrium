@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { LayoutAnimation, View, StyleSheet, type ViewStyle } from 'react-native';
 import { Supramark } from '@supramark/rn';
-import type { SupramarkStyles } from '@supramark/rn';
+import type { SupramarkContentStyle } from '@supramark/rn';
 import {
   SUPRAMARK_CONTAINER_RENDERERS,
   SUPRAMARK_FULL_CONFIG,
@@ -10,8 +10,10 @@ import {
 export interface TypewriterProps {
   /** 完整目标文本（流式累积后的全量内容），组件会逐步显示到该内容 */
   content: string;
-  /** Supramark 样式配置 */
-  styles?: SupramarkStyles;
+  /** Supramark 正文样式 token */
+  contentStyle?: SupramarkContentStyle;
+  /** Supramark 明暗主题 */
+  theme?: 'light' | 'dark';
   /** 每个 tick 推进的字符数，默认 2 */
   charsPerTick?: number;
   /** tick 间隔（毫秒），默认 30 */
@@ -45,7 +47,8 @@ export interface TypewriterProps {
  */
 export function Typewriter({
   content,
-  styles: supramarkStyles,
+  contentStyle,
+  theme = 'light',
   charsPerTick = 2,
   tickIntervalMs = 30,
   lineBreakDelayMs = 150,
@@ -251,7 +254,8 @@ export function Typewriter({
         markdown={renderedContent}
         config={SUPRAMARK_FULL_CONFIG}
         containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
-        styles={supramarkStyles}
+        contentStyle={contentStyle}
+        theme={theme}
       />
     </View>
   );

@@ -10,6 +10,7 @@ import {
   Modal,
   TouchableWithoutFeedback,
   Keyboard,
+  useColorScheme,
 } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { Icon } from '../../../components';
@@ -37,7 +38,7 @@ import { getHostShadows } from '../../styles/shadows';
 
 import { IAttachmentItem } from '../../types/attachment';
 import { Supramark } from '@supramark/rn';
-import type { SupramarkStyles } from '@supramark/rn';
+import type { SupramarkContentStyle } from '@supramark/rn';
 import { Typewriter } from './Typewriter';
 import {
   SUPRAMARK_CONTAINER_RENDERERS,
@@ -88,7 +89,8 @@ interface ChatBubbleBodyProps {
   colors: ColorTokens;
   getDisplayFileName: (item: IAttachmentItem) => string;
   getDisplayFileType: (item: IAttachmentItem) => string;
-  markdownSupramarkStyles: SupramarkStyles;
+  markdownContentStyle: SupramarkContentStyle;
+  supramarkTheme: 'light' | 'dark';
   typewriterEnabled: boolean;
   onTypewriterComplete?: () => void;
   t: ReturnType<typeof useTranslation>['t'];
@@ -118,7 +120,8 @@ const ChatBubbleBody = React.memo(function ChatBubbleBody({
   colors,
   getDisplayFileName,
   getDisplayFileType,
-  markdownSupramarkStyles,
+  markdownContentStyle,
+  supramarkTheme,
   typewriterEnabled,
   onTypewriterComplete,
   t,
@@ -272,12 +275,14 @@ const ChatBubbleBody = React.memo(function ChatBubbleBody({
               markdown={content}
               config={SUPRAMARK_FULL_CONFIG}
               containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
-              styles={markdownSupramarkStyles}
+              contentStyle={markdownContentStyle}
+              theme={supramarkTheme}
             />
           ) : (
             <Typewriter
               content={content}
-              styles={markdownSupramarkStyles}
+              contentStyle={markdownContentStyle}
+              theme={supramarkTheme}
               // typewriterEnabled 在挂载时一次性确定：
               // 流式消息 → true，逐字推进直到自然追上 content；
               // 旧消息 → false，直接显示全文。
@@ -399,8 +404,11 @@ export default function ChatBubble({
 }: ChatBubbleProps) {
   const { t } = useTranslation();
   const colors = useColors();
+  const colorScheme = useColorScheme();
   const styles = React.useMemo(() => makeStyles(colors), [colors]);
   const isQuestion = type === 'question';
+  // Supramark 需要显式主题名，不能只依赖 loom 外层气泡颜色。
+  const supramarkTheme = colorScheme === 'dark' ? 'dark' : 'light';
   // 打字机 enabled 在挂载时一次性确定，之后不再变化。
   // 旧消息（progress 已为 2）→ enabled=false，直接显示全文；
   // 流式消息（progress < 2）→ enabled=true，Typewriter 逐字推进直到自然追上，
@@ -491,74 +499,19 @@ export default function ChatBubble({
   const isAttachmentOnly = parsedAttachments.length > 0 && !content;
   const hasAttachments = parsedAttachments.length > 0;
   const messageTypography = typography.messageBody;
-  const markdownTextStyle = React.useMemo(
+  // 聊天气泡只向 Supramark 传递正文 token，结构样式由 Supramark 主题自己控制。
+  const markdownContentStyle = React.useMemo(
     () => ({
       color: colors.textHeading,
+      headingColor: colors.textHeading,
       fontSize: messageTypography.fontSize,
       lineHeight: messageTypography.lineHeight,
-    }),
+    }) satisfies SupramarkContentStyle,
     [
       colors.textHeading,
       messageTypography.fontSize,
       messageTypography.lineHeight,
     ],
-  );
-  const markdownParagraphStyle = React.useMemo(
-    () => ({
-      ...markdownTextStyle,
-      marginBottom: 0,
-    }),
-    [markdownTextStyle],
-  );
-  const markdownHeadingStyles = React.useMemo(
-    () => ({
-      h1: {
-        ...getTypographyStyle('title2'),
-        color: colors.textHeading,
-        marginBottom: 12,
-      },
-      h2: {
-        ...getTypographyStyle('title3'),
-        color: colors.textHeading,
-        marginBottom: 10,
-      },
-      h3: {
-        ...getTypographyStyle('bodyInput'),
-        color: colors.textHeading,
-        fontWeight: '600',
-        marginBottom: 8,
-      },
-      h4: {
-        ...getTypographyStyle('bodyInput'),
-        color: colors.textHeading,
-        fontWeight: '600',
-        marginBottom: 6,
-      },
-      h5: {
-        ...getTypographyStyle('subhead'),
-        color: colors.textHeading,
-        fontWeight: '600',
-        marginBottom: 4,
-      },
-      h6: {
-        ...getTypographyStyle('footnote'),
-        color: colors.textHeading,
-        fontWeight: '600',
-        marginBottom: 4,
-      },
-    }),
-    [colors.textHeading],
-  );
-  const markdownSupramarkStyles = React.useMemo(
-    () =>
-      ({
-        paragraph: markdownParagraphStyle,
-        ...markdownHeadingStyles,
-        listItemText: markdownTextStyle,
-        inlineCode: markdownTextStyle,
-        code: markdownTextStyle,
-      }) as unknown as SupramarkStyles,
-    [markdownHeadingStyles, markdownParagraphStyle, markdownTextStyle],
   );
 
   const getDisplayFileName = React.useCallback(
@@ -611,7 +564,8 @@ export default function ChatBubble({
       colors={colors}
       getDisplayFileName={getDisplayFileName}
       getDisplayFileType={getDisplayFileType}
-      markdownSupramarkStyles={markdownSupramarkStyles}
+      markdownContentStyle={markdownContentStyle}
+      supramarkTheme={supramarkTheme}
       typewriterEnabled={typewriterEnabled}
       onTypewriterComplete={handleTypewriterComplete}
       t={t}
