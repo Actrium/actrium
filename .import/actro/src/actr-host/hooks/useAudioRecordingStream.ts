@@ -10,6 +10,7 @@ import {
   AudioStreamManager,
   createAudioStream,
 } from '../utils/AudioStreamManager';
+import { calculatePcmMetering } from '../utils/AudioMetering';
 import { useIntervalTimer } from '../../hooks';
 import { GlobalAlert } from '../../components';
 
@@ -60,39 +61,6 @@ async function requestMicrophonePermission(): Promise<boolean> {
   }
   // iOS 会在首次使用时自动请求
   return true;
-}
-
-/**
- * 计算 PCM 音频数据的分贝值并映射到 0-1
- * 中文注释：按 16-bit PCM 录音切片估算输入音量，用于语音录制时的实时波形反馈。
- */
-function calculateMetering(chunk: Uint8Array): number {
-  if (!chunk || chunk.length === 0) return 0;
-
-  let sumSquares = 0;
-  const sampleCount = Math.floor(chunk.length / 2);
-
-  for (let i = 0; i < chunk.length - 1; i += 2) {
-    // 假设是 16-bit Little Endian PCM (AudioStreamManager 中配置为 bitsPerSample: 16)
-    let sample = chunk[i] | (chunk[i + 1] << 8);
-    if (sample > 32767) sample -= 65536;
-    const normalized = sample / 32768;
-    sumSquares += normalized * normalized;
-  }
-
-  const rms = Math.sqrt(sumSquares / (sampleCount || 1));
-  // 使用 20 * log10(rms) 计算分贝
-  // 加上一个极小值避免 log10(0)
-  const db = 20 * Math.log10(rms + 1e-6);
-
-  const MIN_DB = -40;
-  let volume = 0;
-  if (db > MIN_DB) {
-    // 将 [MIN_DB, 0] 映射到 [0, 1]
-    volume = (db - MIN_DB) / (0 - MIN_DB);
-  }
-
-  return Math.min(1, Math.max(0, volume));
 }
 
 /**
@@ -160,7 +128,7 @@ export function useAudioRecordingStream(
 
           setChunkCount((prev) => prev + 1);
           // 计算并更新音量波动
-          const m = calculateMetering(chunk);
+          const m = calculatePcmMetering(chunk);
           setMetering(m);
 
           try {

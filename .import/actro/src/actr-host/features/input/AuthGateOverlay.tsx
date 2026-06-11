@@ -41,7 +41,7 @@ export function AuthGateOverlay({
     await checkInputAuth();
   }, [checkInputAuth]);
 
-  // 中文注释：overlay 显隐直接绑定登录态和授权缓存，状态更新后自动刷新 UI。
+  // overlay 显隐直接绑定登录态和授权缓存，状态更新后自动刷新 UI。
   if (!shouldBlockInput) return null;
 
   return (

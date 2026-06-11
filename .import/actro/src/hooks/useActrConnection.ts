@@ -193,7 +193,7 @@ export function useActrConnection({
     const ids = await Promise.all(
       attachments.map(async (item) =>
         connection!.uploadAttachment({
-          // 中文注释：prepare/result 协议都以 attachmentId 作为唯一键，这里优先复用输入态附件 ID 与宿主对齐。
+          // prepare/result 协议都以 attachmentId 作为唯一键，这里优先复用输入态附件 ID 与宿主对齐。
           attachmentId: item.id || Utils.generateId(),
           sessionId,
           fileName: item.file_name || 'unknown',

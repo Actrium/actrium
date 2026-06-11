@@ -216,7 +216,7 @@ export default function GlobalSearchApp() {
   }, [loadBookmarks]);
 
   useEffect(() => {
-    // 中文注释：活跃应用搜索改为基于页面打开时的 tab 快照做本地过滤，
+    // 活跃应用搜索改为基于页面打开时的 tab 快照做本地过滤，
     // 避免每次提交搜索都跨桥拉取一次，保持交互和书签搜索一致。
     getAllTabs().then((tabs) => {
       setAllTabs(tabs);

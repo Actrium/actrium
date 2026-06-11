@@ -136,7 +136,7 @@ export const ActrApp: React.FC<ActrProps> = (props) => {
     if (!isAndroid) {
       return;
     }
-    // 中文注释：Android 先吃首屏 props，后续完全以宿主尺寸变更事件为准，
+    // Android 先吃首屏 props，后续完全以宿主尺寸变更事件为准，
     // 避免宿主 RootView 改变后 RN 仍停留在旧宽度。
     const unScribe = ContainerEvents.onContainerSizeChange(
       ({ containerWidth, containerHeight }) => {

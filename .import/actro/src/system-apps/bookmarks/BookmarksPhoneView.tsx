@@ -65,7 +65,7 @@ export default function BookmarksPhoneView({
     [groups],
   );
   const getDisplayName = React.useCallback((item: TBookmarkItem) => {
-    // 中文注释：dead 状态只作为名字后缀展示，避免改动书签列表的原始排序和点击行为。
+    // dead 状态只作为名字后缀展示，避免改动书签列表的原始排序和点击行为。
     if (item.app_status === 'dead') {
       return `${item.instance_name}（已停止服务）`;
     }
@@ -224,7 +224,7 @@ const styles = StyleSheet.create({
   listItemDivider: {
     height: 1,
     backgroundColor: '#2C2C2E',
-    // 中文注释：分隔线起点跟 settings 菜单项保持一致，需要避开左侧图标和文本起始前的间距。
+    // 分隔线起点跟 settings 菜单项保持一致，需要避开左侧图标和文本起始前的间距。
     marginLeft: 55,
     marginRight: spacing.md,
   },

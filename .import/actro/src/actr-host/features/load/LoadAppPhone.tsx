@@ -48,7 +48,7 @@ const LoadAppPhone = () => {
   ).current;
 
   React.useEffect(() => {
-    // 中文注释：扫码区域保持挂载，仅通过透明度做显隐切换，
+    // 扫码区域保持挂载，仅通过透明度做显隐切换，
     // 避免直接卸载导致内容闪断，同时让布局占位始终稳定。
     Animated.timing(scanSectionOpacity, {
       toValue: inputExpanded ? 0 : 1,
@@ -142,7 +142,7 @@ const LoadAppPhone = () => {
                       iconSize={16}
                       iconColor={colors.textIconStrong}
                       onPress={() => {
-                        // 中文注释：收起时要同时撤销焦点和展开态，
+                        // 收起时要同时撤销焦点和展开态，
                         // 保证 Phone 端回到默认按钮态，并恢复上方扫码区内容。
                         inputRef.current?.blur();
                         setInputExpanded(false);
@@ -218,7 +218,7 @@ const makeStyles = (colors: ColorTokens) => {
       ...StyleSheet.absoluteFillObject,
       borderRadius: 26,
       overflow: 'hidden',
-      // 中文注释：扫码内容层需要盖过 scan.png，避免打开相机按钮被外框图片压住。
+      // 扫码内容层需要盖过 scan.png，避免打开相机按钮被外框图片压住。
       zIndex: 2,
     },
     scanOverlay: {

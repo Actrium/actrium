@@ -292,7 +292,7 @@ export default function ChatShareBubble({
                 markdown={content}
                 config={SUPRAMARK_FULL_CONFIG}
                 containerRenderers={SUPRAMARK_CONTAINER_RENDERERS as any}
-                // 中文注释：分享卡片沿用聊天正文渲染配置，保证截图样式与对话页一致。
+                // 分享卡片沿用聊天正文渲染配置，保证截图样式与对话页一致。
                 styles={markdownSupramarkStyles}
               />
             </View>

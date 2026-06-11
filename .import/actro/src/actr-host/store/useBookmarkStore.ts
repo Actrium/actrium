@@ -161,7 +161,7 @@ export const useBookmarkStore = create<BookmarkState>((set, get) => ({
         try {
           await setTabBookmarkStatus(tabId, isBookmarked);
         } catch (error) {
-          // 中文注释：批量同步收藏态时，某个 tab 可能已经在关闭过程中被 native 销毁，
+          // 批量同步收藏态时，某个 tab 可能已经在关闭过程中被 native 销毁，
           // 这种场景不应该把整次同步判定为失败，只需要清掉残留映射并忽略。
           if (isTabNotFoundError(error)) {
             useTabIdMapStore.getState().removeTabIdMap(tabId);

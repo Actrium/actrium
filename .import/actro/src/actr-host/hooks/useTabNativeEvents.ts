@@ -52,7 +52,7 @@ export function useTabNativeEvents(tabId: string) {
       const currentAppId = useTabIdMapStore.getState().tabIdMap[tabId];
       if (!currentAppId) return;
 
-      // 中文注释：原生回流同 appId 其他 tab 的同步事件时，
+      // 原生回流同 appId 其他 tab 的同步事件时，
       // store 往往已经处于目标状态；这里直接按当前状态做幂等判断，避免重复写库。
       if (
         useBookmarkStore.getState().isBookmarked(currentAppId) ===

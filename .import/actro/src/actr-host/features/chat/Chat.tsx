@@ -87,9 +87,9 @@ const EMPTY_MESSAGE_IDS: string[] = [];
 const EMPTY_SELECTED_PARTS = new Set<'attachments' | 'question' | 'answer'>();
 const ATTACHMENT_PANEL_OPEN_DURATION = 220;
 const ATTACHMENT_PANEL_CLOSE_DURATION = 180;
-// 中文注释：内容区短按关闭附件区时，允许识别为点击的最长按压时长。
+// 内容区短按关闭附件区时，允许识别为点击的最长按压时长。
 const CONTENT_TAP_MAX_DURATION = 220;
-// 中文注释：内容区短按关闭附件区时，允许识别为点击的最大位移。
+// 内容区短按关闭附件区时，允许识别为点击的最大位移。
 const CONTENT_TAP_MAX_MOVE = 8;
 
 interface MessageRowProps {
@@ -361,7 +361,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [showLoadMoreHeader, setShowLoadMoreHeader] = useState(false);
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
-  // 中文注释：分享模式确认后收集的待分享消息列表，非空时打开分享预览。
+  // 分享模式确认后收集的待分享消息列表，非空时打开分享预览。
   const [shareMessages, setShareMessages] = useState<IMessage[]>([]);
   const [inputDockHeight, setInputDockHeight] = useState(0);
   const [inputDockMinHeight, setInputDockMinHeight] = useState(0);
@@ -399,7 +399,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     });
   }, []);
 
-  // 中文注释：输入区在多行文本或附件预览下会变高，按钮只补偿超出基线的增量，避免遮挡输入区。
+  // 输入区在多行文本或附件预览下会变高，按钮只补偿超出基线的增量，避免遮挡输入区。
   const scrollToBottomBottomOffset = useMemo(() => {
     const baseOffset = layoutTokens.isTablet
       ? scrollToBottomButton.bottomOffsetPad
@@ -417,7 +417,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       Date.now() < forceScrollToBottomUntilRef.current;
     if (!shouldKeepBottom) return;
 
-    // 中文注释：animated: true 使内容撑高后的贴底滚动平滑过渡，
+    // animated: true 使内容撑高后的贴底滚动平滑过渡，
     // 配合 Typewriter 的 LayoutAnimation 消除底部闪跳。
     requestAnimationFrame(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
@@ -445,7 +445,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     const initResult = await AppSessionService.initSession(tab.id, appId);
     if (initResult.ok) return;
 
-    // 中文注释：带 preset appUrl 进入 Chat 时，优先尊重线上结果；
+    // 带 preset appUrl 进入 Chat 时，优先尊重线上结果；
     // 只有接口失败后，才允许回落到 SQLite 里的旧应用信息继续恢复历史会话。
     if (!tab.appUrl) {
       return;
@@ -456,7 +456,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       return;
     }
 
-    // 中文注释：DB 里的 url 可能是旧值，恢复旧会话时要优先保留当前 tab 透传的 appUrl，
+    // DB 里的 url 可能是旧值，恢复旧会话时要优先保留当前 tab 透传的 appUrl，
     // 保证后续分享、tab 信息和宿主恢复语义仍然对应本次打开的地址。
     const resolvedAppInfo = {
       ...localAppInfo,
@@ -477,7 +477,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     if (!appId) return;
 
     try {
-      // 中文注释：聊天页只消费书签 store 的内存态；
+      // 聊天页只消费书签 store 的内存态；
       // 若当前进程内尚未加载过书签，则先由 store 统一回源 SQLite。
       await useBookmarkStore.getState().loadBookmarks();
       await useBookmarkStore.getState().syncNativeBookmarkStatusByAppId({
@@ -671,7 +671,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   );
 
   const handleCancelEdit = useCallback(() => {
-    // 中文注释：一次性清空文本、附件和编辑 ID，避免 Android 先退出编辑态再清文本造成焦点中间态。
+    // 一次性清空文本、附件和编辑 ID，避免 Android 先退出编辑态再清文本造成焦点中间态。
     clearInput(tab.id);
   }, [tab.id, clearInput]);
 
@@ -694,7 +694,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     showTopToast,
   ]);
 
-  // 中文注释：Android 宿主已经在 Native 层处理键盘抬升，
+  // Android 宿主已经在 Native 层处理键盘抬升，
   // Chat 页只保留 iOS 的联动，避免 Android Pad 再叠加一层 keyboardInset。
   const shouldApplyKeyboardInset = Platform.OS === 'ios' && layoutTokens.isTablet;
   const attachmentPanelTranslateY = useRef(new Animated.Value(0)).current;
@@ -706,7 +706,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     }
 
     Animated.timing(attachmentPanelTranslateY, {
-      // 中文注释：Phone 端附件区常驻在输入框下方，展开时通过整块内容上移来露出附件区，
+      // Phone 端附件区常驻在输入框下方，展开时通过整块内容上移来露出附件区，
       // 不再压缩 FlatList 高度。
       toValue: phoneAttachmentPanelController.isAttachmentPanelOpen
         ? -attachmentPanelHeight
@@ -731,14 +731,14 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     }
 
     return {
-      // 中文注释：keyboard-controller 在 iOS 上给出的是负位移，这里转成正的底部内边距，
+      // keyboard-controller 在 iOS 上给出的是负位移，这里转成正的底部内边距，
       // 让内容区随键盘高度实时压缩，而不是等键盘收起后再错位回弹。
       paddingBottom: Math.max(-keyboardHeight.value, 0),
     };
   }, [layoutTokens.isTablet]);
   const isEmptyState =
     hasLoadedInitialMessages && messageIds.length === 0 && !isLoadingMore;
-  // 中文注释：iOS Phone 空态下，内容区会先跟随 keyboard-controller 上移，
+  // iOS Phone 空态下，内容区会先跟随 keyboard-controller 上移，
   // 随后输入区底部安全区留白又从 insets.bottom 切到较小值，导致居中空态被二次拉回。
   // 这里把输入区收缩掉的那段高度补回给空态容器，避免出现“先上后下 / 先下后上”的抖动。
   const emptyStateBottomCompensation =
@@ -833,13 +833,13 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     );
   }, [tab.id, deleteSelectedMessages, exitSelectionMode, t]);
 
-  // 中文注释：点击"生成预览图"时先打开预览层，再延后一帧退出选择模式，避免列表退出动画阻塞弹窗首帧。
+  // 点击"生成预览图"时先打开预览层，再延后一帧退出选择模式，避免列表退出动画阻塞弹窗首帧。
   const handleShareConfirm = useCallback(() => {
     const byId = useMessageStore.getState().messageById[tab.id] || {};
     const orderedIds = useMessageStore.getState().messageIds[tab.id] || [];
     const currentSelectedItems = useMessageStore.getState().selectedItems;
 
-    // 中文注释：按消息在列表中的原始顺序排列，保证分享图内容顺序与聊天一致。
+    // 按消息在列表中的原始顺序排列，保证分享图内容顺序与聊天一致。
     const orderedMessages: IMessage[] = [];
     for (const id of orderedIds) {
       const parts = currentSelectedItems[id];
@@ -847,7 +847,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
       const message = byId[id];
       if (!message) continue;
 
-      // 中文注释：根据选中的 part 构建部分消息，只包含用户选中的内容。
+      // 根据选中的 part 构建部分消息，只包含用户选中的内容。
       const partial: IMessage = { ...message };
       if (!parts.has('attachments')) partial.attachments = undefined;
       if (!parts.has('question')) {
@@ -876,7 +876,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
   const handleContentScrollBeginDrag = useCallback(() => {
     dismissKeyboard();
 
-    // 中文注释：Phone 端附件区展开时，内容区一旦开始滚动就立即收起，避免列表滚动和底部扩展态并存。
+    // Phone 端附件区展开时，内容区一旦开始滚动就立即收起，避免列表滚动和底部扩展态并存。
     if (
       !layoutTokens.isTablet &&
       phoneAttachmentPanelController.isAttachmentPanelOpen
@@ -896,7 +896,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     moved: boolean;
   } | null>(null);
 
-  // 中文注释：记录内容区触摸起点，用于区分短按、长按和拖动。
+  // 记录内容区触摸起点，用于区分短按、长按和拖动。
   const handleContentTouchStart = useCallback(
     (event: GestureResponderEvent) => {
       const { pageX, pageY } = event.nativeEvent;
@@ -910,7 +910,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     [],
   );
 
-  // 中文注释：在手指移动时更新触摸状态，避免把拖动误判成短按点击。
+  // 在手指移动时更新触摸状态，避免把拖动误判成短按点击。
   const handleContentTouchMove = useCallback(
     (event: GestureResponderEvent) => {
       const touchState = contentTouchStartRef.current;
@@ -929,7 +929,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
     [],
   );
 
-  // 中文注释：内容区触摸结束时，只对短按动作收起附件区，保留长按和拖动交互。
+  // 内容区触摸结束时，只对短按动作收起附件区，保留长按和拖动交互。
   const handleContentTouchEnd = useCallback(() => {
     const touchState = contentTouchStartRef.current;
     contentTouchStartRef.current = null;
@@ -940,7 +940,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
 
     const duration = Date.now() - touchState.time;
 
-    // 中文注释：只有短按内容区才收起附件区，长按和拖动都不触发，避免误伤消息长按能力。
+    // 只有短按内容区才收起附件区，长按和拖动都不触发，避免误伤消息长按能力。
     if (
       !layoutTokens.isTablet &&
       phoneAttachmentPanelController.isAttachmentPanelOpen &&
@@ -1170,7 +1170,7 @@ export default function Chat({ showTemporaryMock = false }: ChatProps) {
         <LocationPicker
           visible={phoneAttachmentPanelController.showMapModal}
           onClose={() => phoneAttachmentPanelController.setShowMapModal(false)}
-          // 中文注释：Phone 端附件定位选择器贴底展示，和底部附件面板保持同一交互方向。
+          // Phone 端附件定位选择器贴底展示，和底部附件面板保持同一交互方向。
           presentation='bottom'
           onSelect={(data) => {
             phoneAttachmentPanelController.handleConfirmLocation(data);

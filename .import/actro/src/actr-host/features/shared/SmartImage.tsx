@@ -27,7 +27,7 @@ export const SmartImage: React.FC<SmartImageProps> = ({
     : undefined;
 
   // 如果没有 cdnUrl，或者已经标记为使用本地，则直接用本地
-  // 中文注释：只有本地路径真实存在时才优先走本地，否则直接走 CDN，避免生成 `{ uri: undefined }` 导致图片完全不加载。
+  // 只有本地路径真实存在时才优先走本地，否则直接走 CDN，避免生成 `{ uri: undefined }` 导致图片完全不加载。
   const source: ImageSourcePropType = useLocal && encodedLocalUrl
     ? { uri: encodedLocalUrl }
     : { uri: cdnUrl };

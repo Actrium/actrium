@@ -47,7 +47,7 @@ export function useActrVoiceController(
 
   // 语音流本地缓冲：<1s 先入队，达到阈值后再按序发送。
   const chunkQueueRef = useRef<Uint8Array[]>([]);
-  // 中文注释：本地完整录音单独缓存，避免发送队列被 drain 后无法回放落盘。
+  // 本地完整录音单独缓存，避免发送队列被 drain 后无法回放落盘。
   const recordedChunksRef = useRef<Uint8Array[]>([]);
   const isSendingRef = useRef(false);
   const isDrainingRef = useRef(false);

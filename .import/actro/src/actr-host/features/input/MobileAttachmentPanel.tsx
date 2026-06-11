@@ -63,7 +63,7 @@ const PAGE_SWIPE_ACTIVATE_OFFSET_X = 10;
 const PAGE_SWIPE_FAIL_OFFSET_Y = 8;
 const PAGE_SWIPE_VELOCITY_THRESHOLD = 500;
 const PAGE_SWIPE_ANIMATION_DURATION = 220;
-// 中文注释：安卓字体渲染偏大，这里单独收窄附件面板文案字号与行高。
+// 安卓字体渲染偏大，这里单独收窄附件面板文案字号与行高。
 const PRIMARY_TEXT_FONT_SIZE = Platform.OS === 'android' ? 10 : 12;
 const PRIMARY_TEXT_LINE_HEIGHT = Platform.OS === 'android' ? 14 : 16;
 const SECONDARY_TITLE_FONT_SIZE = Platform.OS === 'android' ? 15 : 17;
@@ -71,11 +71,11 @@ const SECONDARY_TITLE_LINE_HEIGHT = Platform.OS === 'android' ? 19 : 21;
 const SECONDARY_SUBTITLE_FONT_SIZE = Platform.OS === 'android' ? 11 : 13;
 const SECONDARY_SUBTITLE_LINE_HEIGHT = Platform.OS === 'android' ? 14 : 16;
 
-// 中文注释：统一计算附件面板底部留白，安卓兜住手势导航条的最小安全距离。
+// 统一计算附件面板底部留白，安卓兜住手势导航条的最小安全距离。
 export const getMobileAttachmentPanelBottomPadding = (bottomInset: number) =>
   Platform.OS === 'android' ? Math.max(bottomInset, 22) : bottomInset;
 
-// 中文注释：统一计算附件面板总高度，保证内部布局和外层动画位移使用同一套尺寸。
+// 统一计算附件面板总高度，保证内部布局和外层动画位移使用同一套尺寸。
 export const getMobileAttachmentPanelHeight = (bottomInset: number) =>
   PANEL_TOP_PADDING +
   PANEL_ROW_HEIGHT +
@@ -179,7 +179,7 @@ export default function MobileAttachmentPanel({
     ],
   );
 
-  // 中文注释：第二页两个卡片直接按页宽二等分，避免状态切换时 flex 重新测量导致宽度抖动。
+  // 第二页两个卡片直接按页宽二等分，避免状态切换时 flex 重新测量导致宽度抖动。
   const secondaryItemWidth = React.useMemo(() => {
     if (panelWidth <= 0) {
       return undefined;
@@ -233,7 +233,7 @@ export default function MobileAttachmentPanel({
             return;
           }
 
-          // 中文注释：分页位移完全由手势驱动，拖动过程直接更新容器平移，避免 Android ScrollView 在抬手阶段停在中间。
+          // 分页位移完全由手势驱动，拖动过程直接更新容器平移，避免 Android ScrollView 在抬手阶段停在中间。
           translateX.value = clamp(
             gestureStartTranslateX.value + event.translationX,
             -panelWidth * (PAGE_COUNT - 1),

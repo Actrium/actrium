@@ -34,7 +34,7 @@ export const AboutWebViewModal = ({
     }
 
     setModalVisible(true);
-    // 中文注释：设置页和登录页统一复用同一个全屏 Modal 壳，保证协议/关于页的进入动画和返回方式一致。
+    // 设置页和登录页统一复用同一个全屏 Modal 壳，保证协议/关于页的进入动画和返回方式一致。
     Animated.timing(translateX, {
       toValue: 0,
       duration: 260,
@@ -44,7 +44,7 @@ export const AboutWebViewModal = ({
   }, [page, translateX, visible]);
 
   const handleClose = useCallback(() => {
-    // 中文注释：先做退场动画再关闭 Modal，避免底层页面直接闪现。
+    // 先做退场动画再关闭 Modal，避免底层页面直接闪现。
     Animated.timing(translateX, {
       toValue: width,
       duration: 220,

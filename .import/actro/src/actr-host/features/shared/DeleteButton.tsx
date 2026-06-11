@@ -39,7 +39,7 @@ export const DeleteButton: React.FC<DeleteButtonProps> = ({
   return (
     <View style={styles.footer}>
       <LinearGradient
-        // 中文注释：前 1/3 区域完成透明到实体背景的过渡，后 2/3 保持纯色不再继续渐变。
+        // 前 1/3 区域完成透明到实体背景的过渡，后 2/3 保持纯色不再继续渐变。
         colors={[
           colors.bgDeleteGradientStart,
           colors.bgDeleteGradientEnd,

@@ -24,7 +24,7 @@ const useAuth = (appId: string) => {
 
     // 允许匿名访问
     if (appInfo?.allow_anonymous_access) {
-      // 中文注释：匿名应用也写入已授权缓存，保证依赖本地授权态的 UI（如输入框 overlay）能立即放行。
+      // 匿名应用也写入已授权缓存，保证依赖本地授权态的 UI（如输入框 overlay）能立即放行。
       useAuthTaskStore.getState().addAuthorizedAppId(appId);
       return { status: 'authorized', clientId, appId };
     }

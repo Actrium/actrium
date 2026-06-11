@@ -8,6 +8,6 @@ export interface PhoneNavigationBarProps {
   style?: StyleProp<ViewStyle>;
 }
 
-// 中文注释：iOS 和 Android 均使用原生导出的 PhoneNavigationBarView
+// iOS 和 Android 均使用原生导出的 PhoneNavigationBarView
 export const PhoneNavigationBar =
   requireNativeComponent<PhoneNavigationBarProps>('PhoneNavigationBarView');
