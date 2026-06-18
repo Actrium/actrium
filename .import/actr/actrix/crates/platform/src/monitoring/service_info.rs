@@ -80,11 +80,11 @@ impl ServiceInfo {
             }
             ServiceType::Turn => (
                 config.bind.ice.port.to_string(),
-                format!("turn:{}", config.bind.ice.ip),
+                format!("turn:{}", config.bind.ice.advertised_ip),
             ),
             ServiceType::Stun => (
                 config.bind.ice.port.to_string(),
-                format!("stun:{}", config.bind.ice.ip),
+                format!("stun:{}", config.bind.ice.advertised_ip),
             ),
             ServiceType::Ais | ServiceType::Ks | ServiceType::Mfr => {
                 if let Some(ref h) = config.bind.http {
@@ -203,5 +203,30 @@ impl From<&ServiceInfo> for ProtoServiceStatus {
 impl From<ServiceInfo> for ProtoServiceStatus {
     fn from(service_info: ServiceInfo) -> Self {
         Self::from(&service_info)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_ice(advertised_ip: &str, port: u16) -> ActrixConfig {
+        let mut config = ActrixConfig::default();
+        config.bind.ice.advertised_ip = advertised_ip.to_string();
+        config.bind.ice.port = port;
+        config
+    }
+
+    #[test]
+    fn stun_turn_advertise_public_ip_not_listen_ip() {
+        let config = config_with_ice("123.0.0.10", 3480);
+
+        let turn = ServiceInfo::new("TURN Server", ServiceType::Turn, None, &config);
+        assert_eq!(turn.port_info, "3480");
+        assert_eq!(turn.domain_name, "turn:123.0.0.10");
+
+        let stun = ServiceInfo::new("STUN Server", ServiceType::Stun, None, &config);
+        assert_eq!(stun.port_info, "3480");
+        assert_eq!(stun.domain_name, "stun:123.0.0.10");
     }
 }
