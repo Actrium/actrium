@@ -478,9 +478,14 @@ dependencies = [
  "actr-protocol 0.3.12",
  "actr-runtime 0.3.12",
  "actr-runtime-mailbox 0.3.12",
+ "actrix-ais",
  "actrix-mfr",
+ "actrix-platform",
  "actrix-sdk",
- "ais",
+ "actrix-signaling",
+ "actrix-signer",
+ "actrix-stun",
+ "actrix-turn",
  "anyhow",
  "async-trait",
  "axum",
@@ -507,7 +512,6 @@ dependencies = [
  "opentelemetry-otlp 0.31.1",
  "opentelemetry-proto 0.31.0",
  "opentelemetry_sdk 0.31.0",
- "platform",
  "prometheus",
  "prost 0.14.3",
  "prost-types",
@@ -519,11 +523,8 @@ dependencies = [
  "serde",
  "serde_json",
  "serial_test",
- "signaling",
- "signer",
  "sqlx",
  "strum 0.26.3",
- "stun 0.1.2",
  "subtle",
  "tempfile",
  "thiserror 2.0.18",
@@ -539,7 +540,6 @@ dependencies = [
  "tracing-appender",
  "tracing-opentelemetry 0.32.1",
  "tracing-subscriber",
- "turn 0.1.2",
  "typetag",
  "url",
  "urlencoding",
@@ -548,15 +548,73 @@ dependencies = [
 ]
 
 [[package]]
+name = "actrix-admin"
+version = "0.1.2"
+dependencies = [
+ "actrix-platform",
+ "actrix-proto",
+ "chrono",
+ "hex",
+ "nix 0.30.1",
+ "nonce-auth",
+ "pwrzv 0.7.0",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic 0.14.6",
+ "tracing",
+]
+
+[[package]]
+name = "actrix-ais"
+version = "0.1.2"
+dependencies = [
+ "actr-protocol 0.3.12",
+ "actrix-mfr",
+ "actrix-platform",
+ "actrix-signer",
+ "anyhow",
+ "axum",
+ "base64",
+ "ecies",
+ "ed25519-dalek",
+ "governor",
+ "hmac",
+ "nonce-auth",
+ "prost 0.14.3",
+ "prost-types",
+ "rand 0.8.5",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha1",
+ "sha2",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-util",
+ "toml 0.8.23",
+ "tonic 0.14.6",
+ "tower",
+ "tower_governor",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "actrix-mfr"
 version = "0.1.2"
 dependencies = [
+ "actrix-platform",
  "axum",
  "base64",
  "chrono",
  "ed25519-dalek",
  "hex",
- "platform",
  "rand 0.8.5",
  "reqwest",
  "serde",
@@ -569,6 +627,54 @@ dependencies = [
  "tokio",
  "toml 0.8.23",
  "tracing",
+]
+
+[[package]]
+name = "actrix-platform"
+version = "0.1.2"
+dependencies = [
+ "actr-protocol 0.3.12",
+ "actrix-proto",
+ "actrix-signer",
+ "anyhow",
+ "async-trait",
+ "base64",
+ "chrono",
+ "ecies",
+ "ed25519-dalek",
+ "hex",
+ "hmac",
+ "lazy_static",
+ "nonce-auth",
+ "once_cell",
+ "opentelemetry 0.31.0",
+ "proc-macro2",
+ "prometheus",
+ "prost 0.14.3",
+ "prost-types",
+ "pwrzv 0.7.0",
+ "quote",
+ "rand 0.8.5",
+ "rustls",
+ "rustls-pemfile",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha2",
+ "sqlx",
+ "strum 0.27.2",
+ "syn",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-rustls",
+ "tokio-tungstenite",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-opentelemetry 0.32.1",
+ "url",
+ "uuid",
 ]
 
 [[package]]
@@ -586,7 +692,120 @@ dependencies = [
 name = "actrix-sdk"
 version = "0.1.2"
 dependencies = [
- "admin",
+ "actrix-admin",
+]
+
+[[package]]
+name = "actrix-signaling"
+version = "0.1.2"
+dependencies = [
+ "actr-protocol 0.3.12",
+ "actrix-platform",
+ "anyhow",
+ "axum",
+ "base64",
+ "bytes",
+ "chrono",
+ "futures-util",
+ "governor",
+ "opentelemetry 0.31.0",
+ "prost 0.14.3",
+ "prost-types",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sqlx",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite",
+ "tokio-util",
+ "toml 0.8.23",
+ "tracing",
+ "tracing-opentelemetry 0.32.1",
+ "tracing-subscriber",
+ "uuid",
+]
+
+[[package]]
+name = "actrix-signer"
+version = "0.1.2"
+dependencies = [
+ "actrix-proto",
+ "aes-gcm",
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64",
+ "ed25519-dalek",
+ "hex",
+ "hmac",
+ "hyper",
+ "lazy_static",
+ "nonce-auth",
+ "prometheus",
+ "prost 0.14.3",
+ "prost-types",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-stream",
+ "toml 0.8.23",
+ "tonic 0.14.6",
+ "tonic-prost",
+ "tower",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
+name = "actrix-stun"
+version = "0.1.2"
+dependencies = [
+ "actrix-platform",
+ "anyhow",
+ "stun 0.8.0",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "webrtc",
+]
+
+[[package]]
+name = "actrix-turn"
+version = "0.1.2"
+dependencies = [
+ "actr-protocol 0.3.12",
+ "actrix-platform",
+ "anyhow",
+ "base64",
+ "chrono",
+ "hex",
+ "hmac",
+ "lru",
+ "md5 0.8.0",
+ "nonce-auth",
+ "once_cell",
+ "prost 0.14.3",
+ "prost-types",
+ "rsa",
+ "serde",
+ "serde_json",
+ "serial_test",
+ "sha1",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+ "turn",
+ "twox-hash",
+ "uuid",
+ "webrtc",
+ "webrtc-util 0.12.0",
 ]
 
 [[package]]
@@ -603,27 +822,6 @@ name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
-
-[[package]]
-name = "admin"
-version = "0.1.2"
-dependencies = [
- "actrix-proto",
- "chrono",
- "hex",
- "nix 0.30.1",
- "nonce-auth",
- "platform",
- "pwrzv 0.7.0",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tonic 0.14.6",
- "tracing",
-]
 
 [[package]]
 name = "aead"
@@ -679,43 +877,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301"
 dependencies = [
  "memchr",
-]
-
-[[package]]
-name = "ais"
-version = "0.1.2"
-dependencies = [
- "actr-protocol 0.3.12",
- "actrix-mfr",
- "anyhow",
- "axum",
- "base64",
- "ecies",
- "ed25519-dalek",
- "governor",
- "hmac",
- "nonce-auth",
- "platform",
- "prost 0.14.3",
- "prost-types",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "serial_test",
- "sha1",
- "sha2",
- "signer",
- "sqlx",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-util",
- "toml 0.8.23",
- "tonic 0.14.6",
- "tower",
- "tower_governor",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -4449,54 +4610,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
-name = "platform"
-version = "0.1.2"
-dependencies = [
- "actr-protocol 0.3.12",
- "actrix-proto",
- "anyhow",
- "async-trait",
- "base64",
- "chrono",
- "ecies",
- "ed25519-dalek",
- "hex",
- "hmac",
- "lazy_static",
- "nonce-auth",
- "once_cell",
- "opentelemetry 0.31.0",
- "proc-macro2",
- "prometheus",
- "prost 0.14.3",
- "prost-types",
- "pwrzv 0.7.0",
- "quote",
- "rand 0.8.5",
- "rustls",
- "rustls-pemfile",
- "rustls-pki-types",
- "serde",
- "serde_json",
- "serial_test",
- "sha2",
- "signer",
- "sqlx",
- "strum 0.27.2",
- "syn",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-rustls",
- "tokio-tungstenite",
- "toml 0.8.23",
- "tracing",
- "tracing-opentelemetry 0.32.1",
- "url",
- "uuid",
-]
-
-[[package]]
 name = "poly1305"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5654,37 +5767,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "signaling"
-version = "0.1.2"
-dependencies = [
- "actr-protocol 0.3.12",
- "anyhow",
- "axum",
- "base64",
- "bytes",
- "chrono",
- "futures-util",
- "governor",
- "opentelemetry 0.31.0",
- "platform",
- "prost 0.14.3",
- "prost-types",
- "serde",
- "serde_json",
- "serial_test",
- "sqlx",
- "thiserror 2.0.18",
- "tokio",
- "tokio-tungstenite",
- "tokio-util",
- "toml 0.8.23",
- "tracing",
- "tracing-opentelemetry 0.32.1",
- "tracing-subscriber",
- "uuid",
-]
-
-[[package]]
 name = "signature"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5692,43 +5774,6 @@ checksum = "77549399552de45a898a580c1b41d445bf730df867cc44e6c0233bbc4b8329de"
 dependencies = [
  "digest 0.10.7",
  "rand_core 0.6.4",
-]
-
-[[package]]
-name = "signer"
-version = "0.1.2"
-dependencies = [
- "actrix-proto",
- "aes-gcm",
- "anyhow",
- "async-trait",
- "axum",
- "base64",
- "ed25519-dalek",
- "hex",
- "hmac",
- "hyper",
- "lazy_static",
- "nonce-auth",
- "prometheus",
- "prost 0.14.3",
- "prost-types",
- "rand 0.8.5",
- "reqwest",
- "serde",
- "serde_json",
- "sha2",
- "sqlx",
- "tempfile",
- "thiserror 2.0.18",
- "tokio",
- "tokio-stream",
- "toml 0.8.23",
- "tonic 0.14.6",
- "tonic-prost",
- "tower",
- "tracing",
- "uuid",
 ]
 
 [[package]]
@@ -6061,19 +6106,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "stun"
-version = "0.1.2"
-dependencies = [
- "anyhow",
- "platform",
- "stun 0.8.0",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "webrtc",
 ]
 
 [[package]]
@@ -6946,38 +6978,6 @@ dependencies = [
  "sha1",
  "thiserror 2.0.18",
  "utf-8",
-]
-
-[[package]]
-name = "turn"
-version = "0.1.2"
-dependencies = [
- "actr-protocol 0.3.12",
- "anyhow",
- "base64",
- "chrono",
- "hex",
- "hmac",
- "lru",
- "md5 0.8.0",
- "nonce-auth",
- "once_cell",
- "platform",
- "prost 0.14.3",
- "prost-types",
- "rsa",
- "serde",
- "serde_json",
- "serial_test",
- "sha1",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
- "turn 0.11.0",
- "twox-hash",
- "uuid",
- "webrtc",
- "webrtc-util 0.12.0",
 ]
 
 [[package]]
@@ -8026,7 +8026,7 @@ dependencies = [
  "stun 0.9.0",
  "thiserror 1.0.69",
  "tokio",
- "turn 0.11.0",
+ "turn",
  "unicase",
  "url",
  "waitgroup",
@@ -8071,7 +8071,7 @@ dependencies = [
  "stun 0.9.0",
  "thiserror 1.0.69",
  "tokio",
- "turn 0.11.0",
+ "turn",
  "url",
  "uuid",
  "waitgroup",

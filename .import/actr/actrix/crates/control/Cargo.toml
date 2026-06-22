@@ -1,5 +1,5 @@
 [package]
-name = "admin"
+name = "actrix-admin"
 version = "0.1.2"
 edition.workspace = true
 rust-version.workspace = true
@@ -25,7 +25,7 @@ pwrzv = { version = "0.7.0" }
 
 sqlx = { workspace = true }
 
-platform = { path = "../platform" }
+platform = { path = "../platform", package = "actrix-platform" }
 actrix-proto = { path = "../contracts" }
 
 [target.'cfg(unix)'.dependencies]

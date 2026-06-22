@@ -1,5 +1,5 @@
 [package]
-name = "stun"
+name = "actrix-stun"
 version = "0.1.2"
 edition.workspace = true
 rust-version.workspace = true
@@ -16,4 +16,4 @@ anyhow = { workspace = true }
 thiserror = { workspace = true }
 webrtc = { workspace = true }
 
-platform = { path = "../platform" }
+platform = { path = "../platform", package = "actrix-platform" }

@@ -1,5 +1,5 @@
 [package]
-name = "signer"
+name = "actrix-signer"
 version = "0.1.2"
 edition.workspace = true
 repository.workspace = true

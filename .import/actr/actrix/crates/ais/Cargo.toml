@@ -1,5 +1,5 @@
 [package]
-name = "ais"
+name = "actrix-ais"
 version = "0.1.2"
 edition.workspace = true
 rust-version.workspace = true
@@ -46,8 +46,8 @@ governor = "0.10"
 
 
 # Internal dependencies
-platform = { path = "../platform" }
-signer = { path = "../signer" }
+platform = { path = "../platform", package = "actrix-platform" }
+signer = { path = "../signer", package = "actrix-signer" }
 actrix-mfr = { path = "../mfr" }
 
 [dev-dependencies]
