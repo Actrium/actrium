@@ -52,13 +52,13 @@ axum-server = { version = "0.7.3", default-features = false, features = [
 
 # Local dependencies
 actrix-sdk = { path = "../sdk" }
-platform = { path = "../platform" }
-signaling = { path = "../signaling" }
-stun = { path = "../stun" }
-turn = { path = "../turn" }
-ais = { path = "../ais" }
+platform = { path = "../platform", package = "actrix-platform" }
+signaling = { path = "../signaling", package = "actrix-signaling" }
+stun = { path = "../stun", package = "actrix-stun" }
+turn = { path = "../turn", package = "actrix-turn" }
+ais = { path = "../ais", package = "actrix-ais" }
 actrix-mfr = { path = "../mfr" }
-signer = { path = "../signer" }
+signer = { path = "../signer", package = "actrix-signer" }
 rand = "0.9.1"
 futures = "0.3.31"
 num_cpus = "1.16.0"
@@ -100,7 +100,7 @@ nix = { version = "0.30", features = ["user"] }
 
 [dev-dependencies]
 actrix-sdk = { path = "../sdk", features = ["testing"] }
-platform = { path = "../platform" }
+platform = { path = "../platform", package = "actrix-platform" }
 tempfile = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
 urlencoding = "2.1"

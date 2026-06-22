@@ -12,4 +12,4 @@ default = []
 testing = []
 
 [dependencies]
-admin = { path = "../control" }
+admin = { path = "../control", package = "actrix-admin" }
