@@ -47,7 +47,7 @@ class TabSurfaceManager: ObservableObject {
 
     // MARK: - Private State
 
-    private let processManager = TabProcessManager.shared
+    private let processManager = LegacyRendererProcessManager.shared
     private var cancellables = Set<AnyCancellable>()
     private var startingTabs = Set<UUID>()
 

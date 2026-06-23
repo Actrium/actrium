@@ -66,7 +66,7 @@ final class AppsManagerWindowController: NSObject, NSWindowDelegate {
 // MARK: - Apps Manager View
 
 struct AppsManagerView: View {
-    @ObservedObject private var processManager = TabProcessManager.shared
+    @ObservedObject private var diagnosticsStore = RendererDiagnosticsStore.shared
     @ObservedObject private var devTools = DevToolsManager.shared
     @State private var selectedRowId: UUID?
     @State private var refreshTrigger: Bool = false
@@ -188,9 +188,9 @@ struct AppsManagerView: View {
             let tabId = tab.id
 
             // Get process info for this tab
-            if let processInfo = processManager.processes[tabId] {
+            if let processInfo = diagnosticsStore.processInfo(for: tabId) {
                 let metrics = processInfo.pid.flatMap {
-                    processManager.getProcessMetrics(pid: $0)
+                    diagnosticsStore.getProcessMetrics(pid: $0)
                 }
 
                 let memoryMB = Double(metrics?.memory ?? 0) / 1_048_576.0
@@ -235,8 +235,8 @@ struct AppsManagerView: View {
         guard let processId = selectedRowId else { return }
 
         // Terminate the renderer process
-        if processManager.processes[processId] != nil {
-            processManager.terminateProcess(for: processId)
+        if diagnosticsStore.processInfo(for: processId) != nil {
+            diagnosticsStore.terminateLegacyRenderer(for: processId)
         }
 
         // Close the tab through BrowserViewModel

@@ -322,7 +322,7 @@ class CALayerHostDisplayView: NSView {
             viewWidth: Double(bounds.width),
             viewHeight: Double(bounds.height)
         )
-        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
+        LegacyRendererProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     private func forwardMouseEvent(_ event: NSEvent, type: TabXPCEvent.EventType) {
@@ -336,7 +336,7 @@ class CALayerHostDisplayView: NSView {
             viewWidth: Double(bounds.width),
             viewHeight: Double(bounds.height)
         )
-        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
+        LegacyRendererProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     // MARK: - Keyboard Events
@@ -358,7 +358,7 @@ class CALayerHostDisplayView: NSView {
             modifierFlags: event.modifierFlags.rawValue,
             keyCode: event.keyCode
         )
-        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
+        LegacyRendererProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     private func forwardKeyEvent(_ event: NSEvent, type: TabXPCEvent.EventType) {
@@ -369,7 +369,7 @@ class CALayerHostDisplayView: NSView {
             keyCode: event.keyCode,
             characters: event.characters
         )
-        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
+        LegacyRendererProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     // MARK: - Hit Testing
@@ -452,7 +452,7 @@ struct MultiProcessTabView: View {
     let tab: Tab
     let containerSize: CGSize
 
-    private let processManager = TabProcessManager.shared
+    private let processManager = LegacyRendererProcessManager.shared
 
     @State private var surfaceID: UInt32 = 0  // Actually contextId
     @State private var isLoading: Bool = true

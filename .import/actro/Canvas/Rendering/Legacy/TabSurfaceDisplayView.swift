@@ -204,7 +204,7 @@ class TabSurfaceDisplayNSView: NSView {
             viewWidth: Double(bounds.width),
             viewHeight: Double(bounds.height)
         )
-        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
+        LegacyRendererProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     private func forwardMouseEvent(_ event: NSEvent, type: TabXPCEvent.EventType) {
@@ -218,7 +218,7 @@ class TabSurfaceDisplayNSView: NSView {
             viewWidth: Double(bounds.width),
             viewHeight: Double(bounds.height)
         )
-        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
+        LegacyRendererProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     // MARK: - Keyboard Events
@@ -240,7 +240,7 @@ class TabSurfaceDisplayNSView: NSView {
             modifierFlags: event.modifierFlags.rawValue,
             keyCode: event.keyCode
         )
-        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
+        LegacyRendererProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     private func forwardKeyEvent(_ event: NSEvent, type: TabXPCEvent.EventType) {
@@ -251,7 +251,7 @@ class TabSurfaceDisplayNSView: NSView {
             keyCode: event.keyCode,
             characters: event.characters
         )
-        TabProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
+        LegacyRendererProcessManager.shared.forwardEvent(xpcEvent, to: tabId)
     }
 
     // MARK: - Hit Testing

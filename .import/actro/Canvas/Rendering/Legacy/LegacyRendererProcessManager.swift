@@ -51,8 +51,8 @@ class TabProcessInfo: ObservableObject {
 
 /// Manages tab renderer processes via Unix Socket + Protobuf IPC
 /// Canvas creates a Unix socket and launches CanvasTabRenderer which connects to it
-class TabProcessManager: ObservableObject {
-    static let shared = TabProcessManager()
+class LegacyRendererProcessManager: ObservableObject {
+    static let shared = LegacyRendererProcessManager()
 
     /// Active tab processes keyed by tab ID
     @Published private(set) var processes: [UUID: TabProcessInfo] = [:]
@@ -89,7 +89,7 @@ class TabProcessManager: ObservableObject {
             let event = self.memoryPressureSource?.data ?? []
 
             if event.contains(.critical) {
-                logger.warning("TabProcessManager: Critical memory pressure")
+                logger.warning("LegacyRendererProcessManager: Critical memory pressure")
                 self.handleCriticalMemoryPressure()
             }
         }
@@ -105,8 +105,8 @@ class TabProcessManager: ObservableObject {
 
     /// Get a renderer for a tab by launching helper process with Unix Socket IPC
     func getRenderer(for tabId: UUID, config: TabXPCConfig, viewportSize: CGSize? = nil) async throws -> TabProcessInfo {
-        NSLog("🔵 [DEBUG] TabProcessManager.getRenderer: tabId=\(tabId), isMultiProcessEnabled=\(isMultiProcessEnabled)")
-        logger.info("TabProcessManager: Launching tab \(tabId)")
+        NSLog("🔵 [DEBUG] LegacyRendererProcessManager.getRenderer: tabId=\(tabId), isMultiProcessEnabled=\(isMultiProcessEnabled)")
+        logger.info("LegacyRendererProcessManager: Launching tab \(tabId)")
 
         let processInfo = TabProcessInfo(tabId: tabId)
         processInfo.state = .launching
@@ -123,7 +123,7 @@ class TabProcessManager: ObservableObject {
         ipcConnection.onSurfaceUpdated = { [weak processInfo] newSurfaceID in
             DispatchQueue.main.async {
                 guard let info = processInfo, newSurfaceID != info.surfaceID else { return }
-                logger.info("TabProcessManager: Surface ID updated: \(info.surfaceID) -> \(newSurfaceID)")
+                logger.info("LegacyRendererProcessManager: Surface ID updated: \(info.surfaceID) -> \(newSurfaceID)")
                 info.surfaceID = newSurfaceID
                 NotificationCenter.default.post(
                     name: .tabSurfaceUpdated,
@@ -180,9 +180,9 @@ class TabProcessManager: ObservableObject {
         // Start the IPC server (creates Unix socket)
         do {
             try ipcConnection.start()
-            NSLog("🔵 [DEBUG] TabProcessManager: IPC server started at \(ipcConnection.socketPath)")
+            NSLog("🔵 [DEBUG] LegacyRendererProcessManager: IPC server started at \(ipcConnection.socketPath)")
         } catch {
-            NSLog("🔴 [DEBUG] TabProcessManager: Failed to start IPC server: \(error)")
+            NSLog("🔴 [DEBUG] LegacyRendererProcessManager: Failed to start IPC server: \(error)")
             processes.removeValue(forKey: tabId)
             throw TabProcessError.ipcServerFailed(error.localizedDescription)
         }
@@ -194,7 +194,7 @@ class TabProcessManager: ObservableObject {
             throw TabProcessError.helperAppNotFound
         }
 
-        NSLog("🔵 [DEBUG] TabProcessManager: Launching helper at \(helperPath)")
+        NSLog("🔵 [DEBUG] LegacyRendererProcessManager: Launching helper at \(helperPath)")
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: helperPath)
@@ -208,7 +208,7 @@ class TabProcessManager: ObservableObject {
         // Set up termination handler
         process.terminationHandler = { [weak self, weak processInfo] proc in
             let status = proc.terminationStatus
-            NSLog("TabProcessManager: Helper for tab \(tabId) terminated with status \(status)")
+            NSLog("LegacyRendererProcessManager: Helper for tab \(tabId) terminated with status \(status)")
 
             DispatchQueue.main.async {
                 processInfo?.ipcConnection?.stop()
@@ -220,18 +220,18 @@ class TabProcessManager: ObservableObject {
         do {
             try process.run()
             let pid = process.processIdentifier
-            NSLog("🔵 [DEBUG] TabProcessManager: Helper launched with PID \(pid)")
+            NSLog("🔵 [DEBUG] LegacyRendererProcessManager: Helper launched with PID \(pid)")
 
             processInfo.process = process
             processInfo.state = .running(pid: pid)
         } catch {
-            NSLog("🔴 [DEBUG] TabProcessManager: Failed to launch helper: \(error)")
+            NSLog("🔴 [DEBUG] LegacyRendererProcessManager: Failed to launch helper: \(error)")
             ipcConnection.stop()
             processes.removeValue(forKey: tabId)
             throw TabProcessError.helperLaunchFailed(error.localizedDescription)
         }
 
-        logger.info("TabProcessManager: Tab \(tabId) helper launched, waiting for connection...")
+        logger.info("LegacyRendererProcessManager: Tab \(tabId) helper launched, waiting for connection...")
 
         // Wait for helper to connect (just the connection, not surface ID yet)
         try await waitForHelperConnection(processInfo: processInfo, timeout: connectionTimeout)
@@ -247,7 +247,7 @@ class TabProcessManager: ObservableObject {
         if let script = config.unifiedScript {
             contentType = "javascript"
             content = script
-            NSLog("🔵 [DEBUG] TabProcessManager: Loading unifiedScript (\(script.count) bytes)")
+            NSLog("🔵 [DEBUG] LegacyRendererProcessManager: Loading unifiedScript (\(script.count) bytes)")
         } else if let html = config.htmlContent {
             contentType = "html"
             content = html
@@ -278,7 +278,7 @@ class TabProcessManager: ObservableObject {
         let surfaceID = try await waitForValidSurfaceID(processInfo: processInfo, timeout: connectionTimeout)
 
         processInfo.surfaceID = surfaceID
-        logger.info("TabProcessManager: IPC ready, surfaceID=\(surfaceID)")
+        logger.info("LegacyRendererProcessManager: IPC ready, surfaceID=\(surfaceID)")
 
         return processInfo
     }
@@ -387,7 +387,7 @@ class TabProcessManager: ObservableObject {
             return plugInsPath
         }
 
-        NSLog("🔴 [DEBUG] TabProcessManager: Helper not found in Helpers or PlugIns")
+        NSLog("🔴 [DEBUG] LegacyRendererProcessManager: Helper not found in Helpers or PlugIns")
         return nil
     }
 
@@ -396,7 +396,7 @@ class TabProcessManager: ObservableObject {
     func terminateProcess(for tabId: UUID) {
         guard let processInfo = processes[tabId] else { return }
 
-        logger.info("TabProcessManager: Terminating process for tab \(tabId)")
+        logger.info("LegacyRendererProcessManager: Terminating process for tab \(tabId)")
 
         // Send terminate message via IPC
         processInfo.ipcConnection?.terminate(reason: "User requested")
@@ -411,7 +411,7 @@ class TabProcessManager: ObservableObject {
     }
 
     func terminateAllProcesses() {
-        logger.info("TabProcessManager: Terminating all processes")
+        logger.info("LegacyRendererProcessManager: Terminating all processes")
 
         for (_, processInfo) in processes {
             processInfo.ipcConnection?.terminate(reason: "App terminating")
@@ -452,7 +452,7 @@ class TabProcessManager: ObservableObject {
                         }
                     }
                 } catch {
-                    logger.warning("TabProcessManager: Failed to get metrics for tab \(tabId): \(error)")
+                    logger.warning("LegacyRendererProcessManager: Failed to get metrics for tab \(tabId): \(error)")
                 }
             }
         }
@@ -542,3 +542,6 @@ extension Notification.Name {
     static let tabRendererCrashed = Notification.Name("tabRendererCrashed")
     static let memoryPressureCritical = Notification.Name("memoryPressureCritical")
 }
+
+@available(*, deprecated, message: "Use LegacyRendererProcessManager or RendererLifecycleManager instead.")
+typealias TabProcessManager = LegacyRendererProcessManager
