@@ -33,6 +33,7 @@ const START_TIMEOUT: Duration = Duration::from_secs(20);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 const ACTRIX_SHARED_KEY: &str = "0123456789abcdef0123456789abcdef";
 const DEFAULT_TOKEN_TTL: u64 = 3600;
+const RENEWAL_TOKEN_SECRET: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
 
 /// Convenience bundle for a running actrix instance
 struct ActrixHarness {
@@ -137,6 +138,7 @@ path = "ks.db"
 [services.ais]
 [services.ais.server]
 token_ttl_secs = {token_ttl}
+renewal_token_secret = "{renewal_secret}"
 
 [services.signaling]
 [services.signaling.server]
@@ -154,6 +156,7 @@ pid = "{pid}"
         shared = ACTRIX_SHARED_KEY,
         port = port,
         token_ttl = token_ttl_secs,
+        renewal_secret = RENEWAL_TOKEN_SECRET,
         pid = dir.join("actrix.pid").display()
     )
     .expect("write config");
@@ -209,6 +212,7 @@ path = "ks.db"
 [services.ais]
 [services.ais.server]
 token_ttl_secs = {token_ttl}
+renewal_token_secret = "{renewal_secret}"
 
 [services.signaling]
 [services.signaling.server]
@@ -237,6 +241,7 @@ pid = "{pid}"
         shared = ACTRIX_SHARED_KEY,
         port = port,
         token_ttl = token_ttl_secs,
+        renewal_secret = RENEWAL_TOKEN_SECRET,
         max_concurrent = max_concurrent_per_ip,
         message_per_second = message_per_second,
         message_burst = message_burst_size,
@@ -293,6 +298,7 @@ path = "ks.db"
 [services.ais]
 [services.ais.server]
 token_ttl_secs = {token_ttl}
+renewal_token_secret = "{renewal_secret}"
 [services.ais.dependencies.signer]
 endpoint = "{ais_signer_endpoint}"
 timeout_seconds = 1
@@ -314,6 +320,7 @@ pid = "{pid}"
         shared = ACTRIX_SHARED_KEY,
         port = port,
         token_ttl = token_ttl_secs,
+        renewal_secret = RENEWAL_TOKEN_SECRET,
         ais_signer_endpoint = ais_signer_endpoint,
         pid = dir.join("actrix.pid").display()
     )
@@ -453,7 +460,6 @@ async fn ais_register_http_with_secret(
         ws_address: None,
         manifest_raw: None,
         mfr_signature: None,
-        psk_token: None,
         target: None,
         auth_mode: None,
     };
@@ -806,7 +812,6 @@ async fn actrix_end_to_end_register_and_health() {
         ws_address: None,
         manifest_raw: None,
         mfr_signature: None,
-        psk_token: None,
         target: None,
         auth_mode: None,
     };
@@ -1071,7 +1076,6 @@ async fn ais_register_rejects_non_preprovisioned_realm() {
         ws_address: None,
         manifest_raw: None,
         mfr_signature: None,
-        psk_token: None,
         target: None,
         auth_mode: None,
     };
@@ -1203,7 +1207,6 @@ async fn ais_register_enforces_realm_secret_when_configured() {
         ws_address: None,
         manifest_raw: None,
         mfr_signature: None,
-        psk_token: None,
         target: None,
         auth_mode: None,
     };
@@ -1337,7 +1340,6 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
         ws_address: None,
         manifest_raw: None,
         mfr_signature: None,
-        psk_token: None,
         target: None,
         auth_mode: None,
     };
@@ -2094,124 +2096,6 @@ async fn signaling_rejects_expired_credential() {
     }
 
     graceful_shutdown(child);
-}
-
-#[tokio::test]
-#[serial]
-async fn signaling_credential_update_via_ws_returns_410() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    let port = harness.port;
-
-    let (mut write, mut read, ok) = ws_register(port, "acme", "cred-update-client", None).await;
-    let update_req = actr_protocol::ActrToSignaling {
-        source: ok.actr_id.clone(),
-        credential: ok.credential.clone(),
-        payload: Some(
-            actr_protocol::actr_to_signaling::Payload::CredentialUpdateRequest(
-                actr_protocol::CredentialUpdateRequest {
-                    actr_id: ok.actr_id.clone(),
-                },
-            ),
-        ),
-    };
-
-    send_envelope(
-        &mut write,
-        make_envelope(signaling_envelope::Flow::ActrToServer(update_req)),
-    )
-    .await;
-
-    let resp = recv_envelope(&mut read).await;
-    match resp.flow {
-        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
-            Some(signaling_to_actr::Payload::Error(err)) => {
-                assert_eq!(
-                    err.code, 410,
-                    "credential update via WS should return 410 Gone"
-                );
-                assert!(
-                    err.message.contains("/ais/register"),
-                    "error should direct to AIS HTTP, got: {}",
-                    err.message,
-                );
-            }
-            other => panic!("expected 410 error, got {other:?}"),
-        },
-        other => panic!("unexpected flow {other:?}"),
-    }
-
-    let _ = write.send(WsMessage::Close(None)).await;
-    harness.shutdown();
-}
-
-#[tokio::test]
-#[serial]
-async fn signaling_credential_update_returns_410_and_connection_stays_healthy() {
-    let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
-    let port = harness.port;
-
-    let (mut write, mut read, ok) = ws_register(port, "acme", "cred-mismatch-client", None).await;
-
-    // CredentialUpdateRequest 已迁移到 AIS HTTP，应返回 410
-    let update_req = actr_protocol::ActrToSignaling {
-        source: ok.actr_id.clone(),
-        credential: ok.credential.clone(),
-        payload: Some(
-            actr_protocol::actr_to_signaling::Payload::CredentialUpdateRequest(
-                actr_protocol::CredentialUpdateRequest {
-                    actr_id: ok.actr_id.clone(),
-                },
-            ),
-        ),
-    };
-
-    send_envelope(
-        &mut write,
-        make_envelope(signaling_envelope::Flow::ActrToServer(update_req)),
-    )
-    .await;
-
-    let resp = recv_envelope(&mut read).await;
-    match resp.flow {
-        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
-            Some(signaling_to_actr::Payload::Error(err)) => {
-                assert_eq!(err.code, 410);
-            }
-            other => panic!("expected 410 error, got {other:?}"),
-        },
-        other => panic!("unexpected flow {other:?}"),
-    }
-
-    // 连接仍可用
-    let ping = actr_protocol::ActrToSignaling {
-        source: ok.actr_id.clone(),
-        credential: ok.credential.clone(),
-        payload: Some(actr_protocol::actr_to_signaling::Payload::Ping(
-            actr_protocol::Ping {
-                availability: 90,
-                mailbox_backlog: 0.0,
-                power_reserve: 80.0,
-                ..Default::default()
-            },
-        )),
-    };
-    send_envelope(
-        &mut write,
-        make_envelope(signaling_envelope::Flow::ActrToServer(ping)),
-    )
-    .await;
-
-    let pong = recv_envelope(&mut read).await;
-    match pong.flow {
-        Some(signaling_envelope::Flow::ServerToActr(server_msg)) => match server_msg.payload {
-            Some(signaling_to_actr::Payload::Pong(_)) => {}
-            other => panic!("expected pong after 410, got {other:?}"),
-        },
-        other => panic!("unexpected flow {other:?}"),
-    }
-
-    let _ = write.send(WsMessage::Close(None)).await;
-    harness.shutdown();
 }
 
 #[tokio::test]
@@ -3263,7 +3147,6 @@ async fn signaling_rejects_register_request_via_ws() {
         ws_address: None,
         manifest_raw: None,
         mfr_signature: None,
-        psk_token: None,
         target: None,
         auth_mode: None,
     };

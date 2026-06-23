@@ -3,6 +3,7 @@
 //! Implements the Context trait defined in actr-framework.
 
 use crate::inbound::{DataStreamRegistry, MediaFrameRegistry};
+use crate::lifecycle::session_state::{SessionPhase, SessionState};
 use crate::outbound::Gate;
 use crate::wire::webrtc::SignalingClient;
 #[cfg(feature = "opentelemetry")]
@@ -10,8 +11,8 @@ use crate::wire::webrtc::trace::inject_span_context_to_rpc;
 use actr_config::lock::LockFile;
 use actr_framework::{Bytes, Context, DataStream, Dest, MediaSample};
 use actr_protocol::{
-    AIdCredential, ActorResult, ActrError, ActrId, ActrType, PayloadType, RouteCandidatesRequest,
-    RpcEnvelope, RpcRequest, route_candidates_request,
+    AIdCredential, ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, PayloadType,
+    RouteCandidatesRequest, RpcEnvelope, RpcRequest, route_candidates_request,
 };
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
@@ -49,6 +50,13 @@ pub struct RuntimeContext {
     /// Populated by `discover_route_candidate` from the signaling `ws_address_map`,
     /// then read by `DefaultWireBuilder` when establishing outbound connections.
     discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+    /// Session state handle — when set, outbound sends dynamically read the
+    /// current credential from the snapshot (soft renew propagates automatically).
+    /// `None` during transition; will become required.
+    pub(crate) session_state: Option<SessionState>,
+    /// Generation captured at context creation time. After a hard rebind,
+    /// outbound sends from old-generation contexts return `ConnectionNotReady`.
+    pub(crate) context_generation: u64,
 }
 
 impl RuntimeContext {
@@ -80,6 +88,8 @@ impl RuntimeContext {
         credential: AIdCredential,
         actr_lock: Option<Arc<LockFile>>,
         discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+        session_state: Option<SessionState>,
+        context_generation: u64,
     ) -> Self {
         Self {
             self_id,
@@ -93,6 +103,8 @@ impl RuntimeContext {
             credential,
             actr_lock,
             discovered_ws_addresses,
+            session_state,
+            context_generation,
         }
     }
 
@@ -126,6 +138,29 @@ impl RuntimeContext {
         }
     }
 
+    async fn ensure_session_ready(&self) -> ActorResult<()> {
+        let Some(session_state) = &self.session_state else {
+            return Ok(());
+        };
+
+        if !session_state
+            .is_current_generation(self.context_generation)
+            .await
+        {
+            return Err(ActrError::ConnectionNotReady(
+                ConnectionNotReadyInfo::without_retry_hint(),
+            ));
+        }
+
+        if session_state.phase().await != SessionPhase::Active {
+            return Err(ActrError::ConnectionNotReady(
+                ConnectionNotReadyInfo::without_retry_hint(),
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Execute a non-generic RPC request call (useful for language bindings).
     #[cfg_attr(
         feature = "opentelemetry",
@@ -146,6 +181,8 @@ impl RuntimeContext {
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
+        self.ensure_session_ready().await?;
+
         #[cfg(feature = "opentelemetry")]
         use crate::wire::webrtc::trace::inject_span_context_to_rpc;
 
@@ -188,6 +225,8 @@ impl RuntimeContext {
         payload_type: PayloadType,
         payload: Bytes,
     ) -> ActorResult<()> {
+        self.ensure_session_ready().await?;
+
         #[cfg(feature = "opentelemetry")]
         use crate::wire::webrtc::trace::inject_span_context_to_rpc;
 
@@ -221,6 +260,8 @@ impl RuntimeContext {
         payload_type: actr_protocol::PayloadType,
         chunk: DataStream,
     ) -> ActorResult<()> {
+        self.ensure_session_ready().await?;
+
         use actr_protocol::prost::Message as ProstMessage;
 
         let payload = chunk.encode_to_vec();
@@ -288,9 +329,18 @@ impl RuntimeContext {
             client_fingerprint,
         };
 
+        let (source_id, credential) = if let Some(session_state) = &self.session_state {
+            (
+                session_state.actor_id().await,
+                session_state.credential().await,
+            )
+        } else {
+            (self.self_id.clone(), self.credential.clone())
+        };
+
         let response = self
             .signaling_client
-            .send_route_candidates_request(self.self_id.clone(), self.credential.clone(), request)
+            .send_route_candidates_request(source_id, credential, request)
             .await
             .map_err(|e| ActrError::Unavailable(format!("Route candidates request failed: {e}")))?;
 
@@ -348,6 +398,11 @@ pub(crate) struct BootstrapContextBuilder {
     /// Shared map populated by discover_route_candidate; forwarded into each
     /// RuntimeContext so discovery results are visible to DefaultWireBuilder.
     discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+    /// Session state handle — when set, built contexts will read credentials
+    /// dynamically from the snapshot.
+    session_state: Option<SessionState>,
+    /// Generation number for stale-context detection after hard rebind.
+    generation: u64,
 }
 
 impl BootstrapContextBuilder {
@@ -364,6 +419,8 @@ impl BootstrapContextBuilder {
         signaling_client: Arc<dyn SignalingClient>,
         actr_lock: Option<Arc<LockFile>>,
         discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+        session_state: Option<SessionState>,
+        generation: u64,
     ) -> Self {
         Self {
             inproc_gate,
@@ -373,7 +430,19 @@ impl BootstrapContextBuilder {
             signaling_client,
             actr_lock,
             discovered_ws_addresses,
+            session_state,
+            generation,
         }
+    }
+
+    /// Set or replace the session state handle after builder construction.
+    pub(crate) fn set_session_state(&mut self, ss: Option<SessionState>) {
+        self.session_state = ss;
+    }
+
+    /// Update the generation (called after hard rebind).
+    pub(crate) fn set_generation(&mut self, generation: u64) {
+        self.generation = generation;
     }
 
     /// Materialize a bootstrap `RuntimeContext` for lifecycle hooks.
@@ -387,6 +456,12 @@ impl BootstrapContextBuilder {
         self_id: &ActrId,
         credential: &AIdCredential,
     ) -> RuntimeContext {
+        let generation = self
+            .session_state
+            .as_ref()
+            .and_then(SessionState::generation_sync)
+            .unwrap_or(self.generation);
+
         RuntimeContext::new(
             self_id.clone(),
             None,
@@ -399,6 +474,8 @@ impl BootstrapContextBuilder {
             credential.clone(),
             self.actr_lock.clone(),
             self.discovered_ws_addresses.clone(),
+            self.session_state.clone(),
+            generation,
         )
     }
 }
@@ -429,6 +506,8 @@ impl Context for RuntimeContext {
         )
     )]
     async fn call<R: RpcRequest>(&self, target: &Dest, request: R) -> ActorResult<R::Response> {
+        self.ensure_session_ready().await?;
+
         use actr_protocol::prost::Message as ProstMessage;
 
         // 1. Encode the request as protobuf bytes.
@@ -482,6 +561,8 @@ impl Context for RuntimeContext {
         )
     )]
     async fn tell<R: RpcRequest>(&self, target: &Dest, message: R) -> ActorResult<()> {
+        self.ensure_session_ready().await?;
+
         // 1. Encode the message.
         let payload: Bytes = message.encode_to_vec().into();
 
@@ -543,6 +624,8 @@ impl Context for RuntimeContext {
         chunk: DataStream,
         payload_type: actr_protocol::PayloadType,
     ) -> ActorResult<()> {
+        self.ensure_session_ready().await?;
+
         use actr_protocol::prost::Message as ProstMessage;
 
         // 1. Serialize DataStream to bytes
@@ -582,6 +665,8 @@ impl Context for RuntimeContext {
         )
     )]
     async fn discover_route_candidate(&self, target_type: &ActrType) -> ActorResult<ActrId> {
+        self.ensure_session_ready().await?;
+
         if !self.signaling_client.is_connected() {
             return Err(ActrError::Unavailable(
                 "Signaling client is not connected.".to_string(),
