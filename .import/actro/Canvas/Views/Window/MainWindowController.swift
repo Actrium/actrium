@@ -2,6 +2,44 @@ import AppKit
 import SwiftUI
 import Combine
 
+// MARK: - Custom Window (titlebar double-click zoom support)
+
+/// NSWindow subclass that restores double-click-to-zoom on the titlebar
+/// when a custom toolbar overlay intercepts mouse events.
+final class CanvasWindow: NSWindow {
+
+    override func sendEvent(_ event: NSEvent) {
+        guard event.type == .leftMouseUp, event.clickCount == 2,
+              event.locationInWindow.y >= contentLayoutRect.maxY else {
+            super.sendEvent(event)
+            return
+        }
+
+        // Skip interactive controls (address bar, buttons, etc.)
+        if let cv = contentView {
+            let pt = cv.convert(event.locationInWindow, from: nil)
+            if let hit = cv.hitTest(pt), hit is NSControl {
+                super.sendEvent(event)
+                return
+            }
+        }
+
+        // Let the system handle the event first (it may trigger zoom internally)
+        let frameBefore = frame
+        super.sendEvent(event)
+
+        // Only zoom ourselves if the system didn't already do it
+        guard frame == frameBefore else { return }
+
+        let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+        switch action {
+        case "Minimize": miniaturize(nil)
+        case "None":     break
+        default:         zoom(nil)
+        }
+    }
+}
+
 /// Main window controller - manages window chrome with self-drawn toolbar
 final class MainWindowController: NSWindowController, NSWindowDelegate {
 
@@ -30,7 +68,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         self.bookmarkVM = bookmarkVM
 
         // Create window with transparent titlebar
-        let window = NSWindow(
+        let window = CanvasWindow(
             contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,

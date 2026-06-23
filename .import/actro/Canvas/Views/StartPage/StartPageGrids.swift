@@ -33,6 +33,8 @@ private struct FavoriteItem: View {
     let bookmark: Bookmark
 
     private let iconSize: CGFloat = 64
+    private let titleHeight: CGFloat = 30
+    private let itemWidth: CGFloat = 80
 
     var body: some View {
         let firstChar = String(bookmark.title.prefix(1)).uppercased()
@@ -53,9 +55,11 @@ private struct FavoriteItem: View {
                 .font(.system(size: 11))
                 .foregroundColor(StartPageColors.favoriteTitle)
                 .lineLimit(2)
+                .truncationMode(.tail)
                 .multilineTextAlignment(.center)
-                .frame(width: 80)
+                .frame(width: itemWidth, height: titleHeight, alignment: .top)
         }
+        .frame(width: itemWidth, height: iconSize + 8 + titleHeight, alignment: .top)
         .contentShape(Rectangle())
     }
 }
@@ -93,6 +97,8 @@ private struct HistoryGridItem: View {
     let item: HistoryItem
 
     private let iconSize: CGFloat = 56
+    private let titleHeight: CGFloat = 14
+    private let itemWidth: CGFloat = 70
 
     var body: some View {
         let domain = extractDomain(from: item.appURL)
@@ -113,8 +119,10 @@ private struct HistoryGridItem: View {
                 .font(.system(size: 10))
                 .foregroundColor(StartPageColors.historyTitle)
                 .lineLimit(1)
-                .frame(width: 70)
+                .truncationMode(.tail)
+                .frame(width: itemWidth, height: titleHeight, alignment: .top)
         }
+        .frame(width: itemWidth, height: iconSize + 6 + titleHeight, alignment: .top)
         .contentShape(Rectangle())
     }
 
