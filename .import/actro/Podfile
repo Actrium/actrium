@@ -66,6 +66,12 @@ post_install do |installer|
       config.build_settings['CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF'] = 'NO'
       config.build_settings['GCC_WARN_64_TO_32_BIT_CONVERSION'] = 'NO'
 
+      # Xcode 17's Apple Clang rejects fmt 11's C++20 consteval formatting path.
+      # Keep fmt on C++17 so the library's own feature detection avoids consteval.
+      if target.name == 'fmt'
+        config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+      end
+
       # 🔥 禁用 Hermes/Inspector debugger 以避免启动时的线程冲突崩溃
       # react_native_post_install 会在 Debug 配置下添加 HERMES_ENABLE_DEBUGGER=1 和
       # REACT_NATIVE_DEBUGGER_ENABLED=1，这会导致 jsinspector-modern 的 ReentrancyCheck
