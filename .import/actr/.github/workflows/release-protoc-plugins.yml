@@ -1,0 +1,56 @@
+name: Release Protoc Plugins
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing release tag to (re)build and upload protoc plugin assets for
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-protoc-plugins-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  validate-release:
+    name: Ensure release exists
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+    steps:
+      - name: Resolve tag
+        id: resolve
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [[ -z "$TAG" ]]; then
+            echo "::error::No tag provided"
+            exit 1
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+      - name: Validate tag and release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "::error::Expected a stable release tag in vX.Y.Z form, got $TAG"
+            exit 1
+          }
+          git ls-remote --exit-code --tags \
+            "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$TAG" >/dev/null
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+
+  publish-protoc-plugins:
+    needs: validate-release
+    uses: ./.github/workflows/_protoc-plugins-release.yml
+    with:
+      tag: ${{ needs.validate-release.outputs.tag }}
+      source_ref: ${{ needs.validate-release.outputs.tag }}
+      publish: true
+      replace_assets: true
+    secrets: inherit
