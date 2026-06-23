@@ -47,6 +47,7 @@ private final class SystemMetrics: ObservableObject {
 struct DevToolsMonitorView: View {
     @ObservedObject var devTools: DevToolsManager
     @ObservedObject var viewModel: BrowserViewModel
+    @ObservedObject private var diagnosticsStore = RendererDiagnosticsStore.shared
     @StateObject private var systemMetrics = SystemMetrics.shared
 
     @State private var isFrozen: Bool = false
@@ -370,7 +371,7 @@ struct DevToolsMonitorView: View {
                     Divider()
 
                     // Process rows
-                    let processes = Array(TabProcessManager.shared.processes.values)
+                    let processes = diagnosticsStore.allLegacyProcesses()
                     if processes.isEmpty {
                         Text("No tab processes running")
                             .font(.system(size: 11))
@@ -413,7 +414,7 @@ struct DevToolsMonitorView: View {
 
             // Kill all button
             Button(action: {
-                TabProcessManager.shared.terminateAllProcesses()
+                diagnosticsStore.terminateAllLegacyRenderers()
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "xmark.circle")
@@ -703,6 +704,7 @@ private struct MonitorFlowLayout: Layout {
 // MARK: - Task Manager Row
 
 private struct TaskManagerRow: View {
+    @ObservedObject private var diagnosticsStore = RendererDiagnosticsStore.shared
     @ObservedObject var processInfo: TabProcessInfo
     @State private var metrics: (memory: UInt64, cpuTime: UInt64)?
 
@@ -783,7 +785,7 @@ private struct TaskManagerRow: View {
             // Kill button
             if processInfo.isRunning {
                 Button(action: {
-                    TabProcessManager.shared.terminateProcess(for: processInfo.tabId)
+                    diagnosticsStore.terminateLegacyRenderer(for: processInfo.tabId)
                 }) {
                     Image(systemName: "xmark.circle.fill")
                         .foregroundColor(.red)
@@ -811,7 +813,7 @@ private struct TaskManagerRow: View {
             metrics = nil
             return
         }
-        metrics = TabProcessManager.shared.getProcessMetrics(pid: pid)
+        metrics = diagnosticsStore.getProcessMetrics(pid: pid)
     }
 }
 
