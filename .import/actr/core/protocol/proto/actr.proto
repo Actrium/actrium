@@ -185,10 +185,21 @@ message RegisterRequest {
   // Explicit authentication source. Omitted/UNSPECIFIED is treated as PACKAGE
   // for backward compatibility with older package clients.
   optional RegisterAuthMode auth_mode = 14;
-
   // Removed in breaking cleanup: legacy PSK renewal token.
   reserved 12;
   reserved "psk_token";
+
+  // Ed25519 signature over the ACTR-MANUFACTURER-REGISTER-V1 payload.
+  // A package launcher produces this fresh proof with the MFR key that signed
+  // manifest_raw, binding the running package to its manufacturer.
+  // Required only for unpublished Package Path 2 registrations.
+  optional bytes manufacturer_auth_signature = 15;
+  // Unix seconds included in the manufacturer signature payload.
+  // AIS accepts only a short time window to prevent long-lived replay.
+  optional uint64 manufacturer_auth_signed_at = 16;
+  // Random nonce included in the manufacturer signature payload.
+  // AIS atomically consumes it to prevent replay inside the time window.
+  optional bytes manufacturer_auth_nonce = 17;
 }
 
 message RegisterResponse {

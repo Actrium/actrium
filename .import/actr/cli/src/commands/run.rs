@@ -29,6 +29,36 @@ fn resolve_against(base: &Path, path: &Path) -> PathBuf {
     }
 }
 
+/// [`actr_hyper::ManufacturerAuthProvider`] backed by an MFR keychain file.
+///
+/// Holds only the key path — the private key is re-read from disk on every
+/// `sign` call, so it is never kept resident in memory. After MFR key rotation,
+/// an old package can still use published Path 1, but it must be rebuilt and
+/// re-signed before it can use unpublished Path 2 again.
+struct KeychainManufacturerAuthProvider {
+    key_path: PathBuf,
+}
+
+impl actr_hyper::ManufacturerAuthProvider for KeychainManufacturerAuthProvider {
+    fn sign(
+        &self,
+        realm_id: u32,
+        actr_type: &actr_protocol::ActrType,
+        target: &str,
+        manifest_raw: &[u8],
+    ) -> std::result::Result<actr_hyper::ManufacturerRegistrationAuth, actr_hyper::HyperError> {
+        let signing_key = crate::commands::package_build::load_signing_key(&self.key_path)
+            .map_err(|e| actr_hyper::HyperError::Runtime(format!("reload mfr signing key: {e}")))?;
+        actr_hyper::ManufacturerRegistrationAuth::sign(
+            &signing_key,
+            realm_id,
+            actr_type,
+            target,
+            manifest_raw,
+        )
+    }
+}
+
 #[derive(Args)]
 pub struct RunCommand {
     /// Runtime configuration file (defaults to ./actr.toml if not specified)
@@ -141,6 +171,19 @@ impl RunCommand {
         info!("📡 Signaling server: {}", config.signaling_url.as_str());
         info!("🔐 Trust anchors: {} configured", config.trust.len());
 
+        let manufacturer_provider = self.build_manufacturer_auth_provider().map_err(|e| {
+            ActrCliError::command_error(format!(
+                "Failed to prepare manufacturer registration signer: {e}"
+            ))
+        })?;
+        if manufacturer_provider.is_some() {
+            info!("🔏 Manufacturer registration signer prepared from mfr.keychain");
+        } else {
+            info!(
+                "No mfr.keychain configured; continuing without manufacturer registration signature"
+            );
+        }
+
         // 6. Initialize observability
         let _obs_guard = init_observability(&config.observability).map_err(|e| {
             ActrCliError::command_error(format!("Failed to initialize observability: {}", e))
@@ -158,17 +201,20 @@ impl RunCommand {
             .map_err(|e| ActrCliError::command_error(format!("Failed to attach package: {}", e)))?;
         info!("✅ Package attached");
 
-        let registered = attached.register(&ais_endpoint).await.map_err(|e| {
-            ActrCliError::command_error(format!(
-                "Failed to register with AIS at {}.\n\n\
+        let registered = attached
+            .register_with_manufacturer_auth(&ais_endpoint, manufacturer_provider)
+            .await
+            .map_err(|e| {
+                ActrCliError::command_error(format!(
+                    "Failed to register with AIS at {}.\n\n\
                  Possible causes:\n\
                  - AIS server is not running\n\
                  - Incorrect [ais_endpoint] url in the runtime config\n\
                  - Network connectivity issues\n\n\
                  Error: {}",
-                ais_endpoint, e
-            ))
-        })?;
+                    ais_endpoint, e
+                ))
+            })?;
         info!("✅ AIS registration successful");
 
         let actr_ref = registered
@@ -249,6 +295,28 @@ impl RunCommand {
             authors: vec![],
             license: manifest.metadata.license.clone(),
         }
+    }
+
+    /// Build a manufacturer re-signing provider backed by the configured MFR
+    /// keychain, if any.
+    ///
+    /// Returns `Ok(None)` when no keychain is configured (published-package or
+    /// no-keychain runs). The provider does **not** hold the private key in
+    /// memory — it reloads it from the keychain file on every sign call. The
+    /// manifest pins Path 2 verification to its build-time key, so rotating the
+    /// MFR key requires rebuilding and re-signing that package before it can use
+    /// Path 2 again. Published Path 1 remains unaffected.
+    fn build_manufacturer_auth_provider(
+        &self,
+    ) -> anyhow::Result<Option<std::sync::Arc<dyn actr_hyper::ManufacturerAuthProvider>>> {
+        let cli_config = crate::config::resolver::resolve_effective_cli_config()?;
+        let Some(keychain) = cli_config.mfr.keychain.as_deref() else {
+            return Ok(None);
+        };
+        let key_path = crate::commands::package_build::resolve_key_path(None, Some(keychain))?;
+        Ok(Some(std::sync::Arc::new(
+            KeychainManufacturerAuthProvider { key_path },
+        )))
     }
 
     async fn init_hyper(
@@ -1190,5 +1258,98 @@ mod tests {
 
         let _ = child.kill();
         let _ = child.wait();
+    }
+
+    /// The manufacturer re-signing provider must (a) mint a fresh random nonce on
+    /// every call — so hard rebind never replays the nonce AIS consumed on the
+    /// first registration — and (b) re-read the private key from the keychain
+    /// file on every call, never caching it in memory.
+    #[test]
+    fn keychain_manufacturer_auth_provider_mints_fresh_proof_and_reloads_key() {
+        use super::KeychainManufacturerAuthProvider;
+        use actr_hyper::ManufacturerAuthProvider;
+        use actr_protocol::ActrType;
+        use base64::Engine as _;
+        use base64::engine::general_purpose::STANDARD as B64;
+        use ed25519_dalek::{Signature, SigningKey, Verifier as _};
+        use sha2::{Digest as _, Sha256};
+        use std::fs;
+        use std::path::Path;
+        use tempfile::TempDir;
+
+        let dir = TempDir::new().unwrap();
+        let key_path = dir.path().join("keychain.json");
+        let write_key = |path: &Path, seed: [u8; 32]| {
+            let signing_key = SigningKey::from_bytes(&seed);
+            let json = serde_json::json!({
+                "private_key": B64.encode(seed),
+                "public_key": B64.encode(signing_key.verifying_key().to_bytes()),
+            });
+            fs::write(path, json.to_string()).unwrap();
+        };
+        let original_seed = [0x11u8; 32];
+        write_key(&key_path, original_seed);
+
+        let provider = KeychainManufacturerAuthProvider {
+            key_path: key_path.clone(),
+        };
+        let actr_type = ActrType {
+            manufacturer: "acme".into(),
+            name: "svc".into(),
+            version: "1.0.0".into(),
+        };
+        let manifest = b"manifest-bytes";
+
+        let auth_a = provider
+            .sign(7, &actr_type, "wasm32-wasip1", manifest)
+            .unwrap();
+        let auth_b = provider
+            .sign(7, &actr_type, "wasm32-wasip1", manifest)
+            .unwrap();
+
+        // Fresh nonce each call — the property that lets hard rebind avoid
+        // replaying the single-use nonce from the initial registration.
+        assert_ne!(
+            auth_a.nonce, auth_b.nonce,
+            "nonce must differ across sign calls"
+        );
+        assert_ne!(
+            auth_a.signature, auth_b.signature,
+            "signature must differ across sign calls"
+        );
+
+        // The private key is NOT cached. A rotated key is observed immediately.
+        // This proof can still be ignored by published Path 1, but cannot pass
+        // unpublished Path 2 for the old manifest because that manifest pins
+        // verification to its original signing_key_id.
+        let rotated_key = SigningKey::from_bytes(&[0x22u8; 32]);
+        write_key(&key_path, [0x22u8; 32]);
+        let auth_c = provider
+            .sign(7, &actr_type, "wasm32-wasip1", manifest)
+            .unwrap();
+        let manifest_sha256 = hex::encode(Sha256::digest(manifest));
+        let payload = actr_protocol::build_manufacturer_register_payload(
+            actr_protocol::ManufacturerRegisterPayload {
+                realm_id: 7,
+                actr_type: &actr_type,
+                target: "wasm32-wasip1",
+                manifest_sha256_hex: &manifest_sha256,
+                manufacturer_auth_signed_at: auth_c.signed_at,
+                manufacturer_auth_nonce: &auth_c.nonce,
+            },
+        );
+        let signature = Signature::from_slice(&auth_c.signature).unwrap();
+        rotated_key
+            .verifying_key()
+            .verify(payload.as_bytes(), &signature)
+            .expect("proof should be signed by the reloaded rotated key");
+
+        // Corrupting the keychain also proves each call re-reads the file.
+        fs::write(&key_path, "not-json").unwrap();
+        let err = provider.sign(7, &actr_type, "wasm32-wasip1", manifest);
+        assert!(
+            err.is_err(),
+            "sign must re-read the keychain and fail when it is corrupt"
+        );
     }
 }
