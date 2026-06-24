@@ -120,6 +120,7 @@ dependencies = [
  "bytes",
  "chrono",
  "glob",
+ "hex",
  "prost",
  "prost-build",
  "prost-types",

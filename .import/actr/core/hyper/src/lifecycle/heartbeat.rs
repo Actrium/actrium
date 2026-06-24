@@ -37,6 +37,7 @@ const TYPICAL_CAPACITY: f32 = 1000.0;
 /// With the typical 5s-30s heartbeat interval this keeps offline periods visible
 /// without flooding client logs.
 const HEARTBEAT_FAILURE_LOG_EVERY: u64 = 12;
+const POWER_RESERVE_FETCH_TIMEOUT: Duration = Duration::from_millis(250);
 
 fn should_log_heartbeat_failure(consecutive_failures: u64) -> bool {
     consecutive_failures == 1 || consecutive_failures.is_multiple_of(HEARTBEAT_FAILURE_LOG_EVERY)
@@ -60,7 +61,14 @@ async fn get_power_reserve_and_availability(
 ) -> (f32, f32, ServiceAvailabilityState) {
     // TODO: Ensure the default value is correct
     // Get real power reserve from pwrzv (returns 1.0 to 5.0, where higher = more available)
-    let power_reserve = pwrzv::get_power_reserve_level_direct().await.unwrap_or(1.0); // Default to minimum capacity on error
+    let power_reserve = tokio::time::timeout(
+        POWER_RESERVE_FETCH_TIMEOUT,
+        pwrzv::get_power_reserve_level_direct(),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .unwrap_or(1.0); // Default to minimum capacity on error
 
     // Get mailbox backlog from mailbox stats
     // Calculate backlog ratio: (queued + inflight) / typical_capacity
@@ -130,9 +138,9 @@ async fn send_heartbeat_and_handle_response(
     let (power_reserve, mailbox_backlog, availability) =
         get_power_reserve_and_availability(mailbox).await;
 
-    let ping_timeout_secs = (heartbeat_interval.as_secs() as f64 * 0.4) as u64;
+    let ping_timeout = heartbeat_interval.mul_f64(0.4).max(Duration::from_secs(1));
     let pong_response = tokio::time::timeout(
-        Duration::from_secs(ping_timeout_secs),
+        ping_timeout,
         client.send_heartbeat(
             actor_id.clone(),
             current_credential.clone(),
@@ -199,14 +207,14 @@ async fn send_heartbeat_and_handle_response(
             if should_log_heartbeat_failure(*consecutive_failures) {
                 tracing::warn!(
                     consecutive_failures = *consecutive_failures,
-                    "⚠️ Heartbeat timeout after {}s",
-                    ping_timeout_secs
+                    "⚠️ Heartbeat timeout after {:?}",
+                    ping_timeout
                 );
             } else {
                 tracing::debug!(
                     consecutive_failures = *consecutive_failures,
-                    "Suppressed repeated heartbeat timeout after {}s",
-                    ping_timeout_secs
+                    "Suppressed repeated heartbeat timeout after {:?}",
+                    ping_timeout
                 );
             }
             return None;

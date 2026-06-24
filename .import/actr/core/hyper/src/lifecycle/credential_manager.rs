@@ -41,9 +41,15 @@ use super::session_state::{SessionSnapshot, SessionState};
 pub(crate) enum RegistrationContext {
     /// Package-backed registration — carries the full original request
     /// including manifest bytes and MFR signature.
+    ///
+    /// `resign` is the manufacturer re-signing capability. It is `Some` when the
+    /// initial registration carried a manufacturer proof (unpublished package). Hard
+    /// rebind re-invokes it to mint a fresh proof — the original nonce was
+    /// consumed by AIS on first success and cannot be reused.
     Package {
         #[allow(dead_code)]
         request: actr_protocol::RegisterRequest,
+        resign: Option<Arc<dyn crate::ManufacturerAuthProvider>>,
     },
     /// Source-linked registration — carries the request and an optional
     /// realm secret (kept in memory only, never logged).
@@ -323,7 +329,48 @@ async fn run_hard_rebind(
 
     let mut ais = AisClient::new(&ais_endpoint);
     let request = match registration_ctx {
-        RegistrationContext::Package { request } => request,
+        RegistrationContext::Package { request, resign } => {
+            let mut request = request;
+            // The original manufacturer proof's nonce was consumed by AIS on the
+            // first successful registration. Reusing it would be a replay.
+            // Re-invoke the provider to mint a fresh `signed_at` + `nonce` +
+            // signature, overwriting only the three manufacturer fields — the
+            // manifest bytes and MFR signature are static and stay as-is.
+            if let Some(provider) = resign.as_ref() {
+                let realm_id = request.realm.realm_id;
+                let actr_type = request.actr_type.clone();
+                let target = request
+                    .target
+                    .clone()
+                    .filter(|target| !target.is_empty())
+                    .ok_or_else(|| {
+                        "hard rebind manufacturer re-sign failed: package target is missing"
+                            .to_string()
+                    })?;
+                let manifest_raw = request
+                    .manifest_raw
+                    .as_ref()
+                    .filter(|manifest| !manifest.is_empty())
+                    .map(|manifest| manifest.to_vec())
+                    .ok_or_else(|| {
+                        "hard rebind manufacturer re-sign failed: package manifest is missing"
+                            .to_string()
+                    })?;
+                let fresh = crate::sign_manufacturer_proof(
+                    Arc::clone(provider),
+                    realm_id,
+                    actr_type,
+                    target,
+                    manifest_raw,
+                )
+                .await
+                .map_err(|e| format!("hard rebind manufacturer re-sign failed: {e}"))?;
+                request.manufacturer_auth_signature = Some(bytes::Bytes::from(fresh.signature));
+                request.manufacturer_auth_signed_at = Some(fresh.signed_at);
+                request.manufacturer_auth_nonce = Some(bytes::Bytes::from(fresh.nonce));
+            }
+            request
+        }
         RegistrationContext::Linked {
             request,
             realm_secret,
@@ -735,5 +782,115 @@ mod tests {
         assert!(d2 >= Duration::from_secs(1));
         assert!(d3 >= Duration::from_secs(1));
         assert!(d4 <= Duration::from_secs(75)); // 60 + 25% jitter
+    }
+
+    /// Hard rebind of a Package registration must re-invoke the manufacturer auth
+    /// provider to mint a fresh proof. The initial manufacturer nonce was consumed
+    /// by AIS on the first successful registration; replaying it would be
+    /// rejected. This locks in the re-sign behaviour added to fix replay on
+    /// hard rebind.
+    #[tokio::test]
+    async fn package_hard_rebind_re_signs_manufacturer_proof() {
+        use actr_protocol::RegisterAuthMode;
+        use std::sync::atomic::AtomicU64;
+
+        struct CountingManufacturerProvider {
+            calls: Arc<AtomicU64>,
+        }
+        impl crate::ManufacturerAuthProvider for CountingManufacturerProvider {
+            fn sign(
+                &self,
+                _realm_id: u32,
+                _actr_type: &actr_protocol::ActrType,
+                _target: &str,
+                _manifest_raw: &[u8],
+            ) -> std::result::Result<crate::ManufacturerRegistrationAuth, crate::HyperError>
+            {
+                let n = self.calls.fetch_add(1, AtomicOrdering::SeqCst) + 1;
+                // Deterministic fresh proof keyed by call count. The mock AIS
+                // server does not validate crypto, so the values only need to
+                // differ from the stale proof saved on the original request.
+                Ok(crate::ManufacturerRegistrationAuth {
+                    signature: vec![n as u8; 64],
+                    signed_at: 9_999_999_999,
+                    nonce: vec![n as u8; 32],
+                })
+            }
+        }
+
+        let calls = Arc::new(AtomicU64::new(0));
+        let provider: Arc<CountingManufacturerProvider> = Arc::new(CountingManufacturerProvider {
+            calls: calls.clone(),
+        });
+
+        let mut server = mockito::Server::new_async().await;
+        let response = RegisterResponse {
+            result: Some(register_response::Result::Success(register_ok(2, 9))),
+        };
+        let mock = server
+            .mock("POST", "/register")
+            .with_status(200)
+            .with_header("content-type", "application/x-protobuf")
+            .with_body(response.encode_to_vec())
+            .expect(1)
+            .create_async()
+            .await;
+
+        // Stale manufacturer proof (nonce 0xAA) saved on the original request — this
+        // is exactly what must not be replayed to AIS.
+        let request = RegisterRequest {
+            actr_type: actor(1).r#type,
+            realm: Realm { realm_id: 7 },
+            manifest_raw: Some(Bytes::from_static(b"manifest-bytes")),
+            mfr_signature: Some(Bytes::from_static(b"mfr-sig")),
+            target: Some("wasm32-wasip1".to_string()),
+            auth_mode: Some(RegisterAuthMode::Package as i32),
+            manufacturer_auth_signature: Some(Bytes::from_static(b"stale-manufacturer-auth-sig")),
+            manufacturer_auth_signed_at: Some(1),
+            manufacturer_auth_nonce: Some(Bytes::from_static(&[0xAA; 32])),
+            ..Default::default()
+        };
+
+        // Expired renewal token -> run_renewal_once takes the hard rebind branch.
+        let session = SessionState::new(SessionSnapshot {
+            actor_id: actor(1),
+            credential: credential(1),
+            credential_expires_at: prost_types::Timestamp {
+                seconds: 10,
+                nanos: 0,
+            },
+            turn_credential: TurnCredential {
+                username: "10:actor-1".to_string(),
+                password: "old".to_string(),
+                expires_at: 10,
+            },
+            renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
+            renewal_token_expires_at: prost_types::Timestamp {
+                seconds: 1,
+                nanos: 0,
+            },
+            generation: 1,
+        });
+
+        run_renewal_once(
+            session,
+            server.url(),
+            None,
+            RegistrationContext::Package {
+                request,
+                resign: Some(provider),
+            },
+            None,
+            None,
+        )
+        .await
+        .expect("hard rebind should commit new snapshot");
+
+        mock.assert_async().await;
+        assert_eq!(
+            calls.load(AtomicOrdering::SeqCst),
+            1,
+            "hard rebind must re-invoke the manufacturer auth provider exactly once"
+        );
     }
 }

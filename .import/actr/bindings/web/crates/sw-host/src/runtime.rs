@@ -691,6 +691,9 @@ impl SwRuntime {
             manifest_raw: None,
             mfr_signature: None,
             target: None,
+            manufacturer_auth_signature: None,
+            manufacturer_auth_signed_at: None,
+            manufacturer_auth_nonce: None,
             auth_mode: Some(RegisterAuthMode::Linked as i32),
         };
 
