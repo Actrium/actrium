@@ -1,11 +1,10 @@
 # macOS
 
-The macOS client currently starts from the imported Canvas project:
+The macOS client lives under the Actro app shell:
 
 ```text
-apps/macos/canvas/
+apps/macos/actro/
 ```
 
-Keep Canvas intact until the imported project has been verified in place.
 Shared Apple code should move into `platform/apple/Packages/` in follow-up
 commits.

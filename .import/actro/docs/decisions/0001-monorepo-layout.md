@@ -6,13 +6,13 @@ Accepted.
 
 ## Context
 
-Actro needs to contain multiple client projects: the original macOS Canvas
-client first, followed by Windows, Android, and iOS clients. Canvas already
+Actro needs to contain multiple client projects: the original macOS Actro
+client first, followed by Windows, Android, and iOS clients. Actro already
 contains native app code, XPC services, Rust FFI libraries, React Native runtime
 host code, and guest app examples.
 
 Putting all of that under a single flat app directory would make later platform
-work depend on Canvas-specific paths.
+work depend on Actro-specific paths.
 
 ## Decision
 
@@ -26,7 +26,7 @@ Use a product monorepo with explicit top-level ownership:
 - `examples/` for guest apps and sample packages.
 - `docs/` for architecture and migration records.
 
-Canvas is imported intact at `apps/macos/canvas/` first. Follow-up migrations
+Actro is imported intact at `apps/macos/actro/` first. Follow-up migrations
 may move code into shared modules, but those moves must happen in separate
 commits so Git history remains auditable.
 
@@ -35,5 +35,5 @@ commits so Git history remains auditable.
 - Initial macOS paths are historical and not final product paths.
 - Root workspaces only include packages that are ready for monorepo dependency
   management.
-- Canvas-local package manager and Xcode behavior remain isolated until the
+- Actro-local package manager and Xcode behavior remain isolated until the
   migration removes local `file:` assumptions.

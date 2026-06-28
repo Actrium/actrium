@@ -1,0 +1,46 @@
+# macOS
+.DS_Store
+*.swp
+*~
+
+# Xcode
+build/
+.xcode.env.local
+DerivedData/
+*.xcuserstate
+*.xcscmblueprint
+xcuserdata/
+*.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+.swift-module-cache/
+
+# CocoaPods
+Pods/
+Podfile.lock
+
+# React Native / Node.js
+Subsystem/node_modules/
+rn/.metro-health-check*
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Bundle artifacts
+*.jsbundle
+*.jsbundle.map
+
+# Subsystem actr example build artifacts
+Subsystem/actr-app-examples/**/dist/
+Subsystem/actr-app-examples/**/*.actr
+Subsystem/actr-app-examples/**/unified-app.js
+
+# Temporary files
+*.tmp
+*.temp
+Subsystem/bun.lock
+Subsystem/package-lock.json
+Packages/ActroIPC/.build/
+
+# Code coverage
+*.profraw

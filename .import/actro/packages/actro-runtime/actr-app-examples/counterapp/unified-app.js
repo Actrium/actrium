@@ -259,7 +259,7 @@ function Counter({
           console.log("[CLICK_TEST] Red button pressed, count=" + (redCount + 1));
           setRedCount((c) => c + 1);
           onChange?.("红色按钮", "\uD83D\uDD34", "#ff4444");
-        }, { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 182 }),
+        }, { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 182 }),
         style: {
           backgroundColor: "#ff4444",
           padding: 20,
@@ -286,7 +286,7 @@ function Counter({
           console.log("[CLICK_TEST] Blue button pressed, count=" + (blueCount + 1));
           setBlueCount((c) => c + 1);
           onChange?.("蓝色按钮", "\uD83D\uDD35", "#4444ff");
-        }, { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 204 }),
+        }, { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 204 }),
         style: {
           backgroundColor: "#4444ff",
           padding: 20,
@@ -313,7 +313,7 @@ function Counter({
           console.log("[CLICK_TEST] Green button pressed, count=" + (greenCount + 1));
           setGreenCount((c) => c + 1);
           onChange?.("绿色按钮", "\uD83D\uDFE2", "#44ff44");
-        }, { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 226 }),
+        }, { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 226 }),
         style: {
           backgroundColor: "#44ff44",
           padding: 20,
@@ -340,7 +340,7 @@ function Counter({
           setRedCount(0);
           setBlueCount(0);
           setGreenCount(0);
-        }, { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 248 }),
+        }, { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 248 }),
         style: {
           backgroundColor: "#666666",
           padding: 16,
@@ -438,7 +438,7 @@ function Counter({
                 children: weatherData.city
               }),
               /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-                onPress: Object.assign(() => setWeatherExpanded(false), { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 344 }),
+                onPress: Object.assign(() => setWeatherExpanded(false), { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 344 }),
                 children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
                   style: { color: "#88b8e8", fontSize: 12 },
                   children: "收起 ▲"
@@ -560,7 +560,7 @@ function Stats({
             children: "快速测试"
           }),
           /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-            onPress: Object.assign(() => onAddRecord("快速点击", "⚡", "#ffaa00"), { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 450 }),
+            onPress: Object.assign(() => onAddRecord("快速点击", "⚡", "#ffaa00"), { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 450 }),
             style: {
               backgroundColor: "#ffaa00",
               padding: 12,
@@ -574,7 +574,7 @@ function Stats({
             })
           }),
           /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-            onPress: Object.assign(() => onAddRecord("星标动作", "⭐", "#ff88ff"), { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 464 }),
+            onPress: Object.assign(() => onAddRecord("星标动作", "⭐", "#ff88ff"), { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 464 }),
             style: {
               backgroundColor: "#ff88ff",
               padding: 12,
@@ -588,7 +588,7 @@ function Stats({
             })
           }),
           /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-            onPress: Object.assign(() => onAddRecord("火箭发射", "\uD83D\uDE80", "#00aaff"), { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Canvas/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 478 }),
+            onPress: Object.assign(() => onAddRecord("火箭发射", "\uD83D\uDE80", "#00aaff"), { __sourceFile: "/Users/leo/XData/Starbucks/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 478 }),
             style: {
               backgroundColor: "#00aaff",
               padding: 12,

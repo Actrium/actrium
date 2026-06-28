@@ -1,5 +1,5 @@
 /**
- * TabRouter - Top-level routing for Canvas tabs
+ * TabRouter - Top-level routing for Actro tabs
  *
  * Routes to:
  * - ActrApp: for .actr plugin tabs (via rill Engine)
