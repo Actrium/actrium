@@ -1,0 +1,14 @@
+//
+//  Canvas-Bridging-Header.h
+//  Canvas
+//
+//  Bridging header for Objective-C code
+//
+
+#import <React/RCTBridgeModule.h>
+#import <React/RCTViewManager.h>
+#import <React/RCTEventEmitter.h>
+#import <WechatOpenSDK/WXApi.h>
+
+// Note: RillSandboxNative (C++) is compiled separately and auto-registers via RCT_EXPORT_MODULE
+// Do not import C++ headers here - they are not compatible with Swift bridging
