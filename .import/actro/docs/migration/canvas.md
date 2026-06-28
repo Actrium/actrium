@@ -30,13 +30,20 @@ tree under the macOS app directory.
 ```text
 Canvas/                    -> apps/macos/canvas/Canvas/
 Canvas*Service/            -> apps/macos/canvas/Canvas*Service/
-Packages/CanvasIPC/        -> apps/macos/canvas/Packages/CanvasIPC/
+Packages/CanvasIPC/        -> platform/apple/packages/CanvasIPC/
 Shared/IPC/                -> apps/macos/canvas/Shared/IPC/
-canvas-terminal/           -> apps/macos/canvas/canvas-terminal/
-canvas-remote/             -> apps/macos/canvas/canvas-remote/
-RCTNApps/                  -> apps/macos/canvas/RCTNApps/
+canvas-terminal/           -> crates/canvas-terminal/
+canvas-remote/             -> crates/canvas-remote/
+RCTNApps/                  -> packages/canvas-runtime/
 docs/                      -> apps/macos/canvas/docs/
+rill/                      -> packages/rill/
+askit/                     -> packages/askit/
+rustdesk-actr/             -> third_party/rustdesk-actr/
+actor-rtc/actr pinned rev  -> third_party/actor-rtc-actr/
 ```
+
+The legacy paths under `apps/macos/canvas/` remain as symlinks for Xcode and
+CocoaPods compatibility while project references are still Canvas-shaped.
 
 ## Migration Phases
 
@@ -51,10 +58,33 @@ docs/                      -> apps/macos/canvas/docs/
 Each move should be a small commit. Prefer `git mv` for file moves inside this
 repository.
 
-## Current Risks
+## Verified Build
 
-- `RCTNApps/package.json` still references historical local dependencies:
-  `file:../../rill` and `file:../../askit`.
-- `canvas-remote` references external local paths from its original development
-  environment.
-- macOS Xcode schemes and bundle identifiers still use Canvas names.
+After the first split, the macOS app still builds through the original
+workspace:
+
+```text
+xcodebuild -workspace Canvas.xcworkspace -scheme Canvas -configuration Debug -destination platform=macOS CODE_SIGNING_ALLOWED=NO build
+```
+
+The Rust FFI crates also rebuild from their new locations:
+
+```text
+crates/canvas-terminal/build-xcframework.sh
+crates/canvas-remote/build-xcframework.sh
+```
+
+`canvas-remote` requires the native libraries installed by vcpkg
+(`libyuv`, `libvpx`, `aom`) through `VCPKG_ROOT`. The repo declares these in
+`vcpkg.json` and provides `scripts/bootstrap-native-deps.sh`, but vcpkg itself
+and installed artifacts remain outside the repo.
+
+## Remaining Risks
+
+- Xcode project references still point at Canvas-era paths and are satisfied by
+  symlinks.
+- macOS Xcode schemes, target names, bundle identifiers, and visible product
+  names still use Canvas.
+- The pinned `actor-rtc/actr` source is a legacy compatibility dependency for
+  Canvas remote desktop only; it is not the intended long-term Actro runtime
+  dependency model.

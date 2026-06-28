@@ -1,15 +1,32 @@
 // Metro configuration based on @react-native/metro-config
 const path = require('path');
+const fs = require('fs');
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
 const { resolve } = require('metro-resolver');
 
-const projectRoot = __dirname;
-const goAskAwayRoot = path.resolve(projectRoot, '../..');
+const projectRoot = fs.realpathSync.native(__dirname);
+const workspacePackagesRoot = path.resolve(projectRoot, '..');
+const resolveLocalPackage = (name) => {
+  const packagePath = path.resolve(workspacePackagesRoot, name);
+  return fs.realpathSync.native(packagePath);
+};
+const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Local development packages (symlinked via file: protocol)
+// Local development packages in the Actro workspace.
 const localPackages = {
-  rill: path.resolve(goAskAwayRoot, 'rill'),
-  askit: path.resolve(goAskAwayRoot, 'askit'),
+  rill: resolveLocalPackage('rill'),
+  askit: resolveLocalPackage('askit'),
+};
+const localPackageRoots = Object.values(localPackages);
+const localPackageEntries = {
+  'rill': path.resolve(localPackages.rill, 'src', 'index.ts'),
+  'rill/host': path.resolve(localPackages.rill, 'src', 'host', 'index.ts'),
+  'rill/host/preset': path.resolve(localPackages.rill, 'src', 'host', 'preset', 'index.ts'),
+  'rill/guest': path.resolve(localPackages.rill, 'src', 'sdk', 'index.ts'),
+  'rill/contract': path.resolve(localPackages.rill, 'src', 'contract', 'index.ts'),
+  'askit': path.resolve(localPackages.askit, 'src', 'index.host.ts'),
+  'askit/host': path.resolve(localPackages.askit, 'src', 'core', 'index.ts'),
+  'askit/contracts': path.resolve(localPackages.askit, 'src', 'contracts', 'index.ts'),
 };
 
 const defaultConfig = getDefaultConfig(projectRoot);
@@ -24,8 +41,12 @@ defaultConfig.resolver.platforms = Array.from(
 defaultConfig.resolver.blockList = [
   /.*node_modules\/react\/cjs\/react\.development\.js.*inline-requires-plugin.*/,
   // Block react from symlinked local packages (rill, askit)
-  new RegExp(`${goAskAwayRoot}/(rill|askit)/node_modules/react/.*`),
-  new RegExp(`${goAskAwayRoot}/(rill|askit)/node_modules/react-reconciler/.*`),
+  ...localPackageRoots.map(
+    (root) => new RegExp(`${escapeRegExp(root)}/node_modules/react/.*`),
+  ),
+  ...localPackageRoots.map(
+    (root) => new RegExp(`${escapeRegExp(root)}/node_modules/react-reconciler/.*`),
+  ),
 ];
 
 const defaultPolyfills = defaultConfig.serializer?.getPolyfills?.() || [];
@@ -33,7 +54,7 @@ const defaultPolyfills = defaultConfig.serializer?.getPolyfills?.() || [];
 /** @type {import('metro-config').MetroConfig} */
 const customConfig = {
   // Watch local package directories for changes
-  watchFolders: Object.values(localPackages),
+  watchFolders: localPackageRoots,
   serializer: {
     getPolyfills: () => [
       require.resolve('./src/ensure-console-assert.js'),
@@ -61,31 +82,10 @@ const customConfig = {
         return resolve(context, redirected, platform);
       }
 
-      // Resolve rill/host to the host entry point
-      if (moduleName === 'rill/host') {
+      if (localPackageEntries[moduleName]) {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(goAskAwayRoot, 'rill', 'src', 'host', 'index.ts'),
-        };
-      }
-
-      // Resolve askit to host entry point
-      if (moduleName === 'askit') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(goAskAwayRoot, 'askit', 'src', 'index.host.ts'),
-        };
-      }
-      if (moduleName === 'askit/host') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(goAskAwayRoot, 'askit', 'src', 'core', 'index.ts'),
-        };
-      }
-      if (moduleName === 'askit/contracts') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(goAskAwayRoot, 'askit', 'src', 'contracts', 'index.ts'),
+          filePath: localPackageEntries[moduleName],
         };
       }
 

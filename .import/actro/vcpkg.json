@@ -1,0 +1,9 @@
+{
+  "name": "actro-native-deps",
+  "version-string": "0.1.0",
+  "dependencies": [
+    "aom",
+    "libvpx",
+    "libyuv"
+  ]
+}
