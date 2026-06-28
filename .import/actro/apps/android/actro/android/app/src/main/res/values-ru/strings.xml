@@ -1,0 +1,15 @@
+<resources>
+    <string name="tab_active">Активность</string>
+    <string name="tab_bookmark">Закладки</string>
+    <string name="tab_set">Настройки</string>
+    <string name="search">Поиск...</string>
+    <string name="goback">Назад</string>
+    <string name="blank_tab">Новая вкладка</string>
+    <string name="menu_bookmark">Закладка</string>
+    <string name="menu_close_tab">Закрыть вкладку</string>
+    <string name="menu_close_other_tabs">Закрыть остальные вкладки</string>
+    <string name="menu_cancel_bookmark">Удалить закладку</string>
+    <string name="active_empty_text">Приложения здесь\nНажмите \"+\" вверху</string>
+    <string name="server_closed">Сервис закрыт</string>
+</resources>
+

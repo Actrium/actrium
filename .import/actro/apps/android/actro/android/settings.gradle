@@ -1,0 +1,35 @@
+pluginManagement { includeBuild("../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+
+// Read node path from local.properties
+def localProperties = new Properties()
+def localPropertiesFile = file('local.properties')
+if (localPropertiesFile.exists()) {
+    localProperties.load(new FileInputStream(localPropertiesFile))
+}
+def nodeExecutable = localProperties.getProperty('reactNative.nodeExecutableAndArgs', 'node')
+
+extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
+  ex.autolinkLibrariesFromCommand(
+    [
+      nodeExecutable,
+      "./node_modules/@react-native-community/cli/build/bin.js",
+      "config"
+    ]
+  )
+}
+rootProject.name = 'kotlin-canvas'
+include ':app'
+includeBuild('../node_modules/@react-native/gradle-plugin')
+
+include ':actr-kotlin'
+project(':actr-kotlin').projectDir =file('../../actr-kotlin/actr-kotlin')
+
+include ':rill-sandbox-native'
+project(':rill-sandbox-native').projectDir = file('../../rill/native/platform/android')
+
+include ':react-native-safe-area-context'
+project(':react-native-safe-area-context').projectDir = file('../node_modules/react-native-safe-area-context/android')
+
+include ':react-native-view-shot'
+project(':react-native-view-shot').projectDir = file('../node_modules/react-native-view-shot/android')

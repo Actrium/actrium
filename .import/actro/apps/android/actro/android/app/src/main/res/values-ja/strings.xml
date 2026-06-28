@@ -1,0 +1,15 @@
+<resources>
+    <string name="tab_active">アクティビティ</string>
+    <string name="tab_bookmark">ブックマーク</string>
+    <string name="tab_set">環境設定</string>
+    <string name="search">検索...</string>
+    <string name="goback">戻る</string>
+    <string name="blank_tab">新規タブ</string>
+    <string name="menu_bookmark">ブックマーク</string>
+    <string name="menu_close_tab">タブを閉じる</string>
+    <string name="menu_close_other_tabs">その他のタブを閉じる</string>
+    <string name="menu_cancel_bookmark">ブックマークを解除</string>
+    <string name="active_empty_text">アプリがここに表示\n上の「+」をタップ</string>
+    <string name="server_closed">サービス終了</string>
+</resources>
+

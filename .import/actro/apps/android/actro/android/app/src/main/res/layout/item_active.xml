@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<chat.askaway.android.view.RoundedCornerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/fl_active"
+    android:layout_width="match_parent"
+    android:layout_height="200dp"
+    android:layout_marginHorizontal="16dp"
+    android:layout_marginVertical="8dp"
+    android:background="@drawable/item_active_bg"
+    app:cornerRadius="26dp">
+
+    <ImageView
+        android:id="@+id/ivScreenshot"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:scaleType="centerCrop" />
+
+    <!-- 底部操作栏：56dp高，灰色背景 -->
+    <LinearLayout
+        android:id="@+id/llAppBottom"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_gravity="bottom"
+        android:background="@drawable/app_bottom_bg"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="13dp"
+        android:paddingEnd="20dp">
+
+        <!-- 圆形图标容器 -->
+        <FrameLayout
+            android:layout_width="32dp"
+            android:layout_height="32dp">
+
+            <chat.askaway.android.view.RoundedCornerLayout
+                android:layout_width="32dp"
+                android:layout_height="32dp"
+                app:cornerRadius="16dp">
+
+                <ImageView
+                    android:id="@+id/ivAppIcon"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/app_icon_bg"
+                    android:scaleType="centerCrop" />
+            </chat.askaway.android.view.RoundedCornerLayout>
+            <!-- 未读标记圆点 -->
+            <View
+                android:id="@+id/vUnreadBadge"
+                android:layout_width="8dp"
+                android:layout_height="8dp"
+                android:layout_gravity="top|end"
+                android:background="@drawable/unread_dot"
+                android:visibility="gone" />
+        </FrameLayout>
+
+        <!-- 应用名称 -->
+        <TextView
+            android:id="@+id/tvAppName"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="11dp"
+            android:layout_weight="1"
+            android:text="App Name"
+            android:textColor="@color/title_text"
+            android:textSize="17sp" />
+
+        <!-- 标记图标 -->
+        <ImageView
+            android:id="@+id/ivMark"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:src="@drawable/ic_mark"
+            app:tint="@color/icon_1" />
+
+        <!-- 分隔空间 -->
+        <Space
+            android:layout_width="20dp"
+            android:layout_height="1dp" />
+
+        <!-- 删除图标 -->
+        <ImageView
+            android:id="@+id/ivDelete"
+            android:layout_width="20dp"
+            android:layout_height="20dp"
+            android:src="@drawable/ic_delete"
+            app:tint="@color/icon_1" />
+    </LinearLayout>
+</chat.askaway.android.view.RoundedCornerLayout>

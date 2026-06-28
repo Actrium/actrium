@@ -1,0 +1,21 @@
+<resources>
+    <attr name="cornerRadius" format="dimension" />
+
+    <declare-styleable name="RoundedCornerLayout">
+        <attr name="cornerRadius" />
+        <attr name="cornerTopLeftRadius" format="dimension" />
+        <attr name="cornerTopRightRadius" format="dimension" />
+        <attr name="cornerBottomRightRadius" format="dimension" />
+        <attr name="cornerBottomLeftRadius" format="dimension" />
+    </declare-styleable>
+
+    <declare-styleable name="ReverseCornerView">
+        <attr name="reverseDirection" format="enum">
+            <enum name="topLeft" value="0" />
+            <enum name="topRight" value="1" />
+            <enum name="bottomLeft" value="2" />
+            <enum name="bottomRight" value="3" />
+        </attr>
+        <attr name="fillColor" format="color" />
+    </declare-styleable>
+</resources>
