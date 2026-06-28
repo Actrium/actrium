@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">Askaway</string>
+    <string name="tab_bookmark">Bookmarks</string>
+    <string name="tab_active">Activity</string>
+    <string name="tab_set">Preferences</string>
+    <string name="search">Search...</string>
+    <string name="goback">Back</string>
+    <string name="blank_tab">New Tab</string>
+    <string name="menu_bookmark">Bookmark</string>
+    <string name="menu_close_tab">Close Tab</string>
+    <string name="menu_close_other_tabs">Close Other Tabs</string>
+    <string name="menu_cancel_bookmark">Unbookmark</string>
+    <string name="active_empty_text">Apps will show here\nTap \"+\" above</string>
+    <string name="server_closed">Server Closed</string>
+</resources>
