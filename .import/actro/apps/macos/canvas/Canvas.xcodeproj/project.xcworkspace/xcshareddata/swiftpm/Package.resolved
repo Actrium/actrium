@@ -1,0 +1,24 @@
+{
+  "originHash" : "f68389026eacc3dedcb6545edc18070f7354d435f7526a079f2f469f4a11f10b",
+  "pins" : [
+    {
+      "identity" : "highlightr",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/raspu/Highlightr",
+      "state" : {
+        "revision" : "05e7fcc63b33925cd0c1faaa205cdd5681e7bbef",
+        "version" : "2.3.0"
+      }
+    },
+    {
+      "identity" : "swift-protobuf",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-protobuf.git",
+      "state" : {
+        "revision" : "c6fe6442e6a64250495669325044052e113e990c",
+        "version" : "1.32.0"
+      }
+    }
+  ],
+  "version" : 3
+}

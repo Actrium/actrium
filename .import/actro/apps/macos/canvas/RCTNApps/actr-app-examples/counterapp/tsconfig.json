@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "lib": ["ES2022"],
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "strict": false,
+    "noImplicitAny": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "baseUrl": ".",
+    "paths": {
+      "rill/guest": ["../../../../rill/src/sdk/index.ts"],
+      "askit": ["../../../../askit/src/index.guest.ts"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["**/node_modules/**"]
+}
