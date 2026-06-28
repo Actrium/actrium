@@ -10,9 +10,9 @@ The first client targets are:
 - iOS
 
 The original macOS client, Canvas, is imported under
-`apps/macos/canvas/` with its Git history preserved. Treat that directory as
-the migration source of record until the macOS app is renamed and split into
-shared modules.
+`apps/macos/canvas/` with its Git history preserved. Its first Actro-shaped
+source layout now lives behind compatibility symlinks so existing Xcode
+references can keep building during the migration.
 
 ## Repository Layout
 
@@ -42,8 +42,8 @@ Do not copy Canvas files into new locations when history matters. Move code in
 small, reviewable follow-up commits after the imported history is anchored in
 this repository.
 
-The first split keeps compatibility symlinks under `apps/macos/canvas/` so the
-existing Xcode project can keep building while code moves into `packages/`,
-`crates/`, and `platform/apple/`.
+The split keeps compatibility symlinks under `apps/macos/canvas/` so the
+existing Xcode project can keep building while code moves into `Actro*/`,
+`packages/`, `crates/`, and `platform/apple/`.
 
 See `docs/migration/canvas.md` for the migration rules.

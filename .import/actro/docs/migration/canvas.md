@@ -28,13 +28,15 @@ tree under the macOS app directory.
 ## Current Mapping
 
 ```text
-Canvas/                    -> apps/macos/canvas/Canvas/
-Canvas*Service/            -> apps/macos/canvas/Canvas*Service/
+Canvas/                    -> apps/macos/canvas/Actro/
+Canvas*Service/            -> apps/macos/canvas/Actro*Service/
+CanvasTests/               -> apps/macos/canvas/ActroTests/
+CanvasUITests/             -> apps/macos/canvas/ActroUITests/
 Packages/CanvasIPC/        -> platform/apple/packages/CanvasIPC/
 Shared/IPC/                -> apps/macos/canvas/Shared/IPC/
-canvas-terminal/           -> crates/canvas-terminal/
-canvas-remote/             -> crates/canvas-remote/
-RCTNApps/                  -> packages/canvas-runtime/
+canvas-terminal/           -> crates/actro-terminal/
+canvas-remote/             -> crates/actro-remote/
+RCTNApps/                  -> packages/actro-runtime/
 docs/                      -> apps/macos/canvas/docs/
 rill/                      -> packages/rill/
 askit/                     -> packages/askit/
@@ -70,11 +72,11 @@ xcodebuild -workspace Canvas.xcworkspace -scheme Canvas -configuration Debug -de
 The Rust FFI crates also rebuild from their new locations:
 
 ```text
-crates/canvas-terminal/build-xcframework.sh
-crates/canvas-remote/build-xcframework.sh
+crates/actro-terminal/build-xcframework.sh
+crates/actro-remote/build-xcframework.sh
 ```
 
-`canvas-remote` requires the native libraries installed by vcpkg
+`actro-remote` requires the native libraries installed by vcpkg
 (`libyuv`, `libvpx`, `aom`) through `VCPKG_ROOT`. The repo declares these in
 `vcpkg.json` and provides `scripts/bootstrap-native-deps.sh`, but vcpkg itself
 and installed artifacts remain outside the repo.

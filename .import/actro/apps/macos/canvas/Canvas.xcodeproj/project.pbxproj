@@ -145,12 +145,12 @@
 		B3E458AF2EC731A40014D74C /* CanvasTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B3E458B92EC731A40014D74C /* CanvasUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CanvasUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		C6A7E7F65DC0D2FA1F7D3C5F /* Pods-CanvasTests.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-CanvasTests.release.xcconfig"; path = "Target Support Files/Pods-CanvasTests/Pods-CanvasTests.release.xcconfig"; sourceTree = "<group>"; };
-		CC00110022003300AA00BB01 /* CanvasTerminal.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CanvasTerminal.xcframework; path = "canvas-terminal/CanvasTerminal.xcframework"; sourceTree = "<group>"; };
+		CC00110022003300AA00BB01 /* CanvasTerminal.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CanvasTerminal.xcframework; path = "../../../crates/actro-terminal/CanvasTerminal.xcframework"; sourceTree = "<group>"; };
 		CC11220033004400AA00BB10 /* CanvasTerminalService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasTerminalService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		DACA28DED8E4818311DAAB4D /* libPods-CanvasTests.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-CanvasTests.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		DD11220033004400AA00BB10 /* CanvasSFTPService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasSFTPService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 		E9714E32CAB19E5B8190B795 /* Pods-Canvas.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Canvas.debug.xcconfig"; path = "Target Support Files/Pods-Canvas/Pods-Canvas.debug.xcconfig"; sourceTree = "<group>"; };
-		EE00110022003300AA00BB01 /* CanvasRemote.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CanvasRemote.xcframework; path = "canvas-remote/CanvasRemote.xcframework"; sourceTree = "<group>"; };
+		EE00110022003300AA00BB01 /* CanvasRemote.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = CanvasRemote.xcframework; path = "../../../crates/actro-remote/CanvasRemote.xcframework"; sourceTree = "<group>"; };
 		EE11220033004400AA00BB10 /* CanvasRemoteService.xpc */ = {isa = PBXFileReference; explicitFileType = "wrapper.xpc-service"; includeInIndex = 0; path = CanvasRemoteService.xpc; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -191,28 +191,28 @@
 			exceptions = (
 				B3312B272F066DB70018A0B4 /* Exceptions for "CanvasViewService" folder in "CanvasViewService" target */,
 			);
-			path = CanvasViewService;
+			path = ActroViewService;
 			sourceTree = "<group>";
 		};
 		B3E458A22EC731A30014D74C /* Canvas */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 			);
-			path = Canvas;
+			path = Actro;
 			sourceTree = "<group>";
 		};
 		B3E458B22EC731A40014D74C /* CanvasTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 			);
-			path = CanvasTests;
+			path = ActroTests;
 			sourceTree = "<group>";
 		};
 		B3E458BC2EC731A40014D74C /* CanvasUITests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 			);
-			path = CanvasUITests;
+			path = ActroUITests;
 			sourceTree = "<group>";
 		};
 		CC11220033004400AA00BB12 /* CanvasTerminalService */ = {
@@ -220,7 +220,7 @@
 			exceptions = (
 				CC11220033004400AA00BB11 /* Exceptions for "CanvasTerminalService" folder in "CanvasTerminalService" target */,
 			);
-			path = CanvasTerminalService;
+			path = ActroTerminalService;
 			sourceTree = "<group>";
 		};
 		DD11220033004400AA00BB12 /* CanvasSFTPService */ = {
@@ -228,7 +228,7 @@
 			exceptions = (
 				DD11220033004400AA00BB11 /* Exceptions for "CanvasSFTPService" folder in "CanvasSFTPService" target */,
 			);
-			path = CanvasSFTPService;
+			path = ActroSFTPService;
 			sourceTree = "<group>";
 		};
 		EE11220033004400AA00BB12 /* CanvasRemoteService */ = {
@@ -236,7 +236,7 @@
 			exceptions = (
 				EE11220033004400AA00BB11 /* Exceptions for "CanvasRemoteService" folder in "CanvasRemoteService" target */,
 			);
-			path = CanvasRemoteService;
+			path = ActroRemoteService;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -824,7 +824,7 @@
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(SRCROOT)/Canvas/Resources/main.rctnapp.jsbundle",
+				"$(SRCROOT)/Actro/Resources/main.rctnapp.jsbundle",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -967,7 +967,7 @@
 			baseConfigurationReference = 453DB22E380EBC5CF3E87FBC /* Pods-CanvasViewService.debug.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CODE_SIGN_ENTITLEMENTS = CanvasViewService/CanvasViewService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ActroViewService/CanvasViewService.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -976,7 +976,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = CanvasViewService/Info.plist;
+				INFOPLIST_FILE = ActroViewService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CanvasViewService;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1005,7 +1005,7 @@
 			baseConfigurationReference = 89B514D408E702A02C0609E2 /* Pods-CanvasViewService.release.xcconfig */;
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
-				CODE_SIGN_ENTITLEMENTS = CanvasViewService/CanvasViewService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ActroViewService/CanvasViewService.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -1014,7 +1014,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = CanvasViewService/Info.plist;
+				INFOPLIST_FILE = ActroViewService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CanvasViewService;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1184,7 +1184,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Canvas/Info.plist;
+				INFOPLIST_FILE = Actro/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1218,7 +1218,7 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = Canvas/Info.plist;
+				INFOPLIST_FILE = Actro/Info.plist;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -1322,7 +1322,7 @@
 		CC11220033004400AA00BB31 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = CanvasTerminalService/CanvasTerminalService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ActroTerminalService/CanvasTerminalService.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1331,7 +1331,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = CanvasTerminalService/Info.plist;
+				INFOPLIST_FILE = ActroTerminalService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CanvasTerminalService;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1359,7 +1359,7 @@
 		CC11220033004400AA00BB32 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = CanvasTerminalService/CanvasTerminalService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ActroTerminalService/CanvasTerminalService.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1368,7 +1368,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = CanvasTerminalService/Info.plist;
+				INFOPLIST_FILE = ActroTerminalService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CanvasTerminalService;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1395,7 +1395,7 @@
 		DD11220033004400AA00BB31 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = CanvasSFTPService/CanvasSFTPService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ActroSFTPService/CanvasSFTPService.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1404,7 +1404,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = CanvasSFTPService/Info.plist;
+				INFOPLIST_FILE = ActroSFTPService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CanvasSFTPService;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1432,7 +1432,7 @@
 		DD11220033004400AA00BB32 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = CanvasSFTPService/CanvasSFTPService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ActroSFTPService/CanvasSFTPService.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1441,7 +1441,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = CanvasSFTPService/Info.plist;
+				INFOPLIST_FILE = ActroSFTPService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CanvasSFTPService;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1468,7 +1468,7 @@
 		EE11220033004400AA00BB31 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = CanvasRemoteService/CanvasRemoteService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ActroRemoteService/CanvasRemoteService.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1477,7 +1477,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = CanvasRemoteService/Info.plist;
+				INFOPLIST_FILE = ActroRemoteService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CanvasRemoteService;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -1515,7 +1515,7 @@
 		EE11220033004400AA00BB32 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_ENTITLEMENTS = CanvasRemoteService/CanvasRemoteService.entitlements;
+				CODE_SIGN_ENTITLEMENTS = ActroRemoteService/CanvasRemoteService.entitlements;
 				CODE_SIGN_IDENTITY = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
@@ -1524,7 +1524,7 @@
 				ENABLE_APP_SANDBOX = YES;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_FILE = CanvasRemoteService/Info.plist;
+				INFOPLIST_FILE = ActroRemoteService/Info.plist;
 				INFOPLIST_KEY_CFBundleDisplayName = CanvasRemoteService;
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (

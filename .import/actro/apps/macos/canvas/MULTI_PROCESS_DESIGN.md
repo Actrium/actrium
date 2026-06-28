@@ -555,7 +555,7 @@ Canvas/
 │
 ├── Canvas/                                  # 主 App 源码
 │   ├── App/
-│   │   └── CanvasApp.swift
+│   │   └── ActroApp.swift
 │   ├── Browser/
 │   │   ├── BrowserWindow.swift
 │   │   └── BrowserViewModel.swift

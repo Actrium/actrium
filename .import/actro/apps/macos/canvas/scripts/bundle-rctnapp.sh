@@ -11,8 +11,8 @@
 #   --help            Show this help message
 #
 # Bundles:
-#   system  -> Canvas/Resources/main.rctnapp.jsbundle  (for RCTViewService0)
-#   actr    -> Canvas/Resources/actr.jsbundle          (for RCTViewService1-N)
+#   system  -> Actro/Resources/main.rctnapp.jsbundle  (for RCTViewService0)
+#   actr    -> Actro/Resources/actr.jsbundle          (for RCTViewService1-N)
 #
 # Examples:
 #   ./scripts/bundle-rctnapp.sh                    # Build both bundles (release)
@@ -26,7 +26,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 RCTNAPP_DIR="$PROJECT_ROOT/RCTNApps"
-OUTPUT_DIR="$PROJECT_ROOT/Canvas/Resources"
+OUTPUT_DIR="$PROJECT_ROOT/Actro/Resources"
 
 # Default options
 TARGET="all"

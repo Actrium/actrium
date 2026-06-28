@@ -514,7 +514,7 @@ ViewBridgeHostView: Remote view embedded, size=(186.74, 126.19)
 Canvas/
 ├── Canvas/
 │   ├── App/
-│   │   └── CanvasApp.swift              # 应用入口，Metro 自动启动
+│   │   └── ActroApp.swift               # 应用入口，Metro 自动启动
 │   ├── MultiProcess/
 │   │   ├── ViewBridgeHostView.swift     # ViewBridge Host 端实现
 │   │   ├── XPCServicePool.swift         # XPC Service 池管理

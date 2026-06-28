@@ -251,7 +251,7 @@ private struct ContentAreaView: View {
 
     private func handleLaunchURLIfNeeded() {
         guard !hasHandledLaunchURL,
-              let launchURL = CanvasApp.launchURL else { return }
+              let launchURL = ActroApp.launchURL else { return }
         hasHandledLaunchURL = true
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -270,7 +270,7 @@ private struct ContentAreaView: View {
         guard !hasAppliedDebugConfig else { return }
         hasAppliedDebugConfig = true
 
-        let config = CanvasApp.debugConfig
+        let config = ActroApp.debugConfig
         guard config.hasDebugOptions else { return }
 
         NSLog("🔧 [Debug] Applying debug configuration...")

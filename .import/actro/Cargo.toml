@@ -2,8 +2,8 @@
 resolver = "2"
 members = [
     "crates/actro-core",
-    "crates/canvas-terminal",
-    "crates/canvas-remote",
+    "crates/actro-terminal",
+    "crates/actro-remote",
 ]
 exclude = [
     "third_party/actor-rtc-actr",

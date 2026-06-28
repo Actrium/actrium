@@ -13,11 +13,11 @@ coverage/
 
 # Rust
 target/
-crates/canvas-terminal/libcanvas_terminal.a
-crates/canvas-terminal/CanvasTerminal.xcframework/macos-arm64_x86_64/libcanvas_terminal.a
-crates/canvas-remote/libcanvas_remote.a
-crates/canvas-remote/xcframework-staging/
-crates/canvas-remote/CanvasRemote.xcframework/macos-arm64/libcanvas_remote.a
+crates/actro-terminal/libcanvas_terminal.a
+crates/actro-terminal/CanvasTerminal.xcframework/macos-arm64_x86_64/libcanvas_terminal.a
+crates/actro-remote/libcanvas_remote.a
+crates/actro-remote/xcframework-staging/
+crates/actro-remote/CanvasRemote.xcframework/macos-arm64/libcanvas_remote.a
 
 # Apple
 DerivedData/
