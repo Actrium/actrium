@@ -1,0 +1,90 @@
+rctnapps_path = File.join(__dir__, 'RCTNApps')
+# Keep react-native-macos path RELATIVE. RN CocoaPods helpers assume `path` is relative and will
+# incorrectly prefix it if an absolute path is passed (leading to paths like "./Users/..." or "../Users/...").
+react_native_macos_path = 'RCTNApps/node_modules/react-native-macos'
+
+# Require react_native_pods via a stable absolute path.
+require File.join(rctnapps_path, 'node_modules', 'react-native-macos', 'scripts', 'react_native_pods')
+require File.join(rctnapps_path, 'node_modules', 'rill', 'scripts', 'rill_post_install')
+
+prepare_react_native_project!
+
+# rill sandbox engine: JSC for guest sandbox (Hermes is main runtime)
+ENV['RILL_SANDBOX_ENGINE'] = 'jsc'
+
+# Shared React Native configuration
+def use_actro_react_native
+  use_react_native!(
+    path: 'RCTNApps/node_modules/react-native-macos',
+    hermes_enabled: true,
+    app_path: File.join(__dir__, 'RCTNApps')
+  )
+
+  # rill native sandbox (JSI) - Guest uses JSC engine
+  pod 'RillSandboxNative', :path => 'RCTNApps/node_modules/rill'
+end
+
+target 'Actro' do
+  platform :macos, '14.0'
+  use_actro_react_native
+end
+
+target 'ActroTests' do
+  platform :macos, '14.0'
+  use_actro_react_native
+end
+
+# ViewBridge XPC service with React Native
+target 'ActroViewService' do
+  platform :macos, '14.0'
+  use_actro_react_native
+end
+
+post_install do |installer|
+  # 告诉 React Native 正确的源码位置，避免 Codegen 误报
+  react_native_post_install(installer, react_native_macos_path)
+  rill_post_install(installer, react_native_path: react_native_macos_path)
+
+  # NOTE: hermes.framework embedding for ActroViewService XPC target is done via
+  # a manually-added build phase in Actro.xcodeproj (not via CocoaPods).
+  # CocoaPods' xcodeproj gem doesn't support Xcode 26's PBXFileSystemSynchronizedRootGroup,
+  # so we can't programmatically modify the user project from post_install.
+
+  # 抑制所有 Pods 项目的警告
+  installer.pods_project.targets.each do |target|
+    target.build_configurations.each do |config|
+      # Ensure REACT_NATIVE_PATH is available in shell script phases.
+      # hermes-engine's "[Hermes] Replace Hermes" script references this var
+      # but project-level build settings may not propagate to shell environments.
+      config.build_settings['REACT_NATIVE_PATH'] ||=
+        "${PODS_ROOT}/../#{react_native_macos_path}"
+
+      # 抑制所有警告
+      config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
+      # 抑制特定的常见警告
+      config.build_settings['CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS'] = 'NO'
+      config.build_settings['CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF'] = 'NO'
+      config.build_settings['GCC_WARN_64_TO_32_BIT_CONVERSION'] = 'NO'
+
+      # Xcode 17's Apple Clang rejects fmt 11's C++20 consteval formatting path.
+      # Keep fmt on C++17 so the library's own feature detection avoids consteval.
+      if target.name == 'fmt'
+        config.build_settings['CLANG_CXX_LANGUAGE_STANDARD'] = 'c++17'
+      end
+
+      # 🔥 禁用 Hermes/Inspector debugger 以避免启动时的线程冲突崩溃
+      # react_native_post_install 会在 Debug 配置下添加 HERMES_ENABLE_DEBUGGER=1 和
+      # REACT_NATIVE_DEBUGGER_ENABLED=1，这会导致 jsinspector-modern 的 ReentrancyCheck
+      # 在启动时检测到跨线程访问而崩溃。移除这些宏可以禁用 inspector，避免崩溃。
+      # 注意：这会禁用 React Native DevTools 的调试功能，但不影响应用正常运行。
+      if config.name == 'Debug'
+        debugger_targets = ['React-hermes', 'hermes-engine', 'React-RuntimeHermes', 'React-jsinspector']
+        if debugger_targets.include?(target.name)
+          defs = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
+          defs = defs.reject { |d| d.include?('HERMES_ENABLE_DEBUGGER') || d.include?('REACT_NATIVE_DEBUGGER_ENABLED') }
+          config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = defs
+        end
+      end
+    end
+  end
+end

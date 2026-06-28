@@ -9,8 +9,8 @@ The first client targets are:
 - Android
 - iOS
 
-The original macOS client, Canvas, is imported under
-`apps/macos/canvas/` with its Git history preserved. Its first Actro-shaped
+The original macOS client, Actro, is imported under
+`apps/macos/actro/` with its Git history preserved. Its first Actro-shaped
 source layout now lives behind compatibility symlinks so existing Xcode
 references can keep building during the migration.
 
@@ -30,20 +30,20 @@ tools/         Developer tooling.
 tests/         Cross-platform test fixtures and e2e suites.
 ```
 
-## Canvas Import
+## Actro Import
 
-Canvas was imported with a history-preserving merge/read-tree flow:
+Actro was imported with a history-preserving merge/read-tree flow:
 
 ```text
-apps/macos/canvas/
+apps/macos/actro/
 ```
 
-Do not copy Canvas files into new locations when history matters. Move code in
+Do not copy Actro files into new locations when history matters. Move code in
 small, reviewable follow-up commits after the imported history is anchored in
 this repository.
 
-The split keeps compatibility symlinks under `apps/macos/canvas/` so the
+The split keeps compatibility symlinks under `apps/macos/actro/` so the
 existing Xcode project can keep building while code moves into `Actro*/`,
 `packages/`, `crates/`, and `platform/apple/`.
 
-See `docs/migration/canvas.md` for the migration rules.
+See `docs/migration/actro.md` for the migration rules.

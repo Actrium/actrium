@@ -15,7 +15,7 @@ repository and is consumed through released or local SDKs.
 
 ## Initial Platform Strategy
 
-- macOS starts from the imported Canvas codebase.
+- macOS starts from the imported Actro codebase.
 - iOS should share Apple packages where WebKit, account, and Actr SDK behavior
   can be common.
 - Android consumes the Actr Kotlin package and keeps Android lifecycle behavior
@@ -32,7 +32,7 @@ Actro should not vendor the current Actrium `actr` runtime. It should depend on:
 - npm package `@actrium/actr` where Node or desktop tooling needs it.
 - Local overrides only for active development against `/Users/example-dev-2/Projects/example-app-2/actr`.
 
-The imported Canvas remote desktop stack temporarily carries a pinned legacy
-`actor-rtc/actr` source tree under `third_party/actor-rtc-actr` because Canvas
+The imported Actro remote desktop stack temporarily carries a pinned legacy
+`actor-rtc/actr` source tree under `third_party/actor-rtc-actr` because Actro
 was built against that historical API. Treat it as migration compatibility
 source, not the long-term Actro runtime boundary.

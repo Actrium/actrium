@@ -13,11 +13,11 @@ coverage/
 
 # Rust
 target/
-crates/actro-terminal/libcanvas_terminal.a
-crates/actro-terminal/CanvasTerminal.xcframework/macos-arm64_x86_64/libcanvas_terminal.a
-crates/actro-remote/libcanvas_remote.a
+crates/actro-terminal/libactro_terminal.a
+crates/actro-terminal/ActroTerminal.xcframework/macos-arm64_x86_64/libactro_terminal.a
+crates/actro-remote/libactro_remote.a
 crates/actro-remote/xcframework-staging/
-crates/actro-remote/CanvasRemote.xcframework/macos-arm64/libcanvas_remote.a
+crates/actro-remote/ActroRemote.xcframework/macos-arm64/libactro_remote.a
 
 # Apple
 DerivedData/
