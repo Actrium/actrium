@@ -206,7 +206,7 @@ struct DebugLaunchConfig {
 // MARK: - App
 
 @main
-struct CanvasApp: App {
+struct ActroApp: App {
     // Use AppDelegate for window management
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 

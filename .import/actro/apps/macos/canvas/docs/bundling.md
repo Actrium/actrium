@@ -96,6 +96,6 @@ RCTNApps/
 
 ## 文件位置
 
-- **Bundle 输出**：`Canvas/Resources/`
+- **Bundle 输出**：`Actro/Resources/`
 - **Xcode 项目**：`Canvas.xcodeproj`
 - **构建脚本**：`scripts/bundle-rctnapp.sh`

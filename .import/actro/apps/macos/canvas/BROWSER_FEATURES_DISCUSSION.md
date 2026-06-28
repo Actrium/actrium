@@ -78,7 +78,7 @@
 
 ### 代码位置
 - `WebViewTabView.swift:WebViewHolder.print()`
-- `CanvasApp.swift:printCurrentPage()`
+- `ActroApp.swift:printCurrentPage()`
 
 ---
 
@@ -93,7 +93,7 @@
 
 ### 代码位置
 - `WebViewTabView.swift:WebViewHolder.zoomIn/zoomOut/resetZoom()`
-- `CanvasApp.swift:zoomIn/zoomOut/resetZoom()`
+- `ActroApp.swift:zoomIn/zoomOut/resetZoom()`
 
 ---
 
@@ -104,7 +104,7 @@
 - 快捷键: `Ctrl+Cmd+F`
 
 ### 代码位置
-- `CanvasApp.swift:toggleFullScreen()`
+- `ActroApp.swift:toggleFullScreen()`
 
 ---
 
