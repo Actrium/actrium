@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.bun-cache/
+.tmp/
+tmp-build/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
