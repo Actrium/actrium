@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/actro-core",
+]
+exclude = [
+    "apps/macos/canvas/canvas-terminal",
+    "apps/macos/canvas/canvas-remote",
+]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/Actrium/actro"

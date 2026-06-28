@@ -1,0 +1,29 @@
+.DS_Store
+
+# Editors
+.idea/
+.vscode/
+*.swp
+
+# JavaScript
+node_modules/
+.turbo/
+.next/
+coverage/
+
+# Rust
+target/
+
+# Apple
+DerivedData/
+*.xcuserdata/
+
+# Build outputs
+build/
+dist/
+out/
+
+# Local environment
+.env
+.env.*
+!.env.example
