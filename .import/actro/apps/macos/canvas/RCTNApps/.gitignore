@@ -1,0 +1,28 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+*.profraw
+dist/
+
+# Caches
+.bun-cache/
+.tmp/
+tmp-build/
+
+# Lock files (using bun)
+package-lock.json
+pnpm-lock.yaml
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Debug
+.debug/

@@ -1,0 +1,12 @@
+{
+  "name": "counterapp",
+  "version": "3.0.0",
+  "description": "Interactive Counter Test App - usePanels Hook Mode",
+  "entry": "unified-app.js",
+  "leftPanelDefaultVisible": true,
+  "rightPanelDefaultVisible": true,
+  "contract": {
+    "name": "ask",
+    "version": 1
+  }
+}

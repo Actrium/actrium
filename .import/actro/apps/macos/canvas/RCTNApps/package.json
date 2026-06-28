@@ -1,0 +1,36 @@
+{
+  "name": "canvas-subsystem",
+  "version": "1.0.0",
+  "description": "Canvas Subsystem - React Native runtime for actr apps and system apps",
+  "main": "index.ts",
+  "scripts": {
+    "start": "react-native start --verbose",
+    "log": "bun log-server.ts",
+    "dev": "bun scripts/dev.ts",
+    "typecheck": "tsc --noEmit",
+    "lint:logs": "node scripts/check-logs.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@babel/runtime": "^7.28.4",
+    "@react-native-macos/virtualized-lists": "^0.81.1",
+    "react": "19.1.4",
+    "react-native": "0.81.5",
+    "react-native-macos": "0.81.1",
+    "react-reconciler": "0.32.0",
+    "rill": "file:../../rill",
+    "askit": "file:../../askit"
+  },
+  "devDependencies": {
+    "@react-native-community/cli": "^20.1.1",
+    "@react-native/metro-config": "^0.81.5",
+    "@tsconfig/react-native": "^3.0.8",
+    "@types/react": "^19.1.4",
+    "@types/node": "^22.19.3",
+    "typescript": "^5.9.3"
+  }
+}
