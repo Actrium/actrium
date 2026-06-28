@@ -1,0 +1,6 @@
+packages:
+  - "packages/*"
+  - "examples/apps/*"
+
+# Canvas RCTNApps is intentionally not enrolled yet. It still has historical
+# file: dependencies that must be remapped during migration.
