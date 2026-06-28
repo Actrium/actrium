@@ -2,10 +2,12 @@
 resolver = "2"
 members = [
     "crates/actro-core",
+    "crates/canvas-terminal",
+    "crates/canvas-remote",
 ]
 exclude = [
-    "apps/macos/canvas/canvas-terminal",
-    "apps/macos/canvas/canvas-remote",
+    "third_party/actor-rtc-actr",
+    "third_party/rustdesk-actr",
 ]
 
 [workspace.package]

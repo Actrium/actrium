@@ -21,6 +21,7 @@ apps/          Platform app entrypoints.
 platform/      Platform-specific shared libraries and adapters.
 packages/      TypeScript/React Native runtime packages and system apps.
 crates/        Rust client-side native libraries.
+third_party/   Pinned legacy source dependencies needed for migration.
 schemas/       IPC, browser, and service contracts.
 examples/      Example Actro apps and guest packages.
 docs/          Architecture decisions and migration notes.
@@ -40,5 +41,9 @@ apps/macos/canvas/
 Do not copy Canvas files into new locations when history matters. Move code in
 small, reviewable follow-up commits after the imported history is anchored in
 this repository.
+
+The first split keeps compatibility symlinks under `apps/macos/canvas/` so the
+existing Xcode project can keep building while code moves into `packages/`,
+`crates/`, and `platform/apple/`.
 
 See `docs/migration/canvas.md` for the migration rules.

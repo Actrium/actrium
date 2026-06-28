@@ -13,15 +13,26 @@ coverage/
 
 # Rust
 target/
+crates/canvas-terminal/libcanvas_terminal.a
+crates/canvas-terminal/CanvasTerminal.xcframework/macos-arm64_x86_64/libcanvas_terminal.a
+crates/canvas-remote/libcanvas_remote.a
+crates/canvas-remote/xcframework-staging/
+crates/canvas-remote/CanvasRemote.xcframework/macos-arm64/libcanvas_remote.a
 
 # Apple
 DerivedData/
+.build/
 *.xcuserdata/
 
 # Build outputs
 build/
 dist/
 out/
+
+# Temporary migration worktrees
+apps/macos/askit
+apps/macos/rill
+apps/rustdesk-actr/
 
 # Local environment
 .env
