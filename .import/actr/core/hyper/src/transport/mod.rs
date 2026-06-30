@@ -47,6 +47,7 @@ pub(crate) use wire_pool::ConnType;
 pub use host_transport::HostTransport;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use host_transport::HostTransport;
+pub(crate) use peer_transport::DestTransportRef;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use peer_transport::PeerTransport;
 #[cfg(feature = "test-utils")]

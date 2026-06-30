@@ -8,7 +8,8 @@
 
 use super::data_stream_activity::{DataStreamActivityTracker, DataStreamRecordState};
 use crate::transport::{
-    ConnectionEvent, ConnectionState, Dest, PayloadTypeExt, PeerTransport, WireIdentity,
+    ConnectionEvent, ConnectionState, Dest, DestTransportRef, PayloadTypeExt, PeerTransport,
+    WireIdentity,
 };
 use crate::wire::webrtc::{NETWORK_RECOVERY_TIMEOUT, NetworkRecoveryStatus, WebRtcCoordinator};
 use actr_framework::{Bytes, MediaSample};
@@ -812,7 +813,7 @@ impl PeerGate {
         dest: &Dest,
         payload_type: PayloadType,
         data: &[u8],
-    ) -> ActorResult<Option<WireIdentity>> {
+    ) -> ActorResult<DestTransportRef> {
         let policy = payload_type.retry_policy();
         self.send_with_retry_policy_record_identity(dest, payload_type, data, policy)
             .await
@@ -836,7 +837,7 @@ impl PeerGate {
         payload_type: PayloadType,
         data: &[u8],
         policy: crate::transport::RetryPolicy,
-    ) -> ActorResult<Option<WireIdentity>> {
+    ) -> ActorResult<DestTransportRef> {
         let mut delay = policy.initial_delay;
         let mut attempt = 0u32;
 
@@ -883,9 +884,24 @@ impl PeerGate {
         transport_manager: Arc<PeerTransport>,
         dest: Dest,
         target: ActrId,
-        sent_identity: Option<WireIdentity>,
+        sent_transport: Option<DestTransportRef>,
     ) {
-        match sent_identity {
+        let Some(sent_transport) = sent_transport else {
+            tracing::warn!(
+                peer = ?target,
+                "Request timed out before a sent transport was recorded; closing transport"
+            );
+            if let Err(e) = transport_manager.close_transport(&dest).await {
+                tracing::warn!(
+                    peer = ?target,
+                    "Failed to close transport after request timeout: {}",
+                    e
+                );
+            }
+            return;
+        };
+
+        match sent_transport.wire_identity.clone() {
             Some(WireIdentity::WebRtc {
                 peer_id,
                 session_id,
@@ -920,14 +936,25 @@ impl PeerGate {
             None => {
                 tracing::warn!(
                     peer = ?target,
-                    "Request timed out before a WebRTC send identity was recorded; closing transport"
+                    "Request timed out after send without wire identity; closing transport if instance still matches"
                 );
-                if let Err(e) = transport_manager.close_transport(&dest).await {
-                    tracing::warn!(
+                match transport_manager
+                    .close_transport_if_current(&dest, &sent_transport)
+                    .await
+                {
+                    Ok(true) => tracing::debug!(
                         peer = ?target,
-                        "Failed to close transport after request timeout: {}",
+                        "Closed timed-out request transport for matching instance"
+                    ),
+                    Ok(false) => tracing::debug!(
+                        peer = ?target,
+                        "Skipped timed-out request transport close because instance was replaced"
+                    ),
+                    Err(e) => tracing::warn!(
+                        peer = ?target,
+                        "Failed to close stale transport after request timeout: {}",
                         e
-                    );
+                    ),
                 }
             }
         }
@@ -992,15 +1019,15 @@ impl PeerGate {
         //    so the user-perceived latency never exceeds envelope.timeout_ms.
         let timeout = std::time::Duration::from_millis(envelope.timeout_ms as u64);
         let request_id = envelope.request_id.clone();
-        let sent_identity = Arc::new(Mutex::new(None));
-        let sent_identity_for_send = Arc::clone(&sent_identity);
+        let sent_transport = Arc::new(Mutex::new(None));
+        let sent_transport_for_send = Arc::clone(&sent_transport);
 
         let result = tokio::time::timeout(timeout, async {
             // 5a. Send with per-PayloadType retry on transient failures
-            let identity = self
+            let sent_identity = self
                 .send_with_retry_record_identity(&dest, payload_type, &data)
                 .await?;
-            *sent_identity_for_send.lock().await = identity;
+            *sent_transport_for_send.lock().await = Some(sent_identity);
             tracing::debug!("Sent request to {:?}", target);
 
             // 5b. Wait for response
@@ -1032,13 +1059,13 @@ impl PeerGate {
                 let transport_manager = self.transport_manager.clone();
                 let stale_dest = dest.clone();
                 let stale_target = target.clone();
-                let sent_identity = sent_identity.lock().await.clone();
+                let sent_transport = sent_transport.lock().await.clone();
                 tokio::spawn(async move {
                     Self::close_timed_out_request_transport(
                         transport_manager,
                         stale_dest,
                         stale_target,
-                        sent_identity,
+                        sent_transport,
                     )
                     .await;
                 });
