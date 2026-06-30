@@ -546,6 +546,65 @@ async fn wait_for_receiver_results(
     }
 }
 
+async fn wait_for_pending_count(gate: &PeerGate, expected: usize, reason: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let current = gate.pending_count().await;
+        if current == expected {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for pending_count={expected} ({reason}), got {current}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+async fn wait_for_sent_payloads(lane: &ScriptedLane, expected_len: usize, reason: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let current_len = lane.sent_payloads().len();
+        if current_len >= expected_len {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for {expected_len} sent payloads ({reason}), got {current_len}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+async fn wait_for_dest_count(transport: &PeerTransport, expected: usize, reason: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        let current = transport.dest_count().await;
+        if current == expected {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for dest_count={expected} ({reason}), got {current}"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+async fn wait_until_not_closing(transport: &PeerTransport, dest: &Dest, reason: &str) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(1);
+    loop {
+        if !transport.is_closing(dest).await {
+            return;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "timed out waiting for destination to stop closing ({reason})"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
 fn install_slow_receiver_delivery_hook(
     receiver_dedup: Arc<StdMutex<TestDedupState>>,
     handler_calls: Arc<AtomicUsize>,
@@ -981,8 +1040,9 @@ async fn in_flight_duplicate_waits_for_original_result_and_times_out_without_com
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn request_timeout_then_late_old_response_does_not_complete_new_request() {
     let target = make_actor_id(2);
-    let (gate, _lane, _stats) =
-        gate_with_lane(ScriptedLane::new(vec![Ok(()), Ok(())]), Duration::ZERO);
+    let dest = Dest::actor(target.clone());
+    let (gate, _lane, _stats, transport) =
+        gate_with_lane_and_transport(ScriptedLane::new(vec![Ok(()), Ok(())]), Duration::ZERO);
 
     let old_request = {
         let gate = gate.clone();
@@ -1008,6 +1068,18 @@ async fn request_timeout_then_late_old_response_does_not_complete_new_request() 
         0,
         "timed-out request must be removed from pending map"
     );
+    wait_for_dest_count(
+        &transport,
+        0,
+        "old request timeout cleanup should finish before starting the new request",
+    )
+    .await;
+    wait_until_not_closing(
+        &transport,
+        &dest,
+        "old request timeout cleanup should leave the destination open for new sends",
+    )
+    .await;
 
     let new_request = {
         let gate = gate.clone();
@@ -1018,12 +1090,12 @@ async fn request_timeout_then_late_old_response_does_not_complete_new_request() 
         })
     };
 
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(
-        gate.pending_count().await,
+    wait_for_pending_count(
+        &gate,
         1,
-        "new request should be pending before responses are injected"
-    );
+        "new request should be pending before responses are injected",
+    )
+    .await;
 
     assert!(
         !gate
@@ -1032,11 +1104,12 @@ async fn request_timeout_then_late_old_response_does_not_complete_new_request() 
             .expect("late old response should be handled without error"),
         "late old response must not complete any current request"
     );
-    assert_eq!(
-        gate.pending_count().await,
+    wait_for_pending_count(
+        &gate,
         1,
-        "late old response must leave the new request pending"
-    );
+        "late old response must leave the new request pending",
+    )
+    .await;
 
     assert!(
         gate.handle_response("rc25-new-request", Ok(Bytes::from_static(b"new-response")))
@@ -1448,6 +1521,13 @@ async fn cleanup_during_inflight_rpc_is_bounded_and_next_rpc_is_clean() {
         }
     });
 
+    wait_for_sent_payloads(
+        &lane,
+        2,
+        "second RPC should be sent before response injection",
+    )
+    .await;
+
     let response_task = tokio::spawn({
         let gate = gate.clone();
         async move {
@@ -1485,6 +1565,83 @@ async fn cleanup_during_inflight_rpc_is_bounded_and_next_rpc_is_clean() {
         0,
         "successful post-cleanup RPC should leave no pending state"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn timeout_cleanup_without_wire_identity_does_not_close_replacement_transport() {
+    let (gate, lane, _stats, transport) = gate_with_lane_and_transport(
+        ScriptedLane::new(vec![Ok(()), Ok(()), Ok(())]),
+        Duration::ZERO,
+    );
+    let target = make_actor_id(2);
+    let dest = Dest::actor(target.clone());
+
+    let stale_request = tokio::spawn({
+        let gate = gate.clone();
+        let target = target.clone();
+        async move {
+            gate.send_request(&target, envelope_with_timeout("no-identity-stale", 150))
+                .await
+        }
+    });
+
+    wait_for_sent_payloads(&lane, 1, "stale no-identity request should be sent").await;
+
+    transport
+        .close_transport(&dest)
+        .await
+        .expect("test should replace the first no-identity transport");
+
+    let current_request = tokio::spawn({
+        let gate = gate.clone();
+        let target = target.clone();
+        async move {
+            gate.send_request(&target, envelope_with_timeout("no-identity-current", 1_000))
+                .await
+        }
+    });
+
+    wait_for_sent_payloads(&lane, 2, "replacement no-identity request should be sent").await;
+
+    let err = tokio::time::timeout(Duration::from_secs(1), stale_request)
+        .await
+        .expect("stale no-identity request should time out promptly")
+        .expect("stale no-identity task should not panic")
+        .expect_err("stale no-identity request should time out");
+    assert!(
+        (err.to_string().contains("Request timeout") || err.to_string().contains("timed out")),
+        "stale no-identity request should fail with timeout, got: {err}"
+    );
+
+    wait_for_dest_count(
+        &transport,
+        1,
+        "timeout cleanup for stale transport must not close the replacement transport",
+    )
+    .await;
+    wait_until_not_closing(
+        &transport,
+        &dest,
+        "timeout cleanup for stale transport should not leave replacement closing",
+    )
+    .await;
+
+    assert!(
+        gate.handle_response(
+            "no-identity-current",
+            Ok(Bytes::from_static(b"no-identity-ok")),
+        )
+        .await
+        .expect("no-identity response injection should not fail"),
+        "no-identity current request should still be pending"
+    );
+
+    let current_response = tokio::time::timeout(Duration::from_secs(1), current_request)
+        .await
+        .expect("no-identity current request should complete")
+        .expect("no-identity current task should not panic")
+        .expect("no-identity current request should succeed");
+    assert_eq!(&current_response[..], b"no-identity-ok");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -11,13 +11,13 @@
 use super::Dest; // Re-exported from actr-framework
 use super::dest_transport::DestTransport;
 use super::error::{NetworkError, NetworkResult};
-use super::wire_handle::WireHandle;
+use super::wire_handle::{WireHandle, WireIdentity};
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
 use either::Either;
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify, RwLock};
 use tokio_util::sync::CancellationToken;
@@ -72,6 +72,26 @@ pub trait WireBuilder: Send + Sync {
 /// - Left: Connecting state with shared Notify (multiple waiters)
 /// - Right: Connected state with DestTransport
 type DestState = Either<Arc<Notify>, Arc<DestTransport>>;
+
+/// Reference to the DestTransport that accepted a send.
+///
+/// `wire_identity` is available for WebRTC sessions. `transport` guards wires
+/// without their own session identity, such as WebSocket or fake test wires,
+/// so timeout cleanup cannot close a replacement DestTransport.
+#[derive(Clone)]
+pub(crate) struct DestTransportRef {
+    transport: Weak<DestTransport>,
+    pub(crate) wire_identity: Option<WireIdentity>,
+}
+
+impl DestTransportRef {
+    fn new(transport: &Arc<DestTransport>, wire_identity: Option<WireIdentity>) -> Self {
+        Self {
+            transport: Arc::downgrade(transport),
+            wire_identity,
+        }
+    }
+}
 
 /// PeerTransport - Cross-process transport manager
 ///
@@ -366,12 +386,13 @@ impl PeerTransport {
         dest: &Dest,
         payload_type: PayloadType,
         data: &[u8],
-    ) -> NetworkResult<Option<super::wire_handle::WireIdentity>> {
+    ) -> NetworkResult<DestTransportRef> {
         // Get or create DestTransport for this Dest
         let transport = self.get_or_create_transport(dest).await?;
 
         // Send through DestTransport
-        transport.send_with_identity(payload_type, data).await
+        let wire_identity = transport.send_with_identity(payload_type, data).await?;
+        Ok(DestTransportRef::new(&transport, wire_identity))
     }
 
     /// Session-guarded close of only the WebRTC connection for the specified
@@ -546,6 +567,69 @@ impl PeerTransport {
         // 2. Identity matches → proceed with the normal close path.
         self.close_transport(dest).await?;
         Ok(true)
+    }
+
+    /// Instance-guarded full close for transports without a wire session
+    /// identity. This avoids letting an old request timeout close a replacement
+    /// DestTransport for the same destination.
+    pub(crate) async fn close_transport_if_current(
+        &self,
+        dest: &Dest,
+        sent_transport: &DestTransportRef,
+    ) -> NetworkResult<bool> {
+        let Some(sent_transport) = sent_transport.transport.upgrade() else {
+            tracing::debug!(
+                "Skipped close for {:?}; sent DestTransport is already gone",
+                dest
+            );
+            return Ok(false);
+        };
+
+        let matches_current = {
+            let transports = self.transports.read().await;
+            matches!(
+                transports.get(dest),
+                Some(Either::Right(transport)) if Arc::ptr_eq(transport, &sent_transport)
+            )
+        };
+
+        if !matches_current {
+            tracing::debug!(
+                "Skipped close for {:?}; DestTransport instance no longer matches",
+                dest
+            );
+            return Ok(false);
+        }
+
+        self.closing_peers.write().await.insert(dest.clone());
+
+        let transport = {
+            let mut transports = self.transports.write().await;
+            match transports.get(dest) {
+                Some(Either::Right(transport)) if Arc::ptr_eq(transport, &sent_transport) => {
+                    match transports.remove(dest) {
+                        Some(Either::Right(transport)) => Some(transport),
+                        _ => None,
+                    }
+                }
+                _ => None,
+            }
+        };
+
+        let Some(transport) = transport else {
+            tracing::debug!(
+                "Skipped close for {:?}; DestTransport instance no longer matches",
+                dest
+            );
+            self.closing_peers.write().await.remove(dest);
+            return Ok(false);
+        };
+
+        tracing::info!("Closing current DestTransport for {:?}", dest);
+        let result = transport.close().await.map(|_| true);
+
+        self.closing_peers.write().await.remove(dest);
+        result
     }
 
     /// Close all DestTransports
@@ -802,5 +886,42 @@ mod tests {
 
         let dest = Dest::shell();
         assert!(!mgr.has_dest(&dest).await);
+    }
+
+    #[tokio::test]
+    async fn close_transport_if_current_replaced_instance_does_not_mark_closing() {
+        let local_id = ActrId::default();
+        let factory = create_test_factory();
+        let mgr = PeerTransport::new(local_id, factory);
+        let dest = Dest::shell();
+
+        let old_transport = Arc::new(
+            DestTransport::new(dest.clone(), vec![])
+                .await
+                .expect("old transport should be created"),
+        );
+        let current_transport = Arc::new(
+            DestTransport::new(dest.clone(), vec![])
+                .await
+                .expect("current transport should be created"),
+        );
+        let old_ref = DestTransportRef::new(&old_transport, None);
+
+        mgr.transports
+            .write()
+            .await
+            .insert(dest.clone(), Either::Right(current_transport));
+
+        let closed = mgr
+            .close_transport_if_current(&dest, &old_ref)
+            .await
+            .expect("stale instance close should not fail");
+
+        assert!(!closed);
+        assert_eq!(mgr.dest_count().await, 1);
+        assert!(
+            !mgr.is_closing(&dest).await,
+            "stale no-op close must not mark the replacement transport closing"
+        );
     }
 }
