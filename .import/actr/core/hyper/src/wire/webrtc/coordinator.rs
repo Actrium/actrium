@@ -669,6 +669,92 @@ impl WebRtcCoordinator {
             .await;
     }
 
+    async fn notify_removed_peer_idle_if_needed(
+        &self,
+        peer_id: &ActrId,
+        session_id: u64,
+        state: &PeerState,
+        reason: &str,
+    ) {
+        if matches!(
+            state.public_hook_state,
+            PublicRtcHookState::Unknown | PublicRtcHookState::Idle
+        ) {
+            return;
+        }
+
+        tracing::info!(
+            peer_id = ?peer_id,
+            session_id = session_id,
+            previous_status = ?state.public_hook_state,
+            reason = reason,
+            "WebRTC peer cleanup reached terminal idle; emitting hook"
+        );
+        self.invoke_hook(crate::wire::webrtc::HookEvent::WebRtcDisconnected {
+            peer_id: peer_id.clone(),
+            status: WebRtcPeerStatus::Idle,
+        })
+        .await;
+    }
+
+    async fn teardown_removed_peer_state(
+        &self,
+        target: &ActrId,
+        mut state: PeerState,
+        abort_restart_task: bool,
+        reason: &str,
+    ) {
+        let session_id = state.session_id;
+
+        if abort_restart_task {
+            if let Some(handle) = state.restart_task_handle.take() {
+                handle.abort();
+                tracing::debug!(
+                    "🛑 Aborted restart task for serial={}, session_id={}, reason={}",
+                    target,
+                    session_id,
+                    reason
+                );
+            }
+        }
+
+        for handle in &state.receive_handles {
+            handle.abort();
+        }
+        if !state.receive_handles.is_empty() {
+            tracing::debug!(
+                "🛑 Aborted {} receive loops for serial={}, session_id={}, reason={}",
+                state.receive_handles.len(),
+                target,
+                session_id,
+                reason
+            );
+        }
+
+        self.clear_peer_recovering(target, session_id, reason).await;
+        self.notify_removed_peer_idle_if_needed(target, session_id, &state, reason)
+            .await;
+
+        if let Err(e) = state.webrtc_conn.close().await {
+            tracing::warn!(
+                "⚠️ Failed to close webrtc_conn during cleanup for {} (session_id={}, reason={}): {}",
+                target,
+                session_id,
+                reason,
+                e
+            );
+            if let Err(e) = state.peer_connection.close().await {
+                tracing::warn!(
+                    "⚠️ Failed to close peer_connection during cleanup for {} (session_id={}, reason={}): {}",
+                    target,
+                    session_id,
+                    reason,
+                    e
+                );
+            }
+        }
+    }
+
     /// Inject a virtual network for integration testing.
     ///
     /// **Must be called before `start()`** — all subsequently created
@@ -1390,7 +1476,7 @@ impl WebRtcCoordinator {
                                         @ (ConnectionState::Disconnected | ConnectionState::Failed),
                                     ..
                                 } => {
-                                    {
+                                    let recovery_eligible = {
                                         let mut peers = coord.peers.write().await;
                                         if let Some(peer_state) = peers.get_mut(peer_id)
                                             && peer_state.session_id == *session_id
@@ -1407,8 +1493,11 @@ impl WebRtcCoordinator {
                                                 ),
                                             };
                                             peer_state.update_connection_state(rtc_state);
+                                            Some(peer_state.is_network_recovery_eligible())
+                                        } else {
+                                            None
                                         }
-                                    }
+                                    };
                                     let reason = match state {
                                         ConnectionState::Disconnected => "peer state Disconnected",
                                         ConnectionState::Failed => "peer state Failed",
@@ -1416,9 +1505,38 @@ impl WebRtcCoordinator {
                                             "state pattern only matches unavailable states"
                                         ),
                                     };
-                                    coord
-                                        .notify_webrtc_recovering_once(peer_id, *session_id, reason)
-                                        .await;
+                                    match recovery_eligible {
+                                        Some(true) => {
+                                            coord
+                                                .notify_webrtc_recovering_once(
+                                                    peer_id,
+                                                    *session_id,
+                                                    reason,
+                                                )
+                                                .await;
+                                        }
+                                        Some(false) => {
+                                            // Initial connection attempt failed before the peer ever
+                                            // reached a usable state. Terminate at Idle rather than
+                                            // Recovering so clients don't mistake a first-time failure
+                                            // for a recovery window.
+                                            coord
+                                                .notify_webrtc_idle_if_changed(
+                                                    peer_id,
+                                                    *session_id,
+                                                    reason,
+                                                )
+                                                .await;
+                                        }
+                                        None => {
+                                            tracing::debug!(
+                                                peer_id = ?peer_id,
+                                                session_id = *session_id,
+                                                reason = reason,
+                                                "Ignoring unavailable state for stale or missing WebRTC peer"
+                                            );
+                                        }
+                                    }
                                 }
                                 ConnectionEvent::DataChannelOpened {
                                     peer_id,
@@ -1954,7 +2072,7 @@ impl WebRtcCoordinator {
                     peer_id,
                     reason
                 );
-                self.cleanup_cancelled_connection(&peer_id).await;
+                self.cleanup_cancelled_connection(&peer_id, &reason).await;
             }
         }
     }
@@ -2461,10 +2579,11 @@ impl WebRtcCoordinator {
     ///
     /// IMPORTANT: This method must release all locks before calling close() methods
     /// to avoid deadlock, since close() may trigger events that call this method again.
-    async fn cleanup_cancelled_connection(&self, target: &ActrId) {
+    async fn cleanup_cancelled_connection(&self, target: &ActrId, reason: &str) {
         tracing::debug!(
-            "🧹 Starting cleanup for cancelled connection serial={}",
-            target
+            "🧹 Starting cleanup for cancelled connection serial={}, reason={}",
+            target,
+            reason
         );
 
         // 1. Remove from peers map FIRST, release lock, THEN close
@@ -2473,27 +2592,6 @@ impl WebRtcCoordinator {
             let mut peers = self.peers.write().await;
             peers.remove(target)
         }; // Lock released here
-
-        // 1.5 Abort ICE restart task and receive loops from removed PeerState
-        if let Some(ref state) = state_to_close {
-            if let Some(ref handle) = state.restart_task_handle {
-                handle.abort();
-                tracing::debug!(
-                    "🛑 Aborted restart task for serial={} (from removed PeerState)",
-                    target
-                );
-            }
-            for handle in &state.receive_handles {
-                handle.abort();
-            }
-            if !state.receive_handles.is_empty() {
-                tracing::debug!(
-                    "🛑 Aborted {} receive loops for serial={}",
-                    state.receive_handles.len(),
-                    target
-                );
-            }
-        }
 
         // 2. Close via webrtc_conn.close() which internally handles:
         //    - Idempotent close (try_close guard)
@@ -2506,13 +2604,8 @@ impl WebRtcCoordinator {
         // NOTE: Previously this method manually sent ConnectionClosed (with session_id=0)
         //       AND separately called peer_connection.close(), causing double close + double events.
         if let Some(state) = state_to_close {
-            if let Err(e) = state.webrtc_conn.close().await {
-                tracing::warn!(
-                    "⚠️ Failed to close webrtc_conn during cancel cleanup for {}: {}",
-                    target,
-                    e
-                );
-            }
+            self.teardown_removed_peer_state(target, state, true, reason)
+                .await;
         }
 
         // 4. Clear pending candidates
@@ -2524,7 +2617,11 @@ impl WebRtcCoordinator {
             tracing::debug!("🧹 Clearing negotiation state for serial={}", target);
         }
 
-        tracing::debug!("🧹 Cleaned up cancelled connection for serial={}", target);
+        tracing::debug!(
+            "🧹 Cleaned up cancelled connection for serial={}, reason={}",
+            target,
+            reason
+        );
     }
 
     async fn cleanup_connection_if_session(
@@ -2560,7 +2657,7 @@ impl WebRtcCoordinator {
             }
         };
 
-        let Some(mut state) = state_to_close else {
+        let Some(state) = state_to_close else {
             return false;
         };
 
@@ -2572,45 +2669,8 @@ impl WebRtcCoordinator {
             reason
         );
 
-        if abort_restart_task {
-            if let Some(handle) = state.restart_task_handle.take() {
-                handle.abort();
-                tracing::debug!(
-                    "🛑 Aborted restart task for serial={}, session_id={}",
-                    target,
-                    session_id
-                );
-            }
-        }
-
-        for handle in &state.receive_handles {
-            handle.abort();
-        }
-        if !state.receive_handles.is_empty() {
-            tracing::debug!(
-                "🛑 Aborted {} receive loops for serial={}, session_id={}",
-                state.receive_handles.len(),
-                target,
-                session_id
-            );
-        }
-
-        if let Err(e) = state.webrtc_conn.close().await {
-            tracing::warn!(
-                "⚠️ Failed to close webrtc_conn during cleanup for {} (session_id={}): {}",
-                target,
-                session_id,
-                e
-            );
-            if let Err(e) = state.peer_connection.close().await {
-                tracing::warn!(
-                    "⚠️ Failed to close peer_connection during cleanup for {} (session_id={}): {}",
-                    target,
-                    session_id,
-                    e
-                );
-            }
-        }
+        self.teardown_removed_peer_state(target, state, abort_restart_task, reason)
+            .await;
 
         self.pending_candidates.write().await.remove(target);
         if self.peer_negotiation.lock().await.remove(target).is_some() {
@@ -2916,7 +2976,8 @@ impl WebRtcCoordinator {
             );
 
             // Clean up old connection using unified cleanup method
-            self.cleanup_cancelled_connection(from).await;
+            self.cleanup_cancelled_connection(from, "replaced by incoming offer")
+                .await;
         }
         // ========== PrepareForIncomingOffer END ==========
 
@@ -3659,7 +3720,8 @@ impl WebRtcCoordinator {
                     OVERALL_TIMEOUT.as_secs(),
                     target
                 );
-                self.cleanup_cancelled_connection(target).await;
+                self.cleanup_cancelled_connection(target, "send_message overall timeout")
+                    .await;
                 Err(ActrError::TimedOut)
             }
         }
@@ -3713,7 +3775,8 @@ impl WebRtcCoordinator {
                     last_error = Some(e);
 
                     // Cleanup connection before retry (might be stale)
-                    self.cleanup_cancelled_connection(target).await;
+                    self.cleanup_cancelled_connection(target, "send_message retry cleanup")
+                        .await;
                 }
             }
         }
@@ -3895,7 +3958,8 @@ impl WebRtcCoordinator {
                     OVERALL_TIMEOUT.as_secs(),
                     target_id
                 );
-                self.cleanup_cancelled_connection(target_id).await;
+                self.cleanup_cancelled_connection(target_id, "connection factory overall timeout")
+                    .await;
                 Err(ActrError::TimedOut)
             }
         }
@@ -3971,7 +4035,11 @@ impl WebRtcCoordinator {
                     tokio::select! {
                         biased;
                         _ = token.cancelled() => {
-                            self.cleanup_cancelled_connection(target_id).await;
+                            self.cleanup_cancelled_connection(
+                                target_id,
+                                "connection creation cancelled during retry wait",
+                            )
+                            .await;
                             return Err(ActrError::Internal(
                                 "Connection creation cancelled during retry wait".to_string(),
                             ));
@@ -4018,7 +4086,8 @@ impl WebRtcCoordinator {
                     last_error = Some(e);
 
                     // Cleanup failed connection before retry
-                    self.cleanup_cancelled_connection(target_id).await;
+                    self.cleanup_cancelled_connection(target_id, "connection retry cleanup")
+                        .await;
                 }
             }
         }
@@ -4046,7 +4115,11 @@ impl WebRtcCoordinator {
         // Check cancellation after initiation
         if let Some(token) = cancel_token {
             if token.is_cancelled() {
-                self.cleanup_cancelled_connection(target_id).await;
+                self.cleanup_cancelled_connection(
+                    target_id,
+                    "connection creation cancelled after initiation",
+                )
+                .await;
                 return Err(ActrError::Internal(
                     "Connection creation cancelled after initiation".to_string(),
                 ));
@@ -4060,7 +4133,11 @@ impl WebRtcCoordinator {
             tokio::select! {
                 biased;
                 _ = token.cancelled() => {
-                    self.cleanup_cancelled_connection(target_id).await;
+                    self.cleanup_cancelled_connection(
+                        target_id,
+                        "connection creation cancelled while waiting",
+                    )
+                    .await;
                     return Err(ActrError::Internal(
                         "Connection creation cancelled while waiting".to_string(),
                     ));
@@ -4092,7 +4169,11 @@ impl WebRtcCoordinator {
         // Final cancellation check
         if let Some(token) = cancel_token {
             if token.is_cancelled() {
-                self.cleanup_cancelled_connection(target_id).await;
+                self.cleanup_cancelled_connection(
+                    target_id,
+                    "connection creation cancelled after ready",
+                )
+                .await;
                 return Err(ActrError::Internal(
                     "Connection creation cancelled after ready".to_string(),
                 ));
@@ -5420,7 +5501,8 @@ impl WebRtcCoordinator {
                 }
 
                 let this = Arc::clone(self);
-                this.cleanup_cancelled_connection(&peer).await;
+                this.cleanup_cancelled_connection(&peer, "role changed to offerer")
+                    .await;
             }
         }
         tracing::debug!("End role change check ");
@@ -5845,6 +5927,42 @@ mod tests {
         ))
     }
 
+    fn install_hook_recorder(
+        coordinator: &Arc<WebRtcCoordinator>,
+    ) -> mpsc::UnboundedReceiver<crate::wire::webrtc::HookEvent> {
+        let (hook_tx, hook_rx) = mpsc::unbounded_channel();
+        let hook: crate::wire::webrtc::HookCallback = Arc::new(move |event| {
+            let hook_tx = hook_tx.clone();
+            Box::pin(async move {
+                let _ = hook_tx.send(event);
+            })
+        });
+        coordinator.set_hook_callback(hook);
+        hook_rx
+    }
+
+    async fn expect_disconnected_hook(
+        hook_rx: &mut mpsc::UnboundedReceiver<crate::wire::webrtc::HookEvent>,
+        peer_id: &ActrId,
+        expected_status: WebRtcPeerStatus,
+        message: &str,
+    ) {
+        let event = tokio::time::timeout(Duration::from_secs(1), hook_rx.recv())
+            .await
+            .expect(message)
+            .expect("hook channel should remain open");
+        match event {
+            crate::wire::webrtc::HookEvent::WebRtcDisconnected {
+                peer_id: got,
+                status,
+            } => {
+                assert_eq!(got, peer_id.clone());
+                assert_eq!(status, expected_status);
+            }
+            other => panic!("unexpected hook event: {other:?}"),
+        }
+    }
+
     #[tokio::test]
     async fn webrtc_connected_hook_waits_for_open_data_channel() {
         let local_id = test_actor_id(1);
@@ -5962,6 +6080,83 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn initial_failure_emits_idle_not_recovering() {
+        let local_id = test_actor_id(1);
+        let peer_id = test_actor_id(99);
+        let coordinator = new_test_coordinator(local_id);
+        // Fresh peer that has never reached ICE connected / DataChannel opened,
+        // so a failure must terminate at Idle rather than Recovering.
+        let session_id =
+            insert_pending_offer_peer(&coordinator, peer_id.clone(), "current-exchange").await;
+
+        let (hook_tx, mut hook_rx) = mpsc::unbounded_channel();
+        let hook: crate::wire::webrtc::HookCallback = Arc::new(move |event| {
+            let hook_tx = hook_tx.clone();
+            Box::pin(async move {
+                let _ = hook_tx.send(event);
+            })
+        });
+        coordinator.set_hook_callback(hook);
+
+        let listener = coordinator.spawn_internal_event_listener();
+
+        // Initial connecting attempt.
+        let _ = coordinator
+            .event_broadcaster
+            .send(ConnectionEvent::StateChanged {
+                peer_id: peer_id.clone(),
+                session_id,
+                state: ConnectionState::Connecting,
+            });
+        let event = tokio::time::timeout(Duration::from_secs(1), hook_rx.recv())
+            .await
+            .expect("connecting hook should be emitted")
+            .expect("hook channel should remain open");
+        assert!(
+            matches!(
+                event,
+                crate::wire::webrtc::HookEvent::WebRtcConnectStart { .. }
+            ),
+            "unexpected hook event: {event:?}"
+        );
+
+        // The attempt fails before the peer ever became usable.
+        let _ = coordinator
+            .event_broadcaster
+            .send(ConnectionEvent::StateChanged {
+                peer_id: peer_id.clone(),
+                session_id,
+                state: ConnectionState::Disconnected,
+            });
+        let event = tokio::time::timeout(Duration::from_secs(1), hook_rx.recv())
+            .await
+            .expect("failed initial attempt should emit a disconnected hook")
+            .expect("hook channel should remain open");
+        match event {
+            crate::wire::webrtc::HookEvent::WebRtcDisconnected {
+                peer_id: got,
+                status,
+            } => {
+                assert_eq!(got, peer_id);
+                assert_eq!(
+                    status,
+                    WebRtcPeerStatus::Idle,
+                    "initial failure must terminate at Idle, not Recovering"
+                );
+            }
+            other => panic!("unexpected hook event: {other:?}"),
+        }
+
+        // No Recovering should follow a terminal Idle for a never-connected peer.
+        let trailing = tokio::time::timeout(Duration::from_millis(100), hook_rx.recv()).await;
+        assert!(
+            trailing.is_err(),
+            "no further hook expected after terminal Idle, got {trailing:?}"
+        );
+        listener.abort();
+    }
+
+    #[tokio::test]
     async fn recovery_connecting_state_does_not_emit_connecting_hook() {
         let local_id = test_actor_id(1);
         let peer_id = test_actor_id(99);
@@ -6021,6 +6216,253 @@ mod tests {
             connecting.is_err(),
             "recovery Connecting must not emit a public connecting hook, got {connecting:?}"
         );
+        listener.abort();
+    }
+
+    #[tokio::test]
+    async fn data_channel_close_cleanup_emits_terminal_idle_hook() {
+        let local_id = test_actor_id(1);
+        let peer_id = test_actor_id(99);
+        let coordinator = new_test_coordinator(local_id);
+        let session_id =
+            insert_pending_offer_peer(&coordinator, peer_id.clone(), "current-exchange").await;
+
+        {
+            let mut peers = coordinator.peers.write().await;
+            let state = peers.get_mut(&peer_id).expect("peer should exist");
+            state.update_connection_state(RTCPeerConnectionState::Connected);
+            state.mark_data_channel_opened();
+            state.mark_sendable_hook_reported();
+        }
+
+        let (hook_tx, mut hook_rx) = mpsc::unbounded_channel();
+        let hook: crate::wire::webrtc::HookCallback = Arc::new(move |event| {
+            let hook_tx = hook_tx.clone();
+            Box::pin(async move {
+                let _ = hook_tx.send(event);
+            })
+        });
+        coordinator.set_hook_callback(hook);
+
+        let listener = coordinator.spawn_internal_event_listener();
+        let _ = coordinator
+            .event_broadcaster
+            .send(ConnectionEvent::DataChannelClosed {
+                peer_id: peer_id.clone(),
+                session_id,
+                payload_type: PayloadType::RpcReliable,
+            });
+
+        let event = tokio::time::timeout(Duration::from_secs(1), hook_rx.recv())
+            .await
+            .expect("data channel close should emit recovering hook")
+            .expect("hook channel should remain open");
+        match event {
+            crate::wire::webrtc::HookEvent::WebRtcDisconnected {
+                peer_id: got,
+                status,
+            } => {
+                assert_eq!(got, peer_id);
+                assert_eq!(status, WebRtcPeerStatus::Recovering);
+            }
+            other => panic!("unexpected hook event: {other:?}"),
+        }
+
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if !coordinator.peers.read().await.contains_key(&peer_id) {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("data channel close should clean up the peer state");
+
+        let event = tokio::time::timeout(Duration::from_secs(1), hook_rx.recv())
+            .await
+            .expect("cleanup should emit terminal idle hook after recovering")
+            .expect("hook channel should remain open");
+        match event {
+            crate::wire::webrtc::HookEvent::WebRtcDisconnected {
+                peer_id: got,
+                status,
+            } => {
+                assert_eq!(got, peer_id);
+                assert_eq!(status, WebRtcPeerStatus::Idle);
+            }
+            other => panic!("unexpected hook event: {other:?}"),
+        }
+
+        listener.abort();
+    }
+
+    #[tokio::test]
+    async fn cancelled_cleanup_emits_terminal_idle_for_connected_peer() {
+        let local_id = test_actor_id(1);
+        let peer_id = test_actor_id(99);
+        let coordinator = new_test_coordinator(local_id);
+        insert_pending_offer_peer(&coordinator, peer_id.clone(), "current-exchange").await;
+
+        {
+            let mut peers = coordinator.peers.write().await;
+            let state = peers.get_mut(&peer_id).expect("peer should exist");
+            state.update_connection_state(RTCPeerConnectionState::Connected);
+            state.mark_data_channel_opened();
+            state.mark_sendable_hook_reported();
+        }
+
+        let mut hook_rx = install_hook_recorder(&coordinator);
+        coordinator
+            .cleanup_cancelled_connection(&peer_id, "test connected peer replacement")
+            .await;
+
+        expect_disconnected_hook(
+            &mut hook_rx,
+            &peer_id,
+            WebRtcPeerStatus::Idle,
+            "cancelled cleanup should emit terminal idle for connected peer",
+        )
+        .await;
+        assert!(
+            !coordinator.peers.read().await.contains_key(&peer_id),
+            "cancelled cleanup should remove peer state"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_cleanup_clears_recovery_guard_for_removed_session() {
+        let local_id = test_actor_id(1);
+        let peer_id = test_actor_id(99);
+        let coordinator = new_test_coordinator(local_id);
+        let session_id =
+            insert_pending_offer_peer(&coordinator, peer_id.clone(), "current-exchange").await;
+
+        coordinator
+            .mark_peer_recovering(&peer_id, session_id, "test recovery guard")
+            .await;
+        assert!(
+            coordinator
+                .network_recovering_peers
+                .read()
+                .await
+                .contains_key(&peer_id),
+            "test setup should mark peer as recovering"
+        );
+
+        coordinator
+            .cleanup_cancelled_connection(&peer_id, "test recovery guard cleanup")
+            .await;
+
+        assert!(
+            !coordinator
+                .network_recovering_peers
+                .read()
+                .await
+                .contains_key(&peer_id),
+            "cancelled cleanup should clear the removed session's recovery guard"
+        );
+    }
+
+    #[tokio::test]
+    async fn cancelled_cleanup_emits_terminal_idle_after_recovering_peer() {
+        let local_id = test_actor_id(1);
+        let peer_id = test_actor_id(99);
+        let coordinator = new_test_coordinator(local_id);
+        let session_id =
+            insert_pending_offer_peer(&coordinator, peer_id.clone(), "current-exchange").await;
+
+        {
+            let mut peers = coordinator.peers.write().await;
+            let state = peers.get_mut(&peer_id).expect("peer should exist");
+            state.update_connection_state(RTCPeerConnectionState::Connected);
+            state.mark_data_channel_opened();
+            state.mark_sendable_hook_reported();
+        }
+
+        let mut hook_rx = install_hook_recorder(&coordinator);
+        let listener = coordinator.spawn_internal_event_listener();
+        let _ = coordinator
+            .event_broadcaster
+            .send(ConnectionEvent::StateChanged {
+                peer_id: peer_id.clone(),
+                session_id,
+                state: ConnectionState::Failed,
+            });
+
+        expect_disconnected_hook(
+            &mut hook_rx,
+            &peer_id,
+            WebRtcPeerStatus::Recovering,
+            "failed state should emit recovering hook before stale cleanup",
+        )
+        .await;
+
+        coordinator
+            .cleanup_cancelled_connection(&peer_id, "test stale failed peer cleanup")
+            .await;
+        expect_disconnected_hook(
+            &mut hook_rx,
+            &peer_id,
+            WebRtcPeerStatus::Idle,
+            "cancelled cleanup should emit terminal idle after recovering",
+        )
+        .await;
+        assert!(
+            !coordinator.peers.read().await.contains_key(&peer_id),
+            "cancelled cleanup should remove peer state"
+        );
+        listener.abort();
+    }
+
+    #[tokio::test]
+    async fn failed_ice_restart_after_recovering_emits_terminal_idle() {
+        let local_id = test_actor_id(1);
+        let peer_id = test_actor_id(99);
+        let coordinator = new_test_coordinator(local_id);
+        let session_id =
+            insert_pending_offer_peer(&coordinator, peer_id.clone(), "current-exchange").await;
+
+        {
+            let mut peers = coordinator.peers.write().await;
+            let state = peers.get_mut(&peer_id).expect("peer should exist");
+            state.update_connection_state(RTCPeerConnectionState::Connected);
+            state.mark_data_channel_opened();
+            state.mark_sendable_hook_reported();
+        }
+
+        let mut hook_rx = install_hook_recorder(&coordinator);
+        let listener = coordinator.spawn_internal_event_listener();
+        let _ = coordinator
+            .event_broadcaster
+            .send(ConnectionEvent::StateChanged {
+                peer_id: peer_id.clone(),
+                session_id,
+                state: ConnectionState::Disconnected,
+            });
+
+        expect_disconnected_hook(
+            &mut hook_rx,
+            &peer_id,
+            WebRtcPeerStatus::Recovering,
+            "disconnected state should emit recovering hook",
+        )
+        .await;
+
+        let _ = coordinator
+            .event_broadcaster
+            .send(ConnectionEvent::IceRestartCompleted {
+                peer_id: peer_id.clone(),
+                session_id,
+                success: false,
+            });
+        expect_disconnected_hook(
+            &mut hook_rx,
+            &peer_id,
+            WebRtcPeerStatus::Idle,
+            "failed ICE restart should emit terminal idle after recovering",
+        )
+        .await;
         listener.abort();
     }
 
