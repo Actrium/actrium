@@ -35,10 +35,15 @@ import io.actrium.actr.ActrId
 import io.actrium.actr.ActrRefWrapper
 import io.actrium.actr.ActrType
 import io.actrium.actr.CleanupReason
+import io.actrium.actr.CredentialObserverBridge
 import io.actrium.actr.DynamicWorkload
+import io.actrium.actr.MailboxObserverBridge
 import io.actrium.actr.NetworkEventHandleWrapper
 import io.actrium.actr.PayloadType
 import io.actrium.actr.ReconnectReason
+import io.actrium.actr.SignalingObserverBridge
+import io.actrium.actr.WebRtcObserverBridge
+import io.actrium.actr.WebSocketObserverBridge
 import io.actrium.actr.WorkloadLifecycleBridge
 import io.actrium.actr.ActrNode as ActrNodeGenerated
 import kotlinx.coroutines.CoroutineScope
@@ -81,6 +86,74 @@ typealias MediaType = io.actrium.actr.MediaType
 typealias OpusEncoder = io.actrium.actr.OpusEncoder
 
 // ============================================================================
+// Runtime Observers — package-backed host observer convenience
+// ============================================================================
+
+/** Re-export of [io.actrium.actr.RuntimeObservers] — host-side observers for a
+ * package-backed runtime. Pass to [ActrNode.fromPackageFile] to observe transport
+ * readiness (signaling, WebSocket, WebRTC, credential, mailbox) without owning
+ * actor dispatch, which stays with the package guest. */
+typealias RuntimeObservers = io.actrium.actr.RuntimeObservers
+
+/** Re-export of [io.actrium.actr.PeerEventBridge] as [PeerEvent] — peer-scoped
+ * event payload delivered to WebSocket/WebRTC observer callbacks. */
+typealias PeerEvent = io.actrium.actr.PeerEventBridge
+
+/** Re-export of [io.actrium.actr.WebRtcPeerStatusBridge] as [WebRtcPeerStatus] —
+ * coarse WebRTC send-readiness state carried by [PeerEvent.status]. `null` for
+ * WebSocket peers and old compatibility paths where the status is unavailable. */
+typealias WebRtcPeerStatus = io.actrium.actr.WebRtcPeerStatusBridge
+
+// ---------------------------------------------------------------------------
+// Maintenance: runtimeObservers(...) below and dynamicWorkload(...) in Workload.kt
+// hand-maintain the same 5 observer slots (signaling/websocket/webrtc/credential/mailbox).
+// Any new UniFFI observer slot must be added to both so the factory shapes stay aligned.
+// ---------------------------------------------------------------------------
+
+/**
+ * Construct host-side [RuntimeObservers] for a package-backed runtime.
+ *
+ * Mobile shells observe transport readiness for UI state and intent retry
+ * decisions while the package guest continues to own actor dispatch. Pass the
+ * result to [ActrNode.fromPackageFile] or [ActrNode.fromPackageFileWithMonitoring].
+ *
+ * Each slot is optional; omit (or pass `null`) for observers you do not need.
+ *
+ * Example:
+ * ```kotlin
+ * val observers = runtimeObservers(
+ *     webrtc = object : WebRtcObserverBridge {
+ *         override suspend fun onConnecting(ctx: ContextBridge, event: PeerEvent) { /* … */ }
+ *         override suspend fun onConnected(ctx: ContextBridge, event: PeerEvent) { /* … */ }
+ *         override suspend fun onDisconnected(ctx: ContextBridge, event: PeerEvent) { /* … */ }
+ *     },
+ * )
+ * val node = ActrNode.fromPackageFile("config.toml", "dist/app.actr", observers = observers)
+ * ```
+ *
+ * @param signaling Optional signaling-layer observer
+ * @param websocket Optional WebSocket peer observer
+ * @param webrtc Optional WebRTC peer observer
+ * @param credential Optional credential lifecycle observer
+ * @param mailbox Optional mailbox backpressure observer
+ * @return A new [RuntimeObservers] instance
+ */
+fun runtimeObservers(
+    signaling: SignalingObserverBridge? = null,
+    websocket: WebSocketObserverBridge? = null,
+    webrtc: WebRtcObserverBridge? = null,
+    credential: CredentialObserverBridge? = null,
+    mailbox: MailboxObserverBridge? = null,
+): RuntimeObservers =
+    RuntimeObservers(
+        signaling = signaling,
+        websocket = websocket,
+        webrtc = webrtc,
+        credential = credential,
+        mailbox = mailbox,
+    )
+
+// ============================================================================
 // ActrNode — high-level wrapper with workload retention
 // ============================================================================
 
@@ -96,6 +169,11 @@ typealias OpusEncoder = io.actrium.actr.OpusEncoder
 class ActrNode private constructor(
     private val inner: ActrNodeGenerated,
     private val retainedWorkload: DynamicWorkload? = null,
+    /** Defense-in-depth retention mirroring [retainedWorkload]. UniFFI's callback-interface
+     *  handle map is what actually keeps host observer callbacks alive, so this field is not
+     *  required for callback liveness — it is retained for lifecycle symmetry with the workload
+     *  model and follows the wrapper object's lifetime (close() does not clear it). */
+    private val retainedObservers: RuntimeObservers? = null,
     private val networkResources: ManagedNetworkResources? = null,
 ) : AutoCloseable {
     /** Close the underlying node, releasing native resources. */
@@ -116,15 +194,19 @@ class ActrNode private constructor(
          *
          * @param configPath Path to the TOML configuration file
          * @param packagePath Path to the `.actr` package file
+         * @param observers Optional host-side [RuntimeObservers] for transport readiness; when
+         * non-null the node is built with the observer-aware constructor so the package guest
+         * keeps owning dispatch while the shell observes signaling/WebRTC/etc.
          * @return A new ActrNode instance
          * @throws ActrException.Config if the config file is invalid
          */
         suspend fun fromPackageFile(
             configPath: String,
             packagePath: String,
+            observers: RuntimeObservers? = null,
         ): ActrNode {
-            val inner = ActrNodeGenerated.newFromPackageFile(configPath, packagePath)
-            return ActrNode(inner, null)
+            val inner = createPackageBackedNode(configPath, packagePath, observers)
+            return ActrNode(inner, retainedObservers = observers)
         }
 
         /**
@@ -133,6 +215,8 @@ class ActrNode private constructor(
          * The returned [ActrNode] retains the [NetworkEventHandle] and
          * [NetworkMonitor], so callers do not need to manually create or hold
          * those objects.
+         *
+         * @param observers Optional host-side [RuntimeObservers] for transport readiness
          */
         suspend fun fromPackageFileWithMonitoring(
             configPath: String,
@@ -140,11 +224,13 @@ class ActrNode private constructor(
             context: Context,
             scope: CoroutineScope,
             onNetworkStatusLog: ((String) -> Unit)? = null,
+            observers: RuntimeObservers? = null,
         ): ActrNode {
-            val inner = ActrNodeGenerated.newFromPackageFile(configPath, packagePath)
+            val inner = createPackageBackedNode(configPath, packagePath, observers)
             return withNetworkMonitoring(
                 inner = inner,
                 retainedWorkload = null,
+                retainedObservers = observers,
                 context = context,
                 scope = scope,
                 onNetworkStatusLog = onNetworkStatusLog,
@@ -199,6 +285,7 @@ class ActrNode private constructor(
             return withNetworkMonitoring(
                 inner = inner,
                 retainedWorkload = workload,
+                retainedObservers = null,
                 context = context,
                 scope = scope,
                 onNetworkStatusLog = onNetworkStatusLog,
@@ -213,12 +300,14 @@ class ActrNode private constructor(
          *
          * @param configURL File URL to the TOML configuration file
          * @param packageURL File URL to the `.actr` package file
+         * @param observers Optional host-side [RuntimeObservers] for transport readiness; passed through to the path-based overload
          * @return A new ActrNode instance
          * @throws IllegalArgumentException if either URL is not a file URL
          */
         suspend fun fromPackageFile(
             configURL: URL,
             packageURL: URL,
+            observers: RuntimeObservers? = null,
         ): ActrNode {
             require(configURL.protocol == "file") {
                 "configURL must be a file URL, got: $configURL"
@@ -226,11 +315,13 @@ class ActrNode private constructor(
             require(packageURL.protocol == "file") {
                 "packageURL must be a file URL, got: $packageURL"
             }
-            return fromPackageFile(configURL.path, packageURL.path)
+            return fromPackageFile(configURL.path, packageURL.path, observers)
         }
 
         /**
          * Create a monitored package-backed node from config and package file URLs.
+         *
+         * @param observers Optional host-side [RuntimeObservers] for transport readiness; passed through to the path-based overload
          */
         suspend fun fromPackageFileWithMonitoring(
             configURL: URL,
@@ -238,6 +329,7 @@ class ActrNode private constructor(
             context: Context,
             scope: CoroutineScope,
             onNetworkStatusLog: ((String) -> Unit)? = null,
+            observers: RuntimeObservers? = null,
         ): ActrNode {
             require(configURL.protocol == "file") {
                 "configURL must be a file URL, got: $configURL"
@@ -251,6 +343,7 @@ class ActrNode private constructor(
                 context = context,
                 scope = scope,
                 onNetworkStatusLog = onNetworkStatusLog,
+                observers = observers,
             )
         }
 
@@ -298,9 +391,26 @@ class ActrNode private constructor(
             )
         }
 
+        /**
+         * Build the native package-backed node, routing through the observer-aware
+         * constructor when [observers] is supplied. Shared by [fromPackageFile] and
+         * [fromPackageFileWithMonitoring] so the dispatch lives in one place.
+         */
+        private suspend fun createPackageBackedNode(
+            configPath: String,
+            packagePath: String,
+            observers: RuntimeObservers?,
+        ): ActrNodeGenerated =
+            if (observers != null) {
+                ActrNodeGenerated.newFromPackageFileWithObservers(configPath, packagePath, observers)
+            } else {
+                ActrNodeGenerated.newFromPackageFile(configPath, packagePath)
+            }
+
         private suspend fun withNetworkMonitoring(
             inner: ActrNodeGenerated,
             retainedWorkload: DynamicWorkload?,
+            retainedObservers: RuntimeObservers?,
             context: Context,
             scope: CoroutineScope,
             onNetworkStatusLog: ((String) -> Unit)?,
@@ -318,6 +428,7 @@ class ActrNode private constructor(
                 ActrNode(
                     inner = inner,
                     retainedWorkload = retainedWorkload,
+                    retainedObservers = retainedObservers,
                     networkResources =
                         ManagedNetworkResources(
                             handle = handle,
@@ -398,7 +509,7 @@ class ActrNode private constructor(
      */
     suspend fun start(): ActrRef {
         val ref = inner.start()
-        return ActrRef(ref, retainedWorkload, networkResources)
+        return ActrRef(ref, retainedWorkload, retainedObservers, networkResources)
     }
 
     /**
@@ -451,6 +562,11 @@ class ActrNode private constructor(
 class ActrRef internal constructor(
     private val inner: ActrRefWrapper,
     internal val retainedWorkload: DynamicWorkload? = null,
+    /** Defense-in-depth retention mirroring [retainedWorkload]. UniFFI's callback-interface
+     *  handle map is what actually keeps host observer callbacks alive, so this field is not
+     *  required for callback liveness — it is retained for lifecycle symmetry with the workload
+     *  model. See [ActrNode.retainedObservers]. */
+    internal val retainedObservers: RuntimeObservers? = null,
     private val retainedNetworkResources: ManagedNetworkResources? = null,
 ) : AutoCloseable {
     /** Close the underlying reference, releasing native resources. */
@@ -597,16 +713,20 @@ fun setLogCallback(callback: LogCallback?) {
  *
  * @param configPath Path to the TOML configuration file
  * @param packagePath Path to the `.actr` package file
+ * @param observers Optional host-side [RuntimeObservers] for transport readiness
  * @return A new ActrNode instance
  * @throws ActrException.Config if the config file is invalid
  */
 suspend fun createActrNode(
     configPath: String,
     packagePath: String,
-): ActrNode = ActrNode.fromPackageFile(configPath, packagePath)
+    observers: RuntimeObservers? = null,
+): ActrNode = ActrNode.fromPackageFile(configPath, packagePath, observers)
 
 /**
  * Create a monitored ActrNode from a config file and package file.
+ *
+ * @param observers Optional host-side [RuntimeObservers] for transport readiness
  */
 suspend fun createActrNodeWithMonitoring(
     configPath: String,
@@ -614,6 +734,7 @@ suspend fun createActrNodeWithMonitoring(
     context: Context,
     scope: CoroutineScope,
     onNetworkStatusLog: ((String) -> Unit)? = null,
+    observers: RuntimeObservers? = null,
 ): ActrNode =
     ActrNode.fromPackageFileWithMonitoring(
         configPath = configPath,
@@ -621,6 +742,7 @@ suspend fun createActrNodeWithMonitoring(
         context = context,
         scope = scope,
         onNetworkStatusLog = onNetworkStatusLog,
+        observers = observers,
     )
 
 /**
@@ -628,16 +750,20 @@ suspend fun createActrNodeWithMonitoring(
  *
  * @param configURL File URL to the TOML configuration file
  * @param packageURL File URL to the `.actr` package file
+ * @param observers Optional host-side [RuntimeObservers] for transport readiness
  * @return A new ActrNode instance
  * @throws IllegalArgumentException if either URL is not a file URL
  */
 suspend fun createActrNode(
     configURL: URL,
     packageURL: URL,
-): ActrNode = ActrNode.fromPackageFile(configURL, packageURL)
+    observers: RuntimeObservers? = null,
+): ActrNode = ActrNode.fromPackageFile(configURL, packageURL, observers)
 
 /**
  * Create a monitored ActrNode from config and package file URLs.
+ *
+ * @param observers Optional host-side [RuntimeObservers] for transport readiness
  */
 suspend fun createActrNodeWithMonitoring(
     configURL: URL,
@@ -645,6 +771,7 @@ suspend fun createActrNodeWithMonitoring(
     context: Context,
     scope: CoroutineScope,
     onNetworkStatusLog: ((String) -> Unit)? = null,
+    observers: RuntimeObservers? = null,
 ): ActrNode =
     ActrNode.fromPackageFileWithMonitoring(
         configURL = configURL,
@@ -652,6 +779,7 @@ suspend fun createActrNodeWithMonitoring(
         context = context,
         scope = scope,
         onNetworkStatusLog = onNetworkStatusLog,
+        observers = observers,
     )
 
 /**
