@@ -68,6 +68,10 @@ fn swift_echo_init_creates_expected_files() {
         "manifest.toml should exist"
     );
     assert!(
+        project_dir.join("actr.toml").exists(),
+        "actr.toml should exist"
+    );
+    assert!(
         project_dir.join("manifest.lock.toml").exists(),
         "manifest.lock.toml should exist (for xcodegen)"
     );
@@ -78,6 +82,10 @@ fn swift_echo_init_creates_expected_files() {
     assert!(
         !project_dir.join(".protoc-plugin.toml").exists(),
         ".protoc-plugin.toml should not be generated"
+    );
+    assert!(
+        !project_dir.join("dist").exists(),
+        "linked iOS projects should not create a package dist directory"
     );
     assert!(
         project_dir.join("protos/local/local.proto").exists(),
@@ -109,24 +117,39 @@ fn swift_echo_init_creates_expected_files() {
     let actr_service =
         std::fs::read_to_string(app_dir.join("ActrService.swift")).expect("read ActrService.swift");
     assert!(
-        actr_service.contains("ACTR: mutable scaffold"),
-        "ActrService.swift should contain the mutable scaffold marker"
+        actr_service.contains("ActrService is not implemented"),
+        "ActrService.swift should remain an overwriteable pre-codegen placeholder"
     );
+    assert!(!actr_service.contains("ActrNode.from(packageConfig:"));
+    assert!(!actr_service.contains("forResourcesOfType: \"actr\""));
+
+    let project_yml =
+        std::fs::read_to_string(project_dir.join("project.yml")).expect("read project.yml");
+    assert!(project_yml.contains("- path: actr.toml"));
+    assert!(!project_yml.contains("- path: dist"));
+
+    let manifest =
+        std::fs::read_to_string(project_dir.join("manifest.toml")).expect("read manifest.toml");
+    assert!(!manifest.contains("[system."));
+
+    let runtime_config =
+        std::fs::read_to_string(project_dir.join("actr.toml")).expect("read actr.toml");
+    assert!(runtime_config.contains("[signaling]"));
+    assert!(runtime_config.contains("[deployment]"));
 }
 
 #[test]
 #[cfg_attr(not(target_os = "macos"), ignore = "Requires macOS and xcodegen")]
-fn swift_echo_manifest_has_signaling_url() {
+fn swift_echo_actr_toml_has_signaling_url() {
     let tmp = TempDir::new().unwrap();
     let project_dir = init_swift_echo(tmp.path(), "SignalingApp");
 
-    let actr_toml =
-        std::fs::read_to_string(project_dir.join("manifest.toml")).expect("read manifest.toml");
+    let actr_toml = std::fs::read_to_string(project_dir.join("actr.toml")).expect("read actr.toml");
 
     // The template always appends /signaling/ws; input is normalized.
     assert!(
         actr_toml.contains("wss://actrix1.develenv.com/signaling/ws"),
-        "manifest.toml should contain the full signaling URL with /signaling/ws path, got:\n{actr_toml}"
+        "actr.toml should contain the full signaling URL with /signaling/ws path, got:\n{actr_toml}"
     );
 }
 
