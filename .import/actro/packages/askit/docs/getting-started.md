@@ -2,7 +2,7 @@
 
 This guide will help you get started with askit in your project.
 
-**askit** is a UI component library and API layer built on top of [rill](https://github.com/GoAskAway/rill). Through package.json conditional exports, the same `import { StepList, Toast } from 'askit'` delivers real React Native components on the Host side and string identifiers on the Guest side (which rill passes to Host for rendering).
+**askit** is a UI component library and API layer built on top of [rill](https://github.com/Actrium/rill). Through package.json conditional exports, the same `import { StepList, Toast } from 'askit'` delivers real React Native components on the Host side and string identifiers on the Guest side (which rill passes to Host for rendering).
 
 ## Prerequisites
 
@@ -13,7 +13,7 @@ This guide will help you get started with askit in your project.
 ## Installation
 
 ```bash
-bun add github:GoAskAway/askit
+bun add github:Actrium/askit
 ```
 
 > **Note**: askit is published via GitHub and exports TypeScript source directly (no build step required). Your bundler (Metro, Vite, etc.) needs to support TypeScript compilation. Both React Native Metro and modern bundlers handle this automatically.
@@ -59,10 +59,10 @@ await engine.loadBundle('https://example.com/guest.js');
 
 ## Project Structure
 
-A typical AskAway project structure:
+A typical Actro project structure:
 
 ```
-my-askaway-app/
+my-actro-app/
 ├── host/                 # React Native host app
 │   ├── src/
 │   │   ├── App.tsx

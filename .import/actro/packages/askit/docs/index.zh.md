@@ -2,7 +2,7 @@
 
 欢迎阅读 askit 文档。
 
-**askit** 是构建在 [rill](https://github.com/GoAskAway/rill) 之上的 UI 组件库与 API 层。通过 package.json 条件导出，同一份 `import { StepList, Toast } from 'askit'` 在 Host 端获得真实 React Native 组件，在 Guest 端获得字符串标识符（由 rill 传递给 Host 渲染）。
+**askit** 是构建在 [rill](https://github.com/Actrium/rill) 之上的 UI 组件库与 API 层。通过 package.json 条件导出，同一份 `import { StepList, Toast } from 'askit'` 在 Host 端获得真实 React Native 组件，在 Guest 端获得字符串标识符（由 rill 传递给 Host 渲染）。
 
 | 层级 | 职责 |
 |------|------|
@@ -20,5 +20,5 @@
 
 ## 快速链接
 
-- [GitHub 仓库](https://github.com/GoAskAway/askit)
-- [问题追踪](https://github.com/GoAskAway/askit/issues)
+- [GitHub 仓库](https://github.com/Actrium/askit)
+- [问题追踪](https://github.com/Actrium/askit/issues)

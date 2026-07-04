@@ -2,7 +2,7 @@
   "name": "askit",
   "version": "0.1.0",
   "type": "module",
-  "description": "AskAway Client Kit - Isomorphic UI components and APIs for Host and Guest",
+  "description": "Actro Client Kit - Isomorphic UI components and APIs for Host and Guest",
   "license": "Apache-2.0",
   "author": "kookyleo <87705880+kookyleo@users.noreply.github.com>",
   "react-native": "./src/index.host.ts",
@@ -43,7 +43,7 @@
   "peerDependencies": {
     "react": "^19.0.0",
     "react-native": "^0.79.0",
-    "rill": "workspace:*"
+    "rill": ">=0.1.0"
   },
   "peerDependenciesMeta": {
     "react-native": {
@@ -65,7 +65,7 @@
     "typescript-eslint": "^8.48.0"
   },
   "keywords": [
-    "askaway",
+    "actro",
     "react-native",
     "isomorphic",
     "ui-kit",

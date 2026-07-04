@@ -13,7 +13,7 @@
 
 ```bash
 # Clone 仓库
-git clone https://github.com/GoAskAway/askit.git
+git clone https://github.com/Actrium/askit.git
 cd askit
 
 # 安装依赖
@@ -307,8 +307,8 @@ export async function show(
 
 ## 获取帮助
 
-- 💬 创建 [GitHub Discussion](https://github.com/GoAskAway/askit/discussions)
-- 🐛 报告 Bug：[GitHub Issues](https://github.com/GoAskAway/askit/issues)
+- 💬 创建 [GitHub Discussion](https://github.com/Actrium/askit/discussions)
+- 🐛 报告 Bug：[GitHub Issues](https://github.com/Actrium/askit/issues)
 - 📧 联系维护者：87705880+kookyleo@users.noreply.github.com
 
 ## 行为准则

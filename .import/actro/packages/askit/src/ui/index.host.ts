@@ -12,9 +12,12 @@ export type {
   StepStatus,
   ThemeViewProps,
   UserAvatarProps,
+  GlobalAlertProps,
 } from '../types';
 export { ChatBubble } from './ChatBubble/ChatBubble.host';
 export { EngineMonitorOverlay } from './EngineMonitor/EngineMonitor.host';
+export { GlobalAlert } from './GlobalAlert/GlobalAlert.host';
+export type { GlobalAlertButton } from './GlobalAlert/GlobalAlert.guest';
 export { PanelMarker } from './Panel/PanelMarker.host';
 export { StepList } from './StepList/StepList.host';
 export { ThemeView } from './ThemeView/ThemeView.host';

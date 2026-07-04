@@ -4,7 +4,7 @@
 
 ## 概览
 
-**askit** 是构建在 [rill](https://github.com/GoAskAway/rill) 之上的 UI 组件库与 API 层：
+**askit** 是构建在 [rill](https://github.com/Actrium/rill) 之上的 UI 组件库与 API 层：
 
 | 层级 | 职责 |
 |------|------|
@@ -13,7 +13,7 @@
 
 askit 提供：
 - 在 Host 和 Guest 中表现一致的统一 API
-- 为 AskAway 平台优化的预构建 UI 组件
+- 为 Actro 平台优化的预构建 UI 组件
 - 自动消息路由和桥接
 
 ```
