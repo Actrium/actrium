@@ -12,10 +12,10 @@
     "moduleResolution": "bundler",
     "baseUrl": ".",
     "paths": {
-      "rill/guest": ["../../../../rill/src/sdk/index.ts"],
-      "askit": ["../../../../askit/src/index.guest.ts"]
+      "rill/let": ["../../../rill/src/guest/let/index.ts"],
+      "askit": ["../../../askit/src/index.guest.ts"]
     }
   },
-  "include": ["src/**/*"],
+  "include": ["src/**/*", "../../src/actr-host/main"],
   "exclude": ["**/node_modules/**"]
 }

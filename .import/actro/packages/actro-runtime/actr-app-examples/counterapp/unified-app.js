@@ -117,6 +117,7 @@ var __toCommonJS = (from) => {
   __moduleCache.set(from, entry);
   return entry;
 };
+var __commonJS = (cb, mod) => () => (mod || cb((mod = { exports: {} }).exports, mod), mod.exports);
 var __export = (target, all) => {
   for (var name in all)
     __defProp(target, name, {
@@ -127,6 +128,21 @@ var __export = (target, all) => {
     });
 };
 
+// assets/clear.png
+var require_clear = __commonJS((exports2, module2) => {
+  module2.exports = "./clear-653n4c11.png";
+});
+
+// assets/feedback.png
+var require_feedback = __commonJS((exports2, module2) => {
+  module2.exports = "./feedback-ftha5xpq.png";
+});
+
+// assets/about.png
+var require_about = __commonJS((exports2, module2) => {
+  module2.exports = "./about-d6yqzg4s.png";
+});
+
 // src/unified-app.tsx
 var exports_unified_app = {};
 __export(exports_unified_app, {
@@ -134,600 +150,715 @@ __export(exports_unified_app, {
 });
 module.exports = __toCommonJS(exports_unified_app);
 
-// src/panels.tsx
+// src/hooks/usePanels.tsx
+var import_react3 = React;
+
+// ../../../askit/src/api/EventHandler.guest.ts
 var import_react = React;
-var import_sdk = RillGuest;
-var jsx_runtime = ReactJSXRuntime;
-function Counter({
-  onChange
-}) {
-  const [redCount, setRedCount] = import_react.useState(0);
-  const [blueCount, setBlueCount] = import_react.useState(0);
-  const [greenCount, setGreenCount] = import_react.useState(0);
-  const [currentTime, setCurrentTime] = import_react.useState(() => {
-    const now = new Date;
-    return `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
-  });
-  const [weatherData, setWeatherData] = import_react.useState(null);
-  const [weatherLoading, setWeatherLoading] = import_react.useState(false);
-  const [weatherExpanded, setWeatherExpanded] = import_react.useState(false);
-  const sendToHost = import_sdk.useSendToHost();
-  const pendingRequestRef = import_react.useRef(null);
-  import_react.useEffect(() => {
-    const updateTime = () => {
-      const now = new Date;
-      setCurrentTime(`${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`);
+
+// ../../../rill/src/guest/let/sdk.ts
+function getReactHooks() {
+  const g = globalThis;
+  if (g.React && typeof g.React.useEffect === "function") {
+    return g.React;
+  }
+  try {
+    const React = React;
+    if (React && typeof React.useEffect === "function") {
+      return React;
+    }
+  } catch {}
+  const throwUnavailable = (hook) => () => {
+    throw new Error(`[rill/sdk] ${hook} not available. Ensure running in rill sandbox.`);
+  };
+  return {
+    useEffect: throwUnavailable("useEffect"),
+    useRef: throwUnavailable("useRef"),
+    useState: throwUnavailable("useState"),
+    useMemo: throwUnavailable("useMemo"),
+    useCallback: throwUnavailable("useCallback")
+  };
+}
+function isInSandbox() {
+  return globalThis.__RILL_GUEST_ENV__ === true;
+}
+var COMPONENT_NAMES = [
+  "View",
+  "Text",
+  "Image",
+  "ImageBackground",
+  "ScrollView",
+  "FlatList",
+  "SectionList",
+  "VirtualizedList",
+  "RefreshControl",
+  "TextInput",
+  "Button",
+  "Switch",
+  "Pressable",
+  "TouchableOpacity",
+  "TouchableHighlight",
+  "TouchableWithoutFeedback",
+  "ActivityIndicator",
+  "Modal",
+  "StatusBar",
+  "SafeAreaView",
+  "KeyboardAvoidingView"
+];
+function getComponents() {
+  if (isInSandbox()) {
+    const result = {};
+    for (const name of COMPONENT_NAMES) {
+      result[name] = name;
+    }
+    return result;
+  }
+  try {
+    const RN = ReactNative;
+    const result = {};
+    for (const name of COMPONENT_NAMES) {
+      result[name] = RN[name];
+    }
+    return result;
+  } catch {
+    const result = {};
+    for (const name of COMPONENT_NAMES) {
+      result[name] = name;
+    }
+    return result;
+  }
+}
+function getAPIs() {
+  const stubs = {
+    StyleSheet: { create: (styles) => styles, flatten: (s) => s },
+    Easing: {
+      linear: (t) => t,
+      ease: (t) => t,
+      quad: (t) => t * t,
+      cubic: (t) => t * t * t,
+      bezier: () => (t) => t,
+      in: (e) => e,
+      out: (e) => e,
+      inOut: (e) => e
+    },
+    Platform: {
+      OS: "unknown",
+      Version: 0,
+      select: (spec) => spec.default
+    },
+    Dimensions: {
+      get: () => ({ width: 0, height: 0, scale: 1, fontScale: 1 }),
+      addEventListener: () => ({ remove: () => {} })
+    },
+    PixelRatio: {
+      get: () => 1,
+      getFontScale: () => 1,
+      getPixelSizeForLayoutSize: (size) => size,
+      roundToNearestPixel: (size) => size
+    },
+    Appearance: {
+      getColorScheme: () => "light",
+      addChangeListener: () => ({ remove: () => {} })
+    },
+    I18nManager: { isRTL: false, allowRTL: () => {}, forceRTL: () => {} },
+    AppState: {
+      currentState: "active",
+      addEventListener: () => ({ remove: () => {} })
+    },
+    Keyboard: {
+      dismiss: () => {},
+      addListener: () => ({ remove: () => {} })
+    },
+    Alert: { alert: () => {}, prompt: () => {} },
+    Linking: {
+      openURL: async () => {},
+      canOpenURL: async () => false,
+      getInitialURL: async () => null,
+      addEventListener: () => ({ remove: () => {} })
+    },
+    Share: { share: async () => ({ action: "dismissedAction" }) },
+    Vibration: { vibrate: () => {}, cancel: () => {} },
+    Animated: {}
+  };
+  if (isInSandbox()) {
+    return stubs;
+  }
+  try {
+    const RN = ReactNative;
+    return {
+      StyleSheet: RN.StyleSheet ?? stubs.StyleSheet,
+      Easing: RN.Easing ?? stubs.Easing,
+      Platform: RN.Platform ?? stubs.Platform,
+      Dimensions: RN.Dimensions ?? stubs.Dimensions,
+      PixelRatio: RN.PixelRatio ?? stubs.PixelRatio,
+      Appearance: RN.Appearance ?? stubs.Appearance,
+      I18nManager: RN.I18nManager ?? stubs.I18nManager,
+      AppState: RN.AppState ?? stubs.AppState,
+      Keyboard: RN.Keyboard ?? stubs.Keyboard,
+      Alert: RN.Alert ?? stubs.Alert,
+      Linking: RN.Linking ?? stubs.Linking,
+      Share: RN.Share ?? stubs.Share,
+      Vibration: RN.Vibration ?? stubs.Vibration,
+      Animated: RN.Animated ?? stubs.Animated
     };
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, []);
-  import_sdk.useHostEvent("APP_FETCH_RESPONSE", (response) => {
-    if (response.requestId !== pendingRequestRef.current)
-      return;
-    pendingRequestRef.current = null;
-    setWeatherLoading(false);
-    if (!response.ok || !response.data)
-      return;
-    const data = response.data;
-    if (data.current_weather) {
-      const now = new Date;
-      const temp = data.current_weather.temperature ?? 0;
-      const windSpeed = data.current_weather.windspeed ?? 0;
-      const humidity = data.hourly?.relativehumidity_2m?.[0] ?? 0;
-      const weatherCode = data.current_weather.weathercode ?? 0;
-      const weatherDescriptions = {
-        0: "Clear",
-        1: "Mainly Clear",
-        2: "Partly Cloudy",
-        3: "Overcast",
-        45: "Fog",
-        48: "Fog",
-        51: "Light Drizzle",
-        53: "Drizzle",
-        55: "Heavy Drizzle",
-        61: "Light Rain",
-        63: "Rain",
-        65: "Heavy Rain",
-        71: "Light Snow",
-        73: "Snow",
-        75: "Heavy Snow",
-        95: "Thunderstorm"
-      };
-      setWeatherData({
-        city: "Shanghai",
-        temperature: Math.round(temp),
-        description: weatherDescriptions[weatherCode] || "Unknown",
-        humidity,
-        windSpeed: Math.round(windSpeed),
-        feelsLike: Math.round(temp),
-        icon: weatherCode <= 3 ? "01d" : "03d",
-        updatedAt: `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`
+  } catch {
+    return stubs;
+  }
+}
+function getRNHooks() {
+  const stubs = {
+    useColorScheme: () => "light",
+    useWindowDimensions: () => ({ width: 0, height: 0, scale: 1, fontScale: 1 })
+  };
+  if (isInSandbox()) {
+    return stubs;
+  }
+  try {
+    const RN = ReactNative;
+    return {
+      useColorScheme: RN.useColorScheme ?? stubs.useColorScheme,
+      useWindowDimensions: RN.useWindowDimensions ?? stubs.useWindowDimensions
+    };
+  } catch {
+    return stubs;
+  }
+}
+var _components = getComponents();
+var _apis = getAPIs();
+var _rnHooks = getRNHooks();
+var View = _components.View;
+var Text = _components.Text;
+var Image = _components.Image;
+var ImageBackground = _components.ImageBackground;
+var ScrollView = _components.ScrollView;
+var FlatList = _components.FlatList;
+var SectionList = _components.SectionList;
+var VirtualizedList = _components.VirtualizedList;
+var RefreshControl = _components.RefreshControl;
+var TextInput = _components.TextInput;
+var Button = _components.Button;
+var Switch = _components.Switch;
+var Pressable = _components.Pressable;
+var TouchableOpacity = _components.TouchableOpacity;
+var TouchableHighlight = _components.TouchableHighlight;
+var TouchableWithoutFeedback = _components.TouchableWithoutFeedback;
+var ActivityIndicator = _components.ActivityIndicator;
+var Modal = _components.Modal;
+var StatusBar = _components.StatusBar;
+var SafeAreaView = _components.SafeAreaView;
+var KeyboardAvoidingView = _components.KeyboardAvoidingView;
+var StyleSheet = _apis.StyleSheet;
+var Easing = _apis.Easing;
+var Platform = _apis.Platform;
+var Dimensions = _apis.Dimensions;
+var PixelRatio = _apis.PixelRatio;
+var Appearance = _apis.Appearance;
+var I18nManager = _apis.I18nManager;
+var AppState = _apis.AppState;
+var Keyboard = _apis.Keyboard;
+var Alert = _apis.Alert;
+var Linking = _apis.Linking;
+var Share = _apis.Share;
+var Vibration = _apis.Vibration;
+var Animated = _apis.Animated;
+var useColorScheme = _rnHooks.useColorScheme;
+var useWindowDimensions = _rnHooks.useWindowDimensions;
+function useHostEvent(eventName, callback) {
+  const { useEffect, useRef } = getReactHooks();
+  const callbackRef = useRef(callback);
+  useEffect(() => {
+    callbackRef.current = callback;
+    return;
+  });
+  useEffect(() => {
+    const g = globalThis;
+    if ("__useHostEvent" in globalThis) {
+      const stableCallback = (payload) => callbackRef.current(payload);
+      const unsubscribe = g.__useHostEvent(eventName, stableCallback);
+      return unsubscribe;
+    }
+    return;
+  }, [eventName]);
+}
+function useSendToHost() {
+  const g = globalThis;
+  if ("__sendEventToHost" in globalThis) {
+    return g.__sendEventToHost;
+  }
+  return () => {
+    console.warn("[rill] sendToHost is not available outside sandbox");
+  };
+}
+var React = globalThis.React && typeof globalThis.React.Component === "function" ? globalThis.React : { Component: class {
+} };
+
+class RillErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null, errorInfo: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    const info = { componentStack: errorInfo.componentStack };
+    this.setState({ errorInfo: info });
+    if (this.props.onError) {
+      this.props.onError(error, info);
+    }
+    const g = globalThis;
+    if ("__sendEventToHost" in g) {
+      const sendToHost = g.__sendEventToHost;
+      sendToHost("RENDER_ERROR", {
+        message: error.message,
+        stack: error.stack,
+        componentStack: info.componentStack
       });
-      setWeatherExpanded(true);
+    }
+  }
+  render() {
+    if (this.state.hasError) {
+      const { fallback } = this.props;
+      const { error, errorInfo } = this.state;
+      if (typeof fallback === "function" && error && errorInfo) {
+        return fallback(error, errorInfo);
+      }
+      if (fallback && typeof fallback !== "function") {
+        return fallback;
+      }
+      return null;
+    }
+    return this.props.children;
+  }
+}
+// ../../../askit/src/api/EventHandler.guest.ts
+var pendingRequests = new Map;
+function useEventBridge(requestEvent, responseEvent) {
+  const send = useSendToHost();
+  useHostEvent(responseEvent, (res) => {
+    const payload = res;
+    const key = `${responseEvent}:${payload.requestId}`;
+    const resolve = pendingRequests.get(key);
+    if (resolve) {
+      resolve(res);
+      pendingRequests.delete(key);
     }
   });
-  const fetchWeather = import_react.useCallback(() => {
-    if (weatherLoading)
-      return;
-    setWeatherLoading(true);
-    const requestId = `weather-${Date.now()}`;
-    pendingRequestRef.current = requestId;
-    const url = "https://api.open-meteo.com/v1/forecast?latitude=31.23&longitude=121.47&current_weather=true&hourly=relativehumidity_2m";
-    sendToHost("APP_FETCH_REQUEST", { requestId, url, options: { method: "GET" } });
-    setTimeout(() => {
-      if (pendingRequestRef.current === requestId) {
-        pendingRequestRef.current = null;
-        setWeatherLoading(false);
-      }
-    }, 1e4);
-  }, [weatherLoading, sendToHost]);
-  const totalCount = redCount + blueCount + greenCount;
-  return /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.ScrollView, {
-    style: { flex: 1, backgroundColor: "#1a1a2e" },
-    contentContainerStyle: { padding: 16, paddingBottom: 80 },
-    children: [
-      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-        style: {
-          color: "#ffffff",
-          fontSize: 20,
-          fontWeight: "bold",
-          marginBottom: 20
-        },
-        children: "\uD83C\uDFAE 计数器测试"
-      }),
-      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-        style: {
-          backgroundColor: "#2a2a4e",
-          padding: 16,
-          borderRadius: 8,
-          marginBottom: 20,
-          alignItems: "center"
-        },
-        children: [
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-            style: { color: "#888888", fontSize: 12, marginBottom: 4 },
-            children: "总点击次数"
-          }),
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-            style: { color: "#ffaa00", fontSize: 36, fontWeight: "bold" },
-            children: totalCount
-          })
-        ]
-      }),
-      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.TouchableOpacity, {
-        onPress: Object.assign(() => {
-          console.log("[CLICK_TEST] Red button pressed, count=" + (redCount + 1));
-          setRedCount((c) => c + 1);
-          onChange?.("红色按钮", "\uD83D\uDD34", "#ff4444");
-        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 182 }),
-        style: {
-          backgroundColor: "#ff4444",
-          padding: 20,
-          borderRadius: 8,
-          marginBottom: 12,
-          alignItems: "center"
-        },
-        children: [
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-            style: { color: "#ffffff", fontSize: 18, fontWeight: "bold" },
-            children: "\uD83D\uDD34 红色 +1"
-          }),
-          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-            style: { color: "#ffcccc", fontSize: 14, marginTop: 4 },
-            children: [
-              "点击: ",
-              redCount
-            ]
-          })
-        ]
-      }),
-      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.TouchableOpacity, {
-        onPress: Object.assign(() => {
-          console.log("[CLICK_TEST] Blue button pressed, count=" + (blueCount + 1));
-          setBlueCount((c) => c + 1);
-          onChange?.("蓝色按钮", "\uD83D\uDD35", "#4444ff");
-        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 204 }),
-        style: {
-          backgroundColor: "#4444ff",
-          padding: 20,
-          borderRadius: 8,
-          marginBottom: 12,
-          alignItems: "center"
-        },
-        children: [
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-            style: { color: "#ffffff", fontSize: 18, fontWeight: "bold" },
-            children: "\uD83D\uDD35 蓝色 +1"
-          }),
-          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-            style: { color: "#ccccff", fontSize: 14, marginTop: 4 },
-            children: [
-              "点击: ",
-              blueCount
-            ]
-          })
-        ]
-      }),
-      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.TouchableOpacity, {
-        onPress: Object.assign(() => {
-          console.log("[CLICK_TEST] Green button pressed, count=" + (greenCount + 1));
-          setGreenCount((c) => c + 1);
-          onChange?.("绿色按钮", "\uD83D\uDFE2", "#44ff44");
-        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 226 }),
-        style: {
-          backgroundColor: "#44ff44",
-          padding: 20,
-          borderRadius: 8,
-          marginBottom: 12,
-          alignItems: "center"
-        },
-        children: [
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-            style: { color: "#000000", fontSize: 18, fontWeight: "bold" },
-            children: "\uD83D\uDFE2 绿色 +1"
-          }),
-          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-            style: { color: "#006600", fontSize: 14, marginTop: 4 },
-            children: [
-              "点击: ",
-              greenCount
-            ]
-          })
-        ]
-      }),
-      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-        onPress: Object.assign(() => {
-          setRedCount(0);
-          setBlueCount(0);
-          setGreenCount(0);
-        }, { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 248 }),
-        style: {
-          backgroundColor: "#666666",
-          padding: 16,
-          borderRadius: 8,
-          marginTop: 20,
-          alignItems: "center",
-          borderWidth: 1,
-          borderColor: "#888888"
-        },
-        children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-          style: { color: "#ffffff", fontSize: 16, fontWeight: "bold" },
-          children: "\uD83D\uDD04 重置所有计数"
-        })
-      }),
-      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.View, {
-        style: {
-          marginTop: 30,
-          padding: 12,
-          backgroundColor: "#2a2a3a",
-          borderRadius: 8,
-          borderLeftWidth: 4,
-          borderLeftColor: "#ffaa00"
-        },
-        children: /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-          style: { color: "#cccccc", fontSize: 11, lineHeight: 16 },
-          children: [
-            "\uD83D\uDCA1 点击彩色按钮增加对应计数",
-            `
-`,
-            "\uD83D\uDCCA 总计数显示在顶部",
-            `
-`,
-            "\uD83D\uDD04 重置按钮清空所有计数",
-            `
-`,
-            "⚡ 左侧点击会同步到右侧面板"
-          ]
-        })
-      }),
-      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-        style: {
-          marginTop: 20,
-          padding: 12,
-          backgroundColor: "#2a2a4e",
-          borderRadius: 8,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between"
-        },
-        children: [
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-            style: { color: "#888888", fontSize: 14, fontVariant: ["tabular-nums"] },
-            children: currentTime
-          }),
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-            onPress: fetchWeather,
-            disabled: weatherLoading,
-            style: {
-              padding: 8,
-              backgroundColor: weatherExpanded ? "#1a365d" : "#3a3a5e",
-              borderRadius: 6,
-              flexDirection: "row",
-              alignItems: "center"
-            },
-            children: weatherLoading ? /* @__PURE__ */ jsx_runtime.jsx(import_sdk.ActivityIndicator, {
-              size: "small",
-              color: "#88b8e8"
-            }) : /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-              style: { color: "#88b8e8", fontSize: 14 },
-              children: weatherData ? `${weatherData.temperature}°C` : "\uD83C\uDF24️"
-            })
-          })
-        ]
-      }),
-      weatherExpanded && weatherData && /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-        style: {
-          marginTop: 12,
-          padding: 16,
-          backgroundColor: "#1a365d",
-          borderRadius: 12,
-          borderWidth: 1,
-          borderColor: "#2d4a77"
-        },
-        children: [
-          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-            style: {
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 12
-            },
-            children: [
-              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                style: { color: "#ffffff", fontSize: 16, fontWeight: "bold" },
-                children: weatherData.city
-              }),
-              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-                onPress: Object.assign(() => setWeatherExpanded(false), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 344 }),
-                children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                  style: { color: "#88b8e8", fontSize: 12 },
-                  children: "收起 ▲"
-                })
-              })
-            ]
-          }),
-          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-            style: {
-              flexDirection: "row",
-              alignItems: "baseline",
-              marginBottom: 12
-            },
-            children: [
-              /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-                style: { color: "#ffffff", fontSize: 36, fontWeight: "300", marginRight: 12 },
-                children: [
-                  weatherData.temperature,
-                  "°C"
-                ]
-              }),
-              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                style: { color: "#a0c4e8", fontSize: 16 },
-                children: weatherData.description
-              })
-            ]
-          }),
-          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-            style: { flexDirection: "row", flexWrap: "wrap", marginBottom: 8 },
-            children: [
-              /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-                style: { color: "#c0d8f0", fontSize: 12, marginRight: 16 },
-                children: [
-                  "体感 ",
-                  weatherData.feelsLike,
-                  "°C"
-                ]
-              }),
-              /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-                style: { color: "#c0d8f0", fontSize: 12, marginRight: 16 },
-                children: [
-                  "湿度 ",
-                  weatherData.humidity,
-                  "%"
-                ]
-              }),
-              /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-                style: { color: "#c0d8f0", fontSize: 12 },
-                children: [
-                  "风速 ",
-                  weatherData.windSpeed,
-                  "km/h"
-                ]
-              })
-            ]
-          }),
-          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-            style: { color: "#88b8e8", fontSize: 11, fontStyle: "italic" },
-            children: [
-              "更新于 ",
-              weatherData.updatedAt
-            ]
-          })
-        ]
-      })
-    ]
-  });
+  const request = import_react.useCallback(async (payload, timeoutMs = 1e4) => {
+    const { requestId } = payload;
+    if (!requestId) {
+      throw new Error(`[useHostApi] requestId is required for ${requestEvent}`);
+    }
+    const key = `${responseEvent}:${requestId}`;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        if (pendingRequests.has(key)) {
+          pendingRequests.delete(key);
+          reject(new Error(`[useHostApi] Timeout: ${requestEvent} -> ${responseEvent} (ID: ${requestId})`));
+        }
+      }, timeoutMs);
+      pendingRequests.set(key, (res) => {
+        clearTimeout(timer);
+        resolve(res);
+      });
+      send(requestEvent, payload);
+    });
+  }, [send, requestEvent, responseEvent]);
+  return { request };
 }
-function Stats({
-  records,
-  sessionClicks,
-  onAddRecord,
-  onClear
-}) {
-  return /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.ScrollView, {
-    style: { flex: 1, backgroundColor: "#1a1a2e" },
-    contentContainerStyle: { padding: 16 },
+// ../../../askit/src/ui/guest-factory.ts
+function createGuestComponent(name) {
+  return name;
+}
+
+// ../../../askit/src/ui/GlobalAlert/GlobalAlert.guest.tsx
+var GlobalAlert = createGuestComponent("GlobalAlert");
+// src/pages/Stats.tsx
+var import_react2 = React;
+var jsx_runtime = ReactJSXRuntime;
+var clearIconSource = require_clear();
+var feedbackIconSource = require_feedback();
+var aboutIconSource = require_about();
+var supportedLanguages = [
+  {
+    id: "en",
+    label: "Welcome",
+    backgroundColor: "#F4ECEA",
+    color: "#D95B4F"
+  },
+  {
+    id: "zhHans",
+    label: "欢迎",
+    backgroundColor: "#F5EDED",
+    color: "#E45C4E"
+  },
+  {
+    id: "ja",
+    label: "いらっしゃいませ",
+    backgroundColor: "#ECF3F8",
+    color: "#2E7B8B"
+  },
+  {
+    id: "fr",
+    label: "accfaueillir",
+    backgroundColor: "#F8EEF4",
+    color: "#E16586"
+  },
+  {
+    id: "ko",
+    label: "환영",
+    backgroundColor: "#EEF2FF",
+    color: "#005DFF"
+  },
+  {
+    id: "zhHant",
+    label: "歡迎",
+    backgroundColor: "#F8F0F0",
+    color: "#D95B4F"
+  },
+  {
+    id: "es",
+    label: "bienvenido",
+    backgroundColor: "#F8F5F2",
+    color: "#DB9432"
+  },
+  {
+    id: "ru",
+    label: "добропожаловать",
+    backgroundColor: "#F0EEF7",
+    color: "#6B5BAA"
+  }
+];
+function onLanguageChangePlaceholder(language) {}
+function Stats({}) {
+  const [lang, setLang] = import_react2.useState("zhHans");
+  const [statsData, setStatsData] = import_react2.useState({});
+  const [showClearAlert, setShowClearAlert] = import_react2.useState(false);
+  const { request: getAppInfo } = useEventBridge("GET_APP_INFO", "SEND_APP_INFO");
+  const { request: clearChatHistory } = useEventBridge("CLEAR_CHAT_HISTORY", "CLEAR_CHAT_HISTORY_RESULT");
+  const handleClearHistory = () => {
+    setShowClearAlert(true);
+  };
+  const handleConfirmClear = () => {
+    clearChatHistory({
+      requestId: "stats_page_clear_history_001"
+    }).then((result) => {
+      if (result.success) {
+        setShowClearAlert(false);
+      }
+    });
+  };
+  const actions = [
+    {
+      id: "clearHistory",
+      iconSource: clearIconSource,
+      label: "清除对话记录",
+      handler: handleClearHistory
+    },
+    { id: "feedback", iconSource: feedbackIconSource, label: "吐个槽" },
+    { id: "about", iconSource: aboutIconSource, label: "关于 MU AI" }
+  ];
+  import_react2.useEffect(() => {
+    getAppInfo({
+      requestId: "stats_page_001"
+    }).then((appInfo) => {
+      setStatsData(appInfo);
+    });
+  }, []);
+  const handleLanguagePress = (language) => {
+    setStatsData((current) => ({
+      ...current,
+      selectedLanguageId: language.id
+    }));
+    onLanguageChangePlaceholder(language);
+    setLang(language.id);
+  };
+  return /* @__PURE__ */ jsx_runtime.jsxs(View, {
+    style: styles.guestContainer,
     children: [
-      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-        style: {
-          color: "#ffffff",
-          fontSize: 20,
-          fontWeight: "bold",
-          marginBottom: 20
-        },
-        children: "\uD83D\uDCCA 交互统计"
+      /* @__PURE__ */ jsx_runtime.jsx(GlobalAlert, {
+        visible: showClearAlert,
+        title: "清除对话记录",
+        message: "确定要清除所有对话记录吗？此操作不可恢复。",
+        buttons: [
+          { text: "取消", style: "cancel", onPress: () => setShowClearAlert(false) },
+          { text: "清除", style: "destructive", onPress: handleConfirmClear }
+        ],
+        onDismiss: () => setShowClearAlert(false)
       }),
-      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-        style: {
-          backgroundColor: "#2a2a4e",
-          padding: 16,
-          borderRadius: 8,
-          marginBottom: 20
-        },
+      /* @__PURE__ */ jsx_runtime.jsxs(ScrollView, {
+        style: styles.container,
+        contentContainerStyle: styles.contentContainer,
+        id: "sidebar",
         children: [
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-            style: { color: "#888888", fontSize: 12, marginBottom: 8 },
-            children: "本次会话点击"
-          }),
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-            style: { color: "#00ff88", fontSize: 32, fontWeight: "bold" },
-            children: sessionClicks
-          }),
-          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-            style: { color: "#666666", fontSize: 10, marginTop: 4 },
+          /* @__PURE__ */ jsx_runtime.jsxs(View, {
+            style: styles.profileSection,
             children: [
-              "历史记录: ",
-              records.length,
-              " 条"
-            ]
-          })
-        ]
-      }),
-      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-        style: { marginBottom: 20 },
-        children: [
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-            style: { color: "#888888", fontSize: 12, marginBottom: 8 },
-            children: "快速测试"
-          }),
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-            onPress: Object.assign(() => onAddRecord("快速点击", "⚡", "#ffaa00"), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 450 }),
-            style: {
-              backgroundColor: "#ffaa00",
-              padding: 12,
-              borderRadius: 6,
-              marginBottom: 8,
-              alignItems: "center"
-            },
-            children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-              style: { color: "#000000", fontSize: 14, fontWeight: "bold" },
-              children: "⚡ 快速测试"
-            })
-          }),
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-            onPress: Object.assign(() => onAddRecord("星标动作", "⭐", "#ff88ff"), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 464 }),
-            style: {
-              backgroundColor: "#ff88ff",
-              padding: 12,
-              borderRadius: 6,
-              marginBottom: 8,
-              alignItems: "center"
-            },
-            children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-              style: { color: "#000000", fontSize: 14, fontWeight: "bold" },
-              children: "⭐ 星标测试"
-            })
-          }),
-          /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-            onPress: Object.assign(() => onAddRecord("火箭发射", "\uD83D\uDE80", "#00aaff"), { __sourceFile: "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps/actr-app-examples/counterapp/src/panels.tsx", __sourceLine: 478 }),
-            style: {
-              backgroundColor: "#00aaff",
-              padding: 12,
-              borderRadius: 6,
-              alignItems: "center"
-            },
-            children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-              style: { color: "#ffffff", fontSize: 14, fontWeight: "bold" },
-              children: "\uD83D\uDE80 火箭测试"
-            })
-          })
-        ]
-      }),
-      /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-        children: [
-          /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-            style: {
-              flexDirection: "row",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: 12
-            },
-            children: [
-              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                style: { color: "#888888", fontSize: 12 },
-                children: "点击历史"
+              /* @__PURE__ */ jsx_runtime.jsx(View, {
+                style: styles.logoBox,
+                children: /* @__PURE__ */ jsx_runtime.jsx(Image, {
+                  source: { uri: statsData.logo },
+                  style: styles.logo
+                })
               }),
-              records.length > 0 && /* @__PURE__ */ jsx_runtime.jsx(import_sdk.TouchableOpacity, {
-                onPress: onClear,
-                style: { padding: 4 },
-                children: /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                  style: { color: "#ff6666", fontSize: 11 },
-                  children: "清空"
+              /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                style: styles.title,
+                children: statsData.appName
+              }),
+              /* @__PURE__ */ jsx_runtime.jsxs(View, {
+                style: styles.statsRow,
+                children: [
+                  /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                    style: styles.metricValue,
+                    children: statsData.favoriteCount
+                  }),
+                  /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                    style: styles.metricLabel,
+                    children: "收藏"
+                  }),
+                  /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                    style: [styles.metricValue, styles.metricGap],
+                    children: statsData.usedCount
+                  }),
+                  /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                    style: styles.metricLabel,
+                    children: "用过"
+                  })
+                ]
+              }),
+              /* @__PURE__ */ jsx_runtime.jsxs(Text, {
+                style: styles.creator,
+                children: [
+                  "创建者",
+                  statsData.author
+                ]
+              }),
+              /* @__PURE__ */ jsx_runtime.jsxs(TouchableOpacity, {
+                style: styles.shareButton,
+                onPress: () => {},
+                children: [
+                  /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                    style: styles.shareIcon,
+                    children: "↗"
+                  }),
+                  /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                    style: styles.shareText,
+                    children: "分享"
+                  })
+                ]
+              })
+            ]
+          }),
+          /* @__PURE__ */ jsx_runtime.jsxs(View, {
+            style: styles.section,
+            children: [
+              /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                style: styles.sectionTitle,
+                children: "介绍"
+              }),
+              /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                style: styles.aboutText,
+                children: "123"
+              })
+            ]
+          }),
+          /* @__PURE__ */ jsx_runtime.jsxs(View, {
+            style: styles.section,
+            children: [
+              /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                style: styles.sectionTitle,
+                children: "选择语种"
+              }),
+              /* @__PURE__ */ jsx_runtime.jsx(View, {
+                style: styles.languageGrid,
+                children: supportedLanguages.map((language) => {
+                  const isSelected = language.id === lang;
+                  return /* @__PURE__ */ jsx_runtime.jsx(TouchableOpacity, {
+                    onPress: () => handleLanguagePress(language),
+                    style: [
+                      styles.languagePill,
+                      {
+                        backgroundColor: isSelected ? "#E35C49" : language.backgroundColor
+                      }
+                    ],
+                    children: /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                      style: [
+                        styles.languageText,
+                        { color: isSelected ? "#FFFFFF" : language.color }
+                      ],
+                      children: language.label
+                    })
+                  }, language.id);
                 })
               })
             ]
           }),
-          records.length === 0 ? /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-            style: {
-              backgroundColor: "#2a2a3a",
-              padding: 20,
-              borderRadius: 8,
-              alignItems: "center"
-            },
-            children: [
-              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                style: { color: "#666666", fontSize: 13 },
-                children: "暂无记录"
-              }),
-              /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                style: { color: "#555555", fontSize: 11, marginTop: 4 },
-                children: "点击上方按钮开始测试"
-              })
-            ]
-          }) : records.map((record) => /* @__PURE__ */ jsx_runtime.jsx(import_sdk.View, {
-            style: {
-              backgroundColor: "#2a2a3a",
-              padding: 12,
-              borderRadius: 6,
-              marginBottom: 8,
-              borderLeftWidth: 3,
-              borderLeftColor: record.color
-            },
-            children: /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-              style: {
-                flexDirection: "row",
-                justifyContent: "space-between",
-                alignItems: "center"
-              },
+          /* @__PURE__ */ jsx_runtime.jsx(View, {
+            style: styles.actionList,
+            children: actions.map((action) => /* @__PURE__ */ jsx_runtime.jsxs(TouchableOpacity, {
+              onPress: action.handler || (() => {}),
+              style: styles.actionItem,
               children: [
-                /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.View, {
-                  style: { flexDirection: "row", alignItems: "center" },
-                  children: [
-                    /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                      style: { fontSize: 16, marginRight: 8 },
-                      children: record.emoji
-                    }),
-                    /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                      style: { color: "#ffffff", fontSize: 13 },
-                      children: record.action
-                    })
-                  ]
+                /* @__PURE__ */ jsx_runtime.jsx(Image, {
+                  source: action.iconSource,
+                  style: styles.actionIcon
                 }),
-                /* @__PURE__ */ jsx_runtime.jsx(import_sdk.Text, {
-                  style: { color: "#666666", fontSize: 11 },
-                  children: record.time
+                /* @__PURE__ */ jsx_runtime.jsx(Text, {
+                  style: styles.actionText,
+                  children: action.label
                 })
               ]
-            })
-          }, record.id))
+            }, action.id))
+          })
         ]
-      }),
-      /* @__PURE__ */ jsx_runtime.jsx(import_sdk.View, {
-        style: {
-          marginTop: 20,
-          padding: 12,
-          backgroundColor: "#2a2a3a",
-          borderRadius: 8,
-          borderLeftWidth: 4,
-          borderLeftColor: "#00ff88"
-        },
-        children: /* @__PURE__ */ jsx_runtime.jsxs(import_sdk.Text, {
-          style: { color: "#cccccc", fontSize: 11, lineHeight: 16 },
-          children: [
-            "\uD83D\uDCCA 实时统计点击次数",
-            `
-`,
-            "⚡ 快速测试按钮验证交互",
-            `
-`,
-            "\uD83D\uDCDC 自动记录最近20次操作"
-          ]
-        })
       })
     ]
   });
 }
+var styles = StyleSheet.create({
+  guestContainer: {
+    flex: 1,
+    width: "100%"
+  },
+  container: {
+    flex: 1,
+    width: "100%"
+  },
+  contentContainer: {
+    paddingTop: 30,
+    paddingRight: 12,
+    paddingBottom: 28,
+    paddingLeft: 20
+  },
+  profileSection: {
+    alignItems: "center",
+    marginBottom: 52
+  },
+  logoBox: {
+    borderRadius: 33,
+    overflow: "hidden",
+    marginBottom: 24
+  },
+  logo: {
+    width: 66,
+    height: 66
+  },
+  title: {
+    color: "#252525",
+    fontSize: 18,
+    fontWeight: "500",
+    lineHeight: 28,
+    marginBottom: 8
+  },
+  statsRow: {
+    flexDirection: "row",
+    alignItems: "baseline",
+    justifyContent: "center",
+    marginBottom: 10
+  },
+  metricValue: {
+    color: "#2A2A2A",
+    fontSize: 17,
+    fontWeight: "500",
+    lineHeight: 24
+  },
+  metricLabel: {
+    color: "#A7A7A7",
+    fontSize: 16,
+    lineHeight: 22,
+    marginLeft: 6
+  },
+  metricGap: {
+    marginLeft: 28
+  },
+  creator: {
+    color: "#9E9E9E",
+    fontSize: 14,
+    lineHeight: 22,
+    marginBottom: 19
+  },
+  shareButton: {
+    height: 42,
+    paddingHorizontal: 24,
+    borderRadius: 14,
+    backgroundColor: "#34A8FB",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center"
+  },
+  shareIcon: {
+    color: "#FFFFFF",
+    fontSize: 27,
+    fontWeight: "700",
+    marginRight: 8,
+    marginTop: 2
+  },
+  shareText: {
+    color: "#FFFFFF",
+    fontSize: 18,
+    fontWeight: "600"
+  },
+  section: {
+    marginBottom: 40
+  },
+  sectionTitle: {
+    color: "#252525",
+    fontSize: 18,
+    fontWeight: "500",
+    lineHeight: 28,
+    marginBottom: 9
+  },
+  aboutText: {
+    color: "#9E9E9E",
+    fontSize: 16,
+    lineHeight: 24
+  },
+  languageGrid: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "flex-start"
+  },
+  languagePill: {
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    paddingVertical: 8,
+    marginRight: 16,
+    marginBottom: 16
+  },
+  languageText: {
+    fontSize: 18,
+    fontWeight: "700",
+    lineHeight: 25
+  },
+  actionList: {
+    marginTop: -16
+  },
+  actionItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 21
+  },
+  actionIcon: {
+    width: 20,
+    height: 20,
+    marginRight: 18
+  },
+  actionText: {
+    color: "#202124",
+    fontSize: 18,
+    lineHeight: 25
+  }
+});
+
+// src/hooks/usePanels.tsx
+var jsx_runtime2 = ReactJSXRuntime;
 function usePanels() {
-  const [records, setRecords] = import_react.useState([]);
-  const [sessionClicks, setSessionClicks] = import_react.useState(0);
-  const addRecord = import_react.useCallback((action, emoji, color) => {
-    const now = new Date;
-    const timeStr = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}:${now.getSeconds().toString().padStart(2, "0")}`;
-    setRecords((prev) => [{ id: Date.now(), time: timeStr, action, emoji, color }, ...prev].slice(0, 20));
-    setSessionClicks((c) => c + 1);
-  }, []);
-  const clearRecords = import_react.useCallback(() => {
-    setRecords([]);
-    setSessionClicks(0);
-  }, []);
-  const left = import_react.useMemo(() => /* @__PURE__ */ jsx_runtime.jsx(Counter, {
-    onChange: addRecord
-  }), [addRecord]);
-  const right = import_react.useMemo(() => /* @__PURE__ */ jsx_runtime.jsx(Stats, {
-    records,
-    sessionClicks,
-    onAddRecord: addRecord,
-    onClear: clearRecords
-  }), [records, sessionClicks, addRecord, clearRecords]);
+  const left = import_react3.useMemo(() => /* @__PURE__ */ jsx_runtime2.jsx(Text, {
+    children: "123"
+  }), []);
+  const right = import_react3.useMemo(() => /* @__PURE__ */ jsx_runtime2.jsx(Stats, {}), []);
   return { left, right };
 }
 
@@ -735,7 +866,7 @@ function usePanels() {
 try {
   var __rillModuleExports = (typeof module !== 'undefined' && module && module.exports) ? module.exports : (typeof exports !== 'undefined' ? exports : undefined);
   if (__rillModuleExports) {
-    globalThis.__rill.guest = __rillModuleExports.default || __rillModuleExports;
+    globalThis.__RillGuest = __rillModuleExports.default || __rillModuleExports;
   }
 } catch {}
 
@@ -747,7 +878,7 @@ try {
  */
 /* Auto-render (actr mode) */
 (function() {
-  if (typeof __rill_sendBatch === 'function' && typeof globalThis.__rill.guest !== 'undefined') {
+  if (typeof __sendToHost === 'function' && typeof globalThis.__RillGuest !== 'undefined') {
     try {
       var React = globalThis.React;
       if (!React) {
@@ -761,7 +892,7 @@ try {
         return;
       }
 
-      var GuestExport = globalThis.__rill.guest;
+      var GuestExport = globalThis.__RillGuest;
       var element;
 
       // Check for usePanels hook export (actr panel mode)
@@ -791,7 +922,7 @@ try {
       }
 
       console.log('[actr] Auto-rendering guest');
-      RillReconciler.render(element, __rill_sendBatch);
+      RillReconciler.render(element, __sendToHost);
     } catch (error) {
       console.error('[actr] Auto-render failed:', error);
     }

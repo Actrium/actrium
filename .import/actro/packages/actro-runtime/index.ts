@@ -24,25 +24,51 @@ try {
 import { logger } from './src/logger';
 const log = logger.child('index');
 log.debug('console.assert type (after guard): ' + typeof console.assert);
-log.notice('🚀 开始执行 - ActrApp 版本');
+import { initDatabase } from './src/libs/Sqlite.init';
+initDatabase();
+
+// 关闭 Reanimated strict 模式警告，@legendapp/list/keyboard 内部在渲染期读取 shared value 会触发此警告。
+import { configureReanimatedLogger } from 'react-native-reanimated';
+configureReanimatedLogger({ strict: false });
+
+import 'react-native-gesture-handler';
+import 'react-native-get-random-values';
+import '@supramark/markdown-native-rn';
+import '@actrium/supramark-d2-native-rn';
+import '@actrium/supramark-mermaid-native-rn';
+import '@actrium/supramark-plantuml-native-rn';
+import NetInfo from '@react-native-community/netinfo';
 
 import React from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform } from 'react-native';
+const PromiseRejectionTracking = require('promise/setimmediate/rejection-tracking');
 
-// 🔴 统一日志工具 - 输出到 Xcode 原生控制台 (通过 NativeLogger)
-// 远程日志服务器已禁用（避免大量 connection refused 错误）
+// iOS 默认原生 reachability 在 Wi-Fi 断网场景下事件不稳定，这里统一切到 NetInfo 自己的可达性探测。
+NetInfo.configure({
+  useNativeReachability: false,
+  // Wi-Fi 接口还在但外网断掉时，NetInfo 只能靠主动探测发现异常。
+  // 默认 60 秒长轮询太慢，这里压到 3 秒，避免顶部网络状态长时间不更新。
+  reachabilityLongTimeout: 3 * 1000,
+  reachabilityShortTimeout: 3 * 1000,
+  reachabilityRequestTimeout: 3 * 1000,
+});
+
+// 🔴 统一日志工具 - 输出到:
+// 1. 远程日志服务器 (actr log server, 跨平台)
+// 2. 原生控制台 (通过 NativeLogger, 仅 iOS/macOS)
+// 尽早安装 console 拦截器，确保后续所有 console.xxx 都能转发到远程 log server
+import { installConsoleInterceptor } from './src/devtools-console';
+installConsoleInterceptor();
+
 const NativeLogger = NativeModules.NativeLogger;
 
 const sendLog = (level: string, msg: string) => {
-  // 输出到 Xcode 原生控制台
+  // 远程日志转发由 devtools-console.ts 的 console 拦截器统一处理，
+  // 这里通过 console 输出，拦截器会自动转发到远程 log server。
   try {
-    if (level === 'error') {
-      NativeLogger?.error?.(msg);
-    } else if (level === 'warn') {
-      NativeLogger?.warn?.(msg);
-    } else {
-      NativeLogger?.log?.(msg);
-    }
+    if (level === 'error') console.error(msg);
+    else if (level === 'warn') console.warn(msg);
+    else console.log(msg);
   } catch {
     // ignore
   }
@@ -51,6 +77,21 @@ const sendLog = (level: string, msg: string) => {
 const nlog = (msg: string) => sendLog('log', msg);
 const nwarn = (msg: string) => sendLog('warn', msg);
 const nerror = (msg: string) => sendLog('error', msg);
+
+// 统一捕获未处理的 Promise 拒绝，避免异步错误只在运行时静默丢失。
+PromiseRejectionTracking.enable({
+  allRejections: true,
+  onUnhandled: (id: number, error: unknown) => {
+    const errorText =
+      error instanceof Error
+        ? `${error.message}\n${error.stack ?? ''}`
+        : String(error);
+    nerror(`🔴 [UNHANDLED PROMISE] id=${id}\n${errorText}`);
+  },
+  onHandled: (id: number) => {
+    nwarn(`🟡 [PROMISE HANDLED LATE] id=${id}`);
+  },
+});
 
 nlog('📱 Bundle 开始执行');
 nlog('📦 NativeModules keys: ' + Object.keys(NativeModules || {}).slice(0, 15).join(', '));
@@ -99,7 +140,7 @@ const TestComponent = (props: any) => {
 
 // 导入完整版 ActrApp 组件（使用 rill/askit）
 let Component;
-const USE_TEST_COMPONENT = false; // 🟢 使用 ActrApp + GuestAppView
+const USE_TEST_COMPONENT = false; // 🟢 切回正式组件测试逻辑
 
 // 🔴 全局 props 缓存 - 防止 React Native bridge 传入空 props
 let lastValidProps: any = null;
@@ -162,6 +203,7 @@ if (USE_TEST_COMPONENT) {
     const OriginalComponent = Component;
     Component = (props: any) => {
       nlog('🎨 [Wrapper] TabRouter 开始渲染');
+      // console.error(props.isLeftPanelVisible, '????')
       try {
         return React.createElement(ErrorBoundary, null, React.createElement(OriginalComponent, props));
       } catch (renderError: any) {
@@ -211,3 +253,6 @@ try {
 }
 
 nlog('🏁 Bundle 执行完毕，等待 runApplication...');
+
+
+export default Component

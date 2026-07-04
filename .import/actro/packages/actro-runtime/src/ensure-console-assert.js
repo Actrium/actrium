@@ -33,6 +33,18 @@
       // enforce on existing console
       root.console = currentConsole;
     }
+
+    // RN/Hermes compatibility: some libraries (e.g. vega stack) expect structuredClone.
+    if (typeof root.structuredClone !== 'function') {
+      root.structuredClone = function(value){
+        try {
+          return JSON.parse(JSON.stringify(value));
+        } catch (_) {
+          return value;
+        }
+      };
+    }
+
     try {
       // Keep ultra-early log minimal; logger may not be available yet.
       root.console && root.console.log && root.console.log('[ensure-console-assert] loaded before main');

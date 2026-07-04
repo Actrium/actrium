@@ -14,10 +14,17 @@
  * Only applies to functions passed as JSX props to avoid performance overhead.
  */
 
-console.log('[Babel Plugin] function-source-location loaded');
+const debug = process.env.ACTRO_BABEL_PLUGIN_DEBUG === '1';
+const log = (...args) => {
+  if (debug) {
+    console.log(...args);
+  }
+};
+
+log('[Babel Plugin] function-source-location loaded');
 
 module.exports = function functionSourceLocationPlugin({ types: t }) {
-  console.log('[Babel Plugin] function-source-location initialized');
+  log('[Babel Plugin] function-source-location initialized');
   let fileCount = 0;
   let jsxAttrCount = 0;
   let transformCount = 0;
@@ -27,7 +34,7 @@ module.exports = function functionSourceLocationPlugin({ types: t }) {
       Program(path, state) {
         fileCount++;
         if (state.filename && state.filename.includes('countapp')) {
-          console.log(`[Babel Plugin] Processing file: ${state.filename}`);
+          log(`[Babel Plugin] Processing file: ${state.filename}`);
         }
       },
       // Handle JSX attributes with function expressions
@@ -65,7 +72,7 @@ module.exports = function functionSourceLocationPlugin({ types: t }) {
         const attrName = path.node.name?.name || 'unknown';
         transformCount++;
         if (filename.includes('countapp') || filename.includes('App')) {
-          console.log(`[Babel Plugin] Transforming ${attrName} at ${filename}:${line}`);
+          log(`[Babel Plugin] Transforming ${attrName} at ${filename}:${line}`);
         }
 
         // Create Object.assign(fn, { __sourceFile, __sourceLine })

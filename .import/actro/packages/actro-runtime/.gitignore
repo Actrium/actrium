@@ -11,7 +11,7 @@ dist/
 tmp-build/
 
 # Lock files (using bun)
-package-lock.json
+# package-lock.json
 pnpm-lock.yaml
 
 # IDE
