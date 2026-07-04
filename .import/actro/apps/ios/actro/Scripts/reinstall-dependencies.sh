@@ -2,10 +2,15 @@
 #
 # Clean cache and reinstall the project dependent libraries.
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+cd "$PROJECT_ROOT"
+"$SCRIPT_DIR/ensure-actro-runtime.sh"
+
 # 全局清理
 echo "🧹 全局清理旧构建和依赖..."
 rm -rf build
-rm -rf Subsystem/node_modules
+rm -rf ActroRuntime/node_modules
 rm -rf Pods
 
 # 清理 Watchman 和 Metro 缓存
@@ -16,7 +21,7 @@ fi
 
 # 安装依赖
 echo "📦 安装 React Native 依赖..."
-cd Subsystem
+cd ActroRuntime
 
 if command -v yarn &> /dev/null; then
     echo "📦 使用 yarn 安装依赖 (优先)..."
@@ -37,8 +42,8 @@ pod install
 # 清理
 echo "🧹 清理旧构建..."
 xcodebuild clean \
-    -workspace Canvas.xcworkspace \
-    -scheme "AskAway"
+    -workspace Actro.xcworkspace \
+    -scheme "Actro"
 
 # 安装 Swift Package Manager 依赖
 # xcodebuild -resolvePackageDependencies

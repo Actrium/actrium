@@ -19,17 +19,17 @@ set -o pipefail  # 管道命令失败时退出
 # ==============================================================================
 
 # 项目配置
-PROJECT_NAME="Canvas"
-WORKSPACE_PATH="Canvas.xcworkspace"
-SCHEME="AskAway"
+PROJECT_NAME="Actro"
+WORKSPACE_PATH="Actro.xcworkspace"
+SCHEME="Actro"
 CONFIGURATION="Release"
 
 # 路径配置
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$PROJECT_ROOT/build"
-ARCHIVE_PATH="$BUILD_DIR/Canvas.xcarchive"
-EXPORT_PATH="$BUILD_DIR/AskAway-IPA"
+ARCHIVE_PATH="$BUILD_DIR/Actro.xcarchive"
+EXPORT_PATH="$BUILD_DIR/Actro-IPA"
 EXPORT_OPTIONS_PATH="$SCRIPT_DIR/ExportOptions.plist"
 
 # 加载本地配置
@@ -113,12 +113,13 @@ else
 fi
 
 # 检查是否在项目根目录
-if [ ! -f "$PROJECT_ROOT/Canvas.xcworkspace/contents.xcworkspacedata" ]; then
-    log_error "未找到 Canvas.xcworkspace，请确保在项目根目录执行"
+if [ ! -f "$PROJECT_ROOT/Actro.xcworkspace/contents.xcworkspacedata" ]; then
+    log_error "未找到 Actro.xcworkspace，请确保在项目根目录执行"
     exit 1
 fi
 
 log_success "前置检查完成"
+"$SCRIPT_DIR/ensure-actro-runtime.sh"
 
 # ==============================================================================
 # 清理旧构建
@@ -129,7 +130,7 @@ log_step "清理旧构建"
 # 全局清理
 log_info "清理旧构建和依赖..."
 rm -rf "$BUILD_DIR"
-rm -rf "$PROJECT_ROOT/Subsystem/node_modules"
+rm -rf "$PROJECT_ROOT/ActroRuntime/node_modules"
 rm -rf "$PROJECT_ROOT/Pods"
 
 # 清理 Watchman 和 Metro 缓存
@@ -170,7 +171,7 @@ log_info "当前 Version: $VERSION"
 
 log_step "安装 React Native 依赖"
 
-cd "$PROJECT_ROOT/Subsystem"
+cd "$PROJECT_ROOT/ActroRuntime"
 
 if command -v yarn &> /dev/null; then
     log_info "使用 yarn 安装依赖..."
@@ -193,17 +194,17 @@ log_success "React Native 依赖安装完成"
 
 log_step "打包 React Native Bundle"
 
-cd "$PROJECT_ROOT/Subsystem"
+cd "$PROJECT_ROOT/ActroRuntime"
 
 # 运行打包命令
-# --bundle-output 输出到 Canvas 根目录，符合 CanvasReactNativeFactoryDelegate.bundleURL 引用逻辑
-# --assets-dest 输出到 Canvas 根目录，会生成 assets/ 文件夹层级
-npx react-native bundle \
+# --bundle-output 输出到 Actro 根目录，符合 ActroReactNativeFactoryDelegate.bundleURL 引用逻辑
+# --assets-dest 输出到 Actro 根目录，会生成 assets/ 文件夹层级
+node node_modules/react-native/scripts/bundle.js \
     --platform ios \
     --dev false \
     --entry-file index.ts \
-    --bundle-output "$PROJECT_ROOT/Canvas/actr.jsbundle" \
-    --assets-dest "$PROJECT_ROOT/Canvas"
+    --bundle-output "$PROJECT_ROOT/Actro/actr.jsbundle" \
+    --assets-dest "$PROJECT_ROOT/Actro"
 
 cd "$PROJECT_ROOT"
 
@@ -215,8 +216,8 @@ log_success "React Native Bundle 及资源打包完成"
 
 log_step "打包示例 App (counterapp.actr)"
 
-COUNTER_APP_DIR="$PROJECT_ROOT/Subsystem/actr-app-examples/counterapp"
-OUTPUT_ASSET_DIR="$PROJECT_ROOT/Canvas/Resources"
+COUNTER_APP_DIR="$PROJECT_ROOT/ActroRuntime/actr-app-examples/counterapp"
+OUTPUT_ASSET_DIR="$PROJECT_ROOT/Actro/Resources"
 
 if [ -d "$COUNTER_APP_DIR" ]; then
     cd "$COUNTER_APP_DIR"

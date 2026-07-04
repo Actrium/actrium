@@ -31,12 +31,12 @@ check_ok() {
 
 check_warning() {
     echo -e "${YELLOW}⚠️  $1${NC}"
-    ((WARNINGS++))
+    WARNINGS=$((WARNINGS + 1))
 }
 
 check_error() {
     echo -e "${RED}❌ $1${NC}"
-    ((ERRORS++))
+    ERRORS=$((ERRORS + 1))
 }
 
 echo "📋 检查必需工具..."
@@ -88,10 +88,10 @@ echo "📁 检查项目文件..."
 echo ""
 
 # 检查 Workspace
-if [ -f "Canvas.xcworkspace/contents.xcworkspacedata" ]; then
+if [ -f "Actro.xcworkspace/contents.xcworkspacedata" ]; then
     check_ok "Workspace 存在"
 else
-    check_error "Canvas.xcworkspace 不存在"
+    check_error "Actro.xcworkspace 不存在"
 fi
 
 # 检查 Pods
@@ -102,12 +102,22 @@ else
     echo "          运行: pod install"
 fi
 
+# 检查 ActroRuntime symlink
+if [ -L "ActroRuntime" ] && [ -d "ActroRuntime" ]; then
+    check_ok "ActroRuntime symlink 已配置"
+elif [ -e "ActroRuntime" ]; then
+    check_error "ActroRuntime 存在但不是有效 symlink"
+else
+    check_warning "ActroRuntime symlink 未创建"
+    echo "          运行: ./Scripts/ensure-actro-runtime.sh"
+fi
+
 # 检查 React Native 依赖
-if [ -d "Subsystem/node_modules" ]; then
+if [ -d "ActroRuntime/node_modules" ]; then
     check_ok "React Native 依赖已安装"
 else
     check_warning "React Native 依赖未安装"
-    echo "          运行: cd Subsystem && bun install"
+    echo "          运行: cd ActroRuntime && bun install"
 fi
 
 # 检查 ExportOptions.plist
@@ -120,7 +130,7 @@ if [ -f "Scripts/ExportOptions.plist" ]; then
         echo "          请修改为实际的 Team ID"
     fi
 else
-    check_error "ExportOptions.plist 不存在"
+    check_warning "ExportOptions.plist 不存在，会在 build/upload 时按环境变量生成"
 fi
 
 echo ""
@@ -169,7 +179,7 @@ if command -v agvtool &> /dev/null; then
 fi
 
 # 检查 Team ID
-TEAM_ID=$(grep -A 1 "DEVELOPMENT_TEAM" Canvas.xcodeproj/project.pbxproj | grep "=" | head -n 1 | cut -d'"' -f2 || echo "")
+TEAM_ID=$(grep -A 1 "DEVELOPMENT_TEAM" Actro.xcodeproj/project.pbxproj | grep "=" | head -n 1 | cut -d'"' -f2 || echo "")
 if [ -n "$TEAM_ID" ] && [ "$TEAM_ID" != "" ]; then
     check_ok "Team ID: $TEAM_ID"
 else
@@ -177,7 +187,7 @@ else
 fi
 
 # 检查 Bundle ID
-BUNDLE_ID=$(grep -A 1 "PRODUCT_BUNDLE_IDENTIFIER" Canvas.xcodeproj/project.pbxproj | grep "=" | head -n 1 | cut -d'"' -f2 || echo "")
+BUNDLE_ID=$(grep -A 1 "PRODUCT_BUNDLE_IDENTIFIER" Actro.xcodeproj/project.pbxproj | grep "=" | head -n 1 | cut -d'"' -f2 || echo "")
 if [ -n "$BUNDLE_ID" ] && [ "$BUNDLE_ID" != "" ]; then
     check_ok "Bundle ID: $BUNDLE_ID"
 else
