@@ -1,0 +1,106 @@
+namespace actro_vault {
+    /// Return the canonical PBKDF2 iteration count.
+    u32 vault_pbkdf2_iterations();
+
+    /// Return the canonical vault key length in bytes.
+    u32 vault_key_byte_length();
+
+    /// Return the canonical vault salt length in bytes.
+    u32 vault_salt_byte_length();
+
+    /// Return the canonical AES-GCM nonce length in bytes.
+    u32 vault_nonce_byte_length();
+
+    /// Return the fixed plaintext token used to verify a derived vault key.
+    string vault_verification_token();
+
+    /// Generate a 32-byte random salt encoded as base64.
+    string generate_vault_salt_base64();
+
+    /// Derive the 32-byte vault key from a password and base64 salt.
+    [Throws=VaultCoreError]
+    string derive_vault_key_base64(string password, string salt_base64);
+
+    /// Create a base64 verification hash for initial vault setup.
+    [Throws=VaultCoreError]
+    string create_vault_verification_hash(string password, string salt_base64);
+
+    /// Verify a password against the stored salt and verification hash.
+    [Throws=VaultCoreError]
+    boolean verify_vault_password(string password, string salt_base64, string verification_hash_base64);
+
+    /// Encrypt a UTF-8 string using an existing base64 vault key.
+    [Throws=VaultCoreError]
+    string encrypt_vault_string(string key_base64, string plaintext);
+
+    /// Decrypt a UTF-8 string using an existing base64 vault key.
+    [Throws=VaultCoreError]
+    string decrypt_vault_string(string key_base64, string ciphertext_base64);
+
+    /// JSON-encode and encrypt vault fields using the current Swift-compatible shape.
+    [Throws=VaultCoreError]
+    string encrypt_vault_fields(string key_base64, sequence<VaultFieldInfo> fields);
+
+    /// Decrypt and JSON-decode vault fields using the current Swift-compatible shape.
+    [Throws=VaultCoreError]
+    sequence<VaultFieldInfo> decrypt_vault_fields(string key_base64, string ciphertext_base64);
+
+    /// Evaluate password strength with Actro's current shared thresholds.
+    PasswordStrengthInfo vault_password_strength(string password);
+
+    /// Parse a vault category and return its canonical wire value, if known.
+    string? parse_vault_category(string raw);
+
+    /// Return metadata and default fields for a vault category.
+    [Throws=VaultCoreError]
+    VaultCategoryInfo vault_category_info(string raw);
+
+    /// Return all canonical vault category templates.
+    sequence<VaultCategoryInfo> vault_category_templates();
+};
+
+dictionary VaultFieldInfo {
+    string id;
+    string label;
+    string value;
+    boolean is_sensitive;
+};
+
+dictionary VaultFieldTemplateInfo {
+    string label;
+    boolean is_sensitive;
+};
+
+dictionary VaultCategoryInfo {
+    string kind;
+    string label;
+    sequence<VaultFieldTemplateInfo> template;
+};
+
+enum PasswordStrengthLevel {
+    "Weak",
+    "Fair",
+    "Good",
+    "Strong",
+};
+
+dictionary PasswordStrengthInfo {
+    PasswordStrengthLevel level;
+    u32 meter_level;
+    u32 score;
+    string label;
+};
+
+[Error]
+enum VaultCoreError {
+    "InvalidBase64",
+    "InvalidKey",
+    "InvalidSalt",
+    "InvalidNonce",
+    "InvalidCiphertext",
+    "EncryptionFailed",
+    "DecryptionFailed",
+    "InvalidUtf8",
+    "InvalidJson",
+    "UnknownCategory",
+};
