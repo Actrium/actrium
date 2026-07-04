@@ -26,29 +26,6 @@ extension Tag {
         }
         return Color(hex: hex) ?? .accentColor
     }
-
-    /// Default colors for new tags
-    static let defaultColors: [String] = [
-        "#FF3B30", // Red
-        "#FF9500", // Orange
-        "#FFCC00", // Yellow
-        "#34C759", // Green
-        "#00C7BE", // Teal
-        "#007AFF", // Blue
-        "#5856D6", // Purple
-        "#AF52DE", // Magenta
-        "#FF2D55", // Pink
-        "#8E8E93"  // Gray
-    ]
-}
-
-// MARK: - System Tags
-
-extension Tag {
-    static let systemApp = Tag(name: "App", color: "#007AFF", isSystem: true)
-    static let systemManufacturer = Tag(name: "Manufacturer", color: "#5856D6", isSystem: true)
-    static let systemLastUsed = Tag(name: "LastUsed", color: "#FF9500", isSystem: true)
-    static let systemFrequent = Tag(name: "Frequent", color: "#FF2D55", isSystem: true)
 }
 
 // MARK: - Color Extension

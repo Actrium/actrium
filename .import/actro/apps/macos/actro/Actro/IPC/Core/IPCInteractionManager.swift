@@ -822,7 +822,7 @@ public final class IPCInteractionManager: ObservableObject {
 
         // Legacy compatibility
         let sizeInfo: [String: Any] = [
-            "tabId": tabId.uuidString,
+            RuntimeBridgeContract.tabId: tabId.uuidString,
             "width": size.width,
             "height": size.height,
             "requestId": requestId,
@@ -855,17 +855,17 @@ public final class IPCInteractionManager: ObservableObject {
 
     private func configToDictionary(_ config: IPCXPCTabConfig) -> [String: Any] {
         var dict: [String: Any] = [
-            "tabId": config.tabId,
-            "title": config.title,
+            RuntimeBridgeContract.tabId: config.tabId,
+            RuntimeBridgeContract.title: config.title,
             "backgroundColor": config.backgroundColor,
-            "containerWidth": config.containerWidth,
-            "containerHeight": config.containerHeight,
+            RuntimeBridgeContract.containerWidth: config.containerWidth,
+            RuntimeBridgeContract.containerHeight: config.containerHeight,
             "isOverviewMode": isOverviewMode,
             "leftPanelVisible": config.leftPanelVisible,
             "rightPanelVisible": config.rightPanelVisible
         ]
         if let systemAppType = config.systemAppType {
-            dict["systemAppType"] = systemAppType
+            dict[RuntimeBridgeContract.systemAppType] = systemAppType
         }
         if let unifiedScript = config.unifiedScript {
             dict["unifiedScript"] = unifiedScript

@@ -269,10 +269,8 @@ private class ResizableContainerView: NSView {
         }
 
         // 详细日志：检查整个视图层级的尺寸/位置
-        let jailSize = superview?.bounds.size ?? .zero
         let jailFrame = superview?.frame ?? .zero
         let rnFrame = rnView?.frame ?? .zero
-        let rnBounds = rnView?.bounds ?? .zero
         let containerFrame = self.frame
         let containerBounds = self.bounds
 
@@ -374,7 +372,7 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
     /// Lazily resolved host app bundle URL
     private lazy var _hostAppBundleURL: URL? = {
         // Bundle.main in XPC service may be the XPC bundle, not the host app bundle.
-        if let url = Bundle.main.url(forResource: "main.rctnapp", withExtension: "jsbundle") {
+        if let url = Bundle.main.url(forResource: "system", withExtension: "jsbundle") {
             ipcLog("🔧 bundleURL: resolved via Bundle.main")
             return url
         }
@@ -385,7 +383,7 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
         dir = (dir as NSString).deletingLastPathComponent
         dir = (dir as NSString).deletingLastPathComponent
         dir = (dir as NSString).deletingLastPathComponent
-        let path = (dir as NSString).appendingPathComponent("Resources/main.rctnapp.jsbundle")
+        let path = (dir as NSString).appendingPathComponent("Resources/system.jsbundle")
         if FileManager.default.fileExists(atPath: path) {
             ipcLog("🔧 bundleURL: resolved via host app path: \(path)")
             return URL(fileURLWithPath: path)
@@ -591,7 +589,7 @@ private class ServiceReactNativeHost {
             case 4: levelStr = "FATAL"
             default: levelStr = "L\(level.rawValue)"
             }
-            ipcLog("📋 [RCT:\(levelStr)] \(message ?? "(nil)") [\(fileName ?? "?"):\(lineNumber)]")
+            ipcLog("📋 [RCT:\(levelStr)] \(message ?? "(nil)") [\(fileName ?? "?"):\(String(describing: lineNumber))]")
         }
 
         ipcLog("🔧 ensureHostCreated: Creating RCTHost (bridgeless mode)")
@@ -1898,7 +1896,7 @@ private func createRootViewWithConfig(for entry: TabViewControllerEntry, config:
 
     // Diagnostic: log surface state at multiple intervals
     let diagCheck: @convention(block) (Double) -> Void = { delay in
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak entry, weak container] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak entry] in
             guard let entry = entry, let rv = entry.rootView else { return }
             let logId = String((entry.tabId ?? entry.internalId).prefix(8))
             let host = ServiceReactNativeHost.shared

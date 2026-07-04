@@ -129,7 +129,7 @@ public class ViewBridgeHostView: NSView {
     /// Convenience initializer with default Actro service
     public convenience init() {
         self.init(
-            serviceBundleIdentifier: "chat.askaway.ActroViewService.ActroViewService",
+            serviceBundleIdentifier: "io.actrium.actro.viewservice",
             viewControllerClassName: "ActroServiceViewController"
         )
     }
@@ -153,7 +153,7 @@ public class ViewBridgeHostView: NSView {
     }
 
     required init?(coder: NSCoder) {
-        self.serviceBundleIdentifier = "com.anthropic.Actro.ActroViewService"
+        self.serviceBundleIdentifier = "io.actrium.actro.viewservice"
         self.serviceViewControllerClassName = "ActroServiceViewController"
         super.init(coder: coder)
         setupView()
@@ -401,7 +401,7 @@ public class ViewBridgeHostView: NSView {
                         NSNotification.Name(bindName),
                         object: nil,
                         userInfo: [
-                            "tabId": tabId.uuidString,
+                            RuntimeBridgeContract.tabId: tabId.uuidString,
                             "internalId": internalId,
                             "hostProcessId": ActroHostProcessId
                         ],
@@ -535,7 +535,7 @@ public class ViewBridgeHostView: NSView {
                 NSNotification.Name(bindName),
                 object: nil,
                 userInfo: [
-                    "tabId": tabId.uuidString,
+                    RuntimeBridgeContract.tabId: tabId.uuidString,
                     "internalId": internalId,
                     "hostProcessId": ActroHostProcessId
                 ],
@@ -950,10 +950,10 @@ final class ViewBridgeCoordinator {
 
         // 构建 bootstrap config（包含 hostProcessId）
         var config: [String: Any] = [
-            "tabId": tabId.uuidString,
+            RuntimeBridgeContract.tabId: tabId.uuidString,
             "hostProcessId": ActroHostProcessId,
-            "containerWidth": size.width,
-            "containerHeight": size.height,
+            RuntimeBridgeContract.containerWidth: size.width,
+            RuntimeBridgeContract.containerHeight: size.height,
             "isOverviewMode": isOverviewMode,
             "isBootstrap": true  // 标记这是 bootstrap config
         ]
@@ -970,10 +970,10 @@ final class ViewBridgeCoordinator {
         }
 
         if true {  // keep scope for tabConfig
-            config["title"] = tabConfig.title
+            config[RuntimeBridgeContract.title] = tabConfig.title
             config["backgroundColor"] = tabConfig.backgroundColor
             if let systemAppType = tabConfig.systemAppType {
-                config["systemAppType"] = systemAppType
+                config[RuntimeBridgeContract.systemAppType] = systemAppType
             }
             if let script = tabConfig.unifiedScript { config["unifiedScript"] = script }
             if let script = tabConfig.leftPanelScript { config["leftPanelScript"] = script }
@@ -1247,7 +1247,7 @@ final class ViewBridgeCoordinator {
         ) { [weak self] notification in
             guard let self = self,
                   let userInfo = notification.userInfo,
-                  let notifyTabId = userInfo["tabId"] as? String,
+                  let notifyTabId = userInfo[RuntimeBridgeContract.tabId] as? String,
                   notifyTabId == self.tabId?.uuidString else { return }
 
             // Extract requestId for log correlation
@@ -1438,7 +1438,7 @@ final class ViewBridgeCoordinator {
 
         // 构建 sizeInfo 数据
         let sizeInfo: [String: Any] = [
-            "tabId": tabId.uuidString,
+            RuntimeBridgeContract.tabId: tabId.uuidString,
             "width": size.width,
             "height": size.height,
             "requestId": requestId,
@@ -1474,7 +1474,7 @@ final class ViewBridgeCoordinator {
         }
 
         let payload: [String: Any] = [
-            "tabId": tabId.uuidString,
+            RuntimeBridgeContract.tabId: tabId.uuidString,
             "isLeftPanelVisible": visible
         ]
 
@@ -2524,11 +2524,11 @@ struct UnifiedReactNativeLayer: View {
 
         // 发送 tab config - 使用 coordinator 中的最新尺寸
         var tabConfig: [String: Any] = [
-            "tabId": tab.id.uuidString,
-            "title": tab.title,
+            RuntimeBridgeContract.tabId: tab.id.uuidString,
+            RuntimeBridgeContract.title: tab.title,
             "backgroundColor": tab.backgroundColor,
-            "containerWidth": currentSize.width,
-            "containerHeight": currentSize.height,
+            RuntimeBridgeContract.containerWidth: currentSize.width,
+            RuntimeBridgeContract.containerHeight: currentSize.height,
             // 🔑 从状态管理器读取最新状态，而不是 coordinator 本地缓存
             "isOverviewMode": ViewBridgeCoordinatorManager.shared.currentOverviewMode,
             "reloadKey": reloadKey
@@ -2539,7 +2539,7 @@ struct UnifiedReactNativeLayer: View {
             tabConfig["unifiedScript"] = unifiedScript
         }
         if let systemTabType = tab.systemTabType {
-            tabConfig["systemAppType"] = systemTabType.rawValue
+            tabConfig[RuntimeBridgeContract.systemAppType] = systemTabType.rawValue
         }
 
         // Add system app data (for StartPageApp)
@@ -2917,13 +2917,13 @@ struct ViewBridgeMultiProcessTabView: View {
             }
 
             // CRITICAL: Only process if this notification is for OUR tab
-            if let notificationTabId = info["tabId"] as? String {
+            if let notificationTabId = info[RuntimeBridgeContract.tabId] as? String {
                 guard notificationTabId == tabId.uuidString else { return }
             }
 
             let bindName = "com.actro.bindTab.\(ActroHostProcessId).\(serviceId)"
             let bindInfo: [String: Any] = [
-                "tabId": tabId.uuidString,
+                RuntimeBridgeContract.tabId: tabId.uuidString,
                 "internalId": internalId
             ]
             DistributedNotificationCenter.default().postNotificationName(
@@ -2980,11 +2980,11 @@ struct ViewBridgeMultiProcessTabView: View {
 
         // Build tab config dictionary
         var tabConfig: [String: Any] = [
-            "tabId": tab.id.uuidString,
-            "title": tab.title,
+            RuntimeBridgeContract.tabId: tab.id.uuidString,
+            RuntimeBridgeContract.title: tab.title,
             "backgroundColor": tab.backgroundColor,
-            "containerWidth": containerSize.width,
-            "containerHeight": containerSize.height,
+            RuntimeBridgeContract.containerWidth: containerSize.width,
+            RuntimeBridgeContract.containerHeight: containerSize.height,
             // 🔑 从状态管理器读取最新状态，而不是 coordinator 本地缓存
             "isOverviewMode": ViewBridgeCoordinatorManager.shared.currentOverviewMode
         ]
@@ -3003,9 +3003,9 @@ struct ViewBridgeMultiProcessTabView: View {
             tabConfig["guestScript"] = guestScript
         }
 
-        // Add system app type if present (RN expects "systemAppType")
+        // Add system app type if present (RN expects the canonical bridge key)
         if let systemTabType = tab.systemTabType {
-            tabConfig["systemAppType"] = systemTabType.rawValue
+            tabConfig[RuntimeBridgeContract.systemAppType] = systemTabType.rawValue
         }
 
         // Serialize to JSON and send using service-specific notification name

@@ -99,8 +99,8 @@ OperationBatch (JSON)  ──────►  Receiver.applyBatch()
 - `askit/src/core/` - Bridge and registry
 
 **Guest App:**
-- `RCTNApps/actr-app-examples/counterapp/` - Example app
-- `RCTNApps/actr-app-examples/pack-actr.sh` - Packaging script
+- `packages/actro-runtime/actr-app-examples/counterapp/` - Example app
+- `packages/actro-runtime/actr-app-examples/pack-actr.sh` - Packaging script
 
 ## Build Process
 

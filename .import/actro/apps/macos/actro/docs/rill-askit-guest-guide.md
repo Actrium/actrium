@@ -190,7 +190,7 @@ zip -r ../my-app.actr manifest.json dist/*.js
 
 Or use the provided script:
 ```bash
-cd Actro/RCTNApps/actr-app-examples
+cd packages/actro-runtime/actr-app-examples
 ./pack-actr.sh my-app
 ```
 

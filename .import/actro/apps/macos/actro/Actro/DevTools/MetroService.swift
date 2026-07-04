@@ -99,9 +99,7 @@ actor MetroService {
             "images",
             "fonts",
             "src/assets",
-            "src/images",
-            "RCTNApps/assets",
-            "RCTNApps/src/assets"
+            "src/images"
         ]
 
         for dir in assetDirs {
@@ -152,13 +150,19 @@ actor MetroService {
     private func findProjectRoot(from files: [SourceFile]) -> String? {
         // Look for common project markers in paths
         for file in files {
-            if let range = file.fullPath.range(of: "/RCTNApps/") {
-                let root = String(file.fullPath[..<range.lowerBound])
-                // Go up one level from RCTNApps to get Actro project root
-                return (root as NSString).appendingPathComponent("RCTNApps")
+            if let root = projectRoot(in: file.fullPath, marker: "/packages/actro-runtime/") {
+                return root
             }
         }
         return nil
+    }
+
+    private func projectRoot(in path: String, marker: String) -> String? {
+        guard let range = path.range(of: marker) else {
+            return nil
+        }
+
+        return String(path[..<range.upperBound].dropLast())
     }
 }
 
@@ -346,10 +350,10 @@ struct SourceFile: Identifiable, Hashable, Sendable {
         if let range = fullPath.range(of: "/actr-host/") {
             return "Host/" + String(fullPath[range.upperBound...])
         }
-        // Also include RCTNApps-level files under Host
-        if let range = fullPath.range(of: "/RCTNApps/src/") {
+        // Also include runtime-level files under Host.
+        if let range = fullPath.range(of: "/packages/actro-runtime/src/") {
             let remainder = String(fullPath[range.upperBound...])
-            // Files directly in RCTNApps/src but not in actr-host
+            // Files directly in the runtime src root but not in actr-host
             if !remainder.contains("actr-host") {
                 return "Host/" + remainder
             }

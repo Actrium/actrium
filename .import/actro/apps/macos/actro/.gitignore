@@ -29,6 +29,7 @@ yarn-error.log*
 # Bundle artifacts
 *.jsbundle
 *.jsbundle.map
+.generated/
 
 # Subsystem actr example build artifacts
 Subsystem/actr-app-examples/**/dist/

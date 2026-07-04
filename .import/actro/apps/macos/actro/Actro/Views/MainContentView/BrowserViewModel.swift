@@ -62,6 +62,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
 
     /// History view model reference for recording ACTR app visits
     weak var historyVM: HistoryViewModel?
+    private let browserDataRepository = BrowserDataRepository.shared
 
     var currentTab: Tab? {
         guard let currentTabId = currentTabId else { return nil }
@@ -86,6 +87,10 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         actroMode = .focus(tabId: startTab.id)
 
         setupSSHObservers()
+    }
+
+    private func persistBrowserPageSession() {
+        browserDataRepository.saveSession(tabs: tabs, currentTabId: currentTabId)
     }
 
     private func setupSSHObservers() {
@@ -183,6 +188,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         shouldAutoFocusAddressBar = focusAddressBar
 
         logger.notice(" 新标签页已创建: \(newTab.title), 位置: \(self.tabs.count - 1)")
+        persistBrowserPageSession()
         return newTab
     }
 
@@ -196,6 +202,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             currentTabId = existingTab.id
             actroMode = .focus(tabId: existingTab.id)
             logger.debug("🔄 切换到已有系统标签: \(type.title)")
+            persistBrowserPageSession()
             return existingTab
         }
 
@@ -212,6 +219,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         actroMode = .focus(tabId: newTab.id)
 
         logger.notice("📱 已创建系统标签: \(type.title) (\(type.aboutURL.absoluteString)), 位置: \(self.tabs.count - 1)")
+        persistBrowserPageSession()
         return newTab
     }
 
@@ -222,6 +230,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         currentTabId = id
         // Ensure actro is in focus mode when switching tabs
         actroMode = .focus(tabId: id)
+        persistBrowserPageSession()
     }
 
     func closeTab(id: UUID) {
@@ -247,6 +256,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 }
             }
             logger.debug("🚪 关闭最后一个标签页，应用即将退出")
+            browserDataRepository.saveSession(tabs: [], currentTabId: nil)
             NSApplication.shared.terminate(nil)
             return
         }
@@ -302,6 +312,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         }
 
         logger.debug("🗑️ 关闭标签页，位置 \(closedPosition)，剩余 \(self.tabs.count) 个标签页")
+        persistBrowserPageSession()
     }
 
     func reorderTab(fromIndex source: Int, toIndex destination: Int) {
@@ -314,6 +325,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         tabs.insert(movedTab, at: insertIndex)
 
         logger.debug("🔄 标签页重排: 从索引 \(source) 移动到 \(insertIndex)")
+        persistBrowserPageSession()
     }
 
     // MARK: - Tab Group Management
@@ -339,6 +351,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         let targetIndex = min(max(0, toIndex), tabs.count)
         tabs.insert(tab, at: targetIndex)
         logger.debug("📍 Tab 移动: \(tab.title) 从位置 \(fromIndex) 到 \(targetIndex)")
+        persistBrowserPageSession()
     }
 
     /// Move a tab to a specific position and optionally change its group
@@ -365,6 +378,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         if let oldId = oldGroupId, oldId != groupId {
             cleanupEmptyGroup(oldId)
         }
+        persistBrowserPageSession()
     }
 
     /// Insert a tab received from another window (cross-window drag)
@@ -378,6 +392,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         currentTabId = newTab.id
 
         logger.notice(" 跨窗口插入 Tab: \(newTab.title) 到位置 \(targetIndex), 分组: \(groupId?.uuidString ?? "无")")
+        persistBrowserPageSession()
     }
 
     /// Remove a tab by ID (used for cross-window drag source cleanup)
@@ -400,6 +415,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         }
 
         logger.debug("🗑️ 跨窗口移除 Tab: \(tab.title)")
+        persistBrowserPageSession()
     }
 
     /// Calculate the index for inserting a tab into a group at a specific child position
@@ -570,6 +586,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             let newTab = Tab(
                 title: tabTitle,
                 url: resolvedURL,
+                appId: manifestInfo.appId,
                 groupId: groupId,
                 guestScript: guestScript,
                 leftPanelScript: leftPanelScript,
@@ -585,6 +602,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             tabSlotPositions[newTab.id] = tabs.count - 1
             leftPanelVisibility[newTab.id] = newTab.leftPanelDefaultVisible
             logger.notice(" [restoreGroup] 已加载 .actr 到分组: \(tabTitle)")
+            persistBrowserPageSession()
 
         } catch {
             logger.error(" [restoreGroup] .actr 装载失败：\(error.localizedDescription)")
@@ -721,12 +739,14 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         guard let currentTabId = currentTabId,
               let index = tabs.firstIndex(where: { $0.id == currentTabId }) else { return }
         tabs[index].title = title
+        persistBrowserPageSession()
     }
 
     /// Update title for a specific tab
     func updateTabTitle(for tabId: UUID, title: String) {
         guard let index = tabs.firstIndex(where: { $0.id == tabId }) else { return }
         tabs[index].title = title
+        persistBrowserPageSession()
     }
 
     /// Update URL for a specific tab (for web navigation)
@@ -738,6 +758,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         let oldURL = tabs[index].url?.absoluteString ?? "nil"
         tabs[index].url = url
         logger.notice("🔗 [updateTabURL] Tab \(tabId) URL updated from \(oldURL) to \(url.absoluteString)")
+        persistBrowserPageSession()
     }
 
     /// Update background color for a specific tab
@@ -753,7 +774,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
     /// 导航当前 Tab 到指定 URL 或应用 ID
     /// 统一的导航入口 - 处理所有类型的输入
     /// - 如果输入是 about: URL，导航到对应系统应用
-    /// - 如果输入是 askw:// 或 askaway:// URL，加载 AskAway 应用
+    /// - 如果输入是 actro:// URL，加载 Actro 应用
     /// - 如果输入是 http/https URL，作为 Web 内容加载
     /// - 如果输入是本地文件路径，加载 ACTR 应用
     /// - 否则作为 app id 处理
@@ -802,21 +823,23 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 tabs[index].htmlContent = nil
                 tabs[index].contractName = nil
                 objectWillChange.send()
+                persistBrowserPageSession()
                 return
             }
 
-            // Check if it's an askw:// or askaway:// URL for AskAway apps
+            // Check if it's an actro:// URL for Actro apps.
+            // Legacy app-scheme links are still accepted as aliases.
             // Two formats supported:
-            // - askw://bundleId - lookup by bundleId in database
-            // - askw:///absolute/path - local file path (three slashes)
-            if url.scheme == "askw" || url.scheme == "askaway" {
+            // - actro://bundleId - lookup by bundleId in database
+            // - actro:///absolute/path - local file path (three slashes)
+            if ActroAppURLScheme.isSupported(url.scheme) {
                 var sourcePath: String?
 
-                // Check if it's a local path (askw:///path/to/app)
-                // URL parsing: askw:///path -> host is nil/empty, path is /path
+                // Check if it's a local path (actro:///path/to/app)
+                // URL parsing: actro:///path -> host is nil/empty, path is /path
                 if let host = url.host, !host.isEmpty {
-                    // bundleId mode: askw://com.example.app - lookup in database
-                    logger.notice("📱 [navigateCurrentTab] 导航到 AskAway 应用 (bundleId): \(host)")
+                    // bundleId mode: actro://com.example.app - lookup in database
+                    logger.notice("📱 [navigateCurrentTab] 导航到 Actro 应用 (bundleId): \(host)")
                     let appRepo = AppRepository()
                     if let app = appRepo.getByBundleId(host) {
                         sourcePath = app.sourcePath
@@ -826,9 +849,9 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                         return
                     }
                 } else {
-                    // local path mode: askw:///Users/leo/path/to/app
+                    // local path mode: actro:///Users/leo/path/to/app
                     sourcePath = url.path
-                    logger.notice("📂 [navigateCurrentTab] 导航到本地 AskAway 应用: \(sourcePath ?? "")")
+                    logger.notice("📂 [navigateCurrentTab] 导航到本地 Actro 应用: \(sourcePath ?? "")")
                 }
 
                 // Load ACTR app into current tab
@@ -853,6 +876,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 tabs[index].systemTabType = nil
                 tabs[index].contractName = nil
                 objectWillChange.send()
+                persistBrowserPageSession()
                 return
             }
 
@@ -871,6 +895,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 tabs[index].systemTabType = nil
                 tabs[index].contractName = nil
                 objectWillChange.send()
+                persistBrowserPageSession()
                 return
             }
 
@@ -890,6 +915,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 tabs[index].systemTabType = nil
                 tabs[index].contractName = nil
                 objectWillChange.send()
+                persistBrowserPageSession()
                 return
             }
 
@@ -905,6 +931,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             tabs[index].systemTabType = nil
             tabs[index].contractName = nil
             objectWillChange.send()
+            persistBrowserPageSession()
         } else {
             // Try to load as app bundle ID directly
             logger.notice("📱 [navigateCurrentTab] 尝试作为 bundle ID 加载: \(trimmed)")
@@ -919,7 +946,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
     }
 
     /// Load ACTR app into the current tab (in-place update, not creating new tab)
-    /// Used by askw:// URL navigation to update current tab content
+    /// Used by actro:// URL navigation to update current tab content
     private func loadACTRAppIntoCurrentTab(from fileURL: URL, tabIndex: Int) {
         let resolvedURL = fileURL.standardizedFileURL
 
@@ -950,12 +977,12 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             let manifestInfo = try readManifestJSON(fromRoot: rootDir)
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
-            // Register app if bundleId provided
-            if let bundleId = manifestInfo.bundleId {
+            // Register app if appId is provided.
+            if let appId = manifestInfo.appId {
                 let sourceType: AppSourceType = isDirectory.boolValue ? .localDev : .downloaded
                 registerApp(
                     name: tabTitle,
-                    bundleId: bundleId,
+                    bundleId: appId,
                     version: manifestInfo.version,
                     description: manifestInfo.description,
                     sourceType: sourceType,
@@ -981,21 +1008,22 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
 
             let guestScript = readGuestScript(fromRoot: rootDir)
 
-            // Construct askw:// URL for History and address bar
-            let askwURL: URL
-            if let bundleId = manifestInfo.bundleId,
-               let url = URL(string: "askw://\(bundleId)") {
-                askwURL = url
+            // Construct actro:// URL for History and address bar
+            let appURL: URL
+            if let appId = manifestInfo.appId,
+               let url = URL(string: "\(ActroAppURLScheme.primary)://\(appId)") {
+                appURL = url
             } else {
-                // Local dev path: askw:///absolute/path
-                askwURL = URL(string: "askw://\(resolvedURL.path)") ?? resolvedURL
+                // Local dev path: actro:///absolute/path
+                appURL = ActroAppURLScheme.appURL(filePath: resolvedURL.path) ?? resolvedURL
             }
 
             // Update current tab in-place (like about: URL handling)
-            logger.notice("📱 [loadACTRAppIntoCurrentTab] 更新当前 Tab: \(tabTitle), url=\(askwURL.absoluteString)")
+            logger.notice("📱 [loadACTRAppIntoCurrentTab] 更新当前 Tab: \(tabTitle), url=\(appURL.absoluteString)")
 
             tabs[tabIndex].title = tabTitle
-            tabs[tabIndex].url = askwURL
+            tabs[tabIndex].url = appURL
+            tabs[tabIndex].appId = manifestInfo.appId
             tabs[tabIndex].systemTabType = nil
             tabs[tabIndex].htmlContent = nil
 
@@ -1027,6 +1055,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             leftPanelVisibility[tabs[tabIndex].id] = manifestInfo.leftPanelDefaultVisible
 
             objectWillChange.send()
+            persistBrowserPageSession()
 
             // Record History visit for ACTR app
             historyVM?.recordVisit(tab: tabs[tabIndex])
@@ -1058,13 +1087,13 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
     }
 
     /// 解析 URL 字符串
-    /// - 如果是 about:/http/https/askw/askaway，直接解析
+    /// - 如果是 about:/http/https/actro，直接解析
     /// - 如果看起来像域名（包含 . 且不包含空格），添加 https:// 前缀
     func parseURL(_ input: String) -> URL? {
-        // 已经是完整 URL (http/https/about/askw/askaway/ssh)
+        // 已经是完整 URL (http/https/about/actro/ssh)
         if input.hasPrefix("http://") || input.hasPrefix("https://") ||
            input.hasPrefix("about:") ||
-           input.hasPrefix("askw://") || input.hasPrefix("askaway://") ||
+           ActroAppURLScheme.hasSupportedPrefix(input) ||
            input.hasPrefix("ssh://") ||
            input.hasPrefix("sftp://") ||
            input.hasPrefix("ardp://") {
@@ -1193,6 +1222,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             tabs[index].leftPanelScript = leftPanelScript
             tabs[index].rightPanelScript = rightPanelScript
             tabs[index].guestScript = guestScript
+            tabs[index].appId = manifestInfo.appId
             tabs[index].contractName = manifestInfo.contractName
             tabs[index].contractVersion = manifestInfo.contractVersion
             tabs[index].permissions = manifestInfo.permissions
@@ -1288,11 +1318,11 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             let manifestInfo = try readManifestJSON(fromRoot: rootDir)
             let tabTitle = manifestInfo.name ?? resolvedURL.deletingPathExtension().lastPathComponent
 
-            // Register as downloaded app if bundleId is provided
-            if let bundleId = manifestInfo.bundleId {
+            // Register as downloaded app if appId is provided.
+            if let appId = manifestInfo.appId {
                 registerApp(
                     name: tabTitle,
-                    bundleId: bundleId,
+                    bundleId: appId,
                     version: manifestInfo.version,
                     description: manifestInfo.description,
                     sourceType: .downloaded,
@@ -1331,6 +1361,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 appendACTRTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
+                    appId: manifestInfo.appId,
                     unifiedScript: unified,
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
@@ -1346,6 +1377,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 appendACTRTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
+                    appId: manifestInfo.appId,
                     leftPanelScript: leftPanelScript,
                     rightPanelScript: rightPanelScript,
                     contractName: manifestInfo.contractName,
@@ -1361,6 +1393,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 appendACTRTab(
                     title: tabTitle,
                     sourceURL: resolvedURL,
+                    appId: manifestInfo.appId,
                     guestScript: script,
                     contractName: manifestInfo.contractName,
                     contractVersion: manifestInfo.contractVersion,
@@ -1375,7 +1408,12 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                     description: manifestInfo.description ?? "No description provided.",
                     sourcePath: resolvedURL.path
                 )
-                appendACTRTab(title: tabTitle, sourceURL: resolvedURL, htmlContent: html)
+                appendACTRTab(
+                    title: tabTitle,
+                    sourceURL: resolvedURL,
+                    appId: manifestInfo.appId,
+                    htmlContent: html
+                )
             }
         } catch {
             logger.error(" .actr 装载失败：\(error.localizedDescription)")
@@ -1451,6 +1489,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                     self?.appendACTRTab(
                         title: tabTitle,
                         sourceURL: resolvedURL,
+                        appId: manifestInfo.appId,
                         unifiedScript: unified,
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
@@ -1463,6 +1502,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                     self?.appendACTRTab(
                         title: tabTitle,
                         sourceURL: resolvedURL,
+                        appId: manifestInfo.appId,
                         leftPanelScript: leftPanelScript,
                         rightPanelScript: rightPanelScript,
                         contractName: manifestInfo.contractName,
@@ -1476,6 +1516,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                     self?.appendACTRTab(
                         title: tabTitle,
                         sourceURL: resolvedURL,
+                        appId: manifestInfo.appId,
                         guestScript: script,
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
@@ -1489,7 +1530,12 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                         description: manifestInfo.description ?? "No description provided.",
                         sourcePath: resolvedURL.path
                     ) ?? ""
-                    self?.appendACTRTab(title: tabTitle, sourceURL: resolvedURL, htmlContent: html)
+                    self?.appendACTRTab(
+                        title: tabTitle,
+                        sourceURL: resolvedURL,
+                        appId: manifestInfo.appId,
+                        htmlContent: html
+                    )
                 }
             }
         } catch {
@@ -1523,11 +1569,11 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             let tabTitle = manifestInfo.name ?? directoryURL.lastPathComponent
             logger.debug("📂 [loadFromDevDirectory] 加载开发目录: \(tabTitle)")
 
-            // Register as local dev app if bundleId is provided
-            if let bundleId = manifestInfo.bundleId {
+            // Register as local dev app if appId is provided.
+            if let appId = manifestInfo.appId {
                 registerApp(
                     name: tabTitle,
-                    bundleId: bundleId,
+                    bundleId: appId,
                     version: manifestInfo.version,
                     description: manifestInfo.description,
                     sourceType: .localDev,
@@ -1570,6 +1616,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                     self?.appendACTRTab(
                         title: tabTitle,
                         sourceURL: directoryURL,
+                        appId: manifestInfo.appId,
                         unifiedScript: unified,
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
@@ -1582,6 +1629,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                     self?.appendACTRTab(
                         title: tabTitle,
                         sourceURL: directoryURL,
+                        appId: manifestInfo.appId,
                         leftPanelScript: leftPanelScript,
                         rightPanelScript: rightPanelScript,
                         contractName: manifestInfo.contractName,
@@ -1595,6 +1643,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                     self?.appendACTRTab(
                         title: tabTitle,
                         sourceURL: directoryURL,
+                        appId: manifestInfo.appId,
                         guestScript: script,
                         contractName: manifestInfo.contractName,
                         contractVersion: manifestInfo.contractVersion,
@@ -1610,8 +1659,8 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         }
     }
 
-    /// Register an AskAway app in the database
-    /// This allows the app to be opened via askw://bundleId URL
+    /// Register an Actro app in the database
+    /// This allows the app to be opened via actro://bundleId URL
     private func registerApp(
         name: String,
         bundleId: String,
@@ -1635,7 +1684,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
             logger.notice("📱 [registerApp] 更新应用: \(bundleId)")
         } else {
             // Create new entry
-            let app = AskAwayApp(
+            let app = InstalledActroApp(
                 name: name,
                 bundleId: bundleId,
                 version: version,
@@ -1666,11 +1715,13 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         tabSlotPositions[newTab.id] = tabs.count - 1
         leftPanelVisibility[newTab.id] = leftPanelDefaultVisible
         logger.notice(" 已加载系统应用：\(title)")
+        persistBrowserPageSession()
     }
 
     private func appendACTRTab(
         title: String,
         sourceURL: URL,
+        appId: String? = nil,
         htmlContent: String? = nil,
         guestScript: String? = nil,
         leftPanelScript: String? = nil,
@@ -1683,11 +1734,12 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         rightPanelDefaultVisible: Bool = false,
         themeColor: String? = nil
     ) {
-        // Use askw:// URL for History and address bar
-        let askwURL = URL(string: "askw://\(sourceURL.path)") ?? sourceURL
+        // Use actro:// URL for History and address bar
+        let appURL = ActroAppURLScheme.appURL(filePath: sourceURL.path) ?? sourceURL
         let newTab = Tab(
             title: title,
-            url: askwURL,
+            url: appURL,
+            appId: appId,
             htmlContent: htmlContent,
             guestScript: guestScript,
             leftPanelScript: leftPanelScript,
@@ -1722,6 +1774,7 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
 
         // Record History visit for ACTR app
         historyVM?.recordVisit(tab: newTab)
+        persistBrowserPageSession()
     }
 
     private func unzipACTR(archive: URL, to destination: URL) throws {
@@ -1748,109 +1801,8 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         }
     }
 
-    private func readManifestJSON(fromRoot root: URL) throws -> (name: String?, version: String?, description: String?, bundleId: String?, icon: String?, contractName: String?, contractVersion: Int?, permissions: [String], leftPanelDefaultVisible: Bool, rightPanelDefaultVisible: Bool, leftPanelScript: String?, rightPanelScript: String?, unifiedScript: String?, systemAppType: SystemTabType?, themeColor: String?) {
-        guard let manifestURL = findManifestJSON(in: root) else {
-            throw NSError(
-                domain: "ACTRPackage",
-                code: 1,
-                userInfo: [NSLocalizedDescriptionKey: "包内未找到 manifest.json"]
-            )
-        }
-
-        let data = try Data(contentsOf: manifestURL)
-        let json = try JSONSerialization.jsonObject(with: data, options: []) as? [String: Any]
-        let name = json?["name"] as? String
-        let version = json?["version"] as? String
-        let description = json?["description"] as? String
-        // bundleId can be specified as "id" or "bundleId" in manifest
-        let bundleId = (json?["id"] as? String) ?? (json?["bundleId"] as? String)
-        let icon = json?["icon"] as? String
-        // Read theme color (themeColor or backgroundColor)
-        let themeColor = (json?["themeColor"] as? String) ?? (json?["backgroundColor"] as? String)
-        if let color = themeColor {
-            logger.notice("🎨 [BrowserViewModel] 从 manifest 读取 themeColor: \(color)")
-        }
-
-        // MARK: - Contracts / Permissions (Phase 1: gating + logging)
-        let supportedContractName = "ask"
-        let supportedContractVersion = 1
-        var contractNameValue: String? = nil
-        var contractVersionValue: Int? = nil
-        var permissionsValue: [String] = []
-
-        if let contract = json?["contract"] as? [String: Any] {
-            let contractName = contract["name"] as? String
-            let contractVersion: Int? = {
-                if let v = contract["version"] as? Int { return v }
-                if let v = contract["version"] as? Double { return Int(v) }
-                return nil
-            }()
-
-            if let cn = contractName, let cv = contractVersion {
-                if cn != supportedContractName {
-                    throw NSError(
-                        domain: "ACTRContract",
-                        code: 1,
-                        userInfo: [NSLocalizedDescriptionKey: "不支持的 contract：\(cn)（当前仅支持 \(supportedContractName)）"]
-                    )
-                }
-                if cv > supportedContractVersion {
-                    throw NSError(
-                        domain: "ACTRContract",
-                        code: 2,
-                        userInfo: [NSLocalizedDescriptionKey: "contractVersion 太新：\(cn)@v\(cv)（当前宿主仅支持到 v\(supportedContractVersion)）"]
-                    )
-                }
-                contractNameValue = cn
-                contractVersionValue = cv
-                logger.notice(" [BrowserViewModel] contract: \(cn)@v\(cv)")
-            } else {
-                logger.warning(" [BrowserViewModel] manifest.contract 字段不完整，跳过校验")
-            }
-        } else {
-            logger.warning(" [BrowserViewModel] manifest 缺少 contract（兼容模式继续运行）")
-        }
-
-        if let permissions = json?["permissions"] as? [String] {
-            permissionsValue = permissions
-            if !permissions.isEmpty {
-                logger.debug("🔐 [BrowserViewModel] permissions: \(permissions.joined(separator: ", "))")
-            }
-        }
-
-        // v2.1: 简化格式 - 顶级字段优先
-        let unifiedScript = json?["entry"] as? String
-        let leftPanelDefaultVisible = json?["leftPanelDefaultVisible"] as? Bool ?? true
-        let rightPanelDefaultVisible = json?["rightPanelDefaultVisible"] as? Bool ?? false
-
-        // Legacy: layout 嵌套格式 (向后兼容)
-        let layout = json?["layout"] as? [String: Any]
-        let leftPanelScript = layout?["leftPanel"] as? String
-        let rightPanelScript = layout?["rightPanel"] as? String
-
-        // System app type (built-in apps like debug, history, bookmarks)
-        var systemAppType: SystemTabType? = nil
-        if let typeStr = json?["systemAppType"] as? String {
-            systemAppType = SystemTabType(rawValue: typeStr)
-        }
-
-        return (name, version, description, bundleId, icon, contractNameValue, contractVersionValue, permissionsValue, leftPanelDefaultVisible, rightPanelDefaultVisible, leftPanelScript, rightPanelScript, unifiedScript, systemAppType, themeColor)
-    }
-
-    private func findManifestJSON(in root: URL) -> URL? {
-        let fm = FileManager.default
-        if let direct = try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: nil).first(where: { $0.lastPathComponent == "manifest.json" }) {
-            return direct
-        }
-
-        if let enumerator = fm.enumerator(at: root, includingPropertiesForKeys: nil) {
-            for case let fileURL as URL in enumerator {
-                if fileURL.lastPathComponent == "manifest.json" {
-                    return fileURL
-                }
-            }
-        }
-        return nil
+    private func readManifestJSON(fromRoot root: URL) throws -> ActrPackageManifestInfo {
+        try ActrPackageManifestReader.read(fromRoot: root)
     }
 
     /// 通用脚本读取方法

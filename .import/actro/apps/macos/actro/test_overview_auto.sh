@@ -8,7 +8,9 @@ echo "=== Automated Overview Mode Test ==="
 echo ""
 
 # Configuration
-APP_PATH="/Users/leo/Library/Developer/Xcode/DerivedData/Actro-bfrmsauxlmtqwybyzrckiznxvqhp/Build/Products/Debug/Actro.app"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DERIVED_DATA=$(xcodebuild -workspace "$SCRIPT_DIR/Actro.xcworkspace" -scheme Actro -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $3}')
+APP_PATH="${ACTRO_APP_PATH:-${DERIVED_DATA}/Actro.app}"
 LOG_FILE="/tmp/actro_auto_test_$(date +%Y%m%d_%H%M%S).log"
 SCREENSHOT_FOCUS="/tmp/actro_auto_focus_$(date +%Y%m%d_%H%M%S).png"
 SCREENSHOT_OVERVIEW="/tmp/actro_auto_overview_$(date +%Y%m%d_%H%M%S).png"

@@ -23,14 +23,9 @@ struct URLParsingTests {
         #expect(url?.absoluteString == "about:blank")
     }
 
-    @Test func parseURL_askwScheme_passesThrough() {
-        let url = vm.parseURL("askw://some-resource")
-        #expect(url?.absoluteString == "askw://some-resource")
-    }
-
-    @Test func parseURL_askawayScheme_passesThrough() {
-        let url = vm.parseURL("askaway://settings")
-        #expect(url?.absoluteString == "askaway://settings")
+    @Test func parseURL_actroScheme_passesThrough() {
+        let url = vm.parseURL("actro://settings")
+        #expect(url?.absoluteString == "actro://settings")
     }
 
     // MARK: - Domain-like Input (auto-prefix https)

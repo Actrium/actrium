@@ -3,7 +3,7 @@
 # Actro Full Pipeline Test Script
 #
 # 1. Kill old processes
-# 2. Rebuild: rill guest-bundle → actr.jsbundle → Actro.app
+# 2. Rebuild: rill guest-bundle -> actr.jsbundle -> Actro.app
 # 3. Launch app, collect logs for N seconds
 # 4. Kill, parse & filter logs
 # 5. Generate categorised report
@@ -13,13 +13,15 @@ set -euo pipefail
 
 # ---- Configuration --------------------------------------------------------
 WAIT_SECS="${1:-8}"                       # How long to let the app run (default 8s)
-ACTRO_DIR="/Users/leo/XData/Starbucks/GoAskAway/Actro"
-RILL_DIR="/Users/leo/XData/Starbucks/GoAskAway/rill"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ACTRO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$ACTRO_DIR/../../.." && pwd)"
+RILL_DIR="${ACTRO_RILL_PATH:-$REPO_ROOT/packages/rill}"
 IPC_LOG="/tmp/actro_ipc_debug.log"
 SYSLOG_RAW="/tmp/actro_syslog_raw.txt"
 REPORT="/tmp/actro_pipeline_report_$(date +%Y%m%d_%H%M%S).txt"
 DERIVED_DATA=$(xcodebuild -workspace "$ACTRO_DIR/Actro.xcworkspace" -scheme Actro -showBuildSettings 2>/dev/null | grep -m1 'BUILT_PRODUCTS_DIR' | awk '{print $3}')
-APP_PATH="${DERIVED_DATA}/Actro.app"
+APP_PATH="${ACTRO_APP_PATH:-${DERIVED_DATA}/Actro.app}"
 
 # ANSI colors (only for terminal, not in report file)
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -71,7 +73,7 @@ fi
 
 # 2b. All jsbundles (system + actr — both share Engine.ts)
 info "Building actr.jsbundle..."
-ACTR_OUT=$(cd "$ACTRO_DIR" && ./scripts/bundle-rctnapp.sh --target all 2>&1)
+ACTR_OUT=$(cd "$ACTRO_DIR" && ./scripts/bundle-actro-runtime.sh --target all 2>&1)
 if echo "$ACTR_OUT" | grep -q 'Done!'; then
     ACTR_SIZE=$(echo "$ACTR_OUT" | grep -oE 'Size: [0-9A-Za-z.]+' | head -1)
     ok "actr.jsbundle built ($ACTR_SIZE)"

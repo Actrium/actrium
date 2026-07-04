@@ -12,6 +12,7 @@ final class BookmarkViewModel: ObservableObject {
 
     private let bookmarkRepo = BookmarkRepository()
     private let tagRepo = TagRepository()
+    private let browserDataRepository = BrowserDataRepository.shared
     private var cancellables = Set<AnyCancellable>()
 
     init() {
@@ -19,6 +20,7 @@ final class BookmarkViewModel: ObservableObject {
         bookmarkRepo.deduplicateByURL()
 
         setupSearch()
+        backfillSharedBrowserBookmarks()
         loadAll()
     }
 
@@ -31,11 +33,18 @@ final class BookmarkViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    private func backfillSharedBrowserBookmarks() {
+        browserDataRepository.backfillBookmarksIfNeeded(bookmarkRepo.getAll())
+    }
+
     // MARK: - Public Methods
 
     /// Load all bookmarks and tags
     func loadAll() {
-        bookmarks = bookmarkRepo.getAll()
+        bookmarks = mergedBookmarks(
+            localBookmarks: bookmarkRepo.getAll(),
+            sharedBookmarks: browserDataRepository.loadBookmarks()
+        )
         tags = tagRepo.getAllTags()
         performFilter(query: searchQuery, tagIds: selectedTagIds)
     }
@@ -47,37 +56,50 @@ final class BookmarkViewModel: ObservableObject {
         bookmark.tags = tags
 
         bookmarkRepo.add(bookmark)
+        browserDataRepository.upsertBookmark(bookmark)
         loadAll()
     }
 
     /// Add a bookmark directly
     func addBookmark(_ bookmark: Bookmark) {
         bookmarkRepo.add(bookmark)
+        browserDataRepository.upsertBookmark(bookmark)
         loadAll()
     }
 
     /// Update an existing bookmark
     func updateBookmark(_ bookmark: Bookmark) {
+        let existing = bookmarkRepo.getAll().first { $0.id == bookmark.id }
         bookmarkRepo.update(bookmark)
+        if let existing {
+            browserDataRepository.removeBookmark(existing)
+        }
+        browserDataRepository.upsertBookmark(bookmark)
         loadAll()
     }
 
     /// Remove a bookmark
     func removeBookmark(id: UUID) {
+        let existing = bookmarkRepo.getAll().first { $0.id == id } ?? bookmarks.first { $0.id == id }
         bookmarkRepo.delete(id: id)
+        if let existing {
+            browserDataRepository.removeBookmark(existing)
+        }
         loadAll()
     }
 
     /// Check if a tab is bookmarked
     func isBookmarked(tab: Tab) -> Bool {
         guard let url = tab.url else { return false }
-        return bookmarkRepo.isBookmarked(appURL: url)
+        return bookmarkRepo.isBookmarked(appURL: url) ||
+            browserDataRepository.loadBookmarks().contains { $0.appURL?.absoluteString == url.absoluteString }
     }
 
     /// Get bookmark for a tab
     func getBookmark(for tab: Tab) -> Bookmark? {
         guard let url = tab.url else { return nil }
-        return bookmarkRepo.getBookmark(for: url)
+        return bookmarkRepo.getBookmark(for: url) ??
+            browserDataRepository.loadBookmarks().first { $0.appURL?.absoluteString == url.absoluteString }
     }
 
     /// Update last used time when opening a bookmarked app
@@ -136,6 +158,7 @@ final class BookmarkViewModel: ObservableObject {
     /// Clear all bookmarks (including tag associations)
     func clearAllBookmarks() {
         bookmarkRepo.clearAll()
+        browserDataRepository.clearBookmarks()
         loadAll()
     }
 
@@ -162,5 +185,27 @@ final class BookmarkViewModel: ObservableObject {
         }
 
         filteredBookmarks = result
+    }
+
+    private func mergedBookmarks(localBookmarks: [Bookmark], sharedBookmarks: [Bookmark]) -> [Bookmark] {
+        var merged = localBookmarks
+        var knownBrowserAddresses = Set(
+            localBookmarks.compactMap { bookmark -> String? in
+                guard let url = bookmark.appURL, BrowserDataRepository.isBrowserPageURL(url) else {
+                    return nil
+                }
+                return url.absoluteString.lowercased()
+            }
+        )
+
+        for bookmark in sharedBookmarks {
+            guard let url = bookmark.appURL else { continue }
+            let key = url.absoluteString.lowercased()
+            guard !knownBrowserAddresses.contains(key) else { continue }
+            knownBrowserAddresses.insert(key)
+            merged.append(bookmark)
+        }
+
+        return merged.sorted { $0.createdAt > $1.createdAt }
     }
 }

@@ -94,7 +94,7 @@ Actro.app              ActroBroker                ActroTabRenderer
     │                        │                             │
     │  1. 启动时连接 Broker   │                             │
     │     serviceName:       │                             │
-    │     "chat.askaway.     │                             │
+    │     "io.actrium.     │                             │
     │      actro.ActroBroker"                            │
     │───────────────────────>│                             │
     │                        │                             │
@@ -624,7 +624,7 @@ Actro/
 <plist version="1.0">
 <dict>
     <key>CFBundleIdentifier</key>
-    <string>chat.askaway.ActroTabRenderer</string>
+    <string>io.actrium.actro.tabrenderer</string>
 
     <key>CFBundleName</key>
     <string>ActroTabRenderer</string>
@@ -733,11 +733,11 @@ Debug > Attach to Process > ActroTabRenderer
 ```swift
 // Helper 端使用 OSLog
 import os.log
-let logger = Logger(subsystem: "chat.askaway.ActroTabRenderer", category: "Render")
+let logger = Logger(subsystem: "io.actrium.actro.tabrenderer", category: "Render")
 logger.info("Frame rendered in \(duration)ms")
 
 // 查看日志
-log stream --predicate 'subsystem == "chat.askaway.ActroTabRenderer"'
+log stream --predicate 'subsystem == "io.actrium.actro.tabrenderer"'
 ```
 
 ### 11.3 崩溃报告

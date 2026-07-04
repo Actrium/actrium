@@ -15,11 +15,13 @@ final class HistoryViewModel: ObservableObject {
     @Published var closedGroups: [HistoryGroup] = []
 
     private let repository = HistoryRepository()
+    private let browserDataRepository = BrowserDataRepository.shared
     private var cancellables = Set<AnyCancellable>()
     private let groupsKey = "closedTabGroups"
 
     init() {
         setupSearch()
+        backfillSharedBrowserHistory()
         loadRecent()
         loadClosedGroups()
     }
@@ -34,6 +36,10 @@ final class HistoryViewModel: ObservableObject {
             .store(in: &cancellables)
     }
 
+    private func backfillSharedBrowserHistory() {
+        browserDataRepository.backfillHistoryIfNeeded(repository.getAll())
+    }
+
     // MARK: - Public Methods
 
     /// Record a new visit from a Tab
@@ -44,8 +50,9 @@ final class HistoryViewModel: ObservableObject {
             id: UUID(),
             title: tab.title.isEmpty ? "Untitled" : tab.title,
             appURL: url,
-            appId: nil // TODO: Extract from ACTR package
+            appId: tab.resolvedAppId
         )
+        browserDataRepository.recordVisit(tab: tab)
 
         loadRecent()
     }
@@ -58,21 +65,29 @@ final class HistoryViewModel: ObservableObject {
             appURL: item.appURL,
             appId: item.appId
         )
+        browserDataRepository.recordVisit(item: item)
 
         loadRecent()
     }
 
     /// Load recent history items
     func loadRecent(limit: Int = 10) {
-        recentItems = repository.getRecent(limit: limit)
+        recentItems = mergedHistoryItems(
+            localItems: repository.getRecent(limit: limit),
+            sharedItems: browserDataRepository.loadRecentHistory(limit: limit),
+            limit: limit
+        )
     }
 
     /// Load all history items
     func loadAll() {
         if searchQuery.isEmpty {
-            allItems = repository.getAll()
+            allItems = mergedHistoryItems(
+                localItems: repository.getAll(),
+                sharedItems: browserDataRepository.loadRecentHistory()
+            )
         } else {
-            allItems = repository.search(query: searchQuery)
+            allItems = filteredHistoryItems(query: searchQuery)
         }
         groupedItems = allItems.groupedByDate()
     }
@@ -80,6 +95,7 @@ final class HistoryViewModel: ObservableObject {
     /// Delete a single history item
     func deleteItem(_ item: HistoryItem) {
         repository.deleteItem(id: item.id)
+        browserDataRepository.removeHistory(item: item)
         loadRecent()
         loadAll()
     }
@@ -87,6 +103,7 @@ final class HistoryViewModel: ObservableObject {
     /// Clear all history
     func clearHistory() {
         repository.clearAll()
+        browserDataRepository.clearHistory()
         recentItems = []
         allItems = []
         groupedItems = []
@@ -96,11 +113,53 @@ final class HistoryViewModel: ObservableObject {
 
     private func performSearch(_ query: String) {
         if query.isEmpty {
-            allItems = repository.getAll()
+            allItems = mergedHistoryItems(
+                localItems: repository.getAll(),
+                sharedItems: browserDataRepository.loadRecentHistory()
+            )
         } else {
-            allItems = repository.search(query: query)
+            allItems = filteredHistoryItems(query: query)
         }
         groupedItems = allItems.groupedByDate()
+    }
+
+    private func filteredHistoryItems(query: String) -> [HistoryItem] {
+        let localItems = repository.search(query: query)
+        let sharedItems = browserDataRepository.loadRecentHistory().filter { item in
+            item.title.localizedCaseInsensitiveContains(query) ||
+            (item.appURL?.absoluteString.localizedCaseInsensitiveContains(query) ?? false)
+        }
+        return mergedHistoryItems(localItems: localItems, sharedItems: sharedItems)
+    }
+
+    private func mergedHistoryItems(
+        localItems: [HistoryItem],
+        sharedItems: [HistoryItem],
+        limit: Int? = nil
+    ) -> [HistoryItem] {
+        var merged = localItems
+        var knownBrowserAddresses = Set(
+            localItems.compactMap { item -> String? in
+                guard let url = item.appURL, BrowserDataRepository.isBrowserPageURL(url) else {
+                    return nil
+                }
+                return url.absoluteString.lowercased()
+            }
+        )
+
+        for item in sharedItems {
+            guard let url = item.appURL else { continue }
+            let key = url.absoluteString.lowercased()
+            guard !knownBrowserAddresses.contains(key) else { continue }
+            knownBrowserAddresses.insert(key)
+            merged.append(item)
+        }
+
+        let sorted = merged.sorted { $0.visitTime > $1.visitTime }
+        if let limit {
+            return Array(sorted.prefix(max(limit, 0)))
+        }
+        return sorted
     }
 
     // MARK: - Tab Groups History

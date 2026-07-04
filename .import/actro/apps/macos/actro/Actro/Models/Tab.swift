@@ -1,19 +1,6 @@
 import Foundation
-import CryptoKit
 
 private let logger = AppLogger.app
-
-// MARK: - String Hash Extension
-
-extension String {
-    /// 计算稳定的 hash 值（用于 bundle fingerprint）
-    /// 使用 SHA256 前 16 字符
-    var stableHash: String {
-        let data = Data(self.utf8)
-        let hash = SHA256.hash(data: data)
-        return hash.prefix(8).map { String(format: "%02x", $0) }.joined()
-    }
-}
 
 // MARK: - Tab Content Type
 
@@ -107,6 +94,7 @@ struct Tab: Identifiable {
     let id = UUID()
     var title: String
     var url: URL?
+    var appId: String?
     var htmlContent: String?
 
     /// System tab type (nil for regular tabs, set for built-in pages like History/Bookmarks)
@@ -161,6 +149,7 @@ struct Tab: Identifiable {
     init(
         title: String,
         url: URL? = nil,
+        appId: String? = nil,
         htmlContent: String? = nil,
         systemTabType: SystemTabType? = nil,
         groupId: UUID? = nil,
@@ -182,6 +171,7 @@ struct Tab: Identifiable {
     ) {
         self.title = title
         self.url = url
+        self.appId = appId
         self.htmlContent = htmlContent
         self.systemTabType = systemTabType
         self.groupId = groupId

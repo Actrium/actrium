@@ -1,11 +1,12 @@
-rctnapps_path = File.join(__dir__, 'RCTNApps')
+ACTRO_RUNTIME_RELATIVE_PATH = '../../../packages/actro-runtime'
+ACTRO_RUNTIME_PATH = File.expand_path(ACTRO_RUNTIME_RELATIVE_PATH, __dir__)
 # Keep react-native-macos path RELATIVE. RN CocoaPods helpers assume `path` is relative and will
 # incorrectly prefix it if an absolute path is passed (leading to paths like "./Users/..." or "../Users/...").
-react_native_macos_path = 'RCTNApps/node_modules/react-native-macos'
+REACT_NATIVE_MACOS_PATH = File.join(ACTRO_RUNTIME_RELATIVE_PATH, 'node_modules/react-native-macos')
 
 # Require react_native_pods via a stable absolute path.
-require File.join(rctnapps_path, 'node_modules', 'react-native-macos', 'scripts', 'react_native_pods')
-require File.join(rctnapps_path, 'node_modules', 'rill', 'scripts', 'rill_post_install')
+require File.join(ACTRO_RUNTIME_PATH, 'node_modules', 'react-native-macos', 'scripts', 'react_native_pods')
+require File.join(ACTRO_RUNTIME_PATH, 'node_modules', 'rill', 'scripts', 'rill_post_install')
 
 prepare_react_native_project!
 
@@ -15,13 +16,13 @@ ENV['RILL_SANDBOX_ENGINE'] = 'jsc'
 # Shared React Native configuration
 def use_actro_react_native
   use_react_native!(
-    path: 'RCTNApps/node_modules/react-native-macos',
+    path: REACT_NATIVE_MACOS_PATH,
     hermes_enabled: true,
-    app_path: File.join(__dir__, 'RCTNApps')
+    app_path: ACTRO_RUNTIME_PATH
   )
 
   # rill native sandbox (JSI) - Guest uses JSC engine
-  pod 'RillSandboxNative', :path => 'RCTNApps/node_modules/rill'
+  pod 'RillSandboxNative', :path => File.join(ACTRO_RUNTIME_RELATIVE_PATH, 'node_modules/rill')
 end
 
 target 'Actro' do
@@ -42,8 +43,8 @@ end
 
 post_install do |installer|
   # 告诉 React Native 正确的源码位置，避免 Codegen 误报
-  react_native_post_install(installer, react_native_macos_path)
-  rill_post_install(installer, react_native_path: react_native_macos_path)
+  react_native_post_install(installer, REACT_NATIVE_MACOS_PATH)
+  rill_post_install(installer, react_native_path: REACT_NATIVE_MACOS_PATH)
 
   # NOTE: hermes.framework embedding for ActroViewService XPC target is done via
   # a manually-added build phase in Actro.xcodeproj (not via CocoaPods).
@@ -52,12 +53,24 @@ post_install do |installer|
 
   # 抑制所有 Pods 项目的警告
   installer.pods_project.targets.each do |target|
+    target.shell_script_build_phases.each do |phase|
+      case phase.name
+      when '[CP-User] [Hermes] Replace Hermes for the right configuration, if needed'
+        phase.output_paths = ['$(DERIVED_FILE_DIR)/hermes-replace-version-$(CONFIGURATION).stamp']
+        phase.shell_script = "#{phase.shell_script}\nmkdir -p \"${DERIVED_FILE_DIR}\"\ntouch \"${SCRIPT_OUTPUT_FILE_0}\"\n"
+      when '[CP-User] [RN]Check FBReactNativeSpec'
+        phase.output_paths = ['$(DERIVED_FILE_DIR)/check-fbreactnativespec-$(CONFIGURATION).stamp']
+        phase.shell_script = "#{phase.shell_script}\nmkdir -p \"${DERIVED_FILE_DIR}\"\ntouch \"${SCRIPT_OUTPUT_FILE_0}\"\n"
+        phase.always_out_of_date = nil if phase.respond_to?(:always_out_of_date=)
+      end
+    end
+
     target.build_configurations.each do |config|
       # Ensure REACT_NATIVE_PATH is available in shell script phases.
       # hermes-engine's "[Hermes] Replace Hermes" script references this var
       # but project-level build settings may not propagate to shell environments.
       config.build_settings['REACT_NATIVE_PATH'] ||=
-        "${PODS_ROOT}/../#{react_native_macos_path}"
+        "${PODS_ROOT}/../#{REACT_NATIVE_MACOS_PATH}"
 
       # 抑制所有警告
       config.build_settings['GCC_WARN_INHIBIT_ALL_WARNINGS'] = 'YES'
