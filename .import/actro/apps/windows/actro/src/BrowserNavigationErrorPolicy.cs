@@ -1,0 +1,108 @@
+using System.Net;
+
+namespace Actro.Windows;
+
+internal static class BrowserNavigationErrorPolicy
+{
+    public const string DefaultTitle = "Navigation failed";
+    public const string DefaultMessage = "Actro could not open this page.";
+    public const string UnknownAddress = "Unknown address";
+    public const string UnknownStatus = "Unknown error";
+
+    public static string FormatStatus(string? errorStatus)
+    {
+        var status = NormalizeStatus(errorStatus);
+        return string.IsNullOrWhiteSpace(status)
+            ? DefaultTitle
+            : $"{DefaultTitle}: {status}";
+    }
+
+    public static string BuildErrorDocument(string? address, string? errorStatus)
+    {
+        var safeAddress = WebUtility.HtmlEncode(NormalizeAddress(address));
+        var safeStatus = WebUtility.HtmlEncode(NormalizeStatus(errorStatus, UnknownStatus));
+
+        return $$"""
+        <!doctype html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>{{WebUtility.HtmlEncode(DefaultTitle)}}</title>
+            <style>
+              html, body {
+                height: 100%;
+                margin: 0;
+                font-family: "Segoe UI", system-ui, sans-serif;
+                background: #f6f7f9;
+                color: #121417;
+              }
+              main {
+                box-sizing: border-box;
+                display: grid;
+                min-height: 100%;
+                place-items: center;
+                padding: 48px;
+              }
+              section {
+                max-width: 680px;
+                width: 100%;
+              }
+              h1 {
+                font-size: 28px;
+                font-weight: 600;
+                margin: 0 0 8px;
+              }
+              p {
+                color: #59616d;
+                font-size: 15px;
+                margin: 0 0 24px;
+              }
+              dl {
+                display: grid;
+                gap: 8px;
+                margin: 0;
+              }
+              dt {
+                color: #59616d;
+                font-size: 12px;
+                font-weight: 600;
+                text-transform: uppercase;
+              }
+              dd {
+                margin: 0 0 14px;
+                overflow-wrap: anywhere;
+              }
+              code {
+                color: #2d3748;
+                font: 13px "Cascadia Mono", "Consolas", monospace;
+              }
+            </style>
+          </head>
+          <body>
+            <main>
+              <section>
+                <h1>{{WebUtility.HtmlEncode(DefaultTitle)}}</h1>
+                <p>{{WebUtility.HtmlEncode(DefaultMessage)}}</p>
+                <dl>
+                  <dt>Address</dt>
+                  <dd><code>{{safeAddress}}</code></dd>
+                  <dt>Error</dt>
+                  <dd><code>{{safeStatus}}</code></dd>
+                </dl>
+              </section>
+            </main>
+          </body>
+        </html>
+        """;
+    }
+
+    private static string NormalizeAddress(string? address)
+    {
+        return string.IsNullOrWhiteSpace(address) ? UnknownAddress : address.Trim();
+    }
+
+    private static string NormalizeStatus(string? errorStatus, string fallback = "")
+    {
+        return string.IsNullOrWhiteSpace(errorStatus) ? fallback : errorStatus.Trim();
+    }
+}
