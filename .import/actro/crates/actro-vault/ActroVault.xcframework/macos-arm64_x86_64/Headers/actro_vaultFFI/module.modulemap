@@ -1,0 +1,4 @@
+module actro_vaultFFI {
+    header "actro_vaultFFI.h"
+    export *
+}
