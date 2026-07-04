@@ -1,5 +1,7 @@
 // System app types (built-in apps like chrome:// pages)
-export type SystemAppType = 'history' | 'bookmarks' | 'debug' | 'startPage';
+import type { SystemAppType as ActroCoreSystemAppType } from './coreContract';
+
+export type SystemAppType = ActroCoreSystemAppType;
 
 // History item passed from native
 export type HistoryItemData = {
@@ -52,7 +54,9 @@ export type TabConfig = {
   historyItems?: HistoryItemData[];
   historyGroups?: HistoryGroupData[];
   bookmarks?: BookmarkData[];
-  recentHistory?: HistoryItemData[];  // For startPage
+  // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
+  appUrl?: string;
+  appId?: string;
 };
 
 export type ActrProps = {
@@ -63,18 +67,21 @@ export type ActrProps = {
   // Native 传递的容器尺寸（确保窗口缩小时 RN 能感知）
   containerWidth?: number;
   containerHeight?: number;
-  // Overview mode flag - true when in Tab Overview Card mode
-  isOverviewMode?: boolean;
 };
 
 // TabRouter receives all tabs (both actr and system apps)
 export type TabRouterProps = ActrProps & {
   // Single tab mode - each RootView renders one tab
   singleTabMode?: boolean;
-  tab?: TabConfig;  // Single tab when singleTabMode is true
+  tab?: TabConfig; // Single tab when singleTabMode is true
   // Native 传递的容器尺寸（确保窗口缩小时 RN 能感知）
   containerWidth?: number;
   containerHeight?: number;
-  // Overview mode flag - true when in Tab Overview Card mode
-  isOverviewMode?: boolean;
+
+  // FIXME 这些应该放到 tab 里面？
+  // 预设 App URL，有值时 LoadApp 自动加载，无需用户手动输入
+  appUrl?: string;
+  appId?: string;
+  // Native-transparent payload for system app deep-links/actions
+  systemAppPayload?: Record<string, unknown>;
 };

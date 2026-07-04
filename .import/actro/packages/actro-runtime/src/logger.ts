@@ -87,4 +87,4 @@ export class Logger {
   }
 }
 
-export const logger = new Logger('subsystem');
+export const logger = new Logger('actro-runtime');

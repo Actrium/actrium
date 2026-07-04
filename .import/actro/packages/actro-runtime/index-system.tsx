@@ -1,10 +1,10 @@
 /**
  * System Apps Entry Point
  *
- * This bundle contains only system apps (StartPage, History, Bookmarks, Debug).
+ * This bundle contains system apps hosted by the macOS XPC view service.
  * Used by XPC Service (RCTViewService) for rendering system tabs.
  *
- * Output: main.rctnapp.jsbundle
+ * Output: system.jsbundle
  */
 
 // Ensure console.assert exists as early as possible
@@ -28,9 +28,10 @@ import { AppRegistry, LogBox, View, Text, NativeModules, Platform, StyleSheet, D
 
 // Lazy imports for system apps
 const HistoryApp = React.lazy(() => import('./src/system-apps/HistoryApp'));
-const BookmarksApp = React.lazy(() => import('./src/system-apps/BookmarksApp'));
-const DebugApp = React.lazy(() => import('./src/system-apps/DebugApp').then(m => ({ default: m.DebugApp })));
-const StartPageApp = React.lazy(() => import('./src/system-apps/StartPageApp'));
+const BookmarksApp = React.lazy(() => import('./src/system-apps/bookmarks/BookmarksApp'));
+const BookmarkTagsApp = React.lazy(() => import('./src/system-apps/BookmarkTagsApp'));
+const SettingsApp = React.lazy(() => import('./src/system-apps/SettingsApp'));
+const GlobalSearchApp = React.lazy(() => import('./src/system-apps/globalsearch/GlobalSearchApp'));
 
 // Lazy import for ACTR apps (with unifiedScript)
 const ActrApp = React.lazy(() => import('./src/actr-host/ActrApp').then(m => ({ default: m.ActrApp })));
@@ -187,11 +188,6 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
     );
   }
 
-  // 🔑 Log when startPage is about to be rendered
-  if (tab.systemAppType === 'startPage') {
-    nlog(`[SystemAppRouter] Rendering StartPageApp: isOverviewMode=${isOverviewMode}, size=${containerWidth}x${containerHeight}, bookmarks=${tab.bookmarks?.length ?? 0}`);
-  }
-
   return (
     <View style={styles.container} onLayout={handleLayout}>
       <ErrorBoundary>
@@ -212,30 +208,22 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
             />
           )}
           {tab.systemAppType === 'bookmarks' && (
-            <BookmarksApp
-              bookmarks={tab.bookmarks ?? []}
-              containerWidth={containerWidth}
-              containerHeight={containerHeight}
-              isOverviewMode={isOverviewMode}
-            />
+            <BookmarksApp />
           )}
-          {tab.systemAppType === 'debug' && (
-            <DebugApp
-              tabId={tab.id}
-              title={tab.title}
-              backgroundColor={tab.backgroundColor}
-              containerWidth={containerWidth}
-              containerHeight={containerHeight}
-            />
+          {tab.systemAppType === 'bookmarkTags' && (
+            <BookmarkTagsApp />
           )}
-          {tab.systemAppType === 'startPage' && (
-            <StartPageApp
-              bookmarks={tab.bookmarks ?? []}
-              recentHistory={tab.recentHistory ?? []}
-              containerWidth={containerWidth}
-              containerHeight={containerHeight}
-              isOverviewMode={isOverviewMode}
-            />
+          {tab.systemAppType === 'settings' && (
+            <SettingsApp />
+          )}
+          {tab.systemAppType === 'globalSearch' && (
+            <GlobalSearchApp />
+          )}
+          {!['loading', 'history', 'bookmarks', 'bookmarkTags', 'settings', 'globalSearch'].includes(tab.systemAppType) && (
+            <View style={styles.loading}>
+              <Text style={styles.loadingTitle}>Unsupported system app</Text>
+              <Text style={styles.loadingSubtitle}>{tab.systemAppType}</Text>
+            </View>
           )}
         </React.Suspense>
       </ErrorBoundary>

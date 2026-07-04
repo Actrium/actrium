@@ -6,128 +6,108 @@
  * - HistoryApp: for chrome://history
  * - BookmarksApp: for chrome://bookmarks
  */
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, DeviceEventEmitter } from 'react-native';
+import React, { useEffect } from 'react';
+import { View, Text, StyleSheet, Platform } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { I18nextProvider, useTranslation } from 'react-i18next';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
+import './i18n'; // Ensure i18n is initialized
 import type { TabRouterProps } from './actr-host/types';
+import { TabProvider } from './actr-host/contexts/TabContext';
+import { SettingsApp } from './system-apps';
+import { GlobalAlertHost } from './components';
 
 // Lazy imports to avoid circular dependencies
-const ActrApp = React.lazy(() => import('./actr-host/ActrApp').then(m => ({ default: m.ActrApp })));
+const ActrApp = React.lazy(() =>
+  import('./actr-host/features/app/ActrApp').then((m) => ({
+    default: m.ActrApp,
+  })),
+);
 const HistoryApp = React.lazy(() => import('./system-apps/HistoryApp'));
-const BookmarksApp = React.lazy(() => import('./system-apps/BookmarksApp'));
-const DebugApp = React.lazy(() => import('./system-apps/DebugApp').then(m => ({ default: m.DebugApp })));
-const StartPageApp = React.lazy(() => import('./system-apps/StartPageApp'));
+const BookmarksApp = React.lazy(
+  () => import('./system-apps/bookmarks/BookmarksApp'),
+);
+const BookmarkTagsApp = React.lazy(
+  () => import('./system-apps/BookmarkTagsApp'),
+);
+const GlobalSearchApp = React.lazy(
+  () => import('./system-apps/globalsearch/GlobalSearchApp'),
+);
 
 // Props cache for bridge stability
 let cachedValidProps: TabRouterProps | null = null;
 
-// Loading fallback - empty view to avoid "Loading..." text flash
-const LoadingFallback = () => <View style={styles.loading} />;
+// Loading fallback
+const LoadingFallback = () => {
+  const { t } = useTranslation();
+  return (
+    <View style={styles.loading}>
+      <Text style={styles.loadingText}>{t('common.loading')}</Text>
+    </View>
+  );
+};
 
-export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
-  // 🔑 使用 state 来存储动态更新的 props
-  // appProperties 更新可能不可靠，所以通过 DeviceEventEmitter 接收更新
-  const [dynamicProps, setDynamicProps] = useState<Partial<TabRouterProps>>({});
+export const TabRouter: React.FC<TabRouterProps> = (props) => {
+  const content = (
+    <I18nextProvider i18n={require('./i18n').default}>
+      <TabRouterInner {...props} />
+      <GlobalAlertHost />
+    </I18nextProvider>
+  );
 
-  useEffect(() => {
-    console.warn('[TabRouter] Setting up DeviceEventEmitter listener for onPropsUpdate');
+  const keyboardProviderProps =
+    Platform.OS === 'android'
+      ? {
+          // Android 宿主使用 edge-to-edge/透明系统栏，Provider 需要按沉浸式系统栏计算，
+          // 否则会把状态栏高度额外计入根视图，导致 tab 页顶部整体下沉。
+          statusBarTranslucent: true,
+          navigationBarTranslucent: true,
+          preserveEdgeToEdge: true,
+        }
+      : undefined;
 
-    const subscription = DeviceEventEmitter.addListener('onPropsUpdate', (newProps: any) => {
-      // Log to native for visibility in IPC logs
-      const { NativeModules } = require('react-native');
-      const msg = `[TabRouter] onPropsUpdate received: size=${newProps?.containerWidth}x${newProps?.containerHeight}, isOverviewMode=${newProps?.isOverviewMode}`;
-      NativeModules.NativeLogger?.log?.(msg);
-      console.warn(msg);
+  return (
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <SafeAreaProvider>
+        <KeyboardProvider {...keyboardProviderProps}>
+          {content}
+        </KeyboardProvider>
+      </SafeAreaProvider>
+    </GestureHandlerRootView>
+  );
+};
 
-      setDynamicProps(prev => ({
-        ...prev,
-        ...(newProps?.containerWidth !== undefined && { containerWidth: newProps.containerWidth }),
-        ...(newProps?.containerHeight !== undefined && { containerHeight: newProps.containerHeight }),
-        ...(newProps?.isOverviewMode !== undefined && { isOverviewMode: newProps.isOverviewMode }),
-        ...(newProps?.isLeftPanelVisible !== undefined && { isLeftPanelVisible: newProps.isLeftPanelVisible }),
-        ...(newProps?.isRightPanelVisible !== undefined && { isRightPanelVisible: newProps.isRightPanelVisible }),
-      }));
-    });
-
-    return () => {
-      console.warn('[TabRouter] Removing DeviceEventEmitter listener');
-      subscription.remove();
-    };
-  }, []);
-
-  // 合并 initial props 和 dynamic props
-  const props = { ...initialProps, ...dynamicProps };
-
-  // Debug: Log merged isOverviewMode
-  const { NativeModules: NM } = require('react-native');
-  NM.NativeLogger?.log?.(`[TabRouter] Merged props: initialProps.isOverviewMode=${initialProps?.isOverviewMode}, dynamicProps.isOverviewMode=${dynamicProps?.isOverviewMode}, final=${props?.isOverviewMode}`);
-
-  // Debug: Log props received - use NativeModules for visibility
-  const { NativeModules } = require('react-native');
-  const NativeLogger = NativeModules.NativeLogger;
-  const logMsg = `[TabRouter] render: singleTabMode=${props?.singleTabMode}, tabId=${props?.tab?.id?.substring(0,8)}, systemAppType=${props?.tab?.systemAppType}`;
-  NativeLogger?.log?.(logMsg);
-  console.log(logMsg);
-
-  // Also log to stderr for XPC service visibility
-  const propsJson = JSON.stringify({
-    singleTabMode: props?.singleTabMode,
-    tabId: props?.tab?.id,
-    systemAppType: props?.tab?.systemAppType,
-    title: props?.tab?.title,
-  });
-  console.warn(`[TabRouter] PROPS: ${propsJson}`);
-
+const TabRouterInner: React.FC<TabRouterProps> = (props) => {
   // Single tab mode - each RootView renders one tab independently
   if (props?.singleTabMode && props?.tab) {
     const tab = props.tab;
-    const { isLeftPanelVisible = true, isRightPanelVisible = true, containerWidth, containerHeight, isOverviewMode } = props;
+    const {
+      isLeftPanelVisible = true,
+      isRightPanelVisible = true,
+      containerWidth,
+      containerHeight,
+    } = props;
 
     // System app tab
     if (tab.systemAppType) {
       return (
-        <View style={styles.container} key={`${tab.id}-${tab.systemAppType}-${tab.reloadKey ?? 0}`}>
+        <View style={styles.container} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
           <React.Suspense fallback={<LoadingFallback />}>
-            {tab.systemAppType === 'loading' && (
-              <View style={styles.xpcLoading}>
-                <Text style={styles.xpcLoadingTitle}>XPC Service Ready</Text>
-                <Text style={styles.xpcLoadingSubtitle}>Waiting for tab config...</Text>
-              </View>
-            )}
-            {tab.systemAppType === 'history' && (
-              <HistoryApp
-                items={tab.historyItems ?? []}
-                groups={tab.historyGroups ?? []}
-                containerWidth={containerWidth}
-                containerHeight={containerHeight}
-                isOverviewMode={isOverviewMode}
-              />
-            )}
-            {tab.systemAppType === 'bookmarks' && (
-              <BookmarksApp
-                bookmarks={tab.bookmarks ?? []}
-                containerWidth={containerWidth}
-                containerHeight={containerHeight}
-                isOverviewMode={isOverviewMode}
-              />
-            )}
-            {tab.systemAppType === 'debug' && (
-              <DebugApp
-                tabId={tab.id}
-                title={tab.title}
-                backgroundColor={tab.backgroundColor}
-                containerWidth={containerWidth}
-                containerHeight={containerHeight}
-              />
-            )}
-            {tab.systemAppType === 'startPage' && (
-              <StartPageApp
-                bookmarks={tab.bookmarks ?? []}
-                recentHistory={tab.recentHistory ?? []}
-                containerWidth={containerWidth}
-                containerHeight={containerHeight}
-                isOverviewMode={isOverviewMode}
-              />
-            )}
+            <TabProvider tab={tab}>
+              {tab.systemAppType === 'history' && (
+                <HistoryApp
+                  items={tab.historyItems ?? []}
+                  groups={tab.historyGroups ?? []}
+                />
+              )}
+              {tab.systemAppType === 'bookmarks' && <BookmarksApp />}
+              {tab.systemAppType === 'bookmarkTags' && <BookmarkTagsApp />}
+              {tab.systemAppType === 'settings' && (
+                <SettingsApp systemAppPayload={props.systemAppPayload} />
+              )}
+              {tab.systemAppType === 'globalSearch' && <GlobalSearchApp />}
+            </TabProvider>
           </React.Suspense>
         </View>
       );
@@ -137,17 +117,20 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
     // 避免显式 width/height 触发不必要的 re-render
     const containerStyle = styles.container;
 
+    const prefix = 'https://gate-actro.betaenv.com/with/';
+    const appUrl =
+      props.appUrl || (props.appId ? prefix + props.appId : undefined);
+
     return (
       <View style={containerStyle} key={`${tab.id}-${tab.reloadKey ?? 0}`}>
         <React.Suspense fallback={<LoadingFallback />}>
           <ActrApp
-            tabs={[tab]}
+            tabs={[{ ...tab, appUrl }]}
             currentTabId={tab.id}
             isLeftPanelVisible={isLeftPanelVisible}
             isRightPanelVisible={isRightPanelVisible}
             containerWidth={containerWidth}
             containerHeight={containerHeight}
-            isOverviewMode={isOverviewMode}
           />
         </React.Suspense>
       </View>
@@ -164,7 +147,13 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
     effectiveProps = cachedValidProps;
   }
 
-  const { tabs = [], currentTabId, isLeftPanelVisible = true, containerWidth, containerHeight, isOverviewMode } = effectiveProps || {};
+  const {
+    tabs = [],
+    currentTabId,
+    isLeftPanelVisible = true,
+    containerWidth,
+    containerHeight,
+  } = effectiveProps || {};
 
   if (!tabs.length) {
     return <View style={styles.empty} />;
@@ -173,8 +162,8 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
   const activeTabId = currentTabId ?? tabs[0]!.id;
 
   // Separate tabs by type
-  const actrTabs = tabs.filter(t => !t.systemAppType);
-  const systemTabs = tabs.filter(t => !!t.systemAppType);
+  const actrTabs = tabs.filter((t) => !t.systemAppType);
+  const systemTabs = tabs.filter((t) => !!t.systemAppType);
 
   return (
     <View style={styles.container}>
@@ -184,67 +173,52 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
           <View
             style={[
               StyleSheet.absoluteFill,
-              { display: actrTabs.some(t => t.id === activeTabId) ? 'flex' : 'none' }
-            ]}>
+              {
+                display: actrTabs.some((t) => t.id === activeTabId)
+                  ? 'flex'
+                  : 'none',
+              },
+            ]}
+          >
             <ActrApp
               tabs={actrTabs}
               currentTabId={activeTabId}
               isLeftPanelVisible={isLeftPanelVisible}
               containerWidth={containerWidth}
               containerHeight={containerHeight}
-              isOverviewMode={isOverviewMode}
             />
           </View>
         </React.Suspense>
       )}
 
       {/* System tabs - rendered individually */}
-      {systemTabs.map(tab => {
+      {systemTabs.map((tab) => {
         const isActive = tab.id === activeTabId;
         return (
           <View
-            key={`${tab.id}-${tab.systemAppType}-${tab.reloadKey ?? 0}`}
+            key={`${tab.id}-${tab.reloadKey ?? 0}`}
             style={[
               StyleSheet.absoluteFill,
-              { display: isActive ? 'flex' : 'none' }
+              { display: isActive ? 'flex' : 'none' },
             ]}
           >
             <React.Suspense fallback={<LoadingFallback />}>
-              {tab.systemAppType === 'history' && (
-                <HistoryApp
-                  items={tab.historyItems ?? []}
-                  groups={tab.historyGroups ?? []}
-                  containerWidth={containerWidth}
-                  containerHeight={containerHeight}
-                  isOverviewMode={isOverviewMode}
-                />
-              )}
-              {tab.systemAppType === 'bookmarks' && (
-                <BookmarksApp
-                  bookmarks={tab.bookmarks ?? []}
-                  containerWidth={containerWidth}
-                  containerHeight={containerHeight}
-                  isOverviewMode={isOverviewMode}
-                />
-              )}
-              {tab.systemAppType === 'debug' && (
-                <DebugApp
-                  tabId={tab.id}
-                  title={tab.title}
-                  backgroundColor={tab.backgroundColor}
-                  containerWidth={containerWidth}
-                  containerHeight={containerHeight}
-                />
-              )}
-              {tab.systemAppType === 'startPage' && (
-                <StartPageApp
-                  bookmarks={tab.bookmarks ?? []}
-                  recentHistory={tab.recentHistory ?? []}
-                  containerWidth={containerWidth}
-                  containerHeight={containerHeight}
-                  isOverviewMode={isOverviewMode}
-                />
-              )}
+              <TabProvider tab={tab}>
+                {tab.systemAppType === 'history' && (
+                  <HistoryApp
+                    items={tab.historyItems ?? []}
+                    groups={tab.historyGroups ?? []}
+                  />
+                )}
+                {tab.systemAppType === 'bookmarks' && <BookmarksApp />}
+                {tab.systemAppType === 'bookmarkTags' && <BookmarkTagsApp />}
+                {tab.systemAppType === 'settings' && (
+                  <SettingsApp
+                    systemAppPayload={effectiveProps.systemAppPayload}
+                  />
+                )}
+                {tab.systemAppType === 'globalSearch' && <GlobalSearchApp />}
+              </TabProvider>
             </React.Suspense>
           </View>
         );
@@ -254,6 +228,9 @@ export const TabRouter: React.FC<TabRouterProps> = (initialProps) => {
 };
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   container: {
     flex: 1,
     position: 'relative',
@@ -264,23 +241,13 @@ const styles = StyleSheet.create({
   },
   loading: {
     flex: 1,
-    backgroundColor: '#1f1f1f',
-  },
-  xpcLoading: {
-    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#1f1f1f',
+    backgroundColor: '#1a1a2a',
   },
-  xpcLoadingTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  xpcLoadingSubtitle: {
-    color: '#93c5fd',
-    fontSize: 12,
-    marginTop: 8,
+  loadingText: {
+    color: '#888',
+    fontSize: 14,
   },
 });
 

@@ -1,127 +1,207 @@
 /**
  * History System App - Built-in app similar to chrome://history
  */
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
-  Text,
   TextInput,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
   NativeModules,
+  useWindowDimensions,
 } from 'react-native';
+import { useTranslation } from 'react-i18next';
 import type { HistoryItemData, HistoryGroupData } from '../actr-host/types';
-import { CompactSystemAppView, COMPACT_MODE_THRESHOLD } from './CompactSystemAppView';
+import { AppText } from '../components';
+import {
+  clearBrowserHistory,
+  deleteBrowserHistoryItem,
+  hasBrowserDataModule,
+  loadRecentBrowserHistory,
+} from '../native-bridge/browser-data/BrowserDataModule';
+import { openTab } from '../native-bridge/tab/TabModule';
+import { getTypographyStyle, spacing, radius } from '../theme/tokens';
 
 // Native module for history actions
 const HistoryModule = NativeModules.HistoryModule;
 
 interface HistoryAppProps {
-  items: HistoryItemData[];
-  groups: HistoryGroupData[];
-  containerWidth?: number;
-  containerHeight?: number;
-  isOverviewMode?: boolean;
+  items?: HistoryItemData[];
+  groups?: HistoryGroupData[];
 }
 
-// Group items by date
-function groupByDate(items: HistoryItemData[]): { date: string; items: HistoryItemData[] }[] {
-  const grouped: Record<string, HistoryItemData[]> = {};
+const EMPTY_HISTORY_ITEMS: HistoryItemData[] = [];
+const EMPTY_HISTORY_GROUPS: HistoryGroupData[] = [];
 
-  items.forEach(item => {
-    const date = new Date(item.visitTime);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
+export default function HistoryApp({
+  items = EMPTY_HISTORY_ITEMS,
+  groups = EMPTY_HISTORY_GROUPS,
+}: HistoryAppProps) {
+  const { t, i18n } = useTranslation();
+  const isNativeBrowserDataAvailable = hasBrowserDataModule();
 
-    let dateKey: string;
-    if (date.toDateString() === today.toDateString()) {
-      dateKey = 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      dateKey = 'Yesterday';
-    } else {
-      dateKey = date.toLocaleDateString('en-US', {
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      });
-    }
+  // Group items by date
+  const groupByDate = useCallback((items: HistoryItemData[]): { date: string; items: HistoryItemData[] }[] => {
+    const grouped: Record<string, HistoryItemData[]> = {};
 
-    if (!grouped[dateKey]) {
-      grouped[dateKey] = [];
-    }
-    grouped[dateKey].push(item);
-  });
+    items.forEach(item => {
+      const date = new Date(item.visitTime);
+      const today = new Date();
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
 
-  return Object.entries(grouped).map(([date, items]) => ({ date, items }));
-}
+      let dateKey: string;
+      if (date.toDateString() === today.toDateString()) {
+        dateKey = t('actr.history.today');
+      } else if (date.toDateString() === yesterday.toDateString()) {
+        dateKey = t('actr.history.yesterday');
+      } else {
+        dateKey = date.toLocaleDateString(i18n.language === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+      }
 
-function formatTime(timestamp: number): string {
-  const date = new Date(timestamp);
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit'
-  });
-}
+      if (!grouped[dateKey]) {
+        grouped[dateKey] = [];
+      }
+      grouped[dateKey].push(item);
+    });
 
-export default function HistoryApp({ items, groups, containerWidth, containerHeight, isOverviewMode }: HistoryAppProps) {
+    return Object.entries(grouped).map(([date, items]) => ({ date, items }));
+  }, [t, i18n.language]);
+
+  const formatTime = useCallback((timestamp: number): string => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString(i18n.language === 'zh-Hans' ? 'zh-CN' : 'en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: i18n.language !== 'zh-Hans'
+    });
+  }, [i18n.language]);
+
+  const { width } = useWindowDimensions();
+  const isPhone = width < 768;
   const [searchQuery, setSearchQuery] = useState('');
+  const [nativeItems, setNativeItems] = useState<HistoryItemData[]>([]);
+  const [hiddenItemIds, setHiddenItemIds] = useState<Set<string>>(new Set());
+  const [isLocallyCleared, setIsLocallyCleared] = useState(false);
+  const usesProvidedItems = items.length > 0;
+  const sourceItems = usesProvidedItems ? items : nativeItems;
+  const displayItems = useMemo(
+    () => (
+      isLocallyCleared
+        ? []
+        : sourceItems.filter((item) => !hiddenItemIds.has(item.id))
+    ),
+    [hiddenItemIds, isLocallyCleared, sourceItems],
+  );
 
-  // All hooks must be called before any conditional returns (React hooks rules)
+  useEffect(() => {
+    setHiddenItemIds(new Set());
+    setIsLocallyCleared(false);
+  }, [items, nativeItems]);
+
+  useEffect(() => {
+    if (usesProvidedItems || !isNativeBrowserDataAvailable) return;
+
+    let isCancelled = false;
+    loadRecentBrowserHistory().then((historyItems) => {
+      if (!isCancelled) {
+        setNativeItems(historyItems);
+      }
+    });
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [usesProvidedItems, isNativeBrowserDataAvailable]);
+
+  // Filter items based on search
   const filteredItems = useMemo(() => {
-    if (!searchQuery) return items;
+    if (!searchQuery) return displayItems;
     const query = searchQuery.toLowerCase();
-    return items.filter(item =>
+    return displayItems.filter(item =>
       item.title.toLowerCase().includes(query) ||
       item.appURL?.toLowerCase().includes(query)
     );
-  }, [items, searchQuery]);
+  }, [displayItems, searchQuery]);
 
   const groupedItems = useMemo(() => groupByDate(filteredItems), [filteredItems]);
 
-  // 🔑 Compact mode: use BOTH explicit isOverviewMode prop AND size-based detection
-  // Use AND logic: only small if BOTH dimensions are small (Focus mode is ~630x398, Overview is ~196x124)
-  const isSmallContainer = (containerWidth ?? 999) < COMPACT_MODE_THRESHOLD && (containerHeight ?? 999) < COMPACT_MODE_THRESHOLD;
-  const shouldShowCompact = isOverviewMode || isSmallContainer;
-
-  if (shouldShowCompact) {
-    return (
-      <CompactSystemAppView
-        icon="🕐"
-        title="History"
-        subtitle={`${items.length} items`}
-      />
-    );
-  }
-
-  const handleOpenItem = (item: HistoryItemData) => {
-    HistoryModule?.openHistoryItem?.(item.id, item.appURL);
+  const handleOpenItem = async (item: HistoryItemData) => {
+    if (isBrowserPageUrl(item.appURL)) {
+      await openTab({ appUrl: item.appURL });
+      return;
+    }
+    if (HistoryModule?.openHistoryItem) {
+      HistoryModule.openHistoryItem(item.id, item.appURL);
+      return;
+    }
+    if (item.appURL) {
+      await openTab({ appUrl: item.appURL });
+    }
   };
 
-  const handleDeleteItem = (item: HistoryItemData) => {
-    HistoryModule?.deleteHistoryItem?.(item.id);
+  const handleDeleteItem = async (item: HistoryItemData) => {
+    if (usesProvidedItems && HistoryModule?.deleteHistoryItem) {
+      HistoryModule.deleteHistoryItem(item.id);
+      setHiddenItemIds((current) => new Set(current).add(item.id));
+      return;
+    }
+    if (isNativeBrowserDataAvailable && isBrowserPageUrl(item.appURL)) {
+      if (await deleteBrowserHistoryItem(item.appURL)) {
+        setNativeItems((currentItems) => currentItems.filter((current) => current.id !== item.id));
+      }
+      return;
+    }
+    if (HistoryModule?.deleteHistoryItem) {
+      HistoryModule.deleteHistoryItem(item.id);
+      return;
+    }
+    if (await deleteBrowserHistoryItem(item.appURL)) {
+      setNativeItems((currentItems) => currentItems.filter((current) => current.id !== item.id));
+    }
   };
 
-  const handleRestoreGroup = (group: HistoryGroupData) => {
+  const handleRestoreGroup = async (group: HistoryGroupData) => {
     HistoryModule?.restoreGroup?.(group.id);
   };
 
-  const handleClearHistory = () => {
-    HistoryModule?.clearHistory?.();
+  const handleClearHistory = async () => {
+    if (usesProvidedItems && HistoryModule?.clearHistory) {
+      HistoryModule.clearHistory();
+      setIsLocallyCleared(true);
+      return;
+    }
+    if (isNativeBrowserDataAvailable) {
+      if (await clearBrowserHistory()) {
+        setNativeItems([]);
+      }
+      return;
+    }
+    if (HistoryModule?.clearHistory) {
+      HistoryModule.clearHistory();
+      return;
+    }
+    if (await clearBrowserHistory()) {
+      setNativeItems([]);
+    }
   };
 
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>History</Text>
-        <View style={styles.searchContainer}>
-          <Text style={styles.searchIcon}>🔍</Text>
+        <AppText style={styles.title}>{t('actr.history.title')}</AppText>
+        <View style={[styles.searchContainer, isPhone && styles.searchContainerPhone]}>
+          <AppText style={styles.searchIcon}>🔍</AppText>
           <TextInput
             style={styles.searchInput}
-            placeholder="Search history..."
+            placeholder={t('actr.history.searchPlaceholder')}
             placeholderTextColor="#888"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -136,32 +216,32 @@ export default function HistoryApp({ items, groups, containerWidth, containerHei
         {/* Closed Groups Section */}
         {groups.length > 0 && (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Recently Closed Groups</Text>
+            <AppText style={styles.sectionTitle}>{t('actr.history.recentlyClosed')}</AppText>
             {groups.map(group => (
               <TouchableOpacity
                 key={group.id}
                 style={styles.groupRow}
-                onPress={() => handleRestoreGroup(group)}
+                onPress={() => handleRestoreGroup(group as any)}
               >
                 <View style={[styles.groupIcon, { backgroundColor: group.color + '33' }]}>
-                  <Text style={styles.groupIconText}>📁</Text>
+                  <AppText style={styles.groupIconText}>📁</AppText>
                 </View>
                 <View style={styles.groupInfo}>
                   <View style={styles.groupNameRow}>
-                    <Text style={styles.groupName}>
-                      {group.name || 'Unnamed Group'}
-                    </Text>
+                    <AppText style={styles.groupName}>
+                      {group.name || t('actr.history.unnamedGroup')}
+                    </AppText>
                     <View style={[styles.colorDot, { backgroundColor: group.color }]} />
                   </View>
-                  <Text style={styles.groupTabs}>
-                    {group.tabs.length} tab{group.tabs.length !== 1 ? 's' : ''}
-                  </Text>
+                  <AppText style={styles.groupTabs}>
+                    {t('actr.history.tabsCount', { count: group.tabs.length })}
+                  </AppText>
                 </View>
                 <TouchableOpacity
                   style={styles.restoreButton}
-                  onPress={() => handleRestoreGroup(group)}
+                  onPress={() => handleRestoreGroup(group as any)}
                 >
-                  <Text style={styles.restoreButtonText}>Restore</Text>
+                  <AppText style={styles.restoreButtonText}>{t('actr.history.restore')}</AppText>
                 </TouchableOpacity>
               </TouchableOpacity>
             ))}
@@ -171,36 +251,36 @@ export default function HistoryApp({ items, groups, containerWidth, containerHei
         {/* History Items */}
         {groupedItems.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyIcon}>🕐</Text>
-            <Text style={styles.emptyTitle}>No History</Text>
-            <Text style={styles.emptySubtitle}>
+            <AppText style={styles.emptyIcon}>🕐</AppText>
+            <AppText style={styles.emptyTitle}>{t('actr.history.noHistory')}</AppText>
+            <AppText style={styles.emptySubtitle}>
               {searchQuery
-                ? `No results for "${searchQuery}"`
-                : 'Apps you visit will appear here'}
-            </Text>
+                ? t('actr.history.noResult', { query: searchQuery })
+                : t('actr.history.visitEmptyTip')}
+            </AppText>
           </View>
         ) : (
-          groupedItems.map(group => (
+          groupedItems.map((group: any) => (
             <View key={group.date} style={styles.section}>
-              <Text style={styles.sectionTitle}>{group.date}</Text>
-              {group.items.map(item => (
+              <AppText style={styles.sectionTitle}>{group.date}</AppText>
+              {group.items.map((item: any) => (
                 <TouchableOpacity
                   key={item.id}
                   style={styles.itemRow}
-                  onPress={() => handleOpenItem(item)}
+                  onPress={() => handleOpenItem(item as any)}
                 >
-                  <Text style={styles.itemIcon}>📄</Text>
+                  <AppText style={styles.itemIcon}>📄</AppText>
                   <View style={styles.itemInfo}>
-                    <Text style={styles.itemTitle} numberOfLines={1}>
+                    <AppText style={styles.itemTitle} numberOfLines={1}>
                       {item.title}
-                    </Text>
+                    </AppText>
                     {item.appURL && (
-                      <Text style={styles.itemUrl} numberOfLines={1}>
+                      <AppText style={styles.itemUrl} numberOfLines={1}>
                         {item.appURL.split('/').pop()}
-                      </Text>
+                      </AppText>
                     )}
                   </View>
-                  <Text style={styles.itemTime}>{formatTime(item.visitTime)}</Text>
+                  <AppText style={styles.itemTime}>{formatTime(item.visitTime)}</AppText>
                 </TouchableOpacity>
               ))}
             </View>
@@ -212,20 +292,26 @@ export default function HistoryApp({ items, groups, containerWidth, containerHei
 
       {/* Footer */}
       <View style={styles.footer}>
-        <Text style={styles.footerText}>{items.length} items</Text>
+        <AppText style={styles.footerText}>{t('actr.history.itemsCount', { count: displayItems.length })}</AppText>
         <TouchableOpacity
-          style={[styles.clearButton, items.length === 0 && styles.clearButtonDisabled]}
+          style={[styles.clearButton, displayItems.length === 0 && styles.clearButtonDisabled]}
           onPress={handleClearHistory}
-          disabled={items.length === 0}
+          disabled={displayItems.length === 0}
         >
-          <Text style={[styles.clearButtonText, items.length === 0 && styles.clearButtonTextDisabled]}>
-            Clear History...
-          </Text>
+          <AppText style={[styles.clearButtonText, displayItems.length === 0 && styles.clearButtonTextDisabled]}>
+            {t('actr.history.clearHistory')}
+          </AppText>
         </TouchableOpacity>
       </View>
     </View>
   );
 }
+
+const isBrowserPageUrl = (url?: string): url is string => {
+  if (!url) return false;
+  const normalized = url.trim().toLowerCase();
+  return normalized.startsWith('http://') || normalized.startsWith('https://');
+};
 
 const styles = StyleSheet.create({
   container: {
@@ -236,11 +322,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    padding: spacing.lg,
+    gap: spacing.md,
   },
   title: {
-    fontSize: 20,
-    fontWeight: '600',
+    ...getTypographyStyle('title2'),
     color: '#fff',
   },
   searchContainer: {
@@ -248,18 +334,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: '#2d2d2d',
     borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    flex: 1,
+    maxWidth: 420,
+    minWidth: 0,
+  },
+  searchContainerPhone: {
+    maxWidth: '100%',
   },
   searchIcon: {
-    fontSize: 14,
-    marginRight: 6,
+    ...getTypographyStyle('body'),
+    marginRight: spacing.xs,
   },
   searchInput: {
-    width: 200,
-    fontSize: 14,
+    flex: 1,
+    ...getTypographyStyle('body'),
     color: '#fff',
     padding: 0,
+    minWidth: 0,
   },
   divider: {
     height: 1,
@@ -269,26 +362,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contentContainer: {
-    padding: 16,
+    padding: spacing.lg,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: spacing.xxl,
   },
   sectionTitle: {
-    fontSize: 14,
+    ...getTypographyStyle('bodyStrong'),
     fontWeight: '600',
     color: '#888',
-    marginBottom: 12,
+    marginBottom: spacing.md,
     textTransform: 'uppercase',
   },
   groupRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
     backgroundColor: '#2d2d2d',
-    borderRadius: 8,
-    marginBottom: 8,
+    borderRadius: radius.sm,
+    marginBottom: spacing.sm,
   },
   groupIcon: {
     width: 32,
@@ -296,7 +389,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: spacing.md,
   },
   groupIconText: {
     fontSize: 16,
@@ -309,9 +402,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   groupName: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#fff',
-    marginRight: 8,
+    marginRight: spacing.sm,
   },
   colorDot: {
     width: 8,
@@ -319,18 +412,18 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   groupTabs: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#888',
     marginTop: 2,
   },
   restoreButton: {
     backgroundColor: '#0a84ff',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
+    borderRadius: radius.xs,
   },
   restoreButtonText: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#fff',
     fontWeight: '500',
   },
@@ -338,10 +431,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.md,
     backgroundColor: '#2d2d2d',
-    borderRadius: 8,
-    marginBottom: 4,
+    borderRadius: radius.sm,
+    marginBottom: spacing.xxs,
   },
   itemIcon: {
     fontSize: 18,
@@ -351,16 +444,16 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   itemTitle: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#fff',
   },
   itemUrl: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#888',
     marginTop: 2,
   },
   itemTime: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#888',
   },
   emptyState: {
@@ -374,34 +467,33 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   emptyTitle: {
-    fontSize: 18,
-    fontWeight: '600',
+    ...getTypographyStyle('title3'),
     color: '#fff',
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   emptySubtitle: {
-    fontSize: 14,
+    ...getTypographyStyle('body'),
     color: '#888',
   },
   footer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    padding: 16,
+    padding: spacing.lg,
   },
   footerText: {
-    fontSize: 12,
+    ...getTypographyStyle('footnote'),
     color: '#888',
   },
   clearButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs,
   },
   clearButtonDisabled: {
     opacity: 0.5,
   },
   clearButtonText: {
-    fontSize: 13,
+    ...getTypographyStyle('body'),
     color: '#0a84ff',
   },
   clearButtonTextDisabled: {
