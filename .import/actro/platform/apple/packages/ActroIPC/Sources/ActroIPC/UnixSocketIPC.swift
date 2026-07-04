@@ -35,7 +35,7 @@ class IPCServer {
     private var serverSocket: Int32 = -1
     private var clientSocket: Int32 = -1
     private let socketPath: String
-    private let queue = DispatchQueue(label: "chat.askaway.actro.ipc.server")
+    private let queue = DispatchQueue(label: "io.actrium.actro.ipc.server")
     private var isRunning = false
 
     var onMessage: ((Data) -> Void)?
@@ -192,7 +192,7 @@ class IPCServer {
 class IPCClient {
     private var socket: Int32 = -1
     private let socketPath: String
-    private let queue = DispatchQueue(label: "chat.askaway.actro.ipc.client")
+    private let queue = DispatchQueue(label: "io.actrium.actro.ipc.client")
     private var isConnected = false
 
     var onMessage: ((Data) -> Void)?
