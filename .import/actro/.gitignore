@@ -13,6 +13,12 @@ coverage/
 
 # Rust
 target/
+crates/actro-core/generated/
+crates/actro-core/xcframework-staging/
+crates/actro-core/ActroCore.xcframework/**/libactro_core.a
+crates/actro-vault/generated/
+crates/actro-vault/xcframework-staging/
+crates/actro-vault/ActroVault.xcframework/**/libactro_vault.a
 crates/actro-terminal/libactro_terminal.a
 crates/actro-terminal/ActroTerminal.xcframework/macos-arm64_x86_64/libactro_terminal.a
 crates/actro-remote/libactro_remote.a
@@ -28,13 +34,22 @@ DerivedData/
 build/
 dist/
 out/
+apps/windows/actro/bin/
+apps/windows/actro/native/*.dll
+apps/windows/actro/obj/
+apps/windows/actro.tests/bin/
+apps/windows/actro.tests/obj/
+packages/actro-native-kotlin/build/
+packages/actro-native-kotlin/src/main/jniLibs/**/*.so
 
-# Temporary migration worktrees
-apps/macos/askit
-apps/macos/rill
-apps/rustdesk-actr/
+# Local scratch / memory files
+internal/
 
 # Local environment
 .env
 .env.*
 !.env.example
+
+# Windows native staging artifacts
+apps/windows/actro/native/*.dylib
+apps/windows/actro/native/*.dll

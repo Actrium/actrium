@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "crates/actro-core",
+    "crates/actro-sync-server",
+    "crates/actro-vault",
     "crates/actro-terminal",
     "crates/actro-remote",
 ]
@@ -13,4 +15,4 @@ exclude = [
 [workspace.package]
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/Actrium/actro"
+repository = "https://github.com/kookyleo/actro"
