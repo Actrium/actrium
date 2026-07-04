@@ -80,7 +80,7 @@ Actro 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程�
 │   │                                                                              │   │
 │   │  TabA.HostView ─┐                                                            │   │
 │   │  TabB.HostView ─┼─► NSRemoteViewController.requestViewController(...)        │   │
-│   │  TabC.HostView ─┤     fromService: "chat.askaway.Actro.RCTViewService{i}"   │   │
+│   │  TabC.HostView ─┤     fromService: "io.actrium.actro.rctviewservice{i}"   │   │
 │   │  TabD.HostView ─┘                                                            │   │
 │   └─────────────────────────────────────────────────────────────────────────────┘   │
 │                              │                                                       │
@@ -95,7 +95,7 @@ Actro 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程�
 │                                                                                      │
 │  ┌───────────────────────────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
 │  │        RCTViewService0            │  │  RCTViewService1 │  │  RCTViewService2 │  │
-│  │ chat.askaway.Actro.RCTViewService0│  │ ...Service1      │  │ ...Service2      │  │
+│  │ io.actrium.actro.rctviewservice0│  │ ...Service1      │  │ ...Service2      │  │
 │  │                                   │  │                  │  │                  │  │
 │  │  ┌─────────────────────────────┐  │  │ ┌──────────────┐ │  │ ┌──────────────┐ │  │
 │  │  │  ServiceReactNativeHost     │  │  │ │    SRNH      │ │  │ │    SRNH      │ │  │
@@ -151,10 +151,10 @@ Actro 使用 ViewBridge XPC 架构将 React Native 渲染隔离到独立进程�
 
 | Slot | Bundle Identifier |
 |------|-------------------|
-| 0 | `chat.askaway.Actro.RCTViewService0` |
-| 1 | `chat.askaway.Actro.RCTViewService1` |
-| 2 | `chat.askaway.Actro.RCTViewService2` |
-| 3 | `chat.askaway.Actro.RCTViewService3` |
+| 0 | `io.actrium.actro.rctviewservice0` |
+| 1 | `io.actrium.actro.rctviewservice1` |
+| 2 | `io.actrium.actro.rctviewservice2` |
+| 3 | `io.actrium.actro.rctviewservice3` |
 
 ## IPC Communication
 

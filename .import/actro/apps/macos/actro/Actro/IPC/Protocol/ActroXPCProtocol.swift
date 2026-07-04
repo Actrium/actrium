@@ -129,13 +129,13 @@ public protocol ActroServiceXPCProtocol {
 /// Service identifiers for XPC connections
 public enum ActroXPCServiceNames {
     /// Main Actro View Service (React Native host)
-    public static let viewService = "chat.askaway.actro.ActroViewService"
+    public static let viewService = "io.actrium.actro.ActroViewService"
 
     /// System service variant (bundled apps)
-    public static let systemService = "chat.askaway.actro.ActroViewService.system"
+    public static let systemService = "io.actrium.actro.ActroViewService.system"
 
     /// ACTR service variant (user apps)
-    public static let actrService = "chat.askaway.actro.ActroViewService.actr"
+    public static let actrService = "io.actrium.actro.ActroViewService.actr"
 
     /// Get service name for a given type
     public static func serviceName(for type: ServiceType) -> String {

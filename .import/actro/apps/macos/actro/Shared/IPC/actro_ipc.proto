@@ -203,7 +203,7 @@ message XPCTabConfig {
 // Service -> Host: Service ready notification
 // Notification: com.actro.xpcServiceReady
 message XPCServiceReady {
-    string service_bundle_id = 1;  // e.g., "chat.askaway.Actro.RCTViewService0"
+    string service_bundle_id = 1;  // e.g., "io.actrium.actro.rctviewservice0"
 }
 
 // Service -> Host: Tab render state

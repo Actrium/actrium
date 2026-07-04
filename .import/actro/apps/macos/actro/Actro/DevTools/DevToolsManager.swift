@@ -484,8 +484,10 @@ class DevToolsManager: ObservableObject {
     /// Guest app name (for display in file tree)
     @Published var guestAppName: String?
 
-    /// Host source directory (fixed path)
-    static let hostSourcePath = "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps/src/actr-host"
+    /// Host source directory.
+    static var hostSourcePath: String {
+        ActroRuntimePaths.actrHostSourcePath
+    }
 
     struct SourceNavigation: Equatable {
         let searchText: String  // Function name for search fallback

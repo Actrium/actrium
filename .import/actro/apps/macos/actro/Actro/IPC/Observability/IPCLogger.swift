@@ -130,7 +130,7 @@ public final class IPCLogger: @unchecked Sendable {
     // MARK: - Initialization
 
     private init() {
-        self.osLog = OSLog(subsystem: "chat.askaway.actro", category: "IPC")
+        self.osLog = OSLog(subsystem: "io.actrium.actro", category: "IPC")
         self.settings = .default
     }
 

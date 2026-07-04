@@ -1,6 +1,6 @@
 import Foundation
 
-/// Source type for AskAway apps
+/// Source type for Actro apps
 enum AppSourceType: String, Codable {
     /// Downloaded from network (stored in app sandbox)
     case downloaded
@@ -8,9 +8,9 @@ enum AppSourceType: String, Codable {
     case localDev
 }
 
-/// Represents an installed AskAway app
-/// Used for askw:// URL scheme navigation
-struct AskAwayApp: Identifiable, Codable, Equatable, Hashable {
+/// Represents an installed Actro app
+/// Used for actro:// URL scheme navigation
+struct InstalledActroApp: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     var name: String
     var bundleId: String           // Unique app identifier (e.g., "com.example.myapp")
@@ -49,7 +49,7 @@ struct AskAwayApp: Identifiable, Codable, Equatable, Hashable {
         self.isPinned = isPinned
     }
 
-    static func == (lhs: AskAwayApp, rhs: AskAwayApp) -> Bool {
+    static func == (lhs: InstalledActroApp, rhs: InstalledActroApp) -> Bool {
         lhs.id == rhs.id
     }
 
@@ -57,9 +57,9 @@ struct AskAwayApp: Identifiable, Codable, Equatable, Hashable {
         hasher.combine(id)
     }
 
-    /// The askw:// URL for this app
-    var askwURL: URL {
-        URL(string: "askw://\(bundleId)")!
+    /// The actro:// URL for this app
+    var actroURL: URL {
+        ActroAppURLScheme.appURL(bundleId: bundleId)
     }
 
     /// The source URL (file path) for loading this app
@@ -70,7 +70,7 @@ struct AskAwayApp: Identifiable, Codable, Equatable, Hashable {
 
 // MARK: - Display Helpers
 
-extension AskAwayApp {
+extension InstalledActroApp {
     /// SF Symbol name for display
     var displayIcon: String {
         icon ?? "app.fill"
@@ -89,13 +89,5 @@ extension AskAwayApp {
         let formatter = RelativeDateTimeFormatter()
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: lastUsedAt, relativeTo: Date())
-    }
-
-    /// Human-readable source type
-    var sourceTypeDisplay: String {
-        switch sourceType {
-        case .downloaded: return "Downloaded"
-        case .localDev: return "Local Development"
-        }
     }
 }

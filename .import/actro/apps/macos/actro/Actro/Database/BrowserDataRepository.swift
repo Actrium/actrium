@@ -1,0 +1,288 @@
+import Foundation
+import ActroCore
+
+private let browserDataLogger = AppLogger.database
+private let macOSHistoryBackfillKey = "apple_macos_local_history_backfilled_v1"
+private let macOSBookmarkBackfillKey = "apple_macos_local_bookmarks_backfilled_v1"
+
+final class BrowserDataRepository {
+    static let shared = BrowserDataRepository()
+
+    private let database: AppleBrowserStorageDatabase?
+    private let syncScheduler: AppleBrowserStorageSyncScheduler?
+    private let historyReadLimit = 500
+    private let bookmarkReadLimit = 500
+
+    private init() {
+        let path = Self.databasePath()
+        do {
+            let openedDatabase = try AppleBrowserStorageDatabase(path: path) { message in
+                browserDataLogger.error("\(message)")
+            }
+            database = openedDatabase
+            let syncCoordinator = AppleBrowserStorageSyncCoordinator(
+                client: AppleBrowserStorageSyncClient(database: openedDatabase),
+                credentialsProvider: BrowserSyncCredentialsProvider.shared
+            )
+            syncScheduler = AppleBrowserStorageSyncScheduler(coordinator: syncCoordinator)
+            browserDataLogger.notice("Initialized browser storage at: \(path)")
+        } catch {
+            database = nil
+            syncScheduler = nil
+            browserDataLogger.error("Failed to open browser storage at: \(path), error: \(String(describing: error))")
+        }
+    }
+
+    func syncNow() async -> String? {
+        await syncScheduler?.runNow()
+    }
+
+    func syncStatusJson() async -> String? {
+        await syncScheduler?.statusJson()
+    }
+
+    func scheduleSyncAfterCredentialChange() async {
+        await syncScheduler?.scheduleAfterLocalChange(delaySeconds: 0)
+    }
+
+    func cancelPendingSync() async {
+        await syncScheduler?.cancelPendingSync()
+    }
+
+    func recordVisit(tab: Tab) {
+        guard let url = tab.url else { return }
+        recordVisit(title: tab.title, url: url)
+    }
+
+    func recordVisit(item: HistoryItem) {
+        guard let url = item.appURL else { return }
+        recordVisit(title: item.title, url: url)
+    }
+
+    func recordVisit(title: String, url: URL) {
+        guard Self.isBrowserPageURL(url) else { return }
+        let item = AppleBrowserHistoryItem(
+            title: normalizedTitle(title, url: url),
+            address: url.absoluteString,
+            visitedAtUnixSeconds: Int64(Date().timeIntervalSince1970),
+            visitCount: 1
+        )
+        if database?.recordHistoryVisit(item) == true {
+            scheduleSyncAfterLocalChange()
+        }
+    }
+
+    func loadRecentHistory(limit: Int = 500) -> [HistoryItem] {
+        database?.loadRecentHistory(limit: min(max(limit, 0), historyReadLimit)).compactMap(historyItem(from:)) ?? []
+    }
+
+    func backfillHistoryIfNeeded(_ items: [HistoryItem]) {
+        guard let database, !database.hasMetaFlag(macOSHistoryBackfillKey) else { return }
+        let browserItems = items.compactMap(browserHistoryItem(from:))
+        guard !browserItems.isEmpty else {
+            _ = database.setMetaFlag(macOSHistoryBackfillKey)
+            return
+        }
+
+        let succeeded = browserItems.allSatisfy { database.upsertHistoryItem($0) }
+        if succeeded {
+            _ = database.setMetaFlag(macOSHistoryBackfillKey)
+            scheduleSyncAfterLocalChange()
+            browserDataLogger.notice("Backfilled \(browserItems.count) local history items into browser storage")
+        }
+    }
+
+    func removeHistory(item: HistoryItem) {
+        guard let url = item.appURL, Self.isBrowserPageURL(url) else { return }
+        _ = database?.deleteHistory(address: url.absoluteString)
+    }
+
+    func clearHistory() {
+        if database?.clearHistory() == true {
+            scheduleSyncAfterLocalChange()
+        }
+    }
+
+    func upsertBookmark(_ bookmark: Bookmark) {
+        guard let item = browserBookmarkItem(from: bookmark) else { return }
+        if database?.upsertBookmarkItem(item) == true {
+            scheduleSyncAfterLocalChange()
+        }
+    }
+
+    func loadBookmarks(limit: Int = 500) -> [Bookmark] {
+        database?.loadRecentBookmarks(limit: min(max(limit, 0), bookmarkReadLimit)).compactMap(bookmark(from:)) ?? []
+    }
+
+    func backfillBookmarksIfNeeded(_ bookmarks: [Bookmark]) {
+        guard let database, !database.hasMetaFlag(macOSBookmarkBackfillKey) else { return }
+        let browserBookmarks = bookmarks.compactMap(browserBookmarkItem(from:))
+        guard !browserBookmarks.isEmpty else {
+            _ = database.setMetaFlag(macOSBookmarkBackfillKey)
+            return
+        }
+
+        let succeeded = browserBookmarks.allSatisfy { database.upsertBookmarkItem($0) }
+        if succeeded {
+            _ = database.setMetaFlag(macOSBookmarkBackfillKey)
+            scheduleSyncAfterLocalChange()
+            browserDataLogger.notice("Backfilled \(browserBookmarks.count) local bookmarks into browser storage")
+        }
+    }
+
+    func removeBookmark(_ bookmark: Bookmark) {
+        guard let url = bookmark.appURL, Self.isBrowserPageURL(url) else { return }
+        if database?.deleteBookmark(address: url.absoluteString) == true {
+            scheduleSyncAfterLocalChange()
+        }
+    }
+
+    func clearBookmarks() {
+        if database?.clearBookmarks() == true {
+            scheduleSyncAfterLocalChange()
+        }
+    }
+
+    func saveSession(tabs: [Tab], currentTabId: UUID?) {
+        let now = Int64(Date().timeIntervalSince1970)
+        let browserTabs = tabs.compactMap { tab -> (id: UUID, item: AppleBrowserSessionTab)? in
+            guard let url = tab.url, Self.isBrowserPageURL(url) else { return nil }
+            let item = AppleBrowserSessionTab(
+                id: tab.id.uuidString,
+                title: normalizedTitle(tab.title, url: url),
+                address: url.absoluteString,
+                createdAtUnixSeconds: now,
+                updatedAtUnixSeconds: now
+            )
+            return (tab.id, item)
+        }
+
+        let activeTabIndex: Int32
+        if let currentTabId,
+           let index = browserTabs.firstIndex(where: { $0.id == currentTabId }) {
+            activeTabIndex = Int32(index)
+        } else {
+            activeTabIndex = 0
+        }
+
+        let snapshot = AppleBrowserSessionSnapshot(
+            activeTabIndex: activeTabIndex,
+            tabs: browserTabs.map { $0.item },
+            surfaceKind: "macos"
+        )
+        if database?.saveSession(snapshot: snapshot) == true {
+            scheduleSyncAfterLocalChange()
+        }
+    }
+
+    private func scheduleSyncAfterLocalChange() {
+        guard let syncScheduler else { return }
+        Task {
+            await syncScheduler.scheduleAfterLocalChange()
+        }
+    }
+
+    private static func databasePath() -> String {
+        let fileManager = FileManager.default
+        let appSupport = fileManager.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let appFolder = appSupport.appendingPathComponent("Actro", isDirectory: true)
+        if !fileManager.fileExists(atPath: appFolder.path) {
+            try? fileManager.createDirectory(at: appFolder, withIntermediateDirectories: true)
+        }
+        return AppleBrowserStorageDatabase.databasePath(in: appFolder)
+    }
+
+    static func isBrowserPageURL(_ url: URL) -> Bool {
+        let scheme = url.scheme?.lowercased()
+        return scheme == "http" || scheme == "https"
+    }
+
+    private func historyItem(from item: AppleBrowserHistoryItem) -> HistoryItem? {
+        guard let url = URL(string: item.address), Self.isBrowserPageURL(url) else { return nil }
+        return HistoryItem(
+            id: stableUUID(for: "history:\(item.address)"),
+            title: normalizedTitle(item.title, url: url),
+            appURL: url,
+            visitTime: Date(timeIntervalSince1970: TimeInterval(item.visitedAtUnixSeconds))
+        )
+    }
+
+    private func browserHistoryItem(from item: HistoryItem) -> AppleBrowserHistoryItem? {
+        guard let url = item.appURL, Self.isBrowserPageURL(url) else { return nil }
+        return AppleBrowserHistoryItem(
+            title: normalizedTitle(item.title, url: url),
+            address: url.absoluteString,
+            visitedAtUnixSeconds: Int64(item.visitTime.timeIntervalSince1970),
+            visitCount: 1
+        )
+    }
+
+    private func browserBookmarkItem(from bookmark: Bookmark) -> AppleBrowserBookmarkItem? {
+        guard let url = bookmark.appURL, Self.isBrowserPageURL(url) else { return nil }
+        let createdAt = Int64(bookmark.createdAt.timeIntervalSince1970)
+        let updatedAt = Int64((bookmark.lastUsedAt ?? bookmark.createdAt).timeIntervalSince1970)
+        return AppleBrowserBookmarkItem(
+            id: bookmark.id.uuidString,
+            title: normalizedTitle(bookmark.title, url: url),
+            address: url.absoluteString,
+            createdAtUnixSeconds: createdAt,
+            updatedAtUnixSeconds: updatedAt,
+            favicon: bookmark.favicon
+        )
+    }
+
+    private func bookmark(from item: AppleBrowserBookmarkItem) -> Bookmark? {
+        guard let url = URL(string: item.address), Self.isBrowserPageURL(url) else { return nil }
+        return Bookmark(
+            id: UUID(uuidString: item.id) ?? stableUUID(for: "bookmark:\(item.address)"),
+            title: normalizedTitle(item.title, url: url),
+            appURL: url,
+            createdAt: Date(timeIntervalSince1970: TimeInterval(item.createdAtUnixSeconds)),
+            lastUsedAt: Date(timeIntervalSince1970: TimeInterval(item.updatedAtUnixSeconds)),
+            favicon: item.favicon ?? "bookmark.fill"
+        )
+    }
+
+    private func normalizedTitle(_ title: String, url: URL) -> String {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmed.isEmpty {
+            return trimmed
+        }
+        if let host = url.host, !host.isEmpty {
+            return host
+        }
+        return url.absoluteString
+    }
+
+    private func stableUUID(for value: String) -> UUID {
+        let bytes = stableIdentifierBytes(for: value)
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3],
+            bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11],
+            bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+    }
+
+    private func stableIdentifierBytes(for value: String) -> [UInt8] {
+        let first = fnv1a64(value.utf8)
+        let second = fnv1a64(("actro:" + value).utf8)
+        var bytes = [UInt8](repeating: 0, count: 16)
+        for index in 0..<8 {
+            bytes[index] = UInt8((first >> UInt64((7 - index) * 8)) & 0xff)
+            bytes[index + 8] = UInt8((second >> UInt64((7 - index) * 8)) & 0xff)
+        }
+        bytes[6] = (bytes[6] & 0x0f) | 0x50
+        bytes[8] = (bytes[8] & 0x3f) | 0x80
+        return bytes
+    }
+
+    private func fnv1a64<T: Sequence>(_ bytes: T) -> UInt64 where T.Element == UInt8 {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in bytes {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return hash
+    }
+}

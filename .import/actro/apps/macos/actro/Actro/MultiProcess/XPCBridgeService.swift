@@ -39,11 +39,11 @@ struct XPCTabConfig {
 
     func toDictionary(isOverviewMode: Bool) -> [String: Any] {
         var dict: [String: Any] = [
-            "tabId": tabId.uuidString,
-            "title": title,
+            RuntimeBridgeContract.tabId: tabId.uuidString,
+            RuntimeBridgeContract.title: title,
             "backgroundColor": backgroundColor,
-            "containerWidth": containerSize.width,
-            "containerHeight": containerSize.height,
+            RuntimeBridgeContract.containerWidth: containerSize.width,
+            RuntimeBridgeContract.containerHeight: containerSize.height,
             "isOverviewMode": isOverviewMode,
             "leftPanelVisible": leftPanelVisible,
             "rightPanelVisible": rightPanelVisible,
@@ -52,7 +52,7 @@ struct XPCTabConfig {
             "reloadKey": reloadKey
         ]
         if let systemAppType = systemAppType {
-            dict["systemAppType"] = systemAppType
+            dict[RuntimeBridgeContract.systemAppType] = systemAppType
         }
         if let unifiedScript = unifiedScript {
             dict["unifiedScript"] = unifiedScript

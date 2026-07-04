@@ -4,31 +4,31 @@ Actro 项目包含两个独立的 React Native bundle，分别用于不同的 XP
 
 | Bundle | 入口文件 | 输出文件 | 用途 |
 |--------|----------|----------|------|
-| System Apps | `index-system.tsx` | `main.rctnapp.jsbundle` | RCTViewService0 专用（系统应用） |
+| System Apps | `index-system.tsx` | `system.jsbundle` | RCTViewService0 专用（系统应用） |
 | Actr Host | `index-actr.tsx` | `actr.jsbundle` | RCTViewService1-N（插件应用） |
 
 ## 快速使用
 
 ```bash
 # 构建所有 bundle（Release 模式）
-./scripts/bundle-rctnapp.sh
+./scripts/bundle-actro-runtime.sh
 
 # 仅构建 System Apps bundle
-./scripts/bundle-rctnapp.sh --target system
+./scripts/bundle-actro-runtime.sh --target system
 
 # 仅构建 Actr Host bundle
-./scripts/bundle-rctnapp.sh --target actr
+./scripts/bundle-actro-runtime.sh --target actr
 
 # 构建 Development bundle（包含 source map）
-./scripts/bundle-rctnapp.sh --dev
+./scripts/bundle-actro-runtime.sh --dev
 
 # 查看帮助
-./scripts/bundle-rctnapp.sh --help
+./scripts/bundle-actro-runtime.sh --help
 ```
 
 ## Bundle 说明
 
-### System Apps (`main.rctnapp.jsbundle`)
+### System Apps (`system.jsbundle`)
 
 **用途**：由 RCTViewService0 加载，渲染系统内置页面。
 
@@ -38,7 +38,7 @@ Actro 项目包含两个独立的 React Native bundle，分别用于不同的 XP
 - `BookmarksApp` - 书签管理（`about:bookmarks`）
 - `DebugApp` - 调试页面（`about:debug`）
 
-**入口文件**：`RCTNApps/index-system.tsx`
+**入口文件**：`packages/actro-runtime/index-system.tsx`
 
 ### Actr Host (`actr.jsbundle`)
 
@@ -49,12 +49,12 @@ Actro 项目包含两个独立的 React Native bundle，分别用于不同的 XP
 - `rill` / `askit` 引擎支持
 - Guest sandbox 运行时
 
-**入口文件**：`RCTNApps/index-actr.tsx`
+**入口文件**：`packages/actro-runtime/index-actr.tsx`
 
 ## 源码结构
 
 ```
-RCTNApps/
+packages/actro-runtime/
 ├── index-system.tsx      # System Apps 入口
 ├── index-actr.tsx        # Actr Host 入口
 ├── index.ts              # Legacy 统一入口（已废弃）
@@ -73,11 +73,11 @@ RCTNApps/
 
 ## 开发流程
 
-1. **修改源码**：编辑 `RCTNApps/src/` 下的文件
+1. **修改源码**：编辑 `packages/actro-runtime/src/` 下的文件
 
 2. **构建 bundle**：
    ```bash
-   ./scripts/bundle-rctnapp.sh
+   ./scripts/bundle-actro-runtime.sh
    ```
 
 3. **构建 Xcode 项目**：
@@ -98,4 +98,4 @@ RCTNApps/
 
 - **Bundle 输出**：`Actro/Resources/`
 - **Xcode 项目**：`Actro.xcodeproj`
-- **构建脚本**：`scripts/bundle-rctnapp.sh`
+- **构建脚本**：`scripts/bundle-actro-runtime.sh`

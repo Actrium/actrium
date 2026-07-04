@@ -1,8 +1,7 @@
 import Foundation
-import CryptoKit
-import CommonCrypto
 import Combine
 import LocalAuthentication
+import ActroVault
 
 enum VaultState {
     case notSetup, locked, unlocked
@@ -61,7 +60,7 @@ final class VaultManager: ObservableObject {
         VaultDatabase.getVaultMeta(key: "password_hint")
     }
 
-    private var derivedKey: SymmetricKey?
+    private var derivedKeyBase64: String?
     private var autoLockTimer: Timer?
 
     private init() {
@@ -84,22 +83,19 @@ final class VaultManager: ObservableObject {
         isProcessing = true
         defer { isProcessing = false }
 
-        // Generate random salt
-        var saltBytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, saltBytes.count, &saltBytes)
-        let salt = Data(saltBytes)
+        let salt = generateVaultSaltBase64()
 
         // Derive key on background thread (PBKDF2 is CPU-intensive)
         let key = try await Task.detached(priority: .userInitiated) {
-            try Self.deriveKeyStatic(password: password, salt: salt)
+            try Self.deriveKeyStatic(password: password, saltBase64: salt)
         }.value
-        derivedKey = key
+        derivedKeyBase64 = key
 
         // Store salt
-        VaultDatabase.setVaultMeta(key: "salt", value: salt.base64EncodedString())
+        VaultDatabase.setVaultMeta(key: "salt", value: salt)
 
         // Store verification token
-        let verificationToken = try encrypt("vault-verification-token")
+        let verificationToken = try encrypt(vaultVerificationToken())
         VaultDatabase.setVaultMeta(key: "verification_hash", value: verificationToken)
 
         // Store password hint if provided
@@ -122,13 +118,12 @@ final class VaultManager: ObservableObject {
         isProcessing = true
         defer { isProcessing = false }
 
-        guard let saltString = VaultDatabase.getVaultMeta(key: "salt"),
-              let salt = Data(base64Encoded: saltString) else {
+        guard let saltString = VaultDatabase.getVaultMeta(key: "salt") else {
             throw VaultError.notSetup
         }
 
         let key = try await Task.detached(priority: .userInitiated) {
-            try Self.deriveKeyStatic(password: password, salt: salt)
+            try Self.deriveKeyStatic(password: password, saltBase64: saltString)
         }.value
 
         // Verify password by decrypting verification token
@@ -136,15 +131,15 @@ final class VaultManager: ObservableObject {
             throw VaultError.notSetup
         }
 
-        derivedKey = key
+        derivedKeyBase64 = key
         do {
             let decrypted = try decrypt(storedToken)
-            guard decrypted == "vault-verification-token" else {
-                derivedKey = nil
+            guard decrypted == vaultVerificationToken() else {
+                derivedKeyBase64 = nil
                 throw VaultError.wrongPassword
             }
         } catch {
-            derivedKey = nil
+            derivedKeyBase64 = nil
             throw VaultError.wrongPassword
         }
 
@@ -160,7 +155,7 @@ final class VaultManager: ObservableObject {
     }
 
     func lock() {
-        derivedKey = nil
+        derivedKeyBase64 = nil
         items = []
         if state == .unlocked {
             state = .locked
@@ -172,32 +167,31 @@ final class VaultManager: ObservableObject {
     // MARK: - Touch ID Management
 
     func enableTouchID(password: String) async throws {
-        guard let saltString = VaultDatabase.getVaultMeta(key: "salt"),
-              let salt = Data(base64Encoded: saltString) else {
+        guard let saltString = VaultDatabase.getVaultMeta(key: "salt") else {
             throw VaultError.notSetup
         }
 
         let key = try await Task.detached(priority: .userInitiated) {
-            try Self.deriveKeyStatic(password: password, salt: salt)
+            try Self.deriveKeyStatic(password: password, saltBase64: saltString)
         }.value
 
         guard let storedToken = VaultDatabase.getVaultMeta(key: "verification_hash") else {
             throw VaultError.notSetup
         }
 
-        let previousKey = derivedKey
-        derivedKey = key
+        let previousKey = derivedKeyBase64
+        derivedKeyBase64 = key
         do {
             let decrypted = try decrypt(storedToken)
-            guard decrypted == "vault-verification-token" else {
-                derivedKey = previousKey
+            guard decrypted == vaultVerificationToken() else {
+                derivedKeyBase64 = previousKey
                 throw VaultError.wrongPassword
             }
         } catch {
-            derivedKey = previousKey
+            derivedKeyBase64 = previousKey
             throw VaultError.wrongPassword
         }
-        derivedKey = previousKey
+        derivedKeyBase64 = previousKey
 
         try KeychainHelper.saveMasterPassword(password)
         isTouchIDEnabled = true
@@ -217,50 +211,46 @@ final class VaultManager: ObservableObject {
         defer { isProcessing = false }
 
         // Verify current password
-        guard let saltString = VaultDatabase.getVaultMeta(key: "salt"),
-              let salt = Data(base64Encoded: saltString) else {
+        guard let saltString = VaultDatabase.getVaultMeta(key: "salt") else {
             throw VaultError.notSetup
         }
 
         let currentKey = try await Task.detached(priority: .userInitiated) {
-            try Self.deriveKeyStatic(password: current, salt: salt)
+            try Self.deriveKeyStatic(password: current, saltBase64: saltString)
         }.value
 
         guard let storedToken = VaultDatabase.getVaultMeta(key: "verification_hash") else {
             throw VaultError.notSetup
         }
 
-        let previousKey = derivedKey
-        derivedKey = currentKey
+        let previousKey = derivedKeyBase64
+        derivedKeyBase64 = currentKey
         do {
             let decrypted = try decrypt(storedToken)
-            guard decrypted == "vault-verification-token" else {
-                derivedKey = previousKey
+            guard decrypted == vaultVerificationToken() else {
+                derivedKeyBase64 = previousKey
                 throw VaultError.wrongPassword
             }
         } catch {
-            derivedKey = previousKey
+            derivedKeyBase64 = previousKey
             throw VaultError.wrongPassword
         }
 
         // Decrypt all items with old key
         let decryptedItems = try items.isEmpty ? loadAndReturnItems() : items
 
-        // Generate new salt and key
-        var newSaltBytes = [UInt8](repeating: 0, count: 32)
-        _ = SecRandomCopyBytes(kSecRandomDefault, newSaltBytes.count, &newSaltBytes)
-        let newSalt = Data(newSaltBytes)
+        let newSalt = generateVaultSaltBase64()
 
         let newKey = try await Task.detached(priority: .userInitiated) {
-            try Self.deriveKeyStatic(password: newPassword, salt: newSalt)
+            try Self.deriveKeyStatic(password: newPassword, saltBase64: newSalt)
         }.value
-        derivedKey = newKey
+        derivedKeyBase64 = newKey
 
         // Update salt
-        VaultDatabase.setVaultMeta(key: "salt", value: newSalt.base64EncodedString())
+        VaultDatabase.setVaultMeta(key: "salt", value: newSalt)
 
         // Update verification token
-        let newVerification = try encrypt("vault-verification-token")
+        let newVerification = try encrypt(vaultVerificationToken())
         VaultDatabase.setVaultMeta(key: "verification_hash", value: newVerification)
 
         // Re-encrypt all items
@@ -296,7 +286,7 @@ final class VaultManager: ObservableObject {
     func resetVault() {
         autoLockTimer?.invalidate()
         autoLockTimer = nil
-        derivedKey = nil
+        derivedKeyBase64 = nil
         items = []
         KeychainHelper.deleteMasterPassword()
         isTouchIDEnabled = false
@@ -317,7 +307,7 @@ final class VaultManager: ObservableObject {
     // MARK: - Item Management
 
     func addItem(_ item: VaultItem) throws {
-        guard state == .unlocked, derivedKey != nil else { throw VaultError.locked }
+        guard state == .unlocked, derivedKeyBase64 != nil else { throw VaultError.locked }
 
         let now = Date()
         let encFields = try encryptFields(item.fields)
@@ -340,7 +330,7 @@ final class VaultManager: ObservableObject {
     }
 
     func updateItem(_ item: VaultItem) throws {
-        guard state == .unlocked, derivedKey != nil else { throw VaultError.locked }
+        guard state == .unlocked, derivedKeyBase64 != nil else { throw VaultError.locked }
 
         let now = Date()
         let encFields = try encryptFields(item.fields)
@@ -373,19 +363,44 @@ final class VaultManager: ObservableObject {
     // MARK: - Fields Encryption
 
     private func encryptFields(_ fields: [VaultField]) throws -> String {
-        let data = try JSONEncoder().encode(fields)
-        guard let json = String(data: data, encoding: .utf8) else {
+        guard let key = derivedKeyBase64 else { throw VaultError.locked }
+
+        do {
+            return try encryptVaultFields(
+                keyBase64: key,
+                fields: fields.map { field in
+                    VaultFieldInfo(
+                        id: field.id.uuidString,
+                        label: field.label,
+                        value: field.value,
+                        isSensitive: field.isSensitive
+                    )
+                }
+            )
+        } catch {
             throw VaultError.encryptionFailed
         }
-        return try encrypt(json)
     }
 
     private func decryptFields(_ ciphertext: String) throws -> [VaultField] {
-        let json = try decrypt(ciphertext)
-        guard let data = json.data(using: .utf8) else {
+        guard let key = derivedKeyBase64 else { throw VaultError.locked }
+
+        do {
+            return try decryptVaultFields(keyBase64: key, ciphertextBase64: ciphertext).map { field in
+                guard let id = UUID(uuidString: field.id) else {
+                    throw VaultError.decryptionFailed
+                }
+
+                return VaultField(
+                    id: id,
+                    label: field.label,
+                    value: field.value,
+                    isSensitive: field.isSensitive
+                )
+            }
+        } catch {
             throw VaultError.decryptionFailed
         }
-        return try JSONDecoder().decode([VaultField].self, from: data)
     }
 
     // MARK: - Migration from old credentials
@@ -412,7 +427,6 @@ final class VaultManager: ObservableObject {
 
             let title = row["title"] as? String ?? ""
             let notes = row["notes"] as? String
-            let createdAt = row["created_at"] as? Int64 ?? Int64(Date().timeIntervalSince1970)
             let updatedAt = row["updated_at"] as? Int64 ?? Int64(Date().timeIntervalSince1970)
 
             let fields: [VaultField] = [
@@ -435,59 +449,29 @@ final class VaultManager: ObservableObject {
 
     // MARK: - Crypto
 
-    private nonisolated static func deriveKeyStatic(password: String, salt: Data) throws -> SymmetricKey {
-        guard let passwordData = password.data(using: .utf8) else {
+    private nonisolated static func deriveKeyStatic(password: String, saltBase64: String) throws -> String {
+        do {
+            return try deriveVaultKeyBase64(password: password, saltBase64: saltBase64)
+        } catch {
             throw VaultError.keyDerivationFailed
         }
-
-        var derivedBytes = [UInt8](repeating: 0, count: 32)
-        let status = salt.withUnsafeBytes { saltBuffer in
-            passwordData.withUnsafeBytes { passwordBuffer in
-                CCKeyDerivationPBKDF(
-                    CCPBKDFAlgorithm(kCCPBKDF2),
-                    passwordBuffer.baseAddress?.assumingMemoryBound(to: Int8.self),
-                    passwordData.count,
-                    saltBuffer.baseAddress?.assumingMemoryBound(to: UInt8.self),
-                    salt.count,
-                    CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
-                    100_000,
-                    &derivedBytes,
-                    32
-                )
-            }
-        }
-
-        guard status == kCCSuccess else {
-            throw VaultError.keyDerivationFailed
-        }
-
-        return SymmetricKey(data: Data(derivedBytes))
     }
 
     private func encrypt(_ plaintext: String) throws -> String {
-        guard let key = derivedKey else { throw VaultError.locked }
-        guard let data = plaintext.data(using: .utf8) else { throw VaultError.encryptionFailed }
+        guard let key = derivedKeyBase64 else { throw VaultError.locked }
 
         do {
-            let sealedBox = try AES.GCM.seal(data, using: key)
-            guard let combined = sealedBox.combined else { throw VaultError.encryptionFailed }
-            return combined.base64EncodedString()
+            return try encryptVaultString(keyBase64: key, plaintext: plaintext)
         } catch {
             throw VaultError.encryptionFailed
         }
     }
 
     private func decrypt(_ ciphertext: String) throws -> String {
-        guard let key = derivedKey else { throw VaultError.locked }
-        guard let data = Data(base64Encoded: ciphertext) else { throw VaultError.decryptionFailed }
+        guard let key = derivedKeyBase64 else { throw VaultError.locked }
 
         do {
-            let sealedBox = try AES.GCM.SealedBox(combined: data)
-            let decryptedData = try AES.GCM.open(sealedBox, using: key)
-            guard let string = String(data: decryptedData, encoding: .utf8) else {
-                throw VaultError.decryptionFailed
-            }
-            return string
+            return try decryptVaultString(keyBase64: key, ciphertextBase64: ciphertext)
         } catch {
             throw VaultError.decryptionFailed
         }

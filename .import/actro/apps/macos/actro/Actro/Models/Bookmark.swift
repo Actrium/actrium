@@ -54,7 +54,7 @@ extension Bookmark {
         Bookmark(
             title: tab.title.isEmpty ? "Untitled" : tab.title,
             appURL: tab.url,
-            appId: nil, // TODO: Extract from ACTR package
+            appId: tab.resolvedAppId,
             manufacturer: manufacturer,
             favicon: "star.fill" // Default icon
         )

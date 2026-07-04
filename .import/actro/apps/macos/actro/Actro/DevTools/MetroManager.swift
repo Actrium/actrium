@@ -4,6 +4,43 @@ import os.log
 
 private let logger = OSLog(subsystem: "com.actro.devtools", category: "Metro")
 
+enum ActroRuntimePaths {
+    static var runtimePath: String {
+        if let override = ProcessInfo.processInfo.environment["ACTRO_RUNTIME_PATH"],
+           !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return override
+        }
+
+        #if DEBUG
+        return sourceRuntimePath
+        #else
+        return Bundle.main.path(forResource: "ActroRuntime", ofType: nil) ?? sourceRuntimePath
+        #endif
+    }
+
+    static var actrHostSourcePath: String {
+        (runtimePath as NSString).appendingPathComponent("src/actr-host")
+    }
+
+    private static var sourceRuntimePath: String {
+        let sourceFile = URL(fileURLWithPath: #filePath)
+        let appRoot = sourceFile
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+        let repoRoot = appRoot
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+
+        return repoRoot
+            .appendingPathComponent("packages")
+            .appendingPathComponent("actro-runtime")
+            .standardizedFileURL
+            .path
+    }
+}
+
 /// Metro bundler process manager
 /// Manages the lifecycle of Metro bundler with process-specific address binding
 @MainActor
@@ -72,15 +109,9 @@ class MetroManager: ObservableObject {
 
     // MARK: - Paths
 
-    /// Path to RCTNApps directory (system apps)
-    private var rctnAppsPath: String {
-        // In development, use source directory
-        // In production, use app bundle
-        #if DEBUG
-        return "/Users/example-dev-2/Projects/example-workspace/GoAskAway/Actro/RCTNApps"
-        #else
-        return Bundle.main.path(forResource: "RCTNApps", ofType: nil) ?? ""
-        #endif
+    /// Path to the shared Actro runtime package.
+    private var actroRuntimePath: String {
+        ActroRuntimePaths.runtimePath
     }
 
     /// Path to Bun or Node executable
@@ -118,7 +149,7 @@ class MetroManager: ObservableObject {
         #if DEBUG
         // Add system apps folder by default (only in debug builds)
         watchFolders = [
-            WatchFolder(path: rctnAppsPath, isSystemApp: true)
+            WatchFolder(path: actroRuntimePath, isSystemApp: true)
         ]
         #else
         watchFolders = []
@@ -268,7 +299,7 @@ class MetroManager: ObservableObject {
 
         // Build command
         process.executableURL = URL(fileURLWithPath: runtimePath)
-        process.currentDirectoryURL = URL(fileURLWithPath: rctnAppsPath)
+        process.currentDirectoryURL = URL(fileURLWithPath: actroRuntimePath)
 
         // Arguments for Metro
         let watchFolderArgs = watchFolders
@@ -432,7 +463,7 @@ class MetroManager: ObservableObject {
     }
 
     /// App Group for shared Metro config (XPC Service can read on startup)
-    private static let appGroupId = "group.chat.askaway.actro"
+    private static let appGroupId = "group.io.actrium.actro"
     private static let metroHostKey = "metro.host"
     private static let metroPortKey = "metro.port"
 

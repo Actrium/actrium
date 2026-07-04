@@ -10,6 +10,8 @@
 		1A2B3C4D5E6F7890ABCD0001 /* ActroIPC in Frameworks */ = {isa = PBXBuildFile; productRef = 1A2B3C4D5E6F7890ABCD0002 /* ActroIPC */; };
 		457EEA1F5D65241F37B32E2D /* libPods-Actro.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 68501CEF0142AD9A599B85C8 /* libPods-Actro.a */; };
 		A90D97D7984E951158B896D0 /* libPods-ActroTests.a in Frameworks */ = {isa = PBXBuildFile; fileRef = DACA28DED8E4818311DAAB4D /* libPods-ActroTests.a */; };
+		AA00110022003300AA00BB02 /* ActroVault in Frameworks */ = {isa = PBXBuildFile; productRef = AA00110022003300AA00BB03 /* ActroVault */; };
+		AB00110022003300AA00BB02 /* ActroCore in Frameworks */ = {isa = PBXBuildFile; productRef = AB00110022003300AA00BB03 /* ActroCore */; };
 		B3312B262F066DB70018A0B4 /* ActroViewService.xpc in Embed XPC Services */ = {isa = PBXBuildFile; fileRef = B3312B1B2F066DB70018A0B4 /* ActroViewService.xpc */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = B3E78A282F02AFD7001F9589 /* Highlightr */; };
 		BD0800F6A3159CF15D812A33 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 5C60CD013DB3755AB58CD701 /* PrivacyInfo.xcprivacy */; };
@@ -162,6 +164,14 @@
 			);
 			target = B3312B1A2F066DB70018A0B4 /* ActroViewService */;
 		};
+		B3A57E700000000000000001 /* Exceptions for "Actro" folder in "Actro" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				Resources/assets,
+			);
+			target = B3E4589F2EC731A30014D74C /* Actro */;
+		};
 		CC11220033004400AA00BB11 /* Exceptions for "ActroTerminalService" folder in "ActroTerminalService" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -197,6 +207,7 @@
 		B3E458A22EC731A30014D74C /* Actro */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				B3A57E700000000000000001 /* Exceptions for "Actro" folder in "Actro" target */,
 			);
 			path = Actro;
 			sourceTree = "<group>";
@@ -256,6 +267,8 @@
 			files = (
 				CC00110022003300AA00BB02 /* ActroTerminal.xcframework in Frameworks */,
 				EE00110022003300AA00BB02 /* ActroRemote.xcframework in Frameworks */,
+				AB00110022003300AA00BB02 /* ActroCore in Frameworks */,
+				AA00110022003300AA00BB02 /* ActroVault in Frameworks */,
 				1A2B3C4D5E6F7890ABCD0001 /* ActroIPC in Frameworks */,
 				B3E78A292F02AFD7001F9589 /* Highlightr in Frameworks */,
 				457EEA1F5D65241F37B32E2D /* libPods-Actro.a in Frameworks */,
@@ -392,7 +405,7 @@
 			buildConfigurationList = B3E458C32EC731A40014D74C /* Build configuration list for PBXNativeTarget "Actro" */;
 			buildPhases = (
 				CBA3BCE34D80E77B0AABEFD0 /* [CP] Check Pods Manifest.lock */,
-				B3AAAA002F4800000000AAAA /* Bundle RCTNApps */,
+				B3AAAA002F4800000000AAAA /* Bundle Actro Runtime */,
 				B3E4589C2EC731A30014D74C /* Sources */,
 				B3E4589D2EC731A30014D74C /* Frameworks */,
 				B3E4589E2EC731A30014D74C /* Resources */,
@@ -574,6 +587,8 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "ActroIPC" */,
+				AB00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActroCore" */,
+				AA00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActroVault" */,
 				B3E78A272F02AF3B001F9589 /* XCRemoteSwiftPackageReference "Highlightr" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -800,18 +815,38 @@
 			inputFileListPaths = (
 			);
 			inputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroViewService.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroTerminalService.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroSFTPService.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroRemoteService.xpc",
 			);
 			name = "Generate XPC Service Pool";
 			outputFileListPaths = (
 			);
 			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/RCTViewService0.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/RCTViewService1.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/RCTViewService2.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/RCTViewService3.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroTerminalService0.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroTerminalService1.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroTerminalService2.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroTerminalService3.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroSFTPService0.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroSFTPService1.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroSFTPService2.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroSFTPService3.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroRemoteService0.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroRemoteService1.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroRemoteService2.xpc",
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/XPCServices/ActroRemoteService3.xpc",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "# Generate XPC Service Pool (RCTViewService0-3)\n\"${SRCROOT}/scripts/generate_xpc_pool.sh\"\n";
 			showEnvVarsInLog = 0;
 		};
-		B3AAAA002F4800000000AAAA /* Bundle RCTNApps */ = {
+		B3AAAA002F4800000000AAAA /* Bundle Actro Runtime */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -820,15 +855,15 @@
 			);
 			inputPaths = (
 			);
-			name = "Bundle RCTNApps";
+			name = "Bundle Actro Runtime";
 			outputFileListPaths = (
 			);
 			outputPaths = (
-				"$(SRCROOT)/Actro/Resources/main.rctnapp.jsbundle",
+				"$(SRCROOT)/Actro/Resources/system.jsbundle",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"$CONFIGURATION\" = \"Debug\" ]; then\n  DEV_FLAG=\"--dev\"\nelse\n  DEV_FLAG=\"\"\nfi\n\"${SRCROOT}/scripts/bundle-rctnapp.sh\" --target system $DEV_FLAG\n";
+			shellScript = "if [ \"$CONFIGURATION\" = \"Debug\" ]; then\n  DEV_FLAG=\"--dev\"\nelse\n  DEV_FLAG=\"\"\nfi\n\"${SRCROOT}/scripts/bundle-actro-runtime.sh\" --target system $DEV_FLAG\n";
 			showEnvVarsInLog = 0;
 		};
 		CBA3BCE34D80E77B0AABEFD0 /* [CP] Check Pods Manifest.lock */ = {
@@ -987,7 +1022,12 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.ActroViewService.ActroViewService;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.viewservice;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SKIP_INSTALL = YES;
@@ -1025,7 +1065,12 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.2;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.ActroViewService.ActroViewService;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.viewservice;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				SKIP_INSTALL = YES;
@@ -1099,7 +1144,7 @@
 					"$(inherited)",
 					" ",
 				);
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../RCTNApps/node_modules/react-native-macos";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../packages/actro-runtime/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) DEBUG";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -1162,7 +1207,7 @@
 					"$(inherited)",
 					" ",
 				);
-				REACT_NATIVE_PATH = "${PODS_ROOT}/../RCTNApps/node_modules/react-native-macos";
+				REACT_NATIVE_PATH = "${PODS_ROOT}/../../../../packages/actro-runtime/node_modules/react-native-macos";
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				USE_HERMES = true;
@@ -1181,6 +1226,7 @@
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = 7EARH3U976;
 				ENABLE_APP_SANDBOX = NO;
+				ENABLE_DEBUG_DYLIB = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
@@ -1191,7 +1237,12 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Actro;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -1225,7 +1276,12 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Actro;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -1248,7 +1304,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.ActroTests;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -1270,7 +1326,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.ActroTests;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.tests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -1289,7 +1345,7 @@
 				DEVELOPMENT_TEAM = 7EARH3U976;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.ActroUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -1308,7 +1364,7 @@
 				DEVELOPMENT_TEAM = 7EARH3U976;
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.ActroUITests;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.uitests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -1342,7 +1398,12 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Actro.ActroTerminalService;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.terminalservice;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -1379,7 +1440,12 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Actro.ActroTerminalService;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.terminalservice;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -1415,7 +1481,12 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Actro.ActroSFTPService;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.sftpservice;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -1452,7 +1523,12 @@
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.1;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Actro.ActroSFTPService;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-weak_framework",
+					AppIntents,
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.sftpservice;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -1496,9 +1572,11 @@
 					CoreFoundation,
 					"-framework",
 					Security,
+					"-weak_framework",
+					AppIntents,
 					"-lresolv",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Actro.ActroRemoteService;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.remoteservice;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -1543,9 +1621,11 @@
 					CoreFoundation,
 					"-framework",
 					Security,
+					"-weak_framework",
+					AppIntents,
 					"-lresolv",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = chat.askaway.Actro.ActroRemoteService;
+				PRODUCT_BUNDLE_IDENTIFIER = io.actrium.actro.remoteservice;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -1638,7 +1718,15 @@
 /* Begin XCLocalSwiftPackageReference section */
 		1A2B3C4D5E6F7890ABCD0005 /* XCLocalSwiftPackageReference "ActroIPC" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = Packages/ActroIPC;
+			relativePath = ../../../platform/apple/packages/ActroIPC;
+		};
+		AA00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActroVault" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../../platform/apple/packages/ActroVault;
+		};
+		AB00110022003300AA00BB05 /* XCLocalSwiftPackageReference "ActroCore" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../../../platform/apple/packages/ActroCore;
 		};
 /* End XCLocalSwiftPackageReference section */
 
@@ -1657,6 +1745,14 @@
 		1A2B3C4D5E6F7890ABCD0002 /* ActroIPC */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = ActroIPC;
+		};
+		AA00110022003300AA00BB03 /* ActroVault */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ActroVault;
+		};
+		AB00110022003300AA00BB03 /* ActroCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = ActroCore;
 		};
 		B3E78A282F02AFD7001F9589 /* Highlightr */ = {
 			isa = XCSwiftPackageProductDependency;

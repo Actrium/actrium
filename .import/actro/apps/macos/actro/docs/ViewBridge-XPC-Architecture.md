@@ -304,7 +304,7 @@ sequenceDiagram
 ### 6.1 配置
 
 - **Pool 大小**: 4 个 slot (RCTViewService0 - RCTViewService3)
-- **Bundle ID 格式**: `chat.askaway.Actro.RCTViewService{N}`
+- **Bundle ID 格式**: `io.actrium.actro.rctviewservice{N}`
 
 ### 6.2 分配策略
 
@@ -528,7 +528,7 @@ Actro/
 │   └── ActroServiceViewController.swift # XPC Service 实现
 ├── scripts/
 │   └── generate_xpc_pool.sh             # XPC Service Pool 生成脚本
-└── RCTNApps/
+└── packages/actro-runtime/
     └── src/
         ├── TabRouter.tsx                # RN Tab 路由
         └── system-apps/

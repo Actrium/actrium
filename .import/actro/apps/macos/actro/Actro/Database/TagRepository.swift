@@ -1,20 +1,22 @@
 import Foundation
+import ActroCore
 
 /// Repository for tags using native SQLite3
 final class TagRepository {
     private let db = DatabaseManager.shared
+    private let sql = coreTagRepositorySql()
 
     // MARK: - CRUD Operations
 
     /// Get all tags
     func getAllTags() -> [Tag] {
-        let rows = db.query("SELECT * FROM tags ORDER BY is_system DESC, name ASC")
+        let rows = db.query(sql.selectAll)
         return rows.map { mapRowToTag($0) }
     }
 
     /// Get user-created (non-system) tags only
     func getUserTags() -> [Tag] {
-        let rows = db.query("SELECT * FROM tags WHERE is_system = 0 ORDER BY name ASC")
+        let rows = db.query(sql.selectUser)
         return rows.map { mapRowToTag($0) }
     }
 
@@ -28,8 +30,13 @@ final class TagRepository {
         )
 
         let success = db.execute(
-            "INSERT INTO tags (id, name, color, is_system) VALUES (?, ?, ?, ?)",
-            params: [newTag.id.uuidString, name, color, 0]
+            sql.insertTag,
+            coreParams: coreTagInsertParams(
+                id: newTag.id.uuidString,
+                name: name,
+                color: color,
+                isSystem: false
+            )
         )
 
         return success ? newTag : nil
@@ -40,15 +47,19 @@ final class TagRepository {
         guard !tag.isSystem else { return }
 
         db.execute(
-            "UPDATE tags SET name = ?, color = ? WHERE id = ?",
-            params: [tag.name, tag.color, tag.id.uuidString]
+            sql.updateTag,
+            coreParams: coreTagUpdateParams(
+                name: tag.name,
+                color: tag.color,
+                id: tag.id.uuidString
+            )
         )
     }
 
     /// Delete a tag (only non-system tags)
     func deleteTag(id: UUID) {
         db.execute(
-            "DELETE FROM tags WHERE id = ? AND is_system = 0",
+            sql.deleteUserTagById,
             params: [id.uuidString]
         )
     }
@@ -56,11 +67,7 @@ final class TagRepository {
     /// Get tags for a specific bookmark
     func getTagsForBookmark(bookmarkId: UUID) -> [Tag] {
         let rows = db.query(
-            """
-            SELECT t.* FROM tags t
-            INNER JOIN bookmark_tags bt ON t.id = bt.tag_id
-            WHERE bt.bookmark_id = ?
-            """,
+            sql.selectByBookmarkId,
             params: [bookmarkId.uuidString]
         )
         return rows.map { mapRowToTag($0) }
@@ -70,14 +77,14 @@ final class TagRepository {
     func setTagsForBookmark(bookmarkId: UUID, tagIds: [UUID]) {
         // Remove existing associations
         db.execute(
-            "DELETE FROM bookmark_tags WHERE bookmark_id = ?",
+            sql.deleteBookmarkTagsByBookmarkId,
             params: [bookmarkId.uuidString]
         )
 
         // Add new associations
         for tagId in tagIds {
             db.execute(
-                "INSERT INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)",
+                sql.insertBookmarkTag,
                 params: [bookmarkId.uuidString, tagId.uuidString]
             )
         }
@@ -86,7 +93,7 @@ final class TagRepository {
     /// Add a single tag to a bookmark
     func addTagToBookmark(bookmarkId: UUID, tagId: UUID) {
         db.execute(
-            "INSERT OR IGNORE INTO bookmark_tags (bookmark_id, tag_id) VALUES (?, ?)",
+            sql.insertOrIgnoreBookmarkTag,
             params: [bookmarkId.uuidString, tagId.uuidString]
         )
     }
@@ -94,7 +101,7 @@ final class TagRepository {
     /// Remove a tag from a bookmark
     func removeTagFromBookmark(bookmarkId: UUID, tagId: UUID) {
         db.execute(
-            "DELETE FROM bookmark_tags WHERE bookmark_id = ? AND tag_id = ?",
+            sql.deleteBookmarkTag,
             params: [bookmarkId.uuidString, tagId.uuidString]
         )
     }
@@ -102,16 +109,18 @@ final class TagRepository {
     // MARK: - Helpers
 
     private func mapRowToTag(_ row: [String: Any]) -> Tag {
-        let idString = row["id"] as? String ?? ""
-        let name = row["name"] as? String ?? ""
-        let color = row["color"] as? String
-        let isSystemInt = row["is_system"] as? Int64 ?? 0
+        let tag = coreTagFromRow(row: CoreTagRowInfo(
+            id: row["id"] as? String ?? "",
+            name: row["name"] as? String ?? "",
+            color: row["color"] as? String,
+            isSystemValue: row["is_system"] as? Int64 ?? 0
+        ))
 
         return Tag(
-            id: UUID(uuidString: idString) ?? UUID(),
-            name: name,
-            color: color,
-            isSystem: isSystemInt != 0
+            id: UUID(uuidString: tag.id) ?? UUID(),
+            name: tag.name,
+            color: tag.color,
+            isSystem: tag.isSystem
         )
     }
 }
