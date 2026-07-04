@@ -1,0 +1,21 @@
+diff --git a/node_modules/react-native-live-audio-stream/android/build.gradle b/node_modules/react-native-live-audio-stream/android/build.gradle
+index de6cdf1..bdb7d7f 100644
+--- a/node_modules/react-native-live-audio-stream/android/build.gradle
++++ b/node_modules/react-native-live-audio-stream/android/build.gradle
+@@ -10,12 +10,13 @@ def safeExtGet(prop, fallback) {
+ }
+ 
+ android {
+-    compileSdkVersion safeExtGet("compileSdkVersion", DEFAULT_COMPILE_SDK_VERSION)
++    namespace = "com.imxiqi.rnliveaudiostream"
++    compileSdk = safeExtGet("compileSdkVersion", DEFAULT_COMPILE_SDK_VERSION)
+     buildToolsVersion safeExtGet("buildToolsVersion", DEFAULT_BUILD_TOOLS_VERSION)
+ 
+     defaultConfig {
+-        minSdkVersion safeExtGet('minSdkVersion', DEFAULT_MIN_SDK_VERSION)
+-        targetSdkVersion safeExtGet('targetSdkVersion', DEFAULT_TARGET_SDK_VERSION)
++        minSdk = safeExtGet('minSdkVersion', DEFAULT_MIN_SDK_VERSION)
++        targetSdk = safeExtGet('targetSdkVersion', DEFAULT_TARGET_SDK_VERSION)
+         versionCode 1
+         versionName "1.0"
+     }

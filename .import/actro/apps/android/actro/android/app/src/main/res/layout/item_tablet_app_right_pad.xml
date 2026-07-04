@@ -8,7 +8,7 @@
 
     <!-- 右侧虚拟 item：只保留 rcvBottomLeft -->
 
-    <chat.askaway.android.tablet.ReverseCornerView
+    <io.actrium.actro.tablet.ReverseCornerView
         android:id="@+id/rcvBottomLeft"
         android:layout_width="20dp"
         android:layout_height="20dp"

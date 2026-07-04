@@ -45,9 +45,9 @@
 -dontwarn **
 
 # Project Specific
--keep class com.askaway.android.event.** { *; }
--keep class com.askaway.android.model.** { *; }
--keep class com.askaway.android.global.** { *; }
+-keep class io.actrium.actro.event.** { *; }
+-keep class io.actrium.actro.model.** { *; }
+-keep class io.actrium.actro.global.** { *; }
 
 # WeChat
 -keep class com.tencent.mm.opensdk.** { *; }
@@ -65,7 +65,7 @@
 -dontwarn okhttp3.**
 
 # ActrBridge & Other core classes potentially used via JNI or Reflection
--keep class com.askaway.android.core.** { *; }
+-keep class io.actrium.actro.core.** { *; }
 
 # JNA (Java Native Access)
 -dontwarn com.sun.jna.**

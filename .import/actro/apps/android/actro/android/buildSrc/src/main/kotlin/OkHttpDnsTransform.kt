@@ -62,7 +62,7 @@ abstract class OkHttpDnsTransform : AsmClassVisitorFactory<OkHttpDnsTransform.Pa
                 // 我们需要在这个 builder 上调用 .dns(new CellularDns())
 
                 // 1. NEW CellularDns
-                mv.visitTypeInsn(NEW, "chat/askaway/android/core/CellularDns")
+                mv.visitTypeInsn(NEW, "io/actrium/actro/core/CellularDns")
                 // 栈: [builder, cellularDns]
 
                 // 2. DUP - 复制 CellularDns 引用用于构造函数调用
@@ -72,7 +72,7 @@ abstract class OkHttpDnsTransform : AsmClassVisitorFactory<OkHttpDnsTransform.Pa
                 // 3. INVOKESPECIAL - 调用 CellularDns 无参构造函数
                 mv.visitMethodInsn(
                     INVOKESPECIAL,
-                    "chat/askaway/android/core/CellularDns",
+                    "io/actrium/actro/core/CellularDns",
                     "<init>",
                     "()V",
                     false

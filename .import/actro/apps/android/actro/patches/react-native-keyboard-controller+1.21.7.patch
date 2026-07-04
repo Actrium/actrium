@@ -1,0 +1,76 @@
+diff --git a/node_modules/react-native-keyboard-controller/android/build.gradle b/node_modules/react-native-keyboard-controller/android/build.gradle
+index 989c2c4..5b9fc37 100644
+--- a/node_modules/react-native-keyboard-controller/android/build.gradle
++++ b/node_modules/react-native-keyboard-controller/android/build.gradle
+@@ -8,7 +8,7 @@ buildscript {
+   }
+ 
+   dependencies {
+-    classpath 'com.android.tools.build:gradle:4.2.2'
++    classpath 'com.android.tools.build:gradle:8.8.2'
+     // noinspection DifferentKotlinGradleVersion
+     classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+   }
+@@ -46,16 +46,16 @@ if (isNewArchitectureEnabled()) {
+ android {
+   def agpVersion = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION
+   if (agpVersion.tokenize('.')[0].toInteger() >= 7) {
+-    namespace "com.reactnativekeyboardcontroller"
++    namespace = "com.reactnativekeyboardcontroller"
+     buildFeatures {
+-      buildConfig true
++      buildConfig = true
+     }
+   }
+ 
+-  compileSdkVersion getExtOrIntegerDefault('compileSdkVersion')
++  compileSdk = getExtOrIntegerDefault('compileSdkVersion')
+   defaultConfig {
+-    minSdkVersion getExtOrIntegerDefault('minSdkVersion')
+-    targetSdkVersion getExtOrIntegerDefault('targetSdkVersion')
++    minSdk = getExtOrIntegerDefault('minSdkVersion')
++    targetSdk = getExtOrIntegerDefault('targetSdkVersion')
+     versionCode 1
+     versionName "1.0"
+     buildConfigField "boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString()
+@@ -90,7 +90,7 @@ android {
+     }
+   }
+   lintOptions {
+-    warningsAsErrors true
++    warningsAsErrors = true
+   }
+   compileOptions {
+     sourceCompatibility JavaVersion.VERSION_1_8
+@@ -117,8 +117,8 @@ repositories {
+ 
+   if (defaultDir.exists()) {
+     maven {
+-      url defaultDir.toString()
+-      name androidSourcesName
++      url = uri(defaultDir.toString())
++      name = androidSourcesName
+     }
+ 
+     logger.info(":${project.name}:reactNativeAndroidRoot ${defaultDir.canonicalPath}")
+@@ -142,16 +142,16 @@ repositories {
+ 
+       if (androidPrebuiltBinaryDir.exists()) {
+         maven {
+-          url androidPrebuiltBinaryDir.toString()
+-          name androidSourcesName
++          url = uri(androidPrebuiltBinaryDir.toString())
++          name = androidSourcesName
+         }
+ 
+         logger.info(":${project.name}:reactNativeAndroidRoot ${androidPrebuiltBinaryDir.canonicalPath}")
+         found = true
+       } else if (androidSourcesDir.exists()) {
+         maven {
+-          url androidSourcesDir.toString()
+-          name androidSourcesName
++          url = uri(androidSourcesDir.toString())
++          name = androidSourcesName
+         }
+ 
+         logger.info(":${project.name}:reactNativeAndroidRoot ${androidSourcesDir.canonicalPath}")

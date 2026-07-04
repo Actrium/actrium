@@ -1,0 +1,80 @@
+diff --git a/node_modules/@react-native-community/netinfo/android/build.gradle b/node_modules/@react-native-community/netinfo/android/build.gradle
+index d5fda29..58b0e13 100644
+--- a/node_modules/@react-native-community/netinfo/android/build.gradle
++++ b/node_modules/@react-native-community/netinfo/android/build.gradle
+@@ -10,7 +10,7 @@ buildscript {
+     }
+ 
+     dependencies {
+-      classpath("com.android.tools.build:gradle:7.4.2")
++      classpath("com.android.tools.build:gradle:8.8.2")
+     }
+   }
+ }
+@@ -80,7 +80,7 @@ if (isNewArchitectureEnabled()) {
+ }
+ 
+ android {
+-  compileSdkVersion getExtOrIntegerDefault('compileSdkVersion')
++  compileSdk = getExtOrIntegerDefault('compileSdkVersion')
+ 
+   def agpVersion = com.android.Version.ANDROID_GRADLE_PLUGIN_VERSION
+   // Check AGP version for backward compatibility reasons
+@@ -94,8 +94,8 @@ android {
+   }
+ 
+   defaultConfig {
+-    minSdkVersion getExtOrIntegerDefault('minSdkVersion')
+-    targetSdkVersion getExtOrIntegerDefault('targetSdkVersion')
++    minSdk = getExtOrIntegerDefault('minSdkVersion')
++    targetSdk = getExtOrIntegerDefault('targetSdkVersion')
+     buildConfigField("boolean", "IS_NEW_ARCHITECTURE_ENABLED", isNewArchitectureEnabled().toString())
+   }
+   sourceSets {
+@@ -108,7 +108,7 @@ android {
+       }
+   }
+   lintOptions{
+-    abortOnError false
++    abortOnError = false
+   }
+ 
+ }
+@@ -120,11 +120,11 @@ repositories {
+     // Use node resolver to locate react-native package
+     def reactNativePackage = file(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim())
+     if (reactNativePackage.exists()) {
+-      url "$reactNativePackage.parentFile/android"
++      url = uri("$reactNativePackage.parentFile/android")
+     }
+     // Fallback to react-native package colocated in node_modules
+     else {
+-      url "$rootDir/../node_modules/react-native/android"
++      url = uri("$rootDir/../node_modules/react-native/android")
+     }
+   }
+   google()
+diff --git a/node_modules/@react-native-community/netinfo/android/src/newarch/com/reactnativecommunity/netinfo/NetInfoModule.java b/node_modules/@react-native-community/netinfo/android/src/newarch/com/reactnativecommunity/netinfo/NetInfoModule.java
+index 61e44c4..3b7cadc 100644
+--- a/node_modules/@react-native-community/netinfo/android/src/newarch/com/reactnativecommunity/netinfo/NetInfoModule.java
++++ b/node_modules/@react-native-community/netinfo/android/src/newarch/com/reactnativecommunity/netinfo/NetInfoModule.java
+@@ -39,6 +39,7 @@ public class NetInfoModule extends NativeRNCNetInfoSpec {
+         implementation.removeListeners(count);
+     }
+ 
++    @SuppressWarnings("removal")
+     @Override
+     public void onCatalystInstanceDestroy() {
+         implementation.onCatalystInstanceDestroy();
+diff --git a/node_modules/@react-native-community/netinfo/android/src/oldarch/com/reactnativecommunity/netinfo/NetInfoModule.java b/node_modules/@react-native-community/netinfo/android/src/oldarch/com/reactnativecommunity/netinfo/NetInfoModule.java
+index 4738d63..4414b00 100644
+--- a/node_modules/@react-native-community/netinfo/android/src/oldarch/com/reactnativecommunity/netinfo/NetInfoModule.java
++++ b/node_modules/@react-native-community/netinfo/android/src/oldarch/com/reactnativecommunity/netinfo/NetInfoModule.java
+@@ -31,6 +31,7 @@ public class NetInfoModule extends ReactContextBaseJavaModule {
+         implementation.getCurrentState(requestedInterface, promise);
+     }
+ 
++    @SuppressWarnings("removal")
+     @Override
+     public void onCatalystInstanceDestroy() {
+         implementation.onCatalystInstanceDestroy();

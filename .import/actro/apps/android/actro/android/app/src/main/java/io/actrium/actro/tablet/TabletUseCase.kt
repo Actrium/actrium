@@ -1,0 +1,20 @@
+package io.actrium.actro.tablet
+
+import android.os.Bundle
+import io.actrium.actro.model.ActiveModel
+
+data class TabletUseCase(
+    val appList: List<ActiveModel> = emptyList(),
+    val currentApp: Bundle? = null,
+    val pageMode: PageMode = PageMode.TAB,
+    val showPageType: String = "",
+    val autoCreate:Boolean = false,
+)
+
+/**
+ * pad中应用显示模式，TAB为页签形式，GRID为网格形式
+ */
+enum class PageMode {
+    TAB,
+    GRID
+}

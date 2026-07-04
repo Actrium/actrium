@@ -44,7 +44,7 @@
         app:cardCornerRadius="12dp"
         app:cardElevation="4dp">
 
-        <chat.askaway.android.tablet.ScalableContainer
+        <io.actrium.actro.tablet.ScalableContainer
             android:id="@+id/flAppContent"
             android:layout_width="match_parent"
             android:layout_height="match_parent">
@@ -85,7 +85,7 @@
 
             </LinearLayout>
 
-        </chat.askaway.android.tablet.ScalableContainer>
+        </io.actrium.actro.tablet.ScalableContainer>
 
         <!-- Grid 模式下显示的截图 ImageView，覆盖在 ReactRootView 之上 -->
         <ImageView

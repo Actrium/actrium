@@ -2,21 +2,21 @@ edition = 1
 exports = []
 
 [package]
-name = "DataStreamApp"
-description = "Data stream client app"
-authors = ["Actr-Team"]
+name = "actro"
+description = "Actro browser client app"
+authors = ["Actro-Team"]
 license = "Apache-2.0"
 tags = ["dev", "client"]
 
 [package.actr_type]
-manufacturer = "askaway"
-name = "broswer"
+manufacturer = "actro"
+name = "actro"
 
 [dependencies]
-bot = { actr_type = "askaway+app_server" }
+bot = { actr_type = "actro+app_server" }
 
 [system.signaling]
-url = "wss://actrix1.askaway.chat:443/signaling/ws"
+url = "wss://actrix1.actro.chat:443/signaling/ws"
 
 [system.deployment]
 realm_id = 573
@@ -28,12 +28,12 @@ visible = true
 filter_level = "debug"
 tracing_enabled = true
 tracing_endpoint = "http://127.0.0.1:4317"
-tracing_service_name = "DataStreamApp"
+tracing_service_name = "actro"
 
 [system.webrtc]
 force_relay = false
-stun_urls = ["stun:actrix1.askaway.chat:3479"]
-turn_urls = ["turn:actrix1.askaway.chat:3479"]
+stun_urls = ["stun:actrix1.actro.chat:3479"]
+turn_urls = ["turn:actrix1.actro.chat:3479"]
 
 [scripts]
 dev = "xcodegen generate"
@@ -43,4 +43,4 @@ test = "xcodebuild test"
 
 [[acl.rules]]
 permission = "allow"
-types = ["askaway+app_server"]
+types = ["actro+app_server"]
