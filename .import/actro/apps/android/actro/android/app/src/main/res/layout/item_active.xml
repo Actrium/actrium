@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<chat.askaway.android.view.RoundedCornerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<io.actrium.actro.view.RoundedCornerLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/fl_active"
     android:layout_width="match_parent"
@@ -32,7 +32,7 @@
             android:layout_width="32dp"
             android:layout_height="32dp">
 
-            <chat.askaway.android.view.RoundedCornerLayout
+            <io.actrium.actro.view.RoundedCornerLayout
                 android:layout_width="32dp"
                 android:layout_height="32dp"
                 app:cornerRadius="16dp">
@@ -43,7 +43,7 @@
                     android:layout_height="match_parent"
                     android:background="@drawable/app_icon_bg"
                     android:scaleType="centerCrop" />
-            </chat.askaway.android.view.RoundedCornerLayout>
+            </io.actrium.actro.view.RoundedCornerLayout>
             <!-- 未读标记圆点 -->
             <View
                 android:id="@+id/vUnreadBadge"
@@ -86,4 +86,4 @@
             android:src="@drawable/ic_delete"
             app:tint="@color/icon_1" />
     </LinearLayout>
-</chat.askaway.android.view.RoundedCornerLayout>
+</io.actrium.actro.view.RoundedCornerLayout>

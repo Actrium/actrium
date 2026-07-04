@@ -19,13 +19,34 @@ buildscript {
     repositories {
         google()
         mavenCentral()
+        maven {
+            url = uri("https://maven.pkg.github.com/Actrium/actr-kotlin-package-sync")
+            credentials {
+                username = System.getenv("GITHUB_ACTRIUM_USER") ?: System.getenv("GITHUB_ACTOR") ?: "actrium"
+                password = System.getenv("GITHUB_ACTRIUM_TOKEN") ?: System.getenv("GITHUB_TOKEN") ?: ""
+            }
+        }
     }
     dependencies {
-        classpath("com.android.tools.build:gradle")
+        classpath("com.android.tools.build:gradle:8.8.2")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
         classpath("com.google.protobuf:protobuf-gradle-plugin:0.9.4")
         classpath("com.google.devtools.ksp:symbol-processing-gradle-plugin:2.0.21-1.0.28")
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            url = uri("https://maven.pkg.github.com/Actrium/actr-kotlin-package-sync")
+            credentials {
+                username = System.getenv("GITHUB_ACTRIUM_USER") ?: System.getenv("GITHUB_ACTOR") ?: "actrium"
+                password = System.getenv("GITHUB_ACTRIUM_TOKEN") ?: System.getenv("GITHUB_TOKEN") ?: ""
+            }
+        }
     }
 }
 

@@ -11,7 +11,7 @@
         android:background="#80000000" />
 
     <!-- 弹窗内容容器，你可以在这里添加自己的内容 -->
-    <chat.askaway.android.view.RoundedCornerLayout xmlns:app="http://schemas.android.com/apk/res-auto"
+    <io.actrium.actro.view.RoundedCornerLayout xmlns:app="http://schemas.android.com/apk/res-auto"
         android:layout_width="600dp"
         android:layout_height="600dp"
         android:layout_gravity="center"
@@ -21,5 +21,5 @@
             android:id="@+id/llContent"
             android:layout_width="match_parent"
             android:layout_height="match_parent" />
-    </chat.askaway.android.view.RoundedCornerLayout>
+    </io.actrium.actro.view.RoundedCornerLayout>
 </FrameLayout>

@@ -4,7 +4,7 @@
 
 ## 1. 问题
 
-本项目通过 Subsystem 的 React Native 模块以本地依赖的方式间接集成了 rill 项目。rill 项目包含 C 语言代码，但在当前项目编译过程中，rill 的 C 代码未被正确编译进最终产物。
+本项目通过 ActroRuntime 的 React Native 模块以本地依赖的方式间接集成了 rill 项目。rill 项目包含 C 语言代码，但在当前项目编译过程中，rill 的 C 代码未被正确编译进最终产物。
 
 为解决该集成问题，曾尝试在 app/gradle 配置中添加 rill 库 C 代码的路径，但运行时出现如下报错：
 

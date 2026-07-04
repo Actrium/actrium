@@ -6,10 +6,10 @@
       "react": ["./node_modules/@types/react/index.d.ts"],
       "react-native": ["./node_modules/@types/react-native/index.d.ts"],
       "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime.d.ts"],
-      "askit": ["../askit/src/index.host.ts"],
-      "askit/core": ["../askit/src/core/index.ts"],
-      "askit/contracts": ["../askit/src/contracts/index.ts"],
-      "rill": ["../rill/src/host/index.ts"]
+      "askit": ["../../../packages/askit/src/index.host.ts"],
+      "askit/core": ["../../../packages/askit/src/core/index.ts"],
+      "askit/contracts": ["../../../packages/askit/src/contracts/index.ts"],
+      "rill": ["../../../packages/rill/src/host/index.ts"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],

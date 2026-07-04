@@ -2,18 +2,18 @@ edition = 1
 exports = []
 
 [package]
-name = "DataStreamApp"
-description = "Data stream client app"
-authors = ["Actr-Team"]
+name = "actro"
+description = "Actro browser client app"
+authors = ["Actro-Team"]
 license = "Apache-2.0"
 tags = ["dev", "client"]
 
 [package.actr_type]
-manufacturer = "askaway"
-name = "broswer"
+manufacturer = "actro"
+name = "actro"
 
 [dependencies]
-bot = { actr_type = "askaway+app_server" }
+bot = { actr_type = "actro+app_server" }
 
 [system.signaling]
 url = "wss://loran1.actrium.example:443/signaling/ws"
@@ -28,7 +28,7 @@ visible = true
 filter_level = "debug"
 tracing_enabled = true
 tracing_endpoint = "http://127.0.0.1:4317"
-tracing_service_name = "DataStreamApp"
+tracing_service_name = "actro"
 
 [system.webrtc]
 force_relay = false
@@ -43,4 +43,4 @@ test = "xcodebuild test"
 
 [[acl.rules]]
 permission = "allow"
-types = ["askaway+app_server"]
+types = ["actro+app_server"]

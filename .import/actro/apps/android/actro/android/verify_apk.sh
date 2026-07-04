@@ -1,11 +1,13 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo "======================================"
 echo "开始构建和验证 APK"
 echo "======================================"
 
-cd /Users/example/Documents/Project/example-app/canvas-kotlin/android
+cd "$SCRIPT_DIR"
 
 echo ""
 echo "1. 清理旧的构建产物..."

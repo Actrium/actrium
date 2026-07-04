@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package data_stream_app;
+package actro;
 
 import "remote/ask-service/ask.proto";
 

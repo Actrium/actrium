@@ -5,7 +5,7 @@
  * @type {import('@react-native/metro-config').MetroConfig}
  */
 const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
-const { resolve } = require('metro-resolver');
+const fs = require('fs');
 const path = require('path');
 
 const defaultConfig = getDefaultConfig(__dirname);
@@ -15,59 +15,101 @@ defaultConfig.resolver.sourceExts = [
   'ts'
 ];
 
-// 配置 Subsystem 作为 watchFolder
-const subsystemPath = path.resolve(__dirname, 'Subsystem');
-const supermarkRoot = path.resolve(__dirname, '..', 'supermark');
-const loomRoot = path.resolve(__dirname, '..', 'loom');
-const askitRoot = path.resolve(__dirname, '..', 'askit');
-const rillRoot = path.resolve(__dirname, '..', 'rill');
-const loomShimsDir = path.resolve(__dirname, 'loom', 'src', 'actr-host', 'shims');
-const loomNodeModules = path.resolve(__dirname, 'loom', 'node_modules');
+const workspacePackagesRoot = path.resolve(__dirname, '../../../packages');
+const workspaceRoot = path.resolve(__dirname, '../../..');
+const workspaceNodeModules = path.resolve(workspaceRoot, 'node_modules');
+const supramarkRoot = path.resolve(workspacePackagesRoot, 'supramark');
+const runtimeRoot = path.resolve(workspacePackagesRoot, 'actro-runtime');
+const askitRoot = path.resolve(workspacePackagesRoot, 'askit');
+const rillRoot = path.resolve(workspacePackagesRoot, 'rill');
+const runtimeShimsDir = path.resolve(runtimeRoot, 'src', 'actr-host', 'shims');
+const supramarkWebEngineShim = path.resolve(runtimeShimsDir, 'supramark-web-engine.js');
+const runtimeNodeModules = path.resolve(runtimeRoot, 'node_modules');
 const yarnLinkRoot = path.resolve(process.env.HOME || '', '.config', 'yarn', 'link');
-const rillNodeModules = path.resolve(__dirname, '..', 'rill', 'node_modules');
-const askitNodeModules = path.resolve(__dirname, '..', 'askit', 'node_modules');
+const rillNodeModules = path.resolve(rillRoot, 'node_modules');
+const askitNodeModules = path.resolve(askitRoot, 'node_modules');
+const existingDirs = (dirs) => Array.from(new Set(dirs)).filter((dir) => fs.existsSync(dir));
+const resolveFromProject = (moduleName) => require.resolve(moduleName, { paths: [__dirname] });
+const packageRoot = (packageName) => path.dirname(resolveFromProject(`${packageName}/package.json`));
+const defaultResolve = (context, moduleName, platform) => {
+  const resolveRequest = context.resolveRequest;
+  if (typeof resolveRequest !== 'function') {
+    throw new Error(`Metro default resolver is unavailable while resolving ${moduleName}`);
+  }
+  return resolveRequest(
+    Object.freeze({
+      ...context,
+      resolveRequest,
+    }),
+    moduleName,
+    platform,
+  );
+};
+
+const supramarkSourceMap = {
+  '@supramark/core': path.resolve(supramarkRoot, 'packages/core/src/index.rn.ts'),
+  '@supramark/rn': path.resolve(supramarkRoot, 'packages/renderers/rn/src/index.ts'),
+  '@supramark/engines': path.resolve(supramarkRoot, 'packages/engines/src/index.ts'),
+  '@supramark/feature-admonition': path.resolve(supramarkRoot, 'packages/features/containers/admonition/src/index.ts'),
+  '@supramark/feature-core-markdown': path.resolve(supramarkRoot, 'packages/features/core-markdown/src/index.ts'),
+  '@supramark/feature-definition-list': path.resolve(supramarkRoot, 'packages/features/main/definition-list/src/index.ts'),
+  '@supramark/feature-diagram-dot': path.resolve(supramarkRoot, 'packages/features/diagrams/dot/src/index.ts'),
+  '@supramark/feature-diagram-echarts': path.resolve(supramarkRoot, 'packages/features/diagrams/echarts/src/index.ts'),
+  '@supramark/feature-diagram-vega-lite': path.resolve(supramarkRoot, 'packages/features/diagrams/vega-lite/src/index.ts'),
+  '@supramark/feature-emoji': path.resolve(supramarkRoot, 'packages/features/main/emoji/src/index.ts'),
+  '@supramark/feature-footnote': path.resolve(supramarkRoot, 'packages/features/main/footnote/src/index.ts'),
+  '@supramark/feature-gfm': path.resolve(supramarkRoot, 'packages/features/main/gfm/src/index.ts'),
+  '@supramark/feature-math': path.resolve(supramarkRoot, 'packages/features/main/math/src/index.ts'),
+  '@supramark/feature-weather': path.resolve(supramarkRoot, 'packages/features/containers/weather/src/index.ts'),
+  '@supramark/feature-mermaid': path.resolve(supramarkRoot, 'packages/features/diagrams/mermaid/src/index.ts'),
+  '@supramark/feature-plantuml': path.resolve(supramarkRoot, 'packages/features/diagrams/plantuml/src/index.ts'),
+  '@supramark/markdown-web': path.resolve(supramarkRoot, 'crates/supramark-markdown/packages/web/src/index.ts'),
+  '@actrium/graphviz-anywhere-rn': path.resolve(supramarkRoot, 'crates/graphviz-anywhere/packages/react-native/src/index.ts'),
+  '@actrium/graphviz-anywhere-web': supramarkWebEngineShim,
+  '@actrium/d2-little-web': supramarkWebEngineShim,
+  '@actrium/mermaid-little-web': supramarkWebEngineShim,
+  '@actrium/plantuml-little-web': supramarkWebEngineShim,
+};
 
 const config = {
-  watchFolders: [
-    // 中文注释：当前项目内的 loom 是软链，Metro 需要监听其真实目录。
-    loomRoot,
-    supermarkRoot,
+  watchFolders: existingDirs([
+    // 中文注释：当前项目内的 actro-runtime 是软链，Metro 需要监听其真实目录。
+    runtimeRoot,
+    supramarkRoot,
     askitRoot,
     rillRoot,
     yarnLinkRoot,
-    rillRoot,
-    askitRoot,
-  ],
+    workspaceNodeModules,
+  ]),
   resolver: {
     unstable_enableSymlinks: true,
     nodeModulesPaths: [
-      loomNodeModules,
+      workspaceNodeModules,
+      runtimeNodeModules,
       rillNodeModules,
       askitNodeModules,
       path.resolve(__dirname, 'node_modules'),
     ],
     // 确保 react 和 react-native 使用主项目的版本，避免冲突
     extraNodeModules: {
-      'react': path.resolve(__dirname, 'node_modules/react'),
-      'react-native': path.resolve(__dirname, 'node_modules/react-native'),
-      'react-reconciler': path.resolve(__dirname, 'node_modules/react-reconciler'),
-      'scheduler': path.resolve(__dirname, 'node_modules/scheduler'),
+      'react': packageRoot('react'),
+      'react-native': packageRoot('react-native'),
+      'react-reconciler': packageRoot('react-reconciler'),
+      'scheduler': packageRoot('scheduler'),
     },
     // 避免多个 node_modules 导致的模块重复
     blockList: [
-      // 忽略 Subsystem 自己的 react 和 react-native
-      /Subsystem\/node_modules\/react\/.*/,
-      /Subsystem\/node_modules\/react-native\/.*/,
-      /..\/loom\/node_modules\/react\/.*/,
-      /..\/loom\/node_modules\/react-native\/.*/,
-      // 屏蔽 supermark 中的 react / react-native（含 bun .bun 目录下的副本）
-      new RegExp(`${supermarkRoot}/node_modules/react/.*`),
-      new RegExp(`${supermarkRoot}/node_modules/react-native/.*`),
-      new RegExp(`${supermarkRoot}/node_modules/\\.bun/.*\\/react/.*`),
-      new RegExp(`${supermarkRoot}/node_modules/\\.bun/.*\\/react-native/.*`),
-      // 屏蔽 supermark 子包内嵌 node_modules 中的 react / react-native
-      new RegExp(`${supermarkRoot}/packages/.*/node_modules/react/.*`),
-      new RegExp(`${supermarkRoot}/packages/.*/node_modules/react-native/.*`),
+      // 忽略 actro-runtime 自己的 react 和 react-native
+      /..\/actro-runtime\/node_modules\/react\/.*/,
+      /..\/actro-runtime\/node_modules\/react-native\/.*/,
+      // 屏蔽 supramark 中的 react / react-native（含 bun .bun 目录下的副本）
+      new RegExp(`${supramarkRoot}/node_modules/react/.*`),
+      new RegExp(`${supramarkRoot}/node_modules/react-native/.*`),
+      new RegExp(`${supramarkRoot}/node_modules/\\.bun/.*\\/react/.*`),
+      new RegExp(`${supramarkRoot}/node_modules/\\.bun/.*\\/react-native/.*`),
+      // 屏蔽 supramark 子包内嵌 node_modules 中的 react / react-native
+      new RegExp(`${supramarkRoot}/packages/.*/node_modules/react/.*`),
+      new RegExp(`${supramarkRoot}/packages/.*/node_modules/react-native/.*`),
       // 屏蔽 rill 中的 react
       new RegExp(`${rillRoot}/node_modules/react/.*`),
       // 屏蔽 askit 中的 react / react-native
@@ -75,6 +117,20 @@ const config = {
       new RegExp(`${askitRoot}/node_modules/react-native/.*`),
     ],
     resolveRequest: (context, moduleName, platform) => {
+      if (
+        moduleName === 'react' ||
+        moduleName === 'react/jsx-runtime' ||
+        moduleName === 'react/jsx-dev-runtime' ||
+        moduleName === 'react-native' ||
+        moduleName === 'react-reconciler' ||
+        moduleName === 'scheduler'
+      ) {
+        return { type: 'sourceFile', filePath: resolveFromProject(moduleName) };
+      }
+      if (moduleName === '@babel/runtime' || moduleName.startsWith('@babel/runtime/')) {
+        return { type: 'sourceFile', filePath: resolveFromProject(moduleName) };
+      }
+
       // ---- rill/askit 从源码目录解析 ----
       // yarn file: 依赖是物理拷贝，源码更新后 node_modules 副本不会同步。
       // 让 Metro 直接从 rillRoot/askitRoot 解析，确保始终使用最新源码。
@@ -122,88 +178,45 @@ const config = {
 
       if (isFromLinkedPackage) {
         if (moduleName === 'react') {
-          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'react', 'index.js') };
+          return { type: 'sourceFile', filePath: resolveFromProject('react') };
         }
         if (moduleName === 'react/jsx-runtime') {
-          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'react', 'jsx-runtime.js') };
+          return { type: 'sourceFile', filePath: resolveFromProject('react/jsx-runtime') };
         }
         if (moduleName === 'react/jsx-dev-runtime') {
-          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'react', 'jsx-dev-runtime.js') };
+          return { type: 'sourceFile', filePath: resolveFromProject('react/jsx-dev-runtime') };
         }
         if (moduleName === 'react-reconciler') {
-          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'react-reconciler', 'index.js') };
+          return { type: 'sourceFile', filePath: resolveFromProject('react-reconciler') };
         }
         if (moduleName === 'scheduler') {
-          return { type: 'sourceFile', filePath: path.resolve(__dirname, 'node_modules', 'scheduler', 'index.js') };
+          return { type: 'sourceFile', filePath: resolveFromProject('scheduler') };
         }
       }
 
       // ---- RN 不兼容模块的 shim 替换 ----
       // @viz-js/viz 使用 import.meta + WASM，Hermes 不支持，用 shim 让其 fallback 到 Kroki 服务端渲染
       if (moduleName === '@viz-js/viz') {
-        return { type: 'sourceFile', filePath: path.resolve(loomShimsDir, 'viz-js-viz.js') };
+        return { type: 'sourceFile', filePath: path.resolve(runtimeShimsDir, 'viz-js-viz.js') };
       }
-      
+
       // tslib 的 ESM/CJS 混合导出兼容
       if (moduleName === 'tslib') {
-        return { type: 'sourceFile', filePath: path.resolve(loomShimsDir, 'tslib.js') };
+        return { type: 'sourceFile', filePath: path.resolve(runtimeShimsDir, 'tslib.js') };
       }
-      if (moduleName === '@supramark/core') {
+      if (supramarkSourceMap[moduleName]) {
+        return { type: 'sourceFile', filePath: supramarkSourceMap[moduleName] };
+      }
+      if (
+        (context.originModulePath.startsWith(path.resolve(supramarkRoot, 'packages', 'core', 'src')) ||
+         context.originModulePath.includes('/node_modules/@supramark/core/')) &&
+        (moduleName === './plugin-loader.js' || moduleName === './plugin-loader')
+      ) {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(supermarkRoot, 'packages/core/src/index.rn.ts'),
+          filePath: path.resolve(supramarkRoot, 'packages', 'core', 'src', 'plugin-loader-rn.ts'),
         };
       }
-
-      // ---- askit 从源码目录解析，避免 file: 依赖不同步 ----
-      if (moduleName === 'askit') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(askitRoot, 'src/index.host.ts'),
-        };
-      }
-      if (moduleName === 'askit/core') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(askitRoot, 'src/core/index.ts'),
-        };
-      }
-      if (moduleName === 'askit/contracts') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(askitRoot, 'src/contracts/index.ts'),
-        };
-      }
-
-      // ---- rill 从源码目录解析 ----
-      if (moduleName === 'rill') {
-        return {
-          type: 'sourceFile',
-          filePath: path.resolve(rillRoot, 'src/host/index.ts'),
-        };
-      }
-
-      // ---- @supramark/* 包统一从源码目录解析 ----
-      // yarn file: 依赖是物理拷贝，源码更新后 node_modules 副本不会同步。
-      // 让 Metro 直接从 supermarkRoot 解析，确保始终使用最新源码（含图片等资源）。
-      if (moduleName.startsWith('@supramark/')) {
-        const fullName = moduleName.slice('@supramark/'.length);
-        if (!fullName.includes('/')) {
-          // 顶层包导入（不含子路径如 /web）
-          let sourceDir;
-          if (fullName === 'core') {
-            sourceDir = path.resolve(supermarkRoot, 'packages', 'core');
-          } else if (fullName.startsWith('feature-')) {
-            sourceDir = path.resolve(supermarkRoot, 'packages', 'features', fullName);
-          } else {
-            sourceDir = path.resolve(supermarkRoot, 'packages', 'renderers', fullName);
-          }
-          // core 使用 RN 专用入口 index.rn.ts，其余使用 src/index.ts
-          const entryFile = fullName === 'core' ? 'src/index.rn.ts' : 'src/index.ts';
-          return { type: 'sourceFile', filePath: path.resolve(sourceDir, entryFile) };
-        }
-      }
-      // 子路径导入（如 @supramark/feature-admonition/web）暂走默认解析
 
       // ---- supramark peer dependency: pako ----
       // pako 没有 main 字段（只有 exports），Metro 可能无法正确解析入口。
@@ -220,26 +233,26 @@ const config = {
         } catch {}
       }
 
-      // ---- supermark ESM .js → .ts 重写 ----
-      // supermark 源码使用 ESM 风格的 `.js` 后缀导入（如 `from './feature.js'`），
+      // ---- supramark ESM .js → .ts 重写 ----
+      // supramark 源码使用 ESM 风格的 `.js` 后缀导入（如 `from './feature.js'`），
       // 但实际文件是 `.ts`。Metro 无法自动解析，需要在这里拦截并重写。
       if (
-        (context.originModulePath.startsWith(supermarkRoot) ||
+        (context.originModulePath.startsWith(supramarkRoot) ||
          context.originModulePath.includes('@supramark/')) &&
         moduleName.endsWith('.js') &&
         (moduleName.startsWith('./') || moduleName.startsWith('../'))
       ) {
         const tsName = moduleName.replace(/\.js$/, '.ts');
         try {
-          return resolve(context, tsName, platform);
+          return defaultResolve(context, tsName, platform);
         } catch {}
         const tsxName = moduleName.replace(/\.js$/, '.tsx');
         try {
-          return resolve(context, tsxName, platform);
+          return defaultResolve(context, tsxName, platform);
         } catch {}
       }
 
-      return resolve(context, moduleName, platform);
+      return defaultResolve(context, moduleName, platform);
     },
   }
 };

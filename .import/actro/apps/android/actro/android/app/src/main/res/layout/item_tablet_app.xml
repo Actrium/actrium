@@ -20,7 +20,7 @@
             android:orientation="horizontal"
             android:paddingHorizontal="8dp">
 
-            <chat.askaway.android.view.RoundedCornerLayout
+            <io.actrium.actro.view.RoundedCornerLayout
                 android:layout_width="20dp"
                 android:layout_height="20dp"
                 android:layout_marginEnd="6dp"
@@ -30,7 +30,7 @@
                     android:id="@+id/ivAppIcon"
                     android:layout_width="20dp"
                     android:layout_height="20dp" />
-            </chat.askaway.android.view.RoundedCornerLayout>
+            </io.actrium.actro.view.RoundedCornerLayout>
 
             <TextView
                 android:id="@+id/tvAppName"
@@ -50,7 +50,7 @@
 
     <!-- 选中项左侧桥接：填补本item左间距，连接左邻居的rcvBottomRight -->
 
-    <chat.askaway.android.tablet.ReverseCornerView
+    <io.actrium.actro.tablet.ReverseCornerView
         android:id="@+id/vBridgeLeft"
         android:layout_width="20dp"
         android:layout_height="20dp"
@@ -60,7 +60,7 @@
         app:fillColor="#F2F2F6"
         app:reverseDirection="bottomRight" />
 
-    <chat.askaway.android.tablet.ReverseCornerView
+    <io.actrium.actro.tablet.ReverseCornerView
         android:id="@+id/vBridgeRight"
         android:layout_width="20dp"
         android:layout_height="20dp"
@@ -70,7 +70,7 @@
         app:fillColor="#F2F2F6"
         app:reverseDirection="bottomLeft" />
 
-    <chat.askaway.android.tablet.ReverseCornerView
+    <io.actrium.actro.tablet.ReverseCornerView
         android:id="@+id/rcvBottomLeft"
         android:layout_width="20dp"
         android:layout_height="20dp"
@@ -80,7 +80,7 @@
         app:fillColor="#F2F2F6"
         app:reverseDirection="bottomLeft" />
 
-    <chat.askaway.android.tablet.ReverseCornerView
+    <io.actrium.actro.tablet.ReverseCornerView
         android:id="@+id/rcvBottomRight"
         android:layout_width="20dp"
         android:layout_height="20dp"
