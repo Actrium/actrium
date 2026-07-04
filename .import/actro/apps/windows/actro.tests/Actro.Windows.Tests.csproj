@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>Actro.Windows.Tests</AssemblyName>
+    <RootNamespace>Actro.Windows.Tests</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.*" />
+    <!-- DPAPI protection for the browser sync credential file; not part of
+         the .NET 8 shared framework. Non-Windows test hosts never reach the
+         DPAPI calls (the store writes a plain envelope there). -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tests exercise the real Rust core library: a missing library is a
+         test failure, not a silent skip. The dylib glob covers macOS hosts
+         running the same suite through verify:windows. -->
+    <Content Include="..\actro\native\*.dll" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="..\actro\native\*.dylib" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\actro\src\ActroCore.cs" Link="ActroCore.cs" />
+    <Compile Include="..\actro\src\BrowserAddressInputPolicy.cs" Link="BrowserAddressInputPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserBrowsingDataPolicy.cs" Link="BrowserBrowsingDataPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserClosedTabStack.cs" Link="BrowserClosedTabStack.cs" />
+    <Compile Include="..\actro\src\BrowserContentBlockingPolicy.cs" Link="BrowserContentBlockingPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserContentBlockingStore.cs" Link="BrowserContentBlockingStore.cs" />
+    <Compile Include="..\actro\src\BrowserDownloadPolicy.cs" Link="BrowserDownloadPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserExternalProtocolPolicy.cs" Link="BrowserExternalProtocolPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserFindPolicy.cs" Link="BrowserFindPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserBookmarksDocumentPolicy.cs" Link="BrowserBookmarksDocumentPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserBookmarkStore.cs" Link="BrowserBookmarkStore.cs" />
+    <Compile Include="..\actro\src\BrowserHistoryDocumentPolicy.cs" Link="BrowserHistoryDocumentPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserHistoryStore.cs" Link="BrowserHistoryStore.cs" />
+    <Compile Include="..\actro\src\BrowserHomeDocumentPolicy.cs" Link="BrowserHomeDocumentPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserLocalListDocumentPolicy.cs" Link="BrowserLocalListDocumentPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserNavigationErrorPolicy.cs" Link="BrowserNavigationErrorPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserPageActionPolicy.cs" Link="BrowserPageActionPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserPdfPolicy.cs" Link="BrowserPdfPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserPermissionPolicy.cs" Link="BrowserPermissionPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserProfilePolicy.cs" Link="BrowserProfilePolicy.cs" />
+    <Compile Include="..\actro\src\BrowserProcessFailurePolicy.cs" Link="BrowserProcessFailurePolicy.cs" />
+    <Compile Include="..\actro\src\BrowserSearchEnginePolicy.cs" Link="BrowserSearchEnginePolicy.cs" />
+    <Compile Include="..\actro\src\BrowserSearchSettingsStore.cs" Link="BrowserSearchSettingsStore.cs" />
+    <Compile Include="..\actro\src\BrowserSessionStore.cs" Link="BrowserSessionStore.cs" />
+    <Compile Include="..\actro\src\BrowserStartupSettingsStore.cs" Link="BrowserStartupSettingsStore.cs" />
+    <Compile Include="..\actro\src\BrowserStorageDatabase.cs" Link="BrowserStorageDatabase.cs" />
+    <Compile Include="..\actro\src\BrowserStorageSyncClient.cs" Link="BrowserStorageSyncClient.cs" />
+    <Compile Include="..\actro\src\BrowserStorageSyncCoordinator.cs" Link="BrowserStorageSyncCoordinator.cs" />
+    <Compile Include="..\actro\src\BrowserStorageSyncCredentialStore.cs" Link="BrowserStorageSyncCredentialStore.cs" />
+    <Compile Include="..\actro\src\BrowserStorageSyncScheduler.cs" Link="BrowserStorageSyncScheduler.cs" />
+    <Compile Include="..\actro\src\BrowserSyncStatusPolicy.cs" Link="BrowserSyncStatusPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserWindowStateStore.cs" Link="BrowserWindowStateStore.cs" />
+    <Compile Include="..\actro\src\BrowserZoomPolicy.cs" Link="BrowserZoomPolicy.cs" />
+    <Compile Include="..\actro\src\HostBridgeProtocol.cs" Link="HostBridgeProtocol.cs" />
+    <Compile Include="..\actro\src\NavigationPolicy.cs" Link="NavigationPolicy.cs" />
+    <Compile Include="..\actro\src\WindowsAppPaths.cs" Link="WindowsAppPaths.cs" />
+    <Compile Include="..\actro\src\WindowsStartupOptions.cs" Link="WindowsStartupOptions.cs" />
+  </ItemGroup>
+</Project>
