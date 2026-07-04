@@ -2,17 +2,26 @@
 
 Actro is the Actrium browser client monorepo.
 
-The first client targets are:
+The initial client targets are:
 
 - macOS
-- Windows
-- Android
 - iOS
+- Android
+- Windows
 
-The original macOS client, Actro, is imported under
-`apps/macos/actro/` with its Git history preserved. Its first Actro-shaped
-source layout now lives behind compatibility symlinks so existing Xcode
-references can keep building during the migration.
+The first imported clients live in their platform app directories with their
+source histories preserved:
+
+- `apps/macos/actro/` - macOS app.
+- `apps/ios/actro/` - iOS app.
+- `apps/android/actro/` - Android app.
+- `apps/windows/actro/` - Windows WebView2 shell scaffold with a centralized
+  Rust ActroCore C ABI adapter; production Windows client work is still in
+  progress.
+
+iOS and Android share the React Native runtime in `packages/actro-runtime/`.
+The platform apps keep small local entrypoints and point to the shared runtime
+through local symlinks.
 
 ## Repository Layout
 
@@ -30,20 +39,61 @@ tools/         Developer tooling.
 tests/         Cross-platform test fixtures and e2e suites.
 ```
 
-## Actro Import
+## Shared Runtime
 
-Actro was imported with a history-preserving merge/read-tree flow:
+```text
+packages/actro-runtime/       Shared React Native runtime and system apps.
+packages/actr-kotlin/         Android Actr Kotlin package.
+packages/rill/                Shared host/guest runtime helpers.
+packages/askit/               Shared app kit APIs and UI helpers.
+packages/supramark/           Markdown, diagram, and native rendering packages.
+```
+
+Supramark React Native native artifacts are generated locally because the
+staged binaries are large and intentionally ignored by the source packages.
+After a fresh checkout, run:
+
+```text
+npm run prepare:supramark-native
+```
+
+## History-Preserved Imports
+
+Client source must not be copied when history matters. Use history-preserving
+Git imports first, then move code with normal Git moves after the imported
+commits are anchored in this repository.
 
 ```text
 apps/macos/actro/
+apps/ios/actro/
+apps/android/actro/
 ```
 
-Do not copy Actro files into new locations when history matters. Move code in
-small, reviewable follow-up commits after the imported history is anchored in
-this repository.
+See the migration notes for the current mapping and verification commands:
 
-The split keeps compatibility symlinks under `apps/macos/actro/` so the
-existing Xcode project can keep building while code moves into `Actro*/`,
-`packages/`, `crates/`, and `platform/apple/`.
+- `docs/migration/actro.md`
+- `docs/migration/mobile-clients.md`
+- `docs/migration/windows-client.md`
 
-See `docs/migration/actro.md` for the migration rules.
+The full migration verification entrypoint is:
+
+```text
+npm run verify:all
+```
+
+This includes migration hygiene, Rust core/vault tests, Rust-generated contract
+checks, Rust/native boundary hygiene, Windows layout checks, Windows project
+verification, shared runtime typecheck, React Native bundles, and
+Android/iOS/macOS debug builds.
+
+See `docs/architecture/rust-core.md` for the Rust/native boundary. In short,
+shared non-UI protocol, persistence, crypto, parsing, and deterministic data
+rules can move into Rust; platform shell routing, UI lifecycle, OS SDK
+orchestration, and Windows WebView2 policy stay platform-owned.
+
+`apps/windows/actro/` is the Windows app root. It currently contains an initial
+.NET Windows Forms + WebView2 shell scaffold plus `src/ActroCore.cs`, the
+centralized C# adapter for the Rust ActroCore C ABI. `npm run verify:windows`
+validates the project metadata on every host and runs `dotnet build` whenever a
+.NET SDK is available; Windows hosts require the SDK. `third_party/rustdesk-actr/`
+is a remote desktop technology reference, not the Actro Windows browser client.
