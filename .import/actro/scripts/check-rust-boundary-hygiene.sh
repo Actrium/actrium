@@ -1896,7 +1896,7 @@ windows_browser_data_requirements=(
   "platform/apple/packages/ActroCore/Sources/ActroCore/AppleBrowserStorageSyncScheduler.swift|nextRunDelaySeconds|Apple browser sync scheduler consumes Rust-owned schedule state timing"
   "platform/apple/packages/ActroCore/Sources/ActroCore/AppleBrowserStorageSyncScheduler.swift|browserStorageSyncSchedulerStatusJson|Apple browser sync scheduler delegates product status to Rust"
   "platform/apple/packages/ActroCore/Sources/ActroCore/AppleBrowserStorageSyncScheduler.swift|scheduleAfterLocalChange|Apple browser sync scheduler can debounce local browser data changes"
-  "apps/ios/actro/Actro/Database/BrowserSyncCredentialsProvider.swift|UserInfoManager.shared.getUser|iOS browser sync credentials read the current login session"
+  "apps/ios/actro/Actro/Database/BrowserSyncCredentialsProvider.swift|keychainSessionAccount|iOS browser sync credentials come only from the stored Keychain sync session"
   "apps/ios/actro/Actro/Database/BrowserSyncCredentialsProvider.swift|AppleBrowserStorageSyncCredentialsProvider|iOS browser sync credentials implement the Apple coordinator provider"
   "apps/ios/actro/Actro/Database/BrowserDataRepository.swift|syncScheduler|iOS browser data repository wires the sync scheduler"
   "apps/ios/actro/Actro/Database/BrowserDataRepository.swift|syncStatusJson|iOS browser data repository exposes Rust-owned sync status"

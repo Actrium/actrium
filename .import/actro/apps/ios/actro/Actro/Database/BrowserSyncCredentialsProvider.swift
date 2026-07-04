@@ -48,35 +48,21 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
         }
     }
 
+    /// Browser sync is decoupled from the Actrium account: credentials come
+    /// only from the sync session saved via `saveSyncSession` (never from the
+    /// account login token). With no stored session this returns nil and the
+    /// sync scheduler stays in `waitingForCredentials`.
     func browserStorageSyncCredentials() async -> AppleBrowserStorageSyncCredentials? {
-        if let session = storedSession(),
-           !session.accessToken.isEmpty,
-           !session.baseUrl.isEmpty {
-            return AppleBrowserStorageSyncCredentials(
-                baseUrl: session.baseUrl,
-                accessToken: session.accessToken,
-                scope: defaultScope,
-                deviceId: deviceId()
-            )
-        }
-
-        // NOTE: this fallback reads a session token that UserInfoManager still
-        // persists as plaintext in UserDefaults (com.actrium.actro.userInfo)
-        // and bridges to RN. Migrating that store touches the RN bridge and
-        // the login flow, so it is deliberately left to a follow-up batch.
-        guard let user = UserInfoManager.shared.getUser() else {
-            return nil
-        }
-
-        let token = user.sessionToken.trimmingCharacters(in: .whitespacesAndNewlines)
-        let baseUrl = user.loginApiUrl.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !token.isEmpty, !baseUrl.isEmpty else {
+        guard let session = storedSession(),
+              !session.accessToken.isEmpty,
+              !session.baseUrl.isEmpty
+        else {
             return nil
         }
 
         return AppleBrowserStorageSyncCredentials(
-            baseUrl: baseUrl,
-            accessToken: token,
+            baseUrl: session.baseUrl,
+            accessToken: session.accessToken,
             scope: defaultScope,
             deviceId: deviceId()
         )
