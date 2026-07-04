@@ -91,17 +91,18 @@ def enableProguardInReleaseBuilds = false
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 android {
-    ndkVersion rootProject.ext.ndkVersion
-    buildToolsVersion rootProject.ext.buildToolsVersion
-    compileSdk rootProject.ext.compileSdkVersion
+    ndkVersion = rootProject.ext.ndkVersion
+    buildToolsVersion = rootProject.ext.buildToolsVersion
+    compileSdk = rootProject.ext.compileSdkVersion
 
-    namespace "com.askaway.android"
+    namespace = "io.actrium.actro"
     defaultConfig {
-        applicationId "chat.askaway.android"
-        minSdkVersion rootProject.ext.minSdkVersion
-        targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1_28_00
-        versionName "1.28.0"
+        applicationId = "io.actrium.actro"
+        minSdk = rootProject.ext.minSdkVersion
+        targetSdk = rootProject.ext.targetSdkVersion
+        versionCode = 1_28_00
+        versionName = "1.28.0"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
 //        externalNativeBuild {
 //            cmake {
@@ -115,12 +116,12 @@ android {
     signingConfigs {
         release {
             if (isCI) {
-                storeFile file(System.getenv("KEYSTORE_PATH") ?: '../AskAway.jks')
+                storeFile file(System.getenv("KEYSTORE_PATH") ?: '../Actro.jks')
                 storePassword System.getenv("KEYSTORE_PASSWORD") ?: ''
                 keyAlias System.getenv("KEY_ALIAS") ?: ''
                 keyPassword System.getenv("KEY_PASSWORD") ?: ''
             } else {
-                storeFile file(localProperties.getProperty('KEYSTORE_PATH') ?: '../AskAway.jks')
+                storeFile file(localProperties.getProperty('KEYSTORE_PATH') ?: '../Actro.jks')
                 storePassword localProperties.getProperty('KEYSTORE_PASSWORD') ?: ''
                 keyAlias localProperties.getProperty('KEY_ALIAS') ?: ''
                 keyPassword localProperties.getProperty('KEY_PASSWORD') ?: ''
@@ -128,12 +129,10 @@ android {
         }
     }
     buildTypes {
-        debug {
-            signingConfig signingConfigs.release
-        }
+        debug {}
         release {
-            signingConfig signingConfigs.release
-            minifyEnabled false
+            signingConfig = signingConfigs.release
+            minifyEnabled = false
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }
     }
@@ -171,7 +170,8 @@ dependencies {
         implementation jscFlavor
     }
     implementation(project(":actr-kotlin"))
-    implementation(project(":rill-sandbox-native"))
+    implementation(project(":actro-native-kotlin"))
+    implementation(project(":rill"))
     implementation(project(":react-native-safe-area-context"))
     implementation(project(":react-native-view-shot"))
     // AndroidX and Material Design
@@ -188,10 +188,16 @@ dependencies {
     implementation("androidx.credentials:credentials:1.5.0")
     implementation("androidx.credentials:credentials-play-services-auth:1.5.0")
     implementation("com.google.android.libraries.identity.googleid:googleid:1.1.1")
+    // Encrypted storage for browser sync credentials
+    implementation("androidx.security:security-crypto:1.0.0")
     implementation("androidx.room:room-runtime:2.8.0-beta01")
     implementation("androidx.room:room-ktx:2.8.0-beta01")
     ksp("androidx.room:room-compiler:2.8.0-beta01")
     implementation 'com.alphacephei:vosk-android:0.3.75@aar'
     implementation 'com.hankcs:hanlp:portable-1.8.6'
     implementation 'net.java.dev.jna:jna:5.14.0@aar'
+
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
