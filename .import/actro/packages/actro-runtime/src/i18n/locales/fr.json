@@ -208,7 +208,9 @@
       "loginError": "Erreur de connexion",
       "activationFailed": "Échec de l'activation",
       "authorizationFailed": "Échec de l'autorisation",
-      "authorizationError": "Erreur d'autorisation"
+      "authorizationError": "Erreur d'autorisation",
+      "signInToChat": "Connectez-vous pour discuter",
+      "authorizeToChat": "Autorisez l'accès pour discuter"
     },
     "attachment": {
       "overwriteConfirm": "Contenu déjà ajouté. Continuer remplacera le contenu actuel.",

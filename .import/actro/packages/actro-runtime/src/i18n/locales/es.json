@@ -208,7 +208,9 @@
       "loginError": "Error en el inicio de sesión",
       "activationFailed": "Error de activación",
       "authorizationFailed": "Error de autorización",
-      "authorizationError": "Error en la autorización"
+      "authorizationError": "Error en la autorización",
+      "signInToChat": "Inicia sesión para chatear",
+      "authorizeToChat": "Autoriza el acceso para chatear"
     },
     "attachment": {
       "overwriteConfirm": "Contenido ya agregado. Continuar reemplazará el contenido actual.",

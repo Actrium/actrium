@@ -208,7 +208,9 @@
       "loginError": "ログインエラー",
       "activationFailed": "アクティベーション失敗",
       "authorizationFailed": "認証失敗",
-      "authorizationError": "認証エラー"
+      "authorizationError": "認証エラー",
+      "signInToChat": "ログインしてチャット",
+      "authorizeToChat": "認証してチャット"
     },
     "attachment": {
       "overwriteConfirm": "コンテンツが追加済みです。続行すると現在の内容が上書きされます。",

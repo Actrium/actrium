@@ -208,7 +208,9 @@
       "loginError": "Login error",
       "activationFailed": "Activation failed",
       "authorizationFailed": "Authorization failed",
-      "authorizationError": "Authorization error"
+      "authorizationError": "Authorization error",
+      "signInToChat": "Sign in to chat",
+      "authorizeToChat": "Authorize to chat"
     },
     "attachment": {
       "overwriteConfirm": "Content added, continuing will overwrite current content.",

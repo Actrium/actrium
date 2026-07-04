@@ -208,7 +208,9 @@
       "loginError": "로그인 오류",
       "activationFailed": "활성화 실패",
       "authorizationFailed": "권한 부여 실패",
-      "authorizationError": "권한 부여 오류"
+      "authorizationError": "권한 부여 오류",
+      "signInToChat": "로그인 후 대화하기",
+      "authorizeToChat": "권한 부여 후 대화하기"
     },
     "attachment": {
       "overwriteConfirm": "내용이 이미 추가되었습니다. 계속하면 현재 내용을 덮어씁니다.",
