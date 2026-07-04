@@ -208,7 +208,9 @@
       "loginError": "Ошибка при входе",
       "activationFailed": "Ошибка активации",
       "authorizationFailed": "Ошибка авторизации",
-      "authorizationError": "Ошибка при авторизации"
+      "authorizationError": "Ошибка при авторизации",
+      "signInToChat": "Войдите, чтобы начать чат",
+      "authorizeToChat": "Разрешите доступ, чтобы начать чат"
     },
     "attachment": {
       "overwriteConfirm": "Контент уже добавлен. Продолжение заменит текущий контент.",

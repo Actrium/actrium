@@ -208,7 +208,9 @@
       "loginError": "登入出錯",
       "activationFailed": "激活失敗",
       "authorizationFailed": "授權失敗",
-      "authorizationError": "授權出錯"
+      "authorizationError": "授權出錯",
+      "signInToChat": "登入後即可對話",
+      "authorizeToChat": "授權後即可對話"
     },
     "attachment": {
       "overwriteConfirm": "已添加內容，繼續將覆蓋當前內容。",
