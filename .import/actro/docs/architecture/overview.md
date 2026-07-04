@@ -2,7 +2,7 @@
 
 Actro is a multi-platform browser client for the Actrium ecosystem. The client
 repo owns product shells, native integrations, runtime host packages, and
-client-specific services. The core Actrium runtime remains in the `actr`
+client-specific services. The core ACTR runtime remains in the `actr`
 repository and is consumed through released or local SDKs.
 
 ## Product Layers
@@ -10,22 +10,34 @@ repository and is consumed through released or local SDKs.
 1. Platform apps live in `apps/`.
 2. Shared platform adapters live in `platform/`.
 3. JavaScript and React Native runtime packages live in `packages/`.
-4. Native Rust client libraries live in `crates/`.
+4. Native Rust client libraries and server-side reference executors live in `crates/`.
 5. Cross-language contracts live in `schemas/`.
+
+Browser sync uses user-owned cloud storage as the product sync medium, not an
+Actro-operated sync service. See
+[`browser-sync-cloud-drive.md`](browser-sync-cloud-drive.md) for the cloud drive
+provider architecture.
 
 ## Initial Platform Strategy
 
-- macOS starts from the imported Actro codebase.
-- iOS should share Apple packages where WebKit, account, and Actr SDK behavior
-  can be common.
-- Android consumes the Actr Kotlin package and keeps Android lifecycle behavior
-  in `apps/android` and `platform/android`.
-- Windows consumes the TypeScript or native Actr SDK path, with the browser
-  host expected to use WebView2.
+- macOS starts from the imported macOS app codebase.
+- iOS starts from the imported iOS client under `apps/ios/actro/` and
+  should share Apple packages where WebKit, account, and Actr SDK behavior can
+  be common.
+- Android starts from the imported Android client under `apps/android/actro/`,
+  consumes `packages/actr-kotlin/`, and keeps Android lifecycle behavior in
+  `apps/android` and `platform/android`.
+- iOS and Android share the React Native runtime and system apps from
+  `packages/actro-runtime/`.
+- Windows has an initial WebView2 shell scaffold at `apps/windows/actro/`, with
+  native tab/navigation chrome, explicit WebView2 profile storage, page and
+  browser full-screen shell handling, and a `window.actroHost` browser bridge.
+  The browser host should consume shared non-UI behavior through the Actro
+  Rust/native boundary as production implementation continues.
 
 ## Repository Boundary
 
-Actro should not vendor the current Actrium `actr` runtime. It should depend on:
+Actro should not vendor the current ACTR runtime. It should depend on:
 
 - SwiftPM package `Actr` for Apple targets.
 - Maven package `io.actrium:actr` for Android.

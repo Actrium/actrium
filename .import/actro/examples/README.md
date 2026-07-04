@@ -2,5 +2,5 @@
 
 Example Actro apps and guest packages live here.
 
-Actro examples remain in `apps/macos/actro/RCTNApps/actr-app-examples/`
-until their Rill and Askit dependencies are migrated.
+Actro examples live in `packages/actro-runtime/actr-app-examples/`
+alongside the shared runtime source.
