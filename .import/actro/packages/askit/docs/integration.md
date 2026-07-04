@@ -4,7 +4,7 @@ This guide explains how askit integrates with rill to enable sandboxed Guest exe
 
 ## Overview
 
-**askit** is a UI component library and API layer built on top of [rill](https://github.com/GoAskAway/rill):
+**askit** is a UI component library and API layer built on top of [rill](https://github.com/Actrium/rill):
 
 | Layer | Role |
 |-------|------|
@@ -13,7 +13,7 @@ This guide explains how askit integrates with rill to enable sandboxed Guest exe
 
 askit provides:
 - Unified APIs that work identically in both Host and Guest
-- Pre-built UI components optimized for the AskAway platform
+- Pre-built UI components optimized for the Actro platform
 - Automatic message routing and bridging
 
 ```

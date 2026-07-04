@@ -4,7 +4,7 @@
 
 [English](./README.md)
 
-**askit** 是构建在 [rill](https://github.com/GoAskAway/rill) 之上的 UI 组件库与 API 层。通过 package.json 条件导出，同一份 `import { StepList, Toast } from 'askit'` 在 Host 端获得真实 React Native 组件，在 Guest 端获得字符串标识符（由 rill 传递给 Host 渲染）。
+**askit** 是构建在 [rill](https://github.com/Actrium/rill) 之上的 UI 组件库与 API 层。通过 package.json 条件导出，同一份 `import { StepList, Toast } from 'askit'` 在 Host 端获得真实 React Native 组件，在 Guest 端获得字符串标识符（由 rill 传递给 Host 渲染）。
 
 ## 与 rill 的关系
 
@@ -58,7 +58,7 @@ askit 采用 **90% 通用 + 10% 核心** 架构：
 ## 安装
 
 ```bash
-bun add github:GoAskAway/askit
+bun add github:Actrium/askit
 ```
 
 > **注意**：askit 通过 GitHub 发布，直接导出 TypeScript 源码（无需构建步骤）。你的打包工具（Metro、Vite 等）需要支持 TypeScript 编译。React Native Metro 和现代打包工具都会自动处理。

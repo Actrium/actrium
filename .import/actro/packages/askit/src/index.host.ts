@@ -6,7 +6,13 @@
  */
 
 // APIs
-export { EventEmitter, Haptic, Toast } from './api/index.host';
+export { EventEmitter, EventHandler, Haptic, HostHttpHandler, Toast } from './api/index.host';
+export type {
+  HandlerConfig,
+  HandlerRegistry,
+  HostHttpRequest,
+  HostHttpResponse,
+} from './api/index.host';
 // Types
 export type {
   BaseProps,
@@ -34,6 +40,7 @@ export type {
   ToastPosition,
   // UserAvatar
   UserAvatarProps,
+  GlobalAlertProps,
   MyTouchableOpacityProps,
 } from './types';
 // UI Components
@@ -44,6 +51,7 @@ export {
   StepList,
   ThemeView,
   UserAvatar,
+  GlobalAlert,
   MyTouchableOpacity,
    DropdownMenu,
   DropdownMenuItem,

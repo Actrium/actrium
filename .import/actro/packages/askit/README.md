@@ -4,7 +4,7 @@
 
 [中文文档](./README.zh.md)
 
-**askit** is a UI component library and API layer built on top of [rill](https://github.com/GoAskAway/rill). Through package.json conditional exports, the same `import { StepList, Toast } from 'askit'` delivers real React Native components on the Host side and string identifiers on the Guest side (which rill passes to Host for rendering).
+**askit** is a UI component library and API layer built on top of [rill](https://github.com/Actrium/rill). Through package.json conditional exports, the same `import { StepList, Toast } from 'askit'` delivers real React Native components on the Host side and string identifiers on the Guest side (which rill passes to Host for rendering).
 
 ## Relationship with rill
 
@@ -58,7 +58,7 @@ askit follows a **90% Universal + 10% Core** architecture:
 ## Installation
 
 ```bash
-bun add github:GoAskAway/askit
+bun add github:Actrium/askit
 ```
 
 > **Note**: askit is published via GitHub and exports TypeScript source directly (no build step required). Your bundler (Metro, Vite, etc.) needs to support TypeScript compilation. Both React Native Metro and modern bundlers handle this automatically.
