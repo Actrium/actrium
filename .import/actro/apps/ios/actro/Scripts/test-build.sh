@@ -20,7 +20,7 @@ START_TIME=$(date +%s)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-SCHEME="AskAway"
+SCHEME="Actro"
 
 # 颜色输出
 BLUE='\033[0;34m'
@@ -33,11 +33,12 @@ echo -e "${BLUE}===================================================${NC}"
 echo ""
 
 cd "$PROJECT_ROOT"
+"$SCRIPT_DIR/ensure-actro-runtime.sh"
 
 # 全局清理
 echo "🧹 全局清理旧构建和依赖..."
 rm -rf build
-rm -rf Subsystem/node_modules
+rm -rf ActroRuntime/node_modules
 rm -rf Pods
 
 # 清理 Watchman 和 Metro 缓存
@@ -48,7 +49,7 @@ fi
 
 # 打包 React Native Bundle 和资源
 echo "📦 打包 React Native Bundle..."
-cd Subsystem
+cd ActroRuntime
 
 # 安装依赖
 echo "📦 安装 React Native 依赖..."
@@ -65,12 +66,12 @@ else
     exit 1
 fi
 
-npx react-native bundle \
+node node_modules/react-native/scripts/bundle.js \
     --platform ios \
     --dev false \
     --entry-file index.ts \
-    --bundle-output "$PROJECT_ROOT/Canvas/actr.jsbundle" \
-    --assets-dest "$PROJECT_ROOT/Canvas"
+    --bundle-output "$PROJECT_ROOT/Actro/actr.jsbundle" \
+    --assets-dest "$PROJECT_ROOT/Actro"
 
 cd "$PROJECT_ROOT"
 
@@ -113,24 +114,24 @@ EOF
 # 清理
 echo "🧹 清理旧构建..."
 xcodebuild clean \
-    -workspace Canvas.xcworkspace \
+    -workspace Actro.xcworkspace \
     -scheme "$SCHEME"
 
 # 构建 Archive
 echo ""
 echo "🏗️  开始构建 Archive..."
 xcodebuild archive \
-    -workspace Canvas.xcworkspace \
+    -workspace Actro.xcworkspace \
     -scheme "$SCHEME" \
     -configuration Release \
-    -archivePath build/Canvas.xcarchive \
+    -archivePath build/Actro.xcarchive \
     -verbose
 
-if [ -d "build/Canvas.xcarchive" ]; then
+if [ -d "build/Actro.xcarchive" ]; then
     echo ""
     echo -e "${GREEN}✅ 构建成功！${NC}"
     echo ""
-    echo "📁 Archive 路径: build/Canvas.xcarchive"
+    echo "📁 Archive 路径: build/Actro.xcarchive"
     
     # 显示构建信息
     BUILD_VERSION=$(agvtool what-marketing-version -terse1)
@@ -147,7 +148,7 @@ if [ -d "build/Canvas.xcarchive" ]; then
     
     echo "📦 正在导出 IPA 并重命名..."
     xcodebuild -exportArchive \
-        -archivePath build/Canvas.xcarchive \
+        -archivePath build/Actro.xcarchive \
         -exportPath build/IPA \
         -exportOptionsPlist Scripts/ExportOptions.plist \
         -configuration Release \
@@ -158,7 +159,7 @@ if [ -d "build/Canvas.xcarchive" ]; then
         mv "build/IPA/$SCHEME.ipa" "$DESKTOP_PATH/$IPA_NAME"
         echo -e "${GREEN}✅ IPA 已成功导出至: $DESKTOP_PATH/$IPA_NAME${NC}"
     else
-        # 有时导出的文件名可能不是 Canvas.ipa，尝试查找文件夹下唯一的 ipa
+        # 有时导出的文件名可能不是 Actro.ipa，尝试查找文件夹下唯一的 ipa
         EXTRACTED_IPA=$(find build/IPA -name "*.ipa" | head -n 1)
         if [ -n "$EXTRACTED_IPA" ]; then
             mv "$EXTRACTED_IPA" "$DESKTOP_PATH/$IPA_NAME"

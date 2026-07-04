@@ -1,6 +1,6 @@
-# AskAway-Pad/Phone 系统架构总览
+# Actro-Pad/Phone 系统架构总览
 
-本项目是一个跨平台的移动端 AI 交互系统，采用 **Native iOS 外壳 + React Native 运行时** 的混合架构。通过一套 `Subsystem` 业务内核同时驱动 iPad（Canvas）和 iPhone 两端。
+本项目是一个跨平台的移动端 AI 交互系统，采用 **Native iOS 外壳 + React Native 运行时** 的混合架构。通过一套 `ActroRuntime` 业务内核同时驱动 iPad（Actro）和 iPhone 两端。
 
 ---
 
@@ -9,10 +9,10 @@
 ```mermaid
 graph TD
     subgraph "Native Layer (主项目)"
-        A[Canvas / Canvas-Phone] -->|NativeModules| B[Bridge/Event]
+        A[Actro / Actro-Phone] -->|NativeModules| B[Bridge/Event]
     end
 
-    subgraph "Core Layer (Subsystem 子项目)"
+    subgraph "Core Layer (ActroRuntime 子项目)"
         B --> C[native-bridge]
         C --> D[actr-host]
         D --> E[Infrastructure]
@@ -52,12 +52,12 @@ graph TD
 ## 3. 项目协作与仓库说明
 
 - **主仓库 (Current)**:
-    - `Canvas/` & `Canvas-iPhone/`: Native 壳源码与构建环境。
+    - `Actro/` & `Actro-iPhone/`: Native 壳源码与构建环境。
     - 职责：多窗口管理、原生能力增强、渲染层稳定性。
-- **子仓库 (Loom - Submodule)**:
-    - `Subsystem/`: 纯 JS/TS 业务内核。
+- **子仓库 (Actro Runtime - Submodule)**:
+    - `ActroRuntime/`: 纯 JS/TS 业务内核。
     - 职责：业务逻辑、数据持久化、双端逻辑适配。
-    - **详细逻辑文档：[Subsystem/AGENTS.md](./Subsystem/AGENTS.md)**
+    - **详细逻辑文档：[ActroRuntime/AGENTS.md](./ActroRuntime/AGENTS.md)**
 
 ---
 
@@ -73,5 +73,5 @@ Native 启动 -> `TabRouter` 分发 -> `AppSessionService` 初始化插件容器
 ---
 
 ## 5. 开发规范
-- 跨端共用的业务逻辑不要直接在 Native 层实现，要下沉至 `Subsystem`。
+- 跨端共用的业务逻辑不要直接在 Native 层实现，要下沉至 `ActroRuntime`。
 - 原生模块引用须在 `native-bridge` 中收敛。

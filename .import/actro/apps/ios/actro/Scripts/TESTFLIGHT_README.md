@@ -54,7 +54,7 @@ export APPLE_ID="your-apple-id@example.com"
 
 <key>provisioningProfiles</key>
 <dict>
-    <key>com.yourcompany.canvas</key>  <!-- 改为你的 Bundle ID -->
+    <key>com.actrium.actro</key>  <!-- 改为你的 Bundle ID -->
     <string>YOUR_PROVISIONING_PROFILE_NAME</string>  <!-- 改为你的 Provisioning Profile 名称 -->
 </dict>
 ```
@@ -66,7 +66,7 @@ DEVELOPMENT_TEAM="YOUR_TEAM_ID"  # 改为你的 Team ID
 
 ### 3. 确保项目配置正确
 
-检查 `Canvas.xcodeproj/project.pbxproj` 中的版本号设置：
+检查 `Actro.xcodeproj/project.pbxproj` 中的版本号设置：
 - Marketing Version (CFBundleShortVersionString)
 - Current Project Version (CFBundleVersion)
 
@@ -107,9 +107,9 @@ GIT_TAG=true ./Scripts/upload-testflight.sh
 
 ```bash
 # 项目配置
-PROJECT_NAME="Canvas"
-WORKSPACE_PATH="Canvas.xcworkspace"
-SCHEME="Canvas"
+PROJECT_NAME="Actro"
+WORKSPACE_PATH="Actro.xcworkspace"
+SCHEME="Actro"
 CONFIGURATION="Release"
 ```
 
@@ -168,7 +168,7 @@ jobs:
 
 **解决方案：**
 ```bash
-cd Subsystem
+cd ActroRuntime
 rm -rf node_modules
 bun install
 ```
