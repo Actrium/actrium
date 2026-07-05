@@ -87,8 +87,9 @@ required_files=(
   "apps/windows/actro/src/BrowserStartupSettingsStore.cs"
   "apps/windows/actro/src/BrowserStrings.cs"
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
+  "apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs"
   "apps/windows/actro/src/BrowserTab.cs"
-  "apps/windows/actro/src/BrowserTabStrip.cs"
+  "apps/windows/actro/src/BrowserTabSidebar.cs"
   "apps/windows/actro/src/BrowserTheme.cs"
   "apps/windows/actro/src/BrowserThemeManager.cs"
   "apps/windows/actro/src/BrowserThemeSelectionPolicy.cs"
@@ -226,10 +227,45 @@ else
 fi
 
 check_pattern_in_each_file \
-  'new BrowserTabStrip' \
-  "Windows shell attaches a browser tab strip" \
-  "Windows shell does not attach a browser tab strip" \
+  'new BrowserTabSidebar' \
+  "Windows shell attaches a vertical tab sidebar" \
+  "Windows shell does not attach a vertical tab sidebar" \
   apps/windows/actro/src/MainForm.cs
+
+missing_sidebar_shell_symbols=()
+for sidebar_shell_symbol in SplitContainer Panel1Collapsed BrowserSidebarLayoutPolicy ToggleSidebar ApplySidebarLayout FaviconChanged GetFaviconAsync UpdateTabFaviconAsync; do
+  if ! rg -q "$sidebar_shell_symbol" apps/windows/actro/src/MainForm.cs; then
+    missing_sidebar_shell_symbols+=("$sidebar_shell_symbol")
+  fi
+done
+
+if [[ "${#missing_sidebar_shell_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows shell is missing sidebar split/collapse/favicon behavior"
+  printf '%s\n' "${missing_sidebar_shell_symbols[@]}"
+else
+  print_ok "Windows shell owns sidebar split, collapse and favicon behavior"
+fi
+
+missing_sidebar_policy_symbols=()
+for sidebar_policy_symbol in MinWidth DefaultWidth MaxWidth ClampWidth CollapseThreshold ShouldCollapse; do
+  if ! rg -q "$sidebar_policy_symbol" apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs; then
+    missing_sidebar_policy_symbols+=("$sidebar_policy_symbol")
+  fi
+done
+
+if [[ "${#missing_sidebar_policy_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows sidebar layout policy is missing expected symbols"
+  printf '%s\n' "${missing_sidebar_policy_symbols[@]}"
+else
+  print_ok "Windows sidebar layout policy owns width clamp and collapse rules"
+fi
+
+check_pattern_in_each_file \
+  'BrowserSidebarLayoutPolicy' \
+  "Windows tests link and exercise the sidebar layout policy" \
+  "Windows tests do not link and exercise the sidebar layout policy" \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
 
 check_pattern_in_each_file \
   'WebView2' \
@@ -243,22 +279,22 @@ check_pattern_in_each_file \
   "Windows browser tab state does not carry host bridge ownership" \
   apps/windows/actro/src/BrowserTab.cs
 
-missing_tab_strip_events=()
-for tab_strip_event in NewTabRequested TabSelected TabCloseRequested UpdateTabs; do
-  if ! rg -q "$tab_strip_event" apps/windows/actro/src/BrowserTabStrip.cs; then
-    missing_tab_strip_events+=("$tab_strip_event")
+missing_tab_sidebar_events=()
+for tab_sidebar_event in NewTabRequested TabSelected TabCloseRequested UpdateTabs; do
+  if ! rg -q "$tab_sidebar_event" apps/windows/actro/src/BrowserTabSidebar.cs; then
+    missing_tab_sidebar_events+=("$tab_sidebar_event")
   fi
 done
 
-if [[ "${#missing_tab_strip_events[@]}" -ne 0 ]]; then
-  print_failure "Windows browser tab strip is missing tab events"
-  printf '%s\n' "${missing_tab_strip_events[@]}"
+if [[ "${#missing_tab_sidebar_events[@]}" -ne 0 ]]; then
+  print_failure "Windows vertical tab sidebar is missing tab events"
+  printf '%s\n' "${missing_tab_sidebar_events[@]}"
 else
-  print_ok "Windows browser tab strip exposes tab events"
+  print_ok "Windows vertical tab sidebar exposes tab events"
 fi
 
 missing_tab_lifecycle_calls=()
-for tab_lifecycle_call in CreateAndActivateTabAsync CloseTabAsync ReopenClosedTab DuplicateActiveTab RequestNewWindow BrowserClosedTabStack ActivateTab SyncTabStrip ActivateNextTab ActivatePreviousTab ActivateTabAtIndex; do
+for tab_lifecycle_call in CreateAndActivateTabAsync CloseTabAsync ReopenClosedTab DuplicateActiveTab RequestNewWindow BrowserClosedTabStack ActivateTab SyncSidebar ActivateNextTab ActivatePreviousTab ActivateTabAtIndex; do
   if ! rg -q "$tab_lifecycle_call" apps/windows/actro/src/MainForm.cs; then
     missing_tab_lifecycle_calls+=("$tab_lifecycle_call")
   fi
@@ -325,6 +361,7 @@ for menu_command in \
   ZoomOut \
   ZoomReset \
   FullScreen \
+  ToggleSidebar \
   Find \
   FindNext \
   FindPrevious \
@@ -513,7 +550,7 @@ check_pattern_in_each_file \
   apps/windows/actro/src/BrowserToolbar.cs \
   apps/windows/actro/src/BrowserFindBar.cs \
   apps/windows/actro/src/BrowserAppMenu.cs \
-  apps/windows/actro/src/BrowserTabStrip.cs
+  apps/windows/actro/src/BrowserTabSidebar.cs
 
 check_pattern_in_each_file \
   'BrowserTheme' \

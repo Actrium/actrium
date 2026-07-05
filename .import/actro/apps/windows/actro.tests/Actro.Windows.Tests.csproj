@@ -53,6 +53,7 @@
     <Compile Include="..\actro\src\BrowserSearchEnginePolicy.cs" Link="BrowserSearchEnginePolicy.cs" />
     <Compile Include="..\actro\src\BrowserSearchSettingsStore.cs" Link="BrowserSearchSettingsStore.cs" />
     <Compile Include="..\actro\src\BrowserSessionStore.cs" Link="BrowserSessionStore.cs" />
+    <Compile Include="..\actro\src\BrowserSidebarLayoutPolicy.cs" Link="BrowserSidebarLayoutPolicy.cs" />
     <Compile Include="..\actro\src\BrowserStartupSettingsStore.cs" Link="BrowserStartupSettingsStore.cs" />
     <Compile Include="..\actro\src\BrowserStorageDatabase.cs" Link="BrowserStorageDatabase.cs" />
     <Compile Include="..\actro\src\BrowserStorageSyncClient.cs" Link="BrowserStorageSyncClient.cs" />

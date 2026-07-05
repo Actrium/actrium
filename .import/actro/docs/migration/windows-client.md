@@ -121,8 +121,10 @@ apps/windows/actro/src/BrowserProcessFailurePolicy.cs
 apps/windows/actro/src/BrowserClosedTabStack.cs
                               Windows-local last-closed-tab state for
                               Ctrl+Shift+T reopening.
-apps/windows/actro/src/BrowserTabStrip.cs
-                              Native Windows tab strip and tab lifecycle UI.
+apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs
+                              Windows-local sidebar width clamp and collapse rules.
+apps/windows/actro/src/BrowserTabSidebar.cs
+                              Native Windows vertical tab sidebar and tab lifecycle UI.
 apps/windows/actro/src/BrowserToolbar.cs
                               Native Windows browser toolbar, address entry,
                               address bar search fallback, and status display.
@@ -384,7 +386,7 @@ requests can normalize bare hosts into HTTPS, but page-initiated navigations mus
 already be absolute and browser-safe. Unsafe schemes such as `javascript:`,
 `data:`, or unsupported external protocols are canceled locally.
 
-The next browser-client UI slice is `BrowserTab.cs` and `BrowserTabStrip.cs`.
+The next browser-client UI slice is `BrowserTab.cs` and `BrowserTabSidebar.cs`.
 Each tab owns its own WebView2 control and host message bridge. `MainForm.cs`
 creates, activates, closes, and swaps active tabs while preserving toolbar state
 against the active tab only. Closing the final tab creates a fresh home tab, and
@@ -449,7 +451,7 @@ npm run verify:windows
 ```
 
 This validates the Windows project metadata, WebView2 browser shell source,
-native tab strip, native navigation toolbar, host bridge protocol and browser
+native tab sidebar, native navigation toolbar, host bridge protocol and browser
 methods, local navigation/session/bridge behavior tests, and ActroCore C ABI
 adapter. Whenever a .NET SDK is available, it also runs:
 
