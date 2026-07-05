@@ -36,6 +36,7 @@ internal sealed class MainForm : Form
     private readonly BrowserStorageSyncCredentialStore browserSyncCredentialStore;
     private readonly BrowserStorageSyncScheduler browserSyncScheduler;
     private readonly Panel webViewHost;
+    private readonly BrowserStatusOverlay statusOverlay;
     private readonly List<BrowserTab> tabs = [];
     private readonly BrowserClosedTabStack closedTabs = new();
     private CoreWebView2Environment? webViewEnvironment;
@@ -129,9 +130,9 @@ internal sealed class MainForm : Form
         tabSidebar = new BrowserTabSidebar();
         toolbar = new BrowserToolbar();
         findBar = new BrowserFindBar();
-        downloadManager = new BrowserDownloadManager(this, toolbar.SetStatus, SetLastCompletedDownload);
-        permissionManager = new BrowserPermissionManager(this, toolbar.SetStatus);
-        externalProtocolManager = new BrowserExternalProtocolManager(this, toolbar.SetStatus);
+        downloadManager = new BrowserDownloadManager(this, ShowTransientStatus, SetLastCompletedDownload);
+        permissionManager = new BrowserPermissionManager(this, ShowTransientStatus);
+        externalProtocolManager = new BrowserExternalProtocolManager(this, ShowTransientStatus);
         webViewHost = new Panel
         {
             Dock = DockStyle.Fill,
@@ -147,6 +148,12 @@ internal sealed class MainForm : Form
         };
         contentSplit.Panel1.Controls.Add(tabSidebar);
         contentSplit.Panel2.Controls.Add(webViewHost);
+        // Bottom-left status bubble above the content host (Chrome
+        // behavior); it replaced the fixed toolbar status column. A sibling
+        // of the docked webViewHost, kept on top by z-order.
+        statusOverlay = new BrowserStatusOverlay();
+        contentSplit.Panel2.Controls.Add(statusOverlay);
+        statusOverlay.BringToFront();
         sidebarWidth = BrowserSidebarLayoutPolicy.DefaultWidth(DeviceDpi);
 
         Controls.Add(contentSplit);
@@ -270,6 +277,7 @@ internal sealed class MainForm : Form
         tabSidebar.ApplyTheme(theme);
         toolbar.ApplyTheme(theme);
         findBar.ApplyTheme(theme);
+        statusOverlay.ApplyTheme(theme);
         // Re-clamp the sidebar band: on a DPI change the scaled minimum and
         // the stored width both move.
         ApplySidebarLayout();
@@ -342,39 +350,59 @@ internal sealed class MainForm : Form
     /// </summary>
     private void ApplySidebarLayout()
     {
-        if (contentSplit.Panel1Collapsed)
-        {
-            return;
-        }
-
-        var hostWidth = contentSplit.ClientSize.Width;
-        if (hostWidth <= 0)
-        {
-            return;
-        }
-
-        var clampedWidth = BrowserSidebarLayoutPolicy.ClampWidth(sidebarWidth, hostWidth, DeviceDpi);
-        if (clampedWidth > hostWidth - contentSplit.Panel2MinSize - contentSplit.SplitterWidth)
-        {
-            // Transient mid-layout size too narrow for the clamp band; the
-            // next resize pass re-applies with real dimensions.
-            return;
-        }
-
-        if (contentSplit.SplitterDistance == clampedWidth)
-        {
-            return;
-        }
-
-        isApplyingSidebarLayout = true;
         try
         {
-            contentSplit.SplitterDistance = clampedWidth;
+            if (contentSplit.Panel1Collapsed)
+            {
+                return;
+            }
+
+            var hostWidth = contentSplit.ClientSize.Width;
+            if (hostWidth <= 0)
+            {
+                return;
+            }
+
+            var clampedWidth = BrowserSidebarLayoutPolicy.ClampWidth(sidebarWidth, hostWidth, DeviceDpi);
+            if (clampedWidth > hostWidth - contentSplit.Panel2MinSize - contentSplit.SplitterWidth)
+            {
+                // Transient mid-layout size too narrow for the clamp band;
+                // the next resize pass re-applies with real dimensions.
+                return;
+            }
+
+            if (contentSplit.SplitterDistance == clampedWidth)
+            {
+                return;
+            }
+
+            isApplyingSidebarLayout = true;
+            try
+            {
+                contentSplit.SplitterDistance = clampedWidth;
+            }
+            finally
+            {
+                isApplyingSidebarLayout = false;
+            }
         }
         finally
         {
-            isApplyingSidebarLayout = false;
+            // Whatever the outcome, the toolbar's sidebar segment tracks
+            // the sidebar's current geometry.
+            SyncToolbarSidebarSegment();
         }
+    }
+
+    /// <summary>
+    /// Keeps the toolbar's sidebar segment aligned with the live sidebar:
+    /// its width while expanded, the fixed collapsed stub otherwise.
+    /// </summary>
+    private void SyncToolbarSidebarSegment()
+    {
+        toolbar.SetSidebarLayout(
+            contentSplit.Panel1Collapsed ? 0 : contentSplit.SplitterDistance,
+            contentSplit.Panel1Collapsed);
     }
 
     private void OnSidebarSplitterMoved()
@@ -390,6 +418,7 @@ internal sealed class MainForm : Form
             // Dragging the splitter (nearly) shut reads as a collapse
             // gesture; the toggle command or shortcut reopens the sidebar.
             contentSplit.Panel1Collapsed = true;
+            SyncToolbarSidebarSegment();
             return;
         }
 
@@ -415,14 +444,25 @@ internal sealed class MainForm : Form
         {
             ApplySidebarLayout();
         }
+        else
+        {
+            SyncToolbarSidebarSegment();
+        }
     }
 
     private void WireToolbar()
     {
-        toolbar.BackRequested += (_, _) => NavigateBack();
-        toolbar.ForwardRequested += (_, _) => NavigateForward();
+        // Every toolbar button routes through the single command router,
+        // except the reload/stop pair: its state-dependent flip already
+        // lives in ReloadOrStopActiveTab, shared with the menu commands.
+        // There is no Home button (Chrome default); home stays a menu
+        // command plus Alt+Home.
+        toolbar.NewTabRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.NewTab);
+        toolbar.SidebarToggleRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.ToggleSidebar);
+        toolbar.BackRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.Back);
+        toolbar.ForwardRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.Forward);
         toolbar.ReloadRequested += (_, _) => ReloadOrStopActiveTab();
-        toolbar.HomeRequested += (_, _) => NavigateHomeDocument();
+        toolbar.BookmarkRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.BookmarkPage);
         toolbar.MenuRequested += (_, _) => ShowAppMenu();
         toolbar.AddressRequested += (_, args) => NavigateAddress(args.Address);
     }
@@ -637,6 +677,10 @@ internal sealed class MainForm : Form
                 ExecuteCommand(BrowserMenuCommand.Reload);
                 return true;
             case Keys.Escape:
+                // Escape always dismisses the status overlay (pinned
+                // statuses persist until Escape, click or navigation) and
+                // then still resolves through the escape policy.
+                statusOverlay.HideStatus();
                 switch (BrowserEscapePolicy.Resolve(
                     findBar.Visible,
                     isPageFullScreen,
@@ -726,7 +770,7 @@ internal sealed class MainForm : Form
                 ShowNavigationError(tab, args.WebErrorStatus.ToString());
                 if (activeTab == tab)
                 {
-                    toolbar.SetStatus(BrowserNavigationErrorPolicy.FormatStatus(args.WebErrorStatus.ToString()));
+                    ShowTransientStatus(BrowserNavigationErrorPolicy.FormatStatus(args.WebErrorStatus.ToString()));
                 }
 
                 return;
@@ -862,7 +906,7 @@ internal sealed class MainForm : Form
         {
             if (activeTab == tab)
             {
-                toolbar.SetStatus(BrowserProcessFailurePolicy.FormatStatus(processFailedKind));
+                ShowTransientStatus(BrowserProcessFailurePolicy.FormatStatus(processFailedKind));
             }
 
             SyncActiveTabUi();
@@ -872,7 +916,7 @@ internal sealed class MainForm : Form
 
         if (activeTab == tab)
         {
-            toolbar.SetStatus(BrowserProcessFailurePolicy.FormatRecoveryStatus(processFailedKind));
+            ShowTransientStatus(BrowserProcessFailurePolicy.FormatRecoveryStatus(processFailedKind));
         }
 
         try
@@ -892,14 +936,14 @@ internal sealed class MainForm : Form
         {
             if (activeTab == tab)
             {
-                toolbar.SetStatus(BrowserProcessFailurePolicy.FormatRecoveryFailedStatus(processFailedKind));
+                ShowTransientStatus(BrowserProcessFailurePolicy.FormatRecoveryFailedStatus(processFailedKind));
             }
         }
         catch (InvalidOperationException)
         {
             if (activeTab == tab)
             {
-                toolbar.SetStatus(BrowserProcessFailurePolicy.FormatRecoveryFailedStatus(processFailedKind));
+                ShowTransientStatus(BrowserProcessFailurePolicy.FormatRecoveryFailedStatus(processFailedKind));
             }
         }
     }
@@ -914,7 +958,7 @@ internal sealed class MainForm : Form
             {
                 if (!externalProtocolManager.HandleExternalProtocol(args.Uri))
                 {
-                    toolbar.SetStatus(BrowserStrings.Get("status.navigationBlocked"));
+                    ShowTransientStatus(BrowserStrings.Get("status.navigationBlocked"));
                 }
             }
 
@@ -930,8 +974,34 @@ internal sealed class MainForm : Form
             tab.IsShowingErrorPage = false;
         }
 
+        if (activeTab == tab)
+        {
+            // Navigation is one of the three pinned-status dismissal
+            // triggers (Escape, click, navigation).
+            statusOverlay.HidePinnedStatus();
+        }
+
         SyncActiveTabUi();
         SyncSidebar();
+    }
+
+    /// <summary>
+    /// Transient status: hover link targets, ephemeral confirmations.
+    /// Auto-hides after a few seconds (Chrome status-bubble behavior).
+    /// </summary>
+    private void ShowTransientStatus(string status)
+    {
+        statusOverlay.ShowStatus(status, BrowserStatusKind.Transient);
+    }
+
+    /// <summary>
+    /// Pinned status: user-invoked results (e.g. the sync status report)
+    /// persist until Escape, a click on the overlay, or the next
+    /// navigation — a requested status must not vanish unread.
+    /// </summary>
+    private void ShowPinnedStatus(string status)
+    {
+        statusOverlay.ShowStatus(status, BrowserStatusKind.Pinned);
     }
 
     private void SyncStatusBarText(BrowserTab tab)
@@ -941,7 +1011,7 @@ internal sealed class MainForm : Form
             return;
         }
 
-        toolbar.SetStatus(tab.WebView.CoreWebView2?.StatusBarText ?? string.Empty);
+        ShowTransientStatus(tab.WebView.CoreWebView2?.StatusBarText ?? string.Empty);
     }
 
     private async Task<BrowserTab> CreateAndActivateTabAsync(string? initialAddress, Guid? tabId = null)
@@ -987,7 +1057,7 @@ internal sealed class MainForm : Form
 
         if (!NavigationPolicy.TryNormalizeAddress(requestedAddress, out var normalizedAddress))
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.newWindowBlocked"));
+            ShowTransientStatus(BrowserStrings.Get("status.newWindowBlocked"));
             return;
         }
 
@@ -1072,7 +1142,7 @@ internal sealed class MainForm : Form
         if (NewWindowRequested is null)
         {
             RequestNewTab();
-            toolbar.SetStatus(BrowserStrings.Get("status.newWindowUnavailable"));
+            ShowTransientStatus(BrowserStrings.Get("status.newWindowUnavailable"));
             return;
         }
 
@@ -1083,7 +1153,7 @@ internal sealed class MainForm : Form
     {
         if (NewPrivateWindowRequested is null)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.privateWindowUnavailable"));
+            ShowTransientStatus(BrowserStrings.Get("status.privateWindowUnavailable"));
             return;
         }
 
@@ -1126,7 +1196,7 @@ internal sealed class MainForm : Form
     {
         var tab = await CreateAndActivateTabAsync(snapshot.Address);
         tab.Title = snapshot.Title;
-        toolbar.SetStatus(BrowserStrings.Get("status.tabDuplicated"));
+        ShowTransientStatus(BrowserStrings.Get("status.tabDuplicated"));
         SyncActiveTabUi();
         SyncSidebar();
     }
@@ -1478,7 +1548,7 @@ internal sealed class MainForm : Form
         var downloadsDirectory = BrowserDownloadPolicy.GetDefaultDownloadsDirectory();
         if (string.IsNullOrWhiteSpace(downloadsDirectory))
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.OpenDownloadsFolderFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.OpenDownloadsFolderFailedStatus);
             return;
         }
 
@@ -1488,19 +1558,19 @@ internal sealed class MainForm : Form
             {
                 UseShellExecute = true,
             });
-            toolbar.SetStatus(BrowserDownloadPolicy.OpenDownloadsFolderStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.OpenDownloadsFolderStatus);
         }
         catch (ArgumentException)
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.OpenDownloadsFolderFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.OpenDownloadsFolderFailedStatus);
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.OpenDownloadsFolderFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.OpenDownloadsFolderFailedStatus);
         }
         catch (Win32Exception)
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.OpenDownloadsFolderFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.OpenDownloadsFolderFailedStatus);
         }
     }
 
@@ -1509,7 +1579,7 @@ internal sealed class MainForm : Form
         contentBlockingEnabled = !contentBlockingEnabled;
         appMenu.SetContentBlockingEnabled(contentBlockingEnabled);
         PersistContentBlockingSettings();
-        toolbar.SetStatus(BrowserContentBlockingPolicy.FormatToggleStatus(contentBlockingEnabled));
+        ShowTransientStatus(BrowserContentBlockingPolicy.FormatToggleStatus(contentBlockingEnabled));
     }
 
     private void PersistContentBlockingSettings()
@@ -1528,15 +1598,17 @@ internal sealed class MainForm : Form
 
     private async Task SyncBrowserDataNowAsync()
     {
-        toolbar.SetStatus(BrowserSyncStatusPolicy.SyncingStatus);
+        // User-invoked sync: the outcome is pinned so it cannot vanish
+        // unread; Escape, a click on it or the next navigation dismisses it.
+        ShowTransientStatus(BrowserSyncStatusPolicy.SyncingStatus);
         try
         {
             await browserSyncScheduler.RunNowAsync();
-            toolbar.SetStatus(BrowserSyncStatusPolicy.FormatStatusJson(ReadBrowserSyncStatusJson()));
+            ShowPinnedStatus(BrowserSyncStatusPolicy.FormatStatusJson(ReadBrowserSyncStatusJson()));
         }
         catch (Exception error)
         {
-            toolbar.SetStatus(BrowserSyncStatusPolicy.FailedStatus);
+            ShowPinnedStatus(BrowserSyncStatusPolicy.FailedStatus);
             MessageBox.Show(
                 this,
                 FormatBrowserSyncError(error),
@@ -1558,7 +1630,9 @@ internal sealed class MainForm : Form
         {
             browserSyncCredentialStore.ClearSession(dialog.Environment);
             browserSyncScheduler.CancelPendingSync();
-            toolbar.SetStatus(BrowserSyncStatusPolicy.FormatStatusJson(ReadBrowserSyncStatusJson()));
+            // A status report the user asked for by clearing credentials:
+            // pinned, like the syncStatus command result.
+            ShowPinnedStatus(BrowserSyncStatusPolicy.FormatStatusJson(ReadBrowserSyncStatusJson()));
             return;
         }
 
@@ -1567,17 +1641,15 @@ internal sealed class MainForm : Form
             dialog.AccessToken,
             dialog.BaseUrl);
         ScheduleBrowserDataSyncAfterCredentialChange();
-        toolbar.SetStatus(BrowserStrings.Get("status.syncCredentialsUpdated"));
+        ShowTransientStatus(BrowserStrings.Get("status.syncCredentialsUpdated"));
     }
 
     private void ShowBrowserSyncStatus()
     {
-        MessageBox.Show(
-            this,
-            BrowserSyncStatusPolicy.FormatStatusJson(ReadBrowserSyncStatusJson()),
-            BrowserStrings.Get("dialog.sync.title"),
-            MessageBoxButtons.OK,
-            MessageBoxIcon.Information);
+        // Pinned overlay instead of a modal box: the user-requested status
+        // stays readable until Escape, a click on it, or the next
+        // navigation, without blocking the window.
+        ShowPinnedStatus(BrowserSyncStatusPolicy.FormatStatusJson(ReadBrowserSyncStatusJson()));
     }
 
     private void ScheduleBrowserDataSyncAfterCredentialChange()
@@ -1591,7 +1663,7 @@ internal sealed class MainForm : Form
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus(BrowserSyncStatusPolicy.FailedStatus);
+            ShowTransientStatus(BrowserSyncStatusPolicy.FailedStatus);
         }
     }
 
@@ -1606,7 +1678,7 @@ internal sealed class MainForm : Form
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus(BrowserSyncStatusPolicy.FailedStatus);
+            ShowTransientStatus(BrowserSyncStatusPolicy.FailedStatus);
         }
     }
 
@@ -1646,15 +1718,15 @@ internal sealed class MainForm : Form
             searchSettingsStore.Save(searchSettingsSnapshot);
             appMenu.SetSearchEngine(searchSettingsSnapshot.SearchEngineId);
             BrowserSearchEnginePolicy.TryGetEngine(searchSettingsSnapshot.SearchEngineId, out var engine);
-            toolbar.SetStatus(BrowserStrings.Format("status.searchEngineChanged", engine.DisplayName));
+            ShowTransientStatus(BrowserStrings.Format("status.searchEngineChanged", engine.DisplayName));
         }
         catch (IOException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.searchEngineUpdateFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.searchEngineUpdateFailed"));
         }
         catch (UnauthorizedAccessException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.searchEngineUpdateFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.searchEngineUpdateFailed"));
         }
     }
 
@@ -1665,18 +1737,18 @@ internal sealed class MainForm : Form
             startupSettingsSnapshot = startupSettingsStore.CreateSnapshot(restorePreviousSession);
             startupSettingsStore.Save(startupSettingsSnapshot);
             appMenu.SetRestorePreviousSession(startupSettingsSnapshot.RestorePreviousSession);
-            toolbar.SetStatus(BrowserStrings.Get(
+            ShowTransientStatus(BrowserStrings.Get(
                 startupSettingsSnapshot.RestorePreviousSession
                     ? "status.startupRestoresSession"
                     : "status.startupOpensHome"));
         }
         catch (IOException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.startupSettingUpdateFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.startupSettingUpdateFailed"));
         }
         catch (UnauthorizedAccessException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.startupSettingUpdateFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.startupSettingUpdateFailed"));
         }
     }
 
@@ -1693,19 +1765,19 @@ internal sealed class MainForm : Form
             {
                 UseShellExecute = true,
             });
-            toolbar.SetStatus(BrowserDownloadPolicy.OpenedLastDownloadStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.OpenedLastDownloadStatus);
         }
         catch (ArgumentException)
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.OpenLastDownloadFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.OpenLastDownloadFailedStatus);
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.OpenLastDownloadFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.OpenLastDownloadFailedStatus);
         }
         catch (Win32Exception)
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.OpenLastDownloadFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.OpenLastDownloadFailedStatus);
         }
     }
 
@@ -1724,19 +1796,19 @@ internal sealed class MainForm : Form
             {
                 UseShellExecute = true,
             });
-            toolbar.SetStatus(BrowserDownloadPolicy.RevealedLastDownloadStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.RevealedLastDownloadStatus);
         }
         catch (ArgumentException)
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.RevealLastDownloadFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.RevealLastDownloadFailedStatus);
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.RevealLastDownloadFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.RevealLastDownloadFailedStatus);
         }
         catch (Win32Exception)
         {
-            toolbar.SetStatus(BrowserDownloadPolicy.RevealLastDownloadFailedStatus);
+            ShowTransientStatus(BrowserDownloadPolicy.RevealLastDownloadFailedStatus);
         }
     }
 
@@ -1750,7 +1822,7 @@ internal sealed class MainForm : Form
             return true;
         }
 
-        toolbar.SetStatus(BrowserDownloadPolicy.FormatUnavailableDownloadStatus(lastCompletedDownloadPath));
+        ShowTransientStatus(BrowserDownloadPolicy.FormatUnavailableDownloadStatus(lastCompletedDownloadPath));
         return false;
     }
 
@@ -1764,18 +1836,18 @@ internal sealed class MainForm : Form
     {
         if (!BrowserPageActionPolicy.TryGetCopyableAddress(activeTab?.Address, out var address))
         {
-            toolbar.SetStatus(BrowserPageActionPolicy.NoCopyableAddressStatus);
+            ShowTransientStatus(BrowserPageActionPolicy.NoCopyableAddressStatus);
             return;
         }
 
         try
         {
             Clipboard.SetText(address);
-            toolbar.SetStatus(BrowserPageActionPolicy.CopiedAddressStatus);
+            ShowTransientStatus(BrowserPageActionPolicy.CopiedAddressStatus);
         }
         catch (ExternalException)
         {
-            toolbar.SetStatus(BrowserPageActionPolicy.NoCopyableAddressStatus);
+            ShowTransientStatus(BrowserPageActionPolicy.NoCopyableAddressStatus);
         }
     }
 
@@ -1783,7 +1855,7 @@ internal sealed class MainForm : Form
     {
         if (!BrowserPageActionPolicy.TryGetExternalAddress(activeTab?.Address, out var address))
         {
-            toolbar.SetStatus(BrowserPageActionPolicy.NoExternalAddressStatus);
+            ShowTransientStatus(BrowserPageActionPolicy.NoExternalAddressStatus);
             return;
         }
 
@@ -1793,19 +1865,19 @@ internal sealed class MainForm : Form
             {
                 UseShellExecute = true,
             });
-            toolbar.SetStatus(BrowserPageActionPolicy.OpenedExternalStatus);
+            ShowTransientStatus(BrowserPageActionPolicy.OpenedExternalStatus);
         }
         catch (ArgumentException)
         {
-            toolbar.SetStatus(BrowserPageActionPolicy.OpenExternalFailedStatus);
+            ShowTransientStatus(BrowserPageActionPolicy.OpenExternalFailedStatus);
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus(BrowserPageActionPolicy.OpenExternalFailedStatus);
+            ShowTransientStatus(BrowserPageActionPolicy.OpenExternalFailedStatus);
         }
         catch (Win32Exception)
         {
-            toolbar.SetStatus(BrowserPageActionPolicy.OpenExternalFailedStatus);
+            ShowTransientStatus(BrowserPageActionPolicy.OpenExternalFailedStatus);
         }
     }
 
@@ -1814,7 +1886,7 @@ internal sealed class MainForm : Form
         if (activeTab is null
             || !BrowserBookmarkStore.TryNormalizeBookmarkAddress(activeTab.Address, out _))
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.pageNotBookmarkable"));
+            ShowTransientStatus(BrowserStrings.Get("status.pageNotBookmarkable"));
             return;
         }
 
@@ -1825,7 +1897,7 @@ internal sealed class MainForm : Form
             {
                 if (bookmarkStore.RemoveAddress(activeTab.Address))
                 {
-                    toolbar.SetStatus(BrowserStrings.Get("status.bookmarkRemoved"));
+                    ShowTransientStatus(BrowserStrings.Get("status.bookmarkRemoved"));
                     didChangeBookmarks = true;
                 }
             }
@@ -1837,7 +1909,7 @@ internal sealed class MainForm : Form
                         activeTab.Address,
                         DateTimeOffset.UtcNow))
                 {
-                    toolbar.SetStatus(BrowserStrings.Get("status.bookmarkAdded"));
+                    ShowTransientStatus(BrowserStrings.Get("status.bookmarkAdded"));
                     didChangeBookmarks = true;
                 }
             }
@@ -1851,11 +1923,11 @@ internal sealed class MainForm : Form
         }
         catch (IOException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.bookmarkUpdateFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.bookmarkUpdateFailed"));
         }
         catch (UnauthorizedAccessException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.bookmarkUpdateFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.bookmarkUpdateFailed"));
         }
     }
 
@@ -1883,13 +1955,13 @@ internal sealed class MainForm : Form
 
         if (!NavigationPolicy.TryNormalizeLocalFilePath(dialog.FileName, out var fileAddress))
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.fileOpenRejected"));
+            ShowTransientStatus(BrowserStrings.Get("status.fileOpenRejected"));
             return;
         }
 
         if (!TryNavigateTabAddress(activeTab, fileAddress, out var errorMessage))
         {
-            toolbar.SetStatus(errorMessage ?? BrowserStrings.Get("status.fileOpenRejected"));
+            ShowTransientStatus(errorMessage ?? BrowserStrings.Get("status.fileOpenRejected"));
         }
     }
 
@@ -1906,11 +1978,11 @@ internal sealed class MainForm : Form
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.printUnavailable"));
+            ShowTransientStatus(BrowserStrings.Get("status.printUnavailable"));
         }
         catch (ArgumentException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.printUnavailable"));
+            ShowTransientStatus(BrowserStrings.Get("status.printUnavailable"));
         }
     }
 
@@ -1935,22 +2007,22 @@ internal sealed class MainForm : Form
 
         try
         {
-            toolbar.SetStatus(BrowserBrowsingDataPolicy.ClearingStatus);
+            ShowTransientStatus(BrowserBrowsingDataPolicy.ClearingStatus);
             await profile.ClearBrowsingDataAsync(
                 CoreWebView2BrowsingDataKinds.AllSite
                 | CoreWebView2BrowsingDataKinds.DiskCache
                 | CoreWebView2BrowsingDataKinds.BrowsingHistory
                 | CoreWebView2BrowsingDataKinds.DownloadHistory);
             ClearLocalHistory();
-            toolbar.SetStatus(BrowserBrowsingDataPolicy.ClearedStatus);
+            ShowTransientStatus(BrowserBrowsingDataPolicy.ClearedStatus);
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus(BrowserBrowsingDataPolicy.FailedStatus);
+            ShowTransientStatus(BrowserBrowsingDataPolicy.FailedStatus);
         }
         catch (ArgumentException)
         {
-            toolbar.SetStatus(BrowserBrowsingDataPolicy.FailedStatus);
+            ShowTransientStatus(BrowserBrowsingDataPolicy.FailedStatus);
         }
     }
 
@@ -1979,7 +2051,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.savingPdf"));
+            ShowTransientStatus(BrowserStrings.Get("status.savingPdf"));
             var printSettings = webViewEnvironment?.CreatePrintSettings();
             if (printSettings is not null)
             {
@@ -1987,23 +2059,23 @@ internal sealed class MainForm : Form
             }
 
             var succeeded = await coreWebView.PrintToPdfAsync(dialog.FileName, printSettings);
-            toolbar.SetStatus(BrowserPdfPolicy.FormatSaveStatus(succeeded, dialog.FileName));
+            ShowTransientStatus(BrowserPdfPolicy.FormatSaveStatus(succeeded, dialog.FileName));
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.savePdfFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.savePdfFailed"));
         }
         catch (ArgumentException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.savePdfFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.savePdfFailed"));
         }
         catch (IOException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.savePdfFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.savePdfFailed"));
         }
         catch (UnauthorizedAccessException)
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.savePdfFailed"));
+            ShowTransientStatus(BrowserStrings.Get("status.savePdfFailed"));
         }
     }
 
@@ -2038,7 +2110,7 @@ internal sealed class MainForm : Form
 
         var normalizedZoom = BrowserZoomPolicy.Normalize(zoomFactor);
         activeTab.WebView.ZoomFactor = normalizedZoom;
-        toolbar.SetStatus(BrowserStrings.Format(
+        ShowTransientStatus(BrowserStrings.Format(
             "status.zoomLevel",
             BrowserZoomPolicy.FormatZoom(normalizedZoom)));
         SyncActiveTabUi();
@@ -2197,14 +2269,14 @@ internal sealed class MainForm : Form
 
         if (string.IsNullOrWhiteSpace(query))
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.find.emptyQuery"));
+            ShowTransientStatus(BrowserStrings.Get("status.find.emptyQuery"));
             return;
         }
 
         lastFindQuery = query;
         var result = await activeTab.WebView.CoreWebView2.ExecuteScriptAsync(
             BrowserFindPolicy.BuildWindowFindScript(query, forward));
-        toolbar.SetStatus(BrowserStrings.Get(
+        ShowTransientStatus(BrowserStrings.Get(
             BrowserFindPolicy.IsFoundResult(result) ? "status.find.matchFound" : "status.find.noMatch"));
     }
 
@@ -2233,13 +2305,13 @@ internal sealed class MainForm : Form
             out var resolvedAddress,
             out _))
         {
-            toolbar.SetStatus(BrowserStrings.Get("status.addressInvalid"));
+            ShowTransientStatus(BrowserStrings.Get("status.addressInvalid"));
             return;
         }
 
         if (!TryNavigateTabAddress(activeTab, resolvedAddress, out var errorMessage))
         {
-            toolbar.SetStatus(errorMessage ?? BrowserStrings.Get("status.addressInvalid"));
+            ShowTransientStatus(errorMessage ?? BrowserStrings.Get("status.addressInvalid"));
             return;
         }
     }
@@ -2324,6 +2396,7 @@ internal sealed class MainForm : Form
         {
             toolbar.SetAddress(string.Empty);
             toolbar.SetNavigationState(canGoBack: false, canGoForward: false, isLoading: false);
+            toolbar.SetBookmarkState(canBookmark: false, isBookmarked: false);
             appMenu.SetNavigationState(
                 canGoBack: false,
                 canGoForward: false,
@@ -2348,11 +2421,13 @@ internal sealed class MainForm : Form
         var canCopyPageAddress = BrowserPageActionPolicy.TryGetCopyableAddress(activeTab.Address, out _);
         var canOpenInDefaultBrowser = BrowserPageActionPolicy.TryGetExternalAddress(activeTab.Address, out _);
         var canBookmarkPage = BrowserBookmarkStore.TryNormalizeBookmarkAddress(activeTab.Address, out _);
+        var isActivePageBookmarked = canBookmarkPage && IsAddressBookmarked(activeTab.Address);
         toolbar.SetAddress(activeTab.Address);
         toolbar.SetNavigationState(
             canGoBack,
             canGoForward,
             activeTab.IsLoading);
+        toolbar.SetBookmarkState(canBookmarkPage, isActivePageBookmarked);
         appMenu.SetNavigationState(
             canGoBack,
             canGoForward,
@@ -2362,7 +2437,7 @@ internal sealed class MainForm : Form
             canOpenInDefaultBrowser,
             canReopenClosedTab: closedTabs.CanReopen,
             canBookmarkPage,
-            isActivePageBookmarked: canBookmarkPage && IsAddressBookmarked(activeTab.Address),
+            isActivePageBookmarked,
             canOpenLastDownload: HasCompletedDownload(),
             canZoomIn: BrowserZoomPolicy.CanZoomIn(zoomFactor),
             canZoomOut: BrowserZoomPolicy.CanZoomOut(zoomFactor),
@@ -2556,7 +2631,7 @@ internal sealed class MainForm : Form
             SyncActiveTabUi();
             if (removed)
             {
-                toolbar.SetStatus(BrowserStrings.Get("status.bookmarkRemoved"));
+                ShowTransientStatus(BrowserStrings.Get("status.bookmarkRemoved"));
                 ScheduleBrowserDataSyncAfterLocalChange();
             }
 
@@ -2590,7 +2665,7 @@ internal sealed class MainForm : Form
             var removed = historyStore.RemoveAddress(address);
             if (removed)
             {
-                toolbar.SetStatus(BrowserStrings.Get("status.historyEntryRemoved"));
+                ShowTransientStatus(BrowserStrings.Get("status.historyEntryRemoved"));
                 ScheduleBrowserDataSyncAfterLocalChange();
             }
 
@@ -2779,4 +2854,160 @@ internal sealed class BrowserNewWindowRequestedEventArgs : EventArgs
     }
 
     public string? InitialUrl { get; }
+}
+
+/// <summary>
+/// How long a status stays on screen. Transient statuses (hover link
+/// targets, ephemeral confirmations) auto-hide after a few seconds; pinned
+/// statuses (user-invoked results such as the sync status report) persist
+/// until Escape, a click on the overlay, or the next navigation.
+/// </summary>
+internal enum BrowserStatusKind
+{
+    Transient,
+    Pinned,
+}
+
+/// <summary>
+/// Bottom-left status bubble above the content host, replacing the removed
+/// fixed toolbar status column (macOS structure: no status bar; Chrome
+/// detail: a floating status bubble). Lives as a sibling of the web view
+/// host and keeps itself glued to its parent's bottom-left corner.
+/// </summary>
+internal sealed class BrowserStatusOverlay : Label
+{
+    private const int TransientDurationMilliseconds = 4000;
+
+    private readonly System.Windows.Forms.Timer hideTimer;
+    private BrowserTheme theme = BrowserTheme.Light;
+    private Control? subscribedParent;
+
+    public BrowserStatusOverlay()
+    {
+        AutoSize = true;
+        Visible = false;
+        hideTimer = new System.Windows.Forms.Timer
+        {
+            Interval = TransientDurationMilliseconds,
+        };
+        hideTimer.Tick += (_, _) => HideStatus();
+        // Clicking a status dismisses it, pinned or not.
+        Click += (_, _) => HideStatus();
+    }
+
+    public BrowserStatusKind Kind { get; private set; }
+
+    public void ShowStatus(string status, BrowserStatusKind kind)
+    {
+        hideTimer.Stop();
+        if (string.IsNullOrWhiteSpace(status))
+        {
+            // An empty transient update (e.g. the pointer leaving a link)
+            // must not dismiss a pinned result the user asked for.
+            if (kind == BrowserStatusKind.Pinned || Kind != BrowserStatusKind.Pinned)
+            {
+                HideStatus();
+            }
+
+            return;
+        }
+
+        Kind = kind;
+        Text = status;
+        Visible = true;
+        BringToFront();
+        if (kind == BrowserStatusKind.Transient)
+        {
+            hideTimer.Start();
+        }
+    }
+
+    public void HideStatus()
+    {
+        hideTimer.Stop();
+        Visible = false;
+        Text = string.Empty;
+        Kind = BrowserStatusKind.Transient;
+    }
+
+    /// <summary>Dismissal trigger for navigations: only a pinned status reacts.</summary>
+    public void HidePinnedStatus()
+    {
+        if (Kind == BrowserStatusKind.Pinned)
+        {
+            HideStatus();
+        }
+    }
+
+    public void ApplyTheme(BrowserTheme theme)
+    {
+        this.theme = theme;
+        var dpi = DeviceDpi;
+        BackColor = theme.StatusBackground;
+        ForeColor = theme.BarForeground;
+        Font = BrowserThemeManager.Instance.GetUiFont(dpi);
+        Padding = new Padding(
+            BrowserTheme.Metrics.Scale(10, dpi),
+            BrowserTheme.Metrics.Scale(4, dpi),
+            BrowserTheme.Metrics.Scale(10, dpi),
+            BrowserTheme.Metrics.Scale(4, dpi));
+        Invalidate();
+    }
+
+    protected override void OnPaint(PaintEventArgs args)
+    {
+        base.OnPaint(args);
+        // Hairline border so the bubble reads as a surface over any page.
+        var thickness = BrowserTheme.Metrics.Scale(BrowserTheme.Metrics.BorderThickness, DeviceDpi);
+        using var pen = new Pen(theme.Border, thickness);
+        var inset = thickness / 2f;
+        args.Graphics.DrawRectangle(pen, inset, inset, Width - thickness, Height - thickness);
+    }
+
+    protected override void OnSizeChanged(EventArgs args)
+    {
+        base.OnSizeChanged(args);
+        Reposition();
+    }
+
+    protected override void OnParentChanged(EventArgs args)
+    {
+        base.OnParentChanged(args);
+        // Parent already points at the new parent here, so the previous
+        // subscription target is tracked explicitly.
+        if (subscribedParent is not null)
+        {
+            subscribedParent.Resize -= OnParentResize;
+        }
+
+        subscribedParent = Parent;
+        if (subscribedParent is not null)
+        {
+            subscribedParent.Resize += OnParentResize;
+            Reposition();
+        }
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            hideTimer.Dispose();
+        }
+
+        base.Dispose(disposing);
+    }
+
+    private void OnParentResize(object? sender, EventArgs args)
+    {
+        Reposition();
+    }
+
+    private void Reposition()
+    {
+        if (Parent is Control parent)
+        {
+            Location = new Point(0, Math.Max(0, parent.ClientSize.Height - Height));
+        }
+    }
 }

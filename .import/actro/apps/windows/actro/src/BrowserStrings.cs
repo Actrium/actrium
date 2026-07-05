@@ -29,15 +29,18 @@ internal static class BrowserStrings
             ["sidebar.newTab"] = "New tab",
             ["sidebar.loadingTitleFormat"] = "{0} ...",
 
-            // Toolbar
-            ["toolbar.back"] = "Back",
-            ["toolbar.forward"] = "Forward",
-            ["toolbar.reload"] = "Reload",
-            ["toolbar.stop"] = "Stop",
-            ["toolbar.home"] = "Home",
-            ["toolbar.go"] = "Go",
-            ["toolbar.menu"] = "⋯",
-            ["toolbar.status.loading"] = "Loading",
+            // Toolbar (glyph buttons carry tooltips, not captions; the
+            // reload/stop pair flips with the loading state and the
+            // bookmark star with the bookmarked state)
+            ["toolbar.tooltip.newTab"] = "New tab (Ctrl+T)",
+            ["toolbar.tooltip.toggleSidebar"] = "Show or hide sidebar (Ctrl+Shift+,)",
+            ["toolbar.tooltip.back"] = "Go back (Alt+Left)",
+            ["toolbar.tooltip.forward"] = "Go forward (Alt+Right)",
+            ["toolbar.tooltip.reload"] = "Reload (Ctrl+R)",
+            ["toolbar.tooltip.stop"] = "Stop loading (Esc)",
+            ["toolbar.tooltip.bookmark"] = "Bookmark this page (Ctrl+D)",
+            ["toolbar.tooltip.removeBookmark"] = "Remove bookmark (Ctrl+D)",
+            ["toolbar.tooltip.menu"] = "Menu (Alt+E)",
 
             // Compact app menu (mnemonics apply inside the opened menu)
             ["menu.newTab"] = "&New Tab",

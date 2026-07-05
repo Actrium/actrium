@@ -2704,6 +2704,140 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual(180, BrowserSidebarLayoutPolicy.ClampWidth(240, 300, 96));
         return Task.CompletedTask;
     }),
+    ("maps toolbar commands to Segoe MDL2 Assets glyphs", () =>
+    {
+        // Codepoint-to-name pairs verified against the Segoe MDL2 Assets
+        // reference. The app targets Win10 19041, where Segoe Fluent Icons
+        // is not installed, so a Fluent-only codepoint would render as tofu
+        // under the MDL2 fallback. Extend this whitelist only with
+        // codepoints confirmed to exist in Segoe MDL2 Assets.
+        var mdl2Whitelist = new Dictionary<char, string>
+        {
+            ['\uE710'] = "Add",
+            ['\uE711'] = "Cancel",
+            ['\uE712'] = "More",
+            ['\uE72A'] = "Forward",
+            ['\uE72B'] = "Back",
+            ['\uE72C'] = "Refresh",
+            ['\uE734'] = "FavoriteStar",
+            ['\uE735'] = "FavoriteStarFill",
+            ['\uE89F'] = "ClosePane",
+            ['\uE8A0'] = "OpenPane",
+            ['\uE8A9'] = "ViewAll",
+        };
+
+        AssertTrue(BrowserGlyphs.All.Count > 0);
+        foreach (var glyph in BrowserGlyphs.All)
+        {
+            // Icon-font glyphs live in the Private Use Area, never among
+            // printable characters.
+            AssertTrue(glyph >= '\uE700' && glyph <= '\uF8FF');
+            AssertTrue(mdl2Whitelist.ContainsKey(glyph));
+        }
+
+        AssertEqual(BrowserGlyphs.All.Count, BrowserGlyphs.All.Distinct().Count());
+
+        // Exactly the toolbar-invocable commands are mapped; the flip states
+        // (stop, filled star) and the non-command glyphs (overview slot,
+        // app menu ellipsis) stay inside All so nothing bypasses the
+        // whitelist above.
+        var expectedCommands = new[]
+        {
+            BrowserMenuCommand.NewTab,
+            BrowserMenuCommand.ToggleSidebar,
+            BrowserMenuCommand.Back,
+            BrowserMenuCommand.Forward,
+            BrowserMenuCommand.Reload,
+            BrowserMenuCommand.Stop,
+            BrowserMenuCommand.BookmarkPage,
+        };
+        AssertEqual(expectedCommands.Length, BrowserGlyphs.CommandGlyphs.Count);
+        foreach (var command in expectedCommands)
+        {
+            AssertTrue(BrowserGlyphs.CommandGlyphs.ContainsKey(command));
+            AssertEqual(BrowserGlyphs.CommandGlyphs[command], BrowserGlyphs.Get(command));
+            AssertTrue(BrowserGlyphs.All.Contains(BrowserGlyphs.Get(command)));
+        }
+
+        // The state flips must be visibly distinct pairs.
+        AssertTrue(BrowserGlyphs.Get(BrowserMenuCommand.Reload) != BrowserGlyphs.Get(BrowserMenuCommand.Stop));
+        AssertTrue(BrowserGlyphs.BookmarkStar != BrowserGlyphs.BookmarkStarFilled);
+
+        // An unmapped command is a wiring bug and must throw loudly.
+        var unmappedCommandThrew = false;
+        try
+        {
+            _ = BrowserGlyphs.Get(BrowserMenuCommand.Exit);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            unmappedCommandThrew = true;
+        }
+
+        AssertTrue(unmappedCommandThrew);
+        return Task.CompletedTask;
+    }),
+    ("computes two-segment toolbar geometry with a collapsed stub", () =>
+    {
+        // Expanded: the sidebar segment tracks the sidebar width.
+        var expanded = BrowserToolbarLayoutPolicy.Segments(240, false, 1280, 96);
+        AssertEqual(240, expanded.SidebarSegmentWidth);
+        AssertEqual(240, expanded.ContentSegmentLeft);
+        AssertEqual(1040, expanded.ContentSegmentWidth);
+
+        // Collapsed: the fixed 88 px stub keeps [+ new tab][overview slot]
+        // visible instead of vanishing with the sidebar.
+        var collapsed = BrowserToolbarLayoutPolicy.Segments(240, true, 1280, 96);
+        AssertEqual(88, collapsed.SidebarSegmentWidth);
+        AssertEqual(88, collapsed.ContentSegmentLeft);
+        AssertEqual(1192, collapsed.ContentSegmentWidth);
+
+        // The stub is also the expanded floor for degenerate widths.
+        AssertEqual(88, BrowserToolbarLayoutPolicy.Segments(40, false, 1280, 96).SidebarSegmentWidth);
+
+        // DPI scaling: 88 * 192 / 96 = 176; 88 * 120 / 96 = 110.
+        AssertEqual(176, BrowserToolbarLayoutPolicy.Segments(0, true, 1280, 192).SidebarSegmentWidth);
+        AssertEqual(110, BrowserToolbarLayoutPolicy.CollapsedStubWidth(120));
+        AssertEqual(88, BrowserToolbarLayoutPolicy.CollapsedStubWidth(96));
+
+        // A transient mid-layout toolbar narrower than the segment clamps
+        // instead of producing a negative content width.
+        var tiny = BrowserToolbarLayoutPolicy.Segments(240, false, 60, 96);
+        AssertEqual(60, tiny.SidebarSegmentWidth);
+        AssertEqual(0, tiny.ContentSegmentWidth);
+        AssertEqual(0, BrowserToolbarLayoutPolicy.Segments(240, true, -5, 96).SidebarSegmentWidth);
+
+        // The stub reserves room for [pad][+ new tab][gap][overview slot]
+        // at every supported DPI, so the collapsed segment never clips.
+        foreach (var dpi in new[] { 96, 120, 144, 192 })
+        {
+            AssertTrue(
+                BrowserToolbarLayoutPolicy.EdgePadding(dpi)
+                + BrowserToolbarLayoutPolicy.ButtonWidth(dpi)
+                + BrowserToolbarLayoutPolicy.ButtonGap(dpi)
+                + BrowserToolbarLayoutPolicy.OverviewSlotWidth(dpi)
+                <= BrowserToolbarLayoutPolicy.CollapsedStubWidth(dpi));
+        }
+
+        return Task.CompletedTask;
+    }),
+    ("caps the toolbar address box at its scaled maximum width", () =>
+    {
+        AssertEqual(720, BrowserToolbarLayoutPolicy.AddressMaxWidth(96));
+        AssertEqual(900, BrowserToolbarLayoutPolicy.AddressMaxWidth(120));
+        AssertEqual(1440, BrowserToolbarLayoutPolicy.AddressMaxWidth(192));
+
+        // Below the cap the box takes all leftover space; above it the box
+        // stops growing (the toolbar centers it); degenerate space clamps
+        // to zero.
+        AssertEqual(300, BrowserToolbarLayoutPolicy.AddressWidth(300, 96));
+        AssertEqual(720, BrowserToolbarLayoutPolicy.AddressWidth(720, 96));
+        AssertEqual(720, BrowserToolbarLayoutPolicy.AddressWidth(5000, 96));
+        AssertEqual(0, BrowserToolbarLayoutPolicy.AddressWidth(0, 96));
+        AssertEqual(0, BrowserToolbarLayoutPolicy.AddressWidth(-10, 96));
+        AssertEqual(900, BrowserToolbarLayoutPolicy.AddressWidth(5000, 120));
+        return Task.CompletedTask;
+    }),
     ("collapses the sidebar below the scaled width threshold", () =>
     {
         AssertEqual(90, BrowserSidebarLayoutPolicy.CollapseThreshold(96));
