@@ -1046,7 +1046,15 @@ internal sealed class MainForm : Form
 
     private void HandleNavigationStarting(BrowserTab tab, CoreWebView2NavigationStartingEventArgs args)
     {
-        if (!NavigationPolicy.IsAllowedNavigationAddress(args.Uri))
+        // NavigateToString surfaces app-generated documents as
+        // data:text/html navigations that the address allow-list would
+        // cancel; the tab-scoped flag lets exactly one such navigation
+        // through and is consumed by whichever navigation arrives first.
+        var isGeneratedDocument = tab.HasPendingGeneratedDocument
+            && NavigationPolicy.IsGeneratedDocumentUri(args.Uri);
+        tab.HasPendingGeneratedDocument = false;
+
+        if (!isGeneratedDocument && !NavigationPolicy.IsAllowedNavigationAddress(args.Uri))
         {
             args.Cancel = true;
             tab.IsLoading = false;
@@ -1064,8 +1072,11 @@ internal sealed class MainForm : Form
         }
 
         tab.IsLoading = true;
-        if (!string.Equals(args.Uri, "about:blank", StringComparison.OrdinalIgnoreCase))
+        if (!isGeneratedDocument
+            && !string.Equals(args.Uri, "about:blank", StringComparison.OrdinalIgnoreCase))
         {
+            // Generated documents keep their virtual address (e.g.
+            // actro://home); real navigations adopt the target URI.
             tab.Address = args.Uri;
             tab.IsShowingErrorPage = false;
         }
@@ -1514,12 +1525,24 @@ internal sealed class MainForm : Form
         }
     }
 
+    /// <summary>
+    /// Single entry point for app-generated documents (internal pages,
+    /// error pages): marks the pending generated navigation that
+    /// HandleNavigationStarting consumes, then hands the HTML to
+    /// WebView2. Never call NavigateToString directly.
+    /// </summary>
+    private static void NavigateGeneratedDocument(BrowserTab tab, string html)
+    {
+        tab.HasPendingGeneratedDocument = true;
+        tab.WebView.NavigateToString(html);
+    }
+
     private void NavigateHomeDocument(BrowserTab tab)
     {
         tab.Address = NavigationPolicy.HomeAddress;
         tab.Title = BrowserHomeDocumentPolicy.Title;
         tab.IsShowingErrorPage = false;
-        tab.WebView.NavigateToString(BrowserHomeDocumentPolicy.BuildDocument(ActroCore.LoadStatus()));
+        NavigateGeneratedDocument(tab, BrowserHomeDocumentPolicy.BuildDocument(ActroCore.LoadStatus()));
         SyncActiveTabUi();
         SyncSidebar();
     }
@@ -1537,7 +1560,7 @@ internal sealed class MainForm : Form
         tab.Address = NavigationPolicy.HistoryAddress;
         tab.Title = BrowserHistoryDocumentPolicy.Title;
         tab.IsShowingErrorPage = false;
-        tab.WebView.NavigateToString(BrowserHistoryDocumentPolicy.BuildDocument(historyStore.Load().Items));
+        NavigateGeneratedDocument(tab, BrowserHistoryDocumentPolicy.BuildDocument(historyStore.Load().Items));
         SyncActiveTabUi();
         SyncSidebar();
     }
@@ -1556,7 +1579,7 @@ internal sealed class MainForm : Form
         tab.Address = NavigationPolicy.BookmarksAddress;
         tab.Title = BrowserBookmarksDocumentPolicy.Title;
         tab.IsShowingErrorPage = false;
-        tab.WebView.NavigateToString(BrowserBookmarksDocumentPolicy.BuildDocument(bookmarkSnapshot.Items));
+        NavigateGeneratedDocument(tab, BrowserBookmarksDocumentPolicy.BuildDocument(bookmarkSnapshot.Items));
         SyncActiveTabUi();
         SyncSidebar();
     }
@@ -2477,7 +2500,7 @@ internal sealed class MainForm : Form
         tab.IsShowingErrorPage = true;
         tab.IsLoading = false;
         tab.Title = BrowserNavigationErrorPolicy.DefaultTitle;
-        tab.WebView.NavigateToString(BrowserNavigationErrorPolicy.BuildErrorDocument(tab.Address, errorStatus));
+        NavigateGeneratedDocument(tab, BrowserNavigationErrorPolicy.BuildErrorDocument(tab.Address, errorStatus));
         SyncActiveTabUi();
         SyncSidebar();
     }

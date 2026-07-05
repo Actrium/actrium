@@ -32,6 +32,14 @@ internal sealed class BrowserTab : IDisposable
     public bool IsShowingErrorPage { get; set; }
 
     /// <summary>
+    /// Set immediately before NavigateToString delivers an app-generated
+    /// document (internal pages, error pages). NavigationStarting consumes
+    /// the flag so that exactly one generated-document navigation may pass
+    /// the address allow-list; see NavigationPolicy.IsGeneratedDocumentUri.
+    /// </summary>
+    public bool HasPendingGeneratedDocument { get; set; }
+
+    /// <summary>
     /// Cached favicon painted by the sidebar; null falls back to the
     /// letter avatar. The tab owns the image: replacing it disposes the
     /// previous one, and Dispose releases the last one with the tab.

@@ -60,6 +60,24 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertFalse(NavigationPolicy.IsAllowedNavigationAddress("example.com"));
         return Task.CompletedTask;
     }),
+    ("recognizes generated document navigation uris", () =>
+    {
+        // WebView2 NavigateToString surfaces app-generated documents as
+        // data:text/html (current runtimes) or about:blank (older ones).
+        AssertTrue(NavigationPolicy.IsGeneratedDocumentUri(
+            "data:text/html;charset=utf-8;base64,PCFkb2N0eXBlIGh0bWw+"));
+        AssertTrue(NavigationPolicy.IsGeneratedDocumentUri("data:text/html,hello"));
+        AssertTrue(NavigationPolicy.IsGeneratedDocumentUri("about:blank"));
+        AssertTrue(NavigationPolicy.IsGeneratedDocumentUri("DATA:TEXT/HTML,hello"));
+
+        // Everything else stays subject to the address allow-list.
+        AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("data:image/png;base64,AAAA"));
+        AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("data:text/plain,hello"));
+        AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("https://example.com"));
+        AssertFalse(NavigationPolicy.IsGeneratedDocumentUri("actro://home"));
+        AssertFalse(NavigationPolicy.IsGeneratedDocumentUri(""));
+        return Task.CompletedTask;
+    }),
     ("classifies external protocol addresses", () =>
     {
         AssertTrue(BrowserExternalProtocolPolicy.IsExternalProtocolAddress("mailto:hello@example.com"));

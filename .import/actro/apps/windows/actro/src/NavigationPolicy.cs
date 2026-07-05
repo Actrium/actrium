@@ -118,4 +118,18 @@ internal static class NavigationPolicy
             || uri.Scheme == Uri.UriSchemeFile
             || uri.Scheme == "about";
     }
+
+    /// <summary>
+    /// WebView2 surfaces NavigateToString content as a data:text/html
+    /// navigation (older runtimes reported about:blank). Only these exact
+    /// shapes may bypass the address allow-list, and only while the tab
+    /// has a pending app-generated document — arbitrary data: URIs stay
+    /// blocked for top-level navigation, matching Chrome behavior.
+    /// </summary>
+    public static bool IsGeneratedDocumentUri(string uri)
+    {
+        var trimmed = uri.Trim();
+        return trimmed.StartsWith("data:text/html", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "about:blank", StringComparison.OrdinalIgnoreCase);
+    }
 }
