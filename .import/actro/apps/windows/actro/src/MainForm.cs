@@ -654,6 +654,22 @@ internal sealed class MainForm : Form
     /// </summary>
     protected override bool ProcessCmdKey(ref Message message, Keys keyData)
     {
+        if (TryHandleAppShortcut(keyData))
+        {
+            return true;
+        }
+
+        return base.ProcessCmdKey(ref message, keyData);
+    }
+
+    /// <summary>
+    /// Shared shortcut routing for both entry points: ProcessCmdKey (keys
+    /// while WinForms controls own focus) and the per-tab WebView KeyDown
+    /// relay (accelerator keys while the page owns focus). Returns true
+    /// when the key mapped to a command.
+    /// </summary>
+    private bool TryHandleAppShortcut(Keys keyData)
+    {
         if (TryHandleTabShortcut(keyData))
         {
             return true;
@@ -784,11 +800,27 @@ internal sealed class MainForm : Form
                 return true;
         }
 
-        return base.ProcessCmdKey(ref message, keyData);
+        return false;
     }
 
     private void WireWebViewEvents(BrowserTab tab, CoreWebView2 coreWebView)
     {
+        // The WinForms WebView2 wrapper re-surfaces browser accelerator
+        // keys (Ctrl/Alt combos, function keys) as KeyDown while the page
+        // owns focus; regular typing never reaches this handler. Routing
+        // them through TryHandleAppShortcut keeps shortcuts working after
+        // focus moves into page content. Escape stays visible to the page
+        // (sites dismiss their own UI with it); other handled accelerators
+        // are consumed so the browser default cannot fire twice.
+        tab.WebView.KeyDown += (_, e) =>
+        {
+            if (TryHandleAppShortcut(e.KeyData) && e.KeyData != Keys.Escape)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+            }
+        };
+
         coreWebView.AddWebResourceRequestedFilter(
             "*",
             CoreWebView2WebResourceContext.All,
