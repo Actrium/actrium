@@ -112,6 +112,10 @@ required_files=(
   "crates/actro-core/include/actro_core.h"
   "scripts/verify-windows.sh"
   "docs/migration/windows-client.md"
+  "apps/windows/VERSION"
+  "apps/windows/actro/packaging/actro-installer.iss"
+  "scripts/package-windows.sh"
+  "scripts/package-windows.ps1"
 )
 
 missing_files=()
@@ -1822,6 +1826,80 @@ if [[ -f apps/windows/actro/Actro.Windows.csproj ]]; then
 else
   print_failure "Windows project scaffold is missing"
 fi
+
+# Packaging: apps/windows/VERSION is the single version source; the csproj
+# reads it into <Version> and scripts/package-windows.ps1 reads it for
+# artifact and installer stamping.
+if [[ -f apps/windows/VERSION ]] && rg -q '^[0-9]+\.[0-9]+\.[0-9]+$' apps/windows/VERSION; then
+  print_ok "Windows version file carries a MAJOR.MINOR.PATCH version"
+else
+  print_failure "apps/windows/VERSION is missing or not a MAJOR.MINOR.PATCH version"
+fi
+
+check_pattern_in_each_file \
+  'ActroWindowsVersionFile' \
+  "Windows project single-sources its version from apps/windows/VERSION" \
+  "Windows project does not single-source its version from apps/windows/VERSION" \
+  apps/windows/actro/Actro.Windows.csproj
+
+missing_packaging_pipeline_symbols=()
+for packaging_symbol in \
+  'apps.windows.VERSION' \
+  '[-][-]self-contained' \
+  'actro_core\.dll' \
+  'Compress-Archive' \
+  'ISCC' \
+  'actro-installer\.iss' \
+  'LinkId=2124703' \
+  'code-signing certificate'
+do
+  if ! rg -q "$packaging_symbol" scripts/package-windows.ps1; then
+    missing_packaging_pipeline_symbols+=("$packaging_symbol")
+  fi
+done
+
+if [[ "${#missing_packaging_pipeline_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows packaging pipeline is missing expected behavior"
+  printf '%s\n' "${missing_packaging_pipeline_symbols[@]}"
+else
+  print_ok "Windows packaging pipeline publishes, gates actro_core.dll, zips and compiles the installer"
+fi
+
+check_pattern_in_each_file \
+  'package-windows\.ps1' \
+  "Windows packaging entry point delegates to the PowerShell pipeline" \
+  "Windows packaging entry point does not delegate to the PowerShell pipeline" \
+  scripts/package-windows.sh
+
+missing_installer_policy_symbols=()
+for installer_symbol in \
+  'PrivilegesRequired=lowest' \
+  '\{autopf\}' \
+  '\{autoprograms\}' \
+  'F3017226-FE2A-4295-8BDF-00C3A9A7E4C5' \
+  'WOW6432Node' \
+  'IsWebView2RuntimeInstalled' \
+  '\{#AppVersion\}' \
+  'unsigned'
+do
+  if ! rg -q "$installer_symbol" apps/windows/actro/packaging/actro-installer.iss; then
+    missing_installer_policy_symbols+=("$installer_symbol")
+  fi
+done
+
+if [[ "${#missing_installer_policy_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows installer script is missing per-user/WebView2/version policy"
+  printf '%s\n' "${missing_installer_policy_symbols[@]}"
+else
+  print_ok "Windows installer installs per-user, gates WebView2 and stamps the shared version"
+fi
+
+check_pattern_in_each_file \
+  'package-windows' \
+  "Windows app docs record the packaging entry point" \
+  "Windows app docs do not record the packaging entry point" \
+  apps/windows/actro/README.md \
+  docs/migration/windows-client.md
 
 if [[ "$failures" -ne 0 ]]; then
   echo

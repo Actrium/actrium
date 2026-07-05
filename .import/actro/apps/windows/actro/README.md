@@ -440,3 +440,30 @@ Run the shell manually with:
 ```text
 dotnet run --project apps/windows/actro/Actro.Windows.csproj -- --url https://example.com
 ```
+
+## Packaging
+
+`../VERSION` (apps/windows/VERSION) is the single version source: the csproj
+reads it into `<Version>` (which drives the assembly, file and product
+versions) and the packaging pipeline reads it for artifact names and the
+installer version, so the stamps cannot drift.
+
+On a Windows host, `scripts/package-windows.sh` (a thin wrapper around
+`scripts/package-windows.ps1`) produces, under the gitignored `dist/windows/`:
+
+- `Actro-<version>-win-x64.zip` — portable self-contained publish
+  (`dotnet publish -c Release -r win-x64 --self-contained true`) with
+  `actro_core.dll` verified at the application root; extract and run
+  `Actro.exe` in place.
+- `Actro-<version>-win-x64-setup.exe` — per-user installer compiled with Inno
+  Setup 6 from `packaging/actro-installer.iss` when `ISCC.exe` is installed;
+  otherwise the pipeline warns and ships the zip only. The installer needs no
+  administrator rights, installs to `%LOCALAPPDATA%\Programs\Actro`, creates a
+  per-user Start Menu shortcut, and runs the embedded official WebView2
+  Evergreen bootstrapper only when the runtime is missing. Uninstall removes
+  binaries and shortcuts but leaves `%LOCALAPPDATA%\Actrium\Actro\Windows`
+  (profile data) in place.
+
+Known gaps: artifacts are unsigned (no code-signing certificate yet), and the
+app has no icon asset — the repo contains no convertible icon source, so the
+executable and shortcut keep default icons until one is authored.
