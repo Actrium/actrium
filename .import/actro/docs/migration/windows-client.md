@@ -471,3 +471,17 @@ To build and copy the Rust DLL on a Windows Rust host:
 ```text
 scripts/build-actro-rust-bindings.sh windows
 ```
+
+## Packaging
+
+`scripts/package-windows.sh` (delegating to `scripts/package-windows.ps1` on a
+Windows host) turns the tree under `apps/windows/actro/` into distributable
+artifacts in `dist/windows/`: a portable self-contained win-x64 zip and, when
+Inno Setup 6 is present, a per-user installer built from
+`apps/windows/actro/packaging/actro-installer.iss`. `apps/windows/VERSION` is
+the single version source for the assembly/file version stamps and the
+installer version. The installer requires no administrator rights, creates a
+per-user Start Menu shortcut, installs the WebView2 Evergreen runtime through
+the official bootstrapper only when it is missing, and on uninstall leaves the
+user's profile data in `%LOCALAPPDATA%\Actrium\Actro\Windows` untouched.
+Artifacts are currently unsigned (no code-signing certificate yet).
