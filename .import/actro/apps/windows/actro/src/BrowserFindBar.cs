@@ -5,10 +5,11 @@ namespace Actro.Windows;
 
 internal sealed class BrowserFindBar : UserControl
 {
+    private readonly BrowserThemedBorderPanel queryPanel;
     private readonly TextBox queryBox;
-    private readonly Button previousButton;
-    private readonly Button nextButton;
-    private readonly Button closeButton;
+    private readonly BrowserThemedButton previousButton;
+    private readonly BrowserThemedButton nextButton;
+    private readonly BrowserThemedButton closeButton;
 
     public event EventHandler<BrowserFindRequestedEventArgs>? FindRequested;
     public event EventHandler? CloseRequested;
@@ -16,24 +17,23 @@ internal sealed class BrowserFindBar : UserControl
     public BrowserFindBar()
     {
         AutoScaleMode = AutoScaleMode.Dpi;
-        BackColor = Color.FromArgb(250, 251, 252);
         Dock = DockStyle.Top;
-        Height = 40;
-        MinimumSize = new Size(0, 40);
         Padding = new Padding(8, 6, 8, 6);
         Visible = false;
 
         queryBox = new TextBox
         {
+            BorderStyle = BorderStyle.None,
+        };
+        queryPanel = new BrowserThemedBorderPanel(queryBox)
+        {
             Anchor = AnchorStyles.Left | AnchorStyles.Right,
-            BorderStyle = BorderStyle.FixedSingle,
-            Font = new Font("Segoe UI", 10F, FontStyle.Regular, GraphicsUnit.Point),
-            Margin = new Padding(0, 1, 6, 0),
+            Margin = new Padding(0, 0, 6, 0),
         };
 
-        previousButton = CreateButton("Previous", 82);
-        nextButton = CreateButton("Next", 58);
-        closeButton = CreateButton("Close", 62);
+        previousButton = CreateButton("Previous");
+        nextButton = CreateButton("Next");
+        closeButton = CreateButton("Close");
 
         var layout = new TableLayoutPanel
         {
@@ -50,7 +50,7 @@ internal sealed class BrowserFindBar : UserControl
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 64));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        layout.Controls.Add(queryBox, 0, 0);
+        layout.Controls.Add(queryPanel, 0, 0);
         layout.Controls.Add(previousButton, 1, 0);
         layout.Controls.Add(nextButton, 2, 0);
         layout.Controls.Add(closeButton, 3, 0);
@@ -60,6 +60,30 @@ internal sealed class BrowserFindBar : UserControl
         previousButton.Click += (_, _) => SubmitFind(forward: false);
         nextButton.Click += (_, _) => SubmitFind(forward: true);
         closeButton.Click += (_, _) => CloseRequested?.Invoke(this, EventArgs.Empty);
+
+        ApplyTheme(BrowserTheme.Light);
+    }
+
+    /// <summary>Applies palette, typography and DPI-scaled metrics in one pass.</summary>
+    public void ApplyTheme(BrowserTheme theme)
+    {
+        var dpi = DeviceDpi;
+        var barHeight = BrowserTheme.Metrics.Scale(BrowserTheme.Metrics.FindBarHeight, dpi);
+        Height = barHeight;
+        MinimumSize = new Size(0, barHeight);
+        BackColor = theme.StatusBackground;
+
+        var uiFont = BrowserThemeManager.Instance.GetUiFont(dpi);
+        foreach (var button in new[] { previousButton, nextButton, closeButton })
+        {
+            button.Height = BrowserTheme.Metrics.Scale(BrowserTheme.Metrics.InputHeight, dpi);
+            button.Font = uiFont;
+            button.ApplyTheme(theme);
+        }
+
+        queryBox.Font = uiFont;
+        queryPanel.Height = BrowserTheme.Metrics.Scale(BrowserTheme.Metrics.InputHeight, dpi);
+        queryPanel.ApplyTheme(theme);
     }
 
     public void ShowAndFocus()
@@ -76,16 +100,13 @@ internal sealed class BrowserFindBar : UserControl
 
     public string Query => queryBox.Text;
 
-    private static Button CreateButton(string text, int width)
+    private static BrowserThemedButton CreateButton(string text)
     {
-        return new Button
+        return new BrowserThemedButton
         {
             Anchor = AnchorStyles.Left | AnchorStyles.Right,
-            FlatStyle = FlatStyle.System,
-            Height = 28,
             Margin = new Padding(2, 0, 2, 0),
             Text = text,
-            Width = width,
         };
     }
 

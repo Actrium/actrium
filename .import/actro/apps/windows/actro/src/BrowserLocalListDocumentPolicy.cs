@@ -27,11 +27,12 @@ internal static class BrowserLocalListDocumentPolicy
             <meta charset="utf-8">
             <title>{{safeTitle}}</title>
             <style>
+              {{BrowserDocumentStylePolicy.RootCss}}
               html, body {
                 margin: 0;
-                font-family: "Segoe UI", system-ui, sans-serif;
-                background: #f6f7f9;
-                color: #121417;
+                font-family: var(--ui-font);
+                background: var(--page-background);
+                color: var(--page-foreground);
               }
               main {
                 box-sizing: border-box;
@@ -45,24 +46,24 @@ internal static class BrowserLocalListDocumentPolicy
                 margin: 0 0 24px;
               }
               p {
-                color: #59616d;
+                color: var(--muted-foreground);
                 font-size: 15px;
                 margin: 0;
               }
               .list-search {
-                background: #ffffff;
-                border: 1px solid #c8d0dc;
+                background: var(--input-background);
+                border: 1px solid var(--border);
                 border-radius: 4px;
                 box-sizing: border-box;
-                color: #121417;
-                font: 15px "Segoe UI", system-ui, sans-serif;
+                color: var(--page-foreground);
+                font: 15px var(--ui-font);
                 margin: 0 0 16px;
                 padding: 9px 11px;
                 width: 100%;
               }
               .list-search:focus {
-                border-color: #165dff;
-                outline: 2px solid rgba(22, 93, 255, 0.16);
+                border-color: var(--accent);
+                outline: 2px solid var(--accent-soft);
               }
               ol {
                 display: grid;
@@ -72,8 +73,8 @@ internal static class BrowserLocalListDocumentPolicy
                 padding: 0;
               }
               li {
-                background: #ffffff;
-                border: 1px solid #dfe3ea;
+                background: var(--card-background);
+                border: 1px solid var(--border);
                 border-radius: 6px;
                 display: flex;
                 gap: 12px;
@@ -84,7 +85,7 @@ internal static class BrowserLocalListDocumentPolicy
                 min-width: 0;
               }
               a {
-                color: #165dff;
+                color: var(--accent);
                 display: block;
                 font-size: 15px;
                 font-weight: 600;
@@ -96,31 +97,31 @@ internal static class BrowserLocalListDocumentPolicy
                 text-decoration: underline;
               }
               code {
-                color: #59616d;
+                color: var(--muted-foreground);
                 display: block;
-                font: 12px "Cascadia Mono", "Consolas", monospace;
+                font: 12px var(--mono-font);
                 margin-bottom: 6px;
                 overflow-wrap: anywhere;
               }
               time {
-                color: #7a8494;
+                color: var(--disabled-foreground);
                 font-size: 12px;
               }
               button {
                 align-self: flex-start;
-                background: #ffffff;
-                border: 1px solid #c8d0dc;
+                background: var(--card-background);
+                border: 1px solid var(--border);
                 border-radius: 4px;
-                color: #374151;
+                color: var(--page-foreground);
                 cursor: pointer;
-                font: 13px "Segoe UI", system-ui, sans-serif;
+                font: 13px var(--ui-font);
                 padding: 5px 10px;
               }
               button:hover {
-                background: #f1f4f8;
+                background: var(--hover-background);
               }
               button:disabled {
-                color: #9aa3af;
+                color: var(--disabled-foreground);
                 cursor: default;
               }
             </style>
