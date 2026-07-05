@@ -193,6 +193,19 @@ internal sealed class BrowserSyncProviderSettingsStore
         });
     }
 
+    // The settings dialog's Disconnect means "stop browser sync entirely",
+    // not "fall back to the reference server": clearing only the provider
+    // fields would silently reactivate endpoint sync for anyone with
+    // leftover credentials from the transitional dialog while the UI claims
+    // "not configured". Device identity is unaffected — this store owns it.
+    public BrowserSyncProviderSettingsSnapshot DisconnectAndClearEndpointSession(
+        BrowserStorageSyncCredentialStore endpointCredentialStore)
+    {
+        var snapshot = Disconnect();
+        endpointCredentialStore.ClearSession();
+        return snapshot;
+    }
+
     public static BrowserSyncProviderSettingsSnapshot Normalize(
         BrowserSyncProviderSettingsSnapshot? snapshot)
     {

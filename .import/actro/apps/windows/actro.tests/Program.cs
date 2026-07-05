@@ -2756,6 +2756,274 @@ var tests = new (string Name, Func<Task> Run)[]
             BrowserSyncStatusPolicy.FormatStatusJson("{"));
         return Task.CompletedTask;
     }),
+    ("gates browser sync folder acceptance through preflight", () =>
+    {
+        var cloudRoot = CreateTempDirectoryPath();
+        Directory.CreateDirectory(cloudRoot);
+        try
+        {
+            var capabilityJson =
+                ActroCore.BuildBrowserStorageSyncCloudLocalFolderCapabilityPreflightJson(2500);
+            var adapterPlanJson = ActroCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
+                ActroCore.LoadBrowserStorageSyncCloudLocalFolderCapabilitiesJson(),
+                2500);
+            var compatibilityJson =
+                ActroCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
+                    cloudRoot,
+                    2500);
+
+            // Full pipeline over an empty, writable folder: accepted.
+            var accepted = BrowserSyncFolderPreflight.Evaluate(
+                true, true, capabilityJson, adapterPlanJson, compatibilityJson);
+            AssertTrue(accepted.Accept);
+            AssertEqual(null, accepted.BlockedReasonKey);
+            AssertEqual(string.Empty, accepted.DetailText);
+
+            // Platform probe failures block before any contract evaluation.
+            var missing = BrowserSyncFolderPreflight.Evaluate(
+                false, false, capabilityJson, adapterPlanJson, compatibilityJson);
+            AssertFalse(missing.Accept);
+            AssertEqual(
+                BrowserSyncFolderPreflight.FolderMissingReason,
+                missing.BlockedReasonKey);
+            var readOnly = BrowserSyncFolderPreflight.Evaluate(
+                true, false, capabilityJson, adapterPlanJson, compatibilityJson);
+            AssertEqual(
+                BrowserSyncFolderPreflight.FolderNotWritableReason,
+                readOnly.BlockedReasonKey);
+
+            // A blocking capability preflight surfaces its classification.
+            var capabilityBlocked = BrowserSyncFolderPreflight.Evaluate(
+                true,
+                true,
+                """
+                {
+                    "planType": "cloudStoreCapabilityPreflight",
+                    "classification": "providerSetupRequired",
+                    "shouldAllowSync": false,
+                    "shouldBlockSync": true
+                }
+                """,
+                adapterPlanJson,
+                compatibilityJson);
+            AssertEqual(
+                BrowserSyncFolderPreflight.CapabilityBlockedReason,
+                capabilityBlocked.BlockedReasonKey);
+            AssertEqual("providerSetupRequired", capabilityBlocked.DetailText);
+
+            // A wrong object-space root blocks through the real Rust adapter
+            // plan and surfaces the rootPathAction as the thing to fix.
+            var wrongRootAdapterPlanJson = ActroCore.BuildBrowserStorageSyncCloudProviderAdapterPlanJson(
+                """
+                {
+                    "providerKind": "localFolder",
+                    "rootPath": "Wrong/BrowserSync",
+                    "revisionKind": "contentHash",
+                    "supportsPrefixList": true,
+                    "supportsPagedList": true,
+                    "supportsConditionalWrite": true,
+                    "supportsConditionalDelete": true,
+                    "supportsReadIfChanged": true,
+                    "supportsAtomicRename": false,
+                    "supportsAppFolder": true,
+                    "backgroundSync": "platformScheduled",
+                    "conflictResolution": "optimisticRevision",
+                    "maxObjectBytes": 8388608,
+                    "maxPageSize": 1000
+                }
+                """,
+                2501);
+            var adapterBlocked = BrowserSyncFolderPreflight.Evaluate(
+                true, true, capabilityJson, wrongRootAdapterPlanJson, compatibilityJson);
+            AssertEqual(
+                BrowserSyncFolderPreflight.AdapterBlockedReason,
+                adapterBlocked.BlockedReasonKey);
+            AssertEqual("configureActroBrowserSyncRoot", adapterBlocked.DetailText);
+
+            // A cloud store written by a newer schema blocks acceptance with
+            // the compatibility policy's user action as the error detail.
+            var manifestDirectory = Path.Combine(cloudRoot, "Actro", "BrowserSync");
+            Directory.CreateDirectory(manifestDirectory);
+            var manifest = JsonNode.Parse(ActroCore.BuildBrowserStorageSyncCloudDefaultManifestJson(
+                "profile", "device-win-preflight", 2502))!.AsObject();
+            manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
+            File.WriteAllText(Path.Combine(manifestDirectory, "manifest.json"), manifest.ToJsonString());
+            var upgradeCompatibilityJson =
+                ActroCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
+                    cloudRoot,
+                    2503);
+            using (var upgradePlan = JsonDocument.Parse(upgradeCompatibilityJson))
+            {
+                AssertEqual(
+                    "clientUpgradeRequired",
+                    upgradePlan.RootElement.GetProperty("classification").GetString());
+            }
+
+            var compatibilityBlocked = BrowserSyncFolderPreflight.Evaluate(
+                true, true, capabilityJson, adapterPlanJson, upgradeCompatibilityJson);
+            AssertEqual(
+                BrowserSyncFolderPreflight.CompatibilityBlockedReason,
+                compatibilityBlocked.BlockedReasonKey);
+            AssertEqual("upgradeClient", compatibilityBlocked.DetailText);
+
+            // An invalid compatibility outcome (the Rust helper returns
+            // "null" for an unusable root) blocks acceptance too.
+            var invalidCompatibility = BrowserSyncFolderPreflight.Evaluate(
+                true,
+                true,
+                capabilityJson,
+                adapterPlanJson,
+                ActroCore.BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson(
+                    string.Empty,
+                    2504));
+            AssertFalse(invalidCompatibility.Accept);
+            AssertEqual(
+                BrowserSyncFolderPreflight.CompatibilityBlockedReason,
+                invalidCompatibility.BlockedReasonKey);
+
+            // Every blocked reason resolves through the string table, so the
+            // dialog never renders a raw reason token as the error line.
+            foreach (var reasonKey in new[]
+                     {
+                         BrowserSyncFolderPreflight.FolderMissingReason,
+                         BrowserSyncFolderPreflight.FolderNotWritableReason,
+                         BrowserSyncFolderPreflight.CapabilityBlockedReason,
+                         BrowserSyncFolderPreflight.AdapterBlockedReason,
+                         BrowserSyncFolderPreflight.CompatibilityBlockedReason,
+                     })
+            {
+                AssertTrue(BrowserStrings.All.ContainsKey(
+                    $"dialog.syncSettings.folderBlocked.{reasonKey}"));
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(cloudRoot))
+            {
+                Directory.Delete(cloudRoot, recursive: true);
+            }
+        }
+
+        return Task.CompletedTask;
+    }),
+    ("formats browser sync provider connection status for the settings dialog", () =>
+    {
+        // Every classification the Rust connection contract can emit has a
+        // mapped display string, so contract growth fails here instead of
+        // leaking raw tokens into the dialog by default.
+        using (var contract = JsonDocument.Parse(
+            ActroCore.LoadBrowserStorageSyncCloudProviderConnectionContractJson()))
+        {
+            foreach (var classification in contract.RootElement
+                .GetProperty("classifications").EnumerateArray())
+            {
+                var token = classification.GetString()!;
+                var key = $"status.syncProvider.{token}";
+                AssertTrue(BrowserStrings.All.ContainsKey(key));
+                AssertEqual(
+                    BrowserStrings.Get(key),
+                    BrowserSyncProviderStatusFormatter.Format(token, "none"));
+            }
+        }
+
+        // Every user action the contract's action table names resolves
+        // through the string table as well.
+        foreach (var action in new[]
+                 {
+                     "chooseSyncProvider",
+                     "connectProvider",
+                     "reconnectProvider",
+                     "chooseProviderFolder",
+                     "freeCloudStorageOrReduceRetention",
+                     "reportProviderIssue",
+                     "recoverCloudData",
+                     "reviewSyncStatus",
+                 })
+        {
+            AssertTrue(BrowserStrings.All.ContainsKey($"status.syncProvider.action.{action}"));
+        }
+
+        // The user action is appended only when the policy demands one.
+        AssertEqual("Connected", BrowserSyncProviderStatusFormatter.Format("ready", "none"));
+        AssertEqual("Connected", BrowserSyncProviderStatusFormatter.Format("ready", string.Empty));
+        AssertEqual(
+            "Sync folder setup required (choose a sync folder)",
+            BrowserSyncProviderStatusFormatter.Format("storageSetupRequired", "chooseProviderFolder"));
+
+        // Unknown tokens fall back to the raw contract token instead of
+        // throwing or rendering a string-table key.
+        AssertEqual(
+            "mysteryState",
+            BrowserSyncProviderStatusFormatter.Format("mysteryState", "none"));
+        AssertEqual(
+            "mysteryState (mysteryAction)",
+            BrowserSyncProviderStatusFormatter.Format("mysteryState", "mysteryAction"));
+
+        // Explicit non-policy states: not configured, and the truthful
+        // reference-server row shown when only an endpoint session exists.
+        AssertEqual("Not configured", BrowserSyncProviderStatusFormatter.FormatNotConfigured());
+        AssertEqual(
+            "Reference server connection active (development)",
+            BrowserSyncProviderStatusFormatter.FormatReferenceServerActive());
+        AssertEqual(
+            BrowserSyncProviderStatusFormatter.FormatNotConfigured(),
+            BrowserSyncProviderStatusFormatter.FormatConnectionPolicy(null));
+        AssertEqual(
+            BrowserSyncProviderStatusFormatter.FormatNotConfigured(),
+            BrowserSyncProviderStatusFormatter.Format(null, null));
+
+        // Through the real Rust policy: a joined local-folder connection
+        // renders as connected, the same plan the coordinator acts on.
+        var plan = BrowserSyncProviderConnectionPlanner.Plan(
+            new BrowserSyncProviderSettingsSnapshot(
+                1, "localFolder", CreateTempDirectoryPath(), "profile", "device-win", 2600, 2601),
+            null,
+            0,
+            2602);
+        AssertEqual(
+            "Connected",
+            BrowserSyncProviderStatusFormatter.FormatConnectionPolicy(plan.ConnectionPolicy));
+
+        return Task.CompletedTask;
+    }),
+    ("disconnects browser sync provider and endpoint session", () =>
+    {
+        var providerPath = CreateTempPath();
+        var credentialPath = CreateTempPath();
+        try
+        {
+            var credentialStore = new BrowserStorageSyncCredentialStore(credentialPath);
+            credentialStore.SaveSession("prod", "token-win-disconnect");
+            var providerStore = new BrowserSyncProviderSettingsStore(
+                providerPath, () => "device-win-disconnect");
+            providerStore.Save(providerStore.CreateSnapshot(
+                "localFolder", CreateTempDirectoryPath(), "profile"));
+            providerStore.SaveMembershipJoined(2700);
+
+            // Disconnect means "stop browser sync entirely": leftover
+            // endpoint credentials must not silently reactivate
+            // reference-server sync behind a "not configured" connection row.
+            var disconnected = providerStore.DisconnectAndClearEndpointSession(credentialStore);
+            AssertEqual(null, disconnected.ProviderKind);
+            AssertEqual(null, disconnected.LocalFolderRootPath);
+            AssertEqual(null, disconnected.MembershipJoinedAtUnixSeconds);
+            AssertEqual("device-win-disconnect", disconnected.DeviceId);
+            AssertEqual(null, credentialStore.Load());
+
+            // Idempotent with nothing left to clear, and the durable device
+            // identity still survives.
+            providerStore.DisconnectAndClearEndpointSession(credentialStore);
+            AssertEqual(null, credentialStore.Load());
+            AssertEqual("device-win-disconnect", providerStore.Load().DeviceId);
+        }
+        finally
+        {
+            File.Delete(providerPath);
+            File.Delete(credentialPath);
+        }
+
+        return Task.CompletedTask;
+    }),
     ("persists browser storage sync credentials", async () =>
     {
         var filePath = CreateTempPath();
@@ -3434,7 +3702,12 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual("Actro", BrowserStrings.Get("window.title.product"));
         AssertEqual("Actro Private", BrowserStrings.Get("window.title.privateProduct"));
         AssertEqual("New Tab", BrowserStrings.Get("tab.defaultTitle"));
-        AssertEqual("Browser Data Sync", BrowserStrings.Get("dialog.sync.title"));
+        AssertEqual("Browser Data Sync", BrowserStrings.Get("dialog.syncSettings.title"));
+        // The endpoint-token dialog is demoted to the development-only
+        // reference path and its title says so.
+        AssertEqual(
+            "Reference Server Connection (Development)",
+            BrowserStrings.Get("dialog.sync.title"));
         return Task.CompletedTask;
     }),
     ("falls back to the key itself for unknown chrome strings", () =>

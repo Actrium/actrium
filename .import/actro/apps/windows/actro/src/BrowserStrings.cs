@@ -134,9 +134,74 @@ internal static class BrowserStrings
             ["status.savePdfFailed"] = "Save as PDF failed",
             ["status.fileOpenRejected"] = "Selected file cannot be opened",
 
-            // Browser data sync
-            ["status.syncCredentialsUpdated"] = "Browser data sync credentials updated",
-            ["dialog.sync.title"] = "Browser Data Sync",
+            // Browser data sync settings dialog (the product sync surface;
+            // the endpoint-token dialog below is the development-only
+            // reference path reachable solely from this dialog's advanced
+            // link)
+            ["dialog.syncSettings.title"] = "Browser Data Sync",
+            ["dialog.syncSettings.providerSection"] = "Sync provider",
+            ["dialog.syncSettings.providerLocalFolder"] = "Local Folder",
+            ["dialog.syncSettings.providerICloudDrive"] = "iCloud Drive",
+            ["dialog.syncSettings.providerGoogleDrive"] = "Google Drive",
+            ["dialog.syncSettings.providerOneDrive"] = "OneDrive",
+            ["dialog.syncSettings.providerComingLater"] = "coming later",
+            ["dialog.syncSettings.providerDisabledFormat"] = "{0} ({1})",
+            ["dialog.syncSettings.providerFooter"] = "Actro syncs through storage you own. Choose a folder that your cloud drive app already keeps in sync (for example an iCloud Drive or OneDrive folder).",
+            ["dialog.syncSettings.folderSection"] = "Sync folder",
+            ["dialog.syncSettings.folderRow"] = "Folder",
+            ["dialog.syncSettings.folderNotSelected"] = "No folder selected",
+            ["dialog.syncSettings.chooseFolder"] = "Choose Folder...",
+            ["dialog.syncSettings.chooseFolderDescription"] = "Choose the folder Actro syncs browser data through.",
+            ["dialog.syncSettings.disconnect"] = "Disconnect",
+            ["dialog.syncSettings.statusSection"] = "Status",
+            ["dialog.syncSettings.connectionRow"] = "Connection",
+            ["dialog.syncSettings.lastSyncRow"] = "Last sync",
+            ["dialog.syncSettings.deviceRow"] = "This device",
+            ["dialog.syncSettings.syncNow"] = "Sync Now",
+            ["dialog.syncSettings.refreshStatus"] = "Refresh Status",
+            ["dialog.syncSettings.close"] = "Close",
+            ["dialog.syncSettings.referenceServerLink"] = "Reference server (development)...",
+            ["dialog.syncSettings.folderConnected"] = "Browser data sync folder connected",
+            ["dialog.syncSettings.disconnected"] = "Browser data sync disconnected",
+            // Folder acceptance error lines, keyed by the preflight's
+            // blocked-reason token (BrowserSyncFolderPreflight).
+            ["dialog.syncSettings.folderBlockedDetailFormat"] = "{0} ({1})",
+            ["dialog.syncSettings.folderBlocked.folderMissing"] = "The selected folder does not exist.",
+            ["dialog.syncSettings.folderBlocked.folderNotWritable"] = "Actro cannot write to the selected folder.",
+            ["dialog.syncSettings.folderBlocked.capabilityBlocked"] = "The Local Folder provider is not ready to sync.",
+            ["dialog.syncSettings.folderBlocked.adapterBlocked"] = "This folder cannot host the Actro browser sync storage.",
+            ["dialog.syncSettings.folderBlocked.compatibilityBlocked"] = "The sync data already in this folder is not compatible with this app.",
+
+            // Connection row states. Classification and user-action keys
+            // mirror the Rust provider connection contract tokens; the
+            // formatter falls back to the raw token for unknown ones.
+            ["status.syncProvider.notConfigured"] = "Not configured",
+            ["status.syncProvider.referenceServerActive"] = "Reference server connection active (development)",
+            ["status.syncProvider.ready"] = "Connected",
+            ["status.syncProvider.providerNotSelected"] = "No sync provider selected",
+            ["status.syncProvider.signInRequired"] = "Provider sign-in required",
+            ["status.syncProvider.authExpired"] = "Provider sign-in expired",
+            ["status.syncProvider.storageSetupRequired"] = "Sync folder setup required",
+            ["status.syncProvider.quotaExceeded"] = "Cloud storage is full",
+            ["status.syncProvider.providerUnavailable"] = "Provider temporarily unavailable",
+            ["status.syncProvider.adapterUnsupported"] = "Provider storage is not supported",
+            ["status.syncProvider.membershipRequired"] = "Joining the sync storage on the next sync",
+            ["status.syncProvider.recoveryRequired"] = "Cloud sync data needs recovery",
+            ["status.syncProvider.withActionFormat"] = "{0} ({1})",
+            ["status.syncProvider.action.chooseSyncProvider"] = "choose a sync provider",
+            ["status.syncProvider.action.connectProvider"] = "connect the provider",
+            ["status.syncProvider.action.reconnectProvider"] = "reconnect the provider",
+            ["status.syncProvider.action.chooseProviderFolder"] = "choose a sync folder",
+            ["status.syncProvider.action.freeCloudStorageOrReduceRetention"] = "free cloud storage or reduce retention",
+            ["status.syncProvider.action.reportProviderIssue"] = "report a provider issue",
+            ["status.syncProvider.action.recoverCloudData"] = "recover the cloud sync data",
+            ["status.syncProvider.action.reviewSyncStatus"] = "review the sync status",
+
+            // Reference server connection dialog (development-only endpoint
+            // path; it stays the protocol probe for the reference sync
+            // server transport contract)
+            ["status.syncCredentialsUpdated"] = "Reference server sync credentials updated (development)",
+            ["dialog.sync.title"] = "Reference Server Connection (Development)",
             ["dialog.sync.environment"] = "Environment",
             ["dialog.sync.baseUrl"] = "Base URL",
             ["dialog.sync.accessToken"] = "Access Token",
@@ -144,7 +209,7 @@ internal static class BrowserStrings
             ["dialog.sync.save"] = "Save",
             ["dialog.sync.clear"] = "Clear",
             ["dialog.sync.cancel"] = "Cancel",
-            ["dialog.sync.accessTokenRequired"] = "Enter an access token before saving browser data sync credentials.",
+            ["dialog.sync.accessTokenRequired"] = "Enter an access token before saving reference server sync credentials.",
             ["dialog.sync.errorFormat"] = "{0}: {1}",
 
             // File dialogs
