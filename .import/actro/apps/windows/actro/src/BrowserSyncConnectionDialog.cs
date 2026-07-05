@@ -13,7 +13,7 @@ internal sealed class BrowserSyncConnectionDialog : Form
 
     public BrowserSyncConnectionDialog(BrowserStorageSyncCredentialSnapshot? snapshot)
     {
-        Text = "Browser Data Sync";
+        Text = BrowserStrings.Get("dialog.sync.title");
         FormBorderStyle = FormBorderStyle.FixedDialog;
         StartPosition = FormStartPosition.CenterParent;
         MinimizeBox = false;
@@ -37,7 +37,7 @@ internal sealed class BrowserSyncConnectionDialog : Form
 
         var saveButton = new Button
         {
-            Text = "Save",
+            Text = BrowserStrings.Get("dialog.sync.save"),
             DialogResult = DialogResult.None,
             Width = 88,
         };
@@ -45,7 +45,7 @@ internal sealed class BrowserSyncConnectionDialog : Form
 
         var clearButton = new Button
         {
-            Text = "Clear",
+            Text = BrowserStrings.Get("dialog.sync.clear"),
             Width = 88,
         };
         clearButton.Click += (_, _) =>
@@ -57,7 +57,7 @@ internal sealed class BrowserSyncConnectionDialog : Form
 
         var cancelButton = new Button
         {
-            Text = "Cancel",
+            Text = BrowserStrings.Get("dialog.sync.cancel"),
             DialogResult = DialogResult.Cancel,
             Width = 88,
         };
@@ -92,10 +92,10 @@ internal sealed class BrowserSyncConnectionDialog : Form
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
-        AddRow(layout, 0, "Environment", environmentInput);
-        AddRow(layout, 1, "Base URL", baseUrlInput);
-        AddRow(layout, 2, "Access Token", accessTokenInput);
-        AddRow(layout, 3, "Device ID", deviceIdInput);
+        AddRow(layout, 0, BrowserStrings.Get("dialog.sync.environment"), environmentInput);
+        AddRow(layout, 1, BrowserStrings.Get("dialog.sync.baseUrl"), baseUrlInput);
+        AddRow(layout, 2, BrowserStrings.Get("dialog.sync.accessToken"), accessTokenInput);
+        AddRow(layout, 3, BrowserStrings.Get("dialog.sync.deviceId"), deviceIdInput);
 
         var buttons = new FlowLayoutPanel
         {
@@ -142,8 +142,8 @@ internal sealed class BrowserSyncConnectionDialog : Form
         {
             MessageBox.Show(
                 this,
-                "Enter an access token before saving browser data sync credentials.",
-                "Browser Data Sync",
+                BrowserStrings.Get("dialog.sync.accessTokenRequired"),
+                BrowserStrings.Get("dialog.sync.title"),
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
             return;

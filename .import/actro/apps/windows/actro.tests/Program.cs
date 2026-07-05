@@ -2723,6 +2723,63 @@ var tests = new (string Name, Func<Task> Run)[]
 
         return Task.CompletedTask;
     }),
+    ("centralizes user-visible chrome strings under well-formed keys", () =>
+    {
+        AssertTrue(BrowserStrings.All.Count > 0);
+        foreach (var (key, value) in BrowserStrings.All)
+        {
+            AssertFalse(string.IsNullOrWhiteSpace(value));
+            AssertTrue(key.Contains('.', StringComparison.Ordinal));
+            AssertFalse(key.StartsWith('.'));
+            AssertFalse(key.EndsWith('.'));
+            AssertTrue(key.All(character => char.IsAsciiLetterOrDigit(character) || character == '.'));
+        }
+
+        AssertEqual("Actro", BrowserStrings.Get("window.title.product"));
+        AssertEqual("Actro Private", BrowserStrings.Get("window.title.privateProduct"));
+        AssertEqual("New Tab", BrowserStrings.Get("tab.defaultTitle"));
+        AssertEqual("Browser Data Sync", BrowserStrings.Get("dialog.sync.title"));
+        return Task.CompletedTask;
+    }),
+    ("falls back to the key itself for unknown chrome strings", () =>
+    {
+        AssertFalse(BrowserStrings.All.ContainsKey("status.doesNotExist"));
+        AssertEqual("status.doesNotExist", BrowserStrings.Get("status.doesNotExist"));
+        AssertEqual("status.doesNotExist", BrowserStrings.Format("status.doesNotExist"));
+        return Task.CompletedTask;
+    }),
+    ("formats parameterized chrome strings with declared placeholder arity", () =>
+    {
+        foreach (var (key, value) in BrowserStrings.All)
+        {
+            var indices = CollectFormatPlaceholderIndices(value);
+            var arity = indices.Count == 0 ? 0 : indices.Max() + 1;
+            // Contiguous from {0}: a skipped slot would mean an argument list
+            // that can never satisfy every placeholder.
+            for (var slot = 0; slot < arity; slot++)
+            {
+                AssertTrue(indices.Contains(slot));
+            }
+
+            var args = Enumerable.Range(0, arity)
+                .Select(slot => (object)$"[arg{slot}]")
+                .ToArray();
+            var formatted = BrowserStrings.Format(key, args);
+            for (var slot = 0; slot < arity; slot++)
+            {
+                AssertTrue(formatted.Contains($"[arg{slot}]", StringComparison.Ordinal));
+            }
+        }
+
+        AssertEqual(
+            "Search engine: DuckDuckGo",
+            BrowserStrings.Format("status.searchEngineChanged", "DuckDuckGo"));
+        AssertEqual("Zoom 125%", BrowserStrings.Format("status.zoomLevel", "125%"));
+        AssertEqual(
+            "Page - Actro",
+            BrowserStrings.Format("window.title.documentFormat", "Page", "Actro"));
+        return Task.CompletedTask;
+    }),
 };
 
 foreach (var test in tests)
@@ -2811,6 +2868,35 @@ static int CountOccurrences(string text, string value)
     }
 
     return count;
+}
+
+// Collects the {n} composite-format placeholder indices of a string table
+// value. The table only uses plain positional placeholders, so anything
+// between braces that is not a decimal index (or an escaped brace) is a
+// malformed entry and fails the test via the thrown parse exception.
+static List<int> CollectFormatPlaceholderIndices(string format)
+{
+    var indices = new List<int>();
+    for (var position = 0; position < format.Length; position++)
+    {
+        if (format[position] != '{')
+        {
+            continue;
+        }
+
+        if (position + 1 < format.Length && format[position + 1] == '{')
+        {
+            position += 1;
+            continue;
+        }
+
+        var closing = format.IndexOf('}', position + 1);
+        AssertTrue(closing > position);
+        indices.Add(int.Parse(format[(position + 1)..closing], System.Globalization.CultureInfo.InvariantCulture));
+        position = closing;
+    }
+
+    return indices;
 }
 
 static void AssertTrue(bool value)

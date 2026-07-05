@@ -31,9 +31,9 @@ internal sealed class BrowserFindBar : UserControl
             Margin = new Padding(0, 0, 6, 0),
         };
 
-        previousButton = CreateButton("Previous");
-        nextButton = CreateButton("Next");
-        closeButton = CreateButton("Close");
+        previousButton = CreateButton(BrowserStrings.Get("find.previous"));
+        nextButton = CreateButton(BrowserStrings.Get("find.next"));
+        closeButton = CreateButton(BrowserStrings.Get("find.close"));
 
         var layout = new TableLayoutPanel
         {
