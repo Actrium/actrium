@@ -19,6 +19,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="native\*.dll" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Flatten into the output root: DllImport("actro_core") probes the
+         application base directory, not a native\ subdirectory, so keeping
+         the folder layout would leave the library unloadable at runtime.
+         The test project already flattens the same way because its glob
+         lives outside that project's directory. -->
+    <Content Include="native\*.dll" Link="%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
