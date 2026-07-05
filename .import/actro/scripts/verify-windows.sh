@@ -54,6 +54,7 @@ required_files=(
   "apps/windows/actro/src/BrowserSyncConnectionDialog.cs"
   "apps/windows/actro/src/BrowserSyncFolderPreflight.cs"
   "apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs"
+  "apps/windows/actro/src/BrowserSyncProviderDiagnosticsFormatter.cs"
   "apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs"
   "apps/windows/actro/src/BrowserSyncProviderStatusFormatter.cs"
   "apps/windows/actro/src/BrowserSyncSettingsDialog.cs"
@@ -571,14 +572,18 @@ done
 # The compact app menu consumes its labels as menu.* keys through the menu
 # model's string keys. BrowserSyncConnectionDialog stays in the list as the
 # development-only reference-server path (reachable solely from the sync
-# settings dialog's advanced link).
+# settings dialog's advanced link). BrowserSyncStatusPolicy and the
+# diagnostics formatter render sync status/diagnostics wording exclusively
+# through the table.
 for strings_consumer in \
   apps/windows/actro/src/MainForm.cs \
   apps/windows/actro/src/BrowserToolbar.cs \
   apps/windows/actro/src/BrowserFindBar.cs \
   apps/windows/actro/src/BrowserAppMenu.cs \
   apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
-  apps/windows/actro/src/BrowserSyncConnectionDialog.cs
+  apps/windows/actro/src/BrowserSyncConnectionDialog.cs \
+  apps/windows/actro/src/BrowserSyncStatusPolicy.cs \
+  apps/windows/actro/src/BrowserSyncProviderDiagnosticsFormatter.cs
 do
   if ! rg -q 'BrowserStrings\.' "$strings_consumer"; then
     print_failure "Windows chrome does not consume the centralized string table: $strings_consumer"
@@ -1182,7 +1187,7 @@ else
   print_ok "Windows browser sync coordinator routes through the provider connection"
 fi
 
-for provider_test_link in BrowserSyncProviderSettingsStore.cs BrowserSyncProviderConnectionPlanner.cs BrowserSyncFolderPreflight.cs BrowserSyncProviderStatusFormatter.cs; do
+for provider_test_link in BrowserSyncProviderSettingsStore.cs BrowserSyncProviderConnectionPlanner.cs BrowserSyncFolderPreflight.cs BrowserSyncProviderStatusFormatter.cs BrowserSyncProviderDiagnosticsFormatter.cs; do
   if ! rg -Fq "$provider_test_link" "$test_project"; then
     print_failure "Windows tests do not link provider connection file: $provider_test_link"
   fi
@@ -1197,6 +1202,8 @@ for provider_test_case in \
   'browser sync scheduler consumes cloud and blocked provider schedule states' \
   'gates browser sync folder acceptance through preflight' \
   'formats browser sync provider connection status for the settings dialog' \
+  'formats provider sync diagnostics from local-folder round envelopes' \
+  'centralizes browser sync status display strings' \
   'disconnects browser sync provider and endpoint session'
 do
   if ! rg -Fq "$provider_test_case" apps/windows/actro.tests/Program.cs; then
@@ -1226,6 +1233,26 @@ if ! rg -q 'new BrowserSyncSettingsDialog' apps/windows/actro/src/MainForm.cs \
   print_failure "Windows browser sync settings dialog does not front the provider connection"
 else
   print_ok "Windows browser sync settings dialog fronts the provider connection"
+fi
+
+# The diagnostics surface: every local-folder round envelope embeds the Rust
+# provider error classification next to the provider diagnostics, the
+# coordinator keeps the last round's summary in memory (nothing persisted),
+# and the settings dialog renders it through the pure diagnostics formatter
+# behind the collapsible detail. Status line display strings are centralized
+# in BrowserStrings (status.sync.*) with the policy reading through them.
+if ! rg -q 'BuildBrowserStorageSyncCloudProviderErrorClassificationJson' apps/windows/actro/src/BrowserStorageSyncClient.cs \
+  || ! rg -q '"providerErrorClassification"' apps/windows/actro/src/BrowserStorageSyncClient.cs \
+  || ! rg -q 'providerErrorClassification' apps/windows/actro/src/BrowserSyncProviderDiagnosticsFormatter.cs \
+  || ! rg -q 'providerDiagnostics' apps/windows/actro/src/BrowserSyncProviderDiagnosticsFormatter.cs \
+  || ! rg -q 'LastProviderRoundDiagnosticsJson' apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
+  || ! rg -q 'LastProviderRoundDiagnosticsJson' apps/windows/actro/src/MainForm.cs \
+  || ! rg -q 'BrowserSyncProviderDiagnosticsFormatter' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  || ! rg -q 'showDiagnostics' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  || ! rg -q 'status\.sync\.' apps/windows/actro/src/BrowserSyncStatusPolicy.cs; then
+  print_failure "Windows browser sync diagnostics surface is not wired through the Rust round envelopes"
+else
+  print_ok "Windows browser sync diagnostics surface renders the Rust round envelopes"
 fi
 
 for session_call in RestoreInitialTabsAsync PersistSession FormClosing BrowserSessionStore; do

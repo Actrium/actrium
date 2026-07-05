@@ -89,6 +89,7 @@ required_files=(
   "apps/windows/actro/src/BrowserSyncConnectionDialog.cs"
   "apps/windows/actro/src/BrowserSyncFolderPreflight.cs"
   "apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs"
+  "apps/windows/actro/src/BrowserSyncProviderDiagnosticsFormatter.cs"
   "apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs"
   "apps/windows/actro/src/BrowserSyncProviderStatusFormatter.cs"
   "apps/windows/actro/src/BrowserSyncSettingsDialog.cs"
@@ -758,7 +759,9 @@ fi
 # The compact app menu consumes its labels as menu.* keys through the menu
 # model's string keys. BrowserSyncConnectionDialog stays in the list as the
 # development-only reference-server path (reachable solely from the sync
-# settings dialog's advanced link).
+# settings dialog's advanced link). BrowserSyncStatusPolicy and the
+# diagnostics formatter render sync status/diagnostics wording exclusively
+# through the table.
 check_pattern_in_each_file \
   'BrowserStrings\.' \
   "Windows chrome consumes the centralized string table" \
@@ -768,7 +771,9 @@ check_pattern_in_each_file \
   apps/windows/actro/src/BrowserFindBar.cs \
   apps/windows/actro/src/BrowserAppMenu.cs \
   apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
-  apps/windows/actro/src/BrowserSyncConnectionDialog.cs
+  apps/windows/actro/src/BrowserSyncConnectionDialog.cs \
+  apps/windows/actro/src/BrowserSyncStatusPolicy.cs \
+  apps/windows/actro/src/BrowserSyncProviderDiagnosticsFormatter.cs
 
 check_pattern_in_each_file \
   'BrowserStrings' \
@@ -897,6 +902,33 @@ check_pattern_in_each_file \
   "Windows sync disconnect does not stop browser sync entirely" \
   apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
   apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs \
+  apps/windows/actro.tests/Program.cs
+
+# Diagnostics surface: the sync client embeds the Rust provider error
+# classification in every local-folder round envelope, the coordinator keeps
+# the last round's summary in memory for the dialog, and the pure formatter
+# renders it behind the collapsible Show-diagnostics detail.
+check_pattern_in_each_file \
+  'providerErrorClassification' \
+  "Windows sync round envelopes embed the Rust provider error classification" \
+  "Windows sync round envelopes do not embed the Rust provider error classification" \
+  apps/windows/actro/src/BrowserStorageSyncClient.cs \
+  apps/windows/actro/src/BrowserSyncProviderDiagnosticsFormatter.cs
+
+check_pattern_in_each_file \
+  'LastProviderRoundDiagnosticsJson' \
+  "Windows sync coordinator keeps the last provider round diagnostics summary" \
+  "Windows sync coordinator does not keep the last provider round diagnostics summary" \
+  apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
+  apps/windows/actro/src/MainForm.cs \
+  apps/windows/actro.tests/Program.cs
+
+check_pattern_in_each_file \
+  'BrowserSyncProviderDiagnosticsFormatter' \
+  "Windows sync diagnostics render through the pure diagnostics formatter" \
+  "Windows sync diagnostics do not render through the pure diagnostics formatter" \
+  apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
   apps/windows/actro.tests/Program.cs
 
 check_pattern_in_each_file \

@@ -41,6 +41,16 @@ internal sealed class BrowserStorageSyncCoordinator
     // reflects the last round's provider error classification.
     private string? lastProviderErrorKind;
 
+    // Session-scoped summary of the last executed provider round envelope
+    // (endpoint type, classification, Rust provider diagnostics, and the
+    // provider error classification plan), kept for the settings dialog's
+    // diagnostics detail. In-memory only by design: diagnostics describe
+    // this session's rounds, and persisting them would turn a display
+    // detail into state to migrate.
+    private string? lastProviderRoundDiagnosticsJson;
+
+    public string? LastProviderRoundDiagnosticsJson => lastProviderRoundDiagnosticsJson;
+
     public BrowserStorageSyncCoordinator(
         BrowserStorageSyncClient client,
         IBrowserStorageSyncCredentialsProvider credentialsProvider,
@@ -210,10 +220,12 @@ internal sealed class BrowserStorageSyncCoordinator
     }
 
     // Reads the round's provider error classification into the session
-    // error state and clears the persisted membership marker on membership-
-    // or storage-scoped errors so the next run re-joins the cloud store.
+    // error state, keeps the round's diagnostics summary for the settings
+    // dialog, and clears the persisted membership marker on membership- or
+    // storage-scoped errors so the next run re-joins the cloud store.
     private void ApplyProviderRoundOutcome(JsonObject? roundEnvelope)
     {
+        lastProviderRoundDiagnosticsJson = BuildProviderRoundDiagnosticsSummaryJson(roundEnvelope);
         var providerErrorClassification = roundEnvelope?["providerDiagnostics"]?
             ["providerErrorClassification"]?.GetValue<string>();
         lastProviderErrorKind = BrowserSyncProviderConnectionPlanner
@@ -226,6 +238,27 @@ internal sealed class BrowserStorageSyncCoordinator
                 "browser sync provider round reported a membership/storage-scoped error ({0}); cleared the membership marker so the next run re-joins",
                 providerErrorClassification);
         }
+    }
+
+    // Distills the round envelope into the fields the diagnostics formatter
+    // reads. An unparseable envelope clears the summary: a stale diagnosis
+    // from an earlier round would misattribute whatever just went wrong.
+    private static string? BuildProviderRoundDiagnosticsSummaryJson(JsonObject? roundEnvelope)
+    {
+        if (roundEnvelope is null)
+        {
+            return null;
+        }
+
+        var summary = new JsonObject
+        {
+            ["endpointType"] = roundEnvelope["endpointType"]?.GetValue<string>() ?? string.Empty,
+            ["classification"] = roundEnvelope["classification"]?.GetValue<string>() ?? string.Empty,
+            ["providerErrorClassification"] = CloneJsonNode(roundEnvelope["providerErrorClassification"]),
+            ["providerDiagnostics"] = CloneJsonNode(roundEnvelope["providerDiagnostics"]),
+        };
+
+        return summary.ToJsonString(JsonOptions);
     }
 
     // Round routings: the round envelope already carries the cloud

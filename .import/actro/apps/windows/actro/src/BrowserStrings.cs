@@ -127,6 +127,26 @@ internal static class BrowserStrings
             ["status.startupOpensHome"] = "Startup opens home",
             ["status.startupSettingUpdateFailed"] = "Startup setting update failed",
 
+            // Browser data sync status line (BrowserSyncStatusPolicy renders
+            // scheduler status JSON through these; result.* keys map the
+            // classification tokens the policy appends as "(last result: X)",
+            // and unknown tokens render raw so contract growth stays visible)
+            ["status.sync.syncing"] = "Syncing browser data...",
+            ["status.sync.failed"] = "Browser data sync failed",
+            ["status.sync.unavailable"] = "Browser data sync status unavailable",
+            ["status.sync.idle"] = "Browser data sync is up to date",
+            ["status.sync.pending"] = "Browser data sync is pending",
+            ["status.sync.retryScheduledFormat"] = "Browser data sync retry scheduled in {0}s",
+            ["status.sync.retryScheduled"] = "Browser data sync retry scheduled",
+            ["status.sync.needsSignIn"] = "Browser data sync needs sign-in",
+            ["status.sync.requiresAppUpdate"] = "Browser data sync requires an app update",
+            ["status.sync.needsAttention"] = "Browser data sync needs attention",
+            ["status.sync.lastResultFormat"] = "{0} (last result: {1})",
+            ["status.sync.result.credentialsUnavailable"] = "credentials unavailable",
+            ["status.sync.result.serverUnavailable"] = "server unavailable",
+            ["status.sync.result.clientUpgradeRequired"] = "app update required",
+            ["status.sync.result.validationError"] = "validation error",
+
             // Page actions
             ["status.zoomLevel"] = "Zoom {0}",
             ["status.printUnavailable"] = "Print is not available",
@@ -159,6 +179,8 @@ internal static class BrowserStrings
             ["dialog.syncSettings.deviceRow"] = "This device",
             ["dialog.syncSettings.syncNow"] = "Sync Now",
             ["dialog.syncSettings.refreshStatus"] = "Refresh Status",
+            ["dialog.syncSettings.showDiagnostics"] = "Show diagnostics",
+            ["dialog.syncSettings.hideDiagnostics"] = "Hide diagnostics",
             ["dialog.syncSettings.close"] = "Close",
             ["dialog.syncSettings.referenceServerLink"] = "Reference server (development)...",
             ["dialog.syncSettings.folderConnected"] = "Browser data sync folder connected",
@@ -196,6 +218,34 @@ internal static class BrowserStrings
             ["status.syncProvider.action.reportProviderIssue"] = "report a provider issue",
             ["status.syncProvider.action.recoverCloudData"] = "recover the cloud sync data",
             ["status.syncProvider.action.reviewSyncStatus"] = "review the sync status",
+
+            // Diagnostics detail (BrowserSyncProviderDiagnosticsFormatter
+            // renders the last provider round envelope's Rust diagnostics;
+            // labels live here, contract tokens render raw by design)
+            ["diagnostics.syncProvider.empty"] = "No provider sync round has run in this session.",
+            ["diagnostics.syncProvider.summarySection"] = "Provider diagnostics",
+            ["diagnostics.syncProvider.errorSection"] = "Provider errors",
+            ["diagnostics.syncProvider.rowFormat"] = "{0}: {1}",
+            ["diagnostics.syncProvider.listHeaderFormat"] = "{0}:",
+            ["diagnostics.syncProvider.listItemFormat"] = "- {0}",
+            ["diagnostics.syncProvider.classificationRow"] = "Classification",
+            ["diagnostics.syncProvider.severityRow"] = "Severity",
+            ["diagnostics.syncProvider.providerRow"] = "Provider",
+            ["diagnostics.syncProvider.syncAllowedRow"] = "Sync allowed",
+            ["diagnostics.syncProvider.retryRow"] = "Retry planned",
+            ["diagnostics.syncProvider.rereadRow"] = "Cloud reread planned",
+            ["diagnostics.syncProvider.userActionRow"] = "User action",
+            ["diagnostics.syncProvider.reasonsRow"] = "Reasons",
+            ["diagnostics.syncProvider.warningsRow"] = "Warnings",
+            ["diagnostics.syncProvider.failedOperationsRow"] = "Failed operations",
+            ["diagnostics.syncProvider.failedOperationsFormat"] = "{0} of {1} (retryable {2})",
+            ["diagnostics.syncProvider.errorsRow"] = "Errors",
+            ["diagnostics.syncProvider.errorKindRow"] = "Kind",
+            ["diagnostics.syncProvider.errorActionRow"] = "Action",
+            ["diagnostics.syncProvider.errorReasonRow"] = "Reason",
+            ["diagnostics.syncProvider.errorMessageRow"] = "Message",
+            ["diagnostics.syncProvider.yes"] = "yes",
+            ["diagnostics.syncProvider.no"] = "no",
 
             // Reference server connection dialog (development-only endpoint
             // path; it stays the protocol probe for the reference sync
