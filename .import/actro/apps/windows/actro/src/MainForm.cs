@@ -2444,6 +2444,12 @@ internal sealed class MainForm : Form
             ShowTransientStatus(errorMessage ?? BrowserStrings.Get("status.addressInvalid"));
             return;
         }
+
+        // Chrome/Edge behavior: committing an address hands focus to the
+        // page. While the address box keeps focus, SetAddress preserves
+        // the user's typing, so without this hand-off a later tab switch
+        // would keep showing the stale typed address.
+        activeTab.WebView.Focus();
     }
 
     private bool TryNavigateTabAddress(BrowserTab tab, string address, out string? errorMessage)
