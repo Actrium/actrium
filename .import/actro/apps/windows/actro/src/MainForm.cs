@@ -24,7 +24,7 @@ internal sealed class MainForm : Form
     private readonly bool shouldRestoreWindowState;
     private readonly bool shouldPersistWindowState;
     private readonly bool isPrivateWindow;
-    private readonly BrowserMainMenu mainMenu;
+    private readonly BrowserAppMenu appMenu;
     private readonly BrowserTabStrip tabStrip;
     private readonly BrowserToolbar toolbar;
     private readonly BrowserFindBar findBar;
@@ -45,7 +45,6 @@ internal sealed class MainForm : Form
     private FormBorderStyle windowedFormBorderStyle;
     private FormWindowState windowedWindowState;
     private bool windowedTopMost;
-    private bool windowedMainMenuVisible;
     private bool windowedTabStripVisible;
     private bool windowedToolbarVisible;
     private bool windowedFindBarVisible;
@@ -123,7 +122,7 @@ internal sealed class MainForm : Form
         Height = 800;
         MinimumSize = new Size(960, 640);
 
-        mainMenu = new BrowserMainMenu();
+        appMenu = new BrowserAppMenu();
         tabStrip = new BrowserTabStrip();
         toolbar = new BrowserToolbar();
         findBar = new BrowserFindBar();
@@ -135,16 +134,16 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
         };
 
-        MainMenuStrip = mainMenu;
         Controls.Add(webViewHost);
         Controls.Add(findBar);
         Controls.Add(toolbar);
         Controls.Add(tabStrip);
-        Controls.Add(mainMenu);
-        WireMainMenu();
-        mainMenu.SetSearchEngine(searchSettingsSnapshot.SearchEngineId);
-        mainMenu.SetRestorePreviousSession(startupSettingsSnapshot.RestorePreviousSession);
-        mainMenu.SetContentBlockingEnabled(contentBlockingEnabled);
+        // Compact app menu: every menu click funnels into the single
+        // command router shared with keyboard shortcut handling.
+        appMenu.CommandRequested += (_, args) => ExecuteCommand(args.Command, args.Argument);
+        appMenu.SetSearchEngine(searchSettingsSnapshot.SearchEngineId);
+        appMenu.SetRestorePreviousSession(startupSettingsSnapshot.RestorePreviousSession);
+        appMenu.SetContentBlockingEnabled(contentBlockingEnabled);
         WireTabStrip();
         WireToolbar();
         WireFindBar();
@@ -155,6 +154,9 @@ internal sealed class MainForm : Form
         // cascade because every ApplyTheme re-measures from DeviceDpi.
         BrowserThemeManager.Instance.Changed += OnSystemThemeChanged;
         FormClosed += OnFormClosedUnsubscribeTheme;
+        // The app menu is a component, not a child control, so the form
+        // does not dispose it implicitly.
+        FormClosed += (_, _) => appMenu.Dispose();
         DpiChanged += (_, _) => ApplyTheme(BrowserThemeManager.Instance.Current);
         ApplyTheme(BrowserThemeManager.Instance.Current);
 
@@ -232,7 +234,7 @@ internal sealed class MainForm : Form
         // Global renderer so menu drop-downs (which do not inherit a parent
         // strip's renderer) follow the palette as well.
         ToolStripManager.Renderer = new BrowserToolStripRenderer(theme);
-        mainMenu.ApplyTheme(theme);
+        appMenu.ApplyTheme(theme);
         tabStrip.ApplyTheme(theme);
         toolbar.ApplyTheme(theme);
         findBar.ApplyTheme(theme);
@@ -304,48 +306,147 @@ internal sealed class MainForm : Form
         toolbar.ForwardRequested += (_, _) => NavigateForward();
         toolbar.ReloadRequested += (_, _) => ReloadOrStopActiveTab();
         toolbar.HomeRequested += (_, _) => NavigateHomeDocument();
+        toolbar.MenuRequested += (_, _) => ShowAppMenu();
         toolbar.AddressRequested += (_, args) => NavigateAddress(args.Address);
     }
 
-    private void WireMainMenu()
+    private void ShowAppMenu()
     {
-        mainMenu.NewTabRequested += (_, _) => RequestNewTab();
-        mainMenu.NewWindowRequested += (_, _) => RequestNewWindow();
-        mainMenu.NewPrivateWindowRequested += (_, _) => RequestNewPrivateWindow();
-        mainMenu.CloseTabRequested += (_, _) => RequestCloseActiveTab();
-        mainMenu.ReopenClosedTabRequested += (_, _) => ReopenClosedTab();
-        mainMenu.DuplicateTabRequested += (_, _) => DuplicateActiveTab();
-        mainMenu.OpenFileRequested += (_, _) => OpenLocalFile();
-        mainMenu.CopyPageAddressRequested += (_, _) => CopyActivePageAddress();
-        mainMenu.OpenInDefaultBrowserRequested += (_, _) => OpenActivePageInDefaultBrowser();
-        mainMenu.SavePdfRequested += async (_, _) => await SaveActiveTabAsPdfAsync();
-        mainMenu.PrintRequested += (_, _) => PrintActiveTab();
-        mainMenu.ExitRequested += (_, _) => Close();
-        mainMenu.BackRequested += (_, _) => NavigateBack();
-        mainMenu.ForwardRequested += (_, _) => NavigateForward();
-        mainMenu.HomeRequested += (_, _) => NavigateHomeDocument();
-        mainMenu.HistoryRequested += (_, _) => NavigateHistoryDocument();
-        mainMenu.BookmarkPageRequested += (_, _) => ToggleActivePageBookmark();
-        mainMenu.BookmarksRequested += (_, _) => NavigateBookmarksDocument();
-        mainMenu.ReloadRequested += (_, _) => ReloadActiveTab();
-        mainMenu.StopRequested += (_, _) => StopLoadingActiveTab();
-        mainMenu.ZoomInRequested += (_, _) => ZoomInActiveTab();
-        mainMenu.ZoomOutRequested += (_, _) => ZoomOutActiveTab();
-        mainMenu.ResetZoomRequested += (_, _) => ResetActiveTabZoom();
-        mainMenu.FullScreenRequested += (_, _) => ToggleBrowserFullScreen();
-        mainMenu.FindRequested += (_, _) => OpenFindBar();
-        mainMenu.FocusAddressRequested += (_, _) => toolbar.FocusAddress();
-        mainMenu.DeveloperToolsRequested += (_, _) => OpenDeveloperTools();
-        mainMenu.OpenDownloadsFolderRequested += (_, _) => OpenDownloadsFolder();
-        mainMenu.OpenLastDownloadRequested += (_, _) => OpenLastDownload();
-        mainMenu.RevealLastDownloadRequested += (_, _) => RevealLastDownloadInFolder();
-        mainMenu.SearchEngineChanged += (_, args) => SetSearchEngine(args.EngineId);
-        mainMenu.RestorePreviousSessionChanged += (_, args) => SetRestorePreviousSession(args.RestorePreviousSession);
-        mainMenu.ContentBlockingToggled += (_, _) => ToggleContentBlocking();
-        mainMenu.BrowserSyncConfigureRequested += (_, _) => ConfigureBrowserSyncConnection();
-        mainMenu.BrowserSyncNowRequested += async (_, _) => await SyncBrowserDataNowAsync();
-        mainMenu.BrowserSyncStatusRequested += (_, _) => ShowBrowserSyncStatus();
-        mainMenu.ClearBrowsingDataRequested += async (_, _) => await ClearBrowsingDataAsync();
+        toolbar.ShowAppMenu(appMenu);
+    }
+
+    /// <summary>
+    /// Single command router: every compact-menu click and every keyboard
+    /// shortcut lands here, so command behavior cannot fork between input
+    /// paths. The argument channel carries per-item data that a bare enum
+    /// cannot express — currently the search engine id.
+    /// </summary>
+    private void ExecuteCommand(BrowserMenuCommand command, string? argument = null)
+    {
+        switch (command)
+        {
+            case BrowserMenuCommand.NewTab:
+                RequestNewTab();
+                break;
+            case BrowserMenuCommand.NewWindow:
+                RequestNewWindow();
+                break;
+            case BrowserMenuCommand.NewPrivateWindow:
+                RequestNewPrivateWindow();
+                break;
+            case BrowserMenuCommand.CloseTab:
+                RequestCloseActiveTab();
+                break;
+            case BrowserMenuCommand.ReopenClosedTab:
+                ReopenClosedTab();
+                break;
+            case BrowserMenuCommand.DuplicateTab:
+                DuplicateActiveTab();
+                break;
+            case BrowserMenuCommand.OpenFile:
+                OpenLocalFile();
+                break;
+            case BrowserMenuCommand.CopyAddress:
+                CopyActivePageAddress();
+                break;
+            case BrowserMenuCommand.OpenInDefaultBrowser:
+                OpenActivePageInDefaultBrowser();
+                break;
+            case BrowserMenuCommand.SavePdf:
+                _ = SaveActiveTabAsPdfAsync();
+                break;
+            case BrowserMenuCommand.Print:
+                PrintActiveTab();
+                break;
+            case BrowserMenuCommand.Exit:
+                Close();
+                break;
+            case BrowserMenuCommand.Back:
+                NavigateBack();
+                break;
+            case BrowserMenuCommand.Forward:
+                NavigateForward();
+                break;
+            case BrowserMenuCommand.Home:
+                NavigateHomeDocument();
+                break;
+            case BrowserMenuCommand.ShowHistory:
+                NavigateHistoryDocument();
+                break;
+            case BrowserMenuCommand.BookmarkPage:
+                ToggleActivePageBookmark();
+                break;
+            case BrowserMenuCommand.ShowBookmarks:
+                NavigateBookmarksDocument();
+                break;
+            case BrowserMenuCommand.Reload:
+                ReloadActiveTab();
+                break;
+            case BrowserMenuCommand.Stop:
+                StopLoadingActiveTab();
+                break;
+            case BrowserMenuCommand.ZoomIn:
+                ZoomInActiveTab();
+                break;
+            case BrowserMenuCommand.ZoomOut:
+                ZoomOutActiveTab();
+                break;
+            case BrowserMenuCommand.ZoomReset:
+                ResetActiveTabZoom();
+                break;
+            case BrowserMenuCommand.FullScreen:
+                ToggleBrowserFullScreen();
+                break;
+            case BrowserMenuCommand.Find:
+                OpenFindBar();
+                break;
+            case BrowserMenuCommand.FindNext:
+                RepeatFind(forward: true);
+                break;
+            case BrowserMenuCommand.FindPrevious:
+                RepeatFind(forward: false);
+                break;
+            case BrowserMenuCommand.FocusAddress:
+                toolbar.FocusAddress();
+                break;
+            case BrowserMenuCommand.DevTools:
+                OpenDeveloperTools();
+                break;
+            case BrowserMenuCommand.OpenDownloadsFolder:
+                OpenDownloadsFolder();
+                break;
+            case BrowserMenuCommand.OpenLastDownload:
+                OpenLastDownload();
+                break;
+            case BrowserMenuCommand.RevealLastDownload:
+                RevealLastDownloadInFolder();
+                break;
+            case BrowserMenuCommand.SelectSearchEngine:
+                if (!string.IsNullOrWhiteSpace(argument))
+                {
+                    SetSearchEngine(argument);
+                }
+
+                break;
+            case BrowserMenuCommand.RestoreSessionToggle:
+                SetRestorePreviousSession(!startupSettingsSnapshot.RestorePreviousSession);
+                break;
+            case BrowserMenuCommand.BlockAdsToggle:
+                ToggleContentBlocking();
+                break;
+            case BrowserMenuCommand.ConfigureSync:
+                ConfigureBrowserSyncConnection();
+                break;
+            case BrowserMenuCommand.SyncNow:
+                _ = SyncBrowserDataNowAsync();
+                break;
+            case BrowserMenuCommand.SyncStatus:
+                ShowBrowserSyncStatus();
+                break;
+            case BrowserMenuCommand.ClearBrowsingData:
+                _ = ClearBrowsingDataAsync();
+                break;
+        }
     }
 
     private void WireFindBar()
@@ -354,6 +455,13 @@ internal sealed class MainForm : Form
         findBar.CloseRequested += (_, _) => CloseFindBar();
     }
 
+    /// <summary>
+    /// Sole owner of keyboard command handling: primaries and aliases from
+    /// the menu model route into ExecuteCommand (the app menu never
+    /// registers ShortcutKeys, so key handling cannot fork between the menu
+    /// and this method), Escape resolves through BrowserEscapePolicy, and
+    /// Alt+E/Alt+F/F10 open the compact app menu (Chrome/Edge convention).
+    /// </summary>
     protected override bool ProcessCmdKey(ref Message message, Keys keyData)
     {
         if (TryHandleTabShortcut(keyData))
@@ -363,103 +471,112 @@ internal sealed class MainForm : Form
 
         switch (keyData)
         {
+            case Keys.Alt | Keys.E:
+            case Keys.Alt | Keys.F:
+            case Keys.F10:
+                ShowAppMenu();
+                return true;
             case Keys.Control | Keys.L:
-                toolbar.FocusAddress();
+                ExecuteCommand(BrowserMenuCommand.FocusAddress);
                 return true;
             case Keys.Control | Keys.T:
-                RequestNewTab();
+                ExecuteCommand(BrowserMenuCommand.NewTab);
                 return true;
             case Keys.Control | Keys.N:
-                RequestNewWindow();
+                ExecuteCommand(BrowserMenuCommand.NewWindow);
                 return true;
             case Keys.Control | Keys.Shift | Keys.N:
-                RequestNewPrivateWindow();
+                ExecuteCommand(BrowserMenuCommand.NewPrivateWindow);
                 return true;
             case Keys.Control | Keys.W:
-                RequestCloseActiveTab();
+                ExecuteCommand(BrowserMenuCommand.CloseTab);
                 return true;
             case Keys.Control | Keys.Shift | Keys.T:
-                ReopenClosedTab();
+                ExecuteCommand(BrowserMenuCommand.ReopenClosedTab);
                 return true;
             case Keys.Control | Keys.F:
-                OpenFindBar();
+                ExecuteCommand(BrowserMenuCommand.Find);
                 return true;
             case Keys.F3:
-                RepeatFind(forward: true);
+                ExecuteCommand(BrowserMenuCommand.FindNext);
                 return true;
             case Keys.Shift | Keys.F3:
-                RepeatFind(forward: false);
+                ExecuteCommand(BrowserMenuCommand.FindPrevious);
                 return true;
             case Keys.Control | Keys.O:
-                OpenLocalFile();
+                ExecuteCommand(BrowserMenuCommand.OpenFile);
                 return true;
             case Keys.Control | Keys.P:
-                PrintActiveTab();
+                ExecuteCommand(BrowserMenuCommand.Print);
                 return true;
             case Keys.Control | Keys.S:
-                _ = SaveActiveTabAsPdfAsync();
+                ExecuteCommand(BrowserMenuCommand.SavePdf);
                 return true;
             case Keys.Control | Keys.R:
             case Keys.F5:
-                ReloadActiveTab();
+                ExecuteCommand(BrowserMenuCommand.Reload);
                 return true;
             case Keys.Escape:
-                if (findBar.Visible)
+                switch (BrowserEscapePolicy.Resolve(
+                    findBar.Visible,
+                    isPageFullScreen,
+                    isBrowserFullScreen,
+                    activeTab?.IsLoading == true))
                 {
-                    CloseFindBar();
-                }
-                else if (isFullScreen || isBrowserFullScreen || isPageFullScreen)
-                {
-                    RequestExitFullScreen();
-                }
-                else
-                {
-                    StopLoadingActiveTab();
+                    case BrowserEscapeAction.CloseFindBar:
+                        CloseFindBar();
+                        break;
+                    case BrowserEscapeAction.ExitFullScreen:
+                        RequestExitFullScreen();
+                        break;
+                    case BrowserEscapeAction.Stop:
+                        ExecuteCommand(BrowserMenuCommand.Stop);
+                        break;
                 }
 
                 return true;
             case Keys.Control | Keys.Oemplus:
             case Keys.Control | Keys.Shift | Keys.Oemplus:
             case Keys.Control | Keys.Add:
-                ZoomInActiveTab();
+                ExecuteCommand(BrowserMenuCommand.ZoomIn);
                 return true;
             case Keys.Control | Keys.OemMinus:
             case Keys.Control | Keys.Subtract:
-                ZoomOutActiveTab();
+                ExecuteCommand(BrowserMenuCommand.ZoomOut);
                 return true;
             case Keys.Control | Keys.D0:
             case Keys.Control | Keys.NumPad0:
-                ResetActiveTabZoom();
+                ExecuteCommand(BrowserMenuCommand.ZoomReset);
                 return true;
             case Keys.Alt | Keys.Left:
-                NavigateBack();
+                ExecuteCommand(BrowserMenuCommand.Back);
                 return true;
             case Keys.Alt | Keys.Right:
-                NavigateForward();
+                ExecuteCommand(BrowserMenuCommand.Forward);
                 return true;
             case Keys.Alt | Keys.Home:
-                NavigateHomeDocument();
+                ExecuteCommand(BrowserMenuCommand.Home);
                 return true;
             case Keys.Control | Keys.H:
-                NavigateHistoryDocument();
+                ExecuteCommand(BrowserMenuCommand.ShowHistory);
                 return true;
             case Keys.Control | Keys.D:
-                ToggleActivePageBookmark();
+                ExecuteCommand(BrowserMenuCommand.BookmarkPage);
                 return true;
             case Keys.Control | Keys.Shift | Keys.O:
-                NavigateBookmarksDocument();
+                ExecuteCommand(BrowserMenuCommand.ShowBookmarks);
                 return true;
             case Keys.F11:
-                ToggleBrowserFullScreen();
+                ExecuteCommand(BrowserMenuCommand.FullScreen);
                 return true;
             case Keys.Control | Keys.Shift | Keys.I:
-                OpenDeveloperTools();
+                ExecuteCommand(BrowserMenuCommand.DevTools);
                 return true;
             case Keys.Control | Keys.J:
-                OpenDownloadsFolder();
+                ExecuteCommand(BrowserMenuCommand.OpenDownloadsFolder);
                 return true;
             case Keys.Control | Keys.Shift | Keys.Delete:
-                _ = ClearBrowsingDataAsync();
+                ExecuteCommand(BrowserMenuCommand.ClearBrowsingData);
                 return true;
         }
 
@@ -1206,7 +1323,7 @@ internal sealed class MainForm : Form
     private void ToggleContentBlocking()
     {
         contentBlockingEnabled = !contentBlockingEnabled;
-        mainMenu.SetContentBlockingEnabled(contentBlockingEnabled);
+        appMenu.SetContentBlockingEnabled(contentBlockingEnabled);
         PersistContentBlockingSettings();
         toolbar.SetStatus(BrowserContentBlockingPolicy.FormatToggleStatus(contentBlockingEnabled));
     }
@@ -1343,7 +1460,7 @@ internal sealed class MainForm : Form
         {
             searchSettingsSnapshot = searchSettingsStore.CreateSnapshot(engineId);
             searchSettingsStore.Save(searchSettingsSnapshot);
-            mainMenu.SetSearchEngine(searchSettingsSnapshot.SearchEngineId);
+            appMenu.SetSearchEngine(searchSettingsSnapshot.SearchEngineId);
             BrowserSearchEnginePolicy.TryGetEngine(searchSettingsSnapshot.SearchEngineId, out var engine);
             toolbar.SetStatus(BrowserStrings.Format("status.searchEngineChanged", engine.DisplayName));
         }
@@ -1363,7 +1480,7 @@ internal sealed class MainForm : Form
         {
             startupSettingsSnapshot = startupSettingsStore.CreateSnapshot(restorePreviousSession);
             startupSettingsStore.Save(startupSettingsSnapshot);
-            mainMenu.SetRestorePreviousSession(startupSettingsSnapshot.RestorePreviousSession);
+            appMenu.SetRestorePreviousSession(startupSettingsSnapshot.RestorePreviousSession);
             toolbar.SetStatus(BrowserStrings.Get(
                 startupSettingsSnapshot.RestorePreviousSession
                     ? "status.startupRestoresSession"
@@ -1841,13 +1958,11 @@ internal sealed class MainForm : Form
         windowedFormBorderStyle = FormBorderStyle;
         windowedWindowState = WindowState;
         windowedTopMost = TopMost;
-        windowedMainMenuVisible = mainMenu.Visible;
         windowedTabStripVisible = tabStrip.Visible;
         windowedToolbarVisible = toolbar.Visible;
         windowedFindBarVisible = findBar.Visible;
 
         SuspendLayout();
-        mainMenu.Visible = false;
         tabStrip.Visible = false;
         toolbar.Visible = false;
         findBar.Visible = false;
@@ -1870,7 +1985,6 @@ internal sealed class MainForm : Form
         FormBorderStyle = windowedFormBorderStyle;
         WindowState = windowedWindowState;
         TopMost = windowedTopMost;
-        mainMenu.Visible = windowedMainMenuVisible;
         tabStrip.Visible = windowedTabStripVisible;
         toolbar.Visible = windowedToolbarVisible;
         findBar.Visible = windowedFindBarVisible;
@@ -2025,7 +2139,7 @@ internal sealed class MainForm : Form
         {
             toolbar.SetAddress(string.Empty);
             toolbar.SetNavigationState(canGoBack: false, canGoForward: false, isLoading: false);
-            mainMenu.SetNavigationState(
+            appMenu.SetNavigationState(
                 canGoBack: false,
                 canGoForward: false,
                 isLoading: false,
@@ -2054,7 +2168,7 @@ internal sealed class MainForm : Form
             canGoBack,
             canGoForward,
             activeTab.IsLoading);
-        mainMenu.SetNavigationState(
+        appMenu.SetNavigationState(
             canGoBack,
             canGoForward,
             activeTab.IsLoading,

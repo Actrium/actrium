@@ -8,9 +8,9 @@ namespace Actro.Windows;
 /// no resx, no satellite assemblies — but centralizing the literals here is
 /// the groundwork for future localization. Strings owned by tested policy
 /// classes (Browser*Policy) intentionally stay in those policies, which are
-/// already centralized and covered by the harness. Menu labels are added as
-/// menu.* keys together with the menu model, not migrated from the doomed
-/// classic menu bar. Harness-linked: this file must stay WinForms-free.
+/// already centralized and covered by the harness. Menu labels live as
+/// menu.* keys consumed by the compact app menu through the menu model.
+/// Harness-linked: this file must stay WinForms-free.
 /// </summary>
 internal static class BrowserStrings
 {
@@ -32,7 +32,53 @@ internal static class BrowserStrings
             ["toolbar.stop"] = "Stop",
             ["toolbar.home"] = "Home",
             ["toolbar.go"] = "Go",
+            ["toolbar.menu"] = "⋯",
             ["toolbar.status.loading"] = "Loading",
+
+            // Compact app menu (mnemonics apply inside the opened menu)
+            ["menu.newTab"] = "&New Tab",
+            ["menu.newWindow"] = "New &Window",
+            ["menu.newPrivateWindow"] = "New &Private Window",
+            ["menu.closeTab"] = "&Close Tab",
+            ["menu.reopenClosedTab"] = "&Reopen Closed Tab",
+            ["menu.duplicateTab"] = "&Duplicate Tab",
+            ["menu.back"] = "&Back",
+            ["menu.forward"] = "&Forward",
+            ["menu.home"] = "&Home",
+            ["menu.reload"] = "Re&load",
+            ["menu.stop"] = "S&top",
+            ["menu.zoomIn"] = "Zoom &In",
+            ["menu.zoomOut"] = "Zoom &Out",
+            ["menu.zoomReset"] = "Reset &Zoom",
+            ["menu.fullScreen"] = "F&ull Screen",
+            ["menu.find"] = "&Find",
+            ["menu.findNext"] = "Find Ne&xt",
+            ["menu.findPrevious"] = "Find Pre&vious",
+            ["menu.showHistory"] = "H&istory",
+            ["menu.bookmarkPage"] = "Book&mark This Page",
+            ["menu.showBookmarks"] = "Show Bookmark&s",
+            ["menu.page"] = "Pa&ge",
+            ["menu.openFile"] = "&Open File",
+            ["menu.copyAddress"] = "Copy Page &Address",
+            ["menu.openInDefaultBrowser"] = "Open in Default &Browser",
+            ["menu.savePdf"] = "&Save as PDF",
+            ["menu.print"] = "&Print",
+            ["menu.downloads"] = "Do&wnloads",
+            ["menu.openDownloadsFolder"] = "Open &Downloads Folder",
+            ["menu.openLastDownload"] = "Open &Last Download",
+            ["menu.revealLastDownload"] = "Show Last Download in &Folder",
+            ["menu.moreTools"] = "More &Tools",
+            ["menu.focusAddress"] = "Focus &Address Bar",
+            ["menu.devTools"] = "&Developer Tools",
+            ["menu.searchEngine"] = "Search &Engine",
+            ["menu.restoreSession"] = "Restore Previous Session at Start&up",
+            ["menu.blockAds"] = "Bloc&k Ads and Trackers",
+            ["menu.sync"] = "Browser Data S&ync",
+            ["menu.configureSync"] = "&Configure Browser Data Sync...",
+            ["menu.syncNow"] = "Sync &Now",
+            ["menu.syncStatus"] = "Show Sync &Status",
+            ["menu.clearBrowsingData"] = "Clear Bro&wsing Data",
+            ["menu.exit"] = "E&xit",
 
             // Find bar and find results
             ["find.previous"] = "Previous",

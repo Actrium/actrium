@@ -2780,6 +2780,204 @@ var tests = new (string Name, Func<Task> Run)[]
             BrowserStrings.Format("window.title.documentFormat", "Page", "Actro"));
         return Task.CompletedTask;
     }),
+    ("exposes every menu command in the compact menu model exactly once", () =>
+    {
+        var commandItems = BrowserMenuModel.Flatten(BrowserMenuModel.BuildItems())
+            .Where(item => item.Command is not null)
+            .ToList();
+        var engines = BrowserSearchEnginePolicy.Engines;
+
+        foreach (var command in Enum.GetValues<BrowserMenuCommand>())
+        {
+            var matches = commandItems.Where(item => item.Command == command).ToList();
+            if (command == BrowserMenuCommand.SelectSearchEngine)
+            {
+                // One checkable item per Rust-core engine, addressed through
+                // the argument channel with pairwise-distinct engine ids.
+                AssertEqual(engines.Count, matches.Count);
+                var arguments = matches.Select(item => item.Argument).ToList();
+                AssertEqual(engines.Count, arguments.Distinct(StringComparer.Ordinal).Count());
+                foreach (var engine in engines)
+                {
+                    AssertTrue(arguments.Contains(engine.Id));
+                    AssertTrue(matches.All(item => item.IsCheckable));
+                }
+            }
+            else
+            {
+                AssertEqual(1, matches.Count);
+                AssertTrue(matches[0].Argument is null);
+            }
+        }
+
+        return Task.CompletedTask;
+    }),
+    ("keeps compact menu shortcuts unique and aliases valid", () =>
+    {
+        var items = BrowserMenuModel.Flatten(BrowserMenuModel.BuildItems()).ToList();
+        var primaries = items
+            .Where(item => item.Shortcut is not null)
+            .Select(item => item.Shortcut!)
+            .ToList();
+        AssertEqual(primaries.Count, primaries.Distinct().Count());
+
+        var aliasShortcuts = BrowserMenuModel.Aliases.Select(alias => alias.Shortcut).ToList();
+        AssertEqual(aliasShortcuts.Count, aliasShortcuts.Distinct().Count());
+        foreach (var alias in BrowserMenuModel.Aliases)
+        {
+            // Aliases add key variants, they never shadow a primary chord,
+            // and each one targets a command that exists in the menu.
+            AssertFalse(primaries.Contains(alias.Shortcut));
+            AssertTrue(items.Any(item => item.Command == alias.Command));
+        }
+
+        var openers = BrowserMenuModel.MenuOpenShortcuts;
+        AssertEqual(3, openers.Count);
+        AssertEqual(openers.Count, openers.Distinct().Count());
+        foreach (var opener in openers)
+        {
+            AssertFalse(primaries.Contains(opener));
+            AssertFalse(aliasShortcuts.Contains(opener));
+        }
+
+        foreach (var shortcut in primaries.Concat(aliasShortcuts).Concat(openers))
+        {
+            AssertFalse(string.IsNullOrWhiteSpace(shortcut.Key));
+        }
+
+        return Task.CompletedTask;
+    }),
+    ("preserves the legacy keyboard shortcut table across primaries and aliases", () =>
+    {
+        var expected = new Dictionary<(bool Control, bool Shift, bool Alt, string Key), BrowserMenuCommand>
+        {
+            [(true, false, false, "T")] = BrowserMenuCommand.NewTab,
+            [(true, false, false, "N")] = BrowserMenuCommand.NewWindow,
+            [(true, true, false, "N")] = BrowserMenuCommand.NewPrivateWindow,
+            [(true, false, false, "W")] = BrowserMenuCommand.CloseTab,
+            [(true, true, false, "T")] = BrowserMenuCommand.ReopenClosedTab,
+            [(true, false, false, "L")] = BrowserMenuCommand.FocusAddress,
+            [(true, false, false, "F")] = BrowserMenuCommand.Find,
+            [(true, false, false, "H")] = BrowserMenuCommand.ShowHistory,
+            [(true, false, false, "D")] = BrowserMenuCommand.BookmarkPage,
+            [(true, false, false, "J")] = BrowserMenuCommand.OpenDownloadsFolder,
+            [(true, false, false, "R")] = BrowserMenuCommand.Reload,
+            [(true, false, false, "P")] = BrowserMenuCommand.Print,
+            [(true, false, false, "S")] = BrowserMenuCommand.SavePdf,
+            [(true, false, false, "O")] = BrowserMenuCommand.OpenFile,
+            [(true, true, false, "O")] = BrowserMenuCommand.ShowBookmarks,
+            [(true, true, false, "I")] = BrowserMenuCommand.DevTools,
+            [(true, true, false, "Delete")] = BrowserMenuCommand.ClearBrowsingData,
+            [(true, false, false, "Oemplus")] = BrowserMenuCommand.ZoomIn,
+            [(true, true, false, "Oemplus")] = BrowserMenuCommand.ZoomIn,
+            [(true, false, false, "Add")] = BrowserMenuCommand.ZoomIn,
+            [(true, false, false, "OemMinus")] = BrowserMenuCommand.ZoomOut,
+            [(true, false, false, "Subtract")] = BrowserMenuCommand.ZoomOut,
+            [(true, false, false, "D0")] = BrowserMenuCommand.ZoomReset,
+            [(true, false, false, "NumPad0")] = BrowserMenuCommand.ZoomReset,
+            [(false, false, false, "F11")] = BrowserMenuCommand.FullScreen,
+            [(false, false, false, "F5")] = BrowserMenuCommand.Reload,
+            [(false, false, false, "F3")] = BrowserMenuCommand.FindNext,
+            [(false, true, false, "F3")] = BrowserMenuCommand.FindPrevious,
+            [(false, false, true, "Left")] = BrowserMenuCommand.Back,
+            [(false, false, true, "Right")] = BrowserMenuCommand.Forward,
+            [(false, false, true, "Home")] = BrowserMenuCommand.Home,
+            [(false, false, true, "F4")] = BrowserMenuCommand.Exit,
+        };
+
+        var actual = new Dictionary<(bool, bool, bool, string), BrowserMenuCommand>();
+        foreach (var item in BrowserMenuModel.Flatten(BrowserMenuModel.BuildItems()))
+        {
+            if (item.Shortcut is BrowserShortcut shortcut && item.Command is BrowserMenuCommand command)
+            {
+                actual[(shortcut.Control, shortcut.Shift, shortcut.Alt, shortcut.Key)] = command;
+            }
+        }
+
+        foreach (var alias in BrowserMenuModel.Aliases)
+        {
+            var shortcut = alias.Shortcut;
+            actual[(shortcut.Control, shortcut.Shift, shortcut.Alt, shortcut.Key)] = alias.Command;
+        }
+
+        AssertEqual(expected.Count, actual.Count);
+        foreach (var (chord, command) in expected)
+        {
+            AssertTrue(actual.TryGetValue(chord, out var actualCommand));
+            AssertEqual(command, actualCommand);
+        }
+
+        // Tab switching stays in MainForm.TryHandleTabShortcut: the model
+        // must never claim the reserved Ctrl tab-cycling and tab-index keys.
+        var reservedKeys = new[]
+        {
+            "Tab", "PageDown", "PageUp",
+            "D1", "D2", "D3", "D4", "D5", "D6", "D7", "D8", "D9",
+            "NumPad1", "NumPad2", "NumPad3", "NumPad4", "NumPad5",
+            "NumPad6", "NumPad7", "NumPad8", "NumPad9",
+        };
+        foreach (var (chord, _) in actual)
+        {
+            AssertFalse(chord.Item1 && reservedKeys.Contains(chord.Item4));
+        }
+
+        return Task.CompletedTask;
+    }),
+    ("resolves every compact menu string key", () =>
+    {
+        foreach (var item in BrowserMenuModel.Flatten(BrowserMenuModel.BuildItems()))
+        {
+            if (item.IsSeparator)
+            {
+                AssertTrue(item.Command is null);
+                AssertTrue(item.StringKey is null);
+                continue;
+            }
+
+            if (item.StringKey is string stringKey)
+            {
+                AssertTrue(BrowserStrings.All.ContainsKey(stringKey));
+                AssertTrue(stringKey.StartsWith("menu.", StringComparison.Ordinal));
+            }
+            else
+            {
+                // Only runtime-labelled items (search engines) may skip the
+                // string table, and they must carry a display name.
+                AssertEqual(BrowserMenuCommand.SelectSearchEngine, item.Command);
+                AssertFalse(string.IsNullOrWhiteSpace(item.LiteralText));
+            }
+
+            // Submenu headers group commands, they do not execute one.
+            if (item.Children.Count > 0)
+            {
+                AssertTrue(item.Command is null);
+                AssertTrue(item.Shortcut is null);
+            }
+        }
+
+        return Task.CompletedTask;
+    }),
+    ("resolves escape precedence in order", () =>
+    {
+        // Full truth table: find bar > full screen (page or browser) > stop.
+        AssertEqual(BrowserEscapeAction.None, BrowserEscapePolicy.Resolve(false, false, false, false));
+        AssertEqual(BrowserEscapeAction.Stop, BrowserEscapePolicy.Resolve(false, false, false, true));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, true, false));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, true, true));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, true, false, false));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, true, false, true));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, true, true, false));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, true, true, true));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, false, false, false));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, false, false, true));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, false, true, false));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, false, true, true));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, true, false, false));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, true, false, true));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, true, true, false));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, true, true, true));
+        return Task.CompletedTask;
+    }),
 };
 
 foreach (var test in tests)

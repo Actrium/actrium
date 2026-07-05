@@ -48,11 +48,12 @@ Native Windows WebView2 browser shell for Actro.
 - `src/BrowserHistoryDocumentPolicy.cs` owns safe generated history-page HTML
   plus in-page filtering and remove controls for the local `actro://history`
   document.
-- `src/BrowserMainMenu.cs` owns the native desktop menu command surface:
-  tab/window commands, duplicate tab, local file opening, page address
-  copy/default-browser opening, save-as-PDF, print, navigation commands, address
-  focus, stop/reload, history, bookmarks, search engine selection, startup
-  session restore, content blocking, clear browsing data, and developer tools.
+- `src/BrowserMenuCommand.cs`, `src/BrowserMenuModel.cs` and
+  `src/BrowserAppMenu.cs` own the compact application menu (Chrome/Edge
+  three-dot style): the command enum, the menu tree with shortcuts and aliases
+  as pure data, and the themed ContextMenuStrip that renders it. Every command
+  routes through the single `MainForm.ExecuteCommand` router; Escape
+  precedence lives in `src/BrowserEscapePolicy.cs`.
 - `src/BrowserNavigationErrorPolicy.cs` owns Windows-local navigation failure
   status text and safe error-page document generation.
 - `src/BrowserDownloadManager.cs` owns WebView2 download prompts and per-download
