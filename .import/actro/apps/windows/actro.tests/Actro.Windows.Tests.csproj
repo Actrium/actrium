@@ -31,6 +31,7 @@
     <Compile Include="..\actro\src\BrowserClosedTabStack.cs" Link="BrowserClosedTabStack.cs" />
     <Compile Include="..\actro\src\BrowserContentBlockingPolicy.cs" Link="BrowserContentBlockingPolicy.cs" />
     <Compile Include="..\actro\src\BrowserContentBlockingStore.cs" Link="BrowserContentBlockingStore.cs" />
+    <Compile Include="..\actro\src\BrowserDocumentStylePolicy.cs" Link="BrowserDocumentStylePolicy.cs" />
     <Compile Include="..\actro\src\BrowserDownloadPolicy.cs" Link="BrowserDownloadPolicy.cs" />
     <Compile Include="..\actro\src\BrowserExternalProtocolPolicy.cs" Link="BrowserExternalProtocolPolicy.cs" />
     <Compile Include="..\actro\src\BrowserFindPolicy.cs" Link="BrowserFindPolicy.cs" />
@@ -56,6 +57,8 @@
     <Compile Include="..\actro\src\BrowserStorageSyncCredentialStore.cs" Link="BrowserStorageSyncCredentialStore.cs" />
     <Compile Include="..\actro\src\BrowserStorageSyncScheduler.cs" Link="BrowserStorageSyncScheduler.cs" />
     <Compile Include="..\actro\src\BrowserSyncStatusPolicy.cs" Link="BrowserSyncStatusPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserTheme.cs" Link="BrowserTheme.cs" />
+    <Compile Include="..\actro\src\BrowserThemeSelectionPolicy.cs" Link="BrowserThemeSelectionPolicy.cs" />
     <Compile Include="..\actro\src\BrowserWindowStateStore.cs" Link="BrowserWindowStateStore.cs" />
     <Compile Include="..\actro\src\BrowserZoomPolicy.cs" Link="BrowserZoomPolicy.cs" />
     <Compile Include="..\actro\src\HostBridgeProtocol.cs" Link="HostBridgeProtocol.cs" />

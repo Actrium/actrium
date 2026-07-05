@@ -2620,6 +2620,109 @@ var tests = new (string Name, Func<Task> Run)[]
 
         AssertErrorResponse(response, "bad-params", "invalid_json");
     }),
+    ("resolves browser theme from system app mode", () =>
+    {
+        AssertTrue(ReferenceEquals(BrowserTheme.Dark, BrowserThemeSelectionPolicy.Resolve(0)));
+        AssertTrue(ReferenceEquals(BrowserTheme.Light, BrowserThemeSelectionPolicy.Resolve(1)));
+        AssertTrue(ReferenceEquals(BrowserTheme.Light, BrowserThemeSelectionPolicy.Resolve(null)));
+        AssertTrue(ReferenceEquals(BrowserTheme.Light, BrowserThemeSelectionPolicy.Resolve(2)));
+        AssertTrue(ReferenceEquals(BrowserTheme.Light, BrowserThemeSelectionPolicy.Resolve(-1)));
+        AssertFalse(BrowserTheme.Light.IsDark);
+        AssertTrue(BrowserTheme.Dark.IsDark);
+        return Task.CompletedTask;
+    }),
+    ("keeps browser theme palettes complete and distinct", () =>
+    {
+        var lightColors = BrowserTheme.Light.Colors;
+        var darkColors = BrowserTheme.Dark.Colors;
+        AssertEqual(16, lightColors.Count);
+        AssertEqual(lightColors.Count, darkColors.Count);
+        foreach (var (role, lightColor) in lightColors)
+        {
+            AssertTrue(darkColors.ContainsKey(role));
+            AssertEqual(255, (int)lightColor.A);
+            AssertEqual(255, (int)darkColors[role].A);
+            if (role == nameof(BrowserTheme.Accent))
+            {
+                // The accent is deliberately shared between both palettes and
+                // the internal document stylesheet.
+                AssertEqual(lightColor, darkColors[role]);
+            }
+            else
+            {
+                AssertFalse(lightColor == darkColors[role]);
+            }
+        }
+
+        AssertEqual("Segoe UI", BrowserTheme.UiFontFamily);
+        AssertEqual(10f, BrowserTheme.UiFontPointSize);
+        AssertTrue(BrowserTheme.MonoFontFamilies.Count > 0);
+        AssertTrue(BrowserTheme.GlyphFontFamilies.Count > 0);
+        return Task.CompletedTask;
+    }),
+    ("scales browser theme metrics per dpi", () =>
+    {
+        AssertEqual(44, BrowserTheme.Metrics.ToolbarHeight);
+        AssertEqual(40, BrowserTheme.Metrics.FindBarHeight);
+        AssertEqual(32, BrowserTheme.Metrics.TabRowHeight);
+        AssertEqual(180, BrowserTheme.Metrics.SidebarMinWidth);
+        AssertEqual(240, BrowserTheme.Metrics.SidebarDefaultWidth);
+        AssertEqual(88, BrowserTheme.Metrics.CollapsedSegmentWidth);
+
+        AssertEqual(44, BrowserTheme.Metrics.Scale(44, 96));
+        AssertEqual(55, BrowserTheme.Metrics.Scale(44, 120));
+        AssertEqual(66, BrowserTheme.Metrics.Scale(44, 144));
+        AssertEqual(88, BrowserTheme.Metrics.Scale(44, 192));
+        AssertEqual(50, BrowserTheme.Metrics.Scale(40, 120));
+        // Half values round away from zero: 3 * 120 / 96 = 3.75, 1 * 144 / 96 = 1.5.
+        AssertEqual(4, BrowserTheme.Metrics.Scale(3, 120));
+        AssertEqual(2, BrowserTheme.Metrics.Scale(1, 144));
+        AssertEqual(0, BrowserTheme.Metrics.Scale(0, 192));
+        return Task.CompletedTask;
+    }),
+    ("builds shared document stylesheet with both palettes", () =>
+    {
+        var css = BrowserDocumentStylePolicy.RootCss;
+        AssertTrue(css.Contains(":root {", StringComparison.Ordinal));
+        AssertTrue(css.Contains("@media (prefers-color-scheme: dark)", StringComparison.Ordinal));
+        AssertTrue(css.Contains("#165dff", StringComparison.Ordinal));
+        AssertEqual("#f6f7f9", BrowserDocumentStylePolicy.FormatColor(BrowserTheme.Light.WindowBackground));
+        AssertTrue(css.Contains(
+            BrowserDocumentStylePolicy.FormatColor(BrowserTheme.Light.WindowBackground),
+            StringComparison.Ordinal));
+        AssertTrue(css.Contains(
+            BrowserDocumentStylePolicy.FormatColor(BrowserTheme.Dark.WindowBackground),
+            StringComparison.Ordinal));
+        AssertTrue(css.Contains("color-scheme: light", StringComparison.Ordinal));
+        AssertTrue(css.Contains("color-scheme: dark", StringComparison.Ordinal));
+        return Task.CompletedTask;
+    }),
+    ("embeds shared stylesheet exactly once per generated document", () =>
+    {
+        var css = BrowserDocumentStylePolicy.RootCss;
+        var homeDocument = BrowserHomeDocumentPolicy.BuildDocument(
+            ActroCoreStatus.Available("Actro", 1, "ask", 1, 2, 3));
+        var errorDocument = BrowserNavigationErrorPolicy.BuildErrorDocument(
+            "https://example.com/",
+            "Timeout");
+        var listDocument = BrowserLocalListDocumentPolicy.BuildDocument(new BrowserLocalListDocumentOptions(
+            "History",
+            "No history yet.",
+            "Search history",
+            "Search history",
+            "No matches.",
+            "data-remove-history",
+            "removeHistoryEntry",
+            [new BrowserLocalListDocumentItem("Example", "https://example.com/", "today", "example")]));
+
+        foreach (var document in new[] { homeDocument, errorDocument, listDocument })
+        {
+            AssertEqual(1, CountOccurrences(document, css));
+            AssertTrue(document.Contains("var(--page-background)", StringComparison.Ordinal));
+        }
+
+        return Task.CompletedTask;
+    }),
 };
 
 foreach (var test in tests)
@@ -2695,6 +2798,19 @@ static void AssertErrorResponse(JsonDocument response, string id, string code)
     AssertEqual(id, root.GetProperty("id").GetString());
     AssertFalse(root.GetProperty("ok").GetBoolean());
     AssertEqual(code, root.GetProperty("error").GetProperty("code").GetString());
+}
+
+static int CountOccurrences(string text, string value)
+{
+    var count = 0;
+    var index = 0;
+    while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+    {
+        count += 1;
+        index += value.Length;
+    }
+
+    return count;
 }
 
 static void AssertTrue(bool value)

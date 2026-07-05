@@ -50,7 +50,12 @@ required_files=(
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserTab.cs"
   "apps/windows/actro/src/BrowserTabStrip.cs"
+  "apps/windows/actro/src/BrowserTheme.cs"
+  "apps/windows/actro/src/BrowserThemeManager.cs"
+  "apps/windows/actro/src/BrowserThemeSelectionPolicy.cs"
+  "apps/windows/actro/src/BrowserToolStripRenderer.cs"
   "apps/windows/actro/src/BrowserToolbar.cs"
+  "apps/windows/actro/src/BrowserDocumentStylePolicy.cs"
   "apps/windows/actro/src/BrowserZoomPolicy.cs"
   "apps/windows/actro/src/HostMessageBridge.cs"
   "apps/windows/actro/src/HostBridgeProtocol.cs"
@@ -290,6 +295,84 @@ fi
 for event_name in BackRequested ForwardRequested ReloadRequested HomeRequested; do
   if ! rg -q "$event_name" apps/windows/actro/src/BrowserToolbar.cs; then
     print_failure "Windows browser toolbar is missing event: $event_name"
+  fi
+done
+
+if ! rg -q '<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>' "$project"; then
+  print_failure "Windows project does not enable per-monitor DPI v2"
+else
+  print_ok "Windows project enables per-monitor DPI v2"
+fi
+
+for theme_symbol in WM_SETTINGCHANGE ImmersiveColorSet DwmSetWindowAttribute PreferredColorScheme ApplyTheme ApplyWebViewColorScheme DpiChanged OnFormClosedUnsubscribeTheme; do
+  if ! rg -q "$theme_symbol" apps/windows/actro/src/MainForm.cs; then
+    print_failure "Windows shell is missing theme lifecycle behavior: $theme_symbol"
+  fi
+done
+
+for theme_data_symbol in 'static BrowserTheme Light' 'static BrowserTheme Dark' WindowBackground BarBackground BarForeground Accent SidebarBackground InputBackground DisabledForeground StatusBackground UiFontFamily MonoFontFamilies GlyphFontFamilies ToolbarHeight FindBarHeight 'static int Scale'; do
+  if ! rg -q "$theme_data_symbol" apps/windows/actro/src/BrowserTheme.cs; then
+    print_failure "Windows browser theme is missing data: $theme_data_symbol"
+  fi
+done
+
+if ! rg -q 'Resolve' apps/windows/actro/src/BrowserThemeSelectionPolicy.cs; then
+  print_failure "Windows theme selection policy is missing the Resolve mapping"
+fi
+
+for theme_manager_symbol in AppsUseLightTheme RefreshFromSystem Changed GetFont BrowserThemeSelectionPolicy; do
+  if ! rg -q "$theme_manager_symbol" apps/windows/actro/src/BrowserThemeManager.cs; then
+    print_failure "Windows theme manager is missing behavior: $theme_manager_symbol"
+  fi
+done
+
+for renderer_symbol in ProfessionalColorTable OnRenderItemText OnRenderItemCheck OnRenderArrow OnRenderSeparator; do
+  if ! rg -q "$renderer_symbol" apps/windows/actro/src/BrowserToolStripRenderer.cs; then
+    print_failure "Windows themed menu renderer is missing override: $renderer_symbol"
+  fi
+done
+
+for document_style_symbol in RootCss 'prefers-color-scheme: dark' ':root'; do
+  if ! rg -Fq "$document_style_symbol" apps/windows/actro/src/BrowserDocumentStylePolicy.cs; then
+    print_failure "Windows document style policy is missing symbol: $document_style_symbol"
+  fi
+done
+
+if ! rg -q 'BrowserDocumentStylePolicy.RootCss' \
+  apps/windows/actro/src/BrowserHomeDocumentPolicy.cs; then
+  print_failure "Windows home document does not embed the shared stylesheet"
+fi
+
+if ! rg -q 'BrowserDocumentStylePolicy.RootCss' \
+  apps/windows/actro/src/BrowserLocalListDocumentPolicy.cs; then
+  print_failure "Windows local list documents do not embed the shared stylesheet"
+fi
+
+if ! rg -q 'BrowserDocumentStylePolicy.RootCss' \
+  apps/windows/actro/src/BrowserNavigationErrorPolicy.cs; then
+  print_failure "Windows navigation error document does not embed the shared stylesheet"
+fi
+
+if rg -q 'FlatStyle.System' apps/windows/actro/src/BrowserToolbar.cs apps/windows/actro/src/BrowserFindBar.cs; then
+  print_failure "Windows chrome bars still use system-drawn (theme-blind) buttons"
+fi
+
+for themed_chrome_symbol in ApplyTheme BrowserThemedButton BrowserThemedBorderPanel; do
+  if ! rg -q "$themed_chrome_symbol" apps/windows/actro/src/BrowserToolbar.cs \
+    || ! rg -q "$themed_chrome_symbol" apps/windows/actro/src/BrowserFindBar.cs; then
+    print_failure "Windows chrome bars are missing themed drawing: $themed_chrome_symbol"
+  fi
+done
+
+for theme_test_link in BrowserTheme.cs BrowserThemeSelectionPolicy.cs BrowserDocumentStylePolicy.cs; do
+  if ! rg -Fq "$theme_test_link" "$test_project"; then
+    print_failure "Windows tests do not link theme policy file: $theme_test_link"
+  fi
+done
+
+for theme_test_symbol in BrowserThemeSelectionPolicy 'BrowserTheme.Metrics.Scale' 'BrowserDocumentStylePolicy.RootCss'; do
+  if ! rg -Fq "$theme_test_symbol" apps/windows/actro.tests/Program.cs; then
+    print_failure "Windows tests do not exercise theme behavior: $theme_test_symbol"
   fi
 done
 

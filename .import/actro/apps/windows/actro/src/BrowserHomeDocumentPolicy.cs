@@ -23,12 +23,13 @@ internal static class BrowserHomeDocumentPolicy
             <meta charset="utf-8">
             <title>{{productName}}</title>
             <style>
+              {{BrowserDocumentStylePolicy.RootCss}}
               html, body {
                 height: 100%;
                 margin: 0;
-                font-family: "Segoe UI", system-ui, sans-serif;
-                background: #f6f7f9;
-                color: #121417;
+                font-family: var(--ui-font);
+                background: var(--page-background);
+                color: var(--page-foreground);
               }
               main {
                 box-sizing: border-box;
@@ -43,13 +44,13 @@ internal static class BrowserHomeDocumentPolicy
                 margin: 0 0 8px;
               }
               p {
-                color: #59616d;
+                color: var(--muted-foreground);
                 font-size: 15px;
                 margin: 0 0 10px;
               }
               code {
-                color: #2d3748;
-                font: 13px "Cascadia Mono", "Consolas", monospace;
+                color: var(--muted-foreground);
+                font: 13px var(--mono-font);
               }
             </style>
             <script>

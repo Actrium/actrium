@@ -944,9 +944,13 @@ else
   print_ok "RN .actr session loading verifies the downloaded archive in ActrLoader"
 fi
 
+# Windows OS-level interop (dwmapi window chrome) is not Rust-core access:
+# only the actro_core boundary must stay centralized in ActroCore.cs.
 windows_native_imports="$(
   rg -n 'DllImport\(|LibraryImport\(|actro_core_' apps/windows/actro/src \
-    --glob '!ActroCore.cs' 2>/dev/null || true
+    --glob '!ActroCore.cs' 2>/dev/null \
+    | rg -v 'DllImport\("dwmapi\.dll"' \
+    || true
 )"
 
 if [[ -n "$windows_native_imports" ]]; then

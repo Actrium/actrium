@@ -148,6 +148,16 @@ internal sealed class MainForm : Form
         WireTabStrip();
         WireToolbar();
         WireFindBar();
+
+        // Theme lifecycle: subscribe per form and unsubscribe on FormClosed so
+        // closed windows are not kept alive by the singleton manager across
+        // the multi-window application lifetime. A DPI change re-runs the
+        // cascade because every ApplyTheme re-measures from DeviceDpi.
+        BrowserThemeManager.Instance.Changed += OnSystemThemeChanged;
+        FormClosed += OnFormClosedUnsubscribeTheme;
+        DpiChanged += (_, _) => ApplyTheme(BrowserThemeManager.Instance.Current);
+        ApplyTheme(BrowserThemeManager.Instance.Current);
+
         Load += OnLoad;
         FormClosing += OnFormClosing;
     }
@@ -165,6 +175,96 @@ internal sealed class MainForm : Form
         catch (Exception error)
         {
             ShowStartupError(error);
+        }
+    }
+
+    private const int WM_SETTINGCHANGE = 0x001A;
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
+    private const int DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1 = 19;
+
+    [DllImport("dwmapi.dll", ExactSpelling = true)]
+    private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    protected override void WndProc(ref Message message)
+    {
+        // The system broadcasts WM_SETTINGCHANGE with "ImmersiveColorSet"
+        // when the light/dark app mode flips. The manager compares before
+        // raising, so N open windows receiving the broadcast still produce
+        // a single theme cascade.
+        if (message.Msg == WM_SETTINGCHANGE
+            && string.Equals(
+                Marshal.PtrToStringUni(message.LParam),
+                "ImmersiveColorSet",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            BrowserThemeManager.Instance.RefreshFromSystem();
+        }
+
+        base.WndProc(ref message);
+    }
+
+    protected override void OnHandleCreated(EventArgs args)
+    {
+        base.OnHandleCreated(args);
+        ApplyImmersiveTitleBar(BrowserThemeManager.Instance.Current.IsDark);
+    }
+
+    private void OnSystemThemeChanged(object? sender, EventArgs args)
+    {
+        ApplyTheme(BrowserThemeManager.Instance.Current);
+    }
+
+    private void OnFormClosedUnsubscribeTheme(object? sender, FormClosedEventArgs args)
+    {
+        BrowserThemeManager.Instance.Changed -= OnSystemThemeChanged;
+    }
+
+    /// <summary>
+    /// Cascades the shared theme through the whole chrome stack, the caption
+    /// bar and every tab's WebView2 profile (private-window profiles
+    /// included). Runs at construction, on system theme change and on DPI
+    /// change; consumers re-measure their metrics from DeviceDpi.
+    /// </summary>
+    private void ApplyTheme(BrowserTheme theme)
+    {
+        BackColor = theme.WindowBackground;
+        webViewHost.BackColor = theme.WindowBackground;
+        // Global renderer so menu drop-downs (which do not inherit a parent
+        // strip's renderer) follow the palette as well.
+        ToolStripManager.Renderer = new BrowserToolStripRenderer(theme);
+        mainMenu.ApplyTheme(theme);
+        tabStrip.ApplyTheme(theme);
+        toolbar.ApplyTheme(theme);
+        findBar.ApplyTheme(theme);
+        ApplyImmersiveTitleBar(theme.IsDark);
+        foreach (var tab in tabs)
+        {
+            ApplyWebViewColorScheme(tab, theme);
+        }
+    }
+
+    /// <summary>Dark caption bar: attribute 20, with the pre-20H1 fallback 19.</summary>
+    private void ApplyImmersiveTitleBar(bool isDark)
+    {
+        if (!IsHandleCreated)
+        {
+            return;
+        }
+
+        var value = isDark ? 1 : 0;
+        if (DwmSetWindowAttribute(Handle, DWMWA_USE_IMMERSIVE_DARK_MODE, ref value, sizeof(int)) != 0)
+        {
+            _ = DwmSetWindowAttribute(Handle, DWMWA_USE_IMMERSIVE_DARK_MODE_BEFORE_20H1, ref value, sizeof(int));
+        }
+    }
+
+    private static void ApplyWebViewColorScheme(BrowserTab tab, BrowserTheme theme)
+    {
+        if (tab.WebView.CoreWebView2 is CoreWebView2 coreWebView)
+        {
+            coreWebView.Profile.PreferredColorScheme = theme.IsDark
+                ? CoreWebView2PreferredColorScheme.Dark
+                : CoreWebView2PreferredColorScheme.Light;
         }
     }
 
@@ -554,6 +654,10 @@ internal sealed class MainForm : Form
 
         await tab.WebView.EnsureCoreWebView2Async(await GetWebViewEnvironmentAsync());
         ConfigureWebView(tab.WebView.CoreWebView2);
+        // Applied per tab at creation so tabs and windows opened after a
+        // theme flip (including private-window throwaway profiles) start on
+        // the current scheme; the Changed cascade re-applies it live.
+        ApplyWebViewColorScheme(tab, BrowserThemeManager.Instance.Current);
         WireWebViewEvents(tab, tab.WebView.CoreWebView2);
         tab.HostMessageBridge = new HostMessageBridge(tab.Id, tab.WebView.CoreWebView2, CreateHostBridgeActions());
         await tab.HostMessageBridge.AttachAsync();

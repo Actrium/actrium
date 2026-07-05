@@ -85,7 +85,12 @@ required_files=(
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserTab.cs"
   "apps/windows/actro/src/BrowserTabStrip.cs"
+  "apps/windows/actro/src/BrowserTheme.cs"
+  "apps/windows/actro/src/BrowserThemeManager.cs"
+  "apps/windows/actro/src/BrowserThemeSelectionPolicy.cs"
+  "apps/windows/actro/src/BrowserToolStripRenderer.cs"
   "apps/windows/actro/src/BrowserToolbar.cs"
+  "apps/windows/actro/src/BrowserDocumentStylePolicy.cs"
   "apps/windows/actro/src/BrowserZoomPolicy.cs"
   "apps/windows/actro/src/HostMessageBridge.cs"
   "apps/windows/actro/src/HostBridgeProtocol.cs"
@@ -341,6 +346,111 @@ if [[ "${#missing_toolbar_events[@]}" -ne 0 ]]; then
 else
   print_ok "Windows browser toolbar exposes navigation events"
 fi
+
+check_pattern_in_each_file \
+  '<ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>' \
+  "Windows project enables per-monitor DPI v2" \
+  "Windows project does not enable per-monitor DPI v2" \
+  apps/windows/actro/Actro.Windows.csproj
+
+missing_theme_lifecycle_symbols=()
+for theme_symbol in WM_SETTINGCHANGE ImmersiveColorSet DwmSetWindowAttribute PreferredColorScheme ApplyTheme ApplyWebViewColorScheme DpiChanged OnFormClosedUnsubscribeTheme; do
+  if ! rg -q "$theme_symbol" apps/windows/actro/src/MainForm.cs; then
+    missing_theme_lifecycle_symbols+=("$theme_symbol")
+  fi
+done
+
+if [[ "${#missing_theme_lifecycle_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows shell is missing theme lifecycle behavior"
+  printf '%s\n' "${missing_theme_lifecycle_symbols[@]}"
+else
+  print_ok "Windows shell owns the system theme lifecycle"
+fi
+
+missing_theme_data_symbols=()
+for theme_data_symbol in 'static BrowserTheme Light' 'static BrowserTheme Dark' WindowBackground BarBackground BarForeground Accent SidebarBackground InputBackground DisabledForeground StatusBackground UiFontFamily MonoFontFamilies GlyphFontFamilies ToolbarHeight FindBarHeight 'static int Scale'; do
+  if ! rg -q "$theme_data_symbol" apps/windows/actro/src/BrowserTheme.cs; then
+    missing_theme_data_symbols+=("$theme_data_symbol")
+  fi
+done
+
+if [[ "${#missing_theme_data_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows browser theme is missing palette/typography/metric data"
+  printf '%s\n' "${missing_theme_data_symbols[@]}"
+else
+  print_ok "Windows browser theme centralizes palette, typography and metrics"
+fi
+
+check_pattern_in_each_file \
+  'Resolve' \
+  "Windows theme selection policy maps the system app mode" \
+  "Windows theme selection policy does not map the system app mode" \
+  apps/windows/actro/src/BrowserThemeSelectionPolicy.cs
+
+missing_theme_manager_symbols=()
+for theme_manager_symbol in AppsUseLightTheme RefreshFromSystem Changed GetFont BrowserThemeSelectionPolicy; do
+  if ! rg -q "$theme_manager_symbol" apps/windows/actro/src/BrowserThemeManager.cs; then
+    missing_theme_manager_symbols+=("$theme_manager_symbol")
+  fi
+done
+
+if [[ "${#missing_theme_manager_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows theme manager is missing expected behavior"
+  printf '%s\n' "${missing_theme_manager_symbols[@]}"
+else
+  print_ok "Windows theme manager owns system reads and the font cache"
+fi
+
+missing_menu_renderer_symbols=()
+for renderer_symbol in ProfessionalColorTable OnRenderItemText OnRenderItemCheck OnRenderArrow OnRenderSeparator; do
+  if ! rg -q "$renderer_symbol" apps/windows/actro/src/BrowserToolStripRenderer.cs; then
+    missing_menu_renderer_symbols+=("$renderer_symbol")
+  fi
+done
+
+if [[ "${#missing_menu_renderer_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows themed menu renderer is missing render overrides"
+  printf '%s\n' "${missing_menu_renderer_symbols[@]}"
+else
+  print_ok "Windows themed menu renderer paints text, checks, arrows and separators"
+fi
+
+check_pattern_in_each_file \
+  'BrowserDocumentStylePolicy.RootCss' \
+  "Windows internal documents embed the shared stylesheet" \
+  "Windows internal documents do not embed the shared stylesheet" \
+  apps/windows/actro/src/BrowserHomeDocumentPolicy.cs \
+  apps/windows/actro/src/BrowserLocalListDocumentPolicy.cs \
+  apps/windows/actro/src/BrowserNavigationErrorPolicy.cs
+
+if rg -q 'FlatStyle.System' apps/windows/actro/src/BrowserToolbar.cs apps/windows/actro/src/BrowserFindBar.cs; then
+  print_failure "Windows chrome bars still use system-drawn (theme-blind) buttons"
+else
+  print_ok "Windows chrome bars use owner-drawn themed buttons"
+fi
+
+check_pattern_in_each_file \
+  'ApplyTheme' \
+  "Windows chrome controls consume the shared theme" \
+  "Windows chrome controls do not consume the shared theme" \
+  apps/windows/actro/src/BrowserToolbar.cs \
+  apps/windows/actro/src/BrowserFindBar.cs \
+  apps/windows/actro/src/BrowserMainMenu.cs \
+  apps/windows/actro/src/BrowserTabStrip.cs
+
+check_pattern_in_each_file \
+  'BrowserTheme' \
+  "Windows tests link and exercise the theme policies" \
+  "Windows tests do not link and exercise the theme policies" \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
+
+check_pattern_in_each_file \
+  'BrowserDocumentStylePolicy' \
+  "Windows tests link and exercise the shared document stylesheet" \
+  "Windows tests do not link and exercise the shared document stylesheet" \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
 
 missing_webview_events=()
 for webview_event in NavigationStarting NavigationCompleted HistoryChanged SourceChanged StatusBarTextChanged DocumentTitleChanged NewWindowRequested PermissionRequested ContainsFullScreenElementChanged ProcessFailed WebResourceRequested; do

@@ -8,6 +8,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>Actro</AssemblyName>
     <RootNamespace>Actro.Windows</RootNamespace>
+    <!-- Per-monitor DPI: theme metrics are stored at a 96-DPI base and
+         resolved through BrowserTheme.Metrics.Scale; fonts are specified in
+         points. SystemAware (the default) would blur on mixed-DPI setups. -->
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
   </PropertyGroup>
 
   <ItemGroup>
