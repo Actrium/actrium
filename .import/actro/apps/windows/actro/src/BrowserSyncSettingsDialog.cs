@@ -79,17 +79,29 @@ internal sealed class BrowserSyncSettingsDialog : Form
         RefreshFromSettings();
     }
 
+    // All fixed layout metrics in this dialog are 96-DPI base values and
+    // must resolve through this helper: the dialog opens with per-monitor
+    // DPI applied to fonts, and unscaled pixel widths wrap the row labels
+    // mid-word and clip buttons on scaled displays (seen at 125% on real
+    // hardware). Like the theme pass, the DPI is read once at construction;
+    // the dialog is modal and short-lived, so per-monitor moves are not
+    // rescaled live.
+    private int Scale(int baseValue)
+    {
+        return BrowserTheme.Metrics.Scale(baseValue, DeviceDpi);
+    }
+
     private Control BuildLayout()
     {
         var layout = new TableLayoutPanel
         {
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
-            Padding = new Padding(16),
+            Padding = new Padding(Scale(16)),
             ColumnCount = 2,
         };
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 96));
-        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 440));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(96)));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(440)));
 
         // 1. Provider section: Local Folder is the enabled provider; the
         // cloud drive rows are shown-but-disabled roadmap providers.
@@ -123,7 +135,7 @@ internal sealed class BrowserSyncSettingsDialog : Form
         {
             Text = BrowserStrings.Get("dialog.syncSettings.providerFooter"),
             AutoSize = true,
-            MaximumSize = new Size(520, 0),
+            MaximumSize = new Size(Scale(520), 0),
             Margin = new Padding(3, 6, 3, 10),
         };
         AddFullRow(layout, providerFooterLabel);
@@ -133,7 +145,7 @@ internal sealed class BrowserSyncSettingsDialog : Form
         AddSectionHeader(layout, BrowserStrings.Get("dialog.syncSettings.folderSection"));
 
         folderPathBox.ReadOnly = true;
-        folderPathBox.Width = 430;
+        folderPathBox.Width = Scale(430);
         AddLabelledRow(layout, BrowserStrings.Get("dialog.syncSettings.folderRow"), folderPathBox);
 
         chooseFolderButton.Text = BrowserStrings.Get("dialog.syncSettings.chooseFolder");
@@ -145,7 +157,7 @@ internal sealed class BrowserSyncSettingsDialog : Form
         AddFullRow(layout, BuildButtonRow(chooseFolderButton, disconnectButton));
 
         folderErrorLabel.AutoSize = true;
-        folderErrorLabel.MaximumSize = new Size(520, 0);
+        folderErrorLabel.MaximumSize = new Size(Scale(520), 0);
         folderErrorLabel.Visible = false;
         folderErrorLabel.Margin = new Padding(3, 0, 3, 10);
         AddFullRow(layout, folderErrorLabel);
@@ -155,17 +167,17 @@ internal sealed class BrowserSyncSettingsDialog : Form
         AddSectionHeader(layout, BrowserStrings.Get("dialog.syncSettings.statusSection"));
 
         connectionValueLabel.AutoSize = true;
-        connectionValueLabel.MaximumSize = new Size(430, 0);
+        connectionValueLabel.MaximumSize = new Size(Scale(430), 0);
         AddLabelledRow(layout, BrowserStrings.Get("dialog.syncSettings.connectionRow"), connectionValueLabel);
 
         lastSyncValueLabel.AutoSize = true;
-        lastSyncValueLabel.MaximumSize = new Size(430, 0);
+        lastSyncValueLabel.MaximumSize = new Size(Scale(430), 0);
         AddLabelledRow(layout, BrowserStrings.Get("dialog.syncSettings.lastSyncRow"), lastSyncValueLabel);
 
         // 4. Device row: the durable device identity owned by the provider
         // settings store.
         deviceValueLabel.AutoSize = true;
-        deviceValueLabel.MaximumSize = new Size(430, 0);
+        deviceValueLabel.MaximumSize = new Size(Scale(430), 0);
         AddLabelledRow(layout, BrowserStrings.Get("dialog.syncSettings.deviceRow"), deviceValueLabel);
 
         syncNowButton.Text = BrowserStrings.Get("dialog.syncSettings.syncNow");
@@ -189,8 +201,8 @@ internal sealed class BrowserSyncSettingsDialog : Form
         diagnosticsBox.ReadOnly = true;
         diagnosticsBox.WordWrap = false;
         diagnosticsBox.ScrollBars = ScrollBars.Both;
-        diagnosticsBox.Width = 520;
-        diagnosticsBox.Height = 160;
+        diagnosticsBox.Width = Scale(520);
+        diagnosticsBox.Height = Scale(160);
         diagnosticsBox.Visible = false;
         diagnosticsBox.Margin = new Padding(3, 0, 3, 4);
         AddFullRow(layout, diagnosticsBox);
@@ -224,8 +236,8 @@ internal sealed class BrowserSyncSettingsDialog : Form
             ColumnCount = 2,
             Margin = new Padding(0, 12, 0, 0),
         };
-        bottomRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 320));
-        bottomRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 216));
+        bottomRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(320)));
+        bottomRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, Scale(216)));
         referenceServerButton.Anchor = AnchorStyles.Left;
         closeButton.Anchor = AnchorStyles.Right;
         bottomRow.Controls.Add(referenceServerButton, 0, 0);
