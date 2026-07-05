@@ -20,11 +20,23 @@ internal static class Program
                 ? "The Rust core library (actro_core.dll) could not be loaded."
                 : coreStatus.UnavailableReason;
             Trace.TraceError("Rust core library unavailable at startup: {0}", reason);
-            MessageBox.Show(
-                reason,
-                "Actro cannot start",
-                MessageBoxButtons.OK,
-                MessageBoxIcon.Error);
+            if (Environment.UserInteractive)
+            {
+                MessageBox.Show(
+                    reason,
+                    "Actro cannot start",
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Error);
+            }
+            else
+            {
+                // Non-interactive hosts (services, CI, session 0) cannot show
+                // modal UI: MessageBox.Show would itself throw
+                // InvalidOperationException and turn a clean fail-fast into an
+                // unhandled crash, so log-and-exit is the whole story here.
+                Trace.TraceWarning(
+                    "Skipping startup error dialog: no interactive desktop is available.");
+            }
             Environment.Exit(1);
             return;
         }
