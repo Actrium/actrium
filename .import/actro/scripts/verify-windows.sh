@@ -51,6 +51,8 @@ required_files=(
   "apps/windows/actro/src/BrowserStartupSettingsStore.cs"
   "apps/windows/actro/src/BrowserStorageDatabase.cs"
   "apps/windows/actro/src/BrowserStrings.cs"
+  "apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs"
+  "apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs"
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs"
   "apps/windows/actro/src/BrowserTab.cs"
@@ -1157,6 +1159,40 @@ if ! rg -q 'RunLocalFolderSyncCycleAsync' apps/windows/actro/src/BrowserStorageS
 else
   print_ok "Windows local-folder cloud sync client consumes the Rust local-folder cycle helper"
 fi
+
+# The provider connection branch owns browser sync when a cloud provider is
+# configured: settings store + planner feed the Rust connection status policy
+# and the coordinator runs the local-folder rounds from that routing.
+if ! rg -q 'BrowserSyncProviderSettingsStore' apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
+  || ! rg -q 'BrowserSyncProviderConnectionPlanner' apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
+  || ! rg -q 'RunLocalFolderSyncCycleAsync' apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
+  || ! rg -q 'RunLocalFolderMembershipRoundAsync' apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
+  || ! rg -q 'BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson' apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs \
+  || ! rg -q 'MembershipJoinedAtUnixSeconds' apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs \
+  || ! rg -q 'BrowserSyncProviderSettingsStore' apps/windows/actro/src/MainForm.cs; then
+  print_failure "Windows browser sync coordinator does not route through the provider connection"
+else
+  print_ok "Windows browser sync coordinator routes through the provider connection"
+fi
+
+for provider_test_link in BrowserSyncProviderSettingsStore.cs BrowserSyncProviderConnectionPlanner.cs; do
+  if ! rg -Fq "$provider_test_link" "$test_project"; then
+    print_failure "Windows tests do not link provider connection file: $provider_test_link"
+  fi
+done
+
+for provider_test_case in \
+  'persists browser sync provider settings' \
+  'plans browser sync provider connection routing' \
+  'translates blocked provider connection policy into scheduler state' \
+  'routes browser sync coordinator through the provider connection' \
+  'shapes blocked browser sync provider coordinator results' \
+  'browser sync scheduler consumes cloud and blocked provider schedule states'
+do
+  if ! rg -Fq "$provider_test_case" apps/windows/actro.tests/Program.cs; then
+    print_failure "Windows tests do not cover provider connection behavior: $provider_test_case"
+  fi
+done
 
 for session_call in RestoreInitialTabsAsync PersistSession FormClosing BrowserSessionStore; do
   if ! rg -q "$session_call" apps/windows/actro/src/MainForm.cs; then

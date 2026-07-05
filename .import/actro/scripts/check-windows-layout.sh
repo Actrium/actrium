@@ -86,6 +86,8 @@ required_files=(
   "apps/windows/actro/src/BrowserSessionStore.cs"
   "apps/windows/actro/src/BrowserStartupSettingsStore.cs"
   "apps/windows/actro/src/BrowserStrings.cs"
+  "apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs"
+  "apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs"
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs"
   "apps/windows/actro/src/BrowserTab.cs"
@@ -829,6 +831,32 @@ check_pattern_in_each_file \
   apps/windows/actro/src/BrowserProfilePolicy.cs \
   apps/windows/actro/src/BrowserSessionStore.cs \
   apps/windows/actro/src/BrowserWindowStateStore.cs
+
+# Browser sync provider connection: the settings store owns the durable
+# device identity next to the credential store, the planner owns snapshot
+# assembly and routing, and the coordinator consumes both ahead of the
+# endpoint-token branch.
+check_pattern_in_each_file \
+  'WindowsAppPaths' \
+  "Windows browser sync provider settings live under the shared app data root" \
+  "Windows browser sync provider settings do not use the shared app data root" \
+  apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs
+
+check_pattern_in_each_file \
+  'BrowserSyncProviderConnectionPlanner' \
+  "Windows browser sync coordinator routes through the provider connection planner" \
+  "Windows browser sync coordinator does not route through the provider connection planner" \
+  apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
+
+check_pattern_in_each_file \
+  'BrowserSyncProviderSettingsStore' \
+  "Windows browser sync provider settings store is wired and exercised" \
+  "Windows browser sync provider settings store is not wired and exercised" \
+  apps/windows/actro/src/MainForm.cs \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
 
 check_pattern_in_each_file \
   'CoreWebView2Environment.CreateAsync' \

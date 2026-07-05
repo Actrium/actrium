@@ -34,6 +34,7 @@ internal sealed class MainForm : Form
     private readonly BrowserExternalProtocolManager externalProtocolManager;
     private readonly BrowserContentBlockingStore contentBlockingStore;
     private readonly BrowserStorageSyncCredentialStore browserSyncCredentialStore;
+    private readonly BrowserSyncProviderSettingsStore browserSyncProviderSettingsStore;
     private readonly BrowserStorageSyncScheduler browserSyncScheduler;
     private readonly Panel webViewHost;
     private readonly BrowserTabOverviewPanel overviewPanel;
@@ -120,8 +121,16 @@ internal sealed class MainForm : Form
         contentBlockingStore = BrowserContentBlockingStore.CreateDefault();
         contentBlockingEnabled = contentBlockingStore.Load().IsEnabled;
         browserSyncCredentialStore = BrowserStorageSyncCredentialStore.CreateDefault();
+        // Provider settings sit alongside the endpoint credential store: a
+        // configured cloud provider connection routes browser sync through
+        // the provider branch; the endpoint credentials stay the
+        // development-only reference path.
+        browserSyncProviderSettingsStore =
+            BrowserSyncProviderSettingsStore.CreateDefault(browserSyncCredentialStore);
         browserSyncScheduler = new BrowserStorageSyncScheduler(
-            BrowserStorageSyncCoordinator.CreateDefault(browserSyncCredentialStore));
+            BrowserStorageSyncCoordinator.CreateDefault(
+                browserSyncCredentialStore,
+                browserSyncProviderSettingsStore));
         Text = GetProductWindowTitle();
         Width = 1280;
         Height = 800;
