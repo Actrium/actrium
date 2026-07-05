@@ -836,10 +836,21 @@ internal sealed class MainForm : Form
             tab.IsLoading = false;
             if (!args.IsSuccess)
             {
-                ShowNavigationError(tab, args.WebErrorStatus.ToString());
+                var errorStatus = args.WebErrorStatus.ToString();
+                if (!BrowserNavigationErrorPolicy.ShouldShowErrorDocument(errorStatus))
+                {
+                    // Superseded or stopped navigation: keep the current
+                    // document (Chrome behavior); an error page here would
+                    // clobber the newer navigation already in flight.
+                    SyncActiveTabUi();
+                    SyncSidebar();
+                    return;
+                }
+
+                ShowNavigationError(tab, errorStatus);
                 if (activeTab == tab)
                 {
-                    ShowTransientStatus(BrowserNavigationErrorPolicy.FormatStatus(args.WebErrorStatus.ToString()));
+                    ShowTransientStatus(BrowserNavigationErrorPolicy.FormatStatus(errorStatus));
                 }
 
                 return;

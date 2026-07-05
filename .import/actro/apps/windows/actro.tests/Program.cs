@@ -164,6 +164,20 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual("Navigation failed", BrowserNavigationErrorPolicy.FormatStatus(" "));
         return Task.CompletedTask;
     }),
+    ("suppresses error documents for superseded navigations", () =>
+    {
+        // Chrome behavior: aborted or canceled navigations (superseded by
+        // a newer one, stopped, or blocked) keep the current document.
+        AssertFalse(BrowserNavigationErrorPolicy.ShouldShowErrorDocument("ConnectionAborted"));
+        AssertFalse(BrowserNavigationErrorPolicy.ShouldShowErrorDocument("OperationCanceled"));
+        AssertFalse(BrowserNavigationErrorPolicy.ShouldShowErrorDocument(" connectionaborted "));
+
+        AssertTrue(BrowserNavigationErrorPolicy.ShouldShowErrorDocument("HostNameNotResolved"));
+        AssertTrue(BrowserNavigationErrorPolicy.ShouldShowErrorDocument("Timeout"));
+        AssertTrue(BrowserNavigationErrorPolicy.ShouldShowErrorDocument(null));
+        AssertTrue(BrowserNavigationErrorPolicy.ShouldShowErrorDocument(""));
+        return Task.CompletedTask;
+    }),
     ("builds safe browser navigation error document", () =>
     {
         var document = BrowserNavigationErrorPolicy.BuildErrorDocument(
