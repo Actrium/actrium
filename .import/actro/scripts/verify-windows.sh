@@ -60,6 +60,8 @@ required_files=(
   "apps/windows/actro/src/BrowserThemeSelectionPolicy.cs"
   "apps/windows/actro/src/BrowserToolStripRenderer.cs"
   "apps/windows/actro/src/BrowserToolbar.cs"
+  "apps/windows/actro/src/BrowserToolbarLayoutPolicy.cs"
+  "apps/windows/actro/src/BrowserGlyphs.cs"
   "apps/windows/actro/src/BrowserDocumentStylePolicy.cs"
   "apps/windows/actro/src/BrowserZoomPolicy.cs"
   "apps/windows/actro/src/HostMessageBridge.cs"
@@ -366,9 +368,67 @@ else
   print_ok "Windows browser toolbar exposes address navigation"
 fi
 
-for event_name in BackRequested ForwardRequested ReloadRequested HomeRequested; do
+for event_name in BackRequested ForwardRequested ReloadRequested NewTabRequested SidebarToggleRequested BookmarkRequested MenuRequested; do
   if ! rg -q "$event_name" apps/windows/actro/src/BrowserToolbar.cs; then
     print_failure "Windows browser toolbar is missing event: $event_name"
+  fi
+done
+
+# Explicit decision (Chrome/Edge default): no toolbar Home button. Home
+# stays a menu command plus Alt+Home, routed through the command router.
+if rg -q 'HomeRequested' apps/windows/actro/src/BrowserToolbar.cs; then
+  print_failure "Windows browser toolbar still exposes the removed Home affordance"
+else
+  print_ok "Windows browser toolbar has no Home button (home stays menu + Alt+Home)"
+fi
+
+if ! rg -q 'BrowserMenuCommand.Home' apps/windows/actro/src/MainForm.cs; then
+  print_failure "Windows shell no longer routes the home menu command"
+fi
+
+# The toolbar draws MDL2-safe glyphs and lays out its two segments through
+# the pure policy; statuses moved to the MainForm overlay.
+for toolbar_symbol in BrowserGlyphs BrowserToolbarLayoutPolicy SetSidebarLayout SetNavigationState SetBookmarkState; do
+  if ! rg -q "$toolbar_symbol" apps/windows/actro/src/BrowserToolbar.cs; then
+    print_failure "Windows browser toolbar is missing behavior: $toolbar_symbol"
+  fi
+done
+
+if rg -q 'SetStatus|statusLabel' apps/windows/actro/src/BrowserToolbar.cs; then
+  print_failure "Windows browser toolbar still owns the removed status column"
+else
+  print_ok "Windows browser toolbar dropped the fixed status column"
+fi
+
+for glyph_symbol in CommandGlyphs GlyphPointSize NewTab TabOverview ToggleSidebar Back Forward Reload Stop BookmarkStar BookmarkStarFilled AppMenu; do
+  if ! rg -q "$glyph_symbol" apps/windows/actro/src/BrowserGlyphs.cs; then
+    print_failure "Windows browser glyph table is missing symbol: $glyph_symbol"
+  fi
+done
+
+for toolbar_layout_symbol in Segments CollapsedStubWidth OverviewSlotWidth AddressMaxWidth AddressWidth ButtonWidth ButtonGap EdgePadding; do
+  if ! rg -q "$toolbar_layout_symbol" apps/windows/actro/src/BrowserToolbarLayoutPolicy.cs; then
+    print_failure "Windows toolbar layout policy is missing symbol: $toolbar_layout_symbol"
+  fi
+done
+
+for toolbar_policy_test_link in BrowserGlyphs.cs BrowserToolbarLayoutPolicy.cs; do
+  if ! rg -Fq "$toolbar_policy_test_link" "$test_project"; then
+    print_failure "Windows tests do not link toolbar policy file: $toolbar_policy_test_link"
+  fi
+done
+
+for toolbar_policy_test_symbol in BrowserGlyphs BrowserToolbarLayoutPolicy; do
+  if ! rg -q "$toolbar_policy_test_symbol" apps/windows/actro.tests/Program.cs; then
+    print_failure "Windows tests do not exercise toolbar policy: $toolbar_policy_test_symbol"
+  fi
+done
+
+# Statuses live in the bottom-left overlay: transient ones auto-hide,
+# pinned (user-invoked) ones persist until Escape, click or navigation.
+for status_overlay_symbol in BrowserStatusOverlay BrowserStatusKind ShowTransientStatus ShowPinnedStatus HidePinnedStatus Transient Pinned; do
+  if ! rg -q "$status_overlay_symbol" apps/windows/actro/src/MainForm.cs; then
+    print_failure "Windows shell is missing status overlay behavior: $status_overlay_symbol"
   fi
 done
 

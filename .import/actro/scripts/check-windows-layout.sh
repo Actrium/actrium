@@ -95,6 +95,8 @@ required_files=(
   "apps/windows/actro/src/BrowserThemeSelectionPolicy.cs"
   "apps/windows/actro/src/BrowserToolStripRenderer.cs"
   "apps/windows/actro/src/BrowserToolbar.cs"
+  "apps/windows/actro/src/BrowserToolbarLayoutPolicy.cs"
+  "apps/windows/actro/src/BrowserGlyphs.cs"
   "apps/windows/actro/src/BrowserDocumentStylePolicy.cs"
   "apps/windows/actro/src/BrowserZoomPolicy.cs"
   "apps/windows/actro/src/HostMessageBridge.cs"
@@ -448,7 +450,7 @@ check_pattern_in_each_file \
   apps/windows/actro.tests/Program.cs
 
 missing_toolbar_events=()
-for toolbar_event in AddressRequested BackRequested ForwardRequested ReloadRequested HomeRequested; do
+for toolbar_event in AddressRequested BackRequested ForwardRequested ReloadRequested NewTabRequested SidebarToggleRequested BookmarkRequested MenuRequested; do
   if ! rg -q "$toolbar_event" apps/windows/actro/src/BrowserToolbar.cs; then
     missing_toolbar_events+=("$toolbar_event")
   fi
@@ -459,6 +461,98 @@ if [[ "${#missing_toolbar_events[@]}" -ne 0 ]]; then
   printf '%s\n' "${missing_toolbar_events[@]}"
 else
   print_ok "Windows browser toolbar exposes navigation events"
+fi
+
+# Explicit decision (Chrome/Edge default): no toolbar Home button. Home
+# stays a menu command plus Alt+Home, routed through the command router.
+if rg -q 'HomeRequested' apps/windows/actro/src/BrowserToolbar.cs; then
+  print_failure "Windows browser toolbar still exposes the removed Home affordance"
+else
+  print_ok "Windows browser toolbar has no Home button (home stays menu + Alt+Home)"
+fi
+
+check_pattern_in_each_file \
+  'BrowserMenuCommand.Home' \
+  "Windows shell routes the home menu command" \
+  "Windows shell does not route the home menu command" \
+  apps/windows/actro/src/MainForm.cs
+
+missing_toolbar_shell_symbols=()
+for toolbar_symbol in BrowserGlyphs BrowserToolbarLayoutPolicy SetSidebarLayout SetNavigationState SetBookmarkState; do
+  if ! rg -q "$toolbar_symbol" apps/windows/actro/src/BrowserToolbar.cs; then
+    missing_toolbar_shell_symbols+=("$toolbar_symbol")
+  fi
+done
+
+if [[ "${#missing_toolbar_shell_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows browser toolbar is missing two-segment glyph behavior"
+  printf '%s\n' "${missing_toolbar_shell_symbols[@]}"
+else
+  print_ok "Windows browser toolbar draws policy-laid-out MDL2 glyph segments"
+fi
+
+if rg -q 'SetStatus|statusLabel' apps/windows/actro/src/BrowserToolbar.cs; then
+  print_failure "Windows browser toolbar still owns the removed status column"
+else
+  print_ok "Windows browser toolbar dropped the fixed status column"
+fi
+
+missing_glyph_symbols=()
+for glyph_symbol in CommandGlyphs GlyphPointSize NewTab TabOverview ToggleSidebar Back Forward Reload Stop BookmarkStar BookmarkStarFilled AppMenu; do
+  if ! rg -q "$glyph_symbol" apps/windows/actro/src/BrowserGlyphs.cs; then
+    missing_glyph_symbols+=("$glyph_symbol")
+  fi
+done
+
+if [[ "${#missing_glyph_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows browser glyph table is missing expected symbols"
+  printf '%s\n' "${missing_glyph_symbols[@]}"
+else
+  print_ok "Windows browser glyph table owns the MDL2-safe command glyphs"
+fi
+
+missing_toolbar_layout_symbols=()
+for toolbar_layout_symbol in Segments CollapsedStubWidth OverviewSlotWidth AddressMaxWidth AddressWidth ButtonWidth ButtonGap EdgePadding; do
+  if ! rg -q "$toolbar_layout_symbol" apps/windows/actro/src/BrowserToolbarLayoutPolicy.cs; then
+    missing_toolbar_layout_symbols+=("$toolbar_layout_symbol")
+  fi
+done
+
+if [[ "${#missing_toolbar_layout_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows toolbar layout policy is missing expected symbols"
+  printf '%s\n' "${missing_toolbar_layout_symbols[@]}"
+else
+  print_ok "Windows toolbar layout policy owns the two-segment geometry"
+fi
+
+check_pattern_in_each_file \
+  'BrowserGlyphs' \
+  "Windows tests link and exercise the glyph table" \
+  "Windows tests do not link and exercise the glyph table" \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
+
+check_pattern_in_each_file \
+  'BrowserToolbarLayoutPolicy' \
+  "Windows tests link and exercise the toolbar layout policy" \
+  "Windows tests do not link and exercise the toolbar layout policy" \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
+
+# Statuses live in the bottom-left overlay: transient ones auto-hide,
+# pinned (user-invoked) ones persist until Escape, click or navigation.
+missing_status_overlay_symbols=()
+for status_overlay_symbol in BrowserStatusOverlay BrowserStatusKind ShowTransientStatus ShowPinnedStatus HidePinnedStatus Transient Pinned; do
+  if ! rg -q "$status_overlay_symbol" apps/windows/actro/src/MainForm.cs; then
+    missing_status_overlay_symbols+=("$status_overlay_symbol")
+  fi
+done
+
+if [[ "${#missing_status_overlay_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows shell is missing status overlay behavior"
+  printf '%s\n' "${missing_status_overlay_symbols[@]}"
+else
+  print_ok "Windows shell owns the transient/pinned status overlay"
 fi
 
 check_pattern_in_each_file \
