@@ -13,11 +13,13 @@ internal sealed class BrowserToolbar : UserControl
     private readonly TextBox addressBox;
     private readonly BrowserThemedButton goButton;
     private readonly Label statusLabel;
+    private readonly BrowserThemedButton menuButton;
 
     public event EventHandler? BackRequested;
     public event EventHandler? ForwardRequested;
     public event EventHandler? ReloadRequested;
     public event EventHandler? HomeRequested;
+    public event EventHandler? MenuRequested;
     public event EventHandler<BrowserAddressRequestedEventArgs>? AddressRequested;
 
     public BrowserToolbar()
@@ -31,6 +33,10 @@ internal sealed class BrowserToolbar : UserControl
         reloadButton = CreateButton(BrowserStrings.Get("toolbar.reload"));
         homeButton = CreateButton(BrowserStrings.Get("toolbar.home"));
         goButton = CreateButton(BrowserStrings.Get("toolbar.go"));
+        // Transitional placement: the compact app menu anchors to this
+        // ellipsis button until the two-segment toolbar rework moves it to
+        // its final Chrome-ordered slot right of the address box.
+        menuButton = CreateButton(BrowserStrings.Get("toolbar.menu"));
 
         addressBox = new TextBox
         {
@@ -52,7 +58,7 @@ internal sealed class BrowserToolbar : UserControl
 
         var layout = new TableLayoutPanel
         {
-            ColumnCount = 7,
+            ColumnCount = 8,
             Dock = DockStyle.Fill,
             Margin = Padding.Empty,
             Padding = Padding.Empty,
@@ -66,6 +72,7 @@ internal sealed class BrowserToolbar : UserControl
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 50));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 180));
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 40));
         layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
 
         layout.Controls.Add(backButton, 0, 0);
@@ -75,12 +82,14 @@ internal sealed class BrowserToolbar : UserControl
         layout.Controls.Add(addressPanel, 4, 0);
         layout.Controls.Add(goButton, 5, 0);
         layout.Controls.Add(statusLabel, 6, 0);
+        layout.Controls.Add(menuButton, 7, 0);
         Controls.Add(layout);
 
         backButton.Click += (_, _) => BackRequested?.Invoke(this, EventArgs.Empty);
         forwardButton.Click += (_, _) => ForwardRequested?.Invoke(this, EventArgs.Empty);
         reloadButton.Click += (_, _) => ReloadRequested?.Invoke(this, EventArgs.Empty);
         homeButton.Click += (_, _) => HomeRequested?.Invoke(this, EventArgs.Empty);
+        menuButton.Click += (_, _) => MenuRequested?.Invoke(this, EventArgs.Empty);
         goButton.Click += (_, _) => SubmitAddress();
         addressBox.KeyDown += OnAddressKeyDown;
 
@@ -98,7 +107,7 @@ internal sealed class BrowserToolbar : UserControl
         BackColor = theme.BarBackground;
 
         var uiFont = BrowserThemeManager.Instance.GetUiFont(dpi);
-        foreach (var button in new[] { backButton, forwardButton, reloadButton, homeButton, goButton })
+        foreach (var button in new[] { backButton, forwardButton, reloadButton, homeButton, goButton, menuButton })
         {
             button.Height = BrowserTheme.Metrics.Scale(BrowserTheme.Metrics.InputHeight, dpi);
             button.Font = uiFont;
@@ -138,6 +147,18 @@ internal sealed class BrowserToolbar : UserControl
     {
         addressBox.Focus();
         addressBox.SelectAll();
+    }
+
+    /// <summary>
+    /// Drops the compact app menu below its ellipsis button, right-aligned
+    /// to the button edge like the Chrome/Edge three-dot menu.
+    /// </summary>
+    public void ShowAppMenu(ContextMenuStrip menu)
+    {
+        menu.Show(
+            menuButton,
+            new Point(menuButton.Width, menuButton.Height),
+            ToolStripDropDownDirection.BelowLeft);
     }
 
     private static BrowserThemedButton CreateButton(string text)

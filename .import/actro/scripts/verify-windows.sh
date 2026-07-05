@@ -34,7 +34,10 @@ required_files=(
   "apps/windows/actro/src/BrowserHistoryStore.cs"
   "apps/windows/actro/src/BrowserHomeDocumentPolicy.cs"
   "apps/windows/actro/src/BrowserLocalListDocumentPolicy.cs"
-  "apps/windows/actro/src/BrowserMainMenu.cs"
+  "apps/windows/actro/src/BrowserAppMenu.cs"
+  "apps/windows/actro/src/BrowserEscapePolicy.cs"
+  "apps/windows/actro/src/BrowserMenuCommand.cs"
+  "apps/windows/actro/src/BrowserMenuModel.cs"
   "apps/windows/actro/src/BrowserNavigationErrorPolicy.cs"
   "apps/windows/actro/src/BrowserPageActionPolicy.cs"
   "apps/windows/actro/src/BrowserPdfPolicy.cs"
@@ -193,16 +196,28 @@ else
   print_ok "Windows shell attaches the browser toolbar"
 fi
 
-if ! rg -q 'new BrowserMainMenu' apps/windows/actro/src/MainForm.cs; then
-  print_failure "Windows shell does not attach the browser main menu"
+if ! rg -q 'new BrowserAppMenu' apps/windows/actro/src/MainForm.cs; then
+  print_failure "Windows shell does not attach the compact app menu"
 else
-  print_ok "Windows shell attaches the browser main menu"
+  print_ok "Windows shell attaches the compact app menu"
 fi
 
-if ! rg -q 'MainMenuStrip = mainMenu' apps/windows/actro/src/MainForm.cs; then
-  print_failure "Windows shell does not register the browser main menu"
+if ! rg -q 'ExecuteCommand' apps/windows/actro/src/MainForm.cs; then
+  print_failure "Windows shell does not route commands through the single command router"
 else
-  print_ok "Windows shell registers the browser main menu"
+  print_ok "Windows shell routes commands through the single command router"
+fi
+
+if ! rg -q 'BrowserEscapePolicy' apps/windows/actro/src/MainForm.cs; then
+  print_failure "Windows shell does not resolve Escape through the escape policy"
+else
+  print_ok "Windows shell resolves Escape through the escape policy"
+fi
+
+if rg -q 'MenuStrip|BrowserMainMenu' apps/windows/actro/src/MainForm.cs; then
+  print_failure "Windows shell still wires the removed classic menu strip"
+else
+  print_ok "Windows shell no longer wires a classic menu strip"
 fi
 
 if ! rg -q 'new BrowserTabStrip' apps/windows/actro/src/MainForm.cs; then
@@ -211,45 +226,80 @@ else
   print_ok "Windows shell attaches the browser tab strip"
 fi
 
-for main_menu_event in \
-  NewTabRequested \
-  NewWindowRequested \
-  NewPrivateWindowRequested \
-  CloseTabRequested \
-  ReopenClosedTabRequested \
-  DuplicateTabRequested \
-  OpenFileRequested \
-  CopyPageAddressRequested \
-  OpenInDefaultBrowserRequested \
-  SavePdfRequested \
-  PrintRequested \
-  ExitRequested \
-  BackRequested \
-  ForwardRequested \
-  HomeRequested \
-  HistoryRequested \
-  BookmarkPageRequested \
-  BookmarksRequested \
-  ReloadRequested \
-  StopRequested \
-  ZoomInRequested \
-  ZoomOutRequested \
-  ResetZoomRequested \
-  FullScreenRequested \
-  FindRequested \
-  FocusAddressRequested \
-  DeveloperToolsRequested \
-  OpenDownloadsFolderRequested \
-  OpenLastDownloadRequested \
-  RevealLastDownloadRequested \
-  SearchEngineChanged \
-  RestorePreviousSessionChanged \
-  ContentBlockingToggled \
-  ClearBrowsingDataRequested \
-  SetNavigationState
+for menu_command in \
+  NewTab \
+  NewWindow \
+  NewPrivateWindow \
+  CloseTab \
+  ReopenClosedTab \
+  DuplicateTab \
+  OpenFile \
+  CopyAddress \
+  OpenInDefaultBrowser \
+  SavePdf \
+  Print \
+  Exit \
+  Back \
+  Forward \
+  Home \
+  ShowHistory \
+  BookmarkPage \
+  ShowBookmarks \
+  Reload \
+  Stop \
+  ZoomIn \
+  ZoomOut \
+  ZoomReset \
+  FullScreen \
+  Find \
+  FindNext \
+  FindPrevious \
+  FocusAddress \
+  DevTools \
+  OpenDownloadsFolder \
+  OpenLastDownload \
+  RevealLastDownload \
+  SelectSearchEngine \
+  RestoreSessionToggle \
+  BlockAdsToggle \
+  ConfigureSync \
+  SyncNow \
+  SyncStatus \
+  ClearBrowsingData
 do
-  if ! rg -q "$main_menu_event" apps/windows/actro/src/BrowserMainMenu.cs; then
-    print_failure "Windows browser main menu is missing behavior: $main_menu_event"
+  if ! rg -q "$menu_command" apps/windows/actro/src/BrowserMenuCommand.cs \
+    || ! rg -q "$menu_command" apps/windows/actro/src/BrowserMenuModel.cs; then
+    print_failure "Windows compact menu model is missing command: $menu_command"
+  fi
+done
+
+for menu_model_symbol in BrowserShortcut BrowserMenuShortcutAlias Aliases MenuOpenShortcuts Argument StringKey IsSeparator IsCheckable BrowserSearchEnginePolicy.Engines; do
+  if ! rg -q "$menu_model_symbol" apps/windows/actro/src/BrowserMenuModel.cs; then
+    print_failure "Windows compact menu model is missing structure: $menu_model_symbol"
+  fi
+done
+
+for app_menu_symbol in ContextMenuStrip BrowserToolStripRenderer BrowserMenuModel ShortcutKeyDisplayString CommandRequested SetNavigationState ForeColor DisabledForeground KeyTokenMap; do
+  if ! rg -q "$app_menu_symbol" apps/windows/actro/src/BrowserAppMenu.cs; then
+    print_failure "Windows compact app menu is missing behavior: $app_menu_symbol"
+  fi
+done
+
+for escape_policy_symbol in Resolve CloseFindBar ExitFullScreen Stop None; do
+  if ! rg -q "$escape_policy_symbol" apps/windows/actro/src/BrowserEscapePolicy.cs; then
+    print_failure "Windows escape policy is missing symbol: $escape_policy_symbol"
+  fi
+done
+
+for menu_test_link in BrowserMenuCommand.cs BrowserMenuModel.cs BrowserEscapePolicy.cs; do
+  if ! rg -Fq "$menu_test_link" "$test_project"; then
+    print_failure "Windows tests do not link menu policy file: $menu_test_link"
+  fi
+done
+
+for menu_test_symbol in 'BrowserMenuModel.BuildItems' 'BrowserMenuModel.Aliases' 'BrowserMenuModel.MenuOpenShortcuts' 'BrowserEscapePolicy.Resolve'; do
+  if ! rg -Fq "$menu_test_symbol" apps/windows/actro.tests/Program.cs; then
+    print_failure "Windows tests do not exercise menu behavior: $menu_test_symbol"
   fi
 done
 
@@ -383,13 +433,13 @@ for strings_symbol in 'static string Get' 'static string Format' 'IReadOnlyDicti
   fi
 done
 
-# BrowserMainMenu.cs is deliberately absent from this list: the classic menu
-# bar is replaced by the compact app menu, whose labels join the table as
-# menu.* keys together with the menu model.
+# The compact app menu consumes its labels as menu.* keys through the menu
+# model's string keys.
 for strings_consumer in \
   apps/windows/actro/src/MainForm.cs \
   apps/windows/actro/src/BrowserToolbar.cs \
   apps/windows/actro/src/BrowserFindBar.cs \
+  apps/windows/actro/src/BrowserAppMenu.cs \
   apps/windows/actro/src/BrowserSyncConnectionDialog.cs
 do
   if ! rg -q 'BrowserStrings\.' "$strings_consumer"; then
@@ -615,7 +665,7 @@ for navigation_call in GoBack GoForward Reload Stop NavigationPolicy HandleNavig
   fi
 done
 
-if ! rg -Fq 'Keys.Control | Keys.J' apps/windows/actro/src/MainForm.cs apps/windows/actro/src/BrowserMainMenu.cs; then
+if ! rg -Fq 'Keys.Control | Keys.J' apps/windows/actro/src/MainForm.cs; then
   print_failure "Windows shell is missing the open-downloads-folder shortcut"
 fi
 
@@ -673,14 +723,14 @@ if ! rg -q 'BrowserStartupSettings' apps/windows/actro.tests/Program.cs; then
   print_failure "Windows tests do not exercise startup settings"
 fi
 
-for startup_settings_call in RestorePreviousSessionChanged SetRestorePreviousSession BrowserStartupSettingsStore RestoreInitialTabsAsync; do
-  if ! rg -q "$startup_settings_call" apps/windows/actro/src/MainForm.cs apps/windows/actro/src/BrowserMainMenu.cs; then
+for startup_settings_call in RestoreSessionToggle SetRestorePreviousSession BrowserStartupSettingsStore RestoreInitialTabsAsync; do
+  if ! rg -q "$startup_settings_call" apps/windows/actro/src/MainForm.cs; then
     print_failure "Windows shell is missing startup restore settings behavior: $startup_settings_call"
   fi
 done
 
-for search_settings_call in SearchEngineChanged SetSearchEngine BrowserSearchEnginePolicy BrowserSearchSettingsStore TryResolveAddressInput; do
-  if ! rg -q "$search_settings_call" apps/windows/actro/src/MainForm.cs apps/windows/actro/src/BrowserMainMenu.cs apps/windows/actro/src/BrowserAddressInputPolicy.cs; then
+for search_settings_call in SelectSearchEngine SetSearchEngine BrowserSearchEnginePolicy BrowserSearchSettingsStore TryResolveAddressInput; do
+  if ! rg -q "$search_settings_call" apps/windows/actro/src/MainForm.cs apps/windows/actro/src/BrowserAddressInputPolicy.cs; then
     print_failure "Windows shell is missing search engine settings behavior: $search_settings_call"
   fi
 done
@@ -751,17 +801,17 @@ if ! rg -q 'migrates legacy browser bookmark json to sqlite' apps/windows/actro.
   print_failure "Windows tests do not cover bookmark JSON-to-SQLite migration"
 fi
 
-for bookmark_call in BookmarkPageRequested BookmarksRequested NavigateBookmarksDocument ToggleActivePageBookmark RemoveBookmarkFromHostAsync BrowserBookmarksDocumentPolicy BrowserBookmarkStore IsAddressBookmarked; do
-  if ! rg -q "$bookmark_call" apps/windows/actro/src/MainForm.cs apps/windows/actro/src/BrowserMainMenu.cs; then
+for bookmark_call in BookmarkPage ShowBookmarks NavigateBookmarksDocument ToggleActivePageBookmark RemoveBookmarkFromHostAsync BrowserBookmarksDocumentPolicy BrowserBookmarkStore IsAddressBookmarked; do
+  if ! rg -q "$bookmark_call" apps/windows/actro/src/MainForm.cs; then
     print_failure "Windows shell is missing browser bookmark behavior: $bookmark_call"
   fi
 done
 
-if ! rg -Fq 'Keys.Control | Keys.D' apps/windows/actro/src/MainForm.cs apps/windows/actro/src/BrowserMainMenu.cs; then
+if ! rg -Fq 'Keys.Control | Keys.D' apps/windows/actro/src/MainForm.cs; then
   print_failure "Windows shell is missing the bookmark-current-page shortcut"
 fi
 
-if ! rg -Fq 'Keys.Control | Keys.Shift | Keys.O' apps/windows/actro/src/MainForm.cs apps/windows/actro/src/BrowserMainMenu.cs; then
+if ! rg -Fq 'Keys.Control | Keys.Shift | Keys.O' apps/windows/actro/src/MainForm.cs; then
   print_failure "Windows shell is missing the show-bookmarks shortcut"
 fi
 
@@ -793,8 +843,8 @@ if ! rg -q 'migrates legacy browser history json to sqlite' apps/windows/actro.t
   print_failure "Windows tests do not cover history JSON-to-SQLite migration"
 fi
 
-for history_call in HistoryRequested NavigateHistoryDocument BrowserHistoryDocumentPolicy BrowserHistoryStore RecordHistoryVisit RemoveHistoryEntryFromHostAsync ClearLocalHistory; do
-  if ! rg -q "$history_call" apps/windows/actro/src/MainForm.cs apps/windows/actro/src/BrowserMainMenu.cs; then
+for history_call in ShowHistory NavigateHistoryDocument BrowserHistoryDocumentPolicy BrowserHistoryStore RecordHistoryVisit RemoveHistoryEntryFromHostAsync ClearLocalHistory; do
+  if ! rg -q "$history_call" apps/windows/actro/src/MainForm.cs; then
     print_failure "Windows shell is missing browser history behavior: $history_call"
   fi
 done
@@ -820,7 +870,7 @@ if ! rg -q 'BrowserContentBlocking' apps/windows/actro.tests/Program.cs; then
 fi
 
 for content_blocking_call in AddWebResourceRequestedFilter WebResourceRequested HandleWebResourceRequested CreateWebResourceResponse BrowserContentBlockingPolicy BrowserContentBlockingStore ToggleContentBlocking SetContentBlockingEnabled; do
-  if ! rg -q "$content_blocking_call" apps/windows/actro/src/MainForm.cs apps/windows/actro/src/BrowserMainMenu.cs; then
+  if ! rg -q "$content_blocking_call" apps/windows/actro/src/MainForm.cs; then
     print_failure "Windows shell is missing content blocking behavior: $content_blocking_call"
   fi
 done

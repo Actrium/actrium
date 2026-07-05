@@ -33,6 +33,7 @@
     <Compile Include="..\actro\src\BrowserContentBlockingStore.cs" Link="BrowserContentBlockingStore.cs" />
     <Compile Include="..\actro\src\BrowserDocumentStylePolicy.cs" Link="BrowserDocumentStylePolicy.cs" />
     <Compile Include="..\actro\src\BrowserDownloadPolicy.cs" Link="BrowserDownloadPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserEscapePolicy.cs" Link="BrowserEscapePolicy.cs" />
     <Compile Include="..\actro\src\BrowserExternalProtocolPolicy.cs" Link="BrowserExternalProtocolPolicy.cs" />
     <Compile Include="..\actro\src\BrowserFindPolicy.cs" Link="BrowserFindPolicy.cs" />
     <Compile Include="..\actro\src\BrowserBookmarksDocumentPolicy.cs" Link="BrowserBookmarksDocumentPolicy.cs" />
@@ -41,6 +42,8 @@
     <Compile Include="..\actro\src\BrowserHistoryStore.cs" Link="BrowserHistoryStore.cs" />
     <Compile Include="..\actro\src\BrowserHomeDocumentPolicy.cs" Link="BrowserHomeDocumentPolicy.cs" />
     <Compile Include="..\actro\src\BrowserLocalListDocumentPolicy.cs" Link="BrowserLocalListDocumentPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserMenuCommand.cs" Link="BrowserMenuCommand.cs" />
+    <Compile Include="..\actro\src\BrowserMenuModel.cs" Link="BrowserMenuModel.cs" />
     <Compile Include="..\actro\src\BrowserNavigationErrorPolicy.cs" Link="BrowserNavigationErrorPolicy.cs" />
     <Compile Include="..\actro\src\BrowserPageActionPolicy.cs" Link="BrowserPageActionPolicy.cs" />
     <Compile Include="..\actro\src\BrowserPdfPolicy.cs" Link="BrowserPdfPolicy.cs" />

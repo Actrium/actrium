@@ -63,13 +63,19 @@ apps/windows/actro/src/BrowserHistoryDocumentPolicy.cs
 	                              Safe generated history-page document and
 	                              in-page filter/remove controls for
 	                              actro://history.
-apps/windows/actro/src/BrowserMainMenu.cs
-                              Native Windows menu command surface for tab,
-                              local file opening, page address copy/default
-                              browser opening, save-as-PDF, print, navigation,
-                              view, address focus, history, bookmarks, content
-                              blocking, search engine selection, clear browsing
-                              data, and developer tools actions.
+apps/windows/actro/src/BrowserMenuCommand.cs
+                              Command enum shared by the compact app menu and
+                              the keyboard shortcut router.
+apps/windows/actro/src/BrowserMenuModel.cs
+                              Compact app menu tree as pure data: items,
+                              shortcuts, aliases, and the search-engine
+                              argument channel.
+apps/windows/actro/src/BrowserAppMenu.cs
+                              Themed ContextMenuStrip rendering the menu model
+                              (Chrome/Edge three-dot style).
+apps/windows/actro/src/BrowserEscapePolicy.cs
+                              Explicit Escape precedence: find bar, full
+                              screen, then stop.
 apps/windows/actro/src/BrowserNavigationErrorPolicy.cs
                               Windows-local navigation failure status text and
                               safe error-page document generation.
@@ -271,12 +277,13 @@ address bar search fallback for user-entered free text, and a Windows-local
 allowlist for browser-safe navigation schemes without introducing another shared
 abstraction.
 
-`BrowserMainMenu.cs` adds the first native desktop menu command surface. It
-exposes tab commands, navigation commands, page address actions, stop/reload,
-address focus, exit, and developer tools while delegating execution back to the
-same `MainForm.cs` command methods used by the toolbar and keyboard shortcuts.
-Keep this menu layer Windows-owned: it is desktop shell orchestration and should
-not move to Rust.
+`BrowserMenuCommand.cs`, `BrowserMenuModel.cs` and `BrowserAppMenu.cs` form the
+compact application menu (Chrome/Edge three-dot style, replacing the classic
+menu bar). The model carries the menu tree, shortcuts and aliases as pure data;
+the app menu renders it, and every command executes through the single
+`MainForm.ExecuteCommand` router shared with keyboard shortcuts. Escape
+precedence is owned by `BrowserEscapePolicy.cs`. Keep this menu layer
+Windows-owned: it is desktop shell orchestration and should not move to Rust.
 
 `BrowserPageActionPolicy.cs` adds current-page address rules for File menu
 actions. The active page address can be copied to the Windows clipboard, while

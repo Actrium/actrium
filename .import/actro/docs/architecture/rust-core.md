@@ -779,12 +779,15 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   are browser-engine lifecycle concerns. Keep them Windows-owned; Rust has no
   useful role unless a future cross-platform crash-report schema appears.
 - Windows desktop menu commands live in
-  `apps/windows/actro/src/BrowserMainMenu.cs` and delegate back to `MainForm.cs`
-  command methods. Tab/window commands, local file opening, page address
-  copy/default-browser opening, save-as-PDF, print, navigation accelerators,
-  stop/reload, history, address focus, clear browsing data, and developer tools are
-  native shell orchestration; moving them to Rust would split one UI workflow
-  across languages without creating a durable shared rule.
+  `apps/windows/actro/src/BrowserMenuCommand.cs`,
+  `apps/windows/actro/src/BrowserMenuModel.cs` and
+  `apps/windows/actro/src/BrowserAppMenu.cs`, and execute through the single
+  `MainForm.cs` command router. Tab/window commands, local file opening, page
+  address copy/default-browser opening, save-as-PDF, print, navigation
+  accelerators, stop/reload, history, address focus, clear browsing data, and
+  developer tools are native shell orchestration; moving them to Rust would
+  split one UI workflow across languages without creating a durable shared
+  rule.
 - Windows current-page address actions live in
   `apps/windows/actro/src/BrowserPageActionPolicy.cs` and `MainForm.cs`.
   Clipboard writes, default-browser `ProcessStartInfo` handoff, and deciding
