@@ -1794,7 +1794,7 @@ internal sealed class MainForm : Form
             MessageBox.Show(
                 this,
                 FormatBrowserSyncError(error),
-                BrowserStrings.Get("dialog.sync.title"),
+                BrowserStrings.Get("dialog.syncSettings.title"),
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
@@ -1802,8 +1802,28 @@ internal sealed class MainForm : Form
 
     private void ConfigureBrowserSyncConnection()
     {
+        // Product surface: the provider settings dialog. The endpoint-token
+        // dialog is development-only and opens solely from the settings
+        // dialog's advanced reference-server link.
+        using var dialog = new BrowserSyncSettingsDialog(
+            browserSyncProviderSettingsStore,
+            browserSyncCredentialStore,
+            ReadBrowserSyncStatusJson,
+            SyncBrowserDataNowAsync,
+            ScheduleBrowserDataSyncAfterConnectionChange,
+            CancelPendingBrowserSync,
+            ConfigureReferenceServerConnection);
+        dialog.ShowDialog(this);
+    }
+
+    // Development-only reference path: the endpoint-token dialog keeps the
+    // HTTP transport/cycle-request-plan contract executable against the
+    // reference sync server. It lost its direct menu entry; the provider
+    // settings dialog's advanced link is the only way in.
+    private void ConfigureReferenceServerConnection(IWin32Window owner)
+    {
         using var dialog = new BrowserSyncConnectionDialog(browserSyncCredentialStore.Load());
-        if (dialog.ShowDialog(this) != DialogResult.OK)
+        if (dialog.ShowDialog(owner) != DialogResult.OK)
         {
             return;
         }
@@ -1822,7 +1842,7 @@ internal sealed class MainForm : Form
             dialog.Environment,
             dialog.AccessToken,
             dialog.BaseUrl);
-        ScheduleBrowserDataSyncAfterCredentialChange();
+        ScheduleBrowserDataSyncAfterConnectionChange();
         ShowTransientStatus(BrowserStrings.Get("status.syncCredentialsUpdated"));
     }
 
@@ -1834,7 +1854,10 @@ internal sealed class MainForm : Form
         ShowPinnedStatus(BrowserSyncStatusPolicy.FormatStatusJson(ReadBrowserSyncStatusJson()));
     }
 
-    private void ScheduleBrowserDataSyncAfterCredentialChange()
+    // Runs after either connection surface changes what sync runs against —
+    // a provider folder accepted in the settings dialog or an endpoint
+    // session saved in the development dialog.
+    private void ScheduleBrowserDataSyncAfterConnectionChange()
     {
         try
         {
@@ -1846,6 +1869,17 @@ internal sealed class MainForm : Form
         catch (InvalidOperationException)
         {
             ShowTransientStatus(BrowserSyncStatusPolicy.FailedStatus);
+        }
+    }
+
+    private void CancelPendingBrowserSync()
+    {
+        try
+        {
+            browserSyncScheduler.CancelPendingSync();
+        }
+        catch (ObjectDisposedException)
+        {
         }
     }
 

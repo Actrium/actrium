@@ -86,8 +86,12 @@ required_files=(
   "apps/windows/actro/src/BrowserSessionStore.cs"
   "apps/windows/actro/src/BrowserStartupSettingsStore.cs"
   "apps/windows/actro/src/BrowserStrings.cs"
+  "apps/windows/actro/src/BrowserSyncConnectionDialog.cs"
+  "apps/windows/actro/src/BrowserSyncFolderPreflight.cs"
   "apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs"
   "apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs"
+  "apps/windows/actro/src/BrowserSyncProviderStatusFormatter.cs"
+  "apps/windows/actro/src/BrowserSyncSettingsDialog.cs"
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs"
   "apps/windows/actro/src/BrowserTab.cs"
@@ -752,7 +756,9 @@ else
 fi
 
 # The compact app menu consumes its labels as menu.* keys through the menu
-# model's string keys.
+# model's string keys. BrowserSyncConnectionDialog stays in the list as the
+# development-only reference-server path (reachable solely from the sync
+# settings dialog's advanced link).
 check_pattern_in_each_file \
   'BrowserStrings\.' \
   "Windows chrome consumes the centralized string table" \
@@ -761,6 +767,7 @@ check_pattern_in_each_file \
   apps/windows/actro/src/BrowserToolbar.cs \
   apps/windows/actro/src/BrowserFindBar.cs \
   apps/windows/actro/src/BrowserAppMenu.cs \
+  apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
   apps/windows/actro/src/BrowserSyncConnectionDialog.cs
 
 check_pattern_in_each_file \
@@ -856,6 +863,40 @@ check_pattern_in_each_file \
   "Windows browser sync provider settings store is not wired and exercised" \
   apps/windows/actro/src/MainForm.cs \
   apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
+
+# Browser sync settings dialog: the product ConfigureSync surface fronts the
+# provider connection (folder acceptance gated by the pure preflight, the
+# Connection row rendered by the pure status formatter); the endpoint-token
+# dialog is the development-only reference path behind its advanced link.
+check_pattern_in_each_file \
+  'new BrowserSyncSettingsDialog' \
+  "Windows shell fronts browser sync with the provider settings dialog" \
+  "Windows shell does not front browser sync with the provider settings dialog" \
+  apps/windows/actro/src/MainForm.cs
+
+check_pattern_in_each_file \
+  'BrowserSyncFolderPreflight' \
+  "Windows sync folder acceptance is gated by the pure preflight" \
+  "Windows sync folder acceptance is not gated by the pure preflight" \
+  apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
+
+check_pattern_in_each_file \
+  'BrowserSyncProviderStatusFormatter' \
+  "Windows sync connection status renders through the pure formatter" \
+  "Windows sync connection status does not render through the pure formatter" \
+  apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
+
+check_pattern_in_each_file \
+  'DisconnectAndClearEndpointSession' \
+  "Windows sync disconnect stops browser sync entirely" \
+  "Windows sync disconnect does not stop browser sync entirely" \
+  apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs \
   apps/windows/actro.tests/Program.cs
 
 check_pattern_in_each_file \

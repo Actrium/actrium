@@ -51,8 +51,12 @@ required_files=(
   "apps/windows/actro/src/BrowserStartupSettingsStore.cs"
   "apps/windows/actro/src/BrowserStorageDatabase.cs"
   "apps/windows/actro/src/BrowserStrings.cs"
+  "apps/windows/actro/src/BrowserSyncConnectionDialog.cs"
+  "apps/windows/actro/src/BrowserSyncFolderPreflight.cs"
   "apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs"
   "apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs"
+  "apps/windows/actro/src/BrowserSyncProviderStatusFormatter.cs"
+  "apps/windows/actro/src/BrowserSyncSettingsDialog.cs"
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs"
   "apps/windows/actro/src/BrowserTab.cs"
@@ -565,12 +569,15 @@ for strings_symbol in 'static string Get' 'static string Format' 'IReadOnlyDicti
 done
 
 # The compact app menu consumes its labels as menu.* keys through the menu
-# model's string keys.
+# model's string keys. BrowserSyncConnectionDialog stays in the list as the
+# development-only reference-server path (reachable solely from the sync
+# settings dialog's advanced link).
 for strings_consumer in \
   apps/windows/actro/src/MainForm.cs \
   apps/windows/actro/src/BrowserToolbar.cs \
   apps/windows/actro/src/BrowserFindBar.cs \
   apps/windows/actro/src/BrowserAppMenu.cs \
+  apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
   apps/windows/actro/src/BrowserSyncConnectionDialog.cs
 do
   if ! rg -q 'BrowserStrings\.' "$strings_consumer"; then
@@ -1175,7 +1182,7 @@ else
   print_ok "Windows browser sync coordinator routes through the provider connection"
 fi
 
-for provider_test_link in BrowserSyncProviderSettingsStore.cs BrowserSyncProviderConnectionPlanner.cs; do
+for provider_test_link in BrowserSyncProviderSettingsStore.cs BrowserSyncProviderConnectionPlanner.cs BrowserSyncFolderPreflight.cs BrowserSyncProviderStatusFormatter.cs; do
   if ! rg -Fq "$provider_test_link" "$test_project"; then
     print_failure "Windows tests do not link provider connection file: $provider_test_link"
   fi
@@ -1187,12 +1194,39 @@ for provider_test_case in \
   'translates blocked provider connection policy into scheduler state' \
   'routes browser sync coordinator through the provider connection' \
   'shapes blocked browser sync provider coordinator results' \
-  'browser sync scheduler consumes cloud and blocked provider schedule states'
+  'browser sync scheduler consumes cloud and blocked provider schedule states' \
+  'gates browser sync folder acceptance through preflight' \
+  'formats browser sync provider connection status for the settings dialog' \
+  'disconnects browser sync provider and endpoint session'
 do
   if ! rg -Fq "$provider_test_case" apps/windows/actro.tests/Program.cs; then
     print_failure "Windows tests do not cover provider connection behavior: $provider_test_case"
   fi
 done
+
+# The provider settings dialog is the product ConfigureSync surface: folder
+# acceptance is gated by the pure preflight over the Rust capability /
+# adapter / compatibility contracts, the Connection row renders through the
+# pure status formatter (including the explicit reference-server-active
+# state), and Disconnect stops browser sync entirely (provider fields plus
+# the endpoint credential session). The endpoint-token dialog remains
+# development-only, constructed in MainForm but reachable solely from the
+# settings dialog's reference-server link.
+if ! rg -q 'new BrowserSyncSettingsDialog' apps/windows/actro/src/MainForm.cs \
+  || ! rg -q 'ConfigureReferenceServerConnection' apps/windows/actro/src/MainForm.cs \
+  || ! rg -q 'new BrowserSyncConnectionDialog' apps/windows/actro/src/MainForm.cs \
+  || ! rg -q 'BrowserSyncFolderPreflight' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  || ! rg -q 'BrowserSyncProviderStatusFormatter' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  || ! rg -q 'FolderBrowserDialog' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  || ! rg -q 'DisconnectAndClearEndpointSession' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  || ! rg -q 'BuildBrowserStorageSyncCloudLocalFolderCompatibilityPreflightJson' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  || ! rg -q 'referenceServerLink' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
+  || ! rg -q 'FormatReferenceServerActive' apps/windows/actro/src/BrowserSyncProviderStatusFormatter.cs \
+  || ! rg -q 'DisconnectAndClearEndpointSession' apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs; then
+  print_failure "Windows browser sync settings dialog does not front the provider connection"
+else
+  print_ok "Windows browser sync settings dialog fronts the provider connection"
+fi
 
 for session_call in RestoreInitialTabsAsync PersistSession FormClosing BrowserSessionStore; do
   if ! rg -q "$session_call" apps/windows/actro/src/MainForm.cs; then

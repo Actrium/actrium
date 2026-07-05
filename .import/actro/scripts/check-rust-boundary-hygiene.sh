@@ -1213,7 +1213,7 @@ windows_browser_data_requirements=(
   "apps/windows/actro/src/MainForm.cs|ConfigureBrowserSyncConnection|Windows main form wires browser sync credential configuration"
   "apps/windows/actro/src/MainForm.cs|SyncBrowserDataNowAsync|Windows main form wires manual browser sync"
   "apps/windows/actro/src/MainForm.cs|ScheduleBrowserDataSyncAfterLocalChange|Windows main form schedules sync after local browser data changes"
-  "apps/windows/actro/src/MainForm.cs|ScheduleBrowserDataSyncAfterCredentialChange|Windows main form schedules sync after credential changes"
+  "apps/windows/actro/src/MainForm.cs|ScheduleBrowserDataSyncAfterConnectionChange|Windows main form schedules sync after connection changes"
   "apps/windows/actro/src/BrowserSyncStatusPolicy.cs|FormatStatusJson|Windows UI formats Rust-owned browser sync status locally"
   "apps/windows/actro/src/BrowserStorageSyncCredentialStore.cs|IBrowserStorageSyncCredentialsProvider|Windows browser sync credential store implements coordinator credential lookup"
   "apps/windows/actro/src/BrowserStorageSyncCredentialStore.cs|SaveSession|Windows browser sync credential store persists account sync sessions"
