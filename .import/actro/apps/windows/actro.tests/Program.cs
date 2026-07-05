@@ -2680,6 +2680,45 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual(0, BrowserTheme.Metrics.Scale(0, 192));
         return Task.CompletedTask;
     }),
+    ("clamps sidebar width between the scaled minimum and half the window", () =>
+    {
+        AssertEqual(180, BrowserSidebarLayoutPolicy.MinWidth(96));
+        AssertEqual(225, BrowserSidebarLayoutPolicy.MinWidth(120));
+        AssertEqual(270, BrowserSidebarLayoutPolicy.MinWidth(144));
+        AssertEqual(360, BrowserSidebarLayoutPolicy.MinWidth(192));
+        AssertEqual(240, BrowserSidebarLayoutPolicy.DefaultWidth(96));
+        AssertEqual(300, BrowserSidebarLayoutPolicy.DefaultWidth(120));
+        AssertEqual(480, BrowserSidebarLayoutPolicy.DefaultWidth(192));
+
+        AssertEqual(640, BrowserSidebarLayoutPolicy.MaxWidth(1280, 96));
+        // The 50% rule never squeezes the band below the scaled minimum:
+        // on a too-narrow window the minimum wins.
+        AssertEqual(180, BrowserSidebarLayoutPolicy.MaxWidth(300, 96));
+        AssertEqual(360, BrowserSidebarLayoutPolicy.MaxWidth(500, 192));
+
+        AssertEqual(180, BrowserSidebarLayoutPolicy.ClampWidth(100, 1280, 96));
+        AssertEqual(240, BrowserSidebarLayoutPolicy.ClampWidth(240, 1280, 96));
+        AssertEqual(640, BrowserSidebarLayoutPolicy.ClampWidth(5000, 1280, 96));
+        AssertEqual(225, BrowserSidebarLayoutPolicy.ClampWidth(0, 1280, 120));
+        AssertEqual(480, BrowserSidebarLayoutPolicy.ClampWidth(700, 960, 192));
+        AssertEqual(180, BrowserSidebarLayoutPolicy.ClampWidth(240, 300, 96));
+        return Task.CompletedTask;
+    }),
+    ("collapses the sidebar below the scaled width threshold", () =>
+    {
+        AssertEqual(90, BrowserSidebarLayoutPolicy.CollapseThreshold(96));
+        AssertEqual(112, BrowserSidebarLayoutPolicy.CollapseThreshold(120));
+        AssertEqual(180, BrowserSidebarLayoutPolicy.CollapseThreshold(192));
+
+        AssertTrue(BrowserSidebarLayoutPolicy.ShouldCollapse(89, 96));
+        AssertTrue(BrowserSidebarLayoutPolicy.ShouldCollapse(0, 96));
+        AssertTrue(BrowserSidebarLayoutPolicy.ShouldCollapse(-10, 96));
+        AssertFalse(BrowserSidebarLayoutPolicy.ShouldCollapse(90, 96));
+        AssertFalse(BrowserSidebarLayoutPolicy.ShouldCollapse(240, 96));
+        AssertTrue(BrowserSidebarLayoutPolicy.ShouldCollapse(179, 192));
+        AssertFalse(BrowserSidebarLayoutPolicy.ShouldCollapse(180, 192));
+        return Task.CompletedTask;
+    }),
     ("builds shared document stylesheet with both palettes", () =>
     {
         var css = BrowserDocumentStylePolicy.RootCss;
@@ -2876,6 +2915,8 @@ var tests = new (string Name, Func<Task> Run)[]
             [(true, false, false, "D0")] = BrowserMenuCommand.ZoomReset,
             [(true, false, false, "NumPad0")] = BrowserMenuCommand.ZoomReset,
             [(false, false, false, "F11")] = BrowserMenuCommand.FullScreen,
+            // Added with the vertical sidebar slice: Edge vertical-tabs chord.
+            [(true, true, false, "OemComma")] = BrowserMenuCommand.ToggleSidebar,
             [(false, false, false, "F5")] = BrowserMenuCommand.Reload,
             [(false, false, false, "F3")] = BrowserMenuCommand.FindNext,
             [(false, true, false, "F3")] = BrowserMenuCommand.FindPrevious,

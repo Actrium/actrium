@@ -44,6 +44,7 @@ internal sealed class BrowserAppMenu : ContextMenuStrip
             ["Delete"] = Keys.Delete,
             ["Oemplus"] = Keys.Oemplus,
             ["OemMinus"] = Keys.OemMinus,
+            ["OemComma"] = Keys.Oemcomma,
             ["Add"] = Keys.Add,
             ["Subtract"] = Keys.Subtract,
             ["NumPad0"] = Keys.NumPad0,
@@ -137,6 +138,7 @@ internal sealed class BrowserAppMenu : ContextMenuStrip
         {
             "Oemplus" => "+",
             "OemMinus" => "-",
+            "OemComma" => ",",
             "D0" => "0",
             "Delete" => "Del",
             "Add" => "Num +",

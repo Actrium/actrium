@@ -25,7 +25,8 @@ internal sealed class MainForm : Form
     private readonly bool shouldPersistWindowState;
     private readonly bool isPrivateWindow;
     private readonly BrowserAppMenu appMenu;
-    private readonly BrowserTabStrip tabStrip;
+    private readonly BrowserTabSidebar tabSidebar;
+    private readonly SplitContainer contentSplit;
     private readonly BrowserToolbar toolbar;
     private readonly BrowserFindBar findBar;
     private readonly BrowserDownloadManager downloadManager;
@@ -45,9 +46,11 @@ internal sealed class MainForm : Form
     private FormBorderStyle windowedFormBorderStyle;
     private FormWindowState windowedWindowState;
     private bool windowedTopMost;
-    private bool windowedTabStripVisible;
+    private bool windowedSidebarVisible;
     private bool windowedToolbarVisible;
     private bool windowedFindBarVisible;
+    private int sidebarWidth;
+    private bool isApplyingSidebarLayout;
     private bool isFullScreen;
     private bool isBrowserFullScreen;
     private bool isPageFullScreen;
@@ -123,7 +126,7 @@ internal sealed class MainForm : Form
         MinimumSize = new Size(960, 640);
 
         appMenu = new BrowserAppMenu();
-        tabStrip = new BrowserTabStrip();
+        tabSidebar = new BrowserTabSidebar();
         toolbar = new BrowserToolbar();
         findBar = new BrowserFindBar();
         downloadManager = new BrowserDownloadManager(this, toolbar.SetStatus, SetLastCompletedDownload);
@@ -133,20 +136,33 @@ internal sealed class MainForm : Form
         {
             Dock = DockStyle.Fill,
         };
+        // Structure follows the macOS app: the chrome bars sit above one
+        // content area split into [vertical tab sidebar | web content host].
+        // Width and collapse geometry come from BrowserSidebarLayoutPolicy.
+        contentSplit = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            FixedPanel = FixedPanel.Panel1,
+            TabStop = false,
+        };
+        contentSplit.Panel1.Controls.Add(tabSidebar);
+        contentSplit.Panel2.Controls.Add(webViewHost);
+        sidebarWidth = BrowserSidebarLayoutPolicy.DefaultWidth(DeviceDpi);
 
-        Controls.Add(webViewHost);
+        Controls.Add(contentSplit);
         Controls.Add(findBar);
         Controls.Add(toolbar);
-        Controls.Add(tabStrip);
         // Compact app menu: every menu click funnels into the single
         // command router shared with keyboard shortcut handling.
         appMenu.CommandRequested += (_, args) => ExecuteCommand(args.Command, args.Argument);
         appMenu.SetSearchEngine(searchSettingsSnapshot.SearchEngineId);
         appMenu.SetRestorePreviousSession(startupSettingsSnapshot.RestorePreviousSession);
         appMenu.SetContentBlockingEnabled(contentBlockingEnabled);
-        WireTabStrip();
+        WireSidebar();
         WireToolbar();
         WireFindBar();
+        contentSplit.SplitterMoved += (_, _) => OnSidebarSplitterMoved();
+        Resize += (_, _) => ApplySidebarLayout();
 
         // Theme lifecycle: subscribe per form and unsubscribe on FormClosed so
         // closed windows are not kept alive by the singleton manager across
@@ -157,7 +173,19 @@ internal sealed class MainForm : Form
         // The app menu is a component, not a child control, so the form
         // does not dispose it implicitly.
         FormClosed += (_, _) => appMenu.Dispose();
-        DpiChanged += (_, _) => ApplyTheme(BrowserThemeManager.Instance.Current);
+        DpiChanged += (_, args) =>
+        {
+            if (args.DeviceDpiOld > 0)
+            {
+                // Keep the user's chosen sidebar width proportional when the
+                // window moves across monitors with different DPIs.
+                sidebarWidth = (int)Math.Round(
+                    (double)sidebarWidth * args.DeviceDpiNew / args.DeviceDpiOld,
+                    MidpointRounding.AwayFromZero);
+            }
+
+            ApplyTheme(BrowserThemeManager.Instance.Current);
+        };
         ApplyTheme(BrowserThemeManager.Instance.Current);
 
         Load += OnLoad;
@@ -172,6 +200,9 @@ internal sealed class MainForm : Form
         try
         {
             RestoreWindowState();
+            // The split container only receives its real size once the form
+            // is laid out, so the initial clamp runs here as well.
+            ApplySidebarLayout();
             await RestoreInitialTabsAsync();
         }
         catch (Exception error)
@@ -235,9 +266,13 @@ internal sealed class MainForm : Form
         // strip's renderer) follow the palette as well.
         ToolStripManager.Renderer = new BrowserToolStripRenderer(theme);
         appMenu.ApplyTheme(theme);
-        tabStrip.ApplyTheme(theme);
+        contentSplit.BackColor = theme.WindowBackground;
+        tabSidebar.ApplyTheme(theme);
         toolbar.ApplyTheme(theme);
         findBar.ApplyTheme(theme);
+        // Re-clamp the sidebar band: on a DPI change the scaled minimum and
+        // the stored width both move.
+        ApplySidebarLayout();
         ApplyImmersiveTitleBar(theme.IsDark);
         foreach (var tab in tabs)
         {
@@ -293,11 +328,93 @@ internal sealed class MainForm : Form
         coreWebView.Settings.IsZoomControlEnabled = true;
     }
 
-    private void WireTabStrip()
+    private void WireSidebar()
     {
-        tabStrip.NewTabRequested += (_, _) => RequestNewTab();
-        tabStrip.TabSelected += (_, args) => ActivateTab(args.TabId);
-        tabStrip.TabCloseRequested += async (_, args) => await CloseTabAsync(args.TabId);
+        tabSidebar.NewTabRequested += (_, _) => RequestNewTab();
+        tabSidebar.TabSelected += (_, args) => ActivateTab(args.TabId);
+        tabSidebar.TabCloseRequested += async (_, args) => await CloseTabAsync(args.TabId);
+    }
+
+    /// <summary>
+    /// Applies the policy-clamped sidebar width to the split container.
+    /// Runs on construction, load, resize, theme/DPI cascade and after the
+    /// user drags the splitter; no-ops while collapsed or mid-layout.
+    /// </summary>
+    private void ApplySidebarLayout()
+    {
+        if (contentSplit.Panel1Collapsed)
+        {
+            return;
+        }
+
+        var hostWidth = contentSplit.ClientSize.Width;
+        if (hostWidth <= 0)
+        {
+            return;
+        }
+
+        var clampedWidth = BrowserSidebarLayoutPolicy.ClampWidth(sidebarWidth, hostWidth, DeviceDpi);
+        if (clampedWidth > hostWidth - contentSplit.Panel2MinSize - contentSplit.SplitterWidth)
+        {
+            // Transient mid-layout size too narrow for the clamp band; the
+            // next resize pass re-applies with real dimensions.
+            return;
+        }
+
+        if (contentSplit.SplitterDistance == clampedWidth)
+        {
+            return;
+        }
+
+        isApplyingSidebarLayout = true;
+        try
+        {
+            contentSplit.SplitterDistance = clampedWidth;
+        }
+        finally
+        {
+            isApplyingSidebarLayout = false;
+        }
+    }
+
+    private void OnSidebarSplitterMoved()
+    {
+        if (isApplyingSidebarLayout || contentSplit.Panel1Collapsed)
+        {
+            return;
+        }
+
+        var dpi = DeviceDpi;
+        if (BrowserSidebarLayoutPolicy.ShouldCollapse(contentSplit.SplitterDistance, dpi))
+        {
+            // Dragging the splitter (nearly) shut reads as a collapse
+            // gesture; the toggle command or shortcut reopens the sidebar.
+            contentSplit.Panel1Collapsed = true;
+            return;
+        }
+
+        sidebarWidth = BrowserSidebarLayoutPolicy.ClampWidth(
+            contentSplit.SplitterDistance,
+            contentSplit.ClientSize.Width,
+            dpi);
+        ApplySidebarLayout();
+    }
+
+    private void ToggleSidebar()
+    {
+        if (isFullScreen)
+        {
+            // Full screen hides all chrome; only flip the preference that
+            // ExitFullScreenMode restores.
+            windowedSidebarVisible = !windowedSidebarVisible;
+            return;
+        }
+
+        contentSplit.Panel1Collapsed = !contentSplit.Panel1Collapsed;
+        if (!contentSplit.Panel1Collapsed)
+        {
+            ApplySidebarLayout();
+        }
     }
 
     private void WireToolbar()
@@ -396,6 +513,9 @@ internal sealed class MainForm : Form
                 break;
             case BrowserMenuCommand.FullScreen:
                 ToggleBrowserFullScreen();
+                break;
+            case BrowserMenuCommand.ToggleSidebar:
+                ToggleSidebar();
                 break;
             case BrowserMenuCommand.Find:
                 OpenFindBar();
@@ -569,6 +689,9 @@ internal sealed class MainForm : Form
             case Keys.F11:
                 ExecuteCommand(BrowserMenuCommand.FullScreen);
                 return true;
+            case Keys.Control | Keys.Shift | Keys.Oemcomma:
+                ExecuteCommand(BrowserMenuCommand.ToggleSidebar);
+                return true;
             case Keys.Control | Keys.Shift | Keys.I:
                 ExecuteCommand(BrowserMenuCommand.DevTools);
                 return true;
@@ -610,7 +733,7 @@ internal sealed class MainForm : Form
             }
 
             SyncActiveTabUi();
-            SyncTabStrip();
+            SyncSidebar();
             RecordHistoryVisit(tab);
         };
 
@@ -646,17 +769,75 @@ internal sealed class MainForm : Form
         coreWebView.StatusBarTextChanged += (_, _) =>
             SyncStatusBarText(tab);
 
+        coreWebView.FaviconChanged += async (_, _) =>
+            await UpdateTabFaviconAsync(tab);
+
         coreWebView.DocumentTitleChanged += (_, _) =>
         {
             tab.Title = string.IsNullOrWhiteSpace(coreWebView.DocumentTitle)
                 ? BrowserStrings.Get("tab.defaultTitle")
                 : coreWebView.DocumentTitle;
             SyncActiveTabUi();
-            SyncTabStrip();
+            SyncSidebar();
         };
 
         coreWebView.ProcessFailed += (_, args) =>
             HandleProcessFailed(tab, args.ProcessFailedKind.ToString());
+    }
+
+    /// <summary>
+    /// Refreshes the sidebar favicon for a tab from WebView2. The tab owns
+    /// the decoded bitmap (disposed on replacement and with the tab); on a
+    /// failed fetch or undecodable data the previous icon is kept, and the
+    /// sidebar's letter avatar covers tabs that never produce one.
+    /// </summary>
+    private async Task UpdateTabFaviconAsync(BrowserTab tab)
+    {
+        if (tab.WebView.CoreWebView2 is not CoreWebView2 coreWebView)
+        {
+            return;
+        }
+
+        try
+        {
+            using var faviconStream = await coreWebView.GetFaviconAsync(CoreWebView2FaviconImageFormat.Png);
+            if (faviconStream is null || faviconStream.Length == 0)
+            {
+                tab.Favicon = null;
+            }
+            else
+            {
+                using var decodedImage = Image.FromStream(faviconStream);
+                // Copy the pixels: GDI+ images keep their source stream
+                // alive, and the WebView2 stream is disposed right here.
+                tab.Favicon = new Bitmap(decodedImage);
+            }
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+        catch (NotSupportedException)
+        {
+            return;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+        catch (COMException)
+        {
+            return;
+        }
+
+        if (tabs.Contains(tab))
+        {
+            SyncSidebar();
+        }
     }
 
     private void HandleWebResourceRequested(CoreWebView2 coreWebView, CoreWebView2WebResourceRequestedEventArgs args)
@@ -685,7 +866,7 @@ internal sealed class MainForm : Form
             }
 
             SyncActiveTabUi();
-            SyncTabStrip();
+            SyncSidebar();
             return;
         }
 
@@ -704,7 +885,7 @@ internal sealed class MainForm : Form
             {
                 tab.WebView.CoreWebView2.Reload();
                 SyncActiveTabUi();
-                SyncTabStrip();
+                SyncSidebar();
             }
         }
         catch (ObjectDisposedException)
@@ -738,7 +919,7 @@ internal sealed class MainForm : Form
             }
 
             SyncActiveTabUi();
-            SyncTabStrip();
+            SyncSidebar();
             return;
         }
 
@@ -750,7 +931,7 @@ internal sealed class MainForm : Form
         }
 
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private void SyncStatusBarText(BrowserTab tab)
@@ -780,7 +961,7 @@ internal sealed class MainForm : Form
         await tab.HostMessageBridge.AttachAsync();
 
         NavigateInitialDocument(tab, initialAddress);
-        SyncTabStrip();
+        SyncSidebar();
         return tab;
     }
 
@@ -870,7 +1051,7 @@ internal sealed class MainForm : Form
 
         ActivateTab(restoredTabs[Math.Clamp(snapshot.ActiveTabIndex, 0, restoredTabs.Count - 1)].Id);
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private void RequestNewTab()
@@ -926,7 +1107,7 @@ internal sealed class MainForm : Form
         var tab = await CreateAndActivateTabAsync(snapshot.Address);
         tab.Title = snapshot.Title;
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private void DuplicateActiveTab()
@@ -947,7 +1128,7 @@ internal sealed class MainForm : Form
         tab.Title = snapshot.Title;
         toolbar.SetStatus(BrowserStrings.Get("status.tabDuplicated"));
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private bool TryHandleTabShortcut(Keys keyData)
@@ -1073,6 +1254,9 @@ internal sealed class MainForm : Form
             activeTab = null;
         }
 
+        // Drop the closing tab (and its favicon image, disposed just below)
+        // from the sidebar before the resources go away.
+        SyncSidebar();
         tab.Dispose();
 
         if (tabs.Count == 0)
@@ -1089,7 +1273,7 @@ internal sealed class MainForm : Form
         else
         {
             SyncActiveTabUi();
-            SyncTabStrip();
+            SyncSidebar();
         }
     }
 
@@ -1105,7 +1289,7 @@ internal sealed class MainForm : Form
         {
             SyncActiveTabUi();
             SyncFullScreenState(tab);
-            SyncTabStrip();
+            SyncSidebar();
             return;
         }
 
@@ -1114,7 +1298,7 @@ internal sealed class MainForm : Form
         activeTab = tab;
         SyncActiveTabUi();
         SyncFullScreenState(tab);
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private void NavigateInitialDocument(BrowserTab tab, string? initialAddress)
@@ -1160,7 +1344,7 @@ internal sealed class MainForm : Form
         tab.IsShowingErrorPage = false;
         tab.WebView.NavigateToString(BrowserHomeDocumentPolicy.BuildDocument(ActroCore.LoadStatus()));
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private void NavigateHistoryDocument()
@@ -1178,7 +1362,7 @@ internal sealed class MainForm : Form
         tab.IsShowingErrorPage = false;
         tab.WebView.NavigateToString(BrowserHistoryDocumentPolicy.BuildDocument(historyStore.Load().Items));
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private void NavigateBookmarksDocument()
@@ -1197,7 +1381,7 @@ internal sealed class MainForm : Form
         tab.IsShowingErrorPage = false;
         tab.WebView.NavigateToString(BrowserBookmarksDocumentPolicy.BuildDocument(bookmarkSnapshot.Items));
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private void NavigateBack()
@@ -1264,7 +1448,7 @@ internal sealed class MainForm : Form
             activeTab.IsShowingErrorPage = false;
             activeTab.WebView.CoreWebView2.Navigate(retryAddress);
             SyncActiveTabUi();
-            SyncTabStrip();
+            SyncSidebar();
             return;
         }
 
@@ -1281,7 +1465,7 @@ internal sealed class MainForm : Form
         activeTab.WebView.CoreWebView2.Stop();
         activeTab.IsLoading = false;
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private void OpenDeveloperTools()
@@ -1958,12 +2142,12 @@ internal sealed class MainForm : Form
         windowedFormBorderStyle = FormBorderStyle;
         windowedWindowState = WindowState;
         windowedTopMost = TopMost;
-        windowedTabStripVisible = tabStrip.Visible;
+        windowedSidebarVisible = !contentSplit.Panel1Collapsed;
         windowedToolbarVisible = toolbar.Visible;
         windowedFindBarVisible = findBar.Visible;
 
         SuspendLayout();
-        tabStrip.Visible = false;
+        contentSplit.Panel1Collapsed = true;
         toolbar.Visible = false;
         findBar.Visible = false;
         FormBorderStyle = FormBorderStyle.None;
@@ -1985,11 +2169,12 @@ internal sealed class MainForm : Form
         FormBorderStyle = windowedFormBorderStyle;
         WindowState = windowedWindowState;
         TopMost = windowedTopMost;
-        tabStrip.Visible = windowedTabStripVisible;
+        contentSplit.Panel1Collapsed = !windowedSidebarVisible;
         toolbar.Visible = windowedToolbarVisible;
         findBar.Visible = windowedFindBarVisible;
         isFullScreen = false;
         ResumeLayout(performLayout: true);
+        ApplySidebarLayout();
 
         if (findBar.Visible)
         {
@@ -2103,7 +2288,7 @@ internal sealed class MainForm : Form
 
         tab.WebView.CoreWebView2.Navigate(normalizedAddress);
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
         errorMessage = null;
         return true;
     }
@@ -2115,7 +2300,7 @@ internal sealed class MainForm : Form
         tab.Title = BrowserNavigationErrorPolicy.DefaultTitle;
         tab.WebView.NavigateToString(BrowserNavigationErrorPolicy.BuildErrorDocument(tab.Address, errorStatus));
         SyncActiveTabUi();
-        SyncTabStrip();
+        SyncSidebar();
     }
 
     private void UpdateWindowTitle(string documentTitle)
@@ -2245,10 +2430,10 @@ internal sealed class MainForm : Form
         }
     }
 
-    private void SyncTabStrip()
+    private void SyncSidebar()
     {
-        tabStrip.UpdateTabs(
-            tabs.Select(tab => new BrowserTabHeader(tab.Id, tab.DisplayTitle, tab.IsLoading)).ToList(),
+        tabSidebar.UpdateTabs(
+            tabs.Select(tab => new BrowserTabHeader(tab.Id, tab.DisplayTitle, tab.IsLoading, tab.Favicon)).ToList(),
             activeTab?.Id);
     }
 
@@ -2277,7 +2462,7 @@ internal sealed class MainForm : Form
         {
             tab.Title = request.Title.Trim();
             SyncActiveTabUi();
-            SyncTabStrip();
+            SyncSidebar();
         }
 
         if (request.Activate == false

@@ -52,8 +52,9 @@ required_files=(
   "apps/windows/actro/src/BrowserStorageDatabase.cs"
   "apps/windows/actro/src/BrowserStrings.cs"
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
+  "apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs"
   "apps/windows/actro/src/BrowserTab.cs"
-  "apps/windows/actro/src/BrowserTabStrip.cs"
+  "apps/windows/actro/src/BrowserTabSidebar.cs"
   "apps/windows/actro/src/BrowserTheme.cs"
   "apps/windows/actro/src/BrowserThemeManager.cs"
   "apps/windows/actro/src/BrowserThemeSelectionPolicy.cs"
@@ -220,10 +221,30 @@ else
   print_ok "Windows shell no longer wires a classic menu strip"
 fi
 
-if ! rg -q 'new BrowserTabStrip' apps/windows/actro/src/MainForm.cs; then
-  print_failure "Windows shell does not attach the browser tab strip"
+if ! rg -q 'new BrowserTabSidebar' apps/windows/actro/src/MainForm.cs; then
+  print_failure "Windows shell does not attach the vertical tab sidebar"
 else
-  print_ok "Windows shell attaches the browser tab strip"
+  print_ok "Windows shell attaches the vertical tab sidebar"
+fi
+
+for sidebar_shell_symbol in SplitContainer Panel1Collapsed BrowserSidebarLayoutPolicy ToggleSidebar ApplySidebarLayout FaviconChanged GetFaviconAsync UpdateTabFaviconAsync; do
+  if ! rg -q "$sidebar_shell_symbol" apps/windows/actro/src/MainForm.cs; then
+    print_failure "Windows shell is missing sidebar behavior: $sidebar_shell_symbol"
+  fi
+done
+
+for sidebar_policy_symbol in MinWidth DefaultWidth MaxWidth ClampWidth CollapseThreshold ShouldCollapse; do
+  if ! rg -q "$sidebar_policy_symbol" apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs; then
+    print_failure "Windows sidebar layout policy is missing symbol: $sidebar_policy_symbol"
+  fi
+done
+
+if ! rg -Fq 'BrowserSidebarLayoutPolicy.cs' "$test_project"; then
+  print_failure "Windows tests do not link the sidebar layout policy"
+fi
+
+if ! rg -q 'BrowserSidebarLayoutPolicy' apps/windows/actro.tests/Program.cs; then
+  print_failure "Windows tests do not exercise sidebar layout policy"
 fi
 
 for menu_command in \
@@ -251,6 +272,7 @@ for menu_command in \
   ZoomOut \
   ZoomReset \
   FullScreen \
+  ToggleSidebar \
   Find \
   FindNext \
   FindPrevious \
@@ -306,20 +328,21 @@ done
 for tab_file_pattern in \
   'WebView2' \
   'HostMessageBridge' \
-  'IDisposable'
+  'IDisposable' \
+  'Favicon'
 do
   if ! rg -q "$tab_file_pattern" apps/windows/actro/src/BrowserTab.cs; then
     print_failure "Windows browser tab state is missing pattern: $tab_file_pattern"
   fi
 done
 
-for tab_strip_event in NewTabRequested TabSelected TabCloseRequested UpdateTabs; do
-  if ! rg -q "$tab_strip_event" apps/windows/actro/src/BrowserTabStrip.cs; then
-    print_failure "Windows browser tab strip is missing behavior: $tab_strip_event"
+for tab_sidebar_event in NewTabRequested TabSelected TabCloseRequested UpdateTabs; do
+  if ! rg -q "$tab_sidebar_event" apps/windows/actro/src/BrowserTabSidebar.cs; then
+    print_failure "Windows vertical tab sidebar is missing behavior: $tab_sidebar_event"
   fi
 done
 
-for tab_lifecycle_call in CreateAndActivateTabAsync CloseTabAsync ReopenClosedTab DuplicateActiveTab RequestNewWindow BrowserClosedTabStack ActivateTab SyncTabStrip ActivateNextTab ActivatePreviousTab ActivateTabAtIndex; do
+for tab_lifecycle_call in CreateAndActivateTabAsync CloseTabAsync ReopenClosedTab DuplicateActiveTab RequestNewWindow BrowserClosedTabStack ActivateTab SyncSidebar ActivateNextTab ActivatePreviousTab ActivateTabAtIndex; do
   if ! rg -q "$tab_lifecycle_call" apps/windows/actro/src/MainForm.cs; then
     print_failure "Windows shell is missing tab lifecycle behavior: $tab_lifecycle_call"
   fi

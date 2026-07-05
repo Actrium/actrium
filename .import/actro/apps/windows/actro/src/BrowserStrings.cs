@@ -25,6 +25,10 @@ internal static class BrowserStrings
             // Tabs
             ["tab.defaultTitle"] = "New Tab",
 
+            // Vertical tab sidebar
+            ["sidebar.newTab"] = "New tab",
+            ["sidebar.loadingTitleFormat"] = "{0} ...",
+
             // Toolbar
             ["toolbar.back"] = "Back",
             ["toolbar.forward"] = "Forward",
@@ -51,6 +55,7 @@ internal static class BrowserStrings
             ["menu.zoomOut"] = "Zoom &Out",
             ["menu.zoomReset"] = "Reset &Zoom",
             ["menu.fullScreen"] = "F&ull Screen",
+            ["menu.toggleSidebar"] = "Show or Hide Side&bar",
             ["menu.find"] = "&Find",
             ["menu.findNext"] = "Find Ne&xt",
             ["menu.findPrevious"] = "Find Pre&vious",

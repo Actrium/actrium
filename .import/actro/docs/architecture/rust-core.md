@@ -847,7 +847,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   handlers are OS integration concerns; unsafe/browser-internal schemes remain
   local shell policy.
 - Windows tab lifecycle lives in `apps/windows/actro/src/BrowserTab.cs`,
-  `apps/windows/actro/src/BrowserTabStrip.cs`, and `MainForm.cs`. Per-tab
+  `apps/windows/actro/src/BrowserTabSidebar.cs`, and `MainForm.cs`. Per-tab
   WebView2 ownership, active-tab switching, tab cycling/direct-selection
   shortcuts, duplicate-tab creation, `Ctrl+Shift+T` closed-tab reopening,
   close-last-tab behavior, and tab title/loading rendering are platform workflow

@@ -85,8 +85,11 @@ Native Windows WebView2 browser shell for Actro.
   failure status text and recoverable-tab reload classification.
 - `src/BrowserClosedTabStack.cs` owns Windows-local last-closed-tab state for
   `Ctrl+Shift+T` reopening.
-- `src/BrowserTabStrip.cs` owns the first Windows tab strip: new tab, select
-  tab, close tab, and tab title/loading state rendering.
+- `src/BrowserSidebarLayoutPolicy.cs` owns the vertical sidebar width clamp,
+  collapse threshold, and DPI scaling rules.
+- `src/BrowserTabSidebar.cs` owns the vertical tab sidebar: new tab, select
+  tab, close tab, favicon/letter-avatar rendering, and tab title/loading
+  state rendering.
 - `src/BrowserToolbar.cs` owns the first Windows browser chrome: address entry,
   back, forward, reload/stop, home, address focus, loading/status display, and
   link-hover status text.
@@ -327,7 +330,7 @@ opening the target through Windows' default protocol handler. Browser-internal o
 unsafe schemes such as `javascript:`, `data:`, `blob:`, and `actro:` are never
 handed off.
 
-The tab strip is also Windows-owned. Each tab owns a separate WebView2 control
+The tab sidebar is also Windows-owned. Each tab owns a separate WebView2 control
 and host message bridge; selecting a tab swaps the active WebView host, closing
 the last tab creates a fresh home tab, `Ctrl+Shift+T` reopens the last closed
 tab from a Windows-local stack, File > Duplicate Tab opens the active tab's
@@ -397,7 +400,7 @@ WebView2 and browser full-screen are Windows-owned. `MainForm` listens for
 and keeps page full-screen separate from user-requested browser full-screen.
 Both modes share the same WinForms chrome transition: browser chrome is hidden
 while full-screen is active, then the previous border, window state, topmost
-state, toolbar, tab strip, menu, and find bar are restored when neither mode is
+state, toolbar, tab sidebar, menu, and find bar are restored when neither mode is
 active. `Esc` requests the document to leave page full-screen first, or exits browser
 full-screen when the page is not full-screen. This is local window orchestration
 and should not move into Rust.
