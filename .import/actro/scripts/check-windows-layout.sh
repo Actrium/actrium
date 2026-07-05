@@ -89,6 +89,8 @@ required_files=(
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs"
   "apps/windows/actro/src/BrowserTab.cs"
+  "apps/windows/actro/src/BrowserTabOverviewPanel.cs"
+  "apps/windows/actro/src/BrowserTabOverviewPolicy.cs"
   "apps/windows/actro/src/BrowserTabSidebar.cs"
   "apps/windows/actro/src/BrowserTheme.cs"
   "apps/windows/actro/src/BrowserThemeManager.cs"
@@ -295,6 +297,74 @@ else
   print_ok "Windows vertical tab sidebar exposes tab events"
 fi
 
+# Tab overview surface: per-tab snapshots are captured on tab deactivation
+# and refreshed for the active tab at overview open (CapturePreviewAsync),
+# cached on the tab and rendered as a card grid overlaying the content host.
+check_pattern_in_each_file \
+  'new BrowserTabOverviewPanel' \
+  "Windows shell attaches the tab overview panel" \
+  "Windows shell does not attach the tab overview panel" \
+  apps/windows/actro/src/MainForm.cs
+
+missing_overview_shell_symbols=()
+for overview_shell_symbol in CapturePreviewAsync CaptureTabSnapshotAsync ShowTabOverview HideTabOverview ToggleTabOverview SyncOverview; do
+  if ! rg -q "$overview_shell_symbol" apps/windows/actro/src/MainForm.cs; then
+    missing_overview_shell_symbols+=("$overview_shell_symbol")
+  fi
+done
+
+if ! rg -Fq 'Keys.Control | Keys.Shift | Keys.A' apps/windows/actro/src/MainForm.cs; then
+  missing_overview_shell_symbols+=("Keys.Control | Keys.Shift | Keys.A")
+fi
+
+if [[ "${#missing_overview_shell_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows shell is missing tab overview snapshot/toggle behavior"
+  printf '%s\n' "${missing_overview_shell_symbols[@]}"
+else
+  print_ok "Windows shell owns overview snapshots, toggle and shortcut"
+fi
+
+check_pattern_in_each_file \
+  'Snapshot' \
+  "Windows browser tab state caches the overview snapshot" \
+  "Windows browser tab state does not cache the overview snapshot" \
+  apps/windows/actro/src/BrowserTab.cs
+
+missing_overview_panel_symbols=()
+for overview_panel_symbol in NewTabRequested TabSelected TabCloseRequested UpdateCards BrowserTabOverviewPolicy BrowserTabOverviewCard; do
+  if ! rg -q "$overview_panel_symbol" apps/windows/actro/src/BrowserTabOverviewPanel.cs; then
+    missing_overview_panel_symbols+=("$overview_panel_symbol")
+  fi
+done
+
+if [[ "${#missing_overview_panel_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows tab overview panel is missing expected behavior"
+  printf '%s\n' "${missing_overview_panel_symbols[@]}"
+else
+  print_ok "Windows tab overview panel renders policy-laid-out snapshot cards"
+fi
+
+missing_overview_policy_symbols=()
+for overview_policy_symbol in Columns CardRects CardWidth CardHeight ThumbnailHeight ContentHeight; do
+  if ! rg -q "$overview_policy_symbol" apps/windows/actro/src/BrowserTabOverviewPolicy.cs; then
+    missing_overview_policy_symbols+=("$overview_policy_symbol")
+  fi
+done
+
+if [[ "${#missing_overview_policy_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows tab overview policy is missing expected symbols"
+  printf '%s\n' "${missing_overview_policy_symbols[@]}"
+else
+  print_ok "Windows tab overview policy owns the card grid geometry"
+fi
+
+check_pattern_in_each_file \
+  'BrowserTabOverviewPolicy' \
+  "Windows tests link and exercise the tab overview policy" \
+  "Windows tests do not link and exercise the tab overview policy" \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
+
 missing_tab_lifecycle_calls=()
 for tab_lifecycle_call in CreateAndActivateTabAsync CloseTabAsync ReopenClosedTab DuplicateActiveTab RequestNewWindow BrowserClosedTabStack ActivateTab SyncSidebar ActivateNextTab ActivatePreviousTab ActivateTabAtIndex; do
   if ! rg -q "$tab_lifecycle_call" apps/windows/actro/src/MainForm.cs; then
@@ -364,6 +434,7 @@ for menu_command in \
   ZoomReset \
   FullScreen \
   ToggleSidebar \
+  ToggleTabOverview \
   Find \
   FindNext \
   FindPrevious \
@@ -422,7 +493,7 @@ else
 fi
 
 missing_escape_policy_symbols=()
-for escape_policy_symbol in Resolve CloseFindBar ExitFullScreen Stop None; do
+for escape_policy_symbol in Resolve DismissOverview CloseFindBar ExitFullScreen Stop None overviewVisible; do
   if ! rg -q "$escape_policy_symbol" apps/windows/actro/src/BrowserEscapePolicy.cs; then
     missing_escape_policy_symbols+=("$escape_policy_symbol")
   fi
@@ -450,7 +521,7 @@ check_pattern_in_each_file \
   apps/windows/actro.tests/Program.cs
 
 missing_toolbar_events=()
-for toolbar_event in AddressRequested BackRequested ForwardRequested ReloadRequested NewTabRequested SidebarToggleRequested BookmarkRequested MenuRequested; do
+for toolbar_event in AddressRequested BackRequested ForwardRequested ReloadRequested NewTabRequested OverviewToggleRequested SidebarToggleRequested BookmarkRequested MenuRequested; do
   if ! rg -q "$toolbar_event" apps/windows/actro/src/BrowserToolbar.cs; then
     missing_toolbar_events+=("$toolbar_event")
   fi
@@ -478,7 +549,7 @@ check_pattern_in_each_file \
   apps/windows/actro/src/MainForm.cs
 
 missing_toolbar_shell_symbols=()
-for toolbar_symbol in BrowserGlyphs BrowserToolbarLayoutPolicy SetSidebarLayout SetNavigationState SetBookmarkState; do
+for toolbar_symbol in BrowserGlyphs BrowserToolbarLayoutPolicy SetSidebarLayout SetNavigationState SetBookmarkState SetOverviewActive; do
   if ! rg -q "$toolbar_symbol" apps/windows/actro/src/BrowserToolbar.cs; then
     missing_toolbar_shell_symbols+=("$toolbar_symbol")
   fi

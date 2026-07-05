@@ -63,6 +63,7 @@
     <Compile Include="..\actro\src\BrowserStorageSyncScheduler.cs" Link="BrowserStorageSyncScheduler.cs" />
     <Compile Include="..\actro\src\BrowserStrings.cs" Link="BrowserStrings.cs" />
     <Compile Include="..\actro\src\BrowserSyncStatusPolicy.cs" Link="BrowserSyncStatusPolicy.cs" />
+    <Compile Include="..\actro\src\BrowserTabOverviewPolicy.cs" Link="BrowserTabOverviewPolicy.cs" />
     <Compile Include="..\actro\src\BrowserTheme.cs" Link="BrowserTheme.cs" />
     <Compile Include="..\actro\src\BrowserThemeSelectionPolicy.cs" Link="BrowserThemeSelectionPolicy.cs" />
     <Compile Include="..\actro\src\BrowserToolbarLayoutPolicy.cs" Link="BrowserToolbarLayoutPolicy.cs" />

@@ -6,6 +6,7 @@ namespace Actro.Windows;
 internal sealed class BrowserTab : IDisposable
 {
     private Image? favicon;
+    private Image? snapshot;
 
     public BrowserTab(Guid? id = null)
     {
@@ -50,11 +51,34 @@ internal sealed class BrowserTab : IDisposable
         }
     }
 
+    /// <summary>
+    /// Last-seen page snapshot painted by the tab overview, captured on tab
+    /// deactivation and refreshed for the active tab at overview open; null
+    /// falls back to the themed placeholder card. Ownership matches
+    /// <see cref="Favicon"/>: replacing disposes the previous bitmap and
+    /// Dispose releases the last one with the tab.
+    /// </summary>
+    public Image? Snapshot
+    {
+        get => snapshot;
+        set
+        {
+            if (ReferenceEquals(snapshot, value))
+            {
+                return;
+            }
+
+            snapshot?.Dispose();
+            snapshot = value;
+        }
+    }
+
     public string DisplayTitle => string.IsNullOrWhiteSpace(Title) ? "New Tab" : Title;
 
     public void Dispose()
     {
         WebView.Dispose();
         Favicon = null;
+        Snapshot = null;
     }
 }

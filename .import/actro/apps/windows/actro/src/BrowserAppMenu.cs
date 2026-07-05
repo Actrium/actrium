@@ -18,6 +18,7 @@ internal sealed class BrowserAppMenu : ContextMenuStrip
     private static readonly IReadOnlyDictionary<string, Keys> KeyTokenMap =
         new Dictionary<string, Keys>(StringComparer.Ordinal)
         {
+            ["A"] = Keys.A,
             ["D"] = Keys.D,
             ["E"] = Keys.E,
             ["F"] = Keys.F,

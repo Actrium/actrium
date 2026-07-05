@@ -1,3 +1,4 @@
+using System.Drawing;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
@@ -2738,12 +2739,12 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual(BrowserGlyphs.All.Count, BrowserGlyphs.All.Distinct().Count());
 
         // Exactly the toolbar-invocable commands are mapped; the flip states
-        // (stop, filled star) and the non-command glyphs (overview slot,
-        // app menu ellipsis) stay inside All so nothing bypasses the
-        // whitelist above.
+        // (stop, filled star) and the non-command glyph (the app menu
+        // ellipsis) stay inside All so nothing bypasses the whitelist above.
         var expectedCommands = new[]
         {
             BrowserMenuCommand.NewTab,
+            BrowserMenuCommand.ToggleTabOverview,
             BrowserMenuCommand.ToggleSidebar,
             BrowserMenuCommand.Back,
             BrowserMenuCommand.Forward,
@@ -3051,6 +3052,8 @@ var tests = new (string Name, Func<Task> Run)[]
             [(false, false, false, "F11")] = BrowserMenuCommand.FullScreen,
             // Added with the vertical sidebar slice: Edge vertical-tabs chord.
             [(true, true, false, "OemComma")] = BrowserMenuCommand.ToggleSidebar,
+            // Added with the tab-overview slice: overview toggle chord.
+            [(true, true, false, "A")] = BrowserMenuCommand.ToggleTabOverview,
             [(false, false, false, "F5")] = BrowserMenuCommand.Reload,
             [(false, false, false, "F3")] = BrowserMenuCommand.FindNext,
             [(false, true, false, "F3")] = BrowserMenuCommand.FindPrevious,
@@ -3134,23 +3137,103 @@ var tests = new (string Name, Func<Task> Run)[]
     }),
     ("resolves escape precedence in order", () =>
     {
-        // Full truth table: find bar > full screen (page or browser) > stop.
-        AssertEqual(BrowserEscapeAction.None, BrowserEscapePolicy.Resolve(false, false, false, false));
-        AssertEqual(BrowserEscapeAction.Stop, BrowserEscapePolicy.Resolve(false, false, false, true));
-        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, true, false));
-        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, true, true));
-        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, true, false, false));
-        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, true, false, true));
-        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, true, true, false));
-        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, true, true, true));
-        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, false, false, false));
-        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, false, false, true));
-        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, false, true, false));
-        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, false, true, true));
-        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, true, false, false));
-        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, true, false, true));
-        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, true, true, false));
-        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(true, true, true, true));
+        // Full truth table: overview > find bar > full screen (page or
+        // browser) > stop. The overview overlay is the topmost surface, so
+        // its dismissal outranks everything below it.
+        AssertEqual(BrowserEscapeAction.None, BrowserEscapePolicy.Resolve(false, false, false, false, false));
+        AssertEqual(BrowserEscapeAction.Stop, BrowserEscapePolicy.Resolve(false, false, false, false, true));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, false, true, false));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, false, true, true));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, true, false, false));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, true, false, true));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, true, true, false));
+        AssertEqual(BrowserEscapeAction.ExitFullScreen, BrowserEscapePolicy.Resolve(false, false, true, true, true));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(false, true, false, false, false));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(false, true, false, false, true));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(false, true, false, true, false));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(false, true, false, true, true));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(false, true, true, false, false));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(false, true, true, false, true));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(false, true, true, true, false));
+        AssertEqual(BrowserEscapeAction.CloseFindBar, BrowserEscapePolicy.Resolve(false, true, true, true, true));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, false, false, false, false));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, false, false, false, true));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, false, false, true, false));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, false, false, true, true));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, false, true, false, false));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, false, true, false, true));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, false, true, true, false));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, false, true, true, true));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, true, false, false, false));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, true, false, false, true));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, true, false, true, false));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, true, false, true, true));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, true, true, false, false));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, true, true, false, true));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, true, true, true, false));
+        AssertEqual(BrowserEscapeAction.DismissOverview, BrowserEscapePolicy.Resolve(true, true, true, true, true));
+        return Task.CompletedTask;
+    }),
+    ("computes overview card grid columns and rectangles", () =>
+    {
+        // 1280 px viewport, 4 cells at 96 DPI: four 296 px cards fill one
+        // row from the padded origin (content 1232 = 4*296 + 3*16).
+        AssertEqual(4, BrowserTabOverviewPolicy.Columns(1280, 4, 96));
+        var fullRow = BrowserTabOverviewPolicy.CardRects(1280, 4, 96);
+        AssertEqual(4, fullRow.Count);
+        AssertEqual(new Rectangle(24, 24, 296, 221), fullRow[0]);
+        AssertEqual(new Rectangle(336, 24, 296, 221), fullRow[1]);
+        AssertEqual(new Rectangle(960, 24, 296, 221), fullRow[3]);
+
+        // Two cells cap at the 320 px maximum and the grid centers in the
+        // leftover width (content 1232, grid 656 -> origin 312).
+        AssertEqual(2, BrowserTabOverviewPolicy.Columns(1280, 2, 96));
+        var centered = BrowserTabOverviewPolicy.CardRects(1280, 2, 96);
+        AssertEqual(new Rectangle(312, 24, 320, 236), centered[0]);
+        AssertEqual(new Rectangle(648, 24, 320, 236), centered[1]);
+
+        // A narrow viewport still yields one full-width column, and card
+        // height follows the 16:10 thumbnail plus the title strip.
+        AssertEqual(1, BrowserTabOverviewPolicy.Columns(300, 1, 96));
+        AssertEqual(new Rectangle(24, 24, 252, 193), BrowserTabOverviewPolicy.CardRects(300, 1, 96)[0]);
+        AssertEqual(185, BrowserTabOverviewPolicy.ThumbnailHeight(296));
+        AssertEqual(221, BrowserTabOverviewPolicy.CardHeight(296, 96));
+
+        // Degenerate widths clamp to 1 px cards, never negative; an empty
+        // cell list resolves to an empty grid.
+        var degenerate = BrowserTabOverviewPolicy.CardRects(0, 3, 96);
+        AssertEqual(3, degenerate.Count);
+        foreach (var cardRect in degenerate)
+        {
+            AssertTrue(cardRect.Width >= 1);
+            AssertTrue(cardRect.Height >= 1);
+        }
+
+        AssertEqual(0, BrowserTabOverviewPolicy.Columns(1280, 0, 96));
+        AssertEqual(0, BrowserTabOverviewPolicy.CardRects(1280, 0, 96).Count);
+        AssertEqual(0, BrowserTabOverviewPolicy.ContentHeight(1280, 0, 96));
+        return Task.CompletedTask;
+    }),
+    ("scales overview card grid metrics with DPI", () =>
+    {
+        AssertEqual(30, BrowserTabOverviewPolicy.OuterPadding(120));
+        AssertEqual(48, BrowserTabOverviewPolicy.OuterPadding(192));
+        AssertEqual(32, BrowserTabOverviewPolicy.CardGap(192));
+        AssertEqual(400, BrowserTabOverviewPolicy.CardMinWidth(192));
+        AssertEqual(640, BrowserTabOverviewPolicy.CardMaxWidth(192));
+        AssertEqual(72, BrowserTabOverviewPolicy.CardTitleHeight(192));
+
+        // 2560 px viewport, 8 cells at 192 DPI: five 467 px columns and a
+        // second row (content 2464; 5 fit at the 400 px scaled minimum).
+        AssertEqual(5, BrowserTabOverviewPolicy.Columns(2560, 8, 192));
+        var scaledGrid = BrowserTabOverviewPolicy.CardRects(2560, 8, 192);
+        AssertEqual(8, scaledGrid.Count);
+        AssertEqual(new Rectangle(48, 48, 467, 363), scaledGrid[0]);
+        AssertEqual(new Rectangle(48, 443, 467, 363), scaledGrid[5]);
+
+        // Scrollable height: outer padding + rows + inter-row gaps.
+        AssertEqual(854, BrowserTabOverviewPolicy.ContentHeight(2560, 8, 192));
+        AssertEqual(269, BrowserTabOverviewPolicy.ContentHeight(1280, 4, 96));
         return Task.CompletedTask;
     }),
 };

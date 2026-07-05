@@ -54,6 +54,8 @@ required_files=(
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserSidebarLayoutPolicy.cs"
   "apps/windows/actro/src/BrowserTab.cs"
+  "apps/windows/actro/src/BrowserTabOverviewPanel.cs"
+  "apps/windows/actro/src/BrowserTabOverviewPolicy.cs"
   "apps/windows/actro/src/BrowserTabSidebar.cs"
   "apps/windows/actro/src/BrowserTheme.cs"
   "apps/windows/actro/src/BrowserThemeManager.cs"
@@ -275,6 +277,7 @@ for menu_command in \
   ZoomReset \
   FullScreen \
   ToggleSidebar \
+  ToggleTabOverview \
   Find \
   FindNext \
   FindPrevious \
@@ -309,7 +312,7 @@ for app_menu_symbol in ContextMenuStrip BrowserToolStripRenderer BrowserMenuMode
   fi
 done
 
-for escape_policy_symbol in Resolve CloseFindBar ExitFullScreen Stop None; do
+for escape_policy_symbol in Resolve DismissOverview CloseFindBar ExitFullScreen Stop None overviewVisible; do
   if ! rg -q "$escape_policy_symbol" apps/windows/actro/src/BrowserEscapePolicy.cs; then
     print_failure "Windows escape policy is missing symbol: $escape_policy_symbol"
   fi
@@ -344,6 +347,49 @@ for tab_sidebar_event in NewTabRequested TabSelected TabCloseRequested UpdateTab
   fi
 done
 
+# Tab overview surface: per-tab snapshots are captured on tab deactivation
+# and refreshed for the active tab at overview open (CapturePreviewAsync),
+# cached on the tab and rendered as a card grid overlaying the content host.
+if ! rg -q 'new BrowserTabOverviewPanel' apps/windows/actro/src/MainForm.cs; then
+  print_failure "Windows shell does not attach the tab overview panel"
+else
+  print_ok "Windows shell attaches the tab overview panel"
+fi
+
+for overview_shell_symbol in CapturePreviewAsync CaptureTabSnapshotAsync ShowTabOverview HideTabOverview ToggleTabOverview SyncOverview; do
+  if ! rg -q "$overview_shell_symbol" apps/windows/actro/src/MainForm.cs; then
+    print_failure "Windows shell is missing tab overview behavior: $overview_shell_symbol"
+  fi
+done
+
+if ! rg -Fq 'Keys.Control | Keys.Shift | Keys.A' apps/windows/actro/src/MainForm.cs; then
+  print_failure "Windows shell is missing the tab overview shortcut"
+fi
+
+if ! rg -q 'Snapshot' apps/windows/actro/src/BrowserTab.cs; then
+  print_failure "Windows browser tab state does not cache the overview snapshot"
+fi
+
+for overview_panel_symbol in NewTabRequested TabSelected TabCloseRequested UpdateCards BrowserTabOverviewPolicy BrowserTabOverviewCard; do
+  if ! rg -q "$overview_panel_symbol" apps/windows/actro/src/BrowserTabOverviewPanel.cs; then
+    print_failure "Windows tab overview panel is missing behavior: $overview_panel_symbol"
+  fi
+done
+
+for overview_policy_symbol in Columns CardRects CardWidth CardHeight ThumbnailHeight ContentHeight; do
+  if ! rg -q "$overview_policy_symbol" apps/windows/actro/src/BrowserTabOverviewPolicy.cs; then
+    print_failure "Windows tab overview policy is missing symbol: $overview_policy_symbol"
+  fi
+done
+
+if ! rg -Fq 'BrowserTabOverviewPolicy.cs' "$test_project"; then
+  print_failure "Windows tests do not link the tab overview policy"
+fi
+
+if ! rg -q 'BrowserTabOverviewPolicy' apps/windows/actro.tests/Program.cs; then
+  print_failure "Windows tests do not exercise tab overview policy"
+fi
+
 for tab_lifecycle_call in CreateAndActivateTabAsync CloseTabAsync ReopenClosedTab DuplicateActiveTab RequestNewWindow BrowserClosedTabStack ActivateTab SyncSidebar ActivateNextTab ActivatePreviousTab ActivateTabAtIndex; do
   if ! rg -q "$tab_lifecycle_call" apps/windows/actro/src/MainForm.cs; then
     print_failure "Windows shell is missing tab lifecycle behavior: $tab_lifecycle_call"
@@ -368,7 +414,7 @@ else
   print_ok "Windows browser toolbar exposes address navigation"
 fi
 
-for event_name in BackRequested ForwardRequested ReloadRequested NewTabRequested SidebarToggleRequested BookmarkRequested MenuRequested; do
+for event_name in BackRequested ForwardRequested ReloadRequested NewTabRequested OverviewToggleRequested SidebarToggleRequested BookmarkRequested MenuRequested; do
   if ! rg -q "$event_name" apps/windows/actro/src/BrowserToolbar.cs; then
     print_failure "Windows browser toolbar is missing event: $event_name"
   fi
@@ -388,7 +434,7 @@ fi
 
 # The toolbar draws MDL2-safe glyphs and lays out its two segments through
 # the pure policy; statuses moved to the MainForm overlay.
-for toolbar_symbol in BrowserGlyphs BrowserToolbarLayoutPolicy SetSidebarLayout SetNavigationState SetBookmarkState; do
+for toolbar_symbol in BrowserGlyphs BrowserToolbarLayoutPolicy SetSidebarLayout SetNavigationState SetBookmarkState SetOverviewActive; do
   if ! rg -q "$toolbar_symbol" apps/windows/actro/src/BrowserToolbar.cs; then
     print_failure "Windows browser toolbar is missing behavior: $toolbar_symbol"
   fi

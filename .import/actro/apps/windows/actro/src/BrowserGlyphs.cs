@@ -35,15 +35,15 @@ internal static class BrowserGlyphs
     /// reload button flips to <see cref="Stop"/> while a page loads, and the
     /// bookmark star flips to <see cref="BookmarkStarFilled"/> when the page
     /// is bookmarked; both states stay in this table so no glyph can bypass
-    /// the MDL2 whitelist. <see cref="TabOverview"/> and
-    /// <see cref="AppMenu"/> are not commands (the overview button lands in
-    /// the overview slice; the ellipsis opens the app menu), so they live as
-    /// named constants and in <see cref="All"/> only.
+    /// the MDL2 whitelist. <see cref="AppMenu"/> is not a command (the
+    /// ellipsis opens the app menu), so it lives as a named constant and in
+    /// <see cref="All"/> only.
     /// </summary>
     public static IReadOnlyDictionary<BrowserMenuCommand, char> CommandGlyphs { get; } =
         new Dictionary<BrowserMenuCommand, char>
         {
             [BrowserMenuCommand.NewTab] = NewTab,
+            [BrowserMenuCommand.ToggleTabOverview] = TabOverview,
             [BrowserMenuCommand.ToggleSidebar] = ToggleSidebar,
             [BrowserMenuCommand.Back] = Back,
             [BrowserMenuCommand.Forward] = Forward,

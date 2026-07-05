@@ -116,6 +116,7 @@ internal static class BrowserMenuModel
             Item(BrowserMenuCommand.FullScreen, "menu.fullScreen", Plain("F11")),
             // Ctrl+Shift+, is the Edge vertical-tabs chord.
             Item(BrowserMenuCommand.ToggleSidebar, "menu.toggleSidebar", CtrlShift("OemComma")),
+            Item(BrowserMenuCommand.ToggleTabOverview, "menu.toggleTabOverview", CtrlShift("A")),
             Separator(),
             Item(BrowserMenuCommand.Find, "menu.find", Ctrl("F")),
             Item(BrowserMenuCommand.FindNext, "menu.findNext", shortcutDisplayOverride: "F3"),

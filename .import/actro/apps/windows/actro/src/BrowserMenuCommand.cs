@@ -6,8 +6,8 @@ namespace Actro.Windows;
 /// input paths. Commands that need per-item data (currently only
 /// <see cref="SelectSearchEngine"/>) receive it through the string argument
 /// channel of the menu model and the MainForm command router. The enum
-/// grows together with the features: the tab-overview toggle joins in its
-/// own slice, so no dead or disabled menu items ever ship.
+/// grows together with the features, so no dead or disabled menu items
+/// ever ship.
 /// Harness-linked: this file must stay WinForms-free.
 /// </summary>
 internal enum BrowserMenuCommand
@@ -37,6 +37,7 @@ internal enum BrowserMenuCommand
     ZoomReset,
     FullScreen,
     ToggleSidebar,
+    ToggleTabOverview,
     Find,
     FindNext,
     FindPrevious,
