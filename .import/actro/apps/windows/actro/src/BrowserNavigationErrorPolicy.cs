@@ -97,6 +97,21 @@ internal static class BrowserNavigationErrorPolicy
         """;
     }
 
+    /// <summary>
+    /// ConnectionAborted and OperationCanceled mark navigations that were
+    /// superseded or intentionally stopped (a newer navigation started,
+    /// the user pressed Stop, or the allow-list blocked it after posting
+    /// its own status). Chrome shows no error page for those - the tab
+    /// keeps its current document - and replacing the pending newer
+    /// navigation with an error document would clobber it.
+    /// </summary>
+    public static bool ShouldShowErrorDocument(string? errorStatus)
+    {
+        var status = NormalizeStatus(errorStatus);
+        return !string.Equals(status, "ConnectionAborted", StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(status, "OperationCanceled", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string NormalizeAddress(string? address)
     {
         return string.IsNullOrWhiteSpace(address) ? UnknownAddress : address.Trim();
