@@ -7,7 +7,7 @@ namespace Actro.Windows;
 /// <summary>
 /// Two-segment toolbar mirroring the macOS structure with Chrome-ordered
 /// details. The sidebar segment (above the vertical tab sidebar) right-aligns
-/// [+ new tab] next to the reserved tab-overview slot and shrinks to a fixed
+/// [+ new tab][tab overview] and shrinks to a fixed
 /// stub while the sidebar is collapsed; the content segment orders
 /// [sidebar toggle][back][forward][reload-stop][address box][ellipsis menu]
 /// like Chrome/Edge, with the bookmark star inside the address box's right
@@ -18,6 +18,7 @@ namespace Actro.Windows;
 internal sealed class BrowserToolbar : UserControl
 {
     private readonly BrowserThemedButton newTabButton;
+    private readonly BrowserThemedButton overviewButton;
     private readonly BrowserThemedButton sidebarToggleButton;
     private readonly BrowserThemedButton backButton;
     private readonly BrowserThemedButton forwardButton;
@@ -31,8 +32,10 @@ internal sealed class BrowserToolbar : UserControl
     private int sidebarWidth;
     private bool sidebarCollapsed;
     private bool isBookmarked;
+    private bool isOverviewActive;
 
     public event EventHandler? NewTabRequested;
+    public event EventHandler? OverviewToggleRequested;
     public event EventHandler? SidebarToggleRequested;
     public event EventHandler? BackRequested;
     public event EventHandler? ForwardRequested;
@@ -51,6 +54,7 @@ internal sealed class BrowserToolbar : UserControl
 
         toolTip = new ToolTip();
         newTabButton = CreateGlyphButton(BrowserGlyphs.Get(BrowserMenuCommand.NewTab), "toolbar.tooltip.newTab");
+        overviewButton = CreateGlyphButton(BrowserGlyphs.Get(BrowserMenuCommand.ToggleTabOverview), "toolbar.tooltip.tabOverview");
         sidebarToggleButton = CreateGlyphButton(BrowserGlyphs.Get(BrowserMenuCommand.ToggleSidebar), "toolbar.tooltip.toggleSidebar");
         backButton = CreateGlyphButton(BrowserGlyphs.Get(BrowserMenuCommand.Back), "toolbar.tooltip.back");
         forwardButton = CreateGlyphButton(BrowserGlyphs.Get(BrowserMenuCommand.Forward), "toolbar.tooltip.forward");
@@ -67,6 +71,7 @@ internal sealed class BrowserToolbar : UserControl
         addressPanel = new BrowserThemedBorderPanel(addressBox, bookmarkButton);
 
         Controls.Add(newTabButton);
+        Controls.Add(overviewButton);
         Controls.Add(sidebarToggleButton);
         Controls.Add(backButton);
         Controls.Add(forwardButton);
@@ -75,6 +80,7 @@ internal sealed class BrowserToolbar : UserControl
         Controls.Add(menuButton);
 
         newTabButton.Click += (_, _) => NewTabRequested?.Invoke(this, EventArgs.Empty);
+        overviewButton.Click += (_, _) => OverviewToggleRequested?.Invoke(this, EventArgs.Empty);
         sidebarToggleButton.Click += (_, _) => SidebarToggleRequested?.Invoke(this, EventArgs.Empty);
         backButton.Click += (_, _) => BackRequested?.Invoke(this, EventArgs.Empty);
         forwardButton.Click += (_, _) => ForwardRequested?.Invoke(this, EventArgs.Empty);
@@ -87,6 +93,7 @@ internal sealed class BrowserToolbar : UserControl
         ApplyTheme(BrowserTheme.Light);
         SetNavigationState(canGoBack: false, canGoForward: false, isLoading: false);
         SetBookmarkState(canBookmark: false, isBookmarked: false);
+        SetOverviewActive(false);
     }
 
     /// <summary>Applies palette, typography and DPI-scaled metrics in one pass.</summary>
@@ -102,8 +109,8 @@ internal sealed class BrowserToolbar : UserControl
         var glyphFont = GetGlyphFont(dpi);
         foreach (var button in new[]
         {
-            newTabButton, sidebarToggleButton, backButton, forwardButton,
-            reloadStopButton, bookmarkButton, menuButton,
+            newTabButton, overviewButton, sidebarToggleButton, backButton,
+            forwardButton, reloadStopButton, bookmarkButton, menuButton,
         })
         {
             button.Font = glyphFont;
@@ -114,6 +121,7 @@ internal sealed class BrowserToolbar : UserControl
         // filled with the shared accent while the page is bookmarked.
         bookmarkButton.RestingBackground = theme.InputBackground;
         UpdateBookmarkButton();
+        UpdateOverviewButton();
 
         addressBox.Font = BrowserThemeManager.Instance.GetUiFont(dpi);
         addressPanel.ApplyTheme(theme);
@@ -162,6 +170,17 @@ internal sealed class BrowserToolbar : UserControl
         bookmarkButton.Enabled = canBookmark;
         this.isBookmarked = isBookmarked;
         UpdateBookmarkButton();
+    }
+
+    /// <summary>
+    /// Overview toggle state: an accent glyph on a pressed surface while
+    /// the overview overlay is open, so the toolbar reflects it like a
+    /// latched Chrome toolbar action.
+    /// </summary>
+    public void SetOverviewActive(bool isActive)
+    {
+        isOverviewActive = isActive;
+        UpdateOverviewButton();
     }
 
     public void FocusAddress()
@@ -218,10 +237,16 @@ internal sealed class BrowserToolbar : UserControl
         var buttonHeight = BrowserTheme.Metrics.Scale(BrowserTheme.Metrics.InputHeight, dpi);
         var top = Math.Max(0, (ClientSize.Height - buttonHeight) / 2);
 
-        // Sidebar segment: [+ new tab][overview slot], right-aligned.
+        // Sidebar segment: [+ new tab][tab overview], right-aligned; the
+        // overview button fills the slot the layout policy reserved for it.
         var overviewSlotLeft = segments.SidebarSegmentWidth
             - edgePadding
             - BrowserToolbarLayoutPolicy.OverviewSlotWidth(dpi);
+        overviewButton.SetBounds(
+            overviewSlotLeft,
+            top,
+            BrowserToolbarLayoutPolicy.OverviewSlotWidth(dpi),
+            buttonHeight);
         newTabButton.SetBounds(
             overviewSlotLeft - buttonGap - buttonWidth,
             top,
@@ -247,6 +272,12 @@ internal sealed class BrowserToolbar : UserControl
             top,
             addressWidth,
             buttonHeight);
+    }
+
+    private void UpdateOverviewButton()
+    {
+        overviewButton.RestingBackground = isOverviewActive ? theme.ControlPressed : null;
+        overviewButton.EnabledForeground = isOverviewActive ? theme.Accent : null;
     }
 
     private void UpdateBookmarkButton()

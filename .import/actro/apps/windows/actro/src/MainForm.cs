@@ -36,6 +36,7 @@ internal sealed class MainForm : Form
     private readonly BrowserStorageSyncCredentialStore browserSyncCredentialStore;
     private readonly BrowserStorageSyncScheduler browserSyncScheduler;
     private readonly Panel webViewHost;
+    private readonly BrowserTabOverviewPanel overviewPanel;
     private readonly BrowserStatusOverlay statusOverlay;
     private readonly List<BrowserTab> tabs = [];
     private readonly BrowserClosedTabStack closedTabs = new();
@@ -148,6 +149,12 @@ internal sealed class MainForm : Form
         };
         contentSplit.Panel1.Controls.Add(tabSidebar);
         contentSplit.Panel2.Controls.Add(webViewHost);
+        // Tab overview surface (macOS Overview canvas): a card grid that
+        // overlays the content host as a sibling of the docked webViewHost.
+        // ShowTabOverview raises it above the WebView2 child HWND — both
+        // are HWND-backed, so WinForms child z-order applies.
+        overviewPanel = new BrowserTabOverviewPanel();
+        contentSplit.Panel2.Controls.Add(overviewPanel);
         // Bottom-left status bubble above the content host (Chrome
         // behavior); it replaced the fixed toolbar status column. A sibling
         // of the docked webViewHost, kept on top by z-order.
@@ -166,6 +173,7 @@ internal sealed class MainForm : Form
         appMenu.SetRestorePreviousSession(startupSettingsSnapshot.RestorePreviousSession);
         appMenu.SetContentBlockingEnabled(contentBlockingEnabled);
         WireSidebar();
+        WireOverview();
         WireToolbar();
         WireFindBar();
         contentSplit.SplitterMoved += (_, _) => OnSidebarSplitterMoved();
@@ -277,6 +285,7 @@ internal sealed class MainForm : Form
         tabSidebar.ApplyTheme(theme);
         toolbar.ApplyTheme(theme);
         findBar.ApplyTheme(theme);
+        overviewPanel.ApplyTheme(theme);
         statusOverlay.ApplyTheme(theme);
         // Re-clamp the sidebar band: on a DPI change the scaled minimum and
         // the stored width both move.
@@ -341,6 +350,23 @@ internal sealed class MainForm : Form
         tabSidebar.NewTabRequested += (_, _) => RequestNewTab();
         tabSidebar.TabSelected += (_, args) => ActivateTab(args.TabId);
         tabSidebar.TabCloseRequested += async (_, args) => await CloseTabAsync(args.TabId);
+    }
+
+    private void WireOverview()
+    {
+        // Click-to-focus dismisses the overview; closing a card keeps it
+        // open (the SyncSidebar cascade refreshes the remaining grid).
+        overviewPanel.TabSelected += (_, args) =>
+        {
+            ActivateTab(args.TabId);
+            HideTabOverview();
+        };
+        overviewPanel.TabCloseRequested += async (_, args) => await CloseTabAsync(args.TabId);
+        overviewPanel.NewTabRequested += (_, _) =>
+        {
+            HideTabOverview();
+            RequestNewTab();
+        };
     }
 
     /// <summary>
@@ -458,6 +484,7 @@ internal sealed class MainForm : Form
         // There is no Home button (Chrome default); home stays a menu
         // command plus Alt+Home.
         toolbar.NewTabRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.NewTab);
+        toolbar.OverviewToggleRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.ToggleTabOverview);
         toolbar.SidebarToggleRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.ToggleSidebar);
         toolbar.BackRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.Back);
         toolbar.ForwardRequested += (_, _) => ExecuteCommand(BrowserMenuCommand.Forward);
@@ -556,6 +583,9 @@ internal sealed class MainForm : Form
                 break;
             case BrowserMenuCommand.ToggleSidebar:
                 ToggleSidebar();
+                break;
+            case BrowserMenuCommand.ToggleTabOverview:
+                ToggleTabOverview();
                 break;
             case BrowserMenuCommand.Find:
                 OpenFindBar();
@@ -682,11 +712,15 @@ internal sealed class MainForm : Form
                 // then still resolves through the escape policy.
                 statusOverlay.HideStatus();
                 switch (BrowserEscapePolicy.Resolve(
+                    overviewPanel.Visible,
                     findBar.Visible,
                     isPageFullScreen,
                     isBrowserFullScreen,
                     activeTab?.IsLoading == true))
                 {
+                    case BrowserEscapeAction.DismissOverview:
+                        HideTabOverview();
+                        break;
                     case BrowserEscapeAction.CloseFindBar:
                         CloseFindBar();
                         break;
@@ -735,6 +769,9 @@ internal sealed class MainForm : Form
                 return true;
             case Keys.Control | Keys.Shift | Keys.Oemcomma:
                 ExecuteCommand(BrowserMenuCommand.ToggleSidebar);
+                return true;
+            case Keys.Control | Keys.Shift | Keys.A:
+                ExecuteCommand(BrowserMenuCommand.ToggleTabOverview);
                 return true;
             case Keys.Control | Keys.Shift | Keys.I:
                 ExecuteCommand(BrowserMenuCommand.DevTools);
@@ -881,6 +918,65 @@ internal sealed class MainForm : Form
         if (tabs.Contains(tab))
         {
             SyncSidebar();
+        }
+    }
+
+    /// <summary>
+    /// Refreshes the overview snapshot for a tab from WebView2. Skipped
+    /// while CoreWebView2 is uninitialized (nothing to capture yet); on a
+    /// failed capture or undecodable data the prior bitmap is kept, so a
+    /// card degrades to stale-but-real content instead of a placeholder.
+    /// The tab owns the decoded bitmap (disposed on replacement and with
+    /// the tab).
+    /// </summary>
+    private async Task CaptureTabSnapshotAsync(BrowserTab tab)
+    {
+        if (tab.WebView.CoreWebView2 is not CoreWebView2 coreWebView)
+        {
+            return;
+        }
+
+        try
+        {
+            using var previewStream = new MemoryStream();
+            await coreWebView.CapturePreviewAsync(
+                CoreWebView2CapturePreviewImageFormat.Png,
+                previewStream);
+            if (previewStream.Length == 0)
+            {
+                return;
+            }
+
+            previewStream.Position = 0;
+            using var decodedImage = Image.FromStream(previewStream);
+            // Copy the pixels: GDI+ images keep their source stream alive,
+            // and the capture stream is disposed right here.
+            tab.Snapshot = new Bitmap(decodedImage);
+        }
+        catch (ArgumentException)
+        {
+            return;
+        }
+        catch (NotSupportedException)
+        {
+            return;
+        }
+        catch (ObjectDisposedException)
+        {
+            return;
+        }
+        catch (InvalidOperationException)
+        {
+            return;
+        }
+        catch (COMException)
+        {
+            return;
+        }
+
+        if (overviewPanel.Visible && tabs.Contains(tab))
+        {
+            SyncOverview();
         }
     }
 
@@ -1361,6 +1457,17 @@ internal sealed class MainForm : Form
             SyncFullScreenState(tab);
             SyncSidebar();
             return;
+        }
+
+        // Faithful macOS snapshot-on-blur: the outgoing tab's preview
+        // capture starts here, while its webview is still parented under
+        // the host, so the browser still holds the rendered frame. The
+        // capture is skipped when CoreWebView2 is uninitialized and a
+        // failure keeps the prior bitmap — background overview cards show
+        // real last-seen content, not placeholders.
+        if (activeTab is BrowserTab outgoingTab)
+        {
+            _ = CaptureTabSnapshotAsync(outgoingTab);
         }
 
         webViewHost.Controls.Clear();
@@ -2510,6 +2617,70 @@ internal sealed class MainForm : Form
         tabSidebar.UpdateTabs(
             tabs.Select(tab => new BrowserTabHeader(tab.Id, tab.DisplayTitle, tab.IsLoading, tab.Favicon)).ToList(),
             activeTab?.Id);
+        if (overviewPanel.Visible)
+        {
+            // The overview mirrors the same tab set: every sidebar refresh
+            // (title change, close, activation) keeps the open grid current.
+            SyncOverview();
+        }
+    }
+
+    /// <summary>
+    /// Pushes the current tab set into the overview grid: titles, cached
+    /// snapshots and the active flag. Snapshot bitmaps stay owned (and
+    /// disposed) by their BrowserTab; the panel only borrows them.
+    /// </summary>
+    private void SyncOverview()
+    {
+        overviewPanel.UpdateCards(
+            tabs.Select(tab => new BrowserTabOverviewCard(
+                tab.Id,
+                tab.DisplayTitle,
+                tab.Snapshot,
+                tab == activeTab)).ToList());
+    }
+
+    private void ToggleTabOverview()
+    {
+        if (overviewPanel.Visible)
+        {
+            HideTabOverview();
+        }
+        else
+        {
+            ShowTabOverview();
+        }
+    }
+
+    private void ShowTabOverview()
+    {
+        // Background cards render the snapshots captured when their tabs
+        // lost focus; the active tab gets a fresh capture at open so its
+        // card is current (the async refresh re-syncs the visible grid).
+        if (activeTab is BrowserTab tab)
+        {
+            _ = CaptureTabSnapshotAsync(tab);
+        }
+
+        SyncOverview();
+        overviewPanel.Visible = true;
+        // Above the WebView2 child HWND; the status overlay stays topmost.
+        overviewPanel.BringToFront();
+        statusOverlay.BringToFront();
+        toolbar.SetOverviewActive(true);
+        overviewPanel.Focus();
+    }
+
+    private void HideTabOverview()
+    {
+        if (!overviewPanel.Visible)
+        {
+            return;
+        }
+
+        overviewPanel.Visible = false;
+        toolbar.SetOverviewActive(false);
+        activeTab?.WebView.Focus();
     }
 
     private HostBridgeActions CreateHostBridgeActions()

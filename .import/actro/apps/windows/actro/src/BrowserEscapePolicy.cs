@@ -10,26 +10,32 @@ namespace Actro.Windows;
 internal enum BrowserEscapeAction
 {
     None,
+    DismissOverview,
     CloseFindBar,
     ExitFullScreen,
     Stop,
 }
 
 /// <summary>
-/// Resolves what Escape should do for the current chrome state: close the
-/// find bar first, then leave page or browser full screen, then stop the
-/// loading page, otherwise nothing. The overview parameter joins in the
-/// tab-overview slice at the highest precedence. Harness-linked:
-/// WinForms-free.
+/// Resolves what Escape should do for the current chrome state: dismiss the
+/// tab overview first (the topmost surface), then close the find bar, then
+/// leave page or browser full screen, then stop the loading page, otherwise
+/// nothing. Harness-linked: WinForms-free.
 /// </summary>
 internal static class BrowserEscapePolicy
 {
     public static BrowserEscapeAction Resolve(
+        bool overviewVisible,
         bool findBarVisible,
         bool isPageFullScreen,
         bool isBrowserFullScreen,
         bool isLoading)
     {
+        if (overviewVisible)
+        {
+            return BrowserEscapeAction.DismissOverview;
+        }
+
         if (findBarVisible)
         {
             return BrowserEscapeAction.CloseFindBar;

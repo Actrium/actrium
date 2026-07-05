@@ -40,7 +40,11 @@ internal static class BrowserStrings
             ["toolbar.tooltip.stop"] = "Stop loading (Esc)",
             ["toolbar.tooltip.bookmark"] = "Bookmark this page (Ctrl+D)",
             ["toolbar.tooltip.removeBookmark"] = "Remove bookmark (Ctrl+D)",
+            ["toolbar.tooltip.tabOverview"] = "Tab overview (Ctrl+Shift+A)",
             ["toolbar.tooltip.menu"] = "Menu (Alt+E)",
+
+            // Tab overview surface
+            ["overview.newTab"] = "New tab",
 
             // Compact app menu (mnemonics apply inside the opened menu)
             ["menu.newTab"] = "&New Tab",
@@ -59,6 +63,7 @@ internal static class BrowserStrings
             ["menu.zoomReset"] = "Reset &Zoom",
             ["menu.fullScreen"] = "F&ull Screen",
             ["menu.toggleSidebar"] = "Show or Hide Side&bar",
+            ["menu.toggleTabOverview"] = "Tab O&verview",
             ["menu.find"] = "&Find",
             ["menu.findNext"] = "Find Ne&xt",
             ["menu.findPrevious"] = "Find Pre&vious",
