@@ -56,6 +56,7 @@
     <Compile Include="..\actro\src\BrowserStorageSyncCoordinator.cs" Link="BrowserStorageSyncCoordinator.cs" />
     <Compile Include="..\actro\src\BrowserStorageSyncCredentialStore.cs" Link="BrowserStorageSyncCredentialStore.cs" />
     <Compile Include="..\actro\src\BrowserStorageSyncScheduler.cs" Link="BrowserStorageSyncScheduler.cs" />
+    <Compile Include="..\actro\src\BrowserStrings.cs" Link="BrowserStrings.cs" />
     <Compile Include="..\actro\src\BrowserSyncStatusPolicy.cs" Link="BrowserSyncStatusPolicy.cs" />
     <Compile Include="..\actro\src\BrowserTheme.cs" Link="BrowserTheme.cs" />
     <Compile Include="..\actro\src\BrowserThemeSelectionPolicy.cs" Link="BrowserThemeSelectionPolicy.cs" />

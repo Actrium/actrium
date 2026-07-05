@@ -532,7 +532,7 @@ internal sealed class MainForm : Form
         coreWebView.DocumentTitleChanged += (_, _) =>
         {
             tab.Title = string.IsNullOrWhiteSpace(coreWebView.DocumentTitle)
-                ? "New Tab"
+                ? BrowserStrings.Get("tab.defaultTitle")
                 : coreWebView.DocumentTitle;
             SyncActiveTabUi();
             SyncTabStrip();
@@ -616,7 +616,7 @@ internal sealed class MainForm : Form
             {
                 if (!externalProtocolManager.HandleExternalProtocol(args.Uri))
                 {
-                    toolbar.SetStatus("Blocked unsafe navigation");
+                    toolbar.SetStatus(BrowserStrings.Get("status.navigationBlocked"));
                 }
             }
 
@@ -689,7 +689,7 @@ internal sealed class MainForm : Form
 
         if (!NavigationPolicy.TryNormalizeAddress(requestedAddress, out var normalizedAddress))
         {
-            toolbar.SetStatus("Blocked unsafe new window");
+            toolbar.SetStatus(BrowserStrings.Get("status.newWindowBlocked"));
             return;
         }
 
@@ -774,7 +774,7 @@ internal sealed class MainForm : Form
         if (NewWindowRequested is null)
         {
             RequestNewTab();
-            toolbar.SetStatus("Opened a new tab because window management is unavailable");
+            toolbar.SetStatus(BrowserStrings.Get("status.newWindowUnavailable"));
             return;
         }
 
@@ -785,7 +785,7 @@ internal sealed class MainForm : Form
     {
         if (NewPrivateWindowRequested is null)
         {
-            toolbar.SetStatus("Private window management is unavailable");
+            toolbar.SetStatus(BrowserStrings.Get("status.privateWindowUnavailable"));
             return;
         }
 
@@ -828,7 +828,7 @@ internal sealed class MainForm : Form
     {
         var tab = await CreateAndActivateTabAsync(snapshot.Address);
         tab.Title = snapshot.Title;
-        toolbar.SetStatus("Duplicated tab");
+        toolbar.SetStatus(BrowserStrings.Get("status.tabDuplicated"));
         SyncActiveTabUi();
         SyncTabStrip();
     }
@@ -1239,7 +1239,7 @@ internal sealed class MainForm : Form
             MessageBox.Show(
                 this,
                 FormatBrowserSyncError(error),
-                "Browser Data Sync",
+                BrowserStrings.Get("dialog.sync.title"),
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Warning);
         }
@@ -1266,7 +1266,7 @@ internal sealed class MainForm : Form
             dialog.AccessToken,
             dialog.BaseUrl);
         ScheduleBrowserDataSyncAfterCredentialChange();
-        toolbar.SetStatus("Browser data sync credentials updated");
+        toolbar.SetStatus(BrowserStrings.Get("status.syncCredentialsUpdated"));
     }
 
     private void ShowBrowserSyncStatus()
@@ -1274,7 +1274,7 @@ internal sealed class MainForm : Form
         MessageBox.Show(
             this,
             BrowserSyncStatusPolicy.FormatStatusJson(ReadBrowserSyncStatusJson()),
-            "Browser Data Sync",
+            BrowserStrings.Get("dialog.sync.title"),
             MessageBoxButtons.OK,
             MessageBoxIcon.Information);
     }
@@ -1334,7 +1334,7 @@ internal sealed class MainForm : Form
         var message = string.IsNullOrWhiteSpace(error.Message)
             ? error.GetType().Name
             : error.Message;
-        return $"{BrowserSyncStatusPolicy.FailedStatus}: {message}";
+        return BrowserStrings.Format("dialog.sync.errorFormat", BrowserSyncStatusPolicy.FailedStatus, message);
     }
 
     private void SetSearchEngine(string engineId)
@@ -1345,15 +1345,15 @@ internal sealed class MainForm : Form
             searchSettingsStore.Save(searchSettingsSnapshot);
             mainMenu.SetSearchEngine(searchSettingsSnapshot.SearchEngineId);
             BrowserSearchEnginePolicy.TryGetEngine(searchSettingsSnapshot.SearchEngineId, out var engine);
-            toolbar.SetStatus($"Search engine: {engine.DisplayName}");
+            toolbar.SetStatus(BrowserStrings.Format("status.searchEngineChanged", engine.DisplayName));
         }
         catch (IOException)
         {
-            toolbar.SetStatus("Search engine update failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.searchEngineUpdateFailed"));
         }
         catch (UnauthorizedAccessException)
         {
-            toolbar.SetStatus("Search engine update failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.searchEngineUpdateFailed"));
         }
     }
 
@@ -1364,18 +1364,18 @@ internal sealed class MainForm : Form
             startupSettingsSnapshot = startupSettingsStore.CreateSnapshot(restorePreviousSession);
             startupSettingsStore.Save(startupSettingsSnapshot);
             mainMenu.SetRestorePreviousSession(startupSettingsSnapshot.RestorePreviousSession);
-            toolbar.SetStatus(
+            toolbar.SetStatus(BrowserStrings.Get(
                 startupSettingsSnapshot.RestorePreviousSession
-                    ? "Startup restores previous session"
-                    : "Startup opens home");
+                    ? "status.startupRestoresSession"
+                    : "status.startupOpensHome"));
         }
         catch (IOException)
         {
-            toolbar.SetStatus("Startup setting update failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.startupSettingUpdateFailed"));
         }
         catch (UnauthorizedAccessException)
         {
-            toolbar.SetStatus("Startup setting update failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.startupSettingUpdateFailed"));
         }
     }
 
@@ -1513,7 +1513,7 @@ internal sealed class MainForm : Form
         if (activeTab is null
             || !BrowserBookmarkStore.TryNormalizeBookmarkAddress(activeTab.Address, out _))
         {
-            toolbar.SetStatus("This page cannot be bookmarked");
+            toolbar.SetStatus(BrowserStrings.Get("status.pageNotBookmarkable"));
             return;
         }
 
@@ -1524,7 +1524,7 @@ internal sealed class MainForm : Form
             {
                 if (bookmarkStore.RemoveAddress(activeTab.Address))
                 {
-                    toolbar.SetStatus("Bookmark removed");
+                    toolbar.SetStatus(BrowserStrings.Get("status.bookmarkRemoved"));
                     didChangeBookmarks = true;
                 }
             }
@@ -1536,7 +1536,7 @@ internal sealed class MainForm : Form
                         activeTab.Address,
                         DateTimeOffset.UtcNow))
                 {
-                    toolbar.SetStatus("Page bookmarked");
+                    toolbar.SetStatus(BrowserStrings.Get("status.bookmarkAdded"));
                     didChangeBookmarks = true;
                 }
             }
@@ -1550,11 +1550,11 @@ internal sealed class MainForm : Form
         }
         catch (IOException)
         {
-            toolbar.SetStatus("Bookmark update failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.bookmarkUpdateFailed"));
         }
         catch (UnauthorizedAccessException)
         {
-            toolbar.SetStatus("Bookmark update failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.bookmarkUpdateFailed"));
         }
     }
 
@@ -1570,9 +1570,9 @@ internal sealed class MainForm : Form
             AddExtension = false,
             CheckFileExists = true,
             CheckPathExists = true,
-            Filter = "Web and text files|*.html;*.htm;*.xhtml;*.svg;*.txt;*.md;*.pdf|All files|*.*",
+            Filter = BrowserStrings.Get("dialog.openFile.filter"),
             RestoreDirectory = true,
-            Title = "Open File",
+            Title = BrowserStrings.Get("dialog.openFile.title"),
         };
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
@@ -1582,13 +1582,13 @@ internal sealed class MainForm : Form
 
         if (!NavigationPolicy.TryNormalizeLocalFilePath(dialog.FileName, out var fileAddress))
         {
-            toolbar.SetStatus("Selected file cannot be opened");
+            toolbar.SetStatus(BrowserStrings.Get("status.fileOpenRejected"));
             return;
         }
 
         if (!TryNavigateTabAddress(activeTab, fileAddress, out var errorMessage))
         {
-            toolbar.SetStatus(errorMessage ?? "Selected file cannot be opened");
+            toolbar.SetStatus(errorMessage ?? BrowserStrings.Get("status.fileOpenRejected"));
         }
     }
 
@@ -1605,11 +1605,11 @@ internal sealed class MainForm : Form
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus("Print is not available");
+            toolbar.SetStatus(BrowserStrings.Get("status.printUnavailable"));
         }
         catch (ArgumentException)
         {
-            toolbar.SetStatus("Print is not available");
+            toolbar.SetStatus(BrowserStrings.Get("status.printUnavailable"));
         }
     }
 
@@ -1665,10 +1665,10 @@ internal sealed class MainForm : Form
             AddExtension = true,
             DefaultExt = "pdf",
             FileName = BrowserPdfPolicy.GetSuggestedFileName(activeTab.DisplayTitle, activeTab.Address),
-            Filter = "PDF files|*.pdf|All files|*.*",
+            Filter = BrowserStrings.Get("dialog.savePdf.filter"),
             OverwritePrompt = true,
             RestoreDirectory = true,
-            Title = "Save as PDF",
+            Title = BrowserStrings.Get("dialog.savePdf.title"),
         };
 
         if (dialog.ShowDialog(this) != DialogResult.OK)
@@ -1678,7 +1678,7 @@ internal sealed class MainForm : Form
 
         try
         {
-            toolbar.SetStatus("Saving PDF...");
+            toolbar.SetStatus(BrowserStrings.Get("status.savingPdf"));
             var printSettings = webViewEnvironment?.CreatePrintSettings();
             if (printSettings is not null)
             {
@@ -1690,19 +1690,19 @@ internal sealed class MainForm : Form
         }
         catch (InvalidOperationException)
         {
-            toolbar.SetStatus("Save as PDF failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.savePdfFailed"));
         }
         catch (ArgumentException)
         {
-            toolbar.SetStatus("Save as PDF failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.savePdfFailed"));
         }
         catch (IOException)
         {
-            toolbar.SetStatus("Save as PDF failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.savePdfFailed"));
         }
         catch (UnauthorizedAccessException)
         {
-            toolbar.SetStatus("Save as PDF failed");
+            toolbar.SetStatus(BrowserStrings.Get("status.savePdfFailed"));
         }
     }
 
@@ -1737,7 +1737,9 @@ internal sealed class MainForm : Form
 
         var normalizedZoom = BrowserZoomPolicy.Normalize(zoomFactor);
         activeTab.WebView.ZoomFactor = normalizedZoom;
-        toolbar.SetStatus($"Zoom {BrowserZoomPolicy.FormatZoom(normalizedZoom)}");
+        toolbar.SetStatus(BrowserStrings.Format(
+            "status.zoomLevel",
+            BrowserZoomPolicy.FormatZoom(normalizedZoom)));
         SyncActiveTabUi();
     }
 
@@ -1896,14 +1898,15 @@ internal sealed class MainForm : Form
 
         if (string.IsNullOrWhiteSpace(query))
         {
-            toolbar.SetStatus("Enter text to find");
+            toolbar.SetStatus(BrowserStrings.Get("status.find.emptyQuery"));
             return;
         }
 
         lastFindQuery = query;
         var result = await activeTab.WebView.CoreWebView2.ExecuteScriptAsync(
             BrowserFindPolicy.BuildWindowFindScript(query, forward));
-        toolbar.SetStatus(BrowserFindPolicy.IsFoundResult(result) ? "Match found" : "No match");
+        toolbar.SetStatus(BrowserStrings.Get(
+            BrowserFindPolicy.IsFoundResult(result) ? "status.find.matchFound" : "status.find.noMatch"));
     }
 
     private void RepeatFind(bool forward)
@@ -1931,13 +1934,13 @@ internal sealed class MainForm : Form
             out var resolvedAddress,
             out _))
         {
-            toolbar.SetStatus("Enter a valid URL or search query");
+            toolbar.SetStatus(BrowserStrings.Get("status.addressInvalid"));
             return;
         }
 
         if (!TryNavigateTabAddress(activeTab, resolvedAddress, out var errorMessage))
         {
-            toolbar.SetStatus(errorMessage ?? "Enter a valid URL or search query");
+            toolbar.SetStatus(errorMessage ?? BrowserStrings.Get("status.addressInvalid"));
             return;
         }
     }
@@ -1946,7 +1949,7 @@ internal sealed class MainForm : Form
     {
         if (tab.WebView.CoreWebView2 is null)
         {
-            errorMessage = "Tab is not ready";
+            errorMessage = BrowserStrings.Get("status.tabNotReady");
             return false;
         }
 
@@ -1973,7 +1976,7 @@ internal sealed class MainForm : Form
 
         if (!NavigationPolicy.TryNormalizeAddress(address, out var normalizedAddress))
         {
-            errorMessage = "Enter a valid URL";
+            errorMessage = BrowserStrings.Get("status.addressNotNormalizable");
             return false;
         }
 
@@ -2004,14 +2007,16 @@ internal sealed class MainForm : Form
     private void UpdateWindowTitle(string documentTitle)
     {
         var productTitle = GetProductWindowTitle();
-        Text = string.IsNullOrWhiteSpace(documentTitle) || documentTitle == "Actro"
+        Text = string.IsNullOrWhiteSpace(documentTitle)
+            || documentTitle == BrowserStrings.Get("window.title.product")
             ? productTitle
-            : $"{documentTitle} - {productTitle}";
+            : BrowserStrings.Format("window.title.documentFormat", documentTitle, productTitle);
     }
 
     private string GetProductWindowTitle()
     {
-        return isPrivateWindow ? "Actro Private" : "Actro";
+        return BrowserStrings.Get(
+            isPrivateWindow ? "window.title.privateProduct" : "window.title.product");
     }
 
     private void SyncActiveTabUi()
@@ -2034,7 +2039,7 @@ internal sealed class MainForm : Form
                 canZoomIn: false,
                 canZoomOut: false,
                 canResetZoom: false);
-            UpdateWindowTitle("Actro");
+            UpdateWindowTitle(BrowserStrings.Get("window.title.product"));
             return;
         }
 
@@ -2252,7 +2257,7 @@ internal sealed class MainForm : Form
             SyncActiveTabUi();
             if (removed)
             {
-                toolbar.SetStatus("Bookmark removed");
+                toolbar.SetStatus(BrowserStrings.Get("status.bookmarkRemoved"));
                 ScheduleBrowserDataSyncAfterLocalChange();
             }
 
@@ -2286,7 +2291,7 @@ internal sealed class MainForm : Form
             var removed = historyStore.RemoveAddress(address);
             if (removed)
             {
-                toolbar.SetStatus("History entry removed");
+                toolbar.SetStatus(BrowserStrings.Get("status.historyEntryRemoved"));
                 ScheduleBrowserDataSyncAfterLocalChange();
             }
 
@@ -2462,7 +2467,7 @@ internal sealed class MainForm : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(24),
             TextAlign = ContentAlignment.MiddleCenter,
-            Text = $"Actro Windows failed to start WebView2.{Environment.NewLine}{error.Message}",
+            Text = BrowserStrings.Get("error.startupWebView") + Environment.NewLine + error.Message,
         });
     }
 }

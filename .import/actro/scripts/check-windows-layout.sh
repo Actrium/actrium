@@ -82,6 +82,7 @@ required_files=(
   "apps/windows/actro/src/BrowserSearchSettingsStore.cs"
   "apps/windows/actro/src/BrowserSessionStore.cs"
   "apps/windows/actro/src/BrowserStartupSettingsStore.cs"
+  "apps/windows/actro/src/BrowserStrings.cs"
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserTab.cs"
   "apps/windows/actro/src/BrowserTabStrip.cs"
@@ -449,6 +450,39 @@ check_pattern_in_each_file \
   'BrowserDocumentStylePolicy' \
   "Windows tests link and exercise the shared document stylesheet" \
   "Windows tests do not link and exercise the shared document stylesheet" \
+  apps/windows/actro.tests/Actro.Windows.Tests.csproj \
+  apps/windows/actro.tests/Program.cs
+
+missing_string_table_symbols=()
+for strings_symbol in 'static string Get' 'static string Format' 'IReadOnlyDictionary<string, string> All'; do
+  if ! rg -Fq "$strings_symbol" apps/windows/actro/src/BrowserStrings.cs; then
+    missing_string_table_symbols+=("$strings_symbol")
+  fi
+done
+
+if [[ "${#missing_string_table_symbols[@]}" -ne 0 ]]; then
+  print_failure "Windows browser string table is missing its lookup API"
+  printf '%s\n' "${missing_string_table_symbols[@]}"
+else
+  print_ok "Windows browser string table exposes Get/Format/All"
+fi
+
+# BrowserMainMenu.cs is deliberately absent from the consumer list: the
+# classic menu bar is replaced by the compact app menu, whose labels join
+# the table as menu.* keys together with the menu model.
+check_pattern_in_each_file \
+  'BrowserStrings\.' \
+  "Windows chrome consumes the centralized string table" \
+  "Windows chrome does not consume the centralized string table" \
+  apps/windows/actro/src/MainForm.cs \
+  apps/windows/actro/src/BrowserToolbar.cs \
+  apps/windows/actro/src/BrowserFindBar.cs \
+  apps/windows/actro/src/BrowserSyncConnectionDialog.cs
+
+check_pattern_in_each_file \
+  'BrowserStrings' \
+  "Windows tests link and exercise the string table" \
+  "Windows tests do not link and exercise the string table" \
   apps/windows/actro.tests/Actro.Windows.Tests.csproj \
   apps/windows/actro.tests/Program.cs
 

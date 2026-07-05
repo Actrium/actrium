@@ -47,6 +47,7 @@ required_files=(
   "apps/windows/actro/src/BrowserSessionStore.cs"
   "apps/windows/actro/src/BrowserStartupSettingsStore.cs"
   "apps/windows/actro/src/BrowserStorageDatabase.cs"
+  "apps/windows/actro/src/BrowserStrings.cs"
   "apps/windows/actro/src/BrowserWindowStateStore.cs"
   "apps/windows/actro/src/BrowserTab.cs"
   "apps/windows/actro/src/BrowserTabStrip.cs"
@@ -373,6 +374,36 @@ done
 for theme_test_symbol in BrowserThemeSelectionPolicy 'BrowserTheme.Metrics.Scale' 'BrowserDocumentStylePolicy.RootCss'; do
   if ! rg -Fq "$theme_test_symbol" apps/windows/actro.tests/Program.cs; then
     print_failure "Windows tests do not exercise theme behavior: $theme_test_symbol"
+  fi
+done
+
+for strings_symbol in 'static string Get' 'static string Format' 'IReadOnlyDictionary<string, string> All'; do
+  if ! rg -Fq "$strings_symbol" apps/windows/actro/src/BrowserStrings.cs; then
+    print_failure "Windows browser string table is missing API: $strings_symbol"
+  fi
+done
+
+# BrowserMainMenu.cs is deliberately absent from this list: the classic menu
+# bar is replaced by the compact app menu, whose labels join the table as
+# menu.* keys together with the menu model.
+for strings_consumer in \
+  apps/windows/actro/src/MainForm.cs \
+  apps/windows/actro/src/BrowserToolbar.cs \
+  apps/windows/actro/src/BrowserFindBar.cs \
+  apps/windows/actro/src/BrowserSyncConnectionDialog.cs
+do
+  if ! rg -q 'BrowserStrings\.' "$strings_consumer"; then
+    print_failure "Windows chrome does not consume the centralized string table: $strings_consumer"
+  fi
+done
+
+if ! rg -q 'BrowserStrings' "$test_project"; then
+  print_failure "Windows tests do not link the browser string table"
+fi
+
+for strings_test_symbol in 'BrowserStrings.All' 'BrowserStrings.Get' 'BrowserStrings.Format' CollectFormatPlaceholderIndices; do
+  if ! rg -Fq "$strings_test_symbol" apps/windows/actro.tests/Program.cs; then
+    print_failure "Windows tests do not exercise the browser string table: $strings_test_symbol"
   fi
 done
 

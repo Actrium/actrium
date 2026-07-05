@@ -26,11 +26,11 @@ internal sealed class BrowserToolbar : UserControl
         Dock = DockStyle.Top;
         Padding = new Padding(8, 7, 8, 7);
 
-        backButton = CreateButton("Back");
-        forwardButton = CreateButton("Forward");
-        reloadButton = CreateButton("Reload");
-        homeButton = CreateButton("Home");
-        goButton = CreateButton("Go");
+        backButton = CreateButton(BrowserStrings.Get("toolbar.back"));
+        forwardButton = CreateButton(BrowserStrings.Get("toolbar.forward"));
+        reloadButton = CreateButton(BrowserStrings.Get("toolbar.reload"));
+        homeButton = CreateButton(BrowserStrings.Get("toolbar.home"));
+        goButton = CreateButton(BrowserStrings.Get("toolbar.go"));
 
         addressBox = new TextBox
         {
@@ -125,8 +125,8 @@ internal sealed class BrowserToolbar : UserControl
     {
         backButton.Enabled = canGoBack;
         forwardButton.Enabled = canGoForward;
-        reloadButton.Text = isLoading ? "Stop" : "Reload";
-        statusLabel.Text = isLoading ? "Loading" : string.Empty;
+        reloadButton.Text = BrowserStrings.Get(isLoading ? "toolbar.stop" : "toolbar.reload");
+        statusLabel.Text = isLoading ? BrowserStrings.Get("toolbar.status.loading") : string.Empty;
     }
 
     public void SetStatus(string status)
