@@ -2231,6 +2231,496 @@ var tests = new (string Name, Func<Task> Run)[]
             DeleteDatabaseFiles(databasePath);
         }
     }),
+    ("persists browser sync provider settings", () =>
+    {
+        var filePath = CreateTempPath();
+        var mintedPath = CreateTempPath();
+        try
+        {
+            var store = new BrowserSyncProviderSettingsStore(filePath, () => "device-win-legacy");
+
+            // First load adopts the legacy endpoint credential device id and
+            // persists it immediately so the identity is durable.
+            var created = store.Load();
+            AssertEqual(1, created.Version);
+            AssertEqual(null, created.ProviderKind);
+            AssertEqual(null, created.LocalFolderRootPath);
+            AssertEqual("default", created.Scope);
+            AssertEqual("device-win-legacy", created.DeviceId);
+            AssertEqual(null, created.MembershipJoinedAtUnixSeconds);
+            AssertTrue(File.Exists(filePath));
+
+            var root = CreateTempDirectoryPath();
+            store.Save(store.CreateSnapshot("localFolder", $" {root} ", " profile "));
+            var connected = store.Load();
+            AssertEqual("localFolder", connected.ProviderKind);
+            AssertEqual(root, connected.LocalFolderRootPath);
+            AssertEqual("profile", connected.Scope);
+            AssertEqual("device-win-legacy", connected.DeviceId);
+            AssertEqual(null, connected.MembershipJoinedAtUnixSeconds);
+
+            // The membership marker round-trips and clears without touching
+            // the rest of the snapshot.
+            store.SaveMembershipJoined(1900);
+            AssertEqual(1900L, store.Load().MembershipJoinedAtUnixSeconds);
+            store.ClearMembershipMarker();
+            AssertEqual(null, store.Load().MembershipJoinedAtUnixSeconds);
+
+            // A relative local-folder root would resolve against the process
+            // working directory: it rejects to "not configured", and a marker
+            // cannot survive without a configured provider.
+            store.Save(store.CreateSnapshot(
+                "localFolder",
+                "relative/sync-root",
+                membershipJoinedAtUnixSeconds: 1905));
+            var relative = store.Load();
+            AssertEqual(null, relative.LocalFolderRootPath);
+            AssertEqual(null, relative.MembershipJoinedAtUnixSeconds);
+
+            // Unknown provider kinds are contract drift and reject to null.
+            store.Save(store.CreateSnapshot("magicDrive", root));
+            AssertEqual(null, store.Load().ProviderKind);
+
+            // Disconnect clears the provider fields and the membership marker
+            // but keeps the durable device id, so reconnecting the same folder
+            // resumes the same device membership.
+            store.Save(store.CreateSnapshot("localFolder", root));
+            store.SaveMembershipJoined(1910);
+            var disconnected = store.Disconnect();
+            AssertEqual(null, disconnected.ProviderKind);
+            AssertEqual(null, disconnected.LocalFolderRootPath);
+            AssertEqual(null, disconnected.MembershipJoinedAtUnixSeconds);
+            AssertEqual("device-win-legacy", disconnected.DeviceId);
+
+            // Without a legacy session the store mints a fresh device id.
+            var minted = new BrowserSyncProviderSettingsStore(mintedPath).Load();
+            AssertTrue(Guid.TryParse(minted.DeviceId, out _));
+        }
+        finally
+        {
+            File.Delete(filePath);
+            File.Delete(mintedPath);
+        }
+
+        return Task.CompletedTask;
+    }),
+    ("plans browser sync provider connection routing", () =>
+    {
+        var root = CreateTempDirectoryPath();
+        var joined = new BrowserSyncProviderSettingsSnapshot(
+            1, "localFolder", root, "profile", "device-win", 1900, 1901);
+
+        // Cold start with the persisted membership marker: straight to the
+        // cycle round, no membership write.
+        var cyclePlan = BrowserSyncProviderConnectionPlanner.Plan(joined, null, 0, 2000);
+        AssertEqual(BrowserSyncProviderRouting.RunLocalFolderCycle, cyclePlan.Routing);
+        AssertEqual("ready", cyclePlan.ConnectionPolicy?["classification"]?.GetValue<string>());
+        AssertEqual("active", cyclePlan.ProviderSnapshot?["membershipStatus"]?.GetValue<string>());
+        AssertEqual("localFolder", cyclePlan.ConnectionPolicy?["providerKind"]?.GetValue<string>());
+
+        // Cold start without the marker: the membership join round runs first.
+        var fresh = joined with { MembershipJoinedAtUnixSeconds = null };
+        var membershipPlan = BrowserSyncProviderConnectionPlanner.Plan(fresh, null, 0, 2001);
+        AssertEqual(BrowserSyncProviderRouting.RunLocalFolderMembership, membershipPlan.Routing);
+        AssertEqual(
+            "membershipRequired",
+            membershipPlan.ConnectionPolicy?["classification"]?.GetValue<string>());
+        AssertTrue(membershipPlan.ConnectionPolicy?["shouldAttemptMembership"]?.GetValue<bool>() ?? false);
+
+        // A storage-scoped session error blocks with the folder user action.
+        var storagePlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "storage", 0, 2002);
+        AssertEqual(BrowserSyncProviderRouting.Blocked, storagePlan.Routing);
+        AssertEqual(
+            "storageSetupRequired",
+            storagePlan.ConnectionPolicy?["classification"]?.GetValue<string>());
+        AssertEqual(
+            "chooseProviderFolder",
+            storagePlan.ConnectionPolicy?["userAction"]?.GetValue<string>());
+
+        // A transient network error schedules a retry instead of parking on
+        // the user.
+        var retryPlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "network", 1, 2003);
+        AssertEqual(BrowserSyncProviderRouting.Blocked, retryPlan.Routing);
+        AssertEqual(
+            "providerUnavailable",
+            retryPlan.ConnectionPolicy?["classification"]?.GetValue<string>());
+        AssertEqual(
+            "scheduleRetry",
+            retryPlan.ConnectionPolicy?["schedulerAction"]?.GetValue<string>());
+
+        // Unconfigured settings short-circuit without a policy call.
+        var unconfiguredPlan = BrowserSyncProviderConnectionPlanner.Plan(
+            joined with { ProviderKind = null }, null, 0, 2004);
+        AssertEqual(BrowserSyncProviderRouting.NotConfigured, unconfiguredPlan.Routing);
+        AssertEqual(null, unconfiguredPlan.ConnectionPolicy);
+        AssertEqual(
+            BrowserSyncProviderRouting.NotConfigured,
+            BrowserSyncProviderConnectionPlanner.Plan(null, null, 0, 2005).Routing);
+        AssertEqual(
+            BrowserSyncProviderRouting.NotConfigured,
+            BrowserSyncProviderConnectionPlanner.Plan(
+                joined with { LocalFolderRootPath = null }, null, 0, 2006).Routing);
+
+        // A configured cloud provider cannot run yet and blocks on connect.
+        var cloudPlan = BrowserSyncProviderConnectionPlanner.Plan(
+            new BrowserSyncProviderSettingsSnapshot(
+                1, "googleDrive", null, "profile", "device-win", null, 1901),
+            null,
+            0,
+            2007);
+        AssertEqual(BrowserSyncProviderRouting.Blocked, cloudPlan.Routing);
+        AssertEqual(
+            "signInRequired",
+            cloudPlan.ConnectionPolicy?["classification"]?.GetValue<string>());
+
+        // Membership/storage-scoped provider errors clear the persisted
+        // marker (one corrective join on the next run); everything else
+        // keeps it.
+        AssertTrue(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("storageSetupRequired"));
+        AssertTrue(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("recoveryRequired"));
+        AssertTrue(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("deviceMembershipRevoked"));
+        AssertFalse(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("providerUnavailable"));
+        AssertFalse(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("cloudStateRereadRequired"));
+        AssertFalse(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker(""));
+        AssertFalse(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker(null));
+
+        // Session error-kind mapping into the connection contract vocabulary.
+        AssertEqual("storage", BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("storageSetupRequired"));
+        AssertEqual("auth", BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("authExpired"));
+        AssertEqual("providerUnavailable", BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("providerUnavailable"));
+        AssertEqual(null, BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("ready"));
+        AssertEqual(null, BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("cloudStateRereadRequired"));
+        AssertEqual(null, BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification(null));
+
+        return Task.CompletedTask;
+    }),
+    ("translates blocked provider connection policy into scheduler state", () =>
+    {
+        var root = CreateTempDirectoryPath();
+        var joined = new BrowserSyncProviderSettingsSnapshot(
+            1, "localFolder", root, "profile", "device-win", 1900, 1901);
+
+        // Through the real Rust policy: storage-blocked parks on the user.
+        var storagePlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "storage", 2, 2100);
+        var parked = BrowserSyncProviderConnectionPlanner.BuildBlockedScheduleState(
+            storagePlan.ConnectionPolicy!, 2, 2100);
+        AssertEqual("waitForProviderStorage", parked["schedulerAction"]?.GetValue<string>());
+        AssertEqual("storageSetupRequired", parked["classification"]?.GetValue<string>());
+        AssertTrue(parked["requiresUserAction"]?.GetValue<bool>() ?? false);
+        AssertEqual("chooseProviderFolder", parked["userAction"]?.GetValue<string>());
+        AssertFalse(parked["waitingForCredentials"]?.GetValue<bool>() ?? true);
+        AssertFalse(parked["resetRetryAttempt"]?.GetValue<bool>() ?? true);
+        AssertTrue(parked["nextRunDelaySeconds"] is null);
+        AssertTrue(parked["nextRetryAttempt"] is null);
+
+        // Through the real Rust policy: a retryable outage schedules the
+        // next attempt with the policy's backoff delay.
+        var retryPlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "network", 1, 2101);
+        var retry = BrowserSyncProviderConnectionPlanner.BuildBlockedScheduleState(
+            retryPlan.ConnectionPolicy!, 1, 2101);
+        AssertEqual("scheduleRetry", retry["schedulerAction"]?.GetValue<string>());
+        AssertEqual(10U, retry["nextRunDelaySeconds"]?.GetValue<uint>());
+        AssertEqual(2111L, retry["nextRunAtUnixSeconds"]?.GetValue<long>());
+        AssertEqual(2U, retry["nextRetryAttempt"]?.GetValue<uint>());
+        AssertFalse(retry["requiresUserAction"]?.GetValue<bool>() ?? true);
+        AssertFalse(retry["waitingForCredentials"]?.GetValue<bool>() ?? true);
+
+        // Synthetic rows pin the pure field mapping itself.
+        var idlePolicy = JsonNode.Parse(
+            """
+            {
+                "classification": "ready",
+                "schedulerAction": "idle",
+                "userAction": "none",
+                "resetRetryAttempt": true
+            }
+            """)!.AsObject();
+        var idle = BrowserSyncProviderConnectionPlanner.BuildBlockedScheduleState(idlePolicy, 5, 2102);
+        AssertEqual("idle", idle["schedulerAction"]?.GetValue<string>());
+        AssertTrue(idle["resetRetryAttempt"]?.GetValue<bool>() ?? false);
+        AssertFalse(idle["requiresUserAction"]?.GetValue<bool>() ?? true);
+        AssertTrue(idle["nextRetryAttempt"] is null);
+        AssertTrue(idle["nextRunDelaySeconds"] is null);
+
+        var retryPolicy = JsonNode.Parse(
+            """
+            {
+                "classification": "providerUnavailable",
+                "schedulerAction": "scheduleRetry",
+                "retryDelaySeconds": 20,
+                "userAction": "none",
+                "resetRetryAttempt": false
+            }
+            """)!.AsObject();
+        var scheduled = BrowserSyncProviderConnectionPlanner.BuildBlockedScheduleState(retryPolicy, 3, 2103);
+        AssertEqual(20U, scheduled["nextRunDelaySeconds"]?.GetValue<uint>());
+        AssertEqual(2123L, scheduled["nextRunAtUnixSeconds"]?.GetValue<long>());
+        AssertEqual(4U, scheduled["nextRetryAttempt"]?.GetValue<uint>());
+        AssertFalse(scheduled["requiresUserAction"]?.GetValue<bool>() ?? true);
+
+        return Task.CompletedTask;
+    }),
+    ("routes browser sync coordinator through the provider connection", async () =>
+    {
+        var databasePath = CreateTempDatabasePath();
+        var providerPath = CreateTempPath();
+        var cloudRoot = CreateTempDirectoryPath();
+        try
+        {
+            var providerStore = new BrowserSyncProviderSettingsStore(
+                providerPath, () => "device-win-provider");
+            providerStore.Save(providerStore.CreateSnapshot("localFolder", cloudRoot, "profile"));
+
+            var database = new BrowserStorageDatabase(databasePath);
+            database.UpsertHistoryItem(new BrowserHistoryItemSnapshot(
+                "Provider Route",
+                "https://example.com/provider-route",
+                2200,
+                1));
+            var transport = new FakeBrowserStorageSyncTransport("{}");
+            var coordinator = new BrowserStorageSyncCoordinator(
+                new BrowserStorageSyncClient(database, transport),
+                new FakeBrowserStorageSyncCredentialsProvider(null),
+                providerStore);
+
+            // First run: no persisted marker, so membership joins first and
+            // the cycle round runs in the same call; the cycle envelope's
+            // cloud scheduleState is lifted to the top level.
+            using (var result = JsonDocument.Parse(await coordinator.RunSyncCycleAsync(
+                2210, 20, observedAtUnixSeconds: 2210)))
+            {
+                AssertEqual("cloudLocalFolderCycle", result.RootElement.GetProperty("endpointType").GetString());
+                AssertTrue(result.RootElement.GetProperty("credentialsAvailable").GetBoolean());
+                AssertEqual("localFolder", result.RootElement.GetProperty("providerKind").GetString());
+                AssertEqual("success", result.RootElement.GetProperty("classification").GetString());
+                AssertEqual(
+                    "cloudCycleScheduleState",
+                    result.RootElement.GetProperty("scheduleState").GetProperty("planType").GetString());
+                AssertEqual(
+                    "cloudCycleStatusPolicy",
+                    result.RootElement.GetProperty("statusPolicy").GetProperty("planType").GetString());
+                AssertEqual(
+                    "cloudLocalFolderCycle",
+                    result.RootElement.GetProperty("syncResult").GetProperty("endpointType").GetString());
+                AssertTrue(result.RootElement.GetProperty("syncResult")
+                    .GetProperty("applyResult").GetProperty("ackApplied").GetBoolean());
+            }
+
+            AssertEqual(2210L, providerStore.Load().MembershipJoinedAtUnixSeconds);
+            AssertTrue(File.Exists(Path.Combine(
+                cloudRoot, "Actro", "BrowserSync", "devices", "device-win-provider.json")));
+
+            // Second run: the marker routes straight to the cycle round and
+            // the membership document is not rewritten.
+            using (var result = JsonDocument.Parse(await coordinator.RunSyncCycleAsync(
+                2220, 20, observedAtUnixSeconds: 2220)))
+            {
+                AssertEqual("cloudLocalFolderCycle", result.RootElement.GetProperty("endpointType").GetString());
+                AssertEqual("success", result.RootElement.GetProperty("classification").GetString());
+            }
+
+            AssertEqual(2210L, providerStore.Load().MembershipJoinedAtUnixSeconds);
+
+            // The reference server transport never ran while the provider
+            // connection owned the cycles.
+            AssertEqual(null, transport.LastRequest);
+
+            // Disconnect keeps the durable device id and falls through to the
+            // endpoint branch, whose result is exactly today's
+            // credentials-unavailable shape.
+            providerStore.Disconnect();
+            AssertEqual("device-win-provider", providerStore.Load().DeviceId);
+            using (var result = JsonDocument.Parse(await coordinator.RunSyncCycleAsync(
+                2230, 20, observedAtUnixSeconds: 2230)))
+            {
+                AssertEqual("syncCycle", result.RootElement.GetProperty("endpointType").GetString());
+                AssertFalse(result.RootElement.GetProperty("credentialsAvailable").GetBoolean());
+                AssertEqual("credentialsUnavailable", result.RootElement.GetProperty("classification").GetString());
+                AssertEqual("refreshCredentials", result.RootElement.GetProperty("clientAction").GetString());
+                AssertEqual(
+                    "waitForCredentials",
+                    result.RootElement.GetProperty("scheduleState").GetProperty("schedulerAction").GetString());
+                AssertTrue(result.RootElement.GetProperty("scheduleState").GetProperty("waitingForCredentials").GetBoolean());
+            }
+
+            AssertEqual(null, transport.LastRequest);
+        }
+        finally
+        {
+            DeleteDatabaseFiles(databasePath);
+            File.Delete(providerPath);
+            if (Directory.Exists(cloudRoot))
+            {
+                Directory.Delete(cloudRoot, recursive: true);
+            }
+        }
+    }),
+    ("shapes blocked browser sync provider coordinator results", async () =>
+    {
+        var databasePath = CreateTempDatabasePath();
+        var providerPath = CreateTempPath();
+        try
+        {
+            var providerStore = new BrowserSyncProviderSettingsStore(providerPath);
+            providerStore.Save(providerStore.CreateSnapshot("googleDrive", null, "profile"));
+
+            var database = new BrowserStorageDatabase(databasePath);
+            var transport = new FakeBrowserStorageSyncTransport("{}");
+            var coordinator = new BrowserStorageSyncCoordinator(
+                new BrowserStorageSyncClient(database, transport),
+                new FakeBrowserStorageSyncCredentialsProvider(null),
+                providerStore);
+
+            // No round runs on the Blocked routing: the scheduleState is the
+            // planner's synthesized translation of the connection policy.
+            using var result = JsonDocument.Parse(await coordinator.RunSyncCycleAsync(
+                2300, 20, 4, 2300));
+
+            AssertEqual("cloudProviderConnection", result.RootElement.GetProperty("endpointType").GetString());
+            AssertTrue(result.RootElement.GetProperty("credentialsAvailable").GetBoolean());
+            AssertEqual("googleDrive", result.RootElement.GetProperty("providerKind").GetString());
+            AssertEqual("signInRequired", result.RootElement.GetProperty("classification").GetString());
+            AssertEqual("connectProvider", result.RootElement.GetProperty("clientAction").GetString());
+            AssertEqual(JsonValueKind.Null, result.RootElement.GetProperty("syncResult").ValueKind);
+            AssertEqual(
+                "cloudProviderConnectionStatusPolicy",
+                result.RootElement.GetProperty("statusPolicy").GetProperty("planType").GetString());
+            var scheduleState = result.RootElement.GetProperty("scheduleState");
+            AssertEqual(
+                "cloudProviderConnectionScheduleState",
+                scheduleState.GetProperty("planType").GetString());
+            AssertEqual("waitForProviderCredentials", scheduleState.GetProperty("schedulerAction").GetString());
+            AssertTrue(scheduleState.GetProperty("requiresUserAction").GetBoolean());
+            AssertFalse(scheduleState.GetProperty("waitingForCredentials").GetBoolean());
+            AssertEqual("connectProvider", scheduleState.GetProperty("userAction").GetString());
+            AssertEqual(null, transport.LastRequest);
+        }
+        finally
+        {
+            DeleteDatabaseFiles(databasePath);
+            File.Delete(providerPath);
+        }
+    }),
+    ("browser sync scheduler consumes cloud and blocked provider schedule states", async () =>
+    {
+        var databasePath = CreateTempDatabasePath();
+        var seedDatabasePath = CreateTempDatabasePath();
+        var providerPath = CreateTempPath();
+        var blockedProviderPath = CreateTempPath();
+        var cloudRoot = CreateTempDirectoryPath();
+        try
+        {
+            var providerStore = new BrowserSyncProviderSettingsStore(providerPath);
+            providerStore.Save(providerStore.CreateSnapshot("localFolder", cloudRoot, "profile"));
+
+            var database = new BrowserStorageDatabase(databasePath);
+            var coordinator = new BrowserStorageSyncCoordinator(
+                new BrowserStorageSyncClient(database, new FakeBrowserStorageSyncTransport("{}")),
+                new FakeBrowserStorageSyncCredentialsProvider(null),
+                providerStore);
+
+            // A successful local-folder cycle: the scheduler consumes the
+            // cloud scheduleState and settles idle with nothing pending.
+            using (var scheduler = new BrowserStorageSyncScheduler(coordinator))
+            {
+                await scheduler.RunNowAsync(2400, 20, 2400);
+                var snapshot = scheduler.Snapshot;
+                AssertEqual("idle", snapshot.SchedulerAction);
+                AssertEqual(0U, snapshot.RetryAttempt);
+                AssertFalse(snapshot.PendingRunScheduled);
+                AssertFalse(snapshot.RequiresUserAction);
+                AssertFalse(snapshot.WaitingForCredentials);
+
+                using var status = JsonDocument.Parse(scheduler.StatusJson);
+                AssertEqual("idle", status.RootElement.GetProperty("status").GetString());
+                AssertEqual("success", status.RootElement.GetProperty("lastClassification").GetString());
+            }
+
+            // A cloud membership round blocked by a newer store schema: the
+            // round's own cloud scheduleState parks the scheduler on the
+            // user, and the membership marker is not persisted.
+            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
+            manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
+            File.WriteAllText(manifestPath, manifest.ToJsonString());
+
+            var freshProviderPath = CreateTempPath();
+            try
+            {
+                var freshProviderStore = new BrowserSyncProviderSettingsStore(freshProviderPath);
+                freshProviderStore.Save(freshProviderStore.CreateSnapshot("localFolder", cloudRoot, "profile"));
+                var seedDatabase = new BrowserStorageDatabase(seedDatabasePath);
+                var blockedMembershipCoordinator = new BrowserStorageSyncCoordinator(
+                    new BrowserStorageSyncClient(seedDatabase, new FakeBrowserStorageSyncTransport("{}")),
+                    new FakeBrowserStorageSyncCredentialsProvider(null),
+                    freshProviderStore);
+                using var scheduler = new BrowserStorageSyncScheduler(blockedMembershipCoordinator);
+
+                using (var result = JsonDocument.Parse(await scheduler.RunNowAsync(2410, 20, 2410)))
+                {
+                    AssertEqual(
+                        "cloudLocalFolderMembership",
+                        result.RootElement.GetProperty("endpointType").GetString());
+                    AssertEqual(
+                        "clientUpgradeRequired",
+                        result.RootElement.GetProperty("classification").GetString());
+                    AssertEqual(
+                        "cloudMembershipScheduleState",
+                        result.RootElement.GetProperty("scheduleState").GetProperty("planType").GetString());
+                }
+
+                var snapshot = scheduler.Snapshot;
+                AssertTrue(snapshot.RequiresUserAction);
+                AssertFalse(snapshot.PendingRunScheduled);
+                AssertFalse(snapshot.WaitingForCredentials);
+                AssertEqual(null, freshProviderStore.Load().MembershipJoinedAtUnixSeconds);
+
+                using var status = JsonDocument.Parse(scheduler.StatusJson);
+                AssertEqual("requiresUserAction", status.RootElement.GetProperty("status").GetString());
+                AssertEqual(
+                    "clientUpgradeRequired",
+                    status.RootElement.GetProperty("lastClassification").GetString());
+            }
+            finally
+            {
+                File.Delete(freshProviderPath);
+            }
+
+            // A blocked provider connection: the scheduler consumes the
+            // synthesized scheduleState and parks on the user as well.
+            var blockedProviderStore = new BrowserSyncProviderSettingsStore(blockedProviderPath);
+            blockedProviderStore.Save(blockedProviderStore.CreateSnapshot("oneDrive", null, "profile"));
+            var blockedCoordinator = new BrowserStorageSyncCoordinator(
+                new BrowserStorageSyncClient(database, new FakeBrowserStorageSyncTransport("{}")),
+                new FakeBrowserStorageSyncCredentialsProvider(null),
+                blockedProviderStore);
+            using (var scheduler = new BrowserStorageSyncScheduler(blockedCoordinator))
+            {
+                await scheduler.RunNowAsync(2420, 20, 2420);
+                var snapshot = scheduler.Snapshot;
+                AssertTrue(snapshot.RequiresUserAction);
+                AssertFalse(snapshot.WaitingForCredentials);
+                AssertFalse(snapshot.PendingRunScheduled);
+
+                using var status = JsonDocument.Parse(scheduler.StatusJson);
+                AssertEqual("requiresUserAction", status.RootElement.GetProperty("status").GetString());
+                AssertEqual(
+                    "signInRequired",
+                    status.RootElement.GetProperty("lastClassification").GetString());
+            }
+        }
+        finally
+        {
+            DeleteDatabaseFiles(databasePath);
+            DeleteDatabaseFiles(seedDatabasePath);
+            File.Delete(providerPath);
+            File.Delete(blockedProviderPath);
+            if (Directory.Exists(cloudRoot))
+            {
+                Directory.Delete(cloudRoot, recursive: true);
+            }
+        }
+    }),
     ("formats browser sync status for product UI", () =>
     {
         AssertEqual(
