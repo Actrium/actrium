@@ -366,6 +366,16 @@ whole connect/revoke round as `success`, `clientUpgradeRequired`,
 `providerUnavailable` before native UX/schedulers decide what to show. The
 adapters still execute SQLite locally and do not expose per-object provider
 operations over FFI.
+On Windows the product UI now fronts this provider connection: the Browser
+Data Sync settings dialog owns provider selection (Local Folder first, the
+cloud drive providers listed but not yet enabled), folder acceptance gated by
+the Rust capability/adapter/compatibility preflights, the connection and
+last-sync status rows, and a collapsible diagnostics detail rendered from the
+last round envelope's Rust provider diagnostics and provider error
+classification. The old endpoint-token connection dialog is development-only:
+it keeps the HTTP transport contract executable against the reference sync
+server and is reachable solely from the settings dialog's advanced
+reference-server link, never as a product surface.
 `browser_storage_sync_cloud_run_push_round()` composes the push side into one
 Rust-owned provider round: read `manifest.json` and the device document through
 `BrowserStorageSyncCloudStore`, build the push write plan, execute the planned

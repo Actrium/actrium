@@ -2483,6 +2483,10 @@ var tests = new (string Name, Func<Task> Run)[]
                 new FakeBrowserStorageSyncCredentialsProvider(null),
                 providerStore);
 
+            // Cold start: no provider round has run, so no diagnostics
+            // summary exists for the settings dialog yet.
+            AssertEqual(null, coordinator.LastProviderRoundDiagnosticsJson);
+
             // First run: no persisted marker, so membership joins first and
             // the cycle round runs in the same call; the cycle envelope's
             // cloud scheduleState is lifted to the top level.
@@ -2509,6 +2513,23 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual(2210L, providerStore.Load().MembershipJoinedAtUnixSeconds);
             AssertTrue(File.Exists(Path.Combine(
                 cloudRoot, "Actro", "BrowserSync", "devices", "device-win-provider.json")));
+
+            // The coordinator keeps the last executed round's diagnostics
+            // summary in memory (here the cycle that followed the join) for
+            // the settings dialog's collapsible diagnostics detail.
+            using (var summary = JsonDocument.Parse(coordinator.LastProviderRoundDiagnosticsJson!))
+            {
+                AssertEqual(
+                    "cloudLocalFolderCycle",
+                    summary.RootElement.GetProperty("endpointType").GetString());
+                AssertEqual("success", summary.RootElement.GetProperty("classification").GetString());
+                AssertEqual(
+                    "cloudProviderDiagnostics",
+                    summary.RootElement.GetProperty("providerDiagnostics").GetProperty("planType").GetString());
+                AssertEqual(
+                    JsonValueKind.Null,
+                    summary.RootElement.GetProperty("providerErrorClassification").ValueKind);
+            }
 
             // Second run: the marker routes straight to the cycle round and
             // the membership document is not rewritten.
@@ -2983,6 +3004,234 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual(
             "Connected",
             BrowserSyncProviderStatusFormatter.FormatConnectionPolicy(plan.ConnectionPolicy));
+
+        return Task.CompletedTask;
+    }),
+    ("formats provider sync diagnostics from local-folder round envelopes", async () =>
+    {
+        var databasePath = CreateTempDatabasePath();
+        var cloudRoot = CreateTempDirectoryPath();
+        try
+        {
+            var database = new BrowserStorageDatabase(databasePath);
+            var client = new BrowserStorageSyncClient(database);
+            database.UpsertHistoryItem(new BrowserHistoryItemSnapshot(
+                "Diagnostics Local Folder",
+                "https://example.com/diagnostics-local-folder",
+                3100,
+                1));
+
+            // Healthy cycle: the envelope embeds the Rust diagnostics summary
+            // and a null error classification (no failed operations), so the
+            // formatter renders the summary section only.
+            using (var healthy = JsonDocument.Parse(await client.RunLocalFolderSyncCycleAsync(
+                cloudRoot,
+                "profile",
+                "device-win",
+                3100,
+                20,
+                observedAtUnixSeconds: 3100)))
+            {
+                AssertEqual("success", healthy.RootElement.GetProperty("classification").GetString());
+                AssertEqual(
+                    JsonValueKind.Null,
+                    healthy.RootElement.GetProperty("providerErrorClassification").ValueKind);
+                var healthyText = BrowserSyncProviderDiagnosticsFormatter.FormatFromJson(
+                    healthy.RootElement.GetRawText());
+                AssertTrue(healthyText.StartsWith("Provider diagnostics", StringComparison.Ordinal));
+                AssertTrue(healthyText.Contains("  Classification: ready", StringComparison.Ordinal));
+                AssertTrue(healthyText.Contains("  Sync allowed: yes", StringComparison.Ordinal));
+                AssertFalse(healthyText.Contains("Provider errors", StringComparison.Ordinal));
+            }
+
+            // Blocked cycle (cloud schema bumped past this client): the same
+            // fixture as the local-folder client case; the formatter surfaces
+            // the blocking classification and its user action readably.
+            var manifestPath = Path.Combine(cloudRoot, "Actro", "BrowserSync", "manifest.json");
+            var manifest = JsonNode.Parse(File.ReadAllText(manifestPath))!.AsObject();
+            manifest["storageSchemaVersion"] = BrowserStorageDatabase.SchemaVersion + 1;
+            File.WriteAllText(manifestPath, manifest.ToJsonString());
+
+            using (var blocked = JsonDocument.Parse(await client.RunLocalFolderSyncCycleAsync(
+                cloudRoot,
+                "profile",
+                "device-win",
+                3110,
+                20,
+                observedAtUnixSeconds: 3110)))
+            {
+                AssertEqual("clientUpgradeRequired", blocked.RootElement.GetProperty("classification").GetString());
+                var blockedText = BrowserSyncProviderDiagnosticsFormatter.FormatFromJson(
+                    blocked.RootElement.GetRawText());
+                AssertTrue(blockedText.StartsWith("Provider diagnostics", StringComparison.Ordinal));
+                AssertTrue(blockedText.Contains(
+                    "  Classification: clientUpgradeRequired",
+                    StringComparison.Ordinal));
+                AssertTrue(blockedText.Contains("  Sync allowed: no", StringComparison.Ordinal));
+                var blockedUserAction = blocked.RootElement
+                    .GetProperty("providerDiagnostics").GetProperty("userAction").GetString()!;
+                if (!string.Equals(blockedUserAction, "none", StringComparison.Ordinal))
+                {
+                    AssertTrue(blockedText.Contains(
+                        $"  User action: {blockedUserAction}",
+                        StringComparison.Ordinal));
+                }
+            }
+
+            // Membership-blocked round over the same bumped store: the second
+            // device's join is refused and the formatter renders the same
+            // blocking diagnosis for the membership envelope.
+            var blockedJoinRequestJson = JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["scope"] = "profile",
+                ["actorDeviceId"] = "device-win-2",
+                ["memberDeviceId"] = "device-win-2",
+                ["displayName"] = "Actro Windows 2",
+                ["platform"] = "Windows",
+                ["membershipAction"] = "connect",
+                ["generatedAtUnixSeconds"] = 3120,
+            });
+            using (var blockedJoin = JsonDocument.Parse(await client.RunLocalFolderMembershipRoundAsync(
+                cloudRoot,
+                blockedJoinRequestJson,
+                3120)))
+            {
+                AssertEqual(
+                    "cloudLocalFolderMembership",
+                    blockedJoin.RootElement.GetProperty("endpointType").GetString());
+                AssertEqual(
+                    "clientUpgradeRequired",
+                    blockedJoin.RootElement.GetProperty("classification").GetString());
+                var joinText = BrowserSyncProviderDiagnosticsFormatter.FormatFromJson(
+                    blockedJoin.RootElement.GetRawText());
+                AssertTrue(joinText.StartsWith("Provider diagnostics", StringComparison.Ordinal));
+                AssertTrue(joinText.Contains(
+                    "  Classification: clientUpgradeRequired",
+                    StringComparison.Ordinal));
+                AssertTrue(joinText.Contains("  Sync allowed: no", StringComparison.Ordinal));
+            }
+
+            // Failed provider operations through the real Rust classifier:
+            // the error section lists normalized error kinds with the object
+            // paths the provider failed on, plus retry/reread intent.
+            using var errorClassification = JsonDocument.Parse(
+                ActroCore.BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
+                    """
+                    {
+                        "providerKind": "localFolder",
+                        "errors": [
+                            {
+                                "operationIndex": 0,
+                                "operationType": "writeManifest",
+                                "path": "Actro/BrowserSync/manifest.json",
+                                "providerStatusCode": 412,
+                                "message": "etag mismatch"
+                            }
+                        ]
+                    }
+                    """,
+                    0,
+                    3130));
+            using var errorDiagnostics = JsonDocument.Parse(
+                ActroCore.BuildBrowserStorageSyncCloudProviderDiagnosticsJson(
+                    string.Empty,
+                    string.Empty,
+                    errorClassification.RootElement.GetRawText(),
+                    string.Empty,
+                    string.Empty,
+                    3130));
+            var errorEnvelope = new JsonObject
+            {
+                ["endpointType"] = "cloudLocalFolderCycle",
+                ["classification"] = "cloudStateRereadRequired",
+                ["providerErrorClassification"] = JsonNode.Parse(errorClassification.RootElement.GetRawText()),
+                ["providerDiagnostics"] = JsonNode.Parse(errorDiagnostics.RootElement.GetRawText()),
+            };
+            var errorText = BrowserSyncProviderDiagnosticsFormatter.Format(errorEnvelope);
+            AssertTrue(errorText.Contains("Provider errors", StringComparison.Ordinal));
+            AssertTrue(errorText.Contains(
+                "  Classification: cloudStateRereadRequired",
+                StringComparison.Ordinal));
+            AssertTrue(errorText.Contains("  Failed operations: 1 of 1 (retryable ", StringComparison.Ordinal));
+            AssertTrue(errorText.Contains("  Cloud reread planned: yes", StringComparison.Ordinal));
+            AssertTrue(errorText.Contains(
+                "    - writeManifest Actro/BrowserSync/manifest.json",
+                StringComparison.Ordinal));
+            AssertTrue(errorText.Contains("      Kind: conflict", StringComparison.Ordinal));
+            AssertTrue(errorText.Contains("      Message: etag mismatch", StringComparison.Ordinal));
+
+            // Empty states: no summary yet, malformed summary, and an
+            // envelope without diagnostics all render the explicit empty
+            // line instead of throwing or emitting blank text.
+            AssertEqual(
+                BrowserStrings.Get("diagnostics.syncProvider.empty"),
+                BrowserSyncProviderDiagnosticsFormatter.FormatFromJson(null));
+            AssertEqual(
+                BrowserStrings.Get("diagnostics.syncProvider.empty"),
+                BrowserSyncProviderDiagnosticsFormatter.FormatFromJson("{ not json"));
+            AssertEqual(
+                BrowserStrings.Get("diagnostics.syncProvider.empty"),
+                BrowserSyncProviderDiagnosticsFormatter.Format(new JsonObject()));
+        }
+        finally
+        {
+            DeleteDatabaseFiles(databasePath);
+            if (Directory.Exists(cloudRoot))
+            {
+                Directory.Delete(cloudRoot, recursive: true);
+            }
+        }
+    }),
+    ("centralizes browser sync status display strings", () =>
+    {
+        // Behavior-preserving fold: the status line output for the existing
+        // matrix is pinned literally AND against the BrowserStrings entries
+        // the policy now reads, so a table edit cannot silently change the
+        // status line and a policy edit cannot bypass the table.
+        AssertEqual("Syncing browser data...", BrowserSyncStatusPolicy.SyncingStatus);
+        AssertEqual("Browser data sync failed", BrowserSyncStatusPolicy.FailedStatus);
+        AssertEqual("Browser data sync status unavailable", BrowserSyncStatusPolicy.UnavailableStatus);
+        AssertEqual(BrowserStrings.Get("status.sync.syncing"), BrowserSyncStatusPolicy.SyncingStatus);
+        AssertEqual(BrowserStrings.Get("status.sync.failed"), BrowserSyncStatusPolicy.FailedStatus);
+        AssertEqual(BrowserStrings.Get("status.sync.unavailable"), BrowserSyncStatusPolicy.UnavailableStatus);
+
+        foreach (var (statusJson, expected) in new (string, string)[]
+                 {
+                     ("""{"status":"idle"}""", "Browser data sync is up to date"),
+                     ("""{"status":"pending"}""", "Browser data sync is pending"),
+                     ("""{"status":"retryScheduled","nextRunDelaySeconds":7}""",
+                         "Browser data sync retry scheduled in 7s"),
+                     ("""{"status":"retryScheduled"}""", "Browser data sync retry scheduled"),
+                     ("""{"status":"waitingForCredentials","lastClassification":"credentialsUnavailable"}""",
+                         "Browser data sync needs sign-in"),
+                     ("""{"status":"waitingForCredentials","lastClassification":"serverUnavailable"}""",
+                         "Browser data sync needs sign-in (last result: server unavailable)"),
+                     ("""{"status":"requiresUserAction","lastClassification":"clientUpgradeRequired"}""",
+                         "Browser data sync requires an app update"),
+                     ("""{"status":"requiresUserAction","lastClassification":"validationError"}""",
+                         "Browser data sync needs attention (last result: validation error)"),
+                     ("""{"status":"idle","lastClassification":"credentialsUnavailable"}""",
+                         "Browser data sync is up to date (last result: credentials unavailable)"),
+                     ("""{"status":"idle","lastClassification":"clientUpgradeRequired"}""",
+                         "Browser data sync is up to date (last result: app update required)"),
+                     // Success-like classifications never append; unknown
+                     // classification tokens append raw so contract growth
+                     // stays visible.
+                     ("""{"status":"idle","lastClassification":"ok"}""", "Browser data sync is up to date"),
+                     ("""{"status":"idle","lastClassification":"success"}""", "Browser data sync is up to date"),
+                     ("""{"status":"idle","lastClassification":"mysteryClassification"}""",
+                         "Browser data sync is up to date (last result: mysteryClassification)"),
+                     ("""{"status":"mysteryStatus"}""", "Browser data sync status unavailable"),
+                 })
+        {
+            AssertEqual(expected, BrowserSyncStatusPolicy.FormatStatusJson(statusJson));
+        }
+
+        // The mapped classification wordings live in the string table.
+        AssertEqual("credentials unavailable", BrowserStrings.Get("status.sync.result.credentialsUnavailable"));
+        AssertEqual("server unavailable", BrowserStrings.Get("status.sync.result.serverUnavailable"));
+        AssertEqual("app update required", BrowserStrings.Get("status.sync.result.clientUpgradeRequired"));
+        AssertEqual("validation error", BrowserStrings.Get("status.sync.result.validationError"));
 
         return Task.CompletedTask;
     }),

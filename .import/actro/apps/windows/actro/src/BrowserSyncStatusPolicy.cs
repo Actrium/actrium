@@ -2,11 +2,17 @@ using System.Text.Json;
 
 namespace Actro.Windows;
 
+// Renders the scheduler's browser sync status JSON as the one-line status
+// message. All display wording lives in BrowserStrings (status.sync.*);
+// this policy owns only the status/classification mapping rules. Unknown
+// classification tokens render raw so contract growth stays visible on
+// screen instead of hiding behind a generic label. Harness-linked:
+// WinForms-free, output pinned by the status string parity matrix.
 internal static class BrowserSyncStatusPolicy
 {
-    public const string SyncingStatus = "Syncing browser data...";
-    public const string FailedStatus = "Browser data sync failed";
-    public const string UnavailableStatus = "Browser data sync status unavailable";
+    public static string SyncingStatus => BrowserStrings.Get("status.sync.syncing");
+    public static string FailedStatus => BrowserStrings.Get("status.sync.failed");
+    public static string UnavailableStatus => BrowserStrings.Get("status.sync.unavailable");
 
     public static string FormatStatusJson(string? statusJson)
     {
@@ -29,7 +35,10 @@ internal static class BrowserSyncStatusPolicy
             var message = FormatStatus(status, JsonUInt32(root, "nextRunDelaySeconds"), lastClassification);
             if (ShouldAppendLastClassification(status, lastClassification))
             {
-                message += $" (last result: {FormatClassification(lastClassification!)})";
+                message = BrowserStrings.Format(
+                    "status.sync.lastResultFormat",
+                    message,
+                    FormatClassification(lastClassification!));
             }
 
             return message;
@@ -44,17 +53,17 @@ internal static class BrowserSyncStatusPolicy
     {
         return status switch
         {
-            "idle" => "Browser data sync is up to date",
-            "pending" => "Browser data sync is pending",
+            "idle" => BrowserStrings.Get("status.sync.idle"),
+            "pending" => BrowserStrings.Get("status.sync.pending"),
             "retryScheduled" when nextRunDelaySeconds.HasValue =>
-                $"Browser data sync retry scheduled in {nextRunDelaySeconds.Value}s",
-            "retryScheduled" => "Browser data sync retry scheduled",
-            "waitingForCredentials" => "Browser data sync needs sign-in",
+                BrowserStrings.Format("status.sync.retryScheduledFormat", nextRunDelaySeconds.Value),
+            "retryScheduled" => BrowserStrings.Get("status.sync.retryScheduled"),
+            "waitingForCredentials" => BrowserStrings.Get("status.sync.needsSignIn"),
             "requiresUserAction" when string.Equals(
                 lastClassification,
                 "clientUpgradeRequired",
-                StringComparison.Ordinal) => "Browser data sync requires an app update",
-            "requiresUserAction" => "Browser data sync needs attention",
+                StringComparison.Ordinal) => BrowserStrings.Get("status.sync.requiresAppUpdate"),
+            "requiresUserAction" => BrowserStrings.Get("status.sync.needsAttention"),
             _ => UnavailableStatus,
         };
     }
@@ -80,14 +89,12 @@ internal static class BrowserSyncStatusPolicy
 
     private static string FormatClassification(string classification)
     {
-        return classification switch
-        {
-            "credentialsUnavailable" => "credentials unavailable",
-            "serverUnavailable" => "server unavailable",
-            "clientUpgradeRequired" => "app update required",
-            "validationError" => "validation error",
-            _ => classification,
-        };
+        // Deliberately not BrowserStrings.Get: its fail-soft fallback is the
+        // key itself, and "status.sync.result.mysteryToken" on screen is
+        // worse than the raw contract token.
+        return BrowserStrings.All.TryGetValue($"status.sync.result.{classification}", out var text)
+            ? text
+            : classification;
     }
 
     private static string? JsonString(JsonElement root, string propertyName)

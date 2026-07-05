@@ -4,7 +4,9 @@ using System.Windows.Forms;
 namespace Actro.Windows;
 
 // Product surface for the browser sync provider connection, structured after
-// macOS Settings > Sync: provider picker, sync folder, status, device. Local
+// macOS Settings > Sync: provider picker, sync folder, status, device, and a
+// collapsible diagnostics detail over the last provider round's Rust
+// diagnostics (BrowserSyncProviderDiagnosticsFormatter). Local
 // Folder is the only enabled provider; the roadmap cloud providers appear as
 // disabled "coming later" rows because they already classify through the
 // Rust provider connection contract. The endpoint-token dialog
@@ -25,6 +27,7 @@ internal sealed class BrowserSyncSettingsDialog : Form
     private readonly BrowserSyncProviderSettingsStore providerSettingsStore;
     private readonly BrowserStorageSyncCredentialStore endpointCredentialStore;
     private readonly Func<string?> readSchedulerStatusJson;
+    private readonly Func<string?> readLastProviderDiagnosticsJson;
     private readonly Func<Task> runSyncNowAsync;
     private readonly Action scheduleSyncAfterConnect;
     private readonly Action cancelPendingSync;
@@ -40,11 +43,14 @@ internal sealed class BrowserSyncSettingsDialog : Form
     private readonly Label deviceValueLabel = new();
     private readonly BrowserThemedButton syncNowButton = new();
     private readonly BrowserThemedButton refreshStatusButton = new();
+    private readonly BrowserThemedButton toggleDiagnosticsButton = new();
+    private readonly TextBox diagnosticsBox = new();
 
     public BrowserSyncSettingsDialog(
         BrowserSyncProviderSettingsStore providerSettingsStore,
         BrowserStorageSyncCredentialStore endpointCredentialStore,
         Func<string?> readSchedulerStatusJson,
+        Func<string?> readLastProviderDiagnosticsJson,
         Func<Task> runSyncNowAsync,
         Action scheduleSyncAfterConnect,
         Action cancelPendingSync,
@@ -53,6 +59,7 @@ internal sealed class BrowserSyncSettingsDialog : Form
         this.providerSettingsStore = providerSettingsStore;
         this.endpointCredentialStore = endpointCredentialStore;
         this.readSchedulerStatusJson = readSchedulerStatusJson;
+        this.readLastProviderDiagnosticsJson = readLastProviderDiagnosticsJson;
         this.runSyncNowAsync = runSyncNowAsync;
         this.scheduleSyncAfterConnect = scheduleSyncAfterConnect;
         this.cancelPendingSync = cancelPendingSync;
@@ -169,6 +176,25 @@ internal sealed class BrowserSyncSettingsDialog : Form
         refreshStatusButton.Click += (_, _) => RefreshStatusRows();
         AddFullRow(layout, BuildButtonRow(syncNowButton, refreshStatusButton));
 
+        // Collapsible diagnostics detail: the last provider round envelope's
+        // Rust diagnostics and error classification, rendered readably by
+        // the pure formatter. Hidden by default — it is a support detail,
+        // not a status row — and refreshed with the status rows while open.
+        toggleDiagnosticsButton.Text = BrowserStrings.Get("dialog.syncSettings.showDiagnostics");
+        toggleDiagnosticsButton.AutoSize = true;
+        toggleDiagnosticsButton.Click += (_, _) => ToggleDiagnostics();
+        AddFullRow(layout, BuildButtonRow(toggleDiagnosticsButton));
+
+        diagnosticsBox.Multiline = true;
+        diagnosticsBox.ReadOnly = true;
+        diagnosticsBox.WordWrap = false;
+        diagnosticsBox.ScrollBars = ScrollBars.Both;
+        diagnosticsBox.Width = 520;
+        diagnosticsBox.Height = 160;
+        diagnosticsBox.Visible = false;
+        diagnosticsBox.Margin = new Padding(3, 0, 3, 4);
+        AddFullRow(layout, diagnosticsBox);
+
         // 5. Bottom row: the advanced reference-server (development) link on
         // the left, Close on the right.
         var referenceServerButton = new BrowserThemedButton
@@ -274,6 +300,8 @@ internal sealed class BrowserSyncSettingsDialog : Form
 
         folderPathBox.BackColor = theme.InputBackground;
         folderPathBox.ForeColor = theme.InputForeground;
+        diagnosticsBox.BackColor = theme.InputBackground;
+        diagnosticsBox.ForeColor = theme.InputForeground;
         folderErrorLabel.ForeColor = theme.Accent;
         connectionValueLabel.ForeColor = theme.BarForeground;
         lastSyncValueLabel.ForeColor = theme.BarForegroundMuted;
@@ -357,6 +385,31 @@ internal sealed class BrowserSyncSettingsDialog : Form
 
         connectionValueLabel.Text = connectionText;
         lastSyncValueLabel.Text = BrowserSyncStatusPolicy.FormatStatusJson(readSchedulerStatusJson());
+        if (diagnosticsBox.Visible)
+        {
+            RefreshDiagnostics();
+        }
+    }
+
+    private void ToggleDiagnostics()
+    {
+        diagnosticsBox.Visible = !diagnosticsBox.Visible;
+        toggleDiagnosticsButton.Text = BrowserStrings.Get(diagnosticsBox.Visible
+            ? "dialog.syncSettings.hideDiagnostics"
+            : "dialog.syncSettings.showDiagnostics");
+        if (diagnosticsBox.Visible)
+        {
+            RefreshDiagnostics();
+        }
+    }
+
+    private void RefreshDiagnostics()
+    {
+        // The formatter is pure and newline-based; the WinForms TextBox
+        // needs platform line endings to actually break lines.
+        diagnosticsBox.Text = BrowserSyncProviderDiagnosticsFormatter
+            .FormatFromJson(readLastProviderDiagnosticsJson())
+            .Replace("\n", Environment.NewLine, StringComparison.Ordinal);
     }
 
     private bool HasEndpointSession()

@@ -35,6 +35,7 @@ internal sealed class MainForm : Form
     private readonly BrowserContentBlockingStore contentBlockingStore;
     private readonly BrowserStorageSyncCredentialStore browserSyncCredentialStore;
     private readonly BrowserSyncProviderSettingsStore browserSyncProviderSettingsStore;
+    private readonly BrowserStorageSyncCoordinator browserSyncCoordinator;
     private readonly BrowserStorageSyncScheduler browserSyncScheduler;
     private readonly Panel webViewHost;
     private readonly BrowserTabOverviewPanel overviewPanel;
@@ -127,10 +128,13 @@ internal sealed class MainForm : Form
         // development-only reference path.
         browserSyncProviderSettingsStore =
             BrowserSyncProviderSettingsStore.CreateDefault(browserSyncCredentialStore);
-        browserSyncScheduler = new BrowserStorageSyncScheduler(
-            BrowserStorageSyncCoordinator.CreateDefault(
-                browserSyncCredentialStore,
-                browserSyncProviderSettingsStore));
+        // The coordinator stays reachable next to its scheduler: the sync
+        // settings dialog reads the last provider round's diagnostics
+        // summary from it for the collapsible diagnostics detail.
+        browserSyncCoordinator = BrowserStorageSyncCoordinator.CreateDefault(
+            browserSyncCredentialStore,
+            browserSyncProviderSettingsStore);
+        browserSyncScheduler = new BrowserStorageSyncScheduler(browserSyncCoordinator);
         Text = GetProductWindowTitle();
         Width = 1280;
         Height = 800;
@@ -1809,6 +1813,7 @@ internal sealed class MainForm : Form
             browserSyncProviderSettingsStore,
             browserSyncCredentialStore,
             ReadBrowserSyncStatusJson,
+            () => browserSyncCoordinator.LastProviderRoundDiagnosticsJson,
             SyncBrowserDataNowAsync,
             ScheduleBrowserDataSyncAfterConnectionChange,
             CancelPendingBrowserSync,
