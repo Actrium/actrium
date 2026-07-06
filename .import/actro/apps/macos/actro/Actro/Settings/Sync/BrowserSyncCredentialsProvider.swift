@@ -99,6 +99,15 @@ final class BrowserSyncCredentialsProvider: AppleBrowserStorageSyncCredentialsPr
         }
     }
 
+    /// The durable browser-sync device identity. This provider is the sole
+    /// owner of the device id (persisted under a dedicated UserDefaults key
+    /// and minted on first read), so the local-folder provider settings store
+    /// reuses this value instead of minting a second identity that would
+    /// present the same machine as two devices to the shared cloud folder.
+    func deviceIdentifier() -> String {
+        deviceId()
+    }
+
     func snapshot() -> BrowserSyncCredentialSnapshot? {
         guard let session = storedSession() else { return nil }
         return BrowserSyncCredentialSnapshot(

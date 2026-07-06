@@ -83,12 +83,12 @@ struct SyncSettingsView: View {
                 }
             }
 
-            // MARK: - Sync Folder
+            // MARK: - Local Folder Sync
             Section {
-                if let url = syncManager.syncFolderURL {
+                if let path = syncManager.syncFolderPath {
                     LabeledContent("Folder") {
                         HStack(spacing: 8) {
-                            Text(url.path)
+                            Text(path)
                                 .foregroundColor(.secondary)
                                 .lineLimit(1)
                                 .truncationMode(.middle)
@@ -105,13 +105,18 @@ struct SyncSettingsView: View {
                     }
                 }
             } header: {
-                Text("Sync Folder")
+                Text("Local Folder Sync")
             } footer: {
-                Text("Select a folder (e.g., iCloud Drive or Dropbox) to sync data across devices.")
+                Text("Sync browser history, bookmarks, and open tabs across your devices through a shared folder (e.g., iCloud Drive or Dropbox).")
             }
 
             // MARK: - Status
             Section("Status") {
+                LabeledContent("Status") {
+                    Text(syncManager.isSyncing ? "Syncing..." : syncManager.statusText)
+                        .foregroundColor(.secondary)
+                }
+
                 if let date = syncManager.lastSyncDate {
                     LabeledContent("Last Sync") {
                         Text(date, style: .relative)
@@ -133,40 +138,15 @@ struct SyncSettingsView: View {
                 }
             }
 
-            // MARK: - Content
-            Section("Content") {
-                Toggle("Bookmarks", isOn: $syncManager.syncBookmarks)
-                Toggle("Tags", isOn: $syncManager.syncTags)
-                Toggle("Vault", isOn: $syncManager.syncVault)
-                Toggle("Settings", isOn: $syncManager.syncSettings)
-            }
-
-            // MARK: - Auto Sync
-            Section {
-                Toggle("Auto-sync on file changes", isOn: $syncManager.autoSyncEnabled)
-                    .onChange(of: syncManager.autoSyncEnabled) {
-                        if syncManager.autoSyncEnabled && syncManager.syncFolderURL != nil {
-                            syncManager.startMonitoring()
-                        } else {
-                            syncManager.stopMonitoring()
-                        }
-                    }
-            } header: {
-                Text("Automatic")
-            }
-
             // MARK: - Actions
             Section("Actions") {
                 HStack {
-                    Button("Export Now") {
-                        syncManager.exportNow()
+                    Button("Sync Now") {
+                        Task {
+                            await syncManager.syncNow()
+                        }
                     }
-                    .disabled(syncManager.syncFolderURL == nil || syncManager.isSyncing)
-
-                    Button("Import Now") {
-                        syncManager.importNow()
-                    }
-                    .disabled(syncManager.syncFolderURL == nil || syncManager.isSyncing)
+                    .disabled(!syncManager.isConfigured || syncManager.isSyncing)
 
                     if syncManager.isSyncing {
                         ProgressView()
