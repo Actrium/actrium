@@ -1213,6 +1213,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -1403,6 +1405,8 @@ internal interface UniffiLib : Library {
     fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_cycle_round_json(`rootDir`: RustBuffer.ByValue,`pushRequestJson`: RustBuffer.ByValue,`cursorsJson`: RustBuffer.ByValue,`deviceId`: RustBuffer.ByValue,`generatedAtUnixSeconds`: Long,`maxLogObjectsPerCollection`: Int,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_membership_round_json(`rootDir`: RustBuffer.ByValue,`requestJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
+    fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(`rootDir`: RustBuffer.ByValue,`retainSnapshots`: Int,`generatedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(`rootDir`: RustBuffer.ByValue,`schemaMigrationPlaybookJson`: RustBuffer.ByValue,`compatibilityPreflightJson`: RustBuffer.ByValue,`observedAtUnixSeconds`: Long,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
@@ -2018,6 +2022,8 @@ internal interface UniffiLib : Library {
     ): Short
     fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_membership_round_json(
     ): Short
+    fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+    ): Short
     fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json(
     ): Short
     fun uniffi_actro_core_checksum_func_browser_storage_sync_cloud_log_object_json(
@@ -2623,6 +2629,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_membership_round_json() != 56582.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json() != 4074.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json() != 64404.toShort()) {
@@ -7584,6 +7593,18 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_membership_round_json(
         FfiConverterString.lower(`rootDir`),FfiConverterString.lower(`requestJson`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Run one cloud-drive recovery-snapshot retention round against a Rust-owned local-folder provider store.
+         */ fun `browserStorageSyncCloudLocalFolderRecoveryRetentionRoundJson`(`rootDir`: kotlin.String, `retainSnapshots`: kotlin.UInt, `generatedAtUnixSeconds`: kotlin.Long): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+        FfiConverterString.lower(`rootDir`),FfiConverterUInt.lower(`retainSnapshots`),FfiConverterLong.lower(`generatedAtUnixSeconds`),_status)
 }
     )
     }

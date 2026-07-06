@@ -424,6 +424,13 @@ namespace actro_core {
         i64 generated_at_unix_seconds
     );
 
+    /// Run one cloud-drive recovery-snapshot retention round against a Rust-owned local-folder provider store.
+    string browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+        string root_dir,
+        u32 retain_snapshots,
+        i64 generated_at_unix_seconds
+    );
+
     /// Build an ordered cloud-drive provider write plan for a browser sync push.
     string browser_storage_sync_cloud_push_plan_json(
         string manifest_json,

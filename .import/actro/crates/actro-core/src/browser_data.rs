@@ -4788,6 +4788,96 @@ pub struct BrowserStorageSyncCloudRecoveryRetentionPlan {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct BrowserStorageSyncCloudRecoveryRetentionResultPlan {
+    pub version: u32,
+    pub storage_schema_version: u32,
+    pub cloud_data_model_version: u32,
+    pub plan_type: String,
+    pub source_plan_type: String,
+    pub policy_name: String,
+    pub generated_at_unix_seconds: i64,
+    pub cleanup_requested: bool,
+    pub cleanup_completed: bool,
+    pub should_reread: bool,
+    pub should_retry_cleanup: bool,
+    pub client_action: String,
+    pub delete_operation_count: u32,
+    pub delete_succeeded_count: u32,
+    pub delete_failed_count: u32,
+    pub conflict_count: u32,
+    pub retryable_failure_count: u32,
+    pub deleted_paths: Vec<String>,
+    pub issues: Vec<BrowserStorageSyncCloudCleanupResultIssue>,
+    pub reread_operations: Vec<BrowserStorageSyncCloudPlannedReadOperation>,
+    pub cleanup_retry_operations: Vec<BrowserStorageSyncCloudPlannedDeleteOperation>,
+    pub result_policy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserStorageSyncCloudRecoveryRetentionRoundSummary {
+    pub read_result_count: u32,
+    pub successful_read_count: u32,
+    pub failed_read_count: u32,
+    pub delete_result_count: u32,
+    pub successful_delete_count: u32,
+    pub failed_delete_count: u32,
+    pub planned_delete_count: u32,
+    pub total_root_count: u32,
+    pub retained_root_count: u32,
+    pub deleted_root_count: u32,
+    pub conflict_count: u32,
+    pub retryable_failure_count: u32,
+    pub compatibility_blocked: bool,
+    pub cleanup_requested: bool,
+    pub completed: bool,
+    pub cleanup_completed: bool,
+    pub should_reread: bool,
+    pub should_retry: bool,
+    pub should_retry_cleanup: bool,
+    pub summary_action: String,
+    pub summary_reason: String,
+    pub retained_roots: Vec<String>,
+    pub deleted_paths: Vec<String>,
+    pub read_reasons: Vec<String>,
+    pub delete_reasons: Vec<String>,
+    pub failed_read_error_kinds: Vec<String>,
+    pub failed_delete_error_kinds: Vec<String>,
+    pub issue_reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserStorageSyncCloudRecoveryRetentionRoundResult {
+    pub version: u32,
+    pub storage_schema_version: u32,
+    pub cloud_data_model_version: u32,
+    pub plan_type: String,
+    pub generated_at_unix_seconds: i64,
+    pub round_summary: BrowserStorageSyncCloudRecoveryRetentionRoundSummary,
+    pub read_results: Vec<BrowserStorageSyncCloudReadOperationResult>,
+    pub delete_results: Vec<BrowserStorageSyncCloudWriteOperationResult>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub compatibility_preflight: Option<BrowserStorageSyncCloudCompatibilityPreflightPlan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub recovery_retention_plan: Option<BrowserStorageSyncCloudRecoveryRetentionPlan>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result_plan: Option<BrowserStorageSyncCloudRecoveryRetentionResultPlan>,
+    pub completed: bool,
+    pub cleanup_completed: bool,
+    pub should_reread: bool,
+    pub should_retry: bool,
+    pub should_retry_cleanup: bool,
+    pub client_action: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planning_error_kind: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub planning_error_message: Option<String>,
+    pub result_policy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BrowserStorageSyncCloudCleanupResultIssue {
     pub operation_index: u32,
     pub operation_type: String,
@@ -11637,6 +11727,262 @@ fn parse_browser_storage_sync_cloud_recovery_object_paths(json: &str) -> Option<
         .collect()
 }
 
+fn browser_storage_sync_cloud_recovery_retention_candidate_is_valid(
+    operation: &BrowserStorageSyncCloudPlannedDeleteOperation,
+) -> bool {
+    operation.operation_type == "candidateDeleteRecoverySnapshot"
+        && !operation.required
+        && browser_storage_sync_cloud_recovery_root_of_object(&operation.path).is_some()
+}
+
+fn browser_storage_sync_cloud_recovery_retention_issue_action(
+    reason: &str,
+    retryable: bool,
+) -> &'static str {
+    match reason {
+        "conflict" => "relistRecoveryRootsAndRetryCleanup",
+        "unauthorized" => "recoverProviderCredentials",
+        "quotaExceeded" => "freeCloudStorageOrReduceRetention",
+        "invalidPlan" | "invalidPath" | "unsupported" | "invalidResult" => {
+            "abortAndReportProviderBug"
+        }
+        _ if retryable => "retryCloudRecoveryRetentionCleanup",
+        _ => "reportCloudRecoveryRetentionFailure",
+    }
+}
+
+fn browser_storage_sync_cloud_recovery_retention_delete_issue(
+    operation: &BrowserStorageSyncCloudPlannedDeleteOperation,
+    reason: &str,
+    message: Option<&str>,
+    retryable: bool,
+) -> BrowserStorageSyncCloudCleanupResultIssue {
+    BrowserStorageSyncCloudCleanupResultIssue {
+        operation_index: operation.operation_index,
+        operation_type: operation.operation_type.clone(),
+        path: operation.path.clone(),
+        delete_reason: operation.delete_reason.clone(),
+        collection: operation.collection.clone(),
+        sequence: operation.sequence,
+        reason: reason.to_string(),
+        message: message.map(|message| normalize_sync_text(message, "", MAX_SYNC_TEXT_LENGTH)),
+        retryable,
+        action: browser_storage_sync_cloud_recovery_retention_issue_action(reason, retryable)
+            .to_string(),
+    }
+}
+
+fn browser_storage_sync_cloud_recovery_retention_result_client_action(
+    cleanup_requested: bool,
+    cleanup_completed: bool,
+    should_reread: bool,
+    should_retry_cleanup: bool,
+    issues: &[BrowserStorageSyncCloudCleanupResultIssue],
+) -> String {
+    if !cleanup_requested {
+        return "nothingToCleanup".to_string();
+    }
+    if issues.iter().any(|issue| issue.reason == "unauthorized") {
+        return "recoverProviderCredentials".to_string();
+    }
+    if issues.iter().any(|issue| issue.reason == "quotaExceeded") {
+        return "freeCloudStorageOrReduceRetention".to_string();
+    }
+    if should_reread {
+        return "relistRecoveryRootsAndRetryCleanup".to_string();
+    }
+    if should_retry_cleanup {
+        return "retryCloudRecoveryRetentionCleanup".to_string();
+    }
+    if !cleanup_completed {
+        return "reportCloudRecoveryRetentionFailure".to_string();
+    }
+    "finishCloudRecoveryRetentionCleanup".to_string()
+}
+
+fn browser_storage_sync_cloud_recovery_retention_reread_operations(
+) -> Vec<BrowserStorageSyncCloudPlannedReadOperation> {
+    vec![browser_storage_sync_cloud_planned_read(
+        0,
+        "listRecoverySnapshots",
+        None,
+        Some(BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_PREFIX.to_string()),
+        None,
+        Some(MAX_BROWSER_STORAGE_SYNC_RECORDS as u32),
+        "BrowserStorageSyncCloudListResult; Rust regroups recovery objects by root before rebuilding retention cleanup",
+        true,
+    )]
+}
+
+/// Classify the provider delete receipts from a recovery-retention execution
+/// round. Mirrors the high-watermark cleanup result planner: a missing object
+/// is an idempotent success, a conflict means the recovery roots must be
+/// relisted before rebuilding cleanup, and transient failures return only the
+/// Rust-selected candidateDeleteRecoverySnapshot retry operations without
+/// reopening any data merge.
+pub fn browser_storage_sync_cloud_recovery_retention_result_plan(
+    retention_plan: Option<BrowserStorageSyncCloudRecoveryRetentionPlan>,
+    delete_results: Option<Vec<BrowserStorageSyncCloudWriteOperationResult>>,
+    generated_at_unix_seconds: i64,
+) -> Option<BrowserStorageSyncCloudRecoveryRetentionResultPlan> {
+    let retention_plan = retention_plan?;
+    if retention_plan.plan_type != "cloudRecoveryRetention"
+        || !supports_browser_storage_schema_version(retention_plan.storage_schema_version)
+        || !supports_browser_storage_sync_cloud_data_model_version(
+            retention_plan.cloud_data_model_version,
+        )
+    {
+        return None;
+    }
+    let generated_at = normalize_unix_seconds(generated_at_unix_seconds)
+        .max(retention_plan.generated_at_unix_seconds);
+    let delete_results = delete_results?;
+    let mut delete_results_by_index = BTreeMap::new();
+    for result in delete_results {
+        delete_results_by_index.insert(result.operation_index, result);
+    }
+
+    let mut delete_succeeded_count = 0_u32;
+    let mut delete_failed_count = 0_u32;
+    let mut conflict_count = 0_u32;
+    let mut retryable_failure_count = 0_u32;
+    let mut deleted_paths = Vec::new();
+    let mut issues = Vec::new();
+    let mut cleanup_retry_operations = Vec::new();
+
+    for operation in &retention_plan.delete_candidates {
+        if !browser_storage_sync_cloud_recovery_retention_candidate_is_valid(operation) {
+            delete_failed_count = delete_failed_count.saturating_add(1);
+            issues.push(browser_storage_sync_cloud_recovery_retention_delete_issue(
+                operation,
+                "invalidPlan",
+                Some(
+                    "Recovery retention cleanup may only delete Rust-planned recovery-snapshot objects.",
+                ),
+                false,
+            ));
+            continue;
+        }
+
+        match delete_results_by_index.get(&operation.operation_index) {
+            Some(result)
+                if browser_storage_sync_cloud_delete_result_matches_operation(
+                    result, operation,
+                ) && (result.success
+                    || browser_storage_sync_cloud_write_result_reason(result) == "notFound") =>
+            {
+                delete_succeeded_count = delete_succeeded_count.saturating_add(1);
+                deleted_paths.push(operation.path.clone());
+            }
+            Some(result)
+                if !browser_storage_sync_cloud_delete_result_matches_operation(
+                    result, operation,
+                ) =>
+            {
+                delete_failed_count = delete_failed_count.saturating_add(1);
+                issues.push(browser_storage_sync_cloud_recovery_retention_delete_issue(
+                    operation,
+                    "invalidResult",
+                    Some(
+                        "Provider result path or operation type does not match the planned recovery delete.",
+                    ),
+                    false,
+                ));
+            }
+            Some(result) => {
+                let reason = browser_storage_sync_cloud_write_result_reason(result);
+                let retryable =
+                    browser_storage_sync_cloud_write_result_is_retryable(result, &reason);
+                if reason == "conflict" {
+                    conflict_count = conflict_count.saturating_add(1);
+                }
+                if retryable {
+                    retryable_failure_count = retryable_failure_count.saturating_add(1);
+                    if reason != "conflict" {
+                        cleanup_retry_operations.push(operation.clone());
+                    }
+                }
+                delete_failed_count = delete_failed_count.saturating_add(1);
+                issues.push(browser_storage_sync_cloud_recovery_retention_delete_issue(
+                    operation,
+                    &reason,
+                    result.error_message.as_deref(),
+                    retryable,
+                ));
+            }
+            None => {
+                delete_failed_count = delete_failed_count.saturating_add(1);
+                retryable_failure_count = retryable_failure_count.saturating_add(1);
+                cleanup_retry_operations.push(operation.clone());
+                issues.push(browser_storage_sync_cloud_recovery_retention_delete_issue(
+                    operation,
+                    "missingResult",
+                    Some(
+                        "Provider adapter did not report a result for this planned recovery delete.",
+                    ),
+                    true,
+                ));
+            }
+        }
+    }
+
+    let delete_operation_count = retention_plan
+        .delete_candidates
+        .len()
+        .min(u32::MAX as usize) as u32;
+    let cleanup_requested = delete_operation_count > 0;
+    let cleanup_completed =
+        delete_failed_count == 0 && delete_succeeded_count == delete_operation_count;
+    let has_recovery_issue = issues
+        .iter()
+        .any(|issue| issue.reason == "unauthorized" || issue.reason == "quotaExceeded");
+    let should_reread = cleanup_requested && conflict_count > 0;
+    let should_retry_cleanup = cleanup_requested
+        && !cleanup_completed
+        && !should_reread
+        && !has_recovery_issue
+        && !cleanup_retry_operations.is_empty();
+    let reread_operations = if should_reread {
+        browser_storage_sync_cloud_recovery_retention_reread_operations()
+    } else {
+        Vec::new()
+    };
+    let client_action = browser_storage_sync_cloud_recovery_retention_result_client_action(
+        cleanup_requested,
+        cleanup_completed,
+        should_reread,
+        should_retry_cleanup,
+        &issues,
+    );
+
+    Some(BrowserStorageSyncCloudRecoveryRetentionResultPlan {
+        version: BROWSER_STORAGE_SYNC_CLOUD_PLAN_VERSION,
+        storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
+        cloud_data_model_version: BROWSER_STORAGE_SYNC_CLOUD_DATA_MODEL_VERSION,
+        plan_type: "cloudRecoveryRetentionResult".to_string(),
+        source_plan_type: retention_plan.plan_type,
+        policy_name: retention_plan.policy_name,
+        generated_at_unix_seconds: generated_at,
+        cleanup_requested,
+        cleanup_completed,
+        should_reread,
+        should_retry_cleanup,
+        client_action,
+        delete_operation_count,
+        delete_succeeded_count,
+        delete_failed_count,
+        conflict_count,
+        retryable_failure_count,
+        deleted_paths,
+        issues,
+        reread_operations,
+        cleanup_retry_operations,
+        result_policy:
+            "Treat recovery-snapshot retention cleanup as best-effort provider maintenance. A missing recovery object is an idempotent success; conflicts require relisting the recovery roots before rebuilding cleanup; transient failures return only Rust-selected candidateDeleteRecoverySnapshot retry operations."
+                .to_string(),
+    })
+}
+
 pub fn browser_storage_sync_cloud_cleanup_result_plan(
     high_watermark_plan: Option<BrowserStorageSyncCloudHighWatermarkPlan>,
     delete_results: Option<Vec<BrowserStorageSyncCloudWriteOperationResult>>,
@@ -14330,6 +14676,230 @@ pub async fn browser_storage_sync_cloud_run_cleanup_round<S: BrowserStorageSyncC
     ))
 }
 
+/// Run one provider-backed recovery-snapshot retention round in Rust: preflight
+/// cloud-file compatibility, list every object under
+/// `Actro/BrowserSync/recovery/`, feed the paths to the pure retention planner,
+/// execute only the Rust-selected `candidateDeleteRecoverySnapshot` deletes for
+/// objects under the oldest roots, and classify the receipts through the shared
+/// recovery-retention result planner. `retain_snapshots_override` sets how many
+/// of the newest recovery roots to keep (falling back to the default snapshot
+/// retention when `None`). This bounds the unbounded growth of the timestamped
+/// recovery roots that migration/repair/preflight rounds create; it never
+/// touches live snapshots, logs, manifests, or device docs.
+pub async fn browser_storage_sync_cloud_run_recovery_retention_round<
+    S: BrowserStorageSyncCloudStore,
+>(
+    store: &S,
+    retain_snapshots_override: Option<u32>,
+    generated_at_unix_seconds: i64,
+) -> Option<BrowserStorageSyncCloudRecoveryRetentionRoundResult> {
+    let generated_at = normalize_unix_seconds(generated_at_unix_seconds);
+
+    let compatibility_preflight =
+        match browser_storage_sync_cloud_run_compatibility_preflight(store, generated_at).await {
+            Some(plan) => plan,
+            None => {
+                return Some(browser_storage_sync_cloud_recovery_retention_round_result(
+                generated_at,
+                Vec::new(),
+                Vec::new(),
+                None,
+                None,
+                None,
+                false,
+                false,
+                false,
+                true,
+                false,
+                "retryCloudProviderReadWithBackoff",
+                Some("cloudCompatibilityPreflightUnavailable".to_string()),
+                Some(
+                    "Rust could not inspect cloud files before building a recovery retention plan."
+                        .to_string(),
+                ),
+            ));
+            }
+        };
+    if compatibility_preflight.should_block_sync {
+        return Some(browser_storage_sync_cloud_recovery_retention_round_result(
+            generated_at,
+            Vec::new(),
+            Vec::new(),
+            Some(compatibility_preflight.clone()),
+            None,
+            None,
+            false,
+            false,
+            false,
+            false,
+            false,
+            &compatibility_preflight.client_action,
+            Some(compatibility_preflight.classification.clone()),
+            Some(compatibility_preflight.reason.clone()),
+        ));
+    }
+
+    let mut read_results = Vec::new();
+    let mut recovery_paths = Vec::new();
+    let mut cursor: Option<String> = None;
+    let mut list_failed = false;
+    let mut list_retryable = false;
+    for _ in 0..BROWSER_STORAGE_SYNC_CLOUD_MAX_PULL_CONTINUATION_PAGES {
+        let operation = browser_storage_sync_cloud_planned_read_with_page_cursor(
+            read_results.len(),
+            "listRecoverySnapshots",
+            None,
+            Some(BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_PREFIX.to_string()),
+            None,
+            Some(MAX_BROWSER_STORAGE_SYNC_RECORDS as u32),
+            cursor.clone(),
+            "BrowserStorageSyncCloudListResult; Rust groups recovery objects by root for retention",
+            false,
+        );
+        let list_result = store
+            .list(
+                BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_PREFIX,
+                Some(BrowserStorageSyncCloudListPage {
+                    cursor: cursor.clone(),
+                    limit: Some(MAX_BROWSER_STORAGE_SYNC_RECORDS as u32),
+                }),
+            )
+            .await;
+        let mut list_read_result = browser_storage_sync_cloud_list_operation_result(
+            &operation,
+            BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_PREFIX,
+            &list_result,
+        );
+        list_read_result.read_reason = "listRecoverySnapshotsForRetention".to_string();
+
+        match list_result {
+            Ok(page) => {
+                for metadata in &page.objects {
+                    recovery_paths.push(metadata.path.clone());
+                }
+                let next_cursor = page.next_cursor.clone();
+                read_results.push(list_read_result);
+                match next_cursor {
+                    Some(next) => cursor = Some(next),
+                    None => break,
+                }
+            }
+            Err(_) => {
+                list_retryable = list_read_result.retryable.unwrap_or(false);
+                list_failed = true;
+                read_results.push(list_read_result);
+                break;
+            }
+        }
+    }
+
+    if list_failed {
+        return Some(browser_storage_sync_cloud_recovery_retention_round_result(
+            generated_at,
+            read_results,
+            Vec::new(),
+            Some(compatibility_preflight),
+            None,
+            None,
+            false,
+            false,
+            false,
+            list_retryable,
+            false,
+            if list_retryable {
+                "retryCloudProviderReadWithBackoff"
+            } else {
+                "recoverCloudProviderRead"
+            },
+            Some("providerReadFailed".to_string()),
+            Some(
+                "Cloud provider recovery listing failed before Rust could build a retention plan."
+                    .to_string(),
+            ),
+        ));
+    }
+
+    let retention =
+        retain_snapshots_override.map(|retain_snapshots| BrowserStorageSyncCloudRetentionPolicy {
+            retain_log_sequences: BROWSER_STORAGE_SYNC_CLOUD_RETAIN_LOG_SEQUENCES,
+            retain_snapshots,
+            compact_when_log_sequences_exceed: BROWSER_STORAGE_SYNC_CLOUD_RETAIN_LOG_SEQUENCES,
+        });
+    let retention_plan = match browser_storage_sync_cloud_recovery_retention_plan(
+        Some(recovery_paths),
+        retention,
+        generated_at,
+    ) {
+        Some(plan) => plan,
+        None => {
+            return Some(browser_storage_sync_cloud_recovery_retention_round_result(
+                generated_at,
+                read_results,
+                Vec::new(),
+                Some(compatibility_preflight),
+                None,
+                None,
+                false,
+                false,
+                false,
+                false,
+                false,
+                "recoverCloudRecoveryRetentionPlan",
+                Some("invalidRecoveryRetentionPlan".to_string()),
+                Some(
+                    "Rust could not build a recovery retention plan from provider state."
+                        .to_string(),
+                ),
+            ));
+        }
+    };
+
+    let delete_results = if retention_plan.should_cleanup {
+        browser_storage_sync_cloud_execute_planned_deletes(store, &retention_plan.delete_candidates)
+            .await
+    } else {
+        Vec::new()
+    };
+    let result_plan = browser_storage_sync_cloud_recovery_retention_result_plan(
+        Some(retention_plan.clone()),
+        Some(delete_results.clone()),
+        generated_at,
+    );
+    let cleanup_completed = result_plan
+        .as_ref()
+        .map(|plan| plan.cleanup_completed)
+        .unwrap_or(false);
+    let should_reread = result_plan
+        .as_ref()
+        .map(|plan| plan.should_reread)
+        .unwrap_or(false);
+    let should_retry_cleanup = result_plan
+        .as_ref()
+        .map(|plan| plan.should_retry_cleanup)
+        .unwrap_or(false);
+    let client_action = result_plan
+        .as_ref()
+        .map(|plan| plan.client_action.clone())
+        .unwrap_or_else(|| "recoverCloudRecoveryRetentionResult".to_string());
+
+    Some(browser_storage_sync_cloud_recovery_retention_round_result(
+        generated_at,
+        read_results,
+        delete_results,
+        Some(compatibility_preflight),
+        Some(retention_plan),
+        result_plan,
+        cleanup_completed,
+        cleanup_completed,
+        should_reread,
+        false,
+        should_retry_cleanup,
+        &client_action,
+        None,
+        None,
+    ))
+}
+
 pub async fn browser_storage_sync_cloud_run_compatibility_preflight<
     S: BrowserStorageSyncCloudStore,
 >(
@@ -14523,6 +15093,45 @@ pub fn browser_storage_sync_cloud_local_folder_cleanup_round_json(
         root_dir,
         cursors_json,
         device_id,
+        generated_at_unix_seconds,
+    ) {
+        Some(round) => serialize_json(&round),
+        None => "null".to_string(),
+    }
+}
+
+pub fn browser_storage_sync_cloud_local_folder_recovery_retention_round(
+    root_dir: &str,
+    retain_snapshots: u32,
+    generated_at_unix_seconds: i64,
+) -> Option<BrowserStorageSyncCloudRecoveryRetentionRoundResult> {
+    if root_dir.trim().is_empty() {
+        return None;
+    }
+    // A retain_snapshots of 0 requests the default snapshot retention window;
+    // any positive value overrides it. The planner still floors the effective
+    // window at 1 so at least the newest recovery root is always kept.
+    let retain_snapshots_override = if retain_snapshots == 0 {
+        None
+    } else {
+        Some(retain_snapshots)
+    };
+    let store = BrowserStorageSyncLocalFolderCloudStore::new(PathBuf::from(root_dir));
+    block_on_browser_storage_sync_ready(browser_storage_sync_cloud_run_recovery_retention_round(
+        &store,
+        retain_snapshots_override,
+        generated_at_unix_seconds,
+    ))?
+}
+
+pub fn browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+    root_dir: &str,
+    retain_snapshots: u32,
+    generated_at_unix_seconds: i64,
+) -> String {
+    match browser_storage_sync_cloud_local_folder_recovery_retention_round(
+        root_dir,
+        retain_snapshots,
         generated_at_unix_seconds,
     ) {
         Some(round) => serialize_json(&round),
@@ -20283,6 +20892,211 @@ fn browser_storage_sync_cloud_cleanup_round_result(
         planning_error_message,
         result_policy:
             "Run one provider-backed cloud high-watermark cleanup round in Rust: preflight cloud-file compatibility, read manifest/snapshot/log retention state, build the high-watermark plan, execute only Rust-selected non-required candidateDeleteLog operations through BrowserStorageSyncCloudStore, and classify delete receipts through the shared cleanup result planner. Provider sign-in UI, external SDK integration, retry timing, and product recovery surfaces remain platform responsibilities."
+                .to_string(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn browser_storage_sync_cloud_recovery_retention_round_summary(
+    read_results: &[BrowserStorageSyncCloudReadOperationResult],
+    delete_results: &[BrowserStorageSyncCloudWriteOperationResult],
+    compatibility_preflight: Option<&BrowserStorageSyncCloudCompatibilityPreflightPlan>,
+    retention_plan: Option<&BrowserStorageSyncCloudRecoveryRetentionPlan>,
+    result_plan: Option<&BrowserStorageSyncCloudRecoveryRetentionResultPlan>,
+    completed: bool,
+    cleanup_completed: bool,
+    should_reread: bool,
+    should_retry: bool,
+    should_retry_cleanup: bool,
+    client_action: &str,
+    planning_error_kind: Option<&str>,
+) -> BrowserStorageSyncCloudRecoveryRetentionRoundSummary {
+    let read_result_count = read_results.len().min(u32::MAX as usize) as u32;
+    let successful_read_count = read_results
+        .iter()
+        .filter(|result| result.success)
+        .count()
+        .min(u32::MAX as usize) as u32;
+    let failed_read_count = read_result_count.saturating_sub(successful_read_count);
+    let delete_result_count = delete_results.len().min(u32::MAX as usize) as u32;
+    let successful_delete_count = delete_results
+        .iter()
+        .filter(|result| result.success)
+        .count()
+        .min(u32::MAX as usize) as u32;
+    let failed_delete_count = delete_result_count.saturating_sub(successful_delete_count);
+
+    let mut delete_reasons = BTreeSet::new();
+    let mut retained_roots = Vec::new();
+    let mut total_root_count = 0_u32;
+    let mut retained_root_count = 0_u32;
+    let mut deleted_root_count = 0_u32;
+    let mut planned_delete_count = 0_u32;
+    if let Some(plan) = retention_plan {
+        for operation in &plan.delete_candidates {
+            if !operation.delete_reason.is_empty() {
+                delete_reasons.insert(operation.delete_reason.clone());
+            }
+        }
+        retained_roots = plan.retained_roots.clone();
+        total_root_count = plan.total_root_count;
+        retained_root_count = plan.retained_root_count;
+        deleted_root_count = plan.deleted_root_count;
+        planned_delete_count = plan.delete_candidates.len().min(u32::MAX as usize) as u32;
+    }
+
+    let mut read_reasons = BTreeSet::new();
+    let mut failed_read_error_kinds = BTreeSet::new();
+    for result in read_results {
+        if !result.read_reason.is_empty() {
+            read_reasons.insert(result.read_reason.clone());
+        }
+        if !result.success {
+            if let Some(error_kind) = &result.error_kind {
+                failed_read_error_kinds.insert(error_kind.clone());
+            }
+        }
+    }
+
+    let mut failed_delete_error_kinds = BTreeSet::new();
+    for result in delete_results {
+        if !result.success {
+            if let Some(error_kind) = &result.error_kind {
+                failed_delete_error_kinds.insert(error_kind.clone());
+            }
+        }
+    }
+
+    let mut issue_reasons = BTreeSet::new();
+    let mut deleted_paths = Vec::new();
+    let mut conflict_count = 0_u32;
+    let mut retryable_failure_count = 0_u32;
+    if let Some(plan) = result_plan {
+        for issue in &plan.issues {
+            issue_reasons.insert(issue.reason.clone());
+            if !issue.delete_reason.is_empty() {
+                delete_reasons.insert(issue.delete_reason.clone());
+            }
+        }
+        deleted_paths = plan.deleted_paths.clone();
+        conflict_count = plan.conflict_count;
+        retryable_failure_count = plan.retryable_failure_count;
+    }
+
+    let compatibility_blocked = compatibility_preflight
+        .map(|plan| plan.should_block_sync)
+        .unwrap_or(false);
+    let cleanup_requested = result_plan
+        .map(|plan| plan.cleanup_requested)
+        .unwrap_or_else(|| {
+            retention_plan
+                .map(|plan| plan.should_cleanup)
+                .unwrap_or(false)
+        });
+    let summary_reason = planning_error_kind
+        .map(str::to_string)
+        .or_else(|| {
+            result_plan.and_then(|plan| plan.issues.first().map(|issue| issue.reason.clone()))
+        })
+        .unwrap_or_else(|| {
+            if !cleanup_requested {
+                "nothingToCleanup".to_string()
+            } else if completed && cleanup_completed {
+                "cloudRecoveryRetentionCompleted".to_string()
+            } else if should_reread {
+                "recoveryRootsChangedDuringCleanup".to_string()
+            } else if should_retry_cleanup {
+                "recoveryRetentionCleanupRetryPending".to_string()
+            } else {
+                "recoveryRetentionCleanupIncomplete".to_string()
+            }
+        });
+
+    BrowserStorageSyncCloudRecoveryRetentionRoundSummary {
+        read_result_count,
+        successful_read_count,
+        failed_read_count,
+        delete_result_count,
+        successful_delete_count,
+        failed_delete_count,
+        planned_delete_count,
+        total_root_count,
+        retained_root_count,
+        deleted_root_count,
+        conflict_count,
+        retryable_failure_count,
+        compatibility_blocked,
+        cleanup_requested,
+        completed,
+        cleanup_completed,
+        should_reread,
+        should_retry,
+        should_retry_cleanup,
+        summary_action: client_action.to_string(),
+        summary_reason,
+        retained_roots,
+        deleted_paths,
+        read_reasons: read_reasons.into_iter().collect(),
+        delete_reasons: delete_reasons.into_iter().collect(),
+        failed_read_error_kinds: failed_read_error_kinds.into_iter().collect(),
+        failed_delete_error_kinds: failed_delete_error_kinds.into_iter().collect(),
+        issue_reasons: issue_reasons.into_iter().collect(),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn browser_storage_sync_cloud_recovery_retention_round_result(
+    generated_at_unix_seconds: i64,
+    read_results: Vec<BrowserStorageSyncCloudReadOperationResult>,
+    delete_results: Vec<BrowserStorageSyncCloudWriteOperationResult>,
+    compatibility_preflight: Option<BrowserStorageSyncCloudCompatibilityPreflightPlan>,
+    recovery_retention_plan: Option<BrowserStorageSyncCloudRecoveryRetentionPlan>,
+    result_plan: Option<BrowserStorageSyncCloudRecoveryRetentionResultPlan>,
+    completed: bool,
+    cleanup_completed: bool,
+    should_reread: bool,
+    should_retry: bool,
+    should_retry_cleanup: bool,
+    client_action: &str,
+    planning_error_kind: Option<String>,
+    planning_error_message: Option<String>,
+) -> BrowserStorageSyncCloudRecoveryRetentionRoundResult {
+    let round_summary = browser_storage_sync_cloud_recovery_retention_round_summary(
+        &read_results,
+        &delete_results,
+        compatibility_preflight.as_ref(),
+        recovery_retention_plan.as_ref(),
+        result_plan.as_ref(),
+        completed,
+        cleanup_completed,
+        should_reread,
+        should_retry,
+        should_retry_cleanup,
+        client_action,
+        planning_error_kind.as_deref(),
+    );
+    BrowserStorageSyncCloudRecoveryRetentionRoundResult {
+        version: BROWSER_STORAGE_SYNC_CLOUD_PLAN_VERSION,
+        storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
+        cloud_data_model_version: BROWSER_STORAGE_SYNC_CLOUD_DATA_MODEL_VERSION,
+        plan_type: "recoveryRetentionRound".to_string(),
+        generated_at_unix_seconds,
+        round_summary,
+        read_results,
+        delete_results,
+        compatibility_preflight,
+        recovery_retention_plan,
+        result_plan,
+        completed,
+        cleanup_completed,
+        should_reread,
+        should_retry,
+        should_retry_cleanup,
+        client_action: client_action.to_string(),
+        planning_error_kind,
+        planning_error_message,
+        result_policy:
+            "Run one provider-backed recovery-snapshot retention round in Rust: preflight cloud-file compatibility, list recovery objects, plan the newest-root retention window, execute only Rust-selected candidateDeleteRecoverySnapshot deletes through BrowserStorageSyncCloudStore, and classify delete receipts through the shared recovery retention result planner. Scheduling, provider sign-in UI, external SDK integration, and retry timing remain platform responsibilities."
                 .to_string(),
     }
 }
@@ -31923,6 +32737,174 @@ mod tests {
             browser_storage_sync_cloud_recovery_retention_plan_json("null", "null", 0),
             "null"
         );
+    }
+
+    #[test]
+    fn cloud_local_folder_recovery_retention_round_json_deletes_oldest_roots() {
+        let root = TempCloudStoreRoot::new("local-folder-recovery-retention-round-json");
+        let root_dir = root.path.to_string_lossy().to_string();
+        // Four timestamped recovery roots, each holding two objects with
+        // unknown-classified suffixes so the compatibility preflight skips them
+        // and the round exercises pure retention logic against real files.
+        let root_names = [
+            "000000000100-migration",
+            "000000000200-repair",
+            "000000000300-preflight",
+            "000000000400-migration",
+        ];
+        for root_name in root_names {
+            for object in ["payload.json", "state/data.json"] {
+                let file = root
+                    .path
+                    .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"));
+                fs::create_dir_all(file.parent().unwrap()).unwrap();
+                fs::write(&file, b"{}").unwrap();
+            }
+        }
+
+        let round = serde_json::from_str::<Value>(
+            &browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+                &root_dir, 2, 500,
+            ),
+        )
+        .unwrap();
+
+        assert_eq!(round["planType"], json!("recoveryRetentionRound"));
+        assert_eq!(round["completed"], json!(true));
+        assert_eq!(round["cleanupCompleted"], json!(true));
+        assert_eq!(
+            round["clientAction"],
+            json!("finishCloudRecoveryRetentionCleanup")
+        );
+        assert_eq!(round["recoveryRetentionPlan"]["retainSnapshots"], json!(2));
+        assert_eq!(round["recoveryRetentionPlan"]["totalRootCount"], json!(4));
+        assert_eq!(
+            round["recoveryRetentionPlan"]["retainedRootCount"],
+            json!(2)
+        );
+        assert_eq!(round["recoveryRetentionPlan"]["deletedRootCount"], json!(2));
+        assert_eq!(
+            round["recoveryRetentionPlan"]["retainedRoots"],
+            json!([
+                "Actro/BrowserSync/recovery/000000000300-preflight",
+                "Actro/BrowserSync/recovery/000000000400-migration"
+            ])
+        );
+        assert_eq!(round["roundSummary"]["deletedRootCount"], json!(2));
+        assert_eq!(round["roundSummary"]["plannedDeleteCount"], json!(4));
+        assert_eq!(round["roundSummary"]["successfulDeleteCount"], json!(4));
+        assert_eq!(round["roundSummary"]["failedDeleteCount"], json!(0));
+        assert_eq!(
+            round["roundSummary"]["summaryReason"],
+            json!("cloudRecoveryRetentionCompleted")
+        );
+        assert_eq!(
+            round["roundSummary"]["deleteReasons"],
+            json!(["recoveryRootOutsideRetainWindow"])
+        );
+        assert_eq!(
+            round["compatibilityPreflight"]["classification"],
+            json!("compatible")
+        );
+        assert_eq!(round["deleteResults"].as_array().unwrap().len(), 4);
+        assert_eq!(
+            round["deleteResults"][0]["operationType"],
+            json!("candidateDeleteRecoverySnapshot")
+        );
+
+        // Oldest two roots are physically deleted; newest two remain on disk.
+        for root_name in ["000000000100-migration", "000000000200-repair"] {
+            for object in ["payload.json", "state/data.json"] {
+                assert!(!root
+                    .path
+                    .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"))
+                    .exists());
+            }
+        }
+        for root_name in ["000000000300-preflight", "000000000400-migration"] {
+            for object in ["payload.json", "state/data.json"] {
+                assert!(root
+                    .path
+                    .join(format!("Actro/BrowserSync/recovery/{root_name}/{object}"))
+                    .exists());
+            }
+        }
+
+        assert_eq!(
+            browser_storage_sync_cloud_local_folder_recovery_retention_round_json("", 2, 500),
+            "null"
+        );
+    }
+
+    fn recovery_delete_result(
+        path: &str,
+        error_kind: &str,
+    ) -> BrowserStorageSyncCloudWriteOperationResult {
+        BrowserStorageSyncCloudWriteOperationResult {
+            operation_index: 0,
+            operation_type: Some("candidateDeleteRecoverySnapshot".to_string()),
+            path: Some(path.to_string()),
+            success: false,
+            provider_revision: None,
+            error_kind: Some(error_kind.to_string()),
+            error_message: Some("provider error".to_string()),
+            retryable: Some(true),
+        }
+    }
+
+    #[test]
+    fn cloud_recovery_retention_result_plan_classifies_delete_failures() {
+        let older = "Actro/BrowserSync/recovery/000000000100-migration/payload.json";
+        let plan = browser_storage_sync_cloud_recovery_retention_plan(
+            Some(vec![
+                older.to_string(),
+                "Actro/BrowserSync/recovery/000000000200-repair/payload.json".to_string(),
+            ]),
+            Some(recovery_retention_policy(1)),
+            300,
+        )
+        .unwrap();
+        assert_eq!(plan.delete_candidates.len(), 1);
+        assert_eq!(plan.delete_candidates[0].path, older);
+
+        // Transient failure -> retry the same candidate, no reread.
+        let transient = browser_storage_sync_cloud_recovery_retention_result_plan(
+            Some(plan.clone()),
+            Some(vec![recovery_delete_result(older, "network")]),
+            300,
+        )
+        .unwrap();
+        assert!(!transient.cleanup_completed);
+        assert!(transient.should_retry_cleanup);
+        assert!(!transient.should_reread);
+        assert_eq!(transient.retryable_failure_count, 1);
+        assert_eq!(transient.cleanup_retry_operations.len(), 1);
+        assert_eq!(
+            transient.cleanup_retry_operations[0].operation_type,
+            "candidateDeleteRecoverySnapshot"
+        );
+        assert!(transient.reread_operations.is_empty());
+        assert_eq!(
+            transient.client_action,
+            "retryCloudRecoveryRetentionCleanup"
+        );
+
+        // Conflict -> relist recovery roots before rebuilding cleanup.
+        let conflict = browser_storage_sync_cloud_recovery_retention_result_plan(
+            Some(plan),
+            Some(vec![recovery_delete_result(older, "conflict")]),
+            300,
+        )
+        .unwrap();
+        assert!(conflict.should_reread);
+        assert!(!conflict.should_retry_cleanup);
+        assert_eq!(conflict.conflict_count, 1);
+        assert_eq!(conflict.reread_operations.len(), 1);
+        assert_eq!(
+            conflict.reread_operations[0].operation_type,
+            "listRecoverySnapshots"
+        );
+        assert_eq!(conflict.client_action, "relistRecoveryRootsAndRetryCleanup");
     }
 
     #[test]
