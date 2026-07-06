@@ -276,6 +276,10 @@
       "browserSyncUpgradeRequired": "需要更新",
       "browserSyncRequiresUserAction": "需要处理",
       "browserSyncUnavailable": "不可用",
+      "browserSyncFolder": "同步文件夹",
+      "browserSyncFolderConnect": "设置",
+      "browserSyncFolderConnected": "已连接",
+      "browserSyncConnecting": "连接中...",
       "feedbackSubject": "#吐个槽关于"
     }
   }

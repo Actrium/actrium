@@ -16,6 +16,13 @@ type BrowserDataNativeModule = {
   clearSyncSession?: (environment: string) => Promise<boolean>;
   syncNow?: () => Promise<string>;
   getSyncStatus?: () => Promise<string>;
+  // Local-folder cloud provider entry. The native side owns the folder path
+  // string, the provider-settings persistence, and the Rust preflight gate;
+  // the RN side only triggers a connect/disconnect and displays the resulting
+  // provider status.
+  connectLocalFolderProvider?: () => Promise<string>;
+  disconnectProvider?: () => Promise<string>;
+  getProviderStatus?: () => Promise<string>;
 };
 
 const BrowserDataModule: BrowserDataNativeModule | undefined = (
@@ -44,11 +51,29 @@ export type BrowserSyncStatus = {
   lastResult?: unknown | null;
 };
 
+export type BrowserSyncProviderStatus = {
+  version: number;
+  providerKind: string | null;
+  configured: boolean;
+  localFolderRootPath: string | null;
+  membershipActive: boolean;
+  scope: string;
+  // Present only on a connect attempt: whether the picked folder passed the
+  // native preflight gate, and if not, the stable block reason token.
+  accepted?: boolean;
+  blockedReason?: string | null;
+  blockedDetail?: string;
+};
+
 export const hasBrowserDataModule = (): boolean => Boolean(BrowserDataModule);
 
 export const hasBrowserSyncModule = (): boolean =>
   Boolean(BrowserDataModule?.getSyncStatus)
   && Boolean(BrowserDataModule?.syncNow);
+
+export const hasBrowserSyncProviderModule = (): boolean =>
+  Boolean(BrowserDataModule?.connectLocalFolderProvider)
+  && Boolean(BrowserDataModule?.getProviderStatus);
 
 export const loadRecentBrowserHistory = async (
   limit = 500,
@@ -153,6 +178,75 @@ export const getBrowserSyncStatus = async (): Promise<BrowserSyncStatus | null> 
     return parseBrowserSyncStatus(rawStatus);
   } catch (error) {
     console.error('[BrowserDataModule] Failed to get browser sync status', error);
+    return null;
+  }
+};
+
+export const connectBrowserSyncLocalFolder =
+  async (): Promise<BrowserSyncProviderStatus | null> => {
+    try {
+      return parseBrowserSyncProviderStatus(
+        await BrowserDataModule?.connectLocalFolderProvider?.(),
+      );
+    } catch (error) {
+      console.error('[BrowserDataModule] Failed to connect local folder provider', error);
+      return null;
+    }
+  };
+
+export const disconnectBrowserSyncProvider =
+  async (): Promise<BrowserSyncProviderStatus | null> => {
+    try {
+      return parseBrowserSyncProviderStatus(
+        await BrowserDataModule?.disconnectProvider?.(),
+      );
+    } catch (error) {
+      console.error('[BrowserDataModule] Failed to disconnect browser sync provider', error);
+      return null;
+    }
+  };
+
+export const getBrowserSyncProviderStatus =
+  async (): Promise<BrowserSyncProviderStatus | null> => {
+    try {
+      return parseBrowserSyncProviderStatus(
+        await BrowserDataModule?.getProviderStatus?.(),
+      );
+    } catch (error) {
+      console.error('[BrowserDataModule] Failed to get browser sync provider status', error);
+      return null;
+    }
+  };
+
+const parseBrowserSyncProviderStatus = (
+  rawStatus?: string | null,
+): BrowserSyncProviderStatus | null => {
+  if (!rawStatus || rawStatus === 'null') return null;
+
+  try {
+    const parsed = JSON.parse(rawStatus) as Partial<BrowserSyncProviderStatus> | null;
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    return {
+      version: typeof parsed.version === 'number' ? parsed.version : 1,
+      providerKind:
+        typeof parsed.providerKind === 'string' ? parsed.providerKind : null,
+      configured: Boolean(parsed.configured),
+      localFolderRootPath:
+        typeof parsed.localFolderRootPath === 'string'
+          ? parsed.localFolderRootPath
+          : null,
+      membershipActive: Boolean(parsed.membershipActive),
+      scope: typeof parsed.scope === 'string' ? parsed.scope : 'default',
+      accepted:
+        typeof parsed.accepted === 'boolean' ? parsed.accepted : undefined,
+      blockedReason:
+        typeof parsed.blockedReason === 'string' ? parsed.blockedReason : null,
+      blockedDetail:
+        typeof parsed.blockedDetail === 'string' ? parsed.blockedDetail : undefined,
+    };
+  } catch (error) {
+    console.error('[BrowserDataModule] Failed to parse browser sync provider status', error);
     return null;
   }
 };
