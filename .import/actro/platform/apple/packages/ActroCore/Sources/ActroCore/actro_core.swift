@@ -2507,11 +2507,11 @@ public struct BrowserStorageSyncSqlInfo {
     public var markSessionSynced: String
     public var markSessionTabSynced: String
     public var upsertSyncCursor: String
-    public var selectSyncCursor: String
+    public var selectSyncCursorsForScope: String
 
     /// Default memberwise initializers are never public by default, so we
     /// declare one manually.
-    public init(selectDirtyHistoryPages: String, selectDirtyHistoryVisits: String, selectDirtyBookmarkFolders: String, selectDirtyBookmarks: String, selectDirtySessions: String, selectDirtySessionTabs: String, applyRemoteHistoryPage: String, applyRemoteHistoryVisit: String, applyRemoteBookmarkFolder: String, applyRemoteBookmark: String, applyRemoteSession: String, applyRemoteSessionTab: String, markHistoryPageSynced: String, markHistoryVisitSynced: String, markBookmarkFolderSynced: String, markBookmarkSynced: String, markSessionSynced: String, markSessionTabSynced: String, upsertSyncCursor: String, selectSyncCursor: String) {
+    public init(selectDirtyHistoryPages: String, selectDirtyHistoryVisits: String, selectDirtyBookmarkFolders: String, selectDirtyBookmarks: String, selectDirtySessions: String, selectDirtySessionTabs: String, applyRemoteHistoryPage: String, applyRemoteHistoryVisit: String, applyRemoteBookmarkFolder: String, applyRemoteBookmark: String, applyRemoteSession: String, applyRemoteSessionTab: String, markHistoryPageSynced: String, markHistoryVisitSynced: String, markBookmarkFolderSynced: String, markBookmarkSynced: String, markSessionSynced: String, markSessionTabSynced: String, upsertSyncCursor: String, selectSyncCursorsForScope: String) {
         self.selectDirtyHistoryPages = selectDirtyHistoryPages
         self.selectDirtyHistoryVisits = selectDirtyHistoryVisits
         self.selectDirtyBookmarkFolders = selectDirtyBookmarkFolders
@@ -2531,7 +2531,7 @@ public struct BrowserStorageSyncSqlInfo {
         self.markSessionSynced = markSessionSynced
         self.markSessionTabSynced = markSessionTabSynced
         self.upsertSyncCursor = upsertSyncCursor
-        self.selectSyncCursor = selectSyncCursor
+        self.selectSyncCursorsForScope = selectSyncCursorsForScope
     }
 }
 
@@ -2594,7 +2594,7 @@ extension BrowserStorageSyncSqlInfo: Equatable, Hashable {
         if lhs.upsertSyncCursor != rhs.upsertSyncCursor {
             return false
         }
-        if lhs.selectSyncCursor != rhs.selectSyncCursor {
+        if lhs.selectSyncCursorsForScope != rhs.selectSyncCursorsForScope {
             return false
         }
         return true
@@ -2620,7 +2620,7 @@ extension BrowserStorageSyncSqlInfo: Equatable, Hashable {
         hasher.combine(markSessionSynced)
         hasher.combine(markSessionTabSynced)
         hasher.combine(upsertSyncCursor)
-        hasher.combine(selectSyncCursor)
+        hasher.combine(selectSyncCursorsForScope)
     }
 }
 
@@ -2650,7 +2650,7 @@ public struct FfiConverterTypeBrowserStorageSyncSqlInfo: FfiConverterRustBuffer 
                 markSessionSynced: FfiConverterString.read(from: &buf),
                 markSessionTabSynced: FfiConverterString.read(from: &buf),
                 upsertSyncCursor: FfiConverterString.read(from: &buf),
-                selectSyncCursor: FfiConverterString.read(from: &buf)
+                selectSyncCursorsForScope: FfiConverterString.read(from: &buf)
             )
     }
 
@@ -2674,7 +2674,7 @@ public struct FfiConverterTypeBrowserStorageSyncSqlInfo: FfiConverterRustBuffer 
         FfiConverterString.write(value.markSessionSynced, into: &buf)
         FfiConverterString.write(value.markSessionTabSynced, into: &buf)
         FfiConverterString.write(value.upsertSyncCursor, into: &buf)
-        FfiConverterString.write(value.selectSyncCursor, into: &buf)
+        FfiConverterString.write(value.selectSyncCursorsForScope, into: &buf)
     }
 }
 

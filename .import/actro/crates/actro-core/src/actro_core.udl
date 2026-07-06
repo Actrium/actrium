@@ -1187,7 +1187,7 @@ dictionary BrowserStorageSyncSqlInfo {
     string mark_session_synced;
     string mark_session_tab_synced;
     string upsert_sync_cursor;
-    string select_sync_cursor;
+    string select_sync_cursors_for_scope;
 };
 
 dictionary DefaultTagInfo {

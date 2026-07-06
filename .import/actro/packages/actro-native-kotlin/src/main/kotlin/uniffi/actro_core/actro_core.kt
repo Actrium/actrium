@@ -4377,7 +4377,7 @@ data class BrowserStorageSyncSqlInfo (
     var `markSessionSynced`: kotlin.String,
     var `markSessionTabSynced`: kotlin.String,
     var `upsertSyncCursor`: kotlin.String,
-    var `selectSyncCursor`: kotlin.String
+    var `selectSyncCursorsForScope`: kotlin.String
 ) {
 
     companion object
@@ -4432,7 +4432,7 @@ public object FfiConverterTypeBrowserStorageSyncSqlInfo: FfiConverterRustBuffer<
             FfiConverterString.allocationSize(value.`markSessionSynced`) +
             FfiConverterString.allocationSize(value.`markSessionTabSynced`) +
             FfiConverterString.allocationSize(value.`upsertSyncCursor`) +
-            FfiConverterString.allocationSize(value.`selectSyncCursor`)
+            FfiConverterString.allocationSize(value.`selectSyncCursorsForScope`)
     )
 
     override fun write(value: BrowserStorageSyncSqlInfo, buf: ByteBuffer) {
@@ -4455,7 +4455,7 @@ public object FfiConverterTypeBrowserStorageSyncSqlInfo: FfiConverterRustBuffer<
             FfiConverterString.write(value.`markSessionSynced`, buf)
             FfiConverterString.write(value.`markSessionTabSynced`, buf)
             FfiConverterString.write(value.`upsertSyncCursor`, buf)
-            FfiConverterString.write(value.`selectSyncCursor`, buf)
+            FfiConverterString.write(value.`selectSyncCursorsForScope`, buf)
     }
 }
 

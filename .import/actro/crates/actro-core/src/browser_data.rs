@@ -727,7 +727,7 @@ pub struct BrowserStorageSyncSql {
     pub mark_session_synced: &'static str,
     pub mark_session_tab_synced: &'static str,
     pub upsert_sync_cursor: &'static str,
-    pub select_sync_cursor: &'static str,
+    pub select_sync_cursors_for_scope: &'static str,
 }
 
 pub const BROWSER_STORAGE_SYNC_SQL: BrowserStorageSyncSql = BrowserStorageSyncSql {
@@ -920,7 +920,7 @@ ON CONFLICT(scope, collection) DO UPDATE SET
     last_synced_at = excluded.last_synced_at,
     updated_at = excluded.updated_at
 "#,
-    select_sync_cursor: "SELECT cursor, last_synced_at FROM browser_sync_cursors WHERE scope = ? AND collection = ?",
+    select_sync_cursors_for_scope: "SELECT collection, cursor, last_synced_at FROM browser_sync_cursors WHERE scope = ? ORDER BY collection ASC",
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -35962,9 +35962,14 @@ mod tests {
             .mark_session_tab_synced
             .contains("session_id || ':'"));
         assert!(sync_sql.upsert_sync_cursor.contains("browser_sync_cursors"));
-        assert!(sync_sql
-            .select_sync_cursor
-            .contains("WHERE scope = ? AND collection = ?"));
+        assert!(
+            sync_sql
+                .select_sync_cursors_for_scope
+                .contains("ORDER BY collection ASC")
+                && !sync_sql
+                    .select_sync_cursors_for_scope
+                    .contains("AND collection = ?")
+        );
         assert!(browser_storage_sync_sql_json().contains("selectDirtyBookmarks"));
     }
 
