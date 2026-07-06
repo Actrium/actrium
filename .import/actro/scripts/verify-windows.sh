@@ -1191,11 +1191,27 @@ if ! rg -q 'BrowserSyncProviderSettingsStore' apps/windows/actro/src/BrowserStor
   || ! rg -q 'RunLocalFolderSyncCycleAsync' apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
   || ! rg -q 'RunLocalFolderMembershipRoundAsync' apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
   || ! rg -q 'BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson' apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs \
+  || ! rg -q 'routingToken' apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs \
+  || ! rg -q 'blockedScheduleState' apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
+  || ! rg -q 'shouldClearMembershipMarker' apps/windows/actro/src/BrowserStorageSyncCoordinator.cs \
   || ! rg -q 'MembershipJoinedAtUnixSeconds' apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs \
   || ! rg -q 'BrowserSyncProviderSettingsStore' apps/windows/actro/src/MainForm.cs; then
   print_failure "Windows browser sync coordinator does not route through the provider connection"
 else
   print_ok "Windows browser sync coordinator routes through the provider connection"
+fi
+
+# The connection vocabulary is single-sourced in the Rust contract: the planner
+# reads the Rust routing token instead of hand-deriving membership/cycle/blocked
+# and marshals only the marker flag plus the raw round classification, and the
+# coordinator consumes the Rust blocked scheduleState and the Rust-decided
+# membership-marker-clear rather than re-mapping the connection policy natively.
+if rg -q 'BuildBlockedScheduleState|MapProviderErrorClassification|ShouldClearMembershipMarker' apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs \
+  || ! rg -q 'membershipMarkerPresent' apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs \
+  || ! rg -q 'providerRoundClassification' apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs; then
+  print_failure "Windows browser sync planner re-derives connection vocabulary that belongs to the Rust contract"
+else
+  print_ok "Windows browser sync planner single-sources the connection vocabulary in the Rust contract"
 fi
 
 # The provider-settings schema + "configured" determination live in the shared

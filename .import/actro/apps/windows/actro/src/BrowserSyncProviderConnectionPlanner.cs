@@ -26,12 +26,16 @@ internal sealed record BrowserSyncProviderConnectionPlan(
     JsonObject? ProviderSnapshot,
     JsonObject? ConnectionPolicy);
 
-// Assembles the provider snapshot for the Rust cloud provider connection
-// contract and derives the coordinator routing from the resulting policy.
-// Pure by design: no IO — the accept-time folder preflight and each round's
-// own capability/compatibility preflights are the authoritative folder
-// checks, so the snapshot is fully determined by persisted settings plus
-// in-memory session state.
+// Marshals the persisted provider-settings snapshot into the Rust cloud
+// provider connection contract and maps the Rust-returned routing token back
+// into the coordinator's routing. The connection vocabulary now lives entirely
+// in the Rust contract: the localFolder connection constants, the round
+// classification -> error-kind map, the membership/cycle/blocked routing, and
+// the blocked-case scheduler field shape are all emitted by the contract, so
+// this planner only handles the native pre-gate (IsConfigured) and coarse
+// marshalling. Pure by design: no IO — the accept-time folder preflight and
+// each round's own capability/compatibility preflights are the authoritative
+// folder checks.
 internal static class BrowserSyncProviderConnectionPlanner
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -46,46 +50,32 @@ internal static class BrowserSyncProviderConnectionPlanner
         return settings?.Configured ?? false;
     }
 
+    // Coarse marshalling only: the Rust contract fills the localFolder
+    // connection constants from providerKind and derives membership routing
+    // from the marker flag, so the native side no longer hard-codes the
+    // "configured folder is connected" snapshot.
     public static JsonObject BuildProviderSnapshot(
         BrowserSyncProviderSettingsSnapshot settings,
-        string? lastProviderErrorKind)
+        string? lastRoundClassification)
     {
         var snapshot = new JsonObject
         {
             ["providerKind"] = settings.ProviderKind,
             ["scope"] = settings.Scope,
             ["deviceId"] = settings.DeviceId,
+            // The persisted membership marker is the only cold-start
+            // membership signal: a membership round writes the shared cloud
+            // folder, so repeating it on every launch is wrong. The Rust
+            // contract turns this flag into the membership-vs-cycle routing.
+            ["membershipMarkerPresent"] = settings.MembershipJoinedAtUnixSeconds is not null,
         };
 
-        if (settings.ProviderKind == BrowserSyncProviderSettingsStore.LocalFolderProviderKind)
+        if (!string.IsNullOrEmpty(lastRoundClassification))
         {
-            // Local folder is connection-free: there is no session to open,
-            // so a configured folder is by definition "connected", and the
-            // credential state is constantly "available" because there are
-            // no secrets. (The connection contract normalizes unknown
-            // connection tokens to "disconnected", which would misclassify
-            // a configured local folder as signInRequired.)
-            snapshot["connectionState"] = "connected";
-            snapshot["credentialState"] = "available";
-            // The persisted membership marker is the only cold-start
-            // membership signal: a membership round is a write to the
-            // shared cloud folder, and repeating it on every app launch is
-            // wrong even though the device-document upsert is idempotent.
-            // "missing" routes this run to a one-time join; after a
-            // successful join the marker persists and later launches go
-            // straight to the cycle round.
-            snapshot["membershipStatus"] =
-                settings.MembershipJoinedAtUnixSeconds is not null ? "active" : "missing";
-            // No IO here: the folder was validated when it was accepted and
-            // the cycle round re-validates it authoritatively, so the store
-            // is reported ready and a real storage failure comes back as a
-            // storage-scoped provider error on the next round.
-            snapshot["cloudStoreReady"] = true;
-        }
-
-        if (!string.IsNullOrEmpty(lastProviderErrorKind))
-        {
-            snapshot["lastProviderErrorKind"] = lastProviderErrorKind;
+            // Raw last-round classification: the Rust contract owns the map
+            // into the connection error-kind vocabulary and the resulting
+            // classification for this run.
+            snapshot["providerRoundClassification"] = lastRoundClassification;
         }
 
         return snapshot;
@@ -93,7 +83,7 @@ internal static class BrowserSyncProviderConnectionPlanner
 
     public static BrowserSyncProviderConnectionPlan Plan(
         BrowserSyncProviderSettingsSnapshot? settings,
-        string? lastProviderErrorKind,
+        string? lastRoundClassification,
         uint retryAttempt,
         long observedAtUnixSeconds)
     {
@@ -108,10 +98,11 @@ internal static class BrowserSyncProviderConnectionPlanner
                 ConnectionPolicy: null);
         }
 
-        var providerSnapshot = BuildProviderSnapshot(settings!, lastProviderErrorKind);
-        // The Rust core owns the connection classification and action rules.
-        // A result that is not a JSON object is contract drift and must fail
-        // loudly instead of degrading to a hand-copied C# policy.
+        var providerSnapshot = BuildProviderSnapshot(settings!, lastRoundClassification);
+        // The Rust core owns the connection classification, routing token, and
+        // blocked scheduler state. A result that is not a JSON object is
+        // contract drift and must fail loudly instead of degrading to a
+        // hand-copied C# policy.
         var connectionPolicy = JsonNodeFromObjectJson(
             ActroCore.BuildBrowserStorageSyncCloudProviderConnectionStatusPolicyJson(
                 providerSnapshot.ToJsonString(JsonOptions),
@@ -120,109 +111,21 @@ internal static class BrowserSyncProviderConnectionPlanner
             ?? throw new InvalidOperationException(
                 "Browser sync cloud provider connection status policy from the Rust core is not a JSON object.");
 
-        var isLocalFolder = settings!.ProviderKind
-            == BrowserSyncProviderSettingsStore.LocalFolderProviderKind;
-        var routing = isLocalFolder
-            && connectionPolicy["shouldAttemptMembership"]?.GetValue<bool>() == true
-                ? BrowserSyncProviderRouting.RunLocalFolderMembership
-                : isLocalFolder && connectionPolicy["shouldAttemptSync"]?.GetValue<bool>() == true
-                    ? BrowserSyncProviderRouting.RunLocalFolderCycle
-                    : BrowserSyncProviderRouting.Blocked;
-
+        var routing = MapRoutingToken(connectionPolicy["routingToken"]?.GetValue<string>());
         return new BrowserSyncProviderConnectionPlan(routing, providerSnapshot, connectionPolicy);
     }
 
-    // Translates the connection status policy output (schedulerAction /
-    // retryDelaySeconds / userAction / resetRetryAttempt) into the field
-    // shape the sync scheduler consumes. The HTTP-era status policy helper
-    // must not be fed cloud-only classifications, and no round envelope
-    // exists on the Blocked routing, so this pure translation is the only
-    // scheduleState source for blocked provider connections.
-    public static JsonObject BuildBlockedScheduleState(
-        JsonObject connectionPolicy,
-        uint retryAttempt,
-        long observedAtUnixSeconds)
+    // notConfigured is the native pre-gate above (IsConfigured), so the Rust
+    // contract only emits membership/cycle/blocked. Unknown tokens fail safe
+    // to Blocked: no round runs unless the contract explicitly says to.
+    private static BrowserSyncProviderRouting MapRoutingToken(string? routingToken)
     {
-        var schedulerAction = connectionPolicy["schedulerAction"]?.GetValue<string>() ?? string.Empty;
-        var userAction = connectionPolicy["userAction"]?.GetValue<string>() ?? string.Empty;
-        var requiresUserAction = userAction.Length > 0
-            && !string.Equals(userAction, "none", StringComparison.Ordinal);
-
-        var scheduleState = new JsonObject
+        return routingToken switch
         {
-            ["planType"] = "cloudProviderConnectionScheduleState",
-            ["classification"] = connectionPolicy["classification"]?.GetValue<string>() ?? string.Empty,
-            ["schedulerAction"] = schedulerAction,
-            // Local folder never waits for credentials; cloud providers
-            // that do surface it through their own classifications, not
-            // through the endpoint credential wait.
-            ["waitingForCredentials"] = false,
-            ["requiresUserAction"] = requiresUserAction,
-            ["userAction"] = userAction,
-            ["resetRetryAttempt"] = connectionPolicy["resetRetryAttempt"]?.GetValue<bool>() ?? false,
+            "membership" => BrowserSyncProviderRouting.RunLocalFolderMembership,
+            "cycle" => BrowserSyncProviderRouting.RunLocalFolderCycle,
+            _ => BrowserSyncProviderRouting.Blocked,
         };
-
-        if (TryReadUInt(connectionPolicy["retryDelaySeconds"]) is uint retryDelaySeconds)
-        {
-            scheduleState["nextRunDelaySeconds"] = retryDelaySeconds;
-            scheduleState["nextRunAtUnixSeconds"] = observedAtUnixSeconds + retryDelaySeconds;
-        }
-
-        if (string.Equals(schedulerAction, "scheduleRetry", StringComparison.Ordinal))
-        {
-            scheduleState["nextRetryAttempt"] = retryAttempt + 1;
-        }
-
-        return scheduleState;
-    }
-
-    // Maps the provider error classification a round's diagnostics report
-    // (e.g. "storageSetupRequired") into the error-kind vocabulary the
-    // connection contract matches on (e.g. "storage") so the next planner
-    // run classifies the connection truthfully within this session.
-    public static string? MapProviderErrorClassification(string? providerErrorClassification)
-    {
-        return providerErrorClassification switch
-        {
-            null or "" or "ready" => null,
-            "authExpired" => "auth",
-            "quotaExceeded" => "quota",
-            "adapterUnsupported" => "adapterUnsupported",
-            "recoveryRequired" => "recoveryRequired",
-            "providerUnavailable" => "providerUnavailable",
-            "storageSetupRequired" => "storage",
-            // Rereads are handled inside the rounds themselves; they are
-            // not a connection-level condition.
-            "cloudStateRereadRequired" => null,
-            // Unknown tokens pass through; the connection contract ignores
-            // kinds it does not match.
-            _ => providerErrorClassification,
-        };
-    }
-
-    // Membership- or storage-scoped provider errors mean the shared cloud
-    // store no longer knows this device (folder wiped, store reset by
-    // another device): clearing the persisted membership marker makes the
-    // next run re-join. A wrongly cleared marker costs exactly one
-    // corrective membership round, so this stays deliberately narrow.
-    public static bool ShouldClearMembershipMarker(string? providerErrorClassification)
-    {
-        return providerErrorClassification switch
-        {
-            "storageSetupRequired" or "recoveryRequired" => true,
-            "membershipRequired" or "deviceMembershipMissing" or "deviceMembershipRevoked" => true,
-            _ => false,
-        };
-    }
-
-    private static uint? TryReadUInt(JsonNode? node)
-    {
-        if (node is not JsonValue value)
-        {
-            return null;
-        }
-
-        return value.TryGetValue<uint>(out var parsed) ? parsed : null;
     }
 
     private static JsonNode? JsonNodeFromObjectJson(string json)

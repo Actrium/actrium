@@ -4532,6 +4532,12 @@ pub struct BrowserStorageSyncCloudProviderDiagnostics {
     pub capability_classification: String,
     pub compatibility_classification: String,
     pub provider_error_classification: String,
+    // True when the round's provider error classification means the shared
+    // cloud store no longer knows this device (folder wiped, store reset by
+    // another device): the native side clears the persisted membership marker
+    // so the next run re-joins. Owning this here keeps the "which round
+    // outcomes drop membership" rule single-sourced across platforms.
+    pub should_clear_membership_marker: bool,
     pub cycle_classification: String,
     pub schedule_classification: String,
     pub source_count: u32,
@@ -5763,7 +5769,25 @@ pub fn browser_storage_sync_cloud_provider_connection_status_policy_json(
         retry_attempt,
         observed_at_unix_seconds,
     ) {
-        Some(policy) => serialize_json(&policy),
+        Some(policy) => {
+            let mut policy_value = match serde_json::to_value(&policy) {
+                Ok(value) => value,
+                Err(_) => return "null".to_string(),
+            };
+            let routing_token =
+                browser_storage_sync_cloud_provider_connection_routing_token(&policy_value);
+            let blocked_schedule_state =
+                browser_storage_sync_cloud_provider_connection_blocked_schedule_state(
+                    &policy_value,
+                    retry_attempt,
+                    observed_at_unix_seconds,
+                );
+            if let Some(object) = policy_value.as_object_mut() {
+                object.insert("routingToken".to_string(), json!(routing_token));
+                object.insert("blockedScheduleState".to_string(), blocked_schedule_state);
+            }
+            serialize_json(&policy_value)
+        }
         None => "null".to_string(),
     }
 }
@@ -8167,28 +8191,28 @@ fn browser_storage_sync_cloud_provider_connection_status_policy_value(
         browser_storage_sync_cloud_provider_snapshot_string(provider_snapshot, &["deviceId"])
             .map(|device_id| normalize_sync_text(&device_id, "unknown-device", MAX_SYNC_ID_LENGTH))
             .unwrap_or_else(|| "unknown-device".to_string());
-    let connection_state = browser_storage_sync_cloud_provider_connection_state(
+    let mut connection_state = browser_storage_sync_cloud_provider_connection_state(
         browser_storage_sync_cloud_provider_snapshot_string(
             provider_snapshot,
             &["connectionState"],
         )
         .as_deref(),
     );
-    let credential_state = browser_storage_sync_cloud_provider_credential_state(
+    let mut credential_state = browser_storage_sync_cloud_provider_credential_state(
         browser_storage_sync_cloud_provider_snapshot_string(
             provider_snapshot,
             &["credentialState"],
         )
         .as_deref(),
     );
-    let membership_status = browser_storage_sync_cloud_provider_membership_status(
+    let mut membership_status = browser_storage_sync_cloud_provider_membership_status(
         browser_storage_sync_cloud_provider_snapshot_string(
             provider_snapshot,
             &["membershipStatus"],
         )
         .as_deref(),
     );
-    let last_provider_error_kind = browser_storage_sync_cloud_provider_snapshot_string(
+    let mut last_provider_error_kind = browser_storage_sync_cloud_provider_snapshot_string(
         provider_snapshot,
         &[
             "lastProviderErrorKind",
@@ -8210,15 +8234,15 @@ fn browser_storage_sync_cloud_provider_connection_status_policy_value(
     let capability_should_allow = provider_snapshot
         .pointer("/capabilityPreflight/shouldAllowSync")
         .and_then(Value::as_bool);
-    let connected =
+    let mut connected =
         browser_storage_sync_cloud_provider_snapshot_bool(provider_snapshot, &["connected"])
             .unwrap_or_else(|| connection_state == "connected");
-    let credentials_available = browser_storage_sync_cloud_provider_snapshot_bool(
+    let mut credentials_available = browser_storage_sync_cloud_provider_snapshot_bool(
         provider_snapshot,
         &["credentialsAvailable", "hasCredentials"],
     )
     .unwrap_or_else(|| credential_state == "available");
-    let cloud_store_ready = browser_storage_sync_cloud_provider_snapshot_bool(
+    let mut cloud_store_ready = browser_storage_sync_cloud_provider_snapshot_bool(
         provider_snapshot,
         &["cloudStoreReady", "storeReady", "rootPathReady"],
     )
@@ -8230,13 +8254,49 @@ fn browser_storage_sync_cloud_provider_connection_status_policy_value(
                 .unwrap_or(false)
         })
     });
-    let membership_ready =
+    let mut membership_ready =
         browser_storage_sync_cloud_provider_snapshot_bool(provider_snapshot, &["membershipReady"])
             .unwrap_or_else(|| membership_status == "active");
     let requires_user_action = provider_snapshot
         .get("requiresUserAction")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+
+    // Local folder is connection-free: apply the shared snapshot constants
+    // here so every platform marshals only providerKind/scope/deviceId plus a
+    // membershipMarkerPresent flag instead of hand-copying the "a configured
+    // folder is connected, credentialed, and storage-ready" special case. A
+    // real folder failure still surfaces as a storage-scoped round
+    // classification on the next round (folded in below).
+    if provider_kind == BROWSER_SYNC_PROVIDER_LOCAL_FOLDER_KIND {
+        connection_state = "connected".to_string();
+        credential_state = "available".to_string();
+        connected = true;
+        credentials_available = true;
+        cloud_store_ready = true;
+        if let Some(marker_present) = browser_storage_sync_cloud_provider_snapshot_bool(
+            provider_snapshot,
+            &["membershipMarkerPresent"],
+        ) {
+            membership_status = if marker_present { "active" } else { "missing" }.to_string();
+            membership_ready = marker_present;
+        }
+    }
+
+    // Fold the round-diagnostics classification into the connection error
+    // vocabulary so callers pass the raw last-round classification and Rust
+    // owns the token map (authExpired->auth, quotaExceeded->quota,
+    // storageSetupRequired->storage, recoveryRequired/providerUnavailable/
+    // adapterUnsupported pass through, ready/cloudStateRereadRequired->none).
+    if let Some(round_classification) = browser_storage_sync_cloud_provider_snapshot_string(
+        provider_snapshot,
+        &["providerRoundClassification", "roundClassification"],
+    ) {
+        last_provider_error_kind =
+            browser_storage_sync_cloud_provider_round_classification_to_error_kind(
+                &round_classification,
+            );
+    }
 
     let mut diagnostic_reasons = Vec::new();
     browser_storage_sync_cloud_provider_collect_snapshot_reasons(
@@ -9166,6 +9226,99 @@ fn browser_storage_sync_cloud_provider_collect_membership_reason(
         _ => "deviceMembershipUnknown",
     };
     browser_storage_sync_cloud_cycle_collect_reason(diagnostic_reasons, Some(reason));
+}
+
+// Maps a round-diagnostics provider error classification (e.g.
+// "storageSetupRequired") into the connection-contract error-kind vocabulary
+// (e.g. "storage"). This is the single source of the token map that platforms
+// previously hand-copied above this contract. Rereads are handled inside the
+// rounds, and clean/ready rounds carry no connection-level error, so both map
+// to none.
+fn browser_storage_sync_cloud_provider_round_classification_to_error_kind(
+    round_classification: &str,
+) -> Option<String> {
+    match round_classification.trim() {
+        "" | "ready" | "notObserved" | "cloudStateRereadRequired" => None,
+        "authExpired" => Some("auth".to_string()),
+        "quotaExceeded" => Some("quota".to_string()),
+        "storageSetupRequired" => Some("storage".to_string()),
+        "recoveryRequired" => Some("recoveryRequired".to_string()),
+        "providerUnavailable" => Some("providerUnavailable".to_string()),
+        "adapterUnsupported" => Some("adapterUnsupported".to_string()),
+        other => Some(other.to_string()),
+    }
+}
+
+// Routing token derived from the connection status policy: notConfigured is a
+// native pre-gate (platforms short-circuit before calling this contract), so
+// only membership/cycle/blocked are emitted here. The token replaces each
+// platform's hand-copied should_attempt_membership/should_attempt_sync branch.
+fn browser_storage_sync_cloud_provider_connection_routing_token(policy: &Value) -> &'static str {
+    if policy
+        .get("shouldAttemptMembership")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "membership"
+    } else if policy
+        .get("shouldAttemptSync")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
+        "cycle"
+    } else {
+        "blocked"
+    }
+}
+
+// Translates the connection status policy into the scheduler field shape used
+// on the blocked routing, where no round runs and no round envelope exists.
+// This is the field-shape mapping platforms previously duplicated
+// (schedulerAction / retryDelaySeconds / userAction / resetRetryAttempt).
+fn browser_storage_sync_cloud_provider_connection_blocked_schedule_state(
+    policy: &Value,
+    retry_attempt: u32,
+    observed_at_unix_seconds: i64,
+) -> Value {
+    let scheduler_action = policy
+        .get("schedulerAction")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let user_action = policy
+        .get("userAction")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let requires_user_action = !user_action.is_empty() && user_action != "none";
+    let mut schedule_state = json!({
+        "planType": "cloudProviderConnectionScheduleState",
+        "classification": policy.get("classification").and_then(Value::as_str).unwrap_or(""),
+        "schedulerAction": scheduler_action,
+        // Local folder never waits for credentials; cloud providers that do
+        // surface it through their own classifications, not this field.
+        "waitingForCredentials": false,
+        "requiresUserAction": requires_user_action,
+        "userAction": user_action,
+        "resetRetryAttempt": policy.get("resetRetryAttempt").and_then(Value::as_bool).unwrap_or(false),
+    });
+    if let Some(object) = schedule_state.as_object_mut() {
+        if let Some(retry_delay_seconds) = policy.get("retryDelaySeconds").and_then(Value::as_u64) {
+            object.insert(
+                "nextRunDelaySeconds".to_string(),
+                json!(retry_delay_seconds),
+            );
+            object.insert(
+                "nextRunAtUnixSeconds".to_string(),
+                json!(observed_at_unix_seconds + retry_delay_seconds as i64),
+            );
+        }
+        if scheduler_action == "scheduleRetry" {
+            object.insert(
+                "nextRetryAttempt".to_string(),
+                json!(u64::from(retry_attempt) + 1),
+            );
+        }
+    }
+    schedule_state
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -23545,6 +23698,26 @@ pub fn browser_storage_sync_cloud_provider_diagnostics(
         warnings.insert("providerCapabilityDegraded".to_string());
     }
 
+    let provider_error_classification_label = provider_error_classification
+        .as_ref()
+        .and_then(|value| json_string_field(value, "classification"))
+        .map(|classification| {
+            normalize_sync_text(&classification, "notObserved", MAX_SYNC_TEXT_LENGTH)
+        })
+        .unwrap_or_else(|| "notObserved".to_string());
+    // Membership- or storage-scoped round outcomes mean the shared store no
+    // longer knows this device; the native side clears the marker so the next
+    // run re-joins. Deliberately narrow: a wrongly cleared marker costs
+    // exactly one corrective membership round.
+    let should_clear_membership_marker = matches!(
+        provider_error_classification_label.as_str(),
+        "storageSetupRequired"
+            | "recoveryRequired"
+            | "membershipRequired"
+            | "deviceMembershipMissing"
+            | "deviceMembershipRevoked"
+    );
+
     Some(BrowserStorageSyncCloudProviderDiagnostics {
         version: BROWSER_STORAGE_SYNC_CLOUD_PLAN_VERSION,
         storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
@@ -23591,13 +23764,8 @@ pub fn browser_storage_sync_cloud_provider_diagnostics(
         compatibility_classification: compatibility_source
             .map(|source| source.classification.clone())
             .unwrap_or_else(|| "notObserved".to_string()),
-        provider_error_classification: provider_error_classification
-            .as_ref()
-            .and_then(|value| json_string_field(value, "classification"))
-            .map(|classification| {
-                normalize_sync_text(&classification, "notObserved", MAX_SYNC_TEXT_LENGTH)
-            })
-            .unwrap_or_else(|| "notObserved".to_string()),
+        provider_error_classification: provider_error_classification_label,
+        should_clear_membership_marker,
         cycle_classification: cycle_source
             .map(|source| source.classification.clone())
             .unwrap_or_else(|| "notObserved".to_string()),
@@ -39247,6 +39415,168 @@ mod tests {
             browser_storage_sync_cloud_provider_connection_status_policy_json("{bad", 0, 105),
             "null"
         );
+    }
+
+    #[test]
+    fn cloud_provider_connection_status_policy_applies_local_folder_constants() {
+        // A localFolder snapshot carries only providerKind/scope/deviceId plus
+        // the membership marker flag: the contract fills the connection
+        // constants and routes to the cycle round.
+        let cycle = serde_json::from_str::<Value>(
+            &browser_storage_sync_cloud_provider_connection_status_policy_json(
+                &serialize_json(&json!({
+                    "providerKind": "localFolder",
+                    "scope": "profile-a",
+                    "deviceId": "device-a",
+                    "membershipMarkerPresent": true
+                })),
+                0,
+                3000,
+            ),
+        )
+        .unwrap();
+        assert_eq!(cycle["connectionState"], json!("connected"));
+        assert_eq!(cycle["credentialState"], json!("available"));
+        assert_eq!(cycle["cloudStoreReady"], json!(true));
+        assert_eq!(cycle["membershipStatus"], json!("active"));
+        assert_eq!(cycle["classification"], json!("ready"));
+        assert_eq!(cycle["routingToken"], json!("cycle"));
+
+        // Without the marker the same folder routes to the one-time
+        // membership join round first.
+        let membership = serde_json::from_str::<Value>(
+            &browser_storage_sync_cloud_provider_connection_status_policy_json(
+                &serialize_json(&json!({
+                    "providerKind": "localFolder",
+                    "scope": "profile-a",
+                    "deviceId": "device-a",
+                    "membershipMarkerPresent": false
+                })),
+                0,
+                3001,
+            ),
+        )
+        .unwrap();
+        assert_eq!(membership["membershipStatus"], json!("missing"));
+        assert_eq!(membership["classification"], json!("membershipRequired"));
+        assert_eq!(membership["routingToken"], json!("membership"));
+        assert_eq!(membership["shouldAttemptMembership"], json!(true));
+    }
+
+    #[test]
+    fn cloud_provider_connection_status_policy_maps_round_classification_and_blocks() {
+        let policy = |round: &str, retry: u32, observed: i64| {
+            serde_json::from_str::<Value>(
+                &browser_storage_sync_cloud_provider_connection_status_policy_json(
+                    &serialize_json(&json!({
+                        "providerKind": "localFolder",
+                        "scope": "profile-a",
+                        "deviceId": "device-a",
+                        "membershipMarkerPresent": true,
+                        "providerRoundClassification": round
+                    })),
+                    retry,
+                    observed,
+                ),
+            )
+            .unwrap()
+        };
+
+        // storageSetupRequired -> storage: blocked, parks the user, no retry.
+        let storage = policy("storageSetupRequired", 2, 3100);
+        assert_eq!(storage["classification"], json!("storageSetupRequired"));
+        assert_eq!(storage["routingToken"], json!("blocked"));
+        let storage_schedule = &storage["blockedScheduleState"];
+        assert_eq!(
+            storage_schedule["planType"],
+            json!("cloudProviderConnectionScheduleState")
+        );
+        assert_eq!(
+            storage_schedule["schedulerAction"],
+            json!("waitForProviderStorage")
+        );
+        assert_eq!(
+            storage_schedule["userAction"],
+            json!("chooseProviderFolder")
+        );
+        assert_eq!(storage_schedule["requiresUserAction"], json!(true));
+        assert_eq!(storage_schedule["waitingForCredentials"], json!(false));
+        assert_eq!(storage_schedule["resetRetryAttempt"], json!(false));
+        assert!(storage_schedule.get("nextRunDelaySeconds").is_none());
+        assert!(storage_schedule.get("nextRetryAttempt").is_none());
+
+        // Each remaining error token folds into its connection classification.
+        assert_eq!(
+            policy("authExpired", 0, 3101)["classification"],
+            json!("authExpired")
+        );
+        assert_eq!(
+            policy("quotaExceeded", 0, 3102)["classification"],
+            json!("quotaExceeded")
+        );
+        assert_eq!(
+            policy("adapterUnsupported", 0, 3103)["classification"],
+            json!("adapterUnsupported")
+        );
+        assert_eq!(
+            policy("recoveryRequired", 0, 3104)["classification"],
+            json!("recoveryRequired")
+        );
+
+        // ready/cloudStateRereadRequired map to none: the folder stays ready.
+        let reread = policy("cloudStateRereadRequired", 0, 3105);
+        assert_eq!(reread["classification"], json!("ready"));
+        assert_eq!(reread["routingToken"], json!("cycle"));
+
+        // A retryable outage schedules the next attempt with the backoff delay.
+        let network = policy("providerUnavailable", 1, 3106);
+        assert_eq!(network["classification"], json!("providerUnavailable"));
+        let network_schedule = &network["blockedScheduleState"];
+        assert_eq!(network_schedule["schedulerAction"], json!("scheduleRetry"));
+        assert_eq!(network_schedule["nextRunDelaySeconds"], json!(10));
+        assert_eq!(network_schedule["nextRunAtUnixSeconds"], json!(3116));
+        assert_eq!(network_schedule["nextRetryAttempt"], json!(2));
+        assert_eq!(network_schedule["requiresUserAction"], json!(false));
+    }
+
+    #[test]
+    fn cloud_provider_diagnostics_flags_membership_marker_clear() {
+        let clearing = browser_storage_sync_cloud_provider_diagnostics(
+            "",
+            "",
+            &serialize_json(&json!({"classification": "recoveryRequired", "failedCount": 1})),
+            "",
+            "",
+            3200,
+        )
+        .unwrap();
+        assert_eq!(clearing.provider_error_classification, "recoveryRequired");
+        assert!(clearing.should_clear_membership_marker);
+
+        let storage = browser_storage_sync_cloud_provider_diagnostics(
+            "",
+            "",
+            &serialize_json(&json!({"classification": "storageSetupRequired", "failedCount": 1})),
+            "",
+            "",
+            3201,
+        )
+        .unwrap();
+        assert!(storage.should_clear_membership_marker);
+
+        // A reread is handled inside the round; it must not drop membership.
+        let keeping = browser_storage_sync_cloud_provider_diagnostics(
+            "",
+            "",
+            &serialize_json(
+                &json!({"classification": "cloudStateRereadRequired", "failedCount": 1}),
+            ),
+            "",
+            "",
+            3202,
+        )
+        .unwrap();
+        assert!(!keeping.should_clear_membership_marker);
     }
 
     #[test]

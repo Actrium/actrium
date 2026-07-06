@@ -380,7 +380,7 @@ internal sealed class BrowserSyncSettingsDialog : Form
             // provider branch, evaluated fresh for display.
             var plan = BrowserSyncProviderConnectionPlanner.Plan(
                 settings,
-                lastProviderErrorKind: null,
+                lastRoundClassification: null,
                 retryAttempt: 0,
                 DateTimeOffset.UtcNow.ToUnixTimeSeconds());
             connectionText = BrowserSyncProviderStatusFormatter.FormatConnectionPolicy(
