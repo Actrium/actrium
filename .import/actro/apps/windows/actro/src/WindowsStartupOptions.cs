@@ -2,7 +2,10 @@ using System.Collections.Generic;
 
 namespace Actro.Windows;
 
-internal sealed record WindowsStartupOptions(IReadOnlyList<string> InitialAddresses, bool IsPrivate = false)
+internal sealed record WindowsStartupOptions(
+    IReadOnlyList<string> InitialAddresses,
+    bool IsPrivate = false,
+    string? UserDataRoot = null)
 {
     public WindowsStartupOptions(string? initialUrl, bool isPrivate = false)
         : this(
@@ -17,12 +20,24 @@ internal sealed record WindowsStartupOptions(IReadOnlyList<string> InitialAddres
     {
         var initialAddresses = new List<string>();
         var isPrivate = false;
+        string? userDataRoot = null;
 
         for (var index = 0; index < args.Count; index++)
         {
             if (args[index] == "--url" && index + 1 < args.Count)
             {
                 initialAddresses.Add(args[index + 1]);
+                index++;
+                continue;
+            }
+
+            // Concurrent multi-instance runs: overrides the durable state
+            // root so a second instance keeps a fully independent state tree.
+            // Program.Main mirrors it into ACTRO_USER_DATA_ROOT, the single
+            // override choke point WindowsAppPaths reads.
+            if (args[index] == "--user-data-root" && index + 1 < args.Count)
+            {
+                userDataRoot = args[index + 1];
                 index++;
                 continue;
             }
@@ -40,6 +55,6 @@ internal sealed record WindowsStartupOptions(IReadOnlyList<string> InitialAddres
             }
         }
 
-        return new WindowsStartupOptions(initialAddresses, isPrivate);
+        return new WindowsStartupOptions(initialAddresses, isPrivate, userDataRoot);
     }
 }

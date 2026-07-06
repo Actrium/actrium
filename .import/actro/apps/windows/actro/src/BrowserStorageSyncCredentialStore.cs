@@ -242,7 +242,6 @@ internal sealed class BrowserStorageSyncCredentialStore : IBrowserStorageSyncCre
             string.IsNullOrWhiteSpace(baseUrl) ? DefaultBaseUrl(normalizedEnvironment) : baseUrl,
             accessToken,
             scope,
-            deviceId: null,
             environment: normalizedEnvironment));
     }
 
@@ -284,7 +283,6 @@ internal sealed class BrowserStorageSyncCredentialStore : IBrowserStorageSyncCre
         string baseUrl,
         string accessToken,
         string scope = DefaultScope,
-        string? deviceId = null,
         string? environment = null,
         long? savedAtUnixSeconds = null)
     {
@@ -295,7 +293,6 @@ internal sealed class BrowserStorageSyncCredentialStore : IBrowserStorageSyncCre
             NormalizeText(baseUrl).Length == 0 ? DefaultBaseUrl(normalizedEnvironment) : NormalizeText(baseUrl),
             NormalizeText(accessToken),
             NormalizeText(scope).Length == 0 ? DefaultScope : NormalizeText(scope),
-            NormalizeText(deviceId).Length == 0 ? Guid.NewGuid().ToString() : NormalizeText(deviceId),
             savedAtUnixSeconds.GetValueOrDefault(DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
     }
 
@@ -311,8 +308,7 @@ internal sealed class BrowserStorageSyncCredentialStore : IBrowserStorageSyncCre
         var credentials = new BrowserStorageSyncCredentials(
             snapshot.BaseUrl,
             snapshot.AccessToken,
-            snapshot.Scope,
-            snapshot.DeviceId);
+            snapshot.Scope);
 
         return Task.FromResult(credentials.IsUsable ? credentials : null);
     }
@@ -333,9 +329,6 @@ internal sealed class BrowserStorageSyncCredentialStore : IBrowserStorageSyncCre
                 : NormalizeText(snapshot.BaseUrl),
             NormalizeText(snapshot.AccessToken),
             NormalizeText(snapshot.Scope).Length == 0 ? DefaultScope : NormalizeText(snapshot.Scope),
-            NormalizeText(snapshot.DeviceId).Length == 0
-                ? Guid.NewGuid().ToString()
-                : NormalizeText(snapshot.DeviceId),
             snapshot.SavedAtUnixSeconds > 0
                 ? snapshot.SavedAtUnixSeconds
                 : DateTimeOffset.UtcNow.ToUnixTimeSeconds());
@@ -385,11 +378,15 @@ internal sealed record BrowserStorageSyncCredentialEnvelope(
     string? Format,
     string? Payload);
 
+// The reference-server credential snapshot no longer carries a device id:
+// the durable browser sync device identity lives in the provider settings
+// store (browser-sync-provider.json). A "deviceId" key left in an older
+// on-disk file is tolerated and ignored on read (System.Text.Json skips
+// unmapped members), so no migration is required.
 internal sealed record BrowserStorageSyncCredentialSnapshot(
     int Version,
     string Environment,
     string BaseUrl,
     string AccessToken,
     string Scope,
-    string DeviceId,
     long SavedAtUnixSeconds);

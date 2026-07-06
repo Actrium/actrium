@@ -58,6 +58,17 @@ internal static class BrowserSyncStatusPolicy
             "retryScheduled" when nextRunDelaySeconds.HasValue =>
                 BrowserStrings.Format("status.sync.retryScheduledFormat", nextRunDelaySeconds.Value),
             "retryScheduled" => BrowserStrings.Get("status.sync.retryScheduled"),
+            // In the post-endpoint architecture a credentialsUnavailable
+            // classification is reachable only when no provider is configured
+            // and no usable endpoint session exists — i.e. the "nothing
+            // configured" state, not a sign-in prompt. The dev endpoint path
+            // returning authRequired also lands on waitingForCredentials but
+            // carries a different lastClassification, so the two stay
+            // disambiguated and only that case still reads "needs sign-in".
+            "waitingForCredentials" when string.Equals(
+                lastClassification,
+                "credentialsUnavailable",
+                StringComparison.Ordinal) => BrowserStrings.Get("status.sync.notConfigured"),
             "waitingForCredentials" => BrowserStrings.Get("status.sync.needsSignIn"),
             "requiresUserAction" when string.Equals(
                 lastClassification,
