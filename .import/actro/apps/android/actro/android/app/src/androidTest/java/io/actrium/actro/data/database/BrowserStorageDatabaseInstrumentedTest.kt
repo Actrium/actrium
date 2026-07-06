@@ -10,6 +10,7 @@ import io.actrium.actro.data.sync.BrowserStorageSyncCoordinator
 import io.actrium.actro.data.sync.BrowserStorageSyncCredentialStore
 import io.actrium.actro.data.sync.BrowserStorageSyncCredentials
 import io.actrium.actro.data.sync.BrowserStorageSyncCredentialsProvider
+import io.actrium.actro.data.sync.BrowserStorageSyncProviderSettingsStore
 import io.actrium.actro.data.sync.BrowserStorageSyncHttpRequest
 import io.actrium.actro.data.sync.BrowserStorageSyncHttpResponse
 import io.actrium.actro.data.sync.BrowserStorageSyncScheduler
@@ -1438,6 +1439,130 @@ class BrowserStorageDatabaseInstrumentedTest {
         assertEquals("Bearer token-android-stored", transport.lastRequest?.headers?.get("Authorization"))
 
         store.clearSession()
+    }
+
+    @Test
+    fun providerSettingsStoreRoundTripsNormalizesAndTracksMembership() {
+        val storeFile = File(context.cacheDir, "provider-settings-${System.nanoTime()}.json")
+        try {
+            val store = BrowserStorageSyncProviderSettingsStore(storeFile) { "adopted-device-id" }
+
+            // First load mints and persists the durable identity, adopting the
+            // provided (endpoint) device id, and is not configured yet.
+            val initial = store.load()
+            assertEquals("adopted-device-id", initial.deviceId)
+            assertFalse(initial.isConfigured)
+            assertNull(initial.providerKind)
+            assertTrue(storeFile.exists())
+
+            // A relative root is rejected: it degrades to not-configured instead
+            // of syncing into a guessed working-directory-relative folder.
+            val relative = store.save(store.createSnapshot("localFolder", "relative/path"))
+            assertFalse(relative.isConfigured)
+            assertNull(relative.localFolderRootPath)
+
+            // An unknown provider kind is contract drift and normalizes away.
+            assertNull(store.save(store.createSnapshot("dropbox", "/abs/path")).providerKind)
+
+            // An absolute local-folder root configures the provider; the device
+            // id is stable across writes.
+            val configured = store.configureLocalFolder("/data/local/tmp/actro-sync")
+            assertTrue(configured.isConfigured)
+            assertEquals("localFolder", configured.providerKind)
+            assertEquals("/data/local/tmp/actro-sync", configured.localFolderRootPath)
+            assertEquals("adopted-device-id", configured.deviceId)
+            assertNull(configured.membershipJoinedAtUnixSeconds)
+
+            // The membership marker persists and survives a fresh store instance
+            // reading the same file (no re-mint of identity).
+            store.saveMembershipJoined(4242)
+            val reopened = BrowserStorageSyncProviderSettingsStore(storeFile) { "should-not-be-used" }
+            val reloaded = reopened.load()
+            assertEquals(4242L, reloaded.membershipJoinedAtUnixSeconds)
+            assertEquals("adopted-device-id", reloaded.deviceId)
+
+            // Disconnect stops provider sync and clears the marker but keeps the
+            // durable device identity for a later reconnect.
+            val disconnected = store.disconnect()
+            assertFalse(disconnected.isConfigured)
+            assertNull(disconnected.providerKind)
+            assertNull(disconnected.membershipJoinedAtUnixSeconds)
+            assertEquals("adopted-device-id", disconnected.deviceId)
+        } finally {
+            storeFile.delete()
+        }
+    }
+
+    @Test
+    fun syncCoordinatorRoutesLocalFolderProviderMembershipThenCycle() = runBlocking {
+        val testRoot = File(context.cacheDir, "actro-provider-coordinator-${System.nanoTime()}")
+        val databaseFile = File(testRoot, "browser.db")
+        val cloudRoot = File(testRoot, "cloud")
+        val storeFile = File(testRoot, "browser-sync-provider.json")
+        try {
+            testRoot.mkdirs()
+            val database = BrowserStorageDatabase.createAtPath(databaseFile.absolutePath)
+            assertTrue(
+                database.recordHistoryVisit(
+                    BrowserHistoryItem(
+                        title = "Provider Coordinator",
+                        address = "https://example.com/android-provider-coordinator",
+                        visitedAtUnixSeconds = 1800,
+                    ),
+                ),
+            )
+
+            val providerStore = BrowserStorageSyncProviderSettingsStore(storeFile) { "device-android-provider" }
+            providerStore.configureLocalFolder(cloudRoot.absolutePath)
+
+            // Null endpoint credentials on purpose: if the provider branch did
+            // not handle the cycle, the coordinator would fall through and
+            // report credentialsUnavailable, and the endpoint transport would be
+            // hit. Neither must happen.
+            val transport = FakeBrowserStorageSyncTransport("{}")
+            val coordinator = BrowserStorageSyncCoordinator(
+                client = BrowserStorageSyncClient(database, transport),
+                credentialsProvider = FakeBrowserStorageSyncCredentialsProvider(null),
+                providerSettingsStore = providerStore,
+            )
+
+            // First run: membership is missing, so the coordinator joins then
+            // runs the cycle in a single call and returns the cycle envelope.
+            val firstResult = JSONObject(
+                coordinator.runSyncCycle(
+                    generatedAtUnixSeconds = 1810,
+                    limitPerCollection = 20,
+                    observedAtUnixSeconds = 1810,
+                ),
+            )
+            assertEquals("cloudLocalFolderCycle", firstResult.getString("endpointType"))
+            assertEquals("localFolder", firstResult.getString("providerKind"))
+            assertTrue(firstResult.getBoolean("credentialsAvailable"))
+            assertEquals("success", firstResult.getString("classification"))
+            // The lifted scheduleState is scheduler-shaped (carries the field
+            // the scheduler reads), not left as an opaque cloud round shape.
+            assertTrue(firstResult.getJSONObject("scheduleState").has("schedulerAction"))
+            assertNull(transport.lastRequest)
+
+            // The membership marker is now persisted so later runs skip the join.
+            assertNotNull(providerStore.load().membershipJoinedAtUnixSeconds)
+            assertTrue(File(cloudRoot, "Actro/BrowserSync/manifest.json").exists())
+
+            // Second run: membership active, routes straight to the cycle round.
+            val secondResult = JSONObject(
+                coordinator.runSyncCycle(
+                    generatedAtUnixSeconds = 1820,
+                    limitPerCollection = 20,
+                    observedAtUnixSeconds = 1820,
+                ),
+            )
+            assertEquals("cloudLocalFolderCycle", secondResult.getString("endpointType"))
+            assertEquals("success", secondResult.getString("classification"))
+            assertNull(transport.lastRequest)
+        } finally {
+            deleteDatabaseFiles(databaseFile)
+            testRoot.deleteRecursively()
+        }
     }
 
     private fun createLegacyBrowserStorageDatabase(schemaVersion: Int) {

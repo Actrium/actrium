@@ -17,9 +17,13 @@ import { useUserStore } from '../../actr-host/store/useUserStore';
 import { SettingsItem } from './SettingsItem';
 import { PhoneNavigationBar } from '../../components/PhoneNavigationBar';
 import {
+  connectBrowserSyncLocalFolder,
+  getBrowserSyncProviderStatus,
   getBrowserSyncStatus,
   hasBrowserSyncModule,
+  hasBrowserSyncProviderModule,
   syncBrowserDataNow,
+  type BrowserSyncProviderStatus,
   type BrowserSyncStatus,
 } from '../../native-bridge/browser-data/BrowserDataModule';
 
@@ -50,9 +54,14 @@ export const SettingsMain = ({
   const isLoggedIn = !!userInfo;
   const hasNativeNavigationBar = !!PhoneNavigationBar;
   const isBrowserSyncAvailable = hasBrowserSyncModule();
+  const isBrowserSyncProviderAvailable = hasBrowserSyncProviderModule();
   const [browserSyncStatus, setBrowserSyncStatus] =
     useState<BrowserSyncStatus | null>(null);
   const [isBrowserSyncRunning, setIsBrowserSyncRunning] = useState(false);
+  const [browserSyncProviderStatus, setBrowserSyncProviderStatus] =
+    useState<BrowserSyncProviderStatus | null>(null);
+  const [isConnectingBrowserSyncFolder, setIsConnectingBrowserSyncFolder] =
+    useState(false);
   // Android pad 上 insets.top 为 0，原生导航栏标题被系统状态栏遮挡，
   // 用 StatusBar.currentHeight 补偿。Android phone 和 iOS 不受影响。
   const isAndroidPad = Platform.OS === 'android' && isTablet;
@@ -117,6 +126,50 @@ export const SettingsMain = ({
       setIsBrowserSyncRunning(false);
     }
   }, [isBrowserSyncAvailable, isBrowserSyncRunning, loadBrowserSyncStatus]);
+
+  const loadBrowserSyncProviderStatus = useCallback(async () => {
+    if (!isBrowserSyncProviderAvailable) {
+      setBrowserSyncProviderStatus(null);
+      return;
+    }
+
+    setBrowserSyncProviderStatus(await getBrowserSyncProviderStatus());
+  }, [isBrowserSyncProviderAvailable]);
+
+  useEffect(() => {
+    void loadBrowserSyncProviderStatus();
+  }, [loadBrowserSyncProviderStatus]);
+
+  const browserSyncFolderValueText = useMemo(() => {
+    if (isConnectingBrowserSyncFolder) {
+      return t('actr.settings.browserSyncConnecting');
+    }
+    if (browserSyncProviderStatus?.configured) {
+      return t('actr.settings.browserSyncFolderConnected');
+    }
+    return t('actr.settings.browserSyncFolderConnect');
+  }, [browserSyncProviderStatus, isConnectingBrowserSyncFolder, t]);
+
+  // Minimal folder entry: the native side owns the folder path, the
+  // provider-settings persistence, and the Rust preflight gate; here we only
+  // trigger the connect and refresh the displayed provider + sync status.
+  const handleConnectBrowserSyncFolder = useCallback(async () => {
+    if (!isBrowserSyncProviderAvailable || isConnectingBrowserSyncFolder) {
+      return;
+    }
+
+    setIsConnectingBrowserSyncFolder(true);
+    try {
+      setBrowserSyncProviderStatus(await connectBrowserSyncLocalFolder());
+    } finally {
+      await loadBrowserSyncStatus();
+      setIsConnectingBrowserSyncFolder(false);
+    }
+  }, [
+    isBrowserSyncProviderAvailable,
+    isConnectingBrowserSyncFolder,
+    loadBrowserSyncStatus,
+  ]);
 
   return (
     <View style={styles.container}>
@@ -208,6 +261,22 @@ export const SettingsMain = ({
               showChevron={false}
               onPress={loadBrowserSyncStatus}
             />
+            {isBrowserSyncProviderAvailable && (
+              <>
+                <View style={styles.itemDivider} />
+                <SettingsItem
+                  icon="feedback"
+                  label={t('actr.settings.browserSyncFolder')}
+                  value={browserSyncFolderValueText}
+                  showChevron={false}
+                  onPress={
+                    isConnectingBrowserSyncFolder
+                      ? undefined
+                      : handleConnectBrowserSyncFolder
+                  }
+                />
+              </>
+            )}
             <View style={styles.itemDivider} />
             <SettingsItem
               icon="feedback"

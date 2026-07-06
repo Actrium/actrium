@@ -9,7 +9,10 @@ import com.facebook.react.bridge.WritableArray
 import io.actrium.actro.data.database.BrowserBookmarkItem
 import io.actrium.actro.data.database.BrowserHistoryItem
 import io.actrium.actro.data.repository.BrowserDataRepository
+import io.actrium.actro.data.sync.BrowserStorageSyncConnectOutcome
 import io.actrium.actro.data.sync.BrowserStorageSyncCredentialStore
+import io.actrium.actro.data.sync.BrowserStorageSyncLocalFolderConnector
+import io.actrium.actro.data.sync.BrowserStorageSyncProviderSettingsStore
 import io.actrium.actro.data.sync.BrowserStorageSyncScheduler
 import io.actrium.actro.data.sync.BrowserSyncStack
 import java.nio.charset.StandardCharsets
@@ -19,6 +22,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 class BrowserDataModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -27,6 +31,7 @@ class BrowserDataModule(reactContext: ReactApplicationContext) :
     private val moduleScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val syncStack = BrowserSyncStack.getInstance(reactContext.applicationContext)
     private val syncCredentialStore: BrowserStorageSyncCredentialStore = syncStack.credentialStore
+    private val providerSettingsStore: BrowserStorageSyncProviderSettingsStore = syncStack.providerSettingsStore
     private val syncScheduler: BrowserStorageSyncScheduler = syncStack.scheduler
     private val repository: BrowserDataRepository = syncStack.repository
 
@@ -166,6 +171,78 @@ class BrowserDataModule(reactContext: ReactApplicationContext) :
                 onFailure = { error -> promise.reject("BROWSER_SYNC_STATUS_FAILED", error) }
             )
         }
+    }
+
+    // Minimal local-folder provider entry, mirroring the validated Windows
+    // engine wiring: the connector persists nothing until the Rust
+    // capability / adapter / compatibility preflights pass, and on accept the
+    // first scheduled run performs the membership join and cycle round. The
+    // folder is the app-scoped external directory (a real absolute path Rust
+    // can read/write) with no picker and no runtime permission; a user-visible
+    // cross-app shared folder is the product-gated SAF path and out of scope.
+    @ReactMethod
+    fun connectLocalFolderProvider(promise: Promise) {
+        moduleScope.launch {
+            runCatching {
+                val outcome = BrowserStorageSyncLocalFolderConnector.connect(
+                    context = reactApplicationContext,
+                    store = providerSettingsStore,
+                )
+                if (outcome.accepted) {
+                    syncScheduler.runNow()
+                }
+                providerStatusJson(outcome)
+            }.fold(
+                onSuccess = promise::resolve,
+                onFailure = { error -> promise.reject("BROWSER_SYNC_PROVIDER_CONNECT_FAILED", error) }
+            )
+        }
+    }
+
+    @ReactMethod
+    fun disconnectProvider(promise: Promise) {
+        moduleScope.launch {
+            runCatching {
+                // Disconnect means "stop browser sync entirely": also clear any
+                // leftover endpoint session so the reference-server path does
+                // not silently reactivate.
+                providerSettingsStore.disconnectAndClearEndpointSession(syncCredentialStore)
+                syncScheduler.cancelPendingSync()
+                providerStatusJson()
+            }.fold(
+                onSuccess = promise::resolve,
+                onFailure = { error -> promise.reject("BROWSER_SYNC_PROVIDER_DISCONNECT_FAILED", error) }
+            )
+        }
+    }
+
+    @ReactMethod
+    fun getProviderStatus(promise: Promise) {
+        moduleScope.launch {
+            runCatching {
+                providerStatusJson()
+            }.fold(
+                onSuccess = promise::resolve,
+                onFailure = { error -> promise.reject("BROWSER_SYNC_PROVIDER_STATUS_FAILED", error) }
+            )
+        }
+    }
+
+    private fun providerStatusJson(connectOutcome: BrowserStorageSyncConnectOutcome? = null): String {
+        val settings = connectOutcome?.settings ?: providerSettingsStore.load()
+        val json = JSONObject()
+            .put("version", 1)
+            .put("providerKind", settings.providerKind ?: JSONObject.NULL)
+            .put("configured", settings.isConfigured)
+            .put("localFolderRootPath", settings.localFolderRootPath ?: JSONObject.NULL)
+            .put("membershipActive", settings.membershipJoinedAtUnixSeconds != null)
+            .put("scope", settings.scope)
+        if (connectOutcome != null) {
+            json.put("accepted", connectOutcome.accepted)
+            json.put("blockedReason", connectOutcome.blockedReasonKey ?: JSONObject.NULL)
+            json.put("blockedDetail", connectOutcome.detailText)
+        }
+        return json.toString()
     }
 
     private fun historyItemsToArray(items: List<BrowserHistoryItem>): WritableArray {

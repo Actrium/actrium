@@ -276,6 +276,10 @@
       "browserSyncUpgradeRequired": "App update required",
       "browserSyncRequiresUserAction": "Action required",
       "browserSyncUnavailable": "Unavailable",
+      "browserSyncFolder": "Sync folder",
+      "browserSyncFolderConnect": "Set up",
+      "browserSyncFolderConnected": "Connected",
+      "browserSyncConnecting": "Connecting...",
       "feedbackSubject": "#FeedbackAbout"
     }
   }

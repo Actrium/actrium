@@ -1000,11 +1000,18 @@ private fun SQLiteStatement.bindArgs(args: List<Any?>) {
 }
 
 private fun JSONArray.toSqlParams(): List<Any?> {
-    return buildList {
-        for (index in 0 until length()) {
-            add(get(index).toSqlParam())
-        }
+    // `this` is bound to a local so the reads below cannot resolve against the
+    // ArrayList being populated: inside a buildList {} block an unqualified
+    // `get(index)` binds to the MutableList builder receiver, not to
+    // JSONArray.get, which reads the still-empty builder and throws on the
+    // first non-empty params array. Every cloud cycle apply plan that binds a
+    // statement parameter hits this, so it must read the JSONArray explicitly.
+    val array = this
+    val params = ArrayList<Any?>(array.length())
+    for (index in 0 until array.length()) {
+        params.add(array.get(index).toSqlParam())
     }
+    return params
 }
 
 private fun Any?.toSqlParam(): Any? {

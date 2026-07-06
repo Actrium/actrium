@@ -27,9 +27,16 @@ class BrowserSyncStack private constructor(context: Context) {
 
     val credentialStore: BrowserStorageSyncCredentialStore = BrowserStorageSyncCredentialStore(context)
 
+    // Owner of the durable provider connection settings and device identity;
+    // adopts the endpoint credential device id the first time it is written so
+    // the same machine never appears as two cloud devices.
+    val providerSettingsStore: BrowserStorageSyncProviderSettingsStore =
+        BrowserStorageSyncProviderSettingsStore(context) { credentialStore.deviceId() }
+
     val coordinator: BrowserStorageSyncCoordinator = BrowserStorageSyncCoordinator(
         BrowserStorageSyncClient(database),
         credentialStore,
+        providerSettingsStore,
     )
 
     val scheduler: BrowserStorageSyncScheduler = BrowserStorageSyncScheduler(coordinator, syncScope)

@@ -146,6 +146,16 @@ class BrowserStorageSyncCredentialStore(
         )
     }
 
+    /**
+     * Public read accessor for the durable endpoint device identity. The
+     * provider settings store is the device-identity owner now that the
+     * endpoint dialog is dev-only; it adopts this value the first time it is
+     * written so the same machine never appears as two cloud devices, and this
+     * store keeps its own durable copy so a corrupt provider-settings file can
+     * recover the same id instead of minting a ghost.
+     */
+    fun deviceId(): String = getOrCreateDeviceId()
+
     private fun getOrCreateDeviceId(): String {
         val existing = preferences.getString(KEY_DEVICE_ID, null)
         if (!existing.isNullOrBlank()) {
