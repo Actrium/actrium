@@ -551,6 +551,33 @@ internal static class ActroCore
         return Encoding.UTF8.GetString(buffer, 0, requiredLength);
     }
 
+    public static string NormalizeBrowserSyncProviderSettingsJson(
+        string settingsJson,
+        bool isRootAbsolute,
+        long observedAtUnixSeconds,
+        string freshDeviceId)
+    {
+        var safeSettingsJson = settingsJson ?? string.Empty;
+        var safeFreshDeviceId = freshDeviceId ?? string.Empty;
+        var required = ActroCoreNormalizeBrowserSyncProviderSettingsJson(
+            safeSettingsJson,
+            isRootAbsolute,
+            observedAtUnixSeconds,
+            safeFreshDeviceId,
+            null,
+            UIntPtr.Zero);
+        var requiredLength = checked((int)required);
+        var buffer = new byte[requiredLength + 1];
+        ActroCoreNormalizeBrowserSyncProviderSettingsJson(
+            safeSettingsJson,
+            isRootAbsolute,
+            observedAtUnixSeconds,
+            safeFreshDeviceId,
+            buffer,
+            (UIntPtr)buffer.Length);
+        return Encoding.UTF8.GetString(buffer, 0, requiredLength);
+    }
+
     public static string BuildBrowserStorageSyncCloudProviderErrorClassificationJson(
         string providerErrorsJson,
         uint retryAttempt,
@@ -2180,6 +2207,15 @@ internal static class ActroCore
         [MarshalAs(UnmanagedType.LPUTF8Str)] string providerErrorsJson,
         uint retryAttempt,
         long observedAtUnixSeconds,
+        [Out] byte[]? buffer,
+        UIntPtr bufferLen);
+
+    [DllImport(LibraryName, CallingConvention = CallingConvention.Cdecl, EntryPoint = "actro_core_normalize_browser_sync_provider_settings_json")]
+    private static extern UIntPtr ActroCoreNormalizeBrowserSyncProviderSettingsJson(
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string settingsJson,
+        [MarshalAs(UnmanagedType.I1)] bool isRootAbsolute,
+        long observedAtUnixSeconds,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string freshDeviceId,
         [Out] byte[]? buffer,
         UIntPtr bufferLen);
 

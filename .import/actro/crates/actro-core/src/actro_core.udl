@@ -277,6 +277,15 @@ namespace actro_core {
         i64 observed_at_unix_seconds
     );
 
+    /// Normalize a persisted browser sync provider-settings snapshot (schema,
+    /// provider-kind whitelist, absolute-root rule, configured determination).
+    string normalize_browser_sync_provider_settings_json(
+        string settings_json,
+        boolean is_root_absolute,
+        i64 observed_at_unix_seconds,
+        string fresh_device_id
+    );
+
     /// Classify provider SDK/native error batches for retry, reread, and recovery.
     string browser_storage_sync_cloud_provider_error_classification_json(
         string provider_errors_json,

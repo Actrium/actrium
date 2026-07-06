@@ -1190,6 +1190,20 @@ pub fn browser_storage_sync_cloud_provider_connection_status_policy_json(
     )
 }
 
+pub fn normalize_browser_sync_provider_settings_json(
+    settings_json: String,
+    is_root_absolute: bool,
+    observed_at_unix_seconds: i64,
+    fresh_device_id: String,
+) -> String {
+    browser_data::normalize_browser_sync_provider_settings_json(
+        &settings_json,
+        is_root_absolute,
+        observed_at_unix_seconds,
+        &fresh_device_id,
+    )
+}
+
 pub fn browser_storage_sync_cloud_provider_error_classification_json(
     provider_errors_json: String,
     retry_attempt: u32,

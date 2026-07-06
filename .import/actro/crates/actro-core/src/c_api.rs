@@ -758,6 +758,28 @@ pub extern "C" fn actro_core_browser_storage_sync_cloud_provider_connection_stat
 }
 
 #[no_mangle]
+pub extern "C" fn actro_core_normalize_browser_sync_provider_settings_json(
+    settings_json: *const c_char,
+    is_root_absolute: bool,
+    observed_at_unix_seconds: i64,
+    fresh_device_id: *const c_char,
+    buffer: *mut c_char,
+    buffer_len: usize,
+) -> usize {
+    let settings_json = c_char_to_string(settings_json).unwrap_or_default();
+    let fresh_device_id = c_char_to_string(fresh_device_id).unwrap_or_default();
+    let normalized = browser_data::normalize_browser_sync_provider_settings_json(
+        &settings_json,
+        is_root_absolute,
+        observed_at_unix_seconds,
+        &fresh_device_id,
+    );
+    let bytes = normalized.as_bytes();
+    write_c_string_buffer(bytes, buffer, buffer_len);
+    bytes.len()
+}
+
+#[no_mangle]
 pub extern "C" fn actro_core_browser_storage_sync_cloud_provider_error_classification_json(
     provider_errors_json: *const c_char,
     retry_attempt: u32,
@@ -2721,6 +2743,19 @@ mod tests {
             let output = CStr::from_ptr(storage_buffer.as_ptr()).to_str().unwrap();
             assert!(output.contains("\"classification\":\"ready\""));
             assert!(output.contains("\"shouldAttemptSync\":true"));
+
+            let required = actro_core_normalize_browser_sync_provider_settings_json(
+                c"{\"providerKind\":\"localFolder\",\"localFolderRootPath\":\"/Users/example-dev-2/Sync\",\"scope\":\"profile\",\"deviceId\":\"device-a\",\"savedAtUnixSeconds\":1901}".as_ptr(),
+                true,
+                90,
+                c"fresh-id".as_ptr(),
+                storage_buffer.as_mut_ptr(),
+                storage_buffer.len(),
+            );
+            assert!(required > 0);
+            let output = CStr::from_ptr(storage_buffer.as_ptr()).to_str().unwrap();
+            assert!(output.contains("\"configured\":true"));
+            assert!(output.contains("\"deviceId\":\"device-a\""));
 
             let required =
                 actro_core_browser_storage_sync_cloud_provider_error_classification_json(
