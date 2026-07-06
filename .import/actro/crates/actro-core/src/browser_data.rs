@@ -6191,6 +6191,8 @@ pub fn browser_storage_address_canonicalization_policy(
             "Lowercase URL scheme and host through the shared URL parser.".to_string(),
             "Remove default ports for http and https.".to_string(),
             "Strip username/password userinfo before persisting or syncing browser addresses.".to_string(),
+            "Drop a lone empty query or fragment separator so a trailing '?' or '#' does not create a distinct stored address.".to_string(),
+            "Lowercase the whole about: address because the about scheme and its well-known tokens are case-insensitive.".to_string(),
             "Preserve path, query, and fragment because they may identify distinct browser destinations.".to_string(),
             "Reject addresses without a storage-safe scheme; native address-bar search/input expansion stays platform-owned.".to_string(),
             "Return canonicalizationSummary counts and address groups so product diagnostics do not rescan result rows per platform.".to_string(),
@@ -27098,6 +27100,19 @@ fn canonicalize_external_address(address: &str) -> Option<String> {
         .map(|address| address.canonical_address)
 }
 
+/// Drop a lone empty query (`?`) or fragment (`#`) so that two addresses that
+/// point at the same destination but differ only by a trailing separator
+/// canonicalize to one stored/synced form. Non-empty queries and fragments are
+/// preserved because they may identify distinct browser destinations.
+fn strip_empty_url_query_and_fragment(url: &mut Url) {
+    if url.query() == Some("") {
+        url.set_query(None);
+    }
+    if url.fragment() == Some("") {
+        url.set_fragment(None);
+    }
+}
+
 fn canonicalize_external_address_with_reason(
     address: &str,
 ) -> Result<BrowserStorageCanonicalizedExternalAddress, &'static str> {
@@ -27136,6 +27151,7 @@ fn canonicalize_external_address_with_reason(
             if url.port() == default_port {
                 let _ = url.set_port(None);
             }
+            strip_empty_url_query_and_fragment(&mut url);
             let canonical = url.to_string();
             if canonical.chars().count() > MAX_SYNC_URL_LENGTH {
                 Err("tooLong")
@@ -27147,6 +27163,7 @@ fn canonicalize_external_address_with_reason(
             }
         }
         "file" => {
+            strip_empty_url_query_and_fragment(&mut url);
             let canonical = url.to_string();
             if canonical.chars().count() > MAX_SYNC_URL_LENGTH {
                 Err("tooLong")
@@ -27171,7 +27188,10 @@ fn canonicalize_session_only_address(address: &str) -> Option<String> {
     if remainder.is_empty() || remainder.chars().any(char::is_whitespace) {
         return None;
     }
-    let canonical = format!("about:{remainder}");
+    // The `about:` scheme and its well-known tokens (blank, newtab, ...) are
+    // case-insensitive, so normalize the whole canonical form to lowercase to
+    // avoid storing `about:Blank` and `about:blank` as distinct addresses.
+    let canonical = format!("about:{remainder}").to_ascii_lowercase();
     if canonical.chars().count() > MAX_SYNC_URL_LENGTH {
         None
     } else {
@@ -31550,6 +31570,44 @@ mod tests {
             rejected["canonicalizationSummary"]["invalidUrlCount"],
             json!(1)
         );
+    }
+
+    #[test]
+    fn browser_storage_canonicalization_drops_empty_query_fragment_and_lowercases_about() {
+        let policy =
+            serde_json::from_str::<Value>(&browser_storage_address_canonicalization_policy_json())
+                .unwrap();
+        let rules = policy["canonicalRules"].as_array().unwrap();
+        assert!(rules.iter().any(|rule| rule
+            .as_str()
+            .unwrap_or_default()
+            .contains("empty query or fragment")));
+        assert!(rules.iter().any(|rule| rule
+            .as_str()
+            .unwrap_or_default()
+            .contains("about scheme and its well-known tokens are case-insensitive")));
+
+        let batch = serde_json::from_str::<Value>(&browser_storage_canonicalize_addresses_json(
+            r#"{"addresses":[
+                "http://a.com/#",
+                "http://a.com/?",
+                "about:Blank",
+                "http://a.com/#frag",
+                "http://a.com/?q=1",
+                "about:newtab"
+            ]}"#,
+        ))
+        .unwrap();
+        let results = batch["results"].as_array().unwrap();
+        // Lone empty fragment/query are dropped.
+        assert_eq!(results[0]["canonicalAddress"], json!("http://a.com/"));
+        assert_eq!(results[1]["canonicalAddress"], json!("http://a.com/"));
+        // about: is lowercased whole.
+        assert_eq!(results[2]["canonicalAddress"], json!("about:blank"));
+        // Content-bearing fragment/query and already-lowercase about: are preserved.
+        assert_eq!(results[3]["canonicalAddress"], json!("http://a.com/#frag"));
+        assert_eq!(results[4]["canonicalAddress"], json!("http://a.com/?q=1"));
+        assert_eq!(results[5]["canonicalAddress"], json!("about:newtab"));
     }
 
     #[test]
