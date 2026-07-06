@@ -84,6 +84,8 @@ pub const BROWSER_STORAGE_SYNC_CLOUD_CONFLICT_ACTION_REREAD_MERGE_RETRY: &str =
     "rereadManifestMergeAndRetry";
 pub const BROWSER_STORAGE_SYNC_CLOUD_HIGH_WATERMARK_POLICY: &str =
     "browserStorageSyncCloudHighWatermark";
+pub const BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_RETENTION_POLICY: &str =
+    "browserStorageSyncCloudRecoveryRetention";
 pub const BROWSER_STORAGE_ADDRESS_CANONICALIZATION_POLICY: &str =
     "browserStorageAddressCanonicalization";
 pub const BROWSER_STORAGE_BOOKMARK_FOLDER_TREE_INTEGRITY_POLICY: &str =
@@ -4762,6 +4764,25 @@ pub struct BrowserStorageSyncCloudCleanupResultPlan {
     pub issues: Vec<BrowserStorageSyncCloudCleanupResultIssue>,
     pub reread_operations: Vec<BrowserStorageSyncCloudPlannedReadOperation>,
     pub cleanup_retry_operations: Vec<BrowserStorageSyncCloudPlannedDeleteOperation>,
+    pub result_policy: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserStorageSyncCloudRecoveryRetentionPlan {
+    pub version: u32,
+    pub storage_schema_version: u32,
+    pub cloud_data_model_version: u32,
+    pub plan_type: String,
+    pub policy_name: String,
+    pub generated_at_unix_seconds: i64,
+    pub retain_snapshots: u32,
+    pub total_root_count: u32,
+    pub retained_root_count: u32,
+    pub deleted_root_count: u32,
+    pub retained_roots: Vec<String>,
+    pub delete_candidates: Vec<BrowserStorageSyncCloudPlannedDeleteOperation>,
+    pub should_cleanup: bool,
     pub result_policy: String,
 }
 
@@ -11457,6 +11478,163 @@ pub fn browser_storage_sync_cloud_high_watermark_plan(
                 .to_string(),
         conflict_policy: BROWSER_STORAGE_SYNC_CLOUD_CONFLICT_ACTION_REREAD_MERGE_RETRY.to_string(),
     })
+}
+
+/// Parse the recovery-root coordinates out of a cloud object path shaped like
+/// `Actro/BrowserSync/recovery/<012-unix-seconds>-<mode>/<suffix>`. Returns the
+/// parsed leading unix-seconds token and the full recovery-root path. Paths
+/// that are not recovery objects (wrong prefix, no object under the root, or a
+/// non-numeric timestamp token) return `None` and are ignored by the planner.
+fn browser_storage_sync_cloud_recovery_root_of_object(path: &str) -> Option<(i64, String)> {
+    let remainder = path.strip_prefix(BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_PREFIX)?;
+    let (root_name, suffix) = remainder.split_once('/')?;
+    if suffix.is_empty() {
+        return None;
+    }
+    let (timestamp_token, mode) = root_name.split_once('-')?;
+    if timestamp_token.is_empty()
+        || mode.is_empty()
+        || !timestamp_token.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let timestamp = timestamp_token.parse::<i64>().ok()?;
+    let root_path = format!("{BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_PREFIX}{root_name}");
+    Some((timestamp, root_path))
+}
+
+/// Pure retention planner for the timestamped recovery-snapshot roots that
+/// migration/repair/preflight rounds write under
+/// `Actro/BrowserSync/recovery/<ts>-<mode>/`. These roots accumulate without
+/// bound because no compaction/cleanup planner ever touches them. Given the
+/// full set of recovery object paths and the retention policy, this groups the
+/// objects by their root, retains the newest `retain_snapshots` roots (ordered
+/// by the leading unix-seconds token, ties broken by the full root string), and
+/// emits `candidateDeleteRecoverySnapshot` planned deletes for every object
+/// under the older roots. It is the pure-decision counterpart the recovery
+/// retention execution round feeds provider list results into.
+pub fn browser_storage_sync_cloud_recovery_retention_plan(
+    recovery_object_paths: Option<Vec<String>>,
+    retention: Option<BrowserStorageSyncCloudRetentionPolicy>,
+    generated_at_unix_seconds: i64,
+) -> Option<BrowserStorageSyncCloudRecoveryRetentionPlan> {
+    let recovery_object_paths = recovery_object_paths?;
+    let generated_at = normalize_unix_seconds(generated_at_unix_seconds);
+    let retention = normalize_browser_storage_sync_cloud_retention_policy(
+        retention.unwrap_or_else(browser_storage_sync_cloud_default_retention_policy),
+    );
+    let retain_snapshots = retention.retain_snapshots.max(1);
+
+    // Group object paths by their recovery root, remembering the parsed
+    // unix-seconds token for deterministic newest-first ordering.
+    let mut roots: BTreeMap<String, (i64, BTreeSet<String>)> = BTreeMap::new();
+    for path in recovery_object_paths {
+        if let Some((timestamp, root_path)) =
+            browser_storage_sync_cloud_recovery_root_of_object(&path)
+        {
+            let entry = roots
+                .entry(root_path)
+                .or_insert_with(|| (timestamp, BTreeSet::new()));
+            entry.1.insert(path);
+        }
+    }
+
+    let total_root_count = roots.len().min(u32::MAX as usize) as u32;
+
+    // Order roots newest-first by (unix-seconds desc, full root string desc) so
+    // ties on identical timestamps are broken deterministically.
+    let mut ordered_roots: Vec<(String, i64, BTreeSet<String>)> = roots
+        .into_iter()
+        .map(|(root, (timestamp, objects))| (root, timestamp, objects))
+        .collect();
+    ordered_roots.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| b.0.cmp(&a.0)));
+
+    let retain_count = (retain_snapshots as usize).min(ordered_roots.len());
+    let (retained_slice, deleted_slice) = ordered_roots.split_at(retain_count);
+
+    let mut retained_roots: Vec<String> = retained_slice
+        .iter()
+        .map(|(root, _, _)| root.clone())
+        .collect();
+    retained_roots.sort();
+
+    // Emit delete candidates for every object under the older (non-retained)
+    // roots, iterating in a deterministic ascending order for stable indices.
+    let mut deleted_roots_sorted: Vec<&(String, i64, BTreeSet<String>)> =
+        deleted_slice.iter().collect();
+    deleted_roots_sorted.sort_by(|a, b| a.1.cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
+
+    let mut delete_candidates = Vec::new();
+    for (_, _, objects) in deleted_roots_sorted {
+        for object_path in objects {
+            delete_candidates.push(browser_storage_sync_cloud_planned_delete(
+                delete_candidates.len(),
+                "candidateDeleteRecoverySnapshot",
+                object_path,
+                None,
+                None,
+                None,
+            ));
+        }
+    }
+
+    let retained_root_count = retain_count.min(u32::MAX as usize) as u32;
+    let deleted_root_count = deleted_slice.len().min(u32::MAX as usize) as u32;
+    let should_cleanup = !delete_candidates.is_empty();
+
+    Some(BrowserStorageSyncCloudRecoveryRetentionPlan {
+        version: BROWSER_STORAGE_SYNC_CLOUD_PLAN_VERSION,
+        storage_schema_version: BROWSER_STORAGE_SCHEMA_VERSION,
+        cloud_data_model_version: BROWSER_STORAGE_SYNC_CLOUD_DATA_MODEL_VERSION,
+        plan_type: "cloudRecoveryRetention".to_string(),
+        policy_name: BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_RETENTION_POLICY.to_string(),
+        generated_at_unix_seconds: generated_at,
+        retain_snapshots,
+        total_root_count,
+        retained_root_count,
+        deleted_root_count,
+        retained_roots,
+        delete_candidates,
+        should_cleanup,
+        result_policy:
+            "Retain the newest recovery-snapshot roots and delete every object under the older roots as best-effort provider maintenance. Recovery roots are timestamped copies written before migration/repair/preflight; deleting the oldest ones bounds cloud-folder growth without touching live snapshots, logs, or manifests. Execute the returned candidateDeleteRecoverySnapshot operations only after Rust has classified them, and treat a missing object as an idempotent success."
+                .to_string(),
+    })
+}
+
+pub fn browser_storage_sync_cloud_recovery_retention_plan_json(
+    recovery_object_paths_json: &str,
+    retention_json: &str,
+    generated_at_unix_seconds: i64,
+) -> String {
+    let recovery_object_paths =
+        parse_browser_storage_sync_cloud_recovery_object_paths(recovery_object_paths_json);
+    let retention =
+        serde_json::from_str::<BrowserStorageSyncCloudRetentionPolicy>(retention_json).ok();
+    match browser_storage_sync_cloud_recovery_retention_plan(
+        recovery_object_paths,
+        retention,
+        generated_at_unix_seconds,
+    ) {
+        Some(plan) => serialize_json(&plan),
+        None => "null".to_string(),
+    }
+}
+
+fn parse_browser_storage_sync_cloud_recovery_object_paths(json: &str) -> Option<Vec<String>> {
+    let value = serde_json::from_str::<Value>(json).ok()?;
+    let items = match value {
+        Value::Array(items) => items,
+        Value::Object(mut object) => match object.remove("paths") {
+            Some(Value::Array(items)) => items,
+            _ => return None,
+        },
+        _ => return None,
+    };
+    items
+        .into_iter()
+        .map(|entry| entry.as_str().map(ToOwned::to_owned))
+        .collect()
 }
 
 pub fn browser_storage_sync_cloud_cleanup_result_plan(
@@ -18467,6 +18645,7 @@ fn browser_storage_sync_cloud_planned_delete_reason(operation_type: &str) -> &'s
     match operation_type {
         "candidateDeleteLog" => "coveredBySnapshotOutsideRetainedLogWindow",
         "deleteLog" => "compactedIntoSnapshotOutsideRetainedLogWindow",
+        "candidateDeleteRecoverySnapshot" => "recoveryRootOutsideRetainWindow",
         _ => "plannedCloudDelete",
     }
 }
@@ -31608,6 +31787,142 @@ mod tests {
         assert_eq!(results[3]["canonicalAddress"], json!("http://a.com/#frag"));
         assert_eq!(results[4]["canonicalAddress"], json!("http://a.com/?q=1"));
         assert_eq!(results[5]["canonicalAddress"], json!("about:newtab"));
+    }
+
+    fn recovery_retention_policy(retain_snapshots: u32) -> BrowserStorageSyncCloudRetentionPolicy {
+        BrowserStorageSyncCloudRetentionPolicy {
+            retain_log_sequences: BROWSER_STORAGE_SYNC_CLOUD_RETAIN_LOG_SEQUENCES,
+            retain_snapshots,
+            compact_when_log_sequences_exceed: BROWSER_STORAGE_SYNC_CLOUD_RETAIN_LOG_SEQUENCES,
+        }
+    }
+
+    #[test]
+    fn browser_storage_sync_cloud_recovery_retention_plan_retains_newest_roots() {
+        let root100 = "Actro/BrowserSync/recovery/000000000100-migration";
+        let root200 = "Actro/BrowserSync/recovery/000000000200-repair";
+        let root300 = "Actro/BrowserSync/recovery/000000000300-preflight";
+        let root400 = "Actro/BrowserSync/recovery/000000000400-migration";
+        let paths = vec![
+            format!("{root100}/manifest.json"),
+            format!("{root100}/snapshots/historyPages.json"),
+            format!("{root200}/logs/historyPages/dev-1.json"),
+            format!("{root300}/manifest.json"),
+            format!("{root400}/snapshots/bookmarks.json"),
+            format!("{root400}/manifest.json"),
+            // Ignored: non-recovery object, non-numeric timestamp, and a bare
+            // root with no object under it.
+            "Actro/BrowserSync/manifest.json".to_string(),
+            "Actro/BrowserSync/recovery/notanumber-migration/x.json".to_string(),
+            root100.to_string(),
+        ];
+
+        let plan = browser_storage_sync_cloud_recovery_retention_plan(
+            Some(paths.clone()),
+            Some(recovery_retention_policy(2)),
+            400,
+        )
+        .unwrap();
+
+        assert_eq!(plan.plan_type, "cloudRecoveryRetention");
+        assert_eq!(
+            plan.policy_name,
+            BROWSER_STORAGE_SYNC_CLOUD_RECOVERY_RETENTION_POLICY
+        );
+        assert_eq!(plan.retain_snapshots, 2);
+        assert_eq!(plan.total_root_count, 4);
+        assert_eq!(plan.retained_root_count, 2);
+        assert_eq!(plan.deleted_root_count, 2);
+        assert_eq!(
+            plan.retained_roots,
+            vec![root300.to_string(), root400.to_string()]
+        );
+        assert!(plan.should_cleanup);
+
+        let deleted_paths: BTreeSet<String> = plan
+            .delete_candidates
+            .iter()
+            .map(|operation| operation.path.clone())
+            .collect();
+        let expected_deleted: BTreeSet<String> = vec![
+            format!("{root100}/manifest.json"),
+            format!("{root100}/snapshots/historyPages.json"),
+            format!("{root200}/logs/historyPages/dev-1.json"),
+        ]
+        .into_iter()
+        .collect();
+        assert_eq!(deleted_paths, expected_deleted);
+        for (index, operation) in plan.delete_candidates.iter().enumerate() {
+            assert_eq!(operation.operation_index, index as u32);
+            assert_eq!(operation.operation_type, "candidateDeleteRecoverySnapshot");
+            assert_eq!(operation.delete_reason, "recoveryRootOutsideRetainWindow");
+            assert!(!operation.required);
+        }
+
+        // Retention window at or above the root count keeps everything.
+        let keep_all = browser_storage_sync_cloud_recovery_retention_plan(
+            Some(paths),
+            Some(recovery_retention_policy(10)),
+            400,
+        )
+        .unwrap();
+        assert!(!keep_all.should_cleanup);
+        assert!(keep_all.delete_candidates.is_empty());
+        assert_eq!(keep_all.deleted_root_count, 0);
+        assert_eq!(keep_all.retained_root_count, 4);
+        assert_eq!(
+            keep_all.retained_roots,
+            vec![
+                root100.to_string(),
+                root200.to_string(),
+                root300.to_string(),
+                root400.to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn browser_storage_sync_cloud_recovery_retention_plan_breaks_timestamp_ties_by_root() {
+        let migration = "Actro/BrowserSync/recovery/000000000500-migration";
+        let repair = "Actro/BrowserSync/recovery/000000000500-repair";
+        let plan = browser_storage_sync_cloud_recovery_retention_plan(
+            Some(vec![
+                format!("{migration}/manifest.json"),
+                format!("{repair}/manifest.json"),
+            ]),
+            Some(recovery_retention_policy(1)),
+            500,
+        )
+        .unwrap();
+        // Identical timestamps: the lexicographically greater root ("repair")
+        // is treated as newest and retained.
+        assert_eq!(plan.retained_roots, vec![repair.to_string()]);
+        assert_eq!(plan.delete_candidates.len(), 1);
+        assert_eq!(
+            plan.delete_candidates[0].path,
+            format!("{migration}/manifest.json")
+        );
+
+        // JSON wrapper round-trips the same decision.
+        let plan_json = browser_storage_sync_cloud_recovery_retention_plan_json(
+            &serialize_json(&json!([
+                format!("{migration}/manifest.json"),
+                format!("{repair}/manifest.json"),
+            ])),
+            &serialize_json(&recovery_retention_policy(1)),
+            500,
+        );
+        let parsed = serde_json::from_str::<Value>(&plan_json).unwrap();
+        assert_eq!(parsed["retainedRoots"], json!([repair]));
+        assert_eq!(parsed["shouldCleanup"], json!(true));
+        assert_eq!(
+            parsed["deleteCandidates"][0]["operationType"],
+            json!("candidateDeleteRecoverySnapshot")
+        );
+        assert_eq!(
+            browser_storage_sync_cloud_recovery_retention_plan_json("null", "null", 0),
+            "null"
+        );
     }
 
     #[test]
