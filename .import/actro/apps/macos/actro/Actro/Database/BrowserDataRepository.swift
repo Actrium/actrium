@@ -10,8 +10,21 @@ final class BrowserDataRepository {
 
     private let database: AppleBrowserStorageDatabase?
     private let syncScheduler: AppleBrowserStorageSyncScheduler?
+    // Dedicated client for the local-folder cloud provider path. It shares
+    // the opened database with the endpoint scheduler but runs the Rust
+    // local-folder rounds directly instead of the reference-server cycle.
+    private let localFolderSyncClient: AppleBrowserStorageSyncClient?
+    private let providerSettingsStore = BrowserSyncProviderSettingsStore.shared
     private let historyReadLimit = 500
     private let bookmarkReadLimit = 500
+
+    // Session-scoped provider state, mirroring the Windows coordinator: at
+    // cold start no round has run, so the planner snapshot carries no error
+    // kind; within a session it reflects the last round's provider error
+    // classification. Serialized through an actor-free serial queue because
+    // the local-folder cycle can be invoked from concurrent UI actions.
+    private let providerStateQueue = DispatchQueue(label: "io.actrium.actro.browserSync.localFolderProvider")
+    private var lastProviderErrorKindStorage: String?
 
     private init() {
         let path = Self.databasePath()
@@ -25,10 +38,12 @@ final class BrowserDataRepository {
                 credentialsProvider: BrowserSyncCredentialsProvider.shared
             )
             syncScheduler = AppleBrowserStorageSyncScheduler(coordinator: syncCoordinator)
+            localFolderSyncClient = AppleBrowserStorageSyncClient(database: openedDatabase)
             browserDataLogger.notice("Initialized browser storage at: \(path)")
         } catch {
             database = nil
             syncScheduler = nil
+            localFolderSyncClient = nil
             browserDataLogger.error("Failed to open browser storage at: \(path), error: \(String(describing: error))")
         }
     }
@@ -47,6 +62,209 @@ final class BrowserDataRepository {
 
     func cancelPendingSync() async {
         await syncScheduler?.cancelPendingSync()
+    }
+
+    // MARK: - Local-folder cloud provider sync
+
+    func localFolderProviderSnapshot() -> BrowserSyncProviderSettingsSnapshot {
+        providerSettingsStore.load()
+    }
+
+    @discardableResult
+    func configureLocalFolderProvider(rootURL: URL, bookmarkData: Data) -> BrowserSyncProviderSettingsSnapshot {
+        let snapshot = providerSettingsStore.configureLocalFolder(
+            rootPath: rootURL.path,
+            bookmarkData: bookmarkData
+        )
+        setLastProviderErrorKind(nil)
+        browserDataLogger.notice("Configured local-folder browser sync provider at: \(rootURL.path)")
+        return snapshot
+    }
+
+    func clearLocalFolderProvider() {
+        _ = providerSettingsStore.disconnect()
+        setLastProviderErrorKind(nil)
+        browserDataLogger.notice("Cleared local-folder browser sync provider")
+    }
+
+    // Runs the Rust local-folder sync cycle through the connection planner,
+    // mirroring the validated Windows coordinator sequence: plan -> optional
+    // one-time membership join -> cycle round, applying each round's provider
+    // error outcome. Returns nil only when no provider is configured (the
+    // caller has nothing to run); every configured routing returns a result
+    // envelope JSON string. The Rust round self-runs the capability and
+    // compatibility preflights and does real file IO on the folder, so the
+    // whole sequence is bracketed by security-scoped resource access.
+    func runLocalFolderSyncCycleNow(observedAtUnixSeconds: Int64? = nil) async -> String? {
+        guard let client = localFolderSyncClient else { return nil }
+        let observedAt = observedAtUnixSeconds ?? Int64(Date().timeIntervalSince1970)
+
+        var settings = providerSettingsStore.load()
+        guard BrowserSyncProviderConnectionPlanner.isConfigured(settings) else { return nil }
+
+        guard let rootURL = providerSettingsStore.resolveRootURL() else {
+            browserDataLogger.error(
+                "Local-folder browser sync configured but the folder bookmark could not be resolved"
+            )
+            return nil
+        }
+
+        let accessing = rootURL.startAccessingSecurityScopedResource()
+        defer {
+            if accessing {
+                rootURL.stopAccessingSecurityScopedResource()
+            }
+        }
+        let rootDir = rootURL.path
+
+        var plan = BrowserSyncProviderConnectionPlanner.plan(
+            settings: settings,
+            lastProviderErrorKind: getLastProviderErrorKind(),
+            retryAttempt: 0,
+            observedAtUnixSeconds: observedAt
+        )
+        if plan.routing == .notConfigured {
+            return nil
+        }
+        if plan.routing == .blocked {
+            return providerBlockedResultJson(
+                settings: settings,
+                plan: plan,
+                retryAttempt: 0,
+                observedAtUnixSeconds: observedAt
+            )
+        }
+
+        if plan.routing == .runLocalFolderMembership {
+            let membershipResultJson = await client.runLocalFolderMembershipRound(
+                rootDir: rootDir,
+                requestJson: buildMembershipJoinRequestJson(
+                    settings: settings,
+                    generatedAtUnixSeconds: observedAt
+                ),
+                observedAtUnixSeconds: observedAt
+            )
+            let membershipEnvelope = BrowserSyncProviderConnectionPlanner.jsonObject(membershipResultJson)
+            applyProviderRoundOutcome(membershipEnvelope)
+
+            if BrowserSyncProviderConnectionPlanner.jsonBool(membershipEnvelope?["completed"]) != true {
+                return membershipResultJson
+            }
+
+            // Persist the membership marker so later launches skip the join
+            // round and go straight to the cycle.
+            _ = providerSettingsStore.saveMembershipJoined(observedAt)
+            settings = providerSettingsStore.load()
+            plan = BrowserSyncProviderConnectionPlanner.plan(
+                settings: settings,
+                lastProviderErrorKind: getLastProviderErrorKind(),
+                retryAttempt: 0,
+                observedAtUnixSeconds: observedAt
+            )
+            if plan.routing != .runLocalFolderCycle {
+                // Re-evaluation after a successful join is expected to say
+                // "run the cycle"; anything else (fresh provider error, policy
+                // change) is reported honestly instead of forcing a cycle the
+                // policy no longer allows.
+                return plan.routing == .blocked
+                    ? providerBlockedResultJson(
+                        settings: settings,
+                        plan: plan,
+                        retryAttempt: 0,
+                        observedAtUnixSeconds: observedAt
+                    )
+                    : membershipResultJson
+            }
+        }
+
+        let cycleResultJson = await client.runLocalFolderSyncCycle(
+            rootDir: rootDir,
+            scope: settings.scope,
+            deviceId: settings.deviceId,
+            generatedAtUnixSeconds: observedAt,
+            retryAttempt: 0,
+            observedAtUnixSeconds: observedAt
+        )
+        applyProviderRoundOutcome(BrowserSyncProviderConnectionPlanner.jsonObject(cycleResultJson))
+        return cycleResultJson
+    }
+
+    // Reads the round's provider error classification into the session error
+    // state and clears the persisted membership marker on membership- or
+    // storage-scoped errors so the next run re-joins the cloud store.
+    private func applyProviderRoundOutcome(_ roundEnvelope: [String: Any]?) {
+        let diagnostics = roundEnvelope?["providerDiagnostics"] as? [String: Any]
+        let providerErrorClassification = diagnostics?["providerErrorClassification"] as? String
+        setLastProviderErrorKind(
+            BrowserSyncProviderConnectionPlanner.mapProviderErrorClassification(providerErrorClassification)
+        )
+        if BrowserSyncProviderConnectionPlanner.shouldClearMembershipMarker(providerErrorClassification) {
+            _ = providerSettingsStore.clearMembershipMarker()
+            browserDataLogger.warning(
+                "Local-folder browser sync round reported a membership/storage-scoped error (\(providerErrorClassification ?? "")); cleared the membership marker so the next run re-joins"
+            )
+        }
+    }
+
+    private func buildMembershipJoinRequestJson(
+        settings: BrowserSyncProviderSettingsSnapshot,
+        generatedAtUnixSeconds: Int64
+    ) -> String {
+        let request: [String: Any] = [
+            "scope": settings.scope,
+            "actorDeviceId": settings.deviceId,
+            "memberDeviceId": settings.deviceId,
+            "displayName": Host.current().localizedName ?? "Mac",
+            "platform": "macOS",
+            "membershipAction": "connect",
+            "generatedAtUnixSeconds": generatedAtUnixSeconds,
+        ]
+        return BrowserSyncProviderConnectionPlanner.jsonString(request) ?? "{}"
+    }
+
+    // Blocked routing: no round runs and no envelope exists, so the
+    // scheduleState is the planner's pure translation of the connection
+    // status policy into the scheduler's field shape.
+    private func providerBlockedResultJson(
+        settings: BrowserSyncProviderSettingsSnapshot,
+        plan: BrowserSyncProviderConnectionPlan,
+        retryAttempt: UInt32,
+        observedAtUnixSeconds: Int64
+    ) -> String {
+        let connectionPolicy = plan.connectionPolicy ?? [:]
+        let scheduleState = BrowserSyncProviderConnectionPlanner.buildBlockedScheduleState(
+            connectionPolicy: connectionPolicy,
+            retryAttempt: retryAttempt,
+            observedAtUnixSeconds: observedAtUnixSeconds
+        )
+        let payload: [String: Any] = [
+            "version": 1,
+            "storageSchemaVersion": AppleBrowserStorageDatabase.schemaVersion,
+            "endpointType": "cloudProviderConnection",
+            "credentialsAvailable": true,
+            "providerKind": settings.providerKind ?? "",
+            "syncResult": NSNull(),
+            "classification": BrowserSyncProviderConnectionPlanner.jsonStringValue(connectionPolicy["classification"]),
+            "shouldRetry": BrowserSyncProviderConnectionPlanner.jsonBool(connectionPolicy["shouldRetry"]),
+            "clientAction": BrowserSyncProviderConnectionPlanner.jsonStringValue(connectionPolicy["providerAction"]),
+            "statusPolicy": connectionPolicy,
+            "scheduleState": scheduleState,
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]),
+              let json = String(data: data, encoding: .utf8)
+        else {
+            return "null"
+        }
+        return json
+    }
+
+    private func getLastProviderErrorKind() -> String? {
+        providerStateQueue.sync { lastProviderErrorKindStorage }
+    }
+
+    private func setLastProviderErrorKind(_ value: String?) {
+        providerStateQueue.sync { lastProviderErrorKindStorage = value }
     }
 
     func recordVisit(tab: Tab) {

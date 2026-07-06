@@ -88,7 +88,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Pre-compile ad-blocking rules so they're ready when tabs open
         ContentBlockerManager.shared.loadRules { _ in }
 
-        // Restore sync folder and start monitoring if enabled
+        // Restore the local-folder browser sync provider selection
         SyncManager.shared.restoreOnLaunch()
     }
 

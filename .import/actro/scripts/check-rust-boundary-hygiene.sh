@@ -867,6 +867,7 @@ apple_allowed_actrocore_import_files=(
   "apps/macos/actro/Actro/Models/TabRuntimeBridge.swift"
   "apps/macos/actro/Actro/Models/TagCoreBridge.swift"
   "apps/macos/actro/Actro/Settings/Sync/BrowserSyncCredentialsProvider.swift"
+  "apps/macos/actro/Actro/Settings/Sync/BrowserSyncProviderConnectionPlanner.swift"
 )
 
 apple_direct_actrocore_import_files="$(
