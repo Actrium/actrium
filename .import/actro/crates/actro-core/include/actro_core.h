@@ -412,6 +412,13 @@ size_t actro_core_browser_storage_sync_cloud_local_folder_cleanup_round_json(
     char *buffer,
     size_t buffer_len
 );
+size_t actro_core_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+    const char *root_dir,
+    uint32_t retain_snapshots,
+    int64_t generated_at_unix_seconds,
+    char *buffer,
+    size_t buffer_len
+);
 size_t actro_core_browser_storage_sync_cloud_push_plan_json(
     const char *manifest_json,
     const char *manifest_revision,

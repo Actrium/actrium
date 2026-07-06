@@ -7034,6 +7034,19 @@ public func browserStorageSyncCloudLocalFolderMembershipRoundJson(rootDir: Strin
 }
 
 /**
+ * Run one cloud-drive recovery-snapshot retention round against a Rust-owned local-folder provider store.
+ */
+public func browserStorageSyncCloudLocalFolderRecoveryRetentionRoundJson(rootDir: String, retainSnapshots: UInt32, generatedAtUnixSeconds: Int64) -> String {
+    return try! FfiConverterString.lift(try! rustCall {
+        uniffi_actro_core_fn_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+            FfiConverterString.lower(rootDir),
+            FfiConverterUInt32.lower(retainSnapshots),
+            FfiConverterInt64.lower(generatedAtUnixSeconds), $0
+        )
+    })
+}
+
+/**
  * Run one local-folder provider recovery snapshot round through Rust.
  */
 public func browserStorageSyncCloudLocalFolderRecoverySnapshotRoundJson(rootDir: String, schemaMigrationPlaybookJson: String, compatibilityPreflightJson: String, observedAtUnixSeconds: Int64) -> String {
@@ -8947,6 +8960,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_membership_round_json() != 56582 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_retention_round_json() != 4074 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_actro_core_checksum_func_browser_storage_sync_cloud_local_folder_recovery_snapshot_round_json() != 64404 {

@@ -1428,6 +1428,18 @@ pub fn browser_storage_sync_cloud_local_folder_cleanup_round_json(
     )
 }
 
+pub fn browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+    root_dir: String,
+    retain_snapshots: u32,
+    generated_at_unix_seconds: i64,
+) -> String {
+    browser_data::browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+        &root_dir,
+        retain_snapshots,
+        generated_at_unix_seconds,
+    )
+}
+
 pub fn browser_storage_sync_cloud_push_plan_json(
     manifest_json: String,
     manifest_revision: String,
@@ -3432,6 +3444,14 @@ mod tests {
             8,
         );
         assert_eq!(cloud_cleanup_round, "null");
+
+        let cloud_recovery_retention_round =
+            browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+                "".to_string(),
+                2,
+                8,
+            );
+        assert_eq!(cloud_recovery_retention_round, "null");
 
         let provider_diagnostics = browser_storage_sync_cloud_provider_diagnostics_json(
             local_folder_preflight,

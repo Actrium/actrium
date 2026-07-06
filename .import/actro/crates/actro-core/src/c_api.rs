@@ -1197,6 +1197,25 @@ pub extern "C" fn actro_core_browser_storage_sync_cloud_local_folder_cleanup_rou
 }
 
 #[no_mangle]
+pub extern "C" fn actro_core_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+    root_dir: *const c_char,
+    retain_snapshots: u32,
+    generated_at_unix_seconds: i64,
+    buffer: *mut c_char,
+    buffer_len: usize,
+) -> usize {
+    let root_dir = c_char_to_string(root_dir).unwrap_or_default();
+    let round = browser_data::browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+        &root_dir,
+        retain_snapshots,
+        generated_at_unix_seconds,
+    );
+    let bytes = round.as_bytes();
+    write_c_string_buffer(bytes, buffer, buffer_len);
+    bytes.len()
+}
+
+#[no_mangle]
 pub extern "C" fn actro_core_browser_storage_sync_cloud_push_plan_json(
     manifest_json: *const c_char,
     manifest_revision: *const c_char,
@@ -2999,6 +3018,18 @@ mod tests {
                 storage_buffer.as_mut_ptr(),
                 storage_buffer.len(),
             );
+            assert_eq!(required, 4);
+            let output = CStr::from_ptr(storage_buffer.as_ptr()).to_str().unwrap();
+            assert_eq!(output, "null");
+
+            let required =
+                actro_core_browser_storage_sync_cloud_local_folder_recovery_retention_round_json(
+                    c"".as_ptr(),
+                    2,
+                    4,
+                    storage_buffer.as_mut_ptr(),
+                    storage_buffer.len(),
+                );
             assert_eq!(required, 4);
             let output = CStr::from_ptr(storage_buffer.as_ptr()).to_str().unwrap();
             assert_eq!(output, "null");
