@@ -41,6 +41,20 @@ internal static class Program
             return;
         }
 
-        Application.Run(new BrowserApplicationContext(WindowsStartupOptions.FromArgs(args)));
+        var options = WindowsStartupOptions.FromArgs(args);
+
+        // Mirror --user-data-root into the single override choke point before
+        // any durable store is constructed. WindowsAppPaths.GetLocalAppDataRoot
+        // reads this variable, so both the argument and a directly exported
+        // ACTRO_USER_DATA_ROOT share one mechanism. Arg parsing happens before
+        // BrowserApplicationContext builds the stores, so the ordering is safe.
+        if (!string.IsNullOrWhiteSpace(options.UserDataRoot))
+        {
+            Environment.SetEnvironmentVariable(
+                WindowsAppPaths.UserDataRootEnvironmentVariable,
+                options.UserDataRoot);
+        }
+
+        Application.Run(new BrowserApplicationContext(options));
     }
 }

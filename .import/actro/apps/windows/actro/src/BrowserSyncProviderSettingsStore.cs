@@ -18,10 +18,13 @@ internal sealed record BrowserSyncProviderSettingsSnapshot(
     long SavedAtUnixSeconds);
 
 // Owner of the durable browser sync device identity on Windows: DeviceId is
-// minted (or adopted from the legacy endpoint credential snapshot) on first
-// load, persisted immediately, and survives Disconnect so reconnecting the
-// same folder resumes the same device membership instead of minting a ghost
-// device. MembershipJoinedAtUnixSeconds is the persisted connection outcome:
+// minted on first load, persisted immediately, and survives Disconnect so
+// reconnecting the same folder resumes the same device membership instead of
+// minting a ghost device. (Earlier builds adopted the device id from the
+// reference-server credential file; that field is gone now that this store
+// is the sole identity owner, and any installation opened since the store
+// landed already carries its durable id here.)
+// MembershipJoinedAtUnixSeconds is the persisted connection outcome:
 // without it every cold start would re-run the membership round, which is a
 // write to the shared cloud folder; a stale-but-wrong marker costs exactly
 // one corrective round because the coordinator clears it on membership- or
@@ -51,41 +54,31 @@ internal sealed class BrowserSyncProviderSettingsStore
     };
 
     private readonly string filePath;
-    private readonly Func<string?>? legacyDeviceIdSource;
 
-    public BrowserSyncProviderSettingsStore(
-        string filePath,
-        Func<string?>? legacyDeviceIdSource = null)
+    public BrowserSyncProviderSettingsStore(string filePath)
     {
         this.filePath = filePath;
-        this.legacyDeviceIdSource = legacyDeviceIdSource;
     }
 
-    public static BrowserSyncProviderSettingsStore CreateDefault(
-        BrowserStorageSyncCredentialStore? legacyCredentialStore = null)
+    public static BrowserSyncProviderSettingsStore CreateDefault()
     {
-        var credentialStore = legacyCredentialStore
-            ?? BrowserStorageSyncCredentialStore.CreateDefault();
         return new BrowserSyncProviderSettingsStore(
-            Path.Combine(WindowsAppPaths.GetLocalAppDataRoot(), "browser-sync-provider.json"),
-            () => LoadLegacyDeviceId(credentialStore));
+            Path.Combine(WindowsAppPaths.GetLocalAppDataRoot(), "browser-sync-provider.json"));
     }
 
     public BrowserSyncProviderSettingsSnapshot Load()
     {
         if (!File.Exists(filePath))
         {
-            // First load: mint the durable device identity, adopting the
-            // legacy endpoint credential device id when one exists so the
-            // device stays continuous across the endpoint-to-provider
-            // transition, and persist it immediately so it survives app
-            // restarts and later disconnects.
+            // First load: mint the durable device identity (Normalize fills
+            // the empty id with a fresh GUID) and persist it immediately so
+            // it survives app restarts and later disconnects.
             var created = Normalize(new BrowserSyncProviderSettingsSnapshot(
                 CurrentVersion,
                 ProviderKind: null,
                 LocalFolderRootPath: null,
                 DefaultScope,
-                legacyDeviceIdSource?.Invoke() ?? string.Empty,
+                DeviceId: string.Empty,
                 MembershipJoinedAtUnixSeconds: null,
                 SavedAtUnixSeconds: 0));
             return Save(created);
@@ -247,21 +240,6 @@ internal sealed class BrowserSyncProviderSettingsStore
         var normalized = NormalizeText(providerKind);
         return KnownProviderKinds.FirstOrDefault(
             known => string.Equals(known, normalized, StringComparison.Ordinal));
-    }
-
-    private static string? LoadLegacyDeviceId(BrowserStorageSyncCredentialStore credentialStore)
-    {
-        try
-        {
-            return credentialStore.Load()?.DeviceId;
-        }
-        catch (InvalidOperationException)
-        {
-            // A corrupt endpoint credential file fails loudly on the
-            // endpoint path itself; it must not also block provider
-            // settings, so adoption just falls back to minting.
-            return null;
-        }
     }
 
     private static string NormalizeText(string? value)

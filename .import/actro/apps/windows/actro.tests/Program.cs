@@ -656,10 +656,73 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertFalse(options.IsPrivate);
         return Task.CompletedTask;
     }),
+    ("parses user data root startup option", () =>
+    {
+        var options = WindowsStartupOptions.FromArgs(
+            ["--user-data-root", "/srv/actro/instance-b", "https://example.com/"]);
+        AssertEqual("/srv/actro/instance-b", options.UserDataRoot);
+        // The root value is not swallowed as a positional address.
+        AssertEqual("https://example.com/", options.InitialUrl);
+        AssertEqual(1, options.InitialAddresses.Count);
+
+        // Absent by default, and an incomplete option is ignored.
+        AssertEqual(null, WindowsStartupOptions.FromArgs(["https://example.com/"]).UserDataRoot);
+        AssertEqual(null, WindowsStartupOptions.FromArgs(["--user-data-root"]).UserDataRoot);
+        return Task.CompletedTask;
+    }),
     ("builds Windows app data root", () =>
     {
         var root = WindowsAppPaths.GetLocalAppDataRoot();
         AssertTrue(root.EndsWith(Path.Combine("Actrium", "Actro", "Windows"), StringComparison.OrdinalIgnoreCase));
+        return Task.CompletedTask;
+    }),
+    ("honors the user data root environment override", () =>
+    {
+        var original = Environment.GetEnvironmentVariable(
+            WindowsAppPaths.UserDataRootEnvironmentVariable);
+        try
+        {
+            // An absolute override replaces the whole root verbatim (no
+            // Actrium/Actro/Windows suffix), so concurrent instances keep
+            // fully independent state trees.
+            var overrideRoot = CreateTempDirectoryPath();
+            Environment.SetEnvironmentVariable(
+                WindowsAppPaths.UserDataRootEnvironmentVariable, overrideRoot);
+            AssertEqual(overrideRoot, WindowsAppPaths.GetLocalAppDataRoot());
+            // Callers that need isolation compose their own subfolder on top,
+            // so WebView2 profiles still nest under the override root.
+            AssertEqual(
+                Path.Combine(overrideRoot, BrowserProfilePolicy.UserDataFolderName),
+                BrowserProfilePolicy.GetDefaultUserDataFolder());
+
+            // Blank overrides fall back to the standard per-user root.
+            Environment.SetEnvironmentVariable(
+                WindowsAppPaths.UserDataRootEnvironmentVariable, "   ");
+            AssertTrue(WindowsAppPaths.GetLocalAppDataRoot().EndsWith(
+                Path.Combine("Actrium", "Actro", "Windows"), StringComparison.OrdinalIgnoreCase));
+
+            // A relative override would silently split state across instances:
+            // it must fail loudly instead of resolving against the CWD.
+            Environment.SetEnvironmentVariable(
+                WindowsAppPaths.UserDataRootEnvironmentVariable, "relative/actro-root");
+            var threw = false;
+            try
+            {
+                WindowsAppPaths.GetLocalAppDataRoot();
+            }
+            catch (InvalidOperationException)
+            {
+                threw = true;
+            }
+
+            AssertTrue(threw);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(
+                WindowsAppPaths.UserDataRootEnvironmentVariable, original);
+        }
+
         return Task.CompletedTask;
     }),
     ("builds WebView2 profile folder", () =>
@@ -2108,8 +2171,7 @@ var tests = new (string Name, Func<Task> Run)[]
                     new BrowserStorageSyncCredentials(
                         "http://127.0.0.1:8787/",
                         "token-win-coordinator",
-                        "profile",
-                        "device-win")));
+                        "profile")));
 
             using var result = JsonDocument.Parse(await coordinator.RunSyncCycleAsync(1412, 20, 3, 1512));
 
@@ -2149,8 +2211,7 @@ var tests = new (string Name, Func<Task> Run)[]
                     new BrowserStorageSyncCredentials(
                         "http://127.0.0.1:8787/",
                         "token-win-retry",
-                        "profile",
-                        "device-win")));
+                        "profile")));
 
             using var result = JsonDocument.Parse(await coordinator.RunSyncCycleAsync(1420, 20, 2, 2000));
 
@@ -2180,8 +2241,7 @@ var tests = new (string Name, Func<Task> Run)[]
                     new BrowserStorageSyncCredentials(
                         "http://127.0.0.1:8787/",
                         "token-win-scheduler",
-                        "profile",
-                        "device-win")));
+                        "profile")));
             using var scheduler = new BrowserStorageSyncScheduler(coordinator);
 
             await scheduler.RunNowAsync(1430, 20, 3000);
@@ -2237,18 +2297,21 @@ var tests = new (string Name, Func<Task> Run)[]
         var mintedPath = CreateTempPath();
         try
         {
-            var store = new BrowserSyncProviderSettingsStore(filePath, () => "device-win-legacy");
+            var store = new BrowserSyncProviderSettingsStore(filePath);
 
-            // First load adopts the legacy endpoint credential device id and
-            // persists it immediately so the identity is durable.
+            // First load mints the durable device identity and persists it
+            // immediately so the identity survives restarts and disconnects.
             var created = store.Load();
             AssertEqual(1, created.Version);
             AssertEqual(null, created.ProviderKind);
             AssertEqual(null, created.LocalFolderRootPath);
             AssertEqual("default", created.Scope);
-            AssertEqual("device-win-legacy", created.DeviceId);
+            AssertTrue(Guid.TryParse(created.DeviceId, out _));
             AssertEqual(null, created.MembershipJoinedAtUnixSeconds);
             AssertTrue(File.Exists(filePath));
+
+            // The minted id is durable: every later load returns the same one.
+            var deviceId = created.DeviceId;
 
             var root = CreateTempDirectoryPath();
             store.Save(store.CreateSnapshot("localFolder", $" {root} ", " profile "));
@@ -2256,7 +2319,7 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual("localFolder", connected.ProviderKind);
             AssertEqual(root, connected.LocalFolderRootPath);
             AssertEqual("profile", connected.Scope);
-            AssertEqual("device-win-legacy", connected.DeviceId);
+            AssertEqual(deviceId, connected.DeviceId);
             AssertEqual(null, connected.MembershipJoinedAtUnixSeconds);
 
             // The membership marker round-trips and clears without touching
@@ -2290,11 +2353,12 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual(null, disconnected.ProviderKind);
             AssertEqual(null, disconnected.LocalFolderRootPath);
             AssertEqual(null, disconnected.MembershipJoinedAtUnixSeconds);
-            AssertEqual("device-win-legacy", disconnected.DeviceId);
+            AssertEqual(deviceId, disconnected.DeviceId);
 
-            // Without a legacy session the store mints a fresh device id.
+            // A separate store file mints its own independent device id.
             var minted = new BrowserSyncProviderSettingsStore(mintedPath).Load();
             AssertTrue(Guid.TryParse(minted.DeviceId, out _));
+            AssertFalse(string.Equals(deviceId, minted.DeviceId, StringComparison.Ordinal));
         }
         finally
         {
@@ -2467,9 +2531,12 @@ var tests = new (string Name, Func<Task> Run)[]
         var cloudRoot = CreateTempDirectoryPath();
         try
         {
-            var providerStore = new BrowserSyncProviderSettingsStore(
-                providerPath, () => "device-win-provider");
+            var providerStore = new BrowserSyncProviderSettingsStore(providerPath);
             providerStore.Save(providerStore.CreateSnapshot("localFolder", cloudRoot, "profile"));
+            // The store owns the durable device identity; capture the minted
+            // id so the per-device document filename can be asserted below.
+            var deviceId = providerStore.Load().DeviceId;
+            AssertTrue(Guid.TryParse(deviceId, out _));
 
             var database = new BrowserStorageDatabase(databasePath);
             database.UpsertHistoryItem(new BrowserHistoryItemSnapshot(
@@ -2512,7 +2579,7 @@ var tests = new (string Name, Func<Task> Run)[]
 
             AssertEqual(2210L, providerStore.Load().MembershipJoinedAtUnixSeconds);
             AssertTrue(File.Exists(Path.Combine(
-                cloudRoot, "Actro", "BrowserSync", "devices", "device-win-provider.json")));
+                cloudRoot, "Actro", "BrowserSync", "devices", $"{deviceId}.json")));
 
             // The coordinator keeps the last executed round's diagnostics
             // summary in memory (here the cycle that followed the join) for
@@ -2550,7 +2617,7 @@ var tests = new (string Name, Func<Task> Run)[]
             // endpoint branch, whose result is exactly today's
             // credentials-unavailable shape.
             providerStore.Disconnect();
-            AssertEqual("device-win-provider", providerStore.Load().DeviceId);
+            AssertEqual(deviceId, providerStore.Load().DeviceId);
             using (var result = JsonDocument.Parse(await coordinator.RunSyncCycleAsync(
                 2230, 20, observedAtUnixSeconds: 2230)))
             {
@@ -2754,13 +2821,29 @@ var tests = new (string Name, Func<Task> Run)[]
                     "lastClassification": "serverUnavailable"
                 }
                 """));
+        // No provider configured and no usable endpoint session: the round
+        // classifies credentialsUnavailable, which the product UI must read
+        // as "not configured", not the endpoint-era "needs sign-in".
         AssertEqual(
-            "Browser data sync needs sign-in",
+            "Browser data sync is not configured",
             BrowserSyncStatusPolicy.FormatStatusJson(
                 """
                 {
                     "status": "waitingForCredentials",
                     "lastClassification": "credentialsUnavailable"
+                }
+                """));
+        // The remaining "needs sign-in" case is the dev endpoint path
+        // reporting authRequired, which also lands on waitingForCredentials
+        // but with a different classification (and, unlike credentialsUnavailable,
+        // still appends the raw classification tail).
+        AssertEqual(
+            "Browser data sync needs sign-in (last result: authRequired)",
+            BrowserSyncStatusPolicy.FormatStatusJson(
+                """
+                {
+                    "status": "waitingForCredentials",
+                    "lastClassification": "authRequired"
                 }
                 """));
         AssertEqual(
@@ -3203,7 +3286,9 @@ var tests = new (string Name, Func<Task> Run)[]
                          "Browser data sync retry scheduled in 7s"),
                      ("""{"status":"retryScheduled"}""", "Browser data sync retry scheduled"),
                      ("""{"status":"waitingForCredentials","lastClassification":"credentialsUnavailable"}""",
-                         "Browser data sync needs sign-in"),
+                         "Browser data sync is not configured"),
+                     ("""{"status":"waitingForCredentials","lastClassification":"authRequired"}""",
+                         "Browser data sync needs sign-in (last result: authRequired)"),
                      ("""{"status":"waitingForCredentials","lastClassification":"serverUnavailable"}""",
                          "Browser data sync needs sign-in (last result: server unavailable)"),
                      ("""{"status":"requiresUserAction","lastClassification":"clientUpgradeRequired"}""",
@@ -3243,10 +3328,10 @@ var tests = new (string Name, Func<Task> Run)[]
         {
             var credentialStore = new BrowserStorageSyncCredentialStore(credentialPath);
             credentialStore.SaveSession("prod", "token-win-disconnect");
-            var providerStore = new BrowserSyncProviderSettingsStore(
-                providerPath, () => "device-win-disconnect");
+            var providerStore = new BrowserSyncProviderSettingsStore(providerPath);
             providerStore.Save(providerStore.CreateSnapshot(
                 "localFolder", CreateTempDirectoryPath(), "profile"));
+            var deviceId = providerStore.Load().DeviceId;
             providerStore.SaveMembershipJoined(2700);
 
             // Disconnect means "stop browser sync entirely": leftover
@@ -3256,14 +3341,14 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual(null, disconnected.ProviderKind);
             AssertEqual(null, disconnected.LocalFolderRootPath);
             AssertEqual(null, disconnected.MembershipJoinedAtUnixSeconds);
-            AssertEqual("device-win-disconnect", disconnected.DeviceId);
+            AssertEqual(deviceId, disconnected.DeviceId);
             AssertEqual(null, credentialStore.Load());
 
             // Idempotent with nothing left to clear, and the durable device
             // identity still survives.
             providerStore.DisconnectAndClearEndpointSession(credentialStore);
             AssertEqual(null, credentialStore.Load());
-            AssertEqual("device-win-disconnect", providerStore.Load().DeviceId);
+            AssertEqual(deviceId, providerStore.Load().DeviceId);
         }
         finally
         {
@@ -3283,7 +3368,6 @@ var tests = new (string Name, Func<Task> Run)[]
                 " http://127.0.0.1:8787/ ",
                 " token-win-stored ",
                 " profile ",
-                " device-win-stored ",
                 " beta ",
                 12_345));
 
@@ -3293,7 +3377,6 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual("http://127.0.0.1:8787/", snapshot?.BaseUrl);
             AssertEqual("token-win-stored", snapshot?.AccessToken);
             AssertEqual("profile", snapshot?.Scope);
-            AssertEqual("device-win-stored", snapshot?.DeviceId);
             AssertEqual(12_345L, snapshot?.SavedAtUnixSeconds);
 
             // The file on disk must be the self-describing envelope, never a
@@ -3314,7 +3397,6 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual("http://127.0.0.1:8787/", credentials?.BaseUrl);
             AssertEqual("token-win-stored", credentials?.AccessToken);
             AssertEqual("profile", credentials?.Scope);
-            AssertEqual("device-win-stored", credentials?.DeviceId);
 
             store.SaveSession("prod", " token-win-session ");
             snapshot = store.Load();
@@ -3329,6 +3411,9 @@ var tests = new (string Name, Func<Task> Run)[]
             store.ClearSession("prod");
             AssertEqual(null, store.Load());
 
+            // A leftover "deviceId" key from an endpoint-era file is tolerated
+            // and ignored on read: device identity now lives in the provider
+            // settings store, not here, and no migration is required.
             File.WriteAllText(
                 filePath,
                 """
@@ -3346,7 +3431,6 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual("http://127.0.0.1:8788/", snapshot?.BaseUrl);
             AssertEqual("legacy-token", snapshot?.AccessToken);
             AssertEqual("legacy-scope", snapshot?.Scope);
-            AssertEqual("legacy-device", snapshot?.DeviceId);
             AssertTrue((snapshot?.SavedAtUnixSeconds ?? 0) > 0);
 
             // Loading a legacy plaintext file migrates it in place: the file
@@ -3357,7 +3441,6 @@ var tests = new (string Name, Func<Task> Run)[]
 
             snapshot = store.Load();
             AssertEqual("legacy-token", snapshot?.AccessToken);
-            AssertEqual("legacy-device", snapshot?.DeviceId);
 
             store.Clear();
             AssertEqual(null, store.Load());
@@ -3411,8 +3494,7 @@ var tests = new (string Name, Func<Task> Run)[]
             credentialStore.Save(credentialStore.CreateSnapshot(
                 "http://127.0.0.1:8787/",
                 "token-win-stored",
-                "profile",
-                "device-win-stored"));
+                "profile"));
 
             var database = new BrowserStorageDatabase(databasePath);
             var cycleResponseJson = ActroCore.BuildBrowserStorageSyncCycleResponseJson(

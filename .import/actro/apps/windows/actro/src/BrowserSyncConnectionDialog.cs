@@ -8,7 +8,6 @@ internal sealed class BrowserSyncConnectionDialog : Form
     private readonly ComboBox environmentInput = new();
     private readonly TextBox baseUrlInput = new();
     private readonly TextBox accessTokenInput = new();
-    private readonly TextBox deviceIdInput = new();
     private string lastAutoBaseUrl = string.Empty;
 
     public BrowserSyncConnectionDialog(BrowserStorageSyncCredentialSnapshot? snapshot)
@@ -19,7 +18,7 @@ internal sealed class BrowserSyncConnectionDialog : Form
         MinimizeBox = false;
         MaximizeBox = false;
         ShowInTaskbar = false;
-        ClientSize = new Size(520, 238);
+        ClientSize = new Size(520, 204);
 
         environmentInput.DropDownStyle = ComboBoxStyle.DropDownList;
         environmentInput.Items.AddRange(["prod", "beta", "dev"]);
@@ -31,9 +30,6 @@ internal sealed class BrowserSyncConnectionDialog : Form
 
         accessTokenInput.Text = snapshot?.AccessToken ?? string.Empty;
         accessTokenInput.UseSystemPasswordChar = true;
-
-        deviceIdInput.Text = snapshot?.DeviceId ?? string.Empty;
-        deviceIdInput.ReadOnly = true;
 
         var saveButton = new Button
         {
@@ -82,11 +78,10 @@ internal sealed class BrowserSyncConnectionDialog : Form
             Dock = DockStyle.Fill,
             Padding = new Padding(16),
             ColumnCount = 2,
-            RowCount = 5,
+            RowCount = 4,
         };
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 112));
         layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
         layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 34));
@@ -95,7 +90,6 @@ internal sealed class BrowserSyncConnectionDialog : Form
         AddRow(layout, 0, BrowserStrings.Get("dialog.sync.environment"), environmentInput);
         AddRow(layout, 1, BrowserStrings.Get("dialog.sync.baseUrl"), baseUrlInput);
         AddRow(layout, 2, BrowserStrings.Get("dialog.sync.accessToken"), accessTokenInput);
-        AddRow(layout, 3, BrowserStrings.Get("dialog.sync.deviceId"), deviceIdInput);
 
         var buttons = new FlowLayoutPanel
         {
@@ -106,7 +100,7 @@ internal sealed class BrowserSyncConnectionDialog : Form
         buttons.Controls.Add(cancelButton);
         buttons.Controls.Add(saveButton);
         buttons.Controls.Add(clearButton);
-        layout.Controls.Add(buttons, 0, 4);
+        layout.Controls.Add(buttons, 0, 3);
         layout.SetColumnSpan(buttons, 2);
         return layout;
     }

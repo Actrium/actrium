@@ -7,14 +7,15 @@ namespace Actro.Windows;
 internal sealed record BrowserStorageSyncCredentials(
     string BaseUrl,
     string AccessToken,
-    string Scope,
-    string DeviceId)
+    string Scope)
 {
+    // No device id here: the reference-server round sources the durable
+    // device identity from the provider settings store, so the endpoint
+    // credential no longer carries one.
     public bool IsUsable =>
         !string.IsNullOrWhiteSpace(BaseUrl)
         && !string.IsNullOrWhiteSpace(AccessToken)
-        && !string.IsNullOrWhiteSpace(Scope)
-        && !string.IsNullOrWhiteSpace(DeviceId);
+        && !string.IsNullOrWhiteSpace(Scope);
 }
 
 internal interface IBrowserStorageSyncCredentialsProvider
@@ -119,7 +120,11 @@ internal sealed class BrowserStorageSyncCoordinator
             credentials.BaseUrl,
             credentials.AccessToken,
             credentials.Scope,
-            credentials.DeviceId,
+            // Durable device identity lives in the provider settings store,
+            // not the endpoint credential. In production the store is always
+            // present (an unconfigured provider still holds a minted id); the
+            // fallback covers the dev/test coordinator built without one.
+            providerSettingsStore?.Load().DeviceId ?? string.Empty,
             generatedAtUnixSeconds,
             limitPerCollection,
             cancellationToken).ConfigureAwait(false);

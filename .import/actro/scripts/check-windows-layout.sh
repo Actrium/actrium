@@ -844,6 +844,14 @@ check_pattern_in_each_file \
   apps/windows/actro/src/BrowserSessionStore.cs \
   apps/windows/actro/src/BrowserWindowStateStore.cs
 
+# The single app data path choke point honors an absolute-path override so
+# concurrent multi-instance runs keep fully independent state trees.
+check_pattern_in_each_file \
+  'ACTRO_USER_DATA_ROOT' \
+  "Windows app data root honors the user data root override" \
+  "Windows app data root does not honor the user data root override" \
+  apps/windows/actro/src/WindowsAppPaths.cs
+
 # Browser sync provider connection: the settings store owns the durable
 # device identity next to the credential store, the planner owns snapshot
 # assembly and routing, and the coordinator consumes both ahead of the

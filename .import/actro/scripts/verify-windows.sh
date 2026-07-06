@@ -630,6 +630,17 @@ if ! rg -q 'WindowsAppPaths' apps/windows/actro/src/BrowserStorageDatabase.cs ap
   print_failure "Windows local app data paths are not centralized"
 fi
 
+# The durable state root honors an absolute-path override so concurrent
+# multi-instance runs keep independent state trees; the --user-data-root
+# argument feeds the same single choke point.
+if ! rg -q 'ACTRO_USER_DATA_ROOT' apps/windows/actro/src/WindowsAppPaths.cs \
+  || ! rg -q 'UserDataRootEnvironmentVariable' apps/windows/actro/src/Program.cs \
+  || ! rg -q -- '--user-data-root' apps/windows/actro/src/WindowsStartupOptions.cs; then
+  print_failure "Windows user data root override is not wired through the single app data path choke point"
+else
+  print_ok "Windows user data root override routes through WindowsAppPaths"
+fi
+
 if ! rg -q 'DownloadStarting' apps/windows/actro/src/MainForm.cs; then
   print_failure "Windows shell does not handle WebView2 downloads"
 else
@@ -1249,7 +1260,8 @@ if ! rg -q 'BuildBrowserStorageSyncCloudProviderErrorClassificationJson' apps/wi
   || ! rg -q 'LastProviderRoundDiagnosticsJson' apps/windows/actro/src/MainForm.cs \
   || ! rg -q 'BrowserSyncProviderDiagnosticsFormatter' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
   || ! rg -q 'showDiagnostics' apps/windows/actro/src/BrowserSyncSettingsDialog.cs \
-  || ! rg -q 'status\.sync\.' apps/windows/actro/src/BrowserSyncStatusPolicy.cs; then
+  || ! rg -q 'status\.sync\.' apps/windows/actro/src/BrowserSyncStatusPolicy.cs \
+  || ! rg -q 'status\.sync\.notConfigured' apps/windows/actro/src/BrowserSyncStatusPolicy.cs; then
   print_failure "Windows browser sync diagnostics surface is not wired through the Rust round envelopes"
 else
   print_ok "Windows browser sync diagnostics surface renders the Rust round envelopes"

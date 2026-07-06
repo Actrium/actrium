@@ -127,7 +127,7 @@ internal sealed class MainForm : Form
         // the provider branch; the endpoint credentials stay the
         // development-only reference path.
         browserSyncProviderSettingsStore =
-            BrowserSyncProviderSettingsStore.CreateDefault(browserSyncCredentialStore);
+            BrowserSyncProviderSettingsStore.CreateDefault();
         // The coordinator stays reachable next to its scheduler: the sync
         // settings dialog reads the last provider round's diagnostics
         // summary from it for the collapsible diagnostics detail.
