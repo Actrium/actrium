@@ -520,12 +520,7 @@ public final class AppleBrowserStorageDatabase {
 
     public func syncCursorsJson(scope: String = "default") -> String {
         let rows = database.query(
-            """
-            SELECT collection, cursor, last_synced_at
-            FROM browser_sync_cursors
-            WHERE scope = ?
-            ORDER BY collection ASC
-            """,
+            syncSql.selectSyncCursorsForScope,
             params: [scope]
         )
         let cursors: [[String: Any]] = rows.map { row in

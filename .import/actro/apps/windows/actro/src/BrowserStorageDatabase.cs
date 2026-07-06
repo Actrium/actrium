@@ -595,12 +595,7 @@ internal sealed class BrowserStorageDatabase
             using var command = CreateCommand(
                 connection,
                 null,
-                """
-                SELECT collection, cursor, last_synced_at
-                FROM browser_sync_cursors
-                WHERE scope = ?
-                ORDER BY collection ASC
-                """,
+                SyncSql.SelectSyncCursorsForScope,
                 scope);
             using var reader = command.ExecuteReader();
             while (reader.Read())
@@ -1282,6 +1277,7 @@ internal sealed class BrowserStorageDatabase
         public string MarkSessionSynced { get; init; } = string.Empty;
         public string MarkSessionTabSynced { get; init; } = string.Empty;
         public string UpsertSyncCursor { get; init; } = string.Empty;
+        public string SelectSyncCursorsForScope { get; init; } = string.Empty;
 
         public IReadOnlyList<string> SelectDirtyStatements => new[]
         {
@@ -1312,7 +1308,8 @@ internal sealed class BrowserStorageDatabase
             && !string.IsNullOrWhiteSpace(MarkBookmarkSynced)
             && !string.IsNullOrWhiteSpace(MarkSessionSynced)
             && !string.IsNullOrWhiteSpace(MarkSessionTabSynced)
-            && !string.IsNullOrWhiteSpace(UpsertSyncCursor);
+            && !string.IsNullOrWhiteSpace(UpsertSyncCursor)
+            && !string.IsNullOrWhiteSpace(SelectSyncCursorsForScope);
 
         public string? StatementFor(string statementKey)
         {
@@ -1331,6 +1328,7 @@ internal sealed class BrowserStorageDatabase
                 "markSessionSynced" => MarkSessionSynced,
                 "markSessionTabSynced" => MarkSessionTabSynced,
                 "upsertSyncCursor" => UpsertSyncCursor,
+                "selectSyncCursorsForScope" => SelectSyncCursorsForScope,
                 _ => null,
             };
             return string.IsNullOrWhiteSpace(statement) ? null : statement;

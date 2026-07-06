@@ -412,12 +412,7 @@ class BrowserStorageDatabase private constructor(
         return withDatabase { database ->
             val cursors = JSONArray()
             database.rawQuery(
-                """
-                SELECT collection, cursor, last_synced_at
-                FROM browser_sync_cursors
-                WHERE scope = ?
-                ORDER BY collection ASC
-                """.trimIndent(),
+                syncSql.selectSyncCursorsForScope,
                 arrayOf(scope),
             ).use { cursor ->
                 while (cursor.moveToNext()) {

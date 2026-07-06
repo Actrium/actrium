@@ -629,7 +629,7 @@ elif ! rg -q 'SQLiteDatabase' "$android_browser_storage_file"; then
   print_failure "Android browser storage adapter does not own Android SQLite execution"
 elif ! rg -q 'tab_id' "$android_browser_storage_file" ||
   ! rg -q 'syncSql\.' "$android_browser_storage_file" ||
-  ! rg -q 'browser_sync_cursors' "$android_browser_storage_file" ||
+  ! rg -q 'selectSyncCursorsForScope' "$android_browser_storage_file" ||
   ! rg -q 'migrateBrowserStorageSchemaIfNeeded' "$android_browser_storage_file"; then
   print_failure "Android browser storage adapter is missing browser session/sync migration readwrite"
 else
@@ -1159,7 +1159,7 @@ windows_browser_data_requirements=(
   "apps/windows/actro/src/BrowserStorageDatabase.cs|tab_id|Windows browser storage adapter persists stable browser session tab ids"
   "apps/windows/actro/src/BrowserStorageDatabase.cs|BuildBrowserStorageSessionTabIdPlanJson|Windows browser storage adapter derives session tab ids through the Rust batch plan"
   "apps/windows/actro/src/BrowserStorageDatabase.cs|deleted_at|Windows browser storage adapter preserves browser tombstones"
-  "apps/windows/actro/src/BrowserStorageDatabase.cs|browser_sync_cursors|Windows browser storage adapter persists sync cursors"
+  "apps/windows/actro/src/BrowserStorageDatabase.cs|SelectSyncCursorsForScope|Windows browser storage adapter reads sync cursors through the Rust contract"
   "apps/windows/actro/src/BrowserStorageDatabase.cs|ApplyRemoteSyncPlan|Windows browser storage adapter executes Rust browser sync remote apply plans"
   "apps/windows/actro/src/BrowserStorageDatabase.cs|ApplySyncAckPlan|Windows browser storage adapter executes Rust browser sync ack plans"
   "apps/windows/actro/src/BrowserStorageDatabase.cs|ApplySyncCycleResponse|Windows browser storage adapter applies Rust-planned sync cycles"
@@ -2391,7 +2391,7 @@ elif ! rg -q 'deleteBookmark\(id: String\)' "$apple_browser_storage_file"; then
   print_failure "Apple shared browser storage adapter is missing id-scoped bookmark deletion"
 elif ! rg -q 'tab_id' "$apple_browser_storage_file" ||
   ! rg -q 'syncSql\.' "$apple_browser_storage_file" ||
-  ! rg -q 'browser_sync_cursors' "$apple_browser_storage_file" ||
+  ! rg -q 'selectSyncCursorsForScope' "$apple_browser_storage_file" ||
   ! rg -q 'migrateBrowserStorageSchemaIfNeeded' "$apple_browser_storage_file"; then
   print_failure "Apple shared browser storage adapter is missing browser session/sync migration readwrite"
 else

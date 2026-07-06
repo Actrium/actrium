@@ -173,7 +173,7 @@ pub struct BrowserStorageSyncSqlInfo {
     pub mark_session_synced: String,
     pub mark_session_tab_synced: String,
     pub upsert_sync_cursor: String,
-    pub select_sync_cursor: String,
+    pub select_sync_cursors_for_scope: String,
 }
 
 #[derive(Debug, Clone)]
@@ -945,7 +945,7 @@ pub fn browser_storage_sync_sql() -> BrowserStorageSyncSqlInfo {
         mark_session_synced: sql.mark_session_synced.to_string(),
         mark_session_tab_synced: sql.mark_session_tab_synced.to_string(),
         upsert_sync_cursor: sql.upsert_sync_cursor.trim().to_string(),
-        select_sync_cursor: sql.select_sync_cursor.to_string(),
+        select_sync_cursors_for_scope: sql.select_sync_cursors_for_scope.to_string(),
     }
 }
 
