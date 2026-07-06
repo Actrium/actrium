@@ -8,6 +8,14 @@ namespace Actro.Windows;
 // credential field: the local-folder provider has no secrets, and later
 // cloud providers keep their tokens in provider-SDK/OS-owned storage, so the
 // file stays plain JSON without DPAPI protection.
+//
+// Configured is a derived output of the shared Rust normalization contract
+// (schema + provider-kind whitelist + absolute-root rule), not a hand-derived
+// C# rule: the connection planner reads it instead of re-deriving the
+// "provider present AND (not localFolder OR root present)" predicate. It is
+// always recomputed on Load/Save, so a snapshot the store hands out carries a
+// current value; hand-built or `with`-mutated snapshots must be re-normalized
+// before their Configured flag is trusted.
 internal sealed record BrowserSyncProviderSettingsSnapshot(
     int Version,
     string? ProviderKind,
@@ -15,7 +23,8 @@ internal sealed record BrowserSyncProviderSettingsSnapshot(
     string Scope,
     string DeviceId,
     long? MembershipJoinedAtUnixSeconds,
-    long SavedAtUnixSeconds);
+    long SavedAtUnixSeconds,
+    bool Configured = false);
 
 // Owner of the durable browser sync device identity on Windows: DeviceId is
 // minted on first load, persisted immediately, and survives Disconnect so
@@ -35,17 +44,6 @@ internal sealed class BrowserSyncProviderSettingsStore
 
     private const int CurrentVersion = 1;
     private const string DefaultScope = "default";
-
-    // The four roadmap providers of the cloud-drive architecture. Every
-    // other token is contract drift and rejects to "no provider configured"
-    // instead of flowing an unknown kind into the Rust connection contract.
-    private static readonly string[] KnownProviderKinds =
-    [
-        LocalFolderProviderKind,
-        "iCloudDrive",
-        "googleDrive",
-        "oneDrive",
-    ];
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -199,51 +197,37 @@ internal sealed class BrowserSyncProviderSettingsStore
         return snapshot;
     }
 
+    // Thin native wrapper over the shared Rust normalization contract. The
+    // schema, provider-kind whitelist, absolute-root rule, `configured`
+    // determination, membership-marker gating, and scope/version/device-id
+    // defaults all live in Rust so Windows, macOS, iOS, and Android share one
+    // definition. Only the three ambient inputs the Rust function cannot
+    // compute deterministically are minted here:
+    //   - isRootAbsolute: Path.IsPathRooted has Windows-specific
+    //     drive-letter/UNC semantics, so the absolute-path test is resolved
+    //     natively and passed as a boolean rather than moving the raw path
+    //     check into Rust.
+    //   - the observed clock for the saved-at default.
+    //   - a candidate device id, used by Rust only when the stored id is
+    //     empty (first load).
     public static BrowserSyncProviderSettingsSnapshot Normalize(
         BrowserSyncProviderSettingsSnapshot? snapshot)
     {
-        var providerKind = NormalizeProviderKind(snapshot?.ProviderKind);
-        var rootPath = NormalizeText(snapshot?.LocalFolderRootPath);
-        // The local-folder root must be absolute: a relative path would
-        // silently resolve against the process working directory and sync
-        // into the wrong folder. Rejecting it degrades the snapshot to "not
-        // configured" instead of running against a guessed location. The
-        // root path is a local-folder concept only.
-        string? normalizedRootPath =
-            providerKind == LocalFolderProviderKind
-            && rootPath.Length > 0
-            && Path.IsPathRooted(rootPath)
-                ? rootPath
-                : null;
-        var configured = providerKind is not null
-            && (providerKind != LocalFolderProviderKind || normalizedRootPath is not null);
-        var membershipJoinedAt = snapshot?.MembershipJoinedAtUnixSeconds;
+        var rootPath = (snapshot?.LocalFolderRootPath ?? string.Empty).Trim();
+        var isRootAbsolute = rootPath.Length > 0 && Path.IsPathRooted(rootPath);
+        var requestJson = snapshot is null
+            ? "{}"
+            : JsonSerializer.Serialize(snapshot, JsonOptions);
 
-        return new BrowserSyncProviderSettingsSnapshot(
-            CurrentVersion,
-            providerKind,
-            normalizedRootPath,
-            NormalizeText(snapshot?.Scope).Length == 0 ? DefaultScope : NormalizeText(snapshot?.Scope),
-            NormalizeText(snapshot?.DeviceId).Length == 0
-                ? Guid.NewGuid().ToString()
-                : NormalizeText(snapshot?.DeviceId),
-            // A membership marker without a configured provider is
-            // meaningless and would leak into the next connection.
-            configured && membershipJoinedAt > 0 ? membershipJoinedAt : null,
-            snapshot?.SavedAtUnixSeconds > 0
-                ? snapshot.SavedAtUnixSeconds
-                : DateTimeOffset.UtcNow.ToUnixTimeSeconds());
-    }
+        var normalizedJson = ActroCore.NormalizeBrowserSyncProviderSettingsJson(
+            requestJson,
+            isRootAbsolute,
+            DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+            Guid.NewGuid().ToString());
 
-    private static string? NormalizeProviderKind(string? providerKind)
-    {
-        var normalized = NormalizeText(providerKind);
-        return KnownProviderKinds.FirstOrDefault(
-            known => string.Equals(known, normalized, StringComparison.Ordinal));
-    }
-
-    private static string NormalizeText(string? value)
-    {
-        return value?.Trim() ?? string.Empty;
+        return JsonSerializer.Deserialize<BrowserSyncProviderSettingsSnapshot>(
+                normalizedJson, JsonOptions)
+            ?? throw new InvalidOperationException(
+                "Browser sync provider settings normalization from the Rust core is not a valid snapshot.");
     }
 }

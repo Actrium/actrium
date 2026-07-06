@@ -1215,6 +1215,8 @@ internal interface UniffiForeignFutureCompleteVoid : com.sun.jna.Callback {
 
 
 
+
+
 // A JNA Library to expose the extern-C FFI definitions.
 // This is an implementation detail which will be called internally by the public API.
 
@@ -1577,6 +1579,8 @@ internal interface UniffiLib : Library {
     fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cursors_json(`cursorsJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_actro_core_fn_func_normalize_browser_storage_sync_cycle_response_json(`responseJson`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+    ): RustBuffer.ByValue
+    fun uniffi_actro_core_fn_func_normalize_browser_sync_provider_settings_json(`settingsJson`: RustBuffer.ByValue,`isRootAbsolute`: Byte,`observedAtUnixSeconds`: Long,`freshDeviceId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
     fun uniffi_actro_core_fn_func_normalize_integrity_algorithm(`raw`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
     ): RustBuffer.ByValue
@@ -2193,6 +2197,8 @@ internal interface UniffiLib : Library {
     fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cursors_json(
     ): Short
     fun uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cycle_response_json(
+    ): Short
+    fun uniffi_actro_core_checksum_func_normalize_browser_sync_provider_settings_json(
     ): Short
     fun uniffi_actro_core_checksum_func_normalize_integrity_algorithm(
     ): Short
@@ -2887,6 +2893,9 @@ private fun uniffiCheckApiChecksums(lib: UniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cycle_response_json() != 11480.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actro_core_checksum_func_normalize_browser_sync_provider_settings_json() != 48136.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actro_core_checksum_func_normalize_integrity_algorithm() != 25333.toShort()) {
@@ -8628,6 +8637,19 @@ public object FfiConverterSequenceTypeRuntimeTabInfo: FfiConverterRustBuffer<Lis
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_actro_core_fn_func_normalize_browser_storage_sync_cycle_response_json(
         FfiConverterString.lower(`responseJson`),_status)
+}
+    )
+    }
+
+
+        /**
+         * Normalize a persisted browser sync provider-settings snapshot (schema,
+         * provider-kind whitelist, absolute-root rule, configured determination).
+         */ fun `normalizeBrowserSyncProviderSettingsJson`(`settingsJson`: kotlin.String, `isRootAbsolute`: kotlin.Boolean, `observedAtUnixSeconds`: kotlin.Long, `freshDeviceId`: kotlin.String): kotlin.String {
+            return FfiConverterString.lift(
+    uniffiRustCall() { _status ->
+    UniffiLib.INSTANCE.uniffi_actro_core_fn_func_normalize_browser_sync_provider_settings_json(
+        FfiConverterString.lower(`settingsJson`),FfiConverterBoolean.lower(`isRootAbsolute`),FfiConverterLong.lower(`observedAtUnixSeconds`),FfiConverterString.lower(`freshDeviceId`),_status)
 }
     )
     }

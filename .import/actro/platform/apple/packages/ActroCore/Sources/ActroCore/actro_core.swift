@@ -8030,6 +8030,21 @@ public func normalizeBrowserStorageSyncCycleResponseJson(responseJson: String) -
 }
 
 /**
+ * Normalize a persisted browser sync provider-settings snapshot (schema,
+ * provider-kind whitelist, absolute-root rule, configured determination).
+ */
+public func normalizeBrowserSyncProviderSettingsJson(settingsJson: String, isRootAbsolute: Bool, observedAtUnixSeconds: Int64, freshDeviceId: String) -> String {
+    return try! FfiConverterString.lift(try! rustCall {
+        uniffi_actro_core_fn_func_normalize_browser_sync_provider_settings_json(
+            FfiConverterString.lower(settingsJson),
+            FfiConverterBool.lower(isRootAbsolute),
+            FfiConverterInt64.lower(observedAtUnixSeconds),
+            FfiConverterString.lower(freshDeviceId), $0
+        )
+    })
+}
+
+/**
  * Normalize and validate a manifest integrity algorithm.
  */
 public func normalizeIntegrityAlgorithm(raw: String) -> String? {
@@ -9218,6 +9233,9 @@ private var initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_actro_core_checksum_func_normalize_browser_storage_sync_cycle_response_json() != 11480 {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if uniffi_actro_core_checksum_func_normalize_browser_sync_provider_settings_json() != 48136 {
         return InitializationResult.apiChecksumMismatch
     }
     if uniffi_actro_core_checksum_func_normalize_integrity_algorithm() != 25333 {

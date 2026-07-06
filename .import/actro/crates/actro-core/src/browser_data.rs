@@ -57,6 +57,27 @@ pub const MIN_UNIX_SECONDS: i64 = 0;
 pub const MAX_UNIX_SECONDS: i64 = 253_402_300_799;
 pub const BROWSER_STORAGE_SYNC_CLOUD_STORE_CONTRACT_VERSION: u32 = 1;
 pub const BROWSER_STORAGE_SYNC_CLOUD_PROVIDER_ADAPTER_CONTRACT_VERSION: u32 = 1;
+/// Concrete provider kind of the connection-free local-folder adapter. It is
+/// the only member of the provider-settings whitelist that additionally
+/// requires an absolute root path before it counts as configured.
+pub const BROWSER_SYNC_PROVIDER_LOCAL_FOLDER_KIND: &str = "localFolder";
+/// The four roadmap providers of the cloud-drive architecture, in the exact
+/// ordinal spelling the persisted provider-settings snapshot must match. Any
+/// other token is contract drift and normalizes to "no provider configured"
+/// instead of flowing an unknown kind into the connection contract. This is
+/// the single source of truth shared by every platform's provider-settings
+/// store; the capability/connection planners reference the same local-folder
+/// kind constant so the "localFolder" spelling never drifts.
+pub const KNOWN_BROWSER_SYNC_PROVIDER_KINDS: [&str; 4] = [
+    BROWSER_SYNC_PROVIDER_LOCAL_FOLDER_KIND,
+    "iCloudDrive",
+    "googleDrive",
+    "oneDrive",
+];
+/// Schema version of the browser sync provider-settings snapshot.
+pub const BROWSER_SYNC_PROVIDER_SETTINGS_VERSION: u32 = 1;
+/// Default sync scope when the persisted snapshot carries none.
+pub const BROWSER_SYNC_PROVIDER_SETTINGS_DEFAULT_SCOPE: &str = "default";
 pub const BROWSER_STORAGE_SYNC_CLOUD_DATA_MODEL_VERSION: u32 = 1;
 pub const BROWSER_STORAGE_SYNC_CLOUD_PLAN_VERSION: u32 = 1;
 pub const BROWSER_STORAGE_SYNC_CLOUD_DEFAULT_LOOP_MAX_ATTEMPTS: u32 = 3;
@@ -2308,6 +2329,30 @@ pub struct BrowserStorageSyncCloudStoreCapabilityPreflightPlan {
     pub capabilities: Option<BrowserStorageSyncCloudStoreCapabilities>,
     pub required_min_object_bytes: u64,
     pub result_policy: String,
+}
+
+// Durable browser sync provider connection settings, sibling of the endpoint
+// credential snapshot. The record never carries a credential field: the
+// local-folder provider has no secrets, and later cloud providers keep their
+// tokens in provider-SDK/OS-owned storage, so the file stays plain JSON. The
+// schema and its deterministic normalization live in Rust so Windows, macOS,
+// iOS, and Android share one definition of what "configured" means instead of
+// drifting three native copies. `configured` is a derived output of
+// normalization the connection planners consume directly.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserSyncProviderSettingsSnapshot {
+    pub version: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider_kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_folder_root_path: Option<String>,
+    pub scope: String,
+    pub device_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub membership_joined_at_unix_seconds: Option<i64>,
+    pub saved_at_unix_seconds: i64,
+    pub configured: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -5723,6 +5768,125 @@ pub fn browser_storage_sync_cloud_provider_connection_status_policy_json(
     }
 }
 
+// Deterministic normalization of a persisted browser sync provider-settings
+// snapshot. Every ambient input the native store would otherwise reach for is
+// passed in so the function stays pure and identical across platforms:
+//   - is_root_absolute replaces Path.IsPathRooted / URL(fileURLWithPath)
+//     rooting, whose absolute-path semantics differ per OS (drive-letter/UNC
+//     on Windows vs leading-slash on POSIX); the caller pre-computes it over
+//     the trimmed root.
+//   - observed_at_unix_seconds replaces the wall clock for the saved-at
+//     default.
+//   - fresh_device_id replaces Guid.NewGuid()/UUID mint, used only when the
+//     stored device id is empty.
+#[allow(clippy::too_many_arguments)]
+pub fn normalize_browser_sync_provider_settings(
+    provider_kind: Option<&str>,
+    local_folder_root_path: Option<&str>,
+    scope: Option<&str>,
+    device_id: Option<&str>,
+    membership_joined_at_unix_seconds: Option<i64>,
+    saved_at_unix_seconds: i64,
+    is_root_absolute: bool,
+    observed_at_unix_seconds: i64,
+    fresh_device_id: &str,
+) -> BrowserSyncProviderSettingsSnapshot {
+    let normalized_provider_kind = normalize_browser_sync_provider_kind(provider_kind);
+    let root_path = provider_kind_trim(local_folder_root_path);
+    let is_local_folder =
+        normalized_provider_kind.as_deref() == Some(BROWSER_SYNC_PROVIDER_LOCAL_FOLDER_KIND);
+    // The local-folder root must be absolute: a relative path would silently
+    // resolve against the process working directory and sync into the wrong
+    // folder. Rejecting it degrades the snapshot to "not configured" instead
+    // of running against a guessed location. The root is a local-folder
+    // concept only.
+    let normalized_root_path = if is_local_folder && !root_path.is_empty() && is_root_absolute {
+        Some(root_path)
+    } else {
+        None
+    };
+    let configured =
+        normalized_provider_kind.is_some() && (!is_local_folder || normalized_root_path.is_some());
+
+    let scope = provider_kind_trim(scope);
+    let scope = if scope.is_empty() {
+        BROWSER_SYNC_PROVIDER_SETTINGS_DEFAULT_SCOPE.to_string()
+    } else {
+        scope
+    };
+
+    let device_id = provider_kind_trim(device_id);
+    let device_id = if device_id.is_empty() {
+        fresh_device_id.trim().to_string()
+    } else {
+        device_id
+    };
+
+    // A membership marker without a configured provider is meaningless and
+    // would leak into the next connection.
+    let membership_joined_at_unix_seconds = match membership_joined_at_unix_seconds {
+        Some(value) if configured && value > 0 => Some(value),
+        _ => None,
+    };
+
+    let saved_at_unix_seconds = if saved_at_unix_seconds > 0 {
+        saved_at_unix_seconds
+    } else {
+        observed_at_unix_seconds
+    };
+
+    BrowserSyncProviderSettingsSnapshot {
+        version: BROWSER_SYNC_PROVIDER_SETTINGS_VERSION,
+        provider_kind: normalized_provider_kind,
+        local_folder_root_path: normalized_root_path,
+        scope,
+        device_id,
+        membership_joined_at_unix_seconds,
+        saved_at_unix_seconds,
+        configured,
+    }
+}
+
+fn normalize_browser_sync_provider_kind(provider_kind: Option<&str>) -> Option<String> {
+    let normalized = provider_kind_trim(provider_kind);
+    KNOWN_BROWSER_SYNC_PROVIDER_KINDS
+        .iter()
+        .find(|known| **known == normalized)
+        .map(|known| (*known).to_string())
+}
+
+fn provider_kind_trim(value: Option<&str>) -> String {
+    value.unwrap_or_default().trim().to_string()
+}
+
+// Coarse JSON-in/JSON-out FFI entry point: the raw persisted snapshot arrives
+// as JSON, the three ambient inputs the native store computes arrive as scalar
+// args, and the normalized snapshot leaves as JSON. No per-field chatter.
+pub fn normalize_browser_sync_provider_settings_json(
+    settings_json: &str,
+    is_root_absolute: bool,
+    observed_at_unix_seconds: i64,
+    fresh_device_id: &str,
+) -> String {
+    let raw = serde_json::from_str::<Value>(settings_json).unwrap_or(Value::Null);
+    let string_field = |key: &str| raw.get(key).and_then(Value::as_str).map(str::to_string);
+    let normalized = normalize_browser_sync_provider_settings(
+        string_field("providerKind").as_deref(),
+        string_field("localFolderRootPath").as_deref(),
+        string_field("scope").as_deref(),
+        string_field("deviceId").as_deref(),
+        raw.get("membershipJoinedAtUnixSeconds")
+            .and_then(Value::as_i64),
+        raw.get("savedAtUnixSeconds")
+            .and_then(Value::as_i64)
+            .unwrap_or(0),
+        is_root_absolute,
+        observed_at_unix_seconds,
+        fresh_device_id,
+    );
+    serialize_json(&normalized)
+}
+
 pub fn browser_storage_sync_cloud_local_folder_capabilities_json() -> String {
     serialize_json(&browser_storage_sync_cloud_local_folder_capabilities())
 }
@@ -8085,7 +8249,7 @@ fn browser_storage_sync_cloud_provider_connection_status_policy_value(
             Some("providerNotSelected"),
         );
     }
-    if provider_account_id.is_none() && provider_kind != "localFolder" {
+    if provider_account_id.is_none() && provider_kind != BROWSER_SYNC_PROVIDER_LOCAL_FOLDER_KIND {
         browser_storage_sync_cloud_cycle_collect_reason(
             &mut diagnostic_reasons,
             Some("providerAccountMissing"),
@@ -9551,7 +9715,7 @@ fn browser_storage_sync_cloud_provider_adapter_operation_groups(
 pub fn browser_storage_sync_cloud_local_folder_capabilities(
 ) -> BrowserStorageSyncCloudStoreCapabilities {
     BrowserStorageSyncCloudStoreCapabilities {
-        provider_kind: "localFolder".to_string(),
+        provider_kind: BROWSER_SYNC_PROVIDER_LOCAL_FOLDER_KIND.to_string(),
         root_path: BROWSER_STORAGE_SYNC_CLOUD_ROOT_PATH.to_string(),
         revision_kind: "contentHash".to_string(),
         supports_prefix_list: true,
@@ -46284,5 +46448,180 @@ mod tests {
             ),
             "null"
         );
+    }
+
+    #[test]
+    fn normalizes_browser_sync_provider_settings_local_folder_absolute_root() {
+        let normalized = normalize_browser_sync_provider_settings(
+            Some(" localFolder "),
+            Some("  /Users/leo/Sync  "),
+            Some(" profile "),
+            Some(" device-a "),
+            Some(1900),
+            1901,
+            true,
+            5000,
+            "fresh-id",
+        );
+        assert_eq!(normalized.version, BROWSER_SYNC_PROVIDER_SETTINGS_VERSION);
+        assert_eq!(normalized.provider_kind.as_deref(), Some("localFolder"));
+        assert_eq!(
+            normalized.local_folder_root_path.as_deref(),
+            Some("/Users/leo/Sync")
+        );
+        assert_eq!(normalized.scope, "profile");
+        assert_eq!(normalized.device_id, "device-a");
+        assert_eq!(normalized.membership_joined_at_unix_seconds, Some(1900));
+        assert_eq!(normalized.saved_at_unix_seconds, 1901);
+        assert!(normalized.configured);
+    }
+
+    #[test]
+    fn rejects_unknown_browser_sync_provider_kind_to_not_configured() {
+        let normalized = normalize_browser_sync_provider_settings(
+            Some("magicDrive"),
+            Some("/Users/leo/Sync"),
+            None,
+            Some("device-a"),
+            Some(1900),
+            1901,
+            true,
+            5000,
+            "fresh-id",
+        );
+        assert_eq!(normalized.provider_kind, None);
+        assert_eq!(normalized.local_folder_root_path, None);
+        assert!(!normalized.configured);
+        assert_eq!(normalized.membership_joined_at_unix_seconds, None);
+    }
+
+    #[test]
+    fn rejects_relative_local_folder_root_to_not_configured() {
+        let normalized = normalize_browser_sync_provider_settings(
+            Some("localFolder"),
+            Some("relative/sync-root"),
+            None,
+            Some("device-a"),
+            Some(1905),
+            1901,
+            false,
+            5000,
+            "fresh-id",
+        );
+        assert_eq!(normalized.provider_kind.as_deref(), Some("localFolder"));
+        assert_eq!(normalized.local_folder_root_path, None);
+        assert!(!normalized.configured);
+        // A membership marker cannot survive without a configured provider.
+        assert_eq!(normalized.membership_joined_at_unix_seconds, None);
+    }
+
+    #[test]
+    fn clears_membership_marker_when_unconfigured() {
+        // Provider kind present but no root: unconfigured local folder, so the
+        // stored marker is meaningless and drops.
+        let normalized = normalize_browser_sync_provider_settings(
+            Some("localFolder"),
+            None,
+            None,
+            Some("device-a"),
+            Some(1900),
+            1901,
+            true,
+            5000,
+            "fresh-id",
+        );
+        assert!(!normalized.configured);
+        assert_eq!(normalized.membership_joined_at_unix_seconds, None);
+    }
+
+    #[test]
+    fn cloud_provider_is_configured_without_local_root() {
+        let normalized = normalize_browser_sync_provider_settings(
+            Some("googleDrive"),
+            None,
+            None,
+            Some("device-a"),
+            Some(1900),
+            1901,
+            false,
+            5000,
+            "fresh-id",
+        );
+        assert_eq!(normalized.provider_kind.as_deref(), Some("googleDrive"));
+        assert!(normalized.configured);
+        assert_eq!(normalized.membership_joined_at_unix_seconds, Some(1900));
+    }
+
+    #[test]
+    fn applies_scope_version_and_saved_at_defaults() {
+        let normalized = normalize_browser_sync_provider_settings(
+            None,
+            None,
+            Some("   "),
+            Some("device-a"),
+            None,
+            0,
+            false,
+            5000,
+            "fresh-id",
+        );
+        assert_eq!(normalized.version, BROWSER_SYNC_PROVIDER_SETTINGS_VERSION);
+        assert_eq!(
+            normalized.scope,
+            BROWSER_SYNC_PROVIDER_SETTINGS_DEFAULT_SCOPE
+        );
+        // saved_at falls back to the observed clock when non-positive.
+        assert_eq!(normalized.saved_at_unix_seconds, 5000);
+        assert!(!normalized.configured);
+    }
+
+    #[test]
+    fn mints_fresh_device_id_only_when_stored_id_empty() {
+        let minted = normalize_browser_sync_provider_settings(
+            None,
+            None,
+            None,
+            Some("   "),
+            None,
+            0,
+            false,
+            5000,
+            " fresh-id ",
+        );
+        assert_eq!(minted.device_id, "fresh-id");
+
+        let kept = normalize_browser_sync_provider_settings(
+            None,
+            None,
+            None,
+            Some(" device-a "),
+            None,
+            0,
+            false,
+            5000,
+            "fresh-id",
+        );
+        assert_eq!(kept.device_id, "device-a");
+    }
+
+    #[test]
+    fn normalize_browser_sync_provider_settings_json_round_trips() {
+        let output = normalize_browser_sync_provider_settings_json(
+            r#"{"version":1,"providerKind":"localFolder","localFolderRootPath":"/Users/leo/Sync","scope":"profile","deviceId":"device-a","membershipJoinedAtUnixSeconds":1900,"savedAtUnixSeconds":1901}"#,
+            true,
+            5000,
+            "fresh-id",
+        );
+        assert!(output.contains(r#""configured":true"#));
+        assert!(output.contains(r#""providerKind":"localFolder""#));
+        assert!(output.contains(r#""localFolderRootPath":"/Users/leo/Sync""#));
+
+        // Invalid JSON degrades to a freshly-minted unconfigured snapshot
+        // rather than panicking.
+        let fallback =
+            normalize_browser_sync_provider_settings_json("{not-json", false, 5000, "fresh-id");
+        assert!(fallback.contains(r#""configured":false"#));
+        assert!(fallback.contains(r#""deviceId":"fresh-id""#));
+        assert!(fallback.contains(r#""scope":"default""#));
     }
 }

@@ -1198,6 +1198,19 @@ else
   print_ok "Windows browser sync coordinator routes through the provider connection"
 fi
 
+# The provider-settings schema + "configured" determination live in the shared
+# Rust normalization contract: the store is a thin native wrapper and the
+# connection planner reads the normalized Configured flag instead of
+# re-deriving the predicate natively.
+if ! rg -q 'NormalizeBrowserSyncProviderSettingsJson' apps/windows/actro/src/ActroCore.cs \
+  || ! rg -q 'actro_core_normalize_browser_sync_provider_settings_json' apps/windows/actro/src/ActroCore.cs \
+  || ! rg -q 'ActroCore.NormalizeBrowserSyncProviderSettingsJson' apps/windows/actro/src/BrowserSyncProviderSettingsStore.cs \
+  || ! rg -q 'settings\?\.Configured' apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs; then
+  print_failure "Windows browser sync provider settings are not normalized through the Rust contract"
+else
+  print_ok "Windows browser sync provider settings normalize through the shared Rust contract"
+fi
+
 for provider_test_link in BrowserSyncProviderSettingsStore.cs BrowserSyncProviderConnectionPlanner.cs BrowserSyncFolderPreflight.cs BrowserSyncProviderStatusFormatter.cs BrowserSyncProviderDiagnosticsFormatter.cs; do
   if ! rg -Fq "$provider_test_link" "$test_project"; then
     print_failure "Windows tests do not link provider connection file: $provider_test_link"
@@ -1421,7 +1434,8 @@ for symbol in \
   actro_core_browser_storage_sync_scheduler_status_json \
   actro_core_browser_storage_sync_ack_plan_json \
   actro_core_browser_storage_sync_remote_apply_plan_json \
-  actro_core_browser_storage_sync_remote_apply_result_json
+  actro_core_browser_storage_sync_remote_apply_result_json \
+  actro_core_normalize_browser_sync_provider_settings_json
 do
   if ! rg -q "$symbol" crates/actro-core/include/actro_core.h; then
     print_failure "Rust C ABI header is missing symbol: $symbol"

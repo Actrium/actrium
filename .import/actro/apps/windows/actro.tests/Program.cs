@@ -2308,6 +2308,9 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual("default", created.Scope);
             AssertTrue(Guid.TryParse(created.DeviceId, out _));
             AssertEqual(null, created.MembershipJoinedAtUnixSeconds);
+            // The shared Rust normalization stamps the derived configured flag:
+            // a fresh store has no provider, so it reads unconfigured.
+            AssertFalse(created.Configured);
             AssertTrue(File.Exists(filePath));
 
             // The minted id is durable: every later load returns the same one.
@@ -2321,6 +2324,8 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual("profile", connected.Scope);
             AssertEqual(deviceId, connected.DeviceId);
             AssertEqual(null, connected.MembershipJoinedAtUnixSeconds);
+            // A local folder with an absolute root reads configured.
+            AssertTrue(connected.Configured);
 
             // The membership marker round-trips and clears without touching
             // the rest of the snapshot.
@@ -2339,10 +2344,12 @@ var tests = new (string Name, Func<Task> Run)[]
             var relative = store.Load();
             AssertEqual(null, relative.LocalFolderRootPath);
             AssertEqual(null, relative.MembershipJoinedAtUnixSeconds);
+            AssertFalse(relative.Configured);
 
             // Unknown provider kinds are contract drift and reject to null.
             store.Save(store.CreateSnapshot("magicDrive", root));
             AssertEqual(null, store.Load().ProviderKind);
+            AssertFalse(store.Load().Configured);
 
             // Disconnect clears the provider fields and the membership marker
             // but keeps the durable device id, so reconnecting the same folder
@@ -2354,6 +2361,7 @@ var tests = new (string Name, Func<Task> Run)[]
             AssertEqual(null, disconnected.LocalFolderRootPath);
             AssertEqual(null, disconnected.MembershipJoinedAtUnixSeconds);
             AssertEqual(deviceId, disconnected.DeviceId);
+            AssertFalse(disconnected.Configured);
 
             // A separate store file mints its own independent device id.
             var minted = new BrowserSyncProviderSettingsStore(mintedPath).Load();
@@ -2372,7 +2380,7 @@ var tests = new (string Name, Func<Task> Run)[]
     {
         var root = CreateTempDirectoryPath();
         var joined = new BrowserSyncProviderSettingsSnapshot(
-            1, "localFolder", root, "profile", "device-win", 1900, 1901);
+            1, "localFolder", root, "profile", "device-win", 1900, 1901, Configured: true);
 
         // Cold start with the persisted membership marker: straight to the
         // cycle round, no membership write.
@@ -2414,7 +2422,7 @@ var tests = new (string Name, Func<Task> Run)[]
 
         // Unconfigured settings short-circuit without a policy call.
         var unconfiguredPlan = BrowserSyncProviderConnectionPlanner.Plan(
-            joined with { ProviderKind = null }, null, 0, 2004);
+            joined with { ProviderKind = null, Configured = false }, null, 0, 2004);
         AssertEqual(BrowserSyncProviderRouting.NotConfigured, unconfiguredPlan.Routing);
         AssertEqual(null, unconfiguredPlan.ConnectionPolicy);
         AssertEqual(
@@ -2423,12 +2431,12 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertEqual(
             BrowserSyncProviderRouting.NotConfigured,
             BrowserSyncProviderConnectionPlanner.Plan(
-                joined with { LocalFolderRootPath = null }, null, 0, 2006).Routing);
+                joined with { LocalFolderRootPath = null, Configured = false }, null, 0, 2006).Routing);
 
         // A configured cloud provider cannot run yet and blocks on connect.
         var cloudPlan = BrowserSyncProviderConnectionPlanner.Plan(
             new BrowserSyncProviderSettingsSnapshot(
-                1, "googleDrive", null, "profile", "device-win", null, 1901),
+                1, "googleDrive", null, "profile", "device-win", null, 1901, Configured: true),
             null,
             0,
             2007);
@@ -2462,7 +2470,7 @@ var tests = new (string Name, Func<Task> Run)[]
     {
         var root = CreateTempDirectoryPath();
         var joined = new BrowserSyncProviderSettingsSnapshot(
-            1, "localFolder", root, "profile", "device-win", 1900, 1901);
+            1, "localFolder", root, "profile", "device-win", 1900, 1901, Configured: true);
 
         // Through the real Rust policy: storage-blocked parks on the user.
         var storagePlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "storage", 2, 2100);
@@ -3080,7 +3088,7 @@ var tests = new (string Name, Func<Task> Run)[]
         // renders as connected, the same plan the coordinator acts on.
         var plan = BrowserSyncProviderConnectionPlanner.Plan(
             new BrowserSyncProviderSettingsSnapshot(
-                1, "localFolder", CreateTempDirectoryPath(), "profile", "device-win", 2600, 2601),
+                1, "localFolder", CreateTempDirectoryPath(), "profile", "device-win", 2600, 2601, Configured: true),
             null,
             0,
             2602);

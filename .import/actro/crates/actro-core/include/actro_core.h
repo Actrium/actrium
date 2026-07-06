@@ -266,6 +266,14 @@ size_t actro_core_browser_storage_sync_cloud_provider_error_classification_json(
     char *buffer,
     size_t buffer_len
 );
+size_t actro_core_normalize_browser_sync_provider_settings_json(
+    const char *settings_json,
+    bool is_root_absolute,
+    int64_t observed_at_unix_seconds,
+    const char *fresh_device_id,
+    char *buffer,
+    size_t buffer_len
+);
 size_t actro_core_browser_storage_sync_cloud_local_folder_capabilities_json(
     char *buffer,
     size_t buffer_len

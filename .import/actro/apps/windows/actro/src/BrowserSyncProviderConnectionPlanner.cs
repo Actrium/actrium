@@ -36,15 +36,14 @@ internal static class BrowserSyncProviderConnectionPlanner
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
+    // The "provider present AND (not localFolder OR root present)" predicate
+    // lives in the shared Rust normalization contract, which stamps the
+    // result onto the snapshot's Configured flag. Reading it here keeps the
+    // rule single-sourced instead of re-deriving it natively. Callers pass
+    // store-loaded (already normalized) snapshots.
     public static bool IsConfigured(BrowserSyncProviderSettingsSnapshot? settings)
     {
-        if (string.IsNullOrEmpty(settings?.ProviderKind))
-        {
-            return false;
-        }
-
-        return settings.ProviderKind != BrowserSyncProviderSettingsStore.LocalFolderProviderKind
-            || !string.IsNullOrEmpty(settings.LocalFolderRootPath);
+        return settings?.Configured ?? false;
     }
 
     public static JsonObject BuildProviderSnapshot(
