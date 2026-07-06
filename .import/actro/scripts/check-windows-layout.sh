@@ -870,6 +870,29 @@ check_pattern_in_each_file \
   apps/windows/actro.tests/Actro.Windows.Tests.csproj \
   apps/windows/actro.tests/Program.cs
 
+# The connection routing token is the Rust contract's, not the planner's: the
+# planner reads it back out instead of hand-deriving membership/cycle/blocked.
+check_pattern_in_each_file \
+  'routingToken' \
+  "Windows browser sync planner dispatches on the Rust connection routing token" \
+  "Windows browser sync planner does not dispatch on the Rust connection routing token" \
+  apps/windows/actro/src/BrowserSyncProviderConnectionPlanner.cs
+
+# The blocked scheduleState and the membership-marker-clear decision are the
+# Rust round contract's: the coordinator consumes them instead of re-mapping
+# the connection policy or the round classification natively.
+check_pattern_in_each_file \
+  'blockedScheduleState' \
+  "Windows browser sync coordinator consumes the Rust blocked scheduleState" \
+  "Windows browser sync coordinator does not consume the Rust blocked scheduleState" \
+  apps/windows/actro/src/BrowserStorageSyncCoordinator.cs
+
+check_pattern_in_each_file \
+  'shouldClearMembershipMarker' \
+  "Windows browser sync coordinator acts on the Rust membership-marker-clear decision" \
+  "Windows browser sync coordinator does not act on the Rust membership-marker-clear decision" \
+  apps/windows/actro/src/BrowserStorageSyncCoordinator.cs
+
 check_pattern_in_each_file \
   'BrowserSyncProviderSettingsStore' \
   "Windows browser sync provider settings store is wired and exercised" \

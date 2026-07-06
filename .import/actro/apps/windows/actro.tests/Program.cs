@@ -2382,36 +2382,47 @@ var tests = new (string Name, Func<Task> Run)[]
         var joined = new BrowserSyncProviderSettingsSnapshot(
             1, "localFolder", root, "profile", "device-win", 1900, 1901, Configured: true);
 
-        // Cold start with the persisted membership marker: straight to the
-        // cycle round, no membership write.
+        // Cold start with the persisted membership marker: the Rust contract
+        // fills the localFolder connection constants and routes to the cycle
+        // round with no membership write.
         var cyclePlan = BrowserSyncProviderConnectionPlanner.Plan(joined, null, 0, 2000);
         AssertEqual(BrowserSyncProviderRouting.RunLocalFolderCycle, cyclePlan.Routing);
+        AssertEqual("cycle", cyclePlan.ConnectionPolicy?["routingToken"]?.GetValue<string>());
         AssertEqual("ready", cyclePlan.ConnectionPolicy?["classification"]?.GetValue<string>());
-        AssertEqual("active", cyclePlan.ProviderSnapshot?["membershipStatus"]?.GetValue<string>());
+        // The contract, not the planner, fills the membership status from the
+        // marker flag the native side marshals.
+        AssertEqual("active", cyclePlan.ConnectionPolicy?["membershipStatus"]?.GetValue<string>());
         AssertEqual("localFolder", cyclePlan.ConnectionPolicy?["providerKind"]?.GetValue<string>());
+        AssertTrue(cyclePlan.ProviderSnapshot?["membershipMarkerPresent"]?.GetValue<bool>() ?? false);
 
         // Cold start without the marker: the membership join round runs first.
         var fresh = joined with { MembershipJoinedAtUnixSeconds = null };
         var membershipPlan = BrowserSyncProviderConnectionPlanner.Plan(fresh, null, 0, 2001);
         AssertEqual(BrowserSyncProviderRouting.RunLocalFolderMembership, membershipPlan.Routing);
+        AssertEqual("membership", membershipPlan.ConnectionPolicy?["routingToken"]?.GetValue<string>());
         AssertEqual(
             "membershipRequired",
             membershipPlan.ConnectionPolicy?["classification"]?.GetValue<string>());
         AssertTrue(membershipPlan.ConnectionPolicy?["shouldAttemptMembership"]?.GetValue<bool>() ?? false);
 
-        // A storage-scoped session error blocks with the folder user action.
-        var storagePlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "storage", 0, 2002);
+        // A storage-scoped round classification is folded by the contract into
+        // the storage error kind and blocks with the folder user action; the
+        // planner marshals the raw classification untouched.
+        var storagePlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "storageSetupRequired", 0, 2002);
         AssertEqual(BrowserSyncProviderRouting.Blocked, storagePlan.Routing);
+        AssertEqual("blocked", storagePlan.ConnectionPolicy?["routingToken"]?.GetValue<string>());
         AssertEqual(
             "storageSetupRequired",
             storagePlan.ConnectionPolicy?["classification"]?.GetValue<string>());
         AssertEqual(
             "chooseProviderFolder",
             storagePlan.ConnectionPolicy?["userAction"]?.GetValue<string>());
+        AssertEqual(
+            "storageSetupRequired",
+            storagePlan.ProviderSnapshot?["providerRoundClassification"]?.GetValue<string>());
 
-        // A transient network error schedules a retry instead of parking on
-        // the user.
-        var retryPlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "network", 1, 2003);
+        // A transient outage schedules a retry instead of parking on the user.
+        var retryPlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "providerUnavailable", 1, 2003);
         AssertEqual(BrowserSyncProviderRouting.Blocked, retryPlan.Routing);
         AssertEqual(
             "providerUnavailable",
@@ -2445,25 +2456,6 @@ var tests = new (string Name, Func<Task> Run)[]
             "signInRequired",
             cloudPlan.ConnectionPolicy?["classification"]?.GetValue<string>());
 
-        // Membership/storage-scoped provider errors clear the persisted
-        // marker (one corrective join on the next run); everything else
-        // keeps it.
-        AssertTrue(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("storageSetupRequired"));
-        AssertTrue(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("recoveryRequired"));
-        AssertTrue(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("deviceMembershipRevoked"));
-        AssertFalse(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("providerUnavailable"));
-        AssertFalse(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker("cloudStateRereadRequired"));
-        AssertFalse(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker(""));
-        AssertFalse(BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker(null));
-
-        // Session error-kind mapping into the connection contract vocabulary.
-        AssertEqual("storage", BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("storageSetupRequired"));
-        AssertEqual("auth", BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("authExpired"));
-        AssertEqual("providerUnavailable", BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("providerUnavailable"));
-        AssertEqual(null, BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("ready"));
-        AssertEqual(null, BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification("cloudStateRereadRequired"));
-        AssertEqual(null, BrowserSyncProviderConnectionPlanner.MapProviderErrorClassification(null));
-
         return Task.CompletedTask;
     }),
     ("translates blocked provider connection policy into scheduler state", () =>
@@ -2472,10 +2464,13 @@ var tests = new (string Name, Func<Task> Run)[]
         var joined = new BrowserSyncProviderSettingsSnapshot(
             1, "localFolder", root, "profile", "device-win", 1900, 1901, Configured: true);
 
-        // Through the real Rust policy: storage-blocked parks on the user.
-        var storagePlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "storage", 2, 2100);
-        var parked = BrowserSyncProviderConnectionPlanner.BuildBlockedScheduleState(
-            storagePlan.ConnectionPolicy!, 2, 2100);
+        // The Rust connection contract emits the blocked-case scheduleState
+        // alongside the policy: a storage block parks on the user with no
+        // retry delay.
+        var storagePlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "storageSetupRequired", 2, 2100);
+        var parked = storagePlan.ConnectionPolicy?["blockedScheduleState"]?.AsObject();
+        AssertTrue(parked is not null);
+        AssertEqual("cloudProviderConnectionScheduleState", parked!["planType"]?.GetValue<string>());
         AssertEqual("waitForProviderStorage", parked["schedulerAction"]?.GetValue<string>());
         AssertEqual("storageSetupRequired", parked["classification"]?.GetValue<string>());
         AssertTrue(parked["requiresUserAction"]?.GetValue<bool>() ?? false);
@@ -2485,50 +2480,17 @@ var tests = new (string Name, Func<Task> Run)[]
         AssertTrue(parked["nextRunDelaySeconds"] is null);
         AssertTrue(parked["nextRetryAttempt"] is null);
 
-        // Through the real Rust policy: a retryable outage schedules the
-        // next attempt with the policy's backoff delay.
-        var retryPlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "network", 1, 2101);
-        var retry = BrowserSyncProviderConnectionPlanner.BuildBlockedScheduleState(
-            retryPlan.ConnectionPolicy!, 1, 2101);
-        AssertEqual("scheduleRetry", retry["schedulerAction"]?.GetValue<string>());
+        // A retryable outage schedules the next attempt with the policy's
+        // backoff delay and the incremented retry attempt.
+        var retryPlan = BrowserSyncProviderConnectionPlanner.Plan(joined, "providerUnavailable", 1, 2101);
+        var retry = retryPlan.ConnectionPolicy?["blockedScheduleState"]?.AsObject();
+        AssertTrue(retry is not null);
+        AssertEqual("scheduleRetry", retry!["schedulerAction"]?.GetValue<string>());
         AssertEqual(10U, retry["nextRunDelaySeconds"]?.GetValue<uint>());
         AssertEqual(2111L, retry["nextRunAtUnixSeconds"]?.GetValue<long>());
         AssertEqual(2U, retry["nextRetryAttempt"]?.GetValue<uint>());
         AssertFalse(retry["requiresUserAction"]?.GetValue<bool>() ?? true);
         AssertFalse(retry["waitingForCredentials"]?.GetValue<bool>() ?? true);
-
-        // Synthetic rows pin the pure field mapping itself.
-        var idlePolicy = JsonNode.Parse(
-            """
-            {
-                "classification": "ready",
-                "schedulerAction": "idle",
-                "userAction": "none",
-                "resetRetryAttempt": true
-            }
-            """)!.AsObject();
-        var idle = BrowserSyncProviderConnectionPlanner.BuildBlockedScheduleState(idlePolicy, 5, 2102);
-        AssertEqual("idle", idle["schedulerAction"]?.GetValue<string>());
-        AssertTrue(idle["resetRetryAttempt"]?.GetValue<bool>() ?? false);
-        AssertFalse(idle["requiresUserAction"]?.GetValue<bool>() ?? true);
-        AssertTrue(idle["nextRetryAttempt"] is null);
-        AssertTrue(idle["nextRunDelaySeconds"] is null);
-
-        var retryPolicy = JsonNode.Parse(
-            """
-            {
-                "classification": "providerUnavailable",
-                "schedulerAction": "scheduleRetry",
-                "retryDelaySeconds": 20,
-                "userAction": "none",
-                "resetRetryAttempt": false
-            }
-            """)!.AsObject();
-        var scheduled = BrowserSyncProviderConnectionPlanner.BuildBlockedScheduleState(retryPolicy, 3, 2103);
-        AssertEqual(20U, scheduled["nextRunDelaySeconds"]?.GetValue<uint>());
-        AssertEqual(2123L, scheduled["nextRunAtUnixSeconds"]?.GetValue<long>());
-        AssertEqual(4U, scheduled["nextRetryAttempt"]?.GetValue<uint>());
-        AssertFalse(scheduled["requiresUserAction"]?.GetValue<bool>() ?? true);
 
         return Task.CompletedTask;
     }),

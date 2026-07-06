@@ -38,9 +38,10 @@ internal sealed class BrowserStorageSyncCoordinator
     private readonly BrowserSyncProviderSettingsStore? providerSettingsStore;
 
     // Session-scoped provider error state: at cold start no round has run,
-    // so the planner snapshot carries no error kind; within a session it
-    // reflects the last round's provider error classification.
-    private string? lastProviderErrorKind;
+    // so the planner snapshot carries no round classification; within a
+    // session it holds the last round's raw provider error classification,
+    // which the Rust connection contract folds into the error-kind vocabulary.
+    private string? lastProviderRoundClassification;
 
     // Session-scoped summary of the last executed provider round envelope
     // (endpoint type, classification, Rust provider diagnostics, and the
@@ -153,7 +154,7 @@ internal sealed class BrowserStorageSyncCoordinator
         var settings = providerSettingsStore!.Load();
         var plan = BrowserSyncProviderConnectionPlanner.Plan(
             settings,
-            lastProviderErrorKind,
+            lastProviderRoundClassification,
             retryAttempt,
             observedAtUnixSeconds);
         if (plan.Routing == BrowserSyncProviderRouting.NotConfigured)
@@ -170,7 +171,7 @@ internal sealed class BrowserStorageSyncCoordinator
 
         if (plan.Routing == BrowserSyncProviderRouting.Blocked)
         {
-            return ProviderBlockedResultJson(settings, plan, retryAttempt, observedAtUnixSeconds);
+            return ProviderBlockedResultJson(settings, plan);
         }
 
         if (plan.Routing == BrowserSyncProviderRouting.RunLocalFolderMembership)
@@ -195,7 +196,7 @@ internal sealed class BrowserStorageSyncCoordinator
             settings = providerSettingsStore.Load();
             plan = BrowserSyncProviderConnectionPlanner.Plan(
                 settings,
-                lastProviderErrorKind,
+                lastProviderRoundClassification,
                 retryAttempt,
                 observedAtUnixSeconds);
             if (plan.Routing != BrowserSyncProviderRouting.RunLocalFolderCycle)
@@ -205,7 +206,7 @@ internal sealed class BrowserStorageSyncCoordinator
                 // policy change) is reported honestly instead of forcing a
                 // cycle the policy no longer allows.
                 return plan.Routing == BrowserSyncProviderRouting.Blocked
-                    ? ProviderBlockedResultJson(settings, plan, retryAttempt, observedAtUnixSeconds)
+                    ? ProviderBlockedResultJson(settings, plan)
                     : ProviderRoundResultJson(membershipEnvelope, "cloudLocalFolderMembership");
             }
         }
@@ -224,24 +225,24 @@ internal sealed class BrowserStorageSyncCoordinator
         return ProviderRoundResultJson(cycleEnvelope, "cloudLocalFolderCycle");
     }
 
-    // Reads the round's provider error classification into the session
-    // error state, keeps the round's diagnostics summary for the settings
-    // dialog, and clears the persisted membership marker on membership- or
-    // storage-scoped errors so the next run re-joins the cloud store.
+    // Reads the round's raw provider error classification into the session
+    // state (the next planner run hands it to the Rust connection contract to
+    // fold into the error-kind vocabulary), keeps the round's diagnostics
+    // summary for the settings dialog, and clears the persisted membership
+    // marker when the Rust round diagnostics say the shared store no longer
+    // knows this device so the next run re-joins.
     private void ApplyProviderRoundOutcome(JsonObject? roundEnvelope)
     {
         lastProviderRoundDiagnosticsJson = BuildProviderRoundDiagnosticsSummaryJson(roundEnvelope);
-        var providerErrorClassification = roundEnvelope?["providerDiagnostics"]?
-            ["providerErrorClassification"]?.GetValue<string>();
-        lastProviderErrorKind = BrowserSyncProviderConnectionPlanner
-            .MapProviderErrorClassification(providerErrorClassification);
-        if (BrowserSyncProviderConnectionPlanner.ShouldClearMembershipMarker(
-                providerErrorClassification))
+        var providerDiagnostics = roundEnvelope?["providerDiagnostics"];
+        lastProviderRoundClassification =
+            providerDiagnostics?["providerErrorClassification"]?.GetValue<string>();
+        if (providerDiagnostics?["shouldClearMembershipMarker"]?.GetValue<bool>() == true)
         {
             providerSettingsStore!.ClearMembershipMarker();
             Trace.TraceWarning(
                 "browser sync provider round reported a membership/storage-scoped error ({0}); cleared the membership marker so the next run re-joins",
-                providerErrorClassification);
+                lastProviderRoundClassification);
         }
     }
 
@@ -293,14 +294,13 @@ internal sealed class BrowserStorageSyncCoordinator
         return payload.ToJsonString(JsonOptions);
     }
 
-    // Blocked routing: no round runs and no envelope exists, so the
-    // scheduleState is the planner's pure translation of the connection
-    // status policy into the scheduler's field shape.
+    // Blocked routing: no round runs and no round envelope exists, so the
+    // scheduleState is the Rust connection contract's blocked-case translation
+    // of the status policy into the scheduler's field shape, emitted alongside
+    // the policy itself.
     private static string ProviderBlockedResultJson(
         BrowserSyncProviderSettingsSnapshot settings,
-        BrowserSyncProviderConnectionPlan plan,
-        uint retryAttempt,
-        long observedAtUnixSeconds)
+        BrowserSyncProviderConnectionPlan plan)
     {
         var connectionPolicy = plan.ConnectionPolicy!;
         var payload = new JsonObject
@@ -315,10 +315,7 @@ internal sealed class BrowserStorageSyncCoordinator
             ["shouldRetry"] = connectionPolicy["shouldRetry"]?.GetValue<bool>() ?? false,
             ["clientAction"] = connectionPolicy["providerAction"]?.GetValue<string>() ?? string.Empty,
             ["statusPolicy"] = CloneJsonNode(connectionPolicy),
-            ["scheduleState"] = BrowserSyncProviderConnectionPlanner.BuildBlockedScheduleState(
-                connectionPolicy,
-                retryAttempt,
-                observedAtUnixSeconds),
+            ["scheduleState"] = CloneJsonNode(connectionPolicy["blockedScheduleState"]),
         };
 
         return payload.ToJsonString(JsonOptions);
