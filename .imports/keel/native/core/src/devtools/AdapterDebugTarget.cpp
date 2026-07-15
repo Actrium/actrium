@@ -91,8 +91,44 @@ void AdapterDebugTarget::onClientConnect(ConnectionId conn, CdpOutboundFn persis
 }
 
 void AdapterDebugTarget::onClientDisconnect(ConnectionId conn) {
-  std::lock_guard<std::mutex> lock(sinksMutex_);
-  sinks_.erase(conn);
+  bool lastClientGone;
+  {
+    std::lock_guard<std::mutex> lock(sinksMutex_);
+    sinks_.erase(conn);
+    lastClientGone = sinks_.empty();
+  }
+  // Liveness: an inspector socket dropped while the guest is parked at a
+  // breakpoint would otherwise strand the host turn forever — no client remains
+  // to send Debugger.resume (an untrusted-guest DoS, not a feature). When the
+  // LAST client leaves, force a resume if the engine is still paused. This mirrors
+  // the Hermes CDPAgentTarget rationale, adapted to the QuickJS threading model.
+  //
+  // resumeIfPaused() MUST run WITHOUT sinksMutex_ held: it emits Debugger.resumed,
+  // which re-enters broadcast()/sinksMutex_ (now a no-op over the empty set) and
+  // would self-deadlock on the non-recursive mutex otherwise. The resume itself is
+  // thread-safe:
+  //   * native — the guest is blocked on QuickJSDebugCore's condition variable on
+  //     the runtime thread; resume() flips resumeRequested_ and notifies it. Only
+  //     that runtime thread mutates the VM, so we never touch it off-thread here.
+  //   * web (Asyncify) — this runs on the single JS thread while the eval Promise
+  //     is parked (C stack unwound); resume() calls the Asyncify wake, exactly as
+  //     a Debugger.resume dispatched on that same thread would.
+  // isPaused() inside resumeIfPaused() guards against a spurious/duplicate resume.
+  //
+  // Resuming once is NOT enough: the breakpoints stay armed, so a guest that
+  // re-hits one (a loop, a timer, the next host turn) parks again with no client
+  // left to rescue it — the same DoS, re-opened, and this time guest-controllable
+  // (a breakpoint in a hot path re-strands on every iteration). Since the last
+  // client is gone we also DISABLE the debugger for this tenant: handleDisable
+  // clears the tenant's breakpoints and the engine hook, making any future pause
+  // impossible. Order matters — disable BEFORE resume, so the guest wakes into a
+  // debugger with no armed breakpoints and runs to completion instead of
+  // re-parking. (A dropped client's breakpoints are its own state; a reconnecting
+  // client re-enables and re-sets them, matching CDP norms.)
+  if (lastClientGone && adapter_) {
+    adapter_->handleDisable(tenantId_, /*requestId=*/0);
+    adapter_->resumeIfPaused(tenantId_);
+  }
 }
 
 void AdapterDebugTarget::dispatch(ConnectionId conn, const RawCdpMessage& raw) {
