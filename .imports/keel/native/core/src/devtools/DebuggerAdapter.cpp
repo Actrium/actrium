@@ -270,6 +270,18 @@ CDPResponse DebuggerAdapter::handleResume(TenantId tenantId, int requestId) {
   return response;
 }
 
+bool DebuggerAdapter::resumeIfPaused(TenantId tenantId) {
+  // Only resume if the engine is actually parked — otherwise this is a no-op (and
+  // the guard prevents a double-resume if two disconnects race to the last sink).
+  if (!engineDebugger_->isPaused(tenantId)) return false;
+  // Mirror handleResume: announce Debugger.resumed (a no-op broadcast once the
+  // last client is gone) before unblocking the engine; resume() carries no
+  // subsequent paused event.
+  onResumed(tenantId);
+  engineDebugger_->resume(tenantId);
+  return true;
+}
+
 CDPResponse DebuggerAdapter::handleStepOver(TenantId tenantId, int requestId) {
   // A step resumes, then re-pauses at the next stop. Emit resumed first so it
   // always precedes the Debugger.paused the engine delivers on step completion.

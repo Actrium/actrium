@@ -269,6 +269,16 @@ public:
   CDPResponse handleGetProperties(TenantId tenantId, int requestId,
                                    const std::string& params);
 
+  // Liveness helper (no CDP request behind it). Force-resume the engine iff it is
+  // currently paused, emitting Debugger.resumed first (same ordering as
+  // handleResume). Returns true if a resume was actually issued. Called by the
+  // relay when the LAST debug client disconnects while the guest is parked at a
+  // breakpoint: with no client left to send Debugger.resume, the host turn would
+  // be stranded forever (untrusted-guest DoS). Safe to call from the relay/CDP
+  // thread — engineDebugger_->resume() only signals the paused runtime thread; it
+  // never mutates the guest VM off-thread.
+  bool resumeIfPaused(TenantId tenantId);
+
   // ============================================
   // Event Emitters
   // ============================================

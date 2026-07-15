@@ -520,6 +520,87 @@ int main() {
     JS_FreeRuntime(ort);
   }
 
+  // --- Liveness: dropping the ONLY client while parked must force a resume. -----
+  // An inspector socket that disconnects while the guest is paused at a breakpoint
+  // must not strand the host turn forever (untrusted-guest DoS). With no client
+  // left to send Debugger.resume, AdapterDebugTarget::onClientDisconnect has to
+  // force the resume so the parked eval runs to completion instead of hanging.
+  // Resuming once is NOT enough — the breakpoint must also be DISARMED, or the
+  // guest re-parks on the next hit with no client to rescue it. The script below
+  // re-hits the breakpoint in a loop to pin exactly that re-strand hazard.
+  {
+    JSRuntime* drt = JS_NewRuntime();
+    JSContext* dctx = JS_NewContext(drt);
+    QuickJSDebugCore dcore(drt, dctx);
+    auto dEngine = std::make_shared<QuickJSEngineDebugger>(&dcore, 1);
+    auto dAdapter = std::make_shared<DebuggerAdapter>();
+    dAdapter->setEngineDebugger(dEngine);
+    AdapterDebugTarget dTarget(dAdapter, 1);
+    dEngine->setPausedNotifier(
+        [dAdapter](PauseReason r, const std::vector<CallFrame>& frames,
+                   const std::vector<std::string>& hits) {
+          dAdapter->onPaused(1, r, frames, hits);
+        });
+
+    Sink dsink;
+    dTarget.onClientConnect(1, [&dsink](const RawCdpMessage& m) { dsink.push(m); });
+    dTarget.dispatch(1, R"({"id":1,"method":"Debugger.enable"})");
+    // Breakpoint at source line 2 (CDP lineNumber 1).
+    dTarget.dispatch(
+        1,
+        R"({"id":2,"method":"Debugger.setBreakpoint","params":{"location":{"scriptId":"drop.js","lineNumber":1}}})");
+
+    std::promise<void> dDone;
+    auto dFut = dDone.get_future();
+    std::thread dThread([&] {
+      JS_UpdateStackTop(drt);
+      // The breakpoint sits on the top-level while CONDITION (source line 2); the
+      // loop body is on line 3. The condition line is re-entered from the body on
+      // every iteration (its neighbour line differs, so the onStep de-dup does not
+      // suppress it), so the breakpoint would re-hit each of the 3 iterations if
+      // it stayed armed — exercising the re-strand hazard: resuming once is not
+      // enough; the disconnect must also DISABLE so iterations 2 and 3 don't
+      // re-park a now-clientless guest. done ends at 103 only if the loop ran to
+      // completion after the drop.
+      static const char* kCode =
+          "globalThis.done = 0;\n"          // 1
+          "while (globalThis.done < 3)\n"   // 2 <- breakpoint (CDP line 1)
+          "  globalThis.done++;\n"          // 3
+          "globalThis.done += 100;\n";      // 4
+      JSValue v =
+          JS_Eval(dctx, kCode, std::strlen(kCode), "drop.js", JS_EVAL_TYPE_GLOBAL);
+      JS_FreeValue(dctx, v);
+      dDone.set_value();
+    });
+
+    check(dsink.waitFor("\"Debugger.paused\"", "drop paused event"),
+          "guest parks at the breakpoint before the client drops");
+    check(dFut.wait_for(std::chrono::milliseconds(200)) != std::future_status::ready,
+          "runtime stays blocked while paused (before disconnect)");
+
+    // Drop the only client WITHOUT ever sending Debugger.resume. The disconnect
+    // itself must force-resume the parked guest.
+    dTarget.onClientDisconnect(1);
+    bool completed =
+        dFut.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    check(completed,
+          "disconnecting the last client force-resumes the parked guest (no hang)");
+    dThread.join();
+
+    JSValue dg = JS_GetGlobalObject(dctx);
+    JSValue dv = JS_GetPropertyStr(dctx, dg, "done");
+    int32_t dn = -1;
+    JS_ToInt32(dctx, &dn, dv);
+    check(dn == 103,
+          "guest ran through all 3 breakpoint re-hits after the drop (done === 103) "
+          "— proves the disconnect DISARMS breakpoints, not just resumes once");
+    JS_FreeValue(dctx, dv);
+    JS_FreeValue(dctx, dg);
+
+    JS_FreeContext(dctx);
+    JS_FreeRuntime(drt);
+  }
+
   std::cout << "=== " << (g_failures == 0 ? "ALL PASS" : "FAILURES") << " ("
             << g_failures << " failed) ===\n";
   return g_failures == 0 ? 0 : 1;
