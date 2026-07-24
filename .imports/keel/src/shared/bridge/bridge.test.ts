@@ -4,7 +4,7 @@
  * Tests for the unified communication layer with automatic serialization.
  *
  * Key principles:
- * - Bridge exposes sendRawBatch/sendSerializedBatch/sendBinaryBatch/sendJsonBatch and sendToGuest()
+ * - Bridge exposes sendRawBatch/sendSerializedBatch/sendJsonBatch and sendToGuest()
  * - All serialization/deserialization happens internally
  * - JSI-safe types pass through with zero overhead
  */
@@ -39,7 +39,6 @@ describe('Bridge - Unified Communication Layer', () => {
     test('should have send methods', () => {
       expect(typeof bridge.sendRawBatch).toBe('function');
       expect(typeof bridge.sendSerializedBatch).toBe('function');
-      expect(typeof bridge.sendBinaryBatch).toBe('function');
       expect(typeof bridge.sendJsonBatch).toBe('function');
       expect(typeof bridge.sendToGuest).toBe('function');
     });

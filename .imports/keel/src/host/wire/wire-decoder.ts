@@ -8,8 +8,9 @@
  * oracle is contracts/op-batch-wire.golden.json. This decoder is generated
  * against / validated by those files and MUST NOT hand-copy any peer codec.
  *
- * Why this exists (and why it is separate from BinaryDecoder in
- * src/shared/bridge/binary-protocol.ts): the measured V8 win comes from a
+ * This is the ONLY TS decoder for this wire (the legacy BinaryDecoder in
+ * src/shared/bridge/binary-protocol.ts was retired — see
+ * contracts/op-batch-wire.MATURITY.md §4a). The measured V8 win comes from a
  * STREAMING decode that walks each operation record and immediately hands it to
  * an `apply(op)` callback, WITHOUT materialising an intermediate
  * `operations: SerializedOperation[]` graph. Skipping that array (and the
@@ -26,10 +27,11 @@
  *     after the last op → typed throw, never an out-of-bounds read or a
  *     silently-wrapped length.
  *
- * INTEGRATION STATUS: experimental. The live path still uses PayloadEncoding
- * 'json' by default (see BinaryProtocolConfig). This file changes no defaults
- * and is not imported by the receive path — it is here for benchmarking and
- * eventual promotion.
+ * INTEGRATION STATUS: experimental. The live transport default is still JSON;
+ * this decoder is reached only behind the WasmGuestHost `binaryOpBatch` gate
+ * (WIP, default off) on the native-guest render channel. This file changes no
+ * defaults — it is here for the gated route, benchmarking, and eventual
+ * promotion.
  */
 
 import type {
