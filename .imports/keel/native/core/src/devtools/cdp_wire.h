@@ -35,7 +35,20 @@ std::string buildErrorJSON(int id, int code, const std::string& message);
 std::string escapeJSON(const std::string& str);
 
 // Extract a string value for `key` from a flat JSON object (naive, escape-aware).
+// NB: substring-based — it finds the FIRST textual occurrence of the key, even
+// inside nested objects. Several call sites rely on exactly that (flat payloads,
+// or deliberately reaching into a known nested shape), so its behavior is frozen.
+// For keys that MUST be read from the top level only (routing-relevant ones like
+// "sessionId"), use parseJSONStringTopLevel below.
 std::optional<std::string> parseJSONString(const std::string& json, const std::string& key);
+
+// Extract a string value for `key` from the TOP LEVEL of the outermost JSON
+// object only. Nested objects/arrays (e.g. params.sessionId in
+// Target.detachFromTarget) are skipped via string-aware depth tracking, and key
+// text occurring inside string values is ignored. Returns nullopt when the key
+// is absent at the top level or its value is not a string.
+std::optional<std::string> parseJSONStringTopLevel(const std::string& json,
+                                                   const std::string& key);
 
 // Extract an int value for `key` from a flat JSON object (naive, overflow-safe).
 std::optional<int> parseJSONInt(const std::string& json, const std::string& key);

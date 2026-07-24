@@ -27,8 +27,68 @@ TestSuite createCDPServerTests() {
     assertEqual(cdp::escapeJSON("new\nline"), std::string("new\\nline"), "newline");
   }});
 
+  suite.cases.push_back({"cdp::escapeJSON invalid UTF-8 becomes U+FFFD", []() {
+    const std::string fffd = "\xEF\xBF\xBD";  // U+FFFD as UTF-8 bytes
+    // Lone invalid byte / lone continuation byte
+    assertEqual(cdp::escapeJSON("\xFF"), fffd, "0xFF replaced");
+    assertEqual(cdp::escapeJSON("a\x80""b"), std::string("a") + fffd + "b", "stray continuation");
+    // Truncated 3-byte sequence: one U+FFFD per bad byte
+    assertEqual(cdp::escapeJSON("\xE4\xB8"), fffd + fffd, "truncated sequence");
+    // Overlong encoding (0xC0 0xAF) is invalid
+    assertEqual(cdp::escapeJSON("\xC0\xAF"), fffd + fffd, "overlong rejected");
+    // UTF-8-encoded surrogate half (0xED 0xA0 0x80) is invalid
+    assertEqual(cdp::escapeJSON("\xED\xA0\x80"), fffd + fffd + fffd, "surrogate rejected");
+  }});
+
+  suite.cases.push_back({"cdp::escapeJSON valid UTF-8 passes through", []() {
+    assertEqual(cdp::escapeJSON("\xE4\xB8\xAD"), std::string("\xE4\xB8\xAD"), "3-byte CJK");
+    assertEqual(cdp::escapeJSON("\xC3\xA9"), std::string("\xC3\xA9"), "2-byte e-acute");
+    assertEqual(cdp::escapeJSON("\xF0\x9F\x98\x80"), std::string("\xF0\x9F\x98\x80"), "4-byte emoji");
+    assertEqual(cdp::escapeJSON("mix\xE4\xB8\xAD\"q"), std::string("mix\xE4\xB8\xAD\\\"q"),
+                "UTF-8 mixed with JSON escapes");
+  }});
+
+  suite.cases.push_back({"cdp::parseJSONStringTopLevel top-level only", []() {
+    // Plain top-level member is found
+    auto v = cdp::parseJSONStringTopLevel(
+        R"({"id":1,"method":"Runtime.enable","sessionId":"abc"})", "sessionId");
+    assertTrue(v.has_value(), "top-level found");
+    assertEqual(*v, std::string("abc"), "top-level value");
+
+    // Nested params.sessionId must NOT match (the Target.detachFromTarget shape)
+    auto nested = cdp::parseJSONStringTopLevel(
+        R"({"id":2,"method":"Target.detachFromTarget","params":{"sessionId":"nested"}})",
+        "sessionId");
+    assertFalse(nested.has_value(), "nested key ignored");
+
+    // Both nested and top-level: the top-level one wins even though the nested
+    // occurrence comes first in the byte stream
+    auto both = cdp::parseJSONStringTopLevel(
+        R"({"id":3,"method":"X","params":{"sessionId":"decoy"},"sessionId":"real"})",
+        "sessionId");
+    assertTrue(both.has_value(), "found with decoy present");
+    assertEqual(*both, std::string("real"), "top-level wins");
+
+    // Key text inside a string VALUE must not match either
+    auto inValue = cdp::parseJSONStringTopLevel(
+        R"({"id":4,"expr":"\"sessionId\":\"fake\""})", "sessionId");
+    assertFalse(inValue.has_value(), "key inside string value ignored");
+    auto afterValue = cdp::parseJSONStringTopLevel(
+        R"({"note":"mentions \"sessionId\" here","sessionId":"s1"})", "sessionId");
+    assertTrue(afterValue.has_value(), "found after tricky string value");
+    assertEqual(*afterValue, std::string("s1"), "value after tricky string");
+
+    // Arrays and non-string values are skipped / rejected
+    auto arr = cdp::parseJSONStringTopLevel(
+        R"({"list":[{"sessionId":"in-array"}],"sessionId":"top"})", "sessionId");
+    assertTrue(arr.has_value(), "found past array");
+    assertEqual(*arr, std::string("top"), "array skipped");
+    auto nonString = cdp::parseJSONStringTopLevel(R"({"sessionId":42})", "sessionId");
+    assertFalse(nonString.has_value(), "non-string value -> nullopt");
+  }});
+
   suite.cases.push_back({"cdp::buildEventJSON", []() {
-    std::string json = cdp::buildEventJSON("Runtime.consoleAPICalled", 
+    std::string json = cdp::buildEventJSON("Runtime.consoleAPICalled",
                                            "{\"type\":\"log\"}", 
                                            std::nullopt);
     assertTrue(json.find("Runtime.consoleAPICalled") != std::string::npos, "has method");
