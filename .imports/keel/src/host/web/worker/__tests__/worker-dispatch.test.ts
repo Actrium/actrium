@@ -14,6 +14,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { Engine } from '../../../engine';
 import { TimerManager } from '../../../engine/timer-manager';
 import type { MainToWorkerMessage, WorkerToMainMessage } from '../protocol';
 import { type GuestEngineLike, isControlPlaneDbg, WorkerDispatch } from '../worker-dispatch';
@@ -380,5 +381,138 @@ describe('WorkerDispatch — engine timer callbacks take the same gate (real Tim
     // The message turn entered the gate first, the timer callback second.
     expect(h.timerEngine.events.map((e) => e.name)).toEqual(['evt-first']);
     expect(h.timerEngine.fired).toEqual(['timer-second']);
+  });
+});
+
+describe('WorkerDispatch — engine host-microtask guest entries take the same gate (real Engine)', () => {
+  /**
+   * These drive the REAL core {@link Engine} (node-vm sandbox) behind the real
+   * WorkerDispatch, then call the setImmediate / queueMicrotask polyfills the
+   * engine injected — exactly what guest code invokes. Both defer their guest
+   * entry to a HOST microtask (`nativeQueueMicrotask`), which used to call
+   * straight into the guest, bypassing setGuestTurnRunner and therefore the
+   * TurnGate: on the asyncify debug wasm that microtask would re-enter a
+   * runtime whose stack is parked at a breakpoint. They must queue in the gate
+   * like every other guest entry.
+   */
+  interface EngineHarness {
+    dispatch: WorkerDispatch;
+    engine: Engine;
+    send: (m: MainToWorkerMessage) => void;
+    /** Resolves when a message of `type` has been posted (event-driven, no polling). */
+    waitFor: (type: WorkerToMainMessage['type']) => Promise<WorkerToMainMessage>;
+  }
+
+  function engineSetup(): EngineHarness {
+    const posted: WorkerToMainMessage[] = [];
+    const waiters: Array<{
+      type: WorkerToMainMessage['type'];
+      resolve: (m: WorkerToMainMessage) => void;
+    }> = [];
+    const engine = new Engine({ sandbox: 'node-vm', timeout: 5000 });
+    const dispatch = new WorkerDispatch({
+      post: (m) => {
+        posted.push(m);
+        for (let i = waiters.length - 1; i >= 0; i--) {
+          if (waiters[i].type === m.type) {
+            const [w] = waiters.splice(i, 1);
+            w.resolve(m);
+          }
+        }
+      },
+      createEngine: () => engine as unknown as GuestEngineLike,
+    });
+    const waitFor = (type: WorkerToMainMessage['type']) => {
+      const existing = posted.find((m) => m.type === type);
+      if (existing) return Promise.resolve(existing);
+      return new Promise<WorkerToMainMessage>((resolve) => {
+        waiters.push({ type, resolve });
+      });
+    };
+    return { dispatch, engine, send: (m) => dispatch.handle(m), waitFor };
+  }
+
+  type GuestFnScheduler = (fn: () => void) => void;
+
+  async function loadAndExtract(h: EngineHarness): Promise<{
+    guestSetImmediate: GuestFnScheduler;
+    guestQueueMicrotask: GuestFnScheduler;
+  }> {
+    h.send({ type: 'init', sandbox: 'wasm-quickjs' });
+    h.send({ type: 'load', turnId: 1, source: '// init' });
+    await h.waitFor('loaded');
+    // The polyfills the engine injected are what guest code calls; extract and
+    // invoke them directly, standing in for the guest.
+    // Reason: sandbox extract returns an untyped sandbox value
+    const context = (h.engine as unknown as { context: { extract(name: string): unknown } })
+      .context;
+    const guestSetImmediate = (await context.extract('setImmediate')) as GuestFnScheduler;
+    const guestQueueMicrotask = (await context.extract('queueMicrotask')) as GuestFnScheduler;
+    expect(typeof guestSetImmediate).toBe('function');
+    expect(typeof guestQueueMicrotask).toBe('function');
+    return { guestSetImmediate, guestQueueMicrotask };
+  }
+
+  it('with no debug session, setImmediate and queueMicrotask run directly', async () => {
+    const h = engineSetup();
+    try {
+      const { guestSetImmediate, guestQueueMicrotask } = await loadAndExtract(h);
+      const fired: string[] = [];
+      guestQueueMicrotask(() => fired.push('qm'));
+      guestSetImmediate(() => fired.push('imm'));
+      await flush();
+      expect(fired).toEqual(['qm', 'imm']);
+      expect(h.dispatch.pendingTurns).toBe(0);
+    } finally {
+      h.send({ type: 'destroy' });
+    }
+  });
+
+  it('setImmediate / queueMicrotask entries are DEFERRED during a suspend and drain FIFO on resume', async () => {
+    const h = engineSetup();
+    try {
+      const { guestSetImmediate, guestQueueMicrotask } = await loadAndExtract(h);
+      h.send({ type: 'dbg.enable', requestId: 1 });
+      h.send({ type: 'dbg.pause', requestId: 2 });
+      expect(h.dispatch.isSuspended).toBe(true);
+
+      const fired: string[] = [];
+      guestQueueMicrotask(() => fired.push('qm'));
+      guestSetImmediate(() => fired.push('imm'));
+      // Let the host microtasks fire: both entries must park in the gate
+      // instead of entering the guest.
+      await flush();
+      expect(fired).toEqual([]);
+      expect(h.dispatch.pendingTurns).toBe(2);
+
+      // Resume drains them in the order they were scheduled.
+      h.send({ type: 'dbg.resume', requestId: 3 });
+      await flush();
+      expect(fired).toEqual(['qm', 'imm']);
+      expect(h.dispatch.pendingTurns).toBe(0);
+    } finally {
+      h.send({ type: 'destroy' });
+    }
+  });
+
+  it('a setImmediate scheduled before the suspend still drains only after resume', async () => {
+    const h = engineSetup();
+    try {
+      const { guestSetImmediate } = await loadAndExtract(h);
+      h.send({ type: 'dbg.enable', requestId: 1 });
+
+      const fired: string[] = [];
+      // Scheduled while idle, but the suspend lands before its microtask runs.
+      guestSetImmediate(() => fired.push('late'));
+      h.send({ type: 'dbg.pause', requestId: 2 });
+      await flush();
+      expect(fired).toEqual([]);
+
+      h.send({ type: 'dbg.resume', requestId: 3 });
+      await flush();
+      expect(fired).toEqual(['late']);
+    } finally {
+      h.send({ type: 'destroy' });
+    }
   });
 });
