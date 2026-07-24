@@ -28,8 +28,9 @@
 //!
 //! Unlike op-batch's cross-batch persistent table, a canvas frame is fully
 //! self-contained: the intern table starts EMPTY every frame and every
-//! `internRef` resolves within the same frame. Only `setFillStyle` /
-//! `setStrokeStyle` COLOR strings are interned (they repeat heavily within a
+//! `internRef` resolves within the same frame. `setFillStyle` /
+//! `setStrokeStyle` COLOR strings AND `setFont` FONT strings are interned into
+//! that one table (they repeat heavily within a
 //! frame); `fillText` text is INLINE (high cardinality). Indices are assigned in
 //! FIRST-APPEARANCE order as the ops are walked. Coordinates/dimensions are all
 //! `f64` little-endian and MUST be finite (NaN/Inf fail closed), mirroring the
@@ -164,6 +165,30 @@ pub enum CanvasOp {
         d: f64,
         e: f64,
         f: f64,
+    },
+    /// Font is INTERNED (u16 `internRef`, sharing the colors' per-frame table).
+    SetFont {
+        font: String,
+    },
+    /// Text is INLINE (u32 len + UTF-8, not interned) — same shape as `FillText`.
+    StrokeText {
+        x: f64,
+        y: f64,
+        text: String,
+    },
+    BezierCurveTo {
+        cp1x: f64,
+        cp1y: f64,
+        cp2x: f64,
+        cp2y: f64,
+        x: f64,
+        y: f64,
+    },
+    QuadraticCurveTo {
+        cpx: f64,
+        cpy: f64,
+        x: f64,
+        y: f64,
     },
 }
 
@@ -382,6 +407,45 @@ impl Encoder {
                 put_f64(buf, *e)?;
                 put_f64(buf, *f)?;
             }
+            CanvasOp::SetFont { font } => {
+                buf.push(opcode::SET_FONT);
+                let r = self.intern(font)?;
+                put_u16(buf, r);
+            }
+            CanvasOp::StrokeText { x, y, text } => {
+                buf.push(opcode::STROKE_TEXT);
+                put_f64(buf, *x)?;
+                put_f64(buf, *y)?;
+                if text.len() > contract::limits::MAX_TEXT_BYTES {
+                    return Err(EncodeError::TextTooLong);
+                }
+                // textLen is a u32 (the cap, not the field width, is the bound).
+                put_u32(buf, text.len() as u32);
+                buf.extend_from_slice(text.as_bytes());
+            }
+            CanvasOp::BezierCurveTo {
+                cp1x,
+                cp1y,
+                cp2x,
+                cp2y,
+                x,
+                y,
+            } => {
+                buf.push(opcode::BEZIER_CURVE_TO);
+                put_f64(buf, *cp1x)?;
+                put_f64(buf, *cp1y)?;
+                put_f64(buf, *cp2x)?;
+                put_f64(buf, *cp2y)?;
+                put_f64(buf, *x)?;
+                put_f64(buf, *y)?;
+            }
+            CanvasOp::QuadraticCurveTo { cpx, cpy, x, y } => {
+                buf.push(opcode::QUADRATIC_CURVE_TO);
+                put_f64(buf, *cpx)?;
+                put_f64(buf, *cpy)?;
+                put_f64(buf, *x)?;
+                put_f64(buf, *y)?;
+            }
         }
         Ok(())
     }
@@ -538,6 +602,28 @@ mod tests {
                 e: f(op, "e"),
                 f: f(op, "f"),
             },
+            "setFont" => CanvasOp::SetFont {
+                font: s(op, "font").to_string(),
+            },
+            "strokeText" => CanvasOp::StrokeText {
+                x: f(op, "x"),
+                y: f(op, "y"),
+                text: s(op, "text").to_string(),
+            },
+            "bezierCurveTo" => CanvasOp::BezierCurveTo {
+                cp1x: f(op, "cp1x"),
+                cp1y: f(op, "cp1y"),
+                cp2x: f(op, "cp2x"),
+                cp2y: f(op, "cp2y"),
+                x: f(op, "x"),
+                y: f(op, "y"),
+            },
+            "quadraticCurveTo" => CanvasOp::QuadraticCurveTo {
+                cpx: f(op, "cpx"),
+                cpy: f(op, "cpy"),
+                x: f(op, "x"),
+                y: f(op, "y"),
+            },
             other => panic!("unknown golden op {other}"),
         }
     }
@@ -587,10 +673,10 @@ mod tests {
     }
 
     /// The full corpus of golden vectors, defined ONCE and shared by the
-    /// generator and the byte-exact re-encode test. Covers every one of the 21
-    /// ops, an empty frame, intern dedup on repeated colors, a multibyte
-    /// `fillText`, an at-limit op count near `maxOps`, and a mixed realistic
-    /// frame.
+    /// generator and the byte-exact re-encode test. Covers every one of the 25
+    /// ops, an empty frame, intern dedup on repeated colors, font/color sharing
+    /// one intern table, a multibyte `fillText`, an at-limit op count near
+    /// `maxOps`, and a mixed realistic frame.
     fn vectors() -> Vec<Vector> {
         use CanvasOp::*;
         let mut out = vec![
@@ -708,6 +794,46 @@ mod tests {
                 vec![SetTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, e: 100.0, f: 200.0 }],
             ),
             v(
+                "set-font",
+                "setFont interns one font string (index 0) into the SAME table as the colors and references it.",
+                "c",
+                1,
+                vec![SetFont { font: "16px sans-serif".to_string() }],
+            ),
+            v(
+                "stroke-text",
+                "strokeText with x, y then INLINE ASCII text (u32 len + UTF-8) — byte-identical shape to fillText.",
+                "c",
+                1,
+                vec![StrokeText { x: 10.0, y: 20.0, text: "Rill".to_string() }],
+            ),
+            v(
+                "bezier-curve-to",
+                "bezierCurveTo with the two control points and the endpoint (six f64).",
+                "c",
+                1,
+                vec![BezierCurveTo { cp1x: 0.0, cp1y: 0.0, cp2x: 10.0, cp2y: 20.0, x: 30.0, y: 5.0 }],
+            ),
+            v(
+                "quadratic-curve-to",
+                "quadraticCurveTo with the control point and the endpoint (four f64).",
+                "c",
+                1,
+                vec![QuadraticCurveTo { cpx: 5.0, cpy: 15.0, x: 25.0, y: 0.0 }],
+            ),
+            v(
+                "font-and-color-intern",
+                "setFont and setFillStyle share ONE per-frame intern table: the font is index 0, the color index 1, and a repeated font reuses index 0 — mixed strings dedup together.",
+                "label",
+                3,
+                vec![
+                    SetFont { font: "12px monospace".to_string() },
+                    fs("#0af"),
+                    text(2.0, 12.0, "x"),
+                    SetFont { font: "12px monospace".to_string() },
+                ],
+            ),
+            v(
                 "repeated-colors",
                 "Intern dedup: '#f00' appears in THREE ops but is stored ONCE (index 0); '#00f' is index 1. The table holds two entries, not four.",
                 "chart",
@@ -811,6 +937,26 @@ mod tests {
             CanvasOp::Rotate { angle } => format!("{{\"op\":\"rotate\",\"angle\":{angle}}}"),
             CanvasOp::SetTransform { a, b, c, d, e, f } => format!(
                 "{{\"op\":\"setTransform\",\"a\":{a},\"b\":{b},\"c\":{c},\"d\":{d},\"e\":{e},\"f\":{f}}}"
+            ),
+            CanvasOp::SetFont { font } => {
+                format!("{{\"op\":\"setFont\",\"font\":{}}}", jstr(font))
+            }
+            CanvasOp::StrokeText { x, y, text } => format!(
+                "{{\"op\":\"strokeText\",\"x\":{x},\"y\":{y},\"text\":{}}}",
+                jstr(text)
+            ),
+            CanvasOp::BezierCurveTo {
+                cp1x,
+                cp1y,
+                cp2x,
+                cp2y,
+                x,
+                y,
+            } => format!(
+                "{{\"op\":\"bezierCurveTo\",\"cp1x\":{cp1x},\"cp1y\":{cp1y},\"cp2x\":{cp2x},\"cp2y\":{cp2y},\"x\":{x},\"y\":{y}}}"
+            ),
+            CanvasOp::QuadraticCurveTo { cpx, cpy, x, y } => format!(
+                "{{\"op\":\"quadraticCurveTo\",\"cpx\":{cpx},\"cpy\":{cpy},\"x\":{x},\"y\":{y}}}"
             ),
         }
     }

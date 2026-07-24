@@ -20,6 +20,17 @@
           },
           "response": { "ok": "boolean", "dropped": "number" },
           "description": "Blit width*height*4 bytes of straight-alpha row-major RGBA8 (stride = width*4) read from guest linear memory at 'ptr' (bounds-checked host-side). The response resolves only AFTER the host finished reading, so the ack is the guest's backpressure signal. The host additionally byte-budgets present per canvas; over-budget presents fail closed."
+        },
+        "measureText": {
+          "request": { "canvasId": "string", "text": "string", "font": "string" },
+          "response": {
+            "width": "number",
+            "actualBoundingBoxAscent": "number",
+            "actualBoundingBoxDescent": "number",
+            "actualBoundingBoxLeft": "number",
+            "actualBoundingBoxRight": "number"
+          },
+          "description": "Measure 'text' in 'font' (a CSS font shorthand; OPTIONAL — omitted means the canvas's current font) using the host's own 2D-context measureText, returning the advance 'width' and the standard TextMetrics glyph bounds. There is no pixel readback, so this is the ONLY text-layout primitive on a sealed <Canvas> (wrap/align/hit-test). A failed call (unknown/unmounted canvas) fails closed. The four actualBoundingBox* fields are OPTIONAL in the response (a host that reports only 'width' is valid; the guest defaults the bounds to 0)."
         }
       },
       "presentFormats": ["rgba8"],
@@ -65,7 +76,18 @@
           "d": "number",
           "e": "number",
           "f": "number"
-        }
+        },
+        "setFont": { "font": "string" },
+        "strokeText": { "x": "number", "y": "number", "text": "string" },
+        "bezierCurveTo": {
+          "cp1x": "number",
+          "cp1y": "number",
+          "cp2x": "number",
+          "cp2y": "number",
+          "x": "number",
+          "y": "number"
+        },
+        "quadraticCurveTo": { "cpx": "number", "cpy": "number", "x": "number", "y": "number" }
       }
     },
     "host:gpu": {

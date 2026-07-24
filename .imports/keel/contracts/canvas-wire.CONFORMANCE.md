@@ -116,26 +116,39 @@ emission (`fillText` fields are `x, y, text`). No per-op id, no trailer.
 | 19 | scale | x f64, y f64 | 16 |
 | 20 | rotate | angle f64 | 8 |
 | 21 | setTransform | a,b,c,d,e,f f64 | 48 |
+| 22 | setFont | font internRef u16 | 2 |
+| 23 | strokeText | x f64, y f64, textLen u32 + UTF-8 | 20 + len |
+| 24 | bezierCurveTo | cp1x,cp1y,cp2x,cp2y,x,y f64 | 48 |
+| 25 | quadraticCurveTo | cpx,cpy,x,y f64 | 32 |
+
+Opcodes are **append-only**: 22–25 took the next free bytes after the original 21,
+so every earlier opcode keeps its value (an additive, non-breaking wire change — no
+`protocolVersion` bump).
 
 **Per-field encoding decisions** (annotated in the schema):
-- `setFillStyle` / `setStrokeStyle` `color` → **INTERNED** u16 internRef (colors
-  repeat heavily in a frame).
-- `fillText` `text` → **INLINE** u32 len + UTF-8 (high cardinality, do not intern).
+- `setFillStyle` / `setStrokeStyle` `color` **and** `setFont` `font` → **INTERNED**
+  u16 internRef into ONE shared per-frame table (these strings repeat heavily in a
+  frame — a font is set once and reused across many labels, exactly like a color).
+- `fillText` / `strokeText` `text` → **INLINE** u32 len + UTF-8 (high cardinality,
+  do not intern).
 - `arc` `ccw` → **u8 bool** (only `0` / `1` valid; anything else → `bad-opcode`).
 - Numbers are all f64 LE and MUST be finite (NaN/±Inf → `non-finite`). A reserved
   `f32` type-atom and a `COORDS_F32=1` frame flag are named-but-rejected in v1, so
   future half-precision is an additive flag flip, not a redesign.
 
-## 3. The golden vectors (27)
+## 3. The golden vectors (32)
 
-`canvas-wire.golden.json` carries **27 byte-exact vectors** (Rust encoder is the
+`canvas-wire.golden.json` carries **32 byte-exact vectors** (Rust encoder is the
 oracle; TS decoder reconstructs structure-exact). They are:
 
 - `empty` — header + empty intern table + zero ops (fixes the envelope layout).
-- One per op — all 21 opcodes, with `arc` covered twice (`arc-cw`, `arc-ccw`) for
+- One per op — all 25 opcodes, with `arc` covered twice (`arc-cw`, `arc-ccw`) for
   both `ccw` values.
 - `repeated-colors` — 3× `#f00` collapses to a **single** intern entry (proves the
   per-frame color table).
+- `font-and-color-intern` — `setFont` and `setFillStyle` share ONE per-frame table
+  (font index 0, color index 1, and a repeated font reuses index 0 — mixed strings
+  dedup together).
 - `fill-text-multibyte` — `café ☕ 日本語`, byte-length ≠ char count (proves UTF-8
   byte accounting on the inline text).
 - `mixed-frame` — a realistic sparkline (save/transform/path/stroke/fillText).
@@ -262,14 +275,14 @@ Either way the wire is unchanged and this same golden file is the acceptance tes
 
 ## Current status — PASS (WIP, gated off)
 
-Verified 2026-07-08 on Linux (rustc 1.93.0, bun 1.3.5).
+Verified 2026-07-25 on Linux (rustc 1.93.0, bun 1.3.5).
 
 | Codec / suite | Role | Result |
 |---|---|---|
-| Rust `rill-guest` (`--features binary-protocol`) | encoder → golden hex + caps | **PASS** — 51 tests (11 new canvas: golden byte-exact, all seven caps, per-frame intern, header layout) |
-| Rust `rill-guest` (default) | shipped JSON path unaffected | **PASS** — 27 tests |
-| TS `canvas-wire-decoder` (`bun test src/host/wire`) | golden bytes → ops + fail-closed + cross-magic | **PASS** — 163 tests (52 canvas: 27 golden vectors decode to exact ops across all four entry points, a typed negative per reason, cross-magic both directions) |
-| TS `bun test src/host/wasm-guest` | handshake round-trip + JSON fallback + default-stays-JSON | **PASS** — 70 tests (incl. the three canvas handshake fixtures) |
+| Rust `rill-guest` (`--features binary-protocol`) | encoder → golden hex + caps | **PASS** — 91 tests (canvas: golden byte-exact incl. the four new ops, all caps, per-frame color+font intern, header layout) |
+| Rust `rill-guest` (default) | shipped JSON path unaffected | **PASS** — 63 tests |
+| TS `canvas-wire-decoder` (`bun test src/host/wire`) | golden bytes → ops + fail-closed + cross-magic | **PASS** — 220 tests (59 in the canvas decoder file: 32 golden vectors decode to exact ops across all four entry points, a typed negative per reason, cross-magic both directions) |
+| TS `bun test src/host/wasm-guest` | handshake round-trip + JSON fallback + default-stays-JSON | **PASS** — 104 tests (incl. the three canvas handshake fixtures) |
 | `bunx tsc --noEmit` | typecheck | **PASS** — exit 0 |
 
 **Cross-magic (both directions), proven:** a canvas (`RCNV`) buffer fed to the
