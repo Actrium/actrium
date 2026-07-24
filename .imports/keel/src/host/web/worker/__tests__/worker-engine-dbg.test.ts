@@ -231,6 +231,167 @@ describe('WorkerEngine debugger surface', () => {
     expect(fatal).toBeNull();
   });
 
+  it('dbg.paused holds the watchdogs of turns queued behind the breakpoint', async () => {
+    // The worker's TurnGate is suspended while a turn is parked at a breakpoint,
+    // so a turn posted AFTER the pause is queued, not running — its turnDone
+    // cannot arrive until resume. Its watchdog must be held, not left counting.
+    const s = setup({ watchdogTimeout: 60 });
+    engine = s.engine;
+    let fatal: Error | null = null;
+    s.engine.on('fatalError', (e) => {
+      fatal = e;
+    });
+
+    const loadP = s.engine.loadBundle('noop');
+    loadP.catch(() => undefined);
+    await flush();
+    const loadTurnId = s.mock.last('load')?.turnId ?? -1;
+    s.mock.emit({
+      type: 'dbg.paused',
+      turnId: loadTurnId,
+      reason: 'breakpoint',
+      callFrames: [],
+      hitBreakpoints: [],
+    });
+
+    // This event turn queues behind the suspended gate in the worker.
+    s.engine.sendEvent('tap', { x: 1 });
+    expect(s.mock.last('event')).toBeDefined();
+
+    // Well past the 60ms budget: the queued turn must NOT be mistaken for a runaway.
+    await elapse(160);
+    expect(s.engine.isDestroyed).toBe(false);
+    expect(s.mock.terminated).toBe(false);
+    expect(fatal).toBeNull();
+
+    // Resume rearms BOTH turns with a fresh budget; the drained event turn
+    // completes (turnDone disarms it) while the load turn, never completing,
+    // is the one the rearmed watchdog now catches.
+    s.mock.emit({ type: 'dbg.resumed', turnId: loadTurnId });
+    const eventTurnId = s.mock.last('event')?.turnId ?? -1;
+    s.mock.emit({ type: 'turnDone', turnId: eventTurnId });
+    await elapse(40);
+    expect(s.engine.isDestroyed).toBe(false);
+    await elapse(120);
+    expect(s.engine.isDestroyed).toBe(true);
+    expect(fatal).not.toBeNull();
+  });
+
+  it('sendEvent after an explicit dbgPause is not watchdog-killed while suspended', async () => {
+    // The issue-#41 timeline: dbgEnable() -> dbgPause() -> sendEvent(). The event
+    // turn queues behind the paused gate; before the fix its watchdog kept
+    // counting and terminate()d the worker after the budget although nothing hung.
+    const s = setup({ watchdogTimeout: 60 });
+    engine = s.engine;
+    let fatal: Error | null = null;
+    s.engine.on('fatalError', (e) => {
+      fatal = e;
+    });
+
+    const enableP = s.engine.dbgEnable();
+    s.mock.emit({ type: 'dbg.ack', requestId: s.mock.last('dbg.enable')?.requestId ?? -1 });
+    await enableP;
+
+    const pauseP = s.engine.dbgPause();
+    s.mock.emit({ type: 'dbg.ack', requestId: s.mock.last('dbg.pause')?.requestId ?? -1 });
+    await pauseP;
+
+    s.engine.sendEvent('tap', { x: 1 });
+
+    await elapse(160);
+    expect(s.engine.isDestroyed).toBe(false);
+    expect(s.mock.terminated).toBe(false);
+    expect(fatal).toBeNull();
+
+    // On resume the worker drains the gate and the turn completes normally.
+    const resumeP = s.engine.dbgResume();
+    s.mock.emit({ type: 'dbg.ack', requestId: s.mock.last('dbg.resume')?.requestId ?? -1 });
+    await resumeP;
+    s.mock.emit({ type: 'turnDone', turnId: s.mock.last('event')?.turnId ?? -1 });
+    await elapse(160);
+    expect(s.engine.isDestroyed).toBe(false);
+    expect(fatal).toBeNull();
+  });
+
+  it('watchdogs held during an explicit pause rearm with a fresh budget on dbgResume', async () => {
+    const s = setup({ watchdogTimeout: 60 });
+    engine = s.engine;
+    let fatal: Error | null = null;
+    s.engine.on('fatalError', (e) => {
+      fatal = e;
+    });
+
+    const enableP = s.engine.dbgEnable();
+    s.mock.emit({ type: 'dbg.ack', requestId: s.mock.last('dbg.enable')?.requestId ?? -1 });
+    await enableP;
+    const pauseP = s.engine.dbgPause();
+    s.mock.emit({ type: 'dbg.ack', requestId: s.mock.last('dbg.pause')?.requestId ?? -1 });
+    await pauseP;
+
+    s.engine.sendEvent('tap', null);
+    await elapse(120);
+    expect(s.engine.isDestroyed).toBe(false);
+
+    // Resume rearms the held watchdog; with no turnDone coming the guard is
+    // live again and fires — proving the hold is a deferral, not a hole.
+    const resumeP = s.engine.dbgResume();
+    s.mock.emit({ type: 'dbg.ack', requestId: s.mock.last('dbg.resume')?.requestId ?? -1 });
+    await resumeP;
+    await elapse(160);
+    expect(s.engine.isDestroyed).toBe(true);
+    expect(fatal).not.toBeNull();
+    expect((fatal as unknown as Error).message).toMatch(/watchdog/);
+  });
+
+  it('overlapping suspends: watchdogs stay held until the LAST suspend reason clears', async () => {
+    const s = setup({ watchdogTimeout: 60 });
+    engine = s.engine;
+    let fatal: Error | null = null;
+    s.engine.on('fatalError', (e) => {
+      fatal = e;
+    });
+
+    const enableP = s.engine.dbgEnable();
+    s.mock.emit({ type: 'dbg.ack', requestId: s.mock.last('dbg.enable')?.requestId ?? -1 });
+    await enableP;
+
+    // Reason 1: a load turn parked at a breakpoint.
+    const loadP = s.engine.loadBundle('noop');
+    loadP.catch(() => undefined);
+    await flush();
+    const loadTurnId = s.mock.last('load')?.turnId ?? -1;
+    s.mock.emit({
+      type: 'dbg.paused',
+      turnId: loadTurnId,
+      reason: 'breakpoint',
+      callFrames: [],
+      hitBreakpoints: [],
+    });
+
+    // Reason 2: an explicit pause on top of the breakpoint pause.
+    const pauseP = s.engine.dbgPause();
+    s.mock.emit({ type: 'dbg.ack', requestId: s.mock.last('dbg.pause')?.requestId ?? -1 });
+    await pauseP;
+
+    s.engine.sendEvent('tap', null);
+
+    // Clearing only the explicit pause must NOT rearm: the breakpoint still
+    // has the gate suspended.
+    const resumeP = s.engine.dbgResume();
+    s.mock.emit({ type: 'dbg.ack', requestId: s.mock.last('dbg.resume')?.requestId ?? -1 });
+    await resumeP;
+    await elapse(160);
+    expect(s.engine.isDestroyed).toBe(false);
+    expect(fatal).toBeNull();
+
+    // Clearing the last reason rearms everything; nothing completes, so the
+    // watchdog fires.
+    s.mock.emit({ type: 'dbg.resumed', turnId: loadTurnId });
+    await elapse(160);
+    expect(s.engine.isDestroyed).toBe(true);
+    expect(fatal).not.toBeNull();
+  });
+
   it('dbg.resumed rearms the watchdog', async () => {
     const s = setup({ watchdogTimeout: 60 });
     engine = s.engine;
