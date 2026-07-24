@@ -35,7 +35,7 @@
  * path is NOT measured here (it has no in-VM JSON competitor to compare against
  * inside one runtime); it is discussed qualitatively in the report.
  *
- * The CLI is built/run on demand via `cargo run --features wip-binary-protocol
+ * The CLI is built/run on demand via `cargo run --features binary-protocol
  * --example op_batch_oracle`, so this harness needs a Rust toolchain (it already
  * lives outside the unit-test runner and is invoked explicitly).
  */
@@ -217,7 +217,7 @@ function encodeViaOracle(batches: SerializedOperationBatch[]): ArrayBuffer[] {
       '-p',
       'rill-guest',
       '--features',
-      'wip-binary-protocol',
+      'binary-protocol',
       '--example',
       'op_batch_oracle',
     ],

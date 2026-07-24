@@ -15,7 +15,7 @@
 //! tests) is pinned to the oracle corpus on every bench run.
 //!
 //! Run:
-//!   cargo run -p rill-guest --features wip-binary-protocol \
+//!   cargo run -p rill-guest --features binary-protocol \
 //!     --example op_batch_oracle < batches.json
 
 use rill_guest::wire_encode::{Batch, Encoder, Op, Value};

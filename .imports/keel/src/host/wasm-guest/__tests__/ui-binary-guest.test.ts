@@ -8,12 +8,12 @@
  * that the host forks on the RILL magic and decodes via the streaming wire
  * decoder. Every other host×guest combination degrades to JSON.
  *
- * Route-detection trick: with the feature compiled in but the gate NOT
- * enabled, the guest SDK logs one `[info] wip-binary-protocol compiled in but
- * host did not enable binary op-batch` line, and on a failed binary encode it
- * logs `[warn] op-batch binary encode failed`. So "tree correct AND neither
- * log present" proves the batch really travelled the binary wire, without the
- * test reaching into the channel.
+ * Route-detection trick: with the binary encoder compiled in (the default) but
+ * the gate NOT enabled, the guest SDK logs one `[info] binary op-batch encoder
+ * present but host did not enable binary op-batch` line, and on a failed binary
+ * encode it logs `[warn] op-batch binary encode failed`. So "tree correct AND
+ * neither log present" proves the batch really travelled the binary wire,
+ * without the test reaching into the channel.
  */
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -22,10 +22,14 @@ import { ComponentRegistry } from '../../registry';
 import { Receiver } from '../../receiver';
 import { WasmGuestHost } from '../wasm-guest-host';
 
-// Same deterministic tree, two wires: ui-guest (feature OFF, JSON-only) and
-// ui-binary-guest (feature ON, exports rill_wire_caps).
+// Same deterministic tree, three builds:
+//   ui-guest        — the promoted default: binary-capable, exports rill_wire_caps;
+//   ui-binary-guest — same, kept as an explicit binary fixture;
+//   ui-guest-json   — a pre-promotion, JSON-only build (--no-default-features),
+//                     with NO rill_wire_caps export, for the back-compat path.
 const UI_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-guest.wasm'));
 const UI_BINARY_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-binary-guest.wasm'));
+const UI_GUEST_JSON = readFileSync(join(import.meta.dir, 'fixtures/ui-guest-json.wasm'));
 
 const GATE_OFF_LOG = 'host did not enable binary op-batch';
 const ENCODE_FAILED_LOG = 'op-batch binary encode failed';
@@ -85,10 +89,20 @@ describe('WasmGuestHost — binary op-batch wire (rill_wire_caps gate)', () => {
     expect(logs.filter((m) => m.includes(GATE_OFF_LOG))).toHaveLength(1);
   });
 
-  it('skips the caps push for a guest without the export (JSON-only build)', async () => {
-    // binaryOpBatch on, but ui-guest.wasm (feature OFF) has no rill_wire_caps:
-    // the host must skip the call and the JSON batch must still materialize.
-    const { receiver } = await loadGuest(UI_GUEST, true);
+  it('skips the caps push for a pre-promotion guest without the export (JSON-only build)', async () => {
+    // binaryOpBatch on (now the default), but ui-guest-json.wasm is built
+    // --no-default-features so it has no rill_wire_caps export: the host must
+    // skip the call and the JSON batch must still materialize (back-compat).
+    const { receiver } = await loadGuest(UI_GUEST_JSON, true);
     expectUiGuestTree(receiver);
+  });
+
+  it('the promoted default guest (ui-guest) emits binary under the default host option', async () => {
+    // ui-guest.wasm is now binary-capable by default; a host with binaryOpBatch
+    // at its new default (true) negotiates binary and decodes the same tree.
+    const { receiver, logs } = await loadGuest(UI_GUEST, true);
+    expectUiGuestTree(receiver);
+    expect(logs.find((m) => m.includes(GATE_OFF_LOG))).toBeUndefined();
+    expect(logs.find((m) => m.includes(ENCODE_FAILED_LOG))).toBeUndefined();
   });
 });

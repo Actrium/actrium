@@ -1,7 +1,7 @@
 //! Test-fixture native (non-JS) rill guest that exercises the WIP binary CANVAS
 //! wire end-to-end via the capability handshake.
 //!
-//! Built with `rill-guest`'s `wip-binary-protocol` feature ON, so `canvas::draw`
+//! Built with `rill-guest`'s `binary-protocol` feature ON, so `canvas::draw`
 //! first probes `host:canvas.getInfo` (see `canvas-wire.DESIGN.md` §1):
 //!   - a host that advertises `binaryDraw:true` for the encoder's `wireVersion`
 //!     receives the binary `RCNV` frame;

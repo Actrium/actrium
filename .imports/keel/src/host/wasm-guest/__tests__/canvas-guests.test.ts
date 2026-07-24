@@ -497,16 +497,32 @@ describe('canvas guests — capability handshake (WIP binary wire)', () => {
     expect(draws[0].encoding).toBe('json');
   });
 
-  it('DEFAULT guest (wip OFF) stays JSON EVEN when the host advertises binary', async () => {
-    // canvas-guest.wasm is built WITHOUT the wip feature, so its draw path never
-    // probes getInfo and never encodes binary — promotion is a guest rebuild,
-    // not a host advertisement. Proves the shipped default is still JSON.
+  it('the promoted DEFAULT guest probes and emits BINARY when the host advertises (issue #45)', async () => {
+    // canvas-guest.wasm is the shipped demo guest. Post-promotion it carries the
+    // binary encoder BY DEFAULT, so its draw path probes getInfo and — against an
+    // advertising host — emits an RCNV frame, exactly like canvas-binary-guest.
+    // Binary is the promoted default, no longer an opt-in rebuild.
     const { table, draws, probes } = binaryCanvasDispatch({ advertise: true });
     const host = new WasmGuestHost({ dispatch: table });
     await host.load(CANVAS_GUEST);
     await host.drain();
 
-    expect(probes).toHaveLength(0); // default guest never probes
+    expect(probes).toHaveLength(1); // the promoted default DOES probe
+    expect(draws).toHaveLength(1);
+    expect(draws[0].encoding).toBe('binary');
+    expect(draws[0].canvasId).toBe('scene');
+  });
+
+  it('a non-advertising host still gets JSON from the promoted default guest (graceful degrade)', async () => {
+    // The runtime handshake is what keeps back-compat: the same binary-capable
+    // canvas-guest, against a host that does not advertise getInfo, falls back to
+    // JSON — so promoting the guest default never breaks an unupgraded host.
+    const { table, draws, probes } = binaryCanvasDispatch({ advertise: false });
+    const host = new WasmGuestHost({ dispatch: table });
+    await host.load(CANVAS_GUEST);
+    await host.drain();
+
+    expect(probes).toHaveLength(0); // getInfo unregistered → never probed
     expect(draws).toHaveLength(1);
     expect(draws[0].encoding).toBe('json');
     expect(draws[0].canvasId).toBe('scene');
