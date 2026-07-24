@@ -6,11 +6,209 @@
 //! - Network state change scenarios
 
 use actr_hyper::test_support::{
-    TestSignalingServer, create_peer_with_websocket, install_test_crypto_provider, make_actor_id,
+    TestHarness, TestSignalingServer, create_peer_with_websocket, install_test_crypto_provider,
+    make_actor_id,
+};
+use actr_protocol::{
+    ActrId, SignalingEnvelope, actr_relay, ice_restart_rejected, session_description,
+    signaling_envelope,
 };
 use std::time::Duration;
 
 // ==================== Tests ====================
+
+fn restart_rejection_exchange(
+    messages: &[SignalingEnvelope],
+    offerer: &ActrId,
+    answerer: &ActrId,
+) -> Option<(String, i32)> {
+    let mut restart_exchange_ids = Vec::new();
+
+    for envelope in messages {
+        let Some(signaling_envelope::Flow::ActrRelay(relay)) = envelope.flow.as_ref() else {
+            continue;
+        };
+
+        if relay.source == *offerer
+            && relay.target == *answerer
+            && let Some(actr_relay::Payload::SessionDescription(description)) =
+                relay.payload.as_ref()
+            && description.r#type == session_description::Type::IceRestartOffer as i32
+            && let Some(exchange_id) = description.sdp_exchange_id.as_ref()
+        {
+            restart_exchange_ids.push(exchange_id.clone());
+            continue;
+        }
+
+        if relay.source == *answerer
+            && relay.target == *offerer
+            && let Some(actr_relay::Payload::IceRestartRejected(rejection)) = relay.payload.as_ref()
+            && restart_exchange_ids.contains(&rejection.sdp_exchange_id)
+        {
+            return Some((
+                rejection.sdp_exchange_id.clone(),
+                rejection.reason.unwrap_or_default(),
+            ));
+        }
+    }
+
+    None
+}
+
+async fn wait_for_restart_rejection(
+    harness: &TestHarness,
+    offerer: &ActrId,
+    answerer: &ActrId,
+) -> (String, i32) {
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            let messages = harness.server.received_messages().await;
+            if let Some(rejection) = restart_rejection_exchange(&messages, offerer, answerer) {
+                return rejection;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("answerer must explicitly reject the correlated restart offer")
+}
+
+async fn wait_for_peer_removed(
+    coordinator: &actr_hyper::wire::webrtc::WebRtcCoordinator,
+    peer_id: &ActrId,
+) {
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            if coordinator.get_peer_session_id(peer_id).await.is_none() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("stale offerer session should be removed after restart rejection");
+}
+
+/// Regression for #436: the Answerer has forgotten its peer while the Offerer
+/// still owns the old PeerConnection and sends an ICE restart offer.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn test_unknown_answerer_session_rejects_restart_and_fresh_rpc_recovers() {
+    install_test_crypto_provider();
+
+    let mut harness = TestHarness::new().await;
+    harness.add_peer(901).await;
+    harness.add_peer(902).await;
+    harness.connect(901, 902).await;
+
+    let offerer_id = harness.peer(901).id.clone();
+    let answerer_id = harness.peer(902).id.clone();
+    let old_offerer_session = harness
+        .peer(901)
+        .coordinator
+        .get_peer_session_id(&answerer_id)
+        .await
+        .expect("offerer should have an established session");
+    let old_answerer_session = harness
+        .peer(902)
+        .coordinator
+        .get_peer_session_id(&offerer_id)
+        .await
+        .expect("answerer should have an established session");
+
+    let detached_answerer = harness
+        .peer(902)
+        .coordinator
+        .detach_peer_state_for_test(&offerer_id, old_answerer_session)
+        .await
+        .expect("test should detach only the answerer coordinator state");
+    assert!(
+        harness
+            .peer(902)
+            .coordinator
+            .get_peer_session_id(&offerer_id)
+            .await
+            .is_none(),
+        "answerer coordinator state must be absent before the restart offer"
+    );
+    assert_eq!(
+        harness
+            .peer(901)
+            .coordinator
+            .get_peer_session_id(&answerer_id)
+            .await,
+        Some(old_offerer_session),
+        "offerer must still retain the stale session"
+    );
+
+    harness
+        .peer(901)
+        .restart_ice(902)
+        .await
+        .expect("offerer should start ICE restart");
+
+    let (_exchange_id, rejection_reason) =
+        wait_for_restart_rejection(&harness, &offerer_id, &answerer_id).await;
+    assert_eq!(
+        rejection_reason,
+        ice_restart_rejected::Reason::NoActiveSession as i32,
+        "restart rejection must identify the missing active session"
+    );
+    assert!(
+        harness
+            .peer(902)
+            .coordinator
+            .get_peer_session_id(&offerer_id)
+            .await
+            .is_none(),
+        "the stale restart offer must not bootstrap a new answerer PeerConnection"
+    );
+
+    wait_for_peer_removed(harness.peer(901).coordinator.as_ref(), &answerer_id).await;
+    detached_answerer
+        .close()
+        .await
+        .expect("detached answerer connection should close");
+
+    tokio::time::timeout(Duration::from_secs(4), async {
+        loop {
+            if harness.peer(901).transport_manager.dest_count().await == 0
+                && harness.peer(902).transport_manager.dest_count().await == 0
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("old transports should drain after the rejected restart");
+
+    let request = harness
+        .peer(901)
+        .spawn_request(902, "issue_436_fresh_rpc", 15_000);
+    let response = tokio::time::timeout(Duration::from_secs(20), request)
+        .await
+        .expect("fresh RPC should not time out")
+        .expect("fresh RPC task should join")
+        .expect("fresh RPC should succeed after full renegotiation");
+    assert_eq!(response.as_ref(), b"pong");
+
+    let new_offerer_session = harness
+        .peer(901)
+        .coordinator
+        .get_peer_session_id(&answerer_id)
+        .await
+        .expect("offerer should own the rebuilt session");
+    let new_answerer_session = harness
+        .peer(902)
+        .coordinator
+        .get_peer_session_id(&offerer_id)
+        .await
+        .expect("answerer should own the rebuilt session");
+    assert_ne!(new_offerer_session, old_offerer_session);
+    assert_ne!(new_answerer_session, old_answerer_session);
+
+    harness.shutdown().await;
+}
 
 /// Test basic ICE restart on an established connection
 #[tokio::test]
