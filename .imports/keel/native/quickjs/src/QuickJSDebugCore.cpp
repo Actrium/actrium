@@ -247,7 +247,13 @@ void QuickJSDebugCore::onStep(JSContext* ctx, const void* token, int line,
 #endif
   // Fire once per (source line, call depth): the same line re-entered at a
   // different depth (recursion, or a step that returns to it) must re-evaluate.
-  if (token == lastToken_ && line == lastLine_ && depth == lastDepth_) return;
+  // A pending pause request must defeat the dedup: on a single-line loop the
+  // key never changes, and skipping here would starve Debugger.pause forever
+  // (issue #39). Relaxed is enough — the mutex below is the authoritative read.
+  const bool pausePending = pauseRequested_.load(std::memory_order_relaxed);
+  if (!pausePending && token == lastToken_ && line == lastLine_ &&
+      depth == lastDepth_)
+    return;
   lastToken_ = token;
   lastLine_ = line;
   lastDepth_ = depth;
