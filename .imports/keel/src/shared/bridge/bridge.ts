@@ -38,7 +38,6 @@ import {
 // Imported from './types' directly (not '..') to avoid a circular-init TDZ:
 // shared/index.ts re-exports this module before types constants initialize.
 import { OPERATION_TYPES } from '../types';
-import { BinaryProtocol, type BinaryProtocolConfig } from './binary-protocol';
 import { PromiseManager, type PromiseSettleResult } from './promise-manager';
 
 // Runtime membership set for the OperationType union (see shared/types.ts).
@@ -99,12 +98,6 @@ export interface BridgeOptions {
   promiseTimeout?: number;
 
   /**
-   * Binary protocol configuration (optional)
-   * If provided, Bridge can accept ArrayBuffer input in sendToHost()
-   */
-  binaryProtocol?: BinaryProtocolConfig;
-
-  /**
    *
    */
   debug?: boolean;
@@ -142,9 +135,6 @@ export class Bridge {
   private typeRules: TypeRule[];
   private debug: boolean;
 
-  // Binary protocol adapter (optional)
-  private binaryProtocol: BinaryProtocol | null = null;
-
   // Track function IDs during encoding (for cleanup)
   private currentEncodingFnIds: Set<string> | null = null;
 
@@ -167,11 +157,6 @@ export class Bridge {
     this.guestReleaseCallback = options.guestReleaseCallback;
     this.typeRules = options.typeRules ?? DEFAULT_TYPE_RULES;
     this.debug = options.debug ?? false;
-
-    // Initialize BinaryProtocol if configured
-    if (options.binaryProtocol) {
-      this.binaryProtocol = new BinaryProtocol(options.binaryProtocol);
-    }
 
     // Initialize PromiseManager
     this.promiseManager = new PromiseManager({
@@ -226,7 +211,7 @@ export class Bridge {
   }
 
   // ============================================
-  // Public API — Guest → Host (4 explicit entry points)
+  // Public API — Guest → Host (3 explicit entry points)
   // ============================================
 
   /**
@@ -261,7 +246,7 @@ export class Bridge {
       const keyCount = Object.keys(batch).length;
       const hint =
         keyCount === 0
-          ? ' — an empty object here usually means the guest sent a binary ArrayBuffer that the sandbox boundary cannot carry (converter lacks ArrayBuffer support); keep binary op-batch gated off on this provider'
+          ? ' — an empty object here usually means the guest sent a value the sandbox boundary converter cannot carry (e.g. a binary buffer degraded to {}); the guest must send JSON'
           : '';
       throw new Error(
         // Reason: reporting the same unproven field's typeof in the error message
@@ -280,28 +265,6 @@ export class Bridge {
       console.log('[Bridge] sendSerializedBatch input:', batch.operations.length, 'operations');
     }
     this.dispatchSerializedBatch(batch);
-  }
-
-  /**
-   * Send a binary-encoded operation batch from Guest to Host.
-   * Used by WASM providers that transfer data as ArrayBuffer.
-   */
-  sendBinaryBatch(buffer: ArrayBuffer): void {
-    if (this.debug) {
-      console.log('[Bridge] sendBinaryBatch input:', `ArrayBuffer(${buffer.byteLength})`);
-    }
-    if (!this.binaryProtocol) {
-      this.binaryProtocol = new BinaryProtocol({ encoding: 'binary' });
-    }
-    const serializedBatch = this.binaryProtocol.decodeBatch(buffer);
-    if (this.debug) {
-      console.log(
-        '[Bridge] Decoded binary batch:',
-        serializedBatch.operations.length,
-        'operations'
-      );
-    }
-    this.dispatchSerializedBatch(serializedBatch);
   }
 
   /**
@@ -770,10 +733,5 @@ export class Bridge {
 
     // Clear callback registry
     this.registry.clear();
-
-    // Clear binary protocol state
-    if (this.binaryProtocol) {
-      this.binaryProtocol.clearState();
-    }
   }
 }

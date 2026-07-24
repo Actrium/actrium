@@ -4,31 +4,15 @@
  */
 
 import type { SendToHost, SerializedOperation, SerializedOperationBatch } from '../../../sdk/types';
-import { BinaryEncoder } from './binary-encoder';
 
 // Max entries kept in the globalThis.__rill_drain_diag debug buffer (oldest dropped first).
 const DIAG_BUFFER_LIMIT = 200;
-
-export interface OperationCollectorConfig {
-  /**
-   * Enable binary encoding for batches (default: false)
-   * When enabled, flush() sends ArrayBuffer instead of JSON objects
-   */
-  binaryEncoding?: boolean;
-}
 
 export class OperationCollector {
   private operations: SerializedOperation[] = [];
   private batchId = 0;
   private version = 1;
-  private binaryEncoder: BinaryEncoder | null = null;
   private _flushing = false;
-
-  constructor(config?: OperationCollectorConfig) {
-    if (config?.binaryEncoding) {
-      this.binaryEncoder = new BinaryEncoder({ persistentIntern: true });
-    }
-  }
 
   private isDebugEnabled(): boolean {
     try {
@@ -125,19 +109,13 @@ export class OperationCollector {
 
       this.operations = [];
 
-      // Binary encoding path: encode to ArrayBuffer for efficient transfer
-      if (this.binaryEncoder) {
-        const binary = this.binaryEncoder.encodeBatch(batch);
-        sendToHost(binary);
-      } else {
-        // JSON-serialize the batch before crossing the JSI boundary.
-        // On Android (and other native sandbox hosts), the JSI bridge recursively
-        // converts nested JS objects (qjsToJSI / sandboxToHost), which overflows
-        // the native stack for large render batches. Passing a JSON string avoids
-        // this: strings are primitive values in JSI — no recursive conversion.
-        // The Host Bridge detects string input and JSON.parse's it back.
-        sendToHost(JSON.stringify(batch));
-      }
+      // JSON-serialize the batch before crossing the JSI boundary.
+      // On Android (and other native sandbox hosts), the JSI bridge recursively
+      // converts nested JS objects (qjsToJSI / sandboxToHost), which overflows
+      // the native stack for large render batches. Passing a JSON string avoids
+      // this: strings are primitive values in JSI — no recursive conversion.
+      // The Host Bridge detects string input and JSON.parse's it back.
+      sendToHost(JSON.stringify(batch));
     } finally {
       this._flushing = false;
     }
