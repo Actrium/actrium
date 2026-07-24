@@ -105,5 +105,7 @@ message ActrRelay {
     actr.RoleAssignment role_assignment = 13;
     // Answerer notifies Offerer to immediately retry ICE restart (Option A)
     actr.IceRestartRequest ice_restart_request = 14;
+    // Receiver cannot apply the correlated restart to an active session.
+    webrtc.IceRestartRejected ice_restart_rejected = 15;
   }
 }

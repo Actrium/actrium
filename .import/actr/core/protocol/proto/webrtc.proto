@@ -24,3 +24,16 @@ message SessionDescription {
   // Offer-like messages create it; the Answer echoes the same id.
   optional string sdp_exchange_id = 3;
 }
+
+// Rejects an ICE restart that cannot be applied to the receiver's current
+// PeerConnection. The sender must correlate this with its in-flight restart
+// offer and discard that stale session before starting a fresh negotiation.
+message IceRestartRejected {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    NO_ACTIVE_SESSION = 1;
+  }
+
+  required string sdp_exchange_id = 1;
+  optional Reason reason = 2 [default = REASON_UNSPECIFIED];
+}

@@ -35,7 +35,7 @@ use actr_protocol::{
     SignalingEnvelope, acl_rule, actr_relay, actr_to_signaling, renew_credential_response,
     route_candidates_request, session_description, signaling_envelope, signaling_to_actr,
 };
-use actr_protocol::{IceCandidate, SessionDescription};
+use actr_protocol::{IceCandidate, IceRestartRejected, SessionDescription, ice_restart_rejected};
 use actr_web_common::{ExponentialBackoff, MessageFormat, PayloadType, RenewError, WebAisClient};
 use bytes::Bytes;
 use futures::StreamExt;
@@ -469,6 +469,59 @@ const ICE_RESTART_MAX_RETRIES: u32 = 2;
 const ICE_RESTART_TIMEOUT_MS: u32 = 3000;
 const ICE_RESTART_INITIAL_BACKOFF_MS: u32 = 2000;
 const ICE_RESTART_MAX_BACKOFF_MS: u32 = 5000;
+
+fn is_correlated_restart_rejection(
+    is_offerer: bool,
+    restart_inflight: bool,
+    pending_exchange_id: Option<&str>,
+    rejection: &IceRestartRejected,
+) -> bool {
+    is_offerer
+        && restart_inflight
+        && rejection.reason == Some(ice_restart_rejected::Reason::NoActiveSession as i32)
+        && pending_exchange_id == Some(rejection.sdp_exchange_id.as_str())
+}
+
+#[cfg(test)]
+mod ice_restart_rejection_tests {
+    use super::*;
+
+    fn rejection(exchange_id: &str) -> IceRestartRejected {
+        IceRestartRejected {
+            sdp_exchange_id: exchange_id.to_string(),
+            reason: Some(ice_restart_rejected::Reason::NoActiveSession as i32),
+        }
+    }
+
+    #[test]
+    fn accepts_only_current_offerer_restart_rejection() {
+        let current = rejection("current");
+        assert!(is_correlated_restart_rejection(
+            true,
+            true,
+            Some("current"),
+            &current
+        ));
+        assert!(!is_correlated_restart_rejection(
+            true,
+            true,
+            Some("stale"),
+            &current
+        ));
+        assert!(!is_correlated_restart_rejection(
+            false,
+            true,
+            Some("current"),
+            &current
+        ));
+        assert!(!is_correlated_restart_rejection(
+            true,
+            false,
+            Some("current"),
+            &current
+        ));
+    }
+}
 
 /// P2P initial connection retry configuration.
 ///
@@ -1514,6 +1567,41 @@ impl SwRuntime {
         self.send_dom_message(&msg_js_value)
     }
 
+    async fn send_ice_restart_rejected(
+        &self,
+        target: &ActrId,
+        sdp_exchange_id: &str,
+    ) -> Result<(), JsValue> {
+        let actor_id = self
+            .actor_id
+            .clone()
+            .ok_or_else(|| JsValue::from_str("Actor not registered"))?;
+        let credential = self
+            .credential
+            .clone()
+            .ok_or_else(|| JsValue::from_str("Missing credential"))?;
+        let relay = actr_protocol::ActrRelay {
+            source: actor_id,
+            credential,
+            target: target.clone(),
+            payload: Some(actr_relay::Payload::IceRestartRejected(
+                IceRestartRejected {
+                    sdp_exchange_id: sdp_exchange_id.to_string(),
+                    reason: Some(ice_restart_rejected::Reason::NoActiveSession as i32),
+                },
+            )),
+        };
+        let envelope = SignalingEnvelope {
+            envelope_version: SIGNALING_ENVELOPE_VERSION,
+            envelope_id: self.signaling.next_envelope_id(),
+            reply_for: None,
+            traceparent: None,
+            tracestate: None,
+            flow: Some(signaling_envelope::Flow::ActrRelay(relay)),
+        };
+        self.signaling.send_envelope(envelope).await
+    }
+
     async fn send_role_negotiation(&self, target: &ActrId) -> Result<(), JsValue> {
         let actor_id = self
             .actor_id
@@ -1770,7 +1858,7 @@ impl SwRuntime {
     async fn handle_inbound_signaling(&mut self) -> Result<(), JsValue> {
         while let Some(env) = self.signaling.recv_inbound().await {
             if let Some(signaling_envelope::Flow::ActrRelay(relay)) = env.flow {
-                self.handle_actr_relay(relay)?;
+                self.handle_actr_relay(relay).await?;
             }
         }
         Ok(())
@@ -1780,7 +1868,7 @@ impl SwRuntime {
         self.signaling.next_envelope_id()
     }
 
-    fn handle_actr_relay(&mut self, relay: actr_protocol::ActrRelay) -> Result<(), JsValue> {
+    async fn handle_actr_relay(&mut self, relay: actr_protocol::ActrRelay) -> Result<(), JsValue> {
         let peer_id = relay.source.to_string_repr();
         match relay.payload {
             Some(actr_relay::Payload::SessionDescription(sd)) => {
@@ -1792,6 +1880,34 @@ impl SwRuntime {
 
                 // Check if this is an ICE restart offer (type=3)
                 let is_ice_restart = sd.r#type == session_description::Type::IceRestartOffer as i32;
+                // Reject only when we cannot answer the restart at all: the peer
+                // is unknown, or its PeerConnection is already closed. `failed`
+                // is deliberately NOT rejected — an ICE-restart answer is how a
+                // failed connection recovers, so it falls through to the normal
+                // offer/answer path below.
+                let peer_is_closed = matches!(
+                    self.peer_connection_states
+                        .get(&peer_id)
+                        .map(String::as_str),
+                    Some("closed")
+                );
+                if is_ice_restart && (!self.known_peers.contains(&peer_id) || peer_is_closed) {
+                    let Some(exchange_id) = sd.sdp_exchange_id.as_deref() else {
+                        log::warn!(
+                            "[SW] Ignoring ICE restart offer from={} without sdp_exchange_id",
+                            peer_id
+                        );
+                        return Ok(());
+                    };
+                    log::warn!(
+                        "[SW] Rejecting ICE restart offer from={} exchange_id={}: no active peer session",
+                        peer_id,
+                        exchange_id
+                    );
+                    self.send_ice_restart_rejected(&relay.source, exchange_id)
+                        .await?;
+                    return Ok(());
+                }
 
                 let sdp_type = match sd.r#type {
                     0 => "offer",  // OFFER
@@ -1983,6 +2099,44 @@ impl SwRuntime {
                 if assign.is_offerer {
                     self.send_webrtc_command("create_offer", &remote_peer_id, JsValue::NULL)?;
                 }
+            }
+            Some(actr_relay::Payload::IceRestartRejected(rejection)) => {
+                let is_offerer = self
+                    .role_assignments
+                    .get(&peer_id)
+                    .copied()
+                    .unwrap_or(false);
+                let restart_inflight = self.ice_restart_inflight.get(&peer_id) == Some(&true);
+                let pending_exchange_id = self
+                    .pending_local_sdp_exchanges
+                    .get(&peer_id)
+                    .map(String::as_str);
+                if !is_correlated_restart_rejection(
+                    is_offerer,
+                    restart_inflight,
+                    pending_exchange_id,
+                    &rejection,
+                ) {
+                    log::warn!(
+                        "[SW] Ignoring stale or role-invalid ICE restart rejection from={} exchange_id={} reason={:?}",
+                        peer_id,
+                        rejection.sdp_exchange_id,
+                        rejection.reason
+                    );
+                    return Ok(());
+                }
+
+                log::warn!(
+                    "[SW] ICE restart rejected by peer={} exchange_id={}: rebuilding on next request",
+                    peer_id,
+                    rejection.sdp_exchange_id
+                );
+                self.handle_stale_peer_failure(
+                    &peer_id,
+                    "ice_restart_rejected",
+                    "remote peer has no active session",
+                )
+                .await?;
             }
             _ => {}
         }
@@ -3324,7 +3478,7 @@ pub async fn register_client(
         while let Some(env) = signaling.recv_inbound().await {
             if let Some(signaling_envelope::Flow::ActrRelay(relay)) = env.flow {
                 let mut runtime = runtime_for_loop.lock().await;
-                let _ = runtime.handle_actr_relay(relay);
+                let _ = runtime.handle_actr_relay(relay).await;
             }
         }
         log::info!("[SW] [{}] Signaling relay loop ended", client_id_for_loop);
@@ -3418,7 +3572,7 @@ pub async fn register_client(
                         while let Some(env) = new_signaling.recv_inbound().await {
                             if let Some(signaling_envelope::Flow::ActrRelay(relay)) = env.flow {
                                 let mut runtime = runtime_for_new_relay.lock().await;
-                                let _ = runtime.handle_actr_relay(relay);
+                                let _ = runtime.handle_actr_relay(relay).await;
                             }
                         }
                         log::info!("[SW] [{}] Signaling relay loop ended (post-reconnect)", cid);

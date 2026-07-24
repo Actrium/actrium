@@ -17,11 +17,11 @@ pub(crate) type WebRtcInboundMessage = (Vec<u8>, actr_framework::Bytes, actr_pro
 // Re-export public WebRTC surface from this module boundary; internal hook
 // plumbing stays crate-private except under test-utils, where integration
 // tests can install recorders without standing up a full node.
-#[cfg(feature = "test-utils")]
-pub use coordinator::WebRtcCoordinator;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use coordinator::WebRtcCoordinator;
 pub(crate) use coordinator::{CleanupGuard, NETWORK_RECOVERY_TIMEOUT, NetworkRecoveryStatus};
+#[cfg(feature = "test-utils")]
+pub use coordinator::{DetachedPeerForTest, WebRtcCoordinator};
 pub use negotiator::WebRtcConfig;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use signaling::WebSocketSignalingClient;
