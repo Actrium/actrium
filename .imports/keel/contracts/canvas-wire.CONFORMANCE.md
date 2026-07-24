@@ -49,14 +49,14 @@ Locking notes (so the pivot cannot silently rot):
   cap would fail the golden `at-limit-ops` (maxOps=20000) vector, and a magic
   drift would fail every vector — so the golden pivot enforces the TS side too.
 - The golden file is regenerated (never hand-edited) via
-  `RILL_REGEN_CANVAS_GOLDEN=1 cargo test -p rill-guest --features wip-binary-protocol`;
+  `RILL_REGEN_CANVAS_GOLDEN=1 cargo test -p rill-guest --features binary-protocol`;
   the Rust encoder is the oracle.
 
 ## How to run both (Linux)
 
 ```sh
 # 1. Rust encoder → golden hex (+ all cap / negative cases)
-cd /ext/rill/crates && cargo test -p rill-guest --features wip-binary-protocol
+cd /ext/rill/crates && cargo test -p rill-guest --features binary-protocol
 
 # 2. TS zero-DOM decoder ← golden bytes (+ fail-closed + cross-magic)
 cd /ext/rill && bun test src/host/wire
@@ -66,7 +66,7 @@ cd /ext/rill && bun test src/host/wasm-guest
 ```
 
 Both codecs are WORK IN PROGRESS and gated OFF in shipped builds:
-- Rust: `--features wip-binary-protocol` (Cargo feature, default off). The default
+- Rust: `--features binary-protocol` (Cargo feature, default off). The default
   `canvas::draw` path emits JSON, byte-identical to before.
 - TS: the decoder is exported (`rill/wire`) but no live receive path imports it;
   the host `onHostCall` only diverts to a binary-aware handler when a payload
@@ -215,7 +215,7 @@ concrete wiring:
 - One additive host method **`host:canvas.getInfo() → { binaryDraw:boolean,
   wireVersion:number }`**. The guest `await`s it **once** and caches the answer
   (`host_supports_binary()` in `crates/rill-guest/src/lib.rs`, gated on
-  `wip-binary-protocol`).
+  `binary-protocol`).
 - Binary is used **iff** the feature is compiled **and** `ok==1` **and**
   `binaryDraw==true` **and** `wireVersion` == the encoder's `WIRE_VERSION`. Any
   non-affirmative answer — an **old host that never registered `getInfo`** resolves
@@ -266,7 +266,7 @@ Verified 2026-07-08 on Linux (rustc 1.93.0, bun 1.3.5).
 
 | Codec / suite | Role | Result |
 |---|---|---|
-| Rust `rill-guest` (`--features wip-binary-protocol`) | encoder → golden hex + caps | **PASS** — 51 tests (11 new canvas: golden byte-exact, all seven caps, per-frame intern, header layout) |
+| Rust `rill-guest` (`--features binary-protocol`) | encoder → golden hex + caps | **PASS** — 51 tests (11 new canvas: golden byte-exact, all seven caps, per-frame intern, header layout) |
 | Rust `rill-guest` (default) | shipped JSON path unaffected | **PASS** — 27 tests |
 | TS `canvas-wire-decoder` (`bun test src/host/wire`) | golden bytes → ops + fail-closed + cross-magic | **PASS** — 163 tests (52 canvas: 27 golden vectors decode to exact ops across all four entry points, a typed negative per reason, cross-magic both directions) |
 | TS `bun test src/host/wasm-guest` | handshake round-trip + JSON fallback + default-stays-JSON | **PASS** — 70 tests (incl. the three canvas handshake fixtures) |
@@ -279,6 +279,13 @@ byte 1 (`0x43 'C'` vs `0x49 'I'`), so the `u32` compare rejects immediately,
 before any field is read.
 
 The zero-DOM TS decoder is on the public export surface (`import { decodeCanvasBatch }
-from 'rill/wire'`); the Rust encoder and the whole binary path remain WIP and
-default-off. Promotion (flip the guest default) remains the platform's call under
-its gradual-rollout model.
+from 'rill/wire'`), and as of issue #45 the Rust canvas encoder is **compiled into the
+shipped guest by default** (the `binary-protocol` feature is default-on). At RUNTIME
+the guest still emits JSON unless the async `host:canvas.getInfo` handshake answers
+`binaryDraw:true` for the encoder's `wireVersion` — and no rill-shipped host answers
+it, because `host:canvas` (decode `RCNV` + paint to a real surface) is an
+embedder-supplied host module. So canvas binary is guest-ready and decoder-ready
+in-repo — `canvas-guests.test.ts` drives the real guest end-to-end through a
+binary-capable test host that decodes `RCNV` via `decodeCanvasFrame` — and **end-to-end
+promotion is gated on the downstream host implementing `getInfo` + `decodeCanvasBatch`**.
+Until then every host degrades gracefully to JSON.
