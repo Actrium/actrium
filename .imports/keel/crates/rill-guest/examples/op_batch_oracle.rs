@@ -26,7 +26,10 @@ use std::io::Read;
 // std-side helpers of an otherwise `no_std` crate and are not part of its
 // public API.
 include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/mini_json.rs"));
-include!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/wire_fixture_map.rs"));
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/src/wire_fixture_map.rs"
+));
 
 fn main() {
     let mut input = String::new();
