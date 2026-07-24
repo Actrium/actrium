@@ -22,6 +22,7 @@
 
 #include <chrono>
 #include <climits>
+#include <cstdio>
 #include <sstream>
 #include <algorithm>
 #include <random>
@@ -468,6 +469,21 @@ void CDPServer::handleMessage(ConnectionId connId, const std::string& message) {
         sendResponse(connId, error);
         return;
       }
+      if (sit->second.connectionId != connId) {
+        // Ownership check: a session is addressable ONLY from the connection
+        // that created it (Target.attachToTarget). Session ids are secrets of
+        // their connection; honoring one from another socket would let any
+        // local client drive another client's tenant target. Reply exactly like
+        // "unknown session" so a prober cannot confirm the id exists.
+        std::fprintf(stderr,
+                     "[CDPServer] warn: connection %llu used sessionId of connection %llu "
+                     "(cross-connection session access rejected)\n",
+                     static_cast<unsigned long long>(connId),
+                     static_cast<unsigned long long>(sit->second.connectionId));
+        CDPResponse error = makeError(request->id, CDPErrorCode::SESSION_NOT_FOUND, "Session not found");
+        sendResponse(connId, error);
+        return;
+      }
       session = &sit->second;
       sinkSessionId = *request->sessionId;
     } else {
@@ -481,6 +497,23 @@ void CDPServer::handleMessage(ConnectionId connId, const std::string& message) {
     session->lastActivityAt = currentTimeMs();
 
     auto it = tenantTargets_.find(session->tenantId);
+    // Single-tenant fallback for path-less transports. The Apple transport
+    // (nw_ws) cannot surface the WebSocket upgrade path, so a chrome://inspect
+    // direct-attach connection arrives with no "/tenant/{id}" binding and its
+    // session keeps tenantId 0 — real tenant ids start at 1, so the lookup
+    // above finds nothing and the request would never reach the target. When
+    // exactly ONE debug target is registered, such a connection can only mean
+    // that target, so route to it. Boundary: with MORE than one target the
+    // intent is ambiguous and there is deliberately NO fallback — a
+    // multi-tenant client must attach explicitly via Target.attachToTarget
+    // (the sessionId multiplex). Root fix (out of scope here) is the transport
+    // supplying the upgrade path; see CDPTransportApple.mm.
+    bool usedTenantFallback = false;
+    if (it == tenantTargets_.end() && session->tenantId == 0 &&
+        tenantTargets_.size() == 1) {
+      it = tenantTargets_.begin();
+      usedTenantFallback = true;
+    }
     if (it != tenantTargets_.end() && it->second && it->second->ownedDomains().owns(domain)) {
       forwardTarget = it->second;  // forward below, outside the lock
       if (sinkSessionId) {
@@ -506,6 +539,15 @@ void CDPServer::handleMessage(ConnectionId connId, const std::string& message) {
         // Path-bind route (one tenant per socket): at most one onClientConnect
         // per raw connection.
         needClientConnect = connectionTarget_.try_emplace(connId, forwardTarget).second;
+        if (needClientConnect && usedTenantFallback) {
+          // Once per connection, when the fallback actually forwards.
+          std::fprintf(stderr,
+                       "[CDPServer] info: connection %llu has no tenant binding "
+                       "(path-less transport); single-tenant fallback routes it to "
+                       "tenant %u's debug target\n",
+                       static_cast<unsigned long long>(connId),
+                       static_cast<unsigned>(it->first));
+        }
       }
     } else {
       // Local path: the built-in domain handler synthesizes the response.
@@ -593,8 +635,11 @@ std::optional<CDPRequest> CDPServer::parseRequest(const std::string& json) {
     request.params = "{}";
   }
   
-  // Parse sessionId (optional)
-  auto sessionId = cdp::parseJSONString(json, "sessionId");
+  // Parse sessionId (optional). MUST be the top-level member only: a naive
+  // whole-message substring search would also match a nested params.sessionId
+  // (e.g. Target.detachFromTarget), silently re-routing the request to that
+  // nested session instead of the connection's own.
+  auto sessionId = cdp::parseJSONStringTopLevel(json, "sessionId");
   if (sessionId) {
     request.sessionId = *sessionId;
   }
