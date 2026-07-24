@@ -802,6 +802,48 @@ pub mod canvas {
             });
             self
         }
+        /// `bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y)` — a cubic Bezier segment
+        /// from the current point to `(x, y)` with control points `(cp1x, cp1y)`
+        /// and `(cp2x, cp2y)`.
+        pub fn bezier_curve_to(
+            &mut self,
+            cp1x: f64,
+            cp1y: f64,
+            cp2x: f64,
+            cp2y: f64,
+            x: f64,
+            y: f64,
+        ) -> &mut Self {
+            if !self.finite(&[cp1x, cp1y, cp2x, cp2y, x, y]) {
+                return self;
+            }
+            self.push(format!(
+                "{{\"op\":\"bezierCurveTo\",\"cp1x\":{cp1x},\"cp1y\":{cp1y},\"cp2x\":{cp2x},\"cp2y\":{cp2y},\"x\":{x},\"y\":{y}}}"
+            ));
+            #[cfg(feature = "binary-protocol")]
+            self.rec(crate::canvas_encode::CanvasOp::BezierCurveTo {
+                cp1x,
+                cp1y,
+                cp2x,
+                cp2y,
+                x,
+                y,
+            });
+            self
+        }
+        /// `quadraticCurveTo(cpx, cpy, x, y)` — a quadratic Bezier segment from
+        /// the current point to `(x, y)` with control point `(cpx, cpy)`.
+        pub fn quadratic_curve_to(&mut self, cpx: f64, cpy: f64, x: f64, y: f64) -> &mut Self {
+            if !self.finite(&[cpx, cpy, x, y]) {
+                return self;
+            }
+            self.push(format!(
+                "{{\"op\":\"quadraticCurveTo\",\"cpx\":{cpx},\"cpy\":{cpy},\"x\":{x},\"y\":{y}}}"
+            ));
+            #[cfg(feature = "binary-protocol")]
+            self.rec(crate::canvas_encode::CanvasOp::QuadraticCurveTo { cpx, cpy, x, y });
+            self
+        }
         /// `fill()` the current path.
         pub fn fill(&mut self) -> &mut Self {
             self.push(String::from("{\"op\":\"fill\"}"));
@@ -890,6 +932,18 @@ pub mod canvas {
             self.rec(crate::canvas_encode::CanvasOp::SetLineWidth { w });
             self
         }
+        /// `font = font` — a CSS font shorthand string (e.g. `"16px sans-serif"`).
+        pub fn set_font(&mut self, font: &str) -> &mut Self {
+            let mut s = String::from("{\"op\":\"setFont\",\"font\":");
+            json_escape(&mut s, font);
+            s.push('}');
+            self.push(s);
+            #[cfg(feature = "binary-protocol")]
+            self.rec(crate::canvas_encode::CanvasOp::SetFont {
+                font: alloc::string::String::from(font),
+            });
+            self
+        }
 
         // ---- text ----
         /// `fillText(text, x, y)`.
@@ -903,6 +957,24 @@ pub mod canvas {
             self.push(s);
             #[cfg(feature = "binary-protocol")]
             self.rec(crate::canvas_encode::CanvasOp::FillText {
+                x,
+                y,
+                text: alloc::string::String::from(text),
+            });
+            self
+        }
+        /// `strokeText(text, x, y)` — outline `text` at `(x, y)` in the current
+        /// `strokeStyle`/`lineWidth`/`font` (identical arg order to `fill_text`).
+        pub fn stroke_text(&mut self, text: &str, x: f64, y: f64) -> &mut Self {
+            if !self.finite(&[x, y]) {
+                return self;
+            }
+            let mut s = format!("{{\"op\":\"strokeText\",\"x\":{x},\"y\":{y},\"text\":");
+            json_escape(&mut s, text);
+            s.push('}');
+            self.push(s);
+            #[cfg(feature = "binary-protocol")]
+            self.rec(crate::canvas_encode::CanvasOp::StrokeText {
                 x,
                 y,
                 text: alloc::string::String::from(text),
@@ -1099,6 +1171,86 @@ pub mod canvas {
             Ok(bytes)
         } else {
             Err(bytes)
+        }
+    }
+
+    /// A subset of the DOM `TextMetrics` returned by [`measure_text`]. `width` is
+    /// the advance width; the four `actual_bounding_box_*` fields are the glyph
+    /// bounds (`0.0` when the host does not report them). All values are the
+    /// host-measured CSS pixels — no guest pixel readback is involved.
+    #[derive(Debug, Clone, Copy, Default, PartialEq)]
+    pub struct TextMetrics {
+        /// Advance width of the measured text.
+        pub width: f64,
+        /// Distance from the text baseline to the top of the bounding box.
+        pub actual_bounding_box_ascent: f64,
+        /// Distance from the text baseline to the bottom of the bounding box.
+        pub actual_bounding_box_descent: f64,
+        /// Distance from the alignment point to the left of the bounding box.
+        pub actual_bounding_box_left: f64,
+        /// Distance from the alignment point to the right of the bounding box.
+        pub actual_bounding_box_right: f64,
+    }
+
+    /// `host:canvas.measureText(canvasId, text, font?)` → [`TextMetrics`].
+    ///
+    /// Measure `text` in `font` (a CSS font shorthand; `None` = the canvas's
+    /// current font) WITHOUT any pixel readback — the host runs its own 2D
+    /// context `measureText` and returns the numbers. This is the only
+    /// text-layout primitive a sealed guest has (`host:canvas` exposes no
+    /// readback), so a guest that needs to wrap, align, or hit-test text requests the
+    /// host to measure it. Returns `None` if the host fails closed (unknown or
+    /// unmounted canvas, unsupported, JS guest).
+    pub async fn measure_text(
+        canvas_id: &str,
+        text: &str,
+        font: Option<&str>,
+    ) -> Option<TextMetrics> {
+        let mut body = String::from("{\"canvasId\":");
+        json_escape(&mut body, canvas_id);
+        body.push_str(",\"text\":");
+        json_escape(&mut body, text);
+        if let Some(f) = font {
+            body.push_str(",\"font\":");
+            json_escape(&mut body, f);
+        }
+        body.push('}');
+        let (ok, resp) = crate::host_call("host:canvas", "measureText", body.into_bytes()).await;
+        if ok != 1 {
+            return None;
+        }
+        // `width` is required; the four glyph-bound fields are optional (default
+        // 0.0), so a host that reports only the advance width still resolves.
+        let width = parse_f64_field(&resp, "width")?;
+        Some(TextMetrics {
+            width,
+            actual_bounding_box_ascent: parse_f64_field(&resp, "actualBoundingBoxAscent")
+                .unwrap_or(0.0),
+            actual_bounding_box_descent: parse_f64_field(&resp, "actualBoundingBoxDescent")
+                .unwrap_or(0.0),
+            actual_bounding_box_left: parse_f64_field(&resp, "actualBoundingBoxLeft")
+                .unwrap_or(0.0),
+            actual_bounding_box_right: parse_f64_field(&resp, "actualBoundingBoxRight")
+                .unwrap_or(0.0),
+        })
+    }
+
+    /// Read a finite JSON number field (`"field":<number>`) from a compact
+    /// machine-JSON response body. Tiny hand parser — the guest is `no_std` with
+    /// no JSON crate and the host responses are small, fixed shapes. Returns
+    /// `None` if the field is absent or not a finite number.
+    fn parse_f64_field(bytes: &[u8], field: &str) -> Option<f64> {
+        let s = core::str::from_utf8(bytes).ok()?;
+        let needle = format!("\"{field}\":");
+        let start = s.find(&needle)? + needle.len();
+        let rest = &s[start..];
+        // The number runs up to the next value separator or the object end.
+        let end = rest.find([',', '}']).unwrap_or(rest.len());
+        let v: f64 = rest[..end].trim().parse().ok()?;
+        if v.is_finite() {
+            Some(v)
+        } else {
+            None
         }
     }
 

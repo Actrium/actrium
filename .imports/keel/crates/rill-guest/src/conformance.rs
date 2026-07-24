@@ -284,7 +284,10 @@ fn canvas_draw_wire_matches_contract() {
     let canvas_seam = seam(&root, "host:canvas");
     assert_eq!(
         spec_keys(canvas_seam.get("methods").expect("methods")),
-        ["draw", "present"].iter().map(|s| s.to_string()).collect(),
+        ["draw", "present", "measureText"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
         "host:canvas method set drifted"
     );
 
@@ -304,7 +307,11 @@ fn canvas_draw_wire_matches_contract() {
         .set_fill_style("#112233")
         .set_stroke_style("#445566")
         .set_line_width(2.0)
+        .set_font("16px sans-serif")
         .fill_text("rill", 3.0, 9.0)
+        .stroke_text("rill", 3.0, 9.0)
+        .bezier_curve_to(0.0, 0.0, 1.0, 2.0, 3.0, 4.0)
+        .quadratic_curve_to(1.0, 1.0, 2.0, 2.0)
         .save()
         .restore()
         .translate(1.0, 1.0)
@@ -402,6 +409,40 @@ fn canvas_present_wire_matches_contract() {
     assert_eq!(issued.body.get("height").and_then(Json::as_u64), Some(3));
     let out = issued.resolve(1, r#"{"ok":true,"dropped":0}"#);
     assert!(out.is_ok());
+}
+
+#[test]
+fn canvas_measure_text_wire_matches_contract() {
+    let _guard = wire_lock();
+    let root = contract();
+    // measureText is a plain host RPC (no getInfo handshake), so `issue` drives
+    // its single call in both feature configs.
+    let issued = issue(canvas::measure_text(
+        "scene",
+        "Rill",
+        Some("16px sans-serif"),
+    ));
+    assert_eq!(issued.method, "measureText");
+    check_method(&root, "host:canvas", &issued);
+    assert_eq!(
+        issued.body.get("canvasId").and_then(Json::as_str),
+        Some("scene")
+    );
+    assert_eq!(issued.body.get("text").and_then(Json::as_str), Some("Rill"));
+    assert_eq!(
+        issued.body.get("font").and_then(Json::as_str),
+        Some("16px sans-serif")
+    );
+    // The host's standard TextMetrics response parses into the typed struct.
+    let metrics = issued.resolve(
+        1,
+        r#"{"width":24.5,"actualBoundingBoxAscent":8,"actualBoundingBoxDescent":2,"actualBoundingBoxLeft":0,"actualBoundingBoxRight":24}"#,
+    );
+    let m = metrics.expect("measureText surfaces TextMetrics on ok=1");
+    assert_eq!(m.width, 24.5);
+    assert_eq!(m.actual_bounding_box_ascent, 8.0);
+    assert_eq!(m.actual_bounding_box_descent, 2.0);
+    assert_eq!(m.actual_bounding_box_right, 24.0);
 }
 
 // ---- host:gpu ----

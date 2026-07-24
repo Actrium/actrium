@@ -60,7 +60,7 @@ const byName = (n: string): GoldenVector => {
 
 describe('canvas decoder — golden conformance', () => {
   it('has the expected vector count (locked to the Rust oracle)', () => {
-    expect(GOLDEN.vectors.length).toBe(27);
+    expect(GOLDEN.vectors.length).toBe(32);
   });
 
   for (const v of GOLDEN.vectors) {
@@ -114,6 +114,18 @@ describe('canvas decoder — golden conformance', () => {
     const v = byName('fill-text-multibyte');
     const ops = decodeCanvasBatch(fromHex(v.hex)) as Extract<CanvasOp, { op: 'fillText' }>[];
     expect(ops[0].text).toBe((v.frame.ops[0] as { text: string }).text);
+  });
+
+  it('resolves setFont and setFillStyle from ONE shared intern table', () => {
+    // font-and-color-intern: the font is index 0, the color index 1, and the
+    // repeated font reuses index 0 — mixed strings dedup into the same table.
+    const v = byName('font-and-color-intern');
+    const ops = decodeCanvasBatch(fromHex(v.hex));
+    expect(ops).toEqual(v.frame.ops);
+    expect(ops.filter((o) => o.op === 'setFont')).toEqual([
+      { op: 'setFont', font: '12px monospace' },
+      { op: 'setFont', font: '12px monospace' },
+    ]);
   });
 });
 

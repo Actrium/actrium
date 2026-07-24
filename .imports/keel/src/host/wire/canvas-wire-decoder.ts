@@ -77,13 +77,17 @@ const Op = {
   scale: 19,
   rotate: 20,
   setTransform: 21,
+  setFont: 22,
+  strokeText: 23,
+  bezierCurveTo: 24,
+  quadraticCurveTo: 25,
 } as const;
 
 // limits (contracts/canvas-wire.json limits) — all fail-closed.
 const MAX_OPS = 20000; // maxOps — pre-checked against header.opCount BEFORE the loop.
-const MAX_INTERN_STRINGS = 4096; // maxInternStrings — distinct color strings per frame.
-const MAX_STRING_BYTES = 256; // maxStringBytes — canvasId / color string byte length.
-const MAX_TEXT_BYTES = 8192; // maxTextBytes — fillText inline text byte length.
+const MAX_INTERN_STRINGS = 4096; // maxInternStrings — distinct color/font strings per frame.
+const MAX_STRING_BYTES = 256; // maxStringBytes — canvasId / color / font string byte length.
+const MAX_TEXT_BYTES = 8192; // maxTextBytes — fillText/strokeText inline text byte length.
 const MAX_BATCH_BYTES = 8 * 1024 * 1024; // maxBatchBytes — 8 MiB hard ceiling per frame.
 
 // ============================================
@@ -161,7 +165,19 @@ export type CanvasOp =
   | { op: 'translate'; x: number; y: number }
   | { op: 'scale'; x: number; y: number }
   | { op: 'rotate'; angle: number }
-  | { op: 'setTransform'; a: number; b: number; c: number; d: number; e: number; f: number };
+  | { op: 'setTransform'; a: number; b: number; c: number; d: number; e: number; f: number }
+  | { op: 'setFont'; font: string }
+  | { op: 'strokeText'; x: number; y: number; text: string }
+  | {
+      op: 'bezierCurveTo';
+      cp1x: number;
+      cp1y: number;
+      cp2x: number;
+      cp2y: number;
+      x: number;
+      y: number;
+    }
+  | { op: 'quadraticCurveTo'; cpx: number; cpy: number; x: number; y: number };
 
 /** Frame-level metadata read from the fixed header + inline canvasId. */
 export interface CanvasBatchHeader {
@@ -500,6 +516,40 @@ class CanvasDecoder {
           d: this.readF64(),
           e: this.readF64(),
           f: this.readF64(),
+        };
+      case Op.setFont:
+        return { op: 'setFont', font: this.internRef() };
+      case Op.strokeText: {
+        const x = this.readF64();
+        const y = this.readF64();
+        const textLen = this.readU32();
+        if (textLen > MAX_TEXT_BYTES) {
+          throw new CanvasDecodeError(
+            'text-too-big',
+            `${textLen} > ${MAX_TEXT_BYTES}`,
+            this.pos - 4
+          );
+        }
+        const text = this.readUtf8(textLen, 'strokeText text');
+        return { op: 'strokeText', x, y, text };
+      }
+      case Op.bezierCurveTo:
+        return {
+          op: 'bezierCurveTo',
+          cp1x: this.readF64(),
+          cp1y: this.readF64(),
+          cp2x: this.readF64(),
+          cp2y: this.readF64(),
+          x: this.readF64(),
+          y: this.readF64(),
+        };
+      case Op.quadraticCurveTo:
+        return {
+          op: 'quadraticCurveTo',
+          cpx: this.readF64(),
+          cpy: this.readF64(),
+          x: this.readF64(),
+          y: this.readF64(),
         };
       default:
         throw new CanvasDecodeError('bad-opcode', `0x${opcode.toString(16)}`, opStart);

@@ -90,7 +90,7 @@
   },
 
   "intern": {
-    "$comment": "The per-frame color-string dedup table, written immediately after the canvasId and BEFORE the ops. ONLY setFillStyle/setStrokeStyle COLOR strings are interned here (they repeat heavily within a frame — a chart re-uses '#fff'/'red'/'rgba(0,0,0,.5)' across dozens of ops). fillText TEXT is deliberately NOT interned (high cardinality; inline instead — see ops.fillText). Indices are 0-based and assigned in FIRST-APPEARANCE order during a pre-pass that walks the ops in array order (each setFillStyle/setStrokeStyle contributes its color). PER-FRAME SEMANTICS: unlike op-batch's cross-batch persistent table, a canvas frame is fully self-contained — the table starts empty every frame and every internRef resolves within the same frame (frames are independent; no cross-frame index stability is promised or needed).",
+    "$comment": "The per-frame interned-string dedup table, written immediately after the canvasId and BEFORE the ops. setFillStyle/setStrokeStyle COLOR strings AND setFont FONT strings are interned here (both repeat heavily within a frame — a chart re-uses '#fff'/'red'/'rgba(0,0,0,.5)' across dozens of ops and sets '16px sans-serif' once for many labels). fillText/strokeText TEXT is deliberately NOT interned (high cardinality; inline instead — see ops.fillText / ops.strokeText). Indices are 0-based and assigned in FIRST-APPEARANCE order during a pre-pass that walks the ops in array order (each setFillStyle/setStrokeStyle contributes its color and each setFont its font, in the order encountered). PER-FRAME SEMANTICS: unlike op-batch's cross-batch persistent table, a canvas frame is fully self-contained — the table starts empty every frame and every internRef resolves within the same frame (frames are independent; no cross-frame index stability is promised or needed).",
     "layout": [
       {
         "name": "count",
@@ -118,7 +118,7 @@
   },
 
   "opcodes": {
-    "$comment": "u8 tag that leads every draw-op record. Flat map for codegen (name -> byte). The 21 canvas ops in the SAME order as the guest DrawList builder (crates/rill-guest/src/lib.rs canvas module) and the graphics-seams.json host:canvas.ops whitelist. An unknown opcode is a fail-closed whole-frame reject (reason 'bad-opcode').",
+    "$comment": "u8 tag that leads every draw-op record. Flat map for codegen (name -> byte). The 25 canvas ops in the SAME order as the guest DrawList builder (crates/rill-guest/src/lib.rs canvas module) and the graphics-seams.json host:canvas.ops whitelist. Opcodes are APPEND-ONLY: setFont/strokeText/bezierCurveTo/quadraticCurveTo (22-25) were added after the original 21 and take the next free bytes so every existing opcode keeps its value (an additive, non-breaking wire change, no protocolVersion bump). An unknown opcode is a fail-closed whole-frame reject (reason 'bad-opcode').",
     "beginPath": 1,
     "closePath": 2,
     "moveTo": 3,
@@ -139,7 +139,11 @@
     "translate": 18,
     "scale": 19,
     "rotate": 20,
-    "setTransform": 21
+    "setTransform": 21,
+    "setFont": 22,
+    "strokeText": 23,
+    "bezierCurveTo": 24,
+    "quadraticCurveTo": 25
   },
 
   "ops": {
@@ -339,6 +343,62 @@
         { "name": "d", "type": "f64" },
         { "name": "e", "type": "f64" },
         { "name": "f", "type": "f64" }
+      ]
+    },
+    "setFont": {
+      "opcode": 22,
+      "description": "ctx.font = font (a CSS font shorthand STRING, e.g. '16px sans-serif'). Font is INTERNED (u16 internRef) into the SAME per-frame table as the setFillStyle/setStrokeStyle colors: a frame sets a handful of distinct fonts and reuses each across many text ops, exactly the color-reuse pattern the table exists for.",
+      "layout": [
+        { "name": "opcode", "type": "u8", "value": 22 },
+        {
+          "name": "font",
+          "type": "internRef",
+          "note": "index into the intern table; the CSS font shorthand string."
+        }
+      ]
+    },
+    "strokeText": {
+      "opcode": 23,
+      "description": "ctx.strokeText(text, x, y). Text is INLINE (NOT interned: high cardinality) — byte-identical shape to fillText. Field order is x, y, then text, matching fillText and the graphics-seams.json host:canvas.ops table.",
+      "layout": [
+        { "name": "opcode", "type": "u8", "value": 23 },
+        { "name": "x", "type": "f64" },
+        { "name": "y", "type": "f64" },
+        {
+          "name": "textLen",
+          "type": "u32",
+          "note": "UTF-8 byte length of the text; bounded by limits.maxTextBytes (a length exceeding the cap is a fail-closed 'text-too-big' reject — never wrapped/truncated)."
+        },
+        {
+          "name": "text",
+          "type": "utf8",
+          "length": "textLen",
+          "note": "raw UTF-8 text bytes, no terminator; inline, not interned."
+        }
+      ]
+    },
+    "bezierCurveTo": {
+      "opcode": 24,
+      "description": "ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, x, y) — cubic Bezier segment from the current point to (x, y) with control points (cp1x, cp1y) and (cp2x, cp2y).",
+      "layout": [
+        { "name": "opcode", "type": "u8", "value": 24 },
+        { "name": "cp1x", "type": "f64" },
+        { "name": "cp1y", "type": "f64" },
+        { "name": "cp2x", "type": "f64" },
+        { "name": "cp2y", "type": "f64" },
+        { "name": "x", "type": "f64" },
+        { "name": "y", "type": "f64" }
+      ]
+    },
+    "quadraticCurveTo": {
+      "opcode": 25,
+      "description": "ctx.quadraticCurveTo(cpx, cpy, x, y) — quadratic Bezier segment from the current point to (x, y) with control point (cpx, cpy).",
+      "layout": [
+        { "name": "opcode", "type": "u8", "value": 25 },
+        { "name": "cpx", "type": "f64" },
+        { "name": "cpy", "type": "f64" },
+        { "name": "x", "type": "f64" },
+        { "name": "y", "type": "f64" }
       ]
     }
   },
