@@ -167,3 +167,35 @@ guest 现在**可以**（不强制）导出 `rill_abi_version`，向宿主声明
 ---
 
 **一句话**：② = 把 QuickJS 早就在用的那条底层 host↔WASM 桥，**抽成语言中立的线性内存 ABI**，供原生 `.wasm` 直接绑；因**派发/broker/渲染/信任全共享、只多一个 guest 侧适配器**，所以**加法式兼容、不动现有 QuickJS**。Phase A/B/C 已用真 Rust `.wasm` guest 把「装载 + host:* 往返 + 封口 + 渲染出 UI」端到端跑通。
+
+## 10. wasm SIMD128 —— native guest 的向量化构建路径
+
+像素级重计算（图像滤镜、合成）只在 **native guest 线**（Rust→wasm）才谈得上向量化——`runtime:"rill"` 的 JS/QuickJS 线是解释执行、无处上 SIMD（详见 issue #57 / #58）。本节给出这条线上 wasm SIMD128 的**构建路径**与一处基线示例。
+
+### 10.1 构建路径：按函数 `#[target_feature]`，无需全局 flag
+
+首选做法——SIMD 函数上标 `#[target_feature(enable = "simd128")]`，函数体内用 `core::arch::wasm32` 的 v128 内联函数（`v128_load32_zero` / `u16x8_extend_low_u8x16` / `i32x4_add` 等）：
+
+- **无需 nightly、无需 `-Z build-std`**：固定工具链 `rustc 1.93.0`（远超 SIMD 稳定的 1.54）即可。
+- **无需全局 `-C target-feature=+simd128`**：SIMD 按函数开，`crates/build.sh` 与 CI 的 flagless `cargo build --workspace` / `clippy` 都照常编到真 SIMD 路径。
+- **现存 fixture 零漂移**：不动全局 codegen，`__tests__/fixtures/*.wasm` 逐字节可复现性不受影响（只新增该 guest 自己的 fixture）。
+
+备选做法——若要让**整个 crate**都自动向量化，可给该 crate 的构建单独加全局 `-C target-feature=+simd128`（仿 `build.sh` 里 `canvas-binary-guest` 的独立 cargo 调用拆分）。代价：该 crate 全量 codegen 变化，需**同一改动内重建并重提交**其 fixture，且要覆盖 CI 无 RUSTFLAGS 的 build/clippy（`.cargo/config.toml` 只对无 env-RUSTFLAGS 的调用生效，`build.sh` 里的 env 会盖过它——两者不合并）。多数场景优先按函数开。
+
+### 10.2 封口（seal）不变——SIMD 是 opcode，不是 import
+
+host-import 白名单（`env.{rill_host_call, rill_send_batch, rill_log, rill_on_event}`，在 `wasm-guest-host.test.ts` 自动断言）对 SIMD **透明**：v128 是模块内的**指令**，不引入任何 import。实测：真发射了 v128 指令的 guest，import 集合与非 SIMD 基线逐字节一致。**唯一会破封口的是 atomics/threads**——共享内存会引入 `env.memory` import，与 SIMD 无关，切勿顺手一起开。
+
+### 10.3 逐字节正确性：标量与 SIMD 除法必须同法
+
+正确性验收要求 SIMD 输出与标量参照**逐字节一致**。盒式模糊的窗口和除以窗口计数时，**两条路径都用标量整数除法 `sum/count`**——避开「乘倒数」在取整上与整数除法差 1 的风险。SIMD 只把 4 个 RGBA 通道的窗口累加向量化（`i32x4`），最后逐 lane 取出、走同一套标量除法，故结果按位相同。
+
+### 10.4 基线示例 + 门禁 + bench
+
+- `crates/blur-demo-guest/`：一个盒式模糊 demo guest，导出 `box_blur_scalar` 与 `box_blur_simd`（+ `blur_alloc`）。
+- `src/host/wasm-guest/__tests__/blur-demo-guest.test.ts`：**逐字节门禁**——多种尺寸/半径下 `simd === scalar`；随 `bun run preflight` 跑。
+- `src/host/wasm-guest/__benchmarks__/blur-bench.ts`：门控 bench（`bun <file>` 显式跑，非门禁）。
+
+**实测提速（同内核、引擎相关）**：V8（node/浏览器/web host）约 **2.07×**，JSC（bun 测试运行时）约 **1.11×**——差异纯来自引擎的 wasm-SIMD 代码生成质量。web host 跑 V8，故 ~2× 是相关数字；bun 下看到的 ~1.1× 低估了真实收益。正确性与引擎无关。
+
+**scope**：具体滤镜（盒式模糊）属 app/demo 侧，框架只提供这条构建路径（+ 可选通用 helper），不做滤镜库。改任何 guest 后须 `crates/build.sh` 重建并提交其 fixture（CI 不重建）。

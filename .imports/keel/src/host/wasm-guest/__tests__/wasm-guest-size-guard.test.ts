@@ -27,6 +27,7 @@ const CEILINGS: Record<string, number> = {
   'canvas-gpu-guest.wasm': 96,
   'canvas-escape-guest.wasm': 64,
   'asset-guest.wasm': 48,
+  'blur-demo-guest.wasm': 32,
 };
 
 describe('guest .wasm size guard (no accidental std / heavy-dep bloat)', () => {

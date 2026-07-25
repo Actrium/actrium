@@ -74,6 +74,9 @@ const C_GUEST = readFileSync(join(import.meta.dir, 'fixtures/c-guest.wasm'));
 const HEAP_CHURN = readFileSync(join(import.meta.dir, 'fixtures/heap-churn-guest.wasm'));
 // Adversarial guest that imports an undeclared function (must be rejected).
 const BAD_IMPORT = readFileSync(join(import.meta.dir, 'fixtures/bad-import.wasm'));
+// SIMD128 guest: a box-blur demo built with wasm v128 opcodes; proves enabling
+// SIMD adds no host import (opcodes, not imports) so the seal is unchanged (#57).
+const BLUR_GUEST = readFileSync(join(import.meta.dir, 'fixtures/blur-demo-guest.wasm'));
 // Adversarial guest whose rill_on_event traps.
 const EVENT_TRAP = readFileSync(join(import.meta.dir, 'fixtures/event-trap.wasm'));
 // Adversarial guest whose rill_alloc always returns 0 (exhausted allocator).
@@ -401,6 +404,7 @@ describe('WasmGuestHost — the seal is an import allowlist (automated)', () => 
     ['seq-guest', SEQ_GUEST],
     ['event-guest', EVENT_GUEST],
     ['c-guest', C_GUEST],
+    ['blur-demo-guest', BLUR_GUEST],
   ];
   for (const [name, bytes] of guests) {
     it(`${name}.wasm imports only host-provided functions (no fetch/socket/…)`, () => {
