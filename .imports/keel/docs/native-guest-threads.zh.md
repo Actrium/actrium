@@ -1,8 +1,9 @@
 # rill native guest 多线程计算 —— approach B 设计草稿（预研，未实现）
 
-> 状态：**设计草稿 / 预研**。本文只画方案与边界，**不含实现**，也未落任何 host API
-> 或 seal 改动。对应 issue #57 验收的「线程」那半；SIMD 那半已单独落地（见
-> `docs/native-guest.zh.md` 第 10 节 + `crates/blur-demo-guest`）。
+> 状态：**设计 + 已落地 host 侧切片**。approach B 的 host 侧 worker 池已实现并带逐字节
+> 门禁 + 提速 bench（见第 8 节），**未改 seal、未改 guest、未加任何 wire/contract**。对应
+> issue #57 验收的「线程」那半；SIMD 那半见 `docs/native-guest.zh.md` 第 10 节 +
+> `crates/blur-demo-guest`。
 
 ## 0. 定位与边界
 
@@ -101,3 +102,33 @@ Worker，等价物是「OS 线程各承载一个独立 VM 实例 + 线程间传 
 worker 池近线性：8 worker ~9×、16 worker ~12×（16 核，超线程税使 16× 打折到 12×）。
 与「算法（滑窗）+ SIMD」叠加：**1.2s 的 naive 模糊 → ~40ms（约 30×，16 worker）**，逼近
 实时。这也是「先 B」的依据——不动 seal、不改部署，就拿到主要收益。
+
+## 8. 已落地（approach B host 侧切片）
+
+host 侧 worker 池已实现，全在 `src/host/wasm-guest/`，复用 `blur-demo-guest.wasm`，**未改
+seal / guest / 任何 wire·contract**：
+
+- **`blur-pool.ts`** —— 主线程 `BlurPool` 类：把整图切成**全宽行条**、每条带上下各 `radius`
+  行 halo（clamp 到真图边界），把每条的像素拷进一块独立 `ArrayBuffer` **transferable
+  移交**给一个 worker，收回后只缝合内部行。fail-closed 维度/半径守卫（`maxPixels`/
+  `maxRadius`，派发前检查，仿 host:asset「先卡维度再动 raster」）。池大小是构造参数
+  （下游读 `navigator.hardwareConcurrency`），guest 不感知核数。
+- **`blur-pool-worker.ts`** —— worker 入口：一个独立 `WasmGuestHost` + blur guest（各自私有
+  线性内存，无共享内存/atomics），`writeBytes → box_blur_simd → readBytes` 后把结果
+  transferable 移交回来;scratch 缓冲按最大瓦片惰性增长(blur_alloc 泄漏,故复用不重分配)。
+- **`blur-pool-protocol.ts`** —— 三进三出的极简消息协议(init/blur/destroy ↔ ready/result/error)。
+
+**逐字节门禁**：`__tests__/blur-worker-pool.test.ts` —— N-worker 拼接 === 单实例整图，逐
+字节相等,覆盖不均切分、height<workers、radius>条高、细条、radius=0,外加两条 fail-closed
+上限用例。随 `bun run preflight` 跑。
+
+**提速 bench**：`__benchmarks__/blur-worker-pool-bench.ts`（`bun <file>` 显式跑，非门禁）。
+1024×1024 r=4、bun/JSC、16 核实测：1w=1.00×、2w=1.44×、4w=2.27×、8w=2.76×。次线性来自
+每次 blur 的主线程切条/拷贝/缝合串行段 + JSC worker 开销；V8 上更好（引擎 SIMD ~2× vs JSC
+~1.1×）。
+
+**本切片未做（follow-up）**：更细瓦片 + 拷贝/计算重叠（削减主线程串行段、提升并行度）;
+把源像素路径接到真实 `host:asset`/`present`（当前 demo 由调用方传入整块 `Uint8Array`）;
+contract 级的瓦片 bomb-wall（本切片是 host 侧运行时守卫，语义上更靠下游 present 强制那侧,
+若要上升为 wire cap 需 canvas-wire.json + build.rs codegen + 一致性/golden，属更大改动);
+approach A（真 wasm 线程 + 共享内存），仅当瓦片移交开销成瓶颈时才做。
