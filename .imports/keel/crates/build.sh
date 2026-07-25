@@ -20,7 +20,7 @@ FIXTURES=../src/host/wasm-guest/__tests__/fixtures
 # Single source of truth for both the debug (DWARF) and release fixture builds
 # below. canvas-binary-guest / ui-binary-guest are intentionally NOT here — they
 # need a separate cargo invocation (see the wip-binary-protocol note further down).
-GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest"
+GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest blur-demo-guest"
 
 # Optional debug build: DWARF-carrying guests for source-level debugging inside
 # V8's wasm debugger (Chrome DevTools "C/C++ DevTools Support (DWARF)"). Output
@@ -72,3 +72,4 @@ stage canvas_present_guest canvas-present-guest.wasm
 stage canvas_gpu_guest canvas-gpu-guest.wasm
 stage canvas_escape_guest canvas-escape-guest.wasm
 stage asset_guest asset-guest.wasm
+stage blur_demo_guest blur-demo-guest.wasm
