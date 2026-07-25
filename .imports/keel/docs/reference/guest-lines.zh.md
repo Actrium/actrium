@@ -43,11 +43,13 @@ SDK」*——代码本身清楚自己是什么，只是名字没说出来。
 ## 已知命名隐患
 
 `rill/guest`（JS SDK）与 `rill-guest`（Rust/native crate）只差一个字符（`/` 对 `-`），
-却指相反的两条线——读写都容易出错。把 crate 改名（`rill-guest` → `rill-native-guest`）
-和把宿主类改名（`WasmGuestHost` → `NativeGuestHost`）在命名 issue 里另行跟踪；两者都是
-内部的（crate 是 `publish = false`，类是内部 TS），因此属于工作区内部的批量改动，而不是
-对外发布的破坏——但仍需一次明确决策和一份过渡说明。在此之前，本术语表就是这些术语的
-权威口径。
+却指相反的两条线——读写都容易出错。
+
+**已决策（2026-07-25）**：crate 改名为 **`rill-native-guest`**，宿主类改名为
+**`NativeGuestHost`**（连同整个 `NativeGuest*` 家族与 `src/host/native-guest/` 目录），
+并保留 `@deprecated` 向后兼容别名，避免静默破坏下游。执行**推迟**到几个正在进行、改动
+同批文件的功能 PR 落地之后，届时一次性干净改名；具体在命名 issue 里跟踪。在它落地之前，
+本术语表就是这些术语的权威口径。
 
 另见：[Sandbox 引擎对比](./sandbox-comparison.zh.md)（JS-guest 的引擎后端）与
 `docs/native-guest*.zh.md` 下的 native-guest 设计文档。

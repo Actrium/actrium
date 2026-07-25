@@ -46,12 +46,14 @@ When you must distinguish the two in prose, say **"JS-guest line"** and
 ## Known naming wart
 
 `rill/guest` (JS SDK) and `rill-guest` (Rust/native crate) differ by one character
-(`/` vs `-`) yet name opposite lines — error-prone to read and to write. Renaming the
-crate (`rill-guest` → `rill-native-guest`) and the host class (`WasmGuestHost` →
-`NativeGuestHost`) is tracked in the naming issue; both are internal (the crate is
-`publish = false`; the class is internal TS), so they are workspace churn rather than a
-public-registry break, but they still need an explicit decision and a transition note.
-Until then, this glossary is the source of truth for the terms.
+(`/` vs `-`) yet name opposite lines — error-prone to read and to write.
+
+**Decided (2026-07-25):** the crate becomes **`rill-native-guest`** and the host class
+becomes **`NativeGuestHost`** (the whole `NativeGuest*` family and the
+`src/host/native-guest/` dir), with `@deprecated` back-compat aliases so downstream
+isn't broken silently. Implementation is deferred until the in-flight feature PRs that
+touch the same files land, then done as one clean rename; it is tracked in the naming
+issue. Until it ships, this glossary is the source of truth for the terms.
 
 See also: [Sandbox Comparison](./sandbox-comparison.md) (the JS-guest engine backends)
 and the native-guest design docs under `docs/native-guest*.zh.md`.
