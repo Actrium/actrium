@@ -397,6 +397,58 @@ impl Future for HostCall {
     }
 }
 
+impl HostCall {
+    /// Poll this pending host call WITHOUT awaiting it, so the single root task
+    /// can keep presenting while the call is in flight instead of freezing on it.
+    ///
+    /// A native guest drives exactly one root future, and `canvas::present` is
+    /// itself an awaited host call on that task — so `some_call().await` inside
+    /// the render loop stalls presentation for the FULL duration of the call (a
+    /// capability that takes 30 s to reject freezes the canvas for 30 s). Instead,
+    /// keep the [`HostCall`] in a local and `poll_now()` it once per frame: the
+    /// first call issues `rill_host_call` and returns `None`; each later call
+    /// returns `Some((ok, response_bytes))` once the host has resolved the
+    /// matching `cb_id`, or `None` while still pending — so the loop keeps running
+    /// and painting (e.g. an "opening…" spinner) across the whole call.
+    ///
+    /// Completion is level-triggered: the host's `rill_resolve` stashes the result
+    /// in the runtime and this reads that slot, so no waker wakeup is required and
+    /// the no-op waker used internally is sufficient. This adds no host import and
+    /// no runtime change — it only makes the already-pollable future reachable
+    /// ergonomically from safe guest code.
+    ///
+    /// Caveat: a resolved-but-not-yet-taken result lives in a bounded backlog (the
+    /// runtime's `MAX_ORPHAN_RESULTS`, 64). Polling once per frame takes it well
+    /// within that bound; it could only be evicted if 64+ OTHER calls resolved
+    /// between this call's reply and the next `poll_now`.
+    ///
+    /// ```ignore
+    /// let mut pending = Some(host_call("host:store", "getText", req));
+    /// loop {
+    ///     next_frame().await;                       // guest-built frame await
+    ///     if let Some(call) = pending.as_mut() {
+    ///         if let Some((ok, bytes)) = call.poll_now() {
+    ///             handle_reply(ok, &bytes);
+    ///             pending = None;                    // stop polling once resolved
+    ///         }
+    ///     }
+    ///     draw(&pending);                            // spinner while Some, result once done
+    ///     canvas::present().await;                   // never blocked by the pending call
+    /// }
+    /// ```
+    pub fn poll_now(&mut self) -> Option<(u32, Vec<u8>)> {
+        // `HostCall` is `Unpin` (all fields are), so pinning a `&mut` is sound.
+        // The waker is never observed — `HostCall::poll` reads the runtime's
+        // completion slot rather than relying on a wakeup — so the no-op waker
+        // the executor itself uses is sufficient here too.
+        let mut cx = Context::from_waker(Waker::noop());
+        match Pin::new(self).poll(&mut cx) {
+            Poll::Ready(result) => Some(result),
+            Poll::Pending => None,
+        }
+    }
+}
+
 /// Issue an arbitrary host:* call. `input` is the request body (bytes in guest
 /// memory the host reads synchronously).
 pub fn host_call(module: &'static str, method: &'static str, input: Vec<u8>) -> HostCall {
