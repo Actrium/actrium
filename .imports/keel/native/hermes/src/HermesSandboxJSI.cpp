@@ -753,6 +753,10 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
   // attaches a pause callback. Dev-only.
   cdpDebugAPI_ = facebook::hermes::cdp::CDPDebugAPI::create(*sandboxRuntime_);
   runtimeAlive_ = std::make_shared<int>(1);
+  // Teardown gate shared with the CDPAgentTarget: guards the CDP enqueue paths
+  // (dispatch/connect/disconnect) that touch the runtime at enqueue time
+  // against a racing dispose() (issue #40, B1).
+  cdpTeardownGate_ = std::make_shared<rill::devtools::CdpTeardownGate>();
 
   // Reconcile the eval-timeout watchdog with debugger pauses: the watchdog is a
   // wall-clock timer, but time spent stopped at a breakpoint is not execution
@@ -815,6 +819,22 @@ void HermesSandboxContext::dispose() {
         watchdogPauseCallbackId_);
     watchdogPauseCallbackId_ = 0;
   }
+  // Close the teardown gate and wait for every open CDP section to drain
+  // (issue #40, B1): after this returns no dispatch/connect/disconnect can be
+  // mid-flight touching the runtime or AsyncDebuggerAPI, and none can start.
+  // A section held open by a pause blocks here until it resumes, which
+  // mechanically enforces the "resume before dispose" order. Do this BEFORE
+  // expiring the pump token / destroying the debug API + runtime below.
+  if (cdpTeardownGate_) {
+    cdpTeardownGate_->closeAndWait();
+  }
+  // With the gate closed, sweep any CDPAgents still attached to the target,
+  // destroying them while the CDPDebugAPI + runtime are still alive (~CDPAgent
+  // enqueues its cleanup through the AsyncDebuggerAPI, so it must not run after
+  // them — issue #40, B2).
+  if (auto target = cdpTarget_.lock()) {
+    target->detachAllAgentsForTeardown();
+  }
   // Expire the pump token first so any task still queued on the host CallInvoker
   // drops instead of touching a half-torn-down runtime, then destroy the CDP
   // debug API before the runtime it wraps (hard order).
@@ -844,14 +864,26 @@ HermesSandboxContext::createCdpDebugTarget(
   facebook::hermes::debugger::EnqueueRuntimeTaskFunc enqueue =
       [callInvoker, rt, alive](facebook::hermes::debugger::RuntimeTask task) {
         callInvoker->invokeAsync([task = std::move(task), rt, alive]() {
-          // Drop the task if the runtime was disposed before we ran.
+          // Drop the task if the runtime was disposed before we ran. The
+          // teardown gate is NOT taken here on purpose: a task that blocks at a
+          // breakpoint would hold the section across the pause, and once
+          // dispose() closes the gate the CDP resume that would end the pause
+          // is itself refused at the gate — closeAndWait() would then hang.
+          // The "resume before dispose" order is instead guaranteed upstream
+          // (RillTenantManager unregisters the target, force-resuming every
+          // paused connection, before it disposes this context); this token
+          // only guards a task that outlived the runtime for any other reason.
           if (auto keep = alive.lock()) {
             task(*rt);
           }
         });
       };
-  return std::make_shared<rill::devtools::CDPAgentTarget>(
-      executionContextId, cdpDebugAPI_, std::move(enqueue));
+  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+      executionContextId, cdpDebugAPI_, std::move(enqueue), cdpTeardownGate_);
+  // Retain a weak handle so dispose() can sweep any still-attached CDPAgents
+  // while the runtime + CDPDebugAPI are alive (issue #40, B2 ordering).
+  cdpTarget_ = target;
+  return target;
 }
 #endif
 

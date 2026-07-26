@@ -24,6 +24,10 @@ class HermesRuntime;
 
 #if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
 #include "devtools/CdpDebuggable.h"  // rill::devtools::ICdpDebuggable (capability seam)
+namespace rill::devtools {
+class CdpTeardownGate;  // fwd-decl: definition pulled into the .cpp only
+class CDPAgentTarget;   // fwd-decl: sweep handle for dispose(), .cpp only
+}  // namespace rill::devtools
 #endif
 
 namespace facebook {
@@ -128,6 +132,16 @@ private:
   // here to keep the Hermes debugger headers off this header.
   std::uint32_t watchdogPauseCallbackId_ = 0;
   bool watchdogSuspended_ = false;
+  // Teardown gate shared with the CDPAgentTarget (issue #40, B1). Every CDP
+  // entry that reaches the runtime / AsyncDebuggerAPI at ENQUEUE time opens a
+  // section on it; dispose() closes the gate and waits for open sections to
+  // drain before destroying the CDPDebugAPI + runtime, so no CDP thread can
+  // touch a half-torn-down runtime. Constructed with the runtime. Dev-only.
+  std::shared_ptr<rill::devtools::CdpTeardownGate> cdpTeardownGate_;
+  // Weak handle to the target built by createCdpDebugTarget, so dispose() can
+  // sweep any CDPAgents still attached (destroying them while the runtime +
+  // CDPDebugAPI are alive, after closing the gate). Dev-only.
+  std::weak_ptr<rill::devtools::CDPAgentTarget> cdpTarget_;
 #endif
   jsi::Runtime *hostRuntime_;
   bool disposed_;
