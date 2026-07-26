@@ -164,6 +164,12 @@ export class Engine implements IEngine {
   // Populated by injectPolyfills(); called after eval() to flush React scheduler work.
   private _drainPendingImmediates: (() => void) | null = null;
 
+  // Guest-turn runner installed via setGuestTurnRunner() (worker debug harness
+  // TurnGate). Kept here — in addition to TimerManager's copy — so the host
+  // microtask entries into the guest (setImmediate drain fallback, queueMicrotask
+  // polyfill) take the same gate as timer callbacks. Null = direct invocation.
+  private guestTurnRunner: ((run: () => void) => void) | null = null;
+
   // DevTools collector (optional)
   private _devtools: RuntimeCollector | null = null;
 
@@ -1011,10 +1017,16 @@ export class Engine implements IEngine {
 
         // Microtask fallback: drain queue if not already being drained.
         // This handles setImmediate calls outside of eval() context (e.g., from events).
+        // The drain runs guest callbacks, so it is guest-eval ENTRY: route it
+        // through the guest-turn runner (worker debug TurnGate) when installed,
+        // and re-check the queue state inside — by the time a suspended gate
+        // releases the turn, the queue may already have been drained elsewhere.
         nativeQueueMicrotask(() => {
-          if (pendingQueue.length > 0 && !isDraining) {
-            drainQueue();
-          }
+          this.runGuestMicrotaskEntry(() => {
+            if (pendingQueue.length > 0 && !isDraining) {
+              drainQueue();
+            }
+          });
         });
 
         return id;
@@ -1026,13 +1038,18 @@ export class Engine implements IEngine {
     }
 
     // queueMicrotask
+    // The deferred fn is guest code: like the setImmediate drain above it must
+    // take the guest-turn runner (worker debug TurnGate) when one is installed,
+    // instead of re-entering a runtime suspended at a breakpoint.
     injectWithLog('queueMicrotask', (fn: () => void) => {
       nativeQueueMicrotask(() => {
-        try {
-          fn();
-        } catch (error) {
-          logger.error('[Guest] queueMicrotask error:', error);
-        }
+        this.runGuestMicrotaskEntry(() => {
+          try {
+            fn();
+          } catch (error) {
+            logger.error('[Guest] queueMicrotask error:', error);
+          }
+        });
       });
     });
 
@@ -1950,14 +1967,37 @@ ${assignments.join('\n')}
   }
 
   /**
-   * Route every engine-owned guest-callback entry (timer callbacks) through
-   * `runner`. The worker debug harness installs its TurnGate here so a guest
-   * turn suspended at a breakpoint is never re-entered by a setTimeout /
-   * setInterval callback the engine fires from its own event loop. Pass null
-   * to restore direct invocation (the release path).
+   * Route every engine-owned guest-callback entry — timer callbacks AND the
+   * host-microtask entries (the setImmediate drain fallback and the
+   * queueMicrotask polyfill) — through `runner`. The worker debug harness
+   * installs its TurnGate here so a guest turn suspended at a breakpoint is
+   * never re-entered by a callback the engine fires from its own event loop.
+   * Pass null to restore direct invocation (the release path).
    */
   setGuestTurnRunner(runner: ((run: () => void) => void) | null): void {
+    this.guestTurnRunner = runner;
     this.timerManager.setCallbackRunner(runner);
+    if (this.options.debug) {
+      this.options.logger.log(
+        `[rill:${this.id}] Guest turn runner ${runner ? 'installed' : 'cleared'} (timer + microtask guest entries ${runner ? 'gated' : 'direct'})`
+      );
+    }
+  }
+
+  /**
+   * Enter the guest from a HOST microtask (setImmediate drain fallback,
+   * queueMicrotask polyfill). Goes through the installed guest-turn runner when
+   * present so these entries queue behind a debugger suspend exactly like timer
+   * callbacks — a microtask landing on a runtime whose stack is parked at a
+   * breakpoint (asyncify unwind) would re-enter it. Direct call otherwise.
+   */
+  private runGuestMicrotaskEntry(run: () => void): void {
+    const runner = this.guestTurnRunner;
+    if (runner) {
+      runner(run);
+    } else {
+      run();
+    }
   }
 
   /**
