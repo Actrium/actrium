@@ -97,9 +97,10 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "check:types": "bun tsc --noEmit",
+    "check:guest-types": "bunx tsc --noEmit -p tests/guest-bundle/tsconfig.json",
     "check:unknown": "bun scripts/check-unknown.ts",
     "check:build:apple": "bash scripts/check-apple-build.sh",
-    "preflight": "bun run check:unknown && bun run check:types && bun run lint && bun run test:unit"
+    "preflight": "bun run check:unknown && bun run check:types && bun run check:guest-types && bun run lint && bun run test:unit"
   },
   "types": "./src/index.ts",
   "dependencies": {
