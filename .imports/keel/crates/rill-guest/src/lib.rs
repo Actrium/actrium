@@ -468,9 +468,10 @@ pub fn host_call(module: &'static str, method: &'static str, input: Vec<u8>) -> 
 ///
 /// A native guest works with UTF-8 strings, so this wraps the contract's text
 /// convenience methods (`putText` / `getText` — the HOST does the byte
-/// encoding) plus `delete`. The raw-byte `put` / `get` (`value` rides as a
-/// JSON number array) and `update` / `list` remain reachable via
-/// [`crate::host_call`] until typed wrappers land.
+/// encoding) plus `delete`, `list` and `deletePrefix`, and the raw-byte
+/// `putBytes` / `getBytes` (values ride as RBS1 binary segments, never a JSON
+/// number array). `update` remains reachable via [`crate::host_call`] until a
+/// typed wrapper lands.
 pub mod store {
     use crate::json_escape;
     use crate::store_net_encode::{decode_reply, encode_envelope, Value};
@@ -577,6 +578,120 @@ pub mod store {
             }
             _ => Err(Vec::from(
                 &b"{\"error\":\"getBytes: unexpected reply shape\"}"[..],
+            )),
+        }
+    }
+
+    /// One key's metadata as returned by `host:store.list`.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct KeyMeta {
+        /// The plaintext key.
+        pub key: String,
+        /// Monotonic version of the current value.
+        pub version: u64,
+        /// Last-write time, epoch milliseconds.
+        pub updated_at: u64,
+    }
+
+    /// `host:store.list(prefix)` — enumerate keys whose PLAINTEXT key starts with
+    /// `prefix` (the host filters on the decrypted key; an empty prefix lists
+    /// EVERY key). Returns each key's [`KeyMeta`].
+    ///
+    /// This is the only non-scalar reply in the store surface: `{"keys":[{key,
+    /// version,updatedAt},…]}`. Decoding it here — through the SDK's own JSON
+    /// reader ([`decode_reply`], the same path `get_bytes` uses) — spares every
+    /// guest from hand-parsing an array of objects with a substring scan that
+    /// breaks on nested fields or escaped keys.
+    pub async fn list(prefix: &str) -> Result<Vec<KeyMeta>, Vec<u8>> {
+        let mut body = String::from("{\"prefix\":");
+        json_escape(&mut body, prefix);
+        body.push('}');
+        let (ok, resp) = super::host_call("host:store", "list", body.into_bytes()).await;
+        if ok != 1 {
+            return Err(resp);
+        }
+        let entries = match decode_reply(&resp).map_err(crate::codec_error)? {
+            Value::Obj(entries) => entries,
+            _ => return Err(Vec::from(&b"{\"error\":\"list: reply is not an object\"}"[..])),
+        };
+        let items = match entries.into_iter().find(|(k, _)| k == "keys") {
+            Some((_, Value::Arr(items))) => items,
+            _ => {
+                return Err(Vec::from(
+                    &b"{\"error\":\"list: reply missing keys array\"}"[..],
+                ))
+            }
+        };
+        let mut out = Vec::with_capacity(items.len());
+        for item in items {
+            let fields = match item {
+                Value::Obj(fields) => fields,
+                _ => {
+                    return Err(Vec::from(
+                        &b"{\"error\":\"list: key entry is not an object\"}"[..],
+                    ))
+                }
+            };
+            let mut key: Option<String> = None;
+            let mut version: Option<u64> = None;
+            let mut updated_at: Option<u64> = None;
+            for (k, v) in fields {
+                match (k.as_str(), v) {
+                    ("key", Value::Str(s)) => key = Some(s),
+                    ("version", Value::Num(n)) => version = Some(n as u64),
+                    ("updatedAt", Value::Num(n)) => updated_at = Some(n as u64),
+                    _ => {}
+                }
+            }
+            match (key, version, updated_at) {
+                (Some(key), Some(version), Some(updated_at)) => out.push(KeyMeta {
+                    key,
+                    version,
+                    updated_at,
+                }),
+                _ => {
+                    return Err(Vec::from(
+                        &b"{\"error\":\"list: key entry missing key/version/updatedAt\"}"[..],
+                    ))
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// `host:store.deletePrefix(prefix)` -> how many keys were removed.
+    ///
+    /// The delete is NON-ATOMIC on the host: it enumerates matching keys, then
+    /// removes them one at a time, so a mid-way failure leaves the earlier
+    /// removals done. The returned count reflects what was actually removed —
+    /// surfaced rather than discarded so a caller can tell a partial delete from
+    /// a full one.
+    pub async fn delete_prefix(prefix: &str) -> Result<u32, Vec<u8>> {
+        let mut body = String::from("{\"prefix\":");
+        json_escape(&mut body, prefix);
+        body.push('}');
+        let (ok, resp) = super::host_call("host:store", "deletePrefix", body.into_bytes()).await;
+        if ok != 1 {
+            return Err(resp);
+        }
+        match decode_reply(&resp).map_err(crate::codec_error)? {
+            Value::Obj(entries) => {
+                for (k, v) in entries {
+                    if k == "deleted" {
+                        return match v {
+                            Value::Num(n) => Ok(n as u32),
+                            _ => Err(Vec::from(
+                                &b"{\"error\":\"deletePrefix: deleted is not a number\"}"[..],
+                            )),
+                        };
+                    }
+                }
+                Err(Vec::from(
+                    &b"{\"error\":\"deletePrefix: reply missing deleted field\"}"[..],
+                ))
+            }
+            _ => Err(Vec::from(
+                &b"{\"error\":\"deletePrefix: unexpected reply shape\"}"[..],
             )),
         }
     }
