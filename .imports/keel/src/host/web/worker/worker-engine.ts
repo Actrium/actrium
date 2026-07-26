@@ -167,6 +167,22 @@ export class WorkerEngine {
   >();
   #pausedKinds = new Map<number, WatchdogKillInfo['kind']>();
 
+  // Debugger-suspend watchdog hold. While the worker's TurnGate is suspended
+  // (an explicit dbgPause() or a breakpoint `dbg.paused`), guest-eval turns
+  // posted to the worker are QUEUED behind the gate, not running — so their
+  // watchdogs must not count down: their `turnDone` cannot arrive until the
+  // debugger resumes, and letting the timers run would terminate() a perfectly
+  // healthy worker. Kinds of held turns are parked in #heldWatchdogKinds and
+  // rearmed with a fresh budget once no suspend reason remains.
+  /** True between a dbgPause() request and the matching dbgResume()/dbgDisable(). */
+  #dbgExplicitPause = false;
+  /** turnIds currently parked at a breakpoint (`dbg.paused` seen, `dbg.resumed` not yet). */
+  #dbgPausedTurns = new Set<number>();
+  /** Whether the watchdog hold is currently in effect (derived, cached for transitions). */
+  #dbgSuspendActive = false;
+  /** Watchdog kinds of turns held while the debugger suspend is active. */
+  #heldWatchdogKinds = new Map<number, WatchdogKillInfo['kind']>();
+
   constructor(options: WorkerEngineOptions = {}) {
     _workerEngineSeq += 1;
     this.id = `worker-engine-${_workerEngineSeq}`;
@@ -314,6 +330,13 @@ export class WorkerEngine {
 
   /** Disable the guest debugger and clear its breakpoints. */
   dbgDisable(): Promise<void> {
+    // Leaving debug drains the worker's gate unconditionally: drop every suspend
+    // reason so held watchdogs rearm and queued turns are accounted for again.
+    if (!this.#destroyed) {
+      this.#dbgExplicitPause = false;
+      this.#dbgPausedTurns.clear();
+      this.#updateDbgSuspension();
+    }
     return this.#dbgRequest((requestId) => ({ type: 'dbg.disable', requestId })).then(
       () => undefined
     );
@@ -339,6 +362,13 @@ export class WorkerEngine {
 
   /** Request that the guest pause at the next opportunity. */
   dbgPause(): Promise<void> {
+    // Mark the suspend BEFORE posting: the worker processes `dbg.pause` ahead of
+    // any turn posted after this call (postMessage is FIFO), so every later turn
+    // will queue behind the gate — its watchdog must be held from the start.
+    if (!this.#destroyed) {
+      this.#dbgExplicitPause = true;
+      this.#updateDbgSuspension();
+    }
     return this.#dbgRequest((requestId) => ({ type: 'dbg.pause', requestId })).then(
       () => undefined
     );
@@ -346,6 +376,10 @@ export class WorkerEngine {
 
   /** Resume the guest from a breakpoint pause. */
   dbgResume(): Promise<void> {
+    if (!this.#destroyed) {
+      this.#dbgExplicitPause = false;
+      this.#updateDbgSuspension();
+    }
     return this.#dbgRequest((requestId) => ({ type: 'dbg.resume', requestId })).then(
       () => undefined
     );
@@ -466,6 +500,9 @@ export class WorkerEngine {
     }
     this.#dbgPending.clear();
     this.#pausedKinds.clear();
+    this.#dbgPausedTurns.clear();
+    this.#dbgExplicitPause = false;
+    this.#dbgSuspendActive = false;
   }
 
   /** Run now if the worker is ready, otherwise queue until the `ready` message arrives. */
@@ -502,6 +539,15 @@ export class WorkerEngine {
 
   #armWatchdog(turnId: number, kind: WatchdogKillInfo['kind']): void {
     if (this.#watchdogTimeout <= 0) return;
+    if (this.#dbgSuspendActive) {
+      // The worker's gate is suspended by the debugger: this turn is queued, not
+      // running. Hold its watchdog; #updateDbgSuspension rearms it on resume.
+      this.#heldWatchdogKinds.set(turnId, kind);
+      console.debug(
+        `[rill/host/web] WorkerEngine: watchdog for turn ${turnId} (${kind}) held — debugger suspend active`
+      );
+      return;
+    }
     this.#watchdogKinds.set(turnId, kind);
     const timer = setTimeout(() => this.#onWatchdogFire(turnId), this.#watchdogTimeout);
     this.#watchdogs.set(turnId, timer);
@@ -514,6 +560,7 @@ export class WorkerEngine {
       this.#watchdogs.delete(turnId);
     }
     this.#watchdogKinds.delete(turnId);
+    this.#heldWatchdogKinds.delete(turnId);
   }
 
   #clearAllWatchdogs(): void {
@@ -522,6 +569,43 @@ export class WorkerEngine {
     }
     this.#watchdogs.clear();
     this.#watchdogKinds.clear();
+    this.#heldWatchdogKinds.clear();
+  }
+
+  /**
+   * Recompute whether the debugger has the worker's turn gate suspended, and on a
+   * transition either hold every armed watchdog (suspend: queued turns are not
+   * running; counting them would terminate() a healthy worker) or rearm every
+   * held one with a fresh budget (resume: turns start draining now).
+   */
+  #updateDbgSuspension(): void {
+    const suspended = this.#dbgExplicitPause || this.#dbgPausedTurns.size > 0;
+    if (suspended === this.#dbgSuspendActive) return;
+    this.#dbgSuspendActive = suspended;
+    if (suspended) {
+      for (const [turnId, timer] of this.#watchdogs) {
+        clearTimeout(timer);
+        this.#heldWatchdogKinds.set(turnId, this.#watchdogKinds.get(turnId) ?? 'event');
+      }
+      this.#watchdogs.clear();
+      this.#watchdogKinds.clear();
+      if (this.#heldWatchdogKinds.size > 0) {
+        console.debug(
+          `[rill/host/web] WorkerEngine: debugger suspend — holding ${this.#heldWatchdogKinds.size} turn watchdog(s)`
+        );
+      }
+    } else {
+      const held = Array.from(this.#heldWatchdogKinds);
+      this.#heldWatchdogKinds.clear();
+      if (held.length > 0) {
+        console.debug(
+          `[rill/host/web] WorkerEngine: debugger resumed — rearming ${held.length} turn watchdog(s)`
+        );
+      }
+      for (const [turnId, kind] of held) {
+        this.#armWatchdog(turnId, kind);
+      }
+    }
   }
 
   #onWatchdogFire(turnId: number): void {
@@ -625,9 +709,14 @@ export class WorkerEngine {
         // A breakpoint is an intentional, unbounded pause: disarm the offending
         // turn's watchdog so it is not mistaken for a runaway and terminate()d.
         // Park its kind so `dbg.resumed` can rearm the same budget.
-        const kind = this.#watchdogKinds.get(message.turnId);
+        const kind =
+          this.#watchdogKinds.get(message.turnId) ?? this.#heldWatchdogKinds.get(message.turnId);
         this.#disarmWatchdog(message.turnId);
         if (kind) this.#pausedKinds.set(message.turnId, kind);
+        // While this turn is parked the worker's gate is suspended, so every
+        // OTHER pending turn is queued, not running: hold their watchdogs too.
+        this.#dbgPausedTurns.add(message.turnId);
+        this.#updateDbgSuspension();
         this.#emit('paused', {
           turnId: message.turnId,
           reason: message.reason,
@@ -639,6 +728,10 @@ export class WorkerEngine {
       case 'dbg.resumed': {
         const kind = this.#pausedKinds.get(message.turnId);
         this.#pausedKinds.delete(message.turnId);
+        // Drop this suspend reason first so held watchdogs rearm; if another
+        // pause is still outstanding, rearming parks them (and this turn) again.
+        this.#dbgPausedTurns.delete(message.turnId);
+        this.#updateDbgSuspension();
         if (kind) this.#armWatchdog(message.turnId, kind);
         this.#emit('resumed', { turnId: message.turnId });
         break;
