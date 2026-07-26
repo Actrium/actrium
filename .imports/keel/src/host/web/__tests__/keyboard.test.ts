@@ -24,6 +24,7 @@ interface FakeKeyEventInit {
   altKey?: boolean;
   metaKey?: boolean;
   repeat?: boolean;
+  isComposing?: boolean;
 }
 
 class FakeKeyboardEvent {
@@ -34,6 +35,7 @@ class FakeKeyboardEvent {
   altKey: boolean;
   metaKey: boolean;
   repeat: boolean;
+  isComposing: boolean;
   defaultPrevented = false;
 
   constructor(init: FakeKeyEventInit) {
@@ -44,6 +46,7 @@ class FakeKeyboardEvent {
     this.altKey = init.altKey ?? false;
     this.metaKey = init.metaKey ?? false;
     this.repeat = init.repeat ?? false;
+    this.isComposing = init.isComposing ?? false;
   }
 
   preventDefault(): void {
@@ -139,6 +142,7 @@ describe('attachKeyboard', () => {
       altKey: false,
       metaKey: false,
       repeat: false,
+      isComposing: false,
     });
   });
 
@@ -225,7 +229,21 @@ describe('attachKeyboard', () => {
       altKey: false,
       metaKey: true,
       repeat: true,
+      isComposing: false,
     });
+  });
+
+  it('forwards isComposing so a guest can suppress shortcuts during IME composition', () => {
+    attachKeyboard(engine, { target });
+    sub('k1', null, false);
+
+    // A keydown produced while an IME is composing (e.g. key "Process").
+    target.dispatch('keydown', { key: 'Process', code: 'KeyN', isComposing: true });
+    expect((engine.sent[0]?.payload as RillKeyEvent).isComposing).toBe(true);
+
+    // A normal keydown outside composition reports false.
+    target.dispatch('keydown', { key: 'a', code: 'KeyA' });
+    expect((engine.sent[1]?.payload as RillKeyEvent).isComposing).toBe(false);
   });
 
   it('detach removes listeners, drops the message subscription, and stops forwarding', () => {
