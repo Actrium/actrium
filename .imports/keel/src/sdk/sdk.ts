@@ -28,7 +28,11 @@ export type ReactNode =
   | null
   | undefined
   | ReactNode[]
-  | { $$typeof: symbol; type: unknown; props: unknown };
+  // A structural element member ({type, props}) — a real @types/react
+  // ReactElement is assignable to it, but React 19's ReactElement type does not
+  // expose $$typeof, so requiring $$typeof (as before) broke typed JSX children.
+  // Reason: rill mirrors React's ReactNode without a React dependency.
+  | { type: unknown; props: unknown };
 
 /** Component type - matches React.ComponentType */
 export type ComponentType<P = object> =
@@ -396,34 +400,81 @@ const _components = getComponents();
 const _apis = getAPIs();
 const _rnHooks = getRNHooks();
 
+// ============ Component typing ============
+
+/**
+ * A guest UI component: a virtual tag whose DECLARED type carries its props so
+ * guest JSX (`<View style=… />`) type-checks. At runtime every component is just
+ * its tag string, which the reconciler passes straight through to the host (see
+ * `element-transform`); only the declared type is refined from `string`.
+ *
+ * The declared return type is `null` deliberately: a virtual component's tag
+ * string is never invoked, so the return is fiction — it only has to satisfy
+ * React's JSX component contract (be assignable to `React.ReactNode`), and `null`
+ * is the simplest such member nameable without a React type dependency. (rill's
+ * own `ReactNode` is intentionally NOT used here: it is permissive on the INPUT
+ * side so a real `@types/react` element assigns to `children`, which makes it a
+ * superset of `React.ReactNode` and thus invalid as a component RETURN.)
+ */
+export type GuestComponent<P> = (props: P) => null;
+
+// "Cast the declaration, keep the runtime" — the same pattern `RillErrorBoundary`
+// uses below. The `as unknown as` double-cast is intentional and observed by
+// nothing at runtime (the value stays the tag string).
+function asComponent<P>(tag: string): GuestComponent<P> {
+  return tag as unknown as GuestComponent<P>;
+}
+
+/**
+ * Declare a host-registered component name with typed props from the guest side.
+ * A host may register extra component names via `ComponentRegistry.register`;
+ * this gives the guest a typed handle for one so the guest/host prop contract
+ * survives past a bare `as unknown as` cast. The runtime value is the tag string.
+ *
+ * @example
+ * ```tsx
+ * const Chart = declareHostComponent<{ points: number[] }>('Chart');
+ * <Chart points={[1, 2, 3]} />;
+ * ```
+ */
+export function declareHostComponent<P>(name: string): GuestComponent<P> {
+  return asComponent<P>(name);
+}
+
 // ============ Component Exports ============
 // Core
-export const View = _components.View;
-export const Text = _components.Text;
-export const Image = _components.Image;
-export const ImageBackground = _components.ImageBackground;
+export const View = asComponent<ViewProps>(_components.View);
+export const Text = asComponent<TextProps>(_components.Text);
+export const Image = asComponent<ImageProps>(_components.Image);
+export const ImageBackground = asComponent<ImageBackgroundProps>(_components.ImageBackground);
 // Scrolling
-export const ScrollView = _components.ScrollView;
-export const FlatList = _components.FlatList;
-export const SectionList = _components.SectionList;
-export const VirtualizedList = _components.VirtualizedList;
-export const RefreshControl = _components.RefreshControl;
+export const ScrollView = asComponent<ScrollViewProps>(_components.ScrollView);
+export const FlatList = asComponent<FlatListProps>(_components.FlatList);
+export const SectionList = asComponent<SectionListProps>(_components.SectionList);
+export const VirtualizedList = asComponent<VirtualizedListProps>(_components.VirtualizedList);
+export const RefreshControl = asComponent<RefreshControlProps>(_components.RefreshControl);
 // Input
-export const TextInput = _components.TextInput;
-export const Button = _components.Button;
-export const Switch = _components.Switch;
-export const Pressable = _components.Pressable;
+export const TextInput = asComponent<TextInputProps>(_components.TextInput);
+export const Button = asComponent<ButtonProps>(_components.Button);
+export const Switch = asComponent<SwitchProps>(_components.Switch);
+export const Pressable = asComponent<PressableProps>(_components.Pressable);
 // Touchables
-export const TouchableOpacity = _components.TouchableOpacity;
-export const TouchableHighlight = _components.TouchableHighlight;
-export const TouchableWithoutFeedback = _components.TouchableWithoutFeedback;
+export const TouchableOpacity = asComponent<TouchableOpacityProps>(_components.TouchableOpacity);
+export const TouchableHighlight = asComponent<TouchableHighlightProps>(
+  _components.TouchableHighlight
+);
+export const TouchableWithoutFeedback = asComponent<TouchableWithoutFeedbackProps>(
+  _components.TouchableWithoutFeedback
+);
 // Feedback
-export const ActivityIndicator = _components.ActivityIndicator;
-export const Modal = _components.Modal;
-export const StatusBar = _components.StatusBar;
+export const ActivityIndicator = asComponent<ActivityIndicatorProps>(_components.ActivityIndicator);
+export const Modal = asComponent<ModalProps>(_components.Modal);
+export const StatusBar = asComponent<StatusBarProps>(_components.StatusBar);
 // Layout
-export const SafeAreaView = _components.SafeAreaView;
-export const KeyboardAvoidingView = _components.KeyboardAvoidingView;
+export const SafeAreaView = asComponent<SafeAreaViewProps>(_components.SafeAreaView);
+export const KeyboardAvoidingView = asComponent<KeyboardAvoidingViewProps>(
+  _components.KeyboardAvoidingView
+);
 
 // ============ API Exports ============
 // Pure JS
@@ -538,7 +589,7 @@ export interface TouchableOpacityProps extends BaseProps {
 /**
  * FlatList Component Props
  */
-export interface FlatListProps<T> extends ScrollViewProps {
+export interface FlatListProps<T = unknown> extends ScrollViewProps {
   data: T[];
   renderItem: (info: { item: T; index: number }) => ReactNode;
   keyExtractor?: (item: T, index: number) => string;
@@ -620,6 +671,117 @@ export interface ActivityIndicatorProps extends BaseProps {
   color?: string;
   size?: 'small' | 'large' | number;
   hidesWhenStopped?: boolean;
+}
+
+/**
+ * ImageBackground Component Props — an Image that renders children over itself.
+ */
+export interface ImageBackgroundProps extends ImageProps {
+  children?: ReactNode;
+  imageStyle?: StyleProp;
+}
+
+/**
+ * Pressable Component Props.
+ */
+export interface PressableProps extends BaseProps {
+  children?: ReactNode;
+  onPress?: () => void;
+  onPressIn?: () => void;
+  onPressOut?: () => void;
+  onLongPress?: () => void;
+  disabled?: boolean;
+  hitSlop?: number | { top?: number; bottom?: number; left?: number; right?: number };
+}
+
+/**
+ * TouchableHighlight Component Props.
+ */
+export interface TouchableHighlightProps extends TouchableOpacityProps {
+  underlayColor?: string;
+}
+
+/**
+ * TouchableWithoutFeedback Component Props.
+ */
+export interface TouchableWithoutFeedbackProps extends BaseProps {
+  children?: ReactNode;
+  onPress?: () => void;
+  onPressIn?: () => void;
+  onPressOut?: () => void;
+  onLongPress?: () => void;
+  disabled?: boolean;
+}
+
+/**
+ * RefreshControl Component Props.
+ */
+export interface RefreshControlProps extends BaseProps {
+  refreshing: boolean;
+  onRefresh?: () => void;
+  colors?: string[];
+  tintColor?: string;
+  title?: string;
+  progressViewOffset?: number;
+}
+
+/**
+ * Modal Component Props.
+ */
+export interface ModalProps extends BaseProps {
+  children?: ReactNode;
+  visible?: boolean;
+  transparent?: boolean;
+  animationType?: 'none' | 'slide' | 'fade';
+  onRequestClose?: () => void;
+  onShow?: () => void;
+  presentationStyle?: 'fullScreen' | 'pageSheet' | 'formSheet' | 'overFullScreen';
+}
+
+/**
+ * StatusBar Component Props.
+ */
+export interface StatusBarProps {
+  hidden?: boolean;
+  barStyle?: 'default' | 'light-content' | 'dark-content';
+  backgroundColor?: string;
+  translucent?: boolean;
+  animated?: boolean;
+}
+
+/**
+ * SafeAreaView Component Props — a View that insets its content for safe areas.
+ */
+export type SafeAreaViewProps = ViewProps;
+
+/**
+ * KeyboardAvoidingView Component Props.
+ */
+export interface KeyboardAvoidingViewProps extends ViewProps {
+  behavior?: 'height' | 'position' | 'padding';
+  keyboardVerticalOffset?: number;
+  enabled?: boolean;
+}
+
+/**
+ * SectionList Component Props (minimal typed surface).
+ */
+export interface SectionListProps<ItemT = unknown, SectionT = unknown> extends ScrollViewProps {
+  sections: ReadonlyArray<{ data: ReadonlyArray<ItemT> } & SectionT>;
+  renderItem?: (info: { item: ItemT; index: number }) => ReactNode;
+  renderSectionHeader?: (info: { section: { data: ReadonlyArray<ItemT> } & SectionT }) => ReactNode;
+  keyExtractor?: (item: ItemT, index: number) => string;
+}
+
+/**
+ * VirtualizedList Component Props (minimal typed surface).
+ */
+export interface VirtualizedListProps<ItemT = unknown> extends ScrollViewProps {
+  data: ReadonlyArray<ItemT>;
+  getItem: (data: ReadonlyArray<ItemT>, index: number) => ItemT;
+  getItemCount: (data: ReadonlyArray<ItemT>) => number;
+  renderItem: (info: { item: ItemT; index: number }) => ReactNode;
+  keyExtractor?: (item: ItemT, index: number) => string;
 }
 
 // ============ Event Types (re-exported from types.ts) ============

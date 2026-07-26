@@ -94,6 +94,10 @@ export interface StyleObject {
   borderBottomWidth?: number;
   borderLeftWidth?: number;
   borderColor?: string;
+  borderTopColor?: string;
+  borderRightColor?: string;
+  borderBottomColor?: string;
+  borderLeftColor?: string;
   borderRadius?: number;
   borderTopLeftRadius?: number;
   borderTopRightRadius?: number;
@@ -207,6 +211,10 @@ export type ViewStyle = Pick<
   | 'borderBottomWidth'
   | 'borderLeftWidth'
   | 'borderColor'
+  | 'borderTopColor'
+  | 'borderRightColor'
+  | 'borderBottomColor'
+  | 'borderLeftColor'
   | 'borderRadius'
   | 'borderTopLeftRadius'
   | 'borderTopRightRadius'
