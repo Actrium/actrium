@@ -301,3 +301,77 @@ fn text_store_put_is_unchanged_plain_json() {
     assert_eq!(tap.request, b"{\"key\":\"k\",\"text\":\"hi\"}");
     let _ = tap.resolve(1, b"{\"version\":1}");
 }
+
+// ============================================================
+// store::list / store::delete_prefix — the non-scalar replies
+// ============================================================
+
+#[test]
+fn list_request_is_plain_json_and_decodes_key_metadata() {
+    let _guard = crate::wire_lock();
+    let tap = issue(crate::store::list("doc/"));
+    assert_eq!(tap.module, "host:store");
+    assert_eq!(tap.method, "list");
+    // Request carries only the prefix (no bytes) => plain JSON.
+    assert!(!is_rbs1(&tap.request), "list request is plain JSON");
+    assert_eq!(tap.request, b"{\"prefix\":\"doc/\"}");
+
+    // The one non-scalar reply in the store surface: an array of key objects.
+    let reply = br#"{"keys":[{"key":"doc/1","version":1,"updatedAt":1753000000000},{"key":"doc/2","version":7,"updatedAt":1753000000042}]}"#;
+    let keys = tap.resolve(1, reply).expect("list ok");
+    assert_eq!(
+        keys,
+        vec![
+            crate::store::KeyMeta {
+                key: "doc/1".to_string(),
+                version: 1,
+                updated_at: 1753000000000,
+            },
+            crate::store::KeyMeta {
+                key: "doc/2".to_string(),
+                version: 7,
+                updated_at: 1753000000042,
+            },
+        ]
+    );
+}
+
+#[test]
+fn list_empty_prefix_and_empty_result() {
+    let _guard = crate::wire_lock();
+    let tap = issue(crate::store::list(""));
+    // An empty prefix lists every key; the request still carries the field.
+    assert_eq!(tap.request, b"{\"prefix\":\"\"}");
+    let keys = tap.resolve(1, br#"{"keys":[]}"#).expect("list ok");
+    assert!(keys.is_empty(), "empty result decodes to an empty Vec");
+}
+
+#[test]
+fn list_entry_missing_a_field_fails_closed() {
+    let _guard = crate::wire_lock();
+    let tap = issue(crate::store::list("x"));
+    // An entry without updatedAt is not a valid KeyMeta: fail-closed with an
+    // error body rather than fabricating a value.
+    let err = tap
+        .resolve(1, br#"{"keys":[{"key":"x1","version":1}]}"#)
+        .unwrap_err();
+    assert!(
+        core::str::from_utf8(&err).unwrap().contains("error"),
+        "malformed entry surfaces an error body"
+    );
+}
+
+#[test]
+fn delete_prefix_returns_the_removed_count() {
+    let _guard = crate::wire_lock();
+    let tap = issue(crate::store::delete_prefix("doc/"));
+    assert_eq!(tap.module, "host:store");
+    assert_eq!(tap.method, "deletePrefix");
+    assert!(!is_rbs1(&tap.request), "deletePrefix request is plain JSON");
+    assert_eq!(tap.request, b"{\"prefix\":\"doc/\"}");
+    // Non-atomic delete: the count is what was actually removed.
+    let deleted = tap
+        .resolve(1, br#"{"deleted":3}"#)
+        .expect("deletePrefix ok");
+    assert_eq!(deleted, 3);
+}
