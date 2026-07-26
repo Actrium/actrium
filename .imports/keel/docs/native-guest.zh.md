@@ -88,6 +88,8 @@ rill 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 渲染路径（Phase C 首版已通）：原生 guest **发渲染批次** → `rill_send_batch` → host 解码成 `OperationBatch` → 真 `receiver` 物化成 sealed 组件树，**与 JS guest 复用同一 receiver**。批次 wire 首版用 JSON（与 host:* wire 一致），后续换二进制 op 协议——ABI 通道形状不变。
 
+**节点词汇边界（canvas-first，当前）**：原生 guest 能发的**全部**节点就三种——`ui::view`（容器）、`ui::text`（字符串）、`ui::canvas`（视口），而且 `View`/`Text` **不带 props / 样式 / id / 事件回调**。JS guest 的 21 名组件白名单（`src/sdk/sdk.ts`）从原生线**够不着**：原生 guest 挂不了任何可交互 RN 组件，连给 `View`/`Text` 定位、描边都做不到。真正的界面（工具栏、表单、下拉、文本框）要**自绘进一个 `Canvas`**——guest 自己做布局、命中测试、焦点，靠 canvas 的 `pointer` / `wheel` / `key` 事件流（经 `events::on` 投递）驱动。**这是当前能用的形态；把两条线收敛到一套组件模型（props + 事件回传通道）是已记录的 follow-up、不是永久设计**——见 issue #63 与 [native-guest-deferred.zh.md](native-guest-deferred.zh.md)。这条边界现在只有读 `lib.rs` 才发现，此处显式写明，避免作者对着它写完才知道。
+
 **事件（host→guest，已落地）**：guest 导出 `rill_on_event(name_ptr,name_len, payload_ptr,payload_len)`；host 调 `WasmGuestHost.emitEvent(name, payload)`（JSON 编码 payload → `rill_alloc` 写入 → 调 `rill_on_event`，guest 无此导出则 no-op；**全程 try/catch，guest 的坏 alloc/trap 不使 host 抛错**）。SDK `events::on(name, |payload| …)` 注册同步 handler + `off(id)` 注销（`dispatch` 先快照 handler，允许 handler 内自删/新增而不 UAF）。这让原生 guest 从「只能画一帧」变**可收输入/生命周期 = 可交互**。**注**：handler 是同步的，暂不应在其中 `.await` host 调用——被 drop 的 future 不仅收不到结果，其结果槽还会在 guest 侧 `RESULTS` 累积（已加 64 上限兜底，避免无界泄漏）；异步 handler 是 follow-up。**canvas 的帧缓冲 present 是消费者层，地基不碰。**
 
 ## 7. 测试
