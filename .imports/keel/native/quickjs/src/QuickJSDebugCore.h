@@ -161,7 +161,11 @@ private:
   std::condition_variable cv_;
   std::condition_variable jobCv_;  // signals a paused-thread job completed
   std::set<std::pair<std::string, int>> breakpoints_;  // guarded by mutex_
-  bool pauseRequested_ = false;                        // guarded by mutex_
+  // Written under mutex_; additionally read lock-free (relaxed) on the onStep
+  // hot path so a pending pause can defeat the per-line dedup — a single-line
+  // loop never changes the dedup key, and without this probe an async
+  // Debugger.pause would starve forever (issue #39).
+  std::atomic<bool> pauseRequested_{false};
   bool paused_ = false;                                // guarded by mutex_
   bool resumeRequested_ = false;                       // guarded by mutex_
   const EvalJob* pendingJob_ = nullptr;  // guarded by mutex_

@@ -373,6 +373,104 @@ int main() {
     JS_FreeRuntime(mrt);
   }
 
+  // --- Async pause on a single-line loop (issue #39). ------------------------
+  // On `while (...) { ... }` written on one source line the (token,line,depth)
+  // dedup key never changes, so onStep's per-line dedup would swallow every
+  // callback after the first. A pending requestPause() must defeat the dedup,
+  // or an async Debugger.pause never lands and the runtime spins forever.
+  {
+    JSRuntime* lrt = JS_NewRuntime();
+    JSContext* lctx = JS_NewContext(lrt);
+    auto ldbg = std::make_unique<QuickJSDebugCore>(lrt, lctx);
+
+    PauseBus bus;
+    ldbg->setPausedCallback(
+        [&](const std::string&, int line, PauseReason r) { bus.push(line, r); });
+
+    static const char* kLoopCode =
+        "globalThis.stop = 0; globalThis.spins = 0;\n"        // line 1
+        "while (!globalThis.stop) { globalThis.spins++; }\n"  // line 2 (one line)
+        "globalThis.after = 1;\n";                            // line 3
+    // Breakpoint on the loop line: its hit is the sync point proving the dedup
+    // key is already parked on line 2 before the async pause is requested — the
+    // only way a later pause can land there is by defeating the dedup.
+    ldbg->addBreakpoint("loop.js", 2);
+
+    // Hang guard for the regression case: if the pause starves, the loop can
+    // only be stopped by aborting the eval through the engine's interrupt
+    // check — nothing can reach globalThis while the interpreter is spinning.
+    static std::atomic<int> killSwitch{0};
+    killSwitch.store(0);
+    JS_SetInterruptHandler(
+        lrt, [](JSRuntime*, void*) -> int { return killSwitch.load(); },
+        nullptr);
+
+    std::promise<void> evalDone;
+    auto evalFut = evalDone.get_future();
+    std::thread rtThread([&] {
+      JS_UpdateStackTop(lrt);
+      JSValue v = JS_Eval(lctx, kLoopCode, std::strlen(kLoopCode), "loop.js",
+                          JS_EVAL_TYPE_GLOBAL);
+      JS_FreeValue(lctx, v);
+      evalDone.set_value();
+    });
+
+    auto e1 = bus.next();
+    check(e1.first == 2 && e1.second == PauseReason::Breakpoint,
+          "loop-line breakpoint hit (line " + std::to_string(e1.first) + ")");
+    // Drop the breakpoint before resuming: once a pending pause defeats the
+    // dedup, the decision point re-checks breakpoints too, and a still-armed
+    // breakpoint on the loop line would win the pause reason.
+    ldbg->removeBreakpoint("loop.js", 2);
+    ldbg->resume();  // the loop now spins with a constant dedup key
+
+    ldbg->requestPause();
+    auto e2 = bus.next();
+    const bool pauseLanded =
+        e2.first == 2 && e2.second == PauseReason::Pause;
+    check(pauseLanded,
+          "async pause lands on the spinning single-line loop (issue #39)");
+
+    if (pauseLanded) {
+      // Break the loop from the captive paused thread, then run to completion.
+      bool ran = ldbg->runOnPausedThread([](JSContext* c) {
+        static const char* kStop = "globalThis.stop = 1;";
+        JSValue v = JS_Eval(c, kStop, std::strlen(kStop), "<stop>",
+                            JS_EVAL_TYPE_GLOBAL);
+        JS_FreeValue(c, v);
+      });
+      check(ran, "runOnPausedThread reached the captive loop thread");
+      ldbg->resume();
+    }
+
+    bool finished =
+        evalFut.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    if (!finished) {
+      // Regression path: release any pause and abort the spinning eval so the
+      // suite fails cleanly instead of hanging on join().
+      ldbg->detach();
+      killSwitch.store(1);
+      finished = evalFut.wait_for(std::chrono::seconds(5)) ==
+                 std::future_status::ready;
+    }
+    check(finished, "loop exited after stop flag + resume");
+    rtThread.join();
+
+    if (pauseLanded) {
+      JSValue g = JS_GetGlobalObject(lctx);
+      JSValue afterV = JS_GetPropertyStr(lctx, g, "after");
+      int32_t after = -1;
+      JS_ToInt32(lctx, &after, afterV);
+      check(after == 1, "post-loop line ran after the final resume");
+      JS_FreeValue(lctx, afterV);
+      JS_FreeValue(lctx, g);
+    }
+
+    ldbg.reset();
+    JS_FreeContext(lctx);
+    JS_FreeRuntime(lrt);
+  }
+
   std::cout << "=== " << (g_failures == 0 ? "ALL PASS" : "FAILURES") << " ("
             << g_failures << " failed) ===\n";
   return g_failures == 0 ? 0 : 1;

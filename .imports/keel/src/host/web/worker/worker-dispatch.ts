@@ -22,8 +22,10 @@
  *   - inbound messages that eval into the guest as a side effect — config
  *     (CONFIG_UPDATE eval) and resume (flushes pause-queued HOST_EVENT evals) —
  *     gated in handle() the same way; and
- *   - engine-owned timer callbacks (setTimeout/setInterval fire from the worker
- *     event loop, not via postMessage), routed through the same gate via
+ *   - engine-owned callbacks fired from the worker event loop rather than via
+ *     postMessage — timer callbacks (setTimeout/setInterval) and host-microtask
+ *     guest entries (the setImmediate drain fallback and the queueMicrotask
+ *     polyfill) — routed through the same gate via
  *     {@link GuestEngineLike.setGuestTurnRunner} at init.
  * Deliberately NOT gated: pause (clock freeze, never enters the guest) and
  * destroy (teardown must not park behind a dead session's suspend).
@@ -65,10 +67,11 @@ export interface GuestEngineLike {
   destroy(): void;
   /**
    * Optional (the real {@link Engine} has it): route engine-owned guest entry —
-   * timer callbacks the engine fires from its own event loop — through `runner`.
-   * WorkerDispatch installs its TurnGate here at init, closing the re-entry
-   * hole the gate's doc calls out: gating only inbound worker messages would
-   * miss timer-driven guest turns entirely.
+   * timer callbacks and host-microtask entries (setImmediate drain fallback,
+   * queueMicrotask polyfill) the engine fires from its own event loop — through
+   * `runner`. WorkerDispatch installs its TurnGate here at init, closing the
+   * re-entry hole the gate's doc calls out: gating only inbound worker messages
+   * would miss these engine-driven guest turns entirely.
    */
   setGuestTurnRunner?(runner: ((run: () => void) => void) | null): void;
 }

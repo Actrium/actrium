@@ -29,6 +29,7 @@
 
 #include <jsi/jsi.h>
 
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <deque>
@@ -38,6 +39,8 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
+#include <vector>
 
 // Activate the gated body of the production target.
 #define RILL_WIP_CDP_DEVTOOLS 1
@@ -102,9 +105,204 @@ struct Sink {
   }
 };
 
+// A runtime thread that owns a HermesRuntime + CDPDebugAPI and drains runtime
+// tasks, mirroring main()'s setup so each adversarial scenario is self-contained.
+struct Fixture {
+  TaskPump pump;
+  std::thread thread;
+  facebook::hermes::HermesRuntime* rt = nullptr;
+  std::shared_ptr<hcdp::CDPDebugAPI> debugAPI;
+  std::weak_ptr<hcdp::CDPDebugAPI> debugAPIWeak;  // to observe destruction
+  std::shared_ptr<rill::devtools::CdpTeardownGate> gate =
+      std::make_shared<rill::devtools::CdpTeardownGate>();
+
+  Fixture() {
+    std::promise<std::pair<facebook::hermes::HermesRuntime*,
+                           std::shared_ptr<hcdp::CDPDebugAPI>>>
+        ready;
+    auto fut = ready.get_future();
+    thread = std::thread([&] {
+      auto runtime =
+          facebook::hermes::makeHermesRuntime(::hermes::vm::RuntimeConfig());
+      auto* rtPtr = runtime.get();
+      std::shared_ptr<hcdp::CDPDebugAPI> api = hcdp::CDPDebugAPI::create(*runtime);
+      ready.set_value({rtPtr, api});
+      for (;;) {
+        std::function<void()> task;
+        {
+          std::unique_lock<std::mutex> lk(pump.m);
+          pump.cv.wait(lk, [&] { return !pump.q.empty() || pump.stop; });
+          if (pump.q.empty() && pump.stop) break;
+          task = std::move(pump.q.front());
+          pump.q.pop_front();
+        }
+        task();
+      }
+      api.reset();
+      runtime.reset();
+    });
+    auto pair = fut.get();
+    rt = pair.first;
+    debugAPI = pair.second;
+    debugAPIWeak = debugAPI;
+  }
+
+  hdbg::EnqueueRuntimeTaskFunc enqueue() {
+    auto* rtPtr = rt;
+    return [this, rtPtr](hdbg::RuntimeTask t) {
+      pump.push([rtPtr, t = std::move(t)]() { t(*rtPtr); });
+    };
+  }
+
+  void stop() {
+    pump.requestStop();
+    if (thread.joinable()) thread.join();
+  }
+};
+
+// A: disconnect while the runtime is paused at a breakpoint. onClientDisconnect
+// must force-resume the paused runtime (via the interrupt) so the eval finishes
+// and teardown does not deadlock — even though no CDP client is left to resume.
+void test_disconnect_while_paused() {
+  std::cout << "--- disconnect while paused ---\n";
+  Fixture fx;
+  Sink sink;
+  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+      1, fx.debugAPI, fx.enqueue(), fx.gate);
+  const rill::devtools::ConnectionId conn = 1;
+  target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
+  target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
+  check(sink.waitFor("\"id\":1", "enable ack"), "disconnect-paused: enable acked");
+
+  std::promise<void> evalDone;
+  auto evalFut = evalDone.get_future();
+  fx.pump.push([&] {
+    try {
+      fx.rt->evaluateJavaScript(
+          std::make_shared<jsi::StringBuffer>("debugger; globalThis.__y = 7;"),
+          "a.js");
+    } catch (const std::exception&) {
+    }
+    evalDone.set_value();
+  });
+  check(sink.waitFor("\"Debugger.paused\"", "paused"),
+        "disconnect-paused: runtime paused at debugger;");
+
+  // Disconnect while paused: the force-resume interrupt must unblock the eval.
+  target->onClientDisconnect(conn);
+  bool resumed =
+      evalFut.wait_for(std::chrono::seconds(10)) == std::future_status::ready;
+  check(resumed, "disconnect-paused: onClientDisconnect force-resumed the runtime");
+
+  fx.gate->closeAndWait();
+  target->detachAllAgentsForTeardown();
+  target.reset();
+  fx.debugAPI.reset();
+  fx.stop();
+  check(true, "disconnect-paused: teardown without deadlock");
+}
+
+// B: many dispatch() calls racing a gate close (the sandbox dispose path). The
+// gate must serialize so closeAndWait() returns only after every in-flight
+// dispatch section has exited, and dispatches after the close are dropped, not
+// crashed. Correctness is under ASan (build-run.sh -DRILL_ASAN=1); here we
+// assert progress + the post-close drop.
+void test_dispatch_vs_teardown_race() {
+  std::cout << "--- dispatch vs teardown race ---\n";
+  Fixture fx;
+  Sink sink;
+  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+      1, fx.debugAPI, fx.enqueue(), fx.gate);
+  const rill::devtools::ConnectionId conn = 1;
+  target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
+  target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
+  check(sink.waitFor("\"id\":1", "enable ack"), "race: enable acked");
+
+  std::atomic<int> dispatched{0};
+  std::atomic<bool> go{false};
+  std::vector<std::thread> hammer;
+  for (int i = 0; i < 4; ++i) {
+    hammer.emplace_back([&] {
+      while (!go.load()) {
+      }
+      for (int k = 0; k < 200; ++k) {
+        target->dispatch(conn, R"({"id":9,"method":"Runtime.enable"})");
+        dispatched.fetch_add(1);
+      }
+    });
+  }
+  go.store(true);
+  // Close the gate concurrently with the hammering (stands in for dispose()).
+  fx.gate->closeAndWait();
+  for (auto& t : hammer) t.join();
+  check(dispatched.load() > 0, "race: dispatches ran before/around the close");
+
+  // After the gate is closed every further dispatch is refused at the section.
+  size_t before = 0;
+  {
+    std::lock_guard<std::mutex> lk(sink.m);
+    before = sink.all.size();
+  }
+  target->dispatch(conn, R"({"id":123,"method":"Runtime.enable"})");
+  std::this_thread::yield();
+  size_t after = 0;
+  {
+    std::lock_guard<std::mutex> lk(sink.m);
+    after = sink.all.size();
+  }
+  check(after == before, "race: dispatch after gate close is dropped (no output)");
+
+  target->detachAllAgentsForTeardown();
+  target.reset();
+  fx.debugAPI.reset();
+  fx.stop();
+  check(true, "race: teardown without deadlock");
+}
+
+// C: destroy a tenant whose disconnect enqueued a force-resume interrupt that
+// NEVER fires. The runtime is IDLE (not paused, not running JS) when the client
+// disconnects, so the queued interrupt sits unprocessed. The B2 bug: the
+// interrupt closure captured the CDPDebugAPI by shared_ptr and was stored in
+// the AsyncDebuggerAPI queue that same CDPDebugAPI owns -> a self-cycle whose
+// refcount never reaches zero, so the CDPDebugAPI leaks and its destruction
+// (which must precede the runtime's) silently never happens. With the weak
+// capture there is no cycle, so dropping every external ref destructs it.
+void test_destroy_with_pending_interrupt() {
+  std::cout << "--- destroy with pending interrupt ---\n";
+  Fixture fx;
+  Sink sink;
+  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+      1, fx.debugAPI, fx.enqueue(), fx.gate);
+  const rill::devtools::ConnectionId conn = 1;
+  target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
+  target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
+  check(sink.waitFor("\"id\":1", "enable ack"), "pending-int: enable acked");
+
+  // Runtime is idle here (enable was processed; no JS running, not paused).
+  // Disconnect enqueues the force-resume interrupt; nothing will ever run JS to
+  // fire it.
+  target->onClientDisconnect(conn);
+
+  // Production teardown order: close the gate, sweep, drop every external
+  // CDPDebugAPI reference, then stop the (idle) runtime thread so it drops its
+  // own reference. The interrupt is still queued and unfired the whole time.
+  fx.gate->closeAndWait();
+  target->detachAllAgentsForTeardown();
+  target.reset();
+  fx.debugAPI.reset();  // drop our ref
+  fx.stop();            // idle thread: queue empty + stop -> api.reset(); runtime.reset()
+
+  // With the bug's strong capture, the queued-but-never-fired interrupt still
+  // holds a CDPDebugAPI ref through the self-cycle, so the weak_ptr stays valid
+  // (leak). With the weak capture the cycle is broken and it must have expired.
+  check(fx.debugAPIWeak.expired(),
+        "pending-int: CDPDebugAPI destructed (no interrupt-cycle leak)");
+}
+
 }  // namespace
 
 int main() {
+  std::cout << std::unitbuf;  // flush each line so a crash doesn't swallow output
   std::cout << "=== Hermes CDP relay native e2e ===\n";
 
   TaskPump pump;
@@ -150,8 +348,9 @@ int main() {
   };
 
   Sink sink;
+  auto gate = std::make_shared<rill::devtools::CdpTeardownGate>();
   auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
-      /*execCtxId=*/1, debugAPI, std::move(enqueue));
+      /*execCtxId=*/1, debugAPI, std::move(enqueue), gate);
 
   const rill::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
@@ -204,13 +403,28 @@ int main() {
               : -1;
   check(x == 42, "post-resume side effect observed (__x === 42)");
 
-  // 5. Teardown: disconnect, drop the target, stop the runtime thread.
+  // 5. Teardown in production order: disconnect, close the gate + sweep (as the
+  //    sandbox dispose() does), then drop the target and stop the thread.
   target->onClientDisconnect(conn);
+  gate->closeAndWait();
+  target->detachAllAgentsForTeardown();  // empty after the disconnect above
   target.reset();  // release our CDPDebugAPI ref before the runtime thread exits
+  // Drop BOTH main-thread CDPDebugAPI refs (the named copy AND the one still
+  // held inside readyPair) before joining, so the runtime thread owns the last
+  // reference: ~CDPDebugAPI then runs on the runtime thread, before it resets
+  // the runtime. Otherwise readyPair keeps the CDPDebugAPI alive until main
+  // exits and its destructor touches the already-freed runtime (a latent UAF
+  // in this harness).
   debugAPI.reset();
+  readyPair.second.reset();
   pump.requestStop();
   runtimeThread.join();
   check(true, "clean teardown without deadlock");
+
+  // Additional adversarial teardown scenarios (issue #40).
+  test_disconnect_while_paused();
+  test_dispatch_vs_teardown_race();
+  test_destroy_with_pending_interrupt();
 
   std::cout << "=== " << (g_failures == 0 ? "ALL PASS" : "FAILURES")
             << " (" << g_failures << " failed) ===\n";
