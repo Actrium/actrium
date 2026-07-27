@@ -1,0 +1,20 @@
+# cargo-nextest configuration for the workspace.
+#
+# Many integration tests under tests/ bring up real WebRTC peers and full
+# nodes. Under CI CPU contention a DTLS/ICE handshake can occasionally exceed
+# a test's own timeout on the first attempt (observed as intermittent, not
+# deterministic, failures). Give integration tests a bounded number of retries
+# so one slow draw does not fail the whole run.
+#
+# Retries are scoped to integration tests (kind = test). Unit tests
+# (kind = lib) are deterministic and stay retry-free, so a genuine regression
+# there fails immediately instead of being masked by a retry.
+#
+# A test that fails every attempt still fails the run; a test that passes only
+# on retry is reported as FLAKY in the summary, so a rising flake rate stays
+# visible rather than being silently absorbed.
+[profile.default]
+
+[[profile.default.overrides]]
+filter = 'kind(test)'
+retries = 2

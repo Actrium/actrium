@@ -37,11 +37,14 @@ def test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm() -> None:
     assert "- name: Build release" not in rust_job
     assert "cargo build --release --verbose --all-features" not in rust_job
 
-    # The separate test job (not inside rust) runs cargo test for Rust changes.
+    # The separate test job (not inside rust) runs the Rust suite via
+    # cargo-nextest (integration retries live in .config/nextest.toml), plus
+    # doctests on the libtest harness (nextest skips them).
     assert "  test:" in workflow
-    test_job = _job(workflow, "test", "typescript")
-    assert "- name: Run tests" in test_job
-    assert "cargo test --workspace" in test_job
+    test_job = _job(workflow, "test", "rust_msrv")
+    assert "- name: Run tests (nextest)" in test_job
+    assert "cargo nextest run --workspace" in test_job
+    assert "cargo test --doc --workspace" in test_job
 
 
 def test_rust_test_gate_restores_cache_before_installing_tools() -> None:

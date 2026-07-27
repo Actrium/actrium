@@ -47,7 +47,11 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
     static INIT: OnceCell<()> = OnceCell::const_new();
 
     INIT.get_or_init(|| async {
-        let db_dir = std::env::temp_dir().join("actrix_signaling_test_db");
+        // nextest runs each test in its own process, so a fixed path would be
+        // concurrently deleted and rewritten; suffix with the PID to isolate each
+        // process's test database.
+        let db_dir =
+            std::env::temp_dir().join(format!("actrix_signaling_test_db_{}", std::process::id()));
         std::fs::create_dir_all(&db_dir).expect("Failed to create test database directory");
         let db_file = db_dir.join("actrix.db");
         if db_file.exists() {

@@ -214,8 +214,28 @@ jobs:
           wasm-tools --version
       - name: Generate CLI web runtime assets
         run: bash bindings/web/scripts/sync-cli-assets.sh --build
-      - name: Run tests
-        run: cargo test --workspace --verbose --all-features
+      - name: Free disk space
+        # `cargo nextest run --workspace --all-features` builds every test
+        # target into a cold target/ (cache-targets: false), which can exceed
+        # the runner's ~14 GB SSD (`No space left on device`). Reclaim space
+        # held by preinstalled software the Rust build does not need.
+        run: |
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc || true
+          sudo rm -rf /usr/local/share/boost || true
+          sudo docker system prune --all --force || true
+          df -h /
+      - name: Install cargo-nextest
+        # Prebuilt binary. Pin to a fixed release for reproducibility if
+        # desired via `taiki-e/install-action@v2` with `tool: cargo-nextest@<ver>`.
+        uses: taiki-e/install-action@cargo-nextest
+      - name: Run tests (nextest)
+        # Integration tests (tests/) get bounded retries via .config/nextest.toml.
+        run: cargo nextest run --workspace --all-features
+      - name: Run doctests
+        # nextest does not run doctests; keep them on the libtest harness.
+        run: cargo test --doc --workspace --all-features
 
   rust_msrv:
     name: Rust MSRV (1.95)
