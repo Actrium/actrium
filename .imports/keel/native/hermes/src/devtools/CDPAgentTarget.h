@@ -35,6 +35,7 @@
 #include <hermes/cdp/CDPAgent.h>         // cdp::CDPAgent, cdp::State, cdp::OutboundMessageFunc
 #include <hermes/cdp/CDPDebugAPI.h>      // cdp::CDPDebugAPI
 
+#include <atomic>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -48,11 +49,15 @@ public:
   // owner and destroys it in dispose() (after closing `gate`), which keeps the
   // "CDPDebugAPI dies before the runtime" order deterministic no matter how
   // long the CDPServer keeps this target alive. `gate` must be non-null and
-  // must be the same gate that the owner closes in dispose().
+  // must be the same gate that the owner closes in dispose(). `clientsAttached`
+  // is the sandbox's shared connection counter, bumped on connect/disconnect so
+  // the sandbox's watchdog pause callback can auto-resume a client-less pause
+  // (#77); must be non-null.
   CDPAgentTarget(int32_t executionContextId,
                  std::shared_ptr<facebook::hermes::cdp::CDPDebugAPI> debugAPI,
                  facebook::hermes::debugger::EnqueueRuntimeTaskFunc enqueue,
-                 std::shared_ptr<CdpTeardownGate> gate);
+                 std::shared_ptr<CdpTeardownGate> gate,
+                 std::shared_ptr<std::atomic<int>> clientsAttached);
   ~CDPAgentTarget() override;
 
   DomainSet ownedDomains() const override;
@@ -74,6 +79,11 @@ private:
   std::weak_ptr<facebook::hermes::cdp::CDPDebugAPI> debugAPI_;
   facebook::hermes::debugger::EnqueueRuntimeTaskFunc enqueue_;
   const std::shared_ptr<CdpTeardownGate> gate_;
+  // Shared with the sandbox context: incremented while a connection has a live
+  // CDPAgent, decremented when it goes away. Lets the sandbox's watchdog pause
+  // callback distinguish "a client is driving the debugger" from "nobody is,
+  // resume or the runtime hangs" (#77).
+  const std::shared_ptr<std::atomic<int>> clientsAttached_;
 
   std::mutex agentsMutex_;
   // shared_ptr, not unique_ptr: dispatch() must call handleCommand() OUTSIDE

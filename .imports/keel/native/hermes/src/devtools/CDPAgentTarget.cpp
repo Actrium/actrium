@@ -53,11 +53,13 @@ namespace hdbg = facebook::hermes::debugger;
 CDPAgentTarget::CDPAgentTarget(int32_t executionContextId,
                                std::shared_ptr<hcdp::CDPDebugAPI> debugAPI,
                                hdbg::EnqueueRuntimeTaskFunc enqueue,
-                               std::shared_ptr<CdpTeardownGate> gate)
+                               std::shared_ptr<CdpTeardownGate> gate,
+                               std::shared_ptr<std::atomic<int>> clientsAttached)
     : execCtxId_(executionContextId),
       debugAPI_(debugAPI),
       enqueue_(std::move(enqueue)),
-      gate_(std::move(gate)) {}
+      gate_(std::move(gate)),
+      clientsAttached_(std::move(clientsAttached)) {}
 
 CDPAgentTarget::~CDPAgentTarget() {
   // Normal shutdown empties agents_ before this runs: the server disconnects
@@ -116,6 +118,9 @@ void CDPAgentTarget::onClientConnect(ConnectionId conn, CdpOutboundFn persistent
                              std::move(persistentSink), hcdp::State{});
   std::lock_guard<std::mutex> lock(agentsMutex_);
   agents_[conn] = std::move(agent);
+  // A client is now driving the debugger: the sandbox's watchdog callback must
+  // stop auto-resuming its pauses (#77).
+  clientsAttached_->fetch_add(1, std::memory_order_relaxed);
 }
 
 void CDPAgentTarget::dispatch(ConnectionId conn, const RawCdpMessage& raw) {
@@ -172,6 +177,9 @@ void CDPAgentTarget::onClientDisconnect(ConnectionId conn) {
     if (it == agents_.end()) return;
     dead = std::move(it->second);
     agents_.erase(it);
+    // Last driver for this connection is gone; if it was the last client the
+    // sandbox's watchdog callback resumes future pauses itself (#77).
+    clientsAttached_->fetch_sub(1, std::memory_order_relaxed);
   }
   // If this client left the runtime paused at a breakpoint, no one else will
   // resume it and the host thread stays frozen. Force a resume from the
