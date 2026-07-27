@@ -397,8 +397,14 @@ impl PeerGate {
                                 .unwrap_or(true)
                         };
 
+                        // This event is the authoritative recovery resolution,
+                        // so only transport-level state is re-validated here.
+                        // The guard-aware business predicate would race the
+                        // coordinator listener that clears the coordinator
+                        // guard for this same event; preflight still consults
+                        // the coordinator guard before any send.
                         let is_sendable = webrtc_coordinator
-                            .is_peer_sendable_session(peer_id, *session_id)
+                            .is_peer_transport_sendable_session(peer_id, *session_id)
                             .await;
 
                         if should_clear && is_sendable {

@@ -535,6 +535,14 @@ struct PeerState {
     /// Both variants share lifecycle cancellation and de-duplication.
     restart_task_handle: Option<JoinHandle<()>>,
 
+    /// Answerer-side task that waits for the restarted generation to become
+    /// ready (ICE Connected + open DataChannel) and then broadcasts the
+    /// authoritative `IceRestartCompleted` (#359). Tracked so a newer restart
+    /// answer supersedes the previous waiter (at most one outstanding per
+    /// session). The waiter self-terminates on terminal events/timeout, so a
+    /// stale entry is just a finished handle.
+    answerer_restart_ready_handle: Option<JoinHandle<()>>,
+
     /// Used to wake up the backoff sleep in `do_ice_restart_inner`
     /// when external events (NetworkEvent::Available, IceRestartRequest) indicate
     /// that the network may have recovered. Notify is idempotent — multiple
@@ -644,6 +652,10 @@ impl DetachedPeerForTest {
             return Ok(());
         };
         if let Some(handle) = state.restart_task_handle.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+        if let Some(handle) = state.answerer_restart_ready_handle.take() {
             handle.abort();
             let _ = handle.await;
         }
@@ -1410,6 +1422,19 @@ impl WebRtcCoordinator {
             return;
         }
 
+        // Business sendability is guarded: while the current session has an
+        // unresolved network recovery, transient local Connected/Open states
+        // must not surface the connected hook (#359).
+        if self.peer_recovery_status(peer_id).await.is_some() {
+            tracing::debug!(
+                peer_id = ?peer_id,
+                session_id = session_id,
+                reason = reason,
+                "Peer has unresolved network recovery; deferring business-sendable hook"
+            );
+            return;
+        }
+
         let relayed = Self::selected_pair_is_relayed(&peer_connection).await;
         let _hook_emission_guard = self.hook_emission_lock.lock().await;
 
@@ -1418,7 +1443,20 @@ impl WebRtcCoordinator {
             let Some(state) = peers.get_mut(peer_id) else {
                 return;
             };
-            if state.session_id != session_id
+            // Re-validate the recovery guard atomically with the sendable
+            // transition. `restart_ice` arms the guard off the listener task,
+            // so the lock-free check above can go stale before this write lock
+            // is acquired. Lock order here is `peers` ->
+            // `network_recovering_peers`, matching `restart_ice`, so reading
+            // the guard inside this write critical section cannot deadlock.
+            let recovery_guarded = {
+                let recovering = self.network_recovering_peers.read().await;
+                recovering
+                    .get(peer_id)
+                    .is_some_and(|status| status.session_id == session_id)
+            };
+            if recovery_guarded
+                || state.session_id != session_id
                 || state.sendable_hook_reported
                 || state.ice_restart_inflight
                 || state.current_state != RTCPeerConnectionState::Connected
@@ -1657,6 +1695,13 @@ impl WebRtcCoordinator {
                         err
                     );
                 }
+            }
+            // Mirror the restart task: the answerer readiness waiter is
+            // session-scoped too, so abort it on teardown rather than let it
+            // linger to its timeout and log a spurious not-ready warning.
+            if let Some(handle) = state.answerer_restart_ready_handle.take() {
+                handle.abort();
+                let _ = handle.await;
             }
         }
 
@@ -1997,7 +2042,15 @@ impl WebRtcCoordinator {
         Some(status)
     }
 
-    async fn peer_sendable_session(&self, peer_id: &ActrId) -> Option<u64> {
+    /// Local transport-level sendability: no ICE restart in flight, the
+    /// PeerConnection reports Connected, and at least one DataChannel is open.
+    ///
+    /// This is deliberately NOT business sendability. During network recovery
+    /// an old DataChannel can still report Open while its SCTP association is
+    /// already unusable, so these local conditions must never resolve an
+    /// unresolved recovery guard on their own (#359). Business callers must
+    /// use [`Self::peer_sendable_session`] instead.
+    async fn peer_transport_sendable_session(&self, peer_id: &ActrId) -> Option<u64> {
         let (session_id, ice_restart_inflight, peer_connection, webrtc_conn) = {
             let peers = self.peers.read().await;
             let state = peers.get(peer_id)?;
@@ -2020,6 +2073,32 @@ impl WebRtcCoordinator {
         } else {
             None
         }
+    }
+
+    pub(crate) async fn is_peer_transport_sendable_session(
+        &self,
+        peer_id: &ActrId,
+        session_id: u64,
+    ) -> bool {
+        self.peer_transport_sendable_session(peer_id)
+            .await
+            .is_some_and(|current_session_id| current_session_id == session_id)
+    }
+
+    /// Business sendability: transport-sendable AND no unresolved network
+    /// recovery guard for the current session.
+    ///
+    /// The recovery guard is authoritative (#359): once the current session
+    /// entered `Disconnected`/`Failed` or explicit network recovery, a
+    /// transient local `Connected` plus an old Open DataChannel is not proof
+    /// that the data path recovered, so the session stays non-sendable until
+    /// the guard is resolved by a completed recovery for that session.
+    async fn peer_sendable_session(&self, peer_id: &ActrId) -> Option<u64> {
+        let session_id = self.peer_transport_sendable_session(peer_id).await?;
+        if self.peer_recovery_status(peer_id).await.is_some() {
+            return None;
+        }
+        Some(session_id)
     }
 
     pub(crate) async fn is_peer_sendable_session(&self, peer_id: &ActrId, session_id: u64) -> bool {
@@ -2247,27 +2326,6 @@ impl WebRtcCoordinator {
             .await;
     }
 
-    async fn clear_peer_recovering_if_sendable(
-        &self,
-        peer_id: &ActrId,
-        session_id: u64,
-        reason: &str,
-    ) {
-        if self.is_peer_sendable_session(peer_id, session_id).await {
-            self.clear_peer_recovering(peer_id, session_id, reason)
-                .await;
-            self.notify_webrtc_connected_if_sendable(peer_id, session_id, reason)
-                .await;
-        } else {
-            tracing::debug!(
-                peer_id = ?peer_id,
-                session_id = session_id,
-                reason = reason,
-                "Peer is not sendable yet; keeping network recovery guard"
-            );
-        }
-    }
-
     /// Trigger ICE restart for peers currently guarded by a network recovery event.
     ///
     /// This is deliberately broader than `retry_failed_connections()`: mobile
@@ -2464,6 +2522,7 @@ impl WebRtcCoordinator {
 
             for (peer_id, state) in peers.iter_mut() {
                 let handle = state.restart_task_handle.take();
+                let ready_handle = state.answerer_restart_ready_handle.take();
                 if state.ice_restart_inflight || handle.is_some() {
                     tracing::info!("🛑 Aborting pending ICE restart for {:?}", peer_id);
                     if let Some(handle) = handle {
@@ -2473,6 +2532,12 @@ impl WebRtcCoordinator {
                     state.ice_restart_inflight = false;
                     state.ice_restart_attempts = 0;
                     state.ice_signaling.pending_local_sdp_exchange_id = None;
+                }
+                // The answerer readiness waiter is independent of
+                // ice_restart_inflight; abort and join it alongside the rest.
+                if let Some(ready_handle) = ready_handle {
+                    ready_handle.abort();
+                    restart_handles.push((peer_id.clone(), ready_handle));
                 }
                 state.ice_signaling.clear_pending_restart();
             }
@@ -2543,8 +2608,16 @@ impl WebRtcCoordinator {
                                             );
                                         }
                                     }
+                                    // A generic Connected transition is not
+                                    // proof that an unresolved recovery for
+                                    // this session finished (#359): the old
+                                    // DataChannel may still report Open while
+                                    // its SCTP association is dead. Keep the
+                                    // recovery guard; only emit the (guard-
+                                    // aware) connected hook for un-guarded
+                                    // sessions.
                                     coord
-                                        .clear_peer_recovering_if_sendable(
+                                        .notify_webrtc_connected_if_sendable(
                                             peer_id,
                                             *session_id,
                                             "peer connection connected",
@@ -2590,6 +2663,16 @@ impl WebRtcCoordinator {
                                     };
                                     match recovery_eligible {
                                         Some(true) => {
+                                            // The coordinator guard is the
+                                            // authoritative recovery state
+                                            // (#359): every eligible session
+                                            // entering Disconnected/Failed is
+                                            // marked recovering here, so a
+                                            // later transient Connected cannot
+                                            // silently restore sendability.
+                                            coord
+                                                .mark_peer_recovering(peer_id, *session_id, reason)
+                                                .await;
                                             coord
                                                 .notify_webrtc_recovering_once(
                                                     peer_id,
@@ -2634,8 +2717,11 @@ impl WebRtcCoordinator {
                                             state.mark_data_channel_opened();
                                         }
                                     }
+                                    // Same rule as the Connected arm: a newly
+                                    // opened DataChannel alone must not
+                                    // resolve an unresolved recovery guard.
                                     coord
-                                        .clear_peer_recovering_if_sendable(
+                                        .notify_webrtc_connected_if_sendable(
                                             peer_id,
                                             *session_id,
                                             "data channel opened",
@@ -2660,8 +2746,19 @@ impl WebRtcCoordinator {
                                     success: true,
                                     ..
                                 } => {
+                                    // Authoritative resolution: the restart
+                                    // wait verified ICE Connected for this
+                                    // session before emitting this event, so
+                                    // the session-scoped guard may be cleared.
                                     coord
-                                        .clear_peer_recovering_if_sendable(
+                                        .clear_peer_recovering(
+                                            peer_id,
+                                            *session_id,
+                                            "ice restart completed",
+                                        )
+                                        .await;
+                                    coord
+                                        .notify_webrtc_connected_if_sendable(
                                             peer_id,
                                             *session_id,
                                             "ice restart completed",
@@ -2896,6 +2993,15 @@ impl WebRtcCoordinator {
     ///
     /// Stage 1 waits for ICE/DTLS to reach Connected. Stage 2 then gives SCTP/DataChannel
     /// a shorter budget to open before the connection is reported ready.
+    ///
+    /// `restart_mode` distinguishes an ICE-restart readiness wait from an
+    /// initial-connection wait. On an initial connection an open DataChannel
+    /// proves the whole stack (ICE + DTLS + SCTP) because no earlier
+    /// generation can exist. During an ICE restart the session keeps its old
+    /// DataChannels, which may still report Open while the underlying SCTP
+    /// association is already unusable (#359) — so restart readiness must
+    /// observe ICE Connected before any DataChannel evidence is accepted.
+    #[allow(clippy::too_many_arguments)]
     async fn wait_for_connection_ready_event(
         peer_id: &ActrId,
         expected_session_id: u64,
@@ -2904,18 +3010,25 @@ impl WebRtcCoordinator {
         webrtc_conn: &super::connection::WebRtcConnection,
         ice_connected_timeout: Duration,
         data_channel_after_ice_timeout: Duration,
+        restart_mode: bool,
     ) -> bool {
-        // Quick check: if DataChannel is already open, return immediately
-        if webrtc_conn.has_open_data_channel().await {
-            tracing::debug!("✅ DataChannel already open for peer {}", peer_id);
-            return true;
-        }
-
-        // Subscribe to events
+        // Subscribe before the initial state observation. A DataChannel may
+        // open between two await points; installing the receiver first makes
+        // that transition visible either through the event or the state read.
         let mut event_rx = event_broadcaster.subscribe();
+
         let target_peer = peer_id.clone();
         let mut ice_connected =
             Self::is_peer_session_connected(peer_id, expected_session_id, peers).await;
+
+        // Quick check: if the DataChannel is already open, return immediately —
+        // except during an ICE restart, where a pre-existing Open DataChannel
+        // is not evidence about the current restart generation until ICE
+        // reports Connected.
+        if (!restart_mode || ice_connected) && webrtc_conn.has_open_data_channel().await {
+            tracing::debug!("✅ DataChannel already open for peer {}", peer_id);
+            return true;
+        }
 
         if ice_connected {
             tracing::debug!(
@@ -2960,6 +3073,15 @@ impl WebRtcCoordinator {
                             payload_type,
                         }) if peer_id == target_peer && session_id == expected_session_id =>
                         {
+                            if restart_mode && !ice_connected {
+                                tracing::debug!(
+                                    "⏳ DataChannel opened for peer {} (session_id={}, payload_type={:?}) before restart-generation ICE Connected; still waiting",
+                                    peer_id,
+                                    session_id,
+                                    payload_type
+                                );
+                                continue;
+                            }
                             tracing::info!(
                                 "✅ DataChannel opened for peer {} (session_id={}, payload_type={:?}, event-driven)",
                                 peer_id,
@@ -3024,7 +3146,9 @@ impl WebRtcCoordinator {
                         }
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                             tracing::warn!("⚠️ Event stream lagged by {} events, continuing...", n);
-                            if webrtc_conn.has_open_data_channel().await {
+                            if (!restart_mode || ice_connected)
+                                && webrtc_conn.has_open_data_channel().await
+                            {
                                 tracing::info!(
                                     "✅ DataChannel open after event lag for peer {} (session_id={})",
                                     target_peer,
@@ -3041,6 +3165,18 @@ impl WebRtcCoordinator {
                                 .await
                             {
                                 ice_connected = true;
+                                // Re-check the DataChannel now that ICE is
+                                // connected: in restart mode the pre-existing
+                                // Open channel was deliberately ignored above
+                                // and will not emit another open event.
+                                if webrtc_conn.has_open_data_channel().await {
+                                    tracing::info!(
+                                        "✅ DataChannel open once ICE connected after event lag for peer {} (session_id={})",
+                                        target_peer,
+                                        expected_session_id
+                                    );
+                                    return true;
+                                }
                                 sleep.as_mut().reset(
                                     tokio::time::Instant::now() + data_channel_after_ice_timeout
                                 );
@@ -3434,6 +3570,10 @@ impl WebRtcCoordinator {
                     handle.abort();
                     restart_handles.push((peer_id.clone(), handle));
                 }
+                if let Some(ready_handle) = state.answerer_restart_ready_handle.take() {
+                    ready_handle.abort();
+                    restart_handles.push((peer_id.clone(), ready_handle));
+                }
                 state.ice_restart_inflight = false;
                 state.ice_restart_attempts = 0;
                 state.ice_signaling.clear_pending_restart();
@@ -3532,6 +3672,10 @@ impl WebRtcCoordinator {
                         if let Some(handle) = state.restart_task_handle.take() {
                             handle.abort();
                             late_restart_handles.push((peer_id.clone(), handle));
+                        }
+                        if let Some(ready_handle) = state.answerer_restart_ready_handle.take() {
+                            ready_handle.abort();
+                            late_restart_handles.push((peer_id.clone(), ready_handle));
                         }
                     }
 
@@ -4180,6 +4324,13 @@ impl WebRtcCoordinator {
             {
                 handle.abort();
             }
+            if let Some(state) = peers
+                .get_mut(target)
+                .filter(|state| state.session_id == expected_session_id)
+                && let Some(handle) = state.answerer_restart_ready_handle.take()
+            {
+                handle.abort();
+            }
         }
 
         let restart_signaling_gate = self.restart_signaling_gate_for(target).await;
@@ -4255,6 +4406,13 @@ impl WebRtcCoordinator {
                 .get_mut(target)
                 .filter(|state| state.session_id == expected_session_id)
                 && let Some(handle) = state.restart_task_handle.take()
+            {
+                handle.abort();
+            }
+            if let Some(state) = peers
+                .get_mut(target)
+                .filter(|state| state.session_id == expected_session_id)
+                && let Some(handle) = state.answerer_restart_ready_handle.take()
             {
                 handle.abort();
             }
@@ -4360,6 +4518,13 @@ impl WebRtcCoordinator {
                 .get_mut(target)
                 .filter(|state| state.session_id == expected_session_id)
                 && let Some(handle) = state.restart_task_handle.take()
+            {
+                handle.abort();
+            }
+            if let Some(state) = peers
+                .get_mut(target)
+                .filter(|state| state.session_id == expected_session_id)
+                && let Some(handle) = state.answerer_restart_ready_handle.take()
             {
                 handle.abort();
             }
@@ -4559,6 +4724,7 @@ impl WebRtcCoordinator {
             ice_restart_inflight: false,
             ice_restart_attempts: 0,
             restart_task_handle: None,
+            answerer_restart_ready_handle: None,
             restart_wake: Arc::new(tokio::sync::Notify::new()),
             restart_retry_wake: Arc::new(tokio::sync::Notify::new()),
             last_ice_restart_offer_at: None,
@@ -4948,6 +5114,7 @@ impl WebRtcCoordinator {
             ice_restart_inflight: false,
             ice_restart_attempts: 0,
             restart_task_handle: None,
+            answerer_restart_ready_handle: None,
             restart_wake: Arc::new(tokio::sync::Notify::new()),
             restart_retry_wake: Arc::new(tokio::sync::Notify::new()),
             last_ice_restart_offer_at: None,
@@ -5349,7 +5516,15 @@ impl WebRtcCoordinator {
         // Get corresponding PeerConnection and ready_tx only after the Answer
         // is proven to belong to the current local Offer. A stale Answer must
         // not consume ready_tx or mutate the PeerConnection.
-        let (peer_connection, ready_tx, webrtc_conn, is_renegotiation, session_id, offer_id) = {
+        let (
+            peer_connection,
+            ready_tx,
+            webrtc_conn,
+            is_renegotiation,
+            session_id,
+            offer_id,
+            restart_inflight,
+        ) = {
             let mut peers = self.peers.write().await;
             tracing::info!(
                 "🔍 [LOOKUP] Searching for: id={}, total peers={}",
@@ -5396,6 +5571,7 @@ impl WebRtcCoordinator {
                 is_reneg,
                 state.session_id,
                 pending_sdp_exchange_id,
+                state.ice_restart_inflight,
             )
         };
 
@@ -5441,6 +5617,7 @@ impl WebRtcCoordinator {
                 &webrtc_conn_for_wait,
                 ICE_CONNECTED_TIMEOUT,
                 DATA_CHANNEL_AFTER_ICE_TIMEOUT,
+                restart_inflight,
             )
             .await;
 
@@ -8335,6 +8512,75 @@ impl WebRtcCoordinator {
             from,
             session_id
         );
+
+        // The Answerer has no ice_restart_inflight bookkeeping of its own, so
+        // it must produce the authoritative completion signal for this restart
+        // itself (#359): once the restarted generation reaches ICE Connected
+        // with an open DataChannel, broadcast IceRestartCompleted so the
+        // session-scoped recovery guards (coordinator + PeerGate) resolve.
+        // Restart mode deliberately ignores a pre-existing Open DataChannel
+        // until ICE Connected is observed. On timeout the guard stays in
+        // place; the answerer stale-recovery timeout and send preflight
+        // timeout own the teardown.
+        {
+            let peers = Arc::clone(&self.peers);
+            let event_broadcaster = self.event_broadcaster.clone();
+            let from_id = from.clone();
+            let ready_handle = tokio::spawn(async move {
+                let webrtc_conn = {
+                    let peers_guard = peers.read().await;
+                    match peers_guard.get(&from_id) {
+                        Some(state) if state.session_id == session_id => state.webrtc_conn.clone(),
+                        _ => return,
+                    }
+                };
+                let opened = Self::wait_for_connection_ready_event(
+                    &from_id,
+                    session_id,
+                    &peers,
+                    &event_broadcaster,
+                    &webrtc_conn,
+                    ICE_CONNECTED_TIMEOUT,
+                    DATA_CHANNEL_AFTER_ICE_TIMEOUT,
+                    true,
+                )
+                .await;
+                if opened {
+                    tracing::info!(
+                        "✅ ICE restart answer verified ready for serial={}, session_id={}",
+                        from_id,
+                        session_id
+                    );
+                    event_broadcaster.send(ConnectionEvent::IceRestartCompleted {
+                        peer_id: from_id.clone(),
+                        session_id,
+                        success: true,
+                    });
+                } else {
+                    tracing::warn!(
+                        "⚠️ ICE restart answer did not become ready for serial={}, session_id={}; keeping recovery guard",
+                        from_id,
+                        session_id
+                    );
+                }
+            });
+            // Track the readiness waiter so a newer restart answer supersedes
+            // it (at most one outstanding per session). Without this, rapid
+            // successive restarts could stack waiters that all observe a later
+            // generation's ICE Connected and double-emit completion. If the
+            // session already changed, abort the just-spawned waiter instead of
+            // leaking it untracked.
+            let mut peers_guard = self.peers.write().await;
+            match peers_guard.get_mut(from) {
+                Some(state) if state.session_id == session_id => {
+                    let prior = state.answerer_restart_ready_handle.replace(ready_handle);
+                    if let Some(prior) = prior {
+                        prior.abort();
+                    }
+                }
+                _ => ready_handle.abort(),
+            }
+        }
 
         Ok(())
     }

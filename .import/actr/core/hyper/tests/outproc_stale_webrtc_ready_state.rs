@@ -183,7 +183,7 @@ async fn stale_failed_event_does_not_reblock_peer_after_same_session_recovers() 
     let answerer_peer = harness.peer(ANSWERER_SERIAL);
 
     tracing::info!(
-        "Step 2: current session enters Failed, then recovers through Connected, session_id={}",
+        "Step 2: current session enters Failed and is guarded, session_id={}",
         session_id
     );
     answerer_peer.send_event(ConnectionEvent::StateChanged {
@@ -193,6 +193,9 @@ async fn stale_failed_event_does_not_reblock_peer_after_same_session_recovers() 
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
 
+    // #359: a transient Connected event on the guarded session must NOT
+    // restore business sendability — the old DataChannel may still report
+    // Open while its SCTP association is dead. Sends must keep failing fast.
     answerer_peer.send_event(ConnectionEvent::StateChanged {
         peer_id: offerer_id.clone(),
         session_id,
@@ -200,8 +203,62 @@ async fn stale_failed_event_does_not_reblock_peer_after_same_session_recovers() 
     });
     tokio::time::sleep(Duration::from_millis(200)).await;
 
+    let guarded_envelope = RpcEnvelope {
+        request_id: "answerer-send-during-unresolved-recovery".to_string(),
+        route_key: "test.ping".to_string(),
+        payload: Some(bytes::Bytes::from_static(
+            b"answerer-ping-during-unresolved-recovery",
+        )),
+        direction: Some(actr_protocol::Direction::Request as i32),
+        timeout_ms: 30_000,
+        ..Default::default()
+    };
+    let guarded_started = std::time::Instant::now();
+    let guarded_result = tokio::time::timeout(
+        Duration::from_secs(2),
+        answerer_peer
+            .gate
+            .send_request(&offerer_id, guarded_envelope),
+    )
+    .await;
+    match guarded_result {
+        Ok(Err(err)) => {
+            let msg = err.to_string();
+            assert!(
+                msg.contains("connection not ready")
+                    || msg.contains("not ready")
+                    || msg.contains("closing")
+                    || msg.contains("Failed"),
+                "expected ConnectionNotReady while recovery is unresolved, got: {msg}"
+            );
+            assert!(
+                guarded_started.elapsed() < Duration::from_secs(2),
+                "guarded request should fail fast instead of waiting for the RPC timeout"
+            );
+        }
+        Ok(Ok(_)) => {
+            panic!(
+                "send unexpectedly succeeded on a transient Connected while recovery is unresolved (#359)"
+            );
+        }
+        Err(_) => {
+            panic!("guarded send hung instead of failing fast");
+        }
+    }
+
     tracing::info!(
-        "Step 3: delayed Failed from stale session must not reblock peer, stale_session_id={}",
+        "Step 3: authoritative restart completion resolves the guard, session_id={}",
+        session_id
+    );
+    answerer_peer.send_event(ConnectionEvent::IceRestartCompleted {
+        peer_id: offerer_id.clone(),
+        session_id,
+        success: true,
+    });
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    tracing::info!(
+        "Step 4: delayed Failed from stale session must not reblock peer, stale_session_id={}",
         stale_session_id
     );
     answerer_peer.send_event(ConnectionEvent::StateChanged {
@@ -222,7 +279,7 @@ async fn stale_failed_event_does_not_reblock_peer_after_same_session_recovers() 
         ..Default::default()
     };
 
-    tracing::info!("Step 4: answerer sends after stale Failed; send should go through");
+    tracing::info!("Step 5: answerer sends after stale Failed; send should go through");
     let result = tokio::time::timeout(
         Duration::from_secs(2),
         answerer_peer.gate.send_message(&offerer_id, envelope),
