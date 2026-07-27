@@ -532,6 +532,11 @@ pub(crate) struct Inner {
     /// at node construction time.
     #[allow(dead_code)]
     pub(crate) credential_expiry_warning: Duration,
+
+    /// Whether `start()` spawns the membership controller for on-demand
+    /// credential recovery. Resolved from the private runtime configuration at
+    /// construction. The default `false` preserves the legacy lifecycle.
+    pub(crate) membership_controller_enabled: bool,
 }
 
 /// Credential state for shared access between tasks
@@ -1529,6 +1534,7 @@ impl Inner {
         credential_expiry_warning: Duration,
         dispatch_concurrency: crate::config::DispatchConcurrency,
         conflict_keys: Option<crate::dispatch::ConflictKeySpec>,
+        membership_controller_enabled: bool,
     ) -> ActorResult<Self> {
         use crate::outbound::{Gate, HostGate};
         use crate::wire::webrtc::{ReconnectConfig, SignalingConfig, WebSocketSignalingClient};
@@ -1709,6 +1715,7 @@ impl Inner {
             hook_observer: None,
             mailbox_backpressure_threshold,
             credential_expiry_warning,
+            membership_controller_enabled,
         })
     }
 
@@ -1973,11 +1980,33 @@ impl Inner {
         }
 
         tracing::info!("📡 Connecting to signaling server (with credential)");
-        self.signaling_client
-            .connect()
-            .await
-            .map_err(|e| ActrError::Unavailable(format!("Signaling connect failed: {e}")))?;
-        tracing::info!("✅ Connected to signaling server");
+        // A typed auth verdict on the INITIAL handshake (401 credential
+        // rejection or 403 realm denial) must reach the same membership-recovery
+        // path as the connected case. Before the controller is installed the
+        // explicit connect loop cannot report it, so when the controller is
+        // enabled we capture the verdict here and hand it to the controller once
+        // it is spawned (below) instead of failing startup on a credential the
+        // recovery engine could refresh. With the controller disabled, behavior
+        // is unchanged: any connect failure aborts start.
+        let mut deferred_initial_verdict: Option<crate::transport::AuthVerdict> = None;
+        match self.signaling_client.connect().await {
+            Ok(()) => tracing::info!("✅ Connected to signaling server"),
+            Err(e) => match e.auth_verdict() {
+                Some(verdict) if self.membership_controller_enabled => {
+                    tracing::warn!(
+                        ?verdict,
+                        error = %e,
+                        "📡 Initial signaling handshake returned a typed auth verdict; deferring to membership recovery instead of failing startup"
+                    );
+                    deferred_initial_verdict = Some(verdict);
+                }
+                _ => {
+                    return Err(ActrError::Unavailable(format!(
+                        "Signaling connect failed: {e}"
+                    )));
+                }
+            },
+        }
 
         // Collect background task handles so they can be managed by ActrRefShared later.
         let mut task_handles = Vec::new();
@@ -1988,6 +2017,16 @@ impl Inner {
         let node_hook_callback: Option<crate::wire::webrtc::HookCallback>;
         let session_state: SessionState;
         let credential_manager: CredentialManager;
+        // Set when the membership controller is enabled; handed to the heartbeat
+        // task so credential events report to the owner instead of triggering
+        // the legacy fire-and-forget renewal directly.
+        let mut membership_handle: Option<crate::lifecycle::membership::MembershipHandle> = None;
+        // Construct and wire the controller before `on_start`, but do not spawn
+        // it until the fallible hook succeeds. This prevents a failed start from
+        // detaching credential-management tasks.
+        let mut pending_membership_controller: Option<
+            crate::lifecycle::membership::MembershipController,
+        > = None;
 
         {
             let actor_id = register_ok.actr_id;
@@ -2240,6 +2279,52 @@ impl Inner {
                 .await;
             tracing::info!("✅ WebRTC infrastructure initialized");
 
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            // 1.7.5. Membership controller (self-healing credential lifecycle)
+            // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+            // When enabled, the controller becomes the SOLE owner of the
+            // credential: it seeds the `watch` with the just-registered gen-1
+            // credential, installs the two typed channels on the signaling
+            // client, and stages its on-demand coordinator loop.
+            // The signaling client stops reading the stored credential and
+            // instead builds handshake URLs from the watch and reports auth
+            // verdicts (including handshake 401s) over the mpsc — closing the
+            // gap where a handshake 401 never reached the recovery engine.
+            if self.membership_controller_enabled {
+                use crate::lifecycle::membership::MembershipController;
+
+                let seed = credential_manager.published_credential().await;
+                tracing::info!(
+                    revision = seed.revision,
+                    "🪪 Membership controller enabled; seeding credential watch"
+                );
+
+                // The wake edge: after the controller publishes a fresh
+                // credential it calls this to reset the socket's backoff
+                // generation and wake the reconnect loop. Publish
+                // happens-before this wake by construction.
+                let signaling_for_wake = self.signaling_client.clone();
+                let wake_socket: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+                    signaling_for_wake.schedule_auto_reconnect_reset_backoff();
+                });
+
+                let (controller, handle) = MembershipController::new(
+                    credential_manager.clone(),
+                    seed,
+                    wake_socket,
+                    self.shutdown_token.clone(),
+                );
+
+                // Install the two typed channels on the signaling client.
+                self.signaling_client
+                    .install_membership(handle.clone())
+                    .await;
+
+                pending_membership_controller = Some(controller);
+                membership_handle = Some(handle);
+                tracing::info!("✅ Membership controller staged for post-on_start spawn");
+            }
+
             // Fire `on_start` once the runtime context can see the initialized
             // gates, before starting request-accepting/background loops. Its
             // Err/panic aborts Node::start.
@@ -2256,6 +2341,31 @@ impl Inner {
                         .on_start(startup_ctx, invocation, &call_executor),
                 )
                 .await?;
+            }
+
+            if let Some(controller) = pending_membership_controller.take() {
+                task_handles.push(crate::lifecycle::membership::spawn_membership_controller(
+                    controller,
+                ));
+                tracing::info!("✅ Membership controller spawned (credential owner online)");
+            }
+
+            // If the initial handshake was answered with a typed auth verdict,
+            // hand it to the freshly-spawned controller now. This routes the
+            // startup-time verdict through the exact same on-demand recovery the
+            // connected path uses: a `Rejected` verdict re-acquires and
+            // republishes a credential (waking a reconnect), while `RealmDenied`
+            // marks the realm terminally unavailable.
+            if let Some(verdict) = deferred_initial_verdict.take()
+                && let Some(handle) = membership_handle.as_ref()
+            {
+                let stale_revision = handle.current_revision();
+                tracing::warn!(
+                    ?verdict,
+                    stale_revision,
+                    "📡 Reporting deferred initial-handshake auth verdict to membership controller for recovery"
+                );
+                handle.report(verdict, stale_revision).await;
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2368,6 +2478,7 @@ impl Inner {
                 let mailbox_for_heartbeat = self.mailbox.clone();
                 let register_request_for_heartbeat = register_request.clone();
                 let credential_manager_for_heartbeat = credential_manager.clone();
+                let membership_handle_for_heartbeat = membership_handle.clone();
                 let webrtc_coordinator_for_heartbeat = self.webrtc_coordinator.clone();
                 let webrtc_gate_for_heartbeat = self.webrtc_gate.clone();
 
@@ -2394,6 +2505,7 @@ impl Inner {
                     node_hook_callback.clone(),
                     webrtc_coordinator_for_heartbeat,
                     webrtc_gate_for_heartbeat,
+                    membership_handle_for_heartbeat,
                 ));
                 task_handles.push(heartbeat_handle);
             }

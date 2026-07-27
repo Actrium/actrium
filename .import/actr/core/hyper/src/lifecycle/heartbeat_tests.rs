@@ -1,6 +1,10 @@
 use super::*;
 use crate::inbound::MediaFrameRegistry;
-use crate::lifecycle::credential_manager::RegistrationContext;
+use crate::lifecycle::credential_manager::{CredentialManager, RegistrationContext};
+use crate::lifecycle::membership::{
+    MembershipController, PublishedCredential, spawn_membership_controller,
+};
+use crate::lifecycle::session_state::SessionPhase;
 use crate::lifecycle::{SessionSnapshot, SessionState};
 use crate::transport::{NetworkError, NetworkResult};
 use crate::wire::webrtc::{DisconnectReason, SignalingEvent, SignalingStats, WebRtcConfig};
@@ -186,6 +190,7 @@ struct ReconnectBeforeHeartbeatClient {
     connected: AtomicBool,
     connect_calls: AtomicUsize,
     heartbeat_calls: AtomicUsize,
+    reconnect_wakes: AtomicUsize,
     heartbeat_sent: Notify,
 }
 
@@ -291,6 +296,7 @@ impl ReconnectBeforeHeartbeatClient {
             connected: AtomicBool::new(false),
             connect_calls: AtomicUsize::new(0),
             heartbeat_calls: AtomicUsize::new(0),
+            reconnect_wakes: AtomicUsize::new(0),
             heartbeat_sent: Notify::new(),
         }
     }
@@ -390,6 +396,10 @@ impl SignalingClient for ReconnectBeforeHeartbeatClient {
         rx
     }
 
+    fn schedule_auto_reconnect(&self) {
+        self.reconnect_wakes.fetch_add(1, Ordering::SeqCst);
+    }
+
     async fn set_actor_id(&self, _actor_id: ActrId) {}
 
     async fn set_credential_state(&self, _credential_state: CredentialState) {}
@@ -421,6 +431,7 @@ async fn heartbeat_tick_reconnects_before_sending_when_signaling_is_disconnected
         None,
         None,
         None,
+        None,
     ));
 
     tokio::time::timeout(Duration::from_secs(5), async {
@@ -436,6 +447,193 @@ async fn heartbeat_tick_reconnects_before_sending_when_signaling_is_disconnected
 
     assert_eq!(client.connect_calls.load(Ordering::SeqCst), 1);
     assert!(client.heartbeat_calls.load(Ordering::SeqCst) >= 1);
+}
+
+#[tokio::test]
+async fn membership_heartbeat_never_drives_disconnected_socket() {
+    let actor_id = test_actor_id(1);
+    let credential = test_credential_for_actor(&actor_id, 7, 4_000_000_000);
+    let session = SessionState::new(SessionSnapshot {
+        actor_id: actor_id.clone(),
+        credential: credential.clone(),
+        credential_expires_at: prost_types::Timestamp {
+            seconds: 4_000_000_000,
+            nanos: 0,
+        },
+        turn_credential: TurnCredential::default(),
+        renewal_token: vec![7; 32].into(),
+        renewal_token_expires_at: prost_types::Timestamp {
+            seconds: 5_000_000_000,
+            nanos: 0,
+        },
+        generation: 1,
+    });
+    let manager = CredentialManager::new(
+        session,
+        RegistrationContext::Linked {
+            request: RegisterRequest {
+                actr_type: actor_id.r#type.clone(),
+                realm: actor_id.realm,
+                ..Default::default()
+            },
+            realm_secret: None,
+        },
+        "http://127.0.0.1:1",
+        None,
+    );
+    let shutdown = CancellationToken::new();
+    let (_controller, membership) = MembershipController::new(
+        manager,
+        PublishedCredential {
+            credential: credential.clone(),
+            credential_expires_at: None,
+            turn_credential: None,
+            actor_id: actor_id.clone(),
+            revision: 1,
+        },
+        Arc::new(|| {}),
+        shutdown.clone(),
+    );
+    let client = Arc::new(ReconnectBeforeHeartbeatClient::new_disconnected());
+    let task = tokio::spawn(heartbeat_task(
+        shutdown.clone(),
+        client.clone() as Arc<dyn SignalingClient>,
+        actor_id.clone(),
+        CredentialState::new(credential, None, None),
+        Arc::new(EmptyMailbox) as Arc<dyn Mailbox>,
+        Duration::from_millis(20),
+        RegisterRequest {
+            actr_type: actor_id.r#type.clone(),
+            realm: actor_id.realm,
+            ..Default::default()
+        },
+        "http://127.0.0.1:1".to_string(),
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(membership),
+    ));
+
+    tokio::time::sleep(Duration::from_millis(75)).await;
+    shutdown.cancel();
+    task.await.unwrap();
+
+    assert_eq!(client.connect_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(client.heartbeat_calls.load(Ordering::SeqCst), 0);
+}
+
+/// Shared fixture for the membership heartbeat wake-gating tests: a
+/// disconnected client, a credential manager over `session`, and a membership
+/// handle. Returns the wake/connect counters after ~4 heartbeat intervals.
+async fn run_membership_heartbeat_ticks(
+    session: SessionState,
+) -> (Arc<ReconnectBeforeHeartbeatClient>, usize, usize) {
+    let actor_id = test_actor_id(1);
+    let credential = test_credential_for_actor(&actor_id, 7, 4_000_000_000);
+    let manager = CredentialManager::new(
+        session,
+        RegistrationContext::Linked {
+            request: RegisterRequest {
+                actr_type: actor_id.r#type.clone(),
+                realm: actor_id.realm,
+                ..Default::default()
+            },
+            realm_secret: None,
+        },
+        "http://127.0.0.1:1",
+        None,
+    );
+    let shutdown = CancellationToken::new();
+    let (_controller, membership) = MembershipController::new(
+        manager.clone(),
+        PublishedCredential {
+            credential: credential.clone(),
+            credential_expires_at: None,
+            turn_credential: None,
+            actor_id: actor_id.clone(),
+            revision: 1,
+        },
+        Arc::new(|| {}),
+        shutdown.clone(),
+    );
+    let client = Arc::new(ReconnectBeforeHeartbeatClient::new_disconnected());
+    let task = tokio::spawn(heartbeat_task(
+        shutdown.clone(),
+        client.clone() as Arc<dyn SignalingClient>,
+        actor_id.clone(),
+        CredentialState::new(credential, None, None),
+        Arc::new(EmptyMailbox) as Arc<dyn Mailbox>,
+        Duration::from_millis(20),
+        RegisterRequest {
+            actr_type: actor_id.r#type.clone(),
+            realm: actor_id.realm,
+            ..Default::default()
+        },
+        "http://127.0.0.1:1".to_string(),
+        None,
+        Some(manager),
+        None,
+        None,
+        None,
+        Some(membership),
+    ));
+
+    tokio::time::sleep(Duration::from_millis(75)).await;
+    shutdown.cancel();
+    task.await.unwrap();
+
+    let wakes = client.reconnect_wakes.load(Ordering::SeqCst);
+    let connects = client.connect_calls.load(Ordering::SeqCst);
+    (client, wakes, connects)
+}
+
+fn membership_session(actor_id: &ActrId) -> SessionState {
+    SessionState::new(SessionSnapshot {
+        actor_id: actor_id.clone(),
+        credential: test_credential_for_actor(actor_id, 7, 4_000_000_000),
+        credential_expires_at: prost_types::Timestamp {
+            seconds: 4_000_000_000,
+            nanos: 0,
+        },
+        turn_credential: TurnCredential::default(),
+        renewal_token: vec![7; 32].into(),
+        renewal_token_expires_at: prost_types::Timestamp {
+            seconds: 5_000_000_000,
+            nanos: 0,
+        },
+        generation: 1,
+    })
+}
+
+/// Control: while the session is Active, a disconnected heartbeat tick keeps
+/// waking the reconnect manager (and never drives the socket itself).
+#[tokio::test]
+async fn membership_heartbeat_wakes_reconnect_while_active() {
+    let session = membership_session(&test_actor_id(1));
+    let (_client, wakes, connects) = run_membership_heartbeat_ticks(session).await;
+    assert!(
+        wakes >= 1,
+        "active session should keep waking the reconnect manager"
+    );
+    assert_eq!(connects, 0, "heartbeat must never drive the socket");
+}
+
+/// P2 regression: after a terminal Denied verdict (RealmUnavailable), the
+/// disconnected heartbeat tick must NOT wake the reconnect manager — that
+/// would restart the handshake, collect another Denied and loop forever,
+/// violating the no-automatic-reprobe contract.
+#[tokio::test]
+async fn membership_heartbeat_does_not_wake_reconnect_after_terminal_denial() {
+    let session = membership_session(&test_actor_id(1));
+    session.set_realm_unavailable().await;
+    let (_client, wakes, connects) = run_membership_heartbeat_ticks(session).await;
+    assert_eq!(
+        wakes, 0,
+        "terminal realm denial must suppress heartbeat auto-reconnect wakes"
+    );
+    assert_eq!(connects, 0, "heartbeat must never drive the socket");
 }
 
 #[tokio::test]
@@ -502,6 +700,7 @@ async fn credential_expiry_does_not_re_register_or_update_webrtc_local_id() {
         None,
         None,
         Some(&coordinator),
+        None,
         None,
     )
     .await;
@@ -603,6 +802,7 @@ async fn credential_warning_triggers_credential_manager_renewal() {
         &server.url(),
         None,
         Some(&manager),
+        None,
         None,
         None,
         None,
@@ -803,4 +1003,178 @@ async fn re_registration_sends_realm_secret_to_ais() {
     .await;
 
     assert_eq!(returned_actor_id, new_actor_id);
+}
+
+/// A connected socket whose heartbeats the realm rejects with 403.
+struct RealmDeniedHeartbeatClient;
+
+#[async_trait::async_trait]
+impl SignalingClient for RealmDeniedHeartbeatClient {
+    async fn connect(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+    async fn connect_once(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+    async fn disconnect(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+    async fn send_register_request(
+        &self,
+        _request: RegisterRequest,
+    ) -> NetworkResult<RegisterResponse> {
+        unimplemented!("not used by this test")
+    }
+    async fn send_unregister_request(
+        &self,
+        _actor_id: ActrId,
+        _credential: AIdCredential,
+        _reason: Option<String>,
+    ) -> NetworkResult<UnregisterResponse> {
+        unimplemented!("not used by this test")
+    }
+    async fn send_heartbeat(
+        &self,
+        _actor_id: ActrId,
+        _credential: AIdCredential,
+        _availability: ServiceAvailabilityState,
+        _power_reserve: f32,
+        _mailbox_backlog: f32,
+    ) -> NetworkResult<Pong> {
+        // Connected socket, but the realm denies the heartbeat (403).
+        Err(NetworkError::signaling_realm_denied(
+            "heartbeat rejected by realm: denied (403)",
+        ))
+    }
+    async fn send_route_candidates_request(
+        &self,
+        _actor_id: ActrId,
+        _credential: AIdCredential,
+        _request: RouteCandidatesRequest,
+    ) -> NetworkResult<RouteCandidatesResponse> {
+        unimplemented!("not used by this test")
+    }
+    async fn get_signing_key(
+        &self,
+        _actor_id: ActrId,
+        _credential: AIdCredential,
+        _key_id: u32,
+    ) -> NetworkResult<(u32, Vec<u8>)> {
+        unimplemented!("not used by this test")
+    }
+    async fn send_envelope(&self, _envelope: SignalingEnvelope) -> NetworkResult<()> {
+        Ok(())
+    }
+    async fn receive_envelope(&self) -> NetworkResult<Option<SignalingEnvelope>> {
+        Ok(None)
+    }
+    fn is_connected(&self) -> bool {
+        true
+    }
+    fn get_stats(&self) -> SignalingStats {
+        SignalingStats::default()
+    }
+    fn subscribe_events(&self) -> broadcast::Receiver<SignalingEvent> {
+        let (_tx, rx) = broadcast::channel(1);
+        rx
+    }
+    async fn set_actor_id(&self, _actor_id: ActrId) {}
+    async fn set_credential_state(&self, _credential_state: CredentialState) {}
+    async fn clear_identity(&self) {}
+}
+
+/// P2 regression (finding 5): a connected-heartbeat 403 must be routed to the
+/// membership authority as a terminal RealmDenied verdict, driving the session
+/// into `RealmUnavailable` — not downgraded to a generic auth error and retried
+/// forever.
+#[tokio::test]
+async fn connected_heartbeat_403_reports_terminal_realm_denied() {
+    let actor_id = test_actor_id(1);
+    let session = SessionState::new(SessionSnapshot {
+        actor_id: actor_id.clone(),
+        credential: test_credential_for_actor(&actor_id, 1, 4_000_000_000),
+        credential_expires_at: prost_types::Timestamp {
+            seconds: 4_000_000_000,
+            nanos: 0,
+        },
+        turn_credential: TurnCredential {
+            username: "u".to_string(),
+            password: "p".to_string(),
+            expires_at: 4_000_000_000,
+        },
+        renewal_token: bytes::Bytes::new(),
+        renewal_token_expires_at: prost_types::Timestamp {
+            seconds: 1,
+            nanos: 0,
+        },
+        generation: 1,
+    });
+    let engine = CredentialManager::new(
+        session,
+        RegistrationContext::Linked {
+            request: RegisterRequest {
+                actr_type: actor_id.r#type.clone(),
+                realm: actor_id.realm,
+                ..Default::default()
+            },
+            realm_secret: None,
+        },
+        "http://127.0.0.1:1".to_string(),
+        None,
+    );
+    let seed = PublishedCredential {
+        credential: test_credential_for_actor(&actor_id, 1, 4_000_000_000),
+        credential_expires_at: None,
+        turn_credential: None,
+        actor_id: actor_id.clone(),
+        revision: 1,
+    };
+    let shutdown = CancellationToken::new();
+    let (controller, handle) =
+        MembershipController::new(engine.clone(), seed, Arc::new(|| {}), shutdown.clone());
+    let controller_task = spawn_membership_controller(controller);
+
+    let client = Arc::new(RealmDeniedHeartbeatClient);
+    let credential_state = CredentialState::new(
+        test_credential_for_actor(&actor_id, 1, 4_000_000_000),
+        Some(prost_types::Timestamp {
+            seconds: 4_000_000_000,
+            nanos: 0,
+        }),
+        None,
+    );
+    let heartbeat_handle = tokio::spawn(heartbeat_task(
+        shutdown.clone(),
+        client as Arc<dyn SignalingClient>,
+        actor_id.clone(),
+        credential_state,
+        Arc::new(EmptyMailbox) as Arc<dyn Mailbox>,
+        Duration::from_millis(20),
+        RegisterRequest {
+            actr_type: actor_id.r#type.clone(),
+            realm: actor_id.realm,
+            ..Default::default()
+        },
+        "http://127.0.0.1:1".to_string(),
+        None,
+        Some(engine.clone()),
+        None,
+        None,
+        None,
+        Some(handle),
+    ));
+
+    // The first (immediate) heartbeat tick collects the 403 and reports it; the
+    // controller must drive the engine to the terminal denied phase.
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while engine.phase().await != SessionPhase::RealmUnavailable {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("connected heartbeat 403 must drive the session to RealmUnavailable");
+
+    shutdown.cancel();
+    let _ = heartbeat_handle.await;
+    let _ = controller_task.await;
 }

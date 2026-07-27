@@ -185,9 +185,17 @@ async fn pending_route_candidates_waiter_fails_promptly_on_disconnect() {
         .expect("request task should not panic");
 
     let err = result.expect_err("request should fail after disconnect drops pending waiter");
+    let message = err.to_string();
+    // Disconnecting with a request in flight has two legal outcomes, decided
+    // by whether the socket is invalidated before or after the send completes:
+    // either the pending waiter is dropped, or the send itself observes the
+    // dead socket. Both satisfy what this test is actually asserting — that
+    // the caller fails promptly instead of hanging until the response timeout
+    // — so accept either rather than pinning one interleaving, which the test
+    // did before and which made it fail under CI scheduling pressure.
     assert!(
-        err.to_string()
-            .contains("Receiver dropped while waiting for signaling response"),
+        message.contains("Receiver dropped while waiting for signaling response")
+            || message.contains("Signaling send completed after the WebSocket was invalidated"),
         "unexpected error: {err}"
     );
 
