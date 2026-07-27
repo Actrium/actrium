@@ -648,9 +648,30 @@ impl DefaultNetworkEventProcessor {
         result
     }
 
+    /// A signaling-only probe must not conclude recovery for WebRTC peers that
+    /// still carry an unresolved session recovery guard (#359): "signaling is
+    /// alive" is not evidence that a peer's data path recovered. After the
+    /// signaling channel is verified alive, continue (or trigger) ICE restart
+    /// for exactly the guarded peers. This is a no-op when no peer is
+    /// recovering, so a short-foreground probe stays signaling-only for fully
+    /// ready peers.
+    async fn continue_guarded_webrtc_recovery_after_probe(&self, reason: &str) {
+        if let Some(coordinator) = self.webrtc_coordinator.clone() {
+            tracing::debug!(
+                reason = reason,
+                "Signaling probe succeeded; continuing WebRTC recovery for guarded peers"
+            );
+            coordinator.restart_network_recovery_connections().await;
+        }
+    }
+
     async fn probe_or_restore(&self, reason: &str) -> Result<(), String> {
         match self.probe_connectivity().await {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                self.continue_guarded_webrtc_recovery_after_probe(reason)
+                    .await;
+                Ok(())
+            }
             Err(e) => {
                 tracing::warn!(
                     reason = reason,
