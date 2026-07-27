@@ -25,7 +25,8 @@ FIXTURES=../src/host/wasm-guest/__tests__/fixtures
 # invocation now (no feature-isolation split needed). ui-guest-json (built
 # separately with --no-default-features) is the back-compat, pre-promotion
 # JSON-only guest used to test the "guest without rill_wire_caps" host path.
-GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest canvas-binary-guest ui-binary-guest"
+# blur-demo-guest is the SIMD/worker-pool compute demo (issue #57).
+GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest canvas-binary-guest ui-binary-guest blur-demo-guest"
 
 # Optional debug build: DWARF-carrying guests for source-level debugging inside
 # V8's wasm debugger (Chrome DevTools "C/C++ DevTools Support (DWARF)"). Output
@@ -69,6 +70,7 @@ stage canvas_present_guest canvas-present-guest.wasm
 stage canvas_gpu_guest canvas-gpu-guest.wasm
 stage canvas_escape_guest canvas-escape-guest.wasm
 stage asset_guest asset-guest.wasm
+stage blur_demo_guest blur-demo-guest.wasm
 
 # Back-compat fixture: a pre-promotion, JSON-only guest with the binary encoders
 # and rill_wire_caps compiled OUT (--no-default-features). SEPARATE invocation
