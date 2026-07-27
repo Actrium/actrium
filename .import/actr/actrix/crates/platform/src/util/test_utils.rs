@@ -13,8 +13,13 @@ pub mod utils {
     // Setup test database
     pub async fn setup_test_db() -> anyhow::Result<()> {
         INIT.get_or_init(|| async {
-            // Use a directory for the database, not a file directly
-            let db_dir = std::env::temp_dir().join("actrix_test_db");
+            // Use a directory for the database, not a file directly.
+            // nextest runs each test in its own process, so a fixed path is
+            // concurrently deleted and rewritten (SQLITE_IOERR 1802). Suffix the
+            // path with the PID so each process gets an isolated database; under
+            // libtest the path stays shared within the single process, unchanged.
+            let db_dir =
+                std::env::temp_dir().join(format!("actrix_test_db_{}", std::process::id()));
 
             // Ensure directory exists
             std::fs::create_dir_all(&db_dir).expect("Failed to create test database directory");

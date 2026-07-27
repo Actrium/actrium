@@ -6,6 +6,11 @@
 !/.gitignore
 !/.rustfmt.toml
 !/.swiftlint.yml
+# cargo-nextest config (CI test retries) — standard .config/nextest.toml path.
+# Whitelist only nextest.toml; keep everything else under .config/ ignored.
+!/.config/
+/.config/*
+!/.config/nextest.toml
 
 # Build outputs
 target/
