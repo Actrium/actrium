@@ -63,18 +63,30 @@ fn register_ok(serial: u64, key_id: u32) -> register_response::RegisterOk {
     }
 }
 
+/// P1 (finding 1): with the membership controller flag OFF (default), an expired
+/// renewal token drives the legacy hard rebind, which must recover via a FRESH
+/// `/register` (new serial) and must NOT call `/reissue`. A `/reissue`-only
+/// legacy path breaks recovery against older AIS servers (404) and after the
+/// reissue binding grace lapses (403 possession failure).
 #[tokio::test]
-async fn expired_renewal_token_hard_rebinds_via_register() {
+async fn expired_renewal_token_re_registers_fresh_identity() {
     let mut server = mockito::Server::new_async().await;
+    // `/register` mints a NEW identity (serial 2), distinct from the old serial 1.
     let response = RegisterResponse {
         result: Some(register_response::Result::Success(register_ok(2, 9))),
     };
-    let mock = server
+    let register_mock = server
         .mock("POST", "/register")
         .with_status(200)
         .with_header("content-type", "application/x-protobuf")
         .with_body(response.encode_to_vec())
         .expect(1)
+        .create_async()
+        .await;
+    // The legacy flag-OFF path must never touch `/reissue`.
+    let reissue_mock = server
+        .mock("POST", "/reissue")
+        .expect(0)
         .create_async()
         .await;
 
@@ -116,10 +128,12 @@ async fn expired_renewal_token_hard_rebinds_via_register() {
         None,
     )
     .await
-    .expect("hard rebind should commit new snapshot");
+    .expect("legacy hard rebind should commit a fresh registration");
 
-    mock.assert_async().await;
+    register_mock.assert_async().await;
+    reissue_mock.assert_async().await;
     let snapshot = session.snapshot().await;
+    // Fresh register: the new serial issued by AIS is adopted.
     assert_eq!(snapshot.actor_id, actor(2));
     assert_eq!(snapshot.credential.key_id, 9);
     assert_eq!(snapshot.generation, 2);
@@ -226,6 +240,318 @@ async fn soft_renewal_fires_credential_renewed_hook() {
     assert_eq!(hook_expiry.load(AtomicOrdering::SeqCst), NEW_EXPIRY as u64);
 }
 
+/// P2 regression: the credential-only hard reissue (membership controller
+/// path) commits new credential material and must fire the documented
+/// CredentialRenewed notification exactly like the soft-renew path.
+#[tokio::test]
+async fn credential_only_hard_reissue_fires_credential_renewed_hook() {
+    let mut server = mockito::Server::new_async().await;
+    let response = RegisterResponse {
+        result: Some(register_response::Result::Success(register_ok(1, 9))),
+    };
+    let mock = server
+        .mock("POST", "/reissue")
+        .with_status(200)
+        .with_header("content-type", "application/x-protobuf")
+        .with_body(response.encode_to_vec())
+        .expect(1)
+        .create_async()
+        .await;
+
+    // Expired renewal token -> run_reacquire_once takes the hard-rebind branch.
+    let session = SessionState::new(SessionSnapshot {
+        actor_id: actor(1),
+        credential: credential(1),
+        credential_expires_at: prost_types::Timestamp {
+            seconds: 10,
+            nanos: 0,
+        },
+        turn_credential: TurnCredential {
+            username: "10:actor-1".to_string(),
+            password: "old".to_string(),
+            expires_at: 10,
+        },
+        renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
+        renewal_token_expires_at: prost_types::Timestamp {
+            seconds: 1,
+            nanos: 0,
+        },
+        generation: 1,
+    });
+
+    let hook_expiry = Arc::new(AtomicU64::new(0));
+    let hook_expiry_for_cb = hook_expiry.clone();
+    let hook_callback: crate::wire::webrtc::HookCallback = Arc::new(move |event| {
+        let hook_expiry = hook_expiry_for_cb.clone();
+        Box::pin(async move {
+            if let crate::wire::webrtc::HookEvent::CredentialRenewed { new_expiry } = event {
+                let secs = new_expiry
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("expiry should be after epoch")
+                    .as_secs();
+                hook_expiry.store(secs, AtomicOrdering::SeqCst);
+            }
+        })
+    });
+
+    let outcome = run_reacquire_once(
+        session,
+        server.url(),
+        None,
+        RegistrationContext::Linked {
+            request: RegisterRequest {
+                actr_type: actor(1).r#type,
+                realm: Realm { realm_id: 7 },
+                ..Default::default()
+            },
+            realm_secret: None,
+        },
+        None,
+        Some(hook_callback),
+    )
+    .await;
+
+    mock.assert_async().await;
+    assert!(
+        matches!(outcome, ReacquireOutcome::Renewed(_)),
+        "hard reissue should publish a renewed credential"
+    );
+    // register_ok(1, 9) advertises credential_expires_at = 1000s.
+    assert_eq!(
+        hook_expiry.load(AtomicOrdering::SeqCst),
+        1000,
+        "hard reissue must fire CredentialRenewed with the committed expiry"
+    );
+}
+
+/// P1 regression: the membership `/reissue` path must map a possession-proof
+/// failure (its own distinct wire code) to a retryable `Deferred`, NOT terminal
+/// `Denied`. Conflating it with the realm-denial `403` permanently stopped
+/// recovery for a missing / unknown / grace-expired proof.
+#[tokio::test]
+async fn reissue_possession_failure_defers_instead_of_denying() {
+    let mut server = mockito::Server::new_async().await;
+    let response = RegisterResponse {
+        result: Some(register_response::Result::Error(
+            actr_protocol::ErrorResponse {
+                code: REISSUE_POSSESSION_NOT_PROVEN_CODE,
+                message: "actor identity possession not proven".to_string(),
+            },
+        )),
+    };
+    let mock = server
+        .mock("POST", "/reissue")
+        .with_status(200)
+        .with_header("content-type", "application/x-protobuf")
+        .with_body(response.encode_to_vec())
+        .expect(1)
+        .create_async()
+        .await;
+
+    // Expired renewal token -> run_reacquire_once takes the hard-rebind branch.
+    let session = SessionState::new(SessionSnapshot {
+        actor_id: actor(1),
+        credential: credential(1),
+        credential_expires_at: prost_types::Timestamp {
+            seconds: 10,
+            nanos: 0,
+        },
+        turn_credential: TurnCredential {
+            username: "10:actor-1".to_string(),
+            password: "old".to_string(),
+            expires_at: 10,
+        },
+        renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
+        renewal_token_expires_at: prost_types::Timestamp {
+            seconds: 1,
+            nanos: 0,
+        },
+        generation: 1,
+    });
+    let session_handle = session.clone();
+
+    let outcome = run_reacquire_once(
+        session,
+        server.url(),
+        None,
+        RegistrationContext::Linked {
+            request: RegisterRequest {
+                actr_type: actor(1).r#type,
+                realm: Realm { realm_id: 7 },
+                ..Default::default()
+            },
+            realm_secret: None,
+        },
+        None,
+        None,
+    )
+    .await;
+
+    mock.assert_async().await;
+    assert!(
+        matches!(outcome, ReacquireOutcome::Deferred(_)),
+        "possession failure must defer, not deny: {outcome:?}"
+    );
+    assert_ne!(
+        session_handle.phase().await,
+        SessionPhase::RealmUnavailable,
+        "possession failure must NOT terminally mark the realm unavailable"
+    );
+}
+
+/// P1 companion: a genuine realm denial (403) on `/reissue` IS terminal — the
+/// controller marks the realm unavailable and stops automatic recovery.
+#[tokio::test]
+async fn reissue_realm_denied_is_terminal() {
+    let mut server = mockito::Server::new_async().await;
+    let response = RegisterResponse {
+        result: Some(register_response::Result::Error(
+            actr_protocol::ErrorResponse {
+                code: 403,
+                message: "Invalid realm secret".to_string(),
+            },
+        )),
+    };
+    let mock = server
+        .mock("POST", "/reissue")
+        .with_status(200)
+        .with_header("content-type", "application/x-protobuf")
+        .with_body(response.encode_to_vec())
+        .expect(1)
+        .create_async()
+        .await;
+
+    let session = SessionState::new(SessionSnapshot {
+        actor_id: actor(1),
+        credential: credential(1),
+        credential_expires_at: prost_types::Timestamp {
+            seconds: 10,
+            nanos: 0,
+        },
+        turn_credential: TurnCredential {
+            username: "10:actor-1".to_string(),
+            password: "old".to_string(),
+            expires_at: 10,
+        },
+        renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
+        renewal_token_expires_at: prost_types::Timestamp {
+            seconds: 1,
+            nanos: 0,
+        },
+        generation: 1,
+    });
+    let session_handle = session.clone();
+
+    let outcome = run_reacquire_once(
+        session,
+        server.url(),
+        None,
+        RegistrationContext::Linked {
+            request: RegisterRequest {
+                actr_type: actor(1).r#type,
+                realm: Realm { realm_id: 7 },
+                ..Default::default()
+            },
+            realm_secret: None,
+        },
+        None,
+        None,
+    )
+    .await;
+
+    mock.assert_async().await;
+    assert!(
+        matches!(outcome, ReacquireOutcome::Denied),
+        "realm denial must be terminal Denied: {outcome:?}"
+    );
+    assert_eq!(
+        session_handle.phase().await,
+        SessionPhase::RealmUnavailable,
+        "realm denial must mark the realm terminally unavailable"
+    );
+}
+
+/// The legacy fire-and-forget hard rebind path has the same contract: after a
+/// committed re-register, the workload observes CredentialRenewed.
+///
+/// It also pins the flag-OFF recovery endpoint: the legacy path uses fresh
+/// `/register`, never `/reissue` (see `legacy_hard_rebind_registers_fresh_serial`).
+#[tokio::test]
+async fn legacy_hard_rebind_fires_credential_renewed_hook() {
+    let mut server = mockito::Server::new_async().await;
+    let response = RegisterResponse {
+        result: Some(register_response::Result::Success(register_ok(1, 9))),
+    };
+    let mock = server
+        .mock("POST", "/register")
+        .with_status(200)
+        .with_header("content-type", "application/x-protobuf")
+        .with_body(response.encode_to_vec())
+        .expect(1)
+        .create_async()
+        .await;
+
+    let session = SessionState::new(SessionSnapshot {
+        actor_id: actor(1),
+        credential: credential(1),
+        credential_expires_at: prost_types::Timestamp {
+            seconds: 10,
+            nanos: 0,
+        },
+        turn_credential: TurnCredential {
+            username: "10:actor-1".to_string(),
+            password: "old".to_string(),
+            expires_at: 10,
+        },
+        renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
+        renewal_token_expires_at: prost_types::Timestamp {
+            seconds: 1,
+            nanos: 0,
+        },
+        generation: 1,
+    });
+
+    let hook_expiry = Arc::new(AtomicU64::new(0));
+    let hook_expiry_for_cb = hook_expiry.clone();
+    let hook_callback: crate::wire::webrtc::HookCallback = Arc::new(move |event| {
+        let hook_expiry = hook_expiry_for_cb.clone();
+        Box::pin(async move {
+            if let crate::wire::webrtc::HookEvent::CredentialRenewed { new_expiry } = event {
+                let secs = new_expiry
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .expect("expiry should be after epoch")
+                    .as_secs();
+                hook_expiry.store(secs, AtomicOrdering::SeqCst);
+            }
+        })
+    });
+
+    run_renewal_once(
+        session,
+        server.url(),
+        None,
+        RegistrationContext::Linked {
+            request: RegisterRequest {
+                actr_type: actor(1).r#type,
+                realm: Realm { realm_id: 7 },
+                ..Default::default()
+            },
+            realm_secret: None,
+        },
+        None,
+        Some(hook_callback),
+    )
+    .await
+    .expect("hard rebind should commit new snapshot");
+
+    mock.assert_async().await;
+    assert_eq!(
+        hook_expiry.load(AtomicOrdering::SeqCst),
+        1000,
+        "legacy hard rebind must fire CredentialRenewed with the committed expiry"
+    );
+}
+
 #[test]
 fn backoff_sequence() {
     let mut b = Backoff::new();
@@ -282,8 +608,9 @@ async fn package_hard_rebind_re_signs_manufacturer_proof() {
 
     let mut server = mockito::Server::new_async().await;
     let response = RegisterResponse {
-        result: Some(register_response::Result::Success(register_ok(2, 9))),
+        result: Some(register_response::Result::Success(register_ok(1, 9))),
     };
+    // Flag-OFF legacy hard rebind re-registers via fresh `/register`.
     let mock = server
         .mock("POST", "/register")
         .with_status(200)

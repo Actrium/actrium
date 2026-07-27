@@ -25,6 +25,20 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// How long an expired renewal-token record remains a valid possession proof
+/// for `/ais/reissue` (issuer-recorded actor binding).
+///
+/// Renewal (`/ais/renew`) keeps requiring an unexpired token; this grace only
+/// lets a long-offline node prove it once owned the exact serial so it can
+/// recover its stable identity through the hard-reissue path. Records older
+/// than expiry + grace are garbage-collected and the identity can no longer
+/// be reissued (the node must register a fresh serial).
+///
+/// Accepting an up-to-30-day-expired possession proof extends the recovery
+/// authority of a leaked old token; the attack surface, bounds, and mitigations
+/// are analysed in `actrix/docs/reissue-grace-threat-model.zh.md`.
+pub const REISSUE_BINDING_GRACE_SECS: i64 = 30 * 86_400;
+
 // -------- public API ---------------------------------------------------------
 
 /// Compute SHA-256(token) for storage lookup.
@@ -111,6 +125,51 @@ pub async fn insert_renewal_token(
     Ok(())
 }
 
+/// Persist the deterministic `/reissue` successor, refreshing an already-expired
+/// row for the same token hash instead of leaving it stale.
+///
+/// The successor hash is derived deterministically from the possession proof, so
+/// a lost-response retry re-derives the *same* hash. Three cases:
+///
+/// - No row yet (first attempt): insert with `expires_at`.
+/// - Row exists and is still unexpired (replay inside the successor's lifetime):
+///   left untouched, so the caller observes the expiry recorded on the first
+///   attempt.
+/// - Row exists but has already expired (the first response was lost and the
+///   one-day successor lapsed while the original proof is still inside the
+///   reissue grace): atomically refresh its `expires_at`/`created_at` so the
+///   read-back finds a live row instead of failing with a 500.
+///
+/// A plain `INSERT OR IGNORE` cannot do this: it silently keeps the dead row and
+/// the subsequent unexpired lookup returns `None`. Refreshing is safe because the
+/// token is deterministic — the same proof always maps to this one row, so no
+/// competing binding is ever displaced.
+pub async fn upsert_reissue_successor_token(
+    actor_id: &ActrId,
+    token_hash: &[u8],
+    expires_at: i64,
+) -> Result<(), sqlx::Error> {
+    let pool = platform::storage::db::get_database().get_pool();
+    let now = now_secs();
+
+    sqlx::query(
+        "INSERT INTO ais_renewal_token (actor_id, token_hash, expires_at, created_at)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(token_hash) DO UPDATE SET
+             expires_at = excluded.expires_at,
+             created_at = excluded.created_at
+         WHERE ais_renewal_token.expires_at <= excluded.created_at",
+    )
+    .bind(actor_id.to_string_repr())
+    .bind(token_hash)
+    .bind(expires_at)
+    .bind(now)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 /// Row returned by renewal token queries.
 pub struct RenewalTokenRow {
     #[allow(dead_code)]
@@ -148,6 +207,38 @@ pub async fn find_unexpired_token(
             expires_at,
         }),
     )
+}
+
+/// Look up the issuer-recorded binding backing an `/ais/reissue` possession
+/// proof, returning its recorded `expires_at`.
+///
+/// Unlike [`find_unexpired_token`], this accepts tokens that expired up to
+/// [`REISSUE_BINDING_GRACE_SECS`] ago: the reissue path exists precisely for
+/// nodes whose renewal token can no longer be used for `/renew`.
+///
+/// The returned expiry is what makes reissue replay-safe: it is a stable
+/// property of the presented proof, so it can seed a deterministic successor
+/// derivation that yields the same token for every retry of the same attempt.
+pub async fn find_binding_token_expiry(
+    actor_id: &ActrId,
+    token_hash: &[u8],
+) -> Result<Option<i64>, sqlx::Error> {
+    let pool = platform::storage::db::get_database().get_pool();
+    let now = now_secs();
+
+    let expires_at: Option<i64> = sqlx::query_scalar(
+        "SELECT expires_at FROM ais_renewal_token
+         WHERE actor_id = ?1 AND token_hash = ?2 AND expires_at + ?3 > ?4
+         LIMIT 1",
+    )
+    .bind(actor_id.to_string_repr())
+    .bind(token_hash)
+    .bind(REISSUE_BINDING_GRACE_SECS)
+    .bind(now)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(expires_at)
 }
 
 /// Delete all expired tokens for a given actor.
@@ -188,15 +279,19 @@ pub async fn trim_oldest_tokens_for_actor(actor_id: &ActrId) -> Result<u64, sqlx
     Ok(result.rows_affected())
 }
 
-/// Global GC: delete all expired tokens across all actors.
+/// Global GC: delete tokens across all actors once they are expired beyond
+/// [`REISSUE_BINDING_GRACE_SECS`].
 ///
 /// Called periodically (low-frequency) and at the start of each
-/// register/renew transaction.
+/// register/renew transaction. Rows inside the grace window are kept on
+/// purpose: they are the issuer-recorded binding that `/ais/reissue` uses to
+/// verify actor possession after the token stopped being renewable.
 pub async fn gc_expired_tokens() -> Result<u64, sqlx::Error> {
     let pool = platform::storage::db::get_database().get_pool();
     let now = now_secs();
 
-    let result = sqlx::query("DELETE FROM ais_renewal_token WHERE expires_at <= ?1")
+    let result = sqlx::query("DELETE FROM ais_renewal_token WHERE expires_at + ?1 <= ?2")
+        .bind(REISSUE_BINDING_GRACE_SECS)
         .bind(now)
         .execute(pool)
         .await?;

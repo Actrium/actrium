@@ -95,6 +95,18 @@ use tokio::sync::RwLock;
 
 type HmacSha1 = Hmac<Sha1>;
 
+/// Wire code carried in `RegisterResponse::Error` when a `/reissue` caller fails
+/// to prove possession of the requested `ActrId` (a missing, unknown, or
+/// grace-expired binding proof).
+///
+/// Deliberately distinct from the realm-denial `403`: a possession failure is a
+/// per-actor identity problem, not a realm-membership decision. Conflating the
+/// two behind `403` made the client treat a recoverable possession failure as a
+/// terminal realm denial and permanently stop recovery. The hyper membership
+/// controller maps this code to a retryable / identity-loss outcome, while `403`
+/// stays reserved for a genuine realm denial that terminates automatic recovery.
+pub const REISSUE_POSSESSION_NOT_PROVEN_CODE: u32 = 422;
+
 fn aid_error_to_code(err: &AidError) -> u32 {
     match err {
         AidError::InvalidFormat
@@ -115,6 +127,48 @@ fn aid_error_to_code(err: &AidError) -> u32 {
             }
         }
         AidError::InvalidSignature(_) | AidError::DecodeFailure(_) => 500,
+    }
+}
+
+/// Failure of a credential reissue attempt.
+///
+/// Possession failures are deliberately kept AIS-internal instead of widening
+/// [`AidError`]: that enum is publicly re-exported and exhaustive, so adding a
+/// variant would break downstream matches. The endpoint boundary maps this to
+/// the wire status instead.
+enum ReissueFailure {
+    /// Anything the shared credential machinery already classifies.
+    Aid(AidError),
+    /// The caller did not prove possession of the requested `ActrId`.
+    PossessionNotProven,
+}
+
+impl From<AidError> for ReissueFailure {
+    fn from(err: AidError) -> Self {
+        Self::Aid(err)
+    }
+}
+
+/// A possession proof that matched an issuer-recorded binding.
+///
+/// Carries the recorded expiry alongside the proof because both are inputs to
+/// the deterministic successor derivation — that is what makes a reissue retry
+/// reproduce the original token instead of minting a competing one.
+struct VerifiedPossession {
+    token: Vec<u8>,
+    binding_expires_at: i64,
+}
+
+impl ReissueFailure {
+    /// Map to the `(code, message)` pair carried in `RegisterResponse`.
+    fn to_response(&self) -> (u32, String) {
+        match self {
+            Self::Aid(err) => (aid_error_to_code(err), err.to_string()),
+            Self::PossessionNotProven => (
+                REISSUE_POSSESSION_NOT_PROVEN_CODE,
+                "actor identity possession not proven".to_string(),
+            ),
+        }
     }
 }
 
@@ -581,6 +635,140 @@ impl AIdIssuer {
         }
     }
 
+    /// Re-authenticate a registration context and issue fresh credentials for
+    /// an existing actor identity.
+    ///
+    /// This is deliberately separate from registration: callers must provide an
+    /// `ActrId` whose realm and type exactly match the authenticated registration
+    /// request, and no new serial number is allocated.
+    ///
+    /// `renewal_proof` is the caller's possession proof for exactly this
+    /// `actor_id`: the raw renewal token most recently issued to that actor.
+    /// Registration authentication alone only proves the caller may run this
+    /// package/type in this realm — it must never be enough to mint
+    /// credentials for an arbitrary serial number.
+    /// Failures are mapped into the `Error` variant of [`RegisterResponse`] here
+    /// so the handler has a single non-fallible path; this never returns `Err`.
+    pub async fn reissue_credential_with_realm_secret_check(
+        &self,
+        actor_id: &ActrId,
+        request: &RegisterRequest,
+        renewal_proof: Option<&[u8]>,
+        realm_secret_check: Option<RealmSecretCheck>,
+    ) -> RegisterResponse {
+        match self
+            .reissue_credential_inner(
+                actor_id,
+                request,
+                renewal_proof,
+                realm_secret_check.as_ref(),
+            )
+            .await
+        {
+            Ok(register_ok) => RegisterResponse {
+                result: Some(register_response::Result::Success(register_ok)),
+            },
+            Err(err) => {
+                let (code, message) = err.to_response();
+                RegisterResponse {
+                    result: Some(register_response::Result::Error(ErrorResponse {
+                        code,
+                        message,
+                    })),
+                }
+            }
+        }
+    }
+
+    async fn reissue_credential_inner(
+        &self,
+        actor_id: &ActrId,
+        request: &RegisterRequest,
+        renewal_proof: Option<&[u8]>,
+        realm_secret_check: Option<&RealmSecretCheck>,
+    ) -> Result<register_response::RegisterOk, ReissueFailure> {
+        if actor_id.realm != request.realm || actor_id.r#type != request.actr_type {
+            platform::recording::warn!(
+                "Credential reissue identity mismatch: actor={}, requested_type={}, requested_realm={}",
+                actor_id.to_string_repr(),
+                request.actr_type.to_string_repr(),
+                request.realm.realm_id
+            );
+            return Err(AidError::InvalidFormat.into());
+        }
+
+        self.verify_registration_identity(request, realm_secret_check)
+            .await?;
+        let proof = self
+            .verify_actor_possession(actor_id, renewal_proof)
+            .await?;
+
+        let mut register_ok = self.issue_credential_for_actor(actor_id).await?;
+        let (renewal_token, renewal_token_expires_at) =
+            self.issue_reissue_renewal_token(actor_id, &proof).await?;
+        register_ok.renewal_token = Some(renewal_token);
+        register_ok.renewal_token_expires_at = Some(renewal_token_expires_at);
+        Ok(register_ok)
+    }
+
+    /// Verify that the reissue caller actually owns `actor_id`.
+    ///
+    /// `verify_registration_identity` authenticates the workload context
+    /// (package proof or realm authorization) but does not bind the caller to
+    /// `actor_id.serial_number`. The binding proof is the renewal token AIS
+    /// itself issued to that actor: its hash must match an issuer-recorded
+    /// token for exactly this `ActrId`. Expired tokens remain acceptable for
+    /// [`crate::renewal::REISSUE_BINDING_GRACE_SECS`] so long-offline nodes can
+    /// still recover their stable identity; unknown or unbound IDs are rejected
+    /// with a distinct possession-failure code ([`REISSUE_POSSESSION_NOT_PROVEN_CODE`],
+    /// not the realm-denial `403`) and no credential is signed.
+    async fn verify_actor_possession(
+        &self,
+        actor_id: &ActrId,
+        renewal_proof: Option<&[u8]>,
+    ) -> Result<VerifiedPossession, ReissueFailure> {
+        let Some(proof) = renewal_proof.filter(|proof| !proof.is_empty()) else {
+            platform::recording::warn!(
+                "Credential reissue rejected: missing possession proof for actor {}; refusing to sign for an unproven serial",
+                actor_id.to_string_repr()
+            );
+            return Err(ReissueFailure::PossessionNotProven);
+        };
+
+        if proof.len() != 32 {
+            platform::recording::warn!(
+                "Credential reissue rejected: possession proof has invalid length {} for actor {}",
+                proof.len(),
+                actor_id.to_string_repr()
+            );
+            // A wrong-length proof cannot match any recorded binding, so it is
+            // a possession failure (422) — same class as a missing/unknown
+            // proof — not a malformed-request 400.
+            return Err(ReissueFailure::PossessionNotProven);
+        }
+
+        let proof_hash = crate::renewal::hash_token(proof);
+        let binding_expires_at = crate::renewal::find_binding_token_expiry(actor_id, &proof_hash)
+            .await
+            .map_err(|e| {
+                AidError::GenerationFailed(format!("reissue binding lookup failed: {e}"))
+            })?;
+
+        let Some(binding_expires_at) = binding_expires_at else {
+            // Never log the proof or its hash — treat them like credentials.
+            platform::recording::warn!(
+                "Credential reissue rejected: possession proof does not match any recorded binding for actor {}; possible cross-actor credential minting attempt",
+                actor_id.to_string_repr()
+            );
+            return Err(ReissueFailure::PossessionNotProven);
+        };
+
+        Ok(VerifiedPossession {
+            token: proof.to_vec(),
+            binding_expires_at,
+        })
+    }
+
     /// 内部处理逻辑（Ed25519 签名，通过 KS Sign RPC）
     async fn issue_credential_inner(
         &self,
@@ -641,31 +829,8 @@ impl AIdIssuer {
         // Generate a time-limited TURN credential compatible with coturn --use-auth-secret.
         let turn_credential = self.generate_turn_credential(&actr_id.to_string_repr(), expr_time);
 
-        if self.config.renewal_token_secret.is_empty() {
-            return Err(AidError::GenerationFailed(
-                "renewal_token_secret is required".to_string(),
-            ));
-        }
-
-        let token = self.generate_renewal_token();
-        let renewal_expires = self.calculate_renewal_expiry_time();
-
-        // Persist token hash; failure here fails the whole registration.
-        let token_hash = crate::renewal::hash_token(&token);
-        crate::renewal::insert_renewal_token(&actr_id, &token_hash, renewal_expires)
-            .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("Failed to persist renewal token: {e}"))
-            })?;
-
-        // Run global GC for expired tokens.
-        let _ = crate::renewal::gc_expired_tokens().await;
-
-        let renewal_token = Some(Bytes::from(token));
-        let renewal_token_expires_at = Some(Timestamp {
-            seconds: renewal_expires,
-            nanos: 0,
-        });
+        let (renewal_token, renewal_token_expires_at) =
+            self.issue_fresh_renewal_token(&actr_id).await?;
 
         Ok(register_response::RegisterOk {
             actr_id,
@@ -675,8 +840,8 @@ impl AIdIssuer {
             signaling_heartbeat_interval_secs: self.config.signaling_heartbeat_interval_secs,
             signing_pubkey: Bytes::from(verifying_key.as_bytes().to_vec()),
             signing_key_id: key_id,
-            renewal_token,
-            renewal_token_expires_at,
+            renewal_token: Some(renewal_token),
+            renewal_token_expires_at: Some(renewal_token_expires_at),
         })
     }
 
@@ -1198,6 +1363,122 @@ impl AIdIssuer {
         use rand::RngCore;
         rand::thread_rng().fill_bytes(&mut token);
         token
+    }
+
+    async fn issue_fresh_renewal_token(
+        &self,
+        actor_id: &ActrId,
+    ) -> Result<(Bytes, Timestamp), AidError> {
+        if self.config.renewal_token_secret.is_empty() {
+            return Err(AidError::GenerationFailed(
+                "renewal_token_secret is required".to_string(),
+            ));
+        }
+
+        let token = self.generate_renewal_token();
+        let expires_at = self.calculate_renewal_expiry_time();
+        let token_hash = crate::renewal::hash_token(&token);
+        crate::renewal::insert_renewal_token(actor_id, &token_hash, expires_at)
+            .await
+            .map_err(|e| {
+                AidError::GenerationFailed(format!("Failed to persist renewal token: {e}"))
+            })?;
+
+        let _ = crate::renewal::gc_expired_tokens().await;
+        crate::renewal::trim_oldest_tokens_for_actor(actor_id)
+            .await
+            .map_err(|e| {
+                AidError::GenerationFailed(format!("Failed to trim renewal tokens: {e}"))
+            })?;
+
+        Ok((
+            Bytes::from(token),
+            Timestamp {
+                seconds: expires_at,
+                nanos: 0,
+            },
+        ))
+    }
+
+    /// Issue the renewal token that accompanies a credential reissue.
+    ///
+    /// Unlike [`Self::issue_fresh_renewal_token`], the successor is derived
+    /// deterministically from the presented possession proof rather than drawn
+    /// from the CSPRNG. That is what makes `/ais/reissue` safe to retry: a
+    /// client whose response was lost replays the same proof and re-derives the
+    /// same successor, so the binding it is still holding is never displaced by
+    /// a competing token. A fast replay reuses the still-live row unchanged; a
+    /// replay after that one-day successor expired (while the original proof is
+    /// still inside the reissue grace) refreshes the row's expiry rather than
+    /// failing — so identity recovery survives any number of lost responses.
+    async fn issue_reissue_renewal_token(
+        &self,
+        actor_id: &ActrId,
+        proof: &VerifiedPossession,
+    ) -> Result<(Bytes, Timestamp), AidError> {
+        if self.config.renewal_token_secret.is_empty() {
+            return Err(AidError::GenerationFailed(
+                "renewal_token_secret is required".to_string(),
+            ));
+        }
+
+        let token = crate::renewal::derive_successor_token(
+            &self.config.renewal_token_secret,
+            &proof.token,
+            actor_id,
+            proof.binding_expires_at,
+        );
+        let token_hash = crate::renewal::hash_token(&token);
+
+        // Reissue accepts proofs that already expired (anything inside the
+        // binding grace window), so anchoring the successor on the proof's
+        // expiry alone could mint an already-dead token. Take whichever of the
+        // proof expiry and now is later; only the first attempt's value is
+        // ever persisted.
+        let anchor = proof.binding_expires_at.max(crate::renewal::now_secs());
+        let expires_at =
+            crate::renewal::successor_expires_at(anchor, self.config.renewal_token_ttl_secs);
+
+        // Upsert rather than `INSERT OR IGNORE`: if the first response was lost
+        // and this one-day successor already expired while the original proof is
+        // still inside the reissue grace, the deterministic row is refreshed to
+        // a live expiry. `INSERT OR IGNORE` would keep the dead row and the
+        // unexpired read-back below would return `None`, producing a spurious
+        // 500 that permanently blocks identity recovery. A still-live row is
+        // left untouched so a fast replay still observes the first expiry.
+        crate::renewal::upsert_reissue_successor_token(actor_id, &token_hash, expires_at)
+            .await
+            .map_err(|e| {
+                AidError::GenerationFailed(format!("Failed to persist renewal token: {e}"))
+            })?;
+
+        // Read the expiry back instead of returning the value just computed:
+        // on a fast replay the row was left untouched, and the caller must
+        // observe the expiry AIS actually recorded for it.
+        let stored = crate::renewal::find_unexpired_token(actor_id, &token_hash)
+            .await
+            .map_err(|e| {
+                AidError::GenerationFailed(format!("Failed to read back renewal token: {e}"))
+            })?
+            .ok_or_else(|| {
+                AidError::GenerationFailed(
+                    "renewal token missing immediately after insert".to_string(),
+                )
+            })?;
+
+        // Deliberately no trim here. The proof must stay resolvable for as
+        // long as the grace window allows, otherwise a later retry of this
+        // same attempt would be rejected — the exact failure this endpoint
+        // exists to prevent. Growth stays bounded because a replay inserts
+        // nothing, and `gc_expired_tokens` reclaims rows past the grace.
+
+        Ok((
+            Bytes::from(token),
+            Timestamp {
+                seconds: stored.expires_at,
+                nanos: 0,
+            },
+        ))
     }
 
     /// 为已有 ActrId 重新签发 credential（供 /ais/renew 使用）
