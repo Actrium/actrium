@@ -10,7 +10,9 @@
     "types": ["react"],
     "baseUrl": ".",
     "paths": {
-      "rill/guest": ["../../src/sdk/index.ts"]
+      "rill/guest": ["../../src/sdk/index.ts"],
+      "rill/contract": ["../../src/contract/index.ts"],
+      "rill/*": ["../../src/*"]
     }
   },
   "include": ["src/index.tsx"]
