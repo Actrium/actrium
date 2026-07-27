@@ -612,7 +612,11 @@ pub mod store {
         }
         let entries = match decode_reply(&resp).map_err(crate::codec_error)? {
             Value::Obj(entries) => entries,
-            _ => return Err(Vec::from(&b"{\"error\":\"list: reply is not an object\"}"[..])),
+            _ => {
+                return Err(Vec::from(
+                    &b"{\"error\":\"list: reply is not an object\"}"[..],
+                ))
+            }
         };
         let items = match entries.into_iter().find(|(k, _)| k == "keys") {
             Some((_, Value::Arr(items))) => items,
