@@ -20,6 +20,11 @@ export const KBD_UNSUBSCRIBE = '__rill_kbd_unsubscribe';
  * A structured keyboard event forwarded from the host to the guest. Carries the fields apps
  * actually need: `keydown`/`keyup` (deprecated `keypress` is skipped), `key` + `code`,
  * modifier flags, and `repeat` (games need keyup + code + repeat; shortcuts need modifiers).
+ *
+ * `isComposing` is true while an input method (IME, dead-key/accent sequence) is composing.
+ * During composition the `key` stream does NOT carry the committed text (that needs a
+ * separate text channel), but forwarding this flag lets a guest suppress its shortcut
+ * handling for exactly that window instead of acting on the raw composition keystrokes.
  */
 export interface RillKeyEvent {
   type: 'keydown' | 'keyup';
@@ -30,6 +35,7 @@ export interface RillKeyEvent {
   altKey: boolean;
   metaKey: boolean;
   repeat: boolean;
+  isComposing: boolean;
 }
 
 /** Guest → host subscription payload. `keys: null` means "every key". */
