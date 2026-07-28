@@ -185,6 +185,53 @@ impl<F: Future> Issued<F> {
     }
 }
 
+/// `HostCall::poll_now` lets a native guest keep a call in flight WITHOUT
+/// awaiting it, so the single root task can keep presenting instead of freezing
+/// on an in-flight host call (issue #65). This locks the level-triggered
+/// contract: the result the host stashes via `rill_resolve` is observed on a
+/// later `poll_now` with no waker wakeup, the first poll issues exactly one
+/// `rill_host_call`, and the result is taken exactly once.
+#[test]
+fn host_call_poll_now_is_level_triggered() {
+    let _guard = crate::wire_lock();
+    CALLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+
+    let mut call = crate::host_call("host:store", "getText", b"{\"key\":\"k\"}".to_vec());
+
+    // First poll_now issues exactly one rill_host_call and parks (no result yet).
+    assert!(
+        call.poll_now().is_none(),
+        "poll_now must be None while the call is pending"
+    );
+    let cb = {
+        let mut calls = CALLS.lock().unwrap_or_else(|e| e.into_inner());
+        assert_eq!(
+            calls.len(),
+            1,
+            "poll_now must issue exactly one rill_host_call"
+        );
+        calls.pop().expect("len checked").3
+    };
+
+    // Still pending before the host resolves — repeated polling is safe.
+    assert!(call.poll_now().is_none(), "still pending before resolve");
+
+    // Host resolves the matching cb; the completion is stashed in the runtime.
+    let response = b"{\"value\":\"v\"}";
+    // Safety: `response` is a live slice we own; resolve copies it out immediately.
+    unsafe { crate::rt::resolve(cb, 1, response.as_ptr(), response.len()) };
+
+    // A later poll_now observes the stashed result with no waker wakeup.
+    let (ok, bytes) = call
+        .poll_now()
+        .expect("poll_now returns the result after resolve");
+    assert_eq!(ok, 1);
+    assert_eq!(bytes, response);
+
+    // The result was consumed; further polls are None again.
+    assert!(call.poll_now().is_none(), "None after the result is taken");
+}
+
 /// Look up a method spec and verify the captured module/method/body against it.
 fn check_method<F: Future>(root: &Json, seam_name: &str, issued: &Issued<F>) {
     assert_eq!(issued.module, seam_name, "wire module name");
