@@ -45,6 +45,91 @@ export async function refresh() {
     expect(result.violations).toEqual([]);
   });
 
+  it('should not treat a whole `import type` from a host module as a capability', async () => {
+    fs.writeFileSync(
+      path.join('src', 'guest.tsx'),
+      `
+import type { StoreRecord } from 'host:store';
+import { getText } from 'host:store';
+
+const _rec: StoreRecord | null = null;
+export function run(): string {
+  return getText('k');
+}
+`
+    );
+
+    const result = await analyze(path.join('src', 'guest.tsx'), {
+      failOnViolation: true,
+    });
+
+    // The type-only statement is erased and crosses no runtime boundary, so only
+    // the value import is a capability.
+    expect(result.hostCapabilities).toEqual(['host:store.getText']);
+    expect(result.violations).toEqual([]);
+  });
+
+  it('should not treat an inline `type` specifier from a host module as a capability', async () => {
+    fs.writeFileSync(
+      path.join('src', 'guest.tsx'),
+      `
+import { getText, type StoreRecord } from 'host:store';
+
+const _rec: StoreRecord | null = null;
+export function run(): string {
+  return getText('k');
+}
+`
+    );
+
+    const result = await analyze(path.join('src', 'guest.tsx'), {
+      failOnViolation: true,
+    });
+
+    // Only the value specifier is a capability; the inline `type` one is erased.
+    expect(result.hostCapabilities).toEqual(['host:store.getText']);
+    expect(result.violations).toEqual([]);
+  });
+
+  it('should not flag an all-type-specifier host import as a bare import', async () => {
+    fs.writeFileSync(
+      path.join('src', 'guest.tsx'),
+      `
+import { type StoreRecord } from 'host:store';
+
+export const rec: StoreRecord | null = null;
+`
+    );
+
+    // failOnViolation would throw on any violation; reaching the asserts proves
+    // the (erased) all-type import is neither a capability nor a bare-import
+    // violation.
+    const result = await analyze(path.join('src', 'guest.tsx'), {
+      failOnViolation: true,
+    });
+
+    expect(result.hostCapabilities).toEqual([]);
+    expect(result.violations).toEqual([]);
+  });
+
+  it('should still reject a genuinely bare host import', async () => {
+    fs.writeFileSync(
+      path.join('src', 'guest.tsx'),
+      `
+import 'host:store';
+
+export function run(): void {}
+`
+    );
+
+    // The source-count guard must not weaken detection of a real bare import.
+    await expect(
+      analyze(path.join('src', 'guest.tsx'), {
+        failOnViolation: true,
+      })
+    ).rejects.toThrow('Bare host module import is not allowed');
+  });
+
   it('should analyze host imports against a contract file', async () => {
     fs.writeFileSync(
       path.join('src', 'rill.contract.ts'),
