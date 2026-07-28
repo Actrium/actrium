@@ -1,10 +1,14 @@
 # Actr
 
-Swift Package for distributing the ACTR (Actrium) framework via a prebuilt XCFramework.
+Swift bindings and the repository-local Swift package for ACTR (Actrium).
 
 ## Overview
 
-- **ActrFFI.xcframework**: Precompiled iOS/macOS XCFramework published through GitHub Releases (remote `binaryTarget`).
+- **Monorepo `Package.swift`**: Uses an XCFramework built from the current
+  checkout for local development and CI validation. It never falls back to a
+  published binary.
+- **Published package**: The external `actr-swift-package-sync` repository
+  distributes a prebuilt iOS/macOS XCFramework through a remote `binaryTarget`.
 - **Actr**: Swift API that includes UniFFI-generated bindings and high-level helpers.
 
 ## Relationship to the Rust Node Typestate
@@ -105,14 +109,25 @@ This generates Swift bindings and the multi-platform XCFramework at `ActrFFI.xcf
 
 ## Package for release
 
-1. Build the xcframework: `./build-xcframework.sh`
-2. Package and compute checksum: `./scripts/package-binary.sh v0.1.0`
-   - Outputs `dist/ActrFFI.xcframework.zip` and `dist/release.txt` with the checksum and URL.
-3. Update `Package.swift` defaults:
-   - Set `ACTR_BINARY_TAG` (default tag) and `ACTR_BINARY_CHECKSUM` (64-hex checksum) to match `dist/release.txt`.
-4. Trigger the `Actrium/actr-swift-package-sync` release workflow from the monorepo release train.
-   - The external package-sync repository clones the tagged `actr` source, rebuilds the XCFramework, updates `Package.swift`, and publishes `ActrFFI.xcframework.zip`.
-5. Consumers can then resolve the package without building Rust locally.
+Swift publishing is owned by the monorepo release train. Do not add a remote
+binary URL, release tag, or checksum to this directory's `Package.swift`; that
+manifest must remain local-only so repository validation cannot silently use a
+stale published binary.
+
+The release train's `publish-swift` stage dispatches the
+`Actrium/actr-swift-package-sync` release workflow. The external workflow checks
+out the tagged monorepo source, rebuilds the XCFramework, updates its own
+consumer-facing `Package.swift`, and publishes the archive.
+
+For manual artifact inspection:
+
+1. Build the XCFramework: `./build-xcframework.sh`
+2. Package it and compute its checksum:
+   `./scripts/package-binary.sh v0.1.0`
+3. Inspect `dist/ActrFFI.xcframework.zip` and `dist/release.txt`.
+
+The root release workflows consume the same artifact metadata when validating
+and publishing releases.
 
 ## Project Structure
 
