@@ -8,6 +8,7 @@
 //
 // For Windows (Hermes NuGet, N-API-only), see HermesSandboxNAPI.h instead.
 
+#include <atomic>
 #include <cstdint>
 #include <jsi/jsi.h>
 #include <memory>
@@ -138,6 +139,12 @@ private:
   // drain before destroying the CDPDebugAPI + runtime, so no CDP thread can
   // touch a half-torn-down runtime. Constructed with the runtime. Dev-only.
   std::shared_ptr<rill::devtools::CdpTeardownGate> cdpTeardownGate_;
+  // Count of attached DevTools clients, shared with the CDPAgentTarget which
+  // bumps it on connect/disconnect. The watchdog pause callback reads it: with
+  // zero clients a debugger;/breakpoint pause must auto-resume, or the runtime
+  // (and the host JS thread it shares) hangs forever (#77). Written on the
+  // relay thread, read on the runtime thread → atomic. Dev-only.
+  std::shared_ptr<std::atomic<int>> cdpClientsAttached_;
   // Weak handle to the target built by createCdpDebugTarget, so dispose() can
   // sweep any CDPAgents still attached (destroying them while the runtime +
   // CDPDebugAPI are alive, after closing the gate). Dev-only.
