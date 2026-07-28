@@ -1791,12 +1791,30 @@ pub mod gpu {
 /// with props.text, matching the JS reconciler) the host `receiver`
 /// materializes — the same rendering path JS guests use, only the batch is
 /// authored in Rust.
+///
+/// # Node vocabulary is canvas-first (today)
+///
+/// [`crate::ui::Node`] is the *complete* set a native guest can emit: a `View` container, a
+/// `Text` string, and a `Canvas` viewport — and `View`/`Text` carry no props,
+/// style, id or event callbacks. The 21-name component whitelist a JS guest gets
+/// (`src/sdk/sdk.ts`) is therefore NOT reachable from the native line: a native
+/// guest cannot mount an interactive RN component, nor position/style `View`/
+/// `Text`. Real interfaces (toolbars, forms, dropdowns, text fields) are
+/// self-rendered into a `Canvas` — the guest owns layout, hit-testing and focus,
+/// driven by the canvas `pointer` / `wheel` / `key` event streams delivered
+/// through [`crate::events`]. This is what works today; converging the two lines
+/// on one component model (props + an event return path) is a tracked follow-up,
+/// not a permanent design choice — see issue #63 and
+/// `docs/native-guest-deferred.zh.md`.
 pub mod ui {
     use alloc::string::String;
     use alloc::vec::Vec;
 
-    /// A sealed UI node. `View` is a container; `Text` carries a string; `Canvas`
-    /// mounts a viewport painted via host:canvas (draw / present).
+    /// A sealed UI node — and the *complete* native node vocabulary. `View` is a
+    /// container; `Text` carries a string; `Canvas` mounts a viewport painted via
+    /// host:canvas (draw / present). None of the three carry props, style or event
+    /// callbacks; interactive UI is self-rendered into a `Canvas` (see the module
+    /// docs for the canvas-first boundary).
     pub enum Node {
         View(Vec<Node>),
         Text(String),
