@@ -158,6 +158,7 @@ export function attachKeyboard(
       altKey: event.altKey,
       metaKey: event.metaKey,
       repeat: event.repeat,
+      isComposing: event.isComposing,
     };
     (engine as KeyboardBridgeEngine).sendEvent(KBD_EVENT, forwarded);
   }
