@@ -38,13 +38,18 @@ can decode it. Requirements, all mandated by the platform requirement R1
   `1` (`crates/rill-guest/src/lib.rs:53`). Bumping it would force every host to
   re-gate every guest for an additive, opt-in encoding — exactly the flag-day the
   platform said to avoid.
-- **Promotion = flip the default.** During WIP the guest defaults to JSON even
-  when the host advertises binary support (so the decoder can bake without any
-  live traffic depending on it). "Going live" is a one-line default flip in the
-  guest encoder-selection, not a wire change and not a version bump.
-- **WIP-gated.** Like the op-batch codecs, everything here ships **off**: the
-  Rust encoder behind a Cargo feature, the TS decoder not on any live receive
-  path, the guest default still JSON.
+- **Promotion = runtime handshake, not a compile flag.** The guest encoder is
+  shipped by default (issue #45); whether a given frame goes out binary or JSON
+  is decided at runtime by the `host:canvas.getInfo` handshake. "Going live" for
+  a host is implementing that handshake + `decodeCanvasBatch`, not a guest
+  rebuild — no wire change, no version bump.
+- **Guest-shipped, host-consumer downstream (issue #45).** The Rust canvas
+  encoder is now compiled into the shipped guest by default (`binary-protocol`
+  feature, default-on) and the TS decoder is exported from `rill/wire`. What is
+  NOT in rill: the `host:canvas` module that answers `getInfo` and decodes
+  `RCNV` to paint a real surface — that is embedder-supplied, so at runtime the
+  guest degrades to JSON against every rill-shipped host until the downstream
+  host implements it.
 
 ### 1.2 The existing handshake surface (what we build ON)
 
@@ -232,7 +237,7 @@ No wire redesign; the JS encoder must produce the golden `hex` byte-for-byte.
 ## 3. What the next phases own (not this file)
 
 1. **Rust encoder (oracle)** — `crates/rill-guest/src/canvas_encode.rs`, behind a
-   Cargo feature (mirror `wip-binary-protocol`), generating constants from the
+   Cargo feature (mirror `binary-protocol`), generating constants from the
    already-added `canvas_contract.rs` (see `crates/rill-guest/build.rs`
    `generate_canvas_contract`). Produces `canvas-wire.golden.json`.
 2. **TS decoder on the public export surface** — a zero-DOM decoder the platform's

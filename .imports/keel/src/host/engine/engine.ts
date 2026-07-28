@@ -1219,19 +1219,23 @@ export class Engine implements IEngine {
     this.context.inject('__rill_registerComponentType', registerComponentType);
 
     // __rill_sendBatch: Receives batch from Guest, dispatches to the correct Bridge method
-    // based on the batch format (raw object, binary ArrayBuffer, or JSON string).
+    // based on the batch format (raw object or JSON string).
     const sendToHost: SendToHost = (batch) => {
       if (!this.bridge) return;
-      if (batch instanceof ArrayBuffer) {
-        this.bridge.sendBinaryBatch(batch);
-      } else if (ArrayBuffer.isView(batch)) {
-        // Typed-array view (e.g. Uint8Array from a boundary that rebuilds
-        // views rather than bare ArrayBuffers): hand the exact byte window on.
-        const view = batch as ArrayBufferView;
-        this.bridge.sendBinaryBatch(
-          view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength) as ArrayBuffer
+      if (batch instanceof ArrayBuffer || ArrayBuffer.isView(batch)) {
+        // Fail-closed drop: no JS-guest binary op-batch encoder exists (the
+        // legacy TS pair was retired — contracts/op-batch-wire.MATURITY.md
+        // §4a), so binary bytes here can only be stale guest code or a
+        // corrupted boundary. The batch is already unusable; dropping it
+        // loses one frame, and the error names the sender as the fix site.
+        logger.error(
+          `[rill:${this.id}] __rill_sendBatch received binary bytes (${
+            batch instanceof ArrayBuffer ? 'ArrayBuffer' : 'ArrayBufferView'
+          }) — the JS guest has no binary op-batch wire; send JSON. Batch dropped.`
         );
-      } else if (typeof batch === 'string') {
+        return;
+      }
+      if (typeof batch === 'string') {
         this.bridge.sendJsonBatch(batch);
       } else {
         if (
@@ -1240,11 +1244,12 @@ export class Engine implements IEngine {
           Object.keys(batch as object).length === 0 &&
           !(batch as OperationBatch).operations
         ) {
-          // A batch with zero own keys is the signature of a guest ArrayBuffer
-          // destroyed by a sandbox boundary converter without ArrayBuffer
-          // support — attribute the failure to the boundary, not the Bridge.
+          // A batch with zero own keys is the signature of a guest value the
+          // sandbox boundary converter could not represent (e.g. a binary
+          // buffer degraded to {}) — attribute the failure to the boundary,
+          // not the Bridge.
           logger.error(
-            `[rill:${this.id}] sendToHost received an empty object — likely a binary batch lost at the sandbox boundary (converter lacks ArrayBuffer support); binary op-batch must stay disabled on this provider`
+            `[rill:${this.id}] sendToHost received an empty object — the batch was destroyed at the sandbox boundary (converter cannot carry this value type); fix the guest to send JSON`
           );
         }
         this.bridge.sendRawBatch(batch as OperationBatch);

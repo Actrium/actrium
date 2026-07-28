@@ -21,22 +21,29 @@
  *                     path actually pays, not just the microbench ceiling.
  *   3. PAYLOAD SIZE — binary bytes vs JSON UTF-8 bytes.
  *
- * ENCODER NOTE (faithfulness): the binary bytes are produced by the guest-side
- * TS `BinaryEncoder`. Before any timing, this harness (a) re-encodes the 4
- * checked-in golden vectors and asserts BYTE-FOR-BYTE equality with their
- * oracle hex — i.e. the TS encoder is byte-identical to the Rust encoder on the
- * shared golden corpus — and (b) round-trips every generated batch through the
+ * ENCODER NOTE (faithfulness): the binary bytes are produced by the ONLY
+ * conformant encoder in the tree — the schema-locked Rust encoder
+ * (`crates/rill-guest/src/wire_encode.rs`), reached through the dev-harness CLI
+ * `examples/op_batch_oracle.rs` (the retired TS `BinaryEncoder` is gone; see
+ * issue #47). Before any timing, this harness (a) pushes the checked-in golden
+ * vectors through the CLI and asserts BYTE-FOR-BYTE equality with their oracle
+ * hex — confirming the CLI reproduces the same bytes the golden corpus was
+ * generated with — and (b) round-trips every generated batch through the
  * conformant `wire-decoder` and asserts structural equivalence. Payload size and
- * decode cost are properties of the WIRE BYTES + the TS decoder, so this stands
- * in faithfully for the "Rust encoder -> TS decoder" pair. The native C++
- * decoder path is NOT measured here (it has no in-VM JSON competitor to compare
- * against inside one runtime); it is discussed qualitatively in the report.
+ * decode cost are properties of the WIRE BYTES + the TS decoder, so this measures
+ * the real "Rust encoder -> TS decoder" pair directly. The native C++ decoder
+ * path is NOT measured here (it has no in-VM JSON competitor to compare against
+ * inside one runtime); it is discussed qualitatively in the report.
+ *
+ * The CLI is built/run on demand via `cargo run --features binary-protocol
+ * --example op_batch_oracle`, so this harness needs a Rust toolchain (it already
+ * lives outside the unit-test runner and is invoked explicitly).
  */
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BinaryEncoder } from '../../../guest/runtime/reconciler/binary-encoder';
 import type {
   SerializedOperation,
   SerializedOperationBatch,
@@ -174,29 +181,73 @@ function goldenPath(): string {
   return resolve(process.cwd(), 'contracts/op-batch-wire.golden.json');
 }
 
-function toHex(buf: ArrayBuffer): string {
-  const b = new Uint8Array(buf);
+function toHex(buf: ArrayBuffer | Uint8Array): string {
+  const b = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
   let s = '';
   for (let i = 0; i < b.length; i++) s += b[i]!.toString(16).padStart(2, '0');
   return s;
 }
 
+function hexToBytes(hex: string): Uint8Array {
+  const out = new Uint8Array(hex.length / 2);
+  for (let i = 0; i < out.length; i++) out[i] = Number.parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+  return out;
+}
+
+/** Repo root, resolved the same way as {@link goldenPath}. */
+function cratesDir(): string {
+  const rel = fileURLToPath(new URL('../../../../crates', import.meta.url));
+  if (existsSync(rel)) return rel;
+  return resolve(process.cwd(), 'crates');
+}
+
 /**
- * Prove the TS `BinaryEncoder` is byte-identical to the Rust/golden oracle on
- * the shared golden corpus, so its bytes faithfully stand in for the conformant
- * Rust encoder's bytes.
+ * Encode each batch to its conformant `op-batch-wire.json` bytes via the Rust
+ * oracle CLI (`examples/op_batch_oracle.rs`). ONE subprocess call for the whole
+ * array — the CLI prints one lowercase-hex line per input batch, in order. This
+ * is the schema-locked encoder the golden vectors are generated with, and the
+ * only conformant producer in the tree now that the TS pair is retired (#47).
+ */
+function encodeViaOracle(batches: SerializedOperationBatch[]): ArrayBuffer[] {
+  const stdout = execFileSync(
+    'cargo',
+    [
+      'run',
+      '--quiet',
+      '-p',
+      'rill-guest',
+      '--features',
+      'binary-protocol',
+      '--example',
+      'op_batch_oracle',
+    ],
+    { cwd: cratesDir(), input: JSON.stringify(batches), encoding: 'utf8', maxBuffer: 256 * 1024 * 1024 }
+  );
+  const lines = stdout.split('\n').filter((l) => l.trim().length > 0);
+  if (lines.length !== batches.length) {
+    throw new Error(
+      `oracle CLI returned ${lines.length} hex line(s) for ${batches.length} batch(es)`
+    );
+  }
+  return lines.map((l) => hexToBytes(l.trim()).buffer);
+}
+
+/**
+ * Prove the Rust oracle CLI reproduces the checked-in golden bytes on every
+ * golden vector — i.e. the conformant encoder this harness times is the same
+ * one the golden corpus is pinned to.
  */
 function assertGoldenByteIdentity(): number {
   const golden = JSON.parse(readFileSync(goldenPath(), 'utf8')) as {
     vectors: Array<{ name: string; batch: SerializedOperationBatch; hex: string }>;
   };
-  for (const v of golden.vectors) {
-    const enc = new BinaryEncoder(); // fresh per batch = index-from-0, flags NONE
-    const bytes = enc.encodeBatch(v.batch);
-    const got = toHex(bytes);
+  const encoded = encodeViaOracle(golden.vectors.map((v) => v.batch));
+  for (let i = 0; i < golden.vectors.length; i++) {
+    const v = golden.vectors[i]!;
+    const got = toHex(encoded[i]!);
     if (got !== v.hex) {
       throw new Error(
-        `GOLDEN MISMATCH on vector "${v.name}":\n  encoder: ${got}\n  oracle : ${v.hex}`
+        `GOLDEN MISMATCH on vector "${v.name}":\n  oracle CLI: ${got}\n  golden hex: ${v.hex}`
       );
     }
   }
@@ -319,7 +370,7 @@ function run(): void {
 
   const nGolden = assertGoldenByteIdentity();
   console.log(
-    `faithfulness gate 1: TS BinaryEncoder is byte-identical to the golden/Rust oracle on all ${nGolden} golden vectors ✓`
+    `faithfulness gate 1: the Rust oracle CLI reproduces the golden bytes on all ${nGolden} golden vectors ✓`
   );
 
   const sizes: Array<{ label: string; target: number; warmup: number; rounds: number; inner: number }> = [
@@ -328,14 +379,19 @@ function run(): void {
     { label: 'large   (~30k ops)', target: 30000, warmup: 5, rounds: 15, inner: 5 },
   ];
 
+  // Encode every generated batch through the conformant Rust oracle in ONE
+  // subprocess call (the CLI takes an array and emits a hex line per batch).
+  const batches = sizes.map((s) => buildBatch(s.target, 7));
+  const encodedBatches = encodeViaOracle(batches);
+
   const results: RowResult[] = [];
 
-  for (const s of sizes) {
-    const batch = buildBatch(s.target, 7);
+  for (let si = 0; si < sizes.length; si++) {
+    const s = sizes[si]!;
+    const batch = batches[si]!;
     const ops = batch.operations.length;
 
-    const encoder = new BinaryEncoder();
-    const bytes = encoder.encodeBatch(batch);
+    const bytes = encodedBatches[si]!;
     assertRoundTrip(batch, bytes);
 
     const jsonString = JSON.stringify(batch);

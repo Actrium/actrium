@@ -516,12 +516,17 @@ export type SerializedProps = SerializedValueObject;
  * Send operations from Guest to Host.
  * The batch format depends on the provider:
  * - VM: OperationBatch (raw, same runtime)
- * - WASM binary: ArrayBuffer
+ * - WASM: SerializedOperationBatch (pre-serialized, Function → fnId)
  * - Native sandbox: string (JSON-serialized to avoid JSI stack overflow)
+ *
+ * NOTE: there is deliberately no ArrayBuffer arm. The JS guest has no
+ * schema-conformant binary op-batch encoder (the legacy TS pair was retired;
+ * see contracts/op-batch-wire.MATURITY.md §4a) — the only binary op-batch
+ * route is the Rust WASM guest, whose frames are decoded by the host's
+ * wire decoder (src/host/wire/wire-decoder.ts) before they ever reach a
+ * SendToHost boundary.
  */
-export type SendToHost = (
-  batch: OperationBatch | SerializedOperationBatch | ArrayBuffer | string
-) => void;
+export type SendToHost = (batch: OperationBatch | SerializedOperationBatch | string) => void;
 
 // ============================================
 // Type Guards

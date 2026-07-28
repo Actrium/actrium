@@ -7,7 +7,7 @@
 //! declares and is locked to the byte layout by the golden-vector tests at the
 //! bottom (`contracts/op-batch-wire.golden.json`).
 //!
-//! WORK IN PROGRESS — behind the `wip-binary-protocol` cargo feature (default
+//! WORK IN PROGRESS — behind the `binary-protocol` cargo feature (default
 //! OFF). Wired into the live emit path via `render()`'s `op_batch_wire` gate:
 //! taken only when the host enabled binary op-batch through the optional
 //! `rill_wire_caps` export, so the default shipped guest still emits JSON.
@@ -632,195 +632,10 @@ mod tests {
         s
     }
 
-    /// Map a golden JSON prop/arg value to an encoder [`Value`], applying the
-    /// contract's NUMBER RULE (integer in i32 range -> Int32, else Float64).
-    /// Only the JSON kinds the golden vectors use are needed, but objects and
-    /// arrays are handled generically so richer vectors would work too.
-    fn json_to_value(j: &Json) -> Value<'_> {
-        match j {
-            Json::Null => Value::Null,
-            Json::Bool(b) => Value::Bool(*b),
-            Json::Str(s) => Value::Str(s.as_str()),
-            Json::Num(n) => {
-                if n.fract() == 0.0 && *n >= i32::MIN as f64 && *n <= i32::MAX as f64 {
-                    Value::Int32(*n as i32)
-                } else {
-                    Value::Float64(*n)
-                }
-            }
-            Json::Arr(items) => Value::Array(items.iter().map(json_to_value).collect()),
-            Json::Obj(entries) => {
-                // A JSON object is a plain OBJECT value UNLESS it carries one of
-                // the matrix fixture's two fixture-only discriminators: an "__mv"
-                // sentinel (for a value JSON cannot express, e.g. undefined) or a
-                // "__type" tag (function/date/error/regexp/map/set/promise, the
-                // guest SerializedValue special kinds). The golden vectors use
-                // neither, so their plain objects/props fall straight through.
-                if let Some(mv) = j.get("__mv").and_then(Json::as_str) {
-                    match mv {
-                        "undefined" => Value::Undefined,
-                        other => panic!("unknown __mv sentinel {other:?}"),
-                    }
-                } else if let Some(ty) = j.get("__type").and_then(Json::as_str) {
-                    match ty {
-                        "function" => Value::Function {
-                            fn_id: req_str(j, "__fnId"),
-                            name: j.get("__name").and_then(Json::as_str),
-                            source_file: j.get("__sourceFile").and_then(Json::as_str),
-                            source_line: j
-                                .get("__sourceLine")
-                                .and_then(Json::as_u64)
-                                .map(|n| n as u32),
-                        },
-                        "date" => Value::Date {
-                            epoch_ms: req_f64(j, "__epochMs"),
-                        },
-                        "error" => Value::Error {
-                            name: req_str(j, "__name"),
-                            message: req_str(j, "__message"),
-                            // Empty/absent stack interns as "" (decoders map that
-                            // back to an absent stack).
-                            stack: j.get("__stack").and_then(Json::as_str).unwrap_or(""),
-                        },
-                        "regexp" => Value::Regexp {
-                            source: req_str(j, "__source"),
-                            flags: req_str(j, "__flags"),
-                        },
-                        "promise" => Value::Promise {
-                            promise_id: req_str(j, "__promiseId"),
-                        },
-                        "map" => Value::Map(
-                            j.get("__entries")
-                                .and_then(Json::items)
-                                .expect("map __entries[]")
-                                .iter()
-                                .map(|pair| {
-                                    let kv = pair.items().expect("map entry is [key, value]");
-                                    (json_to_value(&kv[0]), json_to_value(&kv[1]))
-                                })
-                                .collect(),
-                        ),
-                        "set" => Value::Set(
-                            j.get("__values")
-                                .and_then(Json::items)
-                                .expect("set __values[]")
-                                .iter()
-                                .map(json_to_value)
-                                .collect(),
-                        ),
-                        other => panic!("unknown __type discriminator {other:?}"),
-                    }
-                } else {
-                    Value::Object(
-                        entries
-                            .iter()
-                            .map(|(k, v)| (k.as_str(), json_to_value(v)))
-                            .collect(),
-                    )
-                }
-            }
-        }
-    }
-
-    /// A required interned-string field of a `__type`-tagged matrix value.
-    fn req_str<'a>(j: &'a Json, key: &str) -> &'a str {
-        j.get(key)
-            .and_then(Json::as_str)
-            .unwrap_or_else(|| panic!("matrix value missing string field {key}"))
-    }
-
-    /// A required numeric field (used for `Date.__epochMs`, which may be
-    /// negative, so `as_u64` is not enough).
-    fn req_f64(j: &Json, key: &str) -> f64 {
-        match j.get(key) {
-            Some(Json::Num(n)) => *n,
-            _ => panic!("matrix value missing number field {key}"),
-        }
-    }
-
-    fn json_props(j: &Json) -> Vec<(&str, Value<'_>)> {
-        match j {
-            Json::Obj(entries) => entries
-                .iter()
-                .map(|(k, v)| (k.as_str(), json_to_value(v)))
-                .collect(),
-            _ => Vec::new(),
-        }
-    }
-
-    fn u32_field(op: &Json, key: &str) -> u32 {
-        op.get(key)
-            .and_then(Json::as_u64)
-            .unwrap_or_else(|| panic!("golden op missing u32 field {key}")) as u32
-    }
-
-    /// Build an [`Op`] from one golden batch operation object.
-    fn json_to_op(op: &Json) -> Op<'_> {
-        let kind = op.get("op").and_then(Json::as_str).expect("op.op");
-        let id = u32_field(op, "id");
-        match kind {
-            "CREATE" => Op::Create {
-                id,
-                ty: op.get("type").and_then(Json::as_str).expect("CREATE.type"),
-                props: op.get("props").map(json_props).unwrap_or_default(),
-            },
-            "UPDATE" => Op::Update {
-                id,
-                props: op.get("props").map(json_props).unwrap_or_default(),
-                removed: op
-                    .get("removedProps")
-                    .and_then(Json::items)
-                    .map(|items| {
-                        items
-                            .iter()
-                            .map(|s| s.as_str().expect("removedProps entry"))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            },
-            "DELETE" => Op::Delete { id },
-            "APPEND" => Op::Append {
-                id,
-                parent_id: u32_field(op, "parentId"),
-                child_id: u32_field(op, "childId"),
-            },
-            "INSERT" => Op::Insert {
-                id,
-                parent_id: u32_field(op, "parentId"),
-                child_id: u32_field(op, "childId"),
-                index: u32_field(op, "index") as u16,
-            },
-            "REMOVE" => Op::Remove {
-                id,
-                parent_id: u32_field(op, "parentId"),
-                child_id: u32_field(op, "childId"),
-            },
-            "REORDER" => Op::Reorder {
-                id,
-                parent_id: u32_field(op, "parentId"),
-                child_ids: op
-                    .get("childIds")
-                    .and_then(Json::items)
-                    .map(|items| items.iter().map(|c| c.as_u64().unwrap() as u32).collect())
-                    .unwrap_or_default(),
-            },
-            "TEXT" => Op::Text {
-                id,
-                text: op.get("text").and_then(Json::as_str).expect("TEXT.text"),
-            },
-            "REF_CALL" => Op::RefCall {
-                id,
-                method: op.get("method").and_then(Json::as_str).expect("method"),
-                call_id: op.get("callId").and_then(Json::as_str).expect("callId"),
-                args: op
-                    .get("args")
-                    .and_then(Json::items)
-                    .map(|items| items.iter().map(json_to_value).collect())
-                    .unwrap_or_default(),
-            },
-            other => panic!("unknown golden op kind {other}"),
-        }
-    }
+    // Golden/matrix JSON -> {Op, Value} mapping, shared with the oracle CLI
+    // example (examples/op_batch_oracle.rs) via include! — see the header of
+    // wire_fixture_map.rs.
+    include!("wire_fixture_map.rs");
 
     /// Every golden vector encodes byte-for-byte to its `hex`, using a FRESH
     /// encoder per batch (index-from-0), header.flags = NONE. This is the
@@ -1344,7 +1159,7 @@ mod tests {
     // decoder suites load the SAME file and decode each vector back to its
     // batch, so all three codecs lock to one artifact. Regenerate the fixture
     // with `RILL_REGEN_MATRIX=1 cargo test -p rill-guest \
-    //   --features wip-binary-protocol matrix_fixture_in_sync`.
+    //   --features binary-protocol matrix_fixture_in_sync`.
     // ========================================================================
 
     /// Build and encode one batch from its `batch` JSON (fresh encoder,
@@ -1834,7 +1649,7 @@ mod tests {
         let comment = jstr(
             "GENERATED by the rill-guest wire_encode matrix generator \
              (RILL_REGEN_MATRIX=1 cargo test -p rill-guest --features \
-             wip-binary-protocol matrix_fixture_in_sync). DO NOT EDIT BY HAND. \
+             binary-protocol matrix_fixture_in_sync). DO NOT EDIT BY HAND. \
              Comprehensive op x value conformance corpus for the op-batch binary \
              wire protocol (contracts/op-batch-wire.json), produced by the pinned \
              Rust encoder (the oracle). All three codecs lock to this file: Rust \
@@ -1893,7 +1708,7 @@ mod tests {
         let committed = std::fs::read_to_string(&path).unwrap_or_else(|e| {
             panic!(
                 "read {}: {e}\nrun `RILL_REGEN_MATRIX=1 cargo test -p rill-guest \
-                 --features wip-binary-protocol matrix_fixture_in_sync` to create it",
+                 --features binary-protocol matrix_fixture_in_sync` to create it",
                 path.display()
             )
         });

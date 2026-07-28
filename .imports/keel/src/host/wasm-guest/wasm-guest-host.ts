@@ -68,13 +68,13 @@ export interface WasmGuestHostOptions {
    */
   onRenderBatch?: (batch: OperationBatch) => void;
   /**
-   * WIP: enable the binary op-batch render wire (default false — same
-   * default-off policy as the rest of the wip-binary-protocol surface). When
-   * true, the host pushes `rill_wire_caps(bit0)` to a guest that exports it
-   * (before `rill_init`, so the first render is already negotiated) and
-   * accepts RILL-magic binary frames on the render channel. A guest without
-   * the export stays on JSON; a binary frame arriving while this is off is
-   * dropped with a warning (fail-closed).
+   * Enable the binary op-batch render wire (default TRUE — promoted, issue #45).
+   * When true, the host pushes `rill_wire_caps(bit0)` to a guest that exports it
+   * (before `rill_init`, so the first render is already negotiated) and accepts
+   * RILL-magic binary frames on the render channel. A guest without the export
+   * (a pre-promotion, JSON-only build) stays on JSON — the caps push is skipped.
+   * Set to false to force JSON on the render channel; a binary frame arriving
+   * while this is off is dropped with a warning (fail-closed).
    */
   binaryOpBatch?: boolean;
 }
@@ -94,7 +94,7 @@ export class WasmGuestHost {
     this.dispatch = options.dispatch;
     this.onLog = options.onLog;
     this.onRenderBatch = options.onRenderBatch;
-    this.binaryOpBatch = options.binaryOpBatch ?? false;
+    this.binaryOpBatch = options.binaryOpBatch ?? true;
   }
 
   /**

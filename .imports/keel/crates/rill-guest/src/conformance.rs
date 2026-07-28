@@ -318,9 +318,9 @@ fn canvas_draw_wire_matches_contract() {
     // unsupported" so the guest falls back to the JSON op-list THIS test
     // validates against the contract; without the feature the JSON call is the
     // first and only one.
-    #[cfg(feature = "wip-binary-protocol")]
+    #[cfg(feature = "binary-protocol")]
     let issued = draw_after_handshake(canvas::draw("scene", &list));
-    #[cfg(not(feature = "wip-binary-protocol"))]
+    #[cfg(not(feature = "binary-protocol"))]
     let issued = issue(canvas::draw("scene", &list));
     assert_eq!(issued.method, "draw");
     check_method(&root, "host:canvas", &issued);
@@ -337,7 +337,7 @@ fn canvas_draw_wire_matches_contract() {
 /// before it emits. Drive that probe, answer "binary unsupported" (so the guest
 /// falls back to the JSON op-list), and return the `Issued` positioned at the
 /// follow-up JSON `draw` call so the existing contract checks apply unchanged.
-#[cfg(feature = "wip-binary-protocol")]
+#[cfg(feature = "binary-protocol")]
 fn draw_after_handshake<F: Future>(f: F) -> Issued<F> {
     CALLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
     let mut fut = Box::pin(f);
