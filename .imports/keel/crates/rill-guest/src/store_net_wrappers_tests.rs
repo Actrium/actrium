@@ -361,6 +361,92 @@ fn list_entry_missing_a_field_fails_closed() {
     );
 }
 
+/// A number that is not a non-negative integer is NOT coerced into one: `-1`,
+/// `1.9` and `1e30` would silently become `0`, `1` and `u64::MAX` under a bare
+/// `as u64`, handing the guest a version/timestamp the host never sent. Each
+/// must fail closed exactly like a missing field.
+#[test]
+fn list_malformed_numbers_fail_closed_rather_than_being_coerced() {
+    for reply in [
+        // negative -> would clamp to 0
+        &br#"{"keys":[{"key":"x1","version":-1,"updatedAt":1753000000000}]}"#[..],
+        // fractional -> would truncate to 1
+        &br#"{"keys":[{"key":"x1","version":1.9,"updatedAt":1753000000000}]}"#[..],
+        // fractional milliseconds -> would drop the fraction
+        &br#"{"keys":[{"key":"x1","version":1,"updatedAt":1753000000000.5}]}"#[..],
+        // past 2^53 -> f64 can no longer name every integer; would saturate
+        &br#"{"keys":[{"key":"x1","version":1,"updatedAt":1e30}]}"#[..],
+    ] {
+        let _guard = crate::wire_lock();
+        let tap = issue(crate::store::list("x"));
+        let err = tap.resolve(1, reply).unwrap_err();
+        assert!(
+            core::str::from_utf8(&err)
+                .unwrap()
+                .contains("missing key/version/updatedAt"),
+            "malformed number must fail closed, got {:?}",
+            core::str::from_utf8(&err)
+        );
+    }
+}
+
+/// The structural fail-closed branches: a reply that is not an object, a `keys`
+/// field that is not an array, and an array member that is not an object.
+#[test]
+fn list_malformed_reply_shapes_fail_closed() {
+    for (reply, expected) in [
+        (&br#"[1,2]"#[..], "reply is not an object"),
+        (&br#"{"keys":"x"}"#[..], "missing keys array"),
+        (&br#"{"other":[]}"#[..], "missing keys array"),
+        (&br#"{"keys":[123]}"#[..], "key entry is not an object"),
+    ] {
+        let _guard = crate::wire_lock();
+        let tap = issue(crate::store::list("x"));
+        let err = tap.resolve(1, reply).unwrap_err();
+        assert!(
+            core::str::from_utf8(&err).unwrap().contains(expected),
+            "expected {expected:?}, got {:?}",
+            core::str::from_utf8(&err)
+        );
+    }
+}
+
+/// Same rule on the delete count: a non-integer, out-of-range or non-numeric
+/// `deleted` is an error, never a fabricated count.
+#[test]
+fn delete_prefix_malformed_count_fails_closed() {
+    for reply in [
+        &br#"{"deleted":-1}"#[..],
+        &br#"{"deleted":1.9}"#[..],
+        // beyond u32 -> would saturate to u32::MAX
+        &br#"{"deleted":5000000000}"#[..],
+        &br#"{"deleted":"3"}"#[..],
+    ] {
+        let _guard = crate::wire_lock();
+        let tap = issue(crate::store::delete_prefix("doc/"));
+        let err = tap.resolve(1, reply).unwrap_err();
+        assert!(
+            core::str::from_utf8(&err)
+                .unwrap()
+                .contains("not a non-negative integer count"),
+            "malformed count must fail closed, got {:?}",
+            core::str::from_utf8(&err)
+        );
+    }
+}
+
+/// Zero is a legitimate count (prefix matched nothing) and must survive the
+/// guard — the fail-closed check must not turn a real `0` into an error.
+#[test]
+fn delete_prefix_zero_is_a_valid_count() {
+    let _guard = crate::wire_lock();
+    let tap = issue(crate::store::delete_prefix("nothing/"));
+    let deleted = tap
+        .resolve(1, br#"{"deleted":0}"#)
+        .expect("zero is a valid count");
+    assert_eq!(deleted, 0);
+}
+
 #[test]
 fn delete_prefix_returns_the_removed_count() {
     let _guard = crate::wire_lock();
