@@ -7,6 +7,15 @@
  * Note: Guest runtime internals (reconciler/bridge) are in src/guest/runtime/
  */
 
+// Sandbox-safe utilities (issue #68). Guest sandboxes provide only core
+// ECMAScript intrinsics — web platform globals like `TextEncoder` and
+// `performance` are NOT guaranteed (they type-check under a DOM lib but throw in
+// the sandbox) — so guest code that needs them must go through these call-time-
+// checked helpers instead of touching the globals directly. `createUtf8Encoder`
+// is byte-identical to `TextEncoder.encode` (incl. lone surrogate → U+FFFD) with
+// a pure-JS fallback; `nowMs` uses `performance.now()` when present, else
+// `Date.now()`.
+export { createUtf8Encoder, nowMs } from '../guest/runtime/reconciler/sandbox-compat';
 // Web keyboard bridge (issue #19, L3)
 export type { RillKeyEvent } from '../shared/keyboard';
 // Component prop types and event types
