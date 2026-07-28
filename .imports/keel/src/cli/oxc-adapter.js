@@ -246,10 +246,19 @@ function collectHostImport(node, hostImports, hostCapabilities, violations) {
   const moduleId = getStringLiteralValue(node.source);
   if (!isHostModuleId(moduleId)) return;
 
+  // A whole `import type { ... } from 'host:*'` is erased by the compiler and
+  // crosses no runtime boundary, so it declares no capability. Skip it entirely:
+  // it must not enter the manifest, nor trip the default/namespace/bare rules
+  // below (a type-only default/namespace import is not a runtime violation).
+  if (node.importKind === 'type') return;
+
   const specifiers = [];
 
   for (const specifier of node.specifiers || []) {
     if (specifier.type === 'ImportSpecifier') {
+      // An inline `import { type X } from 'host:*'` specifier is likewise erased
+      // — it is not a runtime capability, so it must not enter the manifest.
+      if (specifier.importKind === 'type') continue;
       const imported = getImportSpecifierName(specifier.imported);
       const local = getImportSpecifierName(specifier.local) || imported;
       if (imported) {
@@ -291,7 +300,11 @@ function collectHostImport(node, hostImports, hostCapabilities, violations) {
     }
   }
 
-  if (specifiers.length === 0) {
+  // Only a genuinely bare `import 'host:*'` (no specifiers in SOURCE) is a bare
+  // import. Guard on the source count, not the post-filter `specifiers`: a
+  // statement whose only specifiers were inline `type` ones is not bare — it just
+  // contributes nothing at runtime — and must not be flagged.
+  if ((node.specifiers || []).length === 0) {
     specifiers.push({
       imported: null,
       local: '',
