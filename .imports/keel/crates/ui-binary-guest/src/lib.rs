@@ -1,7 +1,7 @@
 //! Test-fixture native (non-JS) rill guest that exercises the WIP binary
 //! OP-BATCH wire end-to-end via the `rill_wire_caps` runtime gate.
 //!
-//! Built with `rill-guest`'s `wip-binary-protocol` feature ON, so the SDK
+//! Built with `rill-guest`'s `binary-protocol` feature ON, so the SDK
 //! exports `rill_wire_caps`:
 //!   - a host that pushes bit0 (binaryOpBatch on) BEFORE `rill_init` receives
 //!     the render batch as a binary `RILL` frame;

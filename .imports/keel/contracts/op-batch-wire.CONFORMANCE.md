@@ -36,7 +36,7 @@ Locking notes (so the pivot cannot silently rot):
 
 ```sh
 # 1. Rust encoder → golden hex
-cd /ext/rill/crates && cargo test -p rill-guest --features wip-binary-protocol
+cd /ext/rill/crates && cargo test -p rill-guest --features binary-protocol
 
 # 2. TS streaming decoder ← golden bytes
 cd /ext/rill && bun test src/host/wasm-guest/__tests__/wire-decoder.test.ts
@@ -46,7 +46,7 @@ make -C /ext/rill/native/core test
 ```
 
 All three codecs are WORK IN PROGRESS and gated OFF in shipped builds:
-- Rust: `--features wip-binary-protocol` (Cargo feature, default off).
+- Rust: `--features binary-protocol` (Cargo feature, default off).
 - C++: `-DRILL_WIP_BINARY_PROTOCOL=1` (the test Makefile defines it; a normal
   build compiles `WireDecoder.cpp` to an empty translation unit).
 - TS: the decoder is not imported by any live receive path; the default

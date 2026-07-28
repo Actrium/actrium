@@ -18,9 +18,15 @@ cd "$(dirname "$0")"
 TARGET=wasm32-unknown-unknown
 FIXTURES=../src/host/wasm-guest/__tests__/fixtures
 # Single source of truth for both the debug (DWARF) and release fixture builds
-# below. canvas-binary-guest / ui-binary-guest are intentionally NOT here — they
-# need a separate cargo invocation (see the wip-binary-protocol note further down).
-GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest blur-demo-guest"
+# below. Since the binary-protocol feature is now DEFAULT ON (issue #45), every
+# guest here is binary-capable (op-batch encoder + rill_wire_caps export, canvas
+# encoder + getInfo probe) yet still emits JSON at runtime unless the host
+# negotiates binary — so canvas-binary-guest / ui-binary-guest build in the SAME
+# invocation now (no feature-isolation split needed). ui-guest-json (built
+# separately with --no-default-features) is the back-compat, pre-promotion
+# JSON-only guest used to test the "guest without rill_wire_caps" host path.
+# blur-demo-guest is the SIMD/worker-pool compute demo (issue #57).
+GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest canvas-binary-guest ui-binary-guest blur-demo-guest"
 
 # Optional debug build: DWARF-carrying guests for source-level debugging inside
 # V8's wasm debugger (Chrome DevTools "C/C++ DevTools Support (DWARF)"). Output
@@ -48,14 +54,6 @@ export CARGO_TARGET_DIR=target/fixtures
 # shellcheck disable=SC2086
 RUSTFLAGS="--remap-path-prefix=$(pwd)=." cargo build $(printf -- '-p %s ' $GUESTS) --target "$TARGET" --release
 
-# canvas-binary-guest / ui-binary-guest are built in a SEPARATE cargo
-# invocation on purpose: they turn ON rill-guest's `wip-binary-protocol`
-# feature, and cargo unifies features across all packages in a single build.
-# Building them apart keeps the WIP feature out of the default JSON fixtures
-# above (their rill-guest stays feature-clean), so the DEFAULT shipped guests
-# provably still emit JSON.
-RUSTFLAGS="--remap-path-prefix=$(pwd)=." cargo build -p canvas-binary-guest -p ui-binary-guest --target "$TARGET" --release
-
 stage() { # <crate-lib-name> <fixture-name>
   cp "$CARGO_TARGET_DIR/$TARGET/release/$1.wasm" "$FIXTURES/$2"
   echo "staged: $FIXTURES/$2 ($(wc -c < "$FIXTURES/$2") bytes)"
@@ -73,3 +71,12 @@ stage canvas_gpu_guest canvas-gpu-guest.wasm
 stage canvas_escape_guest canvas-escape-guest.wasm
 stage asset_guest asset-guest.wasm
 stage blur_demo_guest blur-demo-guest.wasm
+
+# Back-compat fixture: a pre-promotion, JSON-only guest with the binary encoders
+# and rill_wire_caps compiled OUT (--no-default-features). SEPARATE invocation
+# because cargo unifies features across a single build — bundling it above would
+# re-enable the default feature. Staged AFTER the default ui-guest.wasm so it
+# does not clobber it. Exercises the host path for a guest that lacks the
+# rill_wire_caps export (the caps push must be skipped, JSON must still flow).
+RUSTFLAGS="--remap-path-prefix=$(pwd)=." cargo build -p ui-guest --no-default-features --target "$TARGET" --release
+stage ui_guest ui-guest-json.wasm

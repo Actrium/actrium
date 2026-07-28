@@ -4,7 +4,7 @@
 //! length-prefixed segments instead of a JSON number-array.
 //!
 //! Unlike `wire_encode` / `canvas_encode` (opcode streams, gated behind the
-//! `wip-binary-protocol` feature), this is ADDITIVE INFRA compiled into the
+//! `binary-protocol` feature), this is ADDITIVE INFRA compiled into the
 //! shipped guest unconditionally. It changes NO existing call's default path:
 //! `encode_value` only emits an `RBS1` frame when the value actually carries a
 //! byte stream — a segment-free value stays byte-for-byte identical to today's
