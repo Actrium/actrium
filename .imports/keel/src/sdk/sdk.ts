@@ -442,6 +442,18 @@ export function declareHostComponent<P>(name: string): GuestComponent<P> {
 }
 
 // ============ Component Exports ============
+//
+// TWO KNOWN GAPS in the typed surface below, both tracked and deliberately not
+// fixed here — each is a public-API decision, not a mechanical repair:
+//   - #79: `GuestComponent<P>` is not generic, so `asComponent<FlatListProps>`
+//     pins `T` to its `unknown` default. `<FlatList data={…} renderItem={…} />`
+//     cannot be given an element type (annotating the callback fails on
+//     contravariance; explicit type arguments give TS2558). Same for
+//     `SectionList` / `VirtualizedList`.
+//   - #80: no prop interface declares `ref`, and `GuestComponent<P>` is not a
+//     forwardRef shape, so `<TextInput ref={…} />` does not type-check — see the
+//     matching note on `useRemoteRef`.
+//
 // Core
 export const View = asComponent<ViewProps>(_components.View);
 export const Text = asComponent<TextProps>(_components.Text);
@@ -1032,6 +1044,12 @@ const DEFAULT_REMOTE_REF_TIMEOUT = 4000;
  *   );
  * }
  * ```
+ *
+ * NOTE — the `ref={inputRef}` line above is correct at RUNTIME but does not
+ * type-check today: no guest prop interface declares a `ref` prop, so `tsc`
+ * reports `TS2322: Property 'ref' does not exist on type
+ * 'IntrinsicAttributes & TextInputProps'`. Tracked in #80, which will make this
+ * example compile as written; until then a call site needs a cast.
  */
 export function useRemoteRef<T = unknown>(options?: {
   timeout?: number;
