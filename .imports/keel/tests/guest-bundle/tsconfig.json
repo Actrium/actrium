@@ -15,5 +15,14 @@
       "rill/*": ["../../src/*"]
     }
   },
+  // KNOWN COVERAGE BOUNDARY — a green `check:guest-types` does NOT mean the whole
+  // guest type surface is green. Two exclusions, both tracked:
+  //   - `src/host-modules.tsx` imports the virtual `host:*` modules, which plain
+  //     tsc cannot resolve (TS2307) without ambient declarations that do not
+  //     exist yet. Adding the file today would only redden the gate.
+  //   - No `<FlatList>` or `<TextInput ref>` case is present, because neither
+  //     type-checks yet: list components cannot be given an element type (#79)
+  //     and no component declares a `ref` prop (#80). Each issue's acceptance
+  //     includes adding its fixture here, so the gate widens as they land.
   "include": ["src/index.tsx"]
 }
