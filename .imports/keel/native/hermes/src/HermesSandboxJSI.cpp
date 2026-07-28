@@ -749,8 +749,11 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
 
 #if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
   // Create the CDP debug API alongside the runtime — its AsyncDebuggerAPI must
-  // be constructed with the runtime. Inert (no pausing) until a CDPAgent
-  // attaches a pause callback. Dev-only.
+  // be constructed with the runtime. The API pauses nothing until a
+  // DebuggerEventCallback is registered; note the watchdog callback added just
+  // below is itself such a callback, so it takes the runtime OUT of inert mode.
+  // Inert behavior for the no-client case is therefore emulated in that
+  // callback (#77), not inherent to the API. Dev-only.
   cdpDebugAPI_ = facebook::hermes::cdp::CDPDebugAPI::create(*sandboxRuntime_);
   runtimeAlive_ = std::make_shared<int>(1);
   // Teardown gate shared with the CDPAgentTarget: guards the CDP enqueue paths
@@ -758,35 +761,62 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
   // against a racing dispose() (issue #40, B1).
   cdpTeardownGate_ = std::make_shared<rill::devtools::CdpTeardownGate>();
 
-  // Reconcile the eval-timeout watchdog with debugger pauses: the watchdog is a
-  // wall-clock timer, but time spent stopped at a breakpoint is not execution
-  // and must not be charged against the eval budget — otherwise stepping off a
-  // breakpoint after the budget elapsed would immediately kill the program. On
-  // every pause suspend the watchdog (unwatchTimeLimit); on resume re-arm it with
-  // a fresh budget. Fires on the runtime thread, so the plain-bool/id state is
-  // single-threaded. Only meaningful when a finite timeout is set.
+  // How many DevTools clients are currently attached (bumped by the
+  // CDPAgentTarget on connect/disconnect). Read by the watchdog callback below
+  // to tell a client-driven pause from a spurious one. Written on the relay
+  // thread, read on the runtime thread → atomic. Shared so the target can bump
+  // it (same pattern as the teardown gate above).
+  cdpClientsAttached_ = std::make_shared<std::atomic<int>>(0);
+
+  // One callback, two jobs, both on the runtime thread (so the plain bool/id
+  // state below stays single-threaded):
+  //   1. #77 — registering ANY DebuggerEventCallback takes Hermes OUT of inert
+  //      mode, so a `debugger;`/breakpoint pauses even when no DevTools client
+  //      is attached. With nobody to call resumeFromPaused the runtime — and,
+  //      since the Hermes sandbox runs on the host JS thread, the whole RN host
+  //      — would hang forever. When no client is attached we therefore resume
+  //      immediately, emulating the inert behavior the caller expects. This
+  //      runs regardless of any eval timeout.
+  //   2. Reconcile the eval-timeout watchdog with client-driven pauses: the
+  //      watchdog is a wall-clock timer, but time spent stopped at a breakpoint
+  //      is not execution and must not be charged against the eval budget —
+  //      otherwise stepping off after the budget elapsed would immediately kill
+  //      the program. Suspend on pause (unwatchTimeLimit), re-arm on resume.
+  //      Only meaningful when a finite timeout is set.
   watchdogPauseCallbackId_ =
       cdpDebugAPI_->asyncDebuggerAPI().addDebuggerEventCallback_TS(
           [this](facebook::hermes::HermesRuntime &rt,
-                 facebook::hermes::debugger::AsyncDebuggerAPI &,
+                 facebook::hermes::debugger::AsyncDebuggerAPI &dbg,
                  facebook::hermes::debugger::DebuggerEventType event) {
             using ET = facebook::hermes::debugger::DebuggerEventType;
-            if (!(timeoutMs_ > 0 && timeoutMs_ < 4294967295.0)) {
-              return;
-            }
+            const bool hasClient =
+                cdpClientsAttached_->load(std::memory_order_relaxed) > 0;
+            const bool hasBudget = timeoutMs_ > 0 && timeoutMs_ < 4294967295.0;
             switch (event) {
               case ET::Breakpoint:
               case ET::DebuggerStatement:
               case ET::StepFinish:
               case ET::ExplicitPause:
               case ET::Exception:
-                if (!watchdogSuspended_) {
+                if (!hasClient) {
+                  // No one is driving the debugger; resume at once so the
+                  // runtime never hangs (#77). Guard with isWaitingForCommand()
+                  // (NOT isPaused()): resumeFromPaused is only valid when the
+                  // next command is expected. Leave the watchdog budget alone —
+                  // we never really stopped.
+                  if (dbg.isWaitingForCommand()) {
+                    dbg.resumeFromPaused(
+                        facebook::hermes::debugger::AsyncDebugCommand::Continue);
+                  }
+                  break;
+                }
+                if (hasBudget && !watchdogSuspended_) {
                   rt.unwatchTimeLimit();
                   watchdogSuspended_ = true;
                 }
                 break;
               case ET::Resumed:
-                if (watchdogSuspended_) {
+                if (hasBudget && watchdogSuspended_) {
                   rt.watchTimeLimit(static_cast<uint32_t>(timeoutMs_));
                   watchdogSuspended_ = false;
                 }
@@ -879,7 +909,8 @@ HermesSandboxContext::createCdpDebugTarget(
         });
       };
   auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
-      executionContextId, cdpDebugAPI_, std::move(enqueue), cdpTeardownGate_);
+      executionContextId, cdpDebugAPI_, std::move(enqueue), cdpTeardownGate_,
+      cdpClientsAttached_);
   // Retain a weak handle so dispose() can sweep any still-attached CDPAgents
   // while the runtime + CDPDebugAPI are alive (issue #40, B2 ordering).
   cdpTarget_ = target;

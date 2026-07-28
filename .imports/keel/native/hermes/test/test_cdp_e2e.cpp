@@ -115,6 +115,8 @@ struct Fixture {
   std::weak_ptr<hcdp::CDPDebugAPI> debugAPIWeak;  // to observe destruction
   std::shared_ptr<rill::devtools::CdpTeardownGate> gate =
       std::make_shared<rill::devtools::CdpTeardownGate>();
+  std::shared_ptr<std::atomic<int>> clientsAttached =
+      std::make_shared<std::atomic<int>>(0);
 
   Fixture() {
     std::promise<std::pair<facebook::hermes::HermesRuntime*,
@@ -168,7 +170,7 @@ void test_disconnect_while_paused() {
   Fixture fx;
   Sink sink;
   auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
-      1, fx.debugAPI, fx.enqueue(), fx.gate);
+      1, fx.debugAPI, fx.enqueue(), fx.gate, fx.clientsAttached);
   const rill::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
   target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
@@ -212,7 +214,7 @@ void test_dispatch_vs_teardown_race() {
   Fixture fx;
   Sink sink;
   auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
-      1, fx.debugAPI, fx.enqueue(), fx.gate);
+      1, fx.debugAPI, fx.enqueue(), fx.gate, fx.clientsAttached);
   const rill::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
   target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
@@ -272,7 +274,7 @@ void test_destroy_with_pending_interrupt() {
   Fixture fx;
   Sink sink;
   auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
-      1, fx.debugAPI, fx.enqueue(), fx.gate);
+      1, fx.debugAPI, fx.enqueue(), fx.gate, fx.clientsAttached);
   const rill::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
   target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
@@ -349,8 +351,9 @@ int main() {
 
   Sink sink;
   auto gate = std::make_shared<rill::devtools::CdpTeardownGate>();
+  auto clientsAttached = std::make_shared<std::atomic<int>>(0);
   auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
-      /*execCtxId=*/1, debugAPI, std::move(enqueue), gate);
+      /*execCtxId=*/1, debugAPI, std::move(enqueue), gate, clientsAttached);
 
   const rill::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });

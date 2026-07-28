@@ -134,29 +134,47 @@ int main() {
   facebook::hermes::HermesRuntime* rtPtr = readyPair.first;
   std::shared_ptr<hcdp::CDPDebugAPI> debugAPI = readyPair.second;
 
-  // The reconciliation, toggled per pass. This mirrors HermesSandboxContext's
-  // ctor callback exactly. Fires on the runtime thread.
+  // Shared client counter + teardown gate, wired into the CDPAgentTarget exactly
+  // as HermesSandboxContext wires them. clientsAttached starts at 0 (no client);
+  // the target bumps it on connect/disconnect.
+  auto gate = std::make_shared<rill::devtools::CdpTeardownGate>();
+  auto clientsAttached = std::make_shared<std::atomic<int>>(0);
+  std::atomic<int> noClientResumes{0};  // proves the #77 branch actually ran
+
+  // Mirrors HermesSandboxContext's ctor callback. Fires on the runtime thread.
+  // `reconcile` is a test-only knob for the has-client watchdog reconciliation:
+  // OFF is the negative control (watchdog left armed across the pause).
   std::atomic<bool> reconcile{false};
   bool suspended = false;  // runtime-thread-only
   debugAPI->asyncDebuggerAPI().addDebuggerEventCallback_TS(
-      [&reconcile, &suspended, kBudgetMs](
-          facebook::hermes::HermesRuntime& rt, hdbg::AsyncDebuggerAPI&,
+      [&reconcile, &suspended, kBudgetMs, clientsAttached, &noClientResumes](
+          facebook::hermes::HermesRuntime& rt, hdbg::AsyncDebuggerAPI& dbg,
           hdbg::DebuggerEventType ev) {
-        if (!reconcile.load()) return;
         using ET = hdbg::DebuggerEventType;
+        const bool hasClient =
+            clientsAttached->load(std::memory_order_relaxed) > 0;
         switch (ev) {
           case ET::Breakpoint:
           case ET::DebuggerStatement:
           case ET::StepFinish:
           case ET::ExplicitPause:
           case ET::Exception:
-            if (!suspended) {
+            if (!hasClient) {
+              // #77: nobody to drive resume — auto-resume so the runtime never
+              // hangs. This is the behavior exercised by the no-client pass.
+              if (dbg.isWaitingForCommand()) {
+                dbg.resumeFromPaused(hdbg::AsyncDebugCommand::Continue);
+                noClientResumes.fetch_add(1, std::memory_order_relaxed);
+              }
+              break;
+            }
+            if (reconcile.load() && !suspended) {
               rt.unwatchTimeLimit();
               suspended = true;
             }
             break;
           case ET::Resumed:
-            if (suspended) {
+            if (reconcile.load() && suspended) {
               rt.watchTimeLimit(kBudgetMs);
               suspended = false;
             }
@@ -166,13 +184,52 @@ int main() {
         }
       });
 
+  // #77 regression, run FIRST while clientsAttached == 0 (no client). Registering
+  // the callback above took Hermes out of inert mode, so this `debugger;` pauses;
+  // with no client to resume it the runtime would hang forever. The no-client
+  // branch must auto-resume it, so the eval must COMPLETE and set __nc.
+  {
+    rtPtr->global().setProperty(*rtPtr, "__nc", 41);
+    std::promise<bool> done;
+    auto fut = done.get_future();
+    pump.push([rtPtr, &done] {
+      try {
+        const std::string js = "debugger; globalThis.__nc = 5;";
+        rtPtr->evaluateJavaScript(std::make_shared<jsi::StringBuffer>(js), "nc.js");
+        done.set_value(true);
+      } catch (const std::exception& e) {
+        std::cout << "    (no-client eval threw: " << e.what() << ")\n";
+        done.set_value(false);
+      }
+    });
+    bool completed =
+        fut.wait_for(std::chrono::seconds(5)) == std::future_status::ready &&
+        fut.get();
+    int nc = -1;
+    if (completed) {
+      std::promise<int> ncp;
+      auto ncf = ncp.get_future();
+      pump.push([rtPtr, &ncp] {
+        auto v = rtPtr->global().getProperty(*rtPtr, "__nc");
+        ncp.set_value(v.isNumber() ? static_cast<int>(v.getNumber()) : -1);
+      });
+      nc = ncf.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+               ? ncf.get()
+               : -1;
+    }
+    std::cout << "    [no client] completed=" << completed
+              << " resumes=" << noClientResumes.load() << " __nc=" << nc << "\n";
+    check(completed && noClientResumes.load() >= 1 && nc == 5,
+          "#77: debugger; with no client auto-resumes instead of hanging");
+  }
+
   hdbg::EnqueueRuntimeTaskFunc enqueue = [&pump, rtPtr](hdbg::RuntimeTask t) {
     pump.push([rtPtr, t = std::move(t)]() { t(*rtPtr); });
   };
 
   Sink sink;
   auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
-      /*execCtxId=*/1, debugAPI, std::move(enqueue));
+      /*execCtxId=*/1, debugAPI, std::move(enqueue), gate, clientsAttached);
   const rill::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
   target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
@@ -250,6 +307,10 @@ int main() {
   target->onClientDisconnect(conn);
   target.reset();
   debugAPI.reset();
+  // Drop main's remaining CDPDebugAPI ref (held via readyPair) BEFORE the join,
+  // so the runtime thread runs ~CDPDebugAPI/~AsyncDebuggerAPI on the thread that
+  // created them. Destroying them on the main thread at exit segfaults.
+  readyPair.second.reset();
   pump.requestStop();
   runtimeThread.join();
   check(true, "clean teardown without deadlock");
