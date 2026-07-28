@@ -39,7 +39,11 @@ use limits::{MAX_ENVELOPE_BYTES, MAX_JSON_BYTES, MAX_SEGMENTS, MAX_SEGMENT_BYTES
 // Largest exactly-representable integer magnitude in an f64 (2^53). Used for the
 // integral-number checks below without `f64::abs`/`fract` (both live in `std`,
 // not `core`, so they are unavailable in this `no_std` crate).
-const MAX_SAFE_INT_F64: f64 = 9_007_199_254_740_992.0;
+//
+// `pub(crate)` so the typed `store`/`net` wrappers in `lib.rs` apply the SAME
+// integral-number test to host-supplied counts and timestamps as the decoder
+// applies to `$b` segment references — one rule, one constant.
+pub(crate) const MAX_SAFE_INT_F64: f64 = 9_007_199_254_740_992.0;
 
 /// A fail-closed decode/encode failure. The token strings are the stable
 /// `reasons` vocabulary of `contracts/store-net-bytes.json`, shared verbatim

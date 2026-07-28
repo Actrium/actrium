@@ -474,7 +474,7 @@ pub fn host_call(module: &'static str, method: &'static str, input: Vec<u8>) -> 
 /// typed wrapper lands.
 pub mod store {
     use crate::json_escape;
-    use crate::store_net_encode::{decode_reply, encode_envelope, Value};
+    use crate::store_net_encode::{decode_reply, encode_envelope, Value, MAX_SAFE_INT_F64};
     use alloc::string::String;
     use alloc::vec::Vec;
 
@@ -640,10 +640,27 @@ pub mod store {
             let mut version: Option<u64> = None;
             let mut updated_at: Option<u64> = None;
             for (k, v) in fields {
+                // The numbers are guarded, not cast: a bare `n as u64` would turn
+                // host-supplied junk into a plausible value (`-1` -> `0`, `1.9` ->
+                // `1`, `1e30` -> `u64::MAX`) and hand the guest a KeyMeta that
+                // never existed. A number that is not a non-negative integer
+                // representable in an f64 falls through to `_ => {}`, so the field
+                // stays `None` and the entry fails closed below — same treatment
+                // as an outright missing field. Values are well inside 2^53: a
+                // version is a small monotonic counter, and epoch milliseconds
+                // stay under it for ~285k years.
                 match (k.as_str(), v) {
                     ("key", Value::Str(s)) => key = Some(s),
-                    ("version", Value::Num(n)) => version = Some(n as u64),
-                    ("updatedAt", Value::Num(n)) => updated_at = Some(n as u64),
+                    ("version", Value::Num(n))
+                        if (0.0..MAX_SAFE_INT_F64).contains(&n) && n == (n as u64) as f64 =>
+                    {
+                        version = Some(n as u64)
+                    }
+                    ("updatedAt", Value::Num(n))
+                        if (0.0..MAX_SAFE_INT_F64).contains(&n) && n == (n as u64) as f64 =>
+                    {
+                        updated_at = Some(n as u64)
+                    }
                     _ => {}
                 }
             }
@@ -682,10 +699,20 @@ pub mod store {
             Value::Obj(entries) => {
                 for (k, v) in entries {
                     if k == "deleted" {
+                        // Guarded for the same reason as `list`'s version/updatedAt:
+                        // an unchecked `n as u32` reports `0` for `-1` and
+                        // `u32::MAX` for `1e30`, i.e. a delete count the host never
+                        // sent. Anything that is not a non-negative integer in
+                        // `u32` range falls to the error arm below.
                         return match v {
-                            Value::Num(n) => Ok(n as u32),
+                            Value::Num(n)
+                                if (0.0..=u32::MAX as f64).contains(&n)
+                                    && n == (n as u32) as f64 =>
+                            {
+                                Ok(n as u32)
+                            }
                             _ => Err(Vec::from(
-                                &b"{\"error\":\"deletePrefix: deleted is not a number\"}"[..],
+                                &b"{\"error\":\"deletePrefix: deleted is not a non-negative integer count\"}"[..],
                             )),
                         };
                     }
