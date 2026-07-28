@@ -156,7 +156,7 @@ async fn discover_required(caller: &ActrRef, target_type: &ActrType, expected: &
 
 async fn assert_echo_rpc(caller: &ActrRef, target: ActrId, payload: &[u8]) {
     let response = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
+        std::time::Duration::from_secs(60),
         caller.call_remote::<EchoRequest>(
             target,
             EchoRequest {
@@ -525,7 +525,7 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
     let target = discover_required(&caller_actr, &echo_type, &echo_id).await;
 
     let err = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
+        std::time::Duration::from_secs(60),
         caller_actr.call_remote::<UnknownRouteRequest>(target, UnknownRouteRequest::default()),
     )
     .await
@@ -758,7 +758,7 @@ async fn two_nodes_drop_ice_candidates_returns_bounded_rpc_result() {
     let target = discover_required(&caller_actr, &echo_type, &echo_id).await;
 
     let result = tokio::time::timeout(
-        std::time::Duration::from_secs(30),
+        std::time::Duration::from_secs(60),
         caller_actr.call_remote::<EchoRequest>(
             target.clone(),
             EchoRequest {

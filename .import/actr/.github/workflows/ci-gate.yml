@@ -232,7 +232,11 @@ jobs:
         uses: taiki-e/install-action@cargo-nextest
       - name: Run tests (nextest)
         # Integration tests (tests/) get bounded retries via .config/nextest.toml.
-        run: cargo nextest run --workspace --all-features
+        # --no-fail-fast: run the whole suite even when a test fails. With the
+        # default fail-fast, a single failure (e.g. a retry-free unit test that
+        # flakes) cancels the remaining ~1.9k tests, hiding their results and
+        # wasting the cold build. Surface every failure in one run instead.
+        run: cargo nextest run --workspace --all-features --no-fail-fast
       - name: Run doctests
         # nextest does not run doctests; keep them on the libtest harness.
         run: cargo test --doc --workspace --all-features

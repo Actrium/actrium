@@ -506,6 +506,10 @@ async fn node_teardown_releases_registered_stream_callback_cycle() {
     assert!(matches!(callback_result, Err(ActrError::NotImplemented(_))));
 
     drop(ctx);
+    // `ActorHandle::drop` only schedules cancellation. Join the runner before
+    // inspecting registry ownership so its completed DataChunk command cannot
+    // retain a transient HostAbiFn -> RuntimeContext -> registry reference.
+    wl.abort_and_join().await;
     drop(wl);
     drop(registry);
     assert!(
