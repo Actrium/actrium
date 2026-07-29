@@ -13,6 +13,7 @@ coverage/
 
 # Rust
 target/
+vcpkg_installed/
 crates/actro-core/generated/
 crates/actro-core/xcframework-staging/
 crates/actro-core/ActroCore.xcframework/**/libactro_core.a

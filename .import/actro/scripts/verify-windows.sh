@@ -1480,15 +1480,22 @@ fi
 
 dotnet_cmd="${DOTNET:-dotnet}"
 
+if [[ -z "${DOTNET:-}" ]] && ! command -v "$dotnet_cmd" >/dev/null 2>&1 && [[ -x "$repo_root/internal/dotnet/dotnet" ]]; then
+  dotnet_cmd="$repo_root/internal/dotnet/dotnet"
+fi
+
 if command -v "$dotnet_cmd" >/dev/null 2>&1; then
+  export DOTNET_CLI_TELEMETRY_OPTOUT="${DOTNET_CLI_TELEMETRY_OPTOUT:-1}"
+  export DOTNET_NOLOGO="${DOTNET_NOLOGO:-1}"
+  dotnet_build_args=(--configuration Debug -p:NuGetAudit=false -p:UseSharedCompilation=false)
   test_log="$(mktemp -t actro-windows-tests.XXXXXX)"
   build_log="$(mktemp -t actro-windows-build.XXXXXX)"
   trap 'rm -f "$test_log" "$build_log"' EXIT
 
-  "$dotnet_cmd" run --project "$test_project" --configuration Debug -p:NuGetAudit=false 2>&1 | tee "$test_log"
+  "$dotnet_cmd" run --project "$test_project" "${dotnet_build_args[@]}" 2>&1 | tee "$test_log"
   check_dotnet_warnings "$test_log" "Windows tests" false
 
-  "$dotnet_cmd" build "$project" --configuration Debug -p:NuGetAudit=false 2>&1 | tee "$build_log"
+  "$dotnet_cmd" build "$project" "${dotnet_build_args[@]}" 2>&1 | tee "$build_log"
   check_dotnet_warnings "$build_log" "Windows app build" true
 elif [[ "$is_windows_host" == "true" ]]; then
   echo "error: dotnet SDK is required to build Actro Windows on Windows hosts" >&2

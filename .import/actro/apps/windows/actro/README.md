@@ -5,8 +5,7 @@ Native Windows WebView2 browser shell for Actro.
 ## Current State
 
 - This directory is the Windows app root.
-- The current project is an initial .NET Windows Forms + WebView2 shell
-  browser shell.
+- The current project is a .NET Windows Forms + WebView2 browser shell.
 - `src/BrowserApplicationContext.cs` owns the Windows multi-window lifetime:
   first-window session restore/persist, `Ctrl+N` normal window creation,
   `Ctrl+Shift+N` private window creation, `--private`/`--incognito` startup,
@@ -109,8 +108,8 @@ Native Windows WebView2 browser shell for Actro.
   injection, `WebMessageReceived`, and JSON responses back to the page.
 - `src/WindowsAppPaths.cs` centralizes the Actro Windows local app data root
   shared by session/window snapshots and WebView2 profile data.
-- Production browser features and Actro runtime integration are still in
-  progress.
+- Browser-feature parity, OS background sync, packaging/CI automation, and
+  non-local cloud provider integration are still in progress.
 
 ## Ownership Boundary
 

@@ -10,7 +10,7 @@ repository and is consumed through released or local SDKs.
 1. Platform apps live in `apps/`.
 2. Shared platform adapters live in `platform/`.
 3. JavaScript and React Native runtime packages live in `packages/`.
-4. Native Rust client libraries and server-side reference executors live in `crates/`.
+4. Native Rust client libraries and reference executors live in `crates/`.
 5. Cross-language contracts live in `schemas/`.
 
 Browser sync uses user-owned cloud storage as the product sync medium, not an
@@ -29,11 +29,12 @@ provider architecture.
   `apps/android` and `platform/android`.
 - iOS and Android share the React Native runtime and system apps from
   `packages/actro-runtime/`.
-- Windows has an initial WebView2 shell scaffold at `apps/windows/actro/`, with
-  native tab/navigation chrome, explicit WebView2 profile storage, page and
-  browser full-screen shell handling, and a `window.actroHost` browser bridge.
-  The browser host should consume shared non-UI behavior through the Actro
-  Rust/native boundary as production implementation continues.
+- Windows has a WebView2 browser shell at `apps/windows/actro/`, with native
+  tab/navigation chrome, explicit WebView2 profile storage, generated local
+  history/bookmark pages, provider sync settings, page and browser full-screen
+  shell handling, and a `window.actroHost` browser bridge. The browser host
+  consumes shared non-UI behavior through the Actro Rust/native boundary while
+  browser-feature parity and packaging continue.
 
 ## Repository Boundary
 

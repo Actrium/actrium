@@ -15,9 +15,9 @@ source histories preserved:
 - `apps/macos/actro/` - macOS app.
 - `apps/ios/actro/` - iOS app.
 - `apps/android/actro/` - Android app.
-- `apps/windows/actro/` - Windows WebView2 shell scaffold with a centralized
-  Rust ActroCore C ABI adapter; production Windows client work is still in
-  progress.
+- `apps/windows/actro/` - Windows WebView2 browser shell with native chrome,
+  local browser storage, provider sync settings, and a centralized Rust
+  ActroCore C ABI adapter.
 
 iOS and Android share the React Native runtime in `packages/actro-runtime/`.
 The platform apps keep small local entrypoints and point to the shared runtime
@@ -91,9 +91,9 @@ shared non-UI protocol, persistence, crypto, parsing, and deterministic data
 rules can move into Rust; platform shell routing, UI lifecycle, OS SDK
 orchestration, and Windows WebView2 policy stay platform-owned.
 
-`apps/windows/actro/` is the Windows app root. It currently contains an initial
-.NET Windows Forms + WebView2 shell scaffold plus `src/ActroCore.cs`, the
-centralized C# adapter for the Rust ActroCore C ABI. `npm run verify:windows`
-validates the project metadata on every host and runs `dotnet build` whenever a
-.NET SDK is available; Windows hosts require the SDK. `third_party/rustdesk-actr/`
-is a remote desktop technology reference, not the Actro Windows browser client.
+`apps/windows/actro/` is the Windows app root. It contains the .NET Windows
+Forms + WebView2 browser shell plus `src/ActroCore.cs`, the centralized C#
+adapter for the Rust ActroCore C ABI. `npm run verify:windows` validates the
+project metadata on every host and runs `dotnet build` whenever a .NET SDK is
+available; Windows hosts require the SDK. `third_party/rustdesk-actr/` is a
+remote desktop technology reference, not the Actro Windows browser client.

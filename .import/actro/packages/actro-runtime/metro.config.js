@@ -68,6 +68,9 @@ defaultConfig.resolver.platforms = Array.from(
 // React 19 的 interop 层会尝试相对于 React 包加载 inline-requires-plugin，也需要屏蔽
 defaultConfig.resolver.blockList = [
   /.*node_modules\/react\/cjs\/react\.development\.js.*inline-requires-plugin.*/,
+  // 本地源码包加入 watchFolders，但它们自己的 node_modules 不参与 bundle。
+  // 依赖解析统一走 runtime/root node_modules，避免 Metro 递归监听多个依赖树。
+  new RegExp(`${workspacePackagesRoot}/(rill|askit|supramark)/node_modules/.*`),
   // 屏蔽 rill、askit 中的 react / react-reconciler
   new RegExp(`${workspacePackagesRoot}/(rill|askit)/node_modules/react/.*`),
   new RegExp(`${workspacePackagesRoot}/(rill|askit)/node_modules/react-reconciler/.*`),

@@ -28,10 +28,10 @@ Use a product monorepo with explicit top-level ownership:
 
 The macOS app is imported intact at `apps/macos/actro/` first. The iOS and
 Android clients are imported intact at `apps/ios/actro/` and
-`apps/android/actro/` with history-preserving subtree merges. Windows starts at
-`apps/windows/actro/` with an initial WebView2 shell scaffold. Follow-up
-migrations may move code into shared modules, but those moves must happen after
-imported histories are anchored so Git history remains auditable.
+`apps/android/actro/` with history-preserving subtree merges. Windows lives at
+`apps/windows/actro/` as the WebView2 browser shell. Follow-up migrations may
+move code into shared modules, but those moves must happen after imported
+histories are anchored so Git history remains auditable.
 
 ## Consequences
 
