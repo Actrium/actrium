@@ -183,8 +183,16 @@ export class WasmGuestView implements WasmGuestEngine {
     }
   }
 
-  /** Forward an input / lifecycle event to the native guest (rill_on_event). */
-  // Reason: an event payload is any JSON-serializable value, forwarded as-is.
+  /**
+   * Forward an input / lifecycle event to the native guest (rill_on_event).
+   *
+   * The payload may carry `Uint8Array` values: they ride as raw RBS1 segments
+   * rather than being stringified, which is how a host pushes an UNSOLICITED
+   * byte stream (a forwarded socket, a serial port, a subprocess's stdout) to a
+   * native guest — the guest cannot know when to pull for those. A byte-free
+   * payload is encoded exactly as before.
+   */
+  // Reason: an event payload is any JSON-serializable value plus Uint8Array leaves, forwarded as-is.
   sendEvent(name: string, payload?: unknown): void {
     this.host.emitEvent(name, payload);
   }

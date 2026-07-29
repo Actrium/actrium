@@ -62,12 +62,30 @@ describe('rill/contract binary fields', () => {
 
     const manifest = createCapabilitiesManifest(contract);
     expect('binaryCapabilities' in manifest).toBe(false);
-    // Whole-object shape is exactly the pre-change manifest.
     expect(manifest).toEqual({
       contractVersion: '1.0.0',
       hostCapabilities: ['host:store.putText', 'host:theme.onThemeChanged'],
       guestExports: ['refresh'],
       unschemed: ['host:store.putText', 'host:theme.onThemeChanged'],
+      // The subscription is reachable only from a JS guest (a native guest has
+      // no way to hand over a handler function), so it is listed for the gate.
+      jsOnlyCapabilities: ['host:theme.onThemeChanged'],
+    });
+  });
+
+  test('manifest of an rpc-only contract carries NEITHER optional key (byte-identical)', () => {
+    const contract = defineRillContract({
+      version: '1.0.0',
+      hostModules: { 'host:store': { putText: rpc<{ key: string; value: string }, void>() } },
+      guestExports: {},
+    });
+
+    const manifest = createCapabilitiesManifest(contract);
+    expect(manifest).toEqual({
+      contractVersion: '1.0.0',
+      hostCapabilities: ['host:store.putText'],
+      guestExports: [],
+      unschemed: ['host:store.putText'],
     });
   });
 
@@ -411,5 +429,90 @@ describe('rill/contract optional binary fields (trailing ? marker)', () => {
         guestExports: {},
       })
     ).toThrow('must contain non-empty field-name strings');
+  });
+});
+
+describe('rill/contract binary subscription events', () => {
+  test('subscription() carries binary.event into the frozen descriptor', () => {
+    const sub = subscription<{ seq: number; chunk: Uint8Array }>({
+      binary: { event: ['chunk'] },
+    });
+
+    expect(sub.kind).toBe('subscription');
+    expect(sub.binary).toEqual({ event: ['chunk'] });
+    expect(Object.isFrozen(sub)).toBe(true);
+  });
+
+  test('manifest counts a byte-carrying subscription among binaryCapabilities', () => {
+    const contract = defineRillContract({
+      version: '1.0.0',
+      hostModules: {
+        'host:feed': {
+          onChunk: subscription<{ chunk: Uint8Array }>({ binary: { event: ['chunk'] } }),
+          onTick: subscription<{ n: number }>(),
+        },
+      },
+      guestExports: {},
+    });
+
+    expect(createCapabilitiesManifest(contract).binaryCapabilities).toEqual(['host:feed.onChunk']);
+  });
+
+  test('dispatch asserts a declared binary event field is a real Uint8Array', () => {
+    const contract = defineRillContract({
+      version: '1.0.0',
+      hostModules: {
+        'host:feed': {
+          onChunk: subscription<{ chunk: Uint8Array }>({ binary: { event: ['chunk'] } }),
+        },
+      },
+      guestExports: {},
+    });
+
+    let emit: ((event: { chunk: Uint8Array }) => void) | undefined;
+    const dispatch = createHostModuleDispatch(contract, {
+      'host:feed': {
+        onChunk: (handler) => {
+          emit = handler;
+          return undefined;
+        },
+      },
+    });
+
+    const seen: Array<{ chunk: Uint8Array }> = [];
+    dispatch['host:feed']!.onChunk!((event: unknown) => seen.push(event as { chunk: Uint8Array }));
+
+    emit!({ chunk: new Uint8Array([1, 2, 3]) });
+    expect([...seen[0]!.chunk]).toEqual([1, 2, 3]);
+
+    // A number array is the exact fail-open the backstop exists to catch: it
+    // survives JSON, so without the check it would reach the guest as bytes-ish.
+    expect(() => emit!({ chunk: [1, 2, 3] as never })).toThrow(
+      'binary event field "chunk" must be a Uint8Array'
+    );
+    expect(seen).toHaveLength(1);
+  });
+
+  test('a direction that does not exist on the descriptor kind is rejected', () => {
+    expect(() =>
+      defineRillContract({
+        version: '1.0.0',
+        hostModules: {
+          // Reason: deliberately mis-declared descriptors to exercise validation.
+          'host:feed': { onChunk: subscription({ binary: { input: ['chunk'] } } as never) },
+        },
+        guestExports: {},
+      })
+    ).toThrow('binary.input is not valid on a subscription descriptor');
+
+    expect(() =>
+      defineRillContract({
+        version: '1.0.0',
+        hostModules: {
+          'host:store': { putBytes: rpc({ binary: { event: ['chunk'] } } as never) },
+        },
+        guestExports: {},
+      })
+    ).toThrow('binary.event is not valid on a rpc descriptor');
   });
 });

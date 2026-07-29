@@ -3,6 +3,7 @@ import {
   createCapabilitiesManifest,
   createHostModuleDispatch,
   defineRillContract,
+  guestKindsFor,
   implementHostModules,
   isHostModuleId,
   rpc,
@@ -80,7 +81,32 @@ describe('rill/contract', () => {
         'host:theme.notifyReady',
         'host:theme.onThemeChanged',
       ],
+      // subscriptions need a handler function, which only a JS guest can pass
+      jsOnlyCapabilities: ['host:theme.onThemeChanged'],
     });
+  });
+
+  test('guestKindsFor derives reachability from the mechanism, not a declaration', () => {
+    expect(guestKindsFor(rpc<{ id: string }, void>())).toEqual(['js', 'native']);
+    expect(guestKindsFor(subscription<{ theme: string }>())).toEqual(['js']);
+  });
+
+  test('a subscription dispatched from a native guest fails with the guest-kind reason', () => {
+    const contract = defineRillContract({
+      version: '1.0.0',
+      hostModules: { 'host:theme': { onThemeChanged: subscription<{ theme: string }>() } },
+      guestExports: {},
+    });
+    const dispatch = createHostModuleDispatch(contract, {
+      'host:theme': { onThemeChanged: () => undefined },
+    });
+
+    // What a native guest's rill_host_call actually delivers: decoded data, not
+    // a function. The error must name the guest kind and the way out, since no
+    // argument the caller could pass would make this work.
+    expect(() => dispatch['host:theme']!.onThemeChanged!({ theme: 'dark' })).toThrow(
+      /native \(wasm\) guest cannot subscribe/
+    );
   });
 
   test('unschemed flags only capabilities missing untrusted-input validation', () => {

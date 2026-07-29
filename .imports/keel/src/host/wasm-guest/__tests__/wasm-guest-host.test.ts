@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { createHostModuleDispatch, defineRillContract, implementHostModules, rpc } from '../../../contract';
 import { ComponentRegistry } from '../../registry';
 import { Receiver } from '../../receiver';
+import { decodeEnvelope, isRbs1, LIMITS, reviveSentinels } from '../../wire/store-net-envelope';
 import { WasmGuestHost } from '../wasm-guest-host';
 
 // A tiny host module defined IN the test, mirroring the platform's host:store
@@ -364,6 +365,70 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
     host.emitEvent('ping', { n: 7 });
     expect(count()).toBe(2);
     expect(lastPayload()).toEqual({ n: 7 });
+  });
+
+  it('pushes a byte-carrying payload as an RBS1 frame, leaving JSON events byte-identical', async () => {
+    // The host->guest PUSH path for raw bytes (issue #82). A native guest cannot
+    // subscribe to a host module (that needs a function reference), and it cannot
+    // pull data that arrives because an external peer spoke — so the event
+    // channel must be able to carry bytes, not just text.
+    const host = new WasmGuestHost({ dispatch: {} });
+    await host.load(EVENT_GUEST);
+    const lastRaw = (): Uint8Array => {
+      const ptr = (host.exports.last_ptr as () => number)();
+      const len = (host.exports.last_len as () => number)();
+      return host.readBytes(ptr, len);
+    };
+
+    // Byte-free payload: the plain-JSON path, byte-for-byte what it always was.
+    host.emitEvent('ping', { n: 42 });
+    const jsonRaw = lastRaw();
+    expect(isRbs1(jsonRaw)).toBe(false);
+    expect([...jsonRaw]).toEqual([...new TextEncoder().encode(JSON.stringify({ n: 42 }))]);
+
+    // Byte-carrying payload: an RBS1 frame arrives in the guest's own memory,
+    // with the bytes as a raw segment (not a number array, not base64).
+    const chunk = new Uint8Array([0, 1, 2, 253, 254, 255]);
+    host.emitEvent('ping', { seq: 3, chunk });
+    const raw = lastRaw();
+    expect(isRbs1(raw)).toBe(true);
+    const { json, segments } = decodeEnvelope(raw);
+    const revived = reviveSentinels(JSON.parse(new TextDecoder().decode(json)), segments) as {
+      seq: number;
+      chunk: Uint8Array;
+    };
+    expect(revived.seq).toBe(3);
+    expect(revived.chunk).toBeInstanceOf(Uint8Array);
+    expect([...revived.chunk]).toEqual([...chunk]);
+    // The bytes ride raw: the frame is barely longer than the payload itself,
+    // where a number-array/base64 encoding would inflate it several times over.
+    expect(raw.length).toBeLessThan(64);
+  });
+
+  it('drops (and reports) an event whose payload cannot be encoded, without throwing', async () => {
+    // Encode failures are host-side data problems, not guest-mediated ones, so
+    // they get a named warning instead of the silent drop delivery failures take.
+    const host = new WasmGuestHost({ dispatch: {} });
+    await host.load(EVENT_GUEST);
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message?: unknown) => void warnings.push(String(message));
+    try {
+      // A byte segment over the RBS1 cap (1 MiB) — fail-closed in the codec.
+      const oversized = new Uint8Array(LIMITS.maxSegmentBytes + 1);
+      expect(() => host.emitEvent('ping', { chunk: oversized })).not.toThrow();
+      // A circular payload — JSON.stringify throws on the plain path.
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      expect(() => host.emitEvent('ping', circular)).not.toThrow();
+    } finally {
+      console.warn = originalWarn;
+    }
+    expect(warnings).toHaveLength(2);
+    expect(warnings[0]).toContain('event "ping" dropped before delivery');
+    expect(warnings[0]).toContain('segment-too-big');
+    // The guest never saw either event.
+    expect((host.exports.count as () => number)()).toBe(0);
   });
 
   it('emitEvent is a no-op for a guest that does not export rill_on_event', async () => {
