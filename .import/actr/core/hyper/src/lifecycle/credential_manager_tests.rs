@@ -761,3 +761,50 @@ async fn fire_credential_renewed_clamps_negative_seconds_to_zero() {
     .await;
     assert_eq!(*captured.lock().unwrap(), Some(SystemTime::UNIX_EPOCH));
 }
+
+#[test]
+fn credential_expiry_rejects_timestamp_beyond_protobuf_range() {
+    let maximum_valid = prost_types::Timestamp {
+        seconds: 253_402_300_799,
+        nanos: 0,
+    };
+    assert!(
+        credential_expiry_to_system_time(&maximum_valid).is_some(),
+        "the maximum google.protobuf.Timestamp value must remain representable"
+    );
+    assert_eq!(
+        credential_expiry_to_system_time(&prost_types::Timestamp {
+            seconds: i64::MAX,
+            nanos: 0,
+        }),
+        None,
+        "wire timestamps outside google.protobuf.Timestamp must be rejected on every platform"
+    );
+}
+
+#[tokio::test]
+async fn credential_expiry_overflow_skips_callback_instead_of_panicking() {
+    let calls = Arc::new(AtomicU64::new(0));
+    let calls_for_callback = calls.clone();
+    let callback: HookCallback = Arc::new(move |_event| {
+        let calls = calls_for_callback.clone();
+        Box::pin(async move {
+            calls.fetch_add(1, AtomicOrdering::SeqCst);
+        })
+    });
+
+    fire_credential_renewed(
+        Some(&callback),
+        &prost_types::Timestamp {
+            seconds: i64::MAX,
+            nanos: 0,
+        },
+    )
+    .await;
+
+    assert_eq!(
+        calls.load(AtomicOrdering::SeqCst),
+        0,
+        "an invalid remote expiry must not reach the observer callback"
+    );
+}

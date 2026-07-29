@@ -82,6 +82,49 @@ async fn test_ws_connection_from_discovery() {
     assert_eq!(connections[0].connection_type(), ConnType::WebSocket);
 }
 
+#[tokio::test]
+async fn existing_connection_lookup_never_creates_discovered_websocket() {
+    let map = Arc::new(RwLock::new(HashMap::new()));
+    let actor_id = ActrId::default();
+    map.write()
+        .await
+        .insert(actor_id.clone(), "ws://localhost:9001".to_string());
+    let config = DefaultWireBuilderConfig {
+        enable_websocket: true,
+        enable_webrtc: false,
+        local_id_hex: "deadbeef".to_string(),
+        discovered_ws_addresses: map,
+        credential_state: None,
+        session_state: None,
+        pending_requests: None,
+    };
+    let factory = DefaultWireBuilder::new(None, config);
+
+    let connections = factory
+        .existing_connections(&Dest::peer(actor_id))
+        .await
+        .expect("existing-only lookup should succeed");
+
+    assert!(connections.is_empty());
+}
+
+#[tokio::test]
+async fn existing_connection_lookup_without_coordinator_is_empty() {
+    let config = DefaultWireBuilderConfig {
+        enable_websocket: false,
+        enable_webrtc: true,
+        ..Default::default()
+    };
+    let factory = DefaultWireBuilder::new(None, config);
+
+    let connections = factory
+        .existing_connections(&Dest::peer(ActrId::default()))
+        .await
+        .expect("missing coordinator is an existing-only miss");
+
+    assert!(connections.is_empty());
+}
+
 #[test]
 fn default_config_enables_both_transports_with_empty_identity() {
     let cfg = DefaultWireBuilderConfig::default();

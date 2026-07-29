@@ -1,3 +1,7 @@
+// The legacy batch helpers (`select_network_recovery_action`,
+// `process_network_event_batch`) are deprecated in favor of the responsive
+// reconciler; these compatibility tests still exercise them intentionally.
+#![allow(deprecated)]
 //! Network Event Handling Integration Tests
 //!
 //! Tests the network event handling mechanism with real WebRTC connections and WebSocket signaling.
@@ -109,12 +113,12 @@ async fn test_network_available_triggers_recovery() {
         loop {
             tokio::select! {
                 Some(request) = event_rx.recv() => {
-                    let event = request.event;
+                    let (event, result_tx) = request.into_parts_for_test();
                     tracing::info!("📥 Processing event: {:?}", event);
                     let mut results =
                         process_network_event_batch(vec![event], processor_clone.clone()).await;
                     let event_result = results.remove(0);
-                    let _ = request.result_tx.send(event_result);
+                    let _ = result_tx.send(event_result);
                 }
                 _ = shutdown_clone.cancelled() => break,
             }
@@ -202,11 +206,11 @@ async fn test_network_lost_cleanup() {
         loop {
             tokio::select! {
                 Some(request) = event_rx.recv() => {
-                    let event = request.event;
+                    let (event, result_tx) = request.into_parts_for_test();
                     let mut results =
                         process_network_event_batch(vec![event], processor_clone.clone()).await;
                     let event_result = results.remove(0);
-                    let _ = request.result_tx.send(event_result);
+                    let _ = result_tx.send(event_result);
                 }
                 _ = shutdown_clone.cancelled() => break,
             }
@@ -281,13 +285,13 @@ async fn test_result_feedback_mechanism() {
         loop {
             tokio::select! {
                 Some(request) = event_rx.recv() => {
-                    let event = request.event;
+                    let (event, result_tx) = request.into_parts_for_test();
                     // Simulate processing delay
                     tokio::time::sleep(Duration::from_millis(50)).await;
 
                     // Always return success for this test
                     let result = NetworkEventResult::success(event, 50);
-                    let _ = request.result_tx.send(result);
+                    let _ = result_tx.send(result);
                 }
                 _ = shutdown_clone.cancelled() => break,
             }
@@ -378,11 +382,11 @@ async fn test_network_repeatedly_changing() {
         loop {
             tokio::select! {
                 Some(request) = event_rx.recv() => {
-                    let event = request.event;
+                    let (event, result_tx) = request.into_parts_for_test();
                     let mut results =
                         process_network_event_batch(vec![event], processor_clone.clone()).await;
                     let event_result = results.remove(0);
-                    let _ = request.result_tx.send(event_result);
+                    let _ = result_tx.send(event_result);
                 }
                 _ = shutdown_clone.cancelled() => break,
             }

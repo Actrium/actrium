@@ -47,11 +47,27 @@ pub(crate) struct WebSocketServer {
     listener: TcpListener,
     conn_tx: mpsc::Sender<InboundWsConn>,
     local_addr: SocketAddr,
+    /// How long to wait after an `accept()` error before retrying.
+    ///
+    /// A field (not an inlined literal) so the production value can be pinned
+    /// against the audited timer inventory. The wait primitive is tested under
+    /// a paused clock for both expiry and shutdown preemption.
+    accept_backoff: std::time::Duration,
 }
 
 impl WebSocketServer {
     /// Bind to the given port and return the server plus the inbound receiver.
     pub async fn bind(port: u16) -> ActorResult<(Self, mpsc::Receiver<InboundWsConn>)> {
+        Self::bind_with_accept_backoff(port, crate::timer::ids::WEBSOCKET_ACCEPT_BACKOFF_DURATION)
+            .await
+    }
+
+    /// Bind with an explicit accept-error backoff. `bind` calls this with the
+    /// audited production duration.
+    async fn bind_with_accept_backoff(
+        port: u16,
+        accept_backoff: std::time::Duration,
+    ) -> ActorResult<(Self, mpsc::Receiver<InboundWsConn>)> {
         let addr = SocketAddr::from(([0, 0, 0, 0], port));
         let listener = TcpListener::bind(addr).await.map_err(|e| {
             ActrError::Internal(format!("WebSocketServer: failed to bind port {port}: {e}"))
@@ -69,6 +85,7 @@ impl WebSocketServer {
                 listener,
                 conn_tx,
                 local_addr,
+                accept_backoff,
             },
             conn_rx,
         ))
@@ -214,8 +231,16 @@ impl WebSocketServer {
                             }
                             Err(e) => {
                                 tracing::error!("❌ WebSocketServer accept error: {}", e);
-                                // Sleep briefly before retrying to avoid a tight error loop.
-                                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                                // Back off after a real listener failure, but
+                                // never make shutdown wait for that backoff.
+                                if !wait_after_accept_error(
+                                    &shutdown_token,
+                                    self.accept_backoff,
+                                )
+                                .await
+                                {
+                                    break;
+                                }
                             }
                         }
                     }
@@ -226,3 +251,26 @@ impl WebSocketServer {
         });
     }
 }
+
+/// Wait before retrying a failed listener accept, unless shutdown wins.
+///
+/// Kept as a small testable primitive because reliably forcing a platform
+/// `TcpListener::accept()` error is not portable. The production error arm
+/// delegates to this function directly.
+async fn wait_after_accept_error(
+    shutdown_token: &CancellationToken,
+    backoff: std::time::Duration,
+) -> bool {
+    tokio::select! {
+        biased;
+        _ = shutdown_token.cancelled() => false,
+        _ = crate::timer::sleep(
+            crate::timer::ids::WEBSOCKET_ACCEPT_BACKOFF,
+            backoff,
+        ) => true,
+    }
+}
+
+#[cfg(test)]
+#[path = "server_tests.rs"]
+mod tests;

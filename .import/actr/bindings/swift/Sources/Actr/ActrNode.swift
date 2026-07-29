@@ -12,8 +12,7 @@ import AppKit
 /// A high-level entry point for creating and starting a package-backed ACTR node.
 public final class ActrNode: Sendable {
     private let inner: ActrBindings.ActrNode
-    private let networkEventMonitor: NetworkEventMonitor
-    private let appLifecycleMonitor: AppLifecycleMonitor
+    private let monitoringResource: any MobileMonitoringResource
     private let retainedWorkload: DynamicWorkload?
     private let retainedObservers: RuntimeObservers?
 
@@ -38,8 +37,10 @@ public final class ActrNode: Sendable {
             let lifecycleMonitor = AppLifecycleMonitor(handle: handle, networkEventMonitor: monitor)
             return ActrNode(
                 inner: wrapper,
-                networkEventMonitor: monitor,
-                appLifecycleMonitor: lifecycleMonitor,
+                monitoringResource: DefaultMobileMonitoringResource(
+                    networkEventMonitor: monitor,
+                    appLifecycleMonitor: lifecycleMonitor
+                ),
                 retainedWorkload: nil,
                 retainedObservers: observers
             )
@@ -72,8 +73,10 @@ public final class ActrNode: Sendable {
             let lifecycleMonitor = AppLifecycleMonitor(handle: handle, networkEventMonitor: monitor)
             return ActrNode(
                 inner: wrapper,
-                networkEventMonitor: monitor,
-                appLifecycleMonitor: lifecycleMonitor,
+                monitoringResource: DefaultMobileMonitoringResource(
+                    networkEventMonitor: monitor,
+                    appLifecycleMonitor: lifecycleMonitor
+                ),
                 retainedWorkload: workload,
                 retainedObservers: nil
             )
@@ -94,7 +97,12 @@ public final class ActrNode: Sendable {
     public func start() async throws -> ActrRef {
         do {
             let refWrapper = try await inner.start()
-            return ActrRef(inner: refWrapper, retainedWorkload: retainedWorkload, retainedObservers: retainedObservers)
+            return ActrRef(
+                inner: refWrapper,
+                retainedWorkload: retainedWorkload,
+                retainedObservers: retainedObservers,
+                retainedMonitoringResource: monitoringResource
+            )
         } catch {
             throw ActrError(error: error)
         }
@@ -102,14 +110,12 @@ public final class ActrNode: Sendable {
 
     fileprivate init(
         inner: ActrBindings.ActrNode,
-        networkEventMonitor: NetworkEventMonitor,
-        appLifecycleMonitor: AppLifecycleMonitor,
+        monitoringResource: any MobileMonitoringResource,
         retainedWorkload: DynamicWorkload?,
         retainedObservers: RuntimeObservers?
     ) {
         self.inner = inner
-        self.networkEventMonitor = networkEventMonitor
-        self.appLifecycleMonitor = appLifecycleMonitor
+        self.monitoringResource = monitoringResource
         self.retainedWorkload = retainedWorkload
         self.retainedObservers = retainedObservers
     }
@@ -118,16 +124,14 @@ public final class ActrNode: Sendable {
 private final class NetworkEventMonitor: @unchecked Sendable {
     private let monitor: NWPathMonitor
     private let queue: DispatchQueue
-    private let handle: NetworkEventHandleWrapper
-    private var hasProcessedInitialPath = false
-    private var lastStatus: NWPath.Status?
-    private var lastTransport: NetworkTransportFlags?
-    private var lastIsExpensive: Bool?
-    private var lastIsConstrained: Bool?
-    private var nextSequence: UInt64 = 1
+    private let deliverySession: MobileEventDeliverySession
+    private let delivery: MobileEventDeliveryGate
+    private var reducer = NetworkPathEventReducer()
 
     init(handle: NetworkEventHandleWrapper) {
-        self.handle = handle
+        let deliverySession = MobileEventDeliverySession(handle: handle)
+        self.deliverySession = deliverySession
+        delivery = deliverySession.gate
         monitor = NWPathMonitor()
         queue = DispatchQueue(label: "actr.network.monitor")
         monitor.pathUpdateHandler = { [weak self] path in
@@ -140,72 +144,47 @@ private final class NetworkEventMonitor: @unchecked Sendable {
         monitor.cancel()
     }
 
-    func notifyCurrentPath() {
+    func notifyCurrentPath(after predecessor: Task<Void, Never>) {
         queue.async { [weak self] in
             guard let self else { return }
-            self.process(path: self.monitor.currentPath, forceNotify: false)
+            self.process(
+                path: self.monitor.currentPath,
+                forceNotify: true,
+                deliveryPredecessor: predecessor
+            )
         }
     }
 
-    private func process(path: NWPath, forceNotify: Bool) {
-        let status = path.status
+    private func process(
+        path: NWPath,
+        forceNotify: Bool,
+        deliveryPredecessor: Task<Void, Never>? = nil
+    ) {
         let transport = transportFlags(for: path)
-        let snapshot = makeSnapshot(for: path, transport: transport)
+        let reduction = reducer.reduce(
+            NetworkPathObservation(
+                status: path.status,
+                transport: transport,
+                isExpensive: path.isExpensive,
+                isConstrained: path.isConstrained
+            ),
+            forceNotify: forceNotify
+        )
+        let snapshot = reduction.snapshot
         let timestamp = formattedTimestamp()
 
-        print("Network path update: time=\(timestamp), status=\(status), availability=\(snapshot.availability), wifi=\(transport.wifi), cellular=\(transport.cellular), ethernet=\(transport.ethernet), vpn=\(transport.vpn), other=\(transport.other), expensive=\(snapshot.isExpensive), constrained=\(snapshot.isConstrained)")
+        print("Network path update: time=\(timestamp), status=\(path.status), availability=\(snapshot.availability), wifi=\(transport.wifi), cellular=\(transport.cellular), ethernet=\(transport.ethernet), vpn=\(transport.vpn), other=\(transport.other), expensive=\(snapshot.isExpensive), constrained=\(snapshot.isConstrained)")
 
-        if !hasProcessedInitialPath {
+        if reduction.isInitial {
             print("Network initial path captured: time=\(timestamp), forceNotify=\(forceNotify)")
-            hasProcessedInitialPath = true
-            lastStatus = status
-            lastTransport = transport
-            lastIsExpensive = snapshot.isExpensive
-            lastIsConstrained = snapshot.isConstrained
-            if !forceNotify {
-                return
-            }
         }
 
-        let pathChanged = forceNotify
-            || lastStatus != status
-            || lastTransport != transport
-            || lastIsExpensive != snapshot.isExpensive
-            || lastIsConstrained != snapshot.isConstrained
-        guard pathChanged else {
+        guard reduction.shouldNotify else {
             return
         }
 
         print("Network path changed: time=\(timestamp), sequence=\(snapshot.sequence), availability=\(snapshot.availability)")
-        lastStatus = status
-        lastTransport = transport
-        lastIsExpensive = snapshot.isExpensive
-        lastIsConstrained = snapshot.isConstrained
-        notifyPathChanged(snapshot: snapshot)
-    }
-
-    private func makeSnapshot(for path: NWPath, transport: NetworkTransportFlags) -> NetworkSnapshot {
-        defer { nextSequence += 1 }
-        return NetworkSnapshot(
-            sequence: nextSequence,
-            availability: availability(for: path.status),
-            transport: transport,
-            isExpensive: path.isExpensive,
-            isConstrained: path.isConstrained
-        )
-    }
-
-    private func availability(for status: NWPath.Status) -> NetworkAvailability {
-        switch status {
-        case .satisfied:
-            return .available
-        case .unsatisfied:
-            return .unavailable
-        case .requiresConnection:
-            return .unknown
-        @unknown default:
-            return .unknown
-        }
+        notifyPathChanged(snapshot: snapshot, after: deliveryPredecessor)
     }
 
     private func transportFlags(for path: NWPath) -> NetworkTransportFlags {
@@ -218,9 +197,15 @@ private final class NetworkEventMonitor: @unchecked Sendable {
         )
     }
 
-    private func notifyPathChanged(snapshot: NetworkSnapshot) {
-        Task { [handle] in
-            _ = try? await handle.handleNetworkPathChanged(snapshot: snapshot)
+    private func notifyPathChanged(
+        snapshot: NetworkSnapshot,
+        after predecessor: Task<Void, Never>?
+    ) {
+        Task { [delivery] in
+            await delivery.sendNetworkPathChanged(
+                snapshot: snapshot,
+                after: predecessor
+            )
         }
     }
 
@@ -232,18 +217,25 @@ private final class NetworkEventMonitor: @unchecked Sendable {
 }
 
 private final class AppLifecycleMonitor: @unchecked Sendable {
-    private let handle: NetworkEventHandleWrapper
+    private let deliverySession: MobileEventDeliverySession
+    private let delivery: MobileEventDeliveryGate
+    private let lifecycleDelivery: SerializedLifecycleDelivery
     private weak var networkEventMonitor: NetworkEventMonitor?
     private let queue: DispatchQueue
     private var observers: [NSObjectProtocol] = []
-    private var backgroundedAt: Date?
+    private let lifecycleEvents = AppLifecycleEventSource()
 
     init(handle: NetworkEventHandleWrapper, networkEventMonitor: NetworkEventMonitor) {
-        self.handle = handle
+        let deliverySession = MobileEventDeliverySession(handle: handle)
+        let delivery = deliverySession.gate
+        self.deliverySession = deliverySession
+        self.delivery = delivery
+        lifecycleDelivery = SerializedLifecycleDelivery(delivery: delivery)
         self.networkEventMonitor = networkEventMonitor
         self.queue = DispatchQueue(label: "actr.lifecycle.monitor")
         print("AppLifecycleMonitor initialized: time=\(formattedTimestamp())")
         registerObservers()
+        injectInitialLifecycleState()
     }
 
     deinit {
@@ -287,12 +279,41 @@ private final class AppLifecycleMonitor: @unchecked Sendable {
 #endif
     }
 
+    private func injectInitialLifecycleState() {
+#if canImport(UIKit)
+        DispatchQueue.main.async { [weak self] in
+            let isBackground = UIApplication.shared.applicationState == .background
+            self?.queue.async { [weak self] in
+                self?.handleInitialLifecycleState(isBackground: isBackground)
+            }
+        }
+#elseif canImport(AppKit)
+        DispatchQueue.main.async { [weak self] in
+            let isBackground = !NSApplication.shared.isActive
+            self?.queue.async { [weak self] in
+                self?.handleInitialLifecycleState(isBackground: isBackground)
+            }
+        }
+#endif
+    }
+
+    private func handleInitialLifecycleState(isBackground: Bool) {
+        guard let state = lifecycleEvents.initializePhase(isBackground: isBackground) else {
+            print("AppLifecycleMonitor skipped stale initial phase: time=\(formattedTimestamp())")
+            return
+        }
+        print("AppLifecycleMonitor initial phase: time=\(formattedTimestamp()), background=\(isBackground)")
+        let deliveryTask = notifyLifecycleChanged(state: state)
+        if !isBackground {
+            networkEventMonitor?.notifyCurrentPath(after: deliveryTask)
+        }
+    }
+
     private func handleDidEnterBackground() {
         let timestamp = formattedTimestamp()
-        if backgroundedAt == nil {
-            backgroundedAt = Date()
+        if let state = lifecycleEvents.didEnterBackground() {
             print("🔵 App entered background: time=\(timestamp)")
-            notifyLifecycleChanged(state: .background)
+            notifyLifecycleChanged(state: state)
         } else {
             print("⚠️ App entered background (already backgrounded): time=\(timestamp)")
         }
@@ -300,30 +321,42 @@ private final class AppLifecycleMonitor: @unchecked Sendable {
 
     private func handleWillEnterForeground() {
         let timestamp = formattedTimestamp()
-        guard let backgroundedAt else {
-            print("🟢 App entered foreground (no background timestamp): time=\(timestamp)")
-            notifyLifecycleChanged(state: .foreground(backgroundDurationMs: 0))
-            networkEventMonitor?.notifyCurrentPath()
+        let state = lifecycleEvents.willEnterForeground()
+        guard case let .foreground(backgroundDurationMs) = state else {
             return
         }
-
-        self.backgroundedAt = nil
-        let duration = Date().timeIntervalSince(backgroundedAt)
-        let durationMs = UInt64(max(0, duration * 1000).rounded())
-        print("🟢 App entered foreground: time=\(timestamp), backgroundDurationMs=\(durationMs)")
-        notifyLifecycleChanged(state: .foreground(backgroundDurationMs: durationMs))
-        networkEventMonitor?.notifyCurrentPath()
+        if backgroundDurationMs == 0 {
+            print("🟢 App entered foreground (no background timestamp): time=\(timestamp)")
+        } else {
+            print("🟢 App entered foreground: time=\(timestamp), backgroundDurationMs=\(backgroundDurationMs)")
+        }
+        let deliveryTask = notifyLifecycleChanged(state: state)
+        networkEventMonitor?.notifyCurrentPath(after: deliveryTask)
     }
 
-    private func notifyLifecycleChanged(state: AppLifecycleState) {
-        Task { [handle] in
-            _ = try? await handle.handleAppLifecycleChanged(state: state)
-        }
+    @discardableResult
+    private func notifyLifecycleChanged(
+        state: AppLifecycleState
+    ) -> Task<Void, Never> {
+        lifecycleDelivery.enqueue(state)
     }
 
     private func formattedTimestamp() -> String {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.string(from: Date())
+    }
+}
+
+private final class DefaultMobileMonitoringResource: MobileMonitoringResource, @unchecked Sendable {
+    private let networkEventMonitor: NetworkEventMonitor
+    private let appLifecycleMonitor: AppLifecycleMonitor
+
+    init(
+        networkEventMonitor: NetworkEventMonitor,
+        appLifecycleMonitor: AppLifecycleMonitor
+    ) {
+        self.networkEventMonitor = networkEventMonitor
+        self.appLifecycleMonitor = appLifecycleMonitor
     }
 }

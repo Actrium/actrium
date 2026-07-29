@@ -1,3 +1,7 @@
+// The legacy batch helpers (`select_network_recovery_action`,
+// `process_network_event_batch`) are deprecated in favor of the responsive
+// reconciler; these compatibility tests still exercise them intentionally.
+#![allow(deprecated)]
 //! Integration tests for in-flight large WebRTC messages across mobile-style
 //! network and app-lifecycle interruptions.
 
@@ -19,12 +23,22 @@ use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{ActrError, ActrId, DataChunk, Direction, PayloadType, RpcEnvelope};
 use sha2::{Digest, Sha256};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex as StdMutex};
+use std::sync::{Arc, Mutex as StdMutex, OnceLock};
 use std::time::Duration;
-use tokio::sync::{Notify, mpsc, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, Notify, mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 
 const LARGE_PAYLOAD_SIZE: usize = 200 * 1024;
+
+fn fragment_hook_test_lock() -> &'static AsyncMutex<()> {
+    // `install_webrtc_fragment_send_hook_for_test` is intentionally
+    // process-wide. These two top-level tests both send fragmented WebRTC
+    // payloads, while the long interruption matrix temporarily installs that
+    // hook. Serialize the scenarios so one test cannot pause another test's
+    // transport and consume its notification.
+    static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| AsyncMutex::new(()))
+}
 
 #[derive(Clone, Copy)]
 struct RoleCase {
@@ -1213,6 +1227,7 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
+    let _fragment_hook_isolation = fragment_hook_test_lock().lock().await;
     init_tracing();
 
     for case in ROLE_CASES {
@@ -1281,10 +1296,6 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
         storm_task
             .await
             .expect("mobile event storm task should not panic");
-        network_shutdown.cancel();
-        network_task
-            .await
-            .expect("network event reconciler task should not panic");
         assert_eq!(
             harness.peer(case.mobile_serial).pending_count().await,
             0,
@@ -1303,12 +1314,21 @@ async fn mobile_event_storm_during_call_and_data_chunk_does_not_hang() {
             Duration::from_secs(30),
         )
         .await;
+
+        // Cancel the reconciler only after the post-storm traffic: external
+        // cancellation is now lowered to `ShutdownRequested` and runs the real
+        // bounded teardown, which disconnects signaling and closes peers.
+        network_shutdown.cancel();
+        network_task
+            .await
+            .expect("network event reconciler task should not panic");
         shutdown_scenario(harness, background_tasks).await;
     }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_mobile_inflight_large_message_interruptions() {
+    let _fragment_hook_isolation = fragment_hook_test_lock().lock().await;
     init_tracing();
 
     for case in ROLE_CASES {

@@ -189,10 +189,11 @@ async fn linked_node_starts_and_shuts_down_cleanly() {
         .expect("link should attach the workload");
 
     // register hits the mock AIS (MockActrixServer serves /ais/register).
-    let registered = node
+    let mut registered = node
         .register(&format!("http://127.0.0.1:{}/ais", server.port()))
         .await
         .expect("register should succeed against mock AIS");
+    let _network_events = registered.create_gated_network_event_handle(25);
 
     let actr = registered.start().await.expect("node should start");
     // Node is live: it has an actor id and is not yet shutting down.
@@ -202,6 +203,27 @@ async fn linked_node_starts_and_shuts_down_cleanly() {
     // Graceful shutdown.
     actr.shutdown();
     actr.wait_for_shutdown().await;
+
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn attached_node_exposes_gated_network_event_constructor() {
+    let mut server = TestSignalingServer::start().await.expect("server start");
+    let dir = TempDir::new().unwrap();
+    let hyper = Hyper::new(HyperConfig::new(
+        dir.path(),
+        Arc::new(StaticTrust::dev_only()),
+    ))
+    .await
+    .unwrap();
+    let mut node = Node::from_hyper(hyper, runtime_config(&dir, &server, "GatedAttached"))
+        .link(EchoWorkload)
+        .await
+        .expect("link should attach the workload");
+
+    let handle = node.create_gated_network_event_handle(25);
+    handle.notify_session_activated(3);
 
     server.shutdown().await;
 }

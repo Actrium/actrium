@@ -1,4 +1,5 @@
 use super::*;
+use crate::lifecycle::test_recovery_policy as tp;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering as UsizeOrdering};
@@ -130,6 +131,21 @@ fn make_ws_client(config: SignalingConfig) -> Arc<WebSocketSignalingClient> {
     Arc::new(WebSocketSignalingClient::new(config))
 }
 
+fn attach_supervisor_fact_sink(
+    client: &WebSocketSignalingClient,
+) -> mpsc::UnboundedReceiver<tp::Input> {
+    let (tx, rx) = mpsc::unbounded_channel();
+    client.set_supervisor_fact_sink(SupervisorFactSink::new(tx));
+    rx
+}
+
+async fn next_supervisor_fact(rx: &mut mpsc::UnboundedReceiver<tp::Input>) -> tp::Input {
+    tokio::time::timeout(Duration::from_secs(2), rx.recv())
+        .await
+        .expect("signaling should emit a supervisor fact promptly")
+        .expect("supervisor fact channel should remain open")
+}
+
 #[tokio::test]
 async fn probe_alive_times_out_when_sink_lock_is_stalled() {
     let client = make_ws_client(make_config());
@@ -203,6 +219,8 @@ async fn send_envelope_times_out_while_waiting_for_sink_lock() {
 #[tokio::test]
 async fn send_envelope_failure_publishes_disconnect_and_requests_reconnect() {
     let client = make_ws_client(make_config());
+    let mut facts = attach_supervisor_fact_sink(&client);
+    client.connection_generation.store(23, Ordering::Release);
     client.connected.store(true, Ordering::Release);
     let mut events = client.subscribe_events();
 
@@ -223,9 +241,237 @@ async fn send_envelope_failure_publishes_disconnect_and_requests_reconnect() {
             reason: DisconnectReason::SendFailed
         })
     ));
+    assert_eq!(
+        next_supervisor_fact(&mut facts).await,
+        tp::Input::SignalingGenerationLost {
+            generation: 23,
+            cause: tp::SignalingLostCause::RemoteReset,
+        },
+        "an envelope failure must report the exact live generation as a remote reset"
+    );
     tokio::time::timeout(Duration::from_secs(1), client.reconnect_notify.notified())
         .await
         .expect("send failure should wake the reconnect manager");
+}
+
+#[tokio::test]
+async fn receiver_stream_end_reports_the_committed_generation_as_remote_reset() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let (server_ready_tx, server_ready_rx) = tokio::sync::oneshot::channel();
+    let (close_server_tx, close_server_rx) = tokio::sync::oneshot::channel();
+    let server_task = tokio::spawn(async move {
+        let (stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept tcp connection");
+        let websocket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("test server should complete websocket handshake");
+        server_ready_tx
+            .send(())
+            .expect("client should still wait for server readiness");
+        let _ = close_server_rx.await;
+        drop(websocket);
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test websocket URL should parse");
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+    let (fact_tx, mut fact_rx) = tokio::sync::mpsc::unbounded_channel();
+    client.set_supervisor_fact_sink(SupervisorFactSink::new(fact_tx));
+
+    client
+        .connect_once()
+        .await
+        .expect("client should establish the test websocket");
+    server_ready_rx
+        .await
+        .expect("test server should report handshake completion");
+    let generation = client.connection_generation.load(Ordering::Acquire);
+    assert_eq!(
+        fact_rx.recv().await,
+        Some(
+            crate::lifecycle::RecoveryInput::SignalingGenerationCommitted {
+                generation,
+                origin: crate::lifecycle::SignalingOrigin::External,
+            }
+        )
+    );
+
+    close_server_tx
+        .send(())
+        .expect("test server should still be waiting");
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(2), fact_rx.recv())
+            .await
+            .expect("stream termination should emit a supervisor fact"),
+        Some(crate::lifecycle::RecoveryInput::SignalingGenerationLost {
+            generation,
+            cause: crate::lifecycle::SignalingLostCause::RemoteReset,
+        })
+    );
+    assert!(!client.is_connected());
+
+    server_task
+        .await
+        .expect("test websocket server should not panic");
+}
+
+#[tokio::test]
+async fn connect_and_explicit_disconnect_emit_exact_supervisor_facts() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let server_task = tokio::spawn(async move {
+        let (stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept tcp connection");
+        let mut ws_stream = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("test server should complete websocket handshake");
+        while let Some(message) = ws_stream.next().await {
+            if matches!(
+                message.expect("test websocket should remain valid"),
+                tokio_tungstenite::tungstenite::Message::Close(_)
+            ) {
+                break;
+            }
+        }
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test websocket URL should parse");
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+    let mut facts = attach_supervisor_fact_sink(&client);
+
+    client
+        .connect_once()
+        .await
+        .expect("explicit signaling connect should succeed");
+    let generation = client.connection_generation.load(Ordering::Acquire);
+    assert_eq!(
+        next_supervisor_fact(&mut facts).await,
+        tp::Input::SignalingGenerationCommitted {
+            generation,
+            origin: tp::SignalingOrigin::External,
+        },
+        "socket publication must report its exact generation and external origin"
+    );
+
+    client
+        .disconnect()
+        .await
+        .expect("explicit signaling disconnect should succeed");
+    assert_eq!(
+        next_supervisor_fact(&mut facts).await,
+        tp::Input::SignalingGenerationLost {
+            generation,
+            cause: tp::SignalingLostCause::Disconnected,
+        },
+        "explicit disconnect must report the generation that was live before invalidation"
+    );
+
+    tokio::time::timeout(Duration::from_secs(2), server_task)
+        .await
+        .expect("test server should stop after close")
+        .expect("test server should not panic");
+}
+
+#[tokio::test]
+async fn receiver_stream_end_emits_remote_reset_for_committed_generation() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let (release_tx, release_rx) = oneshot::channel::<()>();
+    let server_task = tokio::spawn(async move {
+        let (stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept tcp connection");
+        let ws_stream = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("test server should complete websocket handshake");
+        let _ = release_rx.await;
+        drop(ws_stream);
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test websocket URL should parse");
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+    let mut facts = attach_supervisor_fact_sink(&client);
+
+    client
+        .connect_once()
+        .await
+        .expect("explicit signaling connect should succeed");
+    let generation = client.connection_generation.load(Ordering::Acquire);
+    assert_eq!(
+        next_supervisor_fact(&mut facts).await,
+        tp::Input::SignalingGenerationCommitted {
+            generation,
+            origin: tp::SignalingOrigin::External,
+        }
+    );
+
+    release_tx
+        .send(())
+        .expect("test server should still wait for release");
+    assert_eq!(
+        next_supervisor_fact(&mut facts).await,
+        tp::Input::SignalingGenerationLost {
+            generation,
+            cause: tp::SignalingLostCause::RemoteReset,
+        },
+        "a spontaneous receiver-loop end must report the committed generation as reset"
+    );
+
+    server_task.await.expect("test server should not panic");
+}
+
+#[tokio::test(start_paused = true)]
+async fn ping_send_failure_emits_remote_reset_for_snapshotted_generation() {
+    let client = make_ws_client(make_config());
+    let mut facts = attach_supervisor_fact_sink(&client);
+    client.connection_generation.store(41, Ordering::Release);
+    client.connected.store(true, Ordering::Release);
+
+    client.start_ping_task().await;
+    tokio::task::yield_now().await;
+    tokio::time::advance(Duration::from_secs(PING_INTERVAL_SECS)).await;
+
+    assert_eq!(
+        next_supervisor_fact(&mut facts).await,
+        tp::Input::SignalingGenerationLost {
+            generation: 41,
+            cause: tp::SignalingLostCause::RemoteReset,
+        },
+        "ping failure must report the generation captured when the task started"
+    );
+    assert!(!client.is_connected());
 }
 
 #[tokio::test]
@@ -294,6 +540,8 @@ async fn explicit_connect_once_retries_after_concurrent_attempt_fails() {
         ..ReconnectConfig::default()
     };
     let client = make_ws_client(config);
+    let (fact_tx, mut fact_rx) = tokio::sync::mpsc::unbounded_channel();
+    client.set_supervisor_fact_sink(SupervisorFactSink::new(fact_tx));
 
     client.connecting.store(true, Ordering::Release);
     let connect_task = {
@@ -316,6 +564,15 @@ async fn explicit_connect_once_retries_after_concurrent_attempt_fails() {
     assert!(
         client.is_connected(),
         "explicit recovery connect should establish signaling"
+    );
+    assert_eq!(
+        fact_rx.recv().await,
+        Some(
+            crate::lifecycle::RecoveryInput::SignalingGenerationCommitted {
+                generation: client.connection_generation.load(Ordering::Acquire),
+                origin: crate::lifecycle::SignalingOrigin::External,
+            }
+        )
     );
 
     client.disconnect().await.ok();
@@ -725,6 +982,9 @@ async fn test_disconnect_event_on_connect_failure() {
 #[tokio::test]
 async fn test_disconnect_clears_connected_flag() {
     let client = make_ws_client(make_config());
+    let generation = client.connection_generation.load(Ordering::Acquire);
+    let (fact_tx, mut fact_rx) = tokio::sync::mpsc::unbounded_channel();
+    client.set_supervisor_fact_sink(SupervisorFactSink::new(fact_tx));
     // Simulate connected state
     client.connected.store(true, Ordering::Release);
     assert!(client.is_connected());
@@ -734,6 +994,18 @@ async fn test_disconnect_clears_connected_flag() {
     assert!(
         !client.is_connected(),
         "should be Disconnected after disconnect()"
+    );
+    assert_eq!(
+        client.connection_generation.load(Ordering::Acquire),
+        generation + 1,
+        "disconnect must invalidate every in-flight connection attempt"
+    );
+    assert_eq!(
+        fact_rx.recv().await,
+        Some(crate::lifecycle::RecoveryInput::SignalingGenerationLost {
+            generation,
+            cause: crate::lifecycle::SignalingLostCause::Disconnected,
+        })
     );
 }
 
@@ -819,10 +1091,39 @@ async fn test_schedule_auto_reconnect_reenables_after_explicit_disconnect() {
     );
 }
 
-#[test]
-fn test_suppress_auto_reconnect_invalidates_generation_until_rescheduled() {
+#[tokio::test(start_paused = true)]
+async fn resume_auto_reconnect_clears_suppression_without_scheduling_attempt() {
     let client = make_ws_client(make_config());
-    let generation = client.reconnect_generation.load(Ordering::Acquire);
+    client.suppress_auto_reconnect();
+
+    let mut unexpected_wake = Box::pin(client.reconnect_notify.notified());
+    unexpected_wake.as_mut().enable();
+    client.resume_auto_reconnect();
+
+    assert!(
+        !client.auto_reconnect_suppressed.load(Ordering::Acquire),
+        "resume should allow future reconnect scheduling"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(1), &mut unexpected_wake)
+            .await
+            .is_err(),
+        "resume must not force an immediate reconnect attempt"
+    );
+    drop(unexpected_wake);
+
+    let mut scheduled_wake = Box::pin(client.reconnect_notify.notified());
+    scheduled_wake.as_mut().enable();
+    client.schedule_auto_reconnect();
+    tokio::time::timeout(Duration::from_millis(1), &mut scheduled_wake)
+        .await
+        .expect("schedule_auto_reconnect should wake the reconnect cycle");
+}
+
+#[test]
+fn test_suppress_auto_reconnect_preserves_explicit_connection_generation() {
+    let client = make_ws_client(make_config());
+    let generation = client.connection_generation.load(Ordering::Acquire);
 
     client.suppress_auto_reconnect();
 
@@ -831,9 +1132,9 @@ fn test_suppress_auto_reconnect_invalidates_generation_until_rescheduled() {
         "lifecycle preparation should pause automatic reconnect"
     );
     assert_eq!(
-        client.reconnect_generation.load(Ordering::Acquire),
-        generation + 1,
-        "lifecycle preparation should invalidate the current reconnect generation"
+        client.connection_generation.load(Ordering::Acquire),
+        generation,
+        "pausing automatic reconnect must not cancel an explicit connection attempt"
     );
 
     client.schedule_auto_reconnect_reset_backoff();
@@ -841,6 +1142,26 @@ fn test_suppress_auto_reconnect_invalidates_generation_until_rescheduled() {
         !client.auto_reconnect_suppressed.load(Ordering::Acquire),
         "network recovery should re-enable future automatic reconnects"
     );
+}
+
+#[tokio::test]
+async fn resume_auto_reconnect_reenables_without_waking_manager() {
+    let client = make_ws_client(make_config());
+    client.suppress_auto_reconnect();
+    let mut reconnect_wake = Box::pin(client.reconnect_notify.notified());
+    reconnect_wake.as_mut().enable();
+
+    client.resume_auto_reconnect();
+
+    assert!(
+        !client.auto_reconnect_suppressed.load(Ordering::Acquire),
+        "resume should make a later automatic recovery eligible"
+    );
+    tokio::select! {
+        biased;
+        _ = &mut reconnect_wake => panic!("resume must not start reconnect work immediately"),
+        _ = tokio::task::yield_now() => {}
+    }
 }
 
 #[tokio::test]
@@ -1019,6 +1340,432 @@ async fn test_explicit_disconnect_suppresses_in_flight_auto_reconnect_connected_
         .await
         .expect("test server task should finish")
         .expect("test server task should not panic");
+}
+
+#[tokio::test]
+async fn test_suppress_auto_reconnect_does_not_cancel_in_flight_explicit_connect() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel::<()>();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+    let (finish_tx, finish_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let server_task = tokio::spawn(async move {
+        let (stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept tcp connection");
+        accepted_tx
+            .send(())
+            .expect("test should still wait for accepted connection");
+        let _ = release_rx.await;
+        let ws_stream = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("test server should complete websocket handshake");
+        let _ = finish_rx.await;
+        drop(ws_stream);
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test websocket URL should parse");
+    config.connection_timeout = 5;
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+    let generation = client.connection_generation.load(Ordering::Acquire);
+
+    let connecting_client = client.clone();
+    let connect_task = tokio::spawn(async move { connecting_client.connect_once().await });
+    tokio::time::timeout(Duration::from_secs(1), accepted_rx)
+        .await
+        .expect("explicit connection should reach the server")
+        .expect("server accept notifier should remain open");
+
+    client.suppress_auto_reconnect();
+    assert_eq!(
+        client.connection_generation.load(Ordering::Acquire),
+        generation,
+        "auto-reconnect suppression must not invalidate explicit work"
+    );
+    release_tx
+        .send(())
+        .expect("test server handshake should still be waiting");
+
+    tokio::time::timeout(Duration::from_secs(2), connect_task)
+        .await
+        .expect("explicit connect should not be cancelled")
+        .expect("explicit connect task should not panic")
+        .expect("explicit connect should complete");
+    assert!(client.is_connected());
+    assert!(
+        !client.auto_reconnect_suppressed.load(Ordering::Acquire),
+        "a successful explicit connection should re-arm automatic reconnect"
+    );
+
+    client
+        .disconnect()
+        .await
+        .expect("explicit connection should disconnect cleanly");
+    finish_tx
+        .send(())
+        .expect("test server should still be waiting");
+    tokio::time::timeout(Duration::from_secs(1), server_task)
+        .await
+        .expect("test server task should finish")
+        .expect("test server task should not panic");
+}
+
+#[tokio::test]
+async fn test_explicit_disconnect_cancels_in_flight_explicit_connect() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel::<()>();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let server_task = tokio::spawn(async move {
+        let (stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept tcp connection");
+        accepted_tx
+            .send(())
+            .expect("test should still wait for accepted connection");
+        let _ = release_rx.await;
+        let ws_stream = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("test server should complete websocket handshake");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        drop(ws_stream);
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test websocket URL should parse");
+    config.connection_timeout = 5;
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+    let mut rx = client.subscribe_events();
+
+    let connecting_client = client.clone();
+    let connect_task = tokio::spawn(async move { connecting_client.connect_once().await });
+
+    tokio::time::timeout(Duration::from_secs(1), accepted_rx)
+        .await
+        .expect("explicit connection should reach the server")
+        .expect("server accept notifier should remain open");
+
+    client
+        .disconnect()
+        .await
+        .expect("disconnect should invalidate the in-flight explicit connection");
+    release_tx
+        .send(())
+        .expect("test server handshake should still be waiting");
+
+    tokio::time::timeout(Duration::from_secs(2), connect_task)
+        .await
+        .expect("cancelled explicit connect should exit promptly")
+        .expect("explicit connect task should not panic")
+        .expect_err("the stale explicit connect must not report success");
+
+    while let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(150), rx.recv()).await {
+        assert!(
+            !matches!(event, SignalingEvent::Connected),
+            "cancelled explicit connect must not publish Connected"
+        );
+    }
+
+    assert!(
+        !client.is_connected(),
+        "cancelled explicit connect must not resurrect signaling"
+    );
+    assert!(
+        client.auto_reconnect_suppressed.load(Ordering::Acquire),
+        "disconnect suppression must remain active after stale explicit completion"
+    );
+
+    tokio::time::timeout(Duration::from_secs(1), server_task)
+        .await
+        .expect("test server task should finish")
+        .expect("test server task should not panic");
+}
+
+#[tokio::test]
+async fn inv12_stale_signaling_generation_cannot_publish_connected() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let (first_accepted_tx, first_accepted_rx) = tokio::sync::oneshot::channel::<()>();
+    let (release_first_tx, release_first_rx) = tokio::sync::oneshot::channel::<()>();
+    let (finish_server_tx, finish_server_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let server_task = tokio::spawn(async move {
+        let (first_stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept first tcp connection");
+        first_accepted_tx
+            .send(())
+            .expect("test should still wait for first connection");
+        let _ = release_first_rx.await;
+        let first_ws = tokio_tungstenite::accept_async(first_stream)
+            .await
+            .expect("test server should complete first websocket handshake");
+        drop(first_ws);
+
+        let (second_stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept replacement tcp connection");
+        let second_ws = tokio_tungstenite::accept_async(second_stream)
+            .await
+            .expect("test server should complete replacement websocket handshake");
+        let _ = finish_server_rx.await;
+        drop(second_ws);
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test websocket URL should parse");
+    config.connection_timeout = 5;
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+    let mut rx = client.subscribe_events();
+
+    let stale_client = client.clone();
+    let stale_connect = tokio::spawn(async move { stale_client.connect_once().await });
+
+    tokio::time::timeout(Duration::from_secs(1), first_accepted_rx)
+        .await
+        .expect("first connection should reach the server")
+        .expect("first accept notifier should remain open");
+
+    // A stronger supervisor action fences the superseded Restore synchronously
+    // before requesting task cancellation. The explicit connect may still run
+    // to its next commit boundary, but it must no longer publish Connected.
+    client.invalidate_generation();
+
+    let replacement_client = client.clone();
+    let replacement_connect = tokio::spawn(async move { replacement_client.connect_once().await });
+    release_first_tx
+        .send(())
+        .expect("first handshake should still be waiting");
+
+    tokio::time::timeout(Duration::from_secs(2), stale_connect)
+        .await
+        .expect("stale generation should finish promptly")
+        .expect("stale connection task should not panic")
+        .expect_err("stale generation must not report success");
+    tokio::time::timeout(Duration::from_secs(2), replacement_connect)
+        .await
+        .expect("replacement must not wait for the concurrent-connect timeout")
+        .expect("replacement connection task should not panic")
+        .expect("replacement generation should connect");
+
+    assert!(
+        client.is_connected(),
+        "the current generation should own the signaling connection"
+    );
+    let mut connected_events = 0;
+    while let Ok(Ok(event)) = tokio::time::timeout(Duration::from_millis(150), rx.recv()).await {
+        if matches!(event, SignalingEvent::Connected) {
+            connected_events += 1;
+        }
+    }
+    assert_eq!(
+        connected_events, 1,
+        "only the replacement generation may publish Connected"
+    );
+
+    client
+        .disconnect()
+        .await
+        .expect("replacement connection should disconnect cleanly");
+    finish_server_tx
+        .send(())
+        .expect("test server should still be waiting");
+    tokio::time::timeout(Duration::from_secs(1), server_task)
+        .await
+        .expect("test server task should finish")
+        .expect("test server task should not panic");
+}
+
+#[tokio::test]
+async fn inv12_generation_change_after_validation_cannot_publish_connection() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let (finish_server_tx, finish_server_rx) = tokio::sync::oneshot::channel::<()>();
+    let server_task = tokio::spawn(async move {
+        let (stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept the tcp connection");
+        let websocket = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("test server should complete the websocket handshake");
+        let _ = finish_server_rx.await;
+        drop(websocket);
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test websocket URL should parse");
+    config.connection_timeout = 5;
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+    let publish_barrier = Arc::new(tokio::sync::Barrier::new(2));
+    assert!(
+        client
+            .connection_publish_barrier
+            .set(publish_barrier.clone())
+            .is_ok(),
+        "test publication barrier should only be installed once"
+    );
+    let mut events = client.subscribe_events();
+
+    let stale_client = client.clone();
+    let stale_connect = tokio::spawn(async move { stale_client.connect_once().await });
+
+    tokio::time::timeout(Duration::from_secs(2), publish_barrier.wait())
+        .await
+        .expect("connection should reach the post-validation publication barrier");
+    client.invalidate_generation();
+    publish_barrier.wait().await;
+
+    tokio::time::timeout(Duration::from_secs(2), stale_connect)
+        .await
+        .expect("stale connection should finish promptly")
+        .expect("stale connection task should not panic")
+        .expect_err("generation invalidated before publication must not commit");
+    assert!(!client.is_connected());
+    assert!(client.ws_sink.lock().await.is_none());
+    assert!(client.ws_stream.lock().await.is_none());
+    while let Ok(event) = events.try_recv() {
+        assert!(
+            !matches!(event, SignalingEvent::Connected),
+            "an invalidated generation must not publish Connected"
+        );
+    }
+
+    finish_server_tx
+        .send(())
+        .expect("test server should still be waiting");
+    tokio::time::timeout(Duration::from_secs(1), server_task)
+        .await
+        .expect("test server task should finish")
+        .expect("test server task should not panic");
+}
+
+#[tokio::test]
+async fn test_cancelled_connect_future_releases_single_flight_immediately() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let (first_accepted_tx, first_accepted_rx) = tokio::sync::oneshot::channel::<()>();
+    let (release_first_tx, release_first_rx) = tokio::sync::oneshot::channel::<()>();
+    let (finish_tx, finish_rx) = tokio::sync::oneshot::channel::<()>();
+
+    let server_task = tokio::spawn(async move {
+        let (first_stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept first tcp connection");
+        first_accepted_tx
+            .send(())
+            .expect("test should still wait for first connection");
+        let _ = release_first_rx.await;
+        drop(first_stream);
+
+        let (second_stream, _) = listener
+            .accept()
+            .await
+            .expect("test server should accept replacement tcp connection");
+        let second_ws = tokio_tungstenite::accept_async(second_stream)
+            .await
+            .expect("replacement websocket handshake should complete");
+        let _ = finish_rx.await;
+        drop(second_ws);
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test websocket URL should parse");
+    config.connection_timeout = 5;
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+
+    let first_client = client.clone();
+    let first_connect = tokio::spawn(async move { first_client.connect_once().await });
+    tokio::time::timeout(Duration::from_secs(1), first_accepted_rx)
+        .await
+        .expect("first connection should reach server")
+        .expect("first accept notifier should remain open");
+
+    first_connect.abort();
+    let _ = first_connect.await;
+    assert!(
+        !client.connecting.load(Ordering::Acquire),
+        "dropping the owner future must release single-flight without a timeout"
+    );
+    release_first_tx
+        .send(())
+        .expect("test server should still hold first stream");
+
+    tokio::time::timeout(Duration::from_secs(2), client.connect_once())
+        .await
+        .expect("replacement connect must not wait for the concurrent-connect timeout")
+        .expect("replacement connection should succeed");
+    assert!(client.is_connected());
+
+    client
+        .disconnect()
+        .await
+        .expect("replacement connection should disconnect");
+    finish_tx.send(()).expect("test server should still wait");
+    tokio::time::timeout(Duration::from_secs(1), server_task)
+        .await
+        .expect("test server should finish")
+        .expect("test server should not panic");
+}
+
+#[tokio::test]
+async fn inv22_reconnect_manager_lifetime_uses_drop_signal_not_periodic_polling() {
+    let client = make_ws_client(make_config());
+    let shutdown = client.reconnect_manager_shutdown.clone();
+
+    drop(client);
+
+    tokio::time::timeout(Duration::from_millis(1), shutdown.cancelled())
+        .await
+        .expect("owner drop should signal reconnect-manager shutdown immediately");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

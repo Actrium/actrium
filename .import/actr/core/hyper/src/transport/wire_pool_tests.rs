@@ -12,6 +12,79 @@ struct MockWire {
     identity: Option<WireIdentity>,
 }
 
+#[derive(Debug)]
+struct BlockingWire {
+    started: tokio::sync::Notify,
+    closed: tokio::sync::Notify,
+}
+
+#[derive(Debug)]
+struct CommitRaceWire {
+    started: tokio::sync::Notify,
+    release_connect: tokio::sync::Barrier,
+    close_calls: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl WireHandle for BlockingWire {
+    fn connection_type(&self) -> ConnType {
+        ConnType::WebSocket
+    }
+
+    fn priority(&self) -> u8 {
+        1
+    }
+
+    async fn connect(&self) -> NetworkResult<()> {
+        self.started.notify_one();
+        std::future::pending().await
+    }
+
+    fn is_connected(&self) -> bool {
+        false
+    }
+
+    async fn close(&self) -> NetworkResult<()> {
+        self.closed.notify_one();
+        Ok(())
+    }
+
+    async fn get_lane(&self, _: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        Err(NetworkError::NotImplemented("mock has no lane".into()))
+    }
+}
+
+#[async_trait::async_trait]
+impl WireHandle for CommitRaceWire {
+    fn connection_type(&self) -> ConnType {
+        ConnType::WebSocket
+    }
+
+    fn priority(&self) -> u8 {
+        1
+    }
+
+    async fn connect(&self) -> NetworkResult<()> {
+        self.started.notify_one();
+        self.release_connect.wait().await;
+        Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        true
+    }
+
+    async fn close(&self) -> NetworkResult<()> {
+        self.close_calls
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn get_lane(&self, _: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        Err(NetworkError::NotImplemented("mock has no lane".into()))
+    }
+}
+
 #[async_trait::async_trait]
 impl WireHandle for MockWire {
     fn connection_type(&self) -> ConnType {
@@ -97,6 +170,83 @@ async fn close_all_marks_pool_closed_and_clears_ready() {
     pool.close_all().await;
     assert!(pool.is_closed());
     // Ready set broadcast as empty.
+    assert!(pool.watch_ready().borrow().is_empty());
+}
+
+#[tokio::test]
+async fn close_all_interrupts_an_inflight_connection_attempt() {
+    let pool = WirePool::new(RetryConfig::default());
+    let wire = Arc::new(BlockingWire {
+        started: tokio::sync::Notify::new(),
+        closed: tokio::sync::Notify::new(),
+    });
+
+    pool.add_connection(wire.clone()).await;
+    tokio::time::timeout(Duration::from_secs(1), wire.started.notified())
+        .await
+        .expect("connection attempt should start");
+
+    pool.close_all().await;
+    tokio::time::timeout(Duration::from_secs(1), wire.closed.notified())
+        .await
+        .expect("pool close must cancel and close the in-flight wire immediately");
+}
+
+#[tokio::test]
+async fn close_all_wins_compare_and_commit_after_connect_succeeds() {
+    let pool = Arc::new(WirePool::new(RetryConfig::default()));
+    let wire = Arc::new(CommitRaceWire {
+        started: tokio::sync::Notify::new(),
+        release_connect: tokio::sync::Barrier::new(2),
+        close_calls: std::sync::atomic::AtomicUsize::new(0),
+    });
+
+    pool.add_connection(wire.clone()).await;
+    tokio::time::timeout(Duration::from_secs(1), wire.started.notified())
+        .await
+        .expect("connection attempt should start");
+
+    // Hold the commit lock after the attempt starts. Once `pending` returns to
+    // zero, connect() has succeeded and the task is waiting at compare-and-
+    // commit rather than in the cancellation select.
+    let connections = Arc::clone(&pool.connections);
+    let commit_guard = connections.write().await;
+    wire.release_connect.wait().await;
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while pool.pending.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("successful connect should reach compare-and-commit");
+
+    let closing_pool = Arc::clone(&pool);
+    let close_all = tokio::spawn(async move {
+        closing_pool.close_all().await;
+    });
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while !pool.is_closed() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("close_all should publish the closed flag before taking the commit lock");
+
+    drop(commit_guard);
+    close_all.await.expect("close_all task should not panic");
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while wire.close_calls.load(std::sync::atomic::Ordering::SeqCst) == 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("late successful wire should be closed");
+
+    assert_eq!(
+        wire.close_calls.load(std::sync::atomic::Ordering::SeqCst),
+        1
+    );
+    assert!(pool.get_connection(ConnType::WebSocket).await.is_none());
     assert!(pool.watch_ready().borrow().is_empty());
 }
 

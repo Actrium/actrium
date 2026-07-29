@@ -4,8 +4,16 @@ import io.actrium.actr.CleanupReason
 import io.actrium.actr.NetworkEventHandleWrapper
 import io.actrium.actr.NoHandle
 import io.actrium.actr.ReconnectReason
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotSame
+import kotlin.test.assertSame
 
 class ActrNodeMonitoringTest {
     private class RecordingHandle : NetworkEventHandleWrapper(NoHandle) {
@@ -81,5 +89,103 @@ class ActrNodeMonitoringTest {
         assertEquals(listOf(ReconnectReason.MANUAL_RECONNECT), monitor.reconnectReasons)
         assertEquals(1, monitor.triggerCount)
         assertEquals("WiFi", resources.getCurrentNetworkStatus())
+    }
+
+    @Test
+    fun `managed network resources ignore stale callbacks after close`() {
+        val handle = RecordingHandle()
+        val monitor = RecordingMonitor()
+        val resources = ManagedNetworkResources(handle, monitor)
+
+        resources.close()
+        resources.onAppBackground()
+        resources.onAppForeground()
+        resources.cleanupConnections(CleanupReason.MANUAL_RESET)
+        resources.forceReconnect(ReconnectReason.LONG_BACKGROUND)
+        resources.triggerNetworkCheck()
+
+        assertEquals(1, monitor.stopCount)
+        assertEquals(1, handle.closeCount)
+        assertEquals(0, monitor.backgroundCount)
+        assertEquals(0, monitor.foregroundCount)
+        assertEquals(emptyList(), monitor.cleanupReasons)
+        assertEquals(emptyList(), monitor.reconnectReasons)
+        assertEquals(0, monitor.triggerCount)
+        assertEquals(null, resources.getCurrentNetworkStatus())
+    }
+
+    @Test
+    fun `mobile event delivery gate drops queued callback after close`() = runTest {
+        val gate = MobileEventDeliveryGate()
+        var delivered = 0
+
+        gate.close()
+        gate.deliver { delivered += 1 }
+
+        assertEquals(0, delivered)
+    }
+
+    @Test
+    fun `delivery gate rotation retires old callbacks and admits the new incarnation`() = runTest {
+        val oldGate = MobileEventDeliveryGate()
+        val newGate = oldGate.rotated()
+        var oldDeliveries = 0
+        var newDeliveries = 0
+
+        oldGate.deliver { oldDeliveries += 1 }
+        newGate.deliver { newDeliveries += 1 }
+
+        assertNotSame(oldGate, newGate)
+        assertEquals(0, oldDeliveries)
+        assertEquals(1, newDeliveries)
+    }
+
+    @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
+    fun `serialized lifecycle queue prevents foreground overtaking slow background`() = runTest {
+        val backgroundStarted = CompletableDeferred<Unit>()
+        val releaseBackground = CompletableDeferred<Unit>()
+        val delivered = mutableListOf<String>()
+        val queue =
+            SerializedDeliveryQueue<String>(
+                scope = this,
+                dispatcher = StandardTestDispatcher(testScheduler),
+            ) { state ->
+                if (state == "background") {
+                    backgroundStarted.complete(Unit)
+                    releaseBackground.await()
+                }
+                delivered += state
+            }
+
+        queue.enqueue("background")
+        queue.enqueue("foreground")
+        runCurrent()
+        assertEquals(true, backgroundStarted.isCompleted)
+        assertEquals(emptyList(), delivered)
+
+        releaseBackground.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf("background", "foreground"), delivered)
+        queue.close()
+        advanceUntilIdle()
+    }
+
+    @Test
+    fun `monitor handle cache uses the fresh-monitor allocator once per monitor`() = runTest {
+        var allocations = 0
+        val allocated = RecordingHandle()
+        val cache =
+            MonitorEventHandleCache {
+                allocations += 1
+                allocated
+            }
+
+        val first = cache.getOrCreate()
+        val second = cache.getOrCreate()
+
+        assertSame(allocated, first)
+        assertSame(first, second)
+        assertEquals(1, allocations)
     }
 }

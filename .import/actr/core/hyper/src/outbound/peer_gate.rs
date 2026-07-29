@@ -8,9 +8,10 @@
 
 use super::data_chunk_activity::{DataChunkActivityTracker, DataChunkRecordState};
 use super::ensure_stream_payload_type;
+use crate::lifecycle::SendProjection;
 use crate::transport::{
-    ConnectionEvent, ConnectionState, Dest, DestTransportRef, PayloadTypeExt, PeerTransport,
-    WireIdentity,
+    ConnectionEvent, ConnectionState, Dest, DestTransportRef, NetworkResult, PayloadTypeExt,
+    PeerTransport, WireIdentity,
 };
 use crate::wire::webrtc::{NETWORK_RECOVERY_TIMEOUT, NetworkRecoveryStatus, WebRtcCoordinator};
 use actr_framework::{Bytes, MediaSample};
@@ -22,7 +23,7 @@ use actr_protocol::{
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::{Mutex, RwLock, broadcast, oneshot};
+use tokio::sync::{Mutex, RwLock, broadcast, oneshot, watch};
 
 /// Pending requests map type: request_id -> (target_actor_id, oneshot response sender)
 pub(crate) type PendingRequestsMap =
@@ -47,11 +48,27 @@ const TELL_SEND_TIMEOUT: Duration = Duration::from_secs(13);
 const RECOVERY_REASON_PEER_DISCONNECTED: &str = "peer state Disconnected";
 const RECOVERY_REASON_PEER_FAILED: &str = "peer state Failed";
 const RECOVERY_REASON_ICE_NETWORK_STARTED: &str = "ice/network recovery started";
-/// Extra delay exposed to callers on top of the internal recovery guard.
+
+/// Per-operation send authority captured at outbound admission.
 ///
-/// The internal guard still times out at `NETWORK_RECOVERY_TIMEOUT`; this grace
-/// keeps mobile fallback retries from firing exactly on the cleanup boundary.
-const CONNECTION_NOT_READY_RETRY_GRACE: Duration = Duration::from_millis(300);
+/// Once an operation observes `ExistingOnly`, later policy relaxation must
+/// not upgrade it back to `Normal`; every retry retains the strictest
+/// projection observed since admission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SendAdmission {
+    ExistingOnly,
+    Normal,
+}
+
+impl SendAdmission {
+    fn tighten(self, other: Self) -> Self {
+        if self == Self::ExistingOnly || other == Self::ExistingOnly {
+            Self::ExistingOnly
+        } else {
+            Self::Normal
+        }
+    }
+}
 
 /// PeerGate - Outproc transport adapter (outbound)
 ///
@@ -83,6 +100,9 @@ pub struct PeerGate {
     /// Recently sent `send_data_chunk` chunks used to surface delivery
     /// uncertainty when WebRTC/DataChannel state changes mid-stream.
     active_data_chunks: Arc<RwLock<DataChunkActivityTracker>>,
+
+    /// Live global send authority derived by the recovery supervisor.
+    send_projection_rx: watch::Receiver<SendProjection>,
 }
 
 impl PeerGate {
@@ -130,8 +150,27 @@ impl PeerGate {
         ))
     }
 
+    fn send_projection_not_ready_error() -> ActrError {
+        ActrError::ConnectionNotReady(ConnectionNotReadyInfo::without_retry_hint())
+    }
+
+    fn current_send_admission(&self) -> ActorResult<SendAdmission> {
+        match *self.send_projection_rx.borrow() {
+            SendProjection::Blocked => Err(Self::send_projection_not_ready_error()),
+            SendProjection::ExistingOnly => Ok(SendAdmission::ExistingOnly),
+            SendProjection::Normal => Ok(SendAdmission::Normal),
+        }
+    }
+
+    fn tighten_with_current_projection(
+        &self,
+        admission: SendAdmission,
+    ) -> ActorResult<SendAdmission> {
+        Ok(admission.tighten(self.current_send_admission()?))
+    }
+
     fn connection_not_ready_retry_window_ms() -> u64 {
-        (NETWORK_RECOVERY_TIMEOUT + CONNECTION_NOT_READY_RETRY_GRACE).as_millis() as u64
+        NETWORK_RECOVERY_TIMEOUT.as_millis() as u64
     }
 
     async fn notify_active_data_chunks_uncertain(
@@ -190,6 +229,23 @@ impl PeerGate {
         webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
         pending_requests: PendingRequestsMap,
     ) -> Self {
+        Self::with_pending_requests_and_send_projection(
+            transport_manager,
+            webrtc_coordinator,
+            pending_requests,
+            Self::normal_send_projection_receiver(),
+        )
+    }
+
+    /// Production constructor with the recovery supervisor's live send
+    /// projection. Kept crate-private so the projection remains an internal
+    /// policy contract rather than a second public configuration surface.
+    pub(crate) fn with_pending_requests_and_send_projection(
+        transport_manager: Arc<PeerTransport>,
+        webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
+        pending_requests: PendingRequestsMap,
+        send_projection_rx: watch::Receiver<SendProjection>,
+    ) -> Self {
         let closing_peers = Arc::new(RwLock::new(HashSet::new()));
         let recovering_peers = Arc::new(RwLock::new(HashMap::new()));
         let active_data_chunks = Arc::new(RwLock::new(DataChunkActivityTracker::default()));
@@ -214,7 +270,13 @@ impl PeerGate {
             closing_peers,
             recovering_peers,
             active_data_chunks,
+            send_projection_rx,
         }
+    }
+
+    fn normal_send_projection_receiver() -> watch::Receiver<SendProjection> {
+        let (_tx, rx) = watch::channel(SendProjection::Normal);
+        rx
     }
 
     /// Create new PeerGate
@@ -227,33 +289,8 @@ impl PeerGate {
         transport_manager: Arc<PeerTransport>,
         webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
     ) -> Self {
-        let closing_peers = Arc::new(RwLock::new(HashSet::new()));
-        let recovering_peers = Arc::new(RwLock::new(HashMap::new()));
         let pending_requests = Arc::new(RwLock::new(HashMap::new()));
-        let active_data_chunks = Arc::new(RwLock::new(DataChunkActivityTracker::default()));
-
-        // Start event listener if coordinator is available
-        // This is the ONLY event subscriber - it triggers top-down cleanup
-        if let Some(ref coordinator) = webrtc_coordinator {
-            Self::spawn_event_listener(
-                coordinator.subscribe_events(),
-                Arc::clone(coordinator),
-                Arc::clone(&pending_requests),
-                Arc::clone(&closing_peers),
-                Arc::clone(&recovering_peers),
-                Arc::clone(&active_data_chunks),
-                Arc::clone(&transport_manager),
-            );
-        }
-
-        Self {
-            transport_manager,
-            pending_requests,
-            webrtc_coordinator,
-            closing_peers,
-            recovering_peers,
-            active_data_chunks,
-        }
+        Self::with_pending_requests(transport_manager, webrtc_coordinator, pending_requests)
     }
 
     /// Spawn event listener task to handle connection events
@@ -774,7 +811,11 @@ impl PeerGate {
         }
     }
 
-    async fn preflight_send(&self, target: &ActrId, dest: &Dest) -> ActorResult<()> {
+    async fn preflight_send(&self, target: &ActrId, dest: &Dest) -> ActorResult<SendAdmission> {
+        // Read before any await so globally blocked work fails fast rather than
+        // accidentally waiting on a cleanup or recovery deadline.
+        let admission = self.current_send_admission()?;
+
         if let Some(coordinator) = &self.webrtc_coordinator {
             coordinator.wait_cleanup_complete().await;
 
@@ -822,12 +863,12 @@ impl PeerGate {
         if self.closing_peers.read().await.contains(target)
             || self.transport_manager.is_closing(dest).await
         {
-            return Err(ActrError::ConnectionNotReady(
-                ConnectionNotReadyInfo::without_retry_hint(),
-            ));
+            return Err(Self::send_projection_not_ready_error());
         }
 
-        Ok(())
+        // Policy may have tightened during the coordinator/session awaits.
+        // Keep the strictest projection seen by this operation.
+        self.tighten_with_current_projection(admission)
     }
 }
 
@@ -841,9 +882,10 @@ impl PeerGate {
         dest: &Dest,
         payload_type: PayloadType,
         data: &[u8],
+        admission: SendAdmission,
     ) -> ActorResult<()> {
         let policy = payload_type.retry_policy();
-        self.send_with_retry_policy(dest, payload_type, data, policy)
+        self.send_with_retry_policy(dest, payload_type, data, policy, admission)
             .await
     }
 
@@ -852,9 +894,10 @@ impl PeerGate {
         dest: &Dest,
         payload_type: PayloadType,
         data: &[u8],
+        admission: SendAdmission,
     ) -> ActorResult<DestTransportRef> {
         let policy = payload_type.retry_policy();
-        self.send_with_retry_policy_record_identity(dest, payload_type, data, policy)
+        self.send_with_retry_policy_record_identity(dest, payload_type, data, policy, admission)
             .await
     }
 
@@ -864,10 +907,47 @@ impl PeerGate {
         payload_type: PayloadType,
         data: &[u8],
         policy: crate::transport::RetryPolicy,
+        admission: SendAdmission,
     ) -> ActorResult<()> {
-        self.send_with_retry_policy_record_identity(dest, payload_type, data, policy)
+        self.send_with_retry_policy_record_identity(dest, payload_type, data, policy, admission)
             .await
             .map(|_| ())
+    }
+
+    async fn attempt_send(
+        &self,
+        dest: &Dest,
+        payload_type: PayloadType,
+        data: &[u8],
+        admission: SendAdmission,
+    ) -> NetworkResult<Option<DestTransportRef>> {
+        match admission {
+            SendAdmission::Normal => self
+                .transport_manager
+                .send_with_identity(dest, payload_type, data)
+                .await
+                .map(Some),
+            SendAdmission::ExistingOnly => {
+                self.transport_manager
+                    .send_existing_with_identity(dest, payload_type, data)
+                    .await
+            }
+        }
+    }
+
+    async fn send_once_with_admission(
+        &self,
+        dest: &Dest,
+        payload_type: PayloadType,
+        data: &[u8],
+        admission: SendAdmission,
+    ) -> ActorResult<DestTransportRef> {
+        let admission = self.tighten_with_current_projection(admission)?;
+        match self.attempt_send(dest, payload_type, data, admission).await {
+            Ok(Some(identity)) => Ok(identity),
+            Ok(None) => Err(Self::send_projection_not_ready_error()),
+            Err(error) => Err(error.into()),
+        }
     }
 
     async fn send_with_retry_policy_record_identity(
@@ -876,17 +956,19 @@ impl PeerGate {
         payload_type: PayloadType,
         data: &[u8],
         policy: crate::transport::RetryPolicy,
+        mut admission: SendAdmission,
     ) -> ActorResult<DestTransportRef> {
         let mut delay = policy.initial_delay;
         let mut attempt = 0u32;
 
         loop {
-            match self
-                .transport_manager
-                .send_with_identity(dest, payload_type, data)
-                .await
-            {
-                Ok(identity) => return Ok(identity),
+            admission = self.tighten_with_current_projection(admission)?;
+            match self.attempt_send(dest, payload_type, data, admission).await {
+                Ok(Some(identity)) => return Ok(identity),
+                // `ExistingOnly` with no committed destination is an
+                // admission result, not a transient transport failure. Fail
+                // immediately without entering the retry backoff.
+                Ok(None) => return Err(Self::send_projection_not_ready_error()),
                 Err(e) => {
                     attempt += 1;
                     let retryable = e.is_retryable();
@@ -899,7 +981,7 @@ impl PeerGate {
                             "transient send failure, retrying after {:?}",
                             delay,
                         );
-                        tokio::time::sleep(delay).await;
+                        crate::timer::sleep(crate::timer::ids::PEER_SEND_BACKOFF, delay).await;
                         // exponential backoff capped at max_delay
                         delay = (delay * 2).min(policy.max_delay);
                     } else {
@@ -1007,12 +1089,12 @@ impl PeerGate {
         data: &[u8],
     ) -> ActorResult<()> {
         let dest = Self::actr_id_to_dest(target);
-        self.preflight_send(target, &dest).await?;
+        let admission = self.preflight_send(target, &dest).await?;
 
         let mut policy = payload_type.retry_policy();
         policy.initial_delay = std::time::Duration::ZERO;
         policy.max_delay = std::time::Duration::ZERO;
-        self.send_with_retry_policy(&dest, payload_type, data, policy)
+        self.send_with_retry_policy(&dest, payload_type, data, policy, admission)
             .await
     }
 
@@ -1048,7 +1130,7 @@ impl PeerGate {
         // 1. Convert ActrId to Dest and fail fast during recovery before
         // registering pending_requests.
         let dest = Self::actr_id_to_dest(target);
-        self.preflight_send(target, &dest).await?;
+        let admission = self.preflight_send(target, &dest).await?;
 
         // 2. Create oneshot channel for receiving response
         let (response_tx, response_rx) = oneshot::channel();
@@ -1068,23 +1150,24 @@ impl PeerGate {
         let sent_transport = Arc::new(Mutex::new(None));
         let sent_transport_for_send = Arc::clone(&sent_transport);
 
-        let result = tokio::time::timeout(timeout, async {
-            // 5a. Send with per-PayloadType retry on transient failures
-            let sent_identity = self
-                .send_with_retry_record_identity(&dest, payload_type, &data)
-                .await?;
-            *sent_transport_for_send.lock().await = Some(sent_identity);
-            tracing::debug!("Sent request to {:?}", target);
+        let result =
+            crate::timer::timeout(crate::timer::ids::PEER_REQUEST_DEADLINE, timeout, async {
+                // 5a. Send with per-PayloadType retry on transient failures
+                let sent_identity = self
+                    .send_with_retry_record_identity(&dest, payload_type, &data, admission)
+                    .await?;
+                *sent_transport_for_send.lock().await = Some(sent_identity);
+                tracing::debug!("Sent request to {:?}", target);
 
-            // 5b. Wait for response
-            match response_rx.await {
-                Ok(result) => result,
-                Err(_) => Err(ActrError::Unavailable(
-                    "Response channel closed".to_string(),
-                )),
-            }
-        })
-        .await;
+                // 5b. Wait for response
+                match response_rx.await {
+                    Ok(result) => result,
+                    Err(_) => Err(ActrError::Unavailable(
+                        "Response channel closed".to_string(),
+                    )),
+                }
+            })
+            .await;
 
         match result {
             Ok(inner) => {
@@ -1139,15 +1222,21 @@ impl PeerGate {
     /// A response is correlated to an already-pending request at the caller. If the
     /// existing transport cannot accept it, the caller's RPC deadline remains the
     /// recovery boundary and the caller may issue a fresh request. This path still
-    /// uses the normal reliable transport send and retry policy; it only bypasses
-    /// the request-oriented recovery preflight.
+    /// uses the reliable retry policy but never starts a new destination
+    /// negotiation: it is already-committed work and therefore uses the
+    /// `ExistingOnly` transport path while bypassing request preflight.
     #[cfg(feature = "test-utils")]
     pub async fn send_response(&self, target: &ActrId, envelope: RpcEnvelope) -> ActorResult<()> {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Response);
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
-        self.send_with_retry(&dest, PayloadType::RpcReliable, &data)
-            .await
+        self.send_with_retry(
+            &dest,
+            PayloadType::RpcReliable,
+            &data,
+            SendAdmission::ExistingOnly,
+        )
+        .await
     }
 
     /// Send one-way message with specified PayloadType.
@@ -1197,10 +1286,16 @@ impl PeerGate {
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
-        self.preflight_send(target, &dest).await?;
-        let send = self.send_with_retry(&dest, payload_type, &data);
+        let admission = self.preflight_send(target, &dest).await?;
+        let send = self.send_with_retry(&dest, payload_type, &data, admission);
         if let Some(send_timeout) = send_timeout {
-            match tokio::time::timeout(send_timeout, send).await {
+            match crate::timer::timeout(
+                crate::timer::ids::PEER_REQUEST_DEADLINE,
+                send_timeout,
+                send,
+            )
+            .await
+            {
                 Ok(result) => result,
                 Err(_) => Err(ActrError::TimedOut),
             }
@@ -1229,6 +1324,14 @@ impl PeerGate {
             target,
             track_id
         );
+
+        let dest = Self::actr_id_to_dest(target);
+        let admission = self.preflight_send(target, &dest).await?;
+
+        // Sending a sample only uses an already-registered track, so
+        // ExistingOnly remains valid. Re-read here so a projection that
+        // tightened during preflight cannot admit a newly blocked send.
+        self.tighten_with_current_projection(admission)?;
 
         // Check if WebRTC coordinator is available
         let coordinator = self.webrtc_coordinator.as_ref().ok_or_else(|| {
@@ -1261,6 +1364,15 @@ impl PeerGate {
             media_type
         );
 
+        let dest = Self::actr_id_to_dest(target);
+        let admission = self.preflight_send(target, &dest).await?;
+
+        // Adding a track can establish a connection and always renegotiates
+        // SDP. ExistingOnly therefore cannot safely enter the coordinator.
+        if self.tighten_with_current_projection(admission)? == SendAdmission::ExistingOnly {
+            return Err(Self::send_projection_not_ready_error());
+        }
+
         let coordinator = self.webrtc_coordinator.as_ref().ok_or_else(|| {
             ActrError::NotImplemented("MediaTrack requires WebRTC coordinator".to_string())
         })?;
@@ -1279,6 +1391,16 @@ impl PeerGate {
             target,
             track_id
         );
+
+        let dest = Self::actr_id_to_dest(target);
+        let admission = self.preflight_send(target, &dest).await?;
+
+        // Removing a track triggers SDP renegotiation on an existing
+        // connection. ExistingOnly permits traffic on committed sessions, but
+        // must not start any new negotiation.
+        if self.tighten_with_current_projection(admission)? == SendAdmission::ExistingOnly {
+            return Err(Self::send_projection_not_ready_error());
+        }
 
         let coordinator = self.webrtc_coordinator.as_ref().ok_or_else(|| {
             ActrError::NotImplemented("MediaTrack requires WebRTC coordinator".to_string())
@@ -1343,7 +1465,7 @@ impl PeerGate {
 
         // Convert ActrId to Dest
         let dest = Self::actr_id_to_dest(target);
-        self.preflight_send(target, &dest).await?;
+        let admission = self.preflight_send(target, &dest).await?;
 
         // `ensure_stream_payload_type` above guarantees `payload_type` is a
         // stream variant, so every call tracks an active DataChunk unconditionally.
@@ -1360,14 +1482,15 @@ impl PeerGate {
             false
         };
 
-        let result = match tokio::time::timeout(
+        let result = match crate::timer::timeout(
+            crate::timer::ids::PEER_REQUEST_DEADLINE,
             send_timeout,
-            self.transport_manager.send(&dest, payload_type, &data),
+            self.send_once_with_admission(&dest, payload_type, &data, admission),
         )
         .await
         {
-            Ok(Ok(())) => Ok(()),
-            Ok(Err(e)) => Err(ActrError::Unavailable(e.to_string())),
+            Ok(Ok(_identity)) => Ok(()),
+            Ok(Err(e)) => Err(e),
             Err(_) => Err(ActrError::TimedOut),
         };
 
@@ -1410,6 +1533,18 @@ mod tests {
     };
     use async_trait::async_trait;
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    fn test_actor_id(serial_number: u64) -> ActrId {
+        ActrId {
+            realm: actr_protocol::Realm { realm_id: 1 },
+            serial_number,
+            r#type: actr_protocol::ActrType {
+                manufacturer: "acme".to_string(),
+                name: "peer-gate-test".to_string(),
+                version: "1.0.0".to_string(),
+            },
+        }
+    }
 
     fn envelope_with_direction(direction: Option<i32>) -> RpcEnvelope {
         RpcEnvelope {
@@ -1509,17 +1644,305 @@ mod tests {
         }
     }
 
+    #[derive(Debug)]
+    struct SuccessfulLane {
+        sends: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl DataLane for SuccessfulLane {
+        async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+            self.sends.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn lane_type(&self) -> &'static str {
+            "successful"
+        }
+    }
+
+    #[derive(Debug)]
+    struct ReadySuccessfulWire {
+        sends: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl WireHandle for ReadySuccessfulWire {
+        fn connection_type(&self) -> ConnType {
+            ConnType::WebSocket
+        }
+
+        fn priority(&self) -> u8 {
+            1
+        }
+
+        async fn connect(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        fn is_connected(&self) -> bool {
+            true
+        }
+
+        async fn close(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        async fn get_lane(&self, _payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+            Ok(Arc::new(SuccessfulLane {
+                sends: self.sends.clone(),
+            }))
+        }
+    }
+
+    struct CountingSuccessfulWireBuilder {
+        builds: Arc<AtomicUsize>,
+        sends: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl WireBuilder for CountingSuccessfulWireBuilder {
+        async fn create_connections(
+            &self,
+            _dest: &Dest,
+        ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+            self.builds.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![Arc::new(ReadySuccessfulWire {
+                sends: self.sends.clone(),
+            })])
+        }
+    }
+
+    fn gate_with_projection(
+        projection: SendProjection,
+    ) -> (
+        PeerGate,
+        Arc<PeerTransport>,
+        watch::Sender<SendProjection>,
+        Arc<AtomicUsize>,
+        Arc<AtomicUsize>,
+    ) {
+        let builds = Arc::new(AtomicUsize::new(0));
+        let sends = Arc::new(AtomicUsize::new(0));
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(CountingSuccessfulWireBuilder {
+                builds: builds.clone(),
+                sends: sends.clone(),
+            }),
+        ));
+        let pending_requests = Arc::new(RwLock::new(HashMap::new()));
+        let (projection_tx, projection_rx) = watch::channel(projection);
+        let gate = PeerGate::with_pending_requests_and_send_projection(
+            transport.clone(),
+            None,
+            pending_requests,
+            projection_rx,
+        );
+        (gate, transport, projection_tx, builds, sends)
+    }
+
+    #[tokio::test]
+    async fn blocked_projection_rejects_before_pending_registration_or_build() {
+        let (gate, _transport, _projection_tx, builds, _sends) =
+            gate_with_projection(SendProjection::Blocked);
+        let target = test_actor_id(2);
+        let envelope = RpcEnvelope {
+            request_id: "blocked-request".to_string(),
+            timeout_ms: 1_000,
+            ..Default::default()
+        };
+
+        let error = gate
+            .send_request_with_type(&target, PayloadType::RpcReliable, envelope)
+            .await
+            .expect_err("blocked projection must reject new outbound work");
+
+        assert!(matches!(error, ActrError::ConnectionNotReady(_)));
+        assert!(gate.get_pending_requests().read().await.is_empty());
+        assert_eq!(builds.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn existing_only_without_transport_fails_without_build_or_retry() {
+        let (gate, _transport, _projection_tx, builds, sends) =
+            gate_with_projection(SendProjection::ExistingOnly);
+
+        let error = gate
+            .send_message_with_type(
+                &test_actor_id(2),
+                PayloadType::RpcReliable,
+                RpcEnvelope::default(),
+            )
+            .await
+            .expect_err("existing-only admission requires a reusable physical connection");
+
+        assert!(matches!(error, ActrError::ConnectionNotReady(_)));
+        assert_eq!(builds.load(Ordering::SeqCst), 0);
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
+
+        let chunk_error = gate
+            .send_data_chunk_with_timeout(
+                &test_actor_id(2),
+                PayloadType::StreamReliable,
+                "existing-only-stream",
+                Bytes::from_static(b"chunk"),
+                Duration::from_secs(1),
+            )
+            .await
+            .expect_err("data-chunk send must use the same no-create admission");
+        assert!(matches!(chunk_error, ActrError::ConnectionNotReady(_)));
+        assert_eq!(builds.load(Ordering::SeqCst), 0);
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
+    }
+
+    fn test_media_sample() -> MediaSample {
+        MediaSample {
+            data: Bytes::from_static(b"frame"),
+            timestamp: 0,
+            codec: "OPUS".to_string(),
+            media_type: actr_framework::MediaType::Audio,
+        }
+    }
+
+    #[tokio::test]
+    async fn blocked_projection_rejects_media_operations_before_coordinator_access() {
+        let (gate, _transport, _projection_tx, builds, sends) =
+            gate_with_projection(SendProjection::Blocked);
+        let target = test_actor_id(2);
+
+        let sample_error = gate
+            .send_media_sample(&target, "audio", test_media_sample())
+            .await
+            .expect_err("blocked projection must reject media samples");
+        assert!(matches!(sample_error, ActrError::ConnectionNotReady(_)));
+
+        let track_error = gate
+            .add_media_track(&target, "audio", "OPUS", "audio")
+            .await
+            .expect_err("blocked projection must reject media track negotiation");
+        assert!(matches!(track_error, ActrError::ConnectionNotReady(_)));
+
+        let remove_error = gate
+            .remove_media_track(&target, "audio")
+            .await
+            .expect_err("blocked projection must reject media track renegotiation");
+        assert!(matches!(remove_error, ActrError::ConnectionNotReady(_)));
+        assert_eq!(builds.load(Ordering::SeqCst), 0);
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn existing_only_allows_media_samples_but_rejects_track_negotiation() {
+        let (gate, _transport, _projection_tx, builds, sends) =
+            gate_with_projection(SendProjection::ExistingOnly);
+        let target = test_actor_id(2);
+
+        let sample_error = gate
+            .send_media_sample(&target, "audio", test_media_sample())
+            .await
+            .expect_err("admitted sample should reach the missing coordinator");
+        assert!(matches!(sample_error, ActrError::NotImplemented(_)));
+
+        let track_error = gate
+            .add_media_track(&target, "audio", "OPUS", "audio")
+            .await
+            .expect_err("existing-only projection must not start track negotiation");
+        assert!(matches!(track_error, ActrError::ConnectionNotReady(_)));
+
+        let remove_error = gate
+            .remove_media_track(&target, "audio")
+            .await
+            .expect_err("existing-only projection must not start track renegotiation");
+        assert!(matches!(remove_error, ActrError::ConnectionNotReady(_)));
+        assert_eq!(builds.load(Ordering::SeqCst), 0);
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn normal_projection_builds_but_existing_only_reuses_the_commit() {
+        let (gate, _transport, projection_tx, builds, sends) =
+            gate_with_projection(SendProjection::Normal);
+        let target = test_actor_id(2);
+
+        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
+            .await
+            .expect("normal projection should establish and send");
+        assert_eq!(builds.load(Ordering::SeqCst), 1);
+        assert_eq!(sends.load(Ordering::SeqCst), 1);
+
+        projection_tx.send_replace(SendProjection::ExistingOnly);
+        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
+            .await
+            .expect("existing-only projection should use the committed transport");
+
+        assert_eq!(builds.load(Ordering::SeqCst), 1);
+        assert_eq!(sends.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn policy_tightening_between_preflight_and_send_prevents_build() {
+        let (gate, _transport, projection_tx, builds, sends) =
+            gate_with_projection(SendProjection::Normal);
+        let target = test_actor_id(2);
+        let dest = PeerGate::actr_id_to_dest(&target);
+        let admission = gate
+            .preflight_send(&target, &dest)
+            .await
+            .expect("normal preflight should admit");
+
+        projection_tx.send_replace(SendProjection::ExistingOnly);
+        let error = gate
+            .send_with_retry(&dest, PayloadType::RpcReliable, b"payload", admission)
+            .await
+            .expect_err("send must re-read a tighter projection");
+
+        assert!(matches!(error, ActrError::ConnectionNotReady(_)));
+        assert_eq!(builds.load(Ordering::SeqCst), 0);
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn admitted_existing_only_operation_cannot_upgrade_after_policy_relaxes() {
+        let (gate, _transport, projection_tx, builds, sends) =
+            gate_with_projection(SendProjection::ExistingOnly);
+        let target = test_actor_id(2);
+        let dest = PeerGate::actr_id_to_dest(&target);
+        let admission = gate
+            .preflight_send(&target, &dest)
+            .await
+            .expect("existing-only preflight should admit committed-work attempts");
+
+        projection_tx.send_replace(SendProjection::Normal);
+        let error = gate
+            .send_with_retry(&dest, PayloadType::RpcReliable, b"payload", admission)
+            .await
+            .expect_err("an admitted operation must retain its strictest projection");
+
+        assert!(matches!(error, ActrError::ConnectionNotReady(_)));
+        assert_eq!(builds.load(Ordering::SeqCst), 0);
+        assert_eq!(sends.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn connection_not_ready_window_matches_the_recovery_deadline() {
+        assert_eq!(
+            PeerGate::connection_not_ready_retry_window_ms(),
+            NETWORK_RECOVERY_TIMEOUT.as_millis() as u64
+        );
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn send_message_with_type_times_out_before_reliable_retry_backoff_completes() {
         let attempts = Arc::new(AtomicUsize::new(0));
         let transport = Arc::new(PeerTransport::new(
-            ActrId::default(),
+            test_actor_id(1),
             Arc::new(RetryFailingWireBuilder {
                 attempts: attempts.clone(),
             }),
         ));
         let gate = PeerGate::new(transport, None);
-        let target = ActrId::default();
+        let target = test_actor_id(2);
 
         let err = gate
             .send_message_with_type_inner(
@@ -1594,11 +2017,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn send_data_chunk_timeout_is_timed_out() {
         let transport = Arc::new(PeerTransport::new(
-            ActrId::default(),
+            test_actor_id(1),
             Arc::new(PendingWireBuilder),
         ));
         let gate = PeerGate::new(transport, None);
-        let target = ActrId::default();
+        let target = test_actor_id(2);
 
         let err = gate
             .send_data_chunk_with_timeout(
