@@ -25,6 +25,48 @@ pub(crate) struct DestTransport {
     conn_mgr: Arc<WirePool>,
 }
 
+/// Cleans up a partially-built destination pool if its async constructor is
+/// cancelled. Pool cancellation stops background attempts, while this guard
+/// closes every input wire directly so cancellation is safe even when an
+/// attempt task has not been polled yet.
+struct DestTransportCreationGuard {
+    conn_mgr: Arc<WirePool>,
+    connections: Option<Vec<Arc<dyn WireHandle>>>,
+}
+
+impl DestTransportCreationGuard {
+    fn new(conn_mgr: Arc<WirePool>, connections: Vec<Arc<dyn WireHandle>>) -> Self {
+        Self {
+            conn_mgr,
+            connections: Some(connections),
+        }
+    }
+
+    fn disarm(&mut self) {
+        self.connections = None;
+    }
+}
+
+impl Drop for DestTransportCreationGuard {
+    fn drop(&mut self) {
+        let Some(connections) = self.connections.take() else {
+            return;
+        };
+        let conn_mgr = Arc::clone(&self.conn_mgr);
+        tokio::spawn(async move {
+            conn_mgr.close_all().await;
+            for connection in connections {
+                if let Err(error) = connection.close().await {
+                    tracing::warn!(
+                        "Failed to close wire abandoned during DestTransport creation: {}",
+                        error
+                    );
+                }
+            }
+        });
+    }
+}
+
 impl DestTransport {
     /// Create new DestTransport
     ///
@@ -35,14 +77,57 @@ impl DestTransport {
         dest: Dest,
         connections: Vec<Arc<dyn WireHandle>>,
     ) -> NetworkResult<Self> {
+        Self::new_inner(
+            dest,
+            connections,
+            #[cfg(test)]
+            None,
+        )
+        .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn new_with_creation_barrier(
+        dest: Dest,
+        connections: Vec<Arc<dyn WireHandle>>,
+        creation_barrier: Option<Arc<tokio::sync::Barrier>>,
+    ) -> NetworkResult<Self> {
+        Self::new_inner(dest, connections, creation_barrier).await
+    }
+
+    async fn new_inner(
+        dest: Dest,
+        connections: Vec<Arc<dyn WireHandle>>,
+        #[cfg(test)] creation_barrier: Option<Arc<tokio::sync::Barrier>>,
+    ) -> NetworkResult<Self> {
         let conn_mgr = Arc::new(WirePool::new(RetryConfig::default()));
+        let mut creation_guard =
+            DestTransportCreationGuard::new(Arc::clone(&conn_mgr), connections);
 
         // Start connection tasks in background (concurrently)
         tracing::info!("🚀 [{:?}] Starting connection tasks...", dest);
+        let connections = creation_guard
+            .connections
+            .as_ref()
+            .expect("destination creation guard must be armed")
+            .clone();
+        #[cfg(test)]
+        let mut is_first = true;
         for conn in connections {
             conn_mgr.add_connection(conn).await;
+            #[cfg(test)]
+            {
+                if is_first && let Some(barrier) = creation_barrier.as_ref() {
+                    // Two phases let a cancellation test observe that creation
+                    // is inside this async constructor, then hold it there.
+                    barrier.wait().await;
+                    barrier.wait().await;
+                }
+                is_first = false;
+            }
         }
 
+        creation_guard.disarm();
         Ok(Self { conn_mgr })
     }
 
@@ -306,10 +391,14 @@ impl DestTransport {
         tracing::info!("🔌 Closing DestTransport");
 
         // 1. Get all connections and close them one by one
+        let mut first_error = None;
         for conn_type in [ConnType::WebSocket, ConnType::WebRTC] {
             if let Some(conn) = self.conn_mgr.get_connection(conn_type).await {
                 if let Err(e) = conn.close().await {
                     tracing::warn!("❌ Failed to close {:?} connection: {}", conn_type, e);
+                    if first_error.is_none() {
+                        first_error = Some(e);
+                    }
                 } else {
                     tracing::debug!("✅ Closed {:?} connection", conn_type);
                 }
@@ -323,7 +412,10 @@ impl DestTransport {
         // 3. Clean up the entire pool
         self.conn_mgr.close_all().await;
 
-        Ok(())
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
     }
 
     /// Check if any connection is still healthy

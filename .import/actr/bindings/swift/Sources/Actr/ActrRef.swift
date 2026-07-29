@@ -9,6 +9,8 @@ import SwiftProtobuf
 
 // Observability is automatically initialized when creating ActrNode from a config file.
 
+protocol MobileMonitoringResource: AnyObject, Sendable {}
+
 /// Returns the fault-domain classification for an ACTR error.
 public func actrErrorKind(_ error: ActrError) -> ErrorKind {
     ErrorKind(bridge: ActrBindings.actrErrorKind(err: error.bridge))
@@ -32,6 +34,7 @@ public final class ActrRef: Sendable {
     private let inner: ActrBindings.ActrRefWrapper
     private let retainedWorkload: DynamicWorkload?
     private let retainedObservers: RuntimeObservers?
+    private let retainedMonitoringResource: (any MobileMonitoringResource)?
 
     /// Get the actor's ID
     public func actorId() -> ActrId {
@@ -141,10 +144,12 @@ public final class ActrRef: Sendable {
     init(
         inner: ActrBindings.ActrRefWrapper,
         retainedWorkload: DynamicWorkload? = nil,
-        retainedObservers: RuntimeObservers? = nil
+        retainedObservers: RuntimeObservers? = nil,
+        retainedMonitoringResource: (any MobileMonitoringResource)? = nil
     ) {
         self.inner = inner
         self.retainedWorkload = retainedWorkload
         self.retainedObservers = retainedObservers
+        self.retainedMonitoringResource = retainedMonitoringResource
     }
 }

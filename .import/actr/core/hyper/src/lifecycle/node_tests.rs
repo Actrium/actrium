@@ -1,5 +1,121 @@
 use super::*;
 
+#[tokio::test]
+async fn inv20_empty_mailbox_keeps_driving_inflight_reply_and_ack_tails() {
+    let shutdown = CancellationToken::new();
+    let completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut inflight = futures_util::stream::FuturesUnordered::<MailboxTail>::new();
+    inflight.push(Box::pin({
+        let completed = Arc::clone(&completed);
+        async move {
+            completed.store(true, std::sync::atomic::Ordering::Release);
+        }
+    }));
+
+    let outcome = tokio::time::timeout(
+        Duration::from_millis(100),
+        wait_for_mailbox_idle(&shutdown, &mut inflight, std::future::pending()),
+    )
+    .await
+    .expect("an in-flight reply/ack tail must beat an idle mailbox wake");
+
+    assert_eq!(outcome, MailboxIdleOutcome::Progress);
+    assert!(
+        completed.load(std::sync::atomic::Ordering::Acquire),
+        "empty durable storage must not starve an admitted reply/ack tail"
+    );
+    assert!(inflight.is_empty());
+}
+
+#[tokio::test]
+async fn empty_mailbox_idle_wait_honors_pre_cancelled_shutdown() {
+    let shutdown = CancellationToken::new();
+    shutdown.cancel();
+    let mut inflight = futures_util::stream::FuturesUnordered::<MailboxTail>::new();
+
+    let outcome =
+        wait_for_mailbox_idle(&shutdown, &mut inflight, std::future::pending::<()>()).await;
+
+    assert_eq!(outcome, MailboxIdleOutcome::Shutdown);
+}
+
+#[tokio::test]
+async fn empty_mailbox_idle_wait_honors_ready_enqueue_wake() {
+    let shutdown = CancellationToken::new();
+    let mut inflight = futures_util::stream::FuturesUnordered::<MailboxTail>::new();
+
+    let outcome = wait_for_mailbox_idle(&shutdown, &mut inflight, std::future::ready(())).await;
+
+    assert_eq!(outcome, MailboxIdleOutcome::Progress);
+}
+
+#[tokio::test(start_paused = true)]
+async fn sqlite_enqueue_observer_wakes_idle_dequeue_without_poll_delay() {
+    use actr_runtime_mailbox::{Mailbox as _, MessagePriority, SqliteMailbox};
+
+    let mailbox = SqliteMailbox::new(":memory:")
+        .await
+        .expect("in-memory mailbox should open");
+    let wake = Arc::new(tokio::sync::Notify::new());
+    let observed_depth = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let observed_depth_for_callback = Arc::clone(&observed_depth);
+    let observer = Arc::new(EnqueueObserver {
+        fire: Arc::new(move |depth| {
+            observed_depth_for_callback.store(depth, std::sync::atomic::Ordering::Release);
+        }),
+        wake: Arc::clone(&wake),
+    });
+    assert!(
+        mailbox.set_depth_observer(observer),
+        "SQLite must select the production push-notification path"
+    );
+
+    // Match the production subscribe-before-dequeue ordering that closes the
+    // empty-dequeue/enqueue race.
+    let mut enqueued = Box::pin(Arc::clone(&wake).notified_owned());
+    enqueued.as_mut().enable();
+    let before = tokio::time::Instant::now();
+    mailbox
+        .enqueue(vec![1], vec![2], MessagePriority::Normal)
+        .await
+        .expect("test message should enqueue");
+
+    mailbox_empty_wake(true, enqueued).await;
+
+    assert_eq!(
+        tokio::time::Instant::now(),
+        before,
+        "push wake must not consume the 10 ms compatibility poll delay"
+    );
+    assert_eq!(
+        observed_depth.load(std::sync::atomic::Ordering::Acquire),
+        1,
+        "the same observer must feed the backpressure depth callback"
+    );
+    assert_eq!(
+        mailbox
+            .dequeue()
+            .await
+            .expect("test dequeue should succeed")
+            .len(),
+        1,
+        "work must be visible immediately after the push wake"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn mailbox_without_observer_uses_compatibility_poll_delay() {
+    let before = tokio::time::Instant::now();
+
+    mailbox_empty_wake(false, std::future::ready(())).await;
+
+    assert_eq!(
+        tokio::time::Instant::now().duration_since(before),
+        Duration::from_millis(10),
+        "only backends that decline the observer should take the polling branch"
+    );
+}
+
 // ── Strategy A: keyless zero-overhead scheduler gate ────────────────────────
 //
 // `scheduler_engaged` is the single predicate the node uses to decide whether
@@ -1269,4 +1385,195 @@ async fn request_with_zero_timeout_is_still_dispatched() {
         "a zero-timeout REQUEST must still be answered"
     );
     assert_eq!(h.runs.load(Ordering::SeqCst), 1);
+}
+
+struct ImmediateNetworkProcessor;
+
+#[async_trait::async_trait]
+impl crate::lifecycle::NetworkEventProcessor for ImmediateNetworkProcessor {
+    async fn process_network_available(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn process_network_lost(&self) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn process_network_type_changed(
+        &self,
+        _is_wifi: bool,
+        _is_cellular: bool,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
+    async fn cleanup_connections(&self) -> Result<(), String> {
+        Ok(())
+    }
+}
+
+async fn profile_test_inner() -> (Inner, tempfile::TempDir) {
+    let dir = tempfile::TempDir::new().expect("temporary profile-test directory");
+    let config = dedup_test_config(&dir);
+    let workload = Workload::Linked(Arc::new(DummyLinkedHandle) as Arc<dyn LinkedWorkloadHandle>);
+    let inner = Inner::build(
+        config,
+        workload,
+        None,
+        None,
+        100,
+        Duration::from_secs(60),
+        crate::config::DispatchConcurrency::default(),
+        None,
+        false,
+    )
+    .await
+    .expect("profile-test Inner should build");
+    (inner, dir)
+}
+
+fn online_profile_snapshot(sequence: u64) -> crate::lifecycle::NetworkSnapshot {
+    crate::lifecycle::NetworkSnapshot {
+        sequence,
+        availability: crate::lifecycle::NetworkAvailability::Available,
+        transport: crate::lifecycle::NetworkTransportFlags {
+            wifi: true,
+            ..Default::default()
+        },
+        is_expensive: false,
+        is_constrained: false,
+    }
+}
+
+#[tokio::test]
+async fn node_surface_wires_gated_profile_and_signaling_sink_to_one_supervisor() {
+    let (mut inner, _dir) = profile_test_inner().await;
+    let handle = inner.create_gated_network_event_handle(0);
+    let event_rx = inner
+        .network_event_rx
+        .take()
+        .expect("node surface should install event receiver");
+    let internal = inner
+        .network_event_internal
+        .take()
+        .expect("node surface should install supervisor channel");
+    let shutdown = CancellationToken::new();
+    let (status_tx, mut status_rx) =
+        tokio::sync::watch::channel(crate::lifecycle::SupervisorStatus::default());
+    let reconciler = tokio::spawn(
+        crate::lifecycle::network_event::run_network_event_reconciler_with_channel_and_status(
+            event_rx,
+            internal,
+            Arc::new(ImmediateNetworkProcessor),
+            shutdown.clone(),
+            status_tx,
+        ),
+    );
+
+    handle
+        .handle_network_path_changed(online_profile_snapshot(1))
+        .await
+        .expect("online fact should be accepted");
+    let unknown_status = tokio::time::timeout(
+        Duration::from_secs(1),
+        status_rx.wait_for(|status| status.policy_revision > 0),
+    )
+    .await
+    .expect("Gated online status should be published")
+    .expect("status stream should remain open")
+    .clone();
+    assert_eq!(
+        unknown_status.last_action_id, None,
+        "Gated node surface must not start recovery before authoritative app phase"
+    );
+
+    // Exercise the concrete signaling client's production emitter. Reaching
+    // the same status stream proves set_supervisor_fact_sink() received a clone
+    // of the channel consumed by this reconciler.
+    inner
+        .signaling_client
+        .emit_test_signaling_committed(17, crate::lifecycle::SignalingFactOrigin::External);
+    let signaling_status = tokio::time::timeout(
+        Duration::from_secs(1),
+        status_rx.wait_for(|status| status.policy_revision > unknown_status.policy_revision),
+    )
+    .await
+    .expect("signaling fact should reach the node-owned supervisor")
+    .expect("status stream should remain open")
+    .clone();
+
+    handle
+        .handle_app_lifecycle_changed(crate::lifecycle::AppLifecycleState::Foreground {
+            background_duration_ms: 0,
+        })
+        .await
+        .expect("foreground fact should be accepted");
+    let foreground_status = tokio::time::timeout(
+        Duration::from_secs(1),
+        status_rx.wait_for(|status| {
+            status.policy_revision > signaling_status.policy_revision
+                && status.last_action_id.is_some()
+        }),
+    )
+    .await
+    .expect("foreground status should be published")
+    .expect("status stream should remain open")
+    .clone();
+    assert!(
+        foreground_status.last_action_id.is_some(),
+        "authoritative foreground must release Gated recovery eligibility"
+    );
+
+    shutdown.cancel();
+    reconciler
+        .await
+        .expect("node-surface reconciler should shut down cleanly");
+}
+
+#[tokio::test]
+async fn plain_node_surface_keeps_headless_profile_ungated() {
+    let (mut inner, _dir) = profile_test_inner().await;
+    let handle = inner.create_network_event_handle(0);
+    let event_rx = inner
+        .network_event_rx
+        .take()
+        .expect("plain node surface should install event receiver");
+    let internal = inner
+        .network_event_internal
+        .take()
+        .expect("plain node surface should install supervisor channel");
+    let shutdown = CancellationToken::new();
+    let (status_tx, mut status_rx) =
+        tokio::sync::watch::channel(crate::lifecycle::SupervisorStatus::default());
+    let reconciler = tokio::spawn(
+        crate::lifecycle::network_event::run_network_event_reconciler_with_channel_and_status(
+            event_rx,
+            internal,
+            Arc::new(ImmediateNetworkProcessor),
+            shutdown.clone(),
+            status_tx,
+        ),
+    );
+
+    handle
+        .handle_network_path_changed(online_profile_snapshot(1))
+        .await
+        .expect("online fact should be accepted");
+    let status = tokio::time::timeout(
+        Duration::from_secs(1),
+        status_rx.wait_for(|status| status.policy_revision > 0),
+    )
+    .await
+    .expect("Ungated online status should be published")
+    .expect("status stream should remain open")
+    .clone();
+    assert!(
+        status.last_action_id.is_some(),
+        "plain Rust/headless surface must remain Ungated"
+    );
+
+    shutdown.cancel();
+    reconciler
+        .await
+        .expect("plain node reconciler should shut down cleanly");
 }

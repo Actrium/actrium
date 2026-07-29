@@ -710,6 +710,62 @@ async fn credential_expiry_does_not_re_register_or_update_webrtc_local_id() {
 }
 
 #[tokio::test]
+async fn invalid_expiry_skips_both_expired_and_warning_hooks() {
+    let actor_id = test_actor_id(1);
+    let credential_state = CredentialState::new(
+        test_credential(),
+        Some(prost_types::Timestamp {
+            seconds: i64::MAX,
+            nanos: 0,
+        }),
+        None,
+    );
+    let mailbox = Arc::new(EmptyMailbox) as Arc<dyn Mailbox>;
+    let register_request = RegisterRequest {
+        actr_type: actor_id.r#type.clone(),
+        realm: actor_id.realm,
+        ..Default::default()
+    };
+    let hook_calls = Arc::new(AtomicUsize::new(0));
+    let hook_calls_for_callback = Arc::clone(&hook_calls);
+    let callback: HookCallback = Arc::new(move |_| {
+        hook_calls_for_callback.fetch_add(1, Ordering::SeqCst);
+        Box::pin(async {})
+    });
+
+    for client in [
+        Arc::new(ExpiredHeartbeatSignalingClient::new()) as Arc<dyn SignalingClient>,
+        Arc::new(WarningHeartbeatSignalingClient) as Arc<dyn SignalingClient>,
+    ] {
+        let mut consecutive_failures = 0;
+        let updated_id = send_heartbeat_and_handle_response(
+            &client,
+            &actor_id,
+            &credential_state,
+            &mailbox,
+            Duration::from_secs(30),
+            &register_request,
+            &mut consecutive_failures,
+            "http://127.0.0.1:1",
+            None,
+            None,
+            Some(&callback),
+            None,
+            None,
+            None,
+        )
+        .await;
+        assert_eq!(updated_id, None);
+    }
+
+    assert_eq!(
+        hook_calls.load(Ordering::SeqCst),
+        0,
+        "invalid remote expiry must never reach workload hooks"
+    );
+}
+
+#[tokio::test]
 async fn credential_warning_triggers_credential_manager_renewal() {
     const OLD_EXPIRY: i64 = 4_000_000_000;
     const NEW_EXPIRY: i64 = 4_000_001_000;

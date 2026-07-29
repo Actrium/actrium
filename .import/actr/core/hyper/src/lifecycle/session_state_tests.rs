@@ -1,4 +1,5 @@
 use super::*;
+use crate::lifecycle::test_recovery_policy as tp;
 
 fn test_actor_id() -> ActrId {
     ActrId {
@@ -121,4 +122,28 @@ async fn commit_hard_rebind_returns_previous_snapshot() {
     // New current generation reflects the committed snapshot.
     assert_eq!(state.generation().await, 5);
     assert!(state.is_current_generation(5).await);
+}
+
+#[tokio::test]
+async fn commit_hard_rebind_emits_session_activated_for_new_generation() {
+    let state = SessionState::new(SessionSnapshot::empty_with_id(test_actor_id(), 1));
+    let (fact_tx, mut fact_rx) = tokio::sync::mpsc::unbounded_channel();
+    state.set_fact_sink(SupervisorFactSink::new(fact_tx)).await;
+
+    state
+        .commit_hard_rebind(SessionSnapshot::empty_with_id(test_actor_id(), 9))
+        .await;
+
+    assert_eq!(state.generation().await, 9);
+    assert_eq!(
+        fact_rx.recv().await,
+        Some(tp::Input::SessionActivated {
+            session_generation: 9,
+        }),
+        "the authoritative hard-rebind commit must report the new session generation"
+    );
+    assert!(
+        fact_rx.try_recv().is_err(),
+        "one hard-rebind commit should emit exactly one activation fact"
+    );
 }

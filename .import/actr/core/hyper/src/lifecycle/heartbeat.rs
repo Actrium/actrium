@@ -5,7 +5,7 @@
 
 use crate::ais_client::AisClient;
 use crate::lifecycle::CredentialState;
-use crate::lifecycle::credential_manager::CredentialManager;
+use crate::lifecycle::credential_manager::{CredentialManager, credential_expiry_to_system_time};
 use crate::lifecycle::membership::MembershipHandle;
 use crate::lifecycle::session_state::SessionPhase;
 use crate::transport::{AuthVerdict, NetworkError};
@@ -14,15 +14,8 @@ use crate::wire::webrtc::{HookCallback, HookEvent, SignalingClient, WebRtcCoordi
 use actr_protocol::{ActrId, RegisterRequest, ServiceAvailabilityState};
 use actr_runtime_mailbox::Mailbox;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 use tokio_util::sync::CancellationToken;
-
-/// Convert a `prost_types::Timestamp` expiry to a wall-clock
-/// `SystemTime`. Clamps negative seconds to the Unix epoch so downstream
-/// `Duration` math stays safe.
-fn expiry_to_system_time(expires_at: &prost_types::Timestamp) -> SystemTime {
-    SystemTime::UNIX_EPOCH + Duration::from_secs(expires_at.seconds.max(0) as u64)
-}
 
 /// Invoke a [`HookCallback`], if present, awaiting its completion.
 async fn fire_hook(cb: Option<&HookCallback>, event: HookEvent) {
@@ -88,7 +81,8 @@ async fn get_power_reserve_and_availability(
 ) -> (f32, f32, ServiceAvailabilityState) {
     // TODO: Ensure the default value is correct
     // Get real power reserve from pwrzv (returns 1.0 to 5.0, where higher = more available)
-    let power_reserve = tokio::time::timeout(
+    let power_reserve = crate::timer::timeout(
+        crate::timer::ids::HEARTBEAT_POWER_RESERVE,
         POWER_RESERVE_FETCH_TIMEOUT,
         pwrzv::get_power_reserve_level_direct(),
     )
@@ -182,7 +176,8 @@ async fn send_heartbeat_and_handle_response(
         get_power_reserve_and_availability(mailbox).await;
 
     let ping_timeout = heartbeat_interval.mul_f64(0.4).max(Duration::from_secs(1));
-    let pong_response = tokio::time::timeout(
+    let pong_response = crate::timer::timeout(
+        crate::timer::ids::HEARTBEAT_PONG,
         ping_timeout,
         client.send_heartbeat(
             actor_id.clone(),
@@ -210,13 +205,14 @@ async fn send_heartbeat_and_handle_response(
             // gives the workload one final chance to observe the
             // transition before we trigger renewal).
             if let Some(expires_at) = credential_state.expires_at().await {
-                fire_hook(
-                    hook_callback,
-                    HookEvent::CredentialExpiring {
-                        new_expiry: expiry_to_system_time(&expires_at),
-                    },
-                )
-                .await;
+                if let Some(new_expiry) = credential_expiry_to_system_time(&expires_at) {
+                    fire_hook(hook_callback, HookEvent::CredentialExpiring { new_expiry }).await;
+                } else {
+                    tracing::warn!(
+                        expiry_seconds = expires_at.seconds,
+                        "Skipping credential-expiring hook because expiry is outside the platform range"
+                    );
+                }
             }
 
             request_credential_refresh(membership, credential_manager).await;
@@ -330,13 +326,14 @@ async fn send_heartbeat_and_handle_response(
         // The signaling warning is an idempotent trigger source for the
         // Credential Manager; actual renewal goes through POST /ais/renew.
         if let Some(expires_at) = credential_state.expires_at().await {
-            fire_hook(
-                hook_callback,
-                HookEvent::CredentialExpiring {
-                    new_expiry: expiry_to_system_time(&expires_at),
-                },
-            )
-            .await;
+            if let Some(new_expiry) = credential_expiry_to_system_time(&expires_at) {
+                fire_hook(hook_callback, HookEvent::CredentialExpiring { new_expiry }).await;
+            } else {
+                tracing::warn!(
+                    expiry_seconds = expires_at.seconds,
+                    "Skipping credential-expiring hook because expiry is outside the platform range"
+                );
+            }
         }
         request_credential_refresh(membership, credential_manager).await;
     }
@@ -375,7 +372,8 @@ pub async fn heartbeat_task(
     webrtc_gate: Option<Arc<WebRtcGate>>,
     membership: Option<MembershipHandle>,
 ) {
-    let mut interval = tokio::time::interval(heartbeat_interval);
+    let mut interval =
+        crate::timer::interval(crate::timer::ids::HEARTBEAT_SCHEDULE, heartbeat_interval);
     let mut actor_id = actor_id;
     let mut consecutive_failures = 0;
 
@@ -556,13 +554,18 @@ async fn re_register_task(
                 tracing::debug!("⏰ New credential expires at: {}s", expires_at.seconds);
                 // Fire `on_credential_renewed` for the re-registration
                 // path as well — same semantics as the refresh path.
-                fire_hook(
-                    hook_callback.as_ref(),
-                    HookEvent::CredentialRenewed {
-                        new_expiry: expiry_to_system_time(expires_at),
-                    },
-                )
-                .await;
+                if let Some(new_expiry) = credential_expiry_to_system_time(expires_at) {
+                    fire_hook(
+                        hook_callback.as_ref(),
+                        HookEvent::CredentialRenewed { new_expiry },
+                    )
+                    .await;
+                } else {
+                    tracing::warn!(
+                        expiry_seconds = expires_at.seconds,
+                        "Skipping credential-renewed hook because expiry is outside the platform range"
+                    );
+                }
             }
 
             new_actor_id

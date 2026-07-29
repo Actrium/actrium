@@ -27,6 +27,7 @@ type MediaTracks = Arc<RwLock<HashMap<String, (Arc<TrackLocalStaticRTP>, Arc<RTC
 type LaneCache<const N: usize> = Arc<RwLock<[Option<Arc<dyn DataLane>>; N]>>;
 
 const PEER_CONNECTION_CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
+const DATA_CHANNEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WebRtcCloseMode {
@@ -42,6 +43,55 @@ fn should_wait_for_data_channel_drain(
     close_mode == WebRtcCloseMode::Graceful
         && buffered_amount > 0
         && connection_state == RTCPeerConnectionState::Connected
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct DataChannelDrainReport {
+    notified: usize,
+    timed_out: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DataChannelDrainOutcome {
+    AlreadyDrained,
+    Notified,
+    TimedOut,
+}
+
+async fn wait_for_data_channel_drain(
+    channel: &RTCDataChannel,
+    timeout: Duration,
+) -> DataChannelDrainOutcome {
+    let drained = Arc::new(tokio::sync::Notify::new());
+    let drained_callback = drained.clone();
+    channel.set_buffered_amount_low_threshold(0).await;
+    channel
+        .on_buffered_amount_low(Box::new(move || {
+            let drained = drained_callback.clone();
+            Box::pin(async move {
+                drained.notify_one();
+            })
+        }))
+        .await;
+
+    // Close the callback-install race: the buffer may have reached zero
+    // immediately before the handler became visible.
+    if channel.buffered_amount().await == 0 {
+        return DataChannelDrainOutcome::AlreadyDrained;
+    }
+
+    if crate::timer::timeout(
+        crate::timer::ids::DATA_CHANNEL_DRAIN,
+        timeout,
+        drained.notified(),
+    )
+    .await
+    .is_err()
+    {
+        DataChannelDrainOutcome::TimedOut
+    } else {
+        DataChannelDrainOutcome::Notified
+    }
 }
 
 /// WebRtcConnection - WebRTC P2P Connect
@@ -123,6 +173,14 @@ impl WebRtcConnection {
     /// Get session ID
     pub(crate) fn session_id(&self) -> u64 {
         self.session.session_id
+    }
+
+    /// Whether this connection has entered its terminal close path.
+    ///
+    /// `ConnectionSession::try_close` flips this flag before any asynchronous
+    /// teardown, so it covers both closing and fully closed connections.
+    pub(crate) fn is_closing_or_closed(&self) -> bool {
+        self.session.is_closed()
     }
 
     /// Install a state-change handler on the underlying RTCPeerConnection.
@@ -234,19 +292,29 @@ impl WebRtcConnection {
 
     /// Drain all open DataChannel send buffers before closing (graceful shutdown).
     ///
-    /// Polls `buffered_amount()` up to 50 times with 100 ms intervals (max 5 s total).
-    /// Logs a warning if the buffer is still non-zero when the timeout expires.
+    /// Waits on the DataChannel's buffered-amount-low event, with a five-second
+    /// failure bound. The successful path has no polling interval.
     async fn drain_data_channels(&self, close_mode: WebRtcCloseMode) {
+        let _ = self
+            .drain_data_channels_with_timeout(close_mode, DATA_CHANNEL_DRAIN_TIMEOUT)
+            .await;
+    }
+
+    async fn drain_data_channels_with_timeout(
+        &self,
+        close_mode: WebRtcCloseMode,
+        drain_timeout: Duration,
+    ) -> DataChannelDrainReport {
         use webrtc::data_channel::data_channel_state::RTCDataChannelState;
-        const MAX_POLLS: u32 = 50;
-        const POLL_INTERVAL_MS: u64 = 100;
+
+        let mut report = DataChannelDrainReport::default();
 
         if close_mode == WebRtcCloseMode::Immediate {
             tracing::debug!(
                 peer_id = %self.peer_id,
                 "Skipping DataChannel send-buffer drain for immediate WebRTC close"
             );
-            return;
+            return report;
         }
 
         // Snapshot open channels first, then release the lock before any async waits.
@@ -269,49 +337,52 @@ impl WebRtcConnection {
 
         for (idx, channel) in open_channels {
             let label = channel.label().to_owned();
-            for attempt in 0..MAX_POLLS {
-                let buffered = channel.buffered_amount().await;
-                if buffered == 0 {
-                    if attempt > 0 {
-                        tracing::debug!(
-                            peer_id = %self.peer_id,
-                            channel = %label,
-                            channel_idx = idx,
-                            attempts = attempt,
-                            "DataChannel send buffer drained",
-                        );
-                    }
-                    break;
-                }
+            let buffered = channel.buffered_amount().await;
+            if buffered == 0 {
+                continue;
+            }
 
-                let connection_state = self.peer_connection.connection_state();
-                if !should_wait_for_data_channel_drain(close_mode, connection_state, buffered) {
-                    tracing::warn!(
+            let connection_state = self.peer_connection.connection_state();
+            if !should_wait_for_data_channel_drain(close_mode, connection_state, buffered) {
+                tracing::warn!(
+                    peer_id = %self.peer_id,
+                    channel = %label,
+                    channel_idx = idx,
+                    connection_state = ?connection_state,
+                    buffered_bytes = buffered,
+                    "Skipping DataChannel send-buffer drain because PeerConnection is not connected; \
+                     data may be lost for the peer",
+                );
+                return report;
+            }
+
+            match wait_for_data_channel_drain(&channel, drain_timeout).await {
+                DataChannelDrainOutcome::AlreadyDrained => {}
+                DataChannelDrainOutcome::Notified => {
+                    report.notified += 1;
+                    tracing::debug!(
                         peer_id = %self.peer_id,
                         channel = %label,
                         channel_idx = idx,
-                        connection_state = ?connection_state,
-                        buffered_bytes = buffered,
-                        "Skipping DataChannel send-buffer drain because PeerConnection is not connected; \
-                         data may be lost for the peer",
+                        "DataChannel send buffer drained",
                     );
-                    return;
                 }
-
-                if attempt == MAX_POLLS - 1 {
+                DataChannelDrainOutcome::TimedOut => {
+                    report.timed_out += 1;
+                    let buffered_bytes = channel.buffered_amount().await;
                     tracing::warn!(
                         peer_id = %self.peer_id,
                         channel = %label,
                         channel_idx = idx,
-                        buffered_bytes = buffered,
+                        buffered_bytes,
                         "DataChannel send buffer not fully drained before close; \
                          data may be lost for the peer",
                     );
-                } else {
-                    tokio::time::sleep(tokio::time::Duration::from_millis(POLL_INTERVAL_MS)).await;
                 }
             }
         }
+
+        report
     }
 
     /// Close connection and broadcast ConnectionClosed event
@@ -357,8 +428,12 @@ impl WebRtcConnection {
             "🔒 [close] serial={} step 2: closing peer_connection",
             self.peer_id
         );
-        let close_result =
-            tokio::time::timeout(PEER_CONNECTION_CLOSE_TIMEOUT, self.peer_connection.close()).await;
+        let close_result = crate::timer::timeout(
+            crate::timer::ids::PEER_CONNECTION_CLOSE,
+            PEER_CONNECTION_CLOSE_TIMEOUT,
+            self.peer_connection.close(),
+        )
+        .await;
         let close_error = match close_result {
             Ok(Ok(())) => None,
             Ok(Err(e)) => Some(e),
@@ -598,15 +673,19 @@ impl WebRtcConnection {
         let peer_id_for_open = self.peer_id.clone();
         let session_id_for_open = self.session.session_id;
         let payload_type_for_open = payload_type;
+        let data_channel_state_changed = Arc::new(tokio::sync::Notify::new());
+        let state_changed_for_open = data_channel_state_changed.clone();
 
         data_channel.on_open(Box::new(move || {
             let event_tx = event_tx_for_open.clone();
             let peer_id = peer_id_for_open.clone();
             let payload_type = payload_type_for_open;
+            let state_changed = state_changed_for_open.clone();
 
             tracing::info!("🔄 WebRTC DataChannel opened: {:?}", payload_type);
 
             Box::pin(async move {
+                state_changed.notify_waiters();
                 let _ = event_tx.send(ConnectionEvent::DataChannelOpened {
                     peer_id,
                     session_id: session_id_for_open,
@@ -642,6 +721,7 @@ impl WebRtcConnection {
         let payload_type_for_close = payload_type;
         let label_for_close = label;
         let channel_id_for_close = channel_id;
+        let state_changed_for_close = data_channel_state_changed.clone();
         // Weak: this closure is stored on the data channel itself, so a strong
         // clone would form a self-cycle that keeps the channel (and its SCTP
         // stream state) alive forever.
@@ -656,7 +736,9 @@ impl WebRtcConnection {
             let label = label_for_close;
             let channel_id = channel_id_for_close;
             let dc_weak = dc_for_close.clone();
+            let state_changed = state_changed_for_close.clone();
             Box::pin(async move {
+                state_changed.notify_waiters();
                 // Guard: if session is cancelled (connection already cleaned up),
                 // skip all side effects to avoid corrupting a new connection
                 if session.is_cancelled() {
@@ -734,7 +816,11 @@ impl WebRtcConnection {
         channels[idx] = Some(Arc::clone(&data_channel));
 
         // Returns Lane
-        Ok(Arc::new(WebRtcDataLane::new(data_channel, rx)))
+        Ok(Arc::new(WebRtcDataLane::new(
+            data_channel,
+            rx,
+            data_channel_state_changed,
+        )))
     }
 
     /// Add media track to PeerConnection
@@ -895,11 +981,14 @@ impl WebRtcConnection {
         let peer_id_for_open = self.peer_id.clone();
         let session_id_for_open = self.session.session_id;
         let payload_type_for_open = payload_type;
+        let data_channel_state_changed = Arc::new(tokio::sync::Notify::new());
+        let state_changed_for_open = data_channel_state_changed.clone();
 
         data_channel.on_open(Box::new(move || {
             let event_tx = event_tx_for_open.clone();
             let peer_id = peer_id_for_open.clone();
             let payload_type = payload_type_for_open;
+            let state_changed = state_changed_for_open.clone();
 
             tracing::info!(
                 "🔄 WebRTC DataChannel opened (received): {:?}",
@@ -907,6 +996,7 @@ impl WebRtcConnection {
             );
 
             Box::pin(async move {
+                state_changed.notify_waiters();
                 let _ = event_tx.send(ConnectionEvent::DataChannelOpened {
                     peer_id,
                     session_id: session_id_for_open,
@@ -944,6 +1034,7 @@ impl WebRtcConnection {
         let sid_for_close = self.session.session_id;
         let payload_type_for_close = payload_type;
         let label_for_close = label.clone();
+        let state_changed_for_close = data_channel_state_changed.clone();
         // Weak: a strong clone of the channel inside its own handler would be a
         // self-cycle that keeps the channel alive forever.
         let dc_for_close = Arc::downgrade(&data_channel);
@@ -957,8 +1048,10 @@ impl WebRtcConnection {
             let payload_type = payload_type_for_close;
             let label = label_for_close.clone();
             let dc_weak = dc_for_close.clone();
+            let state_changed = state_changed_for_close.clone();
 
             Box::pin(async move {
+                state_changed.notify_waiters();
                 // Guard: if session is cancelled (connection already cleaned up),
                 // skip all side effects to avoid corrupting a new connection
                 if session.is_cancelled() {
@@ -1036,7 +1129,11 @@ impl WebRtcConnection {
         }
 
         // Create and cache Lane
-        let lane: Arc<dyn DataLane> = Arc::new(WebRtcDataLane::new(data_channel, rx));
+        let lane: Arc<dyn DataLane> = Arc::new(WebRtcDataLane::new(
+            data_channel,
+            rx,
+            data_channel_state_changed,
+        ));
         {
             let mut cache = self.lane_cache.write().await;
             cache[idx] = Some(Arc::clone(&lane));

@@ -26,6 +26,8 @@ private final class InvalidResponseActrRefWrapper: ActrBindings.ActrRefWrapper, 
     }
 }
 
+private final class MonitoringResourceProbe: MobileMonitoringResource, @unchecked Sendable {}
+
 private final class RecordingActrContext: ActrContext, @unchecked Sendable {
     struct RecordedCall {
         let routeKey: String
@@ -95,6 +97,23 @@ extension Google_Protobuf_Empty: RpcRequest {
     }
 
     #expect(wrapper.receivedPayloadType == .rpcSignal)
+}
+
+@Test func runningReferenceRetainsMobileMonitoringResource() {
+    let wrapper = InvalidResponseActrRefWrapper()
+    weak var weakProbe: MonitoringResourceProbe?
+    var ref: ActrRef?
+
+    do {
+        let probe = MonitoringResourceProbe()
+        weakProbe = probe
+        ref = ActrRef(inner: wrapper, retainedMonitoringResource: probe)
+    }
+
+    #expect(weakProbe != nil)
+    withExtendedLifetime(ref) {}
+    ref = nil
+    #expect(weakProbe == nil)
 }
 
 @Test func injectedActrContextSupportsTypedCalls() async throws {

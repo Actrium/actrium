@@ -329,13 +329,13 @@ async fn run_renewal_once(
         }
         Err(RenewError::RateLimited { retry_after }) => {
             if let Some(delay) = retry_after {
-                tokio::time::sleep(delay).await;
+                crate::timer::sleep(crate::timer::ids::CREDENTIAL_RATE_LIMIT, delay).await;
             }
             return Err("renewal rate limited".to_string());
         }
         Err(RenewError::Retryable(err)) => {
             let mut backoff = Backoff::new();
-            tokio::time::sleep(backoff.next()).await;
+            crate::timer::sleep(crate::timer::ids::CREDENTIAL_RETRY_BACKOFF, backoff.next()).await;
             return Err(format!("retryable renew error: {err}"));
         }
         Err(err) => return Err(err.to_string()),
@@ -1027,13 +1027,35 @@ fn is_expired(expires_at: i64) -> bool {
     expires_at <= now
 }
 
+/// Convert a remotely supplied credential expiry without panicking when the
+/// timestamp exceeds the protobuf or platform `SystemTime` range.
+pub(crate) fn credential_expiry_to_system_time(
+    expires_at: &prost_types::Timestamp,
+) -> Option<SystemTime> {
+    // `prost_types::Timestamp` follows google.protobuf.Timestamp, whose upper
+    // bound is 9999-12-31T23:59:59Z. Reject wire values outside that contract
+    // even on platforms whose SystemTime happens to represent a wider range;
+    // otherwise behavior would differ by target and the hook could still panic
+    // when a downstream platform converts the value.
+    const PROTOBUF_TIMESTAMP_MAX_SECONDS: i64 = 253_402_300_799;
+    if expires_at.seconds > PROTOBUF_TIMESTAMP_MAX_SECONDS {
+        return None;
+    }
+    UNIX_EPOCH.checked_add(Duration::from_secs(expires_at.seconds.max(0) as u64))
+}
+
 async fn fire_credential_renewed(
     hook_callback: Option<&HookCallback>,
     expires_at: &prost_types::Timestamp,
 ) {
     if let Some(callback) = hook_callback {
-        let new_expiry =
-            SystemTime::UNIX_EPOCH + Duration::from_secs(expires_at.seconds.max(0) as u64);
+        let Some(new_expiry) = credential_expiry_to_system_time(expires_at) else {
+            tracing::warn!(
+                expiry_seconds = expires_at.seconds,
+                "Skipping credential-renewed hook because expiry is outside the protobuf or platform range"
+            );
+            return;
+        };
         callback(HookEvent::CredentialRenewed { new_expiry }).await;
     }
 }

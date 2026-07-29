@@ -323,6 +323,25 @@ impl WireBuilder for DefaultWireBuilder {
         self.create_connections_with_cancel(dest, None).await
     }
 
+    async fn existing_connections(&self, dest: &Dest) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+        if !self.config.enable_webrtc || !dest.is_peer() {
+            return Ok(Vec::new());
+        }
+
+        let Some(coordinator) = &self.webrtc_coordinator else {
+            return Ok(Vec::new());
+        };
+        let Some(target_id) = dest.as_peer_id() else {
+            return Ok(Vec::new());
+        };
+
+        Ok(coordinator
+            .existing_connection(target_id)
+            .await
+            .map(|connection| vec![Arc::new(connection) as Arc<dyn WireHandle>])
+            .unwrap_or_default())
+    }
+
     #[cfg_attr(feature = "opentelemetry", tracing::instrument(skip_all))]
     async fn create_connections_with_cancel(
         &self,

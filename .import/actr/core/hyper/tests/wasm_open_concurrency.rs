@@ -25,20 +25,24 @@
 
 #![cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 // The conflict-key concurrency harness (route consts, gate bridge, watchdog
 // helpers) is shared with the M6 isomorphism suite; see
 // `core/hyper/tests/common/concurrency.rs`.
+use actr_hyper::config::WasmRuntimeLimits;
 use actr_hyper::test_support::concurrency::{
     BOOM, ECHO, PROBE, await_dispatch, caller, gate_bridge, probe_spec, read_u32, spawn_dispatch,
     wait_entered,
 };
 use actr_hyper::test_support::{
-    TestConcurrentDispatcher, TestDedupOutcome, TestDedupState, instantiate_wasm_workload,
+    TestConcurrentDispatcher, TestDedupOutcome, TestDedupState, TestWasmInstantiateQuotaPermit,
+    TestWasmWorkload, hold_wasm_instantiate_quota, instantiate_wasm_workload,
+    wait_for_wasm_instantiate_quota_denial_after, wait_for_wasm_quota_release_after,
+    wasm_instantiate_quota_denial_snapshot, wasm_quota_release_snapshot,
 };
-use actr_hyper::wasm::WasmHost;
+use actr_hyper::wasm::{WasmError, WasmHost, wasm_runtime_stats};
 use actr_hyper::workload::HostAbiFn;
 use actr_protocol::ActrId;
 use bytes::Bytes;
@@ -51,12 +55,56 @@ fn fixture_bytes() -> &'static [u8] {
     wasm_actor_fixture::WASM_ACTOR_FIXTURE
 }
 
+fn v2_fixture_host() -> &'static WasmHost {
+    static HOST: OnceLock<WasmHost> = OnceLock::new();
+    HOST.get_or_init(|| WasmHost::compile(fixture_bytes()).expect("compile v2 fixture"))
+}
+
+fn wasm_process_quota_test_lock() -> &'static Mutex<()> {
+    // The runtime quota counters and release notification are intentionally
+    // process-wide. Keep this binary's independently scheduled WASM scenarios
+    // from generating unrelated quota-release wakeups while another scenario
+    // is making exact assertions about notification-driven rebuild behavior.
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+}
+
+async fn instantiate_when_quota_is_available(host: &WasmHost) -> TestWasmWorkload {
+    loop {
+        let release_generation = wasm_quota_release_snapshot();
+        match instantiate_wasm_workload(host).await {
+            Ok(workload) => return workload,
+            Err(WasmError::ResourceLimitExceeded("concurrent component instantiations")) => {
+                wait_for_wasm_quota_release_after(release_generation).await;
+            }
+            Err(error) => panic!("unexpected workload instantiation error: {error}"),
+        }
+    }
+}
+
+async fn hold_instantiate_quota_when_available(
+    limits: &WasmRuntimeLimits,
+) -> TestWasmInstantiateQuotaPermit {
+    loop {
+        let release_generation = wasm_quota_release_snapshot();
+        match hold_wasm_instantiate_quota(limits) {
+            Ok(permit) => return permit,
+            Err(WasmError::ResourceLimitExceeded("concurrent component instantiations")) => {
+                wait_for_wasm_quota_release_after(release_generation).await;
+            }
+            Err(error) => panic!("unexpected quota acquisition error: {error}"),
+        }
+    }
+}
+
 // ── Facet 1 — distinct keys truly interleave (MAX_SEEN >= 2) ─────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn interleave_distinct_keys_reaches_max_seen_2() {
-    let host = WasmHost::compile(fixture_bytes()).expect("compile v2 fixture");
-    let wl = instantiate_wasm_workload(&host).await.expect("instantiate");
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
+    let wl = instantiate_wasm_workload(v2_fixture_host())
+        .await
+        .expect("instantiate");
     let dispatcher = Arc::new(wl.into_concurrent_dispatcher(probe_spec(), 8, 256, None));
     let (bridge, mut ctl) = gate_bridge();
 
@@ -90,8 +138,10 @@ async fn interleave_distinct_keys_reaches_max_seen_2() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn same_key_stays_serial_max_seen_1() {
-    let host = WasmHost::compile(fixture_bytes()).expect("compile v2 fixture");
-    let wl = instantiate_wasm_workload(&host).await.expect("instantiate");
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
+    let wl = instantiate_wasm_workload(v2_fixture_host())
+        .await
+        .expect("instantiate");
     let dispatcher = Arc::new(wl.into_concurrent_dispatcher(probe_spec(), 8, 256, None));
     let (bridge, mut ctl) = gate_bridge();
 
@@ -135,9 +185,11 @@ async fn same_key_stays_serial_max_seen_1() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn concurrency_capped_at_budget() {
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
     const C: usize = 3;
-    let host = WasmHost::compile(fixture_bytes()).expect("compile v2 fixture");
-    let wl = instantiate_wasm_workload(&host).await.expect("instantiate");
+    let wl = instantiate_wasm_workload(v2_fixture_host())
+        .await
+        .expect("instantiate");
     // queue_cap high enough to admit all submissions; budget bounds in-flight.
     let dispatcher = Arc::new(wl.into_concurrent_dispatcher(probe_spec(), C, 256, None));
     let (bridge, mut ctl) = gate_bridge();
@@ -177,9 +229,11 @@ async fn concurrency_capped_at_budget() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inflight_trap_fails_all_siblings_then_rebuilds() {
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
     const SIBLINGS: u64 = 3;
-    let host = WasmHost::compile(fixture_bytes()).expect("compile v2 fixture");
-    let wl = instantiate_wasm_workload(&host).await.expect("instantiate");
+    let wl = instantiate_wasm_workload(v2_fixture_host())
+        .await
+        .expect("instantiate");
     let dispatcher = Arc::new(wl.into_concurrent_dispatcher(probe_spec(), 8, 256, None));
     let (bridge, mut ctl) = gate_bridge();
 
@@ -243,12 +297,84 @@ async fn inflight_trap_fails_all_siblings_then_rebuilds() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn quota_denied_rebuild_waits_for_one_release_event_then_recovers() {
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
+    // Rebuild retains the logical active-store permit and reacquires only the
+    // short-lived instantiation permit. Pin that actual quota to one so a test
+    // guard can deterministically deny the first post-trap rebuild attempt.
+    let limits = WasmRuntimeLimits {
+        max_concurrent_instantiates: 1,
+        ..WasmRuntimeLimits::default()
+    };
+    let host = WasmHost::compile_with_limits(fixture_bytes(), &limits)
+        .expect("compile quota-rebuild fixture");
+    let workload = instantiate_when_quota_is_available(&host).await;
+    let dispatcher = Arc::new(workload.into_concurrent_dispatcher(probe_spec(), 8, 256, None));
+    let (bridge, mut ctl) = gate_bridge();
+
+    let boom = spawn_dispatch(
+        &dispatcher,
+        BOOM,
+        1i32.to_le_bytes().to_vec(),
+        caller(880),
+        &bridge,
+    );
+    wait_entered(&mut ctl.impl_entered, 1).await;
+
+    let quota_guard = hold_instantiate_quota_when_available(&limits).await;
+    let denial_generation = wasm_instantiate_quota_denial_snapshot();
+    let denied_before = wasm_runtime_stats().denied_instantiates;
+    ctl.impl_release.add_permits(1);
+
+    assert!(
+        await_dispatch(boom, "quota rebuild trap").await.is_err(),
+        "the triggering guest trap must fail before rebuild"
+    );
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        wait_for_wasm_instantiate_quota_denial_after(denial_generation),
+    )
+    .await
+    .expect("the poisoned runner should attempt one rebuild and hit the held quota");
+    assert_eq!(
+        wasm_runtime_stats().denied_instantiates,
+        denied_before + 1,
+        "the first rebuild attempt should account for one quota denial"
+    );
+
+    let mut recovered = spawn_dispatch(&dispatcher, PROBE, vec![], caller(881), &bridge);
+    assert!(
+        tokio::time::timeout(Duration::from_millis(150), &mut recovered)
+            .await
+            .is_err(),
+        "queued work must stay blocked while the rebuild quota remains occupied"
+    );
+    assert_eq!(
+        wasm_runtime_stats().denied_instantiates,
+        denied_before + 1,
+        "notification-driven waiting must not poll and repeatedly retry the denied rebuild"
+    );
+
+    drop(quota_guard);
+    wait_entered(&mut ctl.gate_entered, 1).await;
+    ctl.gate_release.add_permits(1);
+    let reply = await_dispatch(recovered, "quota rebuild recovery")
+        .await
+        .expect("one quota release event should rebuild the store and resume queued work");
+    assert_eq!(read_u32(&reply), 1, "recovery must use a fresh store");
+
+    dispatcher.shutdown().await;
+}
+
 // ── Facet 6 — per-dispatch timeout: hard cancel, sibling failure, rebuild ────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dispatch_timeout_discards_store_fails_siblings_and_recovers() {
-    let host = WasmHost::compile(fixture_bytes()).expect("compile v2 fixture");
-    let wl = instantiate_wasm_workload(&host).await.expect("instantiate");
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
+    let wl = instantiate_wasm_workload(v2_fixture_host())
+        .await
+        .expect("instantiate");
     // 300ms per-dispatch deadline, enforced inside the region.
     let dispatcher = Arc::new(wl.into_concurrent_dispatcher(
         probe_spec(),
@@ -318,8 +444,10 @@ async fn dispatch_timeout_discards_store_fails_siblings_and_recovers() {
 // region.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn same_key_timeout_seam_seals_region_until_first_leaves() {
-    let host = WasmHost::compile(fixture_bytes()).expect("compile v2 fixture");
-    let wl = instantiate_wasm_workload(&host).await.expect("instantiate");
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
+    let wl = instantiate_wasm_workload(v2_fixture_host())
+        .await
+        .expect("instantiate");
     // Short per-dispatch deadline so the parked first dispatch reliably times out
     // while leaving ample margin before the sealing assertion below.
     let dispatcher = Arc::new(wl.into_concurrent_dispatcher(
@@ -373,11 +501,13 @@ async fn same_key_timeout_seam_seals_region_until_first_leaves() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn gate_off_is_serial_max_seen_1() {
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
     use actr_hyper::workload::InvocationContext;
     use actr_protocol::{Direction, RpcEnvelope, prost::Message as _};
 
-    let host = WasmHost::compile(fixture_bytes()).expect("compile v2 fixture");
-    let wl = instantiate_wasm_workload(&host).await.expect("instantiate");
+    let wl = instantiate_wasm_workload(v2_fixture_host())
+        .await
+        .expect("instantiate");
     // Serial runner (gate off): the V2 kernel drives the per-dispatch region.
     let runner = Arc::new(wl.into_workload_runner());
     let (bridge, mut ctl) = gate_bridge();
@@ -505,8 +635,10 @@ async fn admit_like(
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn node_gate_on_dedup_writeback_survives_interleave() {
-    let host = WasmHost::compile(fixture_bytes()).expect("compile v2 fixture");
-    let wl = instantiate_wasm_workload(&host).await.expect("instantiate");
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
+    let wl = instantiate_wasm_workload(v2_fixture_host())
+        .await
+        .expect("instantiate");
     let dispatcher = Arc::new(wl.into_concurrent_dispatcher(probe_spec(), 8, 256, None));
     let (bridge, mut ctl) = gate_bridge();
     let dedup = Arc::new(Mutex::new(TestDedupState::new()));
@@ -596,8 +728,8 @@ async fn node_gate_on_dedup_writeback_survives_interleave() {
 /// dispatches correctly through the interleaved runner for a lone message too.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn compat_v2_guest_single_dispatch_on_interleaved() {
-    let host = WasmHost::compile(fixture_bytes()).expect("compile v2 fixture");
-    let wl = instantiate_wasm_workload(&host)
+    let _quota_isolation = wasm_process_quota_test_lock().lock().await;
+    let wl = instantiate_wasm_workload(v2_fixture_host())
         .await
         .expect("instantiate v2");
     let dispatcher = Arc::new(wl.into_concurrent_dispatcher(probe_spec(), 8, 256, None));

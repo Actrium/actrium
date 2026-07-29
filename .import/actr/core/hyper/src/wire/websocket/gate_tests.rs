@@ -951,3 +951,311 @@ async fn send_response_returns_false_when_sink_is_none() {
         .unwrap();
     assert!(!sent, "None sink should yield Ok(false)");
 }
+
+// ─── start_receive_loop: admission and termination ───────────────────────
+
+/// Hook probe for receive-loop tests.
+///
+/// `WebSocketConnectStart` fires for every inbound connection *before*
+/// verification, so awaiting N of them proves the loop consumed N
+/// connections — that is how these tests pin `continue` (keep serving)
+/// versus `break` (stop serving) without any timing assumption.
+/// `WebSocketConnected` fires only from `spawn_connection_tasks`, i.e. only
+/// on the admitted path, so it is the discriminator between accept and
+/// reject.
+struct HookProbe {
+    connect_start: mpsc::UnboundedReceiver<ActrId>,
+    connected: mpsc::UnboundedReceiver<ActrId>,
+    connected_count: Arc<AtomicUsize>,
+}
+
+impl HookProbe {
+    /// Await `n` `ConnectStart` peers. Hooks run in independent spawned
+    /// tasks, so arrival order across connections is not guaranteed — the
+    /// caller compares sets, not sequences.
+    ///
+    /// A loop that stopped serving simply never sends the remaining events,
+    /// so this is bounded: the failure mode we are pinning must surface as a
+    /// legible assertion, not as a hung test.
+    async fn take_connect_starts(&mut self, n: usize) -> Vec<ActrId> {
+        let mut seen = Vec::with_capacity(n);
+        for i in 0..n {
+            let peer = tokio::time::timeout(HOOK_TIMEOUT, self.connect_start.recv())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "only {i} of {n} ConnectStart events arrived within {HOOK_TIMEOUT:?} — \
+                         the receive loop stopped serving after a rejection"
+                    )
+                })
+                .expect("hook channel must stay open while the gate is alive");
+            seen.push(peer);
+        }
+        seen
+    }
+
+    /// Await one `WebSocketConnected` peer, bounded for the same reason.
+    async fn take_connected(&mut self) -> ActrId {
+        tokio::time::timeout(HOOK_TIMEOUT, self.connected.recv())
+            .await
+            .expect("a verified connection must fire WebSocketConnected")
+            .expect("hook channel must stay open while the gate is alive")
+    }
+}
+
+/// Bound on how long a hook event may take to arrive. Only ever elapses when
+/// the event is never going to fire, so it gates failure legibility, not
+/// timing sensitivity.
+const HOOK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn hook_probe() -> (HookCallback, HookProbe) {
+    let (start_tx, connect_start) = mpsc::unbounded_channel();
+    let (connected_tx, connected) = mpsc::unbounded_channel();
+    let connected_count = Arc::new(AtomicUsize::new(0));
+    let count_for_hook = connected_count.clone();
+
+    let hook: HookCallback = Arc::new(move |event| {
+        let start_tx = start_tx.clone();
+        let connected_tx = connected_tx.clone();
+        let count = count_for_hook.clone();
+        Box::pin(async move {
+            match event {
+                HookEvent::WebSocketConnectStart { peer_id } => {
+                    let _ = start_tx.send(peer_id);
+                }
+                HookEvent::WebSocketConnected { peer_id } => {
+                    count.fetch_add(1, Ordering::SeqCst);
+                    let _ = connected_tx.send(peer_id);
+                }
+                _ => {}
+            }
+        })
+    });
+
+    (
+        hook,
+        HookProbe {
+            connect_start,
+            connected,
+            connected_count,
+        },
+    )
+}
+
+/// A started receive loop plus everything a test needs to drive and observe it.
+struct RunningLoop {
+    /// Kept alive so the gate (and its hook registration) outlives the loop.
+    _gate: WebSocketGate,
+    conn_tx: mpsc::Sender<InboundWsConn>,
+    probe: HookProbe,
+    /// Drops exactly when the loop task returns — see [`await_loop_exit`].
+    mailbox: std::sync::Weak<CapturingMailbox>,
+}
+
+async fn start_loop(auth_ctx: Option<WsAuthContext>) -> RunningLoop {
+    let (conn_tx, conn_rx) = mpsc::channel::<InboundWsConn>(8);
+    let gate = WebSocketGate::new(
+        conn_rx,
+        empty_pending(),
+        Arc::new(DataChunkRegistry::new()),
+        auth_ctx,
+    );
+    let (hook, probe) = hook_probe();
+    gate.set_hook_callback(hook);
+
+    // The loop task is the sole owner of this mailbox once we drop ours, so
+    // its `Weak` going dead is a precise, sleep-free signal that the task
+    // returned.
+    let mailbox = CapturingMailbox::new();
+    let weak = Arc::downgrade(&mailbox);
+    let as_dyn: Arc<dyn Mailbox> = mailbox.clone();
+    drop(mailbox);
+
+    gate.start_receive_loop(as_dyn)
+        .await
+        .expect("first start_receive_loop call must succeed");
+
+    RunningLoop {
+        _gate: gate,
+        conn_tx,
+        probe,
+        mailbox: weak,
+    }
+}
+
+/// Wait for the receive-loop task to terminate, observed through the drop of
+/// the `Arc<dyn Mailbox>` it captured. The loop only releases it by returning,
+/// which it only does once `conn_rx.recv()` yields `None`.
+async fn await_loop_exit(mailbox: std::sync::Weak<CapturingMailbox>) {
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while mailbox.upgrade().is_some() {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("receive loop must exit once the connection channel closes");
+}
+
+/// A dialled-but-never-connected connection: enough to drive admission,
+/// and its lane readers fail fast on `get_lane` if it is ever admitted.
+fn unconnected_conn() -> WebSocketConnection {
+    WebSocketConnection::new("ws://127.0.0.1:0".into())
+}
+
+#[tokio::test]
+async fn start_receive_loop_is_single_shot() {
+    let (_tx, rx) = mpsc::channel::<InboundWsConn>(1);
+    let gate = WebSocketGate::new(
+        rx,
+        empty_pending(),
+        Arc::new(DataChunkRegistry::new()),
+        None,
+    );
+
+    gate.start_receive_loop(CapturingMailbox::new())
+        .await
+        .expect("first call takes conn_rx");
+
+    // conn_rx has been taken, so a second call cannot start a competing loop
+    // that would silently steal half the inbound connections.
+    let err = gate
+        .start_receive_loop(CapturingMailbox::new())
+        .await
+        .expect_err("second call must fail");
+    assert!(
+        matches!(err, ActrError::Internal(ref msg) if msg.contains("already called")),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[tokio::test]
+async fn receive_loop_exits_when_connection_channel_closes() {
+    let running = start_loop(None).await;
+    drop(running.conn_tx);
+    await_loop_exit(running.mailbox).await;
+}
+
+#[tokio::test]
+async fn receive_loop_rejects_every_connection_when_auth_ctx_missing() {
+    // No auth context is a configuration error: the loop must refuse to admit
+    // anyone rather than fall through to an unauthenticated fast path.
+    let mut running = start_loop(None).await;
+    let peers = [test_actor_id(401), test_actor_id(402)];
+
+    for peer in &peers {
+        let source_id = actr_protocol::prost::Message::encode_to_vec(peer);
+        running
+            .conn_tx
+            .send((unconnected_conn(), source_id, None))
+            .await
+            .expect("loop must be consuming connections");
+    }
+
+    // Two ConnectStart events prove the loop kept serving after the first
+    // rejection instead of breaking out.
+    let started = running.probe.take_connect_starts(peers.len()).await;
+    for peer in &peers {
+        assert!(
+            started.contains(peer),
+            "every inbound connection must fire ConnectStart, missing {peer}"
+        );
+    }
+
+    drop(running.conn_tx);
+    await_loop_exit(running.mailbox).await;
+
+    assert_eq!(
+        running.probe.connected_count.load(Ordering::SeqCst),
+        0,
+        "no connection may be admitted without an auth context"
+    );
+}
+
+#[tokio::test]
+async fn receive_loop_rejects_connection_without_credential_and_keeps_serving() {
+    let sk = signing_key(11);
+    let ctx = make_auth_ctx(&sk, 1, test_actor_id(999)).await;
+    let mut running = start_loop(Some(ctx)).await;
+    let peers = [test_actor_id(411), test_actor_id(412)];
+
+    for peer in &peers {
+        let source_id = actr_protocol::prost::Message::encode_to_vec(peer);
+        // No X-Actr-Credential header at all.
+        running
+            .conn_tx
+            .send((unconnected_conn(), source_id, None))
+            .await
+            .expect("loop must be consuming connections");
+    }
+
+    let started = running.probe.take_connect_starts(peers.len()).await;
+    for peer in &peers {
+        assert!(
+            started.contains(peer),
+            "a rejected connection must not stop the loop, missing {peer}"
+        );
+    }
+
+    drop(running.conn_tx);
+    await_loop_exit(running.mailbox).await;
+
+    assert_eq!(
+        running.probe.connected_count.load(Ordering::SeqCst),
+        0,
+        "a credential-less connection must never be admitted"
+    );
+}
+
+#[tokio::test]
+async fn receive_loop_rejects_connection_with_tampered_credential() {
+    let sk = signing_key(12);
+    let ctx = make_auth_ctx(&sk, 1, test_actor_id(999)).await;
+    let mut running = start_loop(Some(ctx)).await;
+
+    let peer = test_actor_id(421);
+    let mut credential = make_valid_credential(&sk, &peer, future_ts(), 1);
+    let mut sig = credential.signature.to_vec();
+    sig[0] ^= 0xFF;
+    credential.signature = sig.into();
+
+    let source_id = actr_protocol::prost::Message::encode_to_vec(&peer);
+    running
+        .conn_tx
+        .send((unconnected_conn(), source_id, Some(credential)))
+        .await
+        .expect("loop must be consuming connections");
+
+    assert_eq!(running.probe.take_connect_starts(1).await, vec![peer]);
+
+    drop(running.conn_tx);
+    await_loop_exit(running.mailbox).await;
+
+    assert_eq!(
+        running.probe.connected_count.load(Ordering::SeqCst),
+        0,
+        "a connection whose signature fails verification must not be admitted"
+    );
+}
+
+/// Positive control for the three rejection tests above: with the same
+/// harness, a correctly signed credential *is* admitted and does fire
+/// `WebSocketConnected`. Without this, a bug that silently stopped firing
+/// `Connected` would make every rejection test pass vacuously.
+#[tokio::test]
+async fn receive_loop_admits_verified_connection() {
+    let sk = signing_key(13);
+    let ctx = make_auth_ctx(&sk, 1, test_actor_id(999)).await;
+    let mut running = start_loop(Some(ctx)).await;
+
+    let peer = test_actor_id(431);
+    let credential = make_valid_credential(&sk, &peer, future_ts(), 1);
+    let source_id = actr_protocol::prost::Message::encode_to_vec(&peer);
+
+    running
+        .conn_tx
+        .send((unconnected_conn(), source_id, Some(credential)))
+        .await
+        .expect("loop must be consuming connections");
+
+    assert_eq!(running.probe.take_connected().await, peer);
+}

@@ -39,6 +39,10 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
+const TASK_SHUTDOWN_MARGIN: Duration = Duration::from_secs(5);
+const TASK_SHUTDOWN_TIMEOUT: Duration =
+    crate::lifecycle::RECOVERY_TEARDOWN_DEADLINE.saturating_add(TASK_SHUTDOWN_MARGIN);
+
 /// Shared state between all `ActrRef` clones
 ///
 /// This is an internal implementation detail. When the last `ActrRef` is dropped,
@@ -206,29 +210,12 @@ impl ActrRef {
         drop(guard);
         tracing::debug!("Waiting for tasks to complete: {:?}", handles.len());
 
-        // All tasks have been asked to shut down; wait for them with a timeout,
-        // and abort any that don't finish in time to avoid leaking background work.
+        // All tasks run concurrently after cancellation. Give the reconciler
+        // one shared outer join budget beyond its policy-owned teardown
+        // deadline, then abort and join anything still outstanding.
+        let deadline = tokio::time::Instant::now() + TASK_SHUTDOWN_TIMEOUT;
         for handle in handles {
-            let sleep = tokio::time::sleep(Duration::from_secs(5));
-            tokio::pin!(handle);
-            tokio::pin!(sleep);
-
-            tokio::select! {
-                res = &mut handle => {
-                    match res {
-                        Ok(_) => {
-                            tracing::debug!("Task completed");
-                        }
-                        Err(e) => {
-                            tracing::error!("Task failed: {:?}", e);
-                        }
-                    }
-                }
-                _ = sleep => {
-                    tracing::warn!("Task timed out after 5s, aborting");
-                    handle.abort();
-                }
-            }
+            wait_for_task_shutdown(handle, deadline).await;
         }
     }
 
@@ -278,6 +265,32 @@ impl ActrRef {
     }
 }
 
+async fn wait_for_task_shutdown(mut handle: JoinHandle<()>, deadline: tokio::time::Instant) {
+    let sleep = crate::timer::sleep_until(crate::timer::ids::ACTR_REF_TASK_SHUTDOWN, deadline);
+    tokio::pin!(sleep);
+
+    tokio::select! {
+        res = &mut handle => {
+            match res {
+                Ok(_) => tracing::debug!("Task completed"),
+                Err(e) => tracing::error!("Task failed: {:?}", e),
+            }
+        }
+        _ = sleep => {
+            tracing::warn!(
+                timeout_ms = TASK_SHUTDOWN_TIMEOUT.as_millis() as u64,
+                "Task exceeded the actor shutdown deadline, aborting"
+            );
+            handle.abort();
+            match handle.await {
+                Ok(_) => tracing::debug!("Task completed while cancellation was applied"),
+                Err(e) if e.is_cancelled() => tracing::debug!("Task abort completed"),
+                Err(e) => tracing::error!("Task failed while being aborted: {:?}", e),
+            }
+        }
+    }
+}
+
 impl Drop for ActrRefShared {
     fn drop(&mut self) {
         tracing::info!(
@@ -306,6 +319,48 @@ impl Drop for ActrRefShared {
         tracing::debug!(
             "✅ All background tasks aborted for Actor {}",
             actr_protocol::ActrId::to_string_repr(&self.actor_id)
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    #[tokio::test(start_paused = true)]
+    async fn task_shutdown_budget_outlives_recovery_teardown_contract() {
+        assert!(
+            TASK_SHUTDOWN_TIMEOUT > crate::lifecycle::RECOVERY_TEARDOWN_DEADLINE,
+            "the outer task owner must not preempt the supervisor's teardown deadline"
+        );
+
+        let completed = Arc::new(AtomicBool::new(false));
+        let completed_in_task = completed.clone();
+        let handle = tokio::spawn(async move {
+            crate::timer::sleep(
+                crate::timer::ids::ACTR_REF_TASK_SHUTDOWN,
+                crate::lifecycle::RECOVERY_TEARDOWN_DEADLINE + Duration::from_secs(1),
+            )
+            .await;
+            completed_in_task.store(true, Ordering::SeqCst);
+        });
+        let deadline = tokio::time::Instant::now() + TASK_SHUTDOWN_TIMEOUT;
+        let waiter = tokio::spawn(wait_for_task_shutdown(handle, deadline));
+
+        tokio::task::yield_now().await;
+        tokio::time::advance(crate::lifecycle::RECOVERY_TEARDOWN_DEADLINE).await;
+        tokio::task::yield_now().await;
+        assert!(
+            !waiter.is_finished(),
+            "the task owner aborted work at the supervisor's own deadline"
+        );
+
+        tokio::time::advance(Duration::from_secs(1)).await;
+        waiter.await.expect("task waiter should finish cleanly");
+        assert!(
+            completed.load(Ordering::SeqCst),
+            "work finishing inside the outer margin was aborted"
         );
     }
 }
