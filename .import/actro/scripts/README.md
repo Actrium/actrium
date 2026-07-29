@@ -16,6 +16,15 @@ the script is used across multiple top-level areas.
   Rust host to build and copy the ActroCore DLL used by the Windows shell. Heavy
   binary slices are intentionally ignored and should be regenerated locally or in
   CI.
+- `PrepareAndroidBinaryAssets.java` is the JDK-only downloader used by Android
+  Gradle `preBuild` tasks. It reads the pinned Android asset lock, verifies
+  archive SHA-256 values, safely extracts through a staging directory, and
+  atomically generates the offline Vosk assets and Actr JNI libraries. Verified
+  archives remain available to Gradle `--offline` builds through the Gradle user
+  cache.
+- `check-large-files.sh` rejects new tracked files over 1,000,000 bytes unless
+  they have an explicit reviewed budget. `verify-vendored-assets.sh` verifies
+  the remaining large vendored source bundles.
 - `check-migration-hygiene.sh` verifies migration invariants that should stay
   true after the client imports: old product/repository names are absent from
   first-party files, old app/client names are absent from first-party paths,
@@ -86,6 +95,8 @@ The repository root `package.json` exposes the main migration checks:
 - `npm run check:bundles` builds the iOS, Android, and macOS React Native bundles.
   macOS covers both Actro runtime entries: system apps and ACTR host.
 - `npm run check:migration` runs repository migration hygiene checks.
+- `npm run check:repository-assets` validates the Android artifact lock, large
+  file budgets, and vendored source checksums.
 - `npm run verify:rust` runs the core Rust contract/vault tests that back the
   shared native boundary.
 - `npm run verify:apple-core` runs the ActroCore Swift package tests, including
