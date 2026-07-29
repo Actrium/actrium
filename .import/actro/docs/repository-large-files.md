@@ -53,12 +53,35 @@ not APK or installed-app size.
    offline embedding is a requirement. Package-manager generation is an
    optional build-system change, not an automatic repository improvement.
 
-## History is separate
+## History cleanup
 
-The local `.git` directory was 278 MiB at the audit point. Reachable history
-still contains deleted build products, including several 45-90 MiB
-`CanvasTerminal.xcframework` archives, profiling output, and Rust `target`
-artifacts. Removing files from the current tree does not remove those blobs
-from existing clones. If clone size remains a goal after changing current
-distribution, perform a separately coordinated `git filter-repo` rewrite,
-publish a backup ref/bundle, and require fresh clones.
+History cleanup completed on 2026-07-29 after a full mirror backup and
+`git fsck` verification.
+
+`main` was rewritten with exact path filters for the former Android binary
+inputs:
+
+- `android/app/src/main/assets/model/asr/`
+- `apps/android/actro/android/app/src/main/assets/model/asr/`
+- `packages/actr-kotlin/src/main/jniLibs/`
+
+The first path is the model location before the Android project moved under
+`apps/android/actro`; filtering both locations prevents the same model blobs
+from surviving under an earlier name. The rewritten tip kept the exact same
+tree as the pre-rewrite tip.
+
+A malformed Dependabot branch based on a separate legacy root history was also
+deleted. That branch, rather than `main`, retained the 45-90 MiB
+`CanvasTerminal.xcframework` libraries, `default.profraw` files, Rust `target/`
+outputs, and Swift `.build/` outputs. Its pull request showed 10,989 unrelated
+changed files and could not be reused safely.
+
+After expiring the backed-up local reflogs and pruning unreachable objects,
+the local Git object pack fell from 265.70 MiB at audit time to 46.06 MiB.
+Reachable `main` history fell from 25 blobs over 1,000,000 bytes totalling
+212.11 MiB to 15 historical versions totalling 22.41 MiB. The current tree
+still contains only the five reviewed large files described above.
+
+Because commit IDs changed, clones made before the rewrite must be replaced
+with fresh clones. Do not merge or push an old local branch into the rewritten
+history.
