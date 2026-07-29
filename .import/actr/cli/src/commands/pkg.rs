@@ -81,7 +81,7 @@ pub struct PkgVerifyArgs {
 
 #[derive(Args, Debug)]
 pub struct PkgKeygenArgs {
-    /// Key output path (default: ~/.actr/dev-key.json)
+    /// Key output file path (default: ~/.actr/dev-key.json)
     #[arg(long, short = 'o', value_name = "FILE")]
     pub output: Option<PathBuf>,
     /// Force overwrite existing key
@@ -127,6 +127,13 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
             home.join(".actr").join("dev-key.json")
         }
     };
+
+    if key_path.is_dir() {
+        anyhow::bail!(
+            "Key output path is a directory: {}\nSpecify a file name inside it.",
+            key_path.display()
+        );
+    }
 
     if key_path.exists() && !args.force {
         anyhow::bail!(
