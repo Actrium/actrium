@@ -781,6 +781,41 @@ fn pkg_keygen_writes_key_config_and_rejects_existing_key_without_force() {
 }
 
 #[test]
+fn pkg_keygen_rejects_directory_output_path() {
+    let tmp = TempDir::new().expect("tempdir");
+    let home = isolated_home(tmp.path());
+    let key_dir = tmp.path().join("key-chain");
+    fs::create_dir_all(&key_dir).expect("create key dir");
+    let dir_arg = key_dir.to_string_lossy().into_owned();
+
+    let output = run_actr(&["pkg", "keygen", "--output", &dir_arg], tmp.path(), &home);
+    assert_failure(&output, "pkg keygen with directory output");
+    assert!(
+        stderr(&output).contains("Key output path is a directory"),
+        "stderr:\n{}",
+        stderr(&output)
+    );
+    assert!(
+        !stderr(&output).contains("--force"),
+        "stderr should not offer --force for a directory:\n{}",
+        stderr(&output)
+    );
+
+    // --force cannot rescue a directory target; it must fail the same way.
+    let forced = run_actr(
+        &["pkg", "keygen", "--output", &dir_arg, "--force"],
+        tmp.path(),
+        &home,
+    );
+    assert_failure(&forced, "forced pkg keygen with directory output");
+    assert!(
+        stderr(&forced).contains("Key output path is a directory"),
+        "stderr:\n{}",
+        stderr(&forced)
+    );
+}
+
+#[test]
 fn version_prints_human_and_json_forms() {
     let tmp = TempDir::new().expect("tempdir");
     let home = isolated_home(tmp.path());
