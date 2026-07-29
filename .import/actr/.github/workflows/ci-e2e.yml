@@ -88,15 +88,21 @@ jobs:
         with:
           # Distinct from package-runtime-echo's cache: the polyglot scenario
           # uses its own CARGO_TARGET_DIR tree under target/e2e-cache/polyglot-echo/.
+          #
+          # Only the two cross-scenario shared target trees (actr-cli, mock-actrix)
+          # are cached. The per-scenario trees (service-build, driver-rust,
+          # linked-rust, wasm-rust, stream-server) are cheap to rebuild and are
+          # deleted by the "Clean ..." steps below as soon as no later scenario
+          # needs them; caching all seven trees is what exhausted the runner's
+          # ~14 GB disk during the post-run cache save (#314).
           key: polyglot-echo-e2e
+          # Defense in depth: only persist the cache from the nightly schedule (or
+          # a manual run on main), so any other run can never be failed by the
+          # disk-heavy cache-save step.
+          save-if: ${{ github.event_name == 'schedule' || github.ref == 'refs/heads/main' }}
           workspaces: |
             . -> target/e2e-cache/polyglot-echo/actr-cli
             . -> target/e2e-cache/polyglot-echo/mock-actrix
-            . -> target/e2e-cache/polyglot-echo/service-build
-            . -> target/e2e-cache/polyglot-echo/driver-rust
-            . -> target/e2e-cache/polyglot-echo/linked-rust
-            . -> target/e2e-cache/polyglot-echo/wasm-rust
-            . -> target/e2e-cache/polyglot-echo/stream-server
       - name: Generate CLI web runtime assets
         run: bash bindings/web/scripts/sync-cli-assets.sh --build
       - name: Setup Node
@@ -108,6 +114,12 @@ jobs:
         run: bash e2e/polyglot-echo/run.sh --server cdylib-rust --client rust polyglot-ci-cdylib
       - name: Run polyglot-echo (--server linked-rust --client rust)
         run: bash e2e/polyglot-echo/run.sh --server linked-rust --client rust polyglot-ci-linked
+      # linked-rust is used only by the scenario above; reclaim its target dir
+      # immediately to cap peak disk usage (#314).
+      - name: Clean linked-rust target dir
+        run: |
+          rm -rf target/e2e-cache/polyglot-echo/linked-rust
+          df -h /
       - name: Run polyglot-echo (--server wasm-rust --client rust)
         # The wasm-rust first call occasionally hits a transient startup timeout.
         # Retry once, but surface attempt 1's exit code so a real regression is
@@ -121,14 +133,34 @@ jobs:
             set -e
             bash e2e/polyglot-echo/run.sh --server wasm-rust --client rust polyglot-ci-wasm
           fi
+      # wasm-rust is used only by the scenario above; reclaim its target dir.
+      - name: Clean wasm-rust target dir
+        run: |
+          rm -rf target/e2e-cache/polyglot-echo/wasm-rust
+          df -h /
       # ── streaming scenarios (Rust client, dedicated linked stream server) ───
       - name: Run polyglot-echo (--client rust --scenario server-stream)
         run: bash e2e/polyglot-echo/run.sh --client rust --scenario server-stream polyglot-ci-stream
       - name: Run polyglot-echo (--client rust --scenario bidi)
         run: bash e2e/polyglot-echo/run.sh --client rust --scenario bidi polyglot-ci-bidi
+      # bidi is the last streaming scenario and the last Rust-client scenario, so
+      # both stream-server and driver-rust are done after it; reclaim both.
+      - name: Clean stream-server and driver-rust target dirs
+        run: |
+          rm -rf target/e2e-cache/polyglot-echo/stream-server target/e2e-cache/polyglot-echo/driver-rust
+          df -h /
       # ── cross-language client (TypeScript driver, echo scenario) ────────────
       - name: Run polyglot-echo (--server cdylib-rust --client ts)
         run: bash e2e/polyglot-echo/run.sh --server cdylib-rust --client ts polyglot-ci-ts
+      # Disk-usage observability: runs regardless of scenario outcome so future
+      # disk-pressure issues are immediately locatable in the logs (#314). The
+      # per-scenario trees should already have been reclaimed by the steps above.
+      - name: Disk usage
+        if: always()
+        run: |
+          df -h
+          echo "── remaining target/e2e-cache/polyglot-echo trees ──"
+          du -sh target/e2e-cache/polyglot-echo/* 2>/dev/null || true
 
   typescript-e2e:
     name: TypeScript E2E
