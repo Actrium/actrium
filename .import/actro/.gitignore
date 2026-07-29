@@ -45,6 +45,7 @@ packages/actro-native-kotlin/src/main/jniLibs/**/*.so
 
 # Local scratch / memory files
 internal/
+.gemini-clipboard/
 
 # Local environment
 .env
