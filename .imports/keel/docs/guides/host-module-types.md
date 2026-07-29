@@ -75,6 +75,29 @@ descriptors to apply the rule to. On the wire these fields cross as raw bytes (t
 envelope, or the QuickJS `$b64` sidecar), never as a JSON number-array; the type simply
 reflects that. See [`../../contracts/store-net-bytes.CONFORMANCE.md`](../../contracts/store-net-bytes.CONFORMANCE.md).
 
+A `subscription()` declares its byte fields as `binary: { event: [...] }` — one direction,
+because a subscription has no request/response pair — and the same mapping rule applies to
+the emitted event type.
+
+## Subscriptions are reachable only from a JS guest
+
+Subscribing means handing the host a **handler function**. A native (wasm) guest's only route
+into a host module is `rill_host_call`, which carries **bytes**, and a decoded byte payload is
+never a function — so a `subscription` cannot be expressed from there at all, let alone
+dispatched. This is structural, not a missing feature: `guestKindsFor(descriptor)` derives it
+from the mechanism rather than from anything the contract author declares.
+
+The manifest lists such capabilities under **`jsOnlyCapabilities`** (emitted only when
+non-empty). A generator targeting a native guest should omit them or mark them unavailable, and
+a publish gate for a native-guest bundle should treat a use of one as an error — the runtime
+failure is otherwise a throw the guest author cannot act on.
+
+The host→guest push channel for a native guest is the **named event channel**
+(`WasmGuestView.sendEvent` → the guest's `rill_on_event`), whose payload takes the same RBS1
+fork as a call return: JSON by default, raw byte segments when it carries a `Uint8Array`. A host
+that today relays a subscription onto a named event keeps doing exactly that; what changed is
+that the relay is no longer limited to text.
+
 ## The convention: where it goes, how it is picked up
 
 1. Place the host-provided declaration file at the **guest project root** as

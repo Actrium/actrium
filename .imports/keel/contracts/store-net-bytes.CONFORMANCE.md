@@ -156,6 +156,7 @@ framing is **symmetric**, one vector locks **both** directions:
 | 2 | TS **encoder** reproduces the golden `hex` and the TS **decoder** reconstructs each source | `src/host/wire/__tests__/store-net-envelope.test.ts` | bytes ⇄ value (request AND return) |
 | 3 | Round-trip parity: `encode_value(decode_value(bytes)) == bytes`; the same value encodes identically as request or return | both codecs | symmetry lock |
 | 4 | End-to-end through a real guest: `WasmGuestHost` decodes an RBS1 request into a `Uint8Array` and returns a byte-carrying result as an RBS1 frame | `src/host/wasm-guest/__tests__/rbs1-guest.test.ts` (fixture `rbs1-guest.wat`) | live receive + return fork |
+| 5 | End-to-end PUSH: `emitEvent` with a byte-carrying payload lands an RBS1 frame in a real Rust guest's memory (byte-free payloads stay byte-identical JSON) | `src/host/wasm-guest/__tests__/wasm-guest-host.test.ts` (fixture `event-guest.wasm`) | live event fork (host → guest) |
 
 Golden vectors (`store-net-bytes.golden.json`, 6 vectors, Rust encoder as oracle):
 `back-compat-no-segments` (raw JSON, asserted **not** a frame), `one-segment`,
@@ -188,9 +189,25 @@ export interface BinaryFields<Input, Output> {
 // rpc({ binary })  and  RpcDescriptor.binary  — both OPTIONAL, frozen
 ```
 
+`subscription()` accepts the same field with the one direction it has — a
+host→guest event, no request/response pair:
+
+```ts
+export interface BinaryEventFields<Event> {
+  event?: readonly BinaryFieldNames<Event>[];   // event fields that are byte streams
+}
+// subscription({ binary })  and  SubscriptionDescriptor.binary  — OPTIONAL, frozen
+```
+
+Declaring a direction the descriptor kind does not have (`binary.event` on an
+`rpc`, `binary.input`/`binary.output` on a `subscription`) is **rejected at
+`defineRillContract`**: it would otherwise be silently ignored, leaving a byte
+field that no backstop checks — exactly the fail-open the backstop exists to
+prevent.
+
 `BinaryFieldNames<T>` restricts each name to the keys of `T` whose value is (or
 includes) a `Uint8Array`, so a mistyped or non-byte field name is a **compile-time
-error** where the Input/Output types are known.
+error** where the Input/Output/Event types are known.
 
 **Back-compat (non-negotiable):** `binary` is optional and defaults absent. Every
 existing `rpc()` / `defineRillContract()` compiles and behaves **byte-for-byte
@@ -212,9 +229,12 @@ unchanged**; a contract with no `binary` takes exactly today's dispatch path.
    wrapper with the `moduleId.export` + phase. This is the fail-closed backstop for
    the self-describing wire: the codec revives a segment into a `Uint8Array`
    **before** dispatch, and this check guarantees a declared field never reaches
-   the handler as anything else.
+   the handler as anything else. A subscription's declared `binary.event` fields
+   are asserted the same way on every event, **after** `parseEvent` narrows it
+   (same order as rpc's output path) and before the guest handler sees it.
 3. **Validation** — `defineRillContract` rejects a malformed `binary` (non-object,
-   or `input`/`output` that is not an array of non-empty field-name strings).
+   or a direction that is not an array of non-empty field-name strings, or a
+   direction that does not exist on the descriptor kind).
 
 ### Type-gen mapping contract (platform-side generator)
 
@@ -226,9 +246,10 @@ platform generates it** from its capability descriptors. rill fixes only the
 
 > For each capability descriptor, a field name listed in `binary.input` maps to a
 > **`Uint8Array`** parameter/field in the emitted signature, and a field name in
-> `binary.output` maps to a **`Uint8Array`** in the emitted return type. All other
-> fields keep their JSON-derived type. Absent `binary` ⇒ no `Uint8Array` mapping
-> (today's output, unchanged).
+> `binary.output` maps to a **`Uint8Array`** in the emitted return type; for a
+> subscription, a field name in `binary.event` maps to a **`Uint8Array`** in the
+> emitted event type. All other fields keep their JSON-derived type. Absent
+> `binary` ⇒ no `Uint8Array` mapping (today's output, unchanged).
 
 Example — the descriptors
 

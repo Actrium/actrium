@@ -2538,7 +2538,26 @@ pub mod events {
     static mut NEXT_ID: u32 = 1;
 
     /// Register `handler` for events named `name`; returns a subscription id.
-    /// The handler receives the raw payload bytes (UTF-8 JSON) to parse as needed.
+    ///
+    /// The handler receives the RAW payload bytes to parse as needed. They are
+    /// UTF-8 JSON by default, and an RBS1 envelope
+    /// ([`crate::store_net_encode`]) when the host's payload carried a byte
+    /// stream — the same self-describing fork as a host-call return. A handler
+    /// that expects bytes peeks the magic and unframes zero-copy:
+    ///
+    /// ```ignore
+    /// events::on("chunk", |payload| {
+    ///     match store_net_encode::decode_envelope(payload) {
+    ///         Ok(dec) => consume(dec.segments[0]),   // raw bytes, no copy
+    ///         Err(_) => consume_json(payload),       // plain-JSON payload
+    ///     }
+    /// });
+    /// ```
+    ///
+    /// This is the only host->guest PUSH channel: a host module `subscription`
+    /// is unreachable from here (subscribing means handing the host a function
+    /// reference, and this ABI carries bytes), so a host that must push
+    /// unsolicited data — bytes included — sends a named event.
     pub fn on(name: &str, handler: impl Fn(&[u8]) + 'static) -> u32 {
         unsafe {
             let id = NEXT_ID;

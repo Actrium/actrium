@@ -57,6 +57,30 @@ export interface BinaryFields<Input = unknown, Output = unknown> {
   output?: readonly BinaryFieldNames<Output>[];
 }
 
+/**
+ * The subscription-side sibling of {@link BinaryFields}: a subscription has no
+ * request/response pair, only a host->guest EVENT, so it declares one direction.
+ * Same three consumers (type generation, `binaryCapabilities`, the dispatch
+ * boundary backstop) and the same self-describing RBS1 wire.
+ */
+export interface BinaryEventFields<Event = unknown> {
+  /** Top-level event field names whose value is a byte stream (`Uint8Array`). */
+  event?: readonly BinaryFieldNames<Event>[];
+}
+
+/**
+ * Which guest runtime a host capability can actually be reached from.
+ *
+ * - `js` — the interpreted guest (QuickJS / Hermes), which holds real function
+ *   references and so can pass a handler across the boundary.
+ * - `native` — the wasm guest, whose only route into a host module is
+ *   `rill_host_call` with a byte payload (JSON or an RBS1 envelope).
+ *
+ * This is a STRUCTURAL fact of each mechanism, not a policy the contract author
+ * picks — see {@link guestKindsFor}.
+ */
+export type GuestKind = 'js' | 'native';
+
 export interface RpcOptions<Input, Output> {
   timeoutMs?: number;
   schema?: BoundarySchema<Input, Output>;
@@ -77,6 +101,7 @@ export interface SubscriptionOptions<Event> {
     // Reason: Subscription schemas parse untrusted cross-runtime events.
     parseEvent?: (value: unknown) => Event;
   };
+  binary?: BinaryEventFields<Event>;
 }
 
 export interface SubscriptionDescriptor<Event = unknown> {
@@ -85,6 +110,7 @@ export interface SubscriptionDescriptor<Event = unknown> {
     // Reason: Subscription schemas parse untrusted cross-runtime events.
     parseEvent?: (value: unknown) => Event;
   };
+  readonly binary?: BinaryEventFields<Event>;
   readonly __event?: Event;
 }
 
@@ -171,6 +197,16 @@ export interface RillCapabilitiesManifest {
    * ignore it.
    */
   binaryCapabilities?: string[];
+  /**
+   * Host capabilities (`moduleId.export`) that only an interpreted (JS) guest
+   * can reach — a native (wasm) guest structurally cannot, see
+   * {@link guestKindsFor}. ADDITIVE and OPTIONAL: present only when the contract
+   * declares such a capability, so an rpc-only contract's manifest is unchanged.
+   * A host shipping a native guest should treat a non-empty list as "these are
+   * unavailable to it", and reach that guest through the named event channel
+   * instead. Existing readers ignore it.
+   */
+  jsOnlyCapabilities?: string[];
 }
 
 /**
@@ -227,8 +263,33 @@ export function subscription<Event = unknown>(
   return freezeDescriptor({
     kind: 'subscription',
     schema: options.schema,
+    binary: options.binary,
   });
 }
+
+/**
+ * The guest kinds a capability can actually be reached from — DERIVED from the
+ * mechanism, never declared, so it cannot drift from what the runtime does:
+ *
+ * - `rpc` works from both guest kinds: its argument is data, and data crosses
+ *   either boundary (JSON, or an RBS1 envelope when it carries bytes).
+ * - `subscription` is `js`-ONLY. Subscribing means handing the host a HANDLER
+ *   FUNCTION, and a native guest's only route into a host module is
+ *   `rill_host_call`, which carries bytes — a decoded byte payload is never a
+ *   function. So the call cannot be expressed, let alone dispatched. The
+ *   host->guest push channel for a native guest is the named event channel
+ *   (`WasmGuestView.sendEvent` -> the guest's `rill_on_event`), which since the
+ *   RBS1 event fork carries JSON *and* raw bytes.
+ *
+ * Consumed by publish gates and type generators (via the manifest's
+ * `jsOnlyCapabilities`) so the limit is visible BEFORE a native guest hits it.
+ */
+export function guestKindsFor(descriptor: HostCapabilityDescriptor): readonly GuestKind[] {
+  return descriptor.kind === 'subscription' ? JS_ONLY_GUEST_KINDS : ALL_GUEST_KINDS;
+}
+
+const ALL_GUEST_KINDS: readonly GuestKind[] = Object.freeze(['js', 'native'] as const);
+const JS_ONLY_GUEST_KINDS: readonly GuestKind[] = Object.freeze(['js'] as const);
 
 export function isHostModuleId(value: string): value is HostModuleId {
   return HOST_MODULE_ID_PATTERN.test(value);
@@ -347,6 +408,17 @@ export function createCapabilitiesManifest(contract: RillContractShape): RillCap
     )
     .sort();
 
+  // Host capabilities a NATIVE (wasm) guest structurally cannot reach — today
+  // exactly the subscriptions (see guestKindsFor). Additive: only emitted when
+  // non-empty, so an rpc-only contract's manifest is unchanged.
+  const jsOnlyCapabilities = Object.entries(contract.hostModules)
+    .flatMap(([moduleId, moduleSpec]) =>
+      Object.entries(moduleSpec)
+        .filter(([, descriptor]) => !guestKindsFor(descriptor).includes('native'))
+        .map(([exportName]) => `${moduleId}.${exportName}`)
+    )
+    .sort();
+
   const manifest: RillCapabilitiesManifest = {
     contractVersion: contract.version,
     hostCapabilities,
@@ -358,13 +430,17 @@ export function createCapabilitiesManifest(contract: RillContractShape): RillCap
     manifest.binaryCapabilities = binaryCapabilities;
   }
 
+  if (jsOnlyCapabilities.length > 0) {
+    manifest.jsOnlyCapabilities = jsOnlyCapabilities;
+  }
+
   return manifest;
 }
 
-/** True when an rpc descriptor declares at least one binary input or output field. */
+/** True when a descriptor declares at least one binary field, in any direction. */
 function descriptorHasBinary(descriptor: HostCapabilityDescriptor): boolean {
-  if (descriptor.kind !== 'rpc') {
-    return false;
+  if (descriptor.kind === 'subscription') {
+    return (descriptor.binary?.event?.length ?? 0) > 0;
   }
   const binary = descriptor.binary;
   return Boolean(binary && ((binary.input?.length ?? 0) > 0 || (binary.output?.length ?? 0) > 0));
@@ -489,18 +565,23 @@ function validateDescriptor(
     throw new Error(`[rill/contract] Descriptor "${label}" must be rpc() or subscription().`);
   }
 
-  // Reason: `binary` is optional metadata only present on rpc descriptors; when
-  // set it must be a well-formed field-name map. subscription() never sets it.
-  validateBinaryFields((value as { binary?: unknown }).binary, label);
+  // Reason: `binary` is optional metadata on either descriptor kind; when set it
+  // must be a well-formed field-name map whose directions match that kind.
+  validateBinaryFields((value as { binary?: unknown }).binary, label, kind);
 }
 
 /**
  * Validate an optional `binary` descriptor field: when present it must be an
- * object whose `input`/`output` (each optional) are arrays of non-empty
+ * object whose direction lists (each optional) are arrays of non-empty
  * field-name strings. Purely additive — an absent `binary` is always valid.
+ *
+ * The directions are kind-specific: an rpc has `input`/`output`, a subscription
+ * has only `event`. Declaring a direction the kind does not have is rejected —
+ * it would be silently ignored otherwise, and a binary field that no backstop
+ * checks is exactly the fail-open case the backstop exists to prevent.
  */
 // Reason: validates a descriptor's optional `binary` field, whose shape is unverified until checked here.
-function validateBinaryFields(value: unknown, label: string): void {
+function validateBinaryFields(value: unknown, label: string, kind: 'rpc' | 'subscription'): void {
   if (value === undefined) {
     return;
   }
@@ -509,10 +590,19 @@ function validateBinaryFields(value: unknown, label: string): void {
     throw new Error(`[rill/contract] Descriptor "${label}" binary must be an object.`);
   }
 
-  // Reason: narrowing the validated object; input/output are re-checked per direction below.
-  const binary = value as { input?: unknown; output?: unknown };
+  // Reason: narrowing the validated object; each direction is re-checked below.
+  const binary = value as { input?: unknown; output?: unknown; event?: unknown };
+  const allowed = kind === 'subscription' ? (['event'] as const) : (['input', 'output'] as const);
 
-  for (const direction of ['input', 'output'] as const) {
+  for (const direction of ['input', 'output', 'event'] as const) {
+    if (binary[direction] !== undefined && !(allowed as readonly string[]).includes(direction)) {
+      throw new Error(
+        `[rill/contract] Descriptor "${label}" binary.${direction} is not valid on a ${kind} descriptor (expected ${allowed.join('/')}).`
+      );
+    }
+  }
+
+  for (const direction of allowed) {
     const list = binary[direction];
     if (list === undefined) {
       continue;
@@ -672,31 +762,49 @@ function wrapSubscriptionDispatch(
   options: HostModuleDispatchOptions
 ): HostModuleDispatchHandler {
   const schema = descriptor.schema;
+  // Reason: the erased descriptor exposes binary field names as `readonly string[]`.
+  const binaryEvent = descriptor.binary?.event as readonly string[] | undefined;
+  const hasBinaryEvent = Boolean(binaryEvent && binaryEvent.length > 0);
 
   return (...args: unknown[]): unknown => {
     const handler = args[0];
     if (typeof handler !== 'function') {
+      // The only caller that can get here with a non-function is a NATIVE (wasm)
+      // guest: its route into a host module is rill_host_call, which carries
+      // bytes, and a decoded byte payload is never a function. Say that, rather
+      // than blaming the argument — the guest kind is the reason, and the fix is
+      // a different channel, not a different argument. See guestKindsFor.
       throw new Error(
-        `[rill/contract] Subscription "${moduleId}.${exportName}" requires a handler function.`
+        `[rill/contract] Subscription "${moduleId}.${exportName}" requires a handler function, so it is reachable only from a JS guest. A native (wasm) guest cannot subscribe (its calls carry bytes, not function references) — push to it over the named event channel instead.`
       );
     }
 
     // Reason: the Guest handler and its events cross the runtime boundary as untrusted values.
     const guestHandler = handler as (event: unknown) => void;
-    const wrappedHandler = schema?.parseEvent
-      ? (event: unknown): void => {
-          // Boundary: parse every event before it reaches the Guest handler.
-          const parsed = runBoundary(
-            schema.parseEvent!,
-            event,
-            moduleId,
-            exportName,
-            'event',
-            options
-          );
-          guestHandler(parsed);
-        }
-      : guestHandler;
+    const parseEvent = schema?.parseEvent;
+    // Reason: an event from the host implementation is untrusted until parseEvent / the binary backstop runs.
+    const wrappedHandler =
+      parseEvent || hasBinaryEvent
+        ? (event: unknown): void => {
+            // Boundary: parse every event before it reaches the Guest handler,
+            // then run the declared-binary backstop on what parsing produced
+            // (same order as rpc's output path: narrow first, assert after).
+            let checked = parseEvent
+              ? runBoundary(parseEvent, event, moduleId, exportName, 'event', options)
+              : event;
+            if (hasBinaryEvent) {
+              checked = runBoundary(
+                (candidate) => assertBinaryFields(candidate, binaryEvent!, 'event'),
+                checked,
+                moduleId,
+                exportName,
+                'event',
+                options
+              );
+            }
+            guestHandler(checked);
+          }
+        : guestHandler;
 
     return impl(wrappedHandler as never);
   };

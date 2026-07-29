@@ -23,10 +23,13 @@
  *                            env.rill_log(ptr,len)
  *   guest -> host  exports:  memory, rill_alloc(size)->ptr, rill_resolve(cb,ok,ptr,len), rill_init()
  *   guest -> host  exports (optional): rill_abi_version() -> u32,
- *                            rill_wire_caps(flags) (WIP binary op-batch gate)
- *   wire: request/response bytes are UTF-8 JSON in the guest's linear memory,
+ *                            rill_wire_caps(flags) (WIP binary op-batch gate),
+ *                            rill_on_event(name_ptr,name_len, payload_ptr,payload_len)
+ *   wire: request/response/event bytes live in the guest's linear memory,
  *         addressed by (ptr,len); the host reads guest memory bounds-checked
- *         (results are copied out).
+ *         (results are copied out). The bytes are UTF-8 JSON by default and an
+ *         RBS1 envelope (contracts/store-net-bytes.json) when the value carries
+ *         a Uint8Array — one self-describing fork, same on all three paths.
  */
 import type { HostModuleDispatchTable } from '../../contract';
 import type { OperationBatch, SerializedOperation } from '../../shared/types';
@@ -45,6 +48,9 @@ const WIRE_CAP_OP_BATCH_BINARY = 0x1;
 
 /** Cap on render-channel drop warnings per host, so hostile input cannot flood the log. */
 const MAX_BATCH_DROP_WARNINGS = 10;
+
+/** Same cap for host->guest event drops (a per-frame event source could flood too). */
+const MAX_EVENT_DROP_WARNINGS = 10;
 
 /**
  * Guest ABI versions this host understands. A guest may declare its version via
@@ -89,6 +95,7 @@ export class WasmGuestHost {
   private readonly inflight = new Set<Promise<void>>();
   private abiVersion: number | null = null;
   private batchDropWarnings = 0;
+  private eventDropWarnings = 0;
 
   constructor(options: WasmGuestHostOptions) {
     this.dispatch = options.dispatch;
@@ -172,19 +179,45 @@ export class WasmGuestHost {
   }
 
   /**
-   * Deliver an event (name + JSON payload) to the guest's `rill_on_event`
-   * export. No-op if the guest doesn't export it. One-way, like the render
-   * channel — this is how input / lifecycle events reach a native guest.
+   * Deliver an event (name + payload) to the guest's `rill_on_event` export.
+   * No-op if the guest doesn't export it. One-way, like the render channel —
+   * this is how input / lifecycle events, and pushed byte streams, reach a
+   * native guest.
+   *
+   * The payload takes the SAME framing fork as `resolve()`'s return path: a
+   * payload carrying at least one `Uint8Array` is encoded as an RBS1 envelope
+   * (bytes ride as raw segments); a byte-free payload emits the IDENTICAL
+   * `JSON.stringify` bytes as before — no behaviour change for any existing
+   * event. The ABI is unchanged: `rill_on_event` always took a (ptr,len) byte
+   * range, and the guest SDK hands its handlers the raw `&[u8]`, so a guest
+   * that wants bytes peeks the magic and unframes; one that doesn't sees the
+   * same JSON it always did.
    */
-  // Reason: an event payload is any JSON-serializable value, only stringified here.
+  // Reason: an event payload is any JSON-serializable value, plus Uint8Array leaves the RBS1 fork hoists.
   emitEvent(name: string, payload?: unknown): void {
     const onEvent = this.instance.exports.rill_on_event as
       | ((np: number, nl: number, pp: number, pl: number) => void)
       | undefined;
     if (typeof onEvent !== 'function') return;
+
+    // Encode OUTSIDE the delivery try/catch: an encode failure is a host-side
+    // data problem (a byte segment over cap, a circular payload), not the
+    // guest's doing, so it gets a named warning instead of the silent drop that
+    // guest-mediated failures take below. Silence here would turn "this event
+    // never arrived" into an unexplainable gap on the guest side.
+    let nameBytes: Uint8Array;
+    let payloadBytes: Uint8Array;
     try {
-      const nameBytes = new TextEncoder().encode(name);
-      const payloadBytes = new TextEncoder().encode(JSON.stringify(payload ?? null));
+      nameBytes = new TextEncoder().encode(name);
+      payloadBytes =
+        encodeRbs1Result(payload ?? null) ??
+        new TextEncoder().encode(JSON.stringify(payload ?? null));
+    } catch (err) {
+      this.warnEventDropped(name, err instanceof Error ? err.message : String(err));
+      return;
+    }
+
+    try {
       const np = this.allocWrite(nameBytes);
       const pp = this.allocWrite(payloadBytes);
       onEvent(np, nameBytes.length, pp, payloadBytes.length);
@@ -194,6 +227,16 @@ export class WasmGuestHost {
       // delivery throw into the host — drop the event. Same fail-closed
       // contract as onHostCall / onSendBatch.
     }
+  }
+
+  private warnEventDropped(name: string, reason: string): void {
+    if (this.eventDropWarnings >= MAX_EVENT_DROP_WARNINGS) return;
+    this.eventDropWarnings++;
+    const suffix =
+      this.eventDropWarnings === MAX_EVENT_DROP_WARNINGS
+        ? ' (further drop warnings suppressed)'
+        : '';
+    console.warn(`[rill:wasm-guest] event "${name}" dropped before delivery: ${reason}${suffix}`);
   }
 
   /** Allocate guest memory via rill_alloc and copy `bytes` in; returns the ptr. */
