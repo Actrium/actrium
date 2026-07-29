@@ -99,6 +99,9 @@ const config = {
     },
     // 避免多个 node_modules 导致的模块重复
     blockList: [
+      // 本地源码包加入 watchFolders，但依赖解析统一走 app/runtime/root
+      // node_modules，避免 Metro 递归监听多个包自己的依赖树。
+      new RegExp(`${workspacePackagesRoot}/(actro-runtime|rill|askit|supramark)/node_modules/.*`),
       // 忽略 actro-runtime 自己的 react 和 react-native
       /..\/actro-runtime\/node_modules\/react\/.*/,
       /..\/actro-runtime\/node_modules\/react-native\/.*/,

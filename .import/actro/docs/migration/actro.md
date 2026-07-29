@@ -86,11 +86,12 @@ and installed artifacts remain outside the repo.
 - The pinned `actor-rtc/actr` source is a legacy compatibility dependency for
   Actro remote desktop only; it is not the intended long-term Actro runtime
   dependency model.
-- Windows has an initial WebView2 browser shell project at
-  `apps/windows/actro/`, plus native tab strip/navigation chrome and a
-  `window.actroHost` JSON bridge for core status, tab lifecycle, tab selection,
-  tab enumeration, and tab-scoped navigation. It now also owns explicit WebView2
-  profile storage plus page and browser full-screen shell transitions, but is
-  still not a production Windows browser client yet. Root `verify:windows`
+- Windows has a WebView2 browser shell project at `apps/windows/actro/`, plus
+  native tab strip/navigation chrome, generated local history/bookmark pages,
+  provider sync settings, and a `window.actroHost` JSON bridge for core status,
+  tab lifecycle, tab selection, tab enumeration, and tab-scoped navigation. It
+  owns explicit WebView2 profile storage plus page and browser full-screen shell
+  transitions; browser-feature parity, background sync, packaging, and
+  non-local cloud provider adapters remain in progress. Root `verify:windows`
   validates project metadata on every host and builds whenever a .NET SDK is
   available; Windows hosts require the SDK.

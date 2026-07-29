@@ -112,7 +112,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   (`AppleBrowserStorageDatabase.saveSession`) and Android
   (`BrowserStorageDatabase.saveSession`) likewise route session snapshots
   through `browser_session_snapshot_normalize_json` before writing rows.
-- Browser history/bookmark/session storage schema also has a Rust-owned v4
+- Browser history/bookmark/session storage schema also has a Rust-owned v6
   contract in `crates/actro-core/src/browser_data.rs`. It defines the
   `actro_browser.db` table set: `browser_history_pages`,
   `browser_history_visits`, `browser_bookmark_folders`, `browser_bookmarks`,
@@ -126,8 +126,13 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   local-equivalent tombstone updates so later sync can observe removals.
   Version 4 adds `browser_sync_cursors` and a separate Rust-owned
   `BrowserStorageSyncSql` contract for dirty-row selection, remote apply
-  upserts, mark-synced updates, and per-scope collection cursors. Rust also
-  owns the first typed `BrowserStorageSyncBatch` JSON contract and normalizer.
+  upserts, mark-synced updates, and per-scope collection cursors. Version 5
+  adds bookmark `ownerKind` / `ownerId` metadata so durable user/native
+  bookmarks and tab-derived bookmark state no longer overwrite one another.
+  Version 6 adds session `ownerKind` / `ownerId` plus `surfaceKind` /
+  `surfaceId` metadata so saved browser sessions can be distinguished by
+  device and platform surface. Rust also owns the first typed
+  `BrowserStorageSyncBatch` JSON contract and normalizer.
   Remote batches carry per-collection cursor handoff values, and cycle
   responses merge those pull cursors into `ackBatch.cursors` so every platform
   advances cursors through the same `upsertSyncCursor` path. Rust also owns

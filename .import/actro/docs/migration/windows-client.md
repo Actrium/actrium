@@ -1,8 +1,10 @@
 # Windows Client Migration
 
-Windows is part of the initial Actro platform set. The current repository has an
-initial .NET Windows Forms + WebView2 shell scaffold, but the production Windows
-browser client is not complete yet.
+Windows is part of the initial Actro platform set. The current repository has a
+.NET Windows Forms + WebView2 browser shell with native chrome, WebView2
+profile handling, local browser storage, provider sync settings, and Rust
+ActroCore integration. Browser-feature parity, OS background sync, packaging,
+and non-local cloud provider integration are still in progress.
 
 ## Current Mapping
 
@@ -10,7 +12,7 @@ browser client is not complete yet.
 apps/windows/                 Windows platform landing directory.
 apps/windows/actro/           Actro Windows WebView2 browser shell app root.
 apps/windows/actro/Actro.Windows.csproj
-                              Initial .NET Windows project file.
+                              .NET Windows project file.
 apps/windows/actro/src/BrowserApplicationContext.cs
                               Windows multi-window lifetime, first-window
                               session restore/persist, Ctrl+N normal window
@@ -32,12 +34,12 @@ apps/windows/actro/src/BrowserSearchEnginePolicy.cs
                               ActroCore-backed search engine catalog and search
                               URL construction adapter with local fallback.
 apps/windows/actro/src/BrowserSearchSettingsStore.cs
-	                              Persisted Windows-local search engine preference.
+                              Persisted Windows-local search engine preference.
 apps/windows/actro/src/BrowserStartupSettingsStore.cs
-	                              Persisted Windows-local startup session-restore
-	                              preference.
+                              Persisted Windows-local startup session-restore
+                              preference.
 apps/windows/actro/src/BrowserBrowsingDataPolicy.cs
-	                              Windows-local clear-browsing-data prompt and
+                              Windows-local clear-browsing-data prompt and
                               status text.
 apps/windows/actro/src/BrowserContentBlockingPolicy.cs
                               Windows-local lightweight ad/tracker
@@ -49,20 +51,20 @@ apps/windows/actro/src/BrowserBookmarkStore.cs
                               Windows-local browser bookmark JSON snapshots for
                               explicit page bookmarks.
 apps/windows/actro/src/BrowserBookmarksDocumentPolicy.cs
-	                              Safe generated bookmarks-page document and
-	                              in-page filter/remove controls for
-	                              actro://bookmarks.
+                              Safe generated bookmarks-page document and
+                              in-page filter/remove controls for
+                              actro://bookmarks.
 apps/windows/actro/src/BrowserLocalListDocumentPolicy.cs
-	                              Shared generated-list chrome for Windows-local
-	                              pages with safe rows, filtering, and remove
-	                              controls.
+                              Shared generated-list chrome for Windows-local
+                              pages with safe rows, filtering, and remove
+                              controls.
 apps/windows/actro/src/BrowserHistoryStore.cs
-	                              Windows-local browser history JSON snapshots for
+                              Windows-local browser history JSON snapshots for
                               successful non-private external navigations.
 apps/windows/actro/src/BrowserHistoryDocumentPolicy.cs
-	                              Safe generated history-page document and
-	                              in-page filter/remove controls for
-	                              actro://history.
+                              Safe generated history-page document and
+                              in-page filter/remove controls for
+                              actro://history.
 apps/windows/actro/src/BrowserMenuCommand.cs
                               Command enum shared by the compact app menu and
                               the keyboard shortcut router.
