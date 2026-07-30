@@ -147,7 +147,7 @@ if (unapproved.length > 0) {
     console.log(`... and ${unapproved.length - 20} more\n`);
   }
 
-  console.log('📖 See UNKNOWN_POLICY.md for guidelines');
+  console.log('📖 See UNKNOWN_POLICY.zh.md for guidelines');
   process.exit(1);
 } else {
   console.log('🎉 All unknown usages are approved!');

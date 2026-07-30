@@ -886,8 +886,8 @@ ${footerCode}
   // Write final bundle
   await Bun.write(targetPath, wrappedCode);
 
-  // 拷贝 bun 输出中的非 JS 资产（图片等）到目标目录
-  // 当 outDir 与最终目标目录不同时需要拷贝；相同时图片已在目标位置，无需拷贝
+  // Copy the non-JS assets (images and friends) out of bun's output into the target directory.
+  // Only needed when outDir differs from the final target; if they are the same the assets already sit there.
   for (const output of result.outputs) {
     if (output.path === targetPath) continue;
     const ext = path.extname(output.path).toLowerCase();
@@ -899,7 +899,7 @@ ${footerCode}
       console.log(`   Asset: ${path.basename(output.path)}`);
     }
   }
-  // 删除 bun 原始输出中的 JS/Map 文件（非 JS 资产保留在目标目录）
+  // Delete the JS and map files from bun's raw output (non-JS assets stay in the target directory).
   for (const output of result.outputs) {
     if (output.path === targetPath) continue;
     const ext = path.extname(output.path).toLowerCase();
