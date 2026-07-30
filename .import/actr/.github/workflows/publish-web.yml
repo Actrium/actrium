@@ -20,6 +20,7 @@ permissions:
 jobs:
   publish-web:
     name: Publish bindings/web
+    if: github.event_name == 'registry-publishing-disabled'
     runs-on: ubuntu-latest
     defaults:
       run:
