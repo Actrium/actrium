@@ -16,7 +16,7 @@ export { createDecoder, createEncoder };
 type SerializedObject = { __type: string; [key: string]: unknown };
 
 /**
- *
+ * Data transport strategy
  */
 export type TransportStrategy =
   | 'passthrough' // pass straight through (types JSI handles safely)
@@ -24,7 +24,7 @@ export type TransportStrategy =
   | 'proxy'; // pass by proxy (functions)
 
 /**
- *
+ * Type handling rule
  */
 export interface TypeRule {
   /**
@@ -33,14 +33,14 @@ export interface TypeRule {
   name: string;
 
   /**
-   *
+   * Type detection
    */
   // Reason: Type rule must accept any value to check its type
   match: (value: unknown) => boolean;
 
   /**
    * Encode strategy (applied before sending)
-   * @param value -
+   * @param value - the original value
    * @param context - bridge context (supplies the registry and friends)
    */
   // Reason: Type rule encode/decode must handle arbitrary values
@@ -48,14 +48,14 @@ export interface TypeRule {
 
   /**
    * Decode strategy (applied after receiving)
-   * @param value -
-   * @param context - Bridge
+   * @param value - the encoded value
+   * @param context - bridge context
    */
   // Reason: Type rule decode must handle arbitrary value types
   decode?: (value: unknown, context: CodecCallbacks) => unknown;
 
   /**
-   *
+   * Transport strategy
    */
   strategy: TransportStrategy;
 }
@@ -99,8 +99,8 @@ export interface CodecCallbacks {
 
   /**
    * Register a promise (for passing promises across the boundary)
-   * Bridge  Promise
-   * @param promise -  Promise
+   * The bridge automatically listens for the promise to settle and sends a message to the peer
+   * @param promise - the promise to register
    * @returns promiseId
    */
   // Reason: Promise values are runtime-defined across boundaries
@@ -116,17 +116,17 @@ export interface CodecCallbacks {
 }
 
 /**
- *
+ * Predefined type rules
  */
 export const DEFAULT_TYPE_RULES: TypeRule[] = [
-  // 1. Null/Undefined -
+  // 1. Null/Undefined - pass straight through
   {
     name: 'null-undefined',
     match: (v) => v === null || v === undefined,
     strategy: 'passthrough',
   },
 
-  // 2. Primitives -
+  // 2. Primitives - pass straight through
   {
     name: 'primitives',
     match: (v) => typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string',
@@ -145,7 +145,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 3. Serialized Function -  proxy
+  // 3. Serialized Function - decode into a proxy
   {
     name: 'serialized-function',
     match: (v) =>
@@ -219,7 +219,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'proxy',
   },
 
-  // 4. Functions -  fnId
+  // 4. Functions - encode as fnId
   {
     name: 'function',
     match: (v) => typeof v === 'function',
@@ -257,7 +257,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'proxy',
   },
 
-  // 4.5. Serialized Promise -  pending Promise
+  // 4.5. Serialized Promise - decode into a pending Promise
   {
     name: 'serialized-promise',
     match: (v) =>
@@ -279,7 +279,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'proxy',
   },
 
-  // 4.6. Promise -  promiseId
+  // 4.6. Promise - encode as promiseId
   {
     name: 'promise',
     match: (v) => v instanceof Promise,
@@ -296,7 +296,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'proxy',
   },
 
-  // 5. Date -
+  // 5. Date - serialize and pass
   {
     name: 'date',
     match: (v) =>
@@ -328,7 +328,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 6. RegExp -
+  // 6. RegExp - serialize and pass
   {
     name: 'regexp',
     match: (v) =>
@@ -365,7 +365,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 7. Error -
+  // 7. Error - serialize and pass
   {
     name: 'error',
     match: (v) =>
@@ -409,7 +409,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 8. Map - /
+  // 8. Map - encode/decode
   {
     name: 'map',
     match: (v) =>
@@ -441,7 +441,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 9. Set - /
+  // 9. Set - encode/decode
   {
     name: 'set',
     match: (v) =>
@@ -473,7 +473,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 10. TypedArray -  (must be before ArrayBuffer)
+  // 10. TypedArray - serialize and pass (must be before ArrayBuffer)
   {
     name: 'typedarray',
     match: (v) =>
@@ -580,7 +580,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 11. ArrayBuffer -
+  // 11. ArrayBuffer - serialize and pass
   {
     name: 'arraybuffer',
     match: (v) =>
@@ -611,7 +611,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 12. Arrays -  (reference-preserving decode)
+  // 12. Arrays - recursive handling (reference-preserving decode)
   {
     name: 'array',
     match: (v) => Array.isArray(v),
@@ -629,9 +629,9 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 13. toJSON -
-  //  toJSON()
-  // : class User { toJSON() { return { __class: 'User', name: this.name }; } }
+  // 13. toJSON - support custom serialization
+  // Allows a class instance to control its serialization via a toJSON() method
+  // Example: class User { toJSON() { return { __class: 'User', name: this.name }; } }
   {
     name: 'toJSON',
     match: (v) =>
@@ -654,7 +654,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 14. Objects -  (reference-preserving decode)
+  // 14. Objects - recursive handling (reference-preserving decode)
   {
     name: 'object',
     match: (v) => typeof v === 'object' && v !== null,
@@ -676,7 +676,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
         }
       }
 
-      //
+      // Ordinary object: handle recursively
       const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
         result[key] = ctx.encode(value);
