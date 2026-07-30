@@ -155,6 +155,19 @@ test_detect_conventional_bump_reads_commit_without_trailing_newline() {
   assert_eq "patch" "$bump" "fix commit after tag must return patch"
 }
 
+test_calculate_next_version_caps_pre_1_0_breaking_to_minor() {
+  reset_release_train_state
+
+  # Pre-1.0: a breaking ("major") bump must stay on the minor axis (0.y -> 0.(y+1)).
+  assert_eq "0.6.0" "$(calculate_next_version "0.5.6" "major")" "0.x breaking must cap to minor"
+  assert_eq "0.6.0" "$(calculate_next_version "0.5.6" "minor")" "0.x feat is minor"
+  assert_eq "0.5.7" "$(calculate_next_version "0.5.6" "patch")" "0.x fix is patch"
+
+  # Post-1.0: the cap does not apply; a breaking change is a real major bump.
+  assert_eq "2.0.0" "$(calculate_next_version "1.4.2" "major")" "1.x breaking is major"
+  assert_eq "1.5.0" "$(calculate_next_version "1.4.2" "minor")" "1.x feat is minor"
+}
+
 test_parse_prepare_only_mode() {
   reset_release_train_state
 
@@ -1787,6 +1800,7 @@ test_actrix_release_stages_binaries_with_bash() {
 }
 
 test_detect_conventional_bump_reads_commit_without_trailing_newline
+test_calculate_next_version_caps_pre_1_0_breaking_to_minor
 test_parse_prepare_only_mode
 test_parse_stage_argument
 test_parse_stage_publish_rust

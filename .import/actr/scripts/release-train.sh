@@ -359,6 +359,16 @@ calculate_next_version() {
 
   IFS='.' read -r major minor patch <<< "$current"
 
+  # Pre-1.0 (0.y.z) policy: SemVer designates the MINOR as the breaking axis
+  # while the major version is 0, so a breaking change bumps 0.y -> 0.(y+1).
+  # An intentional 1.0.0 must be cut explicitly via --version, never inferred
+  # from a conventional-commit marker. Without this guard the first `!` commit
+  # after v0.x would auto-detect "major" and jump the whole workspace to 1.0.0.
+  if [[ "$bump" == "major" && "$major" -eq 0 ]]; then
+    log_info "Pre-1.0 release line (0.x): capping breaking change to a minor bump" >&2
+    bump="minor"
+  fi
+
   case "$bump" in
     major) echo "$((major + 1)).0.0" ;;
     minor) echo "${major}.$((minor + 1)).0" ;;
