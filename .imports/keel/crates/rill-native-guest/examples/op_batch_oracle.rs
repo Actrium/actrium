@@ -8,17 +8,17 @@
 //! batch (intern indices from 0, header flags NONE) — the same convention the
 //! golden vectors are generated with.
 //!
-//! Consumer: `src/host/wasm-guest/__benchmarks__/op-batch-bench.ts`. Its
+//! Consumer: `src/host/native-guest/__benchmarks__/op-batch-bench.ts`. Its
 //! faithfulness gate pushes the checked-in golden vectors through this CLI and
 //! byte-compares the output against the golden hex before timing anything, so
 //! the JSON mapping (`wire_fixture_map.rs`, shared with the golden re-encode
 //! tests) is pinned to the oracle corpus on every bench run.
 //!
 //! Run:
-//!   cargo run -p rill-guest --features binary-protocol \
+//!   cargo run -p rill-native-guest --features binary-protocol \
 //!     --example op_batch_oracle < batches.json
 
-use rill_guest::wire_encode::{Batch, Encoder, Op, Value};
+use rill_native_guest::wire_encode::{Batch, Encoder, Op, Value};
 use std::io::Read;
 
 // The crate's minimal JSON parser and the golden-JSON -> {Op, Value} mapping.

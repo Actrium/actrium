@@ -1,5 +1,5 @@
 [package]
-name = "rill-guest"
+name = "rill-native-guest"
 version.workspace = true
 edition.workspace = true
 description = "Ergonomic Rust SDK for writing rill native (non-JS) WASM guests — wraps the linear-memory host:* ABI so guests write store::put(k, v).await."

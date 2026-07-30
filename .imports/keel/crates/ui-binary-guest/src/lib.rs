@@ -1,7 +1,7 @@
 //! Test-fixture native (non-JS) rill guest that exercises the WIP binary
 //! OP-BATCH wire end-to-end via the `rill_wire_caps` runtime gate.
 //!
-//! Built with `rill-guest`'s `binary-protocol` feature ON, so the SDK
+//! Built with `rill-native-guest`'s `binary-protocol` feature ON, so the SDK
 //! exports `rill_wire_caps`:
 //!   - a host that pushes bit0 (binaryOpBatch on) BEFORE `rill_init` receives
 //!     the render batch as a binary `RILL` frame;
@@ -18,12 +18,12 @@
 
 extern crate alloc;
 
-use rill_guest::ui::{text, view};
+use rill_native_guest::ui::{text, view};
 
-rill_guest::rill_guest_main!(guest_main);
+rill_native_guest::guest_main!(guest_main);
 
 async fn guest_main() {
-    rill_guest::render(view(alloc::vec![
+    rill_native_guest::render(view(alloc::vec![
         text("hello from rust"),
         view(alloc::vec![text("nested")]),
     ]));

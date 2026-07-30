@@ -10,7 +10,7 @@
 //  - the `wire_encode` test module, whose golden/matrix re-encode tests lock
 //    the mapping + encoder byte-for-byte to the oracle corpus;
 //  - `examples/op_batch_oracle.rs`, the dev-harness CLI that hands the same
-//    oracle bytes to `src/host/wasm-guest/__benchmarks__/op-batch-bench.ts`
+//    oracle bytes to `src/host/native-guest/__benchmarks__/op-batch-bench.ts`
 //    (whose faithfulness gate re-encodes the golden vectors through the CLI
 //    and byte-compares, pinning this mapping a second time).
 //

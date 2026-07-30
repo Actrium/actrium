@@ -1,12 +1,12 @@
-//! rill-guest — ergonomic Rust SDK for native (non-JS) rill WASM guests.
+//! rill-native-guest — ergonomic Rust SDK for native (non-JS) rill WASM guests.
 //!
 //! It wraps the linear-memory host:* ABI (see `docs/native-guest.zh.md`) so a
 //! guest author writes async code:
 //!
 //! ```ignore
-//! rill_guest::rill_guest_main!(guest_main);
+//! rill_native_guest::guest_main!(guest_main);
 //! async fn guest_main() {
-//!     let out = rill_guest::store::put("greeting", "hi").await.unwrap();
+//!     let out = rill_native_guest::store::put("greeting", "hi").await.unwrap();
 //! }
 //! ```
 //!
@@ -42,7 +42,7 @@ extern "C" {
     // One-way render channel: hand the host an operation batch (UTF-8 JSON).
     fn rill_send_batch(batch_ptr: *const u8, batch_len: usize);
     // One-way diagnostics channel: hand the host a UTF-8 log line
-    // (wasm-guest-host.ts wires it to its `onLog` sink).
+    // (native-guest-host.ts wires it to its `onLog` sink).
     fn rill_log(msg_ptr: *const u8, msg_len: usize);
 }
 
@@ -63,7 +63,7 @@ pub fn log(msg: &str) {
 // ---- Global allocator: talc (memory.grow-backed, growable, real free) ----
 //
 // The guest's own Rust allocations (Box/Vec/String/…) are served by talc, wired
-// as the `#[global_allocator]` inside `rill_guest_main!` so each cdylib guest
+// as the `#[global_allocator]` inside `guest_main!` so each cdylib guest
 // instantiates it. On wasm it is `talc::wasm::WasmDynamicTalc`: a single-threaded
 // bump-and-free allocator whose backing memory is claimed on demand via
 // `memory.grow` (WebAssembly's `memory_grow`), and — unlike the retired
@@ -2707,7 +2707,7 @@ pub mod store_net_encode;
 /// global allocator, and a panic handler in the guest cdylib. `$main` is an
 /// `async fn () -> ()`.
 #[macro_export]
-macro_rules! rill_guest_main {
+macro_rules! guest_main {
     ($main:path) => {
         // talc, memory.grow-backed and growable: the guest heap grows to fit the
         // working set then plateaus, reusing freed memory (see the SDK crate root).
@@ -2767,7 +2767,7 @@ macro_rules! rill_guest_main {
     };
 }
 
-// ---- unit tests (run on the HOST target: `cargo test -p rill-guest`) ----
+// ---- unit tests (run on the HOST target: `cargo test -p rill-native-guest`) ----
 //
 // The crate is `no_std`, but libtest brings std, so pure-logic tests (JSON
 // escaping, gpu budget accounting) run natively. The wasm host imports get
@@ -2823,7 +2823,7 @@ mod store_net_wrappers_tests;
 mod module_verdict_tests;
 
 // A net-live-bytes counting global allocator, wired ONLY for the test build
-// (the real guest's allocator is talc, installed by `rill_guest_main!`). It
+// (the real guest's allocator is talc, installed by `guest_main!`). It
 // wraps the system allocator and tracks the live heap so the return-path
 // no-leak test can assert that many oversized host->guest returns free their
 // talc-fallback source buffers (the leak the fix closes) rather than accumulate.
