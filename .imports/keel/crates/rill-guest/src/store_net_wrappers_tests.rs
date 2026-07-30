@@ -12,65 +12,14 @@
 use crate::store_net_encode::limits::{MAX_ENVELOPE_BYTES, MAX_SEGMENTS, MAX_SEGMENT_BYTES};
 use crate::store_net_encode::{decode_envelope, encode_envelope, MAGIC};
 use crate::test_shims::CALLS;
+// The host-call wiretap harness is shared with `module_verdict_tests`.
+use crate::test_wiretap::{issue, poll_once};
 use core::fmt::Write as _;
-use core::future::Future;
-use core::pin::Pin;
-use core::task::{Context, Poll, Waker};
+use core::task::Poll;
 use std::boxed::Box;
 use std::string::{String, ToString};
 use std::vec;
 use std::vec::Vec;
-
-// ---- driving a real host-call future against the recording shim ----
-
-fn poll_once<F: Future>(fut: Pin<&mut F>) -> Poll<F::Output> {
-    let mut cx = Context::from_waker(Waker::noop());
-    fut.poll(&mut cx)
-}
-
-/// A host call captured in-flight: the raw request bytes (for wiretapping) plus
-/// the cb id, ready for `resolve` to feed a mock response back.
-struct Wiretap<F: Future> {
-    fut: Pin<Box<F>>,
-    module: String,
-    method: String,
-    request: Vec<u8>,
-    cb: u32,
-}
-
-fn issue<F: Future>(f: F) -> Wiretap<F> {
-    CALLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    let mut fut = Box::pin(f);
-    assert!(
-        poll_once(fut.as_mut()).is_pending(),
-        "host-call future must park on first poll"
-    );
-    let mut calls = CALLS.lock().unwrap_or_else(|e| e.into_inner());
-    assert_eq!(calls.len(), 1, "expected exactly one rill_host_call");
-    let (module, method, request, cb) = calls.pop().expect("len checked");
-    drop(calls);
-    Wiretap {
-        fut,
-        module,
-        method,
-        request,
-        cb,
-    }
-}
-
-impl<F: Future> Wiretap<F> {
-    /// Feed the mock host's response back through the real `rill_resolve` path
-    /// and return the completed future's output.
-    fn resolve(mut self, ok: u32, response: &[u8]) -> F::Output {
-        // Safety: `response` is a live slice we own for the duration of the call;
-        // resolve copies it out immediately (to_vec).
-        unsafe { crate::rt::resolve(self.cb, ok, response.as_ptr(), response.len()) };
-        match poll_once(self.fut.as_mut()) {
-            Poll::Ready(out) => out,
-            Poll::Pending => panic!("future did not complete after resolve"),
-        }
-    }
-}
 
 fn is_rbs1(buf: &[u8]) -> bool {
     buf.len() >= 4 && buf[0..4] == MAGIC.to_le_bytes()

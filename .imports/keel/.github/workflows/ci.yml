@@ -77,6 +77,16 @@ jobs:
       - name: Build debug (DWARF) WASM guests
         run: RILL_GUEST_DEBUG=1 bash build.sh
 
-      # No `cargo test` step yet: the guest cdylibs are wasm32-only (their
-      # panic handler uses core::arch::wasm32) and the workspace has no
-      # host-runnable tests. Add one here once host-target unit tests land.
+      # Host-target unit tests for the SDK crate: wire codecs (op-batch / canvas /
+      # RBS1 golden vectors), the contract conformance suite, and the host-call
+      # wrapper wiretaps. `-p rill-guest` rather than --workspace on purpose: the
+      # guest cdylibs around it are wasm32-only (their panic handler uses
+      # core::arch::wasm32, which collides with std's in a test harness), so a
+      # workspace-wide `cargo test` cannot compile. Both feature configurations
+      # run — `binary-protocol` is default-on and gates real code paths (e.g. the
+      # canvas encoding fork in canvas::draw), so the JSON-only build needs its
+      # own pass to stay green.
+      - name: Test SDK crate (host target)
+        run: |
+          cargo test -p rill-guest
+          cargo test -p rill-guest --no-default-features
