@@ -286,6 +286,62 @@ describe('TimerManager', () => {
       await waitMs(50);
       expect(fired).toBe(false);
     });
+
+    it('a slow callback does not push the following ticks back', async () => {
+      // Ticks run on a grid anchored at creation, so one that overruns borrows
+      // from the next interval instead of shifting every tick after it.
+      //
+      // Only the FIRST callback blocks, for just under one interval -- enough to
+      // eat into the next slot, not enough to skip it (a callback that overruns
+      // by more than a whole interval re-anchors instead, which is the burst test
+      // below). So the gap after the slow tick should look like any other gap:
+      //   grid scheduling -> gap1 ~= gap2 ~= DELAY
+      //   restart-the-clock -> gap1 ~= DELAY + BLOCK, gap2 ~= DELAY
+      // The assertion compares the two gaps from the SAME run rather than against
+      // a fixed deadline, so a busy machine slows both and cannot fake a pass.
+      const DELAY = 60;
+      const BLOCK = 50;
+      const setI = tm.createSetIntervalPolyfill();
+      const at: number[] = [];
+      let blocked = false;
+      setI(() => {
+        at.push(Date.now());
+        if (!blocked) {
+          blocked = true;
+          const until = Date.now() + BLOCK;
+          while (Date.now() < until) {
+            /* occupy the loop, the way a heavy guest callback would */
+          }
+        }
+      }, DELAY);
+
+      await waitUntil(() => at.length >= 3);
+      const gapAfterSlowTick = at[1] - at[0];
+      const gapAfterNormalTick = at[2] - at[1];
+      expect(gapAfterSlowTick - gapAfterNormalTick).toBeLessThan(BLOCK / 2);
+    });
+
+    it('a long pause does not release a catch-up burst on resume', async () => {
+      // The grid re-anchors to the resume rather than replaying the slots that
+      // went by while frozen: a debugger suspend must not wake the guest into a
+      // pile of backdated ticks.
+      const DELAY = 20;
+      const setI = tm.createSetIntervalPolyfill();
+      let count = 0;
+      setI(() => { count++; }, DELAY);
+
+      tm.pause();
+      await waitMs(DELAY * 6); // six slots go by, frozen
+      expect(count).toBe(0);
+
+      tm.resume();
+      await waitUntil(() => count >= 1);
+      const afterFirst = count;
+      expect(afterFirst).toBe(1); // one tick, not six
+
+      await waitMs(DELAY * 2);
+      expect(count).toBeGreaterThan(afterFirst); // and it keeps ticking
+    });
   });
 
   // =============================================

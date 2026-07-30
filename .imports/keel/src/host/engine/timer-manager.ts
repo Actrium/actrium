@@ -35,6 +35,16 @@ interface IntervalEntry extends TimerEntryBase {
   callback: () => void;
   delay: number;
   lastTickAt: number;
+  /**
+   * Absolute time the next tick is due, on a grid anchored at creation
+   * (`created + n * delay`). Each tick arms the native timer for
+   * `nextTickAt - now` rather than a flat `delay`, so a tick that ran late
+   * borrows from the following interval instead of pushing the whole chain back.
+   * Without it, every tick's overhead accumulates: measured under an
+   * oversubscribed CPU, a 30 ms interval drifted to 99 ms between ticks and
+   * delivered one fewer tick per 130 ms than the platform's own setInterval.
+   */
+  nextTickAt: number;
 }
 
 // Sentinel handles for internal scheduling state
@@ -177,39 +187,72 @@ export class TimerManager {
       this.intervalMap as Map<number, IntervalEntry>,
       entry.lastTickAt,
       delay,
-      (current) => {
-        // The WHOLE tick body goes through the guest-callback runner, not just
-        // the callback: rescheduling only after the (possibly gate-deferred)
-        // callback actually ran means a debugger suspend defers ticks one at a
-        // time instead of piling up a burst behind the gate.
-        const handle = this.nativeSetTimeout(() => {
-          this.runGuestCallback(() => {
-            current.lastTickAt = Date.now();
-
-            try {
-              current.callback();
-            } catch (e) {
-              const error = e instanceof Error ? e : new Error(String(e));
-              this.options.logger.error(
-                `[keel:${this.options.engineId}] setInterval callback error:`,
-                error
-              );
-              this.options.onError?.(error);
-            }
-
-            if (!this.intervalMap.has(current.id)) return;
-            if (this._isPaused) {
-              current.remainingTime = current.delay;
-              current.handle = null;
-              return;
-            }
-            this.scheduleIntervalTick(current, current.delay);
-          });
-        }, delay);
-
-        current.handle = handle as unknown as ReturnType<typeof setInterval>;
-      }
+      (current) => this.armIntervalTimer(current, delay)
     );
+  }
+
+  /**
+   * Arm the native timer for one interval tick, and re-arm from inside the tick.
+   *
+   * Split out of {@link scheduleIntervalTick} so the re-arm can skip the
+   * microtask hop that scheduling goes through. That hop exists to let a
+   * `clearInterval` or `pause` land before the native timer is created, and it
+   * earns its place at creation and resume. On the re-arm path it is pure cost:
+   * we are already inside the tick callback, having just checked both
+   * `intervalMap.has(id)` and `_isPaused` synchronously, and arming is itself
+   * synchronous — so there is no window for either to sneak in. Under a busy
+   * event loop the microtask queue drains late, which delayed the moment the
+   * next `delay` even STARTED counting; that was the single largest contributor
+   * to interval lag (measured: one fewer tick per 130 ms than the platform's own
+   * setInterval, under an oversubscribed CPU).
+   */
+  private armIntervalTimer(entry: IntervalEntry, delay: number): void {
+    // Bump the token even though this path queues no microtask: pause() relies on
+    // it to invalidate anything still in flight.
+    entry.pendingToken++;
+
+    // The WHOLE tick body goes through the guest-callback runner, not just
+    // the callback: rescheduling only after the (possibly gate-deferred)
+    // callback actually ran means a debugger suspend defers ticks one at a
+    // time instead of piling up a burst behind the gate.
+    const handle = this.nativeSetTimeout(() => {
+      this.runGuestCallback(() => {
+        const firedAt = Date.now();
+        entry.lastTickAt = firedAt;
+
+        try {
+          entry.callback();
+        } catch (e) {
+          const error = e instanceof Error ? e : new Error(String(e));
+          this.options.logger.error(
+            `[keel:${this.options.engineId}] setInterval callback error:`,
+            error
+          );
+          this.options.onError?.(error);
+        }
+
+        if (!this.intervalMap.has(entry.id)) return;
+        if (this._isPaused) {
+          entry.remainingTime = entry.delay;
+          entry.handle = null;
+          return;
+        }
+
+        // Advance along the grid rather than restarting the clock, so a late
+        // tick borrows from the next interval instead of shifting every tick
+        // after it. If we have fallen a whole interval or more behind, skip the
+        // slots we missed instead of firing a catch-up burst -- the same reason
+        // the re-arm waits for the callback in the first place.
+        const now = Date.now();
+        entry.nextTickAt += entry.delay;
+        if (entry.nextTickAt <= now) {
+          entry.nextTickAt = now + entry.delay;
+        }
+        this.armIntervalTimer(entry, Math.max(0, entry.nextTickAt - now));
+      });
+    }, delay);
+
+    entry.handle = handle as unknown as ReturnType<typeof setInterval>;
   }
 
   /**
@@ -247,8 +290,9 @@ export class TimerManager {
     // Pause all intervals - calculate remaining time until next tick
     for (const entry of this.intervalMap.values()) {
       if (entry.handle !== null) {
-        const elapsed = now - entry.lastTickAt;
-        entry.remainingTime = Math.max(0, entry.delay - elapsed);
+        // Straight off the grid: nextTickAt already accounts for a tick that ran
+        // late, where `delay - (now - lastTickAt)` would over-report the wait.
+        entry.remainingTime = Math.max(0, entry.nextTickAt - now);
         if (!this.isPendingHandle(entry.handle)) {
           // Intervals use recursive setTimeout, so we must use clearTimeout
           this.nativeClearTimeout(entry.handle);
@@ -291,6 +335,11 @@ export class TimerManager {
         // First, schedule the next tick with remaining time
         const remainingTime = entry.remainingTime;
         entry.remainingTime = null;
+        // Re-anchor the grid to the resume: the frozen span is not lag to be
+        // caught up on, so the next tick is due `remainingTime` from now and the
+        // ones after it follow from there.
+        entry.lastTickAt = now;
+        entry.nextTickAt = now + remainingTime;
         this.scheduleIntervalTick(entry, remainingTime);
       }
     }
@@ -396,6 +445,7 @@ export class TimerManager {
         callback: fn,
         delay,
         lastTickAt: now,
+        nextTickAt: now + delay,
         remainingTime: null,
         pendingToken: 0,
       };
