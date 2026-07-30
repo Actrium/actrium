@@ -1,5 +1,5 @@
 //! Tests for the RBS1 byte-value SDK wrappers (`store::put_bytes`/`get_bytes`
-//! and `net::fetch_bytes`). Runs on the HOST target (`cargo test -p rill-guest`):
+//! and `net::fetch_bytes`). Runs on the HOST target (`cargo test -p rill-native-guest`):
 //! each test drives the REAL host-call future against the recording `rill_host_call`
 //! shim, WIRETAPS the exact request bytes, then feeds a crafted response back
 //! through the real `rill_resolve` path (a mock host that echoes segments).

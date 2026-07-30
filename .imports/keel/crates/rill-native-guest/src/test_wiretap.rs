@@ -1,6 +1,6 @@
 //! Shared host-call wiretap harness for the SDK's wrapper tests.
 //!
-//! Runs on the HOST target (`cargo test -p rill-guest`): a test drives a REAL
+//! Runs on the HOST target (`cargo test -p rill-native-guest`): a test drives a REAL
 //! host-call future against the recording `rill_host_call` shim, so it can read
 //! the exact request bytes that would have crossed the seam, then feed a crafted
 //! response back through the real `rill_resolve` path — a mock host, with none of

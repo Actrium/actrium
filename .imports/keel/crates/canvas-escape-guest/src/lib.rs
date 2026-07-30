@@ -9,9 +9,9 @@
 
 extern crate alloc;
 
-use rill_guest::canvas::{self, DrawList};
+use rill_native_guest::canvas::{self, DrawList};
 
-rill_guest::rill_guest_main!(guest_main);
+rill_native_guest::guest_main!(guest_main);
 
 /// A canvasId carrying a quote, backslash, newline and tab — all of which the SDK
 /// must escape for the host's `JSON.parse` to recover the byte-exact string.
