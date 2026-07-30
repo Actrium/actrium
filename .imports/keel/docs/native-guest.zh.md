@@ -65,6 +65,18 @@ rill 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 > JSON 是地基阶段的务实选择（与现有 JSON 默认编码一致、跨语言好实现）；高频/大载荷路径后续可换二进制编码，ABI 形状不变。
 
+### 4.1 一次调用有两级状态，别只看第一级
+
+上面那个 `ok` 是**传输级**的：它只回答"这个 host 模块有没有跑起来、有没有给出答复"。它**不回答**"模块答应不答应干这件事"。
+
+模块自己的态度写在**响应体**里。凡是契约（`contracts/graphics-seams.json`）声明了 `"ok":boolean` 的方法 —— `canvas.present`、`canvas.draw`、`gpu.submit`、`gpu.configure`、`gpu.createResource`、`asset.blit` —— 一次被拒绝的调用长这样：传输级 `ok=1`（调用完全成功），响应体 `{"ok":false,"reason":"size-mismatch"}`（模块拒绝了）。两件事都是真的，而且不冲突。
+
+拿 `present` 举例把过程走一遍：guest 要贴一帧 8600 设备像素宽的画面，宿主的上限是 8192，于是宿主原地丢掉这一帧，回一句 `{"ok":false,"reason":"invalid-input"}`。传输层一切正常，所以只看第一级的话，guest 收到的是"成功"。它会接着画下一帧、再下一帧，而窗口从此不再更新 —— 两边都不报错，什么日志也没有。这就是 issue #85 的现场。
+
+所以 SDK 的规矩是：**凡是契约声明了体内 `ok` 的方法，包装函数把两级折成一个 `Result`，`Ok` 就代表这件事真的发生了。** 被拒绝时原样返回宿主的响应体，`reason` 还在里面，从 `Err` 里读。两级仍然分得清 —— 传输失败的 body 里根本没有 `ok` 字段可读。
+
+判定是**失败关闭**的：没有明确 `"ok":true` 就算拒绝，包括契约声明了却漏掉这个字段的响应。实现在 `crate::module_result`，回归测试在 `crates/rill-guest/src/module_verdict_tests.rs`。
+
 ## 5. Phase A 已落地 + 后续
 
 **Phase A · 装载 + ABI（本 PR，已跑绿）**
