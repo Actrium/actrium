@@ -2,9 +2,9 @@
  * @rill/shared/bridge - Communication Layer
  *
  * Bridge  Host/Guest
- * - ：sendToHost() / sendToGuest()
+ * - exposes exactly two methods: sendToHost() / sendToGuest()
  * - /
- * -  JSI ：，
+ * - leans on JSI as far as it goes: natively supported types pass straight through, zero overhead
  */
 
 import type {
@@ -76,23 +76,23 @@ export interface BridgeOptions {
 
   /**
    * Guest  -  Sandbox
-   * ，Bridge  Guest
+   * When provided, the bridge routes those calls to the guest
    */
   guestInvoker?: (fnId: string, args: ReviewedUnknown[]) => ReviewedUnknown;
 
   /**
    * Guest  -  Sandbox
-   * ，Bridge  release  Guest
+   * When provided, the bridge routes release calls to the guest
    */
   guestReleaseCallback?: (fnId: string) => void;
 
   /**
-   * （， DEFAULT_TYPE_RULES）
+   * Type rules (optional; DEFAULT_TYPE_RULES when omitted)
    */
   typeRules?: TypeRule[];
 
   /**
-   * Promise （）， 30000ms (30)
+   * Promise timeout in milliseconds, default 30000 (30 seconds); 0 disables it
    *  0
    */
   promiseTimeout?: number;
@@ -123,7 +123,7 @@ export interface EncodeBatchResult {
 /**
  * Bridge -
  *
- * ，/
+ * Two methods only; all encoding and decoding happens inside
  */
 export class Bridge {
   private onGuestOperations: (batch: OperationBatch) => void;
@@ -165,7 +165,7 @@ export class Bridge {
       debug: this.debug,
     });
 
-    //  type rule context (， encoder/decoder )
+    // Declare the type rule context first: the encoder and decoder both close over it
     // Reason: Context must reference encoder/decoder which reference context (circular)
     this.context = {} as CodecCallbacks;
 
@@ -173,7 +173,7 @@ export class Bridge {
     this.encoder = createEncoder(this.typeRules, this.context);
     this.decoder = createDecoder(this.typeRules, this.context);
 
-    //  context（ encoder/decoder ）
+    // Finish filling in the context now that the encoder and decoder exist
     this.context.encode = this.encoder;
     this.context.decode = this.decoder;
     this.context.logger = options.logger; // Pass logger to context for TypeRules error reporting
@@ -187,7 +187,7 @@ export class Bridge {
     };
     // invokeFunction:  Guest  Host registry
     this.context.invokeFunction = (fnId, args) => {
-      //  Host registry（Host ）
+      // Host registry first (callbacks registered on the host side)
       if (this.registry.has(fnId)) {
         return this.registry.invoke(fnId, args);
       }
@@ -371,7 +371,7 @@ export class Bridge {
 
   /**
    * Host → Guest
-   * ，
+   * Send a host message; encoding happens inside
    */
   async sendToGuest(message: HostMessage): Promise<void> {
     if (this.debug) {
@@ -398,7 +398,7 @@ export class Bridge {
   }
 
   // ============================================
-  //  - （BridgeValue → SerializedValue）
+  // Internals - encode (BridgeValue -> SerializedValue)
   // ============================================
 
   /**
@@ -492,14 +492,14 @@ export class Bridge {
   }
 
   /**
-   * （）
+   * Encode an object's properties, recursing through the shared encoder
    */
   private encodeObject(obj: BridgeValueObject): SerializedValueObject {
     return sharedEncodeObject(obj, this.encoder) as SerializedValueObject;
   }
 
   // ============================================
-  //  - （SerializedValue → BridgeValue）
+  // Internals - decode (SerializedValue -> BridgeValue)
   // ============================================
 
   /**
@@ -596,7 +596,7 @@ export class Bridge {
   }
 
   /**
-   * （）
+   * Decode an object's properties, recursing through the shared decoder
    */
   private decodeObject(obj: SerializedValueObject): BridgeValueObject {
     return sharedDecodeObject(obj, this.decoder) as BridgeValueObject;

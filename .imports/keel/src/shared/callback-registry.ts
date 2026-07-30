@@ -4,7 +4,7 @@
  *  Guest
  * -  ID (fnId)
  * -
- * -  Host  __rill.callbacks Map （ Guest ）
+ * - shares the __rill.callbacks Map the host injects (inside the guest environment)
  */
 
 import type { SandboxGlobals } from '../host/sandbox/globals';

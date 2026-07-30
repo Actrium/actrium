@@ -1,9 +1,9 @@
 /**
  * @rill/bridge - Serialization Utilities
  *
- * ， Host  Guest
+ * Shared serialization helpers, used by both the host and the guest
  * - Host: bridge.ts
- * - Guest: reconciler （）
+ * - guest: used by the reconciler (bundled into the sandbox)
  *
  * Performance: Uses type-tag dispatch (O(1) Map lookup) instead of
  * linear rule traversal for serialized objects with __type field.
@@ -52,17 +52,17 @@ function buildTagDispatchMap(rules: TypeRule[]): Map<string, TypeRule> {
 /**
  *
  *  TypeRules
- * ，
+ * Walks TypeRules to match and encode a value
  *
- * ：
- * - （）
+ * Performance notes:
+ * - fast path for primitives (skips the rule walk)
  * -
  * - instanceof
  *
- * ：
- * -  encode  WeakSet（ depth ）
- * -  encode  WeakSet（）
- * -  encode （ render ）
+ * Cycle detection:
+ * - every top-level encode call creates a fresh WeakSet (tracked by a depth counter)
+ * - the WeakSet is shared within one encode call tree, so real cycles are caught
+ * - it is NOT shared between encode calls, so one render cannot false-positive another
  */
 export function createEncoder(
   typeRules: TypeRule[],
@@ -117,18 +117,18 @@ export function createEncoder(
     depth++;
 
     try {
-      // ：null/undefined
+      // Fast path: null/undefined go straight back
       if (value === null || value === undefined) {
         return value;
       }
 
-      // ：（）
+      // Fast path: primitives go straight back (no rule walk)
       const type = typeof value;
       if (type === 'boolean' || type === 'number' || type === 'string') {
         return value;
       }
 
-      // ：
+      // Functions: go straight to the function rule
       if (type === 'function') {
         return applyRule(rulesByName.get('function'), value);
       }
@@ -253,7 +253,7 @@ export function encodeObject(
  *
  *  type-tag dispatch (O(1) Map lookup)
  *
- * ：
+ * Performance notes:
  * -
  * -  __type tag → O(1) Map dispatch
  * - /
@@ -280,12 +280,12 @@ export function createDecoder(
   );
 
   const decode = (value: ReviewedUnknown): ReviewedUnknown => {
-    // ：null/undefined
+    // Fast path: null/undefined
     if (value === null || value === undefined) {
       return value;
     }
 
-    // ：
+    // Fast path: primitives
     const type = typeof value;
     if (type === 'boolean' || type === 'number' || type === 'string') {
       return value;
