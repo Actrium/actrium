@@ -1,10 +1,10 @@
 /**
  * Callback Registry - Guest Side
  *
- *  Guest
- * -  ID (fnId)
- * -
- * -  Host  __rill.callbacks Map （ Guest ）
+ * Manages function references on the Guest side
+ * - Generates a unique ID (fnId) for each function
+ * - Uses reference counting to prevent memory leaks
+ * - shares the __rill.callbacks Map the host injects (inside the guest environment)
  */
 
 import type { SandboxGlobals } from '../host/sandbox/globals';

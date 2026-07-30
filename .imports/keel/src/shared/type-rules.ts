@@ -1,7 +1,7 @@
 /**
  * @rill/bridge - Type Rules
  *
- * ：/
+ * Type rule system: the encode/decode strategy for data crossing the boundary
  * Host ↔ Guest
  */
 
@@ -16,74 +16,74 @@ export { createDecoder, createEncoder };
 type SerializedObject = { __type: string; [key: string]: unknown };
 
 /**
- *
+ * Data transport strategy
  */
 export type TransportStrategy =
-  | 'passthrough' // （JSI ）
-  | 'serialize' // （）
-  | 'proxy'; // （）
+  | 'passthrough' // pass straight through (types JSI handles safely)
+  | 'serialize' // pass serialized (complex types)
+  | 'proxy'; // pass by proxy (functions)
 
 /**
- *
+ * Type handling rule
  */
 export interface TypeRule {
   /**
-   * （）
+   * Rule name (for debugging)
    */
   name: string;
 
   /**
-   *
+   * Type detection
    */
   // Reason: Type rule must accept any value to check its type
   match: (value: unknown) => boolean;
 
   /**
-   * （）
-   * @param value -
-   * @param context - Bridge （ registry ）
+   * Encode strategy (applied before sending)
+   * @param value - the original value
+   * @param context - bridge context (supplies the registry and friends)
    */
   // Reason: Type rule encode/decode must handle arbitrary values
   encode?: (value: unknown, context: CodecCallbacks) => unknown;
 
   /**
-   * （）
-   * @param value -
-   * @param context - Bridge
+   * Decode strategy (applied after receiving)
+   * @param value - the encoded value
+   * @param context - bridge context
    */
   // Reason: Type rule decode must handle arbitrary value types
   decode?: (value: unknown, context: CodecCallbacks) => unknown;
 
   /**
-   *
+   * Transport strategy
    */
   strategy: TransportStrategy;
 }
 
 /**
- * （Bridge ）
+ * Type rule context: what the bridge hands a rule to work with
  */
 export interface CodecCallbacks {
   /**
-   * （）
+   * Encode recursively (for nested structures)
    */
   // Reason: Recursive encode/decode must handle arbitrary value types
   encode: (value: unknown) => unknown;
 
   /**
-   * （）
+   * Decode recursively (for nested structures)
    */
   // Reason: Recursive decode must handle arbitrary value types
   decode: (value: unknown) => unknown;
 
   /**
-   * （ fnId）
+   * Register a function (returns its fnId)
    */
   // biome-ignore lint/complexity/noBannedTypes: Generic function registration requires Function type
   registerFunction: (fn: Function) => string;
 
   /**
-   * （ fnId）
+   * Call a function (by fnId)
    */
   // Reason: Callback functions have arbitrary signatures with unknown args/return
   invokeFunction: (fnId: string, args: unknown[]) => unknown;
@@ -98,42 +98,42 @@ export interface CodecCallbacks {
   };
 
   /**
-   *  Promise（ Promise ）
-   * Bridge  Promise
-   * @param promise -  Promise
+   * Register a promise (for passing promises across the boundary)
+   * The bridge automatically listens for the promise to settle and sends a message to the peer
+   * @param promise - the promise to register
    * @returns promiseId
    */
   // Reason: Promise values are runtime-defined across boundaries
   registerPromise?: (promise: Promise<ReviewedUnknown>) => string;
 
   /**
-   *  Promise（）
+   * Create a pending promise (used while decoding)
    * @param promiseId - Promise ID
-   * @returns  Promise， resolve/reject
+   * @returns a promise that resolves or rejects when the peer's settle message arrives
    */
   // Reason: Promise values are runtime-defined across boundaries
   createPendingPromise?: (promiseId: string) => Promise<ReviewedUnknown>;
 }
 
 /**
- *
+ * Predefined type rules
  */
 export const DEFAULT_TYPE_RULES: TypeRule[] = [
-  // 1. Null/Undefined -
+  // 1. Null/Undefined - pass straight through
   {
     name: 'null-undefined',
     match: (v) => v === null || v === undefined,
     strategy: 'passthrough',
   },
 
-  // 2. Primitives -
+  // 2. Primitives - pass straight through
   {
     name: 'primitives',
     match: (v) => typeof v === 'boolean' || typeof v === 'number' || typeof v === 'string',
     strategy: 'passthrough',
   },
 
-  // 2.5. Circular Reference -  undefined（）
+  // 2.5. Circular Reference - decodes to undefined (the data is already lost)
   {
     name: 'circular',
     match: (v) =>
@@ -141,11 +141,11 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       v !== null &&
       '__type' in v &&
       (v as { __type: string }).__type === 'circular',
-    decode: () => undefined, // ， undefined
+    decode: () => undefined, // a cycle cannot be rebuilt, so hand back undefined
     strategy: 'serialize',
   },
 
-  // 3. Serialized Function -  proxy
+  // 3. Serialized Function - decode into a proxy
   {
     name: 'serialized-function',
     match: (v) =>
@@ -219,7 +219,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'proxy',
   },
 
-  // 4. Functions -  fnId
+  // 4. Functions - encode as fnId
   {
     name: 'function',
     match: (v) => typeof v === 'function',
@@ -257,7 +257,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'proxy',
   },
 
-  // 4.5. Serialized Promise -  pending Promise
+  // 4.5. Serialized Promise - decode into a pending Promise
   {
     name: 'serialized-promise',
     match: (v) =>
@@ -268,35 +268,35 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       '__promiseId' in v,
     decode: (v, ctx) => {
       const { __promiseId } = v as SerializedPromise;
-      //  Bridge  createPendingPromise，
+      // Use createPendingPromise when the bridge supplies one
       if (ctx.createPendingPromise) {
         return ctx.createPendingPromise(__promiseId);
       }
-      //  resolve  Promise（）
+      // Otherwise fall back to a promise that never resolves
       console.warn('[TypeRules] Promise decoding not supported, createPendingPromise not provided');
       return new Promise(() => {});
     },
     strategy: 'proxy',
   },
 
-  // 4.6. Promise -  promiseId
+  // 4.6. Promise - encode as promiseId
   {
     name: 'promise',
     match: (v) => v instanceof Promise,
     encode: (promise, ctx) => {
-      //  Bridge  registerPromise，
+      // Use registerPromise when the bridge supplies one
       if (ctx.registerPromise) {
         const promiseId = ctx.registerPromise(promise as Promise<ReviewedUnknown>);
         return { __type: 'promise', __promiseId: promiseId } as SerializedPromise;
       }
-      //  unsupported（）
+      // Otherwise mark it unsupported (the degraded path)
       console.warn('[TypeRules] Promise encoding not supported, registerPromise not provided');
       return { __type: 'unsupported', __originalType: 'Promise' } as unknown;
     },
     strategy: 'proxy',
   },
 
-  // 5. Date -
+  // 5. Date - serialize and pass
   {
     name: 'date',
     match: (v) =>
@@ -328,7 +328,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 6. RegExp -
+  // 6. RegExp - serialize and pass
   {
     name: 'regexp',
     match: (v) =>
@@ -365,7 +365,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 7. Error -
+  // 7. Error - serialize and pass
   {
     name: 'error',
     match: (v) =>
@@ -409,7 +409,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 8. Map - /
+  // 8. Map - encode/decode
   {
     name: 'map',
     match: (v) =>
@@ -441,7 +441,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 9. Set - /
+  // 9. Set - encode/decode
   {
     name: 'set',
     match: (v) =>
@@ -473,7 +473,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 10. TypedArray -  (must be before ArrayBuffer)
+  // 10. TypedArray - serialize and pass (must be before ArrayBuffer)
   {
     name: 'typedarray',
     match: (v) =>
@@ -580,7 +580,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 11. ArrayBuffer -
+  // 11. ArrayBuffer - serialize and pass
   {
     name: 'arraybuffer',
     match: (v) =>
@@ -611,7 +611,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 12. Arrays -  (reference-preserving decode)
+  // 12. Arrays - recursive handling (reference-preserving decode)
   {
     name: 'array',
     match: (v) => Array.isArray(v),
@@ -629,9 +629,9 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
     strategy: 'serialize',
   },
 
-  // 13. toJSON -
-  //  toJSON()
-  // : class User { toJSON() { return { __class: 'User', name: this.name }; } }
+  // 13. toJSON - support custom serialization
+  // Allows a class instance to control its serialization via a toJSON() method
+  // Example: class User { toJSON() { return { __class: 'User', name: this.name }; } }
   {
     name: 'toJSON',
     match: (v) =>
@@ -639,27 +639,27 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       v !== null &&
       !Array.isArray(v) &&
       typeof (v as { toJSON?: ReviewedUnknown }).toJSON === 'function' &&
-      // （Date, RegExp ）
+      // Skip built-ins (Date, RegExp and the rest already have their own rules)
       !(v instanceof Date) &&
       !(v instanceof RegExp) &&
       !(v instanceof Error) &&
       !(v instanceof Map) &&
       !(v instanceof Set),
     encode: (obj, ctx) => {
-      //  toJSON ，
+      // Call the object's toJSON, then encode what it returned
       const serialized = (obj as { toJSON: () => unknown }).toJSON();
       return ctx.encode(serialized);
     },
-    // decode ，toJSON
+    // decode needs nothing special: a toJSON result decodes like any other value
     strategy: 'serialize',
   },
 
-  // 14. Objects -  (reference-preserving decode)
+  // 14. Objects - recursive handling (reference-preserving decode)
   {
     name: 'object',
     match: (v) => typeof v === 'object' && v !== null,
     encode: (obj, ctx) => {
-      // （，）
+      // Detect the special serialized types (already handled -- return as-is)
       if (typeof obj === 'object' && obj !== null && '__type' in obj) {
         const typed = obj as { __type: string };
         const specialTypes = [
@@ -676,7 +676,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
         }
       }
 
-      //
+      // Ordinary object: handle recursively
       const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
         result[key] = ctx.encode(value);
@@ -684,9 +684,9 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
       return result;
     },
     decode: (obj, ctx) => {
-      // （，）
+      // Detect the special serialized types (not ours to handle -- leave them)
       if (typeof obj === 'object' && obj !== null && '__type' in obj) {
-        // ，
+        // Leave it alone: return the value so another rule can match
         return obj;
       }
 
