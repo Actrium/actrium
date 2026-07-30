@@ -59,6 +59,16 @@
       "segments": [{"fill": "ab", "len": 1048576}],
       "envelopeLen": 1048610,
       "envelopeHexOmitted": "length 1048610 exceeds inline cap; length + structure locked by the Rust suite"
+    },
+    {
+      "name": "one-value-split-at-the-segment-cap",
+      "note": "issue #84: the shape an ENCODER must produce for a value ONE BYTE past maxSegmentBytes -- chunks of exactly maxSegmentBytes then the remainder, in order, named by the array sentinel. Locks the split threshold and the chunk boundaries cross-language. Envelope hex omitted for size; length + structure locked.",
+      "direction": "both",
+      "kind": "envelope",
+      "controlPlane": "{\"value\":{\"$b\":[0,1]}}",
+      "segments": [{"fill": "ab", "len": 1048576}, {"fill": "ab", "len": 1}],
+      "envelopeLen": 1048619,
+      "envelopeHexOmitted": "length 1048619 exceeds inline cap; length + structure locked by the Rust suite"
     }
   ]
 }

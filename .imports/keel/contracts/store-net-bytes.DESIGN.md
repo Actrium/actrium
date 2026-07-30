@@ -276,12 +276,34 @@ Reuse the existing bounds-check posture (`assertInBounds`,
 (host and guest, kept in lockstep — a conformance test locks them, like
 `MAX_BUFFER_BYTES` in `crates/rill-guest/src/conformance.rs:235`):
 
-| cap | value (phase 1) | rationale |
+| cap | value | rationale |
 |---|---|---|
-| `MAX_SEGMENTS` | 16 | bounds the segment table |
-| `MAX_SEGMENT_BYTES` | 1 MiB | one byte stream |
-| `MAX_ENVELOPE_BYTES` | 4 MiB | jsonLen + all segments + framing |
+| `MAX_SEGMENTS` | 16 | bounds the segment table — and the chunk count of one multi-segment value |
+| `MAX_SEGMENT_BYTES` | 1 MiB | **one segment / one decoder allocation** — not one logical value (see below) |
+| `MAX_ENVELOPE_BYTES` | 4 MiB | jsonLen + all segments + framing; the binding cap on one **value** |
 | `MAX_JSON_BYTES` | 256 KiB | the control plane (new explicit cap; there is none today) |
+
+**Phase 2 — one logical value across several segments (issue #84).** In phase 1
+one byte-stream field was one segment, so `MAX_SEGMENT_BYTES` was also the ceiling
+on a stored value. Ordinary documents reach it: a 1076×722 two-layer raster
+serialises to 3,956,173 bytes (the largest two-layer document that fit under 1 MiB
+was 236×158), and a text editor writing one autosave snapshot per open document hits
+it *sometimes*, which is worse than always — the application must implement chunking
+for the tail alone.
+
+The array sentinel form `{"$b":[N0,N1,…]}` lets one field span segments, so each
+allocation stays bounded by `MAX_SEGMENT_BYTES` while the value is bounded by
+`MAX_ENVELOPE_BYTES`. What that buys over application-level chunking is **atomicity**:
+one value stays one field of one frame, covered by the existing whole-frame
+fail-closed rule, instead of becoming `meta` + `chunk/<n>` keys whose
+compare-and-swap is per key — no way to version the set, and a partial write leaves
+a torn value only the application can detect.
+
+Deliberately **not** done here: raising `MAX_SEGMENT_BYTES` or `MAX_ENVELOPE_BYTES`
+(the other option on #84). The aggregate envelope cap is now what binds one value at
+~4 MiB, so raising it is a separate decision with its own allocation trade-off on
+both sides of the seam. See `store-net-bytes.CONFORMANCE.md` §2a for the six
+conformance requirements this form carries.
 
 Enforcement:
 - **Decode (both sides):** every `u32` length is validated against the remaining

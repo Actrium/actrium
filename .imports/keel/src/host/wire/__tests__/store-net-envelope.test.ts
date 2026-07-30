@@ -685,3 +685,116 @@ describe('hoistSentinels toJSON semantics (byte-carrying results)', () => {
     expect(() => JSON.stringify(result)).toThrow(TypeError);
   });
 });
+
+// ============================================================
+// one logical value across several segments (issue #84)
+// ============================================================
+
+describe('store-net-envelope — multi-segment values (#84)', () => {
+  const reasonOf = (fn: () => unknown): StoreNetReason | 'no-throw' => {
+    try {
+      fn();
+      return 'no-throw';
+    } catch (e) {
+      if (e instanceof StoreNetEnvelopeError) return e.reason;
+      throw e;
+    }
+  };
+
+  it('hoists a value past the segment cap into several segments named by one sentinel', () => {
+    // maxSegmentBytes caps a SEGMENT, not a logical value: one byte past it is
+    // two segments, both still within the cap, joined by the array sentinel.
+    const value = new Uint8Array(LIMITS.maxSegmentBytes + 7).fill(0xcd);
+    const { control, segments } = hoistSentinels({ value });
+    expect(control).toEqual({ value: { $b: [0, 1] } });
+    expect(segments).toHaveLength(2);
+    expect(segments[0]?.length).toBe(LIMITS.maxSegmentBytes);
+    expect(segments[1]?.length).toBe(7);
+    for (const seg of segments) {
+      expect(seg.length).toBeLessThanOrEqual(LIMITS.maxSegmentBytes);
+    }
+  });
+
+  it('keeps the scalar sentinel for any value that fits in one segment', () => {
+    // Required by the contract (sentinel.multiSegmentEncoderRule): frames that
+    // were expressible before this extension must stay byte-for-byte identical,
+    // and a single-element array must never be emitted.
+    for (const len of [0, 1, 1024, LIMITS.maxSegmentBytes]) {
+      const { control, segments } = hoistSentinels({ value: new Uint8Array(len) });
+      expect(control).toEqual({ value: { $b: 0 } });
+      expect(segments).toHaveLength(1);
+      expect(segments[0]?.length).toBe(len);
+    }
+  });
+
+  it('continues segment indices across fields, so a split value does not renumber the rest', () => {
+    const big = new Uint8Array(LIMITS.maxSegmentBytes + 1).fill(1);
+    const small = new Uint8Array([2, 2, 2]);
+    const { control, segments } = hoistSentinels({ big, small });
+    expect(control).toEqual({ big: { $b: [0, 1] }, small: { $b: 2 } });
+    expect(segments).toHaveLength(3);
+  });
+
+  it('fails closed when the chunk count exceeds the segment budget, hoisting nothing', () => {
+    const value = new Uint8Array(LIMITS.maxSegmentBytes * LIMITS.maxSegments + 1);
+    expect(reasonOf(() => hoistSentinels({ value }))).toBe('too-many-segments');
+  });
+
+  it('revives an array sentinel by joining its segments in list order', () => {
+    const parts = [new Uint8Array([1, 2]), new Uint8Array([3]), new Uint8Array([4, 5, 6])];
+    const revived = reviveSentinels({ v: { $b: [0, 1, 2] } }, parts) as { v: Uint8Array };
+    expect([...revived.v]).toEqual([1, 2, 3, 4, 5, 6]);
+  });
+
+  it('accepts a single-element array on decode even though the encoder never emits one', () => {
+    // Rejecting it would be stricter than the grammar the contract states.
+    const revived = reviveSentinels({ v: { $b: [0] } }, [new Uint8Array([9])]) as {
+      v: Uint8Array;
+    };
+    expect([...revived.v]).toEqual([9]);
+  });
+
+  it('rejects a segment referenced more than once', () => {
+    // The amplification guard. Without it, one at-cap segment named maxSegments
+    // times in a single sentinel would force a joined value far larger than the
+    // frame carrying it — which is exactly the bound that makes a multi-segment
+    // value safe with no new cap.
+    const segs = [new Uint8Array([1, 2, 3])];
+    expect(reasonOf(() => reviveSentinels({ v: { $b: [0, 0] } }, segs))).toBe('bad-segment-ref');
+    // Also across two separate sentinels, which was always the contract's rule.
+    expect(reasonOf(() => reviveSentinels({ a: { $b: 0 }, b: { $b: 0 } }, segs))).toBe(
+      'bad-segment-ref'
+    );
+  });
+
+  it('rejects malformed array sentinels', () => {
+    const segs = [new Uint8Array([1]), new Uint8Array([2])];
+    for (const ref of [[], [-1], [0.5], ['0'], [[0]], [null], [0, 'x'], {}, '0', true, null]) {
+      expect(reasonOf(() => reviveSentinels({ v: { $b: ref } }, segs))).not.toBe('no-throw');
+    }
+    // An out-of-range index inside a list is a segment-ref failure, not a shape one.
+    expect(reasonOf(() => reviveSentinels({ v: { $b: [0, 5] } }, segs))).toBe('bad-segment-ref');
+  });
+
+  it('round-trips a split value through the full result/request path', () => {
+    // encodeResult -> decodeRequest is the real seam both directions use.
+    const value = new Uint8Array(LIMITS.maxSegmentBytes + 100);
+    for (let i = 0; i < value.length; i++) value[i] = i & 0xff;
+    const frame = encodeRbs1Result({ value });
+    expect(frame instanceof Uint8Array).toBe(true);
+    const back = decodeRbs1Request(frame as Uint8Array) as { value: Uint8Array };
+    expect(back.value.length).toBe(value.length);
+    expect([...back.value]).toEqual([...value]);
+  });
+
+  it('the joined value cannot outweigh the frame that carried it', () => {
+    // The reason no new cap is needed: with each segment claimed once, the sum of
+    // one value's segments is bounded by the frame, which maxEnvelopeBytes already
+    // caps before decoding.
+    const value = new Uint8Array(LIMITS.maxSegmentBytes * 2);
+    const frame = encodeRbs1Result({ value }) as Uint8Array;
+    const back = decodeRbs1Request(frame) as { value: Uint8Array };
+    expect(back.value.length).toBeLessThanOrEqual(frame.length);
+    expect(frame.length).toBeLessThanOrEqual(LIMITS.maxEnvelopeBytes);
+  });
+});

@@ -59,14 +59,58 @@ then segCount times, tightly packed:
 
 ## 2. The sentinel (JSON control plane ⇄ binary data plane)
 
-- A byte-stream field's value in the JSON is the object **`{"$b": N}`**, where the
-  **reserved key `$b`** maps to the 0-based index `N` of the segment carrying that
-  field's bytes.
-- **Decode:** the codec walks the parsed JSON and replaces every `{"$b":N}` with
-  segment `N`'s bytes (a `Uint8Array` / owned slice). `N` MUST be in
-  `[0, segCount)` (`bad-segment-ref`).
-- **Encode:** the codec walks the value, hoists every byte-stream value to a new
-  segment (in walk order), and replaces it with `{"$b":N}`.
+- A byte-stream field's value in the JSON is an object whose **reserved key `$b`**
+  maps to **either** a single 0-based segment index — **`{"$b": N}`** — **or** a
+  non-empty array of them — **`{"$b": [N0, N1, …]}`**, meaning the field's bytes are
+  those segments **concatenated in that order**.
+- **Decode:** the codec walks the parsed JSON and replaces every sentinel with its
+  field's bytes (a `Uint8Array` / owned slice): segment `N` for the scalar form, the
+  ordered join for the array form. Every index MUST be in `[0, segCount)`
+  (`bad-segment-ref`), and each segment MUST be claimed **at most once across the
+  whole frame** — including within one array (`bad-segment-ref`). An empty array, a
+  non-integer element, or any other shape under `$b` is `bad-sentinel`.
+- **Encode:** the codec walks the value, hoists every byte-stream value to new
+  segments (in walk order), and replaces it with the sentinel naming them.
+
+### 2a. One logical value across several segments (issue #84)
+
+`maxSegmentBytes` caps **one segment** — i.e. one decoder allocation — **not** one
+logical value. Before the array form existed it was therefore also the ceiling on a
+stored value, which ordinary documents reach: a 1076×722 two-layer raster serialises
+to 3,956,173 bytes, and the largest two-layer document that fit under 1 MiB was
+236×158. Splitting a value across segments keeps every **individual** allocation
+bounded while lifting the ceiling on the value — and keeps the value **atomic**,
+which is the part a consumer cannot do for itself: it stays one field of one frame,
+so the existing whole-frame fail-closed rule already covers it.
+
+**Conformance requirements.**
+
+1. **An encoder MUST emit the scalar form for any value that fits in one segment,
+   and MUST NOT emit a single-element array.** This is what keeps every frame
+   expressible before the extension byte-for-byte identical, so the pre-existing
+   golden vectors still lock. A **decoder** MUST still accept a single-element
+   array — rejecting it would be stricter than the grammar.
+2. **Chunk boundaries are exact:** chunks of exactly `maxSegmentBytes`, then the
+   remainder, in order. Locked cross-language by the golden vector
+   `one-value-split-at-the-segment-cap`.
+3. **An empty value is one empty segment**, never zero segments — the field must
+   still revive to an empty byte stream rather than vanish.
+4. **Each segment is claimed at most once.** Load-bearing, not hygiene: without it a
+   frame could name one at-cap segment `maxSegments` times inside a single sentinel
+   and force a joined value far larger than the frame carrying it, which would break
+   the bound that makes a multi-segment value safe with **no new cap**.
+5. **No new cap is introduced.** The joined allocation is already bounded by
+   `maxEnvelopeBytes`, validated against the whole buffer before decoding, so
+   `maxEnvelopeBytes` — not `maxSegmentBytes` — is now the binding constraint on one
+   value. Peak decoder residency is the frame plus the joined value (≤ 2×
+   `maxEnvelopeBytes`), since segment bytes are copied into the join.
+6. **The magic stays `RBS1`.** The framing is unchanged; `magic.versionByte` is
+   bumped only for a breaking **framing** change. A decoder predating the array form
+   rejects such a frame fail-closed with `bad-sentinel` (it requires an integer under
+   `$b`), so it can never misread one — and combined with requirement 1, no call that
+   worked before can regress, because the array form is only ever emitted for a value
+   that exceeded `maxSegmentBytes` and an old peer refused that outright anyway.
+
 - **Self-describing:** no descriptor is consulted at the codec layer. Raw bytes —
   including `0x00` and `0xFF` — ride in the segment untouched; the control-plane
   JSON never holds the bytes, only the sentinel.
@@ -118,8 +162,9 @@ directions**.
 | magic | `magic.hex` = `0x31534252` (`RBS1`, `u32le` `827540050`) | `MAGIC = 827540050` (from `magic.hex`; LE bytes asserted == `asciiBytes`) | `bad-magic` |
 | version | `protocolVersion.value` = `1` (4th magic byte `'1'`) | `PROTOCOL_VERSION = 1` | — |
 | maxSegments | `limits.maxSegments.value` = `16` | `limits::MAX_SEGMENTS = 16` | `too-many-segments` |
-| maxSegmentBytes | `limits.maxSegmentBytes.value` = `1048576` (1 MiB) | `limits::MAX_SEGMENT_BYTES = 1048576` | `segment-too-big` |
-| maxEnvelopeBytes | `limits.maxEnvelopeBytes.value` = `4194304` (4 MiB) | `limits::MAX_ENVELOPE_BYTES = 4194304` | `envelope-too-big` |
+| ↳ also bounds | the chunk count of one multi-segment value (§2a) | — | `too-many-segments` |
+| maxSegmentBytes | `limits.maxSegmentBytes.value` = `1048576` (1 MiB) — **one segment, not one value** (§2a) | `limits::MAX_SEGMENT_BYTES = 1048576` | `segment-too-big` |
+| maxEnvelopeBytes | `limits.maxEnvelopeBytes.value` = `4194304` (4 MiB) — the binding cap on one **value** (§2a) | `limits::MAX_ENVELOPE_BYTES = 4194304` | `envelope-too-big` |
 | maxJsonBytes | `limits.maxJsonBytes.value` = `262144` (256 KiB) | `limits::MAX_JSON_BYTES = 262144` | `json-too-big` |
 
 The Rust constants are **generated** from the schema by
