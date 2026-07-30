@@ -12,7 +12,7 @@
 import type { CodecCallbacks, TypeRule } from './type-rules';
 import type { ReviewedUnknown } from './types';
 
-/**  */
+/** Circular reference marker. */
 export interface CircularRef {
   __type: 'circular';
 }
@@ -50,14 +50,14 @@ function buildTagDispatchMap(rules: TypeRule[]): Map<string, TypeRule> {
 }
 
 /**
- *
- *  TypeRules
- * Walks TypeRules to match and encode a value
+ * Create the encode function.
+ * Walks TypeRules to match and encode a value.
+ * Automatically detects circular references to avoid infinite recursion.
  *
  * Performance notes:
  * - fast path for primitives (skips the rule walk)
- * -
- * - instanceof
+ * - rules are pre-grouped by type to reduce match attempts
+ * - instanceof fast dispatch avoids linear traversal
  *
  * Cycle detection:
  * - every top-level encode call creates a fresh WeakSet (tracked by a depth counter)
@@ -133,7 +133,7 @@ export function createEncoder(
         return applyRule(rulesByName.get('function'), value);
       }
 
-      //  — instanceof-based dispatch
+      // Object type — instanceof-based dispatch
       if (type === 'object') {
         // Promise (leaf object, no circular ref detection needed)
         if (value instanceof Promise) {
@@ -236,7 +236,7 @@ export function createEncoder(
 }
 
 /**
- *
+ * Encode all properties of an object.
  */
 export function encodeObject(
   obj: Record<string, unknown>,
@@ -250,13 +250,13 @@ export function encodeObject(
 }
 
 /**
- *
- *  type-tag dispatch (O(1) Map lookup)
+ * Create the decode function.
+ * Uses type-tag dispatch (O(1) Map lookup) instead of linear traversal.
  *
  * Performance notes:
- * -
- * -  __type tag → O(1) Map dispatch
- * - /
+ * - fast path for primitives
+ * - object __type tag → O(1) Map dispatch
+ * - array/object recursive decode handled inline
  */
 export function createDecoder(
   typeRules: TypeRule[],
@@ -352,7 +352,7 @@ export function createDecoder(
 }
 
 /**
- *
+ * Decode all properties of an object.
  *
  * Reference-preserving: returns the original object if no values changed.
  * This is critical for React reconciliation — creating new object references

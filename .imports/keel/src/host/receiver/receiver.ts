@@ -74,7 +74,7 @@ export class Receiver {
     [];
   private static readonly DEBUG_APPEND_TRACK_LIMIT = 1000;
 
-  //  -
+  // Operation handler map - type-driven automatic dispatch
   private readonly operationHandlers: Record<
     OperationType,
     (op: Extract<Operation, { op: OperationType }>) => void
@@ -103,8 +103,8 @@ export class Receiver {
       debug: options?.debug ?? false,
     };
 
-    //
-    //  satisfies  OperationType
+    // Initialize the operation handler map
+    // Use satisfies to guarantee every OperationType is covered
     this.operationHandlers = {
       CREATE: (op) => this.handleCreate(op as Extract<Operation, { op: 'CREATE' }>),
       UPDATE: (op) => this.handleUpdate(op as Extract<Operation, { op: 'UPDATE' }>),
@@ -305,7 +305,7 @@ export class Receiver {
       this.log(`Applying CREATE: id=${op.id}, type=${op.type}`);
     }
 
-    //
+    // Dispatch automatically via the operation handler map
     // satisfies guarantees every OperationType is present at init, so this dispatch is safe
     const handler = this.operationHandlers[op.op];
     handler(op);
@@ -555,7 +555,7 @@ export class Receiver {
       }
     }
 
-    //  Remote Ref
+    // Clean up the Remote Ref
     this.refMap.delete(id);
     // Clean up O(1) children lookup Set
     this.nodeChildrenSet.delete(id);
@@ -624,7 +624,7 @@ export class Receiver {
     // Run the call asynchronously so operation processing is never blocked
     (async () => {
       try {
-        //  ref
+        // Get the component ref
         const ref = this.refMap.get(refId);
         if (!ref?.current) {
           throw new Error(`Node ${refId} not mounted or has no ref`);
@@ -632,7 +632,7 @@ export class Receiver {
 
         const instance = ref.current as Record<string, unknown>;
 
-        //
+        // Check whether the method exists
         if (typeof instance[method] !== 'function') {
           throw new Error(`Method "${method}" not found on node ${refId}`);
         }
@@ -644,7 +644,7 @@ export class Receiver {
           ...args
         );
 
-        //
+        // Send the success result
         // Cast result to BridgeValue - method return types are serializable values
         await this.sendToSandbox({
           type: HostMsg.REF_METHOD_RESULT,
@@ -653,7 +653,7 @@ export class Receiver {
           result: result as BridgeValue,
         });
       } catch (error) {
-        //
+        // Send the error result
         const err = error instanceof Error ? error : new Error(String(error));
         const serializedError: SerializedError = {
           __type: 'error',
@@ -785,7 +785,7 @@ export class Receiver {
     const props: Record<string, unknown> = {
       ...filteredProps,
       key: `rill-${id}`,
-      ref: nodeRef, //  ref  Remote Ref
+      ref: nodeRef, // Inject ref for Remote Ref method calls
     };
 
     return React.createElement(Component, props, ...children);
