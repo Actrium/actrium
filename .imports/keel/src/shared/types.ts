@@ -2,8 +2,8 @@
  * @rill/bridge - Protocol Type System
  *
  *  JSI
- * - JSI ：，
- * -  Bridge ：/
+ * - types JSI supports natively: passed straight through, zero overhead
+ * - types the bridge has to handle: serialized on the way out, deserialized on the way in
  *
  *  Host ↔ Guest
  */
@@ -21,7 +21,7 @@
 export type ReviewedUnknown = unknown;
 
 // ============================================
-// JSI （，）
+// Natively supported by JSI (passed straight through, zero overhead)
 // ============================================
 
 /**
@@ -47,7 +47,7 @@ export interface JSISafeObject {
 }
 
 // ============================================
-//  Bridge （JSI ）
+// Needs bridge handling (JSI cannot carry these directly)
 // ============================================
 
 /**
@@ -138,7 +138,7 @@ export interface SerializedSet {
 
 /**
  *  Promise
- * Promise  ID ， promise:settle
+ * A promise is tracked by id; the result comes back asynchronously in a promise:settle message
  */
 export interface SerializedPromise {
   __type: 'promise';
@@ -256,14 +256,14 @@ export interface TextOperation extends BaseOperation {
 
 /**
  * Remote Ref
- * Guest  Host （ focus, blur, scrollTo）
+ * Guest calls a method on a host component instance (focus, blur, scrollTo, ...)
  */
 export interface RefCallOperation extends BaseOperation {
   op: 'REF_CALL';
-  refId: number; //  ID（ nodeMap  id ）
-  method: string; // ：focus, blur, measure, scrollTo
+  refId: number; // node id (the same id used in nodeMap)
+  method: string; // method name: focus, blur, measure, scrollTo, ...
   args: BridgeValue[]; //
-  callId: string; // （ Promise ）
+  callId: string; // unique call id (used to match up the promise)
 }
 
 /**
@@ -392,7 +392,7 @@ export interface DestroyMessage {
 export interface RefMethodResultMessage {
   type: HostMsg.REF_METHOD_RESULT;
   refId: number; //  ID
-  callId: string; // （ REF_CALL ）
+  callId: string; // unique call id (pairs with the REF_CALL)
   result?: BridgeValue; //
   error?: SerializedError; //
 }
@@ -453,7 +453,7 @@ export type SerializedPromiseSettleMessage =
  */
 export interface CallbackRegistry {
   /**
-   * ， fnId
+   * Register a function and return its fnId
    */
   register(fn: (...args: ReviewedUnknown[]) => ReviewedUnknown): string;
 
@@ -483,7 +483,7 @@ export interface CallbackRegistry {
   retain(fnId: string): void;
 
   /**
-   * ，
+   * Drop a reference; the entry is removed once the count reaches zero
    */
   release(fnId: string): void;
 
@@ -493,7 +493,7 @@ export interface CallbackRegistry {
   getRefCount(fnId: string): number;
 
   /**
-   *  Map（ globalThis.__rill.callbacks）
+   * The backing Map, for syncing into globalThis.__rill.callbacks
    */
   getMap(): Map<string, (...args: ReviewedUnknown[]) => ReviewedUnknown>;
 

@@ -180,8 +180,8 @@ export type {
 /**
  * Remote Ref - Guest  Host
  *
- * ，Guest  Host
- * RemoteRef ， Host
+ * Sandbox isolation means a guest cannot reach a host native component instance directly.
+ * RemoteRef gives it an async call mechanism instead: host-side methods are invoked by message.
  *
  * @example
  * const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
@@ -202,7 +202,7 @@ export interface RemoteRef<T = unknown> {
 
   /**
    *
-   *  Proxy ， invoke()
+   * Implemented with a Proxy, so any method name called on it becomes an invoke() call.
    */
   call: T extends Record<string, (...args: unknown[]) => unknown>
     ? { [K in keyof T]: (...args: Parameters<T[K]>) => Promise<Awaited<ReturnType<T[K]>>> }

@@ -44,7 +44,7 @@ export class Receiver {
   private nodeChildrenSet = new Map<number, Set<number>>();
   // Reverse index: childId -> parentId (0 means root). Keeps DELETE/REMOVE O(1).
   private parentByChildId = new Map<number, number>();
-  // Remote Ref ： ID → React ref
+  // Remote Ref support: node id -> React ref
   private refMap = new Map<number, React.RefObject<ReviewedUnknown>>();
   private registry: ComponentRegistry;
   private callbackRegistry?: ReceiverCallbackRegistry;
@@ -306,7 +306,7 @@ export class Receiver {
     }
 
     //
-    // satisfies  OperationType，
+    // satisfies guarantees every OperationType is present at init, so this dispatch is safe
     const handler = this.operationHandlers[op.op];
     handler(op);
   }
@@ -616,12 +616,12 @@ export class Receiver {
 
   /**
    * Handle remote ref method call
-   * Guest  Host （ focus, blur, scrollTo）
+   * Guest calls a method on a host component instance (focus, blur, scrollTo, ...)
    */
   private handleRefCall(op: RefCallOperation): void {
     const { refId, method, args, callId } = op;
 
-    // ，
+    // Run the call asynchronously so operation processing is never blocked
     (async () => {
       try {
         //  ref
@@ -637,7 +637,7 @@ export class Receiver {
           throw new Error(`Method "${method}" not found on node ${refId}`);
         }
 
-        // （ Promise）
+        // Invoke it (the result may be a Promise)
         const fn = instance[method];
         // Reason: Remote Ref target method signature is runtime-defined by host component instances
         const result = await (fn as (...a: BridgeValue[]) => BridgeValue | Promise<BridgeValue>)(
@@ -744,7 +744,7 @@ export class Receiver {
 
     // Handle text node
     if (node.type === '__TEXT__') {
-      // React Native  Text ，
+      // React Native needs a real Text component instance, not a string tag
       // Reason: React module structure unknown, Text component may or may not exist
       const TextComponent =
         this.registry.get('Text') ?? (React as unknown as { Text?: unknown }).Text;
@@ -771,7 +771,7 @@ export class Receiver {
       .map((childId) => this.renderNode(childId))
       .filter((child): child is React.ReactElement | string => child !== null);
 
-    //  ref（ Remote Ref ）
+    // Create or fetch the ref that Remote Ref support hangs off
     let nodeRef = this.refMap.get(id);
     if (!nodeRef) {
       nodeRef = React.createRef<ReviewedUnknown>();
