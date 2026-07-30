@@ -426,6 +426,40 @@ function asComponent<P>(tag: string): GuestComponent<P> {
 }
 
 /**
+ * Same cast, for a component whose props are generic in an ELEMENT type.
+ *
+ * `GuestComponent<P>` takes its props type as a fixed argument, so
+ * `asComponent<FlatListProps>` pins `T` to the interface's default and the JSX
+ * call site has no way to supply one. Handing the whole component type in
+ * instead keeps the type parameter on the DECLARATION, so TypeScript infers it
+ * per call site — `<FlatList data={['a']} …/>` gives `item: string` with no
+ * annotation, and `<FlatList<string> …/>` also works. Only the list components
+ * need this; every other component's props have nothing to be generic over.
+ */
+function asGenericComponent<C>(tag: string): C {
+  return tag as unknown as C;
+}
+
+/**
+ * `FlatList` as a declaration generic in its element type. Written as a named
+ * type rather than inline so the three list components read the same way.
+ */
+export type FlatListComponent = <T>(props: FlatListProps<T>) => null;
+
+/**
+ * `SectionList` generic in both its item and its section type. `SectionT`
+ * defaults to `object` (not the interface's `unknown`): `unknown` would be
+ * inferred as the empty intersection at a call site that only passes `data`,
+ * which is the same dead end the non-generic declaration had.
+ */
+export type SectionListComponent = <ItemT, SectionT = object>(
+  props: SectionListProps<ItemT, SectionT>
+) => null;
+
+/** `VirtualizedList` as a declaration generic in its element type. */
+export type VirtualizedListComponent = <ItemT>(props: VirtualizedListProps<ItemT>) => null;
+
+/**
  * Declare a host-registered component name with typed props from the guest side.
  * A host may register extra component names via `ComponentRegistry.register`;
  * this gives the guest a typed handle for one so the guest/host prop contract
@@ -443,17 +477,6 @@ export function declareHostComponent<P>(name: string): GuestComponent<P> {
 
 // ============ Component Exports ============
 //
-// TWO KNOWN GAPS in the typed surface below, both tracked and deliberately not
-// fixed here — each is a public-API decision, not a mechanical repair:
-//   - #79: `GuestComponent<P>` is not generic, so `asComponent<FlatListProps>`
-//     pins `T` to its `unknown` default. `<FlatList data={…} renderItem={…} />`
-//     cannot be given an element type (annotating the callback fails on
-//     contravariance; explicit type arguments give TS2558). Same for
-//     `SectionList` / `VirtualizedList`.
-//   - #80: no prop interface declares `ref`, and `GuestComponent<P>` is not a
-//     forwardRef shape, so `<TextInput ref={…} />` does not type-check — see the
-//     matching note on `useRemoteRef`.
-//
 // Core
 export const View = asComponent<ViewProps>(_components.View);
 export const Text = asComponent<TextProps>(_components.Text);
@@ -461,9 +484,11 @@ export const Image = asComponent<ImageProps>(_components.Image);
 export const ImageBackground = asComponent<ImageBackgroundProps>(_components.ImageBackground);
 // Scrolling
 export const ScrollView = asComponent<ScrollViewProps>(_components.ScrollView);
-export const FlatList = asComponent<FlatListProps>(_components.FlatList);
-export const SectionList = asComponent<SectionListProps>(_components.SectionList);
-export const VirtualizedList = asComponent<VirtualizedListProps>(_components.VirtualizedList);
+export const FlatList = asGenericComponent<FlatListComponent>(_components.FlatList);
+export const SectionList = asGenericComponent<SectionListComponent>(_components.SectionList);
+export const VirtualizedList = asGenericComponent<VirtualizedListComponent>(
+  _components.VirtualizedList
+);
 export const RefreshControl = asComponent<RefreshControlProps>(_components.RefreshControl);
 // Input
 export const TextInput = asComponent<TextInputProps>(_components.TextInput);
@@ -522,6 +547,24 @@ export interface BaseProps {
   style?: StyleProp;
   testID?: string;
   key?: string | number;
+  /**
+   * Callback from {@link useRemoteRef} — the guest's handle on the host component
+   * instance behind this node.
+   *
+   * Declared on EVERY component rather than per component, because that is what
+   * the runtime does: the reconciler's `getPublicInstance` hands back
+   * `{ nodeId }` for every node it creates, unconditionally
+   * (`src/guest/runtime/reconciler/host-config.ts`), so a remote ref is
+   * meaningful on any of them — not only on the components that happen to expose
+   * imperative methods today. The host preset already declared `ref` on its side
+   * of this seam; before #80 the guest side did not, which made `useRemoteRef`'s
+   * own documented example fail to type-check.
+   *
+   * Not a React ref: `ref` is stripped from the props that reach the host
+   * (`createInstance` / `commitUpdate` delete it), and React routes it through
+   * the reconciler instead.
+   */
+  ref?: RemoteRefCallback;
 }
 
 /**
@@ -1045,11 +1088,9 @@ const DEFAULT_REMOTE_REF_TIMEOUT = 4000;
  * }
  * ```
  *
- * NOTE — the `ref={inputRef}` line above is correct at RUNTIME but does not
- * type-check today: no guest prop interface declares a `ref` prop, so `tsc`
- * reports `TS2322: Property 'ref' does not exist on type
- * 'IntrinsicAttributes & TextInputProps'`. Tracked in #80, which will make this
- * example compile as written; until then a call site needs a cast.
+ * The `ref={inputRef}` line compiles as written: `ref` is declared on
+ * {@link BaseProps}, so every guest component accepts one (#80). The
+ * `check:guest-types` gate compiles this exact shape.
  */
 export function useRemoteRef<T = unknown>(options?: {
   timeout?: number;
