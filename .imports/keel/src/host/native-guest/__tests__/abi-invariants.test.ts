@@ -8,10 +8,10 @@ import {
   implementHostModules,
   rpc,
 } from '../../../contract';
-import { createWasmGuestEngine } from '../wasm-guest-view';
-import { WasmGuestHost } from '../wasm-guest-host';
+import { createNativeGuestEngine } from '../native-guest-view';
+import { NativeGuestHost } from '../native-guest-host';
 
-// Real Rust guest (rill-guest SDK) — now exports rill_abi_version() -> 1.
+// Real Rust guest (rill-native-guest SDK) — now exports rill_abi_version() -> 1.
 const KV_GUEST = readFileSync(join(import.meta.dir, 'fixtures/kv-guest.wasm'));
 // Render-only Rust guest (also exports rill_abi_version() -> 1).
 const UI_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-guest.wasm'));
@@ -23,7 +23,7 @@ const ABI_V2 = readFileSync(join(import.meta.dir, 'fixtures/abi-v2.wasm'));
 const SYNC_PROBE = readFileSync(join(import.meta.dir, 'fixtures/sync-probe.wasm'));
 
 // A tiny host:store dispatch table mirroring the platform's putText/getText
-// shapes (same as wasm-guest-host.test.ts), so the kv-guest's put resolves.
+// shapes (same as native-guest-host.test.ts), so the kv-guest's put resolves.
 function storeDispatch() {
   const store = new Map<string, string>();
   const contract = defineRillContract({
@@ -70,27 +70,27 @@ function storeDispatch() {
 
 describe('rill_abi_version', () => {
   it('reads the version a versioned guest declares (SDK exports 1)', async () => {
-    const host = new WasmGuestHost({ dispatch: storeDispatch() });
+    const host = new NativeGuestHost({ dispatch: storeDispatch() });
     await host.load(KV_GUEST);
     expect(host.guestAbiVersion).toBe(1);
   });
 
   it('tolerates a pre-versioning guest (no export) as null', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(SYNC_PROBE); // exports no rill_abi_version
     expect(host.guestAbiVersion).toBe(null);
   });
 
   it('rejects an unsupported ABI version at load (fail-closed, before rill_init)', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await expect(host.load(ABI_V2)).rejects.toThrow(/unsupported guest ABI version: 2/);
     // The rejection happened BEFORE rill_init: the instance is assigned (exports
     // are readable), and the guest's rill_init never ran.
     expect((host.exports.init_ran as () => number)()).toBe(0);
   });
 
-  it('surfaces the version through the view engine (createWasmGuestEngine)', async () => {
-    const engine = createWasmGuestEngine({
+  it('surfaces the version through the view engine (createNativeGuestEngine)', async () => {
+    const engine = createNativeGuestEngine({
       wasmBytes: UI_GUEST,
       contract: defineRillContract({ version: '1', hostModules: {}, guestExports: {} }),
       hostModules: {},
@@ -105,7 +105,7 @@ describe('rill_abi_version', () => {
 });
 
 describe('host never resolves a guest call synchronously', () => {
-  // These nail the presence of `await Promise.resolve()` in wasm-guest-host.ts
+  // These nail the presence of `await Promise.resolve()` in native-guest-host.ts
   // onHostCall: delete it and `resolved_during_call` becomes 1, turning these
   // red. The probe snapshots its resolve counter synchronously inside rill_init
   // (right after rill_host_call returns), so no sleep / scheduler timing is
@@ -116,7 +116,7 @@ describe('host never resolves a guest call synchronously', () => {
     const dispatch: HostModuleDispatchTable = {
       'host:store': { getText: () => ({ text: 'x', version: 1 }) },
     };
-    const host = new WasmGuestHost({ dispatch });
+    const host = new NativeGuestHost({ dispatch });
     await host.load(SYNC_PROBE);
     const during = (host.exports.resolved_during_call as () => number)();
     expect(during).toBe(0); // THE invariant: no re-entrant rill_resolve inside rill_host_call
@@ -134,7 +134,7 @@ describe('host never resolves a guest call synchronously', () => {
         },
       },
     };
-    const host = new WasmGuestHost({ dispatch });
+    const host = new NativeGuestHost({ dispatch });
     await host.load(SYNC_PROBE);
     expect((host.exports.resolved_during_call as () => number)()).toBe(0);
     await host.drain();
@@ -146,7 +146,7 @@ describe('host never resolves a guest call synchronously', () => {
 
 describe('wire buffers are recycled per turn (leak regression)', () => {
   it('delivers 8000 x 512B events with linear memory staying bounded', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_GUEST);
     await host.drain();
     const memory = host.exports.memory as WebAssembly.Memory;

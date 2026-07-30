@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ComponentRegistry } from '../../registry';
 import { Receiver } from '../../receiver';
-import { WasmGuestHost } from '../wasm-guest-host';
+import { NativeGuestHost } from '../native-guest-host';
 
 // Same deterministic tree, three builds:
 //   ui-guest        — the promoted default: binary-capable, exports rill_wire_caps;
@@ -46,7 +46,7 @@ async function loadGuest(wasm: Buffer, binaryOpBatch: boolean) {
     () => {}
   );
   const logs: string[] = [];
-  const host = new WasmGuestHost({
+  const host = new NativeGuestHost({
     dispatch: {},
     binaryOpBatch,
     onLog: (m) => logs.push(m),
@@ -66,7 +66,7 @@ function expectUiGuestTree(receiver: Receiver) {
   expect(tree?.children[1].children[0].props.text).toBe('nested');
 }
 
-describe('WasmGuestHost — binary op-batch wire (rill_wire_caps gate)', () => {
+describe('NativeGuestHost — binary op-batch wire (rill_wire_caps gate)', () => {
   it('materializes the batch over the binary wire when the host enables it', async () => {
     const { receiver, logs } = await loadGuest(UI_BINARY_GUEST, true);
     expectUiGuestTree(receiver);

@@ -4,7 +4,7 @@
  * ⚠️ GATED, NON-PRODUCTION PROFILING HARNESS — not collected by the unit-test
  * runner (not a *.test.ts). Run explicitly:
  *
- *     bun src/host/wasm-guest/__benchmarks__/blur-worker-pool-bench.ts
+ *     bun src/host/native-guest/__benchmarks__/blur-worker-pool-bench.ts
  *
  * PURPOSE
  * -------

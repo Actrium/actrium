@@ -2,9 +2,9 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHostModuleDispatch, defineRillContract, implementHostModules, rpc } from '../../../contract';
-import { WasmGuestHost } from '../wasm-guest-host';
+import { NativeGuestHost } from '../native-guest-host';
 
-// Real Rust guest built via the rill-guest `asset` SDK (crates/build.sh). On init
+// Real Rust guest built via the rill-native-guest `asset` SDK (crates/build.sh). On init
 // it drives host:asset.info -> allocate a Surface -> host:asset.blit, resolving an
 // app-package asset to decoded RGBA in its OWN linear memory (the ④ pixera path).
 // rill knows nothing about host:asset, so a test-local dispatch RECORDS what the
@@ -28,9 +28,9 @@ interface AssetDispatchOptions {
 }
 
 // A test-local host:asset capability. `hostRef.host` is late-bound (the dispatch
-// is built BEFORE the WasmGuestHost so the blit impl can reach writeBytes). Both
+// is built BEFORE the NativeGuestHost so the blit impl can reach writeBytes). Both
 // schemas are pass-through so the test asserts the exact wire the guest sent.
-function assetDispatch(hostRef: { host?: WasmGuestHost }, options: AssetDispatchOptions = {}) {
+function assetDispatch(hostRef: { host?: NativeGuestHost }, options: AssetDispatchOptions = {}) {
   const w = options.width ?? 2;
   const h = options.height ?? 2;
   const calls: Call[] = [];
@@ -92,9 +92,9 @@ function assetDispatch(hostRef: { host?: WasmGuestHost }, options: AssetDispatch
 
 describe('asset guest — ④ host:asset.info + host:asset.blit into guest memory', () => {
   it('resolves info, allocates a buffer, and the host-blitted bytes land in guest memory', async () => {
-    const hostRef: { host?: WasmGuestHost } = {};
+    const hostRef: { host?: NativeGuestHost } = {};
     const { table, calls, getBlitted } = assetDispatch(hostRef, { width: 2, height: 2 });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     hostRef.host = host;
     await host.load(ASSET_GUEST);
     await host.drain();
@@ -130,11 +130,11 @@ describe('asset guest — ④ host:asset.info + host:asset.blit into guest memor
   });
 
   it('round-trips a non-trivial (larger) asset: every host-written byte matches', async () => {
-    const hostRef: { host?: WasmGuestHost } = {};
+    const hostRef: { host?: NativeGuestHost } = {};
     // asset-guest fixes its id to "logo"; the host decides the dimensions. A
     // larger raster exercises a multi-KB blit through writeBytes end to end.
     const { table, calls, getBlitted } = assetDispatch(hostRef, { width: 16, height: 16 });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     hostRef.host = host;
     await host.load(ASSET_GUEST);
     await host.drain();
@@ -150,9 +150,9 @@ describe('asset guest — ④ host:asset.info + host:asset.blit into guest memor
   });
 
   it('fail-closed: info resolving {} (no dims) never blits and never crashes the guest', async () => {
-    const hostRef: { host?: WasmGuestHost } = {};
+    const hostRef: { host?: NativeGuestHost } = {};
     const { table, calls } = assetDispatch(hostRef, { infoReturnsEmpty: true });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     hostRef.host = host;
     await host.load(ASSET_GUEST);
     await host.drain(); // must not throw
@@ -168,7 +168,7 @@ describe('asset guest — ④ host:asset.info + host:asset.blit into guest memor
   it('fail-closed: an unregistered host:asset (ok=0 from info) does not crash the guest', async () => {
     // Empty dispatch -> host:asset.info is not registered -> resolves ok=0 ->
     // the SDK asset::info returns None -> the guest bails before blit.
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(ASSET_GUEST);
     await host.drain(); // must not throw
 

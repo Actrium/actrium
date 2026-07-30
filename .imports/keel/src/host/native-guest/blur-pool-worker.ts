@@ -1,7 +1,7 @@
 /**
  * blur-pool-worker.ts — runs INSIDE a Web Worker (approach B, #57).
  *
- * Hosts ONE independent {@link WasmGuestHost} + blur-demo-guest instance (its
+ * Hosts ONE independent {@link NativeGuestHost} + blur-demo-guest instance (its
  * own private wasm linear memory — no shared memory) and blurs pixel tiles the
  * pool hands it as transferable `ArrayBuffer`s: writeBytes the tile into linear
  * memory, run box_blur_(simd|scalar) on the wasm export, readBytes the result,
@@ -11,7 +11,7 @@
  */
 
 import type { PoolToWorker, WorkerToPool } from './blur-pool-protocol';
-import { WasmGuestHost } from './wasm-guest-host';
+import { NativeGuestHost } from './native-guest-host';
 
 // The worker global, typed to what we use. `self as unknown as` mirrors
 // worker-host.ts; the DOM lib types `self` too broadly for a module worker.
@@ -23,14 +23,14 @@ const scope = self as unknown as WorkerScope;
 
 type BlurFn = (src: number, dst: number, w: number, h: number, r: number) => void;
 
-let host: WasmGuestHost | null = null;
+let host: NativeGuestHost | null = null;
 let blurFn: BlurFn | null = null;
 let srcPtr = 0;
 let dstPtr = 0;
 let capacity = 0; // bytes currently allocated for src and for dst
 
 async function init(msg: Extract<PoolToWorker, { kind: 'init' }>): Promise<void> {
-  const h = new WasmGuestHost({ dispatch: {} });
+  const h = new NativeGuestHost({ dispatch: {} });
   await h.load(new Uint8Array(msg.wasm));
   blurFn = (msg.simd ? h.exports.box_blur_simd : h.exports.box_blur_scalar) as BlurFn;
   host = h;
@@ -39,7 +39,7 @@ async function init(msg: Extract<PoolToWorker, { kind: 'init' }>): Promise<void>
 // Grow the src/dst scratch buffers to hold `bytes` if needed. blur_alloc leaks
 // (by design in the guest), so we allocate lazily and only when a bigger tile
 // arrives — the leak is bounded by the largest tile ever seen.
-function ensureCapacity(h: WasmGuestHost, bytes: number): void {
+function ensureCapacity(h: NativeGuestHost, bytes: number): void {
   if (bytes <= capacity) return;
   const alloc = h.exports.blur_alloc as (len: number) => number;
   srcPtr = alloc(bytes);

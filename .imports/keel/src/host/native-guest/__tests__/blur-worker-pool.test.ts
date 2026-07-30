@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { BlurPool } from '../blur-pool';
-import { WasmGuestHost } from '../wasm-guest-host';
+import { NativeGuestHost } from '../native-guest-host';
 
 // Approach-B correctness gate (#57): an N-worker tiled box blur must be
 // BYTE-FOR-BYTE identical to a single-instance whole-image blur of the same
@@ -23,7 +23,7 @@ function fillSource(buf: Uint8Array, seed: number): void {
   }
 }
 
-// Reference: blur the whole image in one WasmGuestHost (same SIMD kernel the pool
+// Reference: blur the whole image in one NativeGuestHost (same SIMD kernel the pool
 // uses), on the main thread — the oracle the pooled result must match.
 async function wholeImageBlur(
   src: Uint8Array,
@@ -31,7 +31,7 @@ async function wholeImageBlur(
   h: number,
   r: number
 ): Promise<Uint8Array> {
-  const host = new WasmGuestHost({ dispatch: {} });
+  const host = new NativeGuestHost({ dispatch: {} });
   await host.load(BLUR_GUEST);
   const n = w * h * 4;
   const blurAlloc = host.exports.blur_alloc as (len: number) => number;

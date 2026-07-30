@@ -1,5 +1,5 @@
 /**
- * WasmGuestView — adapts a native (non-JS) WASM guest to the `EngineViewEngine`
+ * NativeGuestView — adapts a native (non-JS) WASM guest to the `EngineViewEngine`
  * surface that `useEngineView` drives (see src/host/use-engine-view.ts). It lets
  * the platform mount a native guest through the SAME rendering pipeline as the
  * JS `Engine` — only the constructed "engine" object differs; `useEngineView`,
@@ -7,8 +7,8 @@
  *
  * Construction mirrors `Engine`: same `contract` + `hostModules` (the dispatch
  * is built from them, so host:* is written once and serves both guest kinds) and
- * the same `components`. It owns a `WasmGuestHost` + a `Receiver`; the guest's
- * render batches flow WasmGuestHost.onRenderBatch -> receiver.applyBatch, and
+ * the same `components`. It owns a `NativeGuestHost` + a `Receiver`; the guest's
+ * render batches flow NativeGuestHost.onRenderBatch -> receiver.applyBatch, and
  * `sendEvent` forwards to the native event channel (rill_on_event).
  */
 import type { HostModuleImplementationMap, RillContractShape } from '../../contract';
@@ -17,9 +17,9 @@ import { Receiver } from '../receiver';
 import type { ComponentType } from '../registry';
 import { ComponentRegistry } from '../registry';
 import type { EngineViewEngine } from '../use-engine-view';
-import { WasmGuestHost } from './wasm-guest-host';
+import { NativeGuestHost } from './native-guest-host';
 
-export interface WasmGuestViewOptions {
+export interface NativeGuestViewOptions {
   /** The decoded native guest `.wasm` (the caller owns any base64/gzip decode). */
   wasmBytes: BufferSource;
   /** Host-capability contract — same one an `Engine` would take. */
@@ -38,7 +38,7 @@ export interface WasmGuestViewOptions {
  * `Engine`) PLUS the wasm-specific members a native guest exposes. This was
  * previously only an implicit duck type; making it explicit ends the guessing.
  */
-export interface WasmGuestEngine extends EngineViewEngine {
+export interface NativeGuestEngine extends EngineViewEngine {
   /** Bounds-checked slice-copy reader over the guest's linear memory (host:canvas.present late-binding). */
   readonly readGuestMemory: (ptr: number, len: number) => Uint8Array;
   /** Bounds-checked writer into the guest's linear memory (host:asset.blit late-binding). */
@@ -60,8 +60,8 @@ export interface WasmGuestEngine extends EngineViewEngine {
 type Listener = () => void;
 type ErrorListener = (error: Error) => void;
 
-export class WasmGuestView implements WasmGuestEngine {
-  private readonly host: WasmGuestHost;
+export class NativeGuestView implements NativeGuestEngine {
+  private readonly host: NativeGuestHost;
   private readonly wasmBytes: BufferSource;
   private readonly registry: ComponentRegistry;
   private receiver: Receiver | null = null;
@@ -75,7 +75,7 @@ export class WasmGuestView implements WasmGuestEngine {
    * Bounds-checked SLICE-COPY of the native guest's linear memory, exposed so the
    * platform can late-bind it onto host:canvas handles for the stage-② `present`
    * framebuffer path (canvasRegistry.bindGuestMemory). Delegates to
-   * WasmGuestHost.readBytes — a copy, NEVER a live view over `memory.buffer`
+   * NativeGuestHost.readBytes — a copy, NEVER a live view over `memory.buffer`
    * (which would detach on `memory.grow`). Only a native guest exposes this; a JS
    * (QuickJS) guest has no such reader, so `present` stays fail-closed for it.
    *
@@ -91,7 +91,7 @@ export class WasmGuestView implements WasmGuestEngine {
    * Bounds-checked WRITE into the native guest's linear memory — the counterpart
    * of readGuestMemory, exposed so the platform can late-bind it onto host:asset
    * for the ④ `blit` path (the host decodes an asset to RGBA and writes it into a
-   * buffer the guest allocated). Delegates to WasmGuestHost.writeBytes, which
+   * buffer the guest allocated). Delegates to NativeGuestHost.writeBytes, which
    * assertInBounds BEFORE writing: a hostile dstPtr/dstCap throws (caught by the
    * host:asset impl -> fail-closed result) and never writes past guest memory.
    * Only a native guest exposes this; a JS (QuickJS) guest has no writer, so
@@ -110,20 +110,20 @@ export class WasmGuestView implements WasmGuestEngine {
   /**
    * Raw guest exports passthrough (diagnostics only — e.g. kv-guest's
    * `last_ok`). Undefined before `loadBundle` resolves, mirroring
-   * guestAbiVersion's null-before-load contract; WasmGuestHost.exports itself
+   * guestAbiVersion's null-before-load contract; NativeGuestHost.exports itself
    * throws pre-instantiation, so the loaded-guard keeps this undefined-safe.
    */
   get exports(): WebAssembly.Exports | undefined {
     return this.loaded ? this.host.exports : undefined;
   }
 
-  constructor(options: WasmGuestViewOptions) {
+  constructor(options: NativeGuestViewOptions) {
     this.wasmBytes = options.wasmBytes;
     this.registry = new ComponentRegistry();
     for (const [name, component] of Object.entries(options.components)) {
       this.registry.register(name, component);
     }
-    this.host = new WasmGuestHost({
+    this.host = new NativeGuestHost({
       dispatch: createHostModuleDispatch(options.contract, options.hostModules),
       onLog: options.onLog,
       onRenderBatch: (batch) => this.receiver?.applyBatch(batch),
@@ -219,9 +219,9 @@ export class WasmGuestView implements WasmGuestEngine {
 }
 
 /**
- * Construct a native WASM guest engine (a `WasmGuestEngine`, i.e.
+ * Construct a native WASM guest engine (a `NativeGuestEngine`, i.e.
  * EngineViewEngine + the wasm-specific surface).
  */
-export function createWasmGuestEngine(options: WasmGuestViewOptions): WasmGuestView {
-  return new WasmGuestView(options);
+export function createNativeGuestEngine(options: NativeGuestViewOptions): NativeGuestView {
+  return new NativeGuestView(options);
 }

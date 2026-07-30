@@ -8,7 +8,7 @@
  */
 
 export type PoolToWorker =
-  // Instantiate a WasmGuestHost + load the blur guest. `wasm` is CLONED (sent
+  // Instantiate a NativeGuestHost + load the blur guest. `wasm` is CLONED (sent
   // with no transfer list) so every worker in the pool gets its own copy.
   | { kind: 'init'; wasm: ArrayBuffer; simd: boolean }
   // Blur one tile: `buf` (transferred in) holds w*h*4 straight-alpha RGBA8

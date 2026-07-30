@@ -22,11 +22,11 @@ stream"** so that
 
 ### 1.1 WASM guest → host argument path
 
-1. **Guest builds bytes.** The rill-guest Rust SDK builds a request body and
+1. **Guest builds bytes.** The rill-native-guest Rust SDK builds a request body and
    hands it to `host_call(module, method, input: Vec<u8>)`
-   (`crates/rill-guest/src/lib.rs:312`). Today every wrapper builds a **UTF-8
+   (`crates/rill-native-guest/src/lib.rs:312`). Today every wrapper builds a **UTF-8
    JSON string** and calls `.into_bytes()` — e.g. `store::put`
-   (`crates/rill-guest/src/lib.rs:339-351`) emits `{"key":…,"text":…}`. There
+   (`crates/rill-native-guest/src/lib.rs:339-351`) emits `{"key":…,"text":…}`. There
    is **no binary store method in the Rust guest yet**; the doc comment at
    `lib.rs:328-331` notes that a raw-byte `put`/`get` would ride "as a JSON
    number array" via the generic `host_call` — i.e. the number-array hack is the
@@ -37,18 +37,18 @@ stream"** so that
    (`lib.rs:32-41`). `in_ptr/in_len` point at the guest's `Vec<u8>` in linear
    memory. **The ABI is already bytes-in/bytes-out** — nothing about it is JSON.
 
-3. **Host reads bytes.** `WasmGuestHost.onHostCall`
-   (`src/host/wasm-guest/wasm-guest-host.ts:231-289`) reads module/method via
+3. **Host reads bytes.** `NativeGuestHost.onHostCall`
+   (`src/host/native-guest/native-guest-host.ts:231-289`) reads module/method via
    `readString`, then reads the input:
    - `readBytes(ip, il)` copies the raw bytes out of guest memory bounds-checked
-     (`wasm-guest-host.ts:176-179`).
-   - **Framing fork** (`wasm-guest-host.ts:264-276`): if the first 4 bytes are
+     (`native-guest-host.ts:176-179`).
+   - **Framing fork** (`native-guest-host.ts:264-276`): if the first 4 bytes are
      `RCNV` (`52 43 4E 56`) the raw `Uint8Array` is handed to the handler as-is
      (the canvas binary carve-out); **otherwise `JSON.parse(TextDecoder.decode(raw))`**.
      So today, everything that is not a canvas frame is parsed as JSON here.
 
 4. **Contract boundary.** The parsed value goes to
-   `this.dispatch[moduleId]?.[method]` (`wasm-guest-host.ts:277-281`). The
+   `this.dispatch[moduleId]?.[method]` (`native-guest-host.ts:277-281`). The
    dispatch table comes from `createHostModuleDispatch(contract, impl)`
    (`src/contract/index.ts:224-257`). `wrapRpcDispatch`
    (`src/contract/index.ts:418-458`) runs `schema.parseInput(args[0])` **before**
@@ -56,8 +56,8 @@ stream"** so that
    throw → fail-closed.
 
 5. **Result back.** `onHostCall` `await`s the handler and calls
-   `this.resolve(cb, 1, result)` (`wasm-guest-host.ts:282`). `resolve`
-   (`wasm-guest-host.ts:293-313`) does `TextEncoder.encode(JSON.stringify(result))`,
+   `this.resolve(cb, 1, result)` (`native-guest-host.ts:282`). `resolve`
+   (`native-guest-host.ts:293-313`) does `TextEncoder.encode(JSON.stringify(result))`,
    `allocWrite`s it into guest memory (via the guest's `rill_alloc`), and calls
    the guest export `rill_resolve(cb, ok, ptr, len)`. **The return path is
    JSON-only today** — no binary carve-out on the way back.
@@ -103,17 +103,17 @@ the JSON-injection one. The design below handles both realities.)
   supports text" describes **platform handler + platform contract** behaviour.
 - **rill owns the machinery that makes bytes first-class**: the contract
   framework (`src/contract/index.ts`), the WASM dispatch/return codec
-  (`wasm-guest-host.ts`), the QuickJS shell codec (the provider above), the
-  rill-guest Rust SDK wrappers, and type-gen.
+  (`native-guest-host.ts`), the QuickJS shell codec (the provider above), the
+  rill-native-guest Rust SDK wrappers, and type-gen.
 
 **rill-side vs platform-side split (summary):**
 
 | Concern | Owner |
 |---|---|
 | `bytes` field type in the contract DSL + manifest + type-gen | **rill** (`src/contract`) |
-| WASM envelope codec (guest→host decode, host→guest encode) | **rill** (`wasm-guest-host.ts`) |
+| WASM envelope codec (guest→host decode, host→guest encode) | **rill** (`native-guest-host.ts`) |
 | QuickJS shell bytes codec (Uint8Array ⇄ wire) | **rill** (quickjs provider) |
-| rill-guest Rust SDK `store::{put,get}_bytes`, `net` | **rill** (`crates/rill-guest`) |
+| rill-native-guest Rust SDK `store::{put,get}_bytes`, `net` | **rill** (`crates/rill-native-guest`) |
 | JS-guest typed helpers (`putBytes`/`getBytes`) | **rill** (guest SDK) |
 | `host-store.ts` / `host-net.ts` handlers that now take/return `Uint8Array` | **platform** |
 
@@ -196,8 +196,8 @@ One self-describing wire framing, used **in both directions** on the WASM
 boundary. The request/response stays JSON (fields, options); byte-stream fields
 are **replaced by a sentinel** referencing an index into an attached binary
 segment list (multipart-like). The codec is generic and **contract-agnostic** —
-`WasmGuestHost` needs no descriptor knowledge (it only holds the dispatch
-table today, `wasm-guest-host.ts:58`).
+`NativeGuestHost` needs no descriptor knowledge (it only holds the dispatch
+table today, `native-guest-host.ts:58`).
 
 #### B.1 Byte layout (`Vec<u8>` input and response, identical)
 
@@ -231,7 +231,7 @@ then, segCount times, tightly packed:
 #### B.2 Request direction (guest → host), WASM
 
 Guest SDK (§C) emits an `RBS1` envelope instead of a plain JSON body. In
-`WasmGuestHost.onHostCall` (`wasm-guest-host.ts:264-276`), add a **third fork**
+`NativeGuestHost.onHostCall` (`native-guest-host.ts:264-276`), add a **third fork**
 ahead of the current two, checking the full `u32` magic:
 
 ```
@@ -252,7 +252,7 @@ unchanged dispatch → `parseInput` validates → handler receives `Uint8Array`.
 
 #### B.3 Response direction (host → guest), WASM
 
-`WasmGuestHost.resolve` (`wasm-guest-host.ts:293-313`) is generic. Change it to:
+`NativeGuestHost.resolve` (`native-guest-host.ts:293-313`) is generic. Change it to:
 
 ```
 { json, segments } = extractSentinels(result)   // hoist every Uint8Array -> {"$b":N}
@@ -272,9 +272,9 @@ allocWrite(bytes); rill_resolve(cb, ok, ptr, len)
 #### B.4 Caps and fail-closed discipline
 
 Reuse the existing bounds-check posture (`assertInBounds`,
-`wasm-guest-host.ts:206-216`; the `ok=0` fail-closed default). New constants
+`native-guest-host.ts:206-216`; the `ok=0` fail-closed default). New constants
 (host and guest, kept in lockstep — a conformance test locks them, like
-`MAX_BUFFER_BYTES` in `crates/rill-guest/src/conformance.rs:235`):
+`MAX_BUFFER_BYTES` in `crates/rill-native-guest/src/conformance.rs:235`):
 
 | cap | value | rationale |
 |---|---|---|
@@ -349,9 +349,9 @@ the same platform handler. The sentinel key differs (`$b` index vs `$bin`
 handle) because the transports differ, but the contract-level meaning ("this
 field is bytes") is one thing.
 
-### C. rill-guest SDK binary wrappers
+### C. rill-native-guest SDK binary wrappers
 
-Add a generic envelope helper next to `host_call` (`crates/rill-guest/src/lib.rs`),
+Add a generic envelope helper next to `host_call` (`crates/rill-native-guest/src/lib.rs`),
 `no_std`, no JSON crate (reuse `json_escape`, `lib.rs:1673`):
 
 ```rust
@@ -482,13 +482,13 @@ does the `$bin` staging.
    leaking talc fallback (`lib.rs:142-161`). *Mitigation:* conservative phase-1
    response caps + a named phase-4 follow-up to raise `WIRE_SIZE` or add a
    dealloc. Do not ship large `getBytes` before that.
-4. **Codec must be contract-agnostic.** `WasmGuestHost` holds only the dispatch
+4. **Codec must be contract-agnostic.** `NativeGuestHost` holds only the dispatch
    table, not descriptors. *Mitigation:* the self-describing sentinel wire (§B)
    needs no descriptor at the codec layer; `binary` metadata (§A) is only for
    type-gen/manifest/validation. Keeps layering intact.
 5. **Caps drift between Rust guest and TS host.** *Mitigation:* single-source the
    caps and lock them with a conformance test, exactly as `MAX_BUFFER_BYTES` is
-   locked (`crates/rill-guest/src/conformance.rs:235`).
+   locked (`crates/rill-native-guest/src/conformance.rs:235`).
 6. **`binary` must be optional everywhere.** Any non-optional addition to
    `RpcDescriptor`/`RpcOptions` would break every existing `rpc()` call.
    *Mitigation:* `binary?` optional; `rpc()` copies it only when present;
@@ -506,7 +506,7 @@ does the `$bin` staging.
   `RpcDescriptor`; validation; manifest `binaryCapabilities`; unit tests. Fully
   additive; existing contract tests must pass unchanged.
 - **Phase 2 — WASM codec (rill).** `encode/decodeEnvelope` + sentinel revive/
-  extract in `wasm-guest-host.ts` (request fork §B.2, response encode §B.3) with
+  extract in `native-guest-host.ts` (request fork §B.2, response encode §B.3) with
   caps + fail-closed; Rust-guest `encode_envelope`/`decode_envelope`. Lock caps
   with a conformance test. Golden-driven decode tests.
 - **Phase 3 — SDK wrappers (rill).** `store::{put,get}_bytes`, `net::fetch_bytes`

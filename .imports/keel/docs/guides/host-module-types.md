@@ -93,7 +93,7 @@ a publish gate for a native-guest bundle should treat a use of one as an error �
 failure is otherwise a throw the guest author cannot act on.
 
 The host→guest push channel for a native guest is the **named event channel**
-(`WasmGuestView.sendEvent` → the guest's `rill_on_event`), whose payload takes the same RBS1
+(`NativeGuestView.sendEvent` → the guest's `rill_on_event`), whose payload takes the same RBS1
 fork as a call return: JSON by default, raw byte segments when it carries a `Uint8Array`. A host
 that today relays a subscription onto a named event keeps doing exactly that; what changed is
 that the relay is no longer limited to text.

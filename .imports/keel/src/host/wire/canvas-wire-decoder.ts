@@ -6,7 +6,7 @@
  * Zero-DOM host-side decoder for the guest→host CANVAS binary wire protocol.
  * The authoritative wire schema is contracts/canvas-wire.json; the golden oracle
  * is contracts/canvas-wire.golden.json (produced byte-for-byte by the Rust
- * encoder crates/rill-guest/src/canvas_encode.rs). This decoder is validated
+ * encoder crates/rill-native-guest/src/canvas_encode.rs). This decoder is validated
  * against those files and MUST NOT hand-copy any peer codec.
  *
  * ZERO-DOM: this module references NO `document`, `HTMLCanvasElement`,
@@ -140,7 +140,7 @@ export class CanvasDecodeError extends Error {
 
 /**
  * A decoded canvas op. The union is keyed on `op` and mirrors, field-for-field,
- * the guest DrawList JSON shape (crates/rill-guest/src/lib.rs canvas module and
+ * the guest DrawList JSON shape (crates/rill-native-guest/src/lib.rs canvas module and
  * the graphics-seams.json host:canvas.ops whitelist), so a golden vector's
  * `frame.ops` deep-equals `decodeCanvasBatch(fromHex(vector.hex))`.
  */

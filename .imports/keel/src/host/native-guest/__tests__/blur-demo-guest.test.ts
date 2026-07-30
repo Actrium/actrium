@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { WasmGuestHost } from '../wasm-guest-host';
+import { NativeGuestHost } from '../native-guest-host';
 
 // blur-demo-guest ships one baseline pixel filter (a straight-alpha RGBA8 box
 // blur) in two forms — a scalar reference and a hand-vectorized wasm SIMD128
@@ -27,14 +27,14 @@ function fillSource(buf: Uint8Array, seed: number): void {
 // of the whole exports object, which the check:unknown preflight gate bans).
 type BlurFn = (src: number, dst: number, w: number, h: number, r: number) => void;
 interface Blur {
-  host: WasmGuestHost;
+  host: NativeGuestHost;
   blurAlloc: (len: number) => number;
   boxBlurScalar: BlurFn;
   boxBlurSimd: BlurFn;
 }
 
 async function loadGuest(): Promise<Blur> {
-  const host = new WasmGuestHost({ dispatch: {} });
+  const host = new NativeGuestHost({ dispatch: {} });
   await host.load(BLUR_GUEST);
   return {
     host,
