@@ -46,7 +46,10 @@ pub enum HostOperation {
 pub enum HostOperationResult {
     Bytes(Vec<u8>),
     Done,
-    Error(i32),
+    /// Runtime error that must remain distinguishable by the guest.
+    Error(ActrError),
+    /// Failure in the ABI bridge itself, represented by a stable status code.
+    AbiError(i32),
 }
 
 /// Host-side async bridge used by guest runtimes.

@@ -138,7 +138,7 @@ fn recording_bridge() -> (HostAbiFn, tokio::sync::mpsc::UnboundedReceiver<String
                     let _ = tx.send(name);
                     HostOperationResult::Bytes(Vec::new())
                 }
-                _ => HostOperationResult::Error(-1),
+                _ => HostOperationResult::AbiError(-1),
             }
         })
     });

@@ -97,7 +97,8 @@ async fn run_host_operation(
     match (host_abi)(op).await {
         HostOperationResult::Bytes(bytes) => Ok(Ok(bytes)),
         HostOperationResult::Done => Ok(Ok(Vec::new())),
-        HostOperationResult::Error(code) => Ok(Err(actr_error_from_abi_code(code))),
+        HostOperationResult::Error(error) => Ok(Err(actr_error_to_wit(error))),
+        HostOperationResult::AbiError(code) => Ok(Err(actr_error_from_abi_code(code))),
     }
 }
 
@@ -332,6 +333,32 @@ fn actr_error_from_abi_code(code: i32) -> WitActrError {
             WitActrError::NotImplemented("unsupported ABI operation".into())
         }
         other => WitActrError::Internal(format!("ABI status {other}")),
+    }
+}
+
+fn actr_error_to_wit(error: ActrError) -> WitActrError {
+    match error {
+        ActrError::Unavailable(message) => WitActrError::Unavailable(message),
+        ActrError::ConnectionNotReady(info) => {
+            WitActrError::ConnectionNotReady(wit2::ConnectionNotReadyInfo {
+                retry_after_ms: info.retry_after_ms,
+            })
+        }
+        ActrError::TimedOut => WitActrError::TimedOut,
+        ActrError::NotFound(message) => WitActrError::NotFound(message),
+        ActrError::PermissionDenied(message) => WitActrError::PermissionDenied(message),
+        ActrError::InvalidArgument(message) => WitActrError::InvalidArgument(message),
+        ActrError::UnknownRoute(message) => WitActrError::UnknownRoute(message),
+        ActrError::DependencyNotFound {
+            service_name,
+            message,
+        } => WitActrError::DependencyNotFound(wit2::DependencyNotFoundPayload {
+            service_name,
+            message,
+        }),
+        ActrError::DecodeFailure(message) => WitActrError::DecodeFailure(message),
+        ActrError::NotImplemented(message) => WitActrError::NotImplemented(message),
+        ActrError::Internal(message) => WitActrError::Internal(message),
     }
 }
 
@@ -2114,6 +2141,33 @@ async fn run_hook_region(
 #[cfg(test)]
 mod resident_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn host_operation_preserves_connection_not_ready() {
+        let host_abi: HostAbiFn = Arc::new(|_| {
+            Box::pin(async {
+                HostOperationResult::Error(ActrError::ConnectionNotReady(ConnectionNotReadyInfo {
+                    retry_after_ms: Some(5_837),
+                }))
+            })
+        });
+
+        let result = run_host_operation(
+            Some(host_abi),
+            HostOperation::Discover(HostDiscoverV1::default()),
+        )
+        .await
+        .expect("host operation");
+
+        assert!(matches!(
+            result,
+            Err(WitActrError::ConnectionNotReady(
+                wit2::ConnectionNotReadyInfo {
+                    retry_after_ms: Some(5_837),
+                }
+            ))
+        ));
+    }
 
     #[test]
     fn inner_wasmtime_error_is_store_fatal() {

@@ -6,10 +6,11 @@
 //! - "test/sleep": awaits a Tokio timer before returning
 //! - "test/spawn": spawns a Tokio task that calls the host after dispatch returns
 //! - "test/spawn-pending": starts a managed task for shutdown verification
+//! - "test/send-data-chunk-error": classifies a structured host send error
 //! - unknown route: returns error
 
-use actr_framework::{Context, MessageDispatcher, Workload, entry};
-use actr_protocol::{ActorResult, ActrError, RpcEnvelope};
+use actr_framework::{Context, Dest, MessageDispatcher, Workload, entry};
+use actr_protocol::{ActorResult, ActrError, DataChunk, PayloadType, RpcEnvelope};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::time::UNIX_EPOCH;
@@ -124,6 +125,30 @@ impl MessageDispatcher for DoubleDispatcher {
                     std::future::pending::<()>().await;
                 })?;
                 Ok(Bytes::from_static(b"spawned"))
+            }
+            "test/send-data-chunk-error" => {
+                let result = ctx
+                    .send_data_chunk(
+                        &Dest::Peer(ctx.self_id().clone()),
+                        DataChunk {
+                            stream_id: "test/error-stream".into(),
+                            sequence: 1,
+                            payload: Vec::new().into(),
+                            metadata: Vec::new(),
+                            timestamp_ms: None,
+                        },
+                        PayloadType::StreamReliable,
+                    )
+                    .await;
+                match result {
+                    Err(ActrError::ConnectionNotReady(info)) => Ok(Bytes::from(
+                        info.retry_after_ms.unwrap_or_default().to_le_bytes().to_vec(),
+                    )),
+                    Err(error) => Err(error),
+                    Ok(()) => Err(ActrError::Internal(
+                        "expected send_data_chunk to fail".into(),
+                    )),
+                }
             }
             "test/record_hook" => {
                 let payload = envelope.payload.unwrap_or_default();

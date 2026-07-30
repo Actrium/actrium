@@ -691,14 +691,6 @@ async fn host_operation_handler(
     use actr_framework::{Context as _, Dest};
     use actr_protocol::{DataChunk, PayloadType};
 
-    /// Map `ActrError` to ABI error code, preserving semantics for guest-side discrimination
-    fn actr_error_to_code(err: &ActrError) -> i32 {
-        match err {
-            ActrError::DecodeFailure(_) | ActrError::InvalidArgument(_) => abi_code::PROTOCOL_ERROR,
-            _ => abi_code::GENERIC_ERROR,
-        }
-    }
-
     match pending {
         HostOperation::CallRaw(req) => {
             match ctx
@@ -714,7 +706,7 @@ async fn host_operation_handler(
                 Ok(resp) => HostOperationResult::Bytes(resp.to_vec()),
                 Err(e) => {
                     tracing::error!("call_raw routing failed: {e:?}");
-                    HostOperationResult::Error(actr_error_to_code(&e))
+                    HostOperationResult::Error(e)
                 }
             }
         }
@@ -724,7 +716,7 @@ async fn host_operation_handler(
                 Some(d) => d,
                 None => {
                     tracing::error!(route_key = req.route_key, "call: dest decode failed");
-                    return HostOperationResult::Error(abi_code::PROTOCOL_ERROR);
+                    return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
                 }
             };
             match ctx
@@ -740,7 +732,7 @@ async fn host_operation_handler(
                 Ok(resp) => HostOperationResult::Bytes(resp.to_vec()),
                 Err(e) => {
                     tracing::error!("call routing failed: {e:?}");
-                    HostOperationResult::Error(actr_error_to_code(&e))
+                    HostOperationResult::Error(e)
                 }
             }
         }
@@ -750,7 +742,7 @@ async fn host_operation_handler(
                 Some(d) => d,
                 None => {
                     tracing::error!(route_key = req.route_key, "tell: dest decode failed");
-                    return HostOperationResult::Error(abi_code::PROTOCOL_ERROR);
+                    return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
                 }
             };
             match ctx
@@ -765,7 +757,7 @@ async fn host_operation_handler(
                 Ok(()) => HostOperationResult::Done,
                 Err(e) => {
                     tracing::error!("tell routing failed: {e:?}");
-                    HostOperationResult::Error(actr_error_to_code(&e))
+                    HostOperationResult::Error(e)
                 }
             }
         }
@@ -775,7 +767,7 @@ async fn host_operation_handler(
                 Ok(id) => HostOperationResult::Bytes(id.encode_to_vec()),
                 Err(e) => {
                     tracing::error!("discover failed: {e:?}");
-                    HostOperationResult::Error(actr_error_to_code(&e))
+                    HostOperationResult::Error(e)
                 }
             }
         }
@@ -823,7 +815,7 @@ async fn host_operation_handler(
                 Ok(()) => HostOperationResult::Done,
                 Err(e) => {
                     tracing::error!("register_stream failed: {e:?}");
-                    HostOperationResult::Error(actr_error_to_code(&e))
+                    HostOperationResult::Error(e)
                 }
             }
         }
@@ -832,7 +824,7 @@ async fn host_operation_handler(
             Ok(()) => HostOperationResult::Done,
             Err(e) => {
                 tracing::error!("unregister_stream failed: {e:?}");
-                HostOperationResult::Error(actr_error_to_code(&e))
+                HostOperationResult::Error(e)
             }
         },
 
@@ -841,7 +833,7 @@ async fn host_operation_handler(
                 Some(d) => d,
                 None => {
                     tracing::error!("send_data_chunk: dest decode failed");
-                    return HostOperationResult::Error(abi_code::PROTOCOL_ERROR);
+                    return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
                 }
             };
             let payload_type = match PayloadType::try_from(req.payload_type) {
@@ -850,21 +842,21 @@ async fn host_operation_handler(
                 }
                 Ok(other) => {
                     tracing::error!(?other, "send_data_chunk: invalid stream payload type");
-                    return HostOperationResult::Error(abi_code::PROTOCOL_ERROR);
+                    return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
                 }
                 Err(_) => {
                     tracing::error!(
                         payload_type = req.payload_type,
                         "send_data_chunk: unknown payload type"
                     );
-                    return HostOperationResult::Error(abi_code::PROTOCOL_ERROR);
+                    return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
                 }
             };
             match ctx.send_data_chunk(&dest, req.chunk, payload_type).await {
                 Ok(()) => HostOperationResult::Done,
                 Err(e) => {
                     tracing::error!("send_data_chunk failed: {e:?}");
-                    HostOperationResult::Error(actr_error_to_code(&e))
+                    HostOperationResult::Error(e)
                 }
             }
         }
@@ -903,13 +895,6 @@ async fn stream_callback_host_operation_handler(
     use actr_framework::{Context as _, Dest};
     use actr_protocol::PayloadType;
 
-    fn actr_error_to_code(err: &ActrError) -> i32 {
-        match err {
-            ActrError::DecodeFailure(_) | ActrError::InvalidArgument(_) => abi_code::PROTOCOL_ERROR,
-            _ => abi_code::GENERIC_ERROR,
-        }
-    }
-
     match pending {
         HostOperation::CallRaw(req) => {
             match ctx
@@ -923,13 +908,13 @@ async fn stream_callback_host_operation_handler(
                 .await
             {
                 Ok(resp) => HostOperationResult::Bytes(resp.to_vec()),
-                Err(e) => HostOperationResult::Error(actr_error_to_code(&e)),
+                Err(e) => HostOperationResult::Error(e),
             }
         }
         HostOperation::Call(req) => {
             let dest = match decode_dest(&req.dest) {
                 Some(d) => d,
-                None => return HostOperationResult::Error(abi_code::PROTOCOL_ERROR),
+                None => return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR),
             };
             match ctx
                 .call_raw(
@@ -942,13 +927,13 @@ async fn stream_callback_host_operation_handler(
                 .await
             {
                 Ok(resp) => HostOperationResult::Bytes(resp.to_vec()),
-                Err(e) => HostOperationResult::Error(actr_error_to_code(&e)),
+                Err(e) => HostOperationResult::Error(e),
             }
         }
         HostOperation::Tell(req) => {
             let dest = match decode_dest(&req.dest) {
                 Some(d) => d,
-                None => return HostOperationResult::Error(abi_code::PROTOCOL_ERROR),
+                None => return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR),
             };
             match ctx
                 .tell_raw(
@@ -960,37 +945,39 @@ async fn stream_callback_host_operation_handler(
                 .await
             {
                 Ok(()) => HostOperationResult::Done,
-                Err(e) => HostOperationResult::Error(actr_error_to_code(&e)),
+                Err(e) => HostOperationResult::Error(e),
             }
         }
         HostOperation::Discover(req) => {
             match ctx.discover_route_candidate(&req.target_type).await {
                 Ok(id) => HostOperationResult::Bytes(id.encode_to_vec()),
-                Err(e) => HostOperationResult::Error(actr_error_to_code(&e)),
+                Err(e) => HostOperationResult::Error(e),
             }
         }
         HostOperation::RegisterStream(_) => {
             tracing::error!("register_stream from inside a stream callback is not supported");
-            HostOperationResult::Error(abi_code::UNSUPPORTED_OP)
+            HostOperationResult::AbiError(abi_code::UNSUPPORTED_OP)
         }
         HostOperation::UnregisterStream(req) => match ctx.unregister_stream(&req.stream_id).await {
             Ok(()) => HostOperationResult::Done,
-            Err(e) => HostOperationResult::Error(actr_error_to_code(&e)),
+            Err(e) => HostOperationResult::Error(e),
         },
         HostOperation::SendDataChunk(req) => {
             let dest = match decode_dest(&req.dest) {
                 Some(d) => d,
-                None => return HostOperationResult::Error(abi_code::PROTOCOL_ERROR),
+                None => return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR),
             };
             let payload_type = match PayloadType::try_from(req.payload_type) {
                 Ok(PayloadType::StreamReliable | PayloadType::StreamLatencyFirst) => {
                     PayloadType::try_from(req.payload_type).expect("checked payload type")
                 }
-                Ok(_) | Err(_) => return HostOperationResult::Error(abi_code::PROTOCOL_ERROR),
+                Ok(_) | Err(_) => {
+                    return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
+                }
             };
             match ctx.send_data_chunk(&dest, req.chunk, payload_type).await {
                 Ok(()) => HostOperationResult::Done,
-                Err(e) => HostOperationResult::Error(actr_error_to_code(&e)),
+                Err(e) => HostOperationResult::Error(e),
             }
         }
     }
