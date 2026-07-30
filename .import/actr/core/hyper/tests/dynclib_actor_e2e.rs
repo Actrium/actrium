@@ -20,7 +20,10 @@ use std::process::Command;
 use actr_hyper::dynclib::DynclibHost;
 use actr_hyper::test_support::{dynclib_active_bridge_count, instantiate_dynclib_workload};
 use actr_hyper::workload::{HostAbiFn, HostOperation, HostOperationResult, InvocationContext};
-use actr_protocol::{ActrId, ActrType, Realm, RpcEnvelope, prost::Message as ProstMessage};
+use actr_protocol::{
+    ActrError, ActrId, ActrType, ConnectionNotReadyInfo, Realm, RpcEnvelope,
+    prost::Message as ProstMessage,
+};
 
 // ---- helpers ---------------------------------------------------------------
 
@@ -87,7 +90,7 @@ fn test_config() -> InitPayloadV1 {
 }
 
 fn noop_executor() -> HostAbiFn {
-    std::sync::Arc::new(|_pending| Box::pin(async { HostOperationResult::Error(-1) }))
+    std::sync::Arc::new(|_pending| Box::pin(async { HostOperationResult::AbiError(-1) }))
 }
 
 /// Process-level lock ensuring dynclib tests run one at a time.
@@ -196,6 +199,42 @@ async fn dynclib_double_dispatch() {
     instance.shutdown().await.expect("shutdown dynclib");
 }
 
+#[tokio::test]
+async fn dynclib_preserves_connection_not_ready_from_send_data_chunk() {
+    let _guard = DYNCLIB_SERIAL.lock().await;
+    let so_path = fixture_so_path();
+    let host = DynclibHost::load(&so_path).expect("load SO");
+    let mut instance = instantiate_dynclib_workload(host, &test_config()).expect("instantiate");
+
+    let executor: HostAbiFn = std::sync::Arc::new(|pending| {
+        Box::pin(async move {
+            match pending {
+                HostOperation::SendDataChunk(_) => HostOperationResult::Error(
+                    ActrError::ConnectionNotReady(ConnectionNotReadyInfo {
+                        retry_after_ms: Some(5_837),
+                    }),
+                ),
+                _ => HostOperationResult::AbiError(-1),
+            }
+        })
+    });
+
+    let result = instance
+        .handle(
+            &make_envelope("test/send-data-chunk-error", Vec::new()),
+            test_ctx(),
+            &executor,
+        )
+        .await
+        .expect("send error classification dispatch failed");
+
+    assert_eq!(
+        u64::from_le_bytes(result.try_into().expect("retry hint bytes")),
+        5_837
+    );
+    instance.shutdown().await.expect("shutdown dynclib");
+}
+
 /// Multiple dispatches -> verifies state does not leak between calls
 #[tokio::test]
 async fn dynclib_multiple_dispatches() {
@@ -219,7 +258,7 @@ async fn dynclib_multiple_dispatches() {
                         ]);
                         HostOperationResult::Bytes((val * 2).to_le_bytes().to_vec())
                     }
-                    _ => HostOperationResult::Error(-1),
+                    _ => HostOperationResult::AbiError(-1),
                 }
             })
         });
@@ -276,7 +315,7 @@ async fn dynclib_spawned_task_calls_host_after_dispatch() {
                     let _ = event_tx.send(req.payload);
                     HostOperationResult::Bytes(Vec::new())
                 }
-                _ => HostOperationResult::Error(-1),
+                _ => HostOperationResult::AbiError(-1),
             }
         })
     });
@@ -319,7 +358,7 @@ async fn dynclib_shutdown_drains_managed_tasks() {
                     let _ = started_tx.send(());
                     HostOperationResult::Bytes(Vec::new())
                 }
-                _ => HostOperationResult::Error(-1),
+                _ => HostOperationResult::AbiError(-1),
             }
         })
     });

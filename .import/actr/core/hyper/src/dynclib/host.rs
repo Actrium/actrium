@@ -184,7 +184,7 @@ fn trampoline_execute(token: u64, pending: HostOperation) -> HostOperationResult
     });
     let Some((executor, runtime)) = bridge else {
         tracing::error!(token, "dynclib trampoline: bridge token not found");
-        return HostOperationResult::Error(guest_abi::code::GENERIC_ERROR);
+        return HostOperationResult::AbiError(guest_abi::code::GENERIC_ERROR);
     };
 
     let (result_tx, result_rx) = std::sync::mpsc::sync_channel(1);
@@ -194,7 +194,7 @@ fn trampoline_execute(token: u64, pending: HostOperation) -> HostOperationResult
     });
     result_rx.recv().unwrap_or_else(|_| {
         tracing::error!(token, "dynclib trampoline: host executor stopped");
-        HostOperationResult::Error(guest_abi::code::GENERIC_ERROR)
+        HostOperationResult::AbiError(guest_abi::code::GENERIC_ERROR)
     })
 }
 
@@ -257,7 +257,11 @@ unsafe extern "C" fn vtable_invoke(
             status: guest_abi::code::SUCCESS,
             payload: Vec::new(),
         },
-        HostOperationResult::Error(code) => AbiReply {
+        HostOperationResult::Error(error) => match guest_abi::actr_error_reply(error) {
+            Ok(reply) => reply,
+            Err(code) => return code,
+        },
+        HostOperationResult::AbiError(code) => AbiReply {
             abi_version: guest_abi::version::V1,
             status: code,
             payload: Vec::new(),

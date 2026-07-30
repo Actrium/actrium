@@ -11,7 +11,7 @@
 
 use crate::Dest;
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrError, ActrId, ActrType, DataChunk, PayloadType};
+use actr_protocol::{ActrError, ActrId, ActrType, ConnectionNotReadyInfo, DataChunk, PayloadType};
 
 /// ABI error codes.
 pub mod code {
@@ -31,6 +31,8 @@ pub mod code {
     pub const BUFFER_TOO_SMALL: i32 = -6;
     /// Unsupported runtime operation code.
     pub const UNSUPPORTED_OP: i32 = -7;
+    /// Guest-visible [`actr_protocol::ActrError`] encoded in the reply payload.
+    pub const ACTR_ERROR: i32 = -8;
 }
 
 /// Internal ABI version numbers.
@@ -133,6 +135,120 @@ pub struct AbiReply {
     pub status: i32,
     #[prost(bytes = "vec", tag = "3")]
     pub payload: Vec<u8>,
+}
+
+/// Structured guest-visible error carried by an [`AbiReply`].
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct ActrErrorV1 {
+    #[prost(oneof = "ActrErrorKindV1", tags = "1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11")]
+    pub kind: Option<ActrErrorKindV1>,
+}
+
+/// Error variants preserved across the DynClib ABI.
+#[derive(Clone, PartialEq, prost::Oneof)]
+pub enum ActrErrorKindV1 {
+    #[prost(string, tag = "1")]
+    Unavailable(String),
+    #[prost(message, tag = "2")]
+    ConnectionNotReady(ConnectionNotReadyInfoV1),
+    #[prost(message, tag = "3")]
+    TimedOut(TimedOutV1),
+    #[prost(string, tag = "4")]
+    NotFound(String),
+    #[prost(string, tag = "5")]
+    PermissionDenied(String),
+    #[prost(string, tag = "6")]
+    InvalidArgument(String),
+    #[prost(string, tag = "7")]
+    UnknownRoute(String),
+    #[prost(message, tag = "8")]
+    DependencyNotFound(DependencyNotFoundV1),
+    #[prost(string, tag = "9")]
+    DecodeFailure(String),
+    #[prost(string, tag = "10")]
+    NotImplemented(String),
+    #[prost(string, tag = "11")]
+    Internal(String),
+}
+
+/// Empty payload for the unit-like [`ActrError::TimedOut`] variant.
+///
+/// Only the enclosing oneof tag carries meaning; this message intentionally
+/// has no fields that could acquire a second timeout semantic.
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct TimedOutV1 {}
+
+/// Structured payload for [`ActrError::ConnectionNotReady`].
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct ConnectionNotReadyInfoV1 {
+    #[prost(uint64, optional, tag = "1")]
+    pub retry_after_ms: Option<u64>,
+}
+
+/// Structured payload for [`ActrError::DependencyNotFound`].
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct DependencyNotFoundV1 {
+    #[prost(string, tag = "1")]
+    pub service_name: String,
+    #[prost(string, tag = "2")]
+    pub message: String,
+}
+
+impl From<ActrError> for ActrErrorV1 {
+    fn from(error: ActrError) -> Self {
+        let kind = match error {
+            ActrError::Unavailable(message) => ActrErrorKindV1::Unavailable(message),
+            ActrError::ConnectionNotReady(info) => {
+                ActrErrorKindV1::ConnectionNotReady(ConnectionNotReadyInfoV1 {
+                    retry_after_ms: info.retry_after_ms,
+                })
+            }
+            ActrError::TimedOut => ActrErrorKindV1::TimedOut(TimedOutV1 {}),
+            ActrError::NotFound(message) => ActrErrorKindV1::NotFound(message),
+            ActrError::PermissionDenied(message) => ActrErrorKindV1::PermissionDenied(message),
+            ActrError::InvalidArgument(message) => ActrErrorKindV1::InvalidArgument(message),
+            ActrError::UnknownRoute(message) => ActrErrorKindV1::UnknownRoute(message),
+            ActrError::DependencyNotFound {
+                service_name,
+                message,
+            } => ActrErrorKindV1::DependencyNotFound(DependencyNotFoundV1 {
+                service_name,
+                message,
+            }),
+            ActrError::DecodeFailure(message) => ActrErrorKindV1::DecodeFailure(message),
+            ActrError::NotImplemented(message) => ActrErrorKindV1::NotImplemented(message),
+            ActrError::Internal(message) => ActrErrorKindV1::Internal(message),
+        };
+        Self { kind: Some(kind) }
+    }
+}
+
+impl TryFrom<ActrErrorV1> for ActrError {
+    type Error = i32;
+
+    fn try_from(error: ActrErrorV1) -> Result<Self, Self::Error> {
+        match error.kind {
+            Some(ActrErrorKindV1::Unavailable(message)) => Ok(Self::Unavailable(message)),
+            Some(ActrErrorKindV1::ConnectionNotReady(info)) => {
+                Ok(Self::ConnectionNotReady(ConnectionNotReadyInfo {
+                    retry_after_ms: info.retry_after_ms,
+                }))
+            }
+            Some(ActrErrorKindV1::TimedOut(_)) => Ok(Self::TimedOut),
+            Some(ActrErrorKindV1::NotFound(message)) => Ok(Self::NotFound(message)),
+            Some(ActrErrorKindV1::PermissionDenied(message)) => Ok(Self::PermissionDenied(message)),
+            Some(ActrErrorKindV1::InvalidArgument(message)) => Ok(Self::InvalidArgument(message)),
+            Some(ActrErrorKindV1::UnknownRoute(message)) => Ok(Self::UnknownRoute(message)),
+            Some(ActrErrorKindV1::DependencyNotFound(payload)) => Ok(Self::DependencyNotFound {
+                service_name: payload.service_name,
+                message: payload.message,
+            }),
+            Some(ActrErrorKindV1::DecodeFailure(message)) => Ok(Self::DecodeFailure(message)),
+            Some(ActrErrorKindV1::NotImplemented(message)) => Ok(Self::NotImplemented(message)),
+            Some(ActrErrorKindV1::Internal(message)) => Ok(Self::Internal(message)),
+            None => Err(code::PROTOCOL_ERROR),
+        }
+    }
 }
 
 /// Invocation context injected by Hyper before entering guest handle logic.
@@ -459,6 +575,15 @@ pub fn error_reply(status: i32, message: impl Into<Vec<u8>>) -> Result<Vec<u8>, 
     })
 }
 
+/// Encode a structured runtime error into an ABI reply.
+pub fn actr_error_reply(error: ActrError) -> Result<AbiReply, i32> {
+    Ok(AbiReply {
+        abi_version: version::V1,
+        status: code::ACTR_ERROR,
+        payload: encode_message(&ActrErrorV1::from(error))?,
+    })
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Shared guest-side helpers (used by both WASM and DynClib contexts)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -492,6 +617,7 @@ pub fn abi_error_to_actr(code_val: i32) -> actr_protocol::ActrError {
             ActrError::Internal("reply buffer too small for host invoke".into())
         }
         code::UNSUPPORTED_OP => ActrError::NotImplemented("unsupported ABI operation".into()),
+        code::ACTR_ERROR => ActrError::DecodeFailure("ABI error payload is missing".into()),
         other => ActrError::Internal(format!("unexpected ABI status code {other}")),
     }
 }
@@ -499,6 +625,14 @@ pub fn abi_error_to_actr(code_val: i32) -> actr_protocol::ActrError {
 /// Convert an [`AbiReply`] with a non-success status to an [`actr_protocol::ActrError`].
 pub fn reply_to_actr_error(reply: AbiReply) -> actr_protocol::ActrError {
     use actr_protocol::ActrError;
+    if reply.status == code::ACTR_ERROR {
+        return decode_message::<ActrErrorV1>(&reply.payload)
+            .and_then(ActrError::try_from)
+            .unwrap_or_else(|_| {
+                ActrError::DecodeFailure("structured ABI error payload decode failed".into())
+            });
+    }
+
     if reply.payload.is_empty() {
         return abi_error_to_actr(reply.status);
     }
@@ -510,5 +644,78 @@ pub fn reply_to_actr_error(reply: AbiReply) -> actr_protocol::ActrError {
         code::PROTOCOL_ERROR => ActrError::DecodeFailure(message),
         code::UNSUPPORTED_OP => ActrError::NotImplemented(message),
         _ => ActrError::Internal(message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn round_trip(error: ActrError) -> ActrError {
+        reply_to_actr_error(actr_error_reply(error).expect("encode error reply"))
+    }
+
+    #[test]
+    fn structured_errors_round_trip_all_variants() {
+        assert!(matches!(
+            round_trip(ActrError::Unavailable("offline".into())),
+            ActrError::Unavailable(message) if message == "offline"
+        ));
+        assert!(matches!(
+            round_trip(ActrError::ConnectionNotReady(ConnectionNotReadyInfo {
+                retry_after_ms: Some(5_837),
+            })),
+            ActrError::ConnectionNotReady(ConnectionNotReadyInfo {
+                retry_after_ms: Some(5_837),
+            })
+        ));
+        assert!(matches!(
+            round_trip(ActrError::ConnectionNotReady(ConnectionNotReadyInfo {
+                retry_after_ms: None,
+            })),
+            ActrError::ConnectionNotReady(ConnectionNotReadyInfo {
+                retry_after_ms: None,
+            })
+        ));
+        assert!(matches!(
+            round_trip(ActrError::TimedOut),
+            ActrError::TimedOut
+        ));
+        assert!(matches!(
+            round_trip(ActrError::NotFound("actor".into())),
+            ActrError::NotFound(message) if message == "actor"
+        ));
+        assert!(matches!(
+            round_trip(ActrError::PermissionDenied("acl".into())),
+            ActrError::PermissionDenied(message) if message == "acl"
+        ));
+        assert!(matches!(
+            round_trip(ActrError::InvalidArgument("payload".into())),
+            ActrError::InvalidArgument(message) if message == "payload"
+        ));
+        assert!(matches!(
+            round_trip(ActrError::UnknownRoute("route".into())),
+            ActrError::UnknownRoute(message) if message == "route"
+        ));
+        assert!(matches!(
+            round_trip(ActrError::DependencyNotFound {
+                service_name: "storage".into(),
+                message: "missing lock entry".into(),
+            }),
+            ActrError::DependencyNotFound { service_name, message }
+                if service_name == "storage" && message == "missing lock entry"
+        ));
+        assert!(matches!(
+            round_trip(ActrError::DecodeFailure("wire".into())),
+            ActrError::DecodeFailure(message) if message == "wire"
+        ));
+        assert!(matches!(
+            round_trip(ActrError::NotImplemented("media".into())),
+            ActrError::NotImplemented(message) if message == "media"
+        ));
+        assert!(matches!(
+            round_trip(ActrError::Internal("bug".into())),
+            ActrError::Internal(message) if message == "bug"
+        ));
     }
 }

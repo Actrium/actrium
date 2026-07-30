@@ -133,7 +133,7 @@ pub fn gate_bridge() -> (HostAbiFn, GateControls) {
                             .expect("impl semaphore open")
                             .forget();
                         if req.payload.len() < 4 {
-                            return HostOperationResult::Error(-1);
+                            return HostOperationResult::AbiError(-1);
                         }
                         let x = i32::from_le_bytes([
                             req.payload[0],
@@ -143,7 +143,7 @@ pub fn gate_bridge() -> (HostAbiFn, GateControls) {
                         ]);
                         HostOperationResult::Bytes((x * 2).to_le_bytes().to_vec())
                     }
-                    _ => HostOperationResult::Error(-1),
+                    _ => HostOperationResult::AbiError(-1),
                 }
             })
         })
@@ -339,7 +339,7 @@ pub fn io_gate_bridge(io_delay: Duration) -> HostAbiFn {
                     tokio::time::sleep(io_delay).await;
                     HostOperationResult::Done
                 }
-                _ => HostOperationResult::Error(-1),
+                _ => HostOperationResult::AbiError(-1),
             }
         })
     })

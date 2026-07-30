@@ -100,7 +100,7 @@ fn doubling_bridge(sleep: Option<Duration>) -> (HostAbiFn, Arc<AtomicU64>) {
             match op {
                 HostOperation::CallRaw(req) if req.route_key == "test/double_impl" => {
                     if req.payload.len() < 4 {
-                        return HostOperationResult::Error(-1);
+                        return HostOperationResult::AbiError(-1);
                     }
                     let x = i32::from_le_bytes([
                         req.payload[0],
@@ -110,7 +110,7 @@ fn doubling_bridge(sleep: Option<Duration>) -> (HostAbiFn, Arc<AtomicU64>) {
                     ]);
                     HostOperationResult::Bytes((x * 2).to_le_bytes().to_vec())
                 }
-                _ => HostOperationResult::Error(-1),
+                _ => HostOperationResult::AbiError(-1),
             }
         })
     });
@@ -120,7 +120,7 @@ fn doubling_bridge(sleep: Option<Duration>) -> (HostAbiFn, Arc<AtomicU64>) {
 /// Bridge that never gets called (every test/echo dispatch is expected
 /// to stay inside the guest without issuing a host import).
 fn unreachable_bridge() -> HostAbiFn {
-    Arc::new(|_| Box::pin(async move { HostOperationResult::Error(-1) }))
+    Arc::new(|_| Box::pin(async move { HostOperationResult::AbiError(-1) }))
 }
 
 fn stream_registration_bridge() -> HostAbiFn {
@@ -132,7 +132,7 @@ fn stream_registration_bridge() -> HostAbiFn {
                 {
                     HostOperationResult::Done
                 }
-                _ => HostOperationResult::Error(-1),
+                _ => HostOperationResult::AbiError(-1),
             }
         })
     })
@@ -149,7 +149,7 @@ fn stream_callback_bridge() -> (HostAbiFn, Arc<AtomicU64>) {
                     calls.fetch_add(1, Ordering::SeqCst);
                     HostOperationResult::Bytes(Vec::new())
                 }
-                _ => HostOperationResult::Error(-1),
+                _ => HostOperationResult::AbiError(-1),
             }
         })
     });
@@ -692,7 +692,7 @@ async fn runner_concurrent_dispatch_stays_serial_with_real_guest() {
                         ]);
                         HostOperationResult::Bytes((x * 2).to_le_bytes().to_vec())
                     }
-                    _ => HostOperationResult::Error(-1),
+                    _ => HostOperationResult::AbiError(-1),
                 }
             })
         })

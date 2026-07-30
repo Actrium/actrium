@@ -74,7 +74,7 @@ async fn assert_echo_component(env_name: &str, language: &str) {
     let host_calls_for_bridge = Arc::clone(&host_calls);
     let bridge: HostAbiFn = Arc::new(move |_| {
         host_calls_for_bridge.fetch_add(1, Ordering::SeqCst);
-        Box::pin(async { HostOperationResult::Error(-1) })
+        Box::pin(async { HostOperationResult::AbiError(-1) })
     });
     let payload = format!("hello-from-{language}").into_bytes();
     let reply = workload

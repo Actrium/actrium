@@ -495,10 +495,17 @@ async fn actorless_harness() -> (
     (ctx, Arc::new(crate::executor::spawn_runner(wl)))
 }
 
-fn expect_error_code(res: HostOperationResult, expected: i32) {
+fn expect_abi_error_code(res: HostOperationResult, expected: i32) {
     match res {
-        HostOperationResult::Error(code) => assert_eq!(code, expected),
-        other => panic!("expected HostOperationResult::Error({expected}), got {other:?}"),
+        HostOperationResult::AbiError(code) => assert_eq!(code, expected),
+        other => panic!("expected HostOperationResult::AbiError({expected}), got {other:?}"),
+    }
+}
+
+fn expect_runtime_error(res: HostOperationResult) -> ActrError {
+    match res {
+        HostOperationResult::Error(error) => error,
+        other => panic!("expected structured runtime error, got {other:?}"),
     }
 }
 
@@ -509,7 +516,7 @@ fn weak_runner(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn callraw_without_peer_returns_error_code() {
+async fn callraw_without_peer_returns_internal() {
     let (ctx, wl) = actorless_harness().await;
     let res = host_operation_handler(
         ctx,
@@ -518,7 +525,7 @@ async fn callraw_without_peer_returns_error_code() {
     )
     .await;
     // No remote actor gate is installed, so routing fails immediately.
-    expect_error_code(res, abi_code::GENERIC_ERROR);
+    assert!(matches!(expect_runtime_error(res), ActrError::Internal(_)));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -530,7 +537,7 @@ async fn call_with_default_dest_returns_error() {
         HostOperation::Call(HostCallV1::default()),
     )
     .await;
-    expect_error_code(res, abi_code::PROTOCOL_ERROR);
+    expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -542,11 +549,11 @@ async fn tell_with_default_dest_returns_error() {
         HostOperation::Tell(HostTellV1::default()),
     )
     .await;
-    expect_error_code(res, abi_code::PROTOCOL_ERROR);
+    expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn discover_without_realm_returns_error() {
+async fn discover_without_realm_returns_unavailable() {
     let (ctx, wl) = harness().await;
     let res = host_operation_handler(
         ctx,
@@ -555,7 +562,10 @@ async fn discover_without_realm_returns_error() {
     )
     .await;
     // Default ActrType with unreachable signaling → discover errors.
-    expect_error_code(res, abi_code::GENERIC_ERROR);
+    assert!(matches!(
+        expect_runtime_error(res),
+        ActrError::Unavailable(_)
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -674,7 +684,7 @@ async fn send_data_chunk_rejects_non_stream_payload_type() {
         }),
     )
     .await;
-    expect_error_code(res, abi_code::PROTOCOL_ERROR);
+    expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -690,7 +700,7 @@ async fn send_data_chunk_rejects_unknown_payload_type() {
         }),
     )
     .await;
-    expect_error_code(res, abi_code::PROTOCOL_ERROR);
+    expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -707,7 +717,10 @@ async fn send_data_chunk_valid_type_routes_and_errors() {
         }),
     )
     .await;
-    expect_error_code(res, abi_code::GENERIC_ERROR);
+    assert!(matches!(
+        expect_runtime_error(res),
+        ActrError::Unavailable(_)
+    ));
 }
 
 // ── stream_callback_host_operation_handler ──────────────────────────────
@@ -728,7 +741,7 @@ async fn stream_callback_callraw_without_peer_errors() {
         HostOperation::CallRaw(HostCallRawV1::default()),
     )
     .await;
-    expect_error_code(res, abi_code::GENERIC_ERROR);
+    assert!(matches!(expect_runtime_error(res), ActrError::Internal(_)));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -737,7 +750,7 @@ async fn stream_callback_call_with_default_dest_errors() {
     let res =
         stream_callback_host_operation_handler(ctx, HostOperation::Call(HostCallV1::default()))
             .await;
-    expect_error_code(res, abi_code::PROTOCOL_ERROR);
+    expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -746,7 +759,7 @@ async fn stream_callback_tell_with_default_dest_errors() {
     let res =
         stream_callback_host_operation_handler(ctx, HostOperation::Tell(HostTellV1::default()))
             .await;
-    expect_error_code(res, abi_code::PROTOCOL_ERROR);
+    expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -757,7 +770,10 @@ async fn stream_callback_discover_errors() {
         HostOperation::Discover(HostDiscoverV1::default()),
     )
     .await;
-    expect_error_code(res, abi_code::GENERIC_ERROR);
+    assert!(matches!(
+        expect_runtime_error(res),
+        ActrError::Unavailable(_)
+    ));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -771,7 +787,7 @@ async fn stream_callback_register_stream_is_unsupported() {
     )
     .await;
     // Registering a stream from inside a stream callback is rejected.
-    expect_error_code(res, abi_code::UNSUPPORTED_OP);
+    expect_abi_error_code(res, abi_code::UNSUPPORTED_OP);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -802,7 +818,7 @@ async fn stream_callback_send_rejects_non_stream_payload_type() {
         }),
     )
     .await;
-    expect_error_code(res, abi_code::PROTOCOL_ERROR);
+    expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -817,7 +833,7 @@ async fn stream_callback_send_rejects_unknown_payload_type() {
         }),
     )
     .await;
-    expect_error_code(res, abi_code::PROTOCOL_ERROR);
+    expect_abi_error_code(res, abi_code::PROTOCOL_ERROR);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -832,7 +848,10 @@ async fn stream_callback_send_valid_type_routes_and_errors() {
         }),
     )
     .await;
-    expect_error_code(res, abi_code::GENERIC_ERROR);
+    assert!(matches!(
+        expect_runtime_error(res),
+        ActrError::Unavailable(_)
+    ));
 }
 
 // ── duplicate_wait_timeout / wait_for_inflight_duplicate ────────────────
