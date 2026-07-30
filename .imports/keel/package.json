@@ -75,6 +75,7 @@
     "postinstall": "node scripts/rill_postinstall.js",
     "test": "bash scripts/run-all-tests.sh --with-rn",
     "test:unit": "bash scripts/run-unit-tests.sh",
+    "test:scripts": "bun test scripts/__tests__",
     "test:unit:coverage": "bash scripts/run-unit-tests.sh --coverage",
     "test:native": "bash native/core/run-tests.sh && bash native/quickjs/run-tests.sh && bash native/jsc/run-tests.sh",
     "test:bundle": "bash tests/guest-bundle/run-tests.sh",
@@ -96,8 +97,9 @@
     "check:types": "bun tsc --noEmit",
     "check:guest-types": "bunx tsc --noEmit -p tests/guest-bundle/tsconfig.json",
     "check:unknown": "bun scripts/check-unknown.ts",
+    "check:cjk": "bun scripts/check-cjk.ts",
     "check:build:apple": "bash scripts/check-apple-build.sh",
-    "preflight": "bun run check:unknown && bun run check:types && bun run check:guest-types && bun run lint && bun run test:unit"
+    "preflight": "bun run check:cjk && bun run check:unknown && bun run check:types && bun run check:guest-types && bun run lint && bun run test:scripts && bun run test:unit"
   },
   "types": "./src/index.ts",
   "dependencies": {

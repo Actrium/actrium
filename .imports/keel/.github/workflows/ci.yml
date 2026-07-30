@@ -50,6 +50,15 @@ jobs:
       - name: Run WASM sandbox E2E
         run: bun run test:e2e:wasm
 
+      # Source and prose here are English (issue #90). preflight already runs
+      # this, so on a passing build the step is a no-op repeat -- it earns its
+      # place through `if: always()`. A language violation is exactly the kind
+      # of thing that slips in alongside an unrelated failure, and without this
+      # the report would be buried behind whichever earlier step went red.
+      - name: Check source is English-only
+        if: always()
+        run: bun run check:cjk
+
   rust:
     runs-on: ubuntu-latest
     timeout-minutes: 15
