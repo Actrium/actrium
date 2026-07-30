@@ -31,7 +31,7 @@ export class OperationCollector {
       timestamp: Date.now(),
     });
 
-    // ：， CREATE/APPEND/UPDATE （）
+    // Debug aid: a little output, enough to confirm CREATE/APPEND/UPDATE are being collected (off by default)
     if (this.isDebugEnabled()) {
       const len = this.operations.length;
       if (len <= 10 || len % 50 === 0) {
@@ -83,7 +83,7 @@ export class OperationCollector {
       const debug = this.isDebugEnabled();
       if (debug) console.log('[rill:reconciler] flush ops=', opLen);
 
-      // /： ops（ debug ）
+      // Keep the console usable: no per-op detail unless debug mode asked for it
       if (debug) {
         try {
           if (opLen <= 30) {

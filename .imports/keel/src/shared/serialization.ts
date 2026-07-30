@@ -1,9 +1,9 @@
 /**
  * @rill/bridge - Serialization Utilities
  *
- * ， Host  Guest
+ * Shared serialization helpers, used by both the host and the guest
  * - Host: bridge.ts
- * - Guest: reconciler （）
+ * - guest: used by the reconciler (bundled into the sandbox)
  *
  * Performance: Uses type-tag dispatch (O(1) Map lookup) instead of
  * linear rule traversal for serialized objects with __type field.
@@ -12,7 +12,7 @@
 import type { CodecCallbacks, TypeRule } from './type-rules';
 import type { ReviewedUnknown } from './types';
 
-/**  */
+/** Circular reference marker. */
 export interface CircularRef {
   __type: 'circular';
 }
@@ -50,19 +50,19 @@ function buildTagDispatchMap(rules: TypeRule[]): Map<string, TypeRule> {
 }
 
 /**
+ * Create the encode function.
+ * Walks TypeRules to match and encode a value.
+ * Automatically detects circular references to avoid infinite recursion.
  *
- *  TypeRules
- * ，
+ * Performance notes:
+ * - fast path for primitives (skips the rule walk)
+ * - rules are pre-grouped by type to reduce match attempts
+ * - instanceof fast dispatch avoids linear traversal
  *
- * ：
- * - （）
- * -
- * - instanceof
- *
- * ：
- * -  encode  WeakSet（ depth ）
- * -  encode  WeakSet（）
- * -  encode （ render ）
+ * Cycle detection:
+ * - every top-level encode call creates a fresh WeakSet (tracked by a depth counter)
+ * - the WeakSet is shared within one encode call tree, so real cycles are caught
+ * - it is NOT shared between encode calls, so one render cannot false-positive another
  */
 export function createEncoder(
   typeRules: TypeRule[],
@@ -117,23 +117,23 @@ export function createEncoder(
     depth++;
 
     try {
-      // ：null/undefined
+      // Fast path: null/undefined go straight back
       if (value === null || value === undefined) {
         return value;
       }
 
-      // ：（）
+      // Fast path: primitives go straight back (no rule walk)
       const type = typeof value;
       if (type === 'boolean' || type === 'number' || type === 'string') {
         return value;
       }
 
-      // ：
+      // Functions: go straight to the function rule
       if (type === 'function') {
         return applyRule(rulesByName.get('function'), value);
       }
 
-      //  — instanceof-based dispatch
+      // Object type — instanceof-based dispatch
       if (type === 'object') {
         // Promise (leaf object, no circular ref detection needed)
         if (value instanceof Promise) {
@@ -236,7 +236,7 @@ export function createEncoder(
 }
 
 /**
- *
+ * Encode all properties of an object.
  */
 export function encodeObject(
   obj: Record<string, unknown>,
@@ -250,13 +250,13 @@ export function encodeObject(
 }
 
 /**
+ * Create the decode function.
+ * Uses type-tag dispatch (O(1) Map lookup) instead of linear traversal.
  *
- *  type-tag dispatch (O(1) Map lookup)
- *
- * ：
- * -
- * -  __type tag → O(1) Map dispatch
- * - /
+ * Performance notes:
+ * - fast path for primitives
+ * - object __type tag → O(1) Map dispatch
+ * - array/object recursive decode handled inline
  */
 export function createDecoder(
   typeRules: TypeRule[],
@@ -280,12 +280,12 @@ export function createDecoder(
   );
 
   const decode = (value: ReviewedUnknown): ReviewedUnknown => {
-    // ：null/undefined
+    // Fast path: null/undefined
     if (value === null || value === undefined) {
       return value;
     }
 
-    // ：
+    // Fast path: primitives
     const type = typeof value;
     if (type === 'boolean' || type === 'number' || type === 'string') {
       return value;
@@ -352,7 +352,7 @@ export function createDecoder(
 }
 
 /**
- *
+ * Decode all properties of an object.
  *
  * Reference-preserving: returns the original object if no values changed.
  * This is critical for React reconciliation — creating new object references
