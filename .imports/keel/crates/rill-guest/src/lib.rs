@@ -1276,6 +1276,26 @@ pub mod canvas {
     #[cfg(feature = "binary-protocol")]
     static mut FRAME_ID: u32 = 0;
 
+    /// Test-only: prime (or clear) the one-shot handshake cache so a test can
+    /// CHOOSE which encoding path [`draw`] takes.
+    ///
+    /// Without this the cache makes `draw` order-dependent across a test binary:
+    /// the first `draw` in the process issues a `getInfo` probe BEFORE the draw
+    /// call, so a test wiretapping `draw` captures the probe instead — and passes
+    /// or fails depending on whether some earlier test happened to prime the
+    /// static. `Some(true)` = binary path, `Some(false)` = JSON path, `None` =
+    /// unprobed. A no-op when the crate is built without `binary-protocol` (there
+    /// is no probe and no cache; `draw` is JSON-only).
+    #[cfg(test)]
+    pub(crate) fn set_binary_supported_for_test(supported: Option<bool>) {
+        #[cfg(feature = "binary-protocol")]
+        unsafe {
+            BINARY_SUPPORTED = supported;
+        }
+        #[cfg(not(feature = "binary-protocol"))]
+        let _ = supported;
+    }
+
     #[cfg(feature = "binary-protocol")]
     fn next_frame_id() -> u32 {
         unsafe {
@@ -1328,6 +1348,11 @@ pub mod canvas {
     /// Returns `Ok(response)` (`{"ok":true,"dropped":n}`) or `Err(response)` if
     /// the host fails closed (e.g. unknown/unmounted canvas id).
     ///
+    /// `Ok` means the host ACCEPTED the list — a refusal in the reply body is an
+    /// `Err` carrying that body, not an `Ok` (see [`crate::module_result`]).
+    /// `dropped` on the `Ok` path is a partial-success count: individual unknown
+    /// or invalid ops the host skipped while replaying the rest.
+    ///
     /// Encoding selection (`canvas-wire.DESIGN.md` §1): when the crate is built
     /// with `binary-protocol` AND the host advertised `binaryDraw` for a
     /// `wireVersion` this encoder produces, the frame goes out as the binary
@@ -1353,7 +1378,7 @@ pub mod canvas {
             if host_supports_binary().await {
                 if let Ok(frame) = list.encode_binary(canvas_id, next_frame_id()) {
                     let (ok, bytes) = crate::host_call("host:canvas", "draw", frame).await;
-                    return if ok == 1 { Ok(bytes) } else { Err(bytes) };
+                    return crate::module_result(ok, bytes);
                 }
             }
         }
@@ -1365,11 +1390,7 @@ pub mod canvas {
         body.push_str(&list.ops);
         body.push_str("]}");
         let (ok, bytes) = crate::host_call("host:canvas", "draw", body.into_bytes()).await;
-        if ok == 1 {
-            Ok(bytes)
-        } else {
-            Err(bytes)
-        }
+        crate::module_result(ok, bytes)
     }
 
     /// A subset of the DOM `TextMetrics` returned by [`measure_text`]. `width` is
@@ -1521,6 +1542,13 @@ pub mod canvas {
     /// BUDGETS present per canvas (a ~64MB blit is costly), so a non-cooperative
     /// guest that skips the discipline is still rate-bounded host-side — it cannot
     /// flood the main thread, its excess presents just fail closed.
+    ///
+    /// `Ok` means the frame LANDED. Every refusal the host can express —
+    /// over-dimension, size/stride mismatch, a canvas in another mode, no 2D
+    /// context, no memory reader, over byte budget — comes back as `Err(body)`
+    /// with the host's `{"ok":false,"reason":"…"}` intact, so `let _ = present(…)`
+    /// can no longer hide a window that silently stopped updating (issue #85; see
+    /// [`crate::module_result`] for why the reply carries two status levels).
     pub async fn present(canvas_id: &str, surface: &Surface) -> Result<Vec<u8>, Vec<u8>> {
         let mut body = String::from("{\"canvasId\":");
         json_escape(&mut body, canvas_id);
@@ -1531,11 +1559,7 @@ pub mod canvas {
             surface.height
         ));
         let (ok, bytes) = crate::host_call("host:canvas", "present", body.into_bytes()).await;
-        if ok == 1 {
-            Ok(bytes)
-        } else {
-            Err(bytes)
-        }
+        crate::module_result(ok, bytes)
     }
 }
 
@@ -1590,7 +1614,7 @@ pub mod asset {
         json_escape(&mut body, asset_id);
         body.push_str(&format!(",\"dstPtr\":{dst_ptr},\"dstCap\":{dst_cap}}}"));
         let (ok, bytes) = crate::host_call("host:asset", "blit", body.into_bytes()).await;
-        if ok != 1 || !json_flag_true(&bytes, "ok") {
+        if ok != 1 || !crate::json_flag_true(&bytes, "ok") {
             return None;
         }
         parse_u32_field(&bytes, "written").map(|n| n as usize)
@@ -1641,13 +1665,6 @@ pub mod asset {
         } else {
             None
         }
-    }
-
-    /// Whether a boolean JSON field is present and `true` (`"field":true`).
-    fn json_flag_true(bytes: &[u8], field: &str) -> bool {
-        core::str::from_utf8(bytes)
-            .map(|s| s.contains(&format!("\"{field}\":true")))
-            .unwrap_or(false)
     }
 }
 
@@ -1992,7 +2009,7 @@ pub mod gpu {
         body.push_str(mode.as_str());
         body.push_str("\"}");
         let (ok, bytes) = crate::host_call("host:gpu", "configure", body.into_bytes()).await;
-        ok == 1 && json_flag_true(&bytes, "ok")
+        ok == 1 && crate::json_flag_true(&bytes, "ok")
     }
 
     /// `host:gpu.createResource(kind:"vertex")` — upload `data` (raw bytes in the
@@ -2038,7 +2055,7 @@ pub mod gpu {
         }
         body.push('}');
         let (ok, bytes) = crate::host_call("host:gpu", "createResource", body.into_bytes()).await;
-        if ok != 1 || !json_flag_true(&bytes, "ok") {
+        if ok != 1 || !crate::json_flag_true(&bytes, "ok") {
             return None;
         }
         parse_u32_field(&bytes, "handle").map(Handle)
@@ -2055,7 +2072,7 @@ pub mod gpu {
         json_escape(&mut body, asset_id);
         body.push('}');
         let (ok, bytes) = crate::host_call("host:gpu", "createResource", body.into_bytes()).await;
-        if ok != 1 || !json_flag_true(&bytes, "ok") {
+        if ok != 1 || !crate::json_flag_true(&bytes, "ok") {
             return None;
         }
         parse_u32_field(&bytes, "handle").map(Handle)
@@ -2081,11 +2098,7 @@ pub mod gpu {
         body.push_str(&cmds.ops);
         body.push_str("]}");
         let (ok, bytes) = crate::host_call("host:gpu", "submit", body.into_bytes()).await;
-        if ok == 1 {
-            Ok(bytes)
-        } else {
-            Err(bytes)
-        }
+        crate::module_result(ok, bytes)
     }
 
     /// Subscribe to `host:gpu.onDeviceLost` — the host emits this (like
@@ -2126,13 +2139,6 @@ pub mod gpu {
         } else {
             None
         }
-    }
-
-    /// Whether a boolean JSON field is present and `true` (`"field":true`).
-    fn json_flag_true(bytes: &[u8], field: &str) -> bool {
-        core::str::from_utf8(bytes)
-            .map(|s| s.contains(&format!("\"{field}\":true")))
-            .unwrap_or(false)
     }
 }
 
@@ -2477,6 +2483,78 @@ fn push_op(ops: &mut alloc::string::String, op: alloc::string::String) {
     ops.push_str(&op);
 }
 
+/// Format a codec [`store_net_encode::Reason`] as a compact `{"error":"<token>"}`
+/// JSON body, so a byte wrapper can surface a fail-closed cap breach through its
+/// `Err(Vec<u8>)` channel using the schema's stable reason vocabulary.
+pub(crate) fn codec_error(reason: store_net_encode::Reason) -> alloc::vec::Vec<u8> {
+    let mut s = alloc::string::String::from("{\"error\":");
+    json_escape(&mut s, reason.as_str());
+    s.push('}');
+    s.into_bytes()
+}
+
+/// Whether a boolean JSON field is present and affirmatively `true`.
+///
+/// The ONE reader of a host module's own verdict flag, for every wrapper over a
+/// seam whose response declares `"<field>":boolean` in
+/// `contracts/graphics-seams.json`. Same rule as [`json_escape`]: modules call
+/// this instead of growing a local copy.
+///
+/// A substring scan, not a parse: the crate is `no_std` with no JSON reader on
+/// the guest path (`mini_json` is std-only, for `build.rs` + the conformance
+/// tests), and these replies are small fixed shapes. An explicit `false` anywhere
+/// vetoes the match so the one way a scan could FALSE-AFFIRM — the literal
+/// `"ok":true` appearing inside a `reason` string next to the real `"ok":false` —
+/// lands on the fail-closed side instead.
+pub(crate) fn json_flag_true(bytes: &[u8], field: &str) -> bool {
+    let Ok(s) = core::str::from_utf8(bytes) else {
+        return false;
+    };
+    let mut needle = alloc::string::String::with_capacity(field.len() + 8);
+    needle.push('"');
+    needle.push_str(field);
+    needle.push_str("\":");
+    let affirmed = {
+        let mut n = needle.clone();
+        n.push_str("true");
+        s.contains(&n)
+    };
+    let denied = {
+        needle.push_str("false");
+        s.contains(&needle)
+    };
+    affirmed && !denied
+}
+
+/// Fold a host call's TWO status levels into ONE `Result`, so `Ok` means the
+/// operation HAPPENED.
+///
+/// [`host_call`] resolves with the TRANSPORT status: `ok == 1` says the module
+/// ran and answered — not that it agreed to do the work. A module whose seam
+/// declares an `"ok":boolean` response carries its OWN verdict in the body, and a
+/// refusal (`{"ok":false,"reason":"…"}`) arrives over a perfectly successful
+/// call. Mapping only the transport level (issue #85) let every refusal a host
+/// can express reach the guest as `Ok`, which made a dropped frame and a drawn
+/// frame indistinguishable from the return value alone — the guest saw `Ok` while
+/// the window silently stopped updating.
+///
+/// The refused body is returned UNCHANGED through `Err`, so a guest that wants
+/// the host's `reason` reads it from there; the two levels stay distinguishable
+/// because a transport failure has no `"ok"` field to find. Fail-closed: a reply
+/// that does not affirm `"ok":true` — including one that omits the field its seam
+/// declares — is an `Err`, matching what [`asset::blit`], [`gpu::configure`] and
+/// [`gpu::create_vertex_buffer`] already did before this was unified.
+pub(crate) fn module_result(
+    transport_ok: u32,
+    reply: alloc::vec::Vec<u8>,
+) -> Result<alloc::vec::Vec<u8>, alloc::vec::Vec<u8>> {
+    if transport_ok == 1 && json_flag_true(&reply, "ok") {
+        Ok(reply)
+    } else {
+        Err(reply)
+    }
+}
+
 /// Escape `raw` into `out` as a double-quoted JSON string literal.
 ///
 /// The ONE JSON string emitter for every wire path in this SDK (store / canvas /
@@ -2488,16 +2566,6 @@ fn push_op(ops: &mut alloc::string::String, op: alloc::string::String) {
 /// batch/body, and one raw newline inside a string makes the ENTIRE message
 /// invalid — silently dropped host-side. So this must stay strict, and every
 /// module must use this function rather than growing a local copy.
-/// Format a codec [`store_net_encode::Reason`] as a compact `{"error":"<token>"}`
-/// JSON body, so a byte wrapper can surface a fail-closed cap breach through its
-/// `Err(Vec<u8>)` channel using the schema's stable reason vocabulary.
-pub(crate) fn codec_error(reason: store_net_encode::Reason) -> alloc::vec::Vec<u8> {
-    let mut s = alloc::string::String::from("{\"error\":");
-    json_escape(&mut s, reason.as_str());
-    s.push('}');
-    s.into_bytes()
-}
-
 pub(crate) fn json_escape(out: &mut alloc::string::String, raw: &str) {
     out.push('"');
     for ch in raw.chars() {
@@ -2719,11 +2787,22 @@ mod mini_json;
 #[cfg(test)]
 mod conformance;
 
+/// The host-call wiretap harness shared by the wrapper test suites below.
+#[cfg(test)]
+#[path = "test_wiretap.rs"]
+mod test_wiretap;
+
 /// Tests for the RBS1 byte-value SDK wrappers (`store::put_bytes`/`get_bytes`,
 /// `net::fetch_bytes`) — request/response wiretaps against the recording shim.
 #[cfg(test)]
 #[path = "store_net_wrappers_tests.rs"]
 mod store_net_wrappers_tests;
+
+/// Tests that a host module's OWN verdict (`{"ok":false,…}` in the body of a
+/// successful call) reaches the guest as `Err`, never `Ok` (issue #85).
+#[cfg(test)]
+#[path = "module_verdict_tests.rs"]
+mod module_verdict_tests;
 
 // A net-live-bytes counting global allocator, wired ONLY for the test build
 // (the real guest's allocator is talc, installed by `rill_guest_main!`). It
