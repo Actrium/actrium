@@ -1,6 +1,6 @@
 # 原生-guest 线的 defer 项设计留档
 
-> 承 [native-guest.zh.md](native-guest.zh.md)。活跃集（事件 / 共存 / C SDK / fuzz）已落地；本文给**当前刻意 defer 的四项**留下设计与触发条件——不是不做，是排在后面、按条件启动。定序理由见该轮 workflow：多数项改同一批核心文件（`crates/rill-guest/src/lib.rs`、`src/host/wasm-guest/wasm-guest-host.ts`、共享测试文件），必须串行；且 #1/#6 大而险，应等 API 面稳定后再动。
+> 承 [native-guest.zh.md](native-guest.zh.md)。活跃集（事件 / 共存 / C SDK / fuzz）已落地；本文给**当前刻意 defer 的四项**留下设计与触发条件——不是不做，是排在后面、按条件启动。定序理由见该轮 workflow：多数项改同一批核心文件（`crates/rill-native-guest/src/lib.rs`、`src/host/native-guest/native-guest-host.ts`、共享测试文件），必须串行；且 #1/#6 大而险，应等 API 面稳定后再动。
 
 ---
 
@@ -10,14 +10,14 @@
 
 **现状（grounded）**：
 - JS guest 已用二进制协议：`src/shared/bridge/binary-protocol.ts`（`BinaryEncoder`/`BinaryDecoder`；`RILL_MAGIC=0x4c4c4952`、`PROTOCOL_VERSION=1`；op 码 `0x01–0x09`、value 类型 `0x00–0x0f`；16 字节 header + 字符串驻留表；`MAX_INTERN_STRINGS=65535`）。
-- 原生 guest 现在走 JSON：guest 侧 `crates/rill-guest/src/lib.rs` 的 `render()` 用 `format!` 拼 JSON；host 侧 `wasm-guest-host.ts` 的 `onSendBatch`/`onHostCall` 用 `JSON.parse`。
+- 原生 guest 现在走 JSON：guest 侧 `crates/rill-native-guest/src/lib.rs` 的 `render()` 用 `format!` 拼 JSON；host 侧 `native-guest-host.ts` 的 `onSendBatch`/`onHostCall` 用 `JSON.parse`。
 
 **设计**：
-- **guest 侧**：新增 `crates/rill-guest/src/binary.rs`，一个 no_std 二进制编码器，**逐字节对齐** `binary-encoder.ts`（op/value 类型码、u8/u16/u32/f64 小端、header、驻留表用 `Vec` 线性查找——典型批次 <100 串）。`render()` 改调它而非拼 JSON。
+- **guest 侧**：新增 `crates/rill-native-guest/src/binary.rs`，一个 no_std 二进制编码器，**逐字节对齐** `binary-encoder.ts`（op/value 类型码、u8/u16/u32/f64 小端、header、驻留表用 `Vec` 线性查找——典型批次 <100 串）。`render()` 改调它而非拼 JSON。
 - **host 侧**：`onSendBatch` 把 `JSON.parse` 换成 `BinaryProtocol.decodeBatch(this.readBytes(ptr,len))`——`BinaryDecoder` 已能按 `RILL_MAGIC` 自动识别 `ArrayBuffer` 并解成 `OperationBatch`。value/host:* 字节也可同法零拷贝。
 - **兼容**：JSON 保留为回退；host 用 `detectPayloadEncoding` 同时接受二者，灰度切换。
 
-**风险**：**格式逐字节 parity**——字段宽度（header 16 字节、串长 u16 vs u32）差一位，host 解码就静默坏。缓解：紧测试环（round-trip / 压缩率 / 对抗畸形二进制）+ 对着 `binary-protocol.ts` 常量手工核。冲突文件：`wasm-guest-host.ts` + 其测试 + `lib.rs`（**三大热文件全占，绝不能与 #2/#5/#8 并行**）。
+**风险**：**格式逐字节 parity**——字段宽度（header 16 字节、串长 u16 vs u32）差一位，host 解码就静默坏。缓解：紧测试环（round-trip / 压缩率 / 对抗畸形二进制）+ 对着 `binary-protocol.ts` 常量手工核。冲突文件：`native-guest-host.ts` + 其测试 + `lib.rs`（**三大热文件全占，绝不能与 #2/#5/#8 并行**）。
 
 **触发条件**：ABI + 事件 + C SDK 稳定后，且带 round-trip/对抗/压缩基准；保留 JSON 回退。**effort M**。收益：二进制体积约 JSON 的 ~60%、编码 3–5× 提速（`binary-protocol.ts` 基准）。
 
@@ -47,7 +47,7 @@
 
 **目标**：给 guest 作者一套人体工学的 typed host:* 包装，别只有裸 `host_call` + 手拼 JSON。
 
-**现状（grounded）**：`crates/rill-guest/src/lib.rs` 有通用 `host_call` + 一个 `host:store` demo（`store::put/get`，手拼 JSON，wire 对齐平台 host-store.ts 的 putText/getText）。**ABI 无需改**。
+**现状（grounded）**：`crates/rill-native-guest/src/lib.rs` 有通用 `host_call` + 一个 `host:store` demo（`store::put/get`，手拼 JSON，wire 对齐平台 host-store.ts 的 putText/getText）。**ABI 无需改**。
 
 **关键定性（核实后）**：app 专属能力（`host:net`/`identity`/`billing`）住在**下游平台仓**，不在 rill 框架——**框架 SDK 不该硬编码它们**。所以本项是「选抽象」，不是「加能力」：
 - **推荐 · Tier 2 代码生成**：从 `src/contract/index.ts` 的契约定义**生成** typed Rust 包装（TS→Rust codegen），app 作者按自己的契约生成自己的 SDK。
@@ -66,7 +66,7 @@
 
 **现状（grounded）**：`src/host/sandbox/providers/quickjs-native-wasm-provider.ts` 用 **Emscripten 值桥**——`__sendToHost` + `__rill_fn_ret` + `__rill.callbacks`（同步 post + callback-resolve，JS 值形态）。原生 ABI 是线性内存 `ptr+len`。
 
-**设计**：把 QuickJS provider 的 host-call 桥从「JS 值 ccall/cwrap」重构成「线性内存 `rill_host_call`/`rill_resolve`」，与 `WasmGuestHost` 收成同一套派发/编解码。
+**设计**：把 QuickJS provider 的 host-call 桥从「JS 值 ccall/cwrap」重构成「线性内存 `rill_host_call`/`rill_resolve`」，与 `NativeGuestHost` 收成同一套派发/编解码。
 
 **风险（最高，明确 defer）**：
 - QuickJS 是**生产默认引擎**；重构改**核心控制流**（同步 host-fn 注入 → 异步 callback-resolve），需在 C/QuickJS 侧加异步 executor，且**必须保留 timer pause/resume 的时钟冻结语义**。

@@ -5,7 +5,7 @@
  * wired into any live path, and is NOT collected by the unit-test runner (not a
  * *.test.ts). Run it explicitly:
  *
- *     bun src/host/wasm-guest/__benchmarks__/blur-bench.ts
+ *     bun src/host/native-guest/__benchmarks__/blur-bench.ts
  *
  * PURPOSE
  * -------
@@ -35,7 +35,7 @@
 
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { WasmGuestHost } from '../wasm-guest-host';
+import { NativeGuestHost } from '../native-guest-host';
 
 const BLUR_GUEST = readFileSync(join(import.meta.dir, '..', '__tests__', 'fixtures', 'blur-demo-guest.wasm'));
 
@@ -71,7 +71,7 @@ function bench(fn: () => number, opts: { warmup: number; rounds: number }): Timi
 }
 
 async function main(): Promise<void> {
-  const host = new WasmGuestHost({ dispatch: {} });
+  const host = new NativeGuestHost({ dispatch: {} });
   await host.load(BLUR_GUEST);
   // Cast per-function (avoids a bare `unknown` cast, which the check:unknown gate bans).
   const blurAlloc = host.exports.blur_alloc as (len: number) => number;

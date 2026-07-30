@@ -2,8 +2,8 @@
  * Memory-seam tests for the native (non-JS) WASM guest boundary.
  *
  * These cover the BOUNDS-CHECKED WRITE path that the canvas/asset/gpu guest SDK
- * relies on: WasmGuestHost.writeBytes (the host:asset `blit` / host:gpu upload
- * counterpart of readBytes) and the WasmGuestView.readGuestMemory /
+ * relies on: NativeGuestHost.writeBytes (the host:asset `blit` / host:gpu upload
+ * counterpart of readBytes) and the NativeGuestView.readGuestMemory /
  * writeGuestMemory arrow fields the platform late-binds onto host:canvas /
  * host:asset. Every ptr/len that reaches these is GUEST-SUPPLIED and untrusted,
  * so the load-bearing property is: a hostile ptr/len ALWAYS throws (fail-closed)
@@ -19,8 +19,8 @@ import {
   implementHostModules,
   rpc,
 } from '../../../contract';
-import { WasmGuestHost } from '../wasm-guest-host';
-import { WasmGuestView } from '../wasm-guest-view';
+import { NativeGuestHost } from '../native-guest-host';
+import { NativeGuestView } from '../native-guest-view';
 
 // A real guest gives us a real WebAssembly.Memory to write into. roundtrip.wasm
 // calls host:store on init; whether or not host:store is wired, load() sets up
@@ -40,10 +40,10 @@ function makePrng(seed: number): () => number {
   };
 }
 
-// A minimal host:store contract + impl so a WasmGuestView can be constructed the
+// A minimal host:store contract + impl so a NativeGuestView can be constructed the
 // same way an Engine would (contract + hostModules, dispatch built internally).
 // The impl is irrelevant to the memory tests; roundtrip.wasm just needs load()
-// to succeed so the view owns a live WasmGuestHost + memory.
+// to succeed so the view owns a live NativeGuestHost + memory.
 function storeContract(): { contract: RillContractShape; hostModules: HostModuleImplementationMap } {
   const contract = defineRillContract({
     version: '1',
@@ -70,9 +70,9 @@ function storeContract(): { contract: RillContractShape; hostModules: HostModule
   return { contract, hostModules };
 }
 
-describe('WasmGuestHost.writeBytes — bounds-checked write (host:asset.blit / host:gpu)', () => {
+describe('NativeGuestHost.writeBytes — bounds-checked write (host:asset.blit / host:gpu)', () => {
   it('round-trips an in-bounds write through readBytes (mid-memory)', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(WASM);
     const size = (host.exports.memory as WebAssembly.Memory).buffer.byteLength;
 
@@ -85,7 +85,7 @@ describe('WasmGuestHost.writeBytes — bounds-checked write (host:asset.blit / h
   });
 
   it('fuzz: OOB ptr/len ALWAYS throw, in-bounds ALWAYS round-trip (never writes past memory)', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(WASM);
     const memory = host.exports.memory as WebAssembly.Memory;
     const size = memory.buffer.byteLength;
@@ -119,7 +119,7 @@ describe('WasmGuestHost.writeBytes — bounds-checked write (host:asset.blit / h
   });
 
   it('zero-length write is a no-op that does not throw (incl. at ptr === size)', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(WASM);
     const size = (host.exports.memory as WebAssembly.Memory).buffer.byteLength;
 
@@ -132,7 +132,7 @@ describe('WasmGuestHost.writeBytes — bounds-checked write (host:asset.blit / h
   });
 
   it('a negative / non-integer ptr throws (assertInBounds rejects it)', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(WASM);
     const bytes = new Uint8Array(4);
 
@@ -143,20 +143,20 @@ describe('WasmGuestHost.writeBytes — bounds-checked write (host:asset.blit / h
   });
 });
 
-describe('WasmGuestView.readGuestMemory / writeGuestMemory — delegate to the bounds-checked seam', () => {
-  // NOTE / compromise: WasmGuestView does not expose its memory size (the host is
+describe('NativeGuestView.readGuestMemory / writeGuestMemory — delegate to the bounds-checked seam', () => {
+  // NOTE / compromise: NativeGuestView does not expose its memory size (the host is
   // private), so we cannot compute the exact boundary through the view. We instead
   // use a conservatively-in-bounds ptr (well inside the guaranteed 64 KiB minimum
   // page) and a clearly-OOB ptr (> 4 GiB). That is sufficient to prove the arrow
   // fields DELEGATE to the bounds-checked read/write path — the byte-exact
-  // boundary is already exhaustively fuzzed against WasmGuestHost above.
+  // boundary is already exhaustively fuzzed against NativeGuestHost above.
   const IN_PTR = 1024;
   const OOB_PTR = 0x1_0000_0000; // 4 GiB, past any wasm32 linear memory
   const N = 32;
 
-  async function makeView(): Promise<WasmGuestView> {
+  async function makeView(): Promise<NativeGuestView> {
     const { contract, hostModules } = storeContract();
-    const view = new WasmGuestView({
+    const view = new NativeGuestView({
       wasmBytes: WASM,
       contract,
       hostModules,

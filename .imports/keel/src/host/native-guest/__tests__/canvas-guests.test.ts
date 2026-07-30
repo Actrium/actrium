@@ -5,12 +5,12 @@ import { createHostModuleDispatch, defineRillContract, implementHostModules, rpc
 import { ComponentRegistry } from '../../registry';
 import { Receiver } from '../../receiver';
 import { type CanvasOp, decodeCanvasFrame } from '../../wire/canvas-wire-decoder';
-import { WasmGuestHost } from '../wasm-guest-host';
+import { NativeGuestHost } from '../native-guest-host';
 
-// Real Rust guests built via the rill-guest canvas/asset/gpu SDK (crates/build.sh).
+// Real Rust guests built via the rill-native-guest canvas/asset/gpu SDK (crates/build.sh).
 // These drive the SDK modules end-to-end over the native-guest ABI: rill knows
 // nothing about host:canvas / host:gpu, so a test-local dispatch RECORDS what the
-// guest emitted — exactly as storeDispatch does for host:store in wasm-guest-host.test.ts.
+// guest emitted — exactly as storeDispatch does for host:store in native-guest-host.test.ts.
 const fx = (n: string) => readFileSync(join(import.meta.dir, 'fixtures', n));
 const CANVAS_GUEST = fx('canvas-guest.wasm'); // ① host:canvas.draw display list
 const CANVAS_BINARY_GUEST = fx('canvas-binary-guest.wasm'); // wip binary-wire draw (feature ON)
@@ -146,7 +146,7 @@ function makeReceiver() {
 describe('canvas guests — ① host:canvas.draw display list', () => {
   it('canvas-guest emits a host:canvas.draw with the scene ops on init', async () => {
     const { table, calls } = canvasDispatch();
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(CANVAS_GUEST);
     await host.drain();
 
@@ -203,7 +203,7 @@ describe('canvas guests — ② framebuffer present', () => {
   it('canvas-present-guest mounts a <Canvas> and presents its framebuffer on each frame', async () => {
     const receiver = makeReceiver();
     const { table, calls } = canvasDispatch();
-    const host = new WasmGuestHost({ dispatch: table, onRenderBatch: (b) => receiver.applyBatch(b) });
+    const host = new NativeGuestHost({ dispatch: table, onRenderBatch: (b) => receiver.applyBatch(b) });
     await host.load(PRESENT_GUEST);
     await host.drain();
 
@@ -238,7 +238,7 @@ describe('canvas guests — ③ host:gpu command buffer', () => {
   it('canvas-gpu-guest mounts a webgpu <Canvas> and configures + submits on a frame', async () => {
     const receiver = makeReceiver();
     const { table, calls } = gpuDispatch();
-    const host = new WasmGuestHost({ dispatch: table, onRenderBatch: (b) => receiver.applyBatch(b) });
+    const host = new NativeGuestHost({ dispatch: table, onRenderBatch: (b) => receiver.applyBatch(b) });
     await host.load(GPU_GUEST);
     await host.drain();
 
@@ -283,7 +283,7 @@ describe('canvas guests — SDK fail-closed (Result-based)', () => {
     // present() REJECTS host-side -> the guest's await resolves ok=0 -> the SDK's
     // present() returns Err, which the guest ignores and loops for the next tick.
     const { table, calls } = canvasDispatch({ failPresent: true });
-    const host = new WasmGuestHost({ dispatch: table, onRenderBatch: (b) => receiver.applyBatch(b) });
+    const host = new NativeGuestHost({ dispatch: table, onRenderBatch: (b) => receiver.applyBatch(b) });
     await host.load(PRESENT_GUEST);
     await host.drain();
 
@@ -304,7 +304,7 @@ describe('canvas guests — SDK fail-closed (Result-based)', () => {
 
   it('an unregistered host:canvas (empty dispatch) resolves ok=0 without crashing the guest', async () => {
     // No host:canvas at all -> every present resolves ok=0 (the seal's default).
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(PRESENT_GUEST);
     await host.drain();
     host.emitEvent('canvas.frame', { canvasId: 'viewport', t: 0, dt: 0, frame: 1 });
@@ -318,7 +318,7 @@ describe('canvas guests — SDK fail-closed (Result-based)', () => {
 describe('canvas guests — guest->host JSON escaping', () => {
   it('a canvasId / color / text with JSON metachars + multi-byte UTF-8 round-trips exactly', async () => {
     const { table, calls } = canvasDispatch();
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(ESCAPE_GUEST);
     await host.drain();
 
@@ -433,7 +433,7 @@ const EXPECTED_BINARY_OPS: CanvasOp[] = [
 describe('canvas guests — capability handshake (WIP binary wire)', () => {
   it('round-trip: advertised host gets a BINARY frame the TS decoder replays to the exact ops', async () => {
     const { table, draws, probes } = binaryCanvasDispatch({ advertise: true });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(CANVAS_BINARY_GUEST);
     await host.drain();
 
@@ -451,7 +451,7 @@ describe('canvas guests — capability handshake (WIP binary wire)', () => {
     // The wip-enabled guest probes getInfo; this dispatch never registered it,
     // so the probe resolves ok=0 and the guest emits JSON — no flag-day.
     const { table, draws, probes } = binaryCanvasDispatch({ advertise: false });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(CANVAS_BINARY_GUEST);
     await host.drain();
 
@@ -469,7 +469,7 @@ describe('canvas guests — capability handshake (WIP binary wire)', () => {
     // has_flag && has_version` is false on the has_flag half and the guest emits
     // JSON. This is the declining branch a hardcoded {binaryDraw:true} never hit.
     const { table, draws, probes } = binaryCanvasDispatch({ advertise: true, binaryDraw: false });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(CANVAS_BINARY_GUEST);
     await host.drain();
 
@@ -488,7 +488,7 @@ describe('canvas guests — capability handshake (WIP binary wire)', () => {
       binaryDraw: true,
       wireVersion: 0,
     });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(CANVAS_BINARY_GUEST);
     await host.drain();
 
@@ -503,7 +503,7 @@ describe('canvas guests — capability handshake (WIP binary wire)', () => {
     // advertising host — emits an RCNV frame, exactly like canvas-binary-guest.
     // Binary is the promoted default, no longer an opt-in rebuild.
     const { table, draws, probes } = binaryCanvasDispatch({ advertise: true });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(CANVAS_GUEST);
     await host.drain();
 
@@ -518,7 +518,7 @@ describe('canvas guests — capability handshake (WIP binary wire)', () => {
     // canvas-guest, against a host that does not advertise getInfo, falls back to
     // JSON — so promoting the guest default never breaks an unupgraded host.
     const { table, draws, probes } = binaryCanvasDispatch({ advertise: false });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(CANVAS_GUEST);
     await host.drain();
 

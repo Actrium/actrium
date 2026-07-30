@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHostModuleDispatch, defineRillContract, implementHostModules, rpc } from '../../../contract';
 import { decodeEnvelope, isRbs1, reviveSentinels } from '../../wire/store-net-envelope';
-import { WasmGuestHost } from '../wasm-guest-host';
+import { NativeGuestHost } from '../native-guest-host';
 
 // A hand-written guest that sends an RBS1 request (host:store.putBytes with a
 // byte-stream `value` segment) and stashes the RBS1 return the host writes back.
@@ -38,10 +38,10 @@ function bytesDispatch() {
   return { table: createHostModuleDispatch(contract, impl), seen };
 }
 
-describe('WasmGuestHost — RBS1 binary-value envelope (both directions)', () => {
+describe('NativeGuestHost — RBS1 binary-value envelope (both directions)', () => {
   it('decodes an RBS1 request into a Uint8Array and returns an RBS1 envelope', async () => {
     const { table, seen } = bytesDispatch();
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(RBS1_GUEST);
     await host.drain();
 
@@ -82,7 +82,7 @@ describe('WasmGuestHost — RBS1 binary-value envelope (both directions)', () =>
     const impl = implementHostModules(contract, {
       'host:store': { putBytes: async () => ({ version: 7 }) },
     });
-    const host = new WasmGuestHost({ dispatch: createHostModuleDispatch(contract, impl) });
+    const host = new NativeGuestHost({ dispatch: createHostModuleDispatch(contract, impl) });
     await host.load(RBS1_GUEST);
     await host.drain();
 

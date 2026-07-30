@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defineRillContract } from '../../../contract';
-import { createWasmGuestEngine } from '../wasm-guest-view';
+import { createNativeGuestEngine } from '../native-guest-view';
 
 // A render-only native guest (renders View > [Text, View > Text]).
 const UI_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-guest.wasm'));
@@ -10,9 +10,9 @@ const UI_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-guest.wasm'));
 // An empty host-capability contract (ui-guest makes no host:* calls).
 const emptyContract = defineRillContract({ version: '1', hostModules: {}, guestExports: {} });
 
-describe('createWasmGuestEngine — native guest as an EngineViewEngine', () => {
+describe('createNativeGuestEngine — native guest as an EngineViewEngine', () => {
   it('drives a native guest through the EngineViewEngine surface (like useEngineView)', async () => {
-    const engine = createWasmGuestEngine({
+    const engine = createNativeGuestEngine({
       wasmBytes: UI_GUEST,
       contract: emptyContract,
       hostModules: {},
@@ -49,7 +49,7 @@ describe('createWasmGuestEngine — native guest as an EngineViewEngine', () => 
   });
 
   it('forwards events via sendEvent without throwing', async () => {
-    const engine = createWasmGuestEngine({
+    const engine = createNativeGuestEngine({
       wasmBytes: UI_GUEST,
       contract: emptyContract,
       hostModules: {},
@@ -63,7 +63,7 @@ describe('createWasmGuestEngine — native guest as an EngineViewEngine', () => 
   });
 
   it('exposes raw guest exports for diagnostics only after load', async () => {
-    const engine = createWasmGuestEngine({
+    const engine = createNativeGuestEngine({
       wasmBytes: UI_GUEST,
       contract: emptyContract,
       hostModules: {},

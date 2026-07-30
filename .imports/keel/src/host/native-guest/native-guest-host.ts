@@ -1,5 +1,5 @@
 /**
- * WasmGuestHost — the host side of rill's native (non-JS) WASM guest boundary.
+ * NativeGuestHost — the host side of rill's native (non-JS) WASM guest boundary.
  *
  * A native guest is the app compiled straight to `.wasm` (Rust / C / Zig / …),
  * not JS running inside QuickJS. This host instantiates that module, injects the
@@ -60,7 +60,7 @@ const MAX_EVENT_DROP_WARNINGS = 10;
  */
 export const SUPPORTED_GUEST_ABI_VERSIONS: ReadonlySet<number> = new Set([1]);
 
-export interface WasmGuestHostOptions {
+export interface NativeGuestHostOptions {
   /** Capability dispatch table from `createHostModuleDispatch(contract, impl)`. */
   dispatch: HostModuleDispatchTable;
   /** Sink for guest `rill_log` calls. */
@@ -70,7 +70,7 @@ export interface WasmGuestHostOptions {
    * JSON in guest memory (or the binary op-batch wire when `binaryOpBatch` is
    * on); the host decodes it to an `OperationBatch` and hands it off —
    * typically to `receiver.applyBatch`. Keeping this a callback leaves
-   * `WasmGuestHost` decoupled from the receiver.
+   * `NativeGuestHost` decoupled from the receiver.
    */
   onRenderBatch?: (batch: OperationBatch) => void;
   /**
@@ -85,7 +85,7 @@ export interface WasmGuestHostOptions {
   binaryOpBatch?: boolean;
 }
 
-export class WasmGuestHost {
+export class NativeGuestHost {
   private instance!: WebAssembly.Instance;
   private memory!: WebAssembly.Memory;
   private readonly dispatch: HostModuleDispatchTable;
@@ -97,7 +97,7 @@ export class WasmGuestHost {
   private batchDropWarnings = 0;
   private eventDropWarnings = 0;
 
-  constructor(options: WasmGuestHostOptions) {
+  constructor(options: NativeGuestHostOptions) {
     this.dispatch = options.dispatch;
     this.onLog = options.onLog;
     this.onRenderBatch = options.onRenderBatch;
@@ -236,7 +236,7 @@ export class WasmGuestHost {
       this.eventDropWarnings === MAX_EVENT_DROP_WARNINGS
         ? ' (further drop warnings suppressed)'
         : '';
-    console.warn(`[rill:wasm-guest] event "${name}" dropped before delivery: ${reason}${suffix}`);
+    console.warn(`[rill:native-guest] event "${name}" dropped before delivery: ${reason}${suffix}`);
   }
 
   /** Allocate guest memory via rill_alloc and copy `bytes` in; returns the ptr. */
@@ -350,7 +350,7 @@ export class WasmGuestHost {
       this.batchDropWarnings === MAX_BATCH_DROP_WARNINGS
         ? ' (further drop warnings suppressed)'
         : '';
-    console.warn(`[rill:wasm-guest] render batch dropped: ${reason}${suffix}`);
+    console.warn(`[rill:native-guest] render batch dropped: ${reason}${suffix}`);
   }
 
   // --- ABI bridge: guest rill_host_call -> host dispatch -> guest rill_resolve ---

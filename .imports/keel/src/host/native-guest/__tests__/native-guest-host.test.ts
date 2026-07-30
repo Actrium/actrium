@@ -5,7 +5,7 @@ import { createHostModuleDispatch, defineRillContract, implementHostModules, rpc
 import { ComponentRegistry } from '../../registry';
 import { Receiver } from '../../receiver';
 import { decodeEnvelope, isRbs1, LIMITS, reviveSentinels } from '../../wire/store-net-envelope';
-import { WasmGuestHost } from '../wasm-guest-host';
+import { NativeGuestHost } from '../native-guest-host';
 
 // A tiny host module defined IN the test, mirroring the platform's host:store
 // contract (putText/getText shapes from host-store.ts): rill knows nothing
@@ -56,7 +56,7 @@ function storeDispatch(options: { throwOnPut?: boolean } = {}) {
 }
 
 const WASM = readFileSync(join(import.meta.dir, 'fixtures/roundtrip.wasm'));
-// Real Rust guest built via the rill-guest SDK (crates/build.sh).
+// Real Rust guest built via the rill-native-guest SDK (crates/build.sh).
 const RUST_GUEST = readFileSync(join(import.meta.dir, 'fixtures/kv-guest.wasm'));
 // Rust guest that renders UI via the SDK's declarative builder.
 const UI_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-guest.wasm'));
@@ -127,7 +127,7 @@ function randomJson(rng: () => number, depth: number): Json {
     }
   }
 }
-const readResolve = (host: WasmGuestHost) => {
+const readResolve = (host: NativeGuestHost) => {
   const ok = (host.exports.resolve_ok as () => number)();
   const ptr = (host.exports.resolve_ptr as () => number)();
   const len = (host.exports.resolve_len as () => number)();
@@ -135,10 +135,10 @@ const readResolve = (host: WasmGuestHost) => {
   return { ok, result };
 };
 
-describe('WasmGuestHost — native (non-JS) guest host:* ABI', () => {
+describe('NativeGuestHost — native (non-JS) guest host:* ABI', () => {
   it('round-trips a host call through linear memory (guest -> host:* -> guest resolve)', async () => {
     const { table, store } = storeDispatch();
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(WASM);
     await host.drain();
 
@@ -149,7 +149,7 @@ describe('WasmGuestHost — native (non-JS) guest host:* ABI', () => {
   });
 
   it('is fail-closed: an undeclared host module resolves ok=0 (the seal)', async () => {
-    const host = new WasmGuestHost({ dispatch: {} }); // host:store not registered
+    const host = new NativeGuestHost({ dispatch: {} }); // host:store not registered
     await host.load(WASM);
     await host.drain();
 
@@ -159,10 +159,10 @@ describe('WasmGuestHost — native (non-JS) guest host:* ABI', () => {
   });
 });
 
-describe('WasmGuestHost — real Rust guest via the rill-guest SDK', () => {
+describe('NativeGuestHost — real Rust guest via the rill-native-guest SDK', () => {
   it('drives an async Rust guest (store::put("a","b").await) end to end', async () => {
     const { table, store } = storeDispatch();
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(RUST_GUEST);
     await host.drain();
 
@@ -175,7 +175,7 @@ describe('WasmGuestHost — real Rust guest via the rill-guest SDK', () => {
   });
 });
 
-describe('WasmGuestHost — native guest renders UI via the receiver', () => {
+describe('NativeGuestHost — native guest renders UI via the receiver', () => {
   it('materializes a Rust guest render batch into the real receiver tree', async () => {
     const registry = new ComponentRegistry();
     // biome-ignore lint/suspicious/noExplicitAny: registry stores an opaque materializer; irrelevant here.
@@ -190,7 +190,7 @@ describe('WasmGuestHost — native guest renders UI via the receiver', () => {
 
     // The guest's render batch (JSON wire) is decoded by the host and applied
     // to the real receiver — the same materialization path JS guests use.
-    const host = new WasmGuestHost({
+    const host = new NativeGuestHost({
       dispatch: {},
       onRenderBatch: (batch) => receiver.applyBatch(batch),
     });
@@ -209,10 +209,10 @@ describe('WasmGuestHost — native guest renders UI via the receiver', () => {
   });
 });
 
-describe('WasmGuestHost — adversarial / boundary (the trust boundary)', () => {
+describe('NativeGuestHost — adversarial / boundary (the trust boundary)', () => {
   it('fails closed (ok=0) on malformed JSON input, does not crash', async () => {
     const { table } = storeDispatch();
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(BAD_JSON);
     await host.drain();
     expect((host.exports.resolve_ok as () => number)()).toBe(0);
@@ -220,7 +220,7 @@ describe('WasmGuestHost — adversarial / boundary (the trust boundary)', () => 
 
   it('fails closed (ok=0) on an out-of-bounds guest pointer, never reads OOB', async () => {
     const { table } = storeDispatch();
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(OOB);
     await host.drain();
     expect((host.exports.resolve_ok as () => number)()).toBe(0);
@@ -228,7 +228,7 @@ describe('WasmGuestHost — adversarial / boundary (the trust boundary)', () => 
 
   it('drops a malformed render batch without crashing the host', async () => {
     let batchCount = 0;
-    const host = new WasmGuestHost({
+    const host = new NativeGuestHost({
       dispatch: {},
       onRenderBatch: () => {
         batchCount++;
@@ -240,7 +240,7 @@ describe('WasmGuestHost — adversarial / boundary (the trust boundary)', () => 
 
   it('fails closed (ok=0) when a host handler throws', async () => {
     const { table } = storeDispatch({ throwOnPut: true });
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(WASM);
     await host.drain();
     const { ok, result } = readResolve(host);
@@ -249,7 +249,7 @@ describe('WasmGuestHost — adversarial / boundary (the trust boundary)', () => 
   });
 
   it('fails closed (ok=0) when the module exists but the method does not', async () => {
-    const host = new WasmGuestHost({ dispatch: { 'host:store': {} } }); // putText missing
+    const host = new NativeGuestHost({ dispatch: { 'host:store': {} } }); // putText missing
     await host.load(WASM);
     await host.drain();
     const { ok, result } = readResolve(host);
@@ -258,7 +258,7 @@ describe('WasmGuestHost — adversarial / boundary (the trust boundary)', () => 
   });
 });
 
-describe('WasmGuestHost — allocation failure (rill_alloc returns 0)', () => {
+describe('NativeGuestHost — allocation failure (rill_alloc returns 0)', () => {
   // Address 0 is INSIDE linear memory, so a returned NULL passes a pure bounds
   // check. The host must treat ptr 0 + len > 0 as allocation failure and never
   // write there — the SDK's bump allocator returns NULL exactly when a
@@ -266,7 +266,7 @@ describe('WasmGuestHost — allocation failure (rill_alloc returns 0)', () => {
   // heap, and the guest keeps live data at the bottom of memory.
   it('abandons a host-call resolution instead of writing the result over address 0', async () => {
     const { table } = storeDispatch();
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(ALLOC_ZERO);
     await host.drain();
 
@@ -277,7 +277,7 @@ describe('WasmGuestHost — allocation failure (rill_alloc returns 0)', () => {
   });
 
   it('drops an event instead of delivering pointers into corrupted memory', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(ALLOC_ZERO);
 
     // emitEvent absorbs the allocation failure (same fail-closed contract as a
@@ -288,10 +288,10 @@ describe('WasmGuestHost — allocation failure (rill_alloc returns 0)', () => {
   });
 });
 
-describe('WasmGuestHost — SDK executor: sequential awaits + escaping', () => {
+describe('NativeGuestHost — SDK executor: sequential awaits + escaping', () => {
   it('drives two sequential host awaits (put then get) and round-trips escaped chars', async () => {
     const { table, store } = storeDispatch();
-    const host = new WasmGuestHost({ dispatch: table });
+    const host = new NativeGuestHost({ dispatch: table });
     await host.load(SEQ_GUEST);
     await host.drain();
 
@@ -309,14 +309,14 @@ describe('WasmGuestHost — SDK executor: sequential awaits + escaping', () => {
   });
 
   it('takes the guest Err branch (ok=0) when the capability is unavailable', async () => {
-    const host = new WasmGuestHost({ dispatch: {} }); // host:store not registered
+    const host = new NativeGuestHost({ dispatch: {} }); // host:store not registered
     await host.load(RUST_GUEST);
     await host.drain();
     expect((host.exports.last_ok as () => number)()).toBe(0); // Rust matched Err(_)
   });
 });
 
-describe('WasmGuestHost — C guest via the C SDK (language-neutral ABI)', () => {
+describe('NativeGuestHost — C guest via the C SDK (language-neutral ABI)', () => {
   it('loads a C-authored guest and materializes its render batch', async () => {
     const registry = new ComponentRegistry();
     // biome-ignore lint/suspicious/noExplicitAny: opaque materializer, irrelevant here.
@@ -328,7 +328,7 @@ describe('WasmGuestHost — C guest via the C SDK (language-neutral ABI)', () =>
       () => {},
       () => {}
     );
-    const host = new WasmGuestHost({
+    const host = new NativeGuestHost({
       dispatch: {},
       onRenderBatch: (b) => receiver.applyBatch(b),
     });
@@ -341,9 +341,9 @@ describe('WasmGuestHost — C guest via the C SDK (language-neutral ABI)', () =>
   });
 });
 
-describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
+describe('NativeGuestHost — host->guest events (rill_on_event)', () => {
   it('delivers an event to a native guest handler with its payload', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_GUEST);
     const count = () => (host.exports.count as () => number)();
     const lastPayload = () => {
@@ -372,7 +372,7 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
     // subscribe to a host module (that needs a function reference), and it cannot
     // pull data that arrives because an external peer spoke — so the event
     // channel must be able to carry bytes, not just text.
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_GUEST);
     const lastRaw = (): Uint8Array => {
       const ptr = (host.exports.last_ptr as () => number)();
@@ -408,7 +408,7 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
   it('drops (and reports) an event whose payload cannot be encoded, without throwing', async () => {
     // Encode failures are host-side data problems, not guest-mediated ones, so
     // they get a named warning instead of the silent drop delivery failures take.
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_GUEST);
     const warnings: string[] = [];
     const originalWarn = console.warn;
@@ -440,7 +440,7 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
     // aggregate `maxEnvelopeBytes` is unchanged, and a frame that size was always
     // expressible (as several 1 MiB byte fields) — one field may now simply use
     // more of that existing budget.
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_GUEST);
     const chunk = new Uint8Array(LIMITS.maxSegmentBytes + 32);
     for (let i = 0; i < chunk.length; i++) chunk[i] = i & 0xff;
@@ -483,7 +483,7 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
 
   it('emitEvent is a no-op for a guest that does not export rill_on_event', async () => {
     // A .wat guest with no rill_on_event export — must not throw.
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(BAD_BATCH);
     expect(() => host.emitEvent('ping', { n: 1 })).not.toThrow();
   });
@@ -491,7 +491,7 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
   it('is fail-closed when the guest rill_on_event traps (emitEvent never throws)', async () => {
     // event-trap.wasm exports a rill_on_event that traps. A hostile/broken guest
     // must not make host-side event delivery throw.
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_TRAP);
     expect(() => host.emitEvent('anything', { n: 1 })).not.toThrow();
   });
@@ -500,7 +500,7 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
     // event-guest registers an "once" handler that calls events::off(self) while
     // it runs. The SDK snapshots handlers before dispatch, so this must not
     // corrupt the registry (no UAF) and must fire exactly once.
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_GUEST);
     const onceCount = () => (host.exports.once_count as () => number)();
     expect(onceCount()).toBe(0);
@@ -510,7 +510,7 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
   });
 });
 
-describe('WasmGuestHost — the seal is an import allowlist (automated)', () => {
+describe('NativeGuestHost — the seal is an import allowlist (automated)', () => {
   const ALLOWED = new Set(['rill_host_call', 'rill_send_batch', 'rill_log', 'rill_on_event']);
   const guests: Array<[string, Uint8Array]> = [
     ['roundtrip', WASM],
@@ -535,7 +535,7 @@ describe('WasmGuestHost — the seal is an import allowlist (automated)', () => 
     // bad-import.wasm imports env.evil, which the host does NOT provide. This is
     // the actual enforcement (WebAssembly.instantiate -> LinkError), not just the
     // tautology above that our own guests happen to import only allowed names.
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     let threw = false;
     try {
       await host.load(BAD_IMPORT);
@@ -546,9 +546,9 @@ describe('WasmGuestHost — the seal is an import allowlist (automated)', () => 
   });
 });
 
-describe('WasmGuestHost — fuzz + resilience (trust boundary)', () => {
+describe('NativeGuestHost — fuzz + resilience (trust boundary)', () => {
   it('readBytes fuzz: OOB pointers always throw, in-bounds always return exactly len', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(WASM);
     const size = (host.exports.memory as WebAssembly.Memory).buffer.byteLength;
     const rng = makePrng(0xc0ffee);
@@ -564,7 +564,7 @@ describe('WasmGuestHost — fuzz + resilience (trust boundary)', () => {
   });
 
   it('emitEvent fuzz: arbitrary JSON payloads round-trip and never crash the guest', async () => {
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_GUEST);
     const lastPayload = () => {
       const ptr = (host.exports.last_ptr as () => number)();
@@ -588,7 +588,7 @@ describe('WasmGuestHost — fuzz + resilience (trust boundary)', () => {
     // bytes = frames*bytes; peak live = window*bytes (kept tiny). A leaking or
     // grow-only allocator would push linear memory past the cumulative total; a
     // correct reclaiming allocator grows once during warm-up, then PLATEAUS.
-    const host = new WasmGuestHost({ dispatch: {} });
+    const host = new NativeGuestHost({ dispatch: {} });
     await host.load(HEAP_CHURN);
     const memory = host.exports.memory as WebAssembly.Memory;
     const churn = host.exports.heap_churn as (f: number, b: number, w: number) => number;
@@ -635,7 +635,7 @@ describe('WasmGuestHost — fuzz + resilience (trust boundary)', () => {
     // The host process survived a hostile-scale workload: a normal guest still
     // loads and works.
     const { table, store } = storeDispatch();
-    const ok = new WasmGuestHost({ dispatch: table });
+    const ok = new NativeGuestHost({ dispatch: table });
     await ok.load(RUST_GUEST);
     await ok.drain();
     expect((ok.exports.last_ok as () => number)()).toBe(1);

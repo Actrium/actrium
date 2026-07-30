@@ -5,7 +5,7 @@
  * wired into the live receive path, and is NOT collected by the unit-test
  * runner (it is not a *.test.ts / *.spec.ts file). Run it explicitly:
  *
- *     bun src/host/wasm-guest/__benchmarks__/op-batch-bench.ts
+ *     bun src/host/native-guest/__benchmarks__/op-batch-bench.ts
  *
  * PURPOSE
  * -------
@@ -23,7 +23,7 @@
  *
  * ENCODER NOTE (faithfulness): the binary bytes are produced by the ONLY
  * conformant encoder in the tree — the schema-locked Rust encoder
- * (`crates/rill-guest/src/wire_encode.rs`), reached through the dev-harness CLI
+ * (`crates/rill-native-guest/src/wire_encode.rs`), reached through the dev-harness CLI
  * `examples/op_batch_oracle.rs` (the retired TS `BinaryEncoder` is gone; see
  * issue #47). Before any timing, this harness (a) pushes the checked-in golden
  * vectors through the CLI and asserts BYTE-FOR-BYTE equality with their oracle
@@ -215,7 +215,7 @@ function encodeViaOracle(batches: SerializedOperationBatch[]): ArrayBuffer[] {
       'run',
       '--quiet',
       '-p',
-      'rill-guest',
+      'rill-native-guest',
       '--features',
       'binary-protocol',
       '--example',

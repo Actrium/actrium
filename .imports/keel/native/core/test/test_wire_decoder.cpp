@@ -1407,7 +1407,7 @@ TestSuite createWireDecoderTests() {
       // Absence is a hard failure, not a silent coverage gap.
       suite.cases.push_back({"matrix: fixture present", []() {
         assertTrue(false, "contracts/op-batch-wire.matrix.json not found (path " + matrixPath() +
-                              "); (re)generate it with the rill-guest matrix generator");
+                              "); (re)generate it with the rill-native-guest matrix generator");
       }});
     }
   }

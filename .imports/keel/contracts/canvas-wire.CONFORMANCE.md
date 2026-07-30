@@ -26,7 +26,7 @@ loop:
 
 | # | Assertion | Where | Direction |
 |---|-----------|-------|-----------|
-| 1 | Rust **encoder**(source frame) == golden `hex`, byte-for-byte | `crates/rill-guest/src/canvas_encode.rs` (`golden_vectors_encode_byte_exact`) | frame → bytes |
+| 1 | Rust **encoder**(source frame) == golden `hex`, byte-for-byte | `crates/rill-native-guest/src/canvas_encode.rs` (`golden_vectors_encode_byte_exact`) | frame → bytes |
 | 2 | TS **decoder**(golden bytes) semantically == source op array | `src/host/wire/__tests__/canvas-wire-decoder.test.ts` (`toEqual(ops)`) | bytes → ops |
 
 Because Rust emits *exactly* the golden bytes and the decoder consumes *exactly*
@@ -39,7 +39,7 @@ iterator), so they cannot drift from each other either.
 
 Locking notes (so the pivot cannot silently rot):
 - The Rust codec constants (magic, protocol version, opcodes, flags, limits) are
-  **generated** from `canvas-wire.json` by `crates/rill-guest/build.rs`
+  **generated** from `canvas-wire.json` by `crates/rill-native-guest/build.rs`
   (`generate_canvas_contract`), so a renamed/removed key fails the build. `MAGIC`
   is derived from the schema's `magic.hex` and its little-endian bytes are
   asserted to spell `magic.asciiBytes` at build time — any edit to either field
@@ -49,20 +49,20 @@ Locking notes (so the pivot cannot silently rot):
   cap would fail the golden `at-limit-ops` (maxOps=20000) vector, and a magic
   drift would fail every vector — so the golden pivot enforces the TS side too.
 - The golden file is regenerated (never hand-edited) via
-  `RILL_REGEN_CANVAS_GOLDEN=1 cargo test -p rill-guest --features binary-protocol`;
+  `RILL_REGEN_CANVAS_GOLDEN=1 cargo test -p rill-native-guest --features binary-protocol`;
   the Rust encoder is the oracle.
 
 ## How to run both (Linux)
 
 ```sh
 # 1. Rust encoder → golden hex (+ all cap / negative cases)
-cd /ext/rill/crates && cargo test -p rill-guest --features binary-protocol
+cd /ext/rill/crates && cargo test -p rill-native-guest --features binary-protocol
 
 # 2. TS zero-DOM decoder ← golden bytes (+ fail-closed + cross-magic)
 cd /ext/rill && bun test src/host/wire
 
 # 3. Capability handshake round-trip + JSON fallback + default-stays-JSON
-cd /ext/rill && bun test src/host/wasm-guest
+cd /ext/rill && bun test src/host/native-guest
 ```
 
 Both codecs are WORK IN PROGRESS and gated OFF in shipped builds:
@@ -227,7 +227,7 @@ concrete wiring:
 
 - One additive host method **`host:canvas.getInfo() → { binaryDraw:boolean,
   wireVersion:number }`**. The guest `await`s it **once** and caches the answer
-  (`host_supports_binary()` in `crates/rill-guest/src/lib.rs`, gated on
+  (`host_supports_binary()` in `crates/rill-native-guest/src/lib.rs`, gated on
   `binary-protocol`).
 - Binary is used **iff** the feature is compiled **and** `ok==1` **and**
   `binaryDraw==true` **and** `wireVersion` == the encoder's `WIRE_VERSION`. Any
@@ -246,7 +246,7 @@ concrete wiring:
   encoder-selection — not a wire change, not a version bump.
 
 The handshake is proven end-to-end by three fixture tests
-(`src/host/wasm-guest/__tests__/canvas-guests.test.ts`):
+(`src/host/native-guest/__tests__/canvas-guests.test.ts`):
 - **Round-trip** — an advertising host (`getInfo → {binaryDraw:true,
   wireVersion:1}`) + the `canvas-binary-guest.wasm` fixture ⇒ the guest sends a
   **binary** frame; the host decodes it with `decodeCanvasFrame` and the replayed
@@ -279,10 +279,10 @@ Verified 2026-07-25 on Linux (rustc 1.93.0, bun 1.3.5).
 
 | Codec / suite | Role | Result |
 |---|---|---|
-| Rust `rill-guest` (`--features binary-protocol`) | encoder → golden hex + caps | **PASS** — 91 tests (canvas: golden byte-exact incl. the four new ops, all caps, per-frame color+font intern, header layout) |
-| Rust `rill-guest` (default) | shipped JSON path unaffected | **PASS** — 63 tests |
+| Rust `rill-native-guest` (`--features binary-protocol`) | encoder → golden hex + caps | **PASS** — 91 tests (canvas: golden byte-exact incl. the four new ops, all caps, per-frame color+font intern, header layout) |
+| Rust `rill-native-guest` (default) | shipped JSON path unaffected | **PASS** — 63 tests |
 | TS `canvas-wire-decoder` (`bun test src/host/wire`) | golden bytes → ops + fail-closed + cross-magic | **PASS** — 220 tests (59 in the canvas decoder file: 32 golden vectors decode to exact ops across all four entry points, a typed negative per reason, cross-magic both directions) |
-| TS `bun test src/host/wasm-guest` | handshake round-trip + JSON fallback + default-stays-JSON | **PASS** — 104 tests (incl. the three canvas handshake fixtures) |
+| TS `bun test src/host/native-guest` | handshake round-trip + JSON fallback + default-stays-JSON | **PASS** — 104 tests (incl. the three canvas handshake fixtures) |
 | `bunx tsc --noEmit` | typecheck | **PASS** — exit 0 |
 
 **Cross-magic (both directions), proven:** a canvas (`RCNV`) buffer fed to the
