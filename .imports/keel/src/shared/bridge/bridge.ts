@@ -1,10 +1,10 @@
 /**
  * @rill/shared/bridge - Communication Layer
  *
- * Bridge  Host/Guest
- * - ：sendToHost() / sendToGuest()
- * - /
- * -  JSI ：，
+ * Bridge is the communication layer between Host and Guest
+ * - exposes exactly two methods: sendToHost() / sendToGuest()
+ * - handles all encoding/decoding internally, automatically
+ * - leans on JSI as far as it goes: natively supported types pass straight through, zero overhead
  */
 
 import type {
@@ -44,7 +44,7 @@ import { PromiseManager, type PromiseSettleResult } from './promise-manager';
 const VALID_OPERATION_TYPES: ReadonlySet<string> = new Set(OPERATION_TYPES);
 
 /**
- * Bridge
+ * Bridge configuration options
  */
 export interface BridgeOptions {
   /**
@@ -75,30 +75,29 @@ export interface BridgeOptions {
   callbackRegistry: CallbackRegistry;
 
   /**
-   * Guest  -  Sandbox
-   * ，Bridge  Guest
+   * Guest callback invoker - invokes callbacks registered in the Sandbox
+   * When provided, the bridge routes those calls to the guest automatically
    */
   guestInvoker?: (fnId: string, args: ReviewedUnknown[]) => ReviewedUnknown;
 
   /**
-   * Guest  -  Sandbox
-   * ，Bridge  release  Guest
+   * Guest callback releaser - releases callbacks registered in the Sandbox
+   * When provided, the bridge routes release calls to the guest
    */
   guestReleaseCallback?: (fnId: string) => void;
 
   /**
-   * （， DEFAULT_TYPE_RULES）
+   * Type rules (optional; DEFAULT_TYPE_RULES when omitted)
    */
   typeRules?: TypeRule[];
 
   /**
-   * Promise （）， 30000ms (30)
-   *  0
+   * Promise timeout in milliseconds, default 30000 (30 seconds); 0 disables it
    */
   promiseTimeout?: number;
 
   /**
-   *
+   * Debug mode
    */
   debug?: boolean;
 
@@ -121,9 +120,9 @@ export interface EncodeBatchResult {
 }
 
 /**
- * Bridge -
+ * Bridge - unified communication layer
  *
- * ，/
+ * Two methods only; all encoding and decoding happens inside
  */
 export class Bridge {
   private onGuestOperations: (batch: OperationBatch) => void;
@@ -141,7 +140,7 @@ export class Bridge {
   // Promise handling - delegated to PromiseManager
   private promiseManager: PromiseManager;
 
-  // Type rule context ()
+  // Type rule context (capabilities exposed to the rules)
   private readonly context: CodecCallbacks;
 
   // Encoder/Decoder functions (created using shared utilities)
@@ -165,15 +164,15 @@ export class Bridge {
       debug: this.debug,
     });
 
-    //  type rule context (， encoder/decoder )
+    // Declare the type rule context first: the encoder and decoder both close over it
     // Reason: Context must reference encoder/decoder which reference context (circular)
     this.context = {} as CodecCallbacks;
 
-    //  encoder  decoder
+    // Create the encoder and decoder using shared utilities
     this.encoder = createEncoder(this.typeRules, this.context);
     this.decoder = createDecoder(this.typeRules, this.context);
 
-    //  context（ encoder/decoder ）
+    // Finish filling in the context now that the encoder and decoder exist
     this.context.encode = this.encoder;
     this.context.decode = this.decoder;
     this.context.logger = options.logger; // Pass logger to context for TypeRules error reporting
@@ -185,19 +184,19 @@ export class Bridge {
       }
       return fnId;
     };
-    // invokeFunction:  Guest  Host registry
+    // invokeFunction: routes smartly to Guest or Host registry
     this.context.invokeFunction = (fnId, args) => {
-      //  Host registry（Host ）
+      // Host registry first (callbacks registered on the host side)
       if (this.registry.has(fnId)) {
         return this.registry.invoke(fnId, args);
       }
-      // Host registry  →  Guest sandbox
-      //  fn_N (sandbox __rill.registerCallback)  fn_xxx_N (Guest globalCallbackRegistry)
+      // Not in Host registry -> route to Guest sandbox
+      // Covers both fn_N (sandbox __rill.registerCallback) and fn_xxx_N (Guest globalCallbackRegistry)
       // NOTE: args encoding is handled by TypeRules (serialized-function decode)
       if (this.guestInvoker) {
         return this.guestInvoker(fnId, args);
       }
-      //
+      // Cannot route
       if (this.debug) {
         console.warn(
           `[Bridge] invokeFunction: fnId ${fnId} not found in Host registry and no guestInvoker`
@@ -371,23 +370,23 @@ export class Bridge {
 
   /**
    * Host → Guest
-   * ，
+   * Send a host message; encoding happens inside
    */
   async sendToGuest(message: HostMessage): Promise<void> {
     if (this.debug) {
       console.log('[Bridge] sendToGuest input:', message);
     }
 
-    // 1.
+    // 1. Encode
     const encoded = this.encodeHostMessage(message);
 
     if (this.debug) {
       console.log('[Bridge] sendToGuest encoded:', encoded);
     }
 
-    // 2.  JSI
+    // 2. Cross the JSI boundary
 
-    // 3.
+    // 3. Decode and hand off to the receiver
     const decoded = this.decodeHostMessage(encoded);
 
     if (this.debug) {
@@ -398,7 +397,7 @@ export class Bridge {
   }
 
   // ============================================
-  //  - （BridgeValue → SerializedValue）
+  // Internals - encode (BridgeValue -> SerializedValue)
   // ============================================
 
   /**
@@ -438,7 +437,7 @@ export class Bridge {
   }
 
   /**
-   *  Host
+   * Encode a Host message
    */
   private encodeHostMessage(message: HostMessage): SerializedHostMessage {
     switch (message.type) {
@@ -485,25 +484,25 @@ export class Bridge {
   }
 
   /**
-   *  BridgeValue -
+   * Encode an arbitrary BridgeValue - dispatches automatically via type rules
    */
   private encode(value: BridgeValue): SerializedValue {
     return this.encoder(value) as SerializedValue;
   }
 
   /**
-   * （）
+   * Encode an object's properties, recursing through the shared encoder
    */
   private encodeObject(obj: BridgeValueObject): SerializedValueObject {
     return sharedEncodeObject(obj, this.encoder) as SerializedValueObject;
   }
 
   // ============================================
-  //  - （SerializedValue → BridgeValue）
+  // Internals - decode (SerializedValue -> BridgeValue)
   // ============================================
 
   /**
-   *
+   * Decode an operation batch
    */
   private decodeBatch(batch: SerializedOperationBatch): OperationBatch {
     return {
@@ -529,7 +528,7 @@ export class Bridge {
   }
 
   /**
-   *  Host
+   * Decode a Host message
    */
   private decodeHostMessage(message: SerializedHostMessage): HostMessage {
     switch (message.type) {
@@ -553,7 +552,7 @@ export class Bridge {
       case HostMsg.DESTROY:
         return { type: HostMsg.DESTROY };
       case HostMsg.PROMISE_RESOLVE:
-        //  Promise
+        // Settle the promise
         this.settlePromise(message.promiseId, {
           status: 'fulfilled',
           value: this.decode(message.value),
@@ -564,7 +563,7 @@ export class Bridge {
           value: this.decode(message.value),
         };
       case HostMsg.PROMISE_REJECT: {
-        //  Promise
+        // Handle the promise rejection
         const error = new Error(message.error.__message);
         error.name = message.error.__name;
         if (message.error.__stack) {
@@ -589,14 +588,14 @@ export class Bridge {
   }
 
   /**
-   *  SerializedValue -
+   * Decode an arbitrary SerializedValue - dispatches automatically via type rules
    */
   private decode(value: SerializedValue): BridgeValue {
     return this.decoder(value) as BridgeValue;
   }
 
   /**
-   * （）
+   * Decode an object's properties, recursing through the shared decoder
    */
   private decodeObject(obj: SerializedValueObject): BridgeValueObject {
     return sharedDecodeObject(obj, this.decoder) as BridgeValueObject;
@@ -607,7 +606,7 @@ export class Bridge {
   // ============================================
 
   /**
-   *  Promise
+   * Send the promise settlement result to the peer
    */
   private sendPromiseResult(promiseId: string, result: PromiseSettleResult): void {
     // Fire-and-forget, but MUST handle rejection to avoid unhandled Promise rejection.
@@ -620,7 +619,7 @@ export class Bridge {
     };
 
     if (result.status === 'fulfilled') {
-      //  resolve
+      // Send the resolve message
       safeSend(
         this.sendToGuest({
           type: HostMsg.PROMISE_RESOLVE,
@@ -629,7 +628,7 @@ export class Bridge {
         })
       );
     } else {
-      //  reject
+      // Send the reject message
       const error =
         result.reason instanceof Error ? result.reason : new Error(String(result.reason));
       const serializedError: SerializedError = {
@@ -649,7 +648,7 @@ export class Bridge {
   }
 
   /**
-   *  Promise - delegated to PromiseManager
+   * Settle a pending promise - delegated to PromiseManager
    */
   private settlePromise(promiseId: string, result: PromiseSettleResult): void {
     this.promiseManager.settle(promiseId, result);

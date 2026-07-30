@@ -1,11 +1,11 @@
 /**
  * @rill/bridge - Protocol Type System
  *
- *  JSI
- * - JSI ：，
- * -  Bridge ：/
+ * A complete type system built on what JSI can support natively
+ * - types JSI supports natively: passed straight through, zero overhead
+ * - types the bridge has to handle: serialized on the way out, deserialized on the way in
  *
- *  Host ↔ Guest
+ * This is the protocol layer shared between host and guest
  */
 
 // ============================================
@@ -21,69 +21,69 @@
 export type ReviewedUnknown = unknown;
 
 // ============================================
-// JSI （，）
+// Natively supported by JSI (passed straight through, zero overhead)
 // ============================================
 
 /**
- * JSI
+ * JSI primitive types
  */
 export type JSIPrimitive = null | undefined | boolean | number | string;
 
 /**
- * JSI  -
+ * JSI-safe type - can be passed across the boundary directly
  */
 export type JSISafe = JSIPrimitive | JSISafeArray | JSISafeObject;
 
 /**
- * JSI
+ * JSI-safe array
  */
 export interface JSISafeArray extends Array<JSISafe> {}
 
 /**
- * JSI
+ * JSI-safe object
  */
 export interface JSISafeObject {
   [key: string]: JSISafe;
 }
 
 // ============================================
-//  Bridge （JSI ）
+// Needs bridge handling (JSI cannot carry these directly)
 // ============================================
 
 /**
- *
+ * Types that require serialization
  */
 export type RequiresBridge =
   // biome-ignore lint/complexity/noBannedTypes: Generic function type for serialization
   Function | Date | RegExp | Error | Map<BridgeValue, BridgeValue> | Set<BridgeValue>;
 
 // ============================================
-// Bridge
+// Complete Bridge type
 // ============================================
 
 /**
- * Bridge
+ * The complete value type Bridge supports
  */
 export type BridgeValue = JSIPrimitive | RequiresBridge | BridgeValueArray | BridgeValueObject;
 
 /**
- * Bridge
+ * Bridge value array
  */
 export interface BridgeValueArray extends Array<BridgeValue> {}
 
 /**
- * Bridge
+ * Bridge value object
  */
 export interface BridgeValueObject {
   [key: string]: BridgeValue;
 }
 
 // ============================================
-//
+// Serialized types
 // ============================================
 
 /**
- *
+ * Serialized function
  */
 export interface SerializedFunction {
   __type: 'function';
@@ -94,7 +94,7 @@ export interface SerializedFunction {
 }
 
 /**
- *
+ * Serialized date
  */
 export interface SerializedDate {
   __type: 'date';
@@ -102,7 +102,7 @@ export interface SerializedDate {
 }
 
 /**
- *
+ * Serialized regexp
  */
 export interface SerializedRegExp {
   __type: 'regexp';
@@ -111,7 +111,7 @@ export interface SerializedRegExp {
 }
 
 /**
- *
+ * Serialized error
  */
 export interface SerializedError {
   __type: 'error';
@@ -121,7 +121,7 @@ export interface SerializedError {
 }
 
 /**
- *  Map
+ * Serialized Map
  */
 export interface SerializedMap {
   __type: 'map';
@@ -129,7 +129,7 @@ export interface SerializedMap {
 }
 
 /**
- *  Set
+ * Serialized Set
  */
 export interface SerializedSet {
   __type: 'set';
@@ -137,8 +137,8 @@ export interface SerializedSet {
 }
 
 /**
- *  Promise
- * Promise  ID ， promise:settle
+ * Serialized Promise
+ * A promise is tracked by id; the result comes back asynchronously in a promise:settle message
  */
 export interface SerializedPromise {
   __type: 'promise';
@@ -146,7 +146,7 @@ export interface SerializedPromise {
 }
 
 /**
- *
+ * All serialized special types
  */
 export type SerializedSpecialType =
   | SerializedFunction
@@ -158,7 +158,7 @@ export type SerializedSpecialType =
   | SerializedPromise;
 
 /**
- *  - JSI
+ * Serialized value - JSI safe
  */
 export type SerializedValue =
   | JSIPrimitive
@@ -167,23 +167,23 @@ export type SerializedValue =
   | SerializedValueObject;
 
 /**
- *
+ * Serialized value array
  */
 export interface SerializedValueArray extends Array<SerializedValue> {}
 
 /**
- *
+ * Serialized value object
  */
 export interface SerializedValueObject {
   [key: string]: SerializedValue;
 }
 
 // ============================================
-//  (Guest → Host)
+// Operation types (Guest -> Host)
 // ============================================
 
 /**
- *
+ * Enumeration of operation types
  */
 export const OPERATION_TYPES = [
   'CREATE',
@@ -200,7 +200,7 @@ export const OPERATION_TYPES = [
 export type OperationType = (typeof OPERATION_TYPES)[number];
 
 /**
- *
+ * Base operation interface
  */
 export interface BaseOperation {
   op: OperationType;
@@ -255,19 +255,19 @@ export interface TextOperation extends BaseOperation {
 }
 
 /**
- * Remote Ref
- * Guest  Host （ focus, blur, scrollTo）
+ * Remote Ref method-call operation
+ * Guest calls a method on a host component instance (focus, blur, scrollTo, ...)
  */
 export interface RefCallOperation extends BaseOperation {
   op: 'REF_CALL';
-  refId: number; //  ID（ nodeMap  id ）
-  method: string; // ：focus, blur, measure, scrollTo
-  args: BridgeValue[]; //
-  callId: string; // （ Promise ）
+  refId: number; // node id (the same id used in nodeMap)
+  method: string; // method name: focus, blur, measure, scrollTo, ...
+  args: BridgeValue[]; // method arguments
+  callId: string; // unique call id (used to match up the promise)
 }
 
 /**
- *  REF_CALL
+ * Serialized REF_CALL operation
  */
 export interface SerializedRefCallOperation extends BaseOperation {
   op: 'REF_CALL';
@@ -278,7 +278,7 @@ export interface SerializedRefCallOperation extends BaseOperation {
 }
 
 /**
- *  - Discriminated Union
+ * Operation - Discriminated Union
  */
 export type Operation =
   | CreateOperation
@@ -292,7 +292,7 @@ export type Operation =
   | RefCallOperation;
 
 /**
- *
+ * Operation batch
  */
 export interface OperationBatch {
   version: number;
@@ -301,7 +301,7 @@ export interface OperationBatch {
 }
 
 /**
- *
+ * Serialized operation batch
  */
 export interface SerializedOperationBatch {
   version: number;
@@ -310,7 +310,7 @@ export interface SerializedOperationBatch {
 }
 
 /**
- *  CREATE
+ * Serialized CREATE operation
  */
 export interface SerializedCreateOperation extends BaseOperation {
   op: 'CREATE';
@@ -319,7 +319,7 @@ export interface SerializedCreateOperation extends BaseOperation {
 }
 
 /**
- *  UPDATE
+ * Serialized UPDATE operation
  */
 export interface SerializedUpdateOperation extends BaseOperation {
   op: 'UPDATE';
@@ -328,7 +328,7 @@ export interface SerializedUpdateOperation extends BaseOperation {
 }
 
 /**
- *  - props  SerializedValueObject
+ * Serialized operation - props uses SerializedValueObject
  */
 export type SerializedOperation =
   | SerializedCreateOperation
@@ -342,7 +342,7 @@ export type SerializedOperation =
   | SerializedRefCallOperation;
 
 /**
- *  props
+ * Check whether an operation carries props
  */
 export function operationHasProps(
   op: Operation | SerializedOperation
@@ -351,7 +351,7 @@ export function operationHasProps(
 }
 
 // ============================================
-//  (Host → Guest)
+// Message types (Host -> Guest)
 // ============================================
 
 export enum HostMsg {
@@ -386,19 +386,19 @@ export interface DestroyMessage {
 }
 
 /**
- * Remote Ref
- * Host  Guest
+ * Remote Ref method-call result message
+ * The result the host returns to the guest for a ref method call
  */
 export interface RefMethodResultMessage {
   type: HostMsg.REF_METHOD_RESULT;
-  refId: number; //  ID
-  callId: string; // （ REF_CALL ）
-  result?: BridgeValue; //
-  error?: SerializedError; //
+  refId: number; // node id
+  callId: string; // unique call id (pairs with the REF_CALL)
+  result?: BridgeValue; // return value on success
+  error?: SerializedError; // error info on failure
 }
 
 /**
- * Host → Guest
+ * Host -> Guest messages
  */
 export type HostMessage =
   | CallFunctionMessage
@@ -409,14 +409,14 @@ export type HostMessage =
   | RefMethodResultMessage;
 
 /**
- * Promise  -  Promise
+ * Promise settlement message - used to asynchronously deliver a promise's result
  */
 export type PromiseSettleMessage =
   | { type: HostMsg.PROMISE_RESOLVE; promiseId: string; value: BridgeValue }
   | { type: HostMsg.PROMISE_REJECT; promiseId: string; error: SerializedError };
 
 /**
- *  REF_METHOD_RESULT
+ * Serialized REF_METHOD_RESULT message
  */
 export interface SerializedRefMethodResultMessage {
   type: HostMsg.REF_METHOD_RESULT;
@@ -435,80 +435,80 @@ export type SerializedHostMessage =
   | SerializedRefMethodResultMessage;
 
 /**
- *  Promise
+ * Serialized promise settlement message
  */
 export type SerializedPromiseSettleMessage =
   | { type: HostMsg.PROMISE_RESOLVE; promiseId: string; value: SerializedValue }
   | { type: HostMsg.PROMISE_REJECT; promiseId: string; error: SerializedError };
 
 // ============================================
-// Callback Registry
+// Callback Registry interface
 // ============================================
 
 /**
- * Callback Registry -
+ * Callback Registry - manages function calls across the boundary
  *
  * Note: Uses ReviewedUnknown for flexibility with existing implementations.
  * The actual serialization/deserialization is handled by Bridge.
  */
 export interface CallbackRegistry {
   /**
-   * ， fnId
+   * Register a function and return its fnId
    */
   register(fn: (...args: ReviewedUnknown[]) => ReviewedUnknown): string;
 
   /**
-   *  fnId
+   * Invoke the function identified by fnId
    */
   invoke(fnId: string, args: ReviewedUnknown[]): ReviewedUnknown;
 
   /**
-   *  fnId
+   * Check whether fnId exists
    */
   has(fnId: string): boolean;
 
   /**
-   *  fnId
+   * Remove the given fnId
    */
   remove(fnId: string): void;
 
   /**
-   *
+   * Clear all registered functions
    */
   clear(): void;
 
   /**
-   *
+   * Increment the reference count
    */
   retain(fnId: string): void;
 
   /**
-   * ，
+   * Drop a reference; the entry is removed once the count reaches zero
    */
   release(fnId: string): void;
 
   /**
-   *
+   * Get the reference count
    */
   getRefCount(fnId: string): number;
 
   /**
-   *  Map（ globalThis.__rill.callbacks）
+   * The backing Map, for syncing into globalThis.__rill.callbacks
    */
   getMap(): Map<string, (...args: ReviewedUnknown[]) => ReviewedUnknown>;
 
   /**
-   *
+   * Number of currently registered functions
    */
   readonly size: number;
 }
 
 // ============================================
-//
+// Convenience type aliases
 // ============================================
 
 /**
- *  props
+ * Serialized props object
  */
 export type SerializedProps = SerializedValueObject;
 
@@ -533,7 +533,7 @@ export type SendToHost = (batch: OperationBatch | SerializedOperationBatch | str
 // ============================================
 
 /**
- *  JSI
+ * Check whether the value is a JSI primitive type
  */
 export function isJSIPrimitive(value: BridgeValue): value is JSIPrimitive {
   return (
@@ -546,7 +546,7 @@ export function isJSIPrimitive(value: BridgeValue): value is JSIPrimitive {
 }
 
 /**
- *
+ * Check whether the value is a serialized function
  */
 export function isSerializedFunction(value: SerializedValue): value is SerializedFunction {
   return (
@@ -559,7 +559,7 @@ export function isSerializedFunction(value: SerializedValue): value is Serialize
 }
 
 /**
- *
+ * Check whether the value is a serialized date
  */
 export function isSerializedDate(value: SerializedValue): value is SerializedDate {
   return (
@@ -571,7 +571,7 @@ export function isSerializedDate(value: SerializedValue): value is SerializedDat
 }
 
 /**
- *
+ * Check whether the value is a serialized regexp
  */
 export function isSerializedRegExp(value: SerializedValue): value is SerializedRegExp {
   return (
@@ -583,7 +583,7 @@ export function isSerializedRegExp(value: SerializedValue): value is SerializedR
 }
 
 /**
- *
+ * Check whether the value is a serialized error
  */
 export function isSerializedError(value: SerializedValue): value is SerializedError {
   return (
@@ -595,7 +595,7 @@ export function isSerializedError(value: SerializedValue): value is SerializedEr
 }
 
 /**
- *  Map
+ * Check whether the value is a serialized Map
  */
 export function isSerializedMap(value: SerializedValue): value is SerializedMap {
   return (
@@ -607,7 +607,7 @@ export function isSerializedMap(value: SerializedValue): value is SerializedMap 
 }
 
 /**
- *  Set
+ * Check whether the value is a serialized Set
  */
 export function isSerializedSet(value: SerializedValue): value is SerializedSet {
   return (
@@ -619,7 +619,7 @@ export function isSerializedSet(value: SerializedValue): value is SerializedSet 
 }
 
 /**
- *  Promise
+ * Check whether the value is a serialized Promise
  */
 export function isSerializedPromise(value: SerializedValue): value is SerializedPromise {
   return (
@@ -632,7 +632,7 @@ export function isSerializedPromise(value: SerializedValue): value is Serialized
 }
 
 /**
- *
+ * Check whether the value is any serialized special type
  */
 export function isSerializedSpecialType(value: SerializedValue): value is SerializedSpecialType {
   return (
