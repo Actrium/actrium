@@ -17,7 +17,15 @@ use crate::error::{Error, Result};
 #[cfg(feature = "opentelemetry")]
 use opentelemetry::KeyValue;
 #[cfg(feature = "opentelemetry")]
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
+#[cfg(feature = "opentelemetry")]
+use opentelemetry_http::{Bytes, HttpClient, HttpError, Request, Response};
+#[cfg(feature = "opentelemetry")]
+use opentelemetry_otlp::tonic_types::transport::{Certificate, ClientTlsConfig};
+#[cfg(feature = "opentelemetry")]
+use opentelemetry_otlp::{WithExportConfig, WithHttpConfig, WithTonicConfig};
+#[cfg(feature = "opentelemetry")]
+use opentelemetry_sdk::logs::SdkLoggerProvider;
 #[cfg(feature = "opentelemetry")]
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 #[cfg(feature = "opentelemetry")]
@@ -230,6 +238,8 @@ fn effective_channel_otlp_endpoint(
 pub struct RecordingPipelineGuard {
     #[cfg(feature = "opentelemetry")]
     tracer_providers: Vec<SdkTracerProvider>,
+    #[cfg(feature = "opentelemetry")]
+    logger_providers: Vec<SdkLoggerProvider>,
     log_guards: Vec<WorkerGuard>,
 }
 
@@ -239,6 +249,12 @@ impl Drop for RecordingPipelineGuard {
         for provider in self.tracer_providers.drain(..) {
             if let Err(error) = provider.shutdown() {
                 eprintln!("Failed to shutdown tracer provider: {error:?}");
+            }
+        }
+        #[cfg(feature = "opentelemetry")]
+        for provider in self.logger_providers.drain(..) {
+            if let Err(error) = provider.shutdown() {
+                eprintln!("Failed to shutdown logger provider: {error:?}");
             }
         }
     }
@@ -516,7 +532,7 @@ fn init_subscriber(
                 tracing_opentelemetry::layer()
                     .with_tracer(tracer)
                     .with_filter(filter_fn(otlp_observability_filter))
-                    .with_filter(otel_env_filter),
+                    .with_filter(otel_env_filter.clone()),
             );
         }
 
@@ -581,6 +597,20 @@ fn init_subscriber(
             );
         }
 
+        // OTLP logs bridge: forward tracing events as OTel logs to the same
+        // endpoint (collector routes them to the logs backend). Uses the
+        // observability channel's endpoint as the logs destination.
+        let mut logs_layer = None;
+        if recording_config.logs_enabled.unwrap_or(false) {
+            if let Some(otlp) = &observability_otlp {
+                let provider = build_logs_provider(config, otlp)?;
+                logs_layer = Some(
+                    OpenTelemetryTracingBridge::new(&provider).with_filter(otel_env_filter.clone()),
+                );
+                guard.logger_providers.push(provider);
+            }
+        }
+
         tracing_subscriber::registry()
             .with(create_env_filter(recording_config))
             .with(fmt_layer)
@@ -588,6 +618,7 @@ fn init_subscriber(
             .with(audit_layer)
             .with(security_layer)
             .with(operations_layer)
+            .with(logs_layer)
             .try_init()
             .ok();
 
@@ -616,18 +647,46 @@ fn build_tracing_provider(
     otlp: &OtlpEndpoint,
     channel: Option<RecordingChannel>,
 ) -> Result<SdkTracerProvider> {
+    let endpoint = apply_tls_scheme(
+        &otlp.endpoint,
+        config.recording_config().ca_cert_path.is_some(),
+    );
     let exporter = match otlp.transport {
-        OtlpTransport::Grpc => opentelemetry_otlp::SpanExporter::builder()
-            .with_tonic()
-            .with_endpoint(&otlp.endpoint)
-            .build(),
-        OtlpTransport::Http => opentelemetry_otlp::SpanExporter::builder()
-            .with_http()
-            .with_endpoint(&otlp.endpoint)
-            .build(),
+        OtlpTransport::Grpc => {
+            let tls = build_tls_config(config)?;
+            let builder = opentelemetry_otlp::SpanExporter::builder()
+                .with_tonic()
+                .with_endpoint(&endpoint);
+            let builder = match tls {
+                Some(tls) => builder.with_tls_config(tls),
+                None => builder,
+            };
+            builder.build()
+        }
+        OtlpTransport::Http => {
+            let client = build_http_client(config)?;
+            let builder = opentelemetry_otlp::SpanExporter::builder()
+                .with_http()
+                .with_endpoint(&endpoint);
+            let builder = match client {
+                Some(client) => builder.with_http_client(client),
+                None => builder,
+            };
+            builder.build()
+        }
     }
     .map_err(|error| Error::custom(format!("Failed to build OTLP exporter: {error}")))?;
 
+    let resource = build_otel_resource(config, channel);
+
+    Ok(SdkTracerProvider::builder()
+        .with_resource(resource)
+        .with_batch_exporter(exporter)
+        .build())
+}
+
+#[cfg(feature = "opentelemetry")]
+fn build_otel_resource(config: &ActrixConfig, channel: Option<RecordingChannel>) -> Resource {
     let mut attributes = vec![
         KeyValue::new("service.instance.id", config.name.clone()),
         KeyValue::new("service.environment", config.env.clone()),
@@ -645,12 +704,121 @@ fn build_tracing_provider(
         config.recording_service_name().to_string()
     };
 
-    let resource = Resource::builder()
+    Resource::builder()
         .with_service_name(service_name)
         .with_attributes(attributes)
-        .build();
+        .build()
+}
 
-    Ok(SdkTracerProvider::builder()
+/// Build a tonic `ClientTlsConfig` from the configured CA cert, if any.
+///
+/// Returns `Ok(None)` when no `ca_cert_path` is configured (plaintext endpoint).
+#[cfg(feature = "opentelemetry")]
+fn build_tls_config(config: &ActrixConfig) -> Result<Option<ClientTlsConfig>> {
+    match &config.recording_config().ca_cert_path {
+        Some(path) => {
+            let pem = std::fs::read(path)
+                .map_err(|e| Error::custom(format!("Failed to read OTLP CA cert '{path}': {e}")))?;
+            let ca = Certificate::from_pem(pem);
+            Ok(Some(ClientTlsConfig::new().ca_certificate(ca)))
+        }
+        None => Ok(None),
+    }
+}
+
+#[derive(Debug, Clone)]
+#[cfg(feature = "opentelemetry")]
+struct OtlpHttpClient(reqwest::Client);
+
+#[cfg(feature = "opentelemetry")]
+#[async_trait::async_trait]
+impl HttpClient for OtlpHttpClient {
+    async fn send_bytes(
+        &self,
+        request: Request<Bytes>,
+    ) -> std::result::Result<Response<Bytes>, HttpError> {
+        let request = request.try_into()?;
+        let mut response = self.0.execute(request).await?.error_for_status()?;
+        let headers = std::mem::take(response.headers_mut());
+        let mut response = Response::builder()
+            .status(response.status())
+            .body(response.bytes().await?)?;
+        *response.headers_mut() = headers;
+        Ok(response)
+    }
+}
+
+/// Build an HTTP client with the configured OTLP CA certificate, if any.
+#[cfg(feature = "opentelemetry")]
+fn build_http_client(config: &ActrixConfig) -> Result<Option<OtlpHttpClient>> {
+    match &config.recording_config().ca_cert_path {
+        Some(path) => {
+            let pem = std::fs::read(path)
+                .map_err(|e| Error::custom(format!("Failed to read OTLP CA cert '{path}': {e}")))?;
+            let certificate = reqwest::Certificate::from_pem(&pem).map_err(|e| {
+                Error::custom(format!("Failed to parse OTLP CA cert '{path}': {e}"))
+            })?;
+            let client = reqwest::Client::builder()
+                .add_root_certificate(certificate)
+                .build()
+                .map_err(|e| Error::custom(format!("Failed to build OTLP HTTP client: {e}")))?;
+            Ok(Some(OtlpHttpClient(client)))
+        }
+        None => Ok(None),
+    }
+}
+
+/// When TLS is enabled, upgrade an `http://` OTLP endpoint to `https://`.
+///
+/// tonic only enables TLS for `https://` endpoints; an `http://` endpoint with a
+/// TLS config silently falls back to plaintext and fails against a TLS-only
+/// collector (broken pipe).
+#[cfg(feature = "opentelemetry")]
+fn apply_tls_scheme(endpoint: &str, tls_enabled: bool) -> String {
+    match (tls_enabled, endpoint.strip_prefix("http://")) {
+        (true, Some(rest)) => format!("https://{rest}"),
+        _ => endpoint.to_string(),
+    }
+}
+
+/// Build the OTLP logs provider (`SdkLoggerProvider`) exporting to the same OTLP
+/// endpoint as traces. Only used when `[recording].logs_enabled` is true; the
+/// emitted log records carry the same service.name so logs correlate with spans.
+#[cfg(feature = "opentelemetry")]
+fn build_logs_provider(config: &ActrixConfig, otlp: &OtlpEndpoint) -> Result<SdkLoggerProvider> {
+    let endpoint = apply_tls_scheme(
+        &otlp.endpoint,
+        config.recording_config().ca_cert_path.is_some(),
+    );
+    let exporter = match otlp.transport {
+        OtlpTransport::Grpc => {
+            let tls = build_tls_config(config)?;
+            let builder = opentelemetry_otlp::LogExporter::builder()
+                .with_tonic()
+                .with_endpoint(&endpoint);
+            let builder = match tls {
+                Some(tls) => builder.with_tls_config(tls),
+                None => builder,
+            };
+            builder.build()
+        }
+        OtlpTransport::Http => {
+            let client = build_http_client(config)?;
+            let builder = opentelemetry_otlp::LogExporter::builder()
+                .with_http()
+                .with_endpoint(&endpoint);
+            let builder = match client {
+                Some(client) => builder.with_http_client(client),
+                None => builder,
+            };
+            builder.build()
+        }
+    }
+    .map_err(|e| Error::custom(format!("Failed to build OTLP logs exporter: {e}")))?;
+
+    let resource = build_otel_resource(config, Some(RecordingChannel::Observability));
+
+    Ok(SdkLoggerProvider::builder()
         .with_resource(resource)
         .with_batch_exporter(exporter)
         .build())

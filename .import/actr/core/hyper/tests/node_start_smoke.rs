@@ -126,6 +126,8 @@ fn runtime_config_with_type(
             tracing_enabled: false,
             tracing_endpoint: String::new(),
             tracing_service_name: "node-start-smoke".to_string(),
+            logs_enabled: false,
+            ca_cert_path: None,
         },
         config_dir: dir.path().to_path_buf(),
         trust: vec![],

@@ -1200,6 +1200,8 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
             tracing_enabled: false,
             tracing_endpoint: "http://127.0.0.1:9".to_string(),
             tracing_service_name: "dedup-tell-test".to_string(),
+            logs_enabled: false,
+            ca_cert_path: None,
         },
         config_dir: dir.path().to_path_buf(),
         trust: vec![],

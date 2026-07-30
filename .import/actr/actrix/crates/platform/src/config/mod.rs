@@ -179,6 +179,16 @@ pub struct RecordingConfig {
     /// operations 通道配置
     #[serde(default = "default_operations_channel")]
     pub operations: RecordingChannelConfig,
+
+    /// OTLP TLS CA certificate path (PEM). When set, traces and logs exporters
+    /// use TLS with this CA to verify the collector.
+    #[serde(default)]
+    pub ca_cert_path: Option<String>,
+
+    /// Enable OTLP logs export (same OTLP endpoint as traces; the collector
+    /// routes log records to the logs backend).
+    #[serde(default)]
+    pub logs_enabled: Option<bool>,
 }
 
 /// 单通道配置：语义过滤器 + 出口覆盖
@@ -241,6 +251,8 @@ impl Default for RecordingConfig {
             audit: default_audit_channel(),
             security: default_security_channel(),
             operations: default_operations_channel(),
+            ca_cert_path: None,
+            logs_enabled: None,
         }
     }
 }

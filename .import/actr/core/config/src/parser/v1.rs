@@ -148,6 +148,11 @@ impl ParserV1 {
                 .observability
                 .tracing_service_name
                 .unwrap_or_else(|| package.name.clone()),
+            logs_enabled: raw.observability.logs_enabled.unwrap_or(false),
+            ca_cert_path: raw
+                .observability
+                .ca_cert_path
+                .map(|path| self.resolve_manifest_path(&path)),
         };
 
         // Parse ACL
@@ -893,5 +898,47 @@ ice_udp_mux_port = 3478
         // Absent field defaults to None (backward compatible)
         let raw: crate::raw::RawWebRtcConfig = toml::from_str("").unwrap();
         assert_eq!(raw.ice_udp_mux_port, None);
+    }
+
+    #[test]
+    fn test_runtime_ca_cert_path_resolves_from_config_directory() {
+        let tmpdir = TempDir::new().unwrap();
+        let config_path = tmpdir.path().join("config").join("actr.toml");
+        let raw: RuntimeRawConfig = toml::from_str(
+            r#"
+[signaling]
+url = "ws://localhost:8081/signaling/ws"
+
+[ais_endpoint]
+url = "http://localhost:8081/ais"
+
+[deployment]
+realm_id = 1
+
+[observability]
+ca_cert_path = "certs/collector-ca.pem"
+"#,
+        )
+        .unwrap();
+        let package = PackageInfo {
+            name: "test".to_string(),
+            actr_type: ActrType {
+                manufacturer: "acme".to_string(),
+                name: "test".to_string(),
+                version: "1.0.0".to_string(),
+            },
+            description: None,
+            authors: Vec::new(),
+            license: None,
+        };
+
+        let config = ParserV1::new(&config_path)
+            .parse_runtime(raw, package)
+            .unwrap();
+
+        assert_eq!(
+            config.observability.ca_cert_path,
+            Some(tmpdir.path().join("config/certs/collector-ca.pem"))
+        );
     }
 }

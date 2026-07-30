@@ -187,7 +187,7 @@ command_build() {
   else
     log_info "Skipping asset sync (ACTR_PREBUILT_ASSETS=1)"
   fi
-  cargo_args=(--release -p actr-cli --locked --features wasm-engine)
+  cargo_args=(--release -p actr-cli --locked --features wasm-engine,opentelemetry)
   filename=$(binary_name)
 
   if use_zigbuild; then

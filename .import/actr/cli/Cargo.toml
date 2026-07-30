@@ -22,10 +22,11 @@ include = [
 ]
 
 [features]
-default = ["dynclib-engine"]
+default = ["dynclib-engine", "opentelemetry"]
 test-utils = ["dep:actr-mock-actrix", "dep:rusqlite"]
 wasm-engine = ["actr-hyper/wasm-engine"]
 dynclib-engine = ["actr-hyper/dynclib-engine"]
+opentelemetry = ["actr-hyper/opentelemetry", "actr-config/opentelemetry"]
 
 [[bin]]
 name = "actr"

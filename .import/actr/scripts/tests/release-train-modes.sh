@@ -1284,7 +1284,7 @@ EOF
     exit 1
   fi
 
-  if ! grep -q '^zigbuild --release -p actr-cli --locked --features wasm-engine --target aarch64-unknown-linux-musl$' "$cargo_args_log"; then
+  if ! grep -q '^zigbuild --release -p actr-cli --locked --features wasm-engine,opentelemetry --target aarch64-unknown-linux-musl$' "$cargo_args_log"; then
     printf 'cargo zigbuild arguments did not match expected release CLI build\n' >&2
     cat "$cargo_args_log" >&2
     rm -rf "$temp_dir"

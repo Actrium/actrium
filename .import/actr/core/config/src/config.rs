@@ -358,6 +358,13 @@ pub struct ObservabilityConfig {
 
     /// Service name reported to the tracing backend
     pub tracing_service_name: String,
+
+    /// Whether to enable OTLP logs export (to the same endpoint as traces)
+    pub logs_enabled: bool,
+
+    /// Path to a PEM CA certificate for OTLP TLS (optional; applies to both
+    /// the traces and logs exporters)
+    pub ca_cert_path: Option<PathBuf>,
 }
 
 /// Web server configuration (resolved from raw config)
@@ -603,6 +610,8 @@ mod tests {
                 tracing_enabled: false,
                 tracing_endpoint: "http://localhost:4317".to_string(),
                 tracing_service_name: "test-service".to_string(),
+                logs_enabled: false,
+                ca_cert_path: None,
             },
             config_dir: PathBuf::from("."),
             trust: vec![],

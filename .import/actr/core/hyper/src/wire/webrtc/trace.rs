@@ -79,7 +79,7 @@ impl<'a> Injector for EnvelopeInjector<'a> {
 /// Set the given span's parent from RpcEnvelope context (or current Context if invalid).
 pub(crate) fn set_parent_from_rpc_envelope(span: &Span, envelope: &RpcEnvelope) {
     let context = extract_trace_context_from_rpc(envelope);
-    span.set_parent(context);
+    let _ = span.set_parent(context);
 }
 
 #[cfg(feature = "opentelemetry")]
