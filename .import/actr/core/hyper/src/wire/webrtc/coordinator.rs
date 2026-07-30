@@ -3400,7 +3400,7 @@ impl WebRtcCoordinator {
                                 envelope_id = envelope.envelope_id,
                                 reply_for = ?envelope.reply_for
                             );
-                            span.set_parent(remote_ctx.clone());
+                            let _ = span.set_parent(remote_ctx.clone());
                             (span, remote_ctx)
                         };
 
@@ -5039,7 +5039,7 @@ impl WebRtcCoordinator {
                                 if let Some(ctx) =
                                     root_context_map.read().await.get(&target_id).cloned()
                                 {
-                                    span.set_parent(ctx);
+                                    let _ = span.set_parent(ctx);
                                 } else {
                                     tracing::warn!(
                                         "⚠️ No root context found for target_id={}",
@@ -5533,7 +5533,7 @@ impl WebRtcCoordinator {
                                 if let Some(ctx) =
                                     root_context_map.read().await.get(&target_id).cloned()
                                 {
-                                    span.set_parent(ctx);
+                                    let _ = span.set_parent(ctx);
                                 } else {
                                     tracing::warn!(
                                         "⚠️ No root context found for target_id={}",

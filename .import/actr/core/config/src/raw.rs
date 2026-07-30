@@ -331,6 +331,16 @@ pub struct RawObservabilityConfig {
     /// Service name reported to the tracing backend. Default: package.name
     #[serde(default)]
     pub tracing_service_name: Option<String>,
+
+    /// Enable OTLP logs export to the same OTLP endpoint as traces. Default: false
+    #[serde(default)]
+    pub logs_enabled: Option<bool>,
+
+    /// Path to a PEM CA certificate used to verify the OTLP collector's TLS
+    /// certificate. Optional; when set, the OTLP exporter (traces + logs) uses
+    /// TLS with this CA to verify the server.
+    #[serde(default)]
+    pub ca_cert_path: Option<PathBuf>,
 }
 
 fn default_edition() -> u32 {

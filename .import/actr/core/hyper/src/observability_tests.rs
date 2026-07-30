@@ -7,6 +7,8 @@ fn cfg() -> ObservabilityConfig {
         tracing_enabled: false,
         tracing_endpoint: String::new(),
         tracing_service_name: "actr-test".into(),
+        logs_enabled: false,
+        ca_cert_path: None,
     }
 }
 

@@ -58,6 +58,8 @@ fn test_runtime_config(
             tracing_enabled: false,
             tracing_endpoint: "http://localhost:4317".to_string(),
             tracing_service_name: "package-lifecycle-test".to_string(),
+            logs_enabled: false,
+            ca_cert_path: None,
         },
         config_dir: dir.path().to_path_buf(),
         trust: vec![],

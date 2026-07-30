@@ -28,7 +28,7 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 #[allow(dead_code)]
 pub(crate) fn set_parent_from_rpc_envelope(span: &Span, envelope: &RpcEnvelope) {
     let context = extract_trace_context_from_rpc(envelope);
-    span.set_parent(context);
+    let _ = span.set_parent(context);
 }
 
 /// Inject current span context into RpcEnvelope.

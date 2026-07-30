@@ -137,8 +137,14 @@ pub fn build_cli() -> clap::Command {
 
 /// Entry point for `main.rs`.
 pub async fn run() -> Result<()> {
-    let cli = Cli::parse();
+    run_with(Cli::parse()).await
+}
 
+/// Run the CLI from an already parsed command line.
+///
+/// The binary parses arguments before installing its tracing subscriber so
+/// runtime commands can initialize their own observability pipeline.
+pub async fn run_with(cli: Cli) -> Result<()> {
     let Some(ref cmd_variant) = cli.command else {
         Cli::command().print_help()?;
         return Ok(());

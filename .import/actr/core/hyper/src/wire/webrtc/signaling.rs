@@ -1635,7 +1635,7 @@ impl WebSocketSignalingClient {
                                 #[cfg(feature = "opentelemetry")]
                                 let span = {
                                     let span = tracing::info_span!("signaling.receive_envelope", envelope_id = %envelope.envelope_id);
-                                    span.set_parent(extract_trace_context(&envelope));
+                                    let _ = span.set_parent(extract_trace_context(&envelope));
                                     span
                                 };
 
