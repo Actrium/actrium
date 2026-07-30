@@ -1,8 +1,10 @@
 # Sandbox Engine Comparison
 
-Rill 把 JavaScript 执行抽象在一个内部的 `JSEngineProvider` 接口之后。项目内置了 5 种 provider 实现，对应不同运行时环境。
+[中文版本](./sandbox-comparison.zh.md)
 
-注意：这些 provider **不是公共 API**，也不支持用户注入自定义 provider。对外只提供 `EngineOptions.sandbox` 用于选择/提示沙箱后端；其余细节由引擎内部自动选择（例如 `DefaultProvider` 与 TenantManager 集成）。
+Rill hides JavaScript execution behind an internal `JSEngineProvider` interface. Five provider implementations ship with the project, one per runtime environment.
+
+Note that these providers are **not public API**, and injecting a custom provider is not supported. The only knob exposed outward is `EngineOptions.sandbox`, which selects or hints at a sandbox backend; everything else the engine decides for itself (`DefaultProvider` integrating with TenantManager, for instance).
 
 ---
 

@@ -149,6 +149,7 @@ oracle; TS decoder reconstructs structure-exact). They are:
 - `font-and-color-intern` — `setFont` and `setFillStyle` share ONE per-frame table
   (font index 0, color index 1, and a repeated font reuses index 0 — mixed strings
   dedup together).
+<!-- cjk-allow: quotes the fill-text-multibyte fixture verbatim; the multibyte text IS what the vector proves -->
 - `fill-text-multibyte` — `café ☕ 日本語`, byte-length ≠ char count (proves UTF-8
   byte accounting on the inline text).
 - `mixed-frame` — a realistic sparkline (save/transform/path/stroke/fillText).

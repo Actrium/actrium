@@ -2,14 +2,14 @@
  * rill/guest Type Definitions
  *
  * Types for Guest-side SDK and Reconciler
- *  bridge/types.ts
+ * Communication-related types are re-exported from bridge/types.ts
  */
 
 import type React from 'react';
 import type { ReviewedUnknown } from '../shared';
 
 // ============================================
-//  Bridge
+// Re-exported communication types from Bridge
 // ============================================
 
 export type {
@@ -22,20 +22,20 @@ export type {
   InsertOperation,
   Operation,
   OperationBatch,
-  //
+  // Operation types
   OperationType,
   RemoveOperation,
   ReorderOperation,
-  //
+  // Function types
   SendToHost,
-  //  (Guest )
+  // Serialized operation types (used on the Guest side)
   SerializedCreateOperation,
   SerializedFunction,
   SerializedOperation,
   SerializedOperationBatch,
   SerializedProps,
   SerializedUpdateOperation,
-  //
+  // Serialized types
   SerializedValue,
   SerializedValueObject,
   TextOperation,
@@ -45,7 +45,7 @@ export type {
 export { isSerializedFunction, operationHasProps } from '../shared';
 
 // ============================================
-// Guest Element Types (let )
+// Guest Element Types (let-specific)
 // ============================================
 
 /**
@@ -127,7 +127,7 @@ export function isGuestComponentRef(value: unknown): value is GuestComponentRef 
 }
 
 // ============================================
-// Virtual Node (let )
+// Virtual Node (used internally by let)
 // ============================================
 
 /**
@@ -174,14 +174,14 @@ export type {
 } from '../shared/style-types';
 
 // ============================================
-// Remote Ref Types ()
+// Remote Ref Types (cross-sandbox component reference)
 // ============================================
 
 /**
- * Remote Ref - Guest  Host
+ * Remote Ref - the Guest side's reference to a Host component instance
  *
- * ，Guest  Host
- * RemoteRef ， Host
+ * Sandbox isolation means a guest cannot reach a host native component instance directly.
+ * RemoteRef gives it an async call mechanism instead: host-side methods are invoked by message.
  *
  * @example
  * const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
@@ -189,20 +189,20 @@ export type {
  * await remoteInput?.invoke('focus');
  */
 export interface RemoteRef<T = unknown> {
-  /**  ID */
+  /** Node ID */
   readonly nodeId: number;
 
   /**
-   *  Host
-   * @param method
-   * @param args
-   * @returns Promise
+   * Invoke a Host-side component method
+   * @param method - method name
+   * @param args - method arguments
+   * @returns the return value wrapped in a Promise
    */
   invoke<R = unknown>(method: string, ...args: unknown[]): Promise<R>;
 
   /**
-   *
-   *  Proxy ， invoke()
+   * Type-safe method-call proxy
+   * Implemented with a Proxy, so any method name called on it becomes an invoke() call.
    */
   call: T extends Record<string, (...args: unknown[]) => unknown>
     ? { [K in keyof T]: (...args: Parameters<T[K]>) => Promise<Awaited<ReturnType<T[K]>>> }
@@ -210,7 +210,7 @@ export interface RemoteRef<T = unknown> {
 }
 
 /**
- * Measure
+ * Measure result
  */
 export interface MeasureResult {
   x: number;
@@ -222,7 +222,7 @@ export interface MeasureResult {
 }
 
 /**
- *
+ * Methods for components whose layout can be measured
  */
 export interface MeasurableRef {
   measure(): Promise<MeasureResult>;
@@ -235,7 +235,7 @@ export interface MeasurableRef {
 }
 
 /**
- * TextInput
+ * TextInput component methods
  */
 export interface TextInputRef extends MeasurableRef {
   focus(): Promise<void>;
@@ -246,7 +246,7 @@ export interface TextInputRef extends MeasurableRef {
 }
 
 /**
- * ScrollView
+ * ScrollView component methods
  */
 export interface ScrollViewRef extends MeasurableRef {
   scrollTo(options: { x?: number; y?: number; animated?: boolean }): Promise<void>;
@@ -255,7 +255,7 @@ export interface ScrollViewRef extends MeasurableRef {
 }
 
 /**
- * FlatList
+ * FlatList component methods
  */
 export interface FlatListRef extends ScrollViewRef {
   scrollToIndex(params: {
@@ -274,7 +274,7 @@ export interface FlatListRef extends ScrollViewRef {
 }
 
 /**
- * Remote Ref
- *  useRemoteRef  ref callback
+ * Remote Ref callback type
+ * Used for the ref callback returned by useRemoteRef
  */
 export type RemoteRefCallback = (instance: { nodeId: number } | null) => void;
