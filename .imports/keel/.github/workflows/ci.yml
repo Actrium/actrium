@@ -24,6 +24,17 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # This repository carries two lockfiles. bun.lock is the one that installs
+      # (guarded by --frozen-lockfile above); package-lock.json installs nothing
+      # and exists only so Dependabot can resolve the dependency graph and raise
+      # security alerts. Because nothing consumes it, it can silently go stale --
+      # a package.json edit that refreshes only bun.lock leaves the graph, and
+      # therefore every alert derived from it, describing a tree we do not ship.
+      # `npm ls` validates the lock against package.json without rewriting it,
+      # so it cannot fail on npm-version formatting differences.
+      - name: Check package-lock.json matches package.json
+        run: npm ls --package-lock-only --all
+
       - name: Run preflight
         run: bun run preflight
 
