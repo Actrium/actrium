@@ -244,6 +244,67 @@ fn read_slice<'a>(buf: &'a [u8], pos: &mut usize, len: usize) -> Result<&'a [u8]
     Ok(s)
 }
 
+// ---- hoisting one byte value onto segments ----
+
+/// Append `value` to `segments` as ONE logical value — possibly several segments —
+/// and return the JSON sentinel text naming them.
+///
+/// The ONE place that decides how a byte value maps onto segments, shared by the
+/// value walker ([`encode_value`]) and by the SDK wrappers that author their
+/// control plane by hand (`store::put_bytes`, `net::fetch_bytes`). Those wrappers
+/// used to pass a single slice straight to [`encode_envelope`], which is why
+/// `MAX_SEGMENT_BYTES` was the ceiling on one stored value; routing them through
+/// here is what actually lifts it (issue #84).
+///
+/// `MAX_SEGMENT_BYTES` caps a single SEGMENT — one decoder allocation — not a
+/// logical value, so a longer value is split into chunks and named by the array
+/// sentinel form `{"$b":[i,j,…]}`. A value that fits in one segment emits the
+/// SCALAR form `{"$b":i}`, which the contract requires: it keeps every frame
+/// expressible before this extension byte-for-byte identical, so the pre-existing
+/// golden vectors still lock and a peer predating the array form is never handed
+/// one for a value it could already carry.
+///
+/// Fail-closed: the whole value is checked against the remaining segment budget
+/// BEFORE anything is pushed, so an over-budget value leaves `segments` untouched.
+pub fn hoist_bytes<'a>(value: &'a [u8], segments: &mut Vec<&'a [u8]>) -> Result<String, Reason> {
+    // An empty value is ONE empty segment, not zero: the field must still revive
+    // to an empty byte stream on the far side rather than vanish.
+    let chunks = (value.len() / MAX_SEGMENT_BYTES
+        + usize::from(!value.len().is_multiple_of(MAX_SEGMENT_BYTES)))
+    .max(1);
+    let budget = MAX_SEGMENTS.saturating_sub(segments.len());
+    if chunks > budget {
+        return Err(Reason::TooManySegments);
+    }
+
+    let first = segments.len();
+    let mut rest = value;
+    while !rest.is_empty() {
+        let take = rest.len().min(MAX_SEGMENT_BYTES);
+        let (head, tail) = rest.split_at(take);
+        segments.push(head);
+        rest = tail;
+    }
+    if segments.len() == first {
+        segments.push(&[]);
+    }
+
+    let mut out = String::new();
+    if segments.len() - first == 1 {
+        let _ = write!(out, "{{\"$b\":{first}}}");
+    } else {
+        out.push_str("{\"$b\":[");
+        for n in first..segments.len() {
+            if n > first {
+                out.push(',');
+            }
+            let _ = write!(out, "{n}");
+        }
+        out.push_str("]}");
+    }
+    Ok(out)
+}
+
 // ---- value walking (self-describing sentinel hoist / revive) ----
 
 /// Walk `value`, hoisting every [`Value::Bytes`] to a new segment (in walk
@@ -320,17 +381,8 @@ fn write_value<'a>(
             out.push('}');
         }
         Value::Bytes(bytes) => {
-            // Cap the segment table + each stream as we hoist, so an over-cap
-            // value fails closed before any partial frame is built.
-            if segments.len() >= MAX_SEGMENTS {
-                return Err(Reason::TooManySegments);
-            }
-            if bytes.len() > MAX_SEGMENT_BYTES {
-                return Err(Reason::SegmentTooBig);
-            }
-            let n = segments.len();
-            segments.push(bytes.as_slice());
-            let _ = write!(out, "{{\"$b\":{n}}}");
+            let sentinel = hoist_bytes(bytes.as_slice(), segments)?;
+            out.push_str(&sentinel);
         }
     }
     Ok(())
@@ -356,14 +408,18 @@ fn write_num(out: &mut String, n: f64) {
     }
 }
 
-/// Decode an RBS1 return into a [`Value`], reviving each `{"$b":N}` sentinel
-/// back into [`Value::Bytes`] from segment `N`. `Err(Reason::BadMagic)` signals
-/// the buffer is a plain-JSON reply (the caller parses it directly).
+/// Decode an RBS1 return into a [`Value`], reviving each `{"$b":N}` /
+/// `{"$b":[N,…]}` sentinel back into [`Value::Bytes`] from the segments it names.
+/// `Err(Reason::BadMagic)` signals the buffer is a plain-JSON reply (the caller
+/// parses it directly).
 pub fn decode_value(buf: &[u8]) -> Result<Value, Reason> {
     let decoded = decode_envelope(buf)?;
     let json_str = core::str::from_utf8(decoded.json).map_err(|_| Reason::BadJson)?;
     let parsed = parse_json(json_str).map_err(|_| Reason::BadJson)?;
-    revive(parsed, &decoded.segments)
+    // One claim slot per segment: a segment may back at most one sentinel, which
+    // is what keeps the revived value bounded by the frame that carried it.
+    let mut used = alloc::vec![false; decoded.segments.len()];
+    revive(parsed, &decoded.segments, &mut used)
 }
 
 /// Decode a host REPLY that may be EITHER an RBS1 envelope (byte streams
@@ -386,41 +442,99 @@ pub fn decode_reply(buf: &[u8]) -> Result<Value, Reason> {
     }
 }
 
-/// Replace every `{"$b":N}` sentinel object in `value` with `Bytes(segments[N])`.
-fn revive(value: Value, segments: &[&[u8]]) -> Result<Value, Reason> {
+/// A sentinel's segment index, or `None` if the JSON value is not a non-negative
+/// integer. Checked without `f64::fract` (std-only): an out-of-range or
+/// fractional value fails the lossless round-trip through `usize`.
+fn segment_index(value: &Value) -> Option<usize> {
+    match value {
+        Value::Num(n) if *n >= 0.0 && *n < MAX_SAFE_INT_F64 && *n == (*n as usize) as f64 => {
+            Some(*n as usize)
+        }
+        _ => None,
+    }
+}
+
+/// Claim segment `n` for one sentinel, rejecting a SECOND reference to it.
+///
+/// The contract has always said a segment may be referenced at most once; with
+/// only the scalar sentinel form that was a well-formedness note, but the array
+/// form makes it load-bearing. Without it a frame could name one 1 MiB segment
+/// MAX_SEGMENTS times inside a single sentinel and force a 16 MiB joined
+/// allocation out of a ~1 MiB frame — which would break the very argument that
+/// makes a multi-segment value safe without a new cap (that MAX_ENVELOPE_BYTES
+/// already bounds the joined value, true only when each segment is used once).
+fn claim_segment(used: &mut [bool], n: usize) -> Result<(), Reason> {
+    let slot = used.get_mut(n).ok_or(Reason::BadSegmentRef)?;
+    if *slot {
+        return Err(Reason::BadSegmentRef);
+    }
+    *slot = true;
+    Ok(())
+}
+
+/// Replace every `{"$b":N}` / `{"$b":[N,…]}` sentinel object in `value` with the
+/// referenced segment bytes — one segment, or several joined in order.
+fn revive(value: Value, segments: &[&[u8]], used: &mut [bool]) -> Result<Value, Reason> {
     match value {
         Value::Obj(entries) => {
             // Any object carrying the reserved key `$b` MUST be exactly
-            // `{"$b": <non-negative integer>}`; anything else is a malformed
-            // sentinel (fail-closed) rather than literal application data.
+            // `{"$b": <non-negative integer>}` or `{"$b": [<non-negative
+            // integer>, …]}`; anything else is a malformed sentinel (fail-closed)
+            // rather than literal application data.
             if entries.iter().any(|(k, _)| k == "$b") {
                 if entries.len() != 1 {
                     return Err(Reason::BadSentinel);
                 }
-                let n = match &entries[0].1 {
-                    // A non-negative integer, checked without `f64::fract`: an
-                    // out-of-range or fractional value fails the lossless
-                    // round-trip through usize.
-                    Value::Num(n)
-                        if *n >= 0.0 && *n < MAX_SAFE_INT_F64 && *n == (*n as usize) as f64 =>
-                    {
-                        *n as usize
+                match &entries[0].1 {
+                    // Form (a): one segment.
+                    Value::Num(_) => {
+                        let n = segment_index(&entries[0].1).ok_or(Reason::BadSentinel)?;
+                        let seg = *segments.get(n).ok_or(Reason::BadSegmentRef)?;
+                        claim_segment(used, n)?;
+                        return Ok(Value::Bytes(seg.to_vec()));
+                    }
+                    // Form (b): one logical value spanning several segments,
+                    // joined in list order (issue #84). An empty list carries no
+                    // bytes and no meaning, so it is malformed rather than "empty
+                    // value" — an empty value is one empty segment.
+                    Value::Arr(items) => {
+                        if items.is_empty() {
+                            return Err(Reason::BadSentinel);
+                        }
+                        // Resolve EVERY index and total the length before
+                        // allocating, so a bad reference late in the list cannot
+                        // leave a partly built value behind. The total needs no
+                        // cap of its own: the whole frame was already checked
+                        // against MAX_ENVELOPE_BYTES, which bounds the sum of the
+                        // segments it carries.
+                        let mut parts = Vec::with_capacity(items.len());
+                        let mut total = 0usize;
+                        for item in items {
+                            let n = segment_index(item).ok_or(Reason::BadSentinel)?;
+                            let seg = *segments.get(n).ok_or(Reason::BadSegmentRef)?;
+                            claim_segment(used, n)?;
+                            total += seg.len();
+                            parts.push(seg);
+                        }
+                        let mut joined = Vec::with_capacity(total);
+                        for part in parts {
+                            joined.extend_from_slice(part);
+                        }
+                        return Ok(Value::Bytes(joined));
                     }
                     _ => return Err(Reason::BadSentinel),
-                };
-                let seg = segments.get(n).ok_or(Reason::BadSegmentRef)?;
-                return Ok(Value::Bytes(seg.to_vec()));
+                }
             }
             let mut out = Vec::with_capacity(entries.len());
             for (k, v) in entries {
-                out.push((k, revive(v, segments)?));
+                out.push((k, revive(v, segments, used)?));
             }
             Ok(Value::Obj(out))
         }
         Value::Arr(items) => {
             let mut out = Vec::with_capacity(items.len());
             for it in items {
-                out.push(revive(it, segments)?);
+                out.push(revive(it, segments, used)?);
             }
             Ok(Value::Arr(out))
         }

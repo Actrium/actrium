@@ -530,12 +530,22 @@ pub mod store {
     /// `{"error":"…"}` body if the value breaches a codec cap (fail-closed, no
     /// partial write) or the host fails the call.
     pub async fn put_bytes(key: &str, value: &[u8]) -> Result<Vec<u8>, Vec<u8>> {
+        // Hoist the value onto segments THROUGH the codec, not as a single slice:
+        // one segment for a value within the per-segment cap (byte-identical to
+        // before), several plus an array sentinel for a larger one. Passing one
+        // slice straight to `encode_envelope` is what used to make the per-segment
+        // cap the ceiling on a stored value (issue #84).
+        let mut segments: Vec<&[u8]> = Vec::new();
+        let sentinel = crate::store_net_encode::hoist_bytes(value, &mut segments)
+            .map_err(crate::codec_error)?;
         let mut json = String::from("{\"key\":");
         json_escape(&mut json, key);
-        json.push_str(",\"value\":{\"$b\":0}}");
-        // Hoist the value to segment 0; an over-cap value fails closed here
-        // before any host call is issued (nothing partial crosses the seam).
-        let frame = encode_envelope(&json, &[value]).map_err(crate::codec_error)?;
+        json.push_str(",\"value\":");
+        json.push_str(&sentinel);
+        json.push('}');
+        // An over-budget value fails closed above, before any host call is issued
+        // (nothing partial crosses the seam).
+        let frame = encode_envelope(&json, &segments).map_err(crate::codec_error)?;
         let (ok, resp) = super::host_call("host:store", "putBytes", frame).await;
         if ok == 1 {
             Ok(resp)
@@ -791,8 +801,16 @@ pub mod net {
         // JSON control plane (no segment => back-compat shape).
         let frame = match body {
             Some(bytes) => {
-                json.push_str(",\"body\":{\"$b\":0}}");
-                encode_envelope(&json, &[bytes]).map_err(crate::codec_error)?
+                // Same as `store::put_bytes`: hoist through the codec so a body
+                // larger than one segment is split and named by an array sentinel
+                // instead of failing closed at the per-segment cap (issue #84).
+                let mut segments: Vec<&[u8]> = Vec::new();
+                let sentinel = crate::store_net_encode::hoist_bytes(bytes, &mut segments)
+                    .map_err(crate::codec_error)?;
+                json.push_str(",\"body\":");
+                json.push_str(&sentinel);
+                json.push('}');
+                encode_envelope(&json, &segments).map_err(crate::codec_error)?
             }
             None => {
                 json.push('}');

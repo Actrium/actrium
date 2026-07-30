@@ -9,7 +9,7 @@
 //! plane — plus a back-compat check that a text-only store call is byte-identical
 //! to before.
 
-use crate::store_net_encode::limits::MAX_SEGMENT_BYTES;
+use crate::store_net_encode::limits::{MAX_ENVELOPE_BYTES, MAX_SEGMENTS, MAX_SEGMENT_BYTES};
 use crate::store_net_encode::{decode_envelope, encode_envelope, MAGIC};
 use crate::test_shims::CALLS;
 use core::fmt::Write as _;
@@ -142,15 +142,48 @@ fn put_bytes_request_is_an_rbs1_frame_with_no_number_array() {
 }
 
 #[test]
-fn put_bytes_over_cap_fails_closed_with_no_host_call() {
+fn put_bytes_past_the_segment_cap_is_split_across_segments() {
+    // Issue #84: this is the API the 1 MiB ceiling actually bit — `put_bytes`
+    // handed its value to `encode_envelope` as a single slice, so the per-segment
+    // cap was the ceiling on one STORED value. A 1076x722 two-layer raster
+    // serialises to ~3.96 MB, so this is the ordinary case, not the extreme one.
+    let _guard = crate::wire_lock();
+    let value = vec![0xcdu8; MAX_SEGMENT_BYTES + 7];
+    let tap = issue(crate::store::put_bytes("k", &value));
+    assert_eq!(tap.method, "putBytes");
+
+    let dec = decode_envelope(&tap.request).expect("valid envelope");
+    // ONE value, TWO segments, named by the array sentinel — and still no value
+    // bytes anywhere in the control plane.
+    assert_eq!(dec.json, b"{\"key\":\"k\",\"value\":{\"$b\":[0,1]}}");
+    assert_eq!(dec.segments.len(), 2);
+    assert_eq!(dec.segments[0].len(), MAX_SEGMENT_BYTES);
+    assert_eq!(dec.segments[1].len(), 7);
+    // Concatenation order is the sentinel's order, so the value is recoverable.
+    let mut joined = Vec::new();
+    joined.extend_from_slice(dec.segments[0]);
+    joined.extend_from_slice(dec.segments[1]);
+    assert_eq!(joined, value);
+
+    assert_eq!(
+        tap.resolve(1, b"{\"version\":1}").expect("put ok"),
+        b"{\"version\":1}"
+    );
+}
+
+#[test]
+fn put_bytes_beyond_the_envelope_cap_fails_closed_with_no_host_call() {
+    // The ceiling did not disappear, it moved: the aggregate envelope cap now
+    // binds instead of the per-segment cap. It must still fail BEFORE any host
+    // call, so nothing partial crosses the seam.
     let _guard = crate::wire_lock();
     CALLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    let value = vec![0u8; MAX_SEGMENT_BYTES + 1];
+    let value = vec![0u8; MAX_ENVELOPE_BYTES + 1];
     let mut fut = Box::pin(crate::store::put_bytes("k", &value));
     match poll_once(fut.as_mut()) {
         Poll::Ready(Err(body)) => {
-            // Fail-closed with the schema's stable reason token, no partial write.
-            assert_eq!(body, b"{\"error\":\"segment-too-big\"}");
+            // Fail-closed with a stable schema reason token, no partial write.
+            assert_eq!(body, b"{\"error\":\"envelope-too-big\"}");
         }
         Poll::Ready(Ok(_)) => panic!("over-cap value must not succeed"),
         Poll::Pending => panic!("over-cap value must fail before any host call"),
@@ -158,6 +191,25 @@ fn put_bytes_over_cap_fails_closed_with_no_host_call() {
     assert!(
         CALLS.lock().unwrap_or_else(|e| e.into_inner()).is_empty(),
         "no host call may be issued for an over-cap value"
+    );
+}
+
+#[test]
+fn put_bytes_needing_more_chunks_than_the_segment_budget_fails_closed() {
+    // The other fail-closed edge: the chunk count itself exceeds MAX_SEGMENTS.
+    // Reported as `too-many-segments`, and still before any host call.
+    let _guard = crate::wire_lock();
+    CALLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    let value = vec![0u8; MAX_SEGMENT_BYTES * MAX_SEGMENTS + 1];
+    let mut fut = Box::pin(crate::store::put_bytes("k", &value));
+    match poll_once(fut.as_mut()) {
+        Poll::Ready(Err(body)) => assert_eq!(body, b"{\"error\":\"too-many-segments\"}"),
+        Poll::Ready(Ok(_)) => panic!("over-budget value must not succeed"),
+        Poll::Pending => panic!("over-budget value must fail before any host call"),
+    }
+    assert!(
+        CALLS.lock().unwrap_or_else(|e| e.into_inner()).is_empty(),
+        "no host call may be issued for an over-budget value"
     );
 }
 

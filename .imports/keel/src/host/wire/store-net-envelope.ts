@@ -305,18 +305,43 @@ export function hoistSentinels(value: unknown): Hoisted {
       }
     }
     if (v instanceof Uint8Array) {
-      if (segments.length >= LIMITS.maxSegments) {
-        throw new StoreNetEnvelopeError('too-many-segments', `> ${LIMITS.maxSegments}`);
-      }
-      if (v.length > LIMITS.maxSegmentBytes) {
+      // ONE value, possibly MANY segments. `maxSegmentBytes` caps a single
+      // SEGMENT — one decoder allocation — not a logical value, so a longer value
+      // is split into chunks named by the array sentinel form, keeping each
+      // allocation bounded while lifting the ceiling on the value (issue #84).
+      //
+      // A value that fits in one segment MUST still emit the scalar form: that
+      // keeps every frame expressible before this extension byte-for-byte
+      // identical (so the pre-existing golden vectors lock unchanged), and never
+      // hands a peer predating the array form a shape it would reject for a value
+      // it could already carry.
+      const chunkCount = Math.max(1, Math.ceil(v.length / LIMITS.maxSegmentBytes));
+      // Check the WHOLE value against the remaining budget before pushing
+      // anything, so an over-budget value leaves no partial hoist behind.
+      if (chunkCount > LIMITS.maxSegments - segments.length) {
         throw new StoreNetEnvelopeError(
-          'segment-too-big',
-          `${v.length} > ${LIMITS.maxSegmentBytes}`
+          'too-many-segments',
+          `${segments.length} + ${chunkCount} > ${LIMITS.maxSegments}`
         );
       }
-      const n = segments.length;
-      segments.push(v);
-      return { [SENTINEL_KEY]: n };
+      const first = segments.length;
+      if (v.length === 0) {
+        // An empty value is ONE empty segment, not zero: the field must still
+        // revive to an empty byte stream rather than vanish.
+        segments.push(v);
+      } else {
+        for (let off = 0; off < v.length; off += LIMITS.maxSegmentBytes) {
+          segments.push(v.subarray(off, Math.min(off + LIMITS.maxSegmentBytes, v.length)));
+        }
+      }
+      if (segments.length - first === 1) {
+        return { [SENTINEL_KEY]: first };
+      }
+      const indices: number[] = [];
+      for (let n = first; n < segments.length; n++) {
+        indices.push(n);
+      }
+      return { [SENTINEL_KEY]: indices };
     }
     if (Array.isArray(v)) {
       // A still-callable element (a function with no effective toJSON) becomes
@@ -378,6 +403,27 @@ export function hoistSentinels(value: unknown): Hoisted {
  */
 // Reason: revives a parsed control value; {"$b":N} sentinels become Uint8Array segment views.
 export function reviveSentinels(value: unknown, segments: Uint8Array[]): unknown {
+  // One claim per segment. The contract has always said a segment may be
+  // referenced at most once; with only the scalar form that was a well-formedness
+  // note, but the array form makes it load-bearing — without it a frame could name
+  // one at-cap segment `maxSegments` times inside a single sentinel and force a
+  // joined value far larger than the frame carrying it, breaking the very bound
+  // that makes a multi-segment value safe without a new cap.
+  const claimed = new Set<number>();
+  const claim = (n: number): Uint8Array => {
+    if (n >= segments.length) {
+      throw new StoreNetEnvelopeError('bad-segment-ref', `${n} >= ${segments.length}`);
+    }
+    if (claimed.has(n)) {
+      throw new StoreNetEnvelopeError('bad-segment-ref', `segment ${n} referenced more than once`);
+    }
+    claimed.add(n);
+    // Reason: index checked against segments.length immediately above.
+    return segments[n] as Uint8Array;
+  };
+
+  // Reason: walks a parsed control value structurally; sentinels become Uint8Array
+  // segment views and every other node passes through unchanged.
   const walk = (v: unknown): unknown => {
     if (Array.isArray(v)) {
       return v.map(walk);
@@ -385,16 +431,43 @@ export function reviveSentinels(value: unknown, segments: Uint8Array[]): unknown
     if (v !== null && typeof v === 'object') {
       const obj = v as Record<string, unknown>;
       if (Object.hasOwn(obj, SENTINEL_KEY)) {
-        // Any object carrying the reserved key MUST be exactly `{"$b": <int>}`.
+        // Any object carrying the reserved key MUST be exactly `{"$b": <int>}` or
+        // `{"$b": [<int>, …]}`.
         const keys = Object.keys(obj);
-        const n = obj[SENTINEL_KEY];
-        if (keys.length !== 1 || typeof n !== 'number' || !Number.isInteger(n) || n < 0) {
+        const ref = obj[SENTINEL_KEY];
+        if (keys.length !== 1) {
           throw new StoreNetEnvelopeError('bad-sentinel', `keys=${keys.join(',')}`);
         }
-        if (n >= segments.length) {
-          throw new StoreNetEnvelopeError('bad-segment-ref', `${n} >= ${segments.length}`);
+        // Reason: narrows an arbitrary parsed-JSON value under the reserved key to a
+        // segment index; every non-index shape is rejected as bad-sentinel below.
+        const isIndex = (x: unknown): x is number =>
+          typeof x === 'number' && Number.isInteger(x) && x >= 0;
+        if (isIndex(ref)) {
+          return claim(ref);
         }
-        return segments[n];
+        // One logical value spanning several segments, joined in list order. An
+        // empty list carries no bytes and no meaning, so it is malformed rather
+        // than "empty value" — an empty value is one empty segment.
+        if (Array.isArray(ref) && ref.length > 0 && ref.every(isIndex)) {
+          // Resolve and total before allocating, so a bad reference late in the
+          // list cannot leave a partly built value behind. The total needs no cap
+          // of its own: the frame was already checked against maxEnvelopeBytes,
+          // which bounds the sum of the segments it carries — given each is
+          // claimed at most once.
+          const parts = ref.map(claim);
+          let total = 0;
+          for (const part of parts) {
+            total += part.length;
+          }
+          const joined = new Uint8Array(total);
+          let off = 0;
+          for (const part of parts) {
+            joined.set(part, off);
+            off += part.length;
+          }
+          return joined;
+        }
+        throw new StoreNetEnvelopeError('bad-sentinel', `${SENTINEL_KEY}=${JSON.stringify(ref)}`);
       }
       const out: Record<string, unknown> = {};
       for (const [k, val] of Object.entries(obj)) {

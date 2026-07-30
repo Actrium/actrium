@@ -414,8 +414,11 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
     const originalWarn = console.warn;
     console.warn = (message?: unknown) => void warnings.push(String(message));
     try {
-      // A byte segment over the RBS1 cap (1 MiB) — fail-closed in the codec.
-      const oversized = new Uint8Array(LIMITS.maxSegmentBytes + 1);
+      // A payload past the AGGREGATE envelope cap — fail-closed in the codec.
+      // Note this is no longer `maxSegmentBytes + 1`: since issue #84 a single
+      // byte field larger than one segment is SPLIT across segments rather than
+      // refused, so the cap that still refuses is the envelope one.
+      const oversized = new Uint8Array(LIMITS.maxEnvelopeBytes + 1);
       expect(() => host.emitEvent('ping', { chunk: oversized })).not.toThrow();
       // A circular payload — JSON.stringify throws on the plain path.
       const circular: Record<string, unknown> = {};
@@ -426,9 +429,56 @@ describe('WasmGuestHost — host->guest events (rill_on_event)', () => {
     }
     expect(warnings).toHaveLength(2);
     expect(warnings[0]).toContain('event "ping" dropped before delivery');
-    expect(warnings[0]).toContain('segment-too-big');
+    expect(warnings[0]).toContain('envelope-too-big');
     // The guest never saw either event.
     expect((host.exports.count as () => number)()).toBe(0);
+  });
+
+  it('delivers a byte payload larger than one segment by splitting it (#84)', async () => {
+    // The same codec backs the event channel, so lifting the per-FIELD ceiling
+    // lifts it here too. This does NOT widen the host->guest worst case: the
+    // aggregate `maxEnvelopeBytes` is unchanged, and a frame that size was always
+    // expressible (as several 1 MiB byte fields) — one field may now simply use
+    // more of that existing budget.
+    const host = new WasmGuestHost({ dispatch: {} });
+    await host.load(EVENT_GUEST);
+    const chunk = new Uint8Array(LIMITS.maxSegmentBytes + 32);
+    for (let i = 0; i < chunk.length; i++) chunk[i] = i & 0xff;
+
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (message?: unknown) => void warnings.push(String(message));
+    try {
+      expect(() => host.emitEvent('ping', { chunk })).not.toThrow();
+    } finally {
+      console.warn = originalWarn;
+    }
+    // Delivered, not dropped.
+    expect(warnings).toEqual([]);
+    expect((host.exports.count as () => number)()).toBe(1);
+
+    // Read the frame back OUT of the guest's own memory and check its shape,
+    // rather than trusting the delivery count: this fixture's handler stashes the
+    // raw bytes without decoding them, so a count alone would pass even if the
+    // frame were malformed.
+    const raw = host.readBytes(
+      (host.exports.last_ptr as () => number)(),
+      (host.exports.last_len as () => number)()
+    );
+    expect(isRbs1(raw)).toBe(true);
+    const { json, segments } = decodeEnvelope(raw);
+    // Two segments, the array sentinel naming both, and each within the cap.
+    expect(new TextDecoder().decode(json)).toBe('{"chunk":{"$b":[0,1]}}');
+    expect(segments).toHaveLength(2);
+    expect(segments[0]?.length).toBe(LIMITS.maxSegmentBytes);
+    expect(segments[1]?.length).toBe(32);
+    // And they join back to exactly what the host sent.
+    const revived = reviveSentinels(JSON.parse(new TextDecoder().decode(json)), segments) as {
+      chunk: Uint8Array;
+    };
+    expect(revived.chunk.length).toBe(chunk.length);
+    expect([...revived.chunk.subarray(0, 64)]).toEqual([...chunk.subarray(0, 64)]);
+    expect([...revived.chunk.subarray(-64)]).toEqual([...chunk.subarray(-64)]);
   });
 
   it('emitEvent is a no-op for a guest that does not export rill_on_event', async () => {

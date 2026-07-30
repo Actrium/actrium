@@ -341,13 +341,131 @@ fn too_many_segments_rejected() {
 
 #[test]
 fn segment_too_big_rejected() {
+    // The FRAMING primitive still rejects an over-cap segment: its caller hands it
+    // segments directly, so there is nothing for it to split.
     let seg = std::vec![0u8; MAX_SEGMENT_BYTES + 1];
     assert_eq!(
         encode_envelope("{\"v\":{\"$b\":0}}", &[&seg]),
         Err(Reason::SegmentTooBig)
     );
-    let v = Value::Bytes(seg);
-    assert_eq!(encode_value(&v), Err(Reason::SegmentTooBig));
+}
+
+#[test]
+fn a_value_past_the_segment_cap_is_split_not_rejected() {
+    // Issue #84: MAX_SEGMENT_BYTES caps a SEGMENT, not a logical value. One byte
+    // past the cap is two segments named by the array sentinel form.
+    let value = std::vec![0xabu8; MAX_SEGMENT_BYTES + 1];
+    let encoded = encode_value(&Value::Bytes(value.clone())).expect("splits, does not reject");
+    let Encoded::Envelope(frame) = encoded else {
+        panic!("a byte value must frame as an envelope");
+    };
+    let dec = decode_envelope(&frame).expect("valid frame");
+    assert_eq!(dec.json, b"{\"$b\":[0,1]}");
+    assert_eq!(dec.segments.len(), 2);
+    assert_eq!(dec.segments[0].len(), MAX_SEGMENT_BYTES);
+    assert_eq!(dec.segments[1].len(), 1);
+    // Every individual segment still respects the per-segment cap — that is the
+    // property the split preserves.
+    for seg in &dec.segments {
+        assert!(seg.len() <= MAX_SEGMENT_BYTES);
+    }
+    // And the value round-trips as ONE logical value.
+    assert_eq!(decode_value(&frame), Ok(Value::Bytes(value)));
+}
+
+#[test]
+fn a_value_within_the_segment_cap_still_uses_the_scalar_sentinel() {
+    // The contract requires this (sentinel.multiSegmentEncoderRule): a value that
+    // fits in one segment must encode exactly as before the array form existed, so
+    // frames that were expressible before stay byte-for-byte identical.
+    for len in [0usize, 1, 1024, MAX_SEGMENT_BYTES] {
+        let frame = match encode_value(&Value::Bytes(std::vec![0x5au8; len])) {
+            Ok(Encoded::Envelope(f)) => f,
+            other => panic!("expected an envelope for len {len}, got {other:?}"),
+        };
+        let dec = decode_envelope(&frame).expect("valid frame");
+        assert_eq!(
+            dec.json, b"{\"$b\":0}",
+            "len {len} must use the scalar form"
+        );
+        assert_eq!(dec.segments.len(), 1, "len {len} must be one segment");
+    }
+}
+
+#[test]
+fn a_value_needing_more_chunks_than_the_segment_budget_fails_closed() {
+    // MAX_SEGMENTS bounds the chunk count too, and the check happens BEFORE
+    // anything is hoisted, so nothing partial is built.
+    let value = std::vec![0u8; MAX_SEGMENT_BYTES * MAX_SEGMENTS + 1];
+    assert_eq!(
+        encode_value(&Value::Bytes(value)),
+        Err(Reason::TooManySegments)
+    );
+}
+
+#[test]
+fn one_big_value_alongside_other_fields_shares_the_segment_budget() {
+    // Two byte fields, the first split across two segments: indices keep counting
+    // across fields, so the second field's sentinel is 2, not 0.
+    let value = Value::Obj(std::vec![
+        (
+            StdString::from("big"),
+            Value::Bytes(std::vec![1u8; MAX_SEGMENT_BYTES + 1])
+        ),
+        (StdString::from("small"), Value::Bytes(std::vec![2u8; 3])),
+    ]);
+    let Ok(Encoded::Envelope(frame)) = encode_value(&value) else {
+        panic!("expected an envelope");
+    };
+    let dec = decode_envelope(&frame).expect("valid frame");
+    assert_eq!(dec.json, b"{\"big\":{\"$b\":[0,1]},\"small\":{\"$b\":2}}");
+    assert_eq!(dec.segments.len(), 3);
+    assert_eq!(decode_value(&frame), Ok(value));
+}
+
+#[test]
+fn a_reused_segment_reference_is_rejected() {
+    // The amplification guard: without it a frame could name ONE at-cap segment
+    // MAX_SEGMENTS times in a single sentinel and force a joined value far larger
+    // than the frame that carried it — which is exactly the bound that makes a
+    // multi-segment value safe without a new cap.
+    let seg = [0xaau8; 4];
+    let frame = encode_envelope("{\"v\":{\"$b\":[0,0]}}", &[&seg[..]]).expect("frames fine");
+    assert_eq!(decode_value(&frame), Err(Reason::BadSegmentRef));
+
+    // Also across two separate sentinels, which was always the contract's rule.
+    let two = encode_envelope("{\"a\":{\"$b\":0},\"b\":{\"$b\":0}}", &[&seg[..]]).expect("frames");
+    assert_eq!(decode_value(&two), Err(Reason::BadSegmentRef));
+}
+
+#[test]
+fn malformed_array_sentinels_are_rejected() {
+    let seg = [0xaau8; 4];
+    for json in [
+        "{\"v\":{\"$b\":[]}}",        // empty list carries no bytes
+        "{\"v\":{\"$b\":[0,1]}}",     // index 1 does not exist
+        "{\"v\":{\"$b\":[-1]}}",      // negative
+        "{\"v\":{\"$b\":[0.5]}}",     // fractional
+        "{\"v\":{\"$b\":[\"0\"]}}",   // string, not a number
+        "{\"v\":{\"$b\":[[0]]}}",     // nested array
+        "{\"v\":{\"$b\":{\"0\":0}}}", // object under the reserved key
+    ] {
+        let frame = encode_envelope(json, &[&seg[..]]).expect("frames fine");
+        assert!(
+            decode_value(&frame).is_err(),
+            "sentinel {json} must fail closed"
+        );
+    }
+    // A single-element array is legal on DECODE even though the encoder never
+    // emits one — rejecting it would be stricter than the grammar.
+    let one = encode_envelope("{\"v\":{\"$b\":[0]}}", &[&seg[..]]).expect("frames fine");
+    assert_eq!(
+        decode_value(&one),
+        Ok(Value::Obj(std::vec![(
+            StdString::from("v"),
+            Value::Bytes(seg.to_vec())
+        )]))
+    );
 }
 
 #[test]
@@ -605,6 +723,13 @@ fn golden_vectors() -> StdVec<Vector> {
             direction: "both",
             control_plane: "{\"value\":{\"$b\":0}}",
             segments: std::vec![Seg::Fill(0xab, MAX_SEGMENT_BYTES)],
+        },
+        Vector {
+            name: "one-value-split-at-the-segment-cap",
+            note: "issue #84: the shape an ENCODER must produce for a value ONE BYTE past maxSegmentBytes -- chunks of exactly maxSegmentBytes then the remainder, in order, named by the array sentinel. Locks the split threshold and the chunk boundaries cross-language. Envelope hex omitted for size; length + structure locked.",
+            direction: "both",
+            control_plane: "{\"value\":{\"$b\":[0,1]}}",
+            segments: std::vec![Seg::Fill(0xab, MAX_SEGMENT_BYTES), Seg::Fill(0xab, 1)],
         },
     ]
 }
