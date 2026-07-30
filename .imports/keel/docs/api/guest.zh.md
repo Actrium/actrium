@@ -310,3 +310,75 @@ const Linking: {
   canOpenURL: (url: string) => Promise<boolean>;
 }
 ```
+
+---
+
+## 沙箱安全工具
+
+guest 沙箱只提供**核心 ECMAScript**。Web 平台的全局对象不在其中，而处理字节时最想用的那几个恰好都不存在。下面是从一个跑在 QuickJS-WASM 里的真实 rill guest 内部读 `typeof globalThis[name]` 得到的结果：
+
+| 不存在 | 存在 |
+|---|---|
+| `TextEncoder`、`TextDecoder`、`performance`、`btoa`、`atob`、`Buffer`、`crypto` | `Uint8Array`、`console`、`setTimeout` |
+
+这不是"某些平台上可能没有"的兼容性提醒，而是整整一类能力都不在：编码和字节格式化的全局对象，**两个方向都没有**。
+
+> **TypeScript 不会替你拦住这个坑。** 只要 guest 的 `tsconfig` 的 `lib` 里含 `DOM`，`TextEncoder`、`TextDecoder`、`performance` 就都被声明了，于是 `new TextEncoder()` 类型检查完全通过，然后在沙箱里运行时抛错。而 guest 的 `tsconfig` 往往会因为别的原因带上 `DOM`。更麻烦的是这个失败依赖运行环境：在浏览器里跑本地开发循环时一切正常，等上真机才炸。
+
+`rill/guest` 把 rill 自己的 guest bundle 在用的那几个helper 出口了出来，你不必重新实现一遍。每个 helper 都在**每次调用时**重新检查真实全局是否存在（所以宿主晚一步注入全局也能被认到），检查不到就走纯 JS 实现。
+
+```typescript
+import {
+  createUtf8Encoder,
+  createUtf8Decoder,
+  encodeBase64,
+  decodeBase64,
+  nowMs,
+} from 'rill/guest';
+```
+
+### createUtf8Encoder()
+
+```typescript
+function createUtf8Encoder(): (str: string) => Uint8Array;
+```
+
+返回一个编码函数，输出与 `TextEncoder.encode` **逐字节相同**，包括 WHATWG 规定的"孤立代理项编码为 U+FFFD（`ef bf bd`）"这条规则。
+
+逐字节相同是硬要求，不是讲究：宿主侧的 wire 解码器是**致命模式**的 —— 错一个字节，整条消息就整体失败关闭，不会只丢那个字符。
+
+一次调用拿到函数后在循环里复用，不要每次都重新创建。
+
+```typescript
+const encode = createUtf8Encoder();
+const bytes = encode('hello');  // Uint8Array
+```
+
+### createUtf8Decoder()
+
+```typescript
+function createUtf8Decoder(): (bytes: Uint8Array) => string;
+```
+
+反方向 —— 用于宿主能力**交回**给你的字节（你请宿主读的一个文件、一个响应体）。输出与**非致命**的 `TextDecoder('utf-8').decode` 一致：坏输入按 WHATWG 的替换规则产出 U+FFFD 而不是抛错，开头的 BOM 会被去掉。
+
+选非致命是刻意的，而且和宿主侧 wire 解码器的选择正好相反。这两件事并不矛盾，各说各的：wire 帧格式错了是协议被违反，必须整条消息失败关闭；而你拿到的一段任意字节，应该解出浏览器会给你的那个"有损但有定义"的字符串。真需要严格判断时，把结果再编码回去比较一下即可。
+
+### encodeBase64() / decodeBase64()
+
+```typescript
+function encodeBase64(bytes: Uint8Array): string;
+function decodeBase64(text: string): Uint8Array;
+```
+
+标准 base64（RFC 4648 §4，带填充）—— 不是 base64url，因为后者那两个不同的字符会静默解出与发送方本意不同的字节。
+
+`decodeBase64` 沿用 `atob` 的宽容度（忽略 ASCII 空白、填充可省），遇到不是合法 base64 的输入会**抛错**：一段损坏的字节负载解成乱码，比当场停下来更糟。
+
+### nowMs()
+
+```typescript
+function nowMs(): number;
+```
+
+沙箱里有 `performance.now()` 就用它，没有就退到 `Date.now()`。退化后的精度约 1 毫秒 —— 做帧率控制和诊断足够，但不要当作精确时间戳放到 wire 上。

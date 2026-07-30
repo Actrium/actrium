@@ -310,3 +310,98 @@ const Linking: {
   canOpenURL: (url: string) => Promise<boolean>;
 }
 ```
+
+---
+
+## Sandbox-safe utilities
+
+A guest sandbox provides **only core ECMAScript**. Web platform globals are not
+part of that, and the ones you would reach for to handle bytes are missing.
+Measured from inside a rill guest running on QuickJS-WASM, reporting
+`typeof globalThis[name]`:
+
+| absent | present |
+|---|---|
+| `TextEncoder`, `TextDecoder`, `performance`, `btoa`, `atob`, `Buffer`, `crypto` | `Uint8Array`, `console`, `setTimeout` |
+
+This is a category, not a portability caveat: every encoding and byte-formatting
+global is simply not there, in **both** directions.
+
+> **TypeScript will not catch this.** Any guest `tsconfig` whose `lib` includes
+> `DOM` declares `TextEncoder`, `TextDecoder`, `performance` and friends, so
+> `new TextEncoder()` type-checks cleanly and then throws inside the sandbox. And
+> a guest `tsconfig` tends to end up with `DOM` for unrelated reasons. The failure
+> is environment-dependent, so it survives local testing in a browser-hosted dev
+> loop and shows up on the device.
+
+`rill/guest` exports the helpers rill's own guest bundle uses, so you do not have
+to re-implement them. Each checks for the real global on **every call** — a host
+that injects globals late is still picked up — and falls back to pure JS.
+
+```typescript
+import {
+  createUtf8Encoder,
+  createUtf8Decoder,
+  encodeBase64,
+  decodeBase64,
+  nowMs,
+} from 'rill/guest';
+```
+
+### createUtf8Encoder()
+
+```typescript
+function createUtf8Encoder(): (str: string) => Uint8Array;
+```
+
+Returns an encode function **byte-identical to `TextEncoder.encode`**, including
+the WHATWG rule that a lone surrogate encodes as U+FFFD (`ef bf bd`). Byte
+exactness is a hard requirement, not a nicety: the host's wire decoders are
+*fatal*, so one wrong byte fails the whole message closed.
+
+Call once per batch or scope and reuse the returned function inside loops.
+
+```typescript
+const encode = createUtf8Encoder();
+const bytes = encode('hello');  // Uint8Array
+```
+
+### createUtf8Decoder()
+
+```typescript
+function createUtf8Decoder(): (bytes: Uint8Array) => string;
+```
+
+The other direction — for bytes a host capability hands **back** (a file you asked
+the host to read, a response body). Output-identical to a **non-fatal**
+`TextDecoder('utf-8').decode`: malformed input yields U+FFFD by the WHATWG
+replacement rules rather than throwing, and a leading BOM is removed.
+
+Non-fatal is deliberate, and it is the opposite of what the host's wire decoders
+do. Those two are not in tension: a malformed wire frame is a protocol violation
+that must fail the whole message closed, while arbitrary bytes you were handed
+should decode to the same lossy-but-defined string a browser would give. If you
+need strictness, encode the result back and compare.
+
+### encodeBase64() / decodeBase64()
+
+```typescript
+function encodeBase64(bytes: Uint8Array): string;
+function decodeBase64(text: string): Uint8Array;
+```
+
+Standard base64 (RFC 4648 §4, padded) — not base64url, whose two extra characters
+would silently decode to different bytes than the sender meant. `decodeBase64`
+follows the same tolerances `atob` has (ASCII whitespace ignored, padding
+optional) and **throws** on anything that is not valid base64, because a
+corrupted byte payload that decodes to garbage is worse than one that stops.
+
+### nowMs()
+
+```typescript
+function nowMs(): number;
+```
+
+`performance.now()` when the sandbox has it, `Date.now()` otherwise. Fallback
+resolution is about 1 ms — fine for frame pacing and diagnostics; do not put it on
+the wire as a precise timestamp.
