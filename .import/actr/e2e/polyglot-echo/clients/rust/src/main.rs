@@ -204,7 +204,7 @@ async fn scenario_echo(
         message: message.to_string(),
     };
     let response: EchoResponse = actr_ref
-        .call_remote(target, request)
+        .call_remote(target, request, 30_000)
         .await
         .map_err(|e| anyhow!("Echo RPC failed: {e}"))?;
 
@@ -268,6 +268,7 @@ async fn scenario_server_stream(
                 chunk_count,
                 text: message.to_string(),
             },
+            30_000,
         )
         .await
         .map_err(|e| anyhow!("StartServerStream RPC failed: {e}"))?;
@@ -357,6 +358,7 @@ async fn scenario_bidi(
                 server_rx_stream_id: server_rx_id.clone(),
                 expected_chunks: chunk_count,
             },
+            30_000,
         )
         .await
         .map_err(|e| anyhow!("SetupBidi RPC failed: {e}"))?;

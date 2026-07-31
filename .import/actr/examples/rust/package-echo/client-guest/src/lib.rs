@@ -92,7 +92,11 @@ async fn proxy_echo<C: Context>(
     };
 
     match ctx
-        .call(&actr_framework::Dest::Peer(server_id.clone()), echo_req)
+        .call(
+            &actr_framework::Dest::Peer(server_id.clone()),
+            echo_req,
+            30_000,
+        )
         .await
     {
         Ok(resp) => Ok(resp),
@@ -105,7 +109,11 @@ async fn proxy_echo<C: Context>(
             let echo_req2 = EchoRequest {
                 message: req.message.clone(),
             };
-            ctx.call(&actr_framework::Dest::Peer(fresh_id), echo_req2)
+            ctx.call(
+                &actr_framework::Dest::Peer(fresh_id),
+                echo_req2,
+                30_000,
+            )
                 .await
                 .map_err(|e2| {
                     ActrError::Internal(format!(

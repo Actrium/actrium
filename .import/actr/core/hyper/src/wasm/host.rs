@@ -6,7 +6,7 @@
 //!
 //! # Contract
 //!
-//! The guest component must implement the `actr:workload@0.2.0`
+//! The guest component must implement the `actr:workload@0.3.0`
 //! `actr-workload-guest-v2` world defined in
 //! `core/framework/wit-v2/actr-workload.wit`. That contract carries one
 //! `dispatch(envelope, ctx)` export for inbound RPC plus sixteen observation
@@ -102,7 +102,7 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
 ///   that transitively imports WASI interfaces);
 /// - a per-invocation table keyed by `ctx-token`, holding the
 ///   [`InvocationContext`] + [`HostAbiFn`] for every in-flight dispatch on
-///   the 0.2.0 async world — installed before `call_dispatch` and retired
+///   the 0.3.0 async world — installed before `call_dispatch` and retired
 ///   after, so the Accessor-based host imports recover the right per-call
 ///   state without a shared single slot that would cross-talk;
 /// - stream callback token tracking, so a callback registered during one
@@ -111,7 +111,7 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
 pub(crate) struct HostState {
     wasi: WasiCtx,
     table: ResourceTable,
-    /// Per-invocation table keyed by `ctx-token`, used by the V2 (0.2.0
+    /// Per-invocation table keyed by `ctx-token`, used by the V2 (0.3.0
     /// async world) Accessor-based host imports. Each in-flight invocation
     /// keys its own `HostAbiFn` / `InvocationContext` by its token, so the
     /// static Accessor import methods recover the correct one without a
@@ -328,7 +328,7 @@ impl WasmHost {
                     "this .actr package was built by an old SDK (wit-bindgen \
                      <= 0.57 async-lift ABI), which wasmtime 46 rejects per \
                      the Component Model spec. Rebuild it with the current SDK, \
-                     which emits the supported actr:workload@0.2.0 async-world \
+                     which emits the supported actr:workload@0.3.0 async-world \
                      ABI. wasmtime reported: {raw}"
                 ));
             }
@@ -350,14 +350,14 @@ impl WasmHost {
     /// Instantiate the component into a runnable internal workload.
     ///
     /// Probes the component's exported world and rejects anything that is not
-    /// the sole supported `actr:workload@0.2.0` async world, then instantiates
+    /// the sole supported `actr:workload@0.3.0` async world, then instantiates
     /// it on the `run_concurrent` async path via [`WasmWorkloadV2::instantiate`].
-    /// A retired `@0.1.0` synchronous-world package (or an unrecognised world)
-    /// is rejected with an actionable rebuild hint rather than loaded.
+    /// Retired `@0.1.0`/`@0.2.0` packages (or an unrecognised world) are
+    /// rejected with an actionable rebuild hint rather than loaded.
     ///
     /// Builds a fresh [`Linker`] per instance (cheap) inside the V2
     /// instantiation helper, registers WASI p2 as well as the generated
-    /// `actr:workload/host@0.2.0` linker, and runs `Component::instantiate_async`.
+    /// `actr:workload/host@0.3.0` linker, and runs `Component::instantiate_async`.
     pub(crate) async fn instantiate(&self) -> WasmResult<WasmWorkloadV2> {
         let store_permit = acquire_store(&self.limits)?;
         probe_world(&self.component, &self.engine)?;
@@ -377,45 +377,60 @@ impl WasmHost {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Reject a compiled [`Component`] unless it implements the sole supported
-/// `actr:workload@0.2.0` async world. The decision is grounded purely in the
+/// `actr:workload@0.3.0` async world. The decision is grounded purely in the
 /// component's exported instance types — never reads the `.actr` manifest —
 /// so it reflects what the binary actually exports.
 ///
 /// A component exporting the retired `actr:workload@0.1.0` synchronous world
 /// (or no recognised world at all) is rejected with an actionable rebuild
-/// hint: V1 packages must be rebuilt with the current SDK, which now emits
-/// only the V2 async-world ABI.
+/// hint: older packages must be rebuilt with the current SDK, which now emits
+/// only the timeout-aware 0.3.0 async-world ABI.
 fn probe_world(component: &Component, engine: &Engine) -> WasmResult<()> {
+    let mut saw_v3 = false;
     let mut saw_v2 = false;
     let mut saw_v1 = false;
     for (name, _item) in component.component_type().exports(engine) {
-        if name.starts_with("actr:workload/workload@0.2.0") {
+        if name.starts_with("actr:workload/workload@0.3.0") {
+            saw_v3 = true;
+        } else if name.starts_with("actr:workload/workload@0.2.0") {
             saw_v2 = true;
         } else if name.starts_with("actr:workload/workload@0.1.0") {
             saw_v1 = true;
         }
     }
-    match (saw_v1, saw_v2) {
-        (false, true) => Ok(()),
-        (true, false) => Err(WasmError::LoadFailed(
+    let recognized_worlds = u8::from(saw_v1) + u8::from(saw_v2) + u8::from(saw_v3);
+    if saw_v3 && recognized_worlds == 1 {
+        return Ok(());
+    }
+    if recognized_worlds > 1 {
+        return Err(WasmError::LoadFailed(
+            "component exports multiple actr:workload/workload ABI versions; \
+             a package must implement exactly one world (rebuild with the current \
+             SDK, which emits only @0.3.0)"
+                .to_string(),
+        ));
+    }
+    if saw_v2 {
+        return Err(WasmError::LoadFailed(
+            "component exports the retired actr:workload@0.2.0 async world, whose \
+             host call imports do not carry a caller-selected timeout; rebuild the \
+             package with the current SDK, which emits actr:workload@0.3.0"
+                .to_string(),
+        ));
+    }
+    if saw_v1 {
+        return Err(WasmError::LoadFailed(
             "component exports the retired actr:workload@0.1.0 synchronous world; \
              rebuild the package with the current SDK, which emits only the \
-             actr:workload@0.2.0 async-world ABI"
+             actr:workload@0.3.0 async-world ABI"
                 .to_string(),
-        )),
-        (true, true) => Err(WasmError::LoadFailed(
-            "component exports both actr:workload/workload@0.1.0 and @0.2.0; \
-             a package must implement exactly one world (the 0.1.0 synchronous \
-             world is retired — rebuild with the current SDK, which emits only \
-             the @0.2.0 async-world ABI)"
-                .to_string(),
-        )),
-        (false, false) => Err(WasmError::LoadFailed(
-            "component exports no recognised actr:workload/workload world \
-             (expected @0.2.0); rebuild the package with a current SDK"
-                .to_string(),
-        )),
+        ));
     }
+    Err(WasmError::LoadFailed(
+        "component exports no recognised actr:workload/workload world \
+         (expected @0.3.0); rebuild the package with a current SDK"
+            .to_string(),
+    ))
 }
 
 /// Convert the invocation timeout into an epoch deadline (tick count).

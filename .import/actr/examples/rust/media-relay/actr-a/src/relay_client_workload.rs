@@ -63,7 +63,8 @@ impl MessageDispatcher for RelayClientDispatcher {
         );
 
         // Call remote server via Dest::Peer
-        let response: RelayFrameResponse = ctx.call(&Dest::Peer(server_id), request).await?;
+        let response: RelayFrameResponse =
+            ctx.call(&Dest::Peer(server_id), request, 30_000).await?;
 
         Ok(Bytes::from(prost::Message::encode_to_vec(&response)))
     }

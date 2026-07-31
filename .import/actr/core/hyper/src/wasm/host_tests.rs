@@ -76,21 +76,48 @@ fn probe_world_rejects_retired_v1_component_with_rebuild_hint() {
 }
 
 #[test]
-fn probe_world_rejects_component_exporting_both_worlds() {
-    // `(true, true)` arm: a component that exports both the 0.1.0 and 0.2.0
-    // worlds is ambiguous and must be a clean `LoadFailed`, never a panic.
+fn probe_world_accepts_current_v3_component() {
     let src = r#"
         (component
-          (instance $v1)
+          (instance $v3)
+          (export "actr:workload/workload@0.3.0" (instance $v3))
+        )
+    "#;
+    probe_wat(src).expect("current workload ABI should be accepted");
+}
+
+#[test]
+fn probe_world_rejects_retired_v2_component_with_rebuild_hint() {
+    let src = r#"
+        (component
           (instance $v2)
-          (export "actr:workload/workload@0.1.0" (instance $v1))
           (export "actr:workload/workload@0.2.0" (instance $v2))
         )
     "#;
     let err = probe_wat(src).unwrap_err();
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
-        err.to_string().contains("both"),
+        err.to_string().contains("caller-selected timeout") && err.to_string().contains("@0.3.0"),
+        "unexpected message: {err}"
+    );
+}
+
+#[test]
+fn probe_world_rejects_component_exporting_multiple_worlds() {
+    // A component that exports multiple ABI versions is ambiguous and must
+    // be a clean `LoadFailed`, never a panic.
+    let src = r#"
+        (component
+          (instance $v1)
+          (instance $v3)
+          (export "actr:workload/workload@0.1.0" (instance $v1))
+          (export "actr:workload/workload@0.3.0" (instance $v3))
+        )
+    "#;
+    let err = probe_wat(src).unwrap_err();
+    assert!(matches!(err, WasmError::LoadFailed(_)));
+    assert!(
+        err.to_string().contains("multiple"),
         "unexpected message: {err}"
     );
 }

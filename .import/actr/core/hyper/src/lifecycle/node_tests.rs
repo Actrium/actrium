@@ -521,7 +521,12 @@ async fn callraw_without_peer_returns_internal() {
     let res = host_operation_handler(
         ctx,
         weak_runner(&wl),
-        HostOperation::CallRaw(HostCallRawV1::default()),
+        // A positive timeout is required to pass sender-side validation so the
+        // call reaches gate selection, which is the path under test here.
+        HostOperation::CallRaw(HostCallRawV1 {
+            timeout_ms: 30_000,
+            ..Default::default()
+        }),
     )
     .await;
     // No remote actor gate is installed, so routing fails immediately.
@@ -738,7 +743,12 @@ async fn stream_callback_callraw_without_peer_errors() {
     let ctx = actorless_harness().await.0;
     let res = stream_callback_host_operation_handler(
         ctx,
-        HostOperation::CallRaw(HostCallRawV1::default()),
+        // A positive timeout is required to pass sender-side validation so the
+        // call reaches gate selection, which is the path under test here.
+        HostOperation::CallRaw(HostCallRawV1 {
+            timeout_ms: 30_000,
+            ..Default::default()
+        }),
     )
     .await;
     assert!(matches!(expect_runtime_error(res), ActrError::Internal(_)));

@@ -1094,6 +1094,7 @@ dependencies = [
  "actr-protocol",
  "async-trait",
  "bytes",
+ "prost",
 ]
 
 [[package]]

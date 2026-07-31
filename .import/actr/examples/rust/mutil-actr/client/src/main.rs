@@ -65,7 +65,7 @@ async fn main() -> Result<()> {
     println!("\n🔹 Client ID: {}", client_id_str);
     println!("🔹 sendmessage: {}", message);
 
-    match actr_ref.call(request).await {
+    match actr_ref.call(request, 30_000).await {
         Ok(response) => {
             let response: EchoResponse = response;
             info!("📥 [...] echo response: {}", response.reply);

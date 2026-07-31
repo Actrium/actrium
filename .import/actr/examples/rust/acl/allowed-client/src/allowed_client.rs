@@ -61,7 +61,7 @@ impl actr_framework::MessageDispatcher for AllowedClientDispatcher {
 
         info!("[AllowedClient] Forwarding greeting to server...");
         
-        let response: GreetResponse = ctx.call(&Dest::Peer(server_id), request).await?;
+        let response: GreetResponse = ctx.call(&Dest::Peer(server_id), request, 30_000).await?;
 
         info!("[AllowedClient] Got response: {}", response.message);
 
@@ -122,7 +122,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         name: "Allowed Client".to_string(),
     };
     
-    match actr_ref.call(request).await {
+    match actr_ref.call(request, 30_000).await {
         Ok(response) => {
             info!("✅ SUCCESS: Received response: {}", response.message);
             info!("🎉 ACL test PASSED - Allowed client can access server");

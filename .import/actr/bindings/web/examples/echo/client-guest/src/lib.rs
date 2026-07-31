@@ -109,7 +109,10 @@ async fn proxy_echo<C: Context>(
         message: req.message.clone(),
     };
 
-    match ctx.call(&Dest::Peer(server_id.clone()), echo_req).await {
+    match ctx
+        .call(&Dest::Peer(server_id.clone()), echo_req, 30_000)
+        .await
+    {
         Ok(resp) => Ok(resp),
         Err(e) => {
             // Cache miss: clear cached id and retry once with fresh discovery.
@@ -120,7 +123,7 @@ async fn proxy_echo<C: Context>(
             let echo_req2 = EchoRequest {
                 message: req.message.clone(),
             };
-            ctx.call(&Dest::Peer(fresh_id), echo_req2)
+            ctx.call(&Dest::Peer(fresh_id), echo_req2, 30_000)
                 .await
                 .map_err(|e2| {
                     ActrError::Internal(format!(

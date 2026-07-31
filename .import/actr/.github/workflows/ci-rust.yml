@@ -87,7 +87,7 @@ jobs:
           version: ${{ vars.PROTOC_VERSION }}
       # Component Model toolchain:
       # - wasm-component-ld >= 0.5.22 is required to link the V2 async-world
-      #   guest fixture (actr:workload@0.2.0) built by core/hyper/build.rs; that
+      #   guest fixture (actr:workload@0.3.0) built by core/hyper/build.rs; that
       #   is the first release that accepts its async custom sections. CI pins
       #   0.5.26; the runtime check in `cli/src/commands/build.rs` enforces the
       #   minimum.

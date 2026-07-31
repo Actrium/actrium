@@ -34,13 +34,37 @@ use std::sync::Arc;
 /// producing the invalid zero/negative REQUEST envelopes that #254 guards
 /// against on the native side. Mirrors
 /// `actr_hyper::transport::validate_rpc_timeout_ms`.
-pub(crate) fn validate_rpc_timeout_ms(timeout_ms: i64) -> ActorResult<()> {
+pub(crate) fn validate_rpc_timeout_ms(timeout_ms: i64) -> ActorResult<u32> {
     if timeout_ms <= 0 {
         return Err(ActrError::InvalidArgument(format!(
             "RPC call timeout_ms must be > 0, got {timeout_ms} (fire-and-forget messaging must use tell, not a zero timeout)"
         )));
     }
-    Ok(())
+    if timeout_ms > i64::from(i32::MAX) {
+        return Err(ActrError::InvalidArgument(format!(
+            "RPC call timeout_ms must be <= {}, got {timeout_ms}",
+            i32::MAX
+        )));
+    }
+    Ok(timeout_ms as u32)
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::*;
+
+    #[test]
+    fn web_timeout_fits_browser_timer_range() {
+        assert_eq!(validate_rpc_timeout_ms(1).unwrap(), 1);
+        assert_eq!(
+            validate_rpc_timeout_ms(i64::from(i32::MAX)).unwrap(),
+            i32::MAX as u32
+        );
+        assert!(matches!(
+            validate_rpc_timeout_ms(i64::from(i32::MAX) + 1),
+            Err(ActrError::InvalidArgument(_))
+        ));
+    }
 }
 
 /// Gate enum for outbound messaging.

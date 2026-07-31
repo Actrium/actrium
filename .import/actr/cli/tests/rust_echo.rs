@@ -253,6 +253,10 @@ fn rust_echo_app_scaffold() {
         "main.rs should call EchoService through the local guest"
     );
     assert!(
+        main.contains("30_000"),
+        "main.rs should pass an explicit call timeout"
+    );
+    assert!(
         main.contains(r#"println!("Echo reply: {}""#),
         "main.rs should print the echo response"
     );

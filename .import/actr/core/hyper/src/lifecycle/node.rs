@@ -699,7 +699,7 @@ async fn host_operation_handler(
                     req.route_key,
                     PayloadType::RpcReliable,
                     bytes::Bytes::from(req.payload),
-                    30_000,
+                    req.timeout_ms,
                 )
                 .await
             {
@@ -725,7 +725,7 @@ async fn host_operation_handler(
                     req.route_key,
                     PayloadType::RpcReliable,
                     bytes::Bytes::from(req.payload),
-                    30_000,
+                    req.timeout_ms,
                 )
                 .await
             {
@@ -903,7 +903,7 @@ async fn stream_callback_host_operation_handler(
                     req.route_key,
                     PayloadType::RpcReliable,
                     bytes::Bytes::from(req.payload),
-                    30_000,
+                    req.timeout_ms,
                 )
                 .await
             {
@@ -922,7 +922,7 @@ async fn stream_callback_host_operation_handler(
                     req.route_key,
                     PayloadType::RpcReliable,
                     bytes::Bytes::from(req.payload),
-                    30_000,
+                    req.timeout_ms,
                 )
                 .await
             {

@@ -59,7 +59,7 @@
 //! ## 2. Actor Proto Message (Optional, TODO)
 //! ```ignore
 //! // TODO: actors send proto message directly (not yet implemented)
-//! actor_ref.call(NetworkPathChangedMessage { snapshot }).await?;
+//! actor_ref.call(NetworkPathChangedMessage { snapshot }, 30_000).await?;
 //! ```
 //!
 //! **Key Differences:**

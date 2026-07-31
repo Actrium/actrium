@@ -221,7 +221,7 @@ function installActrHostGlobals() {
   // id. This lets multiple concurrent dispatches share the single-threaded
   // JS bridge without clobbering each other's runtime context (TD-003).
 
-  self.actrHostCall = async function (requestId, target, routeKey, payload) {
+  self.actrHostCall = async function (requestId, target, routeKey, payload, timeoutMs) {
     // actr-web-abi `call` passes `Dest` variant as `{ peer: {...} }` or
     // `"host"`/`"workload"`; sw-host's `host_call_async` reads `{ tag, val }`.
     // The WBG path is only exercised by the echo client which uses
@@ -236,7 +236,13 @@ function installActrHostGlobals() {
     }
     const u8 = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
     try {
-      const reply = await wasm_bindgen.host_call_async(requestId, destCamel, routeKey, u8);
+      const reply = await wasm_bindgen.host_call_async(
+        requestId,
+        destCamel,
+        routeKey,
+        u8,
+        timeoutMs,
+      );
       return { ok: Array.from(reply) };
     } catch (e) {
       // Host rejects with Error carrying `actrErrorTag`; fold into the
@@ -245,12 +251,18 @@ function installActrHostGlobals() {
     }
   };
 
-  self.actrHostCallRaw = async function (requestId, target, routeKey, payload) {
+  self.actrHostCallRaw = async function (requestId, target, routeKey, payload, timeoutMs) {
     // `target` is an `ActrId` (kebab) from the guest.
     const targetCamel = actrIdKebabToCamel(target);
     const u8 = payload instanceof Uint8Array ? payload : new Uint8Array(payload);
     try {
-      const reply = await wasm_bindgen.host_call_raw_async(requestId, targetCamel, routeKey, u8);
+      const reply = await wasm_bindgen.host_call_raw_async(
+        requestId,
+        targetCamel,
+        routeKey,
+        u8,
+        timeoutMs,
+      );
       // `reply` is a `Uint8Array` from Rust; guest expects Vec<u8> —
       // serde-wasm-bindgen deserialises Array / Uint8Array / numbers
       // buffer — Uint8Array works directly, but the outer Result

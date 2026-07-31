@@ -27,6 +27,9 @@ pub trait RuntimeBridge {
     /// Register a pending RPC so `handle_fast_path` can recognize the response.
     fn register_pending_rpc(&self, request_id: String);
 
+    /// Remove a pending RPC after a local send failure or timeout.
+    fn unregister_pending_rpc(&self, request_id: &str);
+
     /// Discover a target actor through the signaling service.
     async fn discover_target(&self, target_type: &ActrType) -> ActorResult<ActrId>;
 
@@ -101,7 +104,12 @@ pub trait WebContext {
     // ========== Typed Communication ==========
 
     /// Send a typed RPC request and wait for the response.
-    async fn call<R: RpcRequest>(&self, target: &ActrId, request: R) -> ActorResult<R::Response>;
+    async fn call<R: RpcRequest>(
+        &self,
+        target: &ActrId,
+        request: R,
+        timeout_ms: i64,
+    ) -> ActorResult<R::Response>;
 
     /// Send a one-way message without waiting for a response.
     async fn tell<R: RpcRequest>(&self, target: &ActrId, request: R) -> ActorResult<()>;

@@ -664,12 +664,21 @@ fn emit_host_import_wrapper(out: &mut String, func: &FuncDef) {
     // Serialise the request_id (as a plain JS string) and then each
     // typed argument into its own `JsValue`.
     out.push_str("    let __js_request_id = JsValue::from_str(request_id);\n");
-    for (idx, (pname, _pty)) in func.params.iter().enumerate() {
+    for (idx, (pname, pty)) in func.params.iter().enumerate() {
         let rust_pname = wit_ident_to_rust(pname);
         let var = format!("__js_arg{idx}");
-        out.push_str(&format!(
-            "    let {var} = serde_wasm_bindgen::to_value(&{rust_pname}).map_err(serde_err)?;\n"
-        ));
+        if matches!(pty, TypeRef::U64 | TypeRef::S64) {
+            // WebAssembly's JavaScript API requires BigInt values for direct
+            // i64 parameters. serde-wasm-bindgen defaults to Number for i64,
+            // which would make the subsequent wasm-bindgen export call throw.
+            out.push_str(&format!(
+                "    let {var}: JsValue = js_sys::BigInt::from({rust_pname}).into();\n"
+            ));
+        } else {
+            out.push_str(&format!(
+                "    let {var} = serde_wasm_bindgen::to_value(&{rust_pname}).map_err(serde_err)?;\n"
+            ));
+        }
         let _ = var;
     }
 
@@ -1105,6 +1114,7 @@ mod tests {
         interface host {
             use types.{sample, actr-type};
             ping: func(arg: sample) -> result<u32, string>;
+            wait: func(timeout-ms: s64);
             log-message: func(msg: string);
         }
 
@@ -1176,6 +1186,13 @@ mod tests {
         assert!(out.contains("JsValue::from_str(request_id)"));
         // Call threads the request_id JS value as the first argument.
         assert!(out.contains("__actr_host_ping(__js_request_id"));
+    }
+
+    #[test]
+    fn guest_rs_serializes_direct_i64_parameters_as_bigint() {
+        let model = load_inmem(MINI_WIT);
+        let out = emit_guest(&model);
+        assert!(out.contains("let __js_arg0: JsValue = js_sys::BigInt::from(timeout_ms).into();"));
     }
 
     #[test]

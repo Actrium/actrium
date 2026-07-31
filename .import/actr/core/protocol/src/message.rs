@@ -14,7 +14,7 @@
 //! With the RpcRequest trait, the framework can provide type-safe APIs:
 //! ```rust,ignore
 //! // Type-safe: compiler infers EchoResponse from EchoRequest::Response
-//! let response: EchoResponse = ctx.call(target, request).await?;
+//! let response: EchoResponse = ctx.call(target, request, 30_000).await?;
 //! ```
 //!
 //! # Implementation
@@ -91,7 +91,7 @@ use crate::generated::actr::PayloadType;
 ///     let request = EchoRequest { message };
 ///
 ///     // Type inference: compiler knows Response = EchoResponse
-///     let response = ctx.call(target, request).await?;
+///     let response = ctx.call(target, request, 30_000).await?;
 ///
 ///     Ok(response.reply)
 /// }

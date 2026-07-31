@@ -43,7 +43,7 @@ impl AppSide {
             info!("[App] Sending to local ClientWorkload: {}", line);
             let span = tracing::info_span!("app_side_call", line = line);
             // Call local workload via ActrRef
-            match self.actr_ref.call(request).instrument(span).await {
+            match self.actr_ref.call(request, 30_000).instrument(span).await {
                 Ok(response) => {
                     // Try to print the reply field if available
                     // The runtime typically decodes into the expected type.

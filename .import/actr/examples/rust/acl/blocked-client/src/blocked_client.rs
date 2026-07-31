@@ -61,7 +61,7 @@ impl actr_framework::MessageDispatcher for BlockedClientDispatcher {
 
         info!("[BlockedClient] Forwarding greeting to server...");
         
-        let response: GreetResponse = ctx.call(&Dest::Peer(server_id), request).await?;
+        let response: GreetResponse = ctx.call(&Dest::Peer(server_id), request, 30_000).await?;
 
         info!("[BlockedClient] Got response: {}", response.message);
 
@@ -123,7 +123,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         name: "Blocked Client".to_string(),
     };
     
-    match actr_ref.call(request).await {
+    match actr_ref.call(request, 30_000).await {
         Ok(response) => {
             error!("❌ UNEXPECTED SUCCESS: Received response: {}", response.message);
             error!("💥 ACL test FAILED - Blocked client was not blocked!");

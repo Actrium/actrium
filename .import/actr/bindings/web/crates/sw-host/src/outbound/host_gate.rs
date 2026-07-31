@@ -5,6 +5,7 @@
 use actr_protocol::{ActorResult, ActrError, ActrId, Direction, PayloadType, RpcEnvelope};
 use bytes::Bytes;
 use futures::channel::oneshot;
+use futures::future::{Either, select};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -91,17 +92,19 @@ impl HostGate {
         // Sender-side timeout contract (#254): reject non-positive deadlines
         // before creating the oneshot / registering pending, mirroring
         // PeerGate::send_request and RuntimeContext::call_raw.
-        crate::outbound::validate_rpc_timeout_ms(envelope.timeout_ms)?;
+        let timeout_ms = crate::outbound::validate_rpc_timeout_ms(envelope.timeout_ms)?;
 
         envelope.direction = Some(Direction::Request as i32);
 
         // 1. Create a oneshot channel.
         let (tx, rx) = oneshot::channel();
 
+        let request_id = envelope.request_id.clone();
+
         // 2. Register the pending request.
         {
             let mut pending = self.pending_requests.lock();
-            pending.insert(envelope.request_id.clone(), tx);
+            pending.insert(request_id.clone(), tx);
         }
 
         // 3. Send the request to the target actor.
@@ -114,7 +117,7 @@ impl HostGate {
                 None => {
                     // Clean up the pending request.
                     drop(guard); // Release the lock.
-                    self.pending_requests.lock().remove(&envelope.request_id);
+                    self.pending_requests.lock().remove(&request_id);
 
                     return Err(ActrError::Unavailable(
                         "HostGate message_handler not set".to_string(),
@@ -123,12 +126,17 @@ impl HostGate {
             }
         }
 
-        // 4. Wait for the response.
-        let response = rx
-            .await
-            .map_err(|_| ActrError::Unavailable("Response channel closed".to_string()))?;
-
-        Ok(response)
+        // 4. Wait for the response until the caller-provided deadline.
+        let deadline = gloo_timers::future::TimeoutFuture::new(timeout_ms);
+        futures::pin_mut!(rx, deadline);
+        let result = match select(rx, deadline).await {
+            Either::Left((result, _)) => {
+                result.map_err(|_| ActrError::Unavailable("Response channel closed".to_string()))
+            }
+            Either::Right(((), _)) => Err(ActrError::TimedOut),
+        };
+        self.pending_requests.lock().remove(&request_id);
+        result
     }
 
     /// Send a one-way message without waiting for a response.

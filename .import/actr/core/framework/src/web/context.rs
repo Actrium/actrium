@@ -225,7 +225,12 @@ impl Context for WebContext {
     // integration phase. Leaving them as `todo!()` here lets dependents
     // type-check against the contract while the integration lands.
 
-    async fn call<R: RpcRequest>(&self, target: &Dest, request: R) -> ActorResult<R::Response> {
+    async fn call<R: RpcRequest>(
+        &self,
+        target: &Dest,
+        request: R,
+        timeout_ms: i64,
+    ) -> ActorResult<R::Response> {
         // Typed convenience: encode request via prost, delegate to call_raw,
         // decode response back to the typed Response. Mirrors the wasip2
         // `WasmContext::call` path so handler code is target-agnostic.
@@ -237,7 +242,12 @@ impl Context for WebContext {
         };
         let payload = request.encode_to_vec();
         let bytes = self
-            .call_raw(actor, R::route_key(), bytes::Bytes::from(payload))
+            .call_raw(
+                actor,
+                R::route_key(),
+                bytes::Bytes::from(payload),
+                timeout_ms,
+            )
             .await?;
         R::Response::decode(bytes.as_ref()).map_err(|e| {
             ActrError::DecodeFailure(format!("WebContext::call: response decode failed: {e}"))
@@ -269,6 +279,7 @@ impl Context for WebContext {
         target: &ActrId,
         route_key: &str,
         payload: bytes::Bytes,
+        timeout_ms: i64,
     ) -> ActorResult<bytes::Bytes> {
         // The raw entry point is the one the typed `call` delegates to and
         // the only shape that actually traverses the sw-host HashMap
@@ -278,6 +289,7 @@ impl Context for WebContext {
             actr_id_to_wit(target),
             route_key.to_string(),
             payload.to_vec(),
+            timeout_ms,
         )
         .await;
         flatten_js(outcome).map(bytes::Bytes::from)

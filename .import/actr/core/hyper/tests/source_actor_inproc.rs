@@ -442,6 +442,7 @@ impl Context for MockContext {
         &self,
         _target: &actr_framework::Dest,
         _request: R,
+        _timeout_ms: i64,
     ) -> ActorResult<R::Response> {
         Err(ActrError::NotImplemented("mock context".to_string()))
     }
@@ -488,6 +489,7 @@ impl Context for MockContext {
         _target: &ActrId,
         _route_key: &str,
         _payload: bytes::Bytes,
+        _timeout_ms: i64,
     ) -> ActorResult<bytes::Bytes> {
         Err(ActrError::NotImplemented("mock context".to_string()))
     }

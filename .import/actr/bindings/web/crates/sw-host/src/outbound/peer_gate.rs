@@ -7,6 +7,7 @@ use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{ActorResult, ActrError, ActrId, Direction, PayloadType, RpcEnvelope};
 use actr_web_common::Dest;
 use bytes::Bytes;
+use futures::future::{Either, select};
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -100,7 +101,7 @@ impl PeerGate {
 
         // Sender-side contract (#254): reject non-positive deadlines before
         // registering a pending entry. Mirrors the native PeerGate guard.
-        crate::outbound::validate_rpc_timeout_ms(envelope.timeout_ms)?;
+        let timeout_ms = crate::outbound::validate_rpc_timeout_ms(envelope.timeout_ms)?;
 
         log::debug!(
             "PeerGate::send_request to {:?}, request_id={}",
@@ -114,25 +115,33 @@ impl PeerGate {
         // 2. Create a oneshot channel.
         let (tx, rx) = futures::channel::oneshot::channel();
 
+        let request_id = envelope.request_id.clone();
+
         // 3. Register the pending request.
         {
             let mut pending = self.pending_requests.lock();
-            pending.insert(envelope.request_id.clone(), tx);
+            pending.insert(request_id.clone(), tx);
         }
 
-        // 4. Serialize the envelope and send it.
+        // 4. Serialize the envelope and run send + response under one deadline.
         let payload = envelope.encode_to_vec();
-        self.transport
-            .send(&dest, PayloadType::RpcReliable, &payload)
-            .await
-            .map_err(|e| ActrError::Unavailable(format!("Send failed: {}", e)))?;
+        let operation = async {
+            self.transport
+                .send(&dest, PayloadType::RpcReliable, &payload)
+                .await
+                .map_err(|e| ActrError::Unavailable(format!("Send failed: {}", e)))?;
+            rx.await
+                .map_err(|_| ActrError::Unavailable("Response channel closed".to_string()))
+        };
+        let deadline = gloo_timers::future::TimeoutFuture::new(timeout_ms);
+        futures::pin_mut!(operation, deadline);
 
-        // 5. Wait for the response.
-        let response = rx
-            .await
-            .map_err(|_| ActrError::Unavailable("Response channel closed".to_string()))?;
-
-        Ok(response)
+        let result = match select(operation, deadline).await {
+            Either::Left((result, _)) => result,
+            Either::Right(((), _)) => Err(ActrError::TimedOut),
+        };
+        self.pending_requests.lock().remove(&request_id);
+        result
     }
 
     /// Send a one-way tell without waiting for a response.

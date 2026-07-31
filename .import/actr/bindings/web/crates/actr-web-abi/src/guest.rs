@@ -42,6 +42,7 @@ extern "C" {
         target: JsValue,
         route_key: JsValue,
         payload: JsValue,
+        timeout_ms: JsValue,
     ) -> Result<js_sys::Promise, JsValue>;
     #[wasm_bindgen(catch, js_name = "actrHostCallRaw")]
     fn __actr_host_call_raw(
@@ -49,6 +50,7 @@ extern "C" {
         target: JsValue,
         route_key: JsValue,
         payload: JsValue,
+        timeout_ms: JsValue,
     ) -> Result<js_sys::Promise, JsValue>;
     #[wasm_bindgen(catch, js_name = "actrHostDiscover")]
     fn __actr_host_discover(
@@ -104,12 +106,15 @@ pub async fn call_with_request_id(
     target: Dest,
     route_key: String,
     payload: Vec<u8>,
+    timeout_ms: i64,
 ) -> Result<Result<Vec<u8>, ActrError>, JsValue> {
     let __js_request_id = JsValue::from_str(request_id);
     let __js_arg0 = serde_wasm_bindgen::to_value(&target).map_err(serde_err)?;
     let __js_arg1 = serde_wasm_bindgen::to_value(&route_key).map_err(serde_err)?;
     let __js_arg2 = serde_wasm_bindgen::to_value(&payload).map_err(serde_err)?;
-    let __js_promise = __actr_host_call(__js_request_id, __js_arg0, __js_arg1, __js_arg2)?;
+    let __js_arg3: JsValue = js_sys::BigInt::from(timeout_ms).into();
+    let __js_promise =
+        __actr_host_call(__js_request_id, __js_arg0, __js_arg1, __js_arg2, __js_arg3)?;
     let __js_result = JsFuture::from(__js_promise).await?;
     let __out = serde_wasm_bindgen::from_value(__js_result).map_err(serde_err)?;
     Ok(__out)
@@ -126,12 +131,15 @@ pub async fn call_raw_with_request_id(
     target: ActrId,
     route_key: String,
     payload: Vec<u8>,
+    timeout_ms: i64,
 ) -> Result<Result<Vec<u8>, ActrError>, JsValue> {
     let __js_request_id = JsValue::from_str(request_id);
     let __js_arg0 = serde_wasm_bindgen::to_value(&target).map_err(serde_err)?;
     let __js_arg1 = serde_wasm_bindgen::to_value(&route_key).map_err(serde_err)?;
     let __js_arg2 = serde_wasm_bindgen::to_value(&payload).map_err(serde_err)?;
-    let __js_promise = __actr_host_call_raw(__js_request_id, __js_arg0, __js_arg1, __js_arg2)?;
+    let __js_arg3: JsValue = js_sys::BigInt::from(timeout_ms).into();
+    let __js_promise =
+        __actr_host_call_raw(__js_request_id, __js_arg0, __js_arg1, __js_arg2, __js_arg3)?;
     let __js_result = JsFuture::from(__js_promise).await?;
     let __out = serde_wasm_bindgen::from_value(__js_result).map_err(serde_err)?;
     Ok(__out)

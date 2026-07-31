@@ -21,13 +21,13 @@
 //!
 //! # WIT host interface, as JS function names
 //!
-//! | WIT                                 | JS function (this module)        |
-//! |-------------------------------------|-----------------------------------|
-//! | `host.call(target, route, payload)` | [`host_call_async`]              |
-//! | `host.tell(target, route, payload)` | [`host_tell_async`]              |
-//! | `host.call-raw(id, route, payload)` | [`host_call_raw_async`]          |
-//! | `host.discover(type)`               | [`host_discover_async`]          |
-//! | `host.log-message(level, message)`  | [`host_log_message`]             |
+//! | WIT                                             | JS function (this module) |
+//! |-------------------------------------------------|---------------------------|
+//! | `host.call(target, route, payload, timeout-ms)` | [`host_call_async`]       |
+//! | `host.tell(target, route, payload)`             | [`host_tell_async`]       |
+//! | `host.call-raw(id, route, payload, timeout-ms)` | [`host_call_raw_async`]   |
+//! | `host.discover(type)`                           | [`host_discover_async`]   |
+//! | `host.log-message(level, message)`              | [`host_log_message`]      |
 //! | `host.get-self-id()`                | [`host_get_self_id`]             |
 //! | `host.get-caller-id()`              | [`host_get_caller_id`]           |
 //! | `host.get-request-id()`             | [`host_get_request_id`]          |
@@ -341,6 +341,7 @@ pub async fn host_call_raw_async(
     target: JsValue,
     route_key: String,
     payload: js_sys::Uint8Array,
+    timeout_ms: i64,
 ) -> Result<js_sys::Uint8Array, JsValue> {
     let ctx = ctx_get(&request_id)?;
     let target = parse_actr_id(&target)?;
@@ -355,7 +356,7 @@ pub async fn host_call_raw_async(
     );
 
     match ctx
-        .call_raw(&target, &route_key, &payload_bytes, 30_000)
+        .call_raw(&target, &route_key, &payload_bytes, timeout_ms)
         .await
     {
         Ok(response) => Ok(js_sys::Uint8Array::from(&response[..])),
@@ -363,7 +364,7 @@ pub async fn host_call_raw_async(
     }
 }
 
-/// WIT `host.call(target, route_key, payload) -> result<list<u8>, actr-error>`
+/// WIT `host.call(target, route_key, payload, timeout_ms) -> result<list<u8>, actr-error>`
 ///
 /// The web runtime only supports `dest::peer` for typed calls today (it has
 /// no in-browser Host/Workload routing); other variants return
@@ -375,6 +376,7 @@ pub async fn host_call_async(
     target: JsValue,
     route_key: String,
     payload: js_sys::Uint8Array,
+    timeout_ms: i64,
 ) -> Result<js_sys::Uint8Array, JsValue> {
     let ctx = ctx_get(&request_id)?;
     let dest = parse_dest(&target)?;
@@ -398,7 +400,7 @@ pub async fn host_call_async(
     );
 
     match ctx
-        .call_raw(&actor_id, &route_key, &payload_bytes, 30_000)
+        .call_raw(&actor_id, &route_key, &payload_bytes, timeout_ms)
         .await
     {
         Ok(response) => Ok(js_sys::Uint8Array::from(&response[..])),

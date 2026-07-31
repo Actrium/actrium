@@ -1,4 +1,8 @@
-// actr workload contract — Component Model WIT
+// actr browser workload binding contract — Component Model WIT
+//
+// `actr:workload@0.2.0` is the timeout-aware browser ABI revision. It is a
+// code-generation source for the browser bindings; the native Component Model
+// runtime uses the async `actr:workload@0.3.0` contract in `wit-v2/`.
 //
 // Phase 1 migration target: replaces the handwritten ptr/len ABI
 // (core/hyper/src/wasm/abi.rs, core/framework/src/guest/dynclib_abi.rs,
@@ -33,7 +37,7 @@
 // stdlib-ish names during binding generation (e.g. `actr-error` rather
 // than bare `error`, which clashes with `wasi:io/error`).
 
-package actr:workload@0.1.0;
+package actr:workload@0.2.0;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared value types
@@ -213,6 +217,7 @@ interface host {
         target: dest,
         route-key: string,
         payload: list<u8>,
+        timeout-ms: s64,
     ) -> result<list<u8>, actr-error>;
 
     // Fire-and-forget: host forwards the message and returns without
@@ -228,6 +233,7 @@ interface host {
         target: actr-id,
         route-key: string,
         payload: list<u8>,
+        timeout-ms: s64,
     ) -> result<list<u8>, actr-error>;
 
     // Discovery: find a candidate actor serving the requested type.

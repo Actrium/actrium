@@ -52,7 +52,12 @@ impl Context for DummyContext {
         &self.request_id
     }
 
-    async fn call<R: RpcRequest>(&self, _target: &Dest, _request: R) -> ActorResult<R::Response> {
+    async fn call<R: RpcRequest>(
+        &self,
+        _target: &Dest,
+        _request: R,
+        _timeout_ms: i64,
+    ) -> ActorResult<R::Response> {
         Err(Self::not_implemented("DummyContext::call"))
     }
 
@@ -93,6 +98,7 @@ impl Context for DummyContext {
         _target: &ActrId,
         _route_key: &str,
         _payload: bytes::Bytes,
+        _timeout_ms: i64,
     ) -> ActorResult<bytes::Bytes> {
         Err(Self::not_implemented("DummyContext::call_raw"))
     }

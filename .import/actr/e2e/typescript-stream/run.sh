@@ -560,6 +560,7 @@ impl RelayServiceHandler for RelayServiceImpl {
                 EchoRequest {
                     message: req.message,
                 },
+                30_000,
             )
             .await?;
         eprintln!("relay: echo replied {}", echo_response.reply);
@@ -644,6 +645,7 @@ async fn release_echo_stream<C: Context>(
             StreamReleaseRequest {
                 stream_id: inbound_stream_id.clone(),
             },
+            30_000,
         )
         .await?;
     if release.status != format!("unregistered:{inbound_stream_id}") {
@@ -694,6 +696,7 @@ async fn start_stream_round_trip<C: Context>(
                 reply_stream_id: reply_stream_id.clone(),
                 reply_message: format!("echo-stream-{label}"),
             },
+            30_000,
         )
         .await?;
     if prepare.status != format!("registered:{inbound_stream_id}") {
