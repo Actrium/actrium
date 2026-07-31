@@ -1,6 +1,6 @@
 /*
  * QuickJSDebugCore — engine-level pause/breakpoint controller for the QuickJS
- * sandbox (dev-only, gated on RILL_QJS_DEBUG).
+ * sandbox (dev-only, gated on KEEL_QJS_DEBUG).
  *
  * It registers the interpreter debug hook (quickjs-debug.h) and turns raw
  * per-line callbacks into breakpoint hits and pauses. When a breakpoint (or a
@@ -13,7 +13,7 @@
  */
 #pragma once
 
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
 
 #include <atomic>
 #include <condition_variable>
@@ -29,10 +29,10 @@
 
 struct JSRuntime;
 
-namespace rill::qjs_debug {
+namespace keel::qjs_debug {
 
 // Why the runtime paused. Core-local (kept independent of the devtools CDP
-// types); QuickJSEngineDebugger translates it to rill::devtools::PauseReason.
+// types); QuickJSEngineDebugger translates it to keel::devtools::PauseReason.
 enum class PauseReason { Breakpoint, Step, Pause };
 
 class QuickJSDebugCore {
@@ -192,6 +192,6 @@ private:
   ResumingFn onResuming_;      // set once before debugging starts
 };
 
-}  // namespace rill::qjs_debug
+}  // namespace keel::qjs_debug
 
-#endif  // RILL_QJS_DEBUG
+#endif  // KEEL_QJS_DEBUG

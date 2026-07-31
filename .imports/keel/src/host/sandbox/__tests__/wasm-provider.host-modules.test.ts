@@ -14,10 +14,10 @@
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import {
   createHostModuleDispatch,
-  defineRillContract,
+  defineKeelContract,
   type HostModuleDispatchTable,
   rpc,
-  type RillContractShape,
+  type KeelContractShape,
   subscription,
 } from '../../../contract';
 import { QuickJSNativeWASMProvider } from '../providers/quickjs-native-wasm-provider';
@@ -32,8 +32,8 @@ interface RecordedCalls {
   themeHandler: ((event: any) => void) | null;
 }
 
-function buildContract(): RillContractShape {
-  return defineRillContract({
+function buildContract(): KeelContractShape {
+  return defineKeelContract({
     version: '1.0.0',
     hostModules: {
       'host:analytics': {
@@ -155,35 +155,35 @@ describeIfWASM('QuickJSNativeWASMProvider host:* modules', () => {
   }
 
   it('round-trips an rpc result back to the guest and invokes the implementation', async () => {
-    const out = await callRpc(`globalThis.__rill.hostModules['host:analytics'].track({ name: 'opened' })`);
+    const out = await callRpc(`globalThis.__keel.hostModules['host:analytics'].track({ name: 'opened' })`);
     expect(out).toEqual({ ok: true, value: { ackId: 'ack:opened' } });
     expect(calls.track).toEqual([{ name: 'opened' }]);
   });
 
   it('rejects malformed input fail-closed before the implementation runs', async () => {
     const before = calls.track.length;
-    const out = await callRpc(`globalThis.__rill.hostModules['host:analytics'].track({ name: '' })`);
+    const out = await callRpc(`globalThis.__keel.hostModules['host:analytics'].track({ name: '' })`);
     expect(out.ok).toBe(false);
     expect(out.reason).toContain('name must be a non-empty string');
     expect(calls.track.length).toBe(before);
   });
 
   it('rejects malformed output of an async implementation', async () => {
-    const out = await callRpc(`globalThis.__rill.hostModules['host:analytics'].broken()`);
+    const out = await callRpc(`globalThis.__keel.hostModules['host:analytics'].broken()`);
     expect(out.ok).toBe(false);
     expect(out.reason).toContain('ok must be true');
   });
 
   it('passes a void-returning capability through and records the call', async () => {
     const out = await callRpc(
-      `globalThis.__rill.hostModules['host:navigation'].openProfile({ userId: '42' })`
+      `globalThis.__keel.hostModules['host:navigation'].openProfile({ userId: '42' })`
     );
     expect(out.ok).toBe(true);
     expect(calls.openProfile).toEqual([{ userId: '42' }]);
   });
 
   it('fails closed when the guest invokes an unregistered host module', async () => {
-    const out = await callRpc(`globalThis.__rill.__invokeHostRpc('host:secret', 'doThing', {})`);
+    const out = await callRpc(`globalThis.__keel.__invokeHostRpc('host:secret', 'doThing', {})`);
     expect(out.ok).toBe(false);
     expect(out.reason).toContain('Host module not registered: host:secret');
   });
@@ -191,7 +191,7 @@ describeIfWASM('QuickJSNativeWASMProvider host:* modules', () => {
   it('runs parseEvent before the guest handler and rejects malformed events', () => {
     context.eval(`
       globalThis.__events = [];
-      globalThis.__unsub = globalThis.__rill.hostModules['host:theme'].onThemeChanged(function(e){
+      globalThis.__unsub = globalThis.__keel.hostModules['host:theme'].onThemeChanged(function(e){
         globalThis.__events.push(e);
       });
     `);
@@ -209,7 +209,7 @@ describeIfWASM('QuickJSNativeWASMProvider host:* modules', () => {
   it('unsubscribe stops event delivery to the guest', () => {
     context.eval(`
       globalThis.__ev2 = [];
-      globalThis.__unsub2 = globalThis.__rill.hostModules['host:theme'].onThemeChanged(function(e){
+      globalThis.__unsub2 = globalThis.__keel.hostModules['host:theme'].onThemeChanged(function(e){
         globalThis.__ev2.push(e);
       });
     `);
@@ -232,7 +232,7 @@ describeIfWASM('QuickJSNativeWASMProvider host:* modules', () => {
     // failHard has no boundary schema: the impl throws a plain Error, which must
     // round-trip across the JSON bridge as a guest promise rejection (reason carries
     // the message), not be swallowed or surface as a resolved value.
-    const out = await callRpc(`globalThis.__rill.hostModules['host:analytics'].failHard()`);
+    const out = await callRpc(`globalThis.__keel.hostModules['host:analytics'].failHard()`);
     expect(out.ok).toBe(false);
     expect(out.reason).toContain('backend exploded');
   });
@@ -244,8 +244,8 @@ describeIfWASM('QuickJSNativeWASMProvider host:* modules', () => {
     context.eval(`
       globalThis.__outA = undefined;
       globalThis.__outB = undefined;
-      globalThis.__rill.hostModules['host:analytics'].track({ name: 'a' }).then(function(v){ globalThis.__outA = v; });
-      globalThis.__rill.hostModules['host:analytics'].track({ name: 'b' }).then(function(v){ globalThis.__outB = v; });
+      globalThis.__keel.hostModules['host:analytics'].track({ name: 'a' }).then(function(v){ globalThis.__outA = v; });
+      globalThis.__keel.hostModules['host:analytics'].track({ name: 'b' }).then(function(v){ globalThis.__outB = v; });
     `);
     await context.flushHostModuleCalls?.();
     expect(context.extract('__outA')).toEqual({ ackId: 'ack:a' });
@@ -259,7 +259,7 @@ describeIfWASM('QuickJSNativeWASMProvider host:* module lifecycle', () => {
     const runtime = await provider.createRuntime();
     const context = runtime.createContext();
 
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:theme': {
@@ -280,7 +280,7 @@ describeIfWASM('QuickJSNativeWASMProvider host:* module lifecycle', () => {
     context.installHostModules?.(table, contract);
 
     context.eval(
-      `globalThis.__unsub = globalThis.__rill.hostModules['host:theme'].onThemeChanged(function(){});`
+      `globalThis.__unsub = globalThis.__keel.hostModules['host:theme'].onThemeChanged(function(){});`
     );
     expect(unsubscribed).toBe(false);
 
@@ -297,7 +297,7 @@ describeIfWASM('QuickJSNativeWASMProvider host:* module lifecycle', () => {
     const runtime = await provider.createRuntime();
     const context = runtime.createContext();
 
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:analytics': {
@@ -316,7 +316,7 @@ describeIfWASM('QuickJSNativeWASMProvider host:* module lifecycle', () => {
             // Re-entrant: from inside the first impl, issue a SECOND rpc into the guest.
             // This enqueues another host call while flush is still draining the first.
             context.eval(
-              `globalThis.__rill.hostModules['host:analytics'].track({ name: 'second' }).then(function(v){ globalThis.__secondOut = v; });`
+              `globalThis.__keel.hostModules['host:analytics'].track({ name: 'second' }).then(function(v){ globalThis.__secondOut = v; });`
             );
           }
           return { ackId: `ack:${input.name}` };
@@ -326,7 +326,7 @@ describeIfWASM('QuickJSNativeWASMProvider host:* module lifecycle', () => {
     context.installHostModules?.(table, contract);
 
     context.eval(
-      `globalThis.__rill.hostModules['host:analytics'].track({ name: 'first' }).then(function(v){ globalThis.__firstOut = v; });`
+      `globalThis.__keel.hostModules['host:analytics'].track({ name: 'first' }).then(function(v){ globalThis.__firstOut = v; });`
     );
 
     // A SINGLE flush must drain both the original and the transitively-enqueued call.

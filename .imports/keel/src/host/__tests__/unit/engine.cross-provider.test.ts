@@ -6,9 +6,9 @@
  * runs the same core host<->guest contracts against BOTH in-process providers
  * (node-vm + wasm-quickjs), end-to-end through a real Engine, with host-side assertions:
  *
- * - render: a guest __rill_sendBatch reaches the host Receiver ('operation' event)
- * - host event: engine HOST_EVENT message reaches a guest __rill_onHostEvent listener
- * - config: initialProps are readable by the guest via __rill_getConfig()
+ * - render: a guest __keel_sendBatch reaches the host Receiver ('operation' event)
+ * - host event: engine HOST_EVENT message reaches a guest __keel_onHostEvent listener
+ * - config: initialProps are readable by the guest via __keel_getConfig()
  * - callback: a host CALL_FUNCTION message invokes a registered guest callback
  *
  * Delivery is awaited deterministically via engine.sendToSandbox (no timers/sleeps).
@@ -43,7 +43,7 @@ for (const sandbox of SANDBOXES) {
       engine.createReceiver();
 
       await engine.loadBundle(`
-        globalThis.__rill_sendBatch({
+        globalThis.__keel_sendBatch({
           version: 1, batchId: 3,
           operations: [
             { op: 'CREATE', id: 1, type: 'View', props: {} },
@@ -57,11 +57,11 @@ for (const sandbox of SANDBOXES) {
       engine.destroy();
     });
 
-    it('a host event reaches a guest __rill_onHostEvent listener', async () => {
+    it('a host event reaches a guest __keel_onHostEvent listener', async () => {
       const engine = new Engine({ sandbox });
       await engine.loadBundle(`
         globalThis.__pingPayload = null;
-        globalThis.__rill_onHostEvent('PING', function(p){ globalThis.__pingPayload = p; });
+        globalThis.__keel_onHostEvent('PING', function(p){ globalThis.__pingPayload = p; });
       `);
 
       // Deterministic delivery: await the message round-trip (no sleep).
@@ -76,9 +76,9 @@ for (const sandbox of SANDBOXES) {
       engine.destroy();
     });
 
-    it('initial config is readable by the guest via __rill_getConfig()', async () => {
+    it('initial config is readable by the guest via __keel_getConfig()', async () => {
       const engine = new Engine({ sandbox });
-      await engine.loadBundle('globalThis.__cfg = globalThis.__rill_getConfig();', {
+      await engine.loadBundle('globalThis.__cfg = globalThis.__keel_getConfig();', {
         title: 'hi',
         n: 7,
       });
@@ -89,16 +89,16 @@ for (const sandbox of SANDBOXES) {
     it('a host CALL_FUNCTION message invokes a registered guest callback', async () => {
       const engine = new Engine({ sandbox });
       await engine.loadBundle(`
-        if (!globalThis.__rill) globalThis.__rill = {};
-        if (!globalThis.__rill.callbacks) globalThis.__rill.callbacks = new Map();
-        if (typeof globalThis.__rill.invokeCallback !== 'function') {
-          globalThis.__rill.invokeCallback = function(id, args){
-            var f = globalThis.__rill.callbacks.get(id);
+        if (!globalThis.__keel) globalThis.__keel = {};
+        if (!globalThis.__keel.callbacks) globalThis.__keel.callbacks = new Map();
+        if (typeof globalThis.__keel.invokeCallback !== 'function') {
+          globalThis.__keel.invokeCallback = function(id, args){
+            var f = globalThis.__keel.callbacks.get(id);
             if (f) return f.apply(null, args || []);
           };
         }
         globalThis.__cbResult = null;
-        globalThis.__rill.callbacks.set('fn_test', function(x){ globalThis.__cbResult = x; });
+        globalThis.__keel.callbacks.set('fn_test', function(x){ globalThis.__cbResult = x; });
       `);
 
       await engine.sendToSandbox({
@@ -144,10 +144,10 @@ for (const sandbox of SANDBOXES) {
       const engine = new Engine({ sandbox });
       await engine.loadBundle(`
         globalThis.__pings = 0;
-        globalThis.__rill_onHostEvent('PING', function(){ globalThis.__pings++; });
+        globalThis.__keel_onHostEvent('PING', function(){ globalThis.__pings++; });
       `);
 
-      expect(scope(engine).eval('globalThis.__rill.eventListeners.size')).toBeGreaterThan(0);
+      expect(scope(engine).eval('globalThis.__keel.eventListeners.size')).toBeGreaterThan(0);
 
       await engine.sendToSandbox({
         type: HostMsg.HOST_EVENT,
@@ -160,8 +160,8 @@ for (const sandbox of SANDBOXES) {
       // Drive the guest DESTROY handler directly. sendToSandbox({type:DESTROY}) would also
       // call engine.destroy() and dispose the context, preventing host-side inspection of
       // the cleared guest state — this isolates the guest-side cleanup (#7).
-      scope(engine).eval("globalThis.__rill_handleMessage({ type: 'DESTROY' })");
-      expect(scope(engine).eval('globalThis.__rill.eventListeners.size')).toBe(0);
+      scope(engine).eval("globalThis.__keel_handleMessage({ type: 'DESTROY' })");
+      expect(scope(engine).eval('globalThis.__keel.eventListeners.size')).toBe(0);
 
       engine.destroy();
     });
@@ -170,7 +170,7 @@ for (const sandbox of SANDBOXES) {
       const engine = new Engine({ sandbox });
       await engine.loadBundle('globalThis.__noop = 1;', { mode: 'a', n: 1 });
 
-      // __rill_getConfig returns the live host config; after updateConfig the merged
+      // __keel_getConfig returns the live host config; after updateConfig the merged
       // value must be readable by the guest on the isolated realm too.
       engine.updateConfig({ n: 2, extra: true });
       // updateConfig delivers CONFIG_UPDATE via a fire-and-forget sendToSandbox. Await a
@@ -182,7 +182,7 @@ for (const sandbox of SANDBOXES) {
         // biome-ignore lint/suspicious/noExplicitAny: BridgeValue payload
         payload: {} as any,
       });
-      expect(scope(engine).eval('globalThis.__rill_getConfig()')).toEqual({
+      expect(scope(engine).eval('globalThis.__keel_getConfig()')).toEqual({
         mode: 'a',
         n: 2,
         extra: true,
@@ -195,7 +195,7 @@ for (const sandbox of SANDBOXES) {
       const engine = new Engine({ sandbox });
       await engine.loadBundle(`
         globalThis.__events = [];
-        globalThis.__rill_onHostEvent('TICK', function(p){ globalThis.__events.push(p); });
+        globalThis.__keel_onHostEvent('TICK', function(p){ globalThis.__events.push(p); });
       `);
 
       engine.pause();

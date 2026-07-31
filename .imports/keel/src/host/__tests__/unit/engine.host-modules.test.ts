@@ -1,9 +1,9 @@
 /**
  * Engine host:* module runtime wiring (issue #3)
  *
- * Exercises the runtime backend for the `rill/contract` host-module capability
+ * Exercises the runtime backend for the `keel/contract` host-module capability
  * layer: the Engine pairs the contract's boundary schemas with the host
- * implementations and injects them into the sandbox as `globalThis.__rill.hostModules`,
+ * implementations and injects them into the sandbox as `globalThis.__keel.hostModules`,
  * where the Guest's rewritten `host:*` imports resolve.
  *
  * These tests run a Guest bundle through a real (vm) sandbox and call `host:*`
@@ -16,40 +16,40 @@
  */
 
 import { describe, expect, it } from 'bun:test';
-import { defineRillContract, implementHostModules, rpc, subscription } from '../../../contract';
+import { defineKeelContract, implementHostModules, rpc, subscription } from '../../../contract';
 import { Engine } from '../../engine';
 
 // Mirror of the host-module resolver the CLI injects into every bundle
 // (src/cli/build.ts RUNTIME_INJECT). The CLI rewrites `import { x } from 'host:foo'`
-// into `globalThis.__rill_importHostModule('host:foo')`; this bundle stands in for
+// into `globalThis.__keel_importHostModule('host:foo')`; this bundle stands in for
 // that rewritten guest code so the test exercises the same resolution path.
 const GUEST_BUNDLE = `
-  if (typeof globalThis.__rill_importHostModule !== 'function') {
-    globalThis.__rill_importHostModule = function(moduleId) {
-      var ns = globalThis.__rill;
+  if (typeof globalThis.__keel_importHostModule !== 'function') {
+    globalThis.__keel_importHostModule = function(moduleId) {
+      var ns = globalThis.__keel;
       if (ns && ns.hostModules && ns.hostModules[moduleId]) {
         return ns.hostModules[moduleId];
       }
-      throw new Error('[rill] Host module not registered: ' + moduleId);
+      throw new Error('[keel] Host module not registered: ' + moduleId);
     };
   }
 
   globalThis.__guest = {
     track: function(input) {
-      return globalThis.__rill_importHostModule('host:analytics').track(input);
+      return globalThis.__keel_importHostModule('host:analytics').track(input);
     },
     openProfile: function(input) {
-      return globalThis.__rill_importHostModule('host:navigation').openProfile(input);
+      return globalThis.__keel_importHostModule('host:navigation').openProfile(input);
     },
     subscribeTheme: function() {
-      var theme = globalThis.__rill_importHostModule('host:theme');
+      var theme = globalThis.__keel_importHostModule('host:theme');
       globalThis.__themeEvents = [];
       return theme.onThemeChanged(function(event) {
         globalThis.__themeEvents.push(event);
       });
     },
     useUnregistered: function() {
-      return globalThis.__rill_importHostModule('host:secret');
+      return globalThis.__keel_importHostModule('host:secret');
     },
   };
 `;
@@ -61,7 +61,7 @@ interface HostCalls {
 }
 
 function createEngine() {
-  const contract = defineRillContract({
+  const contract = defineKeelContract({
     version: '1.0.0',
     hostModules: {
       'host:analytics': {
@@ -170,7 +170,7 @@ describe('Engine host:* module runtime wiring', () => {
   });
 
   it('rejects malformed output of an async implementation', async () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:analytics': {
@@ -201,11 +201,11 @@ describe('Engine host:* module runtime wiring', () => {
     });
 
     await engine.loadBundle(`
-      globalThis.__rill_importHostModule = globalThis.__rill_importHostModule || function(id) {
-        return globalThis.__rill.hostModules[id];
+      globalThis.__keel_importHostModule = globalThis.__keel_importHostModule || function(id) {
+        return globalThis.__keel.hostModules[id];
       };
       globalThis.__track = function(input) {
-        return globalThis.__rill_importHostModule('host:analytics').track(input);
+        return globalThis.__keel_importHostModule('host:analytics').track(input);
       };
     `);
 
@@ -282,9 +282,9 @@ describe('Engine host:* module runtime wiring', () => {
     engine.destroy();
   });
 
-  it('does not define __rill.hostModules when no host modules are configured', async () => {
+  it('does not define __keel.hostModules when no host modules are configured', async () => {
     const engine = new Engine({ sandbox: 'node-vm' });
-    await engine.loadBundle('globalThis.__hasHostModules = !!(globalThis.__rill && globalThis.__rill.hostModules);');
+    await engine.loadBundle('globalThis.__hasHostModules = !!(globalThis.__keel && globalThis.__keel.hostModules);');
 
     expect(scope(engine).extract('__hasHostModules')).toBe(false);
 

@@ -1,5 +1,5 @@
 {
-  "name": "rill-test-guest-bundle",
+  "name": "keel-test-guest-bundle",
   "version": "1.0.0",
   "private": true,
   "scripts": {
@@ -7,7 +7,7 @@
     "build:dev": "bun ../../src/cli/bin.ts build src/index.tsx -o dist/bundle.js --no-minify --sourcemap"
   },
   "dependencies": {
-    "rill": "link:../../",
+    "keel": "link:../../",
     "react": "^19.0.0"
   },
   "devDependencies": {

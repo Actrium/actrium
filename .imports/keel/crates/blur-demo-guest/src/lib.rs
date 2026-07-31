@@ -1,4 +1,4 @@
-//! Native rill guest demoing a wasm **SIMD128** pixel filter.
+//! Native keel guest demoing a wasm **SIMD128** pixel filter.
 //!
 //! It ships one baseline image filter — a square box blur over straight-alpha
 //! RGBA8 — in two forms that MUST agree byte-for-byte:
@@ -27,11 +27,11 @@ extern crate alloc;
 use alloc::boxed::Box;
 use core::arch::wasm32::*;
 
-rill_native_guest::guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 async fn guest_main() {
     // No lifecycle behaviour: this fixture exists for the exported blur hooks the
-    // host test drives directly. rill_init still runs so the guest loads cleanly.
+    // host test drives directly. keel_init still runs so the guest loads cleanly.
 }
 
 const BYTES_PER_PIXEL: usize = 4;

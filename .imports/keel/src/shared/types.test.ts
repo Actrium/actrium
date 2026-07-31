@@ -1,5 +1,5 @@
 /**
- * @rill/bridge - Type Guards Tests
+ * @keel/bridge - Type Guards Tests
  *
  * Tests for runtime type checking functions used in serialization/deserialization
  */

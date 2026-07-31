@@ -101,7 +101,7 @@ describe('Engine Event Listener Error Handling', () => {
     await engine.loadBundle('console.log("test")');
 
     expect(customLogger.error).toHaveBeenCalledWith(
-      '[rill] Event listener error:',
+      '[keel] Event listener error:',
       expect.any(Error)
     );
     expect(successHandler).toHaveBeenCalled();
@@ -278,7 +278,7 @@ describe('Engine getDiagnostics().health', () => {
     engine.createReceiver();
 
     await engine.loadBundle(`
-      __rill_sendBatch({
+      __keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [

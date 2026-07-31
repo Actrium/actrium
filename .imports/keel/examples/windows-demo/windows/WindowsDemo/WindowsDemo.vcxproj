@@ -69,13 +69,13 @@
   <ImportGroup Label="ReactNativeWindowsPropertySheets">
     <Import Project="$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.props" />
   </ImportGroup>
-  <!-- Engine selection: quickjs (default) or hermes. Override via /p:RillSandboxEngine=hermes -->
+  <!-- Engine selection: quickjs (default) or hermes. Override via /p:KeelSandboxEngine=hermes -->
   <PropertyGroup>
-    <RillSandboxEngine Condition="'$(RillSandboxEngine)'==''">quickjs</RillSandboxEngine>
-    <RillSandboxEngineDefine Condition="'$(RillSandboxEngine)'=='hermes'">RILL_SANDBOX_ENGINE=2</RillSandboxEngineDefine>
-    <RillSandboxEngineDefine Condition="'$(RillSandboxEngine)'!='hermes'">RILL_SANDBOX_ENGINE=3</RillSandboxEngineDefine>
-    <RillHermesLib Condition="'$(RillSandboxEngine)'=='hermes'">$(PkgMicrosoft_JavaScript_Hermes)\build\native\$(HermesAppPlatform)\$(HermesPlatform)\hermes.lib;</RillHermesLib>
-    <RillHermesLib Condition="'$(RillSandboxEngine)'!='hermes'"></RillHermesLib>
+    <KeelSandboxEngine Condition="'$(KeelSandboxEngine)'==''">quickjs</KeelSandboxEngine>
+    <KeelSandboxEngineDefine Condition="'$(KeelSandboxEngine)'=='hermes'">KEEL_SANDBOX_ENGINE=2</KeelSandboxEngineDefine>
+    <KeelSandboxEngineDefine Condition="'$(KeelSandboxEngine)'!='hermes'">KEEL_SANDBOX_ENGINE=3</KeelSandboxEngineDefine>
+    <KeelHermesLib Condition="'$(KeelSandboxEngine)'=='hermes'">$(PkgMicrosoft_JavaScript_Hermes)\build\native\$(HermesAppPlatform)\$(HermesPlatform)\hermes.lib;</KeelHermesLib>
+    <KeelHermesLib Condition="'$(KeelSandboxEngine)'!='hermes'"></KeelHermesLib>
     <!-- Bundling is handled by examples/windows-demo/dev.cmd step [2]. -->
     <Bundle>false</Bundle>
     <ReactNativeBundle>false</ReactNativeBundle>
@@ -91,8 +91,8 @@
       <DisableSpecificWarnings>4453;28204;4100;4244</DisableSpecificWarnings>
       <AdditionalIncludeDirectories>
         $(MSBuildThisFileDirectory);
-        $(MSBuildThisFileDirectory)..\RillSandboxNative;
-        $(MSBuildThisFileDirectory)..\RillSandboxNative\build;
+        $(MSBuildThisFileDirectory)..\KeelSandboxNative;
+        $(MSBuildThisFileDirectory)..\KeelSandboxNative\build;
         $(MSBuildThisFileDirectory)..\..\..\..\native;
         $(MSBuildThisFileDirectory)..\..\..\..\native\core\src;
         $(MSBuildThisFileDirectory)..\..\..\..\native\quickjs\src;
@@ -105,7 +105,7 @@
       <LanguageStandard>stdcpp20</LanguageStandard>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>shell32.lib;user32.lib;psapi.lib;windowsapp.lib;$(MSBuildThisFileDirectory)..\RillSandboxNative\build\$(Configuration)\rill_sandbox.lib;$(RillHermesLib)%(AdditionalDependenices)</AdditionalDependencies>
+      <AdditionalDependencies>shell32.lib;user32.lib;psapi.lib;windowsapp.lib;$(MSBuildThisFileDirectory)..\KeelSandboxNative\build\$(Configuration)\keel_sandbox.lib;$(KeelHermesLib)%(AdditionalDependenices)</AdditionalDependencies>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <StackReserveSize>8388608</StackReserveSize>
@@ -113,12 +113,12 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
     <ClCompile>
-      <PreprocessorDefinitions>BUNDLE;_DEBUG;BUILDING_NODE_EXTENSION;$(RillSandboxEngineDefine);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BUNDLE;_DEBUG;BUILDING_NODE_EXTENSION;$(KeelSandboxEngineDefine);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
     <ClCompile>
-      <PreprocessorDefinitions>BUNDLE;NDEBUG;BUILDING_NODE_EXTENSION;$(RillSandboxEngineDefine);%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>BUNDLE;NDEBUG;BUILDING_NODE_EXTENSION;$(KeelSandboxEngineDefine);%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
   </ItemDefinitionGroup>
   <PropertyGroup Label="UserMacros" />
@@ -128,14 +128,14 @@
     <ClInclude Include="AutolinkedNativeModules.g.h" />
     <ClInclude Include="pch.h" />
     <ClInclude Include="targetver.h" />
-    <ClInclude Include="..\RillSandboxNative\RillSandboxNativeModule.h" />
+    <ClInclude Include="..\KeelSandboxNative\KeelSandboxNativeModule.h" />
     <ClInclude Include="..\..\..\..\native\core\src\SandboxEngineConfig.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="WindowsDemo.cpp" />
     <ClCompile Include="AutolinkedNativeModules.g.cpp" />
-    <ClCompile Include="..\RillSandboxNative\RillSandboxNativeModule.cpp">
-      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\RillSandboxNative;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    <ClCompile Include="..\KeelSandboxNative\KeelSandboxNativeModule.cpp">
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)..\KeelSandboxNative;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ClCompile Include="pch.cpp">
       <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Create</PrecompiledHeader>

@@ -1,4 +1,4 @@
-// Drives a full debugging session against the rill QuickJS CDP host through the
+// Drives a full debugging session against the keel QuickJS CDP host through the
 // WebSocket bridge, using chrome-remote-interface — the same CDP client library
 // the Chrome DevTools front-end is built on. Proves the transport + protocol
 // interoperate with a real CDP front-end over a real socket.
@@ -31,10 +31,10 @@ const waitFor = (pred, ms, label) =>
   });
 
 (async () => {
-  console.log('=== real CDP front-end (chrome-remote-interface) vs rill QuickJS ===');
+  console.log('=== real CDP front-end (chrome-remote-interface) vs keel QuickJS ===');
   // Connect straight to the target ws URL (skip auto-discovery, which probes
   // browser-only endpoints the bridge does not serve).
-  const wsUrl = process.env.WS || `ws://${HOST}:${PORT}/devtools/page/rill-quickjs-1`;
+  const wsUrl = process.env.WS || `ws://${HOST}:${PORT}/devtools/page/keel-quickjs-1`;
   // local: use the bundled protocol descriptor instead of fetching it from the
   // target (the bridge is not a full browser endpoint).
   const client = await CDP({ target: wsUrl, local: true });

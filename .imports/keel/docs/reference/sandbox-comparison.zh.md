@@ -1,6 +1,6 @@
 # Sandbox 引擎对比
 
-Rill 把 JavaScript 执行抽象在一个内部的 `JSEngineProvider` 接口之后。项目内置了 5 种 provider 实现，对应不同运行时环境。
+Keel 把 JavaScript 执行抽象在一个内部的 `JSEngineProvider` 接口之后。项目内置了 5 种 provider 实现，对应不同运行时环境。
 
 注意：这些 provider **不是公共 API**，也不支持用户注入自定义 provider。对外只提供 `EngineOptions.sandbox` 用于选择/提示沙箱后端；其余细节由引擎内部自动选择（例如 `DefaultProvider` 与 TenantManager 集成）。
 
@@ -47,7 +47,7 @@ const isJSCAvailable = typeof (globalThis as any).__JSCSandboxJSI !== 'undefined
 
 **特性:**
 
-- 需要链接 `RillSandboxNative` 原生模块。
+- 需要链接 `KeelSandboxNative` 原生模块。
 - 在运行时通过 `globalThis.__JSCSandboxJSI` 检测。
 - 默认没有硬超时中断：JavaScriptCore 唯一的执行时限 API
   (`JSContextGroupSetExecutionTimeLimit`) 是私有头文件，因此不做静态引用。
@@ -67,7 +67,7 @@ const isJSCAvailable = typeof (globalThis as any).__JSCSandboxJSI !== 'undefined
 
 **源文件:** `src/host/sandbox/providers/HermesProvider.native.ts`
 
-**构建要求:** 原生模块必须使用 `RILL_SANDBOX_ENGINE=hermes` 编译。
+**构建要求:** 原生模块必须使用 `KEEL_SANDBOX_ENGINE=hermes` 编译。
 
 **独特功能 -- 字节码预编译:**
 
@@ -77,7 +77,7 @@ hermesc -emit-binary -O -out guest.hbc guest.js
 ```
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({ sandbox: 'hermes' });
 // 注意：provider 级别的字节码 API 目前属于内部实现。
@@ -129,15 +129,15 @@ Web 平台解决方案。相同的 QuickJS C 源代码通过 Emscripten 编译�
 **从源代码构建:**
 
 ```bash
-cd rill/native/quickjs
+cd keel/native/quickjs
 ./build-wasm.sh release
-# Output: quickjs-sandbox.{js,wasm} -> rill/src/host/sandbox/wasm/
+# Output: quickjs-sandbox.{js,wasm} -> keel/src/host/sandbox/wasm/
 ```
 
 **用法:**
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({ sandbox: 'wasm-quickjs' });
 // 注意：WASM 资源（`quickjs-sandbox.js/.wasm`）的接入目前仍是内部细节。
@@ -164,7 +164,7 @@ const engine = new Engine({ sandbox: 'wasm-quickjs' });
 **用法:**
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({ sandbox: 'node-vm' });
 ```
@@ -199,7 +199,7 @@ const engine = new Engine({ sandbox: 'node-vm' });
 
 在应用运行于 React Native 内部时使用。检测顺序：
 
-1. **HermesProvider** -- 当 `globalThis.__HermesSandboxJSI` 被定义时选择（原生模块使用 `RILL_SANDBOX_ENGINE=hermes` 构建）。
+1. **HermesProvider** -- 当 `globalThis.__HermesSandboxJSI` 被定义时选择（原生模块使用 `KEEL_SANDBOX_ENGINE=hermes` 构建）。
 2. **JSCProvider** -- 当 `globalThis.__JSCSandboxJSI` 被定义时选择（Apple 平台）。
 3. **QuickJSProvider** -- 当 `globalThis.__QuickJSSandboxJSI` 被定义时选择（跨平台回退）。
 4. **Error** -- 如果没有找到原生模块，则抛出带有诊断信息的错误。
@@ -217,7 +217,7 @@ const engine = new Engine({ sandbox: 'node-vm' });
 传递 `sandbox` 选项以绕过自动检测：
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 // 强制在 Apple 平台使用 JSC
 const engine = new Engine({ sandbox: 'jsc' });
@@ -232,7 +232,7 @@ const engine2 = new Engine({ sandbox: 'wasm-quickjs' });
 
 ## 所有 Provider 的核心优势
 
-无论选择哪个 provider，每个 Rill sandbox 都保证以下属性：
+无论选择哪个 provider，每个 Keel sandbox 都保证以下属性：
 
 - **真正的隔离。** Guest 代码无法访问宿主全局变量、文件系统、网络或任何未通过 `inject` 显式注入的能力。
 - **丰富的数据传输。** 所有基于 JSI 的 provider（JSC、Hermes、QuickJS Native）直接传递函数、循环引用和复杂对象图 -- 无 JSON 序列化、无结构克隆、无消息端口。

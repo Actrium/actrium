@@ -1,6 +1,6 @@
-// WIP subsystem — gated behind RILL_WIP_NATIVE_SECURITY (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_NATIVE_SECURITY (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in security/SecurityManager.h.
-#if RILL_WIP_NATIVE_SECURITY
+#if KEEL_WIP_NATIVE_SECURITY
 #include "FileSandbox.h"
 #include <algorithm>
 #include <filesystem>
@@ -10,7 +10,7 @@
 
 namespace fs = std::filesystem;
 
-namespace rill::security {
+namespace keel::security {
 
 // ---------------------------------------------------------------------------
 // Construction
@@ -290,5 +290,5 @@ FilePolicy FileSandbox::getPolicy() const {
   return policy_;
 }
 
-} // namespace rill::security
-#endif // RILL_WIP_NATIVE_SECURITY
+} // namespace keel::security
+#endif // KEEL_WIP_NATIVE_SECURITY

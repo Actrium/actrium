@@ -23,10 +23,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Asyncify's rewind rebuilds QuickJS's deep interpreter call stack inside V8's
 // execution stack, which needs more headroom than the default limit. Re-exec
 // ourselves once with a larger V8 stack so a plain `node run-poc.mjs` just works.
-if (!process.env.RILL_POC_REEXEC) {
+if (!process.env.KEEL_POC_REEXEC) {
   const child = spawnSync(process.execPath, ['--stack-size=4000', fileURLToPath(import.meta.url)], {
     stdio: 'inherit',
-    env: { ...process.env, RILL_POC_REEXEC: '1' },
+    env: { ...process.env, KEEL_POC_REEXEC: '1' },
   });
   process.exit(child.status === null ? 1 : child.status);
 }
@@ -60,7 +60,7 @@ const factory = (await import(join(__dirname, 'quickjs-asyncify-poc.mjs'))).defa
 const Module = await factory();
 
 let paused = false;
-globalThis.__rillDbg = {
+globalThis.__keelDbg = {
   onPaused: () => {
     paused = true;
   },
@@ -120,10 +120,10 @@ claim(
 
 // Claim 3: resume rewinds the C stack from the suspend point; the eval finishes
 // and returns work computed AFTER the breakpoint line.
-if (typeof globalThis.__rillDbg.resume !== 'function') {
+if (typeof globalThis.__keelDbg.resume !== 'function') {
   claim(3, false, 'no resume() was parked by the suspend primitive');
 } else {
-  globalThis.__rillDbg.resume();
+  globalThis.__keelDbg.resume();
   const result = await p;
   // The global assigned on line 8 (after the breakpoint) proves execution
   // continued past the suspend point rather than restarting.

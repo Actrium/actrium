@@ -1,7 +1,7 @@
 var React = require('react');
 var useState = React.useState;
 var useCallback = React.useCallback;
-var render = require('rill/reconciler').render;
+var render = require('keel/reconciler').render;
 var h = React.createElement;
 
 function GuestApp() {
@@ -32,7 +32,7 @@ function GuestApp() {
       h(
         'Text',
         { style: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 4 } },
-        'Rill Windows Demo'
+        'Keel Windows Demo'
       ),
       h(
         'Text',
@@ -211,11 +211,11 @@ function GuestApp() {
         h(
           'Text',
           { style: { fontSize: 12, color: '#555' } },
-          'Guest code runs in a sandboxed engine. State, callbacks, and rendering all work through the Rill bridge.'
+          'Guest code runs in a sandboxed engine. State, callbacks, and rendering all work through the Keel bridge.'
         )
       )
     )
   );
 }
 
-render(h(GuestApp), globalThis.__rill_sendBatch);
+render(h(GuestApp), globalThis.__keel_sendBatch);

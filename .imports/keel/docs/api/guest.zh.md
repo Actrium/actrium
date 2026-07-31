@@ -1,14 +1,14 @@
 # Guest API 参考
 
-Guest 模块提供了用于在 Rill 沙箱内构建动态 UI 的组件、hooks 和平台 API。Guest 代码使用标准 React 模式（JSX、hooks）并通过定义良好的协议与 Host 通信。
+Guest 模块提供了用于在 Keel 沙箱内构建动态 UI 的组件、hooks 和平台 API。Guest 代码使用标准 React 模式（JSX、hooks）并通过定义良好的协议与 Host 通信。
 
-导入路径：`rill/guest`
+导入路径：`keel/guest`
 
 ---
 
 ## 组件
 
-下面列出的所有组件都可以在沙箱内通过 `require('rill/guest')` 或 JSX 使用。它们映射到通过 `ComponentRegistry` 注册的 Host 侧 React Native 组件实现。
+下面列出的所有组件都可以在沙箱内通过 `require('keel/guest')` 或 JSX 使用。它们映射到通过 `ComponentRegistry` 注册的 Host 侧 React Native 组件实现。
 
 ### View
 
@@ -241,12 +241,12 @@ return <TextInput ref={ref} placeholder="Enter text" />;
 
 ---
 
-## RillErrorBoundary
+## KeelErrorBoundary
 
 用于捕获 Guest 代码中渲染错误的 React 错误边界组件。防止单个组件错误导致整个沙箱 UI 崩溃。
 
 ```typescript
-interface RillErrorBoundaryProps {
+interface KeelErrorBoundaryProps {
   children: ReactNode;
   fallback?: ReactElement | ((error: Error) => ReactElement);
   onError?: (error: Error, errorInfo: { componentStack: string }) => void;
@@ -315,7 +315,7 @@ const Linking: {
 
 ## 沙箱安全工具
 
-guest 沙箱只提供**核心 ECMAScript**。Web 平台的全局对象不在其中，而处理字节时最想用的那几个恰好都不存在。下面是从一个跑在 QuickJS-WASM 里的真实 rill guest 内部读 `typeof globalThis[name]` 得到的结果：
+guest 沙箱只提供**核心 ECMAScript**。Web 平台的全局对象不在其中，而处理字节时最想用的那几个恰好都不存在。下面是从一个跑在 QuickJS-WASM 里的真实 keel guest 内部读 `typeof globalThis[name]` 得到的结果：
 
 | 不存在 | 存在 |
 |---|---|
@@ -325,7 +325,7 @@ guest 沙箱只提供**核心 ECMAScript**。Web 平台的全局对象不在其�
 
 > **TypeScript 不会替你拦住这个坑。** 只要 guest 的 `tsconfig` 的 `lib` 里含 `DOM`，`TextEncoder`、`TextDecoder`、`performance` 就都被声明了，于是 `new TextEncoder()` 类型检查完全通过，然后在沙箱里运行时抛错。而 guest 的 `tsconfig` 往往会因为别的原因带上 `DOM`。更麻烦的是这个失败依赖运行环境：在浏览器里跑本地开发循环时一切正常，等上真机才炸。
 
-`rill/guest` 把 rill 自己的 guest bundle 在用的那几个helper 出口了出来，你不必重新实现一遍。每个 helper 都在**每次调用时**重新检查真实全局是否存在（所以宿主晚一步注入全局也能被认到），检查不到就走纯 JS 实现。
+`keel/guest` 把 keel 自己的 guest bundle 在用的那几个helper 出口了出来，你不必重新实现一遍。每个 helper 都在**每次调用时**重新检查真实全局是否存在（所以宿主晚一步注入全局也能被认到），检查不到就走纯 JS 实现。
 
 ```typescript
 import {
@@ -334,7 +334,7 @@ import {
   encodeBase64,
   decodeBase64,
   nowMs,
-} from 'rill/guest';
+} from 'keel/guest';
 ```
 
 ### createUtf8Encoder()

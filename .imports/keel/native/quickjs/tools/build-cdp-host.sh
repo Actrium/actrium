@@ -10,8 +10,8 @@ OUT="${OUT:-$HERE/cdp_stdio_host}"
 WORK="$(mktemp -d)"; trap 'rm -rf "$WORK"' EXIT
 
 CC="${CC:-clang}"; CXX="${CXX:-clang++}"
-CFLAGS="-DRILL_QJS_DEBUG -D_GNU_SOURCE -O1 -funsigned-char -I $VENDOR"
-CXXFLAGS="-std=c++17 -DRILL_QJS_DEBUG -DRILL_WIP_CDP_DEVTOOLS=1 -O1 -I $VENDOR -I $QSRC -I $CORE"
+CFLAGS="-DKEEL_QJS_DEBUG -D_GNU_SOURCE -O1 -funsigned-char -I $VENDOR"
+CXXFLAGS="-std=c++17 -DKEEL_QJS_DEBUG -DKEEL_WIP_CDP_DEVTOOLS=1 -O1 -I $VENDOR -I $QSRC -I $CORE"
 
 for c in quickjs libregexp libunicode cutils; do
   $CC $CFLAGS -c "$VENDOR/$c.c" -o "$WORK/$c.o"

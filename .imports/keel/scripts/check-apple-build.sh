@@ -1,8 +1,8 @@
 #!/bin/bash
-# Apple (macOS) build gate for RillSandboxNative.
+# Apple (macOS) build gate for KeelSandboxNative.
 #
 # Goal:
-#   - Ensure Objective-C++ native code (including native/core/src/RillTenantManager.mm)
+#   - Ensure Objective-C++ native code (including native/core/src/KeelTenantManager.mm)
 #     compiles in a real React Native build.
 #
 # How it works:
@@ -20,8 +20,8 @@
 
 set -euo pipefail
 
-RILL_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-FIXTURE_DIR="$RILL_ROOT/tests/rn-macos-bridgeless"
+KEEL_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+FIXTURE_DIR="$KEEL_ROOT/tests/rn-macos-bridgeless"
 
 if [ ! -d "$FIXTURE_DIR" ]; then
   echo "[ERROR] RN macOS fixture not found at: $FIXTURE_DIR" >&2

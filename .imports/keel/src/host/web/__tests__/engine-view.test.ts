@@ -71,14 +71,14 @@ describe('WebEngineView', () => {
     });
     let tree = renderer?.toJSON() as Json;
     expect(tree.type).toBe('div');
-    expect(tree.props['data-rill-state']).toBe('loading');
+    expect(tree.props['data-keel-state']).toBe('loading');
 
     // Settle the load inside act, then assert the loaded tree.
     await act(async () => {
       await flushPromises();
     });
     tree = renderer?.toJSON() as Json;
-    expect(tree.props['data-rill-state']).toBe('loaded');
+    expect(tree.props['data-keel-state']).toBe('loaded');
     const child = Array.isArray(tree.children) ? tree.children[0] : tree.children;
     expect(child.type).toBe('span');
     expect(child.props['data-testid']).toBe('guest');
@@ -124,7 +124,7 @@ describe('WebEngineView', () => {
       await flushPromises();
     });
     const tree = renderer?.toJSON() as Json;
-    expect(tree.props['data-rill-state']).toBe('error');
+    expect(tree.props['data-keel-state']).toBe('error');
     expect(onError).toHaveBeenCalled();
     act(() => renderer?.unmount());
   });

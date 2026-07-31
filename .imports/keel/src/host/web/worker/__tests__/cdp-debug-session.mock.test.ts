@@ -10,7 +10,7 @@
  *     sendCdp BYPASSES the gate and round-trips during the pause.
  *
  * The mock is a faithful stand-in for the contract in native/quickjs/src/
- * qjs_cdp_wasm_bindings.cpp: dispatch is synchronous and answers via __rillCdp.onMessage;
+ * qjs_cdp_wasm_bindings.cpp: dispatch is synchronous and answers via __keelCdp.onMessage;
  * eval is async, emits scriptParsed+paused when a breakpoint is armed, and its Promise only
  * resolves after a `Debugger.resume` dispatch.
  */
@@ -19,7 +19,7 @@ import { describe, expect, it } from 'bun:test';
 import { CdpDebugSession, type CdpDebugModule } from '../cdp-debug-session';
 import { TurnGate } from '../turn-gate';
 
-interface RillCdpGlobal {
+interface KeelCdpGlobal {
   onMessage(connId: number, json: string): void;
 }
 
@@ -38,7 +38,7 @@ class MockCdpModule implements CdpDebugModule {
   sinkAtInit = false;
 
   #emit(obj: Record<string, unknown>): void {
-    const cdp = (globalThis as { __rillCdp?: RillCdpGlobal }).__rillCdp;
+    const cdp = (globalThis as { __keelCdp?: KeelCdpGlobal }).__keelCdp;
     cdp?.onMessage(this.#connId || 1, JSON.stringify(obj));
   }
 
@@ -46,7 +46,7 @@ class MockCdpModule implements CdpDebugModule {
     switch (name) {
       case 'qjsd_cdp_init':
         this.initCalls += 1;
-        this.sinkAtInit = !!(globalThis as { __rillCdp?: RillCdpGlobal }).__rillCdp;
+        this.sinkAtInit = !!(globalThis as { __keelCdp?: KeelCdpGlobal }).__keelCdp;
         return 0;
       case 'qjsd_cdp_connect':
         this.#connId = args[0] as number;

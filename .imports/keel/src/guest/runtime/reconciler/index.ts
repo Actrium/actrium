@@ -1,5 +1,5 @@
 /**
- * Rill Reconciler
+ * Keel Reconciler
  *
  * Custom renderer based on react-reconciler
  * Transforms React render actions into JSON instructions
@@ -61,5 +61,5 @@ export {
 // ============================================
 // Types
 // ============================================
-export type { ExtendedHostConfig, PublicInstance, RillReconciler, RootContainer } from './types';
+export type { ExtendedHostConfig, KeelReconciler, PublicInstance, RootContainer } from './types';
 export { getRemovedProps } from './types';

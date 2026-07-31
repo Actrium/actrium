@@ -1,6 +1,6 @@
 # android-demo
 
-Android example app demonstrating rill sandbox execution with React Native Bridgeless / New Architecture.
+Android example app demonstrating keel sandbox execution with React Native Bridgeless / New Architecture.
 
 ## Target
 
@@ -29,16 +29,16 @@ cd examples/android-demo
 ```
 
 The runner builds and installs the selected flavor, launches
-`com.rill.demo.<flavor>/com.rill.demo.MainActivity` with e2e launch props, then waits for
-`RILL_ANDROID_E2E` markers in `adb logcat`.
+`com.keel.demo.<flavor>/com.keel.demo.MainActivity` with e2e launch props, then waits for
+`KEEL_ANDROID_E2E` markers in `adb logcat`.
 
 Useful environment variables:
 
 ```bash
-RILL_ANDROID_E2E_DEVICE=emulator-5554 ./run-e2e.sh
-RILL_ANDROID_E2E_AVD=Pixel_API_35 ./run-e2e.sh
-RILL_ANDROID_E2E_HEADLESS=0 ./run-e2e.sh
-RILL_ANDROID_GRADLE_INIT=/tmp/rill-android-mirrors.gradle ./run-e2e.sh
+KEEL_ANDROID_E2E_DEVICE=emulator-5554 ./run-e2e.sh
+KEEL_ANDROID_E2E_AVD=Pixel_API_35 ./run-e2e.sh
+KEEL_ANDROID_E2E_HEADLESS=0 ./run-e2e.sh
+KEEL_ANDROID_GRADLE_INIT=/tmp/keel-android-mirrors.gradle ./run-e2e.sh
 ```
 
 The Android E2E checks cover sandbox detection, guest eval, host function injection, guest function

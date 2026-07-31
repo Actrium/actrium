@@ -1,5 +1,5 @@
 // Native e2e for the QuickJS engine debug hook (M1: pause / resume / line
-// breakpoints). Builds the vendored QuickJS (with the RILL_QJS_DEBUG hook) plus
+// breakpoints). Builds the vendored QuickJS (with the KEEL_QJS_DEBUG hook) plus
 // QuickJSDebugCore and drives a real runtime:
 //   - set a breakpoint on line 3 of a 4-line script;
 //   - run JS on a runtime thread; the interpreter blocks at line 3;
@@ -25,8 +25,8 @@
 #include <thread>
 #include <utility>
 
-using rill::qjs_debug::PauseReason;
-using rill::qjs_debug::QuickJSDebugCore;
+using keel::qjs_debug::PauseReason;
+using keel::qjs_debug::QuickJSDebugCore;
 
 static int g_failures = 0;
 static void check(bool ok, const std::string& what) {

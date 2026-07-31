@@ -11,7 +11,7 @@ WASM_LD="${WASM_LD:-$(command -v wasm-ld || echo /usr/lib/llvm-17/bin/wasm-ld)}"
 FIXTURE=../../src/host/native-guest/__tests__/fixtures/c-guest.wasm
 
 clang --target=wasm32-unknown-unknown -nostdlib -O2 -c example-guest.c -o example-guest.o
-"$WASM_LD" --no-entry --allow-undefined --export-memory --export=rill_init \
+"$WASM_LD" --no-entry --allow-undefined --export-memory --export=keel_init \
   example-guest.o -o "$FIXTURE"
 rm -f example-guest.o
 

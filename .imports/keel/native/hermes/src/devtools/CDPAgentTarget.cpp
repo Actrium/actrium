@@ -1,6 +1,6 @@
 #include "CDPAgentTarget.h"
 
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
 
 #include <hermes/AsyncDebuggerAPI.h>
 
@@ -45,7 +45,7 @@ void logError(const std::string &msg) {
 }  // namespace
 #endif
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 namespace hcdp = facebook::hermes::cdp;
 namespace hdbg = facebook::hermes::debugger;
@@ -231,6 +231,6 @@ void CDPAgentTarget::detachAllAgentsForTeardown() {
   doomed.clear();
 }
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools
 
-#endif  // RILL_WIP_CDP_DEVTOOLS && !NDEBUG
+#endif  // KEEL_WIP_CDP_DEVTOOLS && !NDEBUG

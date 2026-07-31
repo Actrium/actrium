@@ -2,7 +2,7 @@
 #include <algorithm>
 #include <chrono>
 
-namespace rill::tenant_manager {
+namespace keel::tenant_manager {
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -438,4 +438,4 @@ EventBus::Stats EventBus::getStats() const {
   return s;
 }
 
-} // namespace rill::tenant_manager
+} // namespace keel::tenant_manager

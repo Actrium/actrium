@@ -6,12 +6,12 @@
 // (malformed / truncated / out-of-range input -> nullopt, no OOB read) is
 // covered by the negative cases at the bottom.
 //
-// The WIP decoder is gated behind RILL_WIP_BINARY_PROTOCOL (always defined for
+// The WIP decoder is gated behind KEEL_WIP_BINARY_PROTOCOL (always defined for
 // the test build via native/core/Makefile WIP_DEFS). When the flag is off this
 // file still provides an empty registration so test/main.cpp links.
 #include "test_framework.h"
 
-#if RILL_WIP_BINARY_PROTOCOL
+#if KEEL_WIP_BINARY_PROTOCOL
 
 #include "../src/protocol/WireDecoder.h"
 
@@ -26,8 +26,8 @@
 #include <string_view>
 #include <vector>
 
-using namespace rill::protocol::wire;
-using namespace rill::test;
+using namespace keel::protocol::wire;
+using namespace keel::test;
 
 namespace {
 
@@ -68,14 +68,14 @@ void assertStringValue(const WireValue& v, std::string_view expected) {
 }
 
 // Golden hex strings (contracts/op-batch-wire.golden.json).
-const std::string kEmptyBatch = "52494c4c0100000000000000000000000000";
+const std::string kEmptyBatch = "4b45454c0100000000000000000000000000";
 const std::string kOneCreate =
-    "52494c4c0100010000000100000000000100040056696577010100000000000000";
+    "4b45454c0100010000000100000000000100040056696577010100000000000000";
 const std::string kSetPropRepeatedKey =
-    "52494c4c01000200000002000000000003000900636c6173734e616d6501006101"
+    "4b45454c01000200000002000000000003000900636c6173734e616d6501006101"
     "006202010000000100000006010000000202000000010000000602000000";
 const std::string kMixedFiveOps =
-    "52494c4c0100030000000500000000000600040056696577020069640400726f6f"
+    "4b45454c0100030000000500000000000600040056696577020069640400726f6f"
     "740400546578740200486904006d61696e0101000000000001000100060200010200"
     "0000030000000400000000010000000200000008020000000400020100000001000100"
     "0605000000";
@@ -516,7 +516,7 @@ void compareBatch(const JsonValue& batch, const WireBatch& b) {
 }
 
 std::string matrixPath() {
-  if (const char* env = std::getenv("RILL_MATRIX_JSON")) return env;
+  if (const char* env = std::getenv("KEEL_MATRIX_JSON")) return env;
   // `make -C native/core test` runs the binary from native/core; the fixture
   // lives at repo-root contracts/.
   return "../../contracts/op-batch-wire.matrix.json";
@@ -641,7 +641,7 @@ TestSuite createWireDecoderTests() {
   // __sourceFile="App.tsx", __sourceLine=42 (flags byte 0x07, all three present).
   suite.cases.push_back({"function: full debug metadata decodes", []() {
     WireBatch b = decodeOk(
-        "52494c4c01003204000001000000000005000400566965770100760400666e5f39"
+        "4b45454c01003204000001000000000005000400566965770100760400666e5f39"
         "07006f6e507265737307004170702e747378010100000000000100010007020007"
         "030004002a000000");
     assertEqual(b.ops.size(), size_t{1}, "one op");
@@ -663,7 +663,7 @@ TestSuite createWireDecoderTests() {
   // Vector create-value-function: __fnId="fn_7", no debug fields (flags 0x00).
   suite.cases.push_back({"function: bare fnId, no metadata", []() {
     WireBatch b = decodeOk(
-        "52494c4c0100ef03000001000000000003000400566965770100760400666e5f37"
+        "4b45454c0100ef03000001000000000003000400566965770100760400666e5f37"
         "010100000000000100010007020000");
     const WireValue& fn = b.ops[0].props[0].value;
     assertTrue(fn.tag == ValueTag::Function, "FUNCTION value");
@@ -680,7 +680,7 @@ TestSuite createWireDecoderTests() {
   // desync. Locks the (fnFlags & 0xF8) guard; the TS decoder must match.
   suite.cases.push_back({"fail-closed: FUNCTION reserved flag bit", []() {
     auto bytes = hexToBytes(
-        "52494c4c0100ef03000001000000000003000400566965770100760400666e5f37"
+        "4b45454c0100ef03000001000000000003000400566965770100760400666e5f37"
         "010100000000000100010007020008");
     WireDecoder dec;
     auto r = dec.decode(bytes.data(), bytes.size());
@@ -761,7 +761,7 @@ TestSuite createWireDecoderTests() {
   // seam. Build a one-CREATE batch whose sole intern entry is a lone 0xFF byte.
   suite.cases.push_back({"fail-closed: invalid UTF-8 intern rejected", []() {
     std::vector<uint8_t> bytes = {
-        0x52, 0x49, 0x4c, 0x4c,             // magic 'RILL'
+        0x4b, 0x45, 0x45, 0x4c,             // magic 'KEEL'
         0x01, 0x00,                         // version 1
         0x00, 0x00, 0x00, 0x00,             // batchId
         0x00, 0x00,                         // opCount = 0
@@ -784,7 +784,7 @@ TestSuite createWireDecoderTests() {
   // 0xFF (above) never reaches.
   auto internFrame = [](std::vector<uint8_t> s) -> std::vector<uint8_t> {
     std::vector<uint8_t> b = {
-        0x52, 0x49, 0x4c, 0x4c,             // magic
+        0x4b, 0x45, 0x45, 0x4c,             // magic
         0x01, 0x00,                         // version
         0x00, 0x00, 0x00, 0x00,             // batchId
         0x00, 0x00,                         // opCount = 0
@@ -824,7 +824,7 @@ TestSuite createWireDecoderTests() {
   // (4B), used as a CREATE type.
   suite.cases.push_back({"utf8: valid 2/3/4-byte multibyte intern decodes", []() {
     std::vector<uint8_t> bytes = {
-        0x52, 0x49, 0x4c, 0x4c,             // magic
+        0x4b, 0x45, 0x45, 0x4c,             // magic
         0x01, 0x00,                         // version
         0x00, 0x00, 0x00, 0x00,             // batchId
         0x01, 0x00,                         // opCount = 1
@@ -861,7 +861,7 @@ TestSuite createWireDecoderTests() {
   // Header opCount=1, intern count=0, then CREATE id=1 type=internRef(0).
   suite.cases.push_back({"fail-closed: internRef out of range", []() {
     std::vector<uint8_t> bytes = {
-        0x52, 0x49, 0x4c, 0x4c,             // magic 'RILL'
+        0x4b, 0x45, 0x45, 0x4c,             // magic 'KEEL'
         0x01, 0x00,                         // version 1
         0x00, 0x00, 0x00, 0x00,             // batchId
         0x01, 0x00,                         // opCount = 1
@@ -881,7 +881,7 @@ TestSuite createWireDecoderTests() {
   // --- Fail-closed: unknown opcode ---
   suite.cases.push_back({"fail-closed: unknown opcode", []() {
     std::vector<uint8_t> bytes = {
-        0x52, 0x49, 0x4c, 0x4c,
+        0x4b, 0x45, 0x45, 0x4c,
         0x01, 0x00,
         0x00, 0x00, 0x00, 0x00,
         0x01, 0x00,                         // opCount = 1
@@ -921,7 +921,7 @@ TestSuite createWireDecoderTests() {
       for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xff));
     };
     // Header.
-    b.insert(b.end(), {0x52, 0x49, 0x4c, 0x4c}); // magic 'RILL'
+    b.insert(b.end(), {0x4b, 0x45, 0x45, 0x4c}); // magic 'KEEL'
     u16le(1);                                    // version
     u32le(0);                                    // batchId
     u16le(1);                                    // opCount = 1
@@ -991,7 +991,7 @@ TestSuite createWireDecoderTests() {
     auto u32le = [&](uint32_t v) {
       for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xff));
     };
-    b.insert(b.end(), {0x52, 0x49, 0x4c, 0x4c}); // magic
+    b.insert(b.end(), {0x4b, 0x45, 0x45, 0x4c}); // magic
     u16le(1);                                    // version
     u32le(0);                                    // batchId
     u16le(1);                                    // opCount = 1
@@ -1040,7 +1040,7 @@ TestSuite createWireDecoderTests() {
     auto u32le = [&](uint32_t v) {
       for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xff));
     };
-    b.insert(b.end(), {0x52, 0x49, 0x4c, 0x4c}); // magic 'RILL'
+    b.insert(b.end(), {0x4b, 0x45, 0x45, 0x4c}); // magic 'KEEL'
     u16le(1);                                    // version
     u32le(0);                                    // batchId
     u16le(1);                                    // opCount = 1
@@ -1104,7 +1104,7 @@ TestSuite createWireDecoderTests() {
       for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xff));
     };
     // Header.
-    b.insert(b.end(), {0x52, 0x49, 0x4c, 0x4c}); // magic 'RILL'
+    b.insert(b.end(), {0x4b, 0x45, 0x45, 0x4c}); // magic 'KEEL'
     u16le(1);                                    // version
     u32le(0);                                    // batchId
     u16le(1);                                    // opCount = 1
@@ -1201,7 +1201,7 @@ TestSuite createWireDecoderTests() {
     auto u32le = [&](uint32_t v) {
       for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xff));
     };
-    b.insert(b.end(), {0x52, 0x49, 0x4c, 0x4c}); // magic 'RILL'
+    b.insert(b.end(), {0x4b, 0x45, 0x45, 0x4c}); // magic 'KEEL'
     u16le(1);                                    // version
     u32le(0);                                    // batchId
     u16le(static_cast<uint16_t>(fullOps + 1));   // opCount (full ops + final)
@@ -1243,7 +1243,7 @@ TestSuite createWireDecoderTests() {
     auto u32le = [&](uint32_t v) {
       for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xff));
     };
-    b.insert(b.end(), {0x52, 0x49, 0x4c, 0x4c}); // magic 'RILL'
+    b.insert(b.end(), {0x4b, 0x45, 0x45, 0x4c}); // magic 'KEEL'
     u16le(1);                                    // version
     u32le(0);                                    // batchId
     u16le(static_cast<uint16_t>(fullOps + 1));   // opCount
@@ -1327,7 +1327,7 @@ TestSuite createWireDecoderTests() {
     auto u32le = [&](uint32_t v) {
       for (int i = 0; i < 4; ++i) b.push_back(static_cast<uint8_t>((v >> (8 * i)) & 0xff));
     };
-    b.insert(b.end(), {0x52, 0x49, 0x4c, 0x4c}); // magic 'RILL'
+    b.insert(b.end(), {0x4b, 0x45, 0x45, 0x4c}); // magic 'KEEL'
     u16le(1);                                    // version
     u32le(0);                                    // batchId
     u16le(2);                                    // opCount = 2
@@ -1407,7 +1407,7 @@ TestSuite createWireDecoderTests() {
       // Absence is a hard failure, not a silent coverage gap.
       suite.cases.push_back({"matrix: fixture present", []() {
         assertTrue(false, "contracts/op-batch-wire.matrix.json not found (path " + matrixPath() +
-                              "); (re)generate it with the rill-native-guest matrix generator");
+                              "); (re)generate it with the keel-native-guest matrix generator");
       }});
     }
   }
@@ -1421,8 +1421,8 @@ void registerWireDecoderTests() {
   TestRunner::instance().addSuite(createWireDecoderTests());
 }
 
-#else // !RILL_WIP_BINARY_PROTOCOL
+#else // !KEEL_WIP_BINARY_PROTOCOL
 
 void registerWireDecoderTests() {}
 
-#endif // RILL_WIP_BINARY_PROTOCOL
+#endif // KEEL_WIP_BINARY_PROTOCOL

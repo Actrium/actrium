@@ -9,9 +9,9 @@ cd "$(dirname "$0")"
 BASE_BUNDLE_ID="chat.askaway.ios-demo"
 VALID_CONFIGS=("bridgeless-jsc" "bridgeless-quickjs" "bridgeless-hermes")
 CONFIGS_TO_RUN=()
-TIMEOUT_SECONDS="${RILL_IOS_E2E_TIMEOUT:-120}"
-SIMULATOR_NAME="${RILL_IOS_E2E_SIMULATOR:-${SIMULATOR:-iPhone 17}}"
-LOG_PREDICATE='process == "ios-demo" AND (eventMessage CONTAINS "RILL_IOS_E2E" OR eventMessage CONTAINS "EXIT_CODE:" OR eventMessage BEGINSWITH "Summary:")'
+TIMEOUT_SECONDS="${KEEL_IOS_E2E_TIMEOUT:-120}"
+SIMULATOR_NAME="${KEEL_IOS_E2E_SIMULATOR:-${SIMULATOR:-iPhone 17}}"
+LOG_PREDICATE='process == "ios-demo" AND (eventMessage CONTAINS "KEEL_IOS_E2E" OR eventMessage CONTAINS "EXIT_CODE:" OR eventMessage BEGINSWITH "Summary:")'
 
 is_valid_config() {
     local config="$1"
@@ -38,8 +38,8 @@ if [ ${#CONFIGS_TO_RUN[@]} -eq 0 ]; then
 fi
 
 select_device() {
-    if [ -n "${RILL_IOS_E2E_DEVICE_ID:-}" ]; then
-        echo "$RILL_IOS_E2E_DEVICE_ID"
+    if [ -n "${KEEL_IOS_E2E_DEVICE_ID:-}" ]; then
+        echo "$KEEL_IOS_E2E_DEVICE_ID"
         return 0
     fi
 
@@ -72,7 +72,7 @@ wait_for_result() {
     local deadline=$((SECONDS + TIMEOUT_SECONDS))
 
     while [ $SECONDS -lt $deadline ]; do
-        if grep -q ">>>RILL_IOS_E2E_END<<<" "$log_file" 2>/dev/null; then
+        if grep -q ">>>KEEL_IOS_E2E_END<<<" "$log_file" 2>/dev/null; then
             if grep -q "EXIT_CODE:0" "$log_file"; then
                 return 0
             fi
@@ -90,7 +90,7 @@ wait_for_result() {
 has_success_result() {
     local log_file="$1"
 
-    grep -q ">>>RILL_IOS_E2E_END<<<" "$log_file" 2>/dev/null &&
+    grep -q ">>>KEEL_IOS_E2E_END<<<" "$log_file" 2>/dev/null &&
         grep -q "EXIT_CODE:0" "$log_file"
 }
 
@@ -150,7 +150,7 @@ PASSED=()
 for CONFIG in "${CONFIGS_TO_RUN[@]}"; do
     SANDBOX="${CONFIG#bridgeless-}"
     BUNDLE_ID="${BASE_BUNDLE_ID}.bridgeless.${SANDBOX}"
-    LOG_FILE="/tmp/rill-ios-e2e-${SANDBOX}.log"
+    LOG_FILE="/tmp/keel-ios-e2e-${SANDBOX}.log"
 
     echo "========================================"
     echo "[$CONFIG] build + install"
@@ -169,16 +169,16 @@ for CONFIG in "${CONFIGS_TO_RUN[@]}"; do
     start_log_stream "$DEVICE_ID" "$LOG_FILE"
     sleep 1
 
-    if ! SIMCTL_CHILD_RILL_IOS_E2E=1 \
-        SIMCTL_CHILD_RILL_SANDBOX_TARGET="$SANDBOX" \
+    if ! SIMCTL_CHILD_KEEL_IOS_E2E=1 \
+        SIMCTL_CHILD_KEEL_SANDBOX_TARGET="$SANDBOX" \
         xcrun simctl launch \
         --terminate-running-process \
         --stdout="${LOG_FILE}.stdout" \
         --stderr="${LOG_FILE}.stderr" \
         "$DEVICE_ID" \
-        "$BUNDLE_ID" >/tmp/rill-ios-e2e-launch-${SANDBOX}.log 2>&1; then
+        "$BUNDLE_ID" >/tmp/keel-ios-e2e-launch-${SANDBOX}.log 2>&1; then
         echo "[$CONFIG] launch failed"
-        cat /tmp/rill-ios-e2e-launch-${SANDBOX}.log || true
+        cat /tmp/keel-ios-e2e-launch-${SANDBOX}.log || true
         stop_log_stream "$LOG_STREAM_PID"
         FAILED+=("$CONFIG")
         continue

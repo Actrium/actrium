@@ -17,12 +17,12 @@
 
 ## 通信通道
 
-### Guest 到 Host: `__rill_sendBatch(batch)`
+### Guest 到 Host: `__keel_sendBatch(batch)`
 
-高频通道。reconciler 将单个 React commit 阶段的所有变更批量处理为一个 `OperationBatch` 并调用 `__rill_sendBatch`。Bridge 编码批次(函数变为 `{ __type: 'function', __fnId }`,复杂类型通过 TypeRules 序列化)并将其传递给 `Receiver.applyBatch`。
+高频通道。reconciler 将单个 React commit 阶段的所有变更批量处理为一个 `OperationBatch` 并调用 `__keel_sendBatch`。Bridge 编码批次(函数变为 `{ __type: 'function', __fnId }`,复杂类型通过 TypeRules 序列化)并将其传递给 `Receiver.applyBatch`。
 
 ```
-Guest Reconciler -> __rill_sendBatch(batch) -> Bridge.sendRawBatch -> onGuestOperations -> Receiver.applyBatch
+Guest Reconciler -> __keel_sendBatch(batch) -> Bridge.sendRawBatch -> onGuestOperations -> Receiver.applyBatch
 ```
 
 ### Host 到 Guest: `sendToSandbox(message)`
@@ -30,7 +30,7 @@ Guest Reconciler -> __rill_sendBatch(batch) -> Bridge.sendRawBatch -> onGuestOpe
 较低频率的通道,用于回调调用、host 事件、配置更新和拆除。参数在跨越边界之前会被清理以确保 JSON 安全。
 
 ```
-Engine.sendToSandbox -> Bridge.sendToGuest -> context.inject + evalCode -> Guest __rill_handleMessage
+Engine.sendToSandbox -> Bridge.sendToGuest -> context.inject + evalCode -> Guest __keel_handleMessage
 ```
 
 ## 渲染管道
@@ -61,7 +61,7 @@ const batch: OperationBatch = {
   batchId: nextBatchId++,
   operations: [...collected],
 };
-__rill_sendBatch(batch);
+__keel_sendBatch(batch);
 ```
 
 ### 3. Bridge 编码
@@ -127,8 +127,8 @@ Guest setState
 2. Receiver 渲染的元素有一个代理函数(来自 Bridge 解码)
 3. 代理调用 Bridge.invokeFunction(fnId, encodedArgs)
 4. Bridge 路由到 guestInvoker:
-   - 在沙箱上下文中查找 __rill.invokeCallback
-   - 调用 __rill.invokeCallback(fnId, args)
+   - 在沙箱上下文中查找 __keel.invokeCallback
+   - 调用 __keel.invokeCallback(fnId, args)
 5. Guest CallbackRegistry 找到原始函数
 6. Guest 函数执行(可能调用 setState)
 7. 重新渲染产生新操作

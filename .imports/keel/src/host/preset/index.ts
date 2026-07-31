@@ -1,5 +1,5 @@
 /**
- * @rill/host/preset
+ * @keel/host/preset
  *
  * Default components and EngineView for Host-side rendering
  *

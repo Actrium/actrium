@@ -12,11 +12,11 @@ windows/WindowsDemo.Package/bin/
 windows/WindowsDemo.Package/AppPackages/
 windows/WindowsDemo.Package/Bundle/
 windows/WindowsDemo.Package/packages.lock.json
-windows/RillSandboxNative/build/
-windows/RillSandboxNative/*.obj
-windows/RillSandboxNative/*.exe
-windows/RillSandboxNative/*.ilk
-windows/RillSandboxNative/*.pdb
+windows/KeelSandboxNative/build/
+windows/KeelSandboxNative/*.obj
+windows/KeelSandboxNative/*.exe
+windows/KeelSandboxNative/*.ilk
+windows/KeelSandboxNative/*.pdb
 
 # MSBuild logs
 windows/msbuild_*.binlog

@@ -1,4 +1,4 @@
-//! Demo native (non-JS) rill guest for the stage ③-a HOST-MEDIATED GPU path.
+//! Demo native (non-JS) keel guest for the stage ③-a HOST-MEDIATED GPU path.
 //!
 //! It proves "host-mediated GPU" end to end WITHOUT ever touching a real
 //! WebGPU/WebGL2 context: the guest only (1) configures a `<Canvas>` into a gpu
@@ -9,12 +9,12 @@
 //! (opcode whitelist + per-submit cost budget) and replays. There is NO readback.
 //!
 //! Cost budget: one draw call, 3 vertices, 1 instance per frame — orders of
-//! magnitude under the caps in `rill_native_guest::gpu` (the load-bearing gate against a
+//! magnitude under the caps in `keel_native_guest::gpu` (the load-bearing gate against a
 //! guest TDR-resetting the shared GPU for every other app). `within_budget()` is
 //! asserted before every submit as the cooperative guest's own check; the host is
 //! authoritative regardless.
 //!
-//! Control flow mirrors canvas-present-guest (see docs/rill-canvas.zh.md §6):
+//! Control flow mirrors canvas-present-guest (see docs/keel-canvas.zh.md §6):
 //!   host rAF → onFrame subscription → wake the executor → guest_main submits a
 //!   frame. A `gpu.deviceLost` subscription flags a re-init so a driver TDR (from
 //!   this app OR another app on the shared GPU) is recovered rather than fatal.
@@ -28,10 +28,10 @@ use core::pin::Pin;
 use core::task::{Context, Poll};
 
 use alloc::vec::Vec;
-use rill_native_guest::events;
-use rill_native_guest::gpu::{self, CommandBuffer, Handle, Mode};
+use keel_native_guest::events;
+use keel_native_guest::gpu::{self, CommandBuffer, Handle, Mode};
 
-rill_native_guest::guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 /// The `<Canvas canvasId="viewport" />` the host app mounts for this guest.
 const CANVAS_ID: &str = "viewport";
@@ -85,22 +85,22 @@ async fn guest_main() {
     events::on("canvas.frame", |_p: &[u8]| unsafe {
         FRAME = FRAME.wrapping_add(1);
         READY = true;
-        rill_native_guest::rt::wake();
+        keel_native_guest::rt::wake();
     });
     // Shared-GPU TDR / context-loss recovery: a lost device may be caused by
     // ANOTHER app on the same GPU, so flag a full re-init rather than treating it
     // as fatal. The host emits this like a frame tick; the handler must not .await.
     gpu::on_device_lost(|_p: &[u8]| unsafe {
         DEVICE_LOST = true;
-        rill_native_guest::rt::wake();
+        keel_native_guest::rt::wake();
     });
 
     // Mount the viewport in WEBGPU mode so the host locks the <canvas> to a webgpu
     // context (mode is fixed at mount; host:gpu.configure(Webgpu) then matches it).
-    let kids = alloc::vec![rill_native_guest::ui::canvas_mode(
+    let kids = alloc::vec![keel_native_guest::ui::canvas_mode(
         CANVAS_ID, W as u32, H as u32, "webgpu"
     )];
-    rill_native_guest::render(rill_native_guest::ui::view(kids));
+    keel_native_guest::render(keel_native_guest::ui::view(kids));
 
     // Build the vertex bytes ONCE (BumpAlloc only grows). Kept alive for the
     // guest's life so the handle's backing upload is stable.

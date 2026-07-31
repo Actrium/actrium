@@ -1,7 +1,7 @@
 /**
- * @rill/runtime
+ * @keel/runtime
  *
- * Host-side runtime for rill
+ * Host-side runtime for keel
  * Responsible for sandbox management, operation receiving, and UI rendering
  */
 

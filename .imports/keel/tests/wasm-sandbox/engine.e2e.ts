@@ -25,7 +25,7 @@ const GUEST_USE_EFFECT = `
   var React = require('react');
   var useState = React.useState;
   var useEffect = React.useEffect;
-  var render = require('rill/reconciler').render;
+  var render = require('keel/reconciler').render;
   var h = React.createElement;
   function App() {
     var s = useState(0);
@@ -36,7 +36,7 @@ const GUEST_USE_EFFECT = `
     }, []);
     return h('View', { testID: 'root' }, h('Text', null, 'n=' + n));
   }
-  render(h(App), globalThis.__rill_sendBatch);
+  render(h(App), globalThis.__keel_sendBatch);
 `;
 
 test.describe('Engine useEffect render on real WASM (issue #10)', () => {
@@ -50,14 +50,14 @@ test.describe('Engine useEffect render on real WASM (issue #10)', () => {
     page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
 
     await page.goto('/engine-test.html');
-    await page.waitForFunction(() => (window as AnyWindow).RillEngine !== undefined, null, {
+    await page.waitForFunction(() => (window as AnyWindow).KeelEngine !== undefined, null, {
       timeout: 20000,
     });
 
     // Create a real Engine on the WASM provider and drive a real useEffect component.
     await page.evaluate(async (guestCode) => {
       const w = window as AnyWindow;
-      const Engine = w.RillEngine;
+      const Engine = w.KeelEngine;
       const batches: unknown[] = [];
       w.__batches = batches;
       const mock = (p: unknown) => p;
@@ -115,7 +115,7 @@ test.describe('Engine useEffect render on real WASM (issue #10)', () => {
 const GUEST_ON_PRESS = `
   var React = require('react');
   var useState = React.useState;
-  var render = require('rill/reconciler').render;
+  var render = require('keel/reconciler').render;
   var h = React.createElement;
   function App() {
     var s = useState(0);
@@ -125,7 +125,7 @@ const GUEST_ON_PRESS = `
       h('Text', null, 'n=' + n)
     );
   }
-  render(h(App), globalThis.__rill_sendBatch);
+  render(h(App), globalThis.__keel_sendBatch);
 `;
 
 test.describe('Engine onPress-driven setState on real WASM (issue #17)', () => {
@@ -139,13 +139,13 @@ test.describe('Engine onPress-driven setState on real WASM (issue #17)', () => {
     page.on('pageerror', (err) => consoleErrors.push(`pageerror: ${err.message}`));
 
     await page.goto('/engine-test.html');
-    await page.waitForFunction(() => (window as AnyWindow).RillEngine !== undefined, null, {
+    await page.waitForFunction(() => (window as AnyWindow).KeelEngine !== undefined, null, {
       timeout: 20000,
     });
 
     await page.evaluate(async (guestCode) => {
       const w = window as AnyWindow;
-      const Engine = w.RillEngine;
+      const Engine = w.KeelEngine;
       const batches: unknown[] = [];
       w.__batches = batches;
       const mock = (p: unknown) => p;

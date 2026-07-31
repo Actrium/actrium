@@ -90,6 +90,6 @@ async function main(): Promise<void> {
   console.log('\n(median of 5; bounded by physical cores; engine-specific — see header)');
 }
 
-if (import.meta.main || process.env.RILL_BENCH_RUN) {
+if (import.meta.main || process.env.KEEL_BENCH_RUN) {
   await main();
 }

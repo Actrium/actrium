@@ -8,7 +8,7 @@
  * - Timer operations (setTimeout, setInterval)
  *
  * NOTE: useEffect-based tests have been moved to Playwright E2E:
- * @see tests/wasm-sandbox/rill-useeffect.e2e.ts
+ * @see tests/wasm-sandbox/keel-useeffect.e2e.ts
  *
  * The mock environment cannot test useEffect because react-reconciler
  * captures setTimeout at module import time, before Engine's polyfill.
@@ -32,12 +32,12 @@ describe('E2E Async: Callback with Async Return', () => {
   it('should handle async callback that returns a promise', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const handleSubmit = async (data) => {
           await new Promise(resolve => setTimeout(resolve, 50));
-          globalThis.__rill_emitEvent('SUBMIT_PROCESSED', { result: data.toUpperCase() });
+          globalThis.__keel_emitEvent('SUBMIT_PROCESSED', { result: data.toUpperCase() });
           return { success: true, result: data.toUpperCase() };
         };
 
@@ -47,7 +47,7 @@ describe('E2E Async: Callback with Async Return', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -68,7 +68,7 @@ describe('E2E Async: Callback with Async Return', () => {
     const guestCode = `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [queue, setQueue] = useState([]);
@@ -77,7 +77,7 @@ describe('E2E Async: Callback with Async Return', () => {
           await new Promise(resolve => setTimeout(resolve, 20));
           const result = { processed: item, timestamp: Date.now() };
           setQueue(prev => [...prev, result]);
-          globalThis.__rill_emitEvent('ITEM_PROCESSED', result);
+          globalThis.__keel_emitEvent('ITEM_PROCESSED', result);
           return result;
         };
 
@@ -87,7 +87,7 @@ describe('E2E Async: Callback with Async Return', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -121,7 +121,7 @@ describe('E2E Async: Error Handling in Async Code', () => {
   it('should handle rejected promises in callbacks', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const handlePress = async () => {
@@ -136,7 +136,7 @@ describe('E2E Async: Error Handling in Async Code', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -149,7 +149,7 @@ describe('E2E Async: Error Handling in Async Code', () => {
   it('should handle try/catch in async callbacks', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const handlePress = async () => {
@@ -158,7 +158,7 @@ describe('E2E Async: Error Handling in Async Code', () => {
               setTimeout(() => reject(new Error('Caught error')), 20)
             );
           } catch (e) {
-            globalThis.__rill_emitEvent('ERROR_CAUGHT', { message: e.message });
+            globalThis.__keel_emitEvent('ERROR_CAUGHT', { message: e.message });
             return { error: e.message };
           }
         };
@@ -169,7 +169,7 @@ describe('E2E Async: Error Handling in Async Code', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -203,18 +203,18 @@ describe('E2E Async: Direct Timer Tests', () => {
   it('should handle setTimeout at top level', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       // Direct timer (not in useEffect)
       setTimeout(() => {
-        globalThis.__rill_emitEvent('TIMEOUT_FIRED');
+        globalThis.__keel_emitEvent('TIMEOUT_FIRED');
       }, 50);
 
       function App() {
         return React.createElement('View', { testID: 'container' });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -227,20 +227,20 @@ describe('E2E Async: Direct Timer Tests', () => {
   it('should handle async IIFE with Promise and setTimeout', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       // Async IIFE (not in useEffect)
       (async () => {
-        globalThis.__rill_emitEvent('ASYNC_START');
+        globalThis.__keel_emitEvent('ASYNC_START');
         await new Promise(resolve => setTimeout(resolve, 30));
-        globalThis.__rill_emitEvent('ASYNC_DONE');
+        globalThis.__keel_emitEvent('ASYNC_DONE');
       })();
 
       function App() {
         return React.createElement('View', { testID: 'container' });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -256,7 +256,7 @@ describe('E2E Async: Direct Timer Tests', () => {
   it('should handle Promise.all with timers', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       (async () => {
         const promises = [
@@ -266,14 +266,14 @@ describe('E2E Async: Direct Timer Tests', () => {
         ];
 
         const values = await Promise.all(promises);
-        globalThis.__rill_emitEvent('ALL_RESOLVED', { values });
+        globalThis.__keel_emitEvent('ALL_RESOLVED', { values });
       })();
 
       function App() {
         return React.createElement('View', { testID: 'container' });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -287,21 +287,21 @@ describe('E2E Async: Direct Timer Tests', () => {
   it('should handle Promise.race with timers', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       (async () => {
         const result = await Promise.race([
           new Promise(resolve => setTimeout(() => resolve('slow'), 100)),
           new Promise(resolve => setTimeout(() => resolve('fast'), 10))
         ]);
-        globalThis.__rill_emitEvent('RACE_WINNER', { winner: result });
+        globalThis.__keel_emitEvent('RACE_WINNER', { winner: result });
       })();
 
       function App() {
         return React.createElement('View', { testID: 'container' });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -315,16 +315,16 @@ describe('E2E Async: Direct Timer Tests', () => {
   it('should handle setInterval with clearInterval', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       let count = 0;
       const interval = setInterval(() => {
         count++;
-        globalThis.__rill_emitEvent('TICK', { count });
+        globalThis.__keel_emitEvent('TICK', { count });
 
         if (count >= 3) {
           clearInterval(interval);
-          globalThis.__rill_emitEvent('INTERVAL_STOPPED');
+          globalThis.__keel_emitEvent('INTERVAL_STOPPED');
         }
       }, 20);
 
@@ -332,7 +332,7 @@ describe('E2E Async: Direct Timer Tests', () => {
         return React.createElement('View', { testID: 'container' });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);

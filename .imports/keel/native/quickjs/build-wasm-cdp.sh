@@ -49,8 +49,8 @@ DEFINES=(
     -DCONFIG_BIGNUM
     -D_GNU_SOURCE
     -DEMSCRIPTEN
-    -DRILL_QJS_DEBUG
-    -DRILL_WIP_CDP_DEVTOOLS=1
+    -DKEEL_QJS_DEBUG
+    -DKEEL_WIP_CDP_DEVTOOLS=1
 )
 
 echo "Building QuickJS FAT CDP debug wasm (Asyncify ON)..."

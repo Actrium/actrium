@@ -1,20 +1,20 @@
 /**
- * rill (root entry)
+ * keel (root entry)
  *
  * This package enforces explicit entrypoints:
- * - Host:  `rill/host`
- * - Guest: `rill/guest`
+ * - Host:  `keel/host`
+ * - Guest: `keel/guest`
  *
- * Do not import from `rill`.
+ * Do not import from `keel`.
  */
 
 throw new Error(
   [
-    "[rill] `import ... from 'rill'` is not supported.",
+    "[keel] `import ... from 'keel'` is not supported.",
     'Use one of these explicit entrypoints:',
-    "  - Host:  `import { Engine } from 'rill/host'`",
-    "  - Guest: `import { View, Text } from 'rill/guest'`",
-    "  - Contract: `import { defineRillContract } from 'rill/contract'`",
-    "  - UI preset: `import { EngineView } from 'rill/host/preset'`",
+    "  - Host:  `import { Engine } from 'keel/host'`",
+    "  - Guest: `import { View, Text } from 'keel/guest'`",
+    "  - Contract: `import { defineKeelContract } from 'keel/contract'`",
+    "  - UI preset: `import { EngineView } from 'keel/host/preset'`",
   ].join('\n')
 );

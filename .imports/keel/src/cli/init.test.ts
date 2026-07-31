@@ -24,7 +24,7 @@ describe('CLI init', () => {
     const cwd = process.cwd();
     process.chdir(TMP_ROOT);
     const argv = process.argv;
-    process.argv = ['node', 'rill', 'init', 'my-rill-guest'];
+    process.argv = ['node', 'keel', 'init', 'my-keel-guest'];
 
     // dynamic import to execute commander program
     await import('./bin');
@@ -36,7 +36,7 @@ describe('CLI init', () => {
     process.argv = argv;
     process.chdir(cwd);
 
-    const base = path.join(TMP_ROOT, 'my-rill-guest');
+    const base = path.join(TMP_ROOT, 'my-keel-guest');
     expect(fs.existsSync(path.join(base, 'package.json'))).toBe(true);
     expect(fs.existsSync(path.join(base, 'tsconfig.json'))).toBe(true);
     expect(fs.existsSync(path.join(base, 'src', 'guest.tsx'))).toBe(true);

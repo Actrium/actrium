@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test';
 import {
   createCapabilitiesManifest,
   createHostModuleDispatch,
-  defineRillContract,
+  defineKeelContract,
   rpc,
   subscription,
 } from './index';
 
-describe('rill/contract binary fields', () => {
+describe('keel/contract binary fields', () => {
   test('rpc() carries the additive binary metadata into the frozen descriptor', () => {
     const call = rpc<{ key: string; value: Uint8Array }, { version: number }>({
       binary: { input: ['value'] },
@@ -24,7 +24,7 @@ describe('rill/contract binary fields', () => {
   });
 
   test('manifest lists binaryCapabilities only for capabilities that declare bytes', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:store': {
@@ -45,7 +45,7 @@ describe('rill/contract binary fields', () => {
   });
 
   test('manifest of a purely-JSON contract has NO binaryCapabilities key (byte-identical)', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:store': {
@@ -74,7 +74,7 @@ describe('rill/contract binary fields', () => {
   });
 
   test('manifest of an rpc-only contract carries NEITHER optional key (byte-identical)', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: { 'host:store': { putText: rpc<{ key: string; value: string }, void>() } },
       guestExports: {},
@@ -91,7 +91,7 @@ describe('rill/contract binary fields', () => {
 
   test('validation rejects a malformed binary field-name map', () => {
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {
           'host:store': {
@@ -103,7 +103,7 @@ describe('rill/contract binary fields', () => {
     ).toThrow('binary.input must be an array of field names');
 
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {
           'host:store': {
@@ -115,7 +115,7 @@ describe('rill/contract binary fields', () => {
     ).toThrow('binary.input must contain non-empty field-name strings');
 
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {
           'host:store': {
@@ -128,7 +128,7 @@ describe('rill/contract binary fields', () => {
   });
 
   const buildStoreContract = () =>
-    defineRillContract({
+    defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:store': {
@@ -223,7 +223,7 @@ describe('rill/contract binary fields', () => {
   });
 
   test('async impl: a null result passes the binary output backstop (nullable output)', async () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:store': {
@@ -245,7 +245,7 @@ describe('rill/contract binary fields', () => {
   });
 
   test('binary backstop composes with a user parseInput (parse runs, then bytes are checked)', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:store': {
@@ -290,7 +290,7 @@ describe('rill/contract binary fields', () => {
   });
 
   test('async impl: binary output backstop rejects after resolution', async () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:store': {
@@ -314,7 +314,7 @@ describe('rill/contract binary fields', () => {
   });
 });
 
-describe('rill/contract binary field-name types (compile-time)', () => {
+describe('keel/contract binary field-name types (compile-time)', () => {
   test('binary field names are constrained to Uint8Array-typed keys of Input/Output', () => {
     // Valid: 'value' is the Uint8Array field.
     rpc<{ key: string; value: Uint8Array }, void>({ binary: { input: ['value'] } });
@@ -334,13 +334,13 @@ describe('rill/contract binary field-name types (compile-time)', () => {
   });
 });
 
-describe('rill/contract optional binary fields (trailing ? marker)', () => {
+describe('keel/contract optional binary fields (trailing ? marker)', () => {
   // issue #29: an optional/nullable binary FIELD (an absent optional body, a
   // null value inside a present result) could not be declared — the backstop
   // rejected legitimate absence. The trailing '?' marker tolerates absence
   // while keeping the Uint8Array requirement when the field is present.
   function buildOptionalBodyContract() {
-    return defineRillContract({
+    return defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:net': {
@@ -394,7 +394,7 @@ describe('rill/contract optional binary fields (trailing ? marker)', () => {
   });
 
   test('an UNMARKED (required) binary field keeps failing closed on absence', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:store': {
@@ -418,7 +418,7 @@ describe('rill/contract optional binary fields (trailing ? marker)', () => {
 
   test('a bare "?" is rejected as a field name', () => {
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {
           'host:store': {
@@ -432,7 +432,7 @@ describe('rill/contract optional binary fields (trailing ? marker)', () => {
   });
 });
 
-describe('rill/contract binary subscription events', () => {
+describe('keel/contract binary subscription events', () => {
   test('subscription() carries binary.event into the frozen descriptor', () => {
     const sub = subscription<{ seq: number; chunk: Uint8Array }>({
       binary: { event: ['chunk'] },
@@ -444,7 +444,7 @@ describe('rill/contract binary subscription events', () => {
   });
 
   test('manifest counts a byte-carrying subscription among binaryCapabilities', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:feed': {
@@ -459,7 +459,7 @@ describe('rill/contract binary subscription events', () => {
   });
 
   test('dispatch asserts a declared binary event field is a real Uint8Array', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:feed': {
@@ -495,7 +495,7 @@ describe('rill/contract binary subscription events', () => {
 
   test('a direction that does not exist on the descriptor kind is rejected', () => {
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {
           // Reason: deliberately mis-declared descriptors to exercise validation.
@@ -506,7 +506,7 @@ describe('rill/contract binary subscription events', () => {
     ).toThrow('binary.input is not valid on a subscription descriptor');
 
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {
           'host:store': { putBytes: rpc({ binary: { event: ['chunk'] } } as never) },

@@ -14,8 +14,8 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   type HostModuleImplementationMap,
-  type RillContractShape,
-  defineRillContract,
+  type KeelContractShape,
+  defineKeelContract,
   implementHostModules,
   rpc,
 } from '../../../contract';
@@ -44,8 +44,8 @@ function makePrng(seed: number): () => number {
 // same way an Engine would (contract + hostModules, dispatch built internally).
 // The impl is irrelevant to the memory tests; roundtrip.wasm just needs load()
 // to succeed so the view owns a live NativeGuestHost + memory.
-function storeContract(): { contract: RillContractShape; hostModules: HostModuleImplementationMap } {
-  const contract = defineRillContract({
+function storeContract(): { contract: KeelContractShape; hostModules: HostModuleImplementationMap } {
+  const contract = defineKeelContract({
     version: '1',
     hostModules: {
       'host:store': {

@@ -125,7 +125,7 @@ async function main(): Promise<void> {
   console.log('\n(median of 7; engine-specific; correctness proven separately in __tests__/blur-demo-guest.test.ts)');
 }
 
-// `import.meta.main` fires under `bun <file>`; RILL_BENCH_RUN lets a wrapper opt in.
-if (import.meta.main || process.env.RILL_BENCH_RUN) {
+// `import.meta.main` fires under `bun <file>`; KEEL_BENCH_RUN lets a wrapper opt in.
+if (import.meta.main || process.env.KEEL_BENCH_RUN) {
   await main();
 }

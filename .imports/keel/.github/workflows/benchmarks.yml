@@ -27,7 +27,7 @@ jobs:
       - name: Run benchmark smoke
         run: |
           {
-            echo "# Rill benchmark smoke"
+            echo "# Keel benchmark smoke"
             echo
             echo "## Unit test timing"
             /usr/bin/time -p bun run test:unit

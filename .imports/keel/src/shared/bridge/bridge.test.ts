@@ -1,5 +1,5 @@
 /**
- * @rill/runtime/bridge - Bridge Tests
+ * @keel/runtime/bridge - Bridge Tests
  *
  * Tests for the unified communication layer with automatic serialization.
  *

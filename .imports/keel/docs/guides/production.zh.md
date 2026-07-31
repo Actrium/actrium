@@ -1,6 +1,6 @@
 # 生产部署
 
-本指南介绍在生产环境中部署 Rill 的配置、加固、监控和优化实践。
+本指南介绍在生产环境中部署 Keel 的配置、加固、监控和优化实践。
 
 ---
 
@@ -16,14 +16,14 @@ const engine = new Engine({
     'react',
     'react-native',
     'react/jsx-runtime',
-    'rill/guest',
-    'rill/*',
+    'keel/guest',
+    'keel/*',
   ],
   // ...
 });
 ```
 
-默认白名单包含上述条目。`rill/*` 模式匹配所有 `rill/` 子路径。
+默认白名单包含上述条目。`keel/*` 模式匹配所有 `keel/` 子路径。
 
 ### 执行超时
 
@@ -40,7 +40,7 @@ const engine = new Engine({
 
 ### 错误分类
 
-Rill 将沙箱错误分类为明确定义的类型:
+Keel 将沙箱错误分类为明确定义的类型:
 
 | 错误类 | 含义 |
 |---|---|
@@ -191,7 +191,7 @@ engine.destroy();
 
 ### useEffect 清理模式
 
-在 React 组件中使用 Rill 时,在 `useEffect` 的清理函数中销毁引擎:
+在 React 组件中使用 Keel 时,在 `useEffect` 的清理函数中销毁引擎:
 
 ```ts
 useEffect(() => {
@@ -219,6 +219,6 @@ useEffect(() => {
 - `onMetric` 已连接到您的遥测系统。
 - `logger` 已连接到您的结构化日志记录管道。
 - 在组件卸载或不再需要引擎时调用 `engine.destroy()`。
-- Bundle 已通过 `rill analyze`,没有违规。
+- Bundle 已通过 `keel analyze`,没有违规。
 - 健康检查(`engine.getDiagnostics()` 的 `health` 与 `resources` 字段)已集成到监控仪表板。
 - 错误处理涵盖 `RequireError`、`ExecutionError` 和 `TimeoutError`。

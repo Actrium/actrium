@@ -1,5 +1,5 @@
 /**
- * Rill Engine
+ * Keel Engine
  *
  * Sandbox engine core, responsible for managing the guest JS execution
  * environment and its lifecycle. The actual backend is pluggable via
@@ -11,17 +11,17 @@
 declare global {
   // eslint-disable-next-line no-var
   // Reason: DevTools event payload can be any serializable type
-  var __rill_emitEvent: ((eventName: string, payload?: unknown) => void) | undefined;
+  var __keel_emitEvent: ((eventName: string, payload?: unknown) => void) | undefined;
   // eslint-disable-next-line no-var
-  var __rill: Record<string, unknown> | undefined;
+  var __keel: Record<string, unknown> | undefined;
   // eslint-disable-next-line no-var
-  var __rill_handleMessage: ((message: import('../types').HostMessage) => void) | undefined;
+  var __keel_handleMessage: ((message: import('../types').HostMessage) => void) | undefined;
 }
 
 import {
   createHostModuleDispatch,
   type HostModuleDispatchTable,
-  type RillContractShape,
+  type KeelContractShape,
 } from '../../contract';
 import type { RuntimeCollector } from '../../devtools/index';
 import { createRuntimeCollector } from '../../devtools/index';
@@ -44,7 +44,7 @@ import { Receiver } from '../receiver';
 import type { ComponentMap } from '../registry';
 import { ComponentRegistry } from '../registry';
 import type { JSEngineProvider, JSEngineRuntime, SandboxScope } from '../sandbox';
-import type { RillReconcilerGlobal } from '../sandbox/globals';
+import type { KeelReconcilerGlobal } from '../sandbox/globals';
 import { TenantManagerProvider } from '../tenant-manager/tenant-manager-provider';
 import type {
   HostMessage,
@@ -84,7 +84,7 @@ export type {
 export { ExecutionError, RequireError, TimeoutError } from './types';
 
 /**
- * Rill Engine - JS sandbox engine with dedicated runtime
+ * Keel Engine - JS sandbox engine with dedicated runtime
  *
  * Each Engine instance owns an isolated JS runtime.
  * Create a new Engine for each isolated context (e.g., each tab/view).
@@ -101,7 +101,7 @@ export { ExecutionError, RequireError, TimeoutError } from './types';
 // Global engine counter for debugging
 let engineIdCounter = 0;
 
-// Max entries kept in the globalThis.__rill_drain_diag debug buffer (oldest dropped first).
+// Max entries kept in the globalThis.__keel_drain_diag debug buffer (oldest dropped first).
 const DIAG_BUFFER_LIMIT = 200;
 
 export class Engine implements IEngine {
@@ -143,7 +143,7 @@ export class Engine implements IEngine {
    * Capability contract backing {@link Engine._hostModuleDispatch}. Retained so
    * isolated-realm providers (WASM) can read each capability's kind when bridging.
    */
-  private _hostModuleContract: RillContractShape | null = null;
+  private _hostModuleContract: KeelContractShape | null = null;
 
   // Pause state
   private _isPaused = false;
@@ -184,11 +184,11 @@ export class Engine implements IEngine {
    */
   private diag(msg: string): void {
     if (!this.options.debug) return;
-    this.options.logger.log(`[rill:${this.id}] [DIAG] ${msg}`);
+    this.options.logger.log(`[keel:${this.id}] [DIAG] ${msg}`);
   }
 
   /**
-   * Diagnostic accumulator: write timestamped messages to globalThis.__rill_drain_diag
+   * Diagnostic accumulator: write timestamped messages to globalThis.__keel_drain_diag
    * so host-side integration code can inspect them after loadBundle returns.
    * Exists for environments where console output is unavailable (e.g. XPC
    * ViewBridge contexts without nativeLoggingHook).
@@ -198,10 +198,10 @@ export class Engine implements IEngine {
   private diagAccum(msg: string): void {
     if (!this.options.debug) return;
     try {
-      let diag = (globalThis as Record<string, unknown>).__rill_drain_diag as string[] | undefined;
+      let diag = (globalThis as Record<string, unknown>).__keel_drain_diag as string[] | undefined;
       if (!diag) {
         diag = [];
-        (globalThis as Record<string, unknown>).__rill_drain_diag = diag;
+        (globalThis as Record<string, unknown>).__keel_drain_diag = diag;
       }
       diag.push(`${Date.now()}:${msg}`);
       if (diag.length > DIAG_BUFFER_LIMIT) {
@@ -218,8 +218,8 @@ export class Engine implements IEngine {
       'react-native',
       'react/jsx-runtime',
       'react/jsx-dev-runtime',
-      'rill/guest',
-      'rill/reconciler',
+      'keel/guest',
+      'keel/reconciler',
     ]);
     // Provide a safe fallback logger if console is not available
     const defaultLogger =
@@ -261,9 +261,9 @@ export class Engine implements IEngine {
     // explicit sandbox values, 'tenant-manager' throws when unavailable.
     if (options.sandbox === 'tenant-manager' && !TenantManagerProvider.isAvailable()) {
       throw new Error(
-        `[rill:${this.id}] sandbox 'tenant-manager' was explicitly requested, but the ` +
-          `native __RillTenantManager global is not present in this environment. ` +
-          `It requires the Rill native module (Apple platforms). ` +
+        `[keel:${this.id}] sandbox 'tenant-manager' was explicitly requested, but the ` +
+          `native __KeelTenantManager global is not present in this environment. ` +
+          `It requires the Keel native module (Apple platforms). ` +
           `Link the native module, or omit 'sandbox' to auto-detect a backend.`
       );
     }
@@ -282,7 +282,7 @@ export class Engine implements IEngine {
       });
       if (this.options.debug) {
         this.options.logger.log(
-          `[rill:${this.id}] Using TenantManagerProvider (appId: ${tenantConfig.appId})`
+          `[keel:${this.id}] Using TenantManagerProvider (appId: ${tenantConfig.appId})`
         );
       }
     } else {
@@ -300,7 +300,7 @@ export class Engine implements IEngine {
           typeof (globalThis as Record<string, unknown>).__QuickJSSandboxJSI !== 'undefined'
             ? typeof (globalThis as Record<string, unknown>).__QuickJSSandboxJSI
             : 'undefined';
-        this.options.logger.log('[rill] Sandbox globals', {
+        this.options.logger.log('[keel] Sandbox globals', {
           __HermesSandboxJSI: hermesGlobalType,
           __JSCSandboxJSI: jscGlobalType,
           __QuickJSSandboxJSI: quickjsGlobalType,
@@ -318,11 +318,11 @@ export class Engine implements IEngine {
         });
         if (this.options.debug) {
           const providerName = this.provider?.constructor?.name || 'unknown';
-          this.options.logger.log(`[rill] Provider type: ${providerName}`);
-          this.options.logger.log('[rill] Initialized DefaultProvider');
+          this.options.logger.log(`[keel] Provider type: ${providerName}`);
+          this.options.logger.log('[keel] Initialized DefaultProvider');
         }
       } catch (e) {
-        this.options.logger.error('[rill] Failed to initialize DefaultProvider:', e);
+        this.options.logger.error('[keel] Failed to initialize DefaultProvider:', e);
         throw e;
       }
     }
@@ -347,7 +347,7 @@ export class Engine implements IEngine {
     });
 
     if (this.options.debug) {
-      this.options.logger.log(`[rill:${this.id}] Engine created`);
+      this.options.logger.log(`[keel:${this.id}] Engine created`);
     }
 
     // Initialize DevTools if enabled
@@ -356,7 +356,7 @@ export class Engine implements IEngine {
       this._devtools = createRuntimeCollector(devtoolsConfig);
       this._devtools.enable();
       if (this.options.debug) {
-        this.options.logger.log(`[rill:${this.id}] DevTools enabled`);
+        this.options.logger.log(`[keel:${this.id}] DevTools enabled`);
       }
     }
 
@@ -365,14 +365,14 @@ export class Engine implements IEngine {
     if (options.hostModules) {
       if (!options.contract) {
         throw new Error(
-          '[rill] EngineOptions.hostModules requires EngineOptions.contract so boundary schemas can be enforced.'
+          '[keel] EngineOptions.hostModules requires EngineOptions.contract so boundary schemas can be enforced.'
         );
       }
       this._hostModuleContract = options.contract;
       this._hostModuleDispatch = createHostModuleDispatch(options.contract, options.hostModules, {
         onError: (error, ctx) => {
           this.options.logger.error(
-            `[rill:${this.id}] Host module boundary rejected ${ctx.moduleId}.${ctx.exportName} (${ctx.phase}):`,
+            `[keel:${this.id}] Host module boundary rejected ${ctx.moduleId}.${ctx.exportName} (${ctx.phase}):`,
             error
           );
           this.diagnostics?.recordError?.();
@@ -380,7 +380,7 @@ export class Engine implements IEngine {
       });
       if (this.options.debug) {
         this.options.logger.log(
-          `[rill:${this.id}] Host modules registered: ${Object.keys(this._hostModuleDispatch).join(', ')}`
+          `[keel:${this.id}] Host modules registered: ${Object.keys(this._hostModuleDispatch).join(', ')}`
         );
       }
     }
@@ -395,7 +395,7 @@ export class Engine implements IEngine {
   register(components: ComponentMap): void {
     this.registry.registerAll(components);
     if (this.options.debug) {
-      this.options.logger.log('[rill] Registered components:', Object.keys(components).join(', '));
+      this.options.logger.log('[keel] Registered components:', Object.keys(components).join(', '));
     }
   }
 
@@ -417,11 +417,11 @@ export class Engine implements IEngine {
     bundleOptions?: LoadBundleOptions
   ): Promise<void> {
     if (this.destroyed) {
-      throw new Error('[rill] Engine has been destroyed');
+      throw new Error('[keel] Engine has been destroyed');
     }
 
     if (this.loaded) {
-      throw new Error('[rill] Engine already loaded a Guest');
+      throw new Error('[keel] Engine already loaded a Guest');
     }
 
     this.config = initialProps ?? {};
@@ -444,13 +444,13 @@ export class Engine implements IEngine {
       this.diag(`resolveSource: 0ms (sync inline)`);
 
       if (this.options.debug) {
-        this.options.logger.log(`[rill:${this.id}] Bundle loaded, length:`, code.length);
-        this.options.logger.log(`[rill:${this.id}] Bundle preview:`, code.substring(0, 200));
+        this.options.logger.log(`[keel:${this.id}] Bundle loaded, length:`, code.length);
+        this.options.logger.log(`[keel:${this.id}] Bundle preview:`, code.substring(0, 200));
         this.options.logger.log(
-          `[rill:${this.id}] Bundle footer (last 500 chars):`,
+          `[keel:${this.id}] Bundle footer (last 500 chars):`,
           code.substring(code.length - 500)
         );
-        this.options.logger.log(`[rill:${this.id}] Has Auto-render:`, code.includes('Auto-render'));
+        this.options.logger.log(`[keel:${this.id}] Has Auto-render:`, code.includes('Auto-render'));
       }
 
       // Initialize runtime synchronously (JSC provider returns void, not Promise)
@@ -490,13 +490,13 @@ export class Engine implements IEngine {
       this.diag(`resolveSource: ${t1 - t0}ms`);
 
       if (this.options.debug) {
-        this.options.logger.log(`[rill:${this.id}] Bundle loaded, length:`, code.length);
-        this.options.logger.log(`[rill:${this.id}] Bundle preview:`, code.substring(0, 200));
+        this.options.logger.log(`[keel:${this.id}] Bundle loaded, length:`, code.length);
+        this.options.logger.log(`[keel:${this.id}] Bundle preview:`, code.substring(0, 200));
         this.options.logger.log(
-          `[rill:${this.id}] Bundle footer (last 500 chars):`,
+          `[keel:${this.id}] Bundle footer (last 500 chars):`,
           code.substring(code.length - 500)
         );
-        this.options.logger.log(`[rill:${this.id}] Has Auto-render:`, code.includes('Auto-render'));
+        this.options.logger.log(`[keel:${this.id}] Has Auto-render:`, code.includes('Auto-render'));
       }
 
       await this.initializeRuntime();
@@ -515,10 +515,10 @@ export class Engine implements IEngine {
           const timeoutPromise = new Promise<never>((_, reject) => {
             const timer = globalThis.setTimeout(() => {
               this.options.logger.error(
-                `[rill] Fatal: Bundle execution exceeded timeout ${timeout}ms, destroying engine`
+                `[keel] Fatal: Bundle execution exceeded timeout ${timeout}ms, destroying engine`
               );
               const error = new TimeoutError(
-                `[rill] Execution exceeded timeout ${timeout}ms (hard limit)`
+                `[keel] Execution exceeded timeout ${timeout}ms (hard limit)`
               );
               this.emit('fatalError', error);
               this.forceDestroy();
@@ -582,7 +582,7 @@ export class Engine implements IEngine {
     this.diag(`loadBundle: emit('load') done`);
 
     if (this.options.debug) {
-      this.options.logger.log(`[rill:${this.id}] Bundle executed successfully`);
+      this.options.logger.log(`[keel:${this.id}] Bundle executed successfully`);
     }
   }
 
@@ -633,7 +633,7 @@ export class Engine implements IEngine {
     const logger = this.options.logger;
 
     if (!this.provider) {
-      throw new Error('[rill] Sandbox provider not initialized');
+      throw new Error('[keel] Sandbox provider not initialized');
     }
 
     // After runtime + context are created, set up Bridge, polyfills, and runtime API
@@ -641,7 +641,7 @@ export class Engine implements IEngine {
       this._createBridge();
 
       if (debug) {
-        logger.log(`[rill:${this.id}] initializeRuntime: Bridge created, injecting polyfills...`);
+        logger.log(`[keel:${this.id}] initializeRuntime: Bridge created, injecting polyfills...`);
       }
 
       const polyfillResult = this.injectPolyfills();
@@ -649,14 +649,14 @@ export class Engine implements IEngine {
       const afterPolyfills = (): void | Promise<void> => {
         if (debug) {
           logger.log(
-            `[rill:${this.id}] initializeRuntime: polyfills done, injecting runtimeAPI...`
+            `[keel:${this.id}] initializeRuntime: polyfills done, injecting runtimeAPI...`
           );
         }
 
         const apiResult = this.injectRuntimeAPI();
 
         const afterAPI = () => {
-          if (debug) logger.log(`[rill:${this.id}] initializeRuntime: done`);
+          if (debug) logger.log(`[keel:${this.id}] initializeRuntime: done`);
           const dur = Date.now() - start;
           this.options.onMetric?.('engine.initializeRuntime', dur);
         };
@@ -669,14 +669,14 @@ export class Engine implements IEngine {
       return afterPolyfills();
     };
 
-    if (debug) logger.log(`[rill:${this.id}] initializeRuntime: creating runtime...`);
+    if (debug) logger.log(`[keel:${this.id}] initializeRuntime: creating runtime...`);
     const runtimeResult = this.provider.createRuntime();
 
     if (runtimeResult instanceof Promise) {
       // ASYNC PATH (Worker providers): createRuntime returns a Promise
       return runtimeResult.then((runtime) => {
         this.runtime = runtime;
-        if (debug) logger.log(`[rill:${this.id}] initializeRuntime: runtime created (async)`);
+        if (debug) logger.log(`[keel:${this.id}] initializeRuntime: runtime created (async)`);
         this.context = this.runtime.createContext();
         return finishInit();
       });
@@ -684,7 +684,7 @@ export class Engine implements IEngine {
 
     // SYNC PATH (JSC): createRuntime returns value directly — no microtask boundaries
     this.runtime = runtimeResult;
-    if (debug) logger.log(`[rill:${this.id}] initializeRuntime: runtime created (sync)`);
+    if (debug) logger.log(`[keel:${this.id}] initializeRuntime: runtime created (sync)`);
     this.context = this.runtime.createContext();
     return finishInit();
   }
@@ -698,7 +698,7 @@ export class Engine implements IEngine {
     const logger = this.options.logger;
 
     if (debug) {
-      logger.log(`[rill:${this.id}] _createBridge: creating BridgeV2...`);
+      logger.log(`[keel:${this.id}] _createBridge: creating BridgeV2...`);
     }
 
     // Bridge encapsulates all serialization - uses this Engine's callback registry
@@ -711,7 +711,7 @@ export class Engine implements IEngine {
       onSerializedBatch: this.options.onSerializedBatch,
       // Guest callback releaser
       guestReleaseCallback: (fnId) => {
-        const reconciler = this.context?.extract('RillReconciler') as
+        const reconciler = this.context?.extract('KeelReconciler') as
           | { releaseCallback?: (fnId: string) => void }
           | undefined;
         if (reconciler?.releaseCallback) {
@@ -722,7 +722,7 @@ export class Engine implements IEngine {
         const t0 = Date.now();
         const batchOps = batch.operations?.length ?? '?';
         this.diagAccum(
-          `[rill:${this.id}] onGuestOperations ops=${batchOps} hasReceiver=${!!this.receiver}`
+          `[keel:${this.id}] onGuestOperations ops=${batchOps} hasReceiver=${!!this.receiver}`
         );
         this.diag(`onGuestOperations START ops=${batchOps}`);
         if (this.receiver) {
@@ -730,7 +730,7 @@ export class Engine implements IEngine {
           this.diagnostics.recordBatch(stats);
           this.emit('operation', batch as OperationBatch);
         } else {
-          logger.warn(`[rill:${this.id}] No receiver to apply batch!`);
+          logger.warn(`[keel:${this.id}] No receiver to apply batch!`);
         }
         this.diag(`onGuestOperations END took=${Date.now() - t0}ms`);
       },
@@ -739,14 +739,14 @@ export class Engine implements IEngine {
           if (message.type === HostMsg.REF_METHOD_RESULT) {
             this.context.inject('__refResultMessage', message);
             await this.evalCode(
-              `globalThis.__rill.dispatchEvent('${REF_RESULT_EVENT}', __refResultMessage)`
+              `globalThis.__keel.dispatchEvent('${REF_RESULT_EVENT}', __refResultMessage)`
             );
             this.context.inject('__refResultMessage', undefined);
             return;
           }
 
           this.context.inject('__hostMessage', message);
-          await this.evalCode('globalThis.__rill_handleMessage(__hostMessage)');
+          await this.evalCode('globalThis.__keel_handleMessage(__hostMessage)');
           this.context.inject('__hostMessage', undefined);
         }
       },
@@ -759,8 +759,8 @@ export class Engine implements IEngine {
    * This is the mechanism behind function-prop callbacks (e.g. `onPress` → `setState`): when a
    * host-side proxy for a guest callback fires, the Bridge routes here. Three strategies, in
    * order of preference, all synchronous against the live context:
-   *  - node-vm / native JSI: `extract('__rill')` returns a live `invokeCallback` reference.
-   *  - reconciler: `extract('RillReconciler').invokeCallback`.
+   *  - node-vm / native JSI: `extract('__keel')` returns a live `invokeCallback` reference.
+   *  - reconciler: `extract('KeelReconciler').invokeCallback`.
    *  - fallback (WASM): `extract()` drops function refs through its JSON bridge, so invoke the
    *    callback in-realm via `eval` (the same path the CALL_FUNCTION host message uses). Works
    *    on every provider.
@@ -776,15 +776,15 @@ export class Engine implements IEngine {
     // Fast path: node-vm / native JSI providers return live function references from
     // extract(), so the guest's invokeCallback can be called directly.
     if (/^fn_\d+$/.test(fnId)) {
-      const rillNs = this.context?.extract('__rill') as Record<string, unknown> | undefined;
-      const invokeCallback = rillNs?.invokeCallback as
+      const keelNs = this.context?.extract('__keel') as Record<string, unknown> | undefined;
+      const invokeCallback = keelNs?.invokeCallback as
         | ((fnId: string, args: ReviewedUnknown[]) => ReviewedUnknown)
         | undefined;
       if (typeof invokeCallback === 'function') {
         return invokeCallback(fnId, args);
       }
     }
-    const reconciler = this.context?.extract('RillReconciler') as
+    const reconciler = this.context?.extract('KeelReconciler') as
       | { invokeCallback?: (fnId: string, args: ReviewedUnknown[]) => ReviewedUnknown }
       | undefined;
     if (typeof reconciler?.invokeCallback === 'function') {
@@ -796,17 +796,17 @@ export class Engine implements IEngine {
     // message uses). This is what makes function-prop callbacks (e.g. onPress -> setState)
     // work on web/WASM. Works on every provider.
     if (this.context) {
-      this.context.inject('__rill_guest_invoke_args', (args ?? []) as ReviewedUnknown);
+      this.context.inject('__keel_guest_invoke_args', (args ?? []) as ReviewedUnknown);
       const fnIdLit = JSON.stringify(fnId);
       const result = this.context.eval(
-        `(function(){var a=globalThis.__rill_guest_invoke_args;delete globalThis.__rill_guest_invoke_args;` +
-          `var R=globalThis.__rill;if(R&&typeof R.invokeCallback==='function')return R.invokeCallback(${fnIdLit},a);` +
-          `var RC=globalThis.RillReconciler;if(RC&&typeof RC.invokeCallback==='function')return RC.invokeCallback(${fnIdLit},a);` +
+        `(function(){var a=globalThis.__keel_guest_invoke_args;delete globalThis.__keel_guest_invoke_args;` +
+          `var R=globalThis.__keel;if(R&&typeof R.invokeCallback==='function')return R.invokeCallback(${fnIdLit},a);` +
+          `var RC=globalThis.KeelReconciler;if(RC&&typeof RC.invokeCallback==='function')return RC.invokeCallback(${fnIdLit},a);` +
           `return undefined;})()`
       );
       return result as ReviewedUnknown;
     }
-    this.options.logger.warn(`[rill:${this.id}] No invoker found for ${fnId}`);
+    this.options.logger.warn(`[keel:${this.id}] No invoker found for ${fnId}`);
     return undefined;
   }
 
@@ -822,13 +822,13 @@ export class Engine implements IEngine {
     // Helper to log inject calls for debugging (synchronous)
     // Reason: inject can accept any serializable value
     const injectWithLog = (name: string, value: unknown): void => {
-      if (debug) logger.log(`[rill:${this.id}] inject: ${name} starting...`);
+      if (debug) logger.log(`[keel:${this.id}] inject: ${name} starting...`);
       const start = Date.now();
       try {
         this.context!.inject(name, value);
-        if (debug) logger.log(`[rill:${this.id}] inject: ${name} done (${Date.now() - start}ms)`);
+        if (debug) logger.log(`[keel:${this.id}] inject: ${name} done (${Date.now() - start}ms)`);
       } catch (e) {
-        logger.error(`[rill:${this.id}] inject: ${name} failed:`, e);
+        logger.error(`[keel:${this.id}] inject: ${name} failed:`, e);
         throw e;
       }
     };
@@ -843,8 +843,8 @@ export class Engine implements IEngine {
     // The bundle includes: init, console setup, runtime helpers, React shims, and Reconciler
     // Returns void for sync providers, Promise<void> for async providers.
     const postGuestBundleSetup = () => {
-      // NOTE: Previously this did a extract→inject round-trip for RillGuest and
-      // RillReconciler to ensure they're available as top-level identifiers in sandbox
+      // NOTE: Previously this did a extract→inject round-trip for KeelGuest and
+      // KeelReconciler to ensure they're available as top-level identifiers in sandbox
       // contexts that don't map globalThis properties to lexical bindings.
       //
       // This round-trip is HARMFUL for native JSI providers (QuickJS, Hermes, JSC)
@@ -857,7 +857,7 @@ export class Engine implements IEngine {
       // Native JS engines already have globalThis properties as global bindings,
       // so the round-trip is unnecessary. Removed entirely.
 
-      if (debug) logger.log(`[rill:${this.id}] Guest bundle injected (shims + reconciler)`);
+      if (debug) logger.log(`[keel:${this.id}] Guest bundle injected (shims + reconciler)`);
     };
 
     const injectGuestBundle = (): void | Promise<void> => {
@@ -865,9 +865,9 @@ export class Engine implements IEngine {
         // Check if already injected (e.g., from previous load)
         // Use presence of core globals instead of __REACT_SHIM__ because that flag
         // may be false when using real React (not a shim).
-        const alreadyInjected = this.context?.extract('RillGuest');
+        const alreadyInjected = this.context?.extract('KeelGuest');
         if (alreadyInjected) {
-          if (debug) logger.log(`[rill:${this.id}] Guest bundle already injected, skipping`);
+          if (debug) logger.log(`[keel:${this.id}] Guest bundle already injected, skipping`);
           return;
         }
 
@@ -886,7 +886,7 @@ export class Engine implements IEngine {
         }
         postGuestBundleSetup();
       } catch (e) {
-        logger.error(`[rill:${this.id}] Failed to inject Guest bundle:`, e);
+        logger.error(`[keel:${this.id}] Failed to inject Guest bundle:`, e);
         throw e;
       }
     };
@@ -902,20 +902,20 @@ export class Engine implements IEngine {
     // JSC sandbox can't handle objects with function properties via RN bridge
     injectWithLog('__console_log', (...args: unknown[]) => {
       if (debug) {
-        logger.log(`[rill:${engineId}][Guest]`, ...formatConsoleArgs(args));
+        logger.log(`[keel:${engineId}][Guest]`, ...formatConsoleArgs(args));
       }
     });
     injectWithLog('__console_warn', (...args: unknown[]) => {
-      logger.warn(`[rill:${engineId}][Guest]`, ...formatConsoleArgs(args));
+      logger.warn(`[keel:${engineId}][Guest]`, ...formatConsoleArgs(args));
     });
     injectWithLog('__console_error', (...args: unknown[]) => {
-      logger.error(`[rill:${engineId}][Guest]`, ...formatConsoleArgs(args));
+      logger.error(`[keel:${engineId}][Guest]`, ...formatConsoleArgs(args));
     });
     injectWithLog('__console_debug', (...args: unknown[]) => {
-      if (debug) logger.log(`[rill:${engineId}][Guest:debug]`, ...formatConsoleArgs(args));
+      if (debug) logger.log(`[keel:${engineId}][Guest:debug]`, ...formatConsoleArgs(args));
     });
     injectWithLog('__console_info', (...args: unknown[]) => {
-      if (debug) logger.log(`[rill:${engineId}][Guest:info]`, ...formatConsoleArgs(args));
+      if (debug) logger.log(`[keel:${engineId}][Guest:info]`, ...formatConsoleArgs(args));
     });
 
     // Inject timer polyfills using TimerManager
@@ -956,7 +956,7 @@ export class Engine implements IEngine {
       const drainQueue = () => {
         if (isDraining) return;
         isDraining = true;
-        this.diagAccum(`[rill:${engineId}] DRAIN START pending=${pendingQueue.length}`);
+        this.diagAccum(`[keel:${engineId}] DRAIN START pending=${pendingQueue.length}`);
         try {
           let safety = 0;
           while (pendingQueue.length > 0 && safety < 10000) {
@@ -971,7 +971,7 @@ export class Engine implements IEngine {
               this.diag(
                 `setImmediate FIRED id=${entry.id} delay=${Date.now() - entry.queuedAt}ms total=${immediateCallCount}`
               );
-              this.diagAccum(`[rill:${engineId}] FIRED id=${entry.id} total=${immediateCallCount}`);
+              this.diagAccum(`[keel:${engineId}] FIRED id=${entry.id} total=${immediateCallCount}`);
             }
             try {
               const fnStart = Date.now();
@@ -981,22 +981,22 @@ export class Engine implements IEngine {
                 this.diag(`setImmediate fn() DONE id=${entry.id} took=${fnDur}ms`);
               }
               this.diagAccum(
-                `[rill:${engineId}] fn() DONE id=${entry.id} took=${fnDur}ms queueAfter=${pendingQueue.length}`
+                `[keel:${engineId}] fn() DONE id=${entry.id} took=${fnDur}ms queueAfter=${pendingQueue.length}`
               );
             } catch (e) {
               const error = e instanceof Error ? e : new Error(String(e));
-              logger.error(`[rill:${engineId}] setImmediate callback error:`, error);
-              this.diagAccum(`[rill:${engineId}] fn() ERROR id=${entry.id}: ${error.message}`);
+              logger.error(`[keel:${engineId}] setImmediate callback error:`, error);
+              this.diagAccum(`[keel:${engineId}] fn() ERROR id=${entry.id}: ${error.message}`);
               this.diagnostics?.recordError?.();
               this.emit('error', error);
             }
           }
           this.diagAccum(
-            `[rill:${engineId}] DRAIN END processed=${safety} remaining=${pendingQueue.length}`
+            `[keel:${engineId}] DRAIN END processed=${safety} remaining=${pendingQueue.length}`
           );
           if (safety >= 10000) {
             logger.warn(
-              `[rill:${engineId}] setImmediate drain hit safety limit (10000 iterations)`
+              `[keel:${engineId}] setImmediate drain hit safety limit (10000 iterations)`
             );
           }
         } finally {
@@ -1057,8 +1057,8 @@ export class Engine implements IEngine {
     // Extracted as a function so it can run after sync or async eval.
     const finishPolyfillSetup = () => {
       // require: module loader for Guest code
-      // Note: Globals like __useHostEvent, __rill_getConfig, __rill_emitEvent are defined AFTER require.
-      // They are accessed lazily when require('rill/guest') is called (after injectPolyfills completes).
+      // Note: Globals like __useHostEvent, __keel_getConfig, __keel_emitEvent are defined AFTER require.
+      // They are accessed lazily when require('keel/guest') is called (after injectPolyfills completes).
       // require(): Implemented inside the sandbox to avoid JSI boundary crossings.
       //
       // Previously, require was a host function that called extract() to fetch
@@ -1087,43 +1087,43 @@ export class Engine implements IEngine {
           }
           globalThis.require = function(name) {
             if (!isWhitelisted(name)) {
-              var e = new Error('[rill] Unsupported require("' + name + '")');
+              var e = new Error('[keel] Unsupported require("' + name + '")');
               e.name = 'RequireError';
               throw e;
             }
             if (modules[name]) return modules[name];
             switch (name) {
               case 'react':
-                if (!globalThis.React) throw new Error('[rill] React not found');
+                if (!globalThis.React) throw new Error('[keel] React not found');
                 return globalThis.React;
               case 'react/jsx-runtime':
-                if (!globalThis.ReactJSXRuntime) throw new Error('[rill] ReactJSXRuntime not found');
+                if (!globalThis.ReactJSXRuntime) throw new Error('[keel] ReactJSXRuntime not found');
                 return globalThis.ReactJSXRuntime;
               case 'react/jsx-dev-runtime':
                 return globalThis.ReactJSXDevRuntime || globalThis.ReactJSXRuntime;
-              case 'rill/reconciler':
-                if (!globalThis.RillReconciler) throw new Error('[rill] RillReconciler not found');
-                return globalThis.RillReconciler;
-              case 'rill/guest':
-                if (!globalThis.RillGuest) throw new Error('[rill] RillGuest not found');
-                return globalThis.RillGuest;
+              case 'keel/reconciler':
+                if (!globalThis.KeelReconciler) throw new Error('[keel] KeelReconciler not found');
+                return globalThis.KeelReconciler;
+              case 'keel/guest':
+                if (!globalThis.KeelGuest) throw new Error('[keel] KeelGuest not found');
+                return globalThis.KeelGuest;
               case 'react-native':
                 return modules['react-native'] || { Platform: { OS: 'unknown' } };
               default:
-                throw new Error('[rill] Unsupported require("' + name + '")');
+                throw new Error('[keel] Unsupported require("' + name + '")');
             }
           };
           // Allow host to register module objects (e.g., react-native shim)
-          globalThis.__rill_registerModule = function(name, mod) {
+          globalThis.__keel_registerModule = function(name, mod) {
             modules[name] = mod;
           };
         })();
       `);
       // Inject react-native shim as a module
-      this.context?.inject('__rill_rn_shim', createReactNativeShim());
+      this.context?.inject('__keel_rn_shim', createReactNativeShim());
       this.evalCode(`
-        globalThis.__rill_registerModule('react-native', globalThis.__rill_rn_shim);
-        delete globalThis.__rill_rn_shim;
+        globalThis.__keel_registerModule('react-native', globalThis.__keel_rn_shim);
+        delete globalThis.__keel_rn_shim;
       `);
 
       // React/JSX shims are already injected before require was set up
@@ -1141,7 +1141,7 @@ export class Engine implements IEngine {
         }) => {
           const error =
             event.reason instanceof Error ? event.reason : new Error(String(event.reason));
-          logger.error(`[rill:${this.id}][Guest] Unhandled Promise Rejection:`, error);
+          logger.error(`[keel:${this.id}][Guest] Unhandled Promise Rejection:`, error);
 
           // Track error for monitoring
           this.diagnostics.recordError();
@@ -1169,13 +1169,13 @@ export class Engine implements IEngine {
       } catch (_err) {
         // Silently fail if unhandledrejection is not supported
         if (debug) {
-          logger.warn(`[rill:${this.id}] Unhandledrejection handler not supported in this sandbox`);
+          logger.warn(`[keel:${this.id}] Unhandledrejection handler not supported in this sandbox`);
         }
       }
 
       // Note: console object is now constructed in Guest bundle (globals-setup.ts)
       if (debug) {
-        logger.log(`[rill:${this.id}] injectPolyfills: console setup done via Guest bundle`);
+        logger.log(`[keel:${this.id}] injectPolyfills: console setup done via Guest bundle`);
       }
     }; // end finishPolyfillSetup
 
@@ -1200,15 +1200,15 @@ export class Engine implements IEngine {
     const debug = this.options.debug;
     const logger = this.options.logger;
 
-    // Note: Runtime helpers (__useHostEvent, __rill.dispatchEvent) are now in Guest bundle
+    // Note: Runtime helpers (__useHostEvent, __keel.dispatchEvent) are now in Guest bundle
 
-    // __rill_registerComponentType: register Guest function components on Host so they survive JSI
+    // __keel_registerComponentType: register Guest function components on Host so they survive JSI
     const engineId = this.id;
     const registerComponentType = (fn: unknown) => {
       try {
-        // Use sandbox's RillReconciler for component type registration
-        const reconciler = this.context?.extract('RillReconciler') as
-          | RillReconcilerGlobal
+        // Use sandbox's KeelReconciler for component type registration
+        const reconciler = this.context?.extract('KeelReconciler') as
+          | KeelReconcilerGlobal
           | undefined;
         return reconciler?.registerComponentType?.(fn, engineId) ?? null;
       } catch {
@@ -1216,9 +1216,9 @@ export class Engine implements IEngine {
       }
       return null;
     };
-    this.context.inject('__rill_registerComponentType', registerComponentType);
+    this.context.inject('__keel_registerComponentType', registerComponentType);
 
-    // __rill_sendBatch: Receives batch from Guest, dispatches to the correct Bridge method
+    // __keel_sendBatch: Receives batch from Guest, dispatches to the correct Bridge method
     // based on the batch format (raw object or JSON string).
     const sendToHost: SendToHost = (batch) => {
       if (!this.bridge) return;
@@ -1229,7 +1229,7 @@ export class Engine implements IEngine {
         // corrupted boundary. The batch is already unusable; dropping it
         // loses one frame, and the error names the sender as the fix site.
         logger.error(
-          `[rill:${this.id}] __rill_sendBatch received binary bytes (${
+          `[keel:${this.id}] __keel_sendBatch received binary bytes (${
             batch instanceof ArrayBuffer ? 'ArrayBuffer' : 'ArrayBufferView'
           }) — the JS guest has no binary op-batch wire; send JSON. Batch dropped.`
         );
@@ -1249,20 +1249,20 @@ export class Engine implements IEngine {
           // buffer degraded to {}) — attribute the failure to the boundary,
           // not the Bridge.
           logger.error(
-            `[rill:${this.id}] sendToHost received an empty object — the batch was destroyed at the sandbox boundary (converter cannot carry this value type); fix the guest to send JSON`
+            `[keel:${this.id}] sendToHost received an empty object — the batch was destroyed at the sandbox boundary (converter cannot carry this value type); fix the guest to send JSON`
           );
         }
         this.bridge.sendRawBatch(batch as OperationBatch);
       }
     };
 
-    // Inject __rill_sendBatch for Guest code
+    // Inject __keel_sendBatch for Guest code
     // Bridge.sendToHost handles all serialization via TypeRules
-    this.context.inject('__rill_sendBatch', sendToHost);
+    this.context.inject('__keel_sendBatch', sendToHost);
 
-    // __rill_sendOperation: Send a single operation directly to Host (bypasses batching)
+    // __keel_sendOperation: Send a single operation directly to Host (bypasses batching)
     // Used by Remote Ref for immediate REF_CALL delivery
-    this.context.inject('__rill_sendOperation', (op: ReviewedUnknown) => {
+    this.context.inject('__keel_sendOperation', (op: ReviewedUnknown) => {
       if (!this.bridge || !op || typeof op !== 'object') return;
 
       // Wrap single operation in a minimal batch for Bridge compatibility
@@ -1274,7 +1274,7 @@ export class Engine implements IEngine {
       };
 
       if (debug) {
-        logger.log(`[rill:${this.id}] __rill_sendOperation:`, (op as { op?: string }).op);
+        logger.log(`[keel:${this.id}] __keel_sendOperation:`, (op as { op?: string }).op);
       }
 
       this.bridge.sendRawBatch(batch);
@@ -1285,17 +1285,17 @@ export class Engine implements IEngine {
     this.evalCode(`
       (function() {
         try {
-          if (!globalThis.__rill) globalThis.__rill = {};
-          var __rill = globalThis.__rill;
-          if (!__rill.__internal) __rill.__internal = {};
-          var __internal = __rill.__internal;
+          if (!globalThis.__keel) globalThis.__keel = {};
+          var __keel = globalThis.__keel;
+          if (!__keel.__internal) __keel.__internal = {};
+          var __internal = __keel.__internal;
 
           if (!__internal.renderHookInstalled) {
             __internal.renderHookInstalled = true;
             __internal.lastRenderElement = null;
             __internal.lastRenderSendToHost = null;
 
-            var R = globalThis.RillReconciler;
+            var R = globalThis.KeelReconciler;
             if (R && typeof R.render === 'function') {
               var __origRender = R.render;
               R.render = function(element, sendToHost) {
@@ -1306,10 +1306,10 @@ export class Engine implements IEngine {
             }
           }
 
-          if (typeof globalThis.__rill_scheduleRender !== 'function') {
-            globalThis.__rill_scheduleRender = function() {
+          if (typeof globalThis.__keel_scheduleRender !== 'function') {
+            globalThis.__keel_scheduleRender = function() {
               try {
-                var R = globalThis.RillReconciler;
+                var R = globalThis.KeelReconciler;
                 if (!R || typeof R.render !== 'function') return;
                 var el = __internal.lastRenderElement;
                 var send = __internal.lastRenderSendToHost;
@@ -1322,7 +1322,7 @@ export class Engine implements IEngine {
                 R.render(nextEl, send);
               } catch (e) {
                 if (typeof __console_error === 'function') {
-                  __console_error('[rill] __rill_scheduleRender error:', e);
+                  __console_error('[keel] __keel_scheduleRender error:', e);
                 }
               }
             };
@@ -1331,14 +1331,14 @@ export class Engine implements IEngine {
       })();
     `);
 
-    // __rill_getConfig: Get initial configuration
-    this.context.inject('__rill_getConfig', () => this.config);
+    // __keel_getConfig: Get initial configuration
+    this.context.inject('__keel_getConfig', () => this.config);
 
-    // __rill_emitEvent: Send event to host
+    // __keel_emitEvent: Send event to host
     // Reason: Event payload can be any serializable type
-    this.context.inject('__rill_emitEvent', (eventName: string, payload?: unknown) => {
+    this.context.inject('__keel_emitEvent', (eventName: string, payload?: unknown) => {
       if (debug) {
-        logger.log('[rill] Guest event:', eventName, payload);
+        logger.log('[keel] Guest event:', eventName, payload);
       }
 
       // Handle DevTools messages from Guest
@@ -1393,62 +1393,62 @@ export class Engine implements IEngine {
       this.emit('message', { event: eventName, payload });
     });
 
-    // __rill_handleMessage: Handle messages from host
+    // __keel_handleMessage: Handle messages from host
     // IMPORTANT: Defined as GUEST code (not a host closure) to avoid re-entrant
     // TenantManager mutex calls. When evalInTenant holds the mutex and the evaluated
     // code calls a host closure that uses extract/inject, a deadlock occurs
-    // with non-recursive mutexes. Guest code can access __rill directly from its
+    // with non-recursive mutexes. Guest code can access __keel directly from its
     // own global scope without going through the TenantManager's extract.
     this.evalCode(`
-      globalThis.__rill_handleMessage = function(message) {
+      globalThis.__keel_handleMessage = function(message) {
         try {
           if (!message || !message.type) return;
           if (message.type === 'CALL_FUNCTION') {
-            if (typeof globalThis.__rill !== 'undefined' &&
-                typeof globalThis.__rill.invokeCallback === 'function') {
-              globalThis.__rill.invokeCallback(message.fnId, message.args);
+            if (typeof globalThis.__keel !== 'undefined' &&
+                typeof globalThis.__keel.invokeCallback === 'function') {
+              globalThis.__keel.invokeCallback(message.fnId, message.args);
             }
           } else if (message.type === 'HOST_EVENT') {
-            if (typeof globalThis.__rill !== 'undefined' &&
-                typeof globalThis.__rill.dispatchEvent === 'function') {
-              globalThis.__rill.dispatchEvent(message.eventName, message.payload);
+            if (typeof globalThis.__keel !== 'undefined' &&
+                typeof globalThis.__keel.dispatchEvent === 'function') {
+              globalThis.__keel.dispatchEvent(message.eventName, message.payload);
             }
           } else if (message.type === '${HostMsg.CONFIG_UPDATE}') {
             // Forward config updates to the Host event system so Guest hooks can subscribe.
-            if (typeof globalThis.__rill !== 'undefined' &&
-                typeof globalThis.__rill.dispatchEvent === 'function') {
-              globalThis.__rill.dispatchEvent('${CONFIG_UPDATE_EVENT}', message.config);
+            if (typeof globalThis.__keel !== 'undefined' &&
+                typeof globalThis.__keel.dispatchEvent === 'function') {
+              globalThis.__keel.dispatchEvent('${CONFIG_UPDATE_EVENT}', message.config);
             }
             // Also trigger a re-render (idempotent, no-op before first render).
-            if (typeof globalThis.__rill_scheduleRender === 'function') {
-              globalThis.__rill_scheduleRender();
+            if (typeof globalThis.__keel_scheduleRender === 'function') {
+              globalThis.__keel_scheduleRender();
             }
           } else if (message.type === 'DESTROY') {
-            if (typeof globalThis.RillReconciler !== 'undefined' &&
-                typeof globalThis.RillReconciler.unmountAll === 'function') {
-              globalThis.RillReconciler.unmountAll();
+            if (typeof globalThis.KeelReconciler !== 'undefined' &&
+                typeof globalThis.KeelReconciler.unmountAll === 'function') {
+              globalThis.KeelReconciler.unmountAll();
             }
-            if (typeof globalThis.__rill !== 'undefined' &&
-                globalThis.__rill.eventListeners &&
-                typeof globalThis.__rill.eventListeners.clear === 'function') {
-              globalThis.__rill.eventListeners.clear();
+            if (typeof globalThis.__keel !== 'undefined' &&
+                globalThis.__keel.eventListeners &&
+                typeof globalThis.__keel.eventListeners.clear === 'function') {
+              globalThis.__keel.eventListeners.clear();
             }
           }
         } catch (e) {
           if (typeof __console_error === 'function') {
-            __console_error('[rill] __rill_handleMessage error:', e);
+            __console_error('[keel] __keel_handleMessage error:', e);
           }
         }
       };
     `);
 
-    // Skip RillGuest/ReactNative hooks update for JSC sandbox
-    // The hooks (__useHostEvent, __rill_getConfig, __rill_emitEvent) are already available as global functions
-    // Bundles use require('rill/guest') which returns these via the callback proxy mechanism
+    // Skip KeelGuest/ReactNative hooks update for JSC sandbox
+    // The hooks (__useHostEvent, __keel_getConfig, __keel_emitEvent) are already available as global functions
+    // Bundles use require('keel/guest') which returns these via the callback proxy mechanism
     // Trying to pass an object with extract results (Promises in JSC) causes serialization issues
     if (debug) {
       logger.log(
-        `[rill:${this.id}] injectRuntimeAPI: skipping RillGuest hooks update (available via require())`
+        `[keel:${this.id}] injectRuntimeAPI: skipping KeelGuest hooks update (available via require())`
       );
     }
 
@@ -1460,16 +1460,16 @@ export class Engine implements IEngine {
     }
     if (debug && componentNames.length > 0) {
       logger.log(
-        `[rill:${this.id}] injectRuntimeAPI: injected component globals: ${componentNames.join(', ')}`
+        `[keel:${this.id}] injectRuntimeAPI: injected component globals: ${componentNames.join(', ')}`
       );
     }
 
-    // Expose host:* modules to the Guest resolver (globalThis.__rill.hostModules).
+    // Expose host:* modules to the Guest resolver (globalThis.__keel.hostModules).
     this.injectHostModules();
 
     // All inject operations are now synchronous - no need to wait
     if (debug) {
-      logger.log(`[rill:${this.id}] injectRuntimeAPI: all inject operations done`);
+      logger.log(`[keel:${this.id}] injectRuntimeAPI: all inject operations done`);
     }
 
     // Inject DevTools Guest shim if enabled
@@ -1479,15 +1479,15 @@ export class Engine implements IEngine {
         if (evalResult instanceof Promise) {
           return evalResult.then(() => {
             if (debug) {
-              logger.log(`[rill:${this.id}] injectRuntimeAPI: DevTools shim injected`);
+              logger.log(`[keel:${this.id}] injectRuntimeAPI: DevTools shim injected`);
             }
           });
         }
         if (debug) {
-          logger.log(`[rill:${this.id}] injectRuntimeAPI: DevTools shim injected`);
+          logger.log(`[keel:${this.id}] injectRuntimeAPI: DevTools shim injected`);
         }
       } catch (e) {
-        logger.warn(`[rill:${this.id}] Failed to inject DevTools shim:`, e);
+        logger.warn(`[keel:${this.id}] Failed to inject DevTools shim:`, e);
       }
     }
   }
@@ -1496,10 +1496,10 @@ export class Engine implements IEngine {
    * Inject the dispatch-wrapped `host:*` modules into the sandbox.
    *
    * Each capability is injected as an individual host function (mirroring how
-   * `__rill_emitEvent`, `__rill_getConfig`, etc. are injected) so the marshalling
+   * `__keel_emitEvent`, `__keel_getConfig`, etc. are injected) so the marshalling
    * layer only ever crosses single functions — the JSI-friendly shape. A single
-   * eval then assembles `globalThis.__rill.hostModules`, which is exactly where the
-   * Guest bundle's rewritten `host:*` imports resolve (build.ts: `__rill_importHostModule`).
+   * eval then assembles `globalThis.__keel.hostModules`, which is exactly where the
+   * Guest bundle's rewritten `host:*` imports resolve (build.ts: `__keel_importHostModule`).
    *
    * Capabilities not registered here are absent from the table, so the Guest
    * resolver throws "Host module not registered" (fail-closed).
@@ -1515,7 +1515,7 @@ export class Engine implements IEngine {
       this.context.installHostModules(this._hostModuleDispatch, this._hostModuleContract);
       if (this.options.debug) {
         this.options.logger.log(
-          `[rill:${this.id}] injectHostModules: installed via provider bridge (${Object.keys(this._hostModuleDispatch).join(', ')})`
+          `[keel:${this.id}] injectHostModules: installed via provider bridge (${Object.keys(this._hostModuleDispatch).join(', ')})`
         );
       }
       return;
@@ -1527,7 +1527,7 @@ export class Engine implements IEngine {
     for (const [moduleId, moduleDispatch] of Object.entries(this._hostModuleDispatch)) {
       const moduleKey = JSON.stringify(moduleId);
       for (const [exportName, handler] of Object.entries(moduleDispatch)) {
-        const tempName = `__rill_hm_${counter++}`;
+        const tempName = `__keel_hm_${counter++}`;
         this.context.inject(tempName, handler);
         const tempKey = JSON.stringify(tempName);
         const exportKey = JSON.stringify(exportName);
@@ -1541,16 +1541,16 @@ export class Engine implements IEngine {
 
     this.evalCode(`
       (function() {
-        if (!globalThis.__rill) { globalThis.__rill = {}; }
-        var m = globalThis.__rill.hostModules || {};
+        if (!globalThis.__keel) { globalThis.__keel = {}; }
+        var m = globalThis.__keel.hostModules || {};
 ${assignments.join('\n')}
-        globalThis.__rill.hostModules = m;
+        globalThis.__keel.hostModules = m;
       })();
     `);
 
     if (this.options.debug) {
       this.options.logger.log(
-        `[rill:${this.id}] injectHostModules: injected ${counter} host capability function(s)`
+        `[keel:${this.id}] injectHostModules: injected ${counter} host capability function(s)`
       );
     }
   }
@@ -1585,7 +1585,7 @@ ${assignments.join('\n')}
   private async executeBundle(code: string, bytecodeAssetPath?: string): Promise<void> {
     const start = Date.now();
     if (!this.context) {
-      throw new Error('[rill] Context not initialized');
+      throw new Error('[keel] Context not initialized');
     }
 
     try {
@@ -1602,14 +1602,14 @@ ${assignments.join('\n')}
           const stats = this.receiver?.getStats();
           if (stats && stats.rootChildrenCount === 0) {
             this.options.logger.warn(
-              `[rill:${this.id}] evalBytecodeAsset produced no root nodes, fallback to source eval`
+              `[keel:${this.id}] evalBytecodeAsset produced no root nodes, fallback to source eval`
             );
             await this.evalCode(code);
             usedBytecodeAsset = false;
           }
         } catch (error) {
           this.options.logger.warn(
-            `[rill:${this.id}] evalBytecodeAsset failed, fallback to source eval:`,
+            `[keel:${this.id}] evalBytecodeAsset failed, fallback to source eval:`,
             error
           );
           await this.evalCode(code);
@@ -1623,7 +1623,7 @@ ${assignments.join('\n')}
         mode: usedBytecodeAsset ? 'bytecode-asset' : 'source',
       });
     } catch (error) {
-      this.options.logger.error('[rill] Bundle execution error:', error);
+      this.options.logger.error('[keel] Bundle execution error:', error);
       const errLike = error as {
         name?: ReviewedUnknown;
         message?: ReviewedUnknown;
@@ -1656,21 +1656,21 @@ ${assignments.join('\n')}
   private executeBundleSync(code: string, bytecodeAssetPath?: string): void {
     const start = Date.now();
     if (!this.context) {
-      throw new Error('[rill] Context not initialized');
+      throw new Error('[keel] Context not initialized');
     }
 
     // DIAG: Check sandbox state before eval
-    const hasSendToHost = this.context.extract('__rill_sendBatch');
-    const rillNsDiag = this.context.extract('__rill') as Record<string, unknown> | undefined;
-    const hasRillGuest = rillNsDiag?.guest;
+    const hasSendToHost = this.context.extract('__keel_sendBatch');
+    const keelNsDiag = this.context.extract('__keel') as Record<string, unknown> | undefined;
+    const hasKeelGuest = keelNsDiag?.guest;
     const hasReact = this.context.extract('React');
-    const hasReconciler = this.context.extract('RillReconciler');
+    const hasReconciler = this.context.extract('KeelReconciler');
     this.diag(
       `pre-eval sandbox state: ` +
-        `__rill_sendBatch=${typeof hasSendToHost}, ` +
-        `__rill.guest=${typeof hasRillGuest}, ` +
+        `__keel_sendBatch=${typeof hasSendToHost}, ` +
+        `__keel.guest=${typeof hasKeelGuest}, ` +
         `React=${typeof hasReact}, ` +
-        `RillReconciler=${typeof hasReconciler}`
+        `KeelReconciler=${typeof hasReconciler}`
     );
 
     try {
@@ -1688,7 +1688,7 @@ ${assignments.join('\n')}
           const stats = this.receiver?.getStats();
           if (stats && stats.rootChildrenCount === 0) {
             this.options.logger.warn(
-              `[rill:${this.id}] evalBytecodeAsset produced no root nodes, fallback to source eval`
+              `[keel:${this.id}] evalBytecodeAsset produced no root nodes, fallback to source eval`
             );
             this.context.eval(code);
             usedBytecodeAsset = false;
@@ -1698,7 +1698,7 @@ ${assignments.join('\n')}
           );
         } catch (error) {
           this.options.logger.warn(
-            `[rill:${this.id}] evalBytecodeAsset failed, fallback to source eval:`,
+            `[keel:${this.id}] evalBytecodeAsset failed, fallback to source eval:`,
             error
           );
           this.context.eval(code);
@@ -1717,30 +1717,30 @@ ${assignments.join('\n')}
       // (which would drain too late). We must explicitly flush the queue here so that
       // React's render → commit → sendToHost pipeline completes before this method returns.
       if (this._drainPendingImmediates) {
-        this.diagAccum(`[rill:${this.id}] executeBundleSync: about to drain`);
+        this.diagAccum(`[keel:${this.id}] executeBundleSync: about to drain`);
         const drainStart = Date.now();
         this._drainPendingImmediates();
         const drainDur = Date.now() - drainStart;
-        this.diagAccum(`[rill:${this.id}] executeBundleSync: drain done took=${drainDur}ms`);
+        this.diagAccum(`[keel:${this.id}] executeBundleSync: drain done took=${drainDur}ms`);
         this.diag(`drainPendingImmediates: took=${drainDur}ms`);
       }
 
-      // DIAG: Check sandbox state after eval (verify user script set __rill.guest)
-      const postRillNs = this.context.extract('__rill') as Record<string, unknown> | undefined;
-      const postRillGuest = postRillNs?.guest;
+      // DIAG: Check sandbox state after eval (verify user script set __keel.guest)
+      const postKeelNs = this.context.extract('__keel') as Record<string, unknown> | undefined;
+      const postKeelGuest = postKeelNs?.guest;
       const postKeys =
-        postRillGuest && typeof postRillGuest === 'object' ? Object.keys(postRillGuest) : [];
-      this.diag(`post-eval: __rill.guest=${typeof postRillGuest}, keys=[${postKeys.join(',')}]`);
+        postKeelGuest && typeof postKeelGuest === 'object' ? Object.keys(postKeelGuest) : [];
+      this.diag(`post-eval: __keel.guest=${typeof postKeelGuest}, keys=[${postKeys.join(',')}]`);
 
       const dur = Date.now() - start;
-      this.diagAccum(`[rill:${this.id}] executeBundleSync COMPLETE dur=${dur}ms`);
+      this.diagAccum(`[keel:${this.id}] executeBundleSync COMPLETE dur=${dur}ms`);
       this.options.onMetric?.('engine.executeBundle', dur, {
         size: code.length,
         mode: usedBytecodeAsset ? 'bytecode-asset' : 'source',
       });
     } catch (error) {
-      this.diagAccum(`[rill:${this.id}] executeBundleSync ERROR: ${error}`);
-      this.options.logger.error('[rill] Bundle execution error:', error);
+      this.diagAccum(`[keel:${this.id}] executeBundleSync ERROR: ${error}`);
+      this.options.logger.error('[keel] Bundle execution error:', error);
       const errLike = error as {
         name?: ReviewedUnknown;
         message?: ReviewedUnknown;
@@ -1806,7 +1806,7 @@ ${assignments.join('\n')}
         try {
           listener(args[0]);
         } catch (error) {
-          this.options.logger.error(`[rill] Event listener error:`, error);
+          this.options.logger.error(`[keel] Event listener error:`, error);
         }
       });
     }
@@ -1831,7 +1831,7 @@ ${assignments.join('\n')}
       const count = this.listeners.get(event)!.size;
       if (count > this.maxListeners && !this.warnedEvents.has(event)) {
         this.options.logger.warn(
-          `[rill] Possible EventEmitter memory leak detected. ` +
+          `[keel] Possible EventEmitter memory leak detected. ` +
             `${count} listeners added for event "${String(event)}". ` +
             `Use setMaxListeners() to increase limit.`
         );
@@ -1862,7 +1862,7 @@ ${assignments.join('\n')}
       this._eventQueue.push({ eventName, payload });
       if (this.options.debug) {
         this.options.logger.log(
-          `[rill:${this.id}] Event queued (paused): ${eventName}, queue size: ${this._eventQueue.length}`
+          `[keel:${this.id}] Event queued (paused): ${eventName}, queue size: ${this._eventQueue.length}`
         );
       }
       return;
@@ -1914,7 +1914,7 @@ ${assignments.join('\n')}
    */
   createReceiver(): Receiver {
     if (this.options.debug) {
-      this.options.logger.log(`[rill:${this.id}] Creating Receiver`);
+      this.options.logger.log(`[keel:${this.id}] Creating Receiver`);
     }
     this.receiver = new Receiver(
       this.registry,
@@ -1931,7 +1931,7 @@ ${assignments.join('\n')}
     // BridgeV2 is now connected via the onGuestOperations in the constructor, so setBridge is obsolete.
 
     if (this.options.debug) {
-      this.options.logger.log(`[rill:${this.id}] Receiver created`);
+      this.options.logger.log(`[keel:${this.id}] Receiver created`);
     }
     return this.receiver;
   }
@@ -1984,7 +1984,7 @@ ${assignments.join('\n')}
     this.timerManager.setCallbackRunner(runner);
     if (this.options.debug) {
       this.options.logger.log(
-        `[rill:${this.id}] Guest turn runner ${runner ? 'installed' : 'cleared'} (timer + microtask guest entries ${runner ? 'gated' : 'direct'})`
+        `[keel:${this.id}] Guest turn runner ${runner ? 'installed' : 'cleared'} (timer + microtask guest entries ${runner ? 'gated' : 'direct'})`
       );
     }
   }
@@ -2018,7 +2018,7 @@ ${assignments.join('\n')}
     this.timerManager.pause();
 
     if (this.options.debug) {
-      this.options.logger.log(`[rill:${this.id}] Engine paused`);
+      this.options.logger.log(`[keel:${this.id}] Engine paused`);
     }
 
     // Emit pause event
@@ -2040,14 +2040,14 @@ ${assignments.join('\n')}
     // Flush queued events
     const queuedEvents = this._eventQueue.splice(0);
     if (queuedEvents.length > 0 && this.options.debug) {
-      this.options.logger.log(`[rill:${this.id}] Flushing ${queuedEvents.length} queued events`);
+      this.options.logger.log(`[keel:${this.id}] Flushing ${queuedEvents.length} queued events`);
     }
     for (const event of queuedEvents) {
       this._sendEventInternal(event.eventName, event.payload);
     }
 
     if (this.options.debug) {
-      this.options.logger.log(`[rill:${this.id}] Engine resumed`);
+      this.options.logger.log(`[keel:${this.id}] Engine resumed`);
     }
 
     // Emit resume event
@@ -2093,13 +2093,13 @@ ${assignments.join('\n')}
    * 2. Manual operations: raw functions → Host's callbackRegistry via Bridge
    */
   get guestCallbackCount(): number {
-    // Host's callbackRegistry (for manual operations via __rill_sendBatch)
+    // Host's callbackRegistry (for manual operations via __keel_sendBatch)
     const hostCount = this.callbackRegistry.size;
 
     // Guest's globalCallbackRegistry (for reconciler usage)
     let guestCount = 0;
     if (this.context) {
-      const reconciler = this.context.extract('RillReconciler') as RillReconcilerGlobal | undefined;
+      const reconciler = this.context.extract('KeelReconciler') as KeelReconcilerGlobal | undefined;
       guestCount = reconciler?.getCallbackCount?.() ?? 0;
     }
 
@@ -2118,7 +2118,7 @@ ${assignments.join('\n')}
     this.diagnostics.setDestroyed(true);
 
     if (this.options.debug) {
-      this.options.logger.log(`[rill:${this.id}] Destroying engine`);
+      this.options.logger.log(`[keel:${this.id}] Destroying engine`);
     }
 
     this.emit('destroy');
@@ -2126,8 +2126,8 @@ ${assignments.join('\n')}
     // Clean up component type registry for this engine (JSI-safe function component transport)
     // Must be done before context disposal
     try {
-      const reconciler = this.context?.extract('RillReconciler') as
-        | RillReconcilerGlobal
+      const reconciler = this.context?.extract('KeelReconciler') as
+        | KeelReconcilerGlobal
         | undefined;
       reconciler?.unregisterComponentTypes?.(this.id);
     } catch {
@@ -2195,8 +2195,8 @@ ${assignments.join('\n')}
 
     // Best-effort cleanup for component type registry (before context disposal)
     try {
-      const reconciler = this.context?.extract('RillReconciler') as
-        | RillReconcilerGlobal
+      const reconciler = this.context?.extract('KeelReconciler') as
+        | KeelReconcilerGlobal
         | undefined;
       reconciler?.unregisterComponentTypes?.(this.id);
     } catch {

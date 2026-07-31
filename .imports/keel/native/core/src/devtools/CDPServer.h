@@ -1,12 +1,12 @@
 // ============================================================================
-// WIP — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production builds).
+// WIP — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production builds).
 //
 // WHAT THIS IS
 //   A Chrome DevTools Protocol (CDP) server that lets a downstream app developer
 //   attach Chrome DevTools / VS Code to a *live guest sandbox* and inspect it.
 //   This is developer-facing tooling infrastructure, distinct from:
-//     - the internal [DIAG] logging (rill's own diagnostics), and
-//     - the TS `rill/devtools` entry (guest-side op-log / profiling / error
+//     - the internal [DIAG] logging (keel's own diagnostics), and
+//     - the TS `keel/devtools` entry (guest-side op-log / profiling / error
 //       tracking, which IS wired and shipped).
 //
 // GOAL
@@ -18,7 +18,7 @@
 //   - Transport (CDPTransportApple): REAL — Network.framework WebSocket server.
 //     CDPTransport is an abstract base, so a CDPTransportWeb could be added.
 //   - CDPServer + Console/DOM/Network/Runtime adapters: real structure, fed from
-//     data rill already owns.
+//     data keel already owns.
 //   - Debugger adapter (breakpoints/stepping): STUB ONLY — IEngineDebugger is a
 //     pure interface and NO engine (quickjs/hermes/jsc) implements it; only
 //     StubEngineDebugger exists.
@@ -30,7 +30,7 @@
 //   (see the local architecture deep-review doc, section II.3 addendum, for the
 //    full cost analysis behind these estimates)
 //   1. Wire the non-breakpoint tiers (days): instantiate CDPServer +
-//      CDPTransportApple in RillTenantManager, start(port), registerTenant per
+//      CDPTransportApple in KeelTenantManager, start(port), registerTenant per
 //      tenant, feed Console/DOM/Network/Runtime adapters from existing events.
 //   2. Real breakpoints (weeks, per engine):
 //      - Hermes: bridge hermes::inspector into IEngineDebugger.
@@ -45,7 +45,7 @@
 // PROCESS / HOW TO BUILD WITH IT
 //   Tests always define the flag (native/core/Makefile) so this code keeps
 //   compiling and stays honest. For an evaluation native build:
-//     RILL_WIP_CDP_DEVTOOLS=1 pod install   (podspec forwards it as a -D define)
+//     KEEL_WIP_CDP_DEVTOOLS=1 pod install   (podspec forwards it as a -D define)
 // ============================================================================
 
 /**
@@ -100,7 +100,7 @@
 #include "ConnectionId.h"
 #include "cdp_wire.h"  // cdp:: JSON wire helpers (usable without the server)
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 // Forward declarations
 class ConsoleAdapter;
@@ -328,7 +328,7 @@ namespace CDPErrorCode {
 struct CDPTarget {
   std::string id;                // Unique target ID (tenant ID as string)
   std::string type = "node";     // Target type (node, page, etc.)
-  std::string title;             // Display title (e.g., "Rill Guest: MyApp")
+  std::string title;             // Display title (e.g., "Keel Guest: MyApp")
   std::string url;               // Target URL/identifier
   std::string webSocketDebuggerUrl;  // Full WebSocket URL for this target
   std::string devtoolsFrontendUrl;   // DevTools URL (optional)
@@ -875,4 +875,4 @@ std::string injectSessionId(const std::string& rawCdp, const SessionId& sessionI
 
 } // namespace cdp
 
-} // namespace rill::devtools
+} // namespace keel::devtools

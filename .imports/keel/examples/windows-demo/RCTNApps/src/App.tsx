@@ -8,8 +8,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Engine, useEngineView } from 'rill/host';
-import { DefaultComponents } from 'rill/host/preset';
+import { Engine, useEngineView } from 'keel/host';
+import { DefaultComponents } from 'keel/host/preset';
 
 // ---------------------------------------------------------------------------
 // Guest code — runs inside the sandbox engine
@@ -19,7 +19,7 @@ const GUEST_CODE = `
   var React = require('react');
   var useState = React.useState;
   var useCallback = React.useCallback;
-  var render = require('rill/reconciler').render;
+  var render = require('keel/reconciler').render;
   var h = React.createElement;
 
   function GuestApp() {
@@ -118,7 +118,7 @@ const GUEST_CODE = `
     infoText: { fontSize: 12, color: '#555', marginBottom: 4 },
   };
 
-  render(h(GuestApp), globalThis.__rill_sendBatch);
+  render(h(GuestApp), globalThis.__keel_sendBatch);
 `;
 
 const GUEST_BYTECODE_ASSET = 'bytecode/guest.hbc';
@@ -227,7 +227,7 @@ function getDetectedEngines(preferredEngine?: 'hermes' | 'quickjs' | 'jsc' | nul
   return labels;
 }
 
-const RillSandboxNative = NativeModules.RillSandboxNative as
+const KeelSandboxNative = NativeModules.KeelSandboxNative as
   | {
       install(): boolean;
       getCompiledSandboxEngine?(): string;
@@ -358,10 +358,10 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
 
   // Poll memory periodically
   useEffect(() => {
-    if (!RillSandboxNative) return;
+    if (!KeelSandboxNative) return;
     pollTimerRef.current = setInterval(() => {
       try {
-        const memory = RillSandboxNative.getMemoryUsage();
+        const memory = KeelSandboxNative.getMemoryUsage();
         setMetrics((prev) => ({ ...prev, memory }));
       } catch {
         // ignore
@@ -373,7 +373,7 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
   }, []);
 
   const runTests = useCallback(() => {
-    if (!RillSandboxNative || testing) return;
+    if (!KeelSandboxNative || testing) return;
 
     const safeNumber = (fn: () => number): number => {
       try {
@@ -385,23 +385,23 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
     };
 
     const canUseBytecode = Boolean(
-      engineKey === 'hermes' && RillSandboxNative.supportsBytecodeEval?.(engineKey)
+      engineKey === 'hermes' && KeelSandboxNative.supportsBytecodeEval?.(engineKey)
     );
 
     const runEval = (name: keyof typeof TEST_CODE, engineHint: string): number => {
-      if (canUseBytecode && RillSandboxNative.evalBytecodeAsset) {
+      if (canUseBytecode && KeelSandboxNative.evalBytecodeAsset) {
         const bytecodeResult = safeNumber(() =>
-          RillSandboxNative.evalBytecodeAsset!(TEST_BYTECODE_ASSET[name], engineHint)
+          KeelSandboxNative.evalBytecodeAsset!(TEST_BYTECODE_ASSET[name], engineHint)
         );
         if (bytecodeResult >= 0) return bytecodeResult;
       }
-      return safeNumber(() => RillSandboxNative.evalInSandbox(TEST_CODE[name], engineHint));
+      return safeNumber(() => KeelSandboxNative.evalInSandbox(TEST_CODE[name], engineHint));
     };
 
     const runBench = (name: keyof typeof TEST_CODE, engineHint: string): number => {
-      if (RillSandboxNative.runSandboxBenchmark) {
+      if (KeelSandboxNative.runSandboxBenchmark) {
         return safeNumber(() =>
-          RillSandboxNative.runSandboxBenchmark!(
+          KeelSandboxNative.runSandboxBenchmark!(
             TEST_CODE[name],
             canUseBytecode ? TEST_BYTECODE_ASSET[name] : '',
             engineHint,
@@ -415,14 +415,14 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
 
     setTesting(true);
     try {
-      const memory = safeNumber(() => RillSandboxNative.getMemoryUsage());
+      const memory = safeNumber(() => KeelSandboxNative.getMemoryUsage());
 
       // Native returns ms/call; UI shows μs
-      const rttMs = safeNumber(() => RillSandboxNative.measureJSIRTT(20000));
+      const rttMs = safeNumber(() => KeelSandboxNative.measureJSIRTT(20000));
       const rtt = rttMs < 0 ? -1 : rttMs * 1000;
 
       // Native returns ops/s; UI shows K/s
-      const opsPerSecond = safeNumber(() => RillSandboxNative.measureOpsPerSecond(250));
+      const opsPerSecond = safeNumber(() => KeelSandboxNative.measureOpsPerSecond(250));
       const throughput = opsPerSecond < 0 ? -1 : opsPerSecond / 1000;
 
       const fib = runBench('fib', engineKey);
@@ -448,7 +448,7 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
     }));
   }, []);
 
-  if (!RillSandboxNative) {
+  if (!KeelSandboxNative) {
     return (
       <View style={ui.dashboardContainer}>
         <Text style={ui.dashboardUnavailable}>Performance bridge unavailable</Text>
@@ -523,7 +523,7 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
 // ---------------------------------------------------------------------------
 export default function App() {
   const preferredEngine = useMemo(
-    () => normalizeEngineKey(RillSandboxNative?.getCompiledSandboxEngine?.()),
+    () => normalizeEngineKey(KeelSandboxNative?.getCompiledSandboxEngine?.()),
     []
   );
   const engines = useMemo(() => getDetectedEngines(preferredEngine), [preferredEngine]);

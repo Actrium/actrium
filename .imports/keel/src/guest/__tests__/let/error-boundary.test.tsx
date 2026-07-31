@@ -1,8 +1,8 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'bun:test';
 
-describe('RillErrorBoundary', () => {
+describe('KeelErrorBoundary', () => {
   let React: typeof import('react');
-  let RillErrorBoundary: typeof import('../../../sdk/sdk').RillErrorBoundary;
+  let KeelErrorBoundary: typeof import('../../../sdk/sdk').KeelErrorBoundary;
 
   afterAll(() => {
     // Cleanup globalThis.React
@@ -11,16 +11,16 @@ describe('RillErrorBoundary', () => {
 
   beforeAll(async () => {
     React = await import('react');
-    // Set React on globalThis for RillErrorBoundary
+    // Set React on globalThis for KeelErrorBoundary
     (globalThis as Record<string, unknown>).React = React;
     const sdk = await import('../../../sdk/sdk');
-    RillErrorBoundary = sdk.RillErrorBoundary;
+    KeelErrorBoundary = sdk.KeelErrorBoundary;
   });
 
   describe('getDerivedStateFromError', () => {
     it('should return state with hasError=true and captured error', () => {
       const error = new Error('Test error');
-      const newState = RillErrorBoundary.getDerivedStateFromError(error);
+      const newState = KeelErrorBoundary.getDerivedStateFromError(error);
 
       expect(newState).toEqual({
         hasError: true,
@@ -30,7 +30,7 @@ describe('RillErrorBoundary', () => {
 
     it('should work with TypeError', () => {
       const error = new TypeError('Type error');
-      const newState = RillErrorBoundary.getDerivedStateFromError(error);
+      const newState = KeelErrorBoundary.getDerivedStateFromError(error);
 
       expect(newState.hasError).toBe(true);
       expect(newState.error).toBe(error);
@@ -38,7 +38,7 @@ describe('RillErrorBoundary', () => {
 
     it('should work with generic Error', () => {
       const error = new Error('Generic error');
-      const newState = RillErrorBoundary.getDerivedStateFromError(error);
+      const newState = KeelErrorBoundary.getDerivedStateFromError(error);
 
       expect(newState.hasError).toBe(true);
       expect(newState.error instanceof Error).toBe(true);
@@ -48,20 +48,20 @@ describe('RillErrorBoundary', () => {
 
   describe('component instance behavior', () => {
     it('should exist as a class', () => {
-      expect(typeof RillErrorBoundary).toBe('function');
-      expect(RillErrorBoundary.name).toBe('RillErrorBoundary');
+      expect(typeof KeelErrorBoundary).toBe('function');
+      expect(KeelErrorBoundary.name).toBe('KeelErrorBoundary');
     });
 
     it('should have getDerivedStateFromError as static method', () => {
-      expect(typeof RillErrorBoundary.getDerivedStateFromError).toBe('function');
+      expect(typeof KeelErrorBoundary.getDerivedStateFromError).toBe('function');
     });
 
     it('should have componentDidCatch in prototype', () => {
-      expect(typeof RillErrorBoundary.prototype.componentDidCatch).toBe('function');
+      expect(typeof KeelErrorBoundary.prototype.componentDidCatch).toBe('function');
     });
 
     it('should have render in prototype', () => {
-      expect(typeof RillErrorBoundary.prototype.render).toBe('function');
+      expect(typeof KeelErrorBoundary.prototype.render).toBe('function');
     });
   });
 
@@ -70,23 +70,23 @@ describe('RillErrorBoundary', () => {
 
     beforeEach(() => {
       const g = globalThis as Record<string, unknown>;
-      originalSendToHost = g.__rill_emitEvent;
+      originalSendToHost = g.__keel_emitEvent;
     });
 
     afterEach(() => {
       const g = globalThis as Record<string, unknown>;
       if (originalSendToHost !== undefined) {
-        g.__rill_emitEvent = originalSendToHost;
+        g.__keel_emitEvent = originalSendToHost;
       } else {
-        delete g.__rill_emitEvent;
+        delete g.__keel_emitEvent;
       }
     });
 
-    it('should send RENDER_ERROR event when __rill_emitEvent exists', () => {
+    it('should send RENDER_ERROR event when __keel_emitEvent exists', () => {
       const sentEvents: Array<{ name: string; payload: unknown }> = [];
 
       const g = globalThis as Record<string, unknown>;
-      g.__rill_emitEvent = (name: string, payload: unknown) => {
+      g.__keel_emitEvent = (name: string, payload: unknown) => {
         sentEvents.push({ name, payload });
       };
 
@@ -113,7 +113,7 @@ describe('RillErrorBoundary', () => {
       const errorInfo = { componentStack: 'at Component\n  at Parent' };
 
       // Call componentDidCatch with mock context
-      RillErrorBoundary.prototype.componentDidCatch.call(mockInstance, error, errorInfo);
+      KeelErrorBoundary.prototype.componentDidCatch.call(mockInstance, error, errorInfo);
 
       expect(sentEvents).toHaveLength(1);
       expect(sentEvents[0].name).toBe('RENDER_ERROR');
@@ -154,15 +154,15 @@ describe('RillErrorBoundary', () => {
       const error = new Error('Callback test');
       const errorInfo = { componentStack: 'at TestComponent' };
 
-      RillErrorBoundary.prototype.componentDidCatch.call(mockInstance, error, errorInfo);
+      KeelErrorBoundary.prototype.componentDidCatch.call(mockInstance, error, errorInfo);
 
       expect(capturedError).toBe(error);
       expect(capturedInfo).toEqual({ componentStack: 'at TestComponent' });
     });
 
-    it('should not crash when __rill_emitEvent is not present', () => {
+    it('should not crash when __keel_emitEvent is not present', () => {
       const g = globalThis as Record<string, unknown>;
-      delete g.__rill_emitEvent;
+      delete g.__keel_emitEvent;
 
       const mockInstance = {
         props: { children: 'Hello', onError: undefined },
@@ -174,7 +174,7 @@ describe('RillErrorBoundary', () => {
       const errorInfo = { componentStack: 'at Component' };
 
       expect(() => {
-        RillErrorBoundary.prototype.componentDidCatch.call(mockInstance, error, errorInfo);
+        KeelErrorBoundary.prototype.componentDidCatch.call(mockInstance, error, errorInfo);
       }).not.toThrow();
     });
   });
@@ -193,7 +193,7 @@ describe('RillErrorBoundary', () => {
         },
       };
 
-      const result = RillErrorBoundary.prototype.render.call(mockInstance);
+      const result = KeelErrorBoundary.prototype.render.call(mockInstance);
       expect(result).toBe('Test Child');
     });
 
@@ -211,7 +211,7 @@ describe('RillErrorBoundary', () => {
         },
       };
 
-      const result = RillErrorBoundary.prototype.render.call(mockInstance);
+      const result = KeelErrorBoundary.prototype.render.call(mockInstance);
       expect(result).toEqual(fallbackNode);
     });
 
@@ -240,7 +240,7 @@ describe('RillErrorBoundary', () => {
         },
       };
 
-      const result = RillErrorBoundary.prototype.render.call(mockInstance);
+      const result = KeelErrorBoundary.prototype.render.call(mockInstance);
 
       // Verify fallback was called with correct arguments
       expect(calledWithError).toBe(error);
@@ -263,7 +263,7 @@ describe('RillErrorBoundary', () => {
         },
       };
 
-      const result = RillErrorBoundary.prototype.render.call(mockInstance);
+      const result = KeelErrorBoundary.prototype.render.call(mockInstance);
       expect(result).toBe(null);
     });
 
@@ -282,7 +282,7 @@ describe('RillErrorBoundary', () => {
         },
       };
 
-      const result = RillErrorBoundary.prototype.render.call(mockInstance);
+      const result = KeelErrorBoundary.prototype.render.call(mockInstance);
       // Function fallback requires both error and errorInfo, so should return null
       expect(result).toBe(null);
     });
@@ -302,7 +302,7 @@ describe('RillErrorBoundary', () => {
         },
       };
 
-      const result = RillErrorBoundary.prototype.render.call(mockInstance);
+      const result = KeelErrorBoundary.prototype.render.call(mockInstance);
       expect(result).toBe(null);
     });
 
@@ -321,7 +321,7 @@ describe('RillErrorBoundary', () => {
         },
       };
 
-      const result = RillErrorBoundary.prototype.render.call(mockInstance);
+      const result = KeelErrorBoundary.prototype.render.call(mockInstance);
       expect(result).toEqual(fallbackNode);
     });
   });

@@ -15,12 +15,12 @@ const UI_GUEST = readFileSync(
 
 // A JS guest bundle (runs in the Engine's node-vm sandbox).
 const JS_GUEST = `
-  const { render } = require('rill/reconciler');
+  const { render } = require('keel/reconciler');
   function App() {
     return React.createElement('View', { testID: 'js-only' },
       React.createElement('Text', null, 'from js'));
   }
-  render(React.createElement(App), globalThis.__rill_sendBatch);
+  render(React.createElement(App), globalThis.__keel_sendBatch);
 `;
 
 // One host process, two guest kinds (QuickJS-style JS guest via Engine + native

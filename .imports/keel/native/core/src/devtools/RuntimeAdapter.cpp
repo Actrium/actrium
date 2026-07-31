@@ -1,6 +1,6 @@
-// WIP subsystem — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in devtools/CDPServer.h.
-#if RILL_WIP_CDP_DEVTOOLS
+#if KEEL_WIP_CDP_DEVTOOLS
 /**
  * RuntimeAdapter.cpp
  *
@@ -10,7 +10,7 @@
 #include "RuntimeAdapter.h"
 #include <sstream>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 RuntimeAdapter::RuntimeAdapter(CDPServer& server)
     : server_(server) {}
@@ -25,7 +25,7 @@ void RuntimeAdapter::setGetPropertiesCallback(GetPropertiesCallback callback) {
 
 CDPResponse RuntimeAdapter::handleEnable(TenantId tenantId, int requestId) {
   // Send executionContextCreated event
-  sendExecutionContextCreated(tenantId, "Rill Guest Context");
+  sendExecutionContextCreated(tenantId, "Keel Guest Context");
   
   CDPResponse response;
   response.id = requestId;
@@ -144,7 +144,7 @@ void RuntimeAdapter::sendExecutionContextCreated(TenantId tenantId, const std::s
   std::ostringstream params;
   params << "{\"context\":{";
   params << "\"id\":" << tenantId;
-  params << ",\"origin\":\"rill://tenant/" << tenantId << "\"";
+  params << ",\"origin\":\"keel://tenant/" << tenantId << "\"";
   params << ",\"name\":\"" << cdp::escapeJSON(name) << "\"";
   params << "}}";
   
@@ -216,5 +216,5 @@ std::string RuntimeAdapter::buildExceptionDetailsJSON(const EvaluateResult& resu
   return ss.str();
 }
 
-} // namespace rill::devtools
-#endif // RILL_WIP_CDP_DEVTOOLS
+} // namespace keel::devtools
+#endif // KEEL_WIP_CDP_DEVTOOLS

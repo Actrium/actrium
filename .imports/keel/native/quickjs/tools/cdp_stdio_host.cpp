@@ -1,4 +1,4 @@
-// A long-running CDP host for the QuickJS rill debugger, speaking newline-
+// A long-running CDP host for the QuickJS keel debugger, speaking newline-
 // delimited CDP JSON over stdio. A WebSocket bridge (cdp_ws_bridge.js) puts a
 // real Chrome DevTools front-end in front of it: ws frame -> stdin line, stdout
 // line -> ws frame.
@@ -9,7 +9,7 @@
 // and re-runs that script on Runtime.runIfWaitingForDebugger so breakpoints set
 // from the UI take effect on the next run.
 //
-// Portable C/C++; build with build-cdp-host.sh (RILL_QJS_DEBUG + RILL_WIP_CDP_DEVTOOLS).
+// Portable C/C++; build with build-cdp-host.sh (KEEL_QJS_DEBUG + KEEL_WIP_CDP_DEVTOOLS).
 
 #include "QuickJSDebugCore.h"
 #include "QuickJSEngineDebugger.h"
@@ -32,9 +32,9 @@
 #include <string>
 #include <thread>
 
-using namespace rill::devtools;
-using rill::qjs_debug::QuickJSDebugCore;
-using rill::qjs_debug::QuickJSEngineDebugger;
+using namespace keel::devtools;
+using keel::qjs_debug::QuickJSDebugCore;
+using keel::qjs_debug::QuickJSEngineDebugger;
 
 // The guest program under debug. Line 3 (`var msg = ...`) is a good breakpoint.
 static const char* kGuest =
@@ -54,7 +54,7 @@ static const char* kGuest =
 // minted outside a pause would dangle. Expandable console results are a
 // follow-up; the value is still visible as text.
 static std::string consoleRemoteObjectJSON(JSContext* ctx, JSValueConst v) {
-  using rill::devtools::cdp::escapeJSON;
+  using keel::devtools::cdp::escapeJSON;
   if (JS_IsUndefined(v)) return R"({"type":"undefined"})";
   if (JS_IsNull(v)) return R"({"type":"object","subtype":"null","value":null})";
   if (JS_IsBool(v))
@@ -114,7 +114,7 @@ static std::string consoleRemoteObjectJSON(JSContext* ctx, JSValueConst v) {
 // paused thread via runOnPausedThread.
 static std::string evalConsoleExpression(JSContext* ctx, long id,
                                          const std::string& expr) {
-  using rill::devtools::cdp::escapeJSON;
+  using keel::devtools::cdp::escapeJSON;
   JSValue v = JS_Eval(ctx, expr.c_str(), expr.size(), "<console>",
                       JS_EVAL_TYPE_GLOBAL);
   std::ostringstream ss;
@@ -259,8 +259,8 @@ int main() {
       if (id >= 0) sendLine("{\"id\":" + std::to_string(id) + ",\"result\":{}}");
       sendLine(
           "{\"method\":\"Runtime.executionContextCreated\",\"params\":{"
-          "\"context\":{\"id\":1,\"origin\":\"\",\"name\":\"rill-quickjs\","
-          "\"uniqueId\":\"rill-quickjs-ctx-1\"}}}");
+          "\"context\":{\"id\":1,\"origin\":\"\",\"name\":\"keel-quickjs\","
+          "\"uniqueId\":\"keel-quickjs-ctx-1\"}}}");
     } else if (line.find("\"Runtime.evaluate\"") != std::string::npos) {
       long id = extractId(line);
       auto expr = cdp::parseJSONString(line, "expression");

@@ -121,7 +121,7 @@ export class Receiver {
   // Reason: Debug logger accepts arbitrary arguments
   private log(...args: unknown[]): void {
     if (this.opts.debug) {
-      console.log('[rill:Receiver]', ...args);
+      console.log('[keel:Receiver]', ...args);
     }
   }
 
@@ -336,7 +336,7 @@ export class Receiver {
   private handleUpdate(op: Extract<Operation, { op: 'UPDATE' }>): void {
     const node = this.nodeMap.get(op.id);
     if (!node) {
-      console.warn(`[rill] Protocol violation: Node ${op.id} not found for update`);
+      console.warn(`[keel] Protocol violation: Node ${op.id} not found for update`);
       // Throw to increment failed operation count in applyBatch
       throw new Error(`Node ${op.id} not found for update`);
     }
@@ -738,7 +738,7 @@ export class Receiver {
   private renderNode(id: number): React.ReactElement | string | null {
     const node = this.nodeMap.get(id);
     if (!node) {
-      console.warn(`[rill] Node ${id} not found`);
+      console.warn(`[keel] Node ${id} not found`);
       return null;
     }
 
@@ -749,12 +749,12 @@ export class Receiver {
       const TextComponent =
         this.registry.get('Text') ?? (React as unknown as { Text?: unknown }).Text;
       if (!TextComponent) {
-        console.error('[rill] Text component not registered; cannot render text node');
+        console.error('[keel] Text component not registered; cannot render text node');
         return null;
       }
       return React.createElement(
         TextComponent as React.ComponentType,
-        { key: `rill-text-${id}` },
+        { key: `keel-text-${id}` },
         node.props.text as string
       );
     }
@@ -762,7 +762,7 @@ export class Receiver {
     // Get component implementation
     const Component = this.registry.get(node.type);
     if (!Component) {
-      console.warn(`[rill] Component "${node.type}" not registered`);
+      console.warn(`[keel] Component "${node.type}" not registered`);
       return null;
     }
 
@@ -784,7 +784,7 @@ export class Receiver {
     const { key: _key, ref: _ref, ...filteredProps } = node.props;
     const props: Record<string, unknown> = {
       ...filteredProps,
-      key: `rill-${id}`,
+      key: `keel-${id}`,
       ref: nodeRef, // Inject ref for Remote Ref method calls
     };
 

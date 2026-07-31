@@ -1,6 +1,6 @@
-// WIP subsystem — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in devtools/CDPServer.h.
-#if RILL_WIP_CDP_DEVTOOLS
+#if KEEL_WIP_CDP_DEVTOOLS
 /**
  * CDPServer.cpp
  *
@@ -28,7 +28,7 @@
 #include <random>
 #include <iomanip>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 // ============================================
 // CDPTarget Implementation
@@ -194,7 +194,7 @@ void CDPServer::registerTenant(TenantId id, const std::string& title, const std:
   TenantInfo info;
   info.id = id;
   info.title = title;
-  info.url = url.empty() ? ("rill://tenant/" + std::to_string(id)) : url;
+  info.url = url.empty() ? ("keel://tenant/" + std::to_string(id)) : url;
   info.registeredAt = currentTimeMs();
 
   tenants_[id] = std::move(info);
@@ -740,7 +740,7 @@ HttpResponse CDPServer::handleDiscoveryRequest(const std::string& method,
     // A single root webSocketDebuggerUrl (no tenant path): stock chrome://inspect
     // opens it and drives tenants through the Target domain (attachToTarget).
     std::ostringstream ss;
-    ss << "{\"Browser\":\"Rill/1.0\",\"Protocol-Version\":\"1.3\","
+    ss << "{\"Browser\":\"Keel/1.0\",\"Protocol-Version\":\"1.3\","
        << "\"webSocketDebuggerUrl\":\"ws://" << config_.host << ":" << wsPort_ << "/\"}";
     resp.body = ss.str();
     return resp;
@@ -1245,5 +1245,5 @@ std::string injectSessionId(const std::string& rawCdp, const SessionId& sessionI
 
 } // namespace cdp
 
-} // namespace rill::devtools
-#endif // RILL_WIP_CDP_DEVTOOLS
+} // namespace keel::devtools
+#endif // KEEL_WIP_CDP_DEVTOOLS

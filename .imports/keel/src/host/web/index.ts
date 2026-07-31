@@ -1,7 +1,7 @@
 /**
- * rill/host/web — opt-in, first-class web host adapter (issue #19).
+ * keel/host/web — opt-in, first-class web host adapter (issue #19).
  *
- * Provides the generic web mechanism for embedding rill on the web, kept separate from the
+ * Provides the generic web mechanism for embedding keel on the web, kept separate from the
  * RN-first core so web deps stay opt-in:
  *
  * - **thin-DOM preset** (`WebComponents`): View→div, Text→span, Pressable→button, etc. — a
@@ -19,8 +19,8 @@
  * worker engine + async bridge (L1) is a separate, deeper change.
  *
  * ```ts
- * import { Engine } from 'rill/host';
- * import { WebComponents, WebEngineView } from 'rill/host/web';
+ * import { Engine } from 'keel/host';
+ * import { WebComponents, WebEngineView } from 'keel/host/web';
  *
  * const engine = new Engine({ sandbox: 'wasm-quickjs' });
  * engine.register(WebComponents);
@@ -33,9 +33,9 @@ export {
   KBD_EVENT,
   KBD_SUBSCRIBE,
   KBD_UNSUBSCRIBE,
+  type KeelKeyEvent,
   type KeyboardSubscribePayload,
   type KeyboardUnsubscribePayload,
-  type RillKeyEvent,
 } from '../../shared/keyboard';
 export * from './components';
 export { WebEngineView, type WebEngineViewProps } from './engine-view';

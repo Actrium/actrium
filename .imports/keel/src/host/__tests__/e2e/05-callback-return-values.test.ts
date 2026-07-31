@@ -26,7 +26,7 @@ describe('E2E Callback Returns: Primitives', () => {
   it('should return string from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -35,7 +35,7 @@ describe('E2E Callback Returns: Primitives', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -50,7 +50,7 @@ describe('E2E Callback Returns: Primitives', () => {
   it('should return number from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -59,7 +59,7 @@ describe('E2E Callback Returns: Primitives', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -74,7 +74,7 @@ describe('E2E Callback Returns: Primitives', () => {
   it('should return boolean from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -83,7 +83,7 @@ describe('E2E Callback Returns: Primitives', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -98,7 +98,7 @@ describe('E2E Callback Returns: Primitives', () => {
   it('should return null from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -107,7 +107,7 @@ describe('E2E Callback Returns: Primitives', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -122,7 +122,7 @@ describe('E2E Callback Returns: Primitives', () => {
   it('should return undefined from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -131,7 +131,7 @@ describe('E2E Callback Returns: Primitives', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -158,7 +158,7 @@ describe('E2E Callback Returns: Objects', () => {
   it('should return plain object from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -170,7 +170,7 @@ describe('E2E Callback Returns: Objects', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -188,7 +188,7 @@ describe('E2E Callback Returns: Objects', () => {
   it('should return array from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -197,7 +197,7 @@ describe('E2E Callback Returns: Objects', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -212,7 +212,7 @@ describe('E2E Callback Returns: Objects', () => {
   it('should return deeply nested object from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -231,7 +231,7 @@ describe('E2E Callback Returns: Objects', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -258,7 +258,7 @@ describe('E2E Callback Returns: Complex Types', () => {
   it('should return Date from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -267,7 +267,7 @@ describe('E2E Callback Returns: Complex Types', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -284,7 +284,7 @@ describe('E2E Callback Returns: Complex Types', () => {
   it('should return Map from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -293,7 +293,7 @@ describe('E2E Callback Returns: Complex Types', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -311,7 +311,7 @@ describe('E2E Callback Returns: Complex Types', () => {
   it('should return Set from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -320,7 +320,7 @@ describe('E2E Callback Returns: Complex Types', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -339,7 +339,7 @@ describe('E2E Callback Returns: Complex Types', () => {
   it('should return RegExp from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -348,7 +348,7 @@ describe('E2E Callback Returns: Complex Types', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -378,7 +378,7 @@ describe('E2E Callback Returns: Async', () => {
   it('should return resolved promise value from async callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -390,7 +390,7 @@ describe('E2E Callback Returns: Async', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -406,7 +406,7 @@ describe('E2E Callback Returns: Async', () => {
   it('should handle callback that computes return value', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const processData = (input) => {
@@ -424,7 +424,7 @@ describe('E2E Callback Returns: Async', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -456,7 +456,7 @@ describe('E2E Callback Returns: Form Validation Pattern', () => {
   it('should return validation result from form submit callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const validateAndSubmit = async (formData) => {
@@ -490,7 +490,7 @@ describe('E2E Callback Returns: Form Validation Pattern', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -522,7 +522,7 @@ describe('E2E Callback Returns: Form Validation Pattern', () => {
   it('should return data transformation result from callback', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const transformItems = (items) => {
@@ -545,7 +545,7 @@ describe('E2E Callback Returns: Form Validation Pattern', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);

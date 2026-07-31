@@ -93,8 +93,8 @@ if(BUILD_WASM)
     # -sMAXIMUM_MEMORY / -sSTACK_SIZE link options below, the soft limits go
     # dead again — keep them sourced from the same MAX_BYTES / STACK_BYTES.
     target_compile_definitions(quickjs_sandbox_wasm PRIVATE
-        RILL_WASM_MAX_MEMORY_BYTES=${MAX_BYTES}
-        RILL_WASM_STACK_BYTES=${STACK_BYTES}
+        KEEL_WASM_MAX_MEMORY_BYTES=${MAX_BYTES}
+        KEEL_WASM_STACK_BYTES=${STACK_BYTES}
     )
 
     # ⭐ Emscripten-specific settings

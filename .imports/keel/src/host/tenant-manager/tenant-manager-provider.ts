@@ -1,5 +1,5 @@
 /**
- * TenantManagerProvider - JSEngineProvider that delegates to native __RillTenantManager.
+ * TenantManagerProvider - JSEngineProvider that delegates to native __KeelTenantManager.
  *
  * Instead of creating a sandbox runtime/context directly in TS, this provider
  * creates a "virtual" runtime and context that route all operations through
@@ -25,7 +25,7 @@ import type {
   BusEventData,
   ChannelPolicyConfig,
   EventBusStats,
-  RillTenantManagerJSI,
+  KeelTenantManagerJSI,
   TenantConfig,
 } from './types';
 
@@ -45,10 +45,10 @@ export interface TenantManagerProviderOptions {
  */
 class TenantManagerContext implements SandboxScope {
   private tenantId: number;
-  private tenantManager: RillTenantManagerJSI;
+  private tenantManager: KeelTenantManagerJSI;
   private disposed = false;
 
-  constructor(tenantId: number, tenantManager: RillTenantManagerJSI) {
+  constructor(tenantId: number, tenantManager: KeelTenantManagerJSI) {
     this.tenantId = tenantId;
     this.tenantManager = tenantManager;
   }
@@ -206,10 +206,10 @@ class TenantManagerContext implements SandboxScope {
  */
 class TenantManagerRuntime implements JSEngineRuntime {
   private tenantId: number;
-  private tenantManager: RillTenantManagerJSI;
+  private tenantManager: KeelTenantManagerJSI;
   private disposed = false;
 
-  constructor(tenantId: number, tenantManager: RillTenantManagerJSI) {
+  constructor(tenantId: number, tenantManager: KeelTenantManagerJSI) {
     this.tenantId = tenantId;
     this.tenantManager = tenantManager;
   }
@@ -250,7 +250,7 @@ class TenantManagerRuntime implements JSEngineRuntime {
 }
 
 /**
- * JSEngineProvider that creates tenants via native __RillTenantManager.
+ * JSEngineProvider that creates tenants via native __KeelTenantManager.
  *
  * Usage:
  * ```typescript
@@ -271,10 +271,10 @@ export class TenantManagerProvider implements JSEngineProvider {
   }
 
   createRuntime = (options?: JSEngineRuntimeOptions): JSEngineRuntime => {
-    const tenantManager = globalThis.__RillTenantManager;
+    const tenantManager = globalThis.__KeelTenantManager;
     if (!tenantManager) {
       throw new Error(
-        '[TenantManagerProvider] __RillTenantManager not available. ' +
+        '[TenantManagerProvider] __KeelTenantManager not available. ' +
           'Ensure the native module is installed before creating an Engine.'
       );
     }
@@ -298,6 +298,6 @@ export class TenantManagerProvider implements JSEngineProvider {
    * Check if the native TenantManager is available in the current runtime.
    */
   static isAvailable(): boolean {
-    return typeof globalThis.__RillTenantManager !== 'undefined';
+    return typeof globalThis.__KeelTenantManager !== 'undefined';
   }
 }

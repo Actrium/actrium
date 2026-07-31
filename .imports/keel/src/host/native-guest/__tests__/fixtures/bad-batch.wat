@@ -2,9 +2,9 @@
 ;; render channel must drop it (never crash), so load() completes and nothing
 ;; is materialized.
 (module
-  (import "env" "rill_send_batch" (func $send (param i32 i32)))
+  (import "env" "keel_send_batch" (func $send (param i32 i32)))
   (memory (export "memory") 1)
   (data (i32.const 0) "notjson")
-  (func (export "rill_init")
+  (func (export "keel_init")
     (call $send (i32.const 0) (i32.const 7)))
 )

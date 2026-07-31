@@ -1,6 +1,6 @@
-# Rill 架构概述
+# Keel 架构概述
 
-Rill 是一个轻量级、无头的、沙箱化的动态 UI 渲染引擎,专为 React Native 设计。它在隔离的 JavaScript 运行时中执行不受信任的 guest 代码,并将生成的 UI 描述作为原生 React Native 组件在 host 上渲染。
+Keel 是一个轻量级、无头的、沙箱化的动态 UI 渲染引擎,专为 React Native 设计。它在隔离的 JavaScript 运行时中执行不受信任的 guest 代码,并将生成的 UI 描述作为原生 React Native 组件在 host 上渲染。
 
 ## 设计理念
 
@@ -14,7 +14,7 @@ Rill 是一个轻量级、无头的、沙箱化的动态 UI 渲染引擎,专为 
 
 5. **沙箱隔离** -- guest 代码在专用的 JavaScript 引擎实例中运行(JavaScriptCore、QuickJS、Hermes、WASM 或 Node `vm`)。host 注入一组精心控制的全局变量;除非明确 polyfill,否则不提供环境 API(网络、文件系统、计时器)。
 
-6. **每环境一个引擎** -- 每个宿主 JavaScript 环境里,一个 rill 引擎驱动一个 guest。组合*多个*应用靠隔离,而非共享环境:web 上每个应用跑在各自的 iframe(独立源、存储、CSP),原生侧每个租户跑在各自的 `TenantThread` 与独立 JS 运行时上。rill **不**追求多个独立应用引擎共存于同一个共享 JS 上下文,因此环境作用域内的模块级单例(如安装在 `globalThis` 上的 guest 回调注册表)是合理的,而非局限。在单个应用*内部*开多个 `<Canvas>` 画布是另一回事,完全支持。
+6. **每环境一个引擎** -- 每个宿主 JavaScript 环境里,一个 keel 引擎驱动一个 guest。组合*多个*应用靠隔离,而非共享环境:web 上每个应用跑在各自的 iframe(独立源、存储、CSP),原生侧每个租户跑在各自的 `TenantThread` 与独立 JS 运行时上。keel **不**追求多个独立应用引擎共存于同一个共享 JS 上下文,因此环境作用域内的模块级单例(如安装在 `globalThis` 上的 guest 回调注册表)是合理的,而非局限。在单个应用*内部*开多个 `<Canvas>` 画布是另一回事,完全支持。
 
 ## 四层架构
 
@@ -25,18 +25,18 @@ Platform Layer  (iOS / macOS / Android / Web)
   |     |
   |     +-- Per-Tenant Sandbox  (隔离的 JS 运行时、定时器轮、安全性)
   |           |
-  |           +-- Guest App  (通过 rill/guest 的 React 组件)
+  |           +-- Guest App  (通过 keel/guest 的 React 组件)
   |
   +-- Host Shell  (EngineView 渲染原生 React Native 组件)
 ```
 
-**Platform Layer** -- 原生入口点。在 Apple 平台上,这是一个 TurboModule (`RillSandboxNativeTurboModule`),它将 C++ tenant manager 安装到 React Native host 运行时中。
+**Platform Layer** -- 原生入口点。在 Apple 平台上,这是一个 TurboModule (`KeelSandboxNativeTurboModule`),它将 C++ tenant manager 安装到 React Native host 运行时中。
 
-**C++ TenantManager** -- 单例(`RillTenantManager`),协调租户创建、线程分配、资源配额、事件总线、安全上下文和 CDP 调试。通过 JSI HostObject 安装为 `globalThis.__RillTenantManager`。
+**C++ TenantManager** -- 单例(`KeelTenantManager`),协调租户创建、线程分配、资源配额、事件总线、安全上下文和 CDP 调试。通过 JSI HostObject 安装为 `globalThis.__KeelTenantManager`。
 
 **Per-Tenant Sandbox** -- 每个租户获得一个带有自己运行循环、`TimerWheel` 和 JS 运行时的 `TenantThread`。沙箱在完全隔离于其他租户和 host 的环境中执行 guest bundle。
 
-**Guest App** -- 开发者编写的 React 组件,从 `rill/guest` 导入。这些被编译为自包含的 bundle 并在沙箱内评估。
+**Guest App** -- 开发者编写的 React 组件,从 `keel/guest` 导入。这些被编译为自包含的 bundle 并在沙箱内评估。
 
 **Host Shell** -- `Engine` 类管理沙箱生命周期。它的 `Receiver` 维护虚拟节点的 `nodeMap`,并将它们渲染为由 `EngineView` 消费的活动 React 元素树。
 
@@ -96,7 +96,7 @@ src/
   devtools/            运行时 DevTools 收集器
 
 native/core/src/      C++ TenantManager 和支持模块
-    RillTenantManager.h/.mm    单例 JSI HostObject
+    KeelTenantManager.h/.mm    单例 JSI HostObject
     TenantRegistry.h/.cpp     租户状态跟踪
     TenantHandle.h/.cpp       每个租户的包装器(运行时、上下文、状态机)
     TenantThread.h/.cpp       带优先级队列的专用执行线程
@@ -146,7 +146,7 @@ Guest JSX
 Host 用户事件(例如 onPress)
   -> Receiver 在属性上找到 fnId
   -> Bridge.sendToGuest(CALL_FUNCTION)
-  -> Guest __rill.invokeCallback(fnId, encodedArgs)
+  -> Guest __keel.invokeCallback(fnId, encodedArgs)
   -> Guest 回调执行
   -> setState / 重新渲染
   -> 新的操作批次

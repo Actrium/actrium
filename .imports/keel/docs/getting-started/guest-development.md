@@ -1,20 +1,20 @@
 # Guest Development
 
-This guide covers the components, hooks, styling, communication patterns, and platform APIs available to guest code running inside Rill's sandboxed environment.
+This guide covers the components, hooks, styling, communication patterns, and platform APIs available to guest code running inside Keel's sandboxed environment.
 
 ## SDK Import
 
-All guest APIs are imported from the `rill/guest` module:
+All guest APIs are imported from the `keel/guest` module:
 
 ```tsx
-import { View, Text, useConfig, useSendToHost } from 'rill/guest';
+import { View, Text, useConfig, useSendToHost } from 'keel/guest';
 ```
 
 Guest code does not import from `react-native` directly. The SDK provides a curated set of primitives that the engine maps to native components on the host side.
 
 ## Components Overview
 
-Rill ships with the following built-in components:
+Keel ships with the following built-in components:
 
 | Component | Description |
 |---|---|
@@ -34,7 +34,7 @@ All components accept the same props as their React Native counterparts, with th
 ### Example
 
 ```tsx
-import { View, Text, Image, ScrollView } from 'rill/guest';
+import { View, Text, Image, ScrollView } from 'keel/guest';
 
 export default function ProductCard() {
   return (
@@ -73,7 +73,7 @@ const config = useConfig<Config>();
 Subscribes to events sent from the host. The callback fires whenever the host calls `engine.sendEvent()` with a matching event name:
 
 ```tsx
-import { useHostEvent } from 'rill/guest';
+import { useHostEvent } from 'keel/guest';
 
 useHostEvent('THEME_CHANGED', (payload) => {
   console.log('New theme:', payload.theme);
@@ -89,7 +89,7 @@ useHostEvent('DATA_UPDATE', (payload) => {
 Returns a function that sends events from the guest to the host. The host receives these via `engine.on('message', ...)`:
 
 ```tsx
-import { useSendToHost } from 'rill/guest';
+import { useSendToHost } from 'keel/guest';
 
 const sendToHost = useSendToHost();
 
@@ -103,8 +103,8 @@ const handleSubmit = (data) => {
 Creates a reference to a host-side component instance, allowing the guest to invoke methods on it. This is useful for imperative operations like focusing an input or scrolling to a position:
 
 ```tsx
-import { TextInput, useRemoteRef } from 'rill/guest';
-import type { TextInputRef } from 'rill/guest';
+import { TextInput, useRemoteRef } from 'keel/guest';
+import type { TextInputRef } from 'keel/guest';
 
 export default function SearchBar() {
   const inputRef = useRemoteRef<TextInputRef>();
@@ -137,7 +137,7 @@ Remote ref calls are serialized and executed asynchronously on the host. They do
 Guest components accept React Native style objects. Both inline styles and extracted style objects are supported:
 
 ```tsx
-import { View, Text } from 'rill/guest';
+import { View, Text } from 'keel/guest';
 
 const styles = {
   container: {
@@ -203,14 +203,14 @@ All event payloads must be JSON-serializable. Functions, class instances, and ci
 
 ## Error Boundary
 
-Wrap guest components with `RillErrorBoundary` to catch rendering errors and display a fallback UI instead of crashing the guest:
+Wrap guest components with `KeelErrorBoundary` to catch rendering errors and display a fallback UI instead of crashing the guest:
 
 ```tsx
-import { View, Text, RillErrorBoundary } from 'rill/guest';
+import { View, Text, KeelErrorBoundary } from 'keel/guest';
 
 export default function SafeGuest() {
   return (
-    <RillErrorBoundary
+    <KeelErrorBoundary
       fallback={
         <View style={{ padding: 16 }}>
           <Text>Something went wrong.</Text>
@@ -218,7 +218,7 @@ export default function SafeGuest() {
       }
     >
       <RiskyComponent />
-    </RillErrorBoundary>
+    </KeelErrorBoundary>
   );
 }
 ```
@@ -227,12 +227,12 @@ When an error is caught, the boundary renders the fallback and reports the error
 
 ## Platform APIs
 
-Rill exposes a subset of React Native platform APIs inside the sandbox:
+Keel exposes a subset of React Native platform APIs inside the sandbox:
 
 ### Platform
 
 ```tsx
-import { Platform } from 'rill/guest';
+import { Platform } from 'keel/guest';
 
 if (Platform.OS === 'ios') {
   // iOS-specific logic
@@ -244,7 +244,7 @@ console.log(Platform.Version); // e.g., '17.0'
 ### Dimensions
 
 ```tsx
-import { Dimensions } from 'rill/guest';
+import { Dimensions } from 'keel/guest';
 
 const { width, height } = Dimensions.get('window');
 ```
@@ -252,7 +252,7 @@ const { width, height } = Dimensions.get('window');
 ### StyleSheet
 
 ```tsx
-import { StyleSheet } from 'rill/guest';
+import { StyleSheet } from 'keel/guest';
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
 ### Linking
 
 ```tsx
-import { Linking } from 'rill/guest';
+import { Linking } from 'keel/guest';
 
 const openURL = async (url: string) => {
   const supported = await Linking.canOpenURL(url);

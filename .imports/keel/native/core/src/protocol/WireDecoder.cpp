@@ -1,7 +1,7 @@
-// WIP — gated behind RILL_WIP_BINARY_PROTOCOL (off by default in production
+// WIP — gated behind KEEL_WIP_BINARY_PROTOCOL (off by default in production
 // builds). Rationale, design, and status live in protocol/WireDecoder.h. In a
 // normal build the #if makes this an empty translation unit.
-#if RILL_WIP_BINARY_PROTOCOL
+#if KEEL_WIP_BINARY_PROTOCOL
 
 #include "WireDecoder.h"
 
@@ -10,7 +10,7 @@
 #include <cstring>
 #include <new>
 
-namespace rill::protocol::wire {
+namespace keel::protocol::wire {
 
 const char* toString(WireError e) {
   switch (e) {
@@ -574,6 +574,6 @@ std::optional<WireBatch> WireDecoder::decode(const uint8_t* data, size_t size) {
   }
 }
 
-} // namespace rill::protocol::wire
+} // namespace keel::protocol::wire
 
-#endif // RILL_WIP_BINARY_PROTOCOL
+#endif // KEEL_WIP_BINARY_PROTOCOL

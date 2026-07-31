@@ -1,12 +1,12 @@
 # Event Bus
 
-Event Bus 是一个在 C++ 中实现的跨租户发布/订阅系统。它以基于通道的模型对点对点 `sendEvent`(该方法在 `RillTenantManager` 上仍然可用)形成补充,支持系统广播、受控的租户间通信、速率限制和持久事件缓冲。
+Event Bus 是一个在 C++ 中实现的跨租户发布/订阅系统。它以基于通道的模型对点对点 `sendEvent`(该方法在 `KeelTenantManager` 上仍然可用)形成补充,支持系统广播、受控的租户间通信、速率限制和持久事件缓冲。
 
 ## 设计
 
 **文件:** `native/core/src/EventBus.h`
 
-Event Bus 由 `RillTenantManager` 拥有,并在所有租户之间共享。它提供:
+Event Bus 由 `KeelTenantManager` 拥有,并在所有租户之间共享。它提供:
 
 - **基于通道的路由** -- 事件发布到命名通道,只有该通道的订阅者接收它们
 - **策略执行** -- 每个通道可以限制谁可以发布、发布速度以及载荷大小
@@ -203,7 +203,7 @@ struct Stats {
 
 ## JSI 集成
 
-Event Bus 通过 `RillTenantManager` 上的 JSI 方法暴露给 TypeScript:
+Event Bus 通过 `KeelTenantManager` 上的 JSI 方法暴露给 TypeScript:
 
 | JSI 方法 | 描述 |
 |---|---|

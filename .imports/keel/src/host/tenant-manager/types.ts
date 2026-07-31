@@ -1,7 +1,7 @@
 /**
- * TypeScript type definitions for the native __RillTenantManager HostObject.
+ * TypeScript type definitions for the native __KeelTenantManager HostObject.
  *
- * This HostObject is installed by the C++ RillTenantManager on the Host JS runtime
+ * This HostObject is installed by the C++ KeelTenantManager on the Host JS runtime
  * via JSI. It provides multi-tenant sandbox lifecycle management.
  */
 
@@ -76,10 +76,10 @@ export interface TenantManagerHostCallbacks {
 }
 
 /**
- * The native __RillTenantManager HostObject interface.
- * Installed as `globalThis.__RillTenantManager` when the native module is loaded.
+ * The native __KeelTenantManager HostObject interface.
+ * Installed as `globalThis.__KeelTenantManager` when the native module is loaded.
  */
-export interface RillTenantManagerJSI {
+export interface KeelTenantManagerJSI {
   // --- Tenant lifecycle ---
   createTenant(config: TenantConfig): number;
   destroyTenant(tenantId: number): void;
@@ -178,9 +178,9 @@ export interface EventBusStats {
 }
 
 /**
- * Augment globalThis to include __RillTenantManager.
+ * Augment globalThis to include __KeelTenantManager.
  */
 declare global {
   // eslint-disable-next-line no-var
-  var __RillTenantManager: RillTenantManagerJSI | undefined;
+  var __KeelTenantManager: KeelTenantManagerJSI | undefined;
 }

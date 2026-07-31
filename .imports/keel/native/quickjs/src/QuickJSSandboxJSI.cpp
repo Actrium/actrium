@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
 #include "QuickJSDebugCore.h"
 #include "QuickJSEngineDebugger.h"
 #include "devtools/AdapterDebugTarget.h"
@@ -191,7 +191,7 @@ void QuickJSSandboxContext::dispose() {
   }
   wrapperCache_.clear();
 
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
   // Unregister the interpreter debug hook before the context it references goes
   // away (the QuickJSEngineDebugger that captured the paused callback has already
   // been torn down with its debug target at tenant destroy).
@@ -204,8 +204,8 @@ void QuickJSSandboxContext::dispose() {
   }
 }
 
-#ifdef RILL_QJS_DEBUG
-std::shared_ptr<rill::devtools::IEngineDebugTarget>
+#ifdef KEEL_QJS_DEBUG
+std::shared_ptr<keel::devtools::IEngineDebugTarget>
 QuickJSSandboxContext::createCdpDebugTarget(
     std::shared_ptr<facebook::react::CallInvoker> /*callInvoker*/,
     std::int32_t executionContextId) {
@@ -217,29 +217,29 @@ QuickJSSandboxContext::createCdpDebugTarget(
   // it (non-debugged QuickJS contexts stay on the pristine dispatch path).
   if (!debugCore_) {
     debugCore_ =
-        std::make_unique<rill::qjs_debug::QuickJSDebugCore>(qjsRuntime_, qjsContext_);
+        std::make_unique<keel::qjs_debug::QuickJSDebugCore>(qjsRuntime_, qjsContext_);
   }
 
-  const auto tenantId = static_cast<rill::devtools::TenantId>(executionContextId);
-  auto engineDbg = std::make_shared<rill::qjs_debug::QuickJSEngineDebugger>(
+  const auto tenantId = static_cast<keel::devtools::TenantId>(executionContextId);
+  auto engineDbg = std::make_shared<keel::qjs_debug::QuickJSEngineDebugger>(
       debugCore_.get(), tenantId);
-  auto adapter = std::make_shared<rill::devtools::DebuggerAdapter>();
+  auto adapter = std::make_shared<keel::devtools::DebuggerAdapter>();
   adapter->setEngineDebugger(engineDbg);
-  auto target = std::make_shared<rill::devtools::AdapterDebugTarget>(adapter, tenantId);
+  auto target = std::make_shared<keel::devtools::AdapterDebugTarget>(adapter, tenantId);
 
   // Engine pause -> Debugger.paused through the adapter's per-connection sinks.
   // Capture the adapter raw (no ownership cycle): the adapter owns engineDbg,
   // which owns this notifier, so the adapter outlives every notifier call.
-  rill::devtools::DebuggerAdapter* adapterRaw = adapter.get();
+  keel::devtools::DebuggerAdapter* adapterRaw = adapter.get();
   engineDbg->setPausedNotifier(
-      [adapterRaw, tenantId](rill::devtools::PauseReason r,
-                             const std::vector<rill::devtools::CallFrame>& frames,
+      [adapterRaw, tenantId](keel::devtools::PauseReason r,
+                             const std::vector<keel::devtools::CallFrame>& frames,
                              const std::vector<std::string>& hits) {
         adapterRaw->onPaused(tenantId, r, frames, hits);
       });
   // Script first seen -> Debugger.scriptParsed (drives setBreakpointByUrl).
   engineDbg->setScriptParsedNotifier(
-      [adapterRaw, tenantId](const rill::devtools::ScriptInfo& info) {
+      [adapterRaw, tenantId](const keel::devtools::ScriptInfo& info) {
         adapterRaw->onScriptParsed(tenantId, info);
       });
   return target;
@@ -559,8 +559,8 @@ JSValue QuickJSSandboxContext::wrapFunctionForSandbox(jsi::Runtime &rt,
   bool isCached = false;
   
   try {
-    if (funcObj.hasProperty(rt, "__rill_proxy_id__")) {
-      jsi::Value idVal = funcObj.getProperty(rt, "__rill_proxy_id__");
+    if (funcObj.hasProperty(rt, "__keel_proxy_id__")) {
+      jsi::Value idVal = funcObj.getProperty(rt, "__keel_proxy_id__");
       if (idVal.isString()) {
         existingId = idVal.asString(rt).utf8(rt);
         std::string callbackId = "cb_" + existingId;
@@ -593,7 +593,7 @@ JSValue QuickJSSandboxContext::wrapFunctionForSandbox(jsi::Runtime &rt,
     
     // Tag the original function with the ID for future identity checks
     try {
-      funcObj.setProperty(rt, "__rill_proxy_id__", jsi::String::createFromUtf8(rt, idStr));
+      funcObj.setProperty(rt, "__keel_proxy_id__", jsi::String::createFromUtf8(rt, idStr));
     } catch (...) {
       // Failed to tag, continue anyway
     }
@@ -1015,7 +1015,7 @@ QuickJSSandboxRuntime::QuickJSSandboxRuntime(jsi::Runtime &hostRuntime,
   JS_SetMaxStackSize(qjsRuntime_, 1024 * 1024 * 1024); // 1GB
 #endif
   JS_SetCanBlock(qjsRuntime_, true);
-  JS_SetRuntimeInfo(qjsRuntime_, "RillQuickJSSandbox");
+  JS_SetRuntimeInfo(qjsRuntime_, "KeelQuickJSSandbox");
 
   // Heap limit: the tenant quota when provided, the 256MB default otherwise.
   // Guard the double->size_t cast (Infinity / oversized values are UB to

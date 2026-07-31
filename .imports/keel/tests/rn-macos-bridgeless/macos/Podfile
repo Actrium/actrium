@@ -8,10 +8,10 @@ require "#{ws_dir}/node_modules/react-native-macos/scripts/react_native_pods.rb"
 
 prepare_react_native_project!
 
-# rill sandbox engine: JSC (default)
-ENV['RILL_SANDBOX_ENGINE'] ||= 'jsc'
+# keel sandbox engine: JSC (default)
+ENV['KEEL_SANDBOX_ENGINE'] ||= 'jsc'
 
-target 'RillMacOSTest-macOS' do
+target 'KeelMacOSTest-macOS' do
   platform :macos, '14.0'
   use_native_modules!
 
@@ -26,8 +26,8 @@ target 'RillMacOSTest-macOS' do
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
 
-  # rill native sandbox (JSI)
-  pod 'RillSandboxNative', :path => '../node_modules/rill'
+  # keel native sandbox (JSI)
+  pod 'KeelSandboxNative', :path => '../node_modules/keel'
 
   post_install do |installer|
     react_native_post_install(installer)

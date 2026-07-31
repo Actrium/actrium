@@ -4,7 +4,7 @@ project(appmodules)
 # Include React Native's standard application cmake setup.
 # This handles autolinking, TurboModule registration (PlatformConstants, etc.),
 # and links against jsi, reactnative, fbjni.
-# It also auto-globs *.cpp in this directory, so RillPerformanceBridge.cpp
+# It also auto-globs *.cpp in this directory, so KeelPerformanceBridge.cpp
 # is compiled into the library automatically.
 include(${REACT_ANDROID_DIR}/cmake-utils/ReactNative-application.cmake)
 

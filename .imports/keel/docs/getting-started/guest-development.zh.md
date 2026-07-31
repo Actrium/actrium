@@ -1,20 +1,20 @@
 # Guest 开发
 
-本指南涵盖在 Rill 沙箱环境中运行的 guest 代码可用的组件、hooks、样式、通信模式和平台 API。
+本指南涵盖在 Keel 沙箱环境中运行的 guest 代码可用的组件、hooks、样式、通信模式和平台 API。
 
 ## SDK 导入
 
-所有 guest API 都从 `rill/guest` 模块导入：
+所有 guest API 都从 `keel/guest` 模块导入：
 
 ```tsx
-import { View, Text, useConfig, useSendToHost } from 'rill/guest';
+import { View, Text, useConfig, useSendToHost } from 'keel/guest';
 ```
 
 guest 代码不直接从 `react-native` 导入。SDK 提供了一组精选的原语，引擎将其映射到 host 端的原生组件。
 
 ## 组件概览
 
-Rill 附带以下内置组件：
+Keel 附带以下内置组件：
 
 | 组件 | 描述 |
 |---|---|
@@ -34,7 +34,7 @@ Rill 附带以下内置组件：
 ### 示例
 
 ```tsx
-import { View, Text, Image, ScrollView } from 'rill/guest';
+import { View, Text, Image, ScrollView } from 'keel/guest';
 
 export default function ProductCard() {
   return (
@@ -73,7 +73,7 @@ const config = useConfig<Config>();
 订阅从 host 发送的事件。每当 host 使用匹配的事件名称调用 `engine.sendEvent()` 时，回调就会触发：
 
 ```tsx
-import { useHostEvent } from 'rill/guest';
+import { useHostEvent } from 'keel/guest';
 
 useHostEvent('THEME_CHANGED', (payload) => {
   console.log('New theme:', payload.theme);
@@ -89,7 +89,7 @@ useHostEvent('DATA_UPDATE', (payload) => {
 返回一个从 guest 向 host 发送事件的函数。host 通过 `engine.on('message', ...)` 接收这些事件：
 
 ```tsx
-import { useSendToHost } from 'rill/guest';
+import { useSendToHost } from 'keel/guest';
 
 const sendToHost = useSendToHost();
 
@@ -103,8 +103,8 @@ const handleSubmit = (data) => {
 创建对 host 端组件实例的引用，允许 guest 在其上调用方法。这对于聚焦输入或滚动到某个位置等命令式操作很有用：
 
 ```tsx
-import { TextInput, useRemoteRef } from 'rill/guest';
-import type { TextInputRef } from 'rill/guest';
+import { TextInput, useRemoteRef } from 'keel/guest';
+import type { TextInputRef } from 'keel/guest';
 
 export default function SearchBar() {
   const inputRef = useRemoteRef<TextInputRef>();
@@ -137,7 +137,7 @@ export default function SearchBar() {
 guest 组件接受 React Native 样式对象。支持内联样式和提取的样式对象：
 
 ```tsx
-import { View, Text } from 'rill/guest';
+import { View, Text } from 'keel/guest';
 
 const styles = {
   container: {
@@ -203,14 +203,14 @@ useHostEvent('FORCE_LOGOUT', () => {
 
 ## Error Boundary
 
-使用 `RillErrorBoundary` 包装 guest 组件以捕获渲染错误并显示回退 UI，而不是使 guest 崩溃：
+使用 `KeelErrorBoundary` 包装 guest 组件以捕获渲染错误并显示回退 UI，而不是使 guest 崩溃：
 
 ```tsx
-import { View, Text, RillErrorBoundary } from 'rill/guest';
+import { View, Text, KeelErrorBoundary } from 'keel/guest';
 
 export default function SafeGuest() {
   return (
-    <RillErrorBoundary
+    <KeelErrorBoundary
       fallback={
         <View style={{ padding: 16 }}>
           <Text>Something went wrong.</Text>
@@ -218,7 +218,7 @@ export default function SafeGuest() {
       }
     >
       <RiskyComponent />
-    </RillErrorBoundary>
+    </KeelErrorBoundary>
   );
 }
 ```
@@ -227,12 +227,12 @@ export default function SafeGuest() {
 
 ## 平台 API
 
-Rill 在沙箱内暴露了 React Native 平台 API 的子集：
+Keel 在沙箱内暴露了 React Native 平台 API 的子集：
 
 ### Platform
 
 ```tsx
-import { Platform } from 'rill/guest';
+import { Platform } from 'keel/guest';
 
 if (Platform.OS === 'ios') {
   // iOS-specific logic
@@ -244,7 +244,7 @@ console.log(Platform.Version); // e.g., '17.0'
 ### Dimensions
 
 ```tsx
-import { Dimensions } from 'rill/guest';
+import { Dimensions } from 'keel/guest';
 
 const { width, height } = Dimensions.get('window');
 ```
@@ -252,7 +252,7 @@ const { width, height } = Dimensions.get('window');
 ### StyleSheet
 
 ```tsx
-import { StyleSheet } from 'rill/guest';
+import { StyleSheet } from 'keel/guest';
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16 },
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
 ### Linking
 
 ```tsx
-import { Linking } from 'rill/guest';
+import { Linking } from 'keel/guest';
 
 const openURL = async (url: string) => {
   const supported = await Linking.canOpenURL(url);

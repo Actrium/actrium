@@ -1,4 +1,4 @@
-//! Native rill guest that stress-tests the guest heap allocator (talc).
+//! Native keel guest that stress-tests the guest heap allocator (talc).
 //!
 //! Historically this fixture over-allocated past the SDK's fixed 1 MiB bump
 //! heap so the allocation failed and the guest trapped — a resilience probe for
@@ -23,11 +23,11 @@ extern crate alloc;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
-rill_native_guest::guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 async fn guest_main() {
     // No lifecycle behaviour; this fixture exists for the `heap_churn` hook the
-    // host test calls directly. rill_init still runs so the guest loads cleanly.
+    // host test calls directly. keel_init still runs so the guest loads cleanly.
 }
 
 /// Test hook: run `frames` alloc/free frames, each allocating `bytes_per_frame`

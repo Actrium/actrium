@@ -1,6 +1,6 @@
-// WIP subsystem — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in devtools/CDPServer.h.
-#if RILL_WIP_CDP_DEVTOOLS
+#if KEEL_WIP_CDP_DEVTOOLS
 /**
  * ConsoleAdapter.cpp
  *
@@ -12,7 +12,7 @@
 #include <chrono>
 #include <regex>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 ConsoleAdapter::ConsoleAdapter(CDPServer& server)
     : server_(server) {}
@@ -279,5 +279,5 @@ std::string ConsoleAdapter::parseStackTrace(const std::string& stack) {
   return ss.str();
 }
 
-} // namespace rill::devtools
-#endif // RILL_WIP_CDP_DEVTOOLS
+} // namespace keel::devtools
+#endif // KEEL_WIP_CDP_DEVTOOLS

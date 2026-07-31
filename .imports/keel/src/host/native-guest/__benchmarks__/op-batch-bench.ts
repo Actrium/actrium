@@ -23,7 +23,7 @@
  *
  * ENCODER NOTE (faithfulness): the binary bytes are produced by the ONLY
  * conformant encoder in the tree — the schema-locked Rust encoder
- * (`crates/rill-native-guest/src/wire_encode.rs`), reached through the dev-harness CLI
+ * (`crates/keel-native-guest/src/wire_encode.rs`), reached through the dev-harness CLI
  * `examples/op_batch_oracle.rs` (the retired TS `BinaryEncoder` is gone; see
  * issue #47). Before any timing, this harness (a) pushes the checked-in golden
  * vectors through the CLI and asserts BYTE-FOR-BYTE equality with their oracle
@@ -215,7 +215,7 @@ function encodeViaOracle(batches: SerializedOperationBatch[]): ArrayBuffer[] {
       'run',
       '--quiet',
       '-p',
-      'rill-native-guest',
+      'keel-native-guest',
       '--features',
       'binary-protocol',
       '--example',
@@ -485,9 +485,9 @@ function run(): void {
 }
 
 // Gate: only run when invoked directly (never on import / test discovery).
-// `import.meta.main` fires under `bun <file>` (JSC); RILL_BENCH_RUN lets a
+// `import.meta.main` fires under `bun <file>` (JSC); KEEL_BENCH_RUN lets a
 // node/V8 build (e.g. `bun build --target=node` then `node`) run the same code,
 // so the web host's real engine (V8) can be measured too.
-if (import.meta.main || process.env.RILL_BENCH_RUN) {
+if (import.meta.main || process.env.KEEL_BENCH_RUN) {
   run();
 }

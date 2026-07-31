@@ -5,8 +5,8 @@ const { resolve } = require('metro-resolver');
 
 const rootDir = __dirname;
 
-// Resolve rill from symlink in node_modules
-const rillPath = fs.realpathSync(path.resolve(rootDir, 'node_modules/rill'));
+// Resolve keel from symlink in node_modules
+const keelPath = fs.realpathSync(path.resolve(rootDir, 'node_modules/keel'));
 
 // react-native-windows path (full RN fork with .windows.js overlays)
 const rnwPath = fs.realpathSync(
@@ -19,8 +19,8 @@ const defaultConfig = getDefaultConfig(rootDir);
 const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 defaultConfig.resolver.blockList = [
   /.*node_modules\/react\/cjs\/react\.development\.js.*inline-requires-plugin.*/,
-  new RegExp(`${escapeRegExp(rillPath)}/node_modules/react/.*`),
-  new RegExp(`${escapeRegExp(rillPath)}/node_modules/react-reconciler/.*`),
+  new RegExp(`${escapeRegExp(keelPath)}/node_modules/react/.*`),
+  new RegExp(`${escapeRegExp(keelPath)}/node_modules/react-reconciler/.*`),
   // RNW: prevent metro crash from windows/ build artifacts
   new RegExp(`${path.resolve(__dirname, 'windows').replace(/[/\\]/g, '/')}.*`),
   new RegExp(`${rnwPath}/build/.*`),
@@ -34,45 +34,45 @@ const customConfig = {
     watchman: { deferStates: [] },
     healthCheck: { enabled: false },
   },
-  watchFolders: [rillPath],
+  watchFolders: [keelPath],
   resolver: {
     platforms: ['windows', 'android', 'ios'],
     unstable_enableSymlinks: true,
     nodeModulesPaths: [path.resolve(rootDir, 'node_modules')],
     resolveRequest: (context, moduleName, platform) => {
-      // rill monorepo resolution
-      if (moduleName === 'rill' || moduleName === 'rill/host') {
+      // keel monorepo resolution
+      if (moduleName === 'keel' || moduleName === 'keel/host') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(rillPath, 'src', 'host', 'index.ts'),
+          filePath: path.resolve(keelPath, 'src', 'host', 'index.ts'),
         };
       }
       // Test stubs for isolating crash
-      if (moduleName === 'rill-test-a') {
-        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'rill-test-a.ts') };
+      if (moduleName === 'keel-test-a') {
+        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'keel-test-a.ts') };
       }
-      if (moduleName === 'rill-test-b') {
-        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'rill-test-b.ts') };
+      if (moduleName === 'keel-test-b') {
+        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'keel-test-b.ts') };
       }
-      if (moduleName === 'rill-test-c') {
-        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'rill-test-c.ts') };
+      if (moduleName === 'keel-test-c') {
+        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'keel-test-c.ts') };
       }
-      if (moduleName === 'rill-test-d') {
-        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'rill-test-d.ts') };
+      if (moduleName === 'keel-test-d') {
+        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'keel-test-d.ts') };
       }
-      if (moduleName === 'rill-test-eval-guest') {
+      if (moduleName === 'keel-test-eval-guest') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(rootDir, 'stubs', 'rill-test-eval-guest.ts'),
+          filePath: path.resolve(rootDir, 'stubs', 'keel-test-eval-guest.ts'),
         };
       }
-      if (moduleName === 'rill-test-all') {
-        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'rill-test-all.ts') };
+      if (moduleName === 'keel-test-all') {
+        return { type: 'sourceFile', filePath: path.resolve(rootDir, 'stubs', 'keel-test-all.ts') };
       }
-      if (moduleName === 'rill/host/preset') {
+      if (moduleName === 'keel/host/preset') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(rillPath, 'src', 'host', 'preset', 'index.ts'),
+          filePath: path.resolve(keelPath, 'src', 'host', 'preset', 'index.ts'),
         };
       }
 

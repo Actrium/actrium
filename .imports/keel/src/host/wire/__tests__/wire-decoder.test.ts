@@ -372,8 +372,8 @@ class ByteWriter {
 
 /** 16-byte header + intern table ["View","k"], opCount=1. */
 function writeCreateWithOneProp(w: ByteWriter): void {
-  // header: magic 'RILL', version 1, batchId 0, opCount 1, flags 0, reserved[3]
-  w.u32(0x4c4c4952).u16(1).u32(0).u16(1).u8(0).raw([0, 0, 0]);
+  // header: magic 'KEEL', version 1, batchId 0, opCount 1, flags 0, reserved[3]
+  w.u32(0x4c45454b).u16(1).u32(0).u16(1).u8(0).raw([0, 0, 0]);
   // intern table: index0='View' (CREATE type), index1='k' (prop key)
   w.u16(2);
   w.u16(4).ascii('View');
@@ -605,7 +605,7 @@ function reorderPackedBatch(ops: number, per: number): ArrayBuffer {
   const prelude = 16 + 2; // 16-byte header + intern count(=0)
   const out = new Uint8Array(prelude + ops * opBytes);
   const dv = new DataView(out.buffer);
-  dv.setUint32(0, 0x4c4c4952, true); // magic 'RILL'
+  dv.setUint32(0, 0x4c45454b, true); // magic 'KEEL'
   dv.setUint16(4, 1, true); // version
   dv.setUint32(6, 0, true); // batchId
   dv.setUint16(10, ops, true); // opCount
@@ -633,7 +633,7 @@ function removedPropsPackedBatch(ops: number, per: number): ArrayBuffer {
   const prelude = 16 + 2 + (2 + 1); // header + intern count(1) + ['k']
   const out = new Uint8Array(prelude + ops * opBytes);
   const dv = new DataView(out.buffer);
-  dv.setUint32(0, 0x4c4c4952, true);
+  dv.setUint32(0, 0x4c45454b, true);
   dv.setUint16(4, 1, true);
   dv.setUint32(6, 0, true);
   dv.setUint16(10, ops, true);
@@ -688,7 +688,7 @@ describe('wire-decoder maxTotalElements (non-value collections charged too)', ()
   it('decodes an under-cap batch containing REORDER childIds and UPDATE removedProps', () => {
     const w = new ByteWriter();
     // header opCount=2, intern ['a','b']
-    w.u32(0x4c4c4952).u16(1).u32(0).u16(2).u8(0).raw([0, 0, 0]);
+    w.u32(0x4c45454b).u16(1).u32(0).u16(2).u8(0).raw([0, 0, 0]);
     w.u16(2).u16(1).ascii('a').u16(1).ascii('b');
     // REORDER id=1 parentId=1 childIds=[10,20,30]
     w.u8(0x07).u32(1).u32(1).u16(3).u32(10).u32(20).u32(30);
@@ -706,7 +706,7 @@ describe('wire-decoder intern-table UTF-8 guard', () => {
   it('rejects invalid UTF-8 (FF FE) in an intern string as WireDecodeError', () => {
     const w = new ByteWriter();
     // header with opCount 0, then one intern string of 2 invalid bytes.
-    w.u32(0x4c4c4952).u16(1).u32(0).u16(0).u8(0).raw([0, 0, 0]);
+    w.u32(0x4c45454b).u16(1).u32(0).u16(0).u8(0).raw([0, 0, 0]);
     w.u16(1); // intern count = 1
     w.u16(2).raw([0xff, 0xfe]); // byteLen 2, invalid UTF-8
     const buf = w.build();

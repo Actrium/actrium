@@ -84,7 +84,7 @@ describe('cdp-relay reverse tunnel', () => {
     const agent = connect(`ws://127.0.0.1:${relay.port}/agent`);
     await onceOpen(agent);
     agent.send(
-      JSON.stringify({ type: 'register', id: 'guest-1', title: 'My Guest', url: 'rill://guest/1' }),
+      JSON.stringify({ type: 'register', id: 'guest-1', title: 'My Guest', url: 'keel://guest/1' }),
     );
 
     // Poll discovery until the async registration frame is processed. No sleeps.
@@ -97,7 +97,7 @@ describe('cdp-relay reverse tunnel', () => {
     expect(target).toBeTruthy();
     expect(target.type).toBe('node');
     expect(target.title).toBe('My Guest');
-    expect(target.url).toBe('rill://guest/1');
+    expect(target.url).toBe('keel://guest/1');
     expect(target.webSocketDebuggerUrl).toBe(
       `ws://127.0.0.1:${relay.port}/devtools/guest-1`,
     );
@@ -116,7 +116,7 @@ describe('cdp-relay reverse tunnel', () => {
 
     const agent = connect(`ws://127.0.0.1:${relay.port}/agent`);
     await onceOpen(agent);
-    agent.send(JSON.stringify({ type: 'register', id: 'guest-2', title: 'T', url: 'rill://g/2' }));
+    agent.send(JSON.stringify({ type: 'register', id: 'guest-2', title: 'T', url: 'keel://g/2' }));
 
     // Wait until discovery sees it, then connect the devtools client.
     let seen = false;
@@ -148,7 +148,7 @@ describe('cdp-relay reverse tunnel', () => {
 
     const agent = connect(`ws://127.0.0.1:${relay.port}/agent`);
     await onceOpen(agent);
-    agent.send(JSON.stringify({ type: 'register', id: 'guest-3', title: 'T', url: 'rill://g/3' }));
+    agent.send(JSON.stringify({ type: 'register', id: 'guest-3', title: 'T', url: 'keel://g/3' }));
 
     // Wait until the target is discoverable before pairing a client.
     let registered = false;

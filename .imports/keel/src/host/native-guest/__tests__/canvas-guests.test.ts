@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHostModuleDispatch, defineRillContract, implementHostModules, rpc } from '../../../contract';
+import { createHostModuleDispatch, defineKeelContract, implementHostModules, rpc } from '../../../contract';
 import { ComponentRegistry } from '../../registry';
 import { Receiver } from '../../receiver';
 import { type CanvasOp, decodeCanvasFrame } from '../../wire/canvas-wire-decoder';
 import { NativeGuestHost } from '../native-guest-host';
 
-// Real Rust guests built via the rill-native-guest canvas/asset/gpu SDK (crates/build.sh).
-// These drive the SDK modules end-to-end over the native-guest ABI: rill knows
+// Real Rust guests built via the keel-native-guest canvas/asset/gpu SDK (crates/build.sh).
+// These drive the SDK modules end-to-end over the native-guest ABI: keel knows
 // nothing about host:canvas / host:gpu, so a test-local dispatch RECORDS what the
 // guest emitted — exactly as storeDispatch does for host:store in native-guest-host.test.ts.
 const fx = (n: string) => readFileSync(join(import.meta.dir, 'fixtures', n));
@@ -33,7 +33,7 @@ type Call = { method: string; input: Record<string, unknown> };
 // SDK's fail-closed path) while still recording the attempt.
 function canvasDispatch(options: { failPresent?: boolean } = {}) {
   const calls: Call[] = [];
-  const contract = defineRillContract({
+  const contract = defineKeelContract({
     version: '1',
     hostModules: {
       'host:canvas': {
@@ -76,7 +76,7 @@ function canvasDispatch(options: { failPresent?: boolean } = {}) {
 function gpuDispatch() {
   const calls: Call[] = [];
   let nextHandle = 1;
-  const contract = defineRillContract({
+  const contract = defineKeelContract({
     version: '1',
     hostModules: {
       'host:gpu': {
@@ -191,7 +191,7 @@ describe('canvas guests — ① host:canvas.draw display list', () => {
     }
     // The text label round-trips its string content.
     const text = ops(list).find((o) => asStr(o.op) === 'fillText');
-    expect(asStr(text?.text)).toBe('rill');
+    expect(asStr(text?.text)).toBe('keel');
 
     // arc carries its numeric geometry (radius > 0) — numbers survive too.
     const arc = ops(list).find((o) => asStr(o.op) === 'arc');
@@ -344,7 +344,7 @@ describe('canvas guests — guest->host JSON escaping', () => {
 // Capability handshake — WIP binary canvas wire (canvas-wire.DESIGN.md §1)
 //
 // A binary-CAPABLE host: it advertises `host:canvas.getInfo -> {binaryDraw:true,
-// wireVersion:1}` AND its `draw` accepts BOTH encodings — a binary RCNV frame
+// wireVersion:1}` AND its `draw` accepts BOTH encodings — a binary KCNV frame
 // (delivered as raw bytes, decoded with the TS decoder) or the legacy JSON body.
 // This is exactly the host wiring the design mandates: peek the payload, decode
 // binary via the zero-DOM decoder OR JSON.parse, replay the SAME op array.
@@ -384,7 +384,7 @@ function binaryCanvasDispatch(
   });
   const canvasSeam: Record<string, unknown> = { draw: drawRpc };
   if (advertise) canvasSeam.getInfo = getInfoRpc;
-  const contract = defineRillContract({
+  const contract = defineKeelContract({
     version: '1',
     // biome-ignore lint/suspicious/noExplicitAny: the seam shape is built conditionally above.
     hostModules: { 'host:canvas': canvasSeam as any },
@@ -393,7 +393,7 @@ function binaryCanvasDispatch(
   const hostModules: Record<string, unknown> = {
     draw: async (input: unknown) => {
       if (input instanceof Uint8Array) {
-        // Binary path: decode the RCNV frame with the TS decoder and replay ops.
+        // Binary path: decode the KCNV frame with the TS decoder and replay ops.
         const { header, ops } = decodeCanvasFrame(input);
         draws.push({ encoding: 'binary', canvasId: header.canvasId, ops });
       } else {
@@ -500,7 +500,7 @@ describe('canvas guests — capability handshake (WIP binary wire)', () => {
   it('the promoted DEFAULT guest probes and emits BINARY when the host advertises (issue #45)', async () => {
     // canvas-guest.wasm is the shipped demo guest. Post-promotion it carries the
     // binary encoder BY DEFAULT, so its draw path probes getInfo and — against an
-    // advertising host — emits an RCNV frame, exactly like canvas-binary-guest.
+    // advertising host — emits a KCNV frame, exactly like canvas-binary-guest.
     // Binary is the promoted default, no longer an opt-in rebuild.
     const { table, draws, probes } = binaryCanvasDispatch({ advertise: true });
     const host = new NativeGuestHost({ dispatch: table });

@@ -3,10 +3,10 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "simple-rill-guest",
+      "name": "simple-keel-guest",
       "dependencies": {
         "react": "^19.0.0",
-        "rill": "link:../../",
+        "keel": "link:../../",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
@@ -21,7 +21,7 @@
 
     "react": ["react@19.2.4", "https://registry.npmmirror.com/react/-/react-19.2.4.tgz", {}, "sha512-9nfp2hYpCwOjAN+8TZFGhtWEwgvWHXqESH8qT89AT/lWklpLON22Lc8pEtnpsZz7VmawabSU0gCjnj8aC0euHQ=="],
 
-    "rill": ["rill@link:../../", { "bin": { "rill": "./src/cli/index.ts" } }],
+    "keel": ["keel@link:../../", { "bin": { "keel": "./src/cli/index.ts" } }],
 
     "typescript": ["typescript@5.9.3", "https://registry.npmmirror.com/typescript/-/typescript-5.9.3.tgz", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
   }

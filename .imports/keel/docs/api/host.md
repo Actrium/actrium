@@ -1,10 +1,10 @@
 # Host API Reference
 
-The Host API is the primary interface for embedding Rill in a React Native application. It provides sandbox lifecycle management, component registration, bidirectional communication, and React element tree rendering.
+The Host API is the primary interface for embedding Keel in a React Native application. It provides sandbox lifecycle management, component registration, bidirectional communication, and React element tree rendering.
 
-Import path: `rill/host`
+Import path: `keel/host`
 
-Preset UI helpers (declarative rendering + default components) live in: `rill/host/preset`.
+Preset UI helpers (declarative rendering + default components) live in: `keel/host/preset`.
 
 ---
 
@@ -27,7 +27,7 @@ new Engine(options?: EngineOptions)
 | `timeout` | `number` | `5000` | Execution timeout in milliseconds. |
 | `debug` | `boolean` | `false` | Enable debug logging. |
 | `logger` | `{ log, warn, error }` | `console` | Custom logger implementation. |
-| `requireWhitelist` | `readonly string[]` | `['react', 'react-native', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'rill/guest', 'rill/reconciler']` | Allowed module names for sandbox `require()`. Supports simple trailing `*` prefix patterns (e.g. `rill/*`). |
+| `requireWhitelist` | `readonly string[]` | `['react', 'react-native', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'keel/guest', 'keel/reconciler']` | Allowed module names for sandbox `require()`. Supports simple trailing `*` prefix patterns (e.g. `keel/*`). |
 | `onMetric` | `(name: string, value: number, extra?: Record<string, unknown>) => void` | `undefined` | Performance metrics reporter callback. |
 | `receiverMaxBatchSize` | `number` | `5000` | Maximum operations per batch applied by Receiver. Excess operations are skipped to protect host performance. |
 | `diagnostics` | `{ activityWindowMs?, activityHistoryMs?, activityBucketMs? }` | See below | Diagnostics parameters for host-side monitoring. |
@@ -171,7 +171,7 @@ Other events exist for advanced integrations (for example, low-level operation b
 
 ## EngineView
 
-**Import path:** `rill/host/preset`
+**Import path:** `keel/host/preset`
 
 A React Native component that provides a declarative interface for Engine lifecycle management and rendering.
 
@@ -193,7 +193,7 @@ A React Native component that provides a declarative interface for Engine lifecy
 
 ## useEngineView (Optional)
 
-Import path: `rill/host`
+Import path: `keel/host`
 
 Hook used by custom `EngineView` implementations.
 

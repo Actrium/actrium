@@ -20,7 +20,7 @@ import { type EngineViewEngine, useEngineView } from '../use-engine-view';
 export interface WebEngineViewProps {
   /**
    * Engine instance. Either the in-thread `Engine` (sandbox `'wasm-quickjs'`) or an
-   * off-main-thread `WorkerEngine` from `rill/host/web` — both render identically here.
+   * off-main-thread `WorkerEngine` from `keel/host/web` — both render identically here.
    */
   engine: EngineViewEngine;
   /** Bundle source (URL or code string). */
@@ -75,7 +75,7 @@ export function WebEngineView({
 
   if (loadingState === 'loading' || loadingState === 'idle') {
     return (
-      <div className={className} style={containerStyle} data-rill-state="loading">
+      <div className={className} style={containerStyle} data-keel-state="loading">
         {fallback ?? <span style={{ color: '#666', fontSize: 14 }}>Loading…</span>}
       </div>
     );
@@ -83,7 +83,7 @@ export function WebEngineView({
 
   if (loadingState === 'error' && error) {
     return (
-      <div className={className} style={containerStyle} data-rill-state="error">
+      <div className={className} style={containerStyle} data-keel-state="error">
         {renderError?.(error) ?? (
           <div style={{ color: '#c00', fontSize: 14 }}>
             <strong>Bundle error</strong>
@@ -95,7 +95,7 @@ export function WebEngineView({
   }
 
   return (
-    <div className={className} style={containerStyle} data-rill-state="loaded">
+    <div className={className} style={containerStyle} data-keel-state="loaded">
       {content}
     </div>
   );

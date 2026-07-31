@@ -1,5 +1,5 @@
 /**
- * rill/wire — zero-DOM binary wire decoders (public export surface, R1.3).
+ * keel/wire — zero-DOM binary wire decoders (public export surface, R1.3).
  *
  * This is the importable home for the guest→host binary wire decoders. Both
  * decoders here are STRICTLY ZERO-DOM: they reference no `document`,
@@ -11,11 +11,11 @@
  *
  * Two sister wires, deliberately distinct (different magic, so a buffer meant
  * for one decoder fails the other's u32 magic compare immediately):
- *   - op-batch  (magic 'RILL') — UI-tree diffs over a retained node graph.
- *   - canvas    (magic 'RCNV') — a flat, per-frame 2D display list.
+ *   - op-batch  (magic 'KEEL') — UI-tree diffs over a retained node graph.
+ *   - canvas    (magic 'KCNV') — a flat, per-frame 2D display list.
  *
  * Platform consumers import from here, e.g.:
- *   import { decodeCanvasBatch } from 'rill/wire';
+ *   import { decodeCanvasBatch } from 'keel/wire';
  *
  * WIP / EXPERIMENTAL: neither decoder is on a live receive path yet; they ship
  * off, locked to the contracts + golden vectors under contracts/.
@@ -34,21 +34,21 @@ export {
   peekCanvasHeader,
 } from './canvas-wire-decoder';
 // --- store/net binary-value ENVELOPE (contracts/store-net-bytes.json) ---
-// The RBS1 two-plane frame (JSON control plane + length-prefixed binary data
+// The KBS1 two-plane frame (JSON control plane + length-prefixed binary data
 // plane). Unlike the two decoders above, this codec IS on a live receive path:
-// NativeGuestHost forks on the RBS1 magic to decode a byte-carrying request and
+// NativeGuestHost forks on the KBS1 magic to decode a byte-carrying request and
 // encodes a byte-carrying return. It is contract-agnostic (sentinel-driven).
 export {
   type DecodedEnvelope,
   decodeEnvelope,
-  decodeRequest as decodeRbs1Request,
+  decodeRequest as decodeKbs1Request,
   encodeEnvelope,
-  encodeResult as encodeRbs1Result,
+  encodeResult as encodeKbs1Result,
   type Hoisted,
   hoistSentinels,
-  isRbs1,
+  isKbs1,
+  KBS1_MAGIC,
   LIMITS as STORE_NET_LIMITS,
-  RBS1_MAGIC,
   reviveSentinels,
   SENTINEL_KEY,
   StoreNetEnvelopeError,

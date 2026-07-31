@@ -191,7 +191,7 @@ export class TimerManager {
             } catch (e) {
               const error = e instanceof Error ? e : new Error(String(e));
               this.options.logger.error(
-                `[rill:${this.options.engineId}] setInterval callback error:`,
+                `[keel:${this.options.engineId}] setInterval callback error:`,
                 error
               );
               this.options.onError?.(error);
@@ -260,7 +260,7 @@ export class TimerManager {
 
     if (this.options.debug) {
       this.options.logger.log(
-        `[rill:${this.options.engineId}] Paused ${this.timeoutMap.size} timeouts, ${this.intervalMap.size} intervals`
+        `[keel:${this.options.engineId}] Paused ${this.timeoutMap.size} timeouts, ${this.intervalMap.size} intervals`
       );
     }
   }
@@ -297,7 +297,7 @@ export class TimerManager {
 
     if (this.options.debug) {
       this.options.logger.log(
-        `[rill:${this.options.engineId}] Resumed ${this.timeoutMap.size} timeouts, ${this.intervalMap.size} intervals`
+        `[keel:${this.options.engineId}] Resumed ${this.timeoutMap.size} timeouts, ${this.intervalMap.size} intervals`
       );
     }
   }
@@ -310,7 +310,7 @@ export class TimerManager {
       callback();
     } catch (e) {
       const error = e instanceof Error ? e : new Error(String(e));
-      this.options.logger.error(`[rill:${this.options.engineId}] ${source} callback error:`, error);
+      this.options.logger.error(`[keel:${this.options.engineId}] ${source} callback error:`, error);
       this.options.onError?.(error);
     }
   }
@@ -459,7 +459,7 @@ export class TimerManager {
     this.intervalMap.clear();
 
     if (this.options.debug) {
-      this.options.logger.log(`[rill:${this.options.engineId}] Cleared all timers`);
+      this.options.logger.log(`[keel:${this.options.engineId}] Cleared all timers`);
     }
   }
 

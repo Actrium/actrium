@@ -7,8 +7,8 @@
 #include <thread>
 #include <vector>
 
-using namespace rill::tenant_manager;
-using namespace rill::test;
+using namespace keel::tenant_manager;
+using namespace keel::test;
 
 namespace {
 

@@ -1,5 +1,5 @@
 /**
- * rill/guest Type Definitions
+ * keel/guest Type Definitions
  *
  * Types for Guest-side SDK and Reconciler
  * Communication-related types are re-exported from bridge/types.ts
@@ -52,7 +52,7 @@ export { isSerializedFunction, operationHasProps } from '../shared';
  * Guest component reference (registered on Host)
  */
 export interface GuestComponentRef {
-  __rillComponentId: string;
+  __keelComponentId: string;
   displayName?: string;
 }
 
@@ -60,8 +60,8 @@ export interface GuestComponentRef {
  * Guest React element (from sandbox)
  */
 export interface GuestReactElement {
-  __rillTypeMarker?: string;
-  __rillFragmentType?: string;
+  __keelTypeMarker?: string;
+  __keelFragmentType?: string;
   $$typeof?: symbol;
   // biome-ignore lint/complexity/noBannedTypes: React element type can be Function for component references
   type: string | symbol | Function | GuestComponentRef | Record<string, unknown>;
@@ -95,8 +95,8 @@ export function isGuestReactElement(value: unknown): value is GuestReactElement 
 
   const el = value as Record<string, unknown>;
 
-  // Check for Rill markers
-  if (el.__rillTypeMarker === '__rill_react_element__') {
+  // Check for Keel markers
+  if (el.__keelTypeMarker === '__keel_react_element__') {
     return true;
   }
 
@@ -121,8 +121,8 @@ export function isGuestComponentRef(value: unknown): value is GuestComponentRef 
   return (
     typeof value === 'object' &&
     value !== null &&
-    '__rillComponentId' in value &&
-    typeof (value as GuestComponentRef).__rillComponentId === 'string'
+    '__keelComponentId' in value &&
+    typeof (value as GuestComponentRef).__keelComponentId === 'string'
   );
 }
 

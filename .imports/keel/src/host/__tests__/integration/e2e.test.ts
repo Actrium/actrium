@@ -81,7 +81,7 @@ describe('E2E Integration Tests', () => {
       // Simple guest code
       const guestCode = `
         // Simulate guest execution
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 1,
           operations: [
@@ -111,11 +111,11 @@ describe('E2E Integration Tests', () => {
 
     it('should handle config access', async () => {
       const guestCode = `
-        const config = __rill_getConfig();
+        const config = __keel_getConfig();
         console.log('Config:', config);
 
         if (config.theme === 'dark') {
-          __rill_sendBatch({
+          __keel_sendBatch({
             version: 1,
             batchId: 1,
             operations: [
@@ -137,7 +137,7 @@ describe('E2E Integration Tests', () => {
     it('should handle multiple batches', async () => {
       const guestCode = `
         // First batch of operations
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 1,
           operations: [
@@ -147,7 +147,7 @@ describe('E2E Integration Tests', () => {
         });
 
         // Second batch of operations
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 2,
           operations: [
@@ -167,7 +167,7 @@ describe('E2E Integration Tests', () => {
 
     it('should handle node updates', async () => {
       const guestCode = `
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 1,
           operations: [
@@ -177,7 +177,7 @@ describe('E2E Integration Tests', () => {
         });
 
         // Update node
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 2,
           operations: [
@@ -200,7 +200,7 @@ describe('E2E Integration Tests', () => {
 
     it('should handle node removal', async () => {
       const guestCode = `
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 1,
           operations: [
@@ -212,7 +212,7 @@ describe('E2E Integration Tests', () => {
         });
 
         // Remove child node
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 2,
           operations: [
@@ -409,11 +409,11 @@ describe('E2E Integration Tests', () => {
     it('should send events from host to sandbox', async () => {
       const guestCode = `
         // Set up event handler
-        globalThis.__rill.dispatchEvent = function(eventName, payload) {
+        globalThis.__keel.dispatchEvent = function(eventName, payload) {
           console.log('Received event:', eventName, payload);
 
           if (eventName === 'REFRESH') {
-            __rill_sendBatch({
+            __keel_sendBatch({
               version: 1,
               batchId: 99,
               operations: [
@@ -425,7 +425,7 @@ describe('E2E Integration Tests', () => {
         };
 
         // Initial render
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 1,
           operations: [
@@ -452,7 +452,7 @@ describe('E2E Integration Tests', () => {
 
     it('should handle config updates', async () => {
       const guestCode = `
-        const { View, Text, useConfig } = require('rill/guest');
+        const { View, Text, useConfig } = require('keel/guest');
 
         function App() {
           const config = useConfig();
@@ -464,7 +464,7 @@ describe('E2E Integration Tests', () => {
           );
         }
 
-        RillReconciler.render(React.createElement(App), __rill_sendBatch);
+        KeelReconciler.render(React.createElement(App), __keel_sendBatch);
       `;
 
       const receiver = engine.createReceiver();
@@ -503,7 +503,7 @@ describe('E2E Integration Tests', () => {
     it('should not crash host when guest throws error', async () => {
       const guestCode = `
         // Normal initialization
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 1,
           operations: [
@@ -539,7 +539,7 @@ describe('E2E Integration Tests', () => {
       });
 
       const guestCode = `
-        __rill_sendBatch({
+        __keel_sendBatch({
           version: 1,
           batchId: 1,
           operations: [
@@ -692,7 +692,7 @@ describe('Full Stack Simulation', () => {
         op: 'CREATE',
         id: titleTextId,
         type: '__TEXT__',
-        props: { text: 'Hello Rill!' }
+        props: { text: 'Hello Keel!' }
       });
 
       // Create button
@@ -732,7 +732,7 @@ describe('Full Stack Simulation', () => {
       operations.push({ op: 'APPEND', id: buttonId, parentId: rootId, childId: buttonId });
       operations.push({ op: 'APPEND', id: rootId, parentId: 0, childId: rootId });
 
-      __rill_sendBatch({
+      __keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: operations

@@ -1,6 +1,6 @@
 /**
  * HermesProvider stub for non-native environments
- * HermesProvider requires native JSI bindings (via @rill/sandbox-native)
+ * HermesProvider requires native JSI bindings (via @keel/sandbox-native)
  */
 
 import type { JSEngineProvider } from '../types/provider';

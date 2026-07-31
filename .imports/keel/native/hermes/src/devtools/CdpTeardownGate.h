@@ -39,12 +39,12 @@
  */
 #pragma once
 
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
 
 #include <condition_variable>
 #include <mutex>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 class CdpTeardownGate {
 public:
@@ -100,6 +100,6 @@ private:
   bool closed_ = false;
 };
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools
 
-#endif  // RILL_WIP_CDP_DEVTOOLS && !NDEBUG
+#endif  // KEEL_WIP_CDP_DEVTOOLS && !NDEBUG

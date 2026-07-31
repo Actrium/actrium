@@ -1,8 +1,8 @@
-# Rill
+# Keel
 
 Lightweight, headless, sandboxed React Native dynamic UI rendering engine.
 
-> **rill** /rɪl/ n. a small stream - symbolizing lightweight, smooth data flow
+> **keel** /kiːl/ n. the backbone of a hull - the spine that keeps a vessel upright and holding its course
 
 ## Features
 
@@ -15,7 +15,7 @@ Lightweight, headless, sandboxed React Native dynamic UI rendering engine.
 ## Package Exports
 
 ```
-rill/
+keel/
 ├── /host            # Host runtime (Engine, useEngineView)
 ├── /host/preset     # Host UI helpers (EngineView, DefaultComponents)
 ├── /guest           # Guest SDK (components, hooks, platform APIs)
@@ -23,7 +23,7 @@ rill/
 └── /cli             # CLI build tools
 ```
 
-> `import ... from 'rill'` is intentionally unsupported — use the explicit entrypoints above.
+> `import ... from 'keel'` is intentionally unsupported — use the explicit entrypoints above.
 
 
 ## Quick Start
@@ -32,10 +32,10 @@ rill/
 
 ```bash
 # Using bun
-bun add rill
+bun add keel
 
 # Using npm
-npm install rill
+npm install keel
 ```
 
 **Peer Dependencies:**
@@ -47,8 +47,8 @@ npm install rill
 
 ```tsx
 import React, { useMemo, useEffect } from 'react';
-import { Engine } from 'rill/host';
-import { EngineView } from 'rill/host/preset';
+import { Engine } from 'keel/host';
+import { EngineView } from 'keel/host/preset';
 import { NativeStepList } from './components/NativeStepList';
 
 function App() {
@@ -82,7 +82,7 @@ function App() {
 ### Guest Development
 
 ```tsx
-import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/guest';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'keel/guest';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -107,13 +107,13 @@ export default function MyGuest() {
 
 ```bash
 # Build bundle
-bunx rill build src/guest.tsx -o dist/bundle.js
+bunx keel build src/guest.tsx -o dist/bundle.js
 
 # Development mode
-bunx rill build src/guest.tsx --no-minify --sourcemap
+bunx keel build src/guest.tsx --no-minify --sourcemap
 
 # Analyze bundle
-bunx rill analyze dist/bundle.js
+bunx keel analyze dist/bundle.js
 ```
 
 ## Architecture
@@ -145,18 +145,18 @@ bunx rill analyze dist/bundle.js
 
 | Module | Import Path | Description |
 |--------|-------------|-------------|
-| Host | `rill/host` | Host runtime: Engine, useEngineView |
-| Host Preset | `rill/host/preset` | Host UI helpers: EngineView, DefaultComponents |
-| Guest | `rill/guest` | Guest module: components, hooks |
-| DevTools | `rill/devtools` | Debug tools: operation logging, tree inspection |
-| CLI | `rill` (bin) / `rill/cli` | Guest bundler (Bun-based) |
+| Host | `keel/host` | Host runtime: Engine, useEngineView |
+| Host Preset | `keel/host/preset` | Host UI helpers: EngineView, DefaultComponents |
+| Guest | `keel/guest` | Guest module: components, hooks |
+| DevTools | `keel/devtools` | Debug tools: operation logging, tree inspection |
+| CLI | `keel` (bin) / `keel/cli` | Guest bundler (Bun-based) |
 
 ## API
 
 ### Engine
 
 ```typescript
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   timeout: 5000,        // Execution timeout (ms)
@@ -185,7 +185,7 @@ engine.destroy();
 ### SDK Hooks
 
 ```typescript
-import { useHostEvent, useConfig, useSendToHost, useRemoteRef, TextInputRef } from 'rill/guest';
+import { useHostEvent, useConfig, useSendToHost, useRemoteRef, TextInputRef } from 'keel/guest';
 
 // Subscribe to host events
 useHostEvent('EVENT_NAME', (payload) => { /* handle */ });
@@ -221,7 +221,7 @@ Guest subscribes using SDK hook `useHostEvent(event, callback)`, Host sends via 
 
 **Guest example:**
 ```tsx
-import { View, Text, useHostEvent, useSendToHost } from 'rill/guest';
+import { View, Text, useHostEvent, useSendToHost } from 'keel/guest';
 
 export default function Guest() {
   const send = useSendToHost();
@@ -236,7 +236,7 @@ export default function Guest() {
 
 **Host example:**
 ```tsx
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine();
 engine.on('message', (m) => console.log(m.event, m.payload));

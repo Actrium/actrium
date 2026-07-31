@@ -23,12 +23,12 @@ class HermesRuntime;
 } // namespace hermes
 } // namespace facebook
 
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
-#include "devtools/CdpDebuggable.h"  // rill::devtools::ICdpDebuggable (capability seam)
-namespace rill::devtools {
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#include "devtools/CdpDebuggable.h"  // keel::devtools::ICdpDebuggable (capability seam)
+namespace keel::devtools {
 class CdpTeardownGate;  // fwd-decl: definition pulled into the .cpp only
 class CDPAgentTarget;   // fwd-decl: sweep handle for dispose(), .cpp only
-}  // namespace rill::devtools
+}  // namespace keel::devtools
 #endif
 
 namespace facebook {
@@ -54,9 +54,9 @@ using namespace facebook;
  * - dispose(): void
  */
 class HermesSandboxContext : public jsi::HostObject
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
     ,
-    public rill::devtools::ICdpDebuggable
+    public keel::devtools::ICdpDebuggable
 #endif
 {
 public:
@@ -93,15 +93,15 @@ public:
 
   bool isDisposed() const { return disposed_; }
 
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
-  // CDP debug handles for the relay layer: RillTenantManager builds a
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+  // CDP debug handles for the relay layer: KeelTenantManager builds a
   // CDPAgentTarget from the runtime + this shared CDPDebugAPI. Dev-only.
   facebook::hermes::HermesRuntime &hermesRuntime() { return *sandboxRuntime_; }
   std::shared_ptr<facebook::hermes::cdp::CDPDebugAPI> cdpDebugAPI() { return cdpDebugAPI_; }
 
   // ICdpDebuggable: build a per-tenant CDP target. Runtime tasks are pumped onto
   // the host JS thread (where this guest runtime runs) via `callInvoker`.
-  std::shared_ptr<rill::devtools::IEngineDebugTarget> createCdpDebugTarget(
+  std::shared_ptr<keel::devtools::IEngineDebugTarget> createCdpDebugTarget(
       std::shared_ptr<facebook::react::CallInvoker> callInvoker,
       std::int32_t executionContextId) override;
 #endif
@@ -116,7 +116,7 @@ private:
   double timeoutMs_ = 0;
   // Nesting depth for TimeLimitScope (guarded by mutex_).
   int timeLimitDepth_ = 0;
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
   // Per-runtime CDP debug API (owns the AsyncDebuggerAPI). Constructed with the
   // runtime; inert until a CDPAgent attaches a pause callback. Destroyed before
   // the runtime in dispose(). Dev-only.
@@ -138,7 +138,7 @@ private:
   // section on it; dispose() closes the gate and waits for open sections to
   // drain before destroying the CDPDebugAPI + runtime, so no CDP thread can
   // touch a half-torn-down runtime. Constructed with the runtime. Dev-only.
-  std::shared_ptr<rill::devtools::CdpTeardownGate> cdpTeardownGate_;
+  std::shared_ptr<keel::devtools::CdpTeardownGate> cdpTeardownGate_;
   // Count of attached DevTools clients, shared with the CDPAgentTarget which
   // bumps it on connect/disconnect. The watchdog pause callback reads it: with
   // zero clients a debugger;/breakpoint pause must auto-resume, or the runtime
@@ -148,7 +148,7 @@ private:
   // Weak handle to the target built by createCdpDebugTarget, so dispose() can
   // sweep any CDPAgents still attached (destroying them while the runtime +
   // CDPDebugAPI are alive, after closing the gate). Dev-only.
-  std::weak_ptr<rill::devtools::CDPAgentTarget> cdpTarget_;
+  std::weak_ptr<keel::devtools::CDPAgentTarget> cdpTarget_;
 #endif
   jsi::Runtime *hostRuntime_;
   bool disposed_;

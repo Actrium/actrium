@@ -8,7 +8,7 @@
 
 请使用 GitHub 私密漏洞报告功能联系维护者：
 
-https://github.com/Actrium/rill/security/advisories/new
+https://github.com/Actrium/keel/security/advisories/new
 
 提交报告时，请尽可能提供以下信息：
 

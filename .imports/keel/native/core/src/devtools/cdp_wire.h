@@ -17,7 +17,7 @@
 #include <optional>
 #include <string>
 
-namespace rill::devtools {
+namespace keel::devtools {
 namespace cdp {
 
 // Build a CDP event JSON object: {"method":..,"params":..[,"sessionId":..]}.
@@ -54,4 +54,4 @@ std::optional<std::string> parseJSONStringTopLevel(const std::string& json,
 std::optional<int> parseJSONInt(const std::string& json, const std::string& key);
 
 }  // namespace cdp
-}  // namespace rill::devtools
+}  // namespace keel::devtools

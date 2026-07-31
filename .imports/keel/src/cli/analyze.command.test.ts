@@ -10,7 +10,7 @@ describe('CLI analyze command', () => {
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-cli-test-'));
+    distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-cli-test-'));
     bundle = path.join(distDir, 'cli-analyze.js');
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
   });

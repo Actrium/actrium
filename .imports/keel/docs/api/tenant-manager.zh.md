@@ -6,24 +6,24 @@ TenantManager 是一个通过 JSI（JavaScript Interface）暴露给 Host JS 运
 
 ## Engine 集成
 
-Rill 通过 `EngineOptions.sandbox = 'tenant-manager'`（或自动检测）来集成 TenantManager。内部实现上，`Engine` 会通过一个内部的 TypeScript 适配器（`src/host/tenant manager/tenant manager-provider.ts`）把沙箱操作委托给原生 `__RillTenantManager` HostObject，但该适配器不属于对外 API。
+Keel 通过 `EngineOptions.sandbox = 'tenant-manager'`（或自动检测）来集成 TenantManager。内部实现上，`Engine` 会通过一个内部的 TypeScript 适配器（`src/host/tenant manager/tenant manager-provider.ts`）把沙箱操作委托给原生 `__KeelTenantManager` HostObject，但该适配器不属于对外 API。
 
 ### 检测
 
 原生 TenantManager 作为全局对象安装在 Host JS 运行时上：
 
 ```typescript
-globalThis.__RillTenantManager: RillTenantManagerJSI | undefined
+globalThis.__KeelTenantManager: KeelTenantManagerJSI | undefined
 ```
 
-若 `globalThis.__RillTenantManager` 已定义，则 TenantManager 可用。
+若 `globalThis.__KeelTenantManager` 已定义，则 TenantManager 可用。
 
 ### 用法
 
 当检测到 TenantManager 时会自动选择，或通过 `sandbox` 选项明确选择：
 
 ```typescript
-// 自动检测（在 __RillTenantManager 可用时使用）
+// 自动检测（在 __KeelTenantManager 可用时使用）
 const engine = new Engine();
 
 // 明确选择
@@ -38,9 +38,9 @@ const engine = new Engine({
 
 ---
 
-## RillTenantManagerJSI
+## KeelTenantManagerJSI
 
-原生 `__RillTenantManager` HostObject 的完整 JSI 接口。除非另有说明，所有方法都是同步 JSI 调用。
+原生 `__KeelTenantManager` HostObject 的完整 JSI 接口。除非另有说明，所有方法都是同步 JSI 调用。
 
 ### 租户生命周期
 

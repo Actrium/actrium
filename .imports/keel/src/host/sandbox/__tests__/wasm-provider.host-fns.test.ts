@@ -3,10 +3,10 @@
  *
  * Before the fix, the WASM provider's inject(name, fn) installed a single broken
  * stub for ANY function: a guest shim that called the (non-existent, self-referential)
- * `__rill_sendBatch("CALL_HOST_FN", ...)`. That made the render channel and every
- * by-name host->guest function (__rill_sendBatch / __rill_emitEvent / __rill_getConfig
- * / __rill_sendOperation / __rill_registerComponentType) unreachable on web, and
- * injecting `__rill_sendBatch` produced infinite self-recursion (Out of bounds memory
+ * `__keel_sendBatch("CALL_HOST_FN", ...)`. That made the render channel and every
+ * by-name host->guest function (__keel_sendBatch / __keel_emitEvent / __keel_getConfig
+ * / __keel_sendOperation / __keel_registerComponentType) unreachable on web, and
+ * injecting `__keel_sendBatch` produced infinite self-recursion (Out of bounds memory
  * access). These tests drive the bridge directly on the real WASM provider.
  */
 
@@ -35,12 +35,12 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
   it('routes a one-way host fn (the render channel) to the host with the args intact', () => {
     // biome-ignore lint/suspicious/noExplicitAny: captured render batches
     const batches: any[] = [];
-    context.inject('__rill_sendBatch', (batch: unknown) => {
+    context.inject('__keel_sendBatch', (batch: unknown) => {
       batches.push(batch);
     });
 
     context.eval(
-      'globalThis.__rill_sendBatch({ version: 1, batchId: 7, operations: [{ op: "CREATE", id: 1, type: "View" }] })'
+      'globalThis.__keel_sendBatch({ version: 1, batchId: 7, operations: [{ op: "CREATE", id: 1, type: "View" }] })'
     );
 
     expect(batches).toEqual([
@@ -48,20 +48,20 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
     ]);
   });
 
-  it('does NOT self-recurse / crash when __rill_sendBatch is injected then called', () => {
+  it('does NOT self-recurse / crash when __keel_sendBatch is injected then called', () => {
     let calls = 0;
-    context.inject('__rill_sendBatch', () => {
+    context.inject('__keel_sendBatch', () => {
       calls++;
     });
     // Before the fix this threw "Out of bounds memory access" (infinite self-recursion).
-    expect(() => context.eval('globalThis.__rill_sendBatch({ batchId: 1 })')).not.toThrow();
+    expect(() => context.eval('globalThis.__keel_sendBatch({ batchId: 1 })')).not.toThrow();
     expect(calls).toBe(1);
   });
 
   it('returns a host fn result synchronously to the guest (config hook)', () => {
-    context.inject('__rill_getConfig', () => ({ title: 'hello', n: 42 }));
+    context.inject('__keel_getConfig', () => ({ title: 'hello', n: 42 }));
     const result = context.eval(
-      'var c = globalThis.__rill_getConfig(); c.title + ":" + c.n'
+      'var c = globalThis.__keel_getConfig(); c.title + ":" + c.n'
     );
     expect(result).toBe('hello:42');
   });
@@ -73,13 +73,13 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
 
   it('supports multiple distinct injected host fns', () => {
     const events: Array<{ name: string; payload: unknown }> = [];
-    context.inject('__rill_emitEvent', (name: string, payload: unknown) => {
+    context.inject('__keel_emitEvent', (name: string, payload: unknown) => {
       events.push({ name, payload });
     });
-    context.inject('__rill_getConfig', () => ({ theme: 'dark' }));
+    context.inject('__keel_getConfig', () => ({ theme: 'dark' }));
 
-    const theme = context.eval('globalThis.__rill_getConfig().theme');
-    context.eval('globalThis.__rill_emitEvent("PING", { ok: 1 })');
+    const theme = context.eval('globalThis.__keel_getConfig().theme');
+    context.eval('globalThis.__keel_emitEvent("PING", { ok: 1 })');
 
     expect(theme).toBe('dark');
     expect(events).toEqual([{ name: 'PING', payload: { ok: 1 } }]);
@@ -116,7 +116,7 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
 
   // ---- callback ARGUMENTS across the bridge (issue #10, approach B) ----
   // A function arg can't cross the JSON bridge; the guest shim registers it in
-  // __rill.callbacks and passes a {__rill_cb:id} marker, the host reconstructs a proxy
+  // __keel.callbacks and passes a {__keel_cb:id} marker, the host reconstructs a proxy
   // that invokes the guest callback by id. This is what makes the engine's TimerManager
   // setTimeout/setImmediate polyfills work on WASM.
 
@@ -157,14 +157,14 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
       return 123; // stand-in host timer id
     });
     expect(context.eval(`globalThis.__fired = false; globalThis.setTimeout(function(){ globalThis.__fired = true; }, 5);`)).toBe(123);
-    expect(context.eval('globalThis.__rill.callbacks.size')).toBe(1);
-    expect(context.eval("globalThis.__rill.__timerCb['setTimeout:123'] != null")).toBe(true);
+    expect(context.eval('globalThis.__keel.callbacks.size')).toBe(1);
+    expect(context.eval("globalThis.__keel.__timerCb['setTimeout:123'] != null")).toBe(true);
 
     stored?.(); // host fires the one-shot
     expect(context.extract('__fired')).toBe(true);
     // self-removed: registry empty again, host-id map entry cleared
-    expect(context.eval('globalThis.__rill.callbacks.size')).toBe(0);
-    expect(context.eval("globalThis.__rill.__timerCb['setTimeout:123'] == null")).toBe(true);
+    expect(context.eval('globalThis.__keel.callbacks.size')).toBe(0);
+    expect(context.eval("globalThis.__keel.__timerCb['setTimeout:123'] == null")).toBe(true);
   });
 
   it('one-shot shim leaves no stale __timerCb entry if the callback fires synchronously', () => {
@@ -177,8 +177,8 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
     });
     context.eval(`globalThis.__n = 0; globalThis.setTimeout(function(){ globalThis.__n++; }, 0);`);
     expect(context.extract('__n')).toBe(1); // fired
-    expect(context.eval('globalThis.__rill.callbacks.size')).toBe(0); // self-removed
-    expect(context.eval('Object.keys(globalThis.__rill.__timerCb).length')).toBe(0); // no leak
+    expect(context.eval('globalThis.__keel.callbacks.size')).toBe(0); // self-removed
+    expect(context.eval('Object.keys(globalThis.__keel.__timerCb).length')).toBe(0); // no leak
   });
 
   it('namespaces timer callbacks by family so colliding host ids do not cross-cancel', () => {
@@ -201,12 +201,12 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
       globalThis.setTimeout(function(){}, 5);
       globalThis.setInterval(function(){ globalThis.__iFired++; }, 5);
     `);
-    expect(context.eval('globalThis.__rill.callbacks.size')).toBe(2);
+    expect(context.eval('globalThis.__keel.callbacks.size')).toBe(2);
 
     // Clearing the timeout (host id 1) must NOT touch the interval (also host id 1).
     context.eval('globalThis.clearTimeout(1)');
     expect(clearedTimeout).toBe(1);
-    expect(context.eval('globalThis.__rill.callbacks.size')).toBe(1); // only the timeout cb released
+    expect(context.eval('globalThis.__keel.callbacks.size')).toBe(1); // only the timeout cb released
     intervalCb?.();
     expect(context.extract('__iFired')).toBe(1); // interval still alive
   });
@@ -222,18 +222,18 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
       clearedId = id;
     });
     context.eval(`globalThis.__ticks = 0; globalThis.setInterval(function(){ globalThis.__ticks++; }, 5);`);
-    expect(context.eval('globalThis.__rill.callbacks.size')).toBe(1);
+    expect(context.eval('globalThis.__keel.callbacks.size')).toBe(1);
 
     stored?.();
     stored?.();
     expect(context.extract('__ticks')).toBe(2);
     // not one-shot: still registered after firing
-    expect(context.eval('globalThis.__rill.callbacks.size')).toBe(1);
+    expect(context.eval('globalThis.__keel.callbacks.size')).toBe(1);
 
     context.eval('globalThis.clearInterval(7)');
     expect(clearedId).toBe(7);
     // released on clear — and a later fire reaches no one
-    expect(context.eval('globalThis.__rill.callbacks.size')).toBe(0);
+    expect(context.eval('globalThis.__keel.callbacks.size')).toBe(0);
     stored?.();
     expect(context.extract('__ticks')).toBe(2);
   });
@@ -245,14 +245,14 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
 
   it('registerComponentType-style host fn: receives a function arg and returns a sync ctype id', () => {
     let receivedType: string | null = null;
-    // The engine injects __rill_registerComponentType as a host fn that takes the guest
+    // The engine injects __keel_registerComponentType as a host fn that takes the guest
     // component function and returns a synchronous "ctype_*" id.
-    context.inject('__rill_registerComponentType', (fn: unknown) => {
+    context.inject('__keel_registerComponentType', (fn: unknown) => {
       receivedType = typeof fn;
       return 'ctype_7';
     });
     const ret = context.eval(
-      `globalThis.__rill_registerComponentType(function MyComp(){ return null; })`
+      `globalThis.__keel_registerComponentType(function MyComp(){ return null; })`
     );
     // The function arg crossed the bridge as a callable proxy, and the ctype id returned sync.
     expect(receivedType).toBe('function');
@@ -261,12 +261,12 @@ describeIfWASM('QuickJSNativeWASMProvider by-name host-fn bridge', () => {
 
   it('sendOperation-style host fn: routes a single op object to the host intact (one-way)', () => {
     const ops: unknown[] = [];
-    context.inject('__rill_sendOperation', (op: unknown) => {
+    context.inject('__keel_sendOperation', (op: unknown) => {
       ops.push(op);
     });
-    // A REF_CALL-shaped single op (the real caller of __rill_sendOperation).
+    // A REF_CALL-shaped single op (the real caller of __keel_sendOperation).
     context.eval(
-      `globalThis.__rill_sendOperation({ op: 'REF_CALL', refId: 5, method: 'focus', args: [], callId: 1 })`
+      `globalThis.__keel_sendOperation({ op: 'REF_CALL', refId: 5, method: 'focus', args: [], callId: 1 })`
     );
     expect(ops).toEqual([{ op: 'REF_CALL', refId: 5, method: 'focus', args: [], callId: 1 }]);
   });
@@ -294,31 +294,31 @@ describeIfWASM('QuickJSNativeWASMProvider binary host-fn channel', () => {
   it('delivers a guest ArrayBuffer to the host byte-identical', () => {
     // biome-ignore lint/suspicious/noExplicitAny: captured binary payloads
     const received: any[] = [];
-    context.inject('__rill_sendBatch', (batch: unknown) => {
+    context.inject('__keel_sendBatch', (batch: unknown) => {
       received.push(batch);
     });
 
     context.eval(
       'var ab = new ArrayBuffer(4); var w = new Uint8Array(ab); ' +
-        'w[0] = 0x52; w[1] = 0x49; w[2] = 0x4c; w[3] = 0x4c; ' +
-        'globalThis.__rill_sendBatch(ab);'
+        'w[0] = 0x4b; w[1] = 0x45; w[2] = 0x45; w[3] = 0x4c; ' +
+        'globalThis.__keel_sendBatch(ab);'
     );
 
     expect(received).toHaveLength(1);
     expect(received[0]).toBeInstanceOf(ArrayBuffer);
-    expect([...new Uint8Array(received[0] as ArrayBuffer)]).toEqual([0x52, 0x49, 0x4c, 0x4c]);
+    expect([...new Uint8Array(received[0] as ArrayBuffer)]).toEqual([0x4b, 0x45, 0x45, 0x4c]);
   });
 
   it("delivers only a typed-array view's byte window", () => {
     // biome-ignore lint/suspicious/noExplicitAny: captured binary payloads
     const received: any[] = [];
-    context.inject('__rill_sendBatch', (batch: unknown) => {
+    context.inject('__keel_sendBatch', (batch: unknown) => {
       received.push(batch);
     });
 
     context.eval(
       'var backing = new Uint8Array([1, 2, 3, 4, 5]); ' +
-        'globalThis.__rill_sendBatch(backing.subarray(1, 4));'
+        'globalThis.__keel_sendBatch(backing.subarray(1, 4));'
     );
 
     expect(received).toHaveLength(1);
@@ -329,11 +329,11 @@ describeIfWASM('QuickJSNativeWASMProvider binary host-fn channel', () => {
   it('keeps multi-arg and non-binary calls on the JSON path', () => {
     // biome-ignore lint/suspicious/noExplicitAny: captured args
     const received: any[] = [];
-    context.inject('__rill_probe', (...args: unknown[]) => {
+    context.inject('__keel_probe', (...args: unknown[]) => {
       received.push(args);
     });
 
-    context.eval('globalThis.__rill_probe({ a: 1 }, "two")');
+    context.eval('globalThis.__keel_probe({ a: 1 }, "two")');
     expect(received).toEqual([[{ a: 1 }, 'two']]);
   });
 });

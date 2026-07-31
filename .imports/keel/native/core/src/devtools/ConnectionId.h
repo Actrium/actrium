@@ -10,8 +10,8 @@
 
 #include <cstdint>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 using ConnectionId = std::uint64_t;
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools

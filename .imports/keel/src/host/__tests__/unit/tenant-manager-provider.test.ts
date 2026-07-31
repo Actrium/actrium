@@ -2,16 +2,16 @@
  * TenantManagerProvider Unit Tests
  *
  * Tests the TypeScript delegation layer that routes Engine sandbox operations
- * through the native __RillTenantManager JSI HostObject.
+ * through the native __KeelTenantManager JSI HostObject.
  *
- * Since __RillTenantManager is a native JSI object not available in Bun/Node,
+ * Since __KeelTenantManager is a native JSI object not available in Bun/Node,
  * we mock it to verify correct delegation behavior.
  */
 
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test';
-import type { RillTenantManagerJSI } from '../../tenant-manager/types';
+import type { KeelTenantManagerJSI } from '../../tenant-manager/types';
 
-// --- Mock __RillTenantManager ---
+// --- Mock __KeelTenantManager ---
 
 function createMockTenantManager() {
   let nextTenantId = 1;
@@ -37,7 +37,7 @@ function createMockTenantManager() {
     apiViolations: number;
   }>();
 
-  const tenantManager: RillTenantManagerJSI = {
+  const tenantManager: KeelTenantManagerJSI = {
     createTenant: mock((config: { appId: string; apis?: string[]; quota?: { maxTimers?: number } }) => {
       const id = nextTenantId++;
       tenants.set(id, {
@@ -277,27 +277,27 @@ describe('TenantManagerProvider', () => {
 
   beforeEach(() => {
     mockOrch = createMockTenantManager();
-    (globalThis as Record<string, unknown>).__RillTenantManager = mockOrch.tenantManager;
+    (globalThis as Record<string, unknown>).__KeelTenantManager = mockOrch.tenantManager;
   });
 
   afterEach(() => {
-    delete (globalThis as Record<string, unknown>).__RillTenantManager;
+    delete (globalThis as Record<string, unknown>).__KeelTenantManager;
   });
 
   // ─── Static: isAvailable ───
 
   describe('isAvailable', () => {
-    it('should return true when __RillTenantManager is set', () => {
+    it('should return true when __KeelTenantManager is set', () => {
       expect(TenantManagerProvider.isAvailable()).toBe(true);
     });
 
-    it('should return false when __RillTenantManager is not set', () => {
-      delete (globalThis as Record<string, unknown>).__RillTenantManager;
+    it('should return false when __KeelTenantManager is not set', () => {
+      delete (globalThis as Record<string, unknown>).__KeelTenantManager;
       expect(TenantManagerProvider.isAvailable()).toBe(false);
     });
 
-    it('should return false when __RillTenantManager is undefined', () => {
-      (globalThis as Record<string, unknown>).__RillTenantManager = undefined;
+    it('should return false when __KeelTenantManager is undefined', () => {
+      (globalThis as Record<string, unknown>).__KeelTenantManager = undefined;
       expect(TenantManagerProvider.isAvailable()).toBe(false);
     });
   });
@@ -375,14 +375,14 @@ describe('TenantManagerProvider', () => {
       expect(result.dispose).toBeInstanceOf(Function);
     });
 
-    it('should throw when __RillTenantManager is not available', () => {
-      delete (globalThis as Record<string, unknown>).__RillTenantManager;
+    it('should throw when __KeelTenantManager is not available', () => {
+      delete (globalThis as Record<string, unknown>).__KeelTenantManager;
 
       const provider = new TenantManagerProvider({
         tenantConfig: { appId: 'com.missing' },
       });
 
-      expect(() => provider.createRuntime()).toThrow('__RillTenantManager not available');
+      expect(() => provider.createRuntime()).toThrow('__KeelTenantManager not available');
     });
 
     it('should create unique tenant IDs for multiple runtimes', () => {

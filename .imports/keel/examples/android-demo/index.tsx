@@ -1,19 +1,19 @@
 /**
- * android-demo - React Native + rill sandbox testing
+ * android-demo - React Native + keel sandbox testing
  */
 
 import React from 'react';
 import { AppRegistry, NativeModules, Platform } from 'react-native';
 
-// Install rill sandbox JSI bindings (must happen before Engine uses them)
-// Read the engine from the build flavor (BuildConfig.SANDBOX_ENGINE exposed via RillDemoConfig)
+// Install keel sandbox JSI bindings (must happen before Engine uses them)
+// Read the engine from the build flavor (BuildConfig.SANDBOX_ENGINE exposed via KeelDemoConfig)
 // so each APK flavor only installs its designated engine.
 if (Platform.OS === 'android') {
   try {
-    const engine: string = NativeModules.RillDemoConfig?.sandboxEngine || 'auto';
+    const engine: string = NativeModules.KeelDemoConfig?.sandboxEngine || 'auto';
     const installed =
-      NativeModules.RillSandboxNative?.installEngine?.(engine) ??
-      NativeModules.RillSandboxNative?.install?.();
+      NativeModules.KeelSandboxNative?.installEngine?.(engine) ??
+      NativeModules.KeelSandboxNative?.install?.();
     console.log('[android-demo] Sandbox install:', { engine, installed });
   } catch (e) {
     console.warn('[android-demo] Failed to install sandbox bindings:', e);
@@ -68,6 +68,6 @@ const WrappedApp = (props: Record<string, unknown>) => (
 );
 
 // Register the app
-AppRegistry.registerComponent('RillDemo', () => WrappedApp);
+AppRegistry.registerComponent('KeelDemo', () => WrappedApp);
 
-console.log('[android-demo] App registered as RillDemo');
+console.log('[android-demo] App registered as KeelDemo');

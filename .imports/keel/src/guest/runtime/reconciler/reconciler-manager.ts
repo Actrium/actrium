@@ -13,7 +13,7 @@ import type { GuestElement } from '../../../sdk/types';
 import { type CallbackRegistry, globalCallbackRegistry, type SendToHost } from '../../../shared';
 import { transformGuestElement } from './element-transform';
 import { createReconciler } from './host-config';
-import type { RillReconciler, RootContainer } from './types';
+import type { KeelReconciler, RootContainer } from './types';
 
 // ============================================
 // Reconciler Instance Management
@@ -23,11 +23,11 @@ import type { RillReconciler, RootContainer } from './types';
  * Reconciler instance data for each guest
  */
 interface ReconcilerInstance {
-  reconciler: RillReconciler;
+  reconciler: KeelReconciler;
   callbackRegistry: CallbackRegistry;
   collector: ReturnType<typeof createReconciler>['collector'];
   container: RootContainer;
-  root: ReturnType<RillReconciler['createContainer']>;
+  root: ReturnType<KeelReconciler['createContainer']>;
 }
 
 /**
@@ -41,8 +41,8 @@ interface ReconcilerInstance {
  */
 const globals = globalThis as Record<string, unknown>;
 const reconcilerMap: Map<SendToHost, ReconcilerInstance> =
-  (globals.__rillReconcilerMap as Map<SendToHost, ReconcilerInstance>) ??
-  (globals.__rillReconcilerMap = new Map<SendToHost, ReconcilerInstance>());
+  (globals.__keelReconcilerMap as Map<SendToHost, ReconcilerInstance>) ??
+  (globals.__keelReconcilerMap = new Map<SendToHost, ReconcilerInstance>());
 
 // Export globalCallbackRegistry from shared for public API
 // (re-export the singleton from shared module)
@@ -65,16 +65,16 @@ export { globalCallbackRegistry } from '../../../shared';
  * @param sendToHost - Function to send operations to host (typically Bridge.sendToHost)
  */
 export function render(element: ReactElement, sendToHost: SendToHost): void {
-  const debugEnabled = Boolean((globalThis as Record<string, unknown>).__RILL_RECONCILER_DEBUG__);
+  const debugEnabled = Boolean((globalThis as Record<string, unknown>).__KEEL_RECONCILER_DEBUG__);
   if (debugEnabled) {
     const elAny = element as unknown as Record<string, unknown>;
     try {
       const props = elAny?.props as Record<string, unknown> | undefined;
       console.log(
-        `[rill:reconciler] render called | type=${String(elAny?.type)} | typeType=${typeof elAny?.type} | marker=${String(elAny?.__rillTypeMarker)} | fragment=${String(elAny?.__rillFragmentType)} | propsKeys=${props ? Object.keys(props).join(',') : 'null'}`
+        `[keel:reconciler] render called | type=${String(elAny?.type)} | typeType=${typeof elAny?.type} | marker=${String(elAny?.__keelTypeMarker)} | fragment=${String(elAny?.__keelFragmentType)} | propsKeys=${props ? Object.keys(props).join(',') : 'null'}`
       );
     } catch {
-      console.log('[rill:reconciler] render called (log format failed)');
+      console.log('[keel:reconciler] render called (log format failed)');
     }
   }
 
@@ -85,10 +85,10 @@ export function render(element: ReactElement, sendToHost: SendToHost): void {
     try {
       const t = transformedElement as ReactElement | null;
       console.log(
-        `[rill:reconciler] transformed element | type=${String(t?.type)} | typeType=${typeof t?.type} | propsKeys=${t?.props ? Object.keys(t.props as Record<string, unknown>).join(',') : 'null'}`
+        `[keel:reconciler] transformed element | type=${String(t?.type)} | typeType=${typeof t?.type} | propsKeys=${t?.props ? Object.keys(t.props as Record<string, unknown>).join(',') : 'null'}`
       );
     } catch {
-      console.log('[rill:reconciler] transformed element (log format failed)');
+      console.log('[keel:reconciler] transformed element (log format failed)');
     }
   }
 
@@ -105,28 +105,28 @@ export function render(element: ReactElement, sendToHost: SendToHost): void {
       null, // hydrationCallbacks
       false, // isStrictMode
       null, // concurrentUpdatesByDefaultOverride
-      'rill', // identifierPrefix
+      'keel', // identifierPrefix
       // biome-ignore lint/suspicious/noExplicitAny: Error could be non-standard
       (error: any) => {
         // String-only console to avoid JSI circular ref traversal
         const msg = error instanceof Error ? error.message : String(error);
         const stack = error instanceof Error ? (error.stack ?? '') : '';
-        console.error(`[rill] onUncaughtError: ${msg}`);
-        if (stack) console.error(`[rill] stack: ${stack}`);
+        console.error(`[keel] onUncaughtError: ${msg}`);
+        if (stack) console.error(`[keel] stack: ${stack}`);
       }, // onUncaughtError
       // biome-ignore lint/suspicious/noExplicitAny: Error could be non-standard
       (error: any) => {
         const msg = error instanceof Error ? error.message : String(error);
         const stack = error instanceof Error ? (error.stack ?? '') : '';
-        console.error(`[rill] onCaughtError: ${msg}`);
-        if (stack) console.error(`[rill] stack: ${stack}`);
+        console.error(`[keel] onCaughtError: ${msg}`);
+        if (stack) console.error(`[keel] stack: ${stack}`);
       }, // onCaughtError
       // biome-ignore lint/suspicious/noExplicitAny: Error could be non-standard
       (error: any) => {
         const msg = error instanceof Error ? error.message : String(error);
         const stack = error instanceof Error ? (error.stack ?? '') : '';
-        console.error(`[rill] onRecoverableError: ${msg}`);
-        if (stack) console.error(`[rill] stack: ${stack}`);
+        console.error(`[keel] onRecoverableError: ${msg}`);
+        if (stack) console.error(`[keel] stack: ${stack}`);
       }, // onRecoverableError
       () => {}, // onDefaultTransitionIndicator
       null // transitionCallbacks
@@ -186,7 +186,7 @@ export function getCallbackRegistry(sendToHost?: SendToHost): CallbackRegistry |
  *
  * Note: In RN / VM runtimes, Guest-side functions are seen by Host-side reconciler
  * as callable handles and registered in CallbackRegistry.
- * No need to rely on Guest runtime injected globalThis.__rill.callbacks / __rill.invokeCallback.
+ * No need to rely on Guest runtime injected globalThis.__keel.callbacks / __keel.invokeCallback.
  */
 export function hasCallback(fnId: string): boolean {
   return globalCallbackRegistry.getMap().has(fnId);

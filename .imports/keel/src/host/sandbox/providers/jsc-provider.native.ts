@@ -11,7 +11,7 @@ import { NativeJSIProvider, type NativeJSIProviderOptions } from './native-jsi-p
 export type JSCProviderOptions = NativeJSIProviderOptions;
 
 /**
- * JSCProvider - Wraps native JSC JSI module for rill Engine
+ * JSCProvider - Wraps native JSC JSI module for keel Engine
  */
 export class JSCProvider extends NativeJSIProvider {
   constructor(options?: JSCProviderOptions) {

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { defineRillContract } from '../../../contract';
+import { defineKeelContract } from '../../../contract';
 import { createNativeGuestEngine } from '../native-guest-view';
 
 // A render-only native guest (renders View > [Text, View > Text]).
 const UI_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-guest.wasm'));
 
 // An empty host-capability contract (ui-guest makes no host:* calls).
-const emptyContract = defineRillContract({ version: '1', hostModules: {}, guestExports: {} });
+const emptyContract = defineKeelContract({ version: '1', hostModules: {}, guestExports: {} });
 
 describe('createNativeGuestEngine — native guest as an EngineViewEngine', () => {
   it('drives a native guest through the EngineViewEngine surface (like useEngineView)', async () => {
@@ -58,7 +58,7 @@ describe('createNativeGuestEngine — native guest as an EngineViewEngine', () =
     });
     engine.createReceiver();
     await engine.loadBundle();
-    // ui-guest has no rill_on_event handler; sendEvent must be a safe no-op.
+    // ui-guest has no keel_on_event handler; sendEvent must be a safe no-op.
     expect(() => engine.sendEvent('key', 'a')).not.toThrow();
   });
 
@@ -80,7 +80,7 @@ describe('createNativeGuestEngine — native guest as an EngineViewEngine', () =
     // Post-load: the guest's real export surface is visible (memory + ABI exports).
     expect(engine.exports).toBeDefined();
     expect(engine.exports?.memory).toBeInstanceOf(WebAssembly.Memory);
-    expect(typeof engine.exports?.rill_alloc).toBe('function');
+    expect(typeof engine.exports?.keel_alloc).toBe('function');
     engine.destroy();
   });
 });

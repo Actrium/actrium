@@ -1,12 +1,12 @@
 # Event Bus
 
-The Event Bus is a cross-tenant publish/subscribe system implemented in C++. It complements point-to-point `sendEvent` (which remains available on `RillTenantManager`) with a channel-based model that supports system broadcasts, controlled inter-tenant communication, rate limiting, and persistent event buffering.
+The Event Bus is a cross-tenant publish/subscribe system implemented in C++. It complements point-to-point `sendEvent` (which remains available on `KeelTenantManager`) with a channel-based model that supports system broadcasts, controlled inter-tenant communication, rate limiting, and persistent event buffering.
 
 ## Design
 
 **File:** `native/core/src/EventBus.h`
 
-The Event Bus is owned by `RillTenantManager` and shared across all tenants. It provides:
+The Event Bus is owned by `KeelTenantManager` and shared across all tenants. It provides:
 
 - **Channel-based routing** -- Events are published to named channels, and only subscribers of that channel receive them
 - **Policy enforcement** -- Each channel can restrict who can publish, how fast, and how large payloads can be
@@ -203,7 +203,7 @@ The publish/deliver/drop counters are `std::atomic`, so they can be updated with
 
 ## JSI Integration
 
-The Event Bus is exposed to TypeScript through JSI methods on `RillTenantManager`:
+The Event Bus is exposed to TypeScript through JSI methods on `KeelTenantManager`:
 
 | JSI Method | Description |
 |---|---|

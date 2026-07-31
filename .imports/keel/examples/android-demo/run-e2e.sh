@@ -6,13 +6,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-BASE_PACKAGE_ID="com.rill.demo"
+BASE_PACKAGE_ID="com.keel.demo"
 VALID_CONFIGS=("quickjs" "hermes")
 CONFIGS_TO_RUN=()
 VARIANT="release"
-TIMEOUT_SECONDS="${RILL_ANDROID_E2E_TIMEOUT:-120}"
-BOOT_TIMEOUT_SECONDS="${RILL_ANDROID_E2E_BOOT_TIMEOUT:-180}"
-HEADLESS="${RILL_ANDROID_E2E_HEADLESS:-1}"
+TIMEOUT_SECONDS="${KEEL_ANDROID_E2E_TIMEOUT:-120}"
+BOOT_TIMEOUT_SECONDS="${KEEL_ANDROID_E2E_BOOT_TIMEOUT:-180}"
+HEADLESS="${KEEL_ANDROID_E2E_HEADLESS:-1}"
 ADB_BIN="${ADB:-adb}"
 EMULATOR_BIN="${EMULATOR:-emulator}"
 DEVICE_SERIAL=""
@@ -43,12 +43,12 @@ show_usage() {
     echo "  ./run-e2e.sh --debug            # Run debug variants"
     echo ""
     echo "Environment:"
-    echo "  RILL_ANDROID_E2E_DEVICE=<serial>       Target adb device serial"
-    echo "  RILL_ANDROID_E2E_AVD=<name>            AVD to start when no device is connected"
-    echo "  RILL_ANDROID_E2E_HEADLESS=0            Show emulator window when runner starts it"
-    echo "  RILL_ANDROID_E2E_TIMEOUT=<seconds>     Marker wait timeout (default: 120)"
-    echo "  RILL_ANDROID_GRADLE_INIT=<path>        Extra Gradle init script for install.sh"
-    echo "  RILL_ANDROID_GRADLE_ARGS='<flags>'     Extra Gradle flags for install.sh"
+    echo "  KEEL_ANDROID_E2E_DEVICE=<serial>       Target adb device serial"
+    echo "  KEEL_ANDROID_E2E_AVD=<name>            AVD to start when no device is connected"
+    echo "  KEEL_ANDROID_E2E_HEADLESS=0            Show emulator window when runner starts it"
+    echo "  KEEL_ANDROID_E2E_TIMEOUT=<seconds>     Marker wait timeout (default: 120)"
+    echo "  KEEL_ANDROID_GRADLE_INIT=<path>        Extra Gradle init script for install.sh"
+    echo "  KEEL_ANDROID_GRADLE_ARGS='<flags>'     Extra Gradle flags for install.sh"
 }
 
 is_valid_config() {
@@ -100,8 +100,8 @@ adb_cmd() {
 }
 
 select_device() {
-    if [ -n "${RILL_ANDROID_E2E_DEVICE:-}" ]; then
-        echo "$RILL_ANDROID_E2E_DEVICE"
+    if [ -n "${KEEL_ANDROID_E2E_DEVICE:-}" ]; then
+        echo "$KEEL_ANDROID_E2E_DEVICE"
         return 0
     fi
 
@@ -109,8 +109,8 @@ select_device() {
 }
 
 select_avd() {
-    if [ -n "${RILL_ANDROID_E2E_AVD:-}" ]; then
-        echo "$RILL_ANDROID_E2E_AVD"
+    if [ -n "${KEEL_ANDROID_E2E_AVD:-}" ]; then
+        echo "$KEEL_ANDROID_E2E_AVD"
         return 0
     fi
 
@@ -164,7 +164,7 @@ launch_emulator_if_needed() {
         flags+=("-no-window" "-gpu" "swiftshader_indirect" "-no-audio" "-no-boot-anim")
     fi
 
-    "$EMULATOR_BIN" "${flags[@]}" >/tmp/rill-android-e2e-emulator.log 2>&1 &
+    "$EMULATOR_BIN" "${flags[@]}" >/tmp/keel-android-e2e-emulator.log 2>&1 &
     STARTED_EMULATOR=1
 
     sleep 2
@@ -181,7 +181,7 @@ launch_emulator_if_needed() {
 }
 
 cleanup() {
-    if [ "$STARTED_EMULATOR" = "1" ] && [ "${RILL_ANDROID_E2E_KEEP_EMULATOR:-0}" != "1" ]; then
+    if [ "$STARTED_EMULATOR" = "1" ] && [ "${KEEL_ANDROID_E2E_KEEP_EMULATOR:-0}" != "1" ]; then
         adb_cmd emu kill >/dev/null 2>&1 || true
     fi
 }
@@ -195,7 +195,7 @@ wait_for_result() {
         adb_cmd logcat -d -v time >"$log_file.tmp" 2>/dev/null || true
         mv "$log_file.tmp" "$log_file"
 
-        if grep -q ">>>RILL_ANDROID_E2E_END<<<" "$log_file" 2>/dev/null; then
+        if grep -q ">>>KEEL_ANDROID_E2E_END<<<" "$log_file" 2>/dev/null; then
             if grep -q "EXIT_CODE:0" "$log_file"; then
                 return 0
             fi
@@ -218,7 +218,7 @@ wait_for_result() {
 print_relevant_logs() {
     local log_file="$1"
 
-    grep -E "RILL_ANDROID_E2E|EXIT_CODE|Summary:|RillSandboxNative|RillPerformanceBridge|ReactNativeJS|FATAL EXCEPTION|AndroidRuntime" \
+    grep -E "KEEL_ANDROID_E2E|EXIT_CODE|Summary:|KeelSandboxNative|KeelPerformanceBridge|ReactNativeJS|FATAL EXCEPTION|AndroidRuntime" \
         "$log_file" | tail -160 || true
 }
 
@@ -248,7 +248,7 @@ for CONFIG in "${CONFIGS_TO_RUN[@]}"; do
     fi
 
     PACKAGE_ID="${BASE_PACKAGE_ID}.${CONFIG}"
-    LOG_FILE="/tmp/rill-android-e2e-${CONFIG}.log"
+    LOG_FILE="/tmp/keel-android-e2e-${CONFIG}.log"
 
     echo "========================================"
     echo "[$CONFIG] build + install"
@@ -259,19 +259,19 @@ for CONFIG in "${CONFIGS_TO_RUN[@]}"; do
         continue
     fi
 
-    rm -f "$LOG_FILE" "$LOG_FILE.tmp" "/tmp/rill-android-e2e-launch-${CONFIG}.log"
+    rm -f "$LOG_FILE" "$LOG_FILE.tmp" "/tmp/keel-android-e2e-launch-${CONFIG}.log"
     adb_cmd logcat -c
     adb_cmd shell am force-stop "$PACKAGE_ID" >/dev/null 2>&1 || true
 
     echo "[$CONFIG] launch + verify"
     if ! adb_cmd shell am start \
         -S \
-        -n "$PACKAGE_ID/com.rill.demo.MainActivity" \
-        --ez rillE2E true \
-        --es rillSandbox "$CONFIG" \
-        >"/tmp/rill-android-e2e-launch-${CONFIG}.log" 2>&1; then
+        -n "$PACKAGE_ID/com.keel.demo.MainActivity" \
+        --ez keelE2E true \
+        --es keelSandbox "$CONFIG" \
+        >"/tmp/keel-android-e2e-launch-${CONFIG}.log" 2>&1; then
         echo "[$CONFIG] launch failed"
-        cat "/tmp/rill-android-e2e-launch-${CONFIG}.log" || true
+        cat "/tmp/keel-android-e2e-launch-${CONFIG}.log" || true
         FAILED+=("$CONFIG")
         continue
     fi
