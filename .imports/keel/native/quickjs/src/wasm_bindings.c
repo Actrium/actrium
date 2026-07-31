@@ -16,30 +16,10 @@
 #define EXPORT
 #endif
 
-// Wasm resource ceilings, injected by CMakeLists.wasm.txt from the same values
-// fed to Emscripten's -sMAXIMUM_MEMORY / -sSTACK_SIZE link options. Deriving the
-// QuickJS soft limits from these guarantees they can never drift above the hard
-// wasm ceilings (where the module would OOM/trap ungracefully) the way two
-// independent magic numbers did. Fallbacks match the current CMake defaults
-// (WASM_MAX_MEMORY=32MB, WASM_STACK_SIZE=512KB) so a stray non-CMake build still
-// keeps the soft limits below the ceiling instead of disabling them.
-#ifndef KEEL_WASM_MAX_MEMORY_BYTES
-#define KEEL_WASM_MAX_MEMORY_BYTES (32 * 1024 * 1024)
-#endif
-#ifndef KEEL_WASM_STACK_BYTES
-#define KEEL_WASM_STACK_BYTES (512 * 1024)
-#endif
-
-// Headroom fractions. The linear-memory ceiling holds far more than the QuickJS
-// heap — the C stack, static data, and the Emscripten runtime all live in the
-// same address space — so the heap soft limit sits at 75% of MAX, leaving ~25%
-// (8MB at the 32MB default) for everything else; QuickJS reports "out of memory"
-// before the module hard-OOMs. Likewise the wasm stack is shared with non-QuickJS
-// C frames (Emscripten init, host callbacks), so the interpreter's stack soft
-// limit sits at 75% of the wasm stack, leaving ~25% (128KB at the 512KB default)
-// for those frames; QuickJS throws "stack overflow" before the wasm stack traps.
-#define KEEL_QJS_MEMORY_LIMIT_BYTES ((KEEL_WASM_MAX_MEMORY_BYTES / 4) * 3)
-#define KEEL_QJS_STACK_LIMIT_BYTES ((KEEL_WASM_STACK_BYTES / 4) * 3)
+// The soft limits (and the ceilings they derive from) are shared with the two
+// standalone Asyncify debug builds — see qjs_wasm_limits.h for the rationale and
+// for what breaks when a runtime is created without applying them.
+#include "qjs_wasm_limits.h"
 
 #ifdef __EMSCRIPTEN__
 // Accurate allocation accounting so the memory soft limit can actually fire.
