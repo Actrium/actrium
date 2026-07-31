@@ -1,11 +1,11 @@
 #!/bin/bash
-# Rill macOS E2E Test Runner (Bridgeless Mode)
+# Keel macOS E2E Test Runner (Bridgeless Mode)
 # Full automation: deps -> init -> build -> run -> parse results
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-RILL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+KEEL_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 cd "$SCRIPT_DIR"
 
 # CocoaPods cache: Use system default ~/Library/Caches/CocoaPods/ to share cache
@@ -15,8 +15,8 @@ if [ -n "${CP_CACHE_DIR:-}" ]; then
     export CP_CACHE_DIR
 fi
 # Opt into a repo-scoped home if your environment blocks writing to ~/.cocoapods:
-#   RILL_E2E_LOCAL_COCOAPODS_HOME=1
-if [ "${RILL_E2E_LOCAL_COCOAPODS_HOME:-0}" = "1" ]; then
+#   KEEL_E2E_LOCAL_COCOAPODS_HOME=1
+if [ "${KEEL_E2E_LOCAL_COCOAPODS_HOME:-0}" = "1" ]; then
     COCOAPODS_WORK_DIR="$SCRIPT_DIR/macos/.cocoapods"
     export CP_HOME_DIR="${CP_HOME_DIR:-$COCOAPODS_WORK_DIR/home}"
 fi
@@ -60,7 +60,7 @@ print_recent_crash_report() {
 
     # Look for .ips (new) and .crash (old) reports.
     local f
-    for f in "$REPORT_DIR"/RillMacOSTest-*.ips "$REPORT_DIR"/RillMacOSTest_*.crash; do
+    for f in "$REPORT_DIR"/KeelMacOSTest-*.ips "$REPORT_DIR"/KeelMacOSTest_*.crash; do
         [ -f "$f" ] || continue
         local mtime
         mtime="$(stat -f "%m" "$f" 2>/dev/null || echo 0)"
@@ -165,8 +165,8 @@ parse_test_spec() {
 # ============================================
 use_metro() {
     # Default: use pre-bundled JS (faster, no Watchman issues, CI-friendly).
-    # Set RILL_E2E_USE_METRO=1 to use Metro dev server instead.
-    [ "${RILL_E2E_USE_METRO:-0}" = "1" ]
+    # Set KEEL_E2E_USE_METRO=1 to use Metro dev server instead.
+    [ "${KEEL_E2E_USE_METRO:-0}" = "1" ]
 }
 
 bundle_cache_dir() {
@@ -185,7 +185,7 @@ bundle_needs_rebuild() {
     local BUNDLE_PATH="$1"
 
     # Force rebuild if requested
-    if [ "${RILL_E2E_BUNDLE_RESET:-0}" = "1" ]; then
+    if [ "${KEEL_E2E_BUNDLE_RESET:-0}" = "1" ]; then
         return 0
     fi
 
@@ -205,8 +205,8 @@ bundle_needs_rebuild() {
         "$SCRIPT_DIR/App.tsx" \
         "$SCRIPT_DIR"/src/**/*.ts \
         "$SCRIPT_DIR"/src/**/*.tsx \
-        "$RILL_ROOT"/src/**/*.ts \
-        "$RILL_ROOT"/src/**/*.tsx
+        "$KEEL_ROOT"/src/**/*.ts \
+        "$KEEL_ROOT"/src/**/*.tsx
     do
         [ -f "$src_file" ] || continue
         local file_mtime
@@ -251,7 +251,7 @@ ensure_bundle_cache() {
 install_bundled_js_into_app() {
     local CONFIG
     CONFIG="$(get_build_config)"
-    local APP_PATH="macos/build/Build/Products/${CONFIG}/RillMacOSTest.app"
+    local APP_PATH="macos/build/Build/Products/${CONFIG}/KeelMacOSTest.app"
     local RES_DIR="$APP_PATH/Contents/Resources"
 
     if [ ! -d "$APP_PATH" ]; then
@@ -276,7 +276,7 @@ install_bundled_js_into_app() {
 }
 
 pod_cmd() {
-    if [ "${RILL_E2E_KEEP_PROXY:-0}" = "1" ] || [ "${RILL_E2E_STRIP_LOCAL_PROXY:-0}" != "1" ]; then
+    if [ "${KEEL_E2E_KEEP_PROXY:-0}" = "1" ] || [ "${KEEL_E2E_STRIP_LOCAL_PROXY:-0}" != "1" ]; then
         pod "$@"
         return $?
     fi
@@ -298,7 +298,7 @@ pod_cmd() {
 }
 
 pods_engine_marker_path() {
-    echo "Pods/.rill_sandbox_engine"
+    echo "Pods/.keel_sandbox_engine"
 }
 
 pods_integration_ok() {
@@ -306,8 +306,8 @@ pods_integration_ok() {
         return 1
     fi
 
-    local xcconfig_dir="Pods/Target Support Files/Pods-RillMacOSTest-macOS"
-    if [ ! -f "$xcconfig_dir/Pods-RillMacOSTest-macOS.debug.xcconfig" ]; then
+    local xcconfig_dir="Pods/Target Support Files/Pods-KeelMacOSTest-macOS"
+    if [ ! -f "$xcconfig_dir/Pods-KeelMacOSTest-macOS.debug.xcconfig" ]; then
         return 1
     fi
     return 0
@@ -333,8 +333,8 @@ pods_install() {
     MARKER="$(pods_engine_marker_path)"
 
     local PODSPEC_HASH=""
-    if command -v shasum >/dev/null 2>&1 && [ -f "$RILL_ROOT/RillSandboxNative.podspec" ]; then
-        PODSPEC_HASH="$(shasum -a 256 "$RILL_ROOT/RillSandboxNative.podspec" | awk '{print $1}')"
+    if command -v shasum >/dev/null 2>&1 && [ -f "$KEEL_ROOT/KeelSandboxNative.podspec" ]; then
+        PODSPEC_HASH="$(shasum -a 256 "$KEEL_ROOT/KeelSandboxNative.podspec" | awk '{print $1}')"
     fi
     local CURRENT_MARKER="${MAIN}:${SANDBOX}:${USE_HERMES_ENV}:${PODSPEC_HASH}"
 
@@ -345,11 +345,11 @@ pods_install() {
 
     if [ "$PREV_MARKER" != "$CURRENT_MARKER" ]; then
         log_info "Switching config: ${PREV_MARKER:-<none>} -> ${CURRENT_MARKER}"
-        rm -rf Pods/RillSandboxNative
-        rm -rf Pods/Local\ Podspecs/RillSandboxNative.podspec.json
-        rm -rf build/Build/Intermediates.noindex/Pods.build/Debug/RillSandboxNative.build 2>/dev/null || true
-        rm -rf build/Build/Products/Debug/RillSandboxNative 2>/dev/null || true
-        rm -f build/Build/Products/Debug/libRillSandboxNative.a 2>/dev/null || true
+        rm -rf Pods/KeelSandboxNative
+        rm -rf Pods/Local\ Podspecs/KeelSandboxNative.podspec.json
+        rm -rf build/Build/Intermediates.noindex/Pods.build/Debug/KeelSandboxNative.build 2>/dev/null || true
+        rm -rf build/Build/Products/Debug/KeelSandboxNative 2>/dev/null || true
+        rm -f build/Build/Products/Debug/libKeelSandboxNative.a 2>/dev/null || true
         touch Podfile
     fi
 
@@ -371,9 +371,9 @@ pods_install() {
         export COCOAPODS_PARALLEL_DOWNLOADS="${COCOAPODS_PARALLEL_DOWNLOADS:-10}"
 
         if [ -n "$POD_ENGINE_ENV" ]; then
-            export RILL_SANDBOX_ENGINE="$POD_ENGINE_ENV"
+            export KEEL_SANDBOX_ENGINE="$POD_ENGINE_ENV"
         else
-            unset RILL_SANDBOX_ENGINE 2>/dev/null || true
+            unset KEEL_SANDBOX_ENGINE 2>/dev/null || true
         fi
         if [ -n "$USE_HERMES_ENV" ]; then
             export USE_HERMES="$USE_HERMES_ENV"
@@ -447,9 +447,9 @@ install_npm() {
     fi
 
     # npm skips postinstall for file: (symlink) dependencies.
-    # Manually invoke rill's postinstall to match real consumer behavior.
-    if [ -f "node_modules/rill/scripts/rill_postinstall.js" ]; then
-        node node_modules/rill/scripts/rill_postinstall.js
+    # Manually invoke keel's postinstall to match real consumer behavior.
+    if [ -f "node_modules/keel/scripts/keel_postinstall.js" ]; then
+        node node_modules/keel/scripts/keel_postinstall.js
     fi
 
     log_success "npm dependencies installed"
@@ -464,7 +464,7 @@ init_macos_project() {
 
     log_step "Initializing macOS native project..."
 
-    if [ ! -f "macos/RillMacOSTest.xcworkspace/contents.xcworkspacedata" ]; then
+    if [ ! -f "macos/KeelMacOSTest.xcworkspace/contents.xcworkspacedata" ]; then
         log_info "Generating macOS native project with react-native-macos-init..."
 
         npx react-native-macos-init --version 0.79.1 --overwrite || {
@@ -490,7 +490,7 @@ init_macos_project() {
 # Build the app
 # ============================================
 build_app() {
-    local SCHEME="${1:-RillMacOSTest-macOS}"
+    local SCHEME="${1:-KeelMacOSTest-macOS}"
     local MAIN_ENGINE="${2:-jsc}"
     log_step "Building macOS app (Bridgeless Mode)..."
 
@@ -505,10 +505,10 @@ build_app() {
         log_info "Using Release config for Hermes (workaround for macOS Debug hang)"
     fi
 
-    local CODE_SIGNING_ALLOWED="${RILL_E2E_CODE_SIGNING_ALLOWED:-NO}"
+    local CODE_SIGNING_ALLOWED="${KEEL_E2E_CODE_SIGNING_ALLOWED:-NO}"
 
     xcodebuild \
-        -workspace RillMacOSTest.xcworkspace \
+        -workspace KeelMacOSTest.xcworkspace \
         -scheme "$SCHEME" \
         -configuration "$CONFIG" \
         -derivedDataPath build \
@@ -518,13 +518,13 @@ build_app() {
         CODE_SIGNING_REQUIRED=NO \
         CODE_SIGN_IDENTITY="" \
         build \
-        2>&1 | tee /tmp/rill-bridgeless-build.log | grep -E "^(Build |error:|warning:)" || true
+        2>&1 | tee /tmp/keel-bridgeless-build.log | grep -E "^(Build |error:|warning:)" || true
 
-    if grep -q "BUILD SUCCEEDED" /tmp/rill-bridgeless-build.log; then
+    if grep -q "BUILD SUCCEEDED" /tmp/keel-bridgeless-build.log; then
         log_success "Build completed"
     else
-        log_error "Build failed. Check /tmp/rill-bridgeless-build.log for details"
-        tail -50 /tmp/rill-bridgeless-build.log
+        log_error "Build failed. Check /tmp/keel-bridgeless-build.log for details"
+        tail -50 /tmp/keel-bridgeless-build.log
         exit 1
     fi
 
@@ -539,10 +539,10 @@ start_metro() {
 
     pkill -f "metro" 2>/dev/null || true
 
-    local METRO_HOST="${RILL_E2E_METRO_HOST:-127.0.0.1}"
-    local METRO_PORT="${RILL_E2E_METRO_PORT:-8081}"
+    local METRO_HOST="${KEEL_E2E_METRO_HOST:-127.0.0.1}"
+    local METRO_PORT="${KEEL_E2E_METRO_PORT:-8081}"
 
-    npm start -- --reset-cache --host "$METRO_HOST" --port "$METRO_PORT" > /tmp/rill-bridgeless-metro.log 2>&1 &
+    npm start -- --reset-cache --host "$METRO_HOST" --port "$METRO_PORT" > /tmp/keel-bridgeless-metro.log 2>&1 &
     METRO_PID=$!
 
     log_info "Waiting for Metro to start..."
@@ -552,8 +552,8 @@ start_metro() {
             break
         fi
         if ! kill -0 $METRO_PID 2>/dev/null; then
-            log_error "Metro failed to start. Check /tmp/rill-bridgeless-metro.log"
-            tail -20 /tmp/rill-bridgeless-metro.log
+            log_error "Metro failed to start. Check /tmp/keel-bridgeless-metro.log"
+            tail -20 /tmp/keel-bridgeless-metro.log
             exit 1
         fi
         sleep 1
@@ -561,12 +561,12 @@ start_metro() {
     done
 
     if [ $WAIT -ge 30 ]; then
-        log_error "Metro timed out. Check /tmp/rill-bridgeless-metro.log"
+        log_error "Metro timed out. Check /tmp/keel-bridgeless-metro.log"
         exit 1
     fi
 
     log_success "Metro started (PID: $METRO_PID)"
-    echo $METRO_PID > /tmp/rill-bridgeless-metro.pid
+    echo $METRO_PID > /tmp/keel-bridgeless-metro.pid
 }
 
 # ============================================
@@ -580,14 +580,14 @@ run_tests() {
 
     local CONFIG
     CONFIG="$(get_build_config)"
-    local APP_PATH="macos/build/Build/Products/${CONFIG}/RillMacOSTest.app"
+    local APP_PATH="macos/build/Build/Products/${CONFIG}/KeelMacOSTest.app"
 
     if [ ! -d "$APP_PATH" ]; then
         log_error "App not found at $APP_PATH"
         exit 1
     fi
 
-    local OUTPUT_FILE="/tmp/rill-bridgeless-test-output.log"
+    local OUTPUT_FILE="/tmp/keel-bridgeless-test-output.log"
     rm -f "$OUTPUT_FILE"
 
     log_info "Launching app..."
@@ -595,19 +595,19 @@ run_tests() {
     START_TS="$(date +%s)"
 
     local APP_ENV=()
-    APP_ENV+=("RILL_SANDBOX_TARGET=$SANDBOX")
+    APP_ENV+=("KEEL_SANDBOX_TARGET=$SANDBOX")
     if ! use_metro; then
-        APP_ENV+=("RILL_E2E_USE_BUNDLED_JS=1")
+        APP_ENV+=("KEEL_E2E_USE_BUNDLED_JS=1")
     fi
 
-    env "${APP_ENV[@]}" "$APP_PATH/Contents/MacOS/RillMacOSTest" > "$OUTPUT_FILE" 2>&1 &
+    env "${APP_ENV[@]}" "$APP_PATH/Contents/MacOS/KeelMacOSTest" > "$OUTPUT_FILE" 2>&1 &
     APP_PID=$!
 
     local TIMEOUT=60
     local ELAPSED=0
     local HEARTBEAT_WARNED=0
     while [ $ELAPSED -lt $TIMEOUT ]; do
-        if grep -q ">>>RILL_TEST_END<<<" "$OUTPUT_FILE" 2>/dev/null; then
+        if grep -q ">>>KEEL_TEST_END<<<" "$OUTPUT_FILE" 2>/dev/null; then
             break
         fi
         if ! kill -0 $APP_PID 2>/dev/null; then
@@ -646,7 +646,7 @@ run_tests() {
             log_error "Diagnostic hints (Bridgeless Mode):"
             log_error "  1. Is main.jsbundle embedded in app Resources?"
             log_error "  2. Does AppDelegate return YES from bridgelessEnabled?"
-            log_error "  3. Is RillSandboxNative TurboModule registered?"
+            log_error "  3. Is KeelSandboxNative TurboModule registered?"
             log_error "  4. Did didInitializeRuntime: fire?"
         fi
         print_recent_crash_report "$START_TS"
@@ -668,7 +668,7 @@ run_tests() {
         return 0
     else
         log_error "Some tests failed"
-        grep ">>>RILL_TEST_RESULT<<<" "$OUTPUT_FILE" | grep '"status":"failed"' | while read line; do
+        grep ">>>KEEL_TEST_RESULT<<<" "$OUTPUT_FILE" | grep '"status":"failed"' | while read line; do
             echo "  $line"
         done
         return 1
@@ -681,9 +681,9 @@ run_tests() {
 cleanup() {
     log_step "Cleaning up..."
 
-    if [ -f /tmp/rill-bridgeless-metro.pid ]; then
-        kill $(cat /tmp/rill-bridgeless-metro.pid) 2>/dev/null || true
-        rm -f /tmp/rill-bridgeless-metro.pid
+    if [ -f /tmp/keel-bridgeless-metro.pid ]; then
+        kill $(cat /tmp/keel-bridgeless-metro.pid) 2>/dev/null || true
+        rm -f /tmp/keel-bridgeless-metro.pid
     fi
 
     pkill -f "metro" 2>/dev/null || true
@@ -697,7 +697,7 @@ cleanup() {
 run_single() {
     local SPEC="${1:-jsc-jsc}"
     read -r MAIN SANDBOX <<< "$(parse_test_spec "$SPEC")"
-    local SCHEME="RillMacOSTest-macOS"
+    local SCHEME="KeelMacOSTest-macOS"
 
     CURRENT_MAIN_ENGINE="$MAIN"
 
@@ -741,7 +741,7 @@ run_all() {
     echo ""
 
     if ! use_metro; then
-        log_info "Using pre-bundled JS (set RILL_E2E_USE_METRO=1 for dev server)"
+        log_info "Using pre-bundled JS (set KEEL_E2E_USE_METRO=1 for dev server)"
     fi
 
     local -a RESULTS_SPEC=()
@@ -752,7 +752,7 @@ run_all() {
         ((CURRENT++))
         read -r MAIN SANDBOX <<< "$(parse_test_spec "$SPEC")"
         local CURRENT_CONFIG="${MAIN}:${SANDBOX}"
-        local SCHEME="RillMacOSTest-macOS"
+        local SCHEME="KeelMacOSTest-macOS"
 
         log_step "[$CURRENT/$TOTAL] $SPEC (main=$MAIN sandbox=$SANDBOX) [Bridgeless]"
 
@@ -826,8 +826,8 @@ clean() {
     rm -rf macos/Pods
     rm -rf macos/build
     rm -rf macos/Podfile.lock
-    rm -f /tmp/rill-bridgeless-metro.pid
-    rm -f /tmp/rill-bridgeless-test-output.log
+    rm -f /tmp/keel-bridgeless-metro.pid
+    rm -f /tmp/keel-bridgeless-test-output.log
     log_success "Cleaned"
 }
 
@@ -837,7 +837,7 @@ clean() {
 main() {
     echo ""
     echo "======================================"
-    echo "  Rill macOS E2E Test Runner"
+    echo "  Keel macOS E2E Test Runner"
     echo "  (Bridgeless Mode)"
     echo "======================================"
     echo ""
@@ -857,7 +857,7 @@ main() {
         build)
             local SPEC="${2:-jsc-jsc}"
             read -r MAIN _SANDBOX <<< "$(parse_test_spec "$SPEC")"
-            local SCHEME="RillMacOSTest-macOS"
+            local SCHEME="KeelMacOSTest-macOS"
             build_app "$SCHEME" "$MAIN"
             ;;
         metro)
@@ -902,7 +902,7 @@ main() {
             echo "  $0 all            # Run all 5 combinations"
             echo ""
             echo "Environment variables:"
-            echo "  RILL_E2E_USE_METRO=1  - Use Metro dev server instead of pre-bundled JS"
+            echo "  KEEL_E2E_USE_METRO=1  - Use Metro dev server instead of pre-bundled JS"
             exit 1
             ;;
     esac

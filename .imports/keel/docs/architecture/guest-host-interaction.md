@@ -17,12 +17,12 @@ The sandbox boundary is the critical trust boundary. All data crossing it passes
 
 ## Communication Channels
 
-### Guest to Host: `__rill_sendBatch(batch)`
+### Guest to Host: `__keel_sendBatch(batch)`
 
-High-frequency channel. The reconciler batches all mutations from a single React commit phase into an `OperationBatch` and calls `__rill_sendBatch`. Bridge encodes the batch (functions become `{ __type: 'function', __fnId }`, complex types serialized via TypeRules) and delivers it to `Receiver.applyBatch`.
+High-frequency channel. The reconciler batches all mutations from a single React commit phase into an `OperationBatch` and calls `__keel_sendBatch`. Bridge encodes the batch (functions become `{ __type: 'function', __fnId }`, complex types serialized via TypeRules) and delivers it to `Receiver.applyBatch`.
 
 ```
-Guest Reconciler -> __rill_sendBatch(batch) -> Bridge.sendRawBatch -> onGuestOperations -> Receiver.applyBatch
+Guest Reconciler -> __keel_sendBatch(batch) -> Bridge.sendRawBatch -> onGuestOperations -> Receiver.applyBatch
 ```
 
 ### Host to Guest: `sendToSandbox(message)`
@@ -30,7 +30,7 @@ Guest Reconciler -> __rill_sendBatch(batch) -> Bridge.sendRawBatch -> onGuestOpe
 Lower-frequency channel used for callback invocations, host events, configuration updates, and teardown. Parameters are sanitized for JSON safety before crossing the boundary.
 
 ```
-Engine.sendToSandbox -> Bridge.sendToGuest -> context.inject + evalCode -> Guest __rill_handleMessage
+Engine.sendToSandbox -> Bridge.sendToGuest -> context.inject + evalCode -> Guest __keel_handleMessage
 ```
 
 ## Rendering Pipeline
@@ -61,7 +61,7 @@ const batch: OperationBatch = {
   batchId: nextBatchId++,
   operations: [...collected],
 };
-__rill_sendBatch(batch);
+__keel_sendBatch(batch);
 ```
 
 ### 3. Bridge Encoding
@@ -127,8 +127,8 @@ When a host-rendered component fires an event (e.g., `onPress`):
 2. Receiver's rendered element has a proxy function (from Bridge decoding)
 3. Proxy calls Bridge.invokeFunction(fnId, encodedArgs)
 4. Bridge routes to guestInvoker:
-   - Looks up __rill.invokeCallback in sandbox context
-   - Calls __rill.invokeCallback(fnId, args)
+   - Looks up __keel.invokeCallback in sandbox context
+   - Calls __keel.invokeCallback(fnId, args)
 5. Guest CallbackRegistry finds the original function
 6. Guest function executes (may call setState)
 7. Re-render produces new operations

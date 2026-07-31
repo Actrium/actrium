@@ -24,6 +24,17 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # This repository carries two lockfiles. bun.lock is the one that installs
+      # (guarded by --frozen-lockfile above); package-lock.json installs nothing
+      # and exists only so Dependabot can resolve the dependency graph and raise
+      # security alerts. Because nothing consumes it, it can silently go stale --
+      # a package.json edit that refreshes only bun.lock leaves the graph, and
+      # therefore every alert derived from it, describing a tree we do not ship.
+      # `npm ls` validates the lock against package.json without rewriting it,
+      # so it cannot fail on npm-version formatting differences.
+      - name: Check package-lock.json matches package.json
+        run: npm ls --package-lock-only --all
+
       - name: Run preflight
         run: bun run preflight
 
@@ -53,7 +64,7 @@ jobs:
     timeout-minutes: 15
 
     # crates/ is the native (non-JS) WASM guest workspace. The .wasm test
-    # fixtures under src/host/wasm-guest/__tests__/fixtures/ are committed to
+    # fixtures under src/host/native-guest/__tests__/fixtures/ are committed to
     # git and are NOT compared here (wasm output is not byte-reproducible
     # across toolchains): after changing crates/, rebuild them manually with
     # crates/build.sh. This job only keeps the Rust sources themselves green.
@@ -84,11 +95,11 @@ jobs:
       # so a rename in the workspace can break it while --workspace above stays
       # green. Build it for real so the list can never drift again.
       - name: Build debug (DWARF) WASM guests
-        run: RILL_GUEST_DEBUG=1 bash build.sh
+        run: KEEL_GUEST_DEBUG=1 bash build.sh
 
       # Host-target unit tests for the SDK crate: wire codecs (op-batch / canvas /
-      # RBS1 golden vectors), the contract conformance suite, and the host-call
-      # wrapper wiretaps. `-p rill-guest` rather than --workspace on purpose: the
+      # KBS1 golden vectors), the contract conformance suite, and the host-call
+      # wrapper wiretaps. `-p keel-native-guest` rather than --workspace on purpose: the
       # guest cdylibs around it are wasm32-only (their panic handler uses
       # core::arch::wasm32, which collides with std's in a test harness), so a
       # workspace-wide `cargo test` cannot compile. Both feature configurations
@@ -97,5 +108,5 @@ jobs:
       # own pass to stay green.
       - name: Test SDK crate (host target)
         run: |
-          cargo test -p rill-guest
-          cargo test -p rill-guest --no-default-features
+          cargo test -p keel-native-guest
+          cargo test -p keel-native-guest --no-default-features

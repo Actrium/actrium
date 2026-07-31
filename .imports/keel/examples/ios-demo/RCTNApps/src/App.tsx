@@ -3,7 +3,7 @@
  *
  * The Host creates an Engine, registers default RN components,
  * and loads Guest code that contains all business logic.
- * Guest renders its UI through the rill bridge; the Host
+ * Guest renders its UI through the keel bridge; the Host
  * displays it via useEngineView.
  */
 
@@ -18,8 +18,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Engine, useEngineView } from 'rill/host';
-import { DefaultComponents } from 'rill/host/preset';
+import { Engine, useEngineView } from 'keel/host';
+import { DefaultComponents } from 'keel/host/preset';
 
 // ---------------------------------------------------------------------------
 // Guest code — runs inside the sandbox engine
@@ -30,7 +30,7 @@ const GUEST_CODE = `
   var useState = React.useState;
   var useEffect = React.useEffect;
   var useCallback = React.useCallback;
-  var render = require('rill/reconciler').render;
+  var render = require('keel/reconciler').render;
 
   // h() shorthand for React.createElement
   var h = React.createElement;
@@ -140,7 +140,7 @@ const GUEST_CODE = `
 
   // ── Mount ───────────────────────────────────────────────────────────────
 
-  render(h(GuestApp), globalThis.__rill_sendBatch);
+  render(h(GuestApp), globalThis.__keel_sendBatch);
 `;
 
 // ---------------------------------------------------------------------------
@@ -182,9 +182,9 @@ function getDetectedEngines(): string[] {
 // ---------------------------------------------------------------------------
 // Android-only wrapper UI (match iOS native wrapper)
 // ---------------------------------------------------------------------------
-const RillDemoConfig = NativeModules.RillDemoConfig as { sandboxEngine: string } | undefined;
+const KeelDemoConfig = NativeModules.KeelDemoConfig as { sandboxEngine: string } | undefined;
 
-const RillPerformanceBridge = NativeModules.RillPerformanceBridge as
+const KeelPerformanceBridge = NativeModules.KeelPerformanceBridge as
   | {
       getMemoryUsage(): number;
       startFPSTracking(): boolean;
@@ -294,12 +294,12 @@ function AndroidPerformanceDashboard({ sandboxEngine }: { sandboxEngine: string 
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    if (!RillPerformanceBridge) return;
-    RillPerformanceBridge.startFPSTracking();
+    if (!KeelPerformanceBridge) return;
+    KeelPerformanceBridge.startFPSTracking();
     pollTimerRef.current = setInterval(() => {
       try {
-        const memory = RillPerformanceBridge.getMemoryUsage();
-        const fps = RillPerformanceBridge.getCurrentFPS();
+        const memory = KeelPerformanceBridge.getMemoryUsage();
+        const fps = KeelPerformanceBridge.getCurrentFPS();
         setMetrics((prev) => ({ ...prev, memory, fps }));
       } catch {
         // ignore
@@ -307,12 +307,12 @@ function AndroidPerformanceDashboard({ sandboxEngine }: { sandboxEngine: string 
     }, 500);
     return () => {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-      RillPerformanceBridge.stopFPSTracking();
+      KeelPerformanceBridge.stopFPSTracking();
     };
   }, []);
 
   const runTests = useCallback(() => {
-    if (!RillPerformanceBridge || testing) return;
+    if (!KeelPerformanceBridge || testing) return;
 
     const safeNumber = (fn: () => number): number => {
       try {
@@ -330,14 +330,14 @@ function AndroidPerformanceDashboard({ sandboxEngine }: { sandboxEngine: string 
         // Prefer Hermes AOT bytecode when available (aligns with historical ios-demo results)
         const bytecodePath = `TestBytecode/${name}.hbc`;
         const bytecodeMs = safeNumber(() =>
-          RillPerformanceBridge.evalBytecodeAsset(bytecodePath, engineHint)
+          KeelPerformanceBridge.evalBytecodeAsset(bytecodePath, engineHint)
         );
         if (bytecodeMs >= 0) return bytecodeMs;
 
         const sourcePath = `TestCode/${name}.js`;
-        const code = RillPerformanceBridge.readAsset(sourcePath);
+        const code = KeelPerformanceBridge.readAsset(sourcePath);
         if (!code) return -1;
-        return safeNumber(() => RillPerformanceBridge.evalInSandbox(code, engineHint));
+        return safeNumber(() => KeelPerformanceBridge.evalInSandbox(code, engineHint));
       } catch {
         return -1;
       }
@@ -345,15 +345,15 @@ function AndroidPerformanceDashboard({ sandboxEngine }: { sandboxEngine: string 
 
     setTesting(true);
     try {
-      const memory = safeNumber(() => RillPerformanceBridge.getMemoryUsage());
-      const fps = safeNumber(() => RillPerformanceBridge.getCurrentFPS());
+      const memory = safeNumber(() => KeelPerformanceBridge.getMemoryUsage());
+      const fps = safeNumber(() => KeelPerformanceBridge.getCurrentFPS());
 
       // Native returns ms/call; UI shows μs.
-      const rttMs = safeNumber(() => RillPerformanceBridge.measureJSIRTT(20000));
+      const rttMs = safeNumber(() => KeelPerformanceBridge.measureJSIRTT(20000));
       const rtt = rttMs < 0 ? -1 : rttMs * 1000;
 
       // Native returns ops/s; UI shows K/s.
-      const opsPerSecond = safeNumber(() => RillPerformanceBridge.measureOpsPerSecond(250));
+      const opsPerSecond = safeNumber(() => KeelPerformanceBridge.measureOpsPerSecond(250));
       const throughput = opsPerSecond < 0 ? -1 : opsPerSecond / 1000;
 
       const fib = safeEvalAsset('fib');
@@ -388,7 +388,7 @@ function AndroidPerformanceDashboard({ sandboxEngine }: { sandboxEngine: string 
     }));
   }, []);
 
-  if (!RillPerformanceBridge) {
+  if (!KeelPerformanceBridge) {
     return (
       <View style={ui.dashboardContainer}>
         <Text style={ui.dashboardUnavailable}>Performance bridge unavailable</Text>
@@ -497,14 +497,14 @@ function assertE2E(condition: unknown, message: string): asserts condition {
 
 function logE2E(message: string) {
   console.log(message);
-  if (!RillPerformanceBridge?.log) {
+  if (!KeelPerformanceBridge?.log) {
     return;
   }
   try {
-    RillPerformanceBridge.log(message);
+    KeelPerformanceBridge.log(message);
   } catch (error) {
     console.log(
-      `>>>RILL_IOS_E2E_RESULT<<< ${JSON.stringify({
+      `>>>KEEL_IOS_E2E_RESULT<<< ${JSON.stringify({
         name: 'native log',
         status: 'failed',
         error: error instanceof Error ? error.message : String(error),
@@ -520,17 +520,17 @@ async function runIOSE2EChecks(engineHint: string) {
     try {
       await fn();
       results.push({ name, status: 'passed' });
-      logE2E(`>>>RILL_IOS_E2E_RESULT<<< ${JSON.stringify({ name, status: 'passed' })}`);
+      logE2E(`>>>KEEL_IOS_E2E_RESULT<<< ${JSON.stringify({ name, status: 'passed' })}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       results.push({ name, status: 'failed', error: message });
       logE2E(
-        `>>>RILL_IOS_E2E_RESULT<<< ${JSON.stringify({ name, status: 'failed', error: message })}`
+        `>>>KEEL_IOS_E2E_RESULT<<< ${JSON.stringify({ name, status: 'failed', error: message })}`
       );
     }
   };
 
-  logE2E('>>>RILL_IOS_E2E_START<<<');
+  logE2E('>>>KEEL_IOS_E2E_START<<<');
   logE2E(`Target: ${engineHint || 'auto'}`);
 
   await run('detect requested sandbox module', () => {
@@ -653,20 +653,20 @@ async function runIOSE2EChecks(engineHint: string) {
   });
 
   await run('native performance bridge can reach sandbox', () => {
-    assertE2E(RillPerformanceBridge, 'RillPerformanceBridge is unavailable');
-    const evalMs = RillPerformanceBridge.evalInSandbox('1 + 1', engineHint);
+    assertE2E(KeelPerformanceBridge, 'KeelPerformanceBridge is unavailable');
+    const evalMs = KeelPerformanceBridge.evalInSandbox('1 + 1', engineHint);
     assertE2E(Number.isFinite(evalMs) && evalMs >= 0, `evalInSandbox returned ${evalMs}`);
-    const rttMs = RillPerformanceBridge.measureJSIRTT(100);
+    const rttMs = KeelPerformanceBridge.measureJSIRTT(100);
     assertE2E(Number.isFinite(rttMs) && rttMs >= 0, `measureJSIRTT returned ${rttMs}`);
   });
 
   const failed = results.filter((result) => result.status === 'failed');
   logE2E(`Summary: ${results.length - failed.length} passed, ${failed.length} failed`);
   logE2E(failed.length === 0 ? 'EXIT_CODE:0' : 'EXIT_CODE:1');
-  logE2E('>>>RILL_IOS_E2E_END<<<');
+  logE2E('>>>KEEL_IOS_E2E_END<<<');
 }
 
-export default function App(props: { rillE2E?: boolean; rillSandbox?: string }) {
+export default function App(props: { keelE2E?: boolean; keelSandbox?: string }) {
   const engines = useMemo(() => getDetectedEngines(), []);
   const e2eStartedRef = useRef(false);
 
@@ -677,7 +677,7 @@ export default function App(props: { rillE2E?: boolean; rillSandbox?: string }) 
     return e;
   }, []);
 
-  // Load Guest code via rill bridge
+  // Load Guest code via keel bridge
   const { loadingState, error, content } = useEngineView({
     engine,
     source: GUEST_CODE,
@@ -693,22 +693,22 @@ export default function App(props: { rillE2E?: boolean; rillSandbox?: string }) 
   const engineLabel = engines.length > 0 ? engines.join(', ') : 'None detected';
 
   const sandboxEngine = useMemo(() => {
-    return normalizeSandboxEngine(props.rillSandbox) || RillDemoConfig?.sandboxEngine || '';
-  }, [props.rillSandbox]);
+    return normalizeSandboxEngine(props.keelSandbox) || KeelDemoConfig?.sandboxEngine || '';
+  }, [props.keelSandbox]);
 
   useEffect(() => {
-    if (!props.rillE2E || e2eStartedRef.current || loadingState !== 'loaded') {
+    if (!props.keelE2E || e2eStartedRef.current || loadingState !== 'loaded') {
       return;
     }
 
     e2eStartedRef.current = true;
     runIOSE2EChecks(sandboxEngine).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
-      logE2E(`>>>RILL_IOS_E2E_RESULT<<< ${JSON.stringify({ name: 'runner', status: 'failed', error: message })}`);
+      logE2E(`>>>KEEL_IOS_E2E_RESULT<<< ${JSON.stringify({ name: 'runner', status: 'failed', error: message })}`);
       logE2E('EXIT_CODE:1');
-      logE2E('>>>RILL_IOS_E2E_END<<<');
+      logE2E('>>>KEEL_IOS_E2E_END<<<');
     });
-  }, [props.rillE2E, loadingState, sandboxEngine]);
+  }, [props.keelE2E, loadingState, sandboxEngine]);
 
   return (
     <SafeAreaView style={styles.container}>

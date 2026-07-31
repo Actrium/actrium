@@ -1,4 +1,4 @@
-//! Native (non-JS) rill guest that exercises the canvas SDK's guest->host JSON
+//! Native (non-JS) keel guest that exercises the canvas SDK's guest->host JSON
 //! ESCAPING. It draws a one-op display list whose `canvasId`, fill color and text
 //! all carry JSON metacharacters (quote, backslash, newline, tab) plus multi-byte
 //! UTF-8 (`é`, an emoji). The host decodes the batch with a strict `JSON.parse`,
@@ -9,9 +9,9 @@
 
 extern crate alloc;
 
-use rill_guest::canvas::{self, DrawList};
+use keel_native_guest::canvas::{self, DrawList};
 
-rill_guest::rill_guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 /// A canvasId carrying a quote, backslash, newline and tab — all of which the SDK
 /// must escape for the host's `JSON.parse` to recover the byte-exact string.

@@ -1,5 +1,5 @@
 /**
- * @rill/bridge - Serialization Utilities
+ * @keel/bridge - Serialization Utilities
  *
  * Shared serialization helpers, used by both the host and the guest
  * - Host: bridge.ts

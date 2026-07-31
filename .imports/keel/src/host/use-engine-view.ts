@@ -17,7 +17,7 @@ export type LoadingState = 'idle' | 'loading' | 'loaded' | 'error';
 
 /**
  * The minimal engine surface `useEngineView` drives. Both the in-thread {@link Engine} and the
- * off-main-thread `WorkerEngine` (`rill/host/web`) satisfy it, so a single EngineView component
+ * off-main-thread `WorkerEngine` (`keel/host/web`) satisfy it, so a single EngineView component
  * works with either. Kept structural (not the concrete `Engine`) precisely so the worker proxy
  * can stand in.
  */

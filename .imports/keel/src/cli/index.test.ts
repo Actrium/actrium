@@ -29,7 +29,7 @@ describe('CLI Commands', () => {
     originalArgv = process.argv;
 
     // Create temp directory
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-cli-test-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-cli-test-'));
     originalCwd = process.cwd();
     process.chdir(tempDir);
 
@@ -39,7 +39,7 @@ describe('CLI Commands', () => {
     fs.writeFileSync(
       path.join(srcDir, 'guest.tsx'),
       `
-      import { View, Text } from 'rill/guest';
+      import { View, Text } from 'keel/guest';
       export default function Guest() {
         return <View><Text>Hello CLI Test</Text></View>;
       }
@@ -203,12 +203,12 @@ describe('CLI Commands', () => {
       const buildMock = {
         // biome-ignore lint/suspicious/noExplicitAny: Mock function accepts any build options
         build: async (opts: any) => {
-          expect(opts.contractFile).toBe('src/rill.contract.ts');
-          expect(opts.capabilityManifest).toBe('dist/rill-capabilities.json');
+          expect(opts.contractFile).toBe('src/keel.contract.ts');
+          expect(opts.capabilityManifest).toBe('dist/keel-capabilities.json');
 
           fs.writeFileSync(path.join(tempDir, 'dist/bundle.js'), '// bundle');
           fs.writeFileSync(
-            path.join(tempDir, 'dist/rill-capabilities.json'),
+            path.join(tempDir, 'dist/keel-capabilities.json'),
             JSON.stringify({ hostCapabilities: [], guestExports: [] })
           );
         },
@@ -220,11 +220,11 @@ describe('CLI Commands', () => {
         minify: true,
         sourcemap: false,
         watch: false,
-        contractFile: 'src/rill.contract.ts',
-        capabilityManifest: 'dist/rill-capabilities.json',
+        contractFile: 'src/keel.contract.ts',
+        capabilityManifest: 'dist/keel-capabilities.json',
       });
 
-      expect(fs.existsSync(path.join(tempDir, 'dist/rill-capabilities.json'))).toBe(true);
+      expect(fs.existsSync(path.join(tempDir, 'dist/keel-capabilities.json'))).toBe(true);
     });
   });
 
@@ -256,7 +256,7 @@ describe('CLI Commands', () => {
       };
 
       await analyzeMock.analyze('dist/test-bundle.js', {
-        whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/guest'],
+        whitelist: ['react', 'react-native', 'react/jsx-runtime', 'keel/guest'],
       });
     });
 
@@ -316,12 +316,12 @@ describe('CLI Commands', () => {
       const analyzeMock = {
         // biome-ignore lint/suspicious/noExplicitAny: Mock function accepts any analyze options
         analyze: async (_bundlePath: string, opts?: any) => {
-          expect(opts?.contractFile).toBe('src/rill.contract.ts');
+          expect(opts?.contractFile).toBe('src/keel.contract.ts');
         },
       };
 
       await analyzeMock.analyze('dist/test-bundle.js', {
-        contractFile: 'src/rill.contract.ts',
+        contractFile: 'src/keel.contract.ts',
       });
     });
   });
@@ -348,8 +348,8 @@ describe('CLI Commands', () => {
         version: '0.1.0',
         private: true,
         scripts: {
-          build: 'rill build src/guest.tsx -o dist/bundle.js',
-          analyze: 'rill analyze dist/bundle.js',
+          build: 'keel build src/guest.tsx -o dist/bundle.js',
+          analyze: 'keel analyze dist/bundle.js',
         },
         devDependencies: {
           '@types/bun': 'latest',
@@ -357,7 +357,7 @@ describe('CLI Commands', () => {
         },
         dependencies: {
           react: '^18.0.0',
-          rill: 'latest',
+          keel: 'latest',
         },
       };
       fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
@@ -379,12 +379,12 @@ describe('CLI Commands', () => {
       // Create src/guest.tsx
       const guestPath = path.join(srcDir, 'guest.tsx');
       const guestContent = `import * as React from 'react';
-import { View, Text } from 'rill/guest';
+import { View, Text } from 'keel/guest';
 
 export default function Guest() {
   return (
     <View>
-      <Text>Hello from Rill Guest</Text>
+      <Text>Hello from Keel Guest</Text>
     </View>
   );
 }
@@ -400,11 +400,11 @@ export default function Guest() {
 
       const pkgData = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
       expect(pkgData.name).toBe(projectName);
-      expect(pkgData.scripts.build).toContain('rill build');
+      expect(pkgData.scripts.build).toContain('keel build');
     });
 
     it('should handle default project name', async () => {
-      const defaultName = 'my-rill-guest';
+      const defaultName = 'my-keel-guest';
       const projectDir = path.join(tempDir, defaultName);
 
       fs.mkdirSync(projectDir, { recursive: true });

@@ -1,4 +1,4 @@
-//! Native rill guest demoing a wasm **SIMD128** pixel filter.
+//! Native keel guest demoing a wasm **SIMD128** pixel filter.
 //!
 //! It ships one baseline image filter — a square box blur over straight-alpha
 //! RGBA8 — in two forms that MUST agree byte-for-byte:
@@ -10,7 +10,7 @@
 //!
 //! Both divide the per-pixel window sum by the same window count with the SAME
 //! integer division, so the SIMD result is bit-identical to the scalar one — the
-//! correctness gate in `src/host/wasm-guest/__tests__/blur-demo-guest.test.ts`
+//! correctness gate in `src/host/native-guest/__tests__/blur-demo-guest.test.ts`
 //! asserts exactly that. This is the reference for #57's "documented +simd128
 //! build path + one baseline filter's SIMD version, verifiable byte-for-byte".
 //!
@@ -27,11 +27,11 @@ extern crate alloc;
 use alloc::boxed::Box;
 use core::arch::wasm32::*;
 
-rill_guest::rill_guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 async fn guest_main() {
     // No lifecycle behaviour: this fixture exists for the exported blur hooks the
-    // host test drives directly. rill_init still runs so the guest loads cleanly.
+    // host test drives directly. keel_init still runs so the guest loads cleanly.
 }
 
 const BYTES_PER_PIXEL: usize = 4;

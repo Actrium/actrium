@@ -7,7 +7,7 @@
 `Engine` 类是中心入口点。为每个逻辑沙箱创建一个实例：
 
 ```tsx
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   timeout: 5000,
@@ -38,7 +38,7 @@ const engine = new Engine({
 
 ## 组件注册
 
-默认情况下，Rill 将 guest 元素映射到标准的 React Native 原语（`View`、`Text`、`Image` 等）。要使自定义 host 组件可供 guest 代码使用，请在引擎上注册它们：
+默认情况下，Keel 将 guest 元素映射到标准的 React Native 原语（`View`、`Text`、`Image` 等）。要使自定义 host 组件可供 guest 代码使用，请在引擎上注册它们：
 
 ```tsx
 import { NativeStepList } from './components/NativeStepList';
@@ -54,7 +54,7 @@ engine.register({
 
 ```tsx
 // Inside guest code
-import { View } from 'rill/guest';
+import { View } from 'keel/guest';
 
 export default function Guest() {
   return (

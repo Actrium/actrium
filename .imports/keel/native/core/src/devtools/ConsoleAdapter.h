@@ -14,7 +14,7 @@
 #include <vector>
 #include <functional>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 // ============================================
 // Console Entry Types
@@ -153,4 +153,4 @@ private:
   CDPServer& server_;
 };
 
-} // namespace rill::devtools
+} // namespace keel::devtools

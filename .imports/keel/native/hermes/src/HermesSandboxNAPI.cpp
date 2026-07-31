@@ -31,13 +31,13 @@
 
 #ifdef _WIN32
 #include <windows.h>
-static void rill_napi_log(const char *tag, const std::string &msg) {
+static void keel_napi_log(const char *tag, const std::string &msg) {
   std::string out = "[" + std::string(tag) + "] " + msg + "\n";
   OutputDebugStringA(out.c_str());
 }
 #else
 #include <cstdio>
-static void rill_napi_log(const char *tag, const std::string &msg) {
+static void keel_napi_log(const char *tag, const std::string &msg) {
   fprintf(stderr, "[%s] %s\n", tag, msg.c_str());
 }
 #endif
@@ -119,7 +119,7 @@ static void drainAllMicrotasks(napi_env env) {
   do {                                                                         \
     napi_status _s = (expr);                                                   \
     if (_s != napi_ok) {                                                       \
-      rill_napi_log(kLogTag, std::string(#expr) + " failed: " +               \
+      keel_napi_log(kLogTag, std::string(#expr) + " failed: " +               \
                                  std::to_string(static_cast<int>(_s)));        \
     }                                                                          \
   } while (0)
@@ -143,7 +143,7 @@ HermesSandboxNAPIContext::EnvScope::EnvScope(napi_env e) : env(e) {
   napi_status s = jsr_open_napi_env_scope(env, &scope);
   if (s != napi_ok) {
     scope = nullptr;
-    rill_napi_log(kLogTag, "EnvScope: jsr_open_napi_env_scope FAILED: " +
+    keel_napi_log(kLogTag, "EnvScope: jsr_open_napi_env_scope FAILED: " +
                   std::to_string(static_cast<int>(s)));
   }
 }
@@ -203,7 +203,7 @@ HermesSandboxNAPIContext::HermesSandboxNAPIContext(jsi::Runtime &hostRuntime,
     installConsole();
   }
   // Scope is now closed - host Hermes TLS is restored.
-  rill_napi_log(kLogTag, "Created new Hermes N-API sandbox context");
+  keel_napi_log(kLogTag, "Created new Hermes N-API sandbox context");
 }
 
 HermesSandboxNAPIContext::~HermesSandboxNAPIContext() { dispose(); }
@@ -232,7 +232,7 @@ void HermesSandboxNAPIContext::dispose() {
     runtime_ = nullptr;
   }
   env_ = nullptr;
-  rill_napi_log(kLogTag, "Disposed N-API sandbox context");
+  keel_napi_log(kLogTag, "Disposed N-API sandbox context");
 }
 
 std::string HermesSandboxNAPIContext::getExceptionMessage() {
@@ -426,7 +426,7 @@ jsi::Value HermesSandboxNAPIContext::napiToJsi(jsi::Runtime &rt,
     napi_ref funcRef = nullptr;
     napi_status refStatus = napi_create_reference(env_, value, 1, &funcRef);
     if (refStatus != napi_ok || !funcRef) {
-      rill_napi_log(kLogTag, "napiToJsi: failed to create ref for sandbox function");
+      keel_napi_log(kLogTag, "napiToJsi: failed to create ref for sandbox function");
       return jsi::Value::undefined();
     }
 
@@ -447,14 +447,14 @@ jsi::Value HermesSandboxNAPIContext::napiToJsi(jsi::Runtime &rt,
           std::lock_guard<std::recursive_mutex> lock(self->mutex_);
           EnvScope scope(self->env_);
           if (!scope.ok()) {
-            rill_napi_log(kLogTag, "sandboxFn: failed to open EnvScope");
+            keel_napi_log(kLogTag, "sandboxFn: failed to open EnvScope");
             return jsi::Value::undefined();
           }
 
           napi_value func;
           napi_get_reference_value(self->env_, funcRef, &func);
           if (!func) {
-            rill_napi_log(kLogTag, "sandboxFn: ref returned null");
+            keel_napi_log(kLogTag, "sandboxFn: ref returned null");
             return jsi::Value::undefined();
           }
 
@@ -476,7 +476,7 @@ jsi::Value HermesSandboxNAPIContext::napiToJsi(jsi::Runtime &rt,
 
           if (callStatus != napi_ok) {
             std::string errMsg = self->getExceptionMessage();
-            rill_napi_log(kLogTag, "sandboxFn call failed: " + errMsg);
+            keel_napi_log(kLogTag, "sandboxFn call failed: " + errMsg);
             return jsi::Value::undefined();
           }
 
@@ -545,7 +545,7 @@ napi_value HermesSandboxNAPIContext::wrapHostFunction(jsi::Runtime &rt,
 
           return self->jsiToNapi(*hostRt, result);
         } catch (const std::exception &e) {
-          rill_napi_log(kLogTag,
+          keel_napi_log(kLogTag,
                         std::string("Host callback error: ") + e.what());
           napi_value undef;
           napi_get_undefined(env, &undef);
@@ -614,7 +614,7 @@ void HermesSandboxNAPIContext::installConsole() {
               msg += "[object]";
             }
           }
-          rill_napi_log(kLogTag, msg);
+          keel_napi_log(kLogTag, msg);
 
           napi_value undef;
           napi_get_undefined(env, &undef);
@@ -754,7 +754,7 @@ jsi::Value HermesSandboxNAPIContext::eval(jsi::Runtime &rt,
 
   if (s != napi_ok) {
     std::string msg = getExceptionMessage();
-    rill_napi_log(kLogTag, "eval failed: " + msg);
+    keel_napi_log(kLogTag, "eval failed: " + msg);
     throw jsi::JSError(rt, "[HermesSandboxNAPI] " + msg);
   }
 
@@ -984,7 +984,7 @@ void HermesSandboxNAPIModule::install(jsi::Runtime &runtime) {
   jsi::Object moduleObj = jsi::Object::createFromHostObject(runtime, module);
   runtime.global().setProperty(runtime, "__HermesSandboxJSI",
                                std::move(moduleObj));
-  rill_napi_log(kLogTag, "Installed __HermesSandboxJSI (N-API backend)");
+  keel_napi_log(kLogTag, "Installed __HermesSandboxJSI (N-API backend)");
 }
 
 } // namespace hermes_sandbox_napi

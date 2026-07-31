@@ -19,7 +19,7 @@ const createMockComponent = (name: string) => {
   const component = (props: any) => React.createElement(name, props);
   Object.defineProperty(component, 'name', { value: `Mock${name}` });
   // biome-ignore lint/suspicious/noExplicitAny: Adding custom property to component for testing
-  (component as any).__rillComponentName = name;
+  (component as any).__keelComponentName = name;
   return component;
 };
 
@@ -181,7 +181,7 @@ function analyzeTree(
   // Get component type
   let typeName = 'unknown';
   if (typeof element.type === 'function') {
-    typeName = element.type.__rillComponentName || element.type.name || 'Function';
+    typeName = element.type.__keelComponentName || element.type.name || 'Function';
     if (typeName.startsWith('Mock')) typeName = typeName.substring(4);
   } else if (typeof element.type === 'string') {
     typeName = element.type;

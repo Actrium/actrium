@@ -6,10 +6,10 @@
  * Licensed under the Apache License, Version 2.0.
  */
 
-// WIP subsystem — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production
-// builds). The debug wasm builds pass -DRILL_WIP_CDP_DEVTOOLS=1 and need these
+// WIP subsystem — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production
+// builds). The debug wasm builds pass -DKEEL_WIP_CDP_DEVTOOLS=1 and need these
 // helpers; a normal Apple pod build leaves an empty TU instead of shipping them.
-#if RILL_WIP_CDP_DEVTOOLS
+#if KEEL_WIP_CDP_DEVTOOLS
 
 #include "cdp_wire.h"
 
@@ -18,7 +18,7 @@
 #include <iomanip>
 #include <sstream>
 
-namespace rill::devtools {
+namespace keel::devtools {
 namespace cdp {
 
 // Quick validation: params must start with '{' and end with '}'. Not a full JSON
@@ -323,6 +323,6 @@ std::optional<std::string> parseJSONStringTopLevel(const std::string& json,
 }
 
 }  // namespace cdp
-}  // namespace rill::devtools
+}  // namespace keel::devtools
 
-#endif  // RILL_WIP_CDP_DEVTOOLS
+#endif  // KEEL_WIP_CDP_DEVTOOLS

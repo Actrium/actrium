@@ -517,16 +517,16 @@
   });
   binCtx.eval(
     'var ab = new ArrayBuffer(4); var w = new Uint8Array(ab); ' +
-      'w[0] = 0x52; w[1] = 0x49; w[2] = 0x4c; w[3] = 0x4c; sendBinary(ab);'
+      'w[0] = 0x4b; w[1] = 0x45; w[2] = 0x45; w[3] = 0x4c; sendBinary(ab);'
   );
   assert(gotBatch instanceof ArrayBuffer, 'sandbox ArrayBuffer arrives as host ArrayBuffer');
   var gotBytes = gotBatch instanceof ArrayBuffer ? new Uint8Array(gotBatch) : null;
   assert(
     gotBytes &&
       gotBytes.length === 4 &&
-      gotBytes[0] === 0x52 &&
-      gotBytes[1] === 0x49 &&
-      gotBytes[2] === 0x4c &&
+      gotBytes[0] === 0x4b &&
+      gotBytes[1] === 0x45 &&
+      gotBytes[2] === 0x45 &&
       gotBytes[3] === 0x4c,
     'ArrayBuffer bytes survive the boundary intact'
   );
@@ -556,7 +556,7 @@
   binCtx.inject('getFakeView', () => ({
     constructor: { name: 'Uint8Array' },
     buffer: new ArrayBuffer(4),
-    byteOffset: Math.pow(2, 64),
+    byteOffset: 2 ** 64,
     byteLength: 2,
   }));
   assert(

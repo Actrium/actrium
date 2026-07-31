@@ -1,5 +1,5 @@
 /**
- * ios-demo - React Native + rill sandbox testing
+ * ios-demo - React Native + keel sandbox testing
  */
 
 import React from 'react';
@@ -10,11 +10,11 @@ if (Platform.OS === 'macos') {
   LogBox.ignoreAllLogs(true);
 }
 
-// Install rill sandbox JSI bindings on Android (bridgeless runtime)
+// Install keel sandbox JSI bindings on Android (bridgeless runtime)
 if (Platform.OS === 'android') {
   try {
-    NativeModules.RillSandboxNative?.installEngine?.('auto') ??
-      NativeModules.RillSandboxNative?.install?.();
+    NativeModules.KeelSandboxNative?.installEngine?.('auto') ??
+      NativeModules.KeelSandboxNative?.install?.();
   } catch (e) {
     console.warn('[ios-demo] Failed to install sandbox bindings:', e);
   }
@@ -68,6 +68,6 @@ const WrappedApp = (props: Record<string, unknown>) => (
 );
 
 // Register the app
-AppRegistry.registerComponent('RillDemo', () => WrappedApp);
+AppRegistry.registerComponent('KeelDemo', () => WrappedApp);
 
-console.log('[ios-demo] App registered as RillDemo');
+console.log('[ios-demo] App registered as KeelDemo');

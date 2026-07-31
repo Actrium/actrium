@@ -2,7 +2,7 @@
 //  ContentView.swift
 //  ios-demo
 //
-//  Main UI for testing rill sandbox across different engine configurations
+//  Main UI for testing keel sandbox across different engine configurations
 //
 
 import SwiftUI
@@ -17,7 +17,7 @@ struct ConfigurationBanner: View {
                 Text("Mode")
                     .font(.caption2)
                     .foregroundColor(.secondary)
-                Text(RillConfiguration.modeName())
+                Text(KeelConfiguration.modeName())
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundColor(.primary)
@@ -30,7 +30,7 @@ struct ConfigurationBanner: View {
                 Text("Sandbox")
                     .font(.caption2)
                     .foregroundColor(.secondary)
-                Text(RillConfiguration.sandboxEngineName())
+                Text(KeelConfiguration.sandboxEngineName())
                     .font(.caption)
                     .fontWeight(.semibold)
                     .foregroundColor(.primary)
@@ -59,17 +59,17 @@ struct ReactNativeContainerView: UIViewRepresentable {
         let env = ProcessInfo.processInfo.environment
         var initialProperties: [String: Any] = [:]
 
-        if env["RILL_IOS_E2E"] == "1" {
-            initialProperties["rillE2E"] = true
+        if env["KEEL_IOS_E2E"] == "1" {
+            initialProperties["keelE2E"] = true
         }
 
-        if let sandboxTarget = env["RILL_SANDBOX_TARGET"], !sandboxTarget.isEmpty {
-            initialProperties["rillSandbox"] = sandboxTarget
+        if let sandboxTarget = env["KEEL_SANDBOX_TARGET"], !sandboxTarget.isEmpty {
+            initialProperties["keelSandbox"] = sandboxTarget
         }
 
         let factory = ReactNativeFactory.sharedInstance()
         let rootView = factory.createRootView(
-            withModuleName: "RillDemo",
+            withModuleName: "KeelDemo",
             initialProperties: initialProperties.isEmpty ? nil : initialProperties
         )
         rootView.translatesAutoresizingMaskIntoConstraints = false

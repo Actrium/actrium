@@ -1,6 +1,6 @@
 # Sandbox Engine Selection & Configuration
 
-Rill supports multiple sandbox backends to run guest bundles in isolation. Each backend targets a specific platform and offers different trade-offs in isolation strength, binary size overhead, and runtime performance.
+Keel supports multiple sandbox backends to run guest bundles in isolation. Each backend targets a specific platform and offers different trade-offs in isolation strength, binary size overhead, and runtime performance.
 
 Note: provider implementations are **internal** (not exported, not user-injectable). The only supported public switch is `EngineOptions.sandbox`.
 
@@ -23,7 +23,7 @@ Note: provider implementations are **internal** (not exported, not user-injectab
 Uses the platform JavaScriptCore engine available on Apple platforms. No additional binary is bundled because JSC ships with iOS and macOS.
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'jsc',
@@ -44,7 +44,7 @@ const engine = new Engine({
 Uses the Hermes engine that ships with React Native. When the host app already runs on Hermes, this provider reuses the same engine binary and avoids any extra weight.
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'hermes',
@@ -65,7 +65,7 @@ const engine = new Engine({
 A lightweight, embeddable JavaScript engine compiled as a native library. Works on all React Native platforms regardless of which JS engine the host app uses.
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'quickjs',
@@ -86,7 +86,7 @@ const engine = new Engine({
 A WebAssembly build of QuickJS for browser and web-worker environments.
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'wasm-quickjs',
@@ -107,7 +107,7 @@ const engine = new Engine({
 Uses the built-in `node:vm` module. Available in Node.js and Bun environments -- primarily for server-side rendering, testing, and development.
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'node-vm',
@@ -125,11 +125,11 @@ const engine = new Engine({
 
 ## DefaultProvider Auto-Selection
 
-When no explicit `sandbox` option is provided, Rill selects the best available provider automatically using the following priority:
+When no explicit `sandbox` option is provided, Keel selects the best available provider automatically using the following priority:
 
 | Condition | Selected Provider |
 |---|---|
-| React Native with Hermes (`RILL_SANDBOX_ENGINE=hermes`) | `HermesProvider` |
+| React Native with Hermes (`KEEL_SANDBOX_ENGINE=hermes`) | `HermesProvider` |
 | Apple platform (iOS / macOS) | `JSCProvider` |
 | Any other React Native platform | `QuickJSProvider` |
 | Node.js or Bun runtime | `NodeVMProvider` |

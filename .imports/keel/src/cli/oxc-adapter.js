@@ -134,7 +134,7 @@ function analyzeModuleIDs(code) {
 }
 
 /**
- * Analyze Rill host module imports and Guest exports.
+ * Analyze Keel host module imports and Guest exports.
  *
  * Static named imports are the only accepted host import shape:
  *   import { openProfile } from 'host:navigation'
@@ -167,7 +167,7 @@ function analyzeHostBoundary(code) {
   try {
     const result = oxc.parseSync(code, {
       sourceType: 'module',
-      sourceFilename: 'rill-guest-boundary.tsx',
+      sourceFilename: 'keel-guest-boundary.tsx',
     });
 
     if (result.errors && result.errors.length > 0) {

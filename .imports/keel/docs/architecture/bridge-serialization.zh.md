@@ -69,9 +69,9 @@ fn_<instanceId>_<counter>
 
 ### Guest 环境共享
 
-在 guest 沙箱中,`CallbackRegistry` 检测 `globalThis.__RILL_GUEST_ENV__ === true` 并直接共享 `globalThis.__rill.callbacks` Map。这确保了 reconciler 注册的函数可以被 `__rill.invokeCallback` 访问,而不会出现跨模块协调问题。
+在 guest 沙箱中,`CallbackRegistry` 检测 `globalThis.__KEEL_GUEST_ENV__ === true` 并直接共享 `globalThis.__keel.callbacks` Map。这确保了 reconciler 注册的函数可以被 `__keel.invokeCallback` 访问,而不会出现跨模块协调问题。
 
-导出全局单例(`globalCallbackRegistry`)并安装在 `globalThis.__rillGlobalCallbackRegistry` 上,以确保所有打包模块之间有单个实例。
+导出全局单例(`globalCallbackRegistry`)并安装在 `globalThis.__keelGlobalCallbackRegistry` 上,以确保所有打包模块之间有单个实例。
 
 ### 方法
 
@@ -83,7 +83,7 @@ fn_<instanceId>_<counter>
 | `invoke(fnId, args)` | 查找并调用函数 |
 | `has(fnId)` | 检查 fnId 是否已注册 |
 | `clear()` | 删除所有注册 |
-| `getMap()` | 访问内部 Map(用于 `globalThis.__rill.callbacks` 同步) |
+| `getMap()` | 访问内部 Map(用于 `globalThis.__keel.callbacks` 同步) |
 | `size` | 已注册函数的数量 |
 
 ## bridge.ts: 双向通信
@@ -106,7 +106,7 @@ new Bridge({
 ### Guest 到 Host 流程
 
 ```
-Guest __rill_sendBatch(batch)
+Guest __keel_sendBatch(batch)
   -> Bridge.sendRawBatch(batch)
   -> 通过 TypeRules 解码序列化的属性(函数变为可调用代理)
   -> 提取 fnIds 用于 Receiver 跟踪(_fnIds 注释)
@@ -122,7 +122,7 @@ Engine.sendToSandbox(message)
   -> 通过 TypeRules 编码参数(函数变为 { __type: 'function', __fnId })
   -> onHostMessage(encodedMessage)
   -> context.inject + evalCode
-  -> Guest __rill_handleMessage
+  -> Guest __keel_handleMessage
 ```
 
 ### 传输模式

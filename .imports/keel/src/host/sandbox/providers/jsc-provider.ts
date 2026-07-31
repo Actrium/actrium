@@ -1,6 +1,6 @@
 /**
  * JSCProvider stub for non-native environments
- * JSCProvider requires native JSI bindings (via @rill/sandbox-native)
+ * JSCProvider requires native JSI bindings (via @keel/sandbox-native)
  */
 
 import type { JSEngineProvider } from '../types/provider';

@@ -24,7 +24,7 @@
 
 const params = new URLSearchParams(location.search);
 const relayUrl = params.get('relay');
-const GUEST_ID = 'rill-guest';
+const GUEST_ID = 'keel-guest';
 
 interface PageWindow {
   __cdpReady?: boolean;
@@ -85,7 +85,7 @@ function openAgent() {
   agent = ws;
   ws.onopen = () => {
     // First frame MUST be the registration handshake (relay contract).
-    ws.send(JSON.stringify({ type: 'register', id: GUEST_ID, title: 'Rill Guest', url: 'rill://guest' }));
+    ws.send(JSON.stringify({ type: 'register', id: GUEST_ID, title: 'Keel Guest', url: 'keel://guest' }));
     registered = true;
     w.__cdpReady = true;
     flushOutbound();

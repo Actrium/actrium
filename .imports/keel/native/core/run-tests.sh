@@ -1,5 +1,5 @@
 #!/bin/bash
-# Rill Core Native Tests - One-shot runner
+# Keel Core Native Tests - One-shot runner
 # Builds and runs core C++ tests (TimerWheel, TenantThread, ThreadPool, TenantContext, TenantRegistry).
 
 set -euo pipefail
@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 echo "======================================"
-echo "  Rill Core Native Tests"
+echo "  Keel Core Native Tests"
 echo "======================================"
 echo ""
 

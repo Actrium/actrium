@@ -41,7 +41,7 @@ The binary protocol addresses these with:
 
 ```
 Offset  Size  Field        Description
-0       4     magic        0x4C4C4952 ("RILL" in little-endian)
+0       4     magic        0x4C45454B ("KEEL" in little-endian)
 4       2     version      Protocol version (currently 1)
 6       4     batchId      Batch sequence number
 10      2     opCount      Number of operations in this batch
@@ -156,7 +156,7 @@ Decodes binary data on the host side:
 
 ### BinaryEncoder (TypeScript) -- `src/guest/runtime/reconciler/binary-encoder.ts`
 
-Guest-side encoder that produces `ArrayBuffer` from operation batches. Used when the guest reconciler is configured for binary output. The `ArrayBuffer` is passed directly through `__rill_sendBatch` and detected by Bridge for binary-mode processing.
+Guest-side encoder that produces `ArrayBuffer` from operation batches. Used when the guest reconciler is configured for binary output. The `ArrayBuffer` is passed directly through `__keel_sendBatch` and detected by Bridge for binary-mode processing.
 
 ### BinaryProtocol (TypeScript) -- `src/shared/bridge/binary-protocol.ts`
 
@@ -168,7 +168,7 @@ The decoder reports structured errors via `DecodeError` enum:
 
 | Error | Description |
 |---|---|
-| `INVALID_MAGIC` | First 4 bytes do not match `0x4C4C4952` |
+| `INVALID_MAGIC` | First 4 bytes do not match `0x4C45454B` |
 | `VERSION_MISMATCH` | Protocol version not supported |
 | `TRUNCATED_HEADER` | Buffer too small for 16-byte header |
 | `TRUNCATED_DATA` | Buffer ends mid-operation |

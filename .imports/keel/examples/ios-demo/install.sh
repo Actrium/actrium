@@ -185,9 +185,9 @@ project_has_sandbox_config() {
     local macro=""
 
     case "$sandbox" in
-        jsc) macro="RILL_SANDBOX_JSC=1" ;;
-        hermes) macro="RILL_SANDBOX_HERMES=1" ;;
-        quickjs) macro="RILL_SANDBOX_QUICKJS=1" ;;
+        jsc) macro="KEEL_SANDBOX_JSC=1" ;;
+        hermes) macro="KEEL_SANDBOX_HERMES=1" ;;
+        quickjs) macro="KEEL_SANDBOX_QUICKJS=1" ;;
         *) return 1 ;;
     esac
 
@@ -219,7 +219,7 @@ for CONFIG in "${CONFIGS_TO_INSTALL[@]}"; do
     esac
 
     BUNDLE_ID="${BASE_BUNDLE_ID}.${MODE}.${SANDBOX}"
-    APP_DISPLAY_NAME="rill-Bridgeless-${SANDBOX_DISPLAY}"
+    APP_DISPLAY_NAME="keel-Bridgeless-${SANDBOX_DISPLAY}"
     SCHEME="ios-demo (Bridgeless+${SANDBOX_DISPLAY})"
     BUILD_DIR="$HOME/Library/Developer/Xcode/DerivedData/ios-demo-${MODE}-${SANDBOX}"
 
@@ -232,7 +232,7 @@ for CONFIG in "${CONFIGS_TO_INSTALL[@]}"; do
     ensure_codegen_placeholders
 
     # Switch configuration (pod install) — skip if cached for this sandbox engine
-    CACHE_FILE=".rill_pod_cache"
+    CACHE_FILE=".keel_pod_cache"
     CURRENT_KEY="${SANDBOX}"
     if [ -f "$CACHE_FILE" ] && [ "$(cat "$CACHE_FILE")" = "$CURRENT_KEY" ] && [ -d "Pods" ] && project_has_sandbox_config "$SANDBOX"; then
         echo "[${CONFIG}] Pods cached for $SANDBOX, skipping pod install"
@@ -241,14 +241,14 @@ for CONFIG in "${CONFIGS_TO_INSTALL[@]}"; do
         POD_LOG="/tmp/ios-demo-pods-${MODE}-${SANDBOX}.log"
         if [ "$VERBOSE" -eq 1 ]; then
             POD_CMD=(pod install)
-            if ! (RILL_SANDBOX=$SANDBOX "${POD_CMD[@]}" 2>&1 | tee "$POD_LOG"); then
+            if ! (KEEL_SANDBOX=$SANDBOX "${POD_CMD[@]}" 2>&1 | tee "$POD_LOG"); then
                 FAILED+=("$CONFIG")
                 echo "[${CONFIG}] Pod install failed (see $POD_LOG)"
                 echo ""
                 continue
             fi
         else
-            if ! (RILL_SANDBOX=$SANDBOX pod install >"$POD_LOG" 2>&1); then
+            if ! (KEEL_SANDBOX=$SANDBOX pod install >"$POD_LOG" 2>&1); then
                 FAILED+=("$CONFIG")
                 echo "[${CONFIG}] Pod install failed (see $POD_LOG)"
                 tail -n 40 "$POD_LOG" || true

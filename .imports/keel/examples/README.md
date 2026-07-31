@@ -1,6 +1,6 @@
-# Rill Examples
+# Keel Examples
 
-Example applications demonstrating the rill SDK across different platforms.
+Example applications demonstrating the keel SDK across different platforms.
 
 ## Examples
 
@@ -13,25 +13,25 @@ Example applications demonstrating the rill SDK across different platforms.
 
 ## Dependency Resolution
 
-Examples reference `rill` via relative `file:` paths, not npm registry:
+Examples reference `keel` via relative `file:` paths, not npm registry:
 
-| Example | rill dependency |
+| Example | keel dependency |
 |---------|----------------|
-| `ios-demo/RCTNApps` | `"rill": "file:../../../"` |
+| `ios-demo/RCTNApps` | `"keel": "file:../../../"` |
 
-This ensures examples always use the local checkout of rill.
+This ensures examples always use the local checkout of keel.
 
 ## Package Exports Reference
 
-Guest bundles import from `rill/guest`:
+Guest bundles import from `keel/guest`:
 
 ```tsx
-import { View, Text, useHostEvent, useSendToHost, useConfig } from 'rill/guest';
+import { View, Text, useHostEvent, useSendToHost, useConfig } from 'keel/guest';
 ```
 
-Host apps import from `rill/host` and `rill/host/preset`:
+Host apps import from `keel/host` and `keel/host/preset`:
 
 ```tsx
-import { Engine } from 'rill/host';
-import { DefaultComponents, EngineView } from 'rill/host/preset';
+import { Engine } from 'keel/host';
+import { DefaultComponents, EngineView } from 'keel/host/preset';
 ```

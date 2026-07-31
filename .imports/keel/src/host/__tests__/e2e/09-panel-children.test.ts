@@ -44,7 +44,7 @@ describe('PanelMarker with askit Panel pattern', () => {
     // This exactly mimics askit/src/ui/Panel/Panel.guest.tsx
     const guestCode = `
       var React = require('react');
-      var render = require('rill/reconciler').render;
+      var render = require('keel/reconciler').render;
 
       // createGuestComponent returns the string type name
       // This is what askit's guest-factory.ts does
@@ -98,7 +98,7 @@ describe('PanelMarker with askit Panel pattern', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -140,7 +140,7 @@ describe('PanelMarker with askit Panel pattern', () => {
     // This mimics the compiled JSX: jsx(PanelMarker, {panelId: side, children: children})
     const guestCode = `
       var React = require('react');
-      var render = require('rill/reconciler').render;
+      var render = require('keel/reconciler').render;
 
       // jsx() passes children in props, not as rest args
       var jsx = function(type, props) {
@@ -168,7 +168,7 @@ describe('PanelMarker with askit Panel pattern', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -206,7 +206,7 @@ describe('PanelMarker Children Rendering', () => {
     // This simulates the jsx() pattern where children are passed in props
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       // Simulating Panel.Left - a function component that wraps children in PanelMarker
       function PanelLeft({ children }) {
@@ -226,7 +226,7 @@ describe('PanelMarker Children Rendering', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -261,7 +261,7 @@ describe('PanelMarker Children Rendering', () => {
     // More complex case: jsx(Panel.Left, {children: jsx(ScrollView, {...}, jsx(Text, ...))})
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       // Panel.Left implementation
       function PanelLeft({ children }) {
@@ -299,7 +299,7 @@ describe('PanelMarker Children Rendering', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -339,7 +339,7 @@ describe('PanelMarker Children Rendering', () => {
     // This is the exact pattern used by jsxs(): jsx(type, {children: [...], ...props})
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         // Simulating: jsxs('View', {style: {flex:1}, children: [child1, child2]})
@@ -354,7 +354,7 @@ describe('PanelMarker Children Rendering', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -375,7 +375,7 @@ describe('PanelMarker Children Rendering', () => {
     // jsx(PanelMarker, {panelId: "left", children: someElement})
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         // Simulating: f.jsx(d, {panelId: "left", children: z})
@@ -394,7 +394,7 @@ describe('PanelMarker Children Rendering', () => {
         return React.createElement('View', { testID: 'root' }, panelElement);
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);

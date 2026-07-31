@@ -134,7 +134,7 @@ describe('E2E Test Infrastructure', () => {
 
   it('should capture events from guest', async () => {
     const guestCode = `
-      globalThis.__rill_emitEvent('TEST_EVENT', { value: 123 });
+      globalThis.__keel_emitEvent('TEST_EVENT', { value: 123 });
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -194,7 +194,7 @@ describe('E2E Test Helpers Integration', () => {
   it('should find nodes by testID after rendering', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement(
@@ -204,7 +204,7 @@ describe('E2E Test Helpers Integration', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -229,7 +229,7 @@ describe('E2E Test Helpers Integration', () => {
   it('should find nodes by type', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement(
@@ -240,7 +240,7 @@ describe('E2E Test Helpers Integration', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -256,20 +256,20 @@ describe('E2E Test Helpers Integration', () => {
   it('should verify function props exist', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement(
           'TouchableOpacity',
           {
             testID: 'button',
-            onPress: () => globalThis.__rill_emitEvent('PRESS')
+            onPress: () => globalThis.__keel_emitEvent('PRESS')
           },
           React.createElement('Text', {}, 'Click Me')
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);

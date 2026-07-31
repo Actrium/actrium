@@ -11,7 +11,7 @@ import {
   KBD_EVENT,
   KBD_SUBSCRIBE,
   KBD_UNSUBSCRIBE,
-  type RillKeyEvent,
+  type KeelKeyEvent,
 } from '../../../shared/keyboard';
 import type { GuestMessage } from '../../engine';
 import { attachKeyboard, type KeyboardBridgeEngine, type KeyboardTarget } from '../keyboard';
@@ -132,7 +132,7 @@ describe('attachKeyboard', () => {
     expect(event.defaultPrevented).toBe(true);
     expect(engine.sent).toHaveLength(1);
     expect(engine.sent[0]?.name).toBe(KBD_EVENT);
-    const forwarded = engine.sent[0]?.payload as RillKeyEvent;
+    const forwarded = engine.sent[0]?.payload as KeelKeyEvent;
     expect(forwarded).toEqual({
       type: 'keydown',
       key: 'Enter',
@@ -173,8 +173,8 @@ describe('attachKeyboard', () => {
     target.dispatch('keydown', { key: 'a' });
     target.dispatch('keyup', { key: 'ArrowDown' });
 
-    expect(engine.sent.map((s) => (s.payload as RillKeyEvent).key)).toEqual(['a', 'ArrowDown']);
-    expect((engine.sent[1]?.payload as RillKeyEvent).type).toBe('keyup');
+    expect(engine.sent.map((s) => (s.payload as KeelKeyEvent).key)).toEqual(['a', 'ArrowDown']);
+    expect((engine.sent[1]?.payload as KeelKeyEvent).type).toBe('keyup');
   });
 
   it('preventDefaultKeys always suppress and forward, even without a guest subscription', () => {
@@ -184,7 +184,7 @@ describe('attachKeyboard', () => {
 
     expect(event.defaultPrevented).toBe(true);
     expect(engine.sent).toHaveLength(1);
-    expect((engine.sent[0]?.payload as RillKeyEvent).key).toBe('Tab');
+    expect((engine.sent[0]?.payload as KeelKeyEvent).key).toBe('Tab');
   });
 
   it('preventDefault is the OR across subscriptions for the same key', () => {
@@ -239,11 +239,11 @@ describe('attachKeyboard', () => {
 
     // A keydown produced while an IME is composing (e.g. key "Process").
     target.dispatch('keydown', { key: 'Process', code: 'KeyN', isComposing: true });
-    expect((engine.sent[0]?.payload as RillKeyEvent).isComposing).toBe(true);
+    expect((engine.sent[0]?.payload as KeelKeyEvent).isComposing).toBe(true);
 
     // A normal keydown outside composition reports false.
     target.dispatch('keydown', { key: 'a', code: 'KeyA' });
-    expect((engine.sent[1]?.payload as RillKeyEvent).isComposing).toBe(false);
+    expect((engine.sent[1]?.payload as KeelKeyEvent).isComposing).toBe(false);
   });
 
   it('detach removes listeners, drops the message subscription, and stops forwarding', () => {

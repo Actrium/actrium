@@ -1,6 +1,6 @@
 # 贡献指南
 
-感谢你对 Rill 的兴趣！
+感谢你对 Keel 的兴趣！
 
 [English Version](./CONTRIBUTING.md)
 
@@ -13,8 +13,8 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/GoAskAway/rill.git
-cd rill
+git clone https://github.com/Actrium/keel.git
+cd keel
 
 # 安装依赖
 bun install
@@ -87,7 +87,7 @@ git push origin feature/your-feature-name
 ## 项目结构
 
 ```
-rill/
+keel/
 ├── src/
 │   ├── runtime/        # Host 运行时 (Engine, Receiver)
 │   ├── let/            # Guest SDK (组件、Hooks)
@@ -124,4 +124,4 @@ rill/
 ## 需要帮助？
 
 - [项目文档](../README.md)
-- [报告问题](https://github.com/GoAskAway/rill/issues)
+- [报告问题](https://github.com/Actrium/keel/issues)

@@ -111,7 +111,7 @@ describe('Engine', () => {
 
     it('should pass initial props as config', async () => {
       const bundleCode = `
-        const config = __rill_getConfig();
+        const config = __keel_getConfig();
         console.log(config.theme);
       `;
 
@@ -433,10 +433,10 @@ describe('Engine Runtime API', () => {
     engine.destroy();
   });
 
-  it('should provide __rill_getConfig API', async () => {
+  it('should provide __keel_getConfig API', async () => {
     await engine.loadBundle(
       `
-      const config = __rill_getConfig();
+      const config = __keel_getConfig();
       console.log(config.theme);
     `,
       { theme: 'dark' }
@@ -445,11 +445,11 @@ describe('Engine Runtime API', () => {
     expect(engine.isLoaded).toBe(true);
   });
 
-  it('should provide __rill_sendBatch API', async () => {
+  it('should provide __keel_sendBatch API', async () => {
     const _receiver = engine.createReceiver();
 
     await engine.loadBundle(`
-      __rill_sendBatch({
+      __keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: []

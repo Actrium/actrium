@@ -28,7 +28,7 @@
  *     silently-wrapped length.
  *
  * INTEGRATION STATUS: experimental. The live transport default is still JSON;
- * this decoder is reached only behind the WasmGuestHost `binaryOpBatch` gate
+ * this decoder is reached only behind the NativeGuestHost `binaryOpBatch` gate
  * (WIP, default off) on the native-guest render channel. This file changes no
  * defaults — it is here for the gated route, benchmarking, and eventual
  * promotion.
@@ -45,7 +45,7 @@ import type {
 // Wire constants (locked to contracts/op-batch-wire.json)
 // ============================================
 
-const RILL_MAGIC = 0x4c4c4952; // 'RILL', u32 LE
+const KEEL_MAGIC = 0x4c45454b; // 'KEEL', u32 LE
 const PROTOCOL_VERSION = 1;
 const HEADER_SIZE = 16;
 
@@ -229,7 +229,7 @@ class WireDecoder {
     }
 
     const magic = this.readU32();
-    if (magic !== RILL_MAGIC) {
+    if (magic !== KEEL_MAGIC) {
       throw new WireDecodeError(`Invalid magic: 0x${(magic >>> 0).toString(16)}`, 0);
     }
 

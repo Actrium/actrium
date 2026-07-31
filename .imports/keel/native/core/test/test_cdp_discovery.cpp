@@ -18,8 +18,8 @@
 #include <unordered_map>
 #include <vector>
 
-using namespace rill::devtools;
-using namespace rill::test;
+using namespace keel::devtools;
+using namespace keel::test;
 
 namespace {
 
@@ -184,7 +184,7 @@ TestSuite createCDPDiscoveryTests() {
     CDPServer server(cfg);
     HttpResponse r = server.handleDiscoveryRequest("GET", "/json/version");
     assertEqual(r.status, 200, "200");
-    assertTrue(r.body.find("Rill/1.0") != std::string::npos, "browser");
+    assertTrue(r.body.find("Keel/1.0") != std::string::npos, "browser");
     assertTrue(r.body.find("Protocol-Version") != std::string::npos, "protocol version");
     // A single ROOT url with a trailing slash and no tenant path.
     assertTrue(r.body.find("\"ws://127.0.0.1:9229/\"") != std::string::npos, "root ws url");
@@ -227,7 +227,7 @@ TestSuite createCDPDiscoveryTests() {
     CDPServer server;
     server.registerTenant(2, "App B");
     assertTrue(server.handleHttpRequest("/json").find("App B") != std::string::npos, "body for /json");
-    assertTrue(server.handleHttpRequest("/json/version").find("Rill/1.0") != std::string::npos, "version body");
+    assertTrue(server.handleHttpRequest("/json/version").find("Keel/1.0") != std::string::npos, "version body");
     assertEqual(server.handleHttpRequest("/nope"), std::string(), "404 -> empty");
   }});
 

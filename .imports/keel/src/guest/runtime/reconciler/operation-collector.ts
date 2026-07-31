@@ -5,7 +5,7 @@
 
 import type { SendToHost, SerializedOperation, SerializedOperationBatch } from '../../../sdk/types';
 
-// Max entries kept in the globalThis.__rill_drain_diag debug buffer (oldest dropped first).
+// Max entries kept in the globalThis.__keel_drain_diag debug buffer (oldest dropped first).
 const DIAG_BUFFER_LIMIT = 200;
 
 export class OperationCollector {
@@ -16,7 +16,7 @@ export class OperationCollector {
 
   private isDebugEnabled(): boolean {
     try {
-      return Boolean((globalThis as Record<string, unknown>).__RILL_RECONCILER_DEBUG__);
+      return Boolean((globalThis as Record<string, unknown>).__KEEL_RECONCILER_DEBUG__);
     } catch {
       return false;
     }
@@ -35,7 +35,7 @@ export class OperationCollector {
     if (this.isDebugEnabled()) {
       const len = this.operations.length;
       if (len <= 10 || len % 50 === 0) {
-        console.log('[rill:reconciler] add op', op.op, 'len', len);
+        console.log('[keel:reconciler] add op', op.op, 'len', len);
       }
     }
   }
@@ -52,18 +52,18 @@ export class OperationCollector {
     this._flushing = true;
 
     try {
-      // Diagnostic accumulator: write to globalThis.__rill_drain_diag for HOST readout.
+      // Diagnostic accumulator: write to globalThis.__keel_drain_diag for HOST readout.
       // Debug-only; buffer is capped at DIAG_BUFFER_LIMIT entries (oldest dropped first).
       if (this.isDebugEnabled()) {
         try {
-          let diag = (globalThis as Record<string, unknown>).__rill_drain_diag as
+          let diag = (globalThis as Record<string, unknown>).__keel_drain_diag as
             | string[]
             | undefined;
           if (!diag) {
             diag = [];
-            (globalThis as Record<string, unknown>).__rill_drain_diag = diag;
+            (globalThis as Record<string, unknown>).__keel_drain_diag = diag;
           }
-          diag.push(`${Date.now()}:[rill:reconciler] flush ops=${this.operations.length}`);
+          diag.push(`${Date.now()}:[keel:reconciler] flush ops=${this.operations.length}`);
           if (diag.length > DIAG_BUFFER_LIMIT) {
             diag.splice(0, diag.length - DIAG_BUFFER_LIMIT);
           }
@@ -74,27 +74,27 @@ export class OperationCollector {
 
       if (this.operations.length === 0) {
         if (this.isDebugEnabled()) {
-          console.warn('[rill:reconciler] flush called with 0 ops');
+          console.warn('[keel:reconciler] flush called with 0 ops');
         }
         return;
       }
 
       const opLen = this.operations.length;
       const debug = this.isDebugEnabled();
-      if (debug) console.log('[rill:reconciler] flush ops=', opLen);
+      if (debug) console.log('[keel:reconciler] flush ops=', opLen);
 
       // Keep the console usable: no per-op detail unless debug mode asked for it
       if (debug) {
         try {
           if (opLen <= 30) {
-            console.log('[rill:reconciler] ops detail', JSON.stringify(this.operations));
+            console.log('[keel:reconciler] ops detail', JSON.stringify(this.operations));
           } else {
             const opCounts: Record<string, number> = {};
             for (const op of this.operations) {
               opCounts[op.op] = (opCounts[op.op] || 0) + 1;
             }
-            console.log('[rill:reconciler] opCounts', JSON.stringify(opCounts));
-            console.log('[rill:reconciler] ops head', JSON.stringify(this.operations.slice(0, 5)));
+            console.log('[keel:reconciler] opCounts', JSON.stringify(opCounts));
+            console.log('[keel:reconciler] ops head', JSON.stringify(this.operations.slice(0, 5)));
           }
         } catch {
           // ignore

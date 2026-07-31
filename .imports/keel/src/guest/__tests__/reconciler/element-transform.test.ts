@@ -182,16 +182,16 @@ describe('element-transform', () => {
       // cost 100-500ms due to circular ref traversal (see PERF comment in source).
       // Debug mode is now only used in reconciler-manager.ts render() entry point.
       const globalState = globalThis as Record<string, unknown>;
-      const originalDebug = globalState.__RILL_RECONCILER_DEBUG__;
+      const originalDebug = globalState.__KEEL_RECONCILER_DEBUG__;
 
       try {
-        globalState.__RILL_RECONCILER_DEBUG__ = true;
+        globalState.__KEEL_RECONCILER_DEBUG__ = true;
 
         const mockElement = {
           $$typeof: Symbol.for('react.element'),
           type: 'div',
           props: { children: 'test' },
-          __rillTypeMarker: 'string',
+          __keelTypeMarker: 'string',
         };
 
         // Should not throw even with debug enabled
@@ -199,23 +199,23 @@ describe('element-transform', () => {
           transformGuestElement(mockElement as never);
         }).not.toThrow();
       } finally {
-        globalState.__RILL_RECONCILER_DEBUG__ = originalDebug;
+        globalState.__KEEL_RECONCILER_DEBUG__ = originalDebug;
       }
     });
 
     test('should handle logging failures gracefully', () => {
       const globalState = globalThis as Record<string, unknown>;
-      const originalDebug = globalState.__RILL_RECONCILER_DEBUG__;
+      const originalDebug = globalState.__KEEL_RECONCILER_DEBUG__;
 
       try {
-        globalState.__RILL_RECONCILER_DEBUG__ = true;
+        globalState.__KEEL_RECONCILER_DEBUG__ = true;
 
         // Create element with props that might cause logging errors
         const mockElement = {
           $$typeof: Symbol.for('react.element'),
           type: 'div',
           props: null, // This might cause issues in logging
-          __rillTypeMarker: 'string',
+          __keelTypeMarker: 'string',
         };
 
         // Should not throw
@@ -223,7 +223,7 @@ describe('element-transform', () => {
           transformGuestElement(mockElement as never);
         }).not.toThrow();
       } finally {
-        globalState.__RILL_RECONCILER_DEBUG__ = originalDebug;
+        globalState.__KEEL_RECONCILER_DEBUG__ = originalDebug;
       }
     });
 
@@ -232,7 +232,7 @@ describe('element-transform', () => {
         $$typeof: Symbol.for('react.element'),
         type: 'div',
         props: { children: 'test' },
-        __rillTypeMarker: 'string',
+        __keelTypeMarker: 'string',
       };
 
       const result = transformGuestElement(mockElement as never, 'auto-key-123');
@@ -243,7 +243,7 @@ describe('element-transform', () => {
       const mockElement = {
         $$typeof: Symbol.for('react.element'),
         type: 'div',
-        __rillTypeMarker: 'string',
+        __keelTypeMarker: 'string',
       };
 
       const result = transformGuestElement(mockElement as never);
@@ -261,12 +261,12 @@ describe('element-transform', () => {
               $$typeof: Symbol.for('react.element'),
               type: 'span',
               props: { children: 'nested' },
-              __rillTypeMarker: 'string',
+              __keelTypeMarker: 'string',
             },
             null,
           ],
         },
-        __rillTypeMarker: 'string',
+        __keelTypeMarker: 'string',
       };
 
       expect(() => {
@@ -276,10 +276,10 @@ describe('element-transform', () => {
   });
 
   describe('Fragment Handling', () => {
-    test('should transform Fragment with __rillFragmentType marker', () => {
+    test('should transform Fragment with __keelFragmentType marker', () => {
       const fragmentElement = {
-        __rillTypeMarker: '__rill_react_element__',
-        __rillFragmentType: '__rill_react_fragment__',
+        __keelTypeMarker: '__keel_react_element__',
+        __keelFragmentType: '__keel_react_fragment__',
         type: 'fragment-placeholder',
         props: {
           children: ['child1', 'child2'],
@@ -298,7 +298,7 @@ describe('element-transform', () => {
     test('should transform Fragment with Symbol type', () => {
       const fragmentSymbol = Symbol.for('react.fragment');
       const fragmentElement = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: fragmentSymbol,
         props: {
           children: ['text'],
@@ -314,14 +314,14 @@ describe('element-transform', () => {
 
     test('should preserve Fragment children', () => {
       const fragmentElement = {
-        __rillTypeMarker: '__rill_react_element__',
-        __rillFragmentType: '__rill_react_fragment__',
+        __keelTypeMarker: '__keel_react_element__',
+        __keelFragmentType: '__keel_react_fragment__',
         type: 'fragment',
         props: {
           children: [
             'text1',
             {
-              __rillTypeMarker: '__rill_react_element__',
+              __keelTypeMarker: '__keel_react_element__',
               type: 'div',
               props: { id: 'nested' },
             },
@@ -339,8 +339,8 @@ describe('element-transform', () => {
 
     test('should handle Fragment with key', () => {
       const fragmentElement = {
-        __rillTypeMarker: '__rill_react_element__',
-        __rillFragmentType: '__rill_react_fragment__',
+        __keelTypeMarker: '__keel_react_element__',
+        __keelFragmentType: '__keel_react_fragment__',
         type: 'fragment',
         key: 'fragment-key',
         props: {
@@ -366,9 +366,9 @@ describe('element-transform', () => {
       const typeId = registerComponentType(Component, 'test-type-resolution');
 
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: {
-          __rillComponentId: typeId,
+          __keelComponentId: typeId,
           displayName: 'TestComponent',
         },
         props: { foo: 'bar' },
@@ -385,7 +385,7 @@ describe('element-transform', () => {
       const Component = () => null;
 
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: Component,
         props: { testProp: 'value' },
       };
@@ -396,20 +396,20 @@ describe('element-transform', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Test needs to access React element properties
       expect(typeof (result as any).type).toBe('function');
       // biome-ignore lint/suspicious/noExplicitAny: Test needs to access React element properties
-      expect((result as any).type).toHaveProperty('__rillSandboxWrapper', true);
+      expect((result as any).type).toHaveProperty('__keelSandboxWrapper', true);
     });
 
     test('should cache wrapped components', () => {
       const Component = () => null;
 
       const element1 = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: Component,
         props: {},
       };
 
       const element2 = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: Component,
         props: {},
       };
@@ -427,9 +427,9 @@ describe('element-transform', () => {
 
     test('should fallback to Fragment when component type ref not found', () => {
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: {
-          __rillComponentId: 'cmp_missing_999',
+          __keelComponentId: 'cmp_missing_999',
         },
         props: {
           children: 'test',
@@ -449,9 +449,9 @@ describe('element-transform', () => {
       const typeId = registerComponentType(Component, 'test-type-resolution');
 
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: {
-          __rillComponentId: typeId,
+          __keelComponentId: typeId,
           displayName: 'MyCustomComponent',
         },
         props: {},
@@ -466,7 +466,7 @@ describe('element-transform', () => {
 
     test('should handle object type with nested type field', () => {
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: {
           type: 'div',
         },
@@ -486,7 +486,7 @@ describe('element-transform', () => {
     test('should handle object type with render field', () => {
       const RenderComponent = () => null;
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: {
           render: RenderComponent,
         },
@@ -503,7 +503,7 @@ describe('element-transform', () => {
     test('should handle object type with default field', () => {
       const DefaultComponent = () => null;
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: {
           default: DefaultComponent,
         },
@@ -519,7 +519,7 @@ describe('element-transform', () => {
 
     test('should fallback to Fragment for unresolvable object type', () => {
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: {
           someRandomField: 'value',
         },
@@ -543,7 +543,7 @@ describe('element-transform', () => {
       const onPress = () => 'clicked';
 
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: Component,
         props: {
           onPress,
@@ -565,7 +565,7 @@ describe('element-transform', () => {
       const Component = () => null;
 
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: Component,
         props: {
           children: 'child text',
@@ -585,7 +585,7 @@ describe('element-transform', () => {
       const Component = () => null;
 
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: Component,
         props: {
           handlers: {
@@ -607,12 +607,12 @@ describe('element-transform', () => {
   describe('Children Transformation', () => {
     test('should transform children for non-sandbox components', () => {
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: 'div',
         props: {
           children: [
             {
-              __rillTypeMarker: '__rill_react_element__',
+              __keelTypeMarker: '__keel_react_element__',
               type: 'span',
               props: { children: 'text' },
             },
@@ -632,11 +632,11 @@ describe('element-transform', () => {
       const Component = () => null;
 
       const element = {
-        __rillTypeMarker: '__rill_react_element__',
+        __keelTypeMarker: '__keel_react_element__',
         type: Component,
         props: {
           children: {
-            __rillTypeMarker: '__rill_react_element__',
+            __keelTypeMarker: '__keel_react_element__',
             type: 'div',
             props: {},
           },
@@ -679,16 +679,16 @@ describe('element-transform', () => {
 
     test('should handle transform with circular references in debug mode', () => {
       const globalState = globalThis as Record<string, unknown>;
-      const originalDebug = globalState.__RILL_RECONCILER_DEBUG__;
+      const originalDebug = globalState.__KEEL_RECONCILER_DEBUG__;
 
       try {
-        globalState.__RILL_RECONCILER_DEBUG__ = true;
+        globalState.__KEEL_RECONCILER_DEBUG__ = true;
         globalState.__TRANSFORM_LOG_COUNT = 0;
 
         const circular: Record<string, unknown> = {
           $$typeof: Symbol.for('react.element'),
           type: 'div',
-          __rillTypeMarker: 'string',
+          __keelTypeMarker: 'string',
         };
         circular.props = { self: circular };
 
@@ -697,7 +697,7 @@ describe('element-transform', () => {
           transformGuestElement(circular as never);
         }).not.toThrow();
       } finally {
-        globalState.__RILL_RECONCILER_DEBUG__ = originalDebug;
+        globalState.__KEEL_RECONCILER_DEBUG__ = originalDebug;
       }
     });
   });

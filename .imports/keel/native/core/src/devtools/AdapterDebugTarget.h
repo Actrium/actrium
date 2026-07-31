@@ -20,7 +20,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 class DebuggerAdapter;
 
@@ -45,4 +45,4 @@ private:
   std::unordered_map<ConnectionId, CdpOutboundFn> sinks_;
 };
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools

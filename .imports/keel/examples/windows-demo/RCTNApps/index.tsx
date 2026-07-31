@@ -1,8 +1,8 @@
 /**
- * windows-demo — React Native + rill sandbox
+ * windows-demo — React Native + keel sandbox
  *
  * IMPORTANT: Sandbox JSI bindings and the TenantManager shim MUST be installed
- * BEFORE importing rill. We use dynamic require() to ensure correct ordering
+ * BEFORE importing keel. We use dynamic require() to ensure correct ordering
  * (static imports get hoisted by Babel).
  */
 
@@ -14,7 +14,7 @@ type NativeSandboxModule = {
   getCompiledSandboxEngine?: () => string;
 };
 
-const nativeSandbox = NativeModules.RillSandboxNative as NativeSandboxModule | undefined;
+const nativeSandbox = NativeModules.KeelSandboxNative as NativeSandboxModule | undefined;
 const compiledEngine = nativeSandbox?.getCompiledSandboxEngine?.();
 
 const getSandboxModuleForEngine = (engine?: string): any => {
@@ -44,24 +44,24 @@ if (Platform.OS === 'windows') {
     console.log('[windows-demo] Globals check:', {
       __QuickJSSandboxJSI: typeof (globalThis as any).__QuickJSSandboxJSI,
       __HermesSandboxJSI: typeof (globalThis as any).__HermesSandboxJSI,
-      __RillTenantManager: typeof (globalThis as any).__RillTenantManager,
+      __KeelTenantManager: typeof (globalThis as any).__KeelTenantManager,
     });
   }
 }
 
-// Step 2: Create __RillTenantManager shim wrapping whichever engine was installed.
-// The rill Engine checks TenantManagerProvider.isAvailable() first, which looks
-// for globalThis.__RillTenantManager. On iOS/Android, the native TenantManager
+// Step 2: Create __KeelTenantManager shim wrapping whichever engine was installed.
+// The keel Engine checks TenantManagerProvider.isAvailable() first, which looks
+// for globalThis.__KeelTenantManager. On iOS/Android, the native TenantManager
 // C++ module provides this. On Windows we only have the sandbox JSI bindings,
 // so we create a lightweight JS shim that delegates to the available engine.
-if (Platform.OS === 'windows' && typeof (globalThis as any).__RillTenantManager === 'undefined') {
+if (Platform.OS === 'windows' && typeof (globalThis as any).__KeelTenantManager === 'undefined') {
   const sandboxModule = getSandboxModuleForEngine(compiledEngine);
 
   if (sandboxModule) {
     let nextTenantId = 1;
     const tenants: Record<number, { runtime: any; context: any }> = {};
 
-    (globalThis as any).__RillTenantManager = {
+    (globalThis as any).__KeelTenantManager = {
       // --- Tenant lifecycle ---
       createTenant(config: any): number {
         const timeout = config?.timeout ?? 30000;
@@ -213,7 +213,7 @@ if (Platform.OS === 'windows' && typeof (globalThis as any).__RillTenantManager 
     const engineName =
       compiledEngine ||
       (sandboxModule === (globalThis as any).__HermesSandboxJSI ? 'hermes' : 'quickjs');
-    console.log(`[windows-demo] __RillTenantManager shim installed (backed by ${engineName})`);
+    console.log(`[windows-demo] __KeelTenantManager shim installed (backed by ${engineName})`);
   } else if (compiledEngine) {
     console.error(
       `[windows-demo] Compiled engine '${compiledEngine}' global is missing; tenant-manager shim not installed`
@@ -221,7 +221,7 @@ if (Platform.OS === 'windows' && typeof (globalThis as any).__RillTenantManager 
   }
 }
 
-// Step 3: NOW import App (which imports rill) — engines are available
+// Step 3: NOW import App (which imports keel) — engines are available
 // Using require() to prevent Babel from hoisting this above the install code
 const App = require('./App').default;
 
@@ -265,6 +265,6 @@ class ErrorBoundary extends React.Component<
 const WrappedApp = (props: Record<string, unknown>) =>
   React.createElement(ErrorBoundary, null, React.createElement(App, props));
 
-AppRegistry.registerComponent('RillDemo', () => WrappedApp);
+AppRegistry.registerComponent('KeelDemo', () => WrappedApp);
 
-console.log('[windows-demo] App registered as RillDemo');
+console.log('[windows-demo] App registered as KeelDemo');

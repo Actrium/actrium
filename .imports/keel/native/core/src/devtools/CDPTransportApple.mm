@@ -1,6 +1,6 @@
-// WIP subsystem — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in devtools/CDPServer.h.
-#if RILL_WIP_CDP_DEVTOOLS
+#if KEEL_WIP_CDP_DEVTOOLS
 /**
  * CDPTransportApple.mm
  *
@@ -42,7 +42,7 @@
 #include <cstdlib>
 #include <cstring>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 namespace {
 
@@ -122,7 +122,7 @@ static nw_listener_t createLoopbackListener(nw_parameters_t params,
 } // namespace
 
 CDPTransportApple::CDPTransportApple() {
-  queue_ = dispatch_queue_create("rill.cdp.transport", DISPATCH_QUEUE_SERIAL);
+  queue_ = dispatch_queue_create("keel.cdp.transport", DISPATCH_QUEUE_SERIAL);
 }
 
 CDPTransportApple::~CDPTransportApple() {
@@ -592,7 +592,7 @@ void CDPTransportApple::closeHttpConnection(ConnectionId connId, void* nwConnect
   nw_connection_cancel(conn);
 }
 
-} // namespace rill::devtools
+} // namespace keel::devtools
 
 #endif // __APPLE__
-#endif // RILL_WIP_CDP_DEVTOOLS
+#endif // KEEL_WIP_CDP_DEVTOOLS

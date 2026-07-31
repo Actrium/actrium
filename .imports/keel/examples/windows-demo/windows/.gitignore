@@ -35,7 +35,7 @@ ipch/
 [Rr]elease*/
 Ankh.NoLoad
 x64/
-RillSandboxNative/build/
+KeelSandboxNative/build/
 .vs/
 # Visual C++ cache files
 

@@ -2,9 +2,9 @@
 # Bridgeless (New Architecture) only — supports 3 sandbox configurations: JSC, Hermes, QuickJS
 #
 # Usage examples:
-#   RILL_SANDBOX=hermes pod install
-#   RILL_SANDBOX=quickjs pod install
-#   RILL_SANDBOX=jsc pod install
+#   KEEL_SANDBOX=hermes pod install
+#   KEEL_SANDBOX=quickjs pod install
+#   KEEL_SANDBOX=jsc pod install
 #
 # Default: hermes
 
@@ -13,7 +13,7 @@ install! 'cocoapods',
   :generate_multiple_pod_projects => true
 
 # Get sandbox configuration from environment
-rill_sandbox = ENV['RILL_SANDBOX'] || 'hermes'
+keel_sandbox = ENV['KEEL_SANDBOX'] || 'hermes'
 
 # Always use Bridgeless (New Architecture)
 ENV['RCT_NEW_ARCH_ENABLED'] = '1'
@@ -23,15 +23,15 @@ puts "╔═══════════════════════�
 puts "║  ios-demo Configuration                                  ║"
 puts "╠══════════════════════════════════════════════════════════╣"
 puts "║  Mode:    Bridgeless (New Architecture)                  ║"
-puts "║  Sandbox: #{rill_sandbox.ljust(46)}║"
+puts "║  Sandbox: #{keel_sandbox.ljust(46)}║"
 puts "╚══════════════════════════════════════════════════════════╝"
 puts ""
 
 puts "[ios-demo] New Architecture (Bridgeless) ENABLED"
-puts "[ios-demo] Sandbox engine: #{rill_sandbox}"
+puts "[ios-demo] Sandbox engine: #{keel_sandbox}"
 
 # Set sandbox engine
-ENV['RILL_SANDBOX_ENGINE'] = rill_sandbox
+ENV['KEEL_SANDBOX_ENGINE'] = keel_sandbox
 
 react_native_path = 'node_modules/react-native'
 
@@ -82,7 +82,7 @@ post_install do |installer|
         # Add preprocessor definitions for sandbox detection
         # RCT_DEV=0 disables Metro connection banner and dev menu
         config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] ||= ['$(inherited)']
-        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << "RILL_SANDBOX_#{rill_sandbox.upcase}=1"
+        config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << "KEEL_SANDBOX_#{keel_sandbox.upcase}=1"
         config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] << "RCT_DEV=0"
       end
     end
@@ -94,20 +94,20 @@ post_install do |installer|
   main_project.targets.each do |target|
     if target.name == 'ios-demo'
       target.build_configurations.each do |config|
-        # Remove old RILL_ definitions and rebuild the array
+        # Remove old KEEL_ definitions and rebuild the array
         existing = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
         existing = [existing].flatten  # Ensure it's an array
-        existing = existing.reject { |d| d.to_s.start_with?('RILL_SANDBOX_') || d.to_s.start_with?('RCT_DEV') }
-        existing << "RILL_SANDBOX_#{rill_sandbox.upcase}=1"
+        existing = existing.reject { |d| d.to_s.start_with?('KEEL_SANDBOX_') || d.to_s.start_with?('RCT_DEV') }
+        existing << "KEEL_SANDBOX_#{keel_sandbox.upcase}=1"
         existing << "RCT_DEV=0"
         config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = existing
       end
-      puts "[ios-demo] Set preprocessor definitions: RILL_SANDBOX_#{rill_sandbox.upcase}"
+      puts "[ios-demo] Set preprocessor definitions: KEEL_SANDBOX_#{keel_sandbox.upcase}"
     end
   end
   main_project.save
 
   puts ""
-  puts "[ios-demo] Post-install complete for: bridgeless + #{rill_sandbox}"
+  puts "[ios-demo] Post-install complete for: bridgeless + #{keel_sandbox}"
   puts ""
 end

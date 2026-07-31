@@ -20,7 +20,7 @@ describe('CLI Build', () => {
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
 
     // Create temp directory
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-test-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-test-'));
     originalCwd = process.cwd();
     process.chdir(tempDir);
 
@@ -30,7 +30,7 @@ describe('CLI Build', () => {
     fs.writeFileSync(
       path.join(srcDir, 'guest.tsx'),
       `
-      import { View, Text } from 'rill/guest';
+      import { View, Text } from 'keel/guest';
       export default function Guest() {
         return <View><Text>Hello</Text></View>;
       }
@@ -308,16 +308,16 @@ describe('Runtime Inject Content', () => {
     // 
     const buildSource = fs.readFileSync(path.join(__dirname, 'build.ts'), 'utf-8');
 
-    expect(buildSource).toContain('__rill.registerCallback');
-    expect(buildSource).toContain('__rill.invokeCallback');
-    expect(buildSource).toContain('__rill.removeCallback');
+    expect(buildSource).toContain('__keel.registerCallback');
+    expect(buildSource).toContain('__keel.invokeCallback');
+    expect(buildSource).toContain('__keel.removeCallback');
   });
 
   it('should include host event handling', () => {
     const buildSource = fs.readFileSync(path.join(__dirname, 'build.ts'), 'utf-8');
 
-    expect(buildSource).toContain('__rill_onHostEvent');
-    expect(buildSource).toContain('__rill.dispatchEvent');
-    expect(buildSource).toContain('__rill_handleMessage');
+    expect(buildSource).toContain('__keel_onHostEvent');
+    expect(buildSource).toContain('__keel.dispatchEvent');
+    expect(buildSource).toContain('__keel_handleMessage');
   });
 });

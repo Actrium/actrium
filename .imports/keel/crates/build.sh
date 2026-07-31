@@ -16,15 +16,15 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 TARGET=wasm32-unknown-unknown
-FIXTURES=../src/host/wasm-guest/__tests__/fixtures
+FIXTURES=../src/host/native-guest/__tests__/fixtures
 # Single source of truth for both the debug (DWARF) and release fixture builds
 # below. Since the binary-protocol feature is now DEFAULT ON (issue #45), every
-# guest here is binary-capable (op-batch encoder + rill_wire_caps export, canvas
+# guest here is binary-capable (op-batch encoder + keel_wire_caps export, canvas
 # encoder + getInfo probe) yet still emits JSON at runtime unless the host
 # negotiates binary — so canvas-binary-guest / ui-binary-guest build in the SAME
 # invocation now (no feature-isolation split needed). ui-guest-json (built
 # separately with --no-default-features) is the back-compat, pre-promotion
-# JSON-only guest used to test the "guest without rill_wire_caps" host path.
+# JSON-only guest used to test the "guest without keel_wire_caps" host path.
 # blur-demo-guest is the SIMD/worker-pool compute demo (issue #57).
 GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest canvas-binary-guest ui-binary-guest blur-demo-guest"
 
@@ -34,7 +34,7 @@ GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest ca
 # fixtures; real source paths are preserved (no --remap-path-prefix here). Runs
 # with the default target dir and exits before the reproducible fixtures build
 # below. See docs/native-guest-debugging.zh.md.
-if [ "${RILL_GUEST_DEBUG:-}" = "1" ]; then
+if [ "${KEEL_GUEST_DEBUG:-}" = "1" ]; then
   DEBUG_OUT=debug-artifacts
   mkdir -p "$DEBUG_OUT"
   # shellcheck disable=SC2086
@@ -73,10 +73,10 @@ stage asset_guest asset-guest.wasm
 stage blur_demo_guest blur-demo-guest.wasm
 
 # Back-compat fixture: a pre-promotion, JSON-only guest with the binary encoders
-# and rill_wire_caps compiled OUT (--no-default-features). SEPARATE invocation
+# and keel_wire_caps compiled OUT (--no-default-features). SEPARATE invocation
 # because cargo unifies features across a single build — bundling it above would
 # re-enable the default feature. Staged AFTER the default ui-guest.wasm so it
 # does not clobber it. Exercises the host path for a guest that lacks the
-# rill_wire_caps export (the caps push must be skipped, JSON must still flow).
+# keel_wire_caps export (the caps push must be skipped, JSON must still flow).
 RUSTFLAGS="--remap-path-prefix=$(pwd)=." cargo build -p ui-guest --no-default-features --target "$TARGET" --release
 stage ui_guest ui-guest-json.wasm

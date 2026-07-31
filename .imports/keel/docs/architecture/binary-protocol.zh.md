@@ -41,7 +41,7 @@ JSON 序列化是操作批次的默认编码,但它有可测量的开销:
 
 ```
 Offset  Size  Field        描述
-0       4     magic        0x4C4C4952(小端序的 "RILL")
+0       4     magic        0x4C45454B(小端序的 "KEEL")
 4       2     version      协议版本(当前为 1)
 6       4     batchId      批次序列号
 10      2     opCount      此批次中的操作数
@@ -156,7 +156,7 @@ u8    hasMetadata(0 或 1)
 
 ### BinaryEncoder (TypeScript) -- `src/guest/runtime/reconciler/binary-encoder.ts`
 
-Guest 端编码器,从操作批次生成 `ArrayBuffer`。当 guest reconciler 配置为二进制输出时使用。`ArrayBuffer` 直接通过 `__rill_sendBatch` 传递,并由 Bridge 检测以进行二进制模式处理。
+Guest 端编码器,从操作批次生成 `ArrayBuffer`。当 guest reconciler 配置为二进制输出时使用。`ArrayBuffer` 直接通过 `__keel_sendBatch` 传递,并由 Bridge 检测以进行二进制模式处理。
 
 ### BinaryProtocol (TypeScript) -- `src/shared/bridge/binary-protocol.ts`
 
@@ -168,7 +168,7 @@ Guest 和 host 之间共享的 TypeScript 端二进制协议支持工具。
 
 | 错误 | 描述 |
 |---|---|
-| `INVALID_MAGIC` | 前 4 字节不匹配 `0x4C4C4952` |
+| `INVALID_MAGIC` | 前 4 字节不匹配 `0x4C45454B` |
 | `VERSION_MISMATCH` | 不支持的协议版本 |
 | `TRUNCATED_HEADER` | 缓冲区太小,无法容纳 16 字节头部 |
 | `TRUNCATED_DATA` | 缓冲区在操作中间结束 |

@@ -1,7 +1,7 @@
 {
-  "name": "rill",
+  "name": "keel",
   "version": "0.1.0",
-  "repository": "https://github.com/GoAskAway/rill.git",
+  "repository": "https://github.com/Actrium/keel.git",
   "main": "./src/index.ts",
   "devDependencies": {
     "@babel/core": "^7.28.5",
@@ -15,15 +15,12 @@
     "@types/react": "19.0.0",
     "@types/react-reconciler": "^0.32.3",
     "@types/react-test-renderer": "^18.3.0",
-    "@vitest/browser-webdriverio": "4.1.9",
     "commander": "^14.0.2",
     "oxc-parser": "^0.26.0",
     "react": "19.0.0",
     "react-reconciler": "0.31.0",
     "react-test-renderer": "19.0.0",
-    "typescript": "^5.9.3",
-    "vitest": "4.1.9",
-    "webdriverio": "^9.29.1"
+    "typescript": "^5.9.3"
   },
   "peerDependencies": {
     "react": ">=18.0.0",
@@ -43,7 +40,7 @@
     "./wire": "./src/host/wire/index.ts"
   },
   "bin": {
-    "rill": "./src/cli/bin.ts"
+    "keel": "./src/cli/bin.ts"
   },
   "description": "A lightweight, headless, sandboxed dynamic UI rendering engine for React Native",
   "engines": {
@@ -54,14 +51,14 @@
     "src",
     "native",
     "android",
-    "scripts/rill_postinstall.js",
-    "scripts/rill_post_install.rb",
+    "scripts/keel_postinstall.js",
+    "scripts/keel_post_install.rb",
     "react-native.config.js",
-    "RillSandboxNative.podspec",
+    "KeelSandboxNative.podspec",
     "README.md",
     "LICENSE"
   ],
-  "homepage": "https://github.com/GoAskAway/rill",
+  "homepage": "https://github.com/Actrium/keel",
   "license": "Apache-2.0",
   "peerDependenciesMeta": {
     "react-dom": {
@@ -75,7 +72,7 @@
     }
   },
   "scripts": {
-    "postinstall": "node scripts/rill_postinstall.js",
+    "postinstall": "node scripts/keel_postinstall.js",
     "test": "bash scripts/run-all-tests.sh --with-rn",
     "test:unit": "bash scripts/run-unit-tests.sh",
     "test:scripts": "bun test scripts/__tests__",

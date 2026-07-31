@@ -16,30 +16,10 @@
 #define EXPORT
 #endif
 
-// Wasm resource ceilings, injected by CMakeLists.wasm.txt from the same values
-// fed to Emscripten's -sMAXIMUM_MEMORY / -sSTACK_SIZE link options. Deriving the
-// QuickJS soft limits from these guarantees they can never drift above the hard
-// wasm ceilings (where the module would OOM/trap ungracefully) the way two
-// independent magic numbers did. Fallbacks match the current CMake defaults
-// (WASM_MAX_MEMORY=32MB, WASM_STACK_SIZE=512KB) so a stray non-CMake build still
-// keeps the soft limits below the ceiling instead of disabling them.
-#ifndef RILL_WASM_MAX_MEMORY_BYTES
-#define RILL_WASM_MAX_MEMORY_BYTES (32 * 1024 * 1024)
-#endif
-#ifndef RILL_WASM_STACK_BYTES
-#define RILL_WASM_STACK_BYTES (512 * 1024)
-#endif
-
-// Headroom fractions. The linear-memory ceiling holds far more than the QuickJS
-// heap — the C stack, static data, and the Emscripten runtime all live in the
-// same address space — so the heap soft limit sits at 75% of MAX, leaving ~25%
-// (8MB at the 32MB default) for everything else; QuickJS reports "out of memory"
-// before the module hard-OOMs. Likewise the wasm stack is shared with non-QuickJS
-// C frames (Emscripten init, host callbacks), so the interpreter's stack soft
-// limit sits at 75% of the wasm stack, leaving ~25% (128KB at the 512KB default)
-// for those frames; QuickJS throws "stack overflow" before the wasm stack traps.
-#define RILL_QJS_MEMORY_LIMIT_BYTES ((RILL_WASM_MAX_MEMORY_BYTES / 4) * 3)
-#define RILL_QJS_STACK_LIMIT_BYTES ((RILL_WASM_STACK_BYTES / 4) * 3)
+// The soft limits (and the ceilings they derive from) are shared with the two
+// standalone Asyncify debug builds — see qjs_wasm_limits.h for the rationale and
+// for what breaks when a runtime is created without applying them.
+#include "qjs_wasm_limits.h"
 
 #ifdef __EMSCRIPTEN__
 // Accurate allocation accounting so the memory soft limit can actually fire.
@@ -58,7 +38,7 @@
 #include <assert.h>
 #include <malloc.h>
 
-static void *rill_qjs_malloc(JSMallocState *s, size_t size) {
+static void *keel_qjs_malloc(JSMallocState *s, size_t size) {
     void *ptr;
 
     // QuickJS never requests zero bytes (same contract as js_def_malloc).
@@ -76,7 +56,7 @@ static void *rill_qjs_malloc(JSMallocState *s, size_t size) {
     return ptr;
 }
 
-static void rill_qjs_free(JSMallocState *s, void *ptr) {
+static void keel_qjs_free(JSMallocState *s, void *ptr) {
     if (!ptr) {
         return;
     }
@@ -85,14 +65,14 @@ static void rill_qjs_free(JSMallocState *s, void *ptr) {
     free(ptr);
 }
 
-static void *rill_qjs_realloc(JSMallocState *s, void *ptr, size_t size) {
+static void *keel_qjs_realloc(JSMallocState *s, void *ptr, size_t size) {
     size_t old_size;
 
     if (!ptr) {
         if (size == 0) {
             return NULL;
         }
-        return rill_qjs_malloc(s, size);
+        return keel_qjs_malloc(s, size);
     }
     old_size = malloc_usable_size(ptr);
     if (size == 0) {
@@ -112,10 +92,10 @@ static void *rill_qjs_realloc(JSMallocState *s, void *ptr, size_t size) {
     return ptr;
 }
 
-static const JSMallocFunctions rill_qjs_malloc_funcs = {
-    rill_qjs_malloc,
-    rill_qjs_free,
-    rill_qjs_realloc,
+static const JSMallocFunctions keel_qjs_malloc_funcs = {
+    keel_qjs_malloc,
+    keel_qjs_free,
+    keel_qjs_realloc,
     (size_t (*)(const void *))malloc_usable_size,
 };
 #endif // __EMSCRIPTEN__
@@ -171,7 +151,7 @@ static HostCallbackFn g_host_callback = NULL;
 // memory — the dedicated channel for ArrayBuffer payloads, which the JSON
 // string bridge above cannot carry (JSON.stringify(ArrayBuffer) === "{}",
 // silently destroying the bytes). Same technique as the native-guest
-// rill_send_batch channel: no serialisation, the host reads HEAPU8 directly.
+// keel_send_batch channel: no serialisation, the host reads HEAPU8 directly.
 typedef void (*HostBinaryCallbackFn)(const char *event, const uint8_t *data,
                                      size_t len);
 static HostBinaryCallbackFn g_host_binary_callback = NULL;
@@ -185,12 +165,12 @@ static HostBinaryCallbackFn g_host_binary_callback = NULL;
 // the JSON payload as {"$bin":id}. Ids are monotonic, starting at 1 (0 means
 // staging failed), and every staged block is consumed EXACTLY ONCE by the
 // receiving side:
-//   guest -> host: the guest calls __rill_stageBinary(bufferOrView) -> id;
+//   guest -> host: the guest calls __keel_stageBinary(bufferOrView) -> id;
 //     the host reads qjs_binary_ptr/qjs_binary_len, copies the window out of
 //     linear memory, and MUST call qjs_binary_free(id).
 //   host -> guest: the host copies bytes into linear memory (_malloc) and
 //     calls qjs_binary_stage(ptr,len) (the table takes ownership of ptr);
-//     the guest calls __rill_takeBinary(id), which adopts the block into a
+//     the guest calls __keel_takeBinary(id), which adopts the block into a
 //     JS ArrayBuffer (no extra copy) and removes the entry.
 // qjs_destroy() clears leftovers so an aborted payload cannot outlive the
 // context; qjs_binary_count() exists for zero-leak assertions in tests.
@@ -310,8 +290,8 @@ EXPORT int qjs_init(void) {
 
 #ifdef __EMSCRIPTEN__
     // Metered allocator: without it the memory soft limit is inert (see
-    // rill_qjs_malloc_funcs above).
-    g_runtime = JS_NewRuntime2(&rill_qjs_malloc_funcs, NULL);
+    // keel_qjs_malloc_funcs above).
+    g_runtime = JS_NewRuntime2(&keel_qjs_malloc_funcs, NULL);
 #else
     g_runtime = JS_NewRuntime();
 #endif
@@ -322,13 +302,13 @@ EXPORT int qjs_init(void) {
     // Soft limits kept safely below the actual wasm ceilings so QuickJS raises a
     // graceful JS error ("out of memory" / "stack overflow") before the module
     // hits the hard wasm trap. Both are derived from the build's real ceilings
-    // (see RILL_WASM_* / headroom rationale above), not standalone constants, so
+    // (see KEEL_WASM_* / headroom rationale above), not standalone constants, so
     // they cannot silently drift above the ceiling and go dead again. They only
     // fire because the two enforcement mechanisms are made real on wasm:
-    // accurate byte metering via rill_qjs_malloc_funcs (memory), and
+    // accurate byte metering via keel_qjs_malloc_funcs (memory), and
     // CONFIG_STACK_CHECK enabled under EMSCRIPTEN in vendor quickjs.c (stack).
-    JS_SetMemoryLimit(g_runtime, RILL_QJS_MEMORY_LIMIT_BYTES);
-    JS_SetMaxStackSize(g_runtime, RILL_QJS_STACK_LIMIT_BYTES);
+    JS_SetMemoryLimit(g_runtime, KEEL_QJS_MEMORY_LIMIT_BYTES);
+    JS_SetMaxStackSize(g_runtime, KEEL_QJS_STACK_LIMIT_BYTES);
 
     // Interrupt runaway guest code (e.g. `while(true){}`) once the
     // host-armed deadline expires.
@@ -420,14 +400,14 @@ static char *json_escape_dup(const char *s) {
 }
 
 // Best-effort rich encoder for a guest exception. Returns a freshly malloc'd,
-// wire-valid JSON string; caller owns it. Tries globalThis.__rill.__errenc
+// wire-valid JSON string; caller owns it. Tries globalThis.__keel.__errenc
 // (installed by the provider prelude); on ANY failure drains the pending
 // exception and falls back to a C-escaped
 // {"error":"<msg>","errorDetail":{"name":"Error"}}.
 //
 // Marker-forgery defense: the host provider classifies a deadline interrupt
 // by exact string match on QJS_INTERRUPTED_ERROR_JSON, so no output of this
-// function may ever be byte-identical to it. globalThis.__rill is a plain
+// function may ever be byte-identical to it. globalThis.__keel is a plain
 // writable global — a guest can replace it wholesale and install its own
 // __errenc — so the invariant is ENFORCED HERE, not merely by construction:
 // an __errenc return equal to the bare marker is discarded and the fallback
@@ -441,11 +421,11 @@ static char *json_escape_dup(const char *s) {
 static char *encode_guest_error(JSContext *ctx, JSValueConst exception) {
     char *out = NULL;
     JSValue global = JS_GetGlobalObject(ctx);
-    JSValue rill = JS_GetPropertyStr(ctx, global, "__rill");
+    JSValue keel = JS_GetPropertyStr(ctx, global, "__keel");
     JSValue enc =
-        (JS_IsException(rill) || JS_IsUndefined(rill) || JS_IsNull(rill))
+        (JS_IsException(keel) || JS_IsUndefined(keel) || JS_IsNull(keel))
             ? JS_UNDEFINED
-            : JS_GetPropertyStr(ctx, rill, "__errenc");
+            : JS_GetPropertyStr(ctx, keel, "__errenc");
 
     if (JS_IsFunction(ctx, enc)) {
         JSValue arg = JS_DupValue(ctx, exception);
@@ -472,7 +452,7 @@ static char *encode_guest_error(JSContext *ctx, JSValueConst exception) {
         JS_FreeValue(ctx, r);
     }
     JS_FreeValue(ctx, enc);
-    JS_FreeValue(ctx, rill);
+    JS_FreeValue(ctx, keel);
     JS_FreeValue(ctx, global);
 
     if (!out) {
@@ -770,7 +750,7 @@ static JSValue js_send_binary_to_host(JSContext *ctx, JSValueConst this_val,
 }
 
 /**
- * __rill_stageBinary(arrayBufferOrView) -> id
+ * __keel_stageBinary(arrayBufferOrView) -> id
  *
  * Guest -> host staging: copies the EXACT byte window of an ArrayBuffer or a
  * typed-array view (byteOffset/byteLength respected — never the whole backing
@@ -778,10 +758,10 @@ static JSValue js_send_binary_to_host(JSContext *ctx, JSValueConst this_val,
  * sentinel. Throws a TypeError on non-binary input so a marshalling bug
  * surfaces in the guest instead of silently dropping bytes.
  */
-static JSValue js_rill_stage_binary(JSContext *ctx, JSValueConst this_val,
+static JSValue js_keel_stage_binary(JSContext *ctx, JSValueConst this_val,
                                     int argc, JSValueConst *argv) {
     if (argc < 1) {
-        return JS_ThrowTypeError(ctx, "__rill_stageBinary: missing argument");
+        return JS_ThrowTypeError(ctx, "__keel_stageBinary: missing argument");
     }
 
     const uint8_t *src = NULL;
@@ -803,7 +783,7 @@ static JSValue js_rill_stage_binary(JSContext *ctx, JSValueConst this_val,
         if (JS_IsException(backing)) {
             JS_FreeValue(ctx, JS_GetException(ctx));
             return JS_ThrowTypeError(
-                ctx, "__rill_stageBinary: expected an ArrayBuffer or view");
+                ctx, "__keel_stageBinary: expected an ArrayBuffer or view");
         }
         size_t backing_size = 0;
         uint8_t *backing_data = JS_GetArrayBuffer(ctx, &backing_size, backing);
@@ -811,7 +791,7 @@ static JSValue js_rill_stage_binary(JSContext *ctx, JSValueConst this_val,
             JS_FreeValue(ctx, JS_GetException(ctx));
             JS_FreeValue(ctx, backing);
             return JS_ThrowTypeError(ctx,
-                                     "__rill_stageBinary: detached view");
+                                     "__keel_stageBinary: detached view");
         }
         src = backing_data + offset;
         len = length;
@@ -836,7 +816,7 @@ static JSValue js_rill_stage_binary(JSContext *ctx, JSValueConst this_val,
 }
 
 // Free-func handed to JS_NewArrayBuffer for adopted staging blocks: every
-// block was plain-malloc'd (host _malloc or js_rill_stage_binary), so plain
+// block was plain-malloc'd (host _malloc or js_keel_stage_binary), so plain
 // free() matches.
 static void binary_js_free(JSRuntime *rt, void *opaque, void *ptr) {
     (void)rt;
@@ -845,24 +825,24 @@ static void binary_js_free(JSRuntime *rt, void *opaque, void *ptr) {
 }
 
 /**
- * __rill_takeBinary(id) -> ArrayBuffer
+ * __keel_takeBinary(id) -> ArrayBuffer
  *
  * Host -> guest consumption: removes the staged block and adopts it into a
  * JS ArrayBuffer (zero-copy; the ArrayBuffer's free func releases the block).
  * Throws on an unknown or already-consumed id — each id is single-use by
  * design, and a double take indicates a marshalling bug.
  */
-static JSValue js_rill_take_binary(JSContext *ctx, JSValueConst this_val,
+static JSValue js_keel_take_binary(JSContext *ctx, JSValueConst this_val,
                                    int argc, JSValueConst *argv) {
     uint32_t id = 0;
     if (argc < 1 || JS_ToUint32(ctx, &id, argv[0])) {
-        return JS_ThrowTypeError(ctx, "__rill_takeBinary: bad id");
+        return JS_ThrowTypeError(ctx, "__keel_takeBinary: bad id");
     }
 
     BinaryEntry *e = binary_table_detach(id);
     if (!e) {
         return JS_ThrowTypeError(
-            ctx, "__rill_takeBinary: unknown or already-consumed id");
+            ctx, "__keel_takeBinary: unknown or already-consumed id");
     }
     uint8_t *data = e->data;
     size_t len = e->len;
@@ -902,14 +882,14 @@ EXPORT void qjs_install_host_functions(void) {
                                       "__sendBinaryToHost", 2));
 
     // Binary staging helpers backing the {"$bin":id} JSON sentinel: the guest
-    // codec (__rill.__binenc/__binrev, injected by the provider) is their only
+    // codec (__keel.__binenc/__binrev, injected by the provider) is their only
     // intended caller.
-    JS_SetPropertyStr(g_context, global, "__rill_stageBinary",
-                      JS_NewCFunction(g_context, js_rill_stage_binary,
-                                      "__rill_stageBinary", 1));
-    JS_SetPropertyStr(g_context, global, "__rill_takeBinary",
-                      JS_NewCFunction(g_context, js_rill_take_binary,
-                                      "__rill_takeBinary", 1));
+    JS_SetPropertyStr(g_context, global, "__keel_stageBinary",
+                      JS_NewCFunction(g_context, js_keel_stage_binary,
+                                      "__keel_stageBinary", 1));
+    JS_SetPropertyStr(g_context, global, "__keel_takeBinary",
+                      JS_NewCFunction(g_context, js_keel_take_binary,
+                                      "__keel_takeBinary", 1));
 
     JS_FreeValue(g_context, global);
 }

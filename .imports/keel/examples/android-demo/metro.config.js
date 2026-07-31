@@ -5,17 +5,17 @@ const { resolve } = require('metro-resolver');
 
 const rootDir = __dirname;
 
-// Resolve rill from symlink in node_modules
-const rillPath = fs.realpathSync(path.resolve(rootDir, 'node_modules/rill'));
+// Resolve keel from symlink in node_modules
+const keelPath = fs.realpathSync(path.resolve(rootDir, 'node_modules/keel'));
 
 const defaultConfig = getDefaultConfig(rootDir);
 
 // Block duplicate React instances from symlinked packages
 const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 defaultConfig.resolver.blockList = [
-  new RegExp(`${escapeRegExp(rillPath)}/node_modules/.*`),
-  new RegExp(`${escapeRegExp(rillPath)}/android/(?:\\.cxx|build)/.*`),
-  new RegExp(`${escapeRegExp(rillPath)}/tests/.*`),
+  new RegExp(`${escapeRegExp(keelPath)}/node_modules/.*`),
+  new RegExp(`${escapeRegExp(keelPath)}/android/(?:\\.cxx|build)/.*`),
+  new RegExp(`${escapeRegExp(keelPath)}/tests/.*`),
   /.*node_modules\/react\/cjs\/react\.development\.js.*inline-requires-plugin.*/,
 ];
 
@@ -26,30 +26,30 @@ const customConfig = {
     watchman: { deferStates: [] },
     healthCheck: { enabled: false },
   },
-  watchFolders: [rillPath],
+  watchFolders: [keelPath],
   resolver: {
     useWatchman: false,
     unstable_enableSymlinks: true,
     nodeModulesPaths: [path.resolve(rootDir, 'node_modules')],
     resolveRequest: (context, moduleName, platform) => {
-      if (moduleName === 'rill') {
+      if (moduleName === 'keel') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(rillPath, 'src', 'host', 'index.ts'),
+          filePath: path.resolve(keelPath, 'src', 'host', 'index.ts'),
         };
       }
 
-      if (moduleName === 'rill/host') {
+      if (moduleName === 'keel/host') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(rillPath, 'src', 'host', 'index.ts'),
+          filePath: path.resolve(keelPath, 'src', 'host', 'index.ts'),
         };
       }
 
-      if (moduleName === 'rill/host/preset') {
+      if (moduleName === 'keel/host/preset') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(rillPath, 'src', 'host', 'preset', 'index.ts'),
+          filePath: path.resolve(keelPath, 'src', 'host', 'preset', 'index.ts'),
         };
       }
 

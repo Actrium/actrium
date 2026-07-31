@@ -348,7 +348,7 @@ typedef struct JSStackFrame {
     /* only used in generators. Current stack pointer value. NULL if
        the function is running. */ 
     JSValue *cur_sp;
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
     /* dev-only: the frame's `this` receiver, captured for the debugger so
        evaluate-on-call-frame can bind `this`. Borrowed (not ref-counted here);
        read only while the frame is live on a paused stack. */
@@ -16485,63 +16485,63 @@ typedef enum {
 #define FUNC_RET_YIELD_STAR 2
 
 /* argv[] is modified if (flags & JS_CALL_FLAG_COPY_ARGV) = 0. */
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
 /*
  * Dev-only source-line debug hook (see quickjs-debug.h). Global rather than
  * per-runtime: the callback routes by JSContext, so one pointer keeps the
  * per-instruction check in SWITCH() down to a single predictable branch, and a
- * build without RILL_QJS_DEBUG pays nothing at all.
+ * build without KEEL_QJS_DEBUG pays nothing at all.
  */
 #include "quickjs-debug.h"
 #include <pthread.h>
 
 /*
- * Per-context hook registry. `rill_qjs_debug_active` is the fast-path gate the
+ * Per-context hook registry. `keel_qjs_debug_active` is the fast-path gate the
  * per-instruction SWITCH check reads (0 in a non-debug or fully-detached state,
  * so the interpreter pays a single predictable branch and nothing else). The
  * table is a fixed static array (QuickJS forbids raw malloc, and a debugger is
  * dev-only) walked only while a debugger is attached, under a mutex. An entry is
  * free iff its hook is NULL.
  */
-#define RILL_QJS_MAX_HOOKS 64
+#define KEEL_QJS_MAX_HOOKS 64
 static struct {
     JSContext *ctx;
-    RillQjsDebugHook hook;
+    KeelQjsDebugHook hook;
     void *opaque;
-} rill_qjs_hooks[RILL_QJS_MAX_HOOKS];
-static volatile int rill_qjs_debug_active;
-static pthread_mutex_t rill_qjs_hooks_mtx = PTHREAD_MUTEX_INITIALIZER;
+} keel_qjs_hooks[KEEL_QJS_MAX_HOOKS];
+static volatile int keel_qjs_debug_active;
+static pthread_mutex_t keel_qjs_hooks_mtx = PTHREAD_MUTEX_INITIALIZER;
 
-void rill_qjs_set_debug_hook(JSContext *ctx, RillQjsDebugHook hook, void *opaque)
+void keel_qjs_set_debug_hook(JSContext *ctx, KeelQjsDebugHook hook, void *opaque)
 {
     int i, found = -1, free_slot = -1;
-    pthread_mutex_lock(&rill_qjs_hooks_mtx);
-    for (i = 0; i < RILL_QJS_MAX_HOOKS; i++) {
-        if (rill_qjs_hooks[i].hook) {
-            if (rill_qjs_hooks[i].ctx == ctx) { found = i; break; }
+    pthread_mutex_lock(&keel_qjs_hooks_mtx);
+    for (i = 0; i < KEEL_QJS_MAX_HOOKS; i++) {
+        if (keel_qjs_hooks[i].hook) {
+            if (keel_qjs_hooks[i].ctx == ctx) { found = i; break; }
         } else if (free_slot < 0) {
             free_slot = i;
         }
     }
     if (hook) {
         if (found >= 0) {  /* re-attach: update in place */
-            rill_qjs_hooks[found].hook = hook;
-            rill_qjs_hooks[found].opaque = opaque;
+            keel_qjs_hooks[found].hook = hook;
+            keel_qjs_hooks[found].opaque = opaque;
         } else if (free_slot >= 0) {
-            rill_qjs_hooks[free_slot].ctx = ctx;
-            rill_qjs_hooks[free_slot].hook = hook;
-            rill_qjs_hooks[free_slot].opaque = opaque;
-            rill_qjs_debug_active++;
+            keel_qjs_hooks[free_slot].ctx = ctx;
+            keel_qjs_hooks[free_slot].hook = hook;
+            keel_qjs_hooks[free_slot].opaque = opaque;
+            keel_qjs_debug_active++;
         }  /* else: table full (dev-only cap) — not attached */
     } else if (found >= 0) {  /* detach this context only */
-        rill_qjs_hooks[found].hook = NULL;
-        rill_qjs_hooks[found].ctx = NULL;
-        rill_qjs_debug_active--;
+        keel_qjs_hooks[found].hook = NULL;
+        keel_qjs_hooks[found].ctx = NULL;
+        keel_qjs_debug_active--;
     }
-    pthread_mutex_unlock(&rill_qjs_hooks_mtx);
+    pthread_mutex_unlock(&keel_qjs_hooks_mtx);
 }
 
-const char *rill_qjs_script_filename(JSContext *ctx, const void *script_token)
+const char *keel_qjs_script_filename(JSContext *ctx, const void *script_token)
 {
     const JSFunctionBytecode *b = script_token;
     if (!b || !b->has_debug || b->debug.filename == JS_ATOM_NULL)
@@ -16549,7 +16549,7 @@ const char *rill_qjs_script_filename(JSContext *ctx, const void *script_token)
     return JS_AtomToCString(ctx, b->debug.filename);
 }
 
-const char *rill_qjs_script_source(const void *script_token, size_t *out_len)
+const char *keel_qjs_script_source(const void *script_token, size_t *out_len)
 {
     const JSFunctionBytecode *b = script_token;
     if (!b || !b->has_debug || !b->debug.source) {
@@ -16564,11 +16564,11 @@ const char *rill_qjs_script_source(const void *script_token, size_t *out_len)
 
 /*
  * Walk the live call stack, top (innermost) first, mirroring build_backtrace().
- * The top frame's PC is live-stamped by rill_qjs_on_step (see below), so it uses
+ * The top frame's PC is live-stamped by keel_qjs_on_step (see below), so it uses
  * the raw offset; caller frames record the PC of the instruction AFTER the call,
  * so subtract one to land back inside the call site (as build_backtrace does).
  */
-int rill_qjs_capture_frames(JSContext *ctx, RillQjsFrameSink sink, void *user)
+int keel_qjs_capture_frames(JSContext *ctx, KeelQjsFrameSink sink, void *user)
 {
     JSStackFrame *sf;
     int idx = 0;
@@ -16590,11 +16590,11 @@ int rill_qjs_capture_frames(JSContext *ctx, RillQjsFrameSink sink, void *user)
     return idx;
 }
 
-/* Walk to the Nth "located" JS frame — the same frames rill_qjs_capture_frames
+/* Walk to the Nth "located" JS frame — the same frames keel_qjs_capture_frames
    keeps (a bytecode function carrying debug line info and a live PC), in the same
    order. So a frame index taken from a captured backtrace maps to the same frame
    here. Returns NULL when the index is out of range. */
-static JSStackFrame *rill_qjs_nth_frame(JSContext *ctx, int frame_index)
+static JSStackFrame *keel_qjs_nth_frame(JSContext *ctx, int frame_index)
 {
     JSStackFrame *sf;
     int idx = 0;
@@ -16611,17 +16611,17 @@ static JSStackFrame *rill_qjs_nth_frame(JSContext *ctx, int frame_index)
     return NULL;
 }
 
-JSValue rill_qjs_frame_this(JSContext *ctx, int frame_index)
+JSValue keel_qjs_frame_this(JSContext *ctx, int frame_index)
 {
-    JSStackFrame *sf = rill_qjs_nth_frame(ctx, frame_index);
+    JSStackFrame *sf = keel_qjs_nth_frame(ctx, frame_index);
     return sf ? sf->this_val : JS_UNDEFINED;
 }
 
-int rill_qjs_enumerate_frame_vars(JSContext *ctx, int frame_index,
-                                  RillQjsVarKind kind, RillQjsVarSink sink,
+int keel_qjs_enumerate_frame_vars(JSContext *ctx, int frame_index,
+                                  KeelQjsVarKind kind, KeelQjsVarSink sink,
                                   void *user)
 {
-    JSStackFrame *sf = rill_qjs_nth_frame(ctx, frame_index);
+    JSStackFrame *sf = keel_qjs_nth_frame(ctx, frame_index);
     JSFunctionBytecode *b;
     JSObject *p;
     int i, n = 0;
@@ -16634,7 +16634,7 @@ int rill_qjs_enumerate_frame_vars(JSContext *ctx, int frame_index,
     /* Variable names live in the bytecode's debug metadata (vardefs / closure_var);
        values live on the paused frame (arg_buf / var_buf) or in the closure's
        var_refs. Names are borrowed for the duration of the sink call. */
-    if (kind == RILL_QJS_VAR_ARG) {
+    if (kind == KEEL_QJS_VAR_ARG) {
         if (!b->vardefs)
             return 0;
         for (i = 0; i < b->arg_count; i++) {
@@ -16649,7 +16649,7 @@ int rill_qjs_enumerate_frame_vars(JSContext *ctx, int frame_index,
             JS_FreeCString(ctx, s);
             n++;
         }
-    } else if (kind == RILL_QJS_VAR_LOCAL) {
+    } else if (kind == KEEL_QJS_VAR_LOCAL) {
         if (!b->vardefs)
             return 0;
         for (i = 0; i < b->var_count; i++) {
@@ -16664,7 +16664,7 @@ int rill_qjs_enumerate_frame_vars(JSContext *ctx, int frame_index,
             JS_FreeCString(ctx, s);
             n++;
         }
-    } else if (kind == RILL_QJS_VAR_CLOSURE) {
+    } else if (kind == KEEL_QJS_VAR_CLOSURE) {
         JSVarRef **var_refs;
         if (!b->closure_var || !p)
             return 0;
@@ -16689,12 +16689,12 @@ int rill_qjs_enumerate_frame_vars(JSContext *ctx, int frame_index,
 
 /* Save / restore rt->current_stack_frame as an opaque token (web Asyncify path;
    see quickjs-debug.h). Never dereferenced by the caller. */
-void *rill_qjs_current_frame(JSContext *ctx)
+void *keel_qjs_current_frame(JSContext *ctx)
 {
     return ctx->rt->current_stack_frame;
 }
 
-void rill_qjs_set_current_frame(JSContext *ctx, void *frame)
+void keel_qjs_set_current_frame(JSContext *ctx, void *frame)
 {
     ctx->rt->current_stack_frame = (JSStackFrame *)frame;
 }
@@ -16703,7 +16703,7 @@ void rill_qjs_set_current_frame(JSContext *ctx, void *frame)
    Stamps sf->cur_pc so a frame walk triggered from the callback reads this live
    PC for the top frame instead of a stale call-site value (only ever runs while
    attached, so a detached build pays nothing). */
-static void rill_qjs_on_step(JSContext *ctx, JSFunctionBytecode *b,
+static void keel_qjs_on_step(JSContext *ctx, JSFunctionBytecode *b,
                              JSStackFrame *sf, const uint8_t *pc)
 {
     int line, depth;
@@ -16720,18 +16720,18 @@ static void rill_qjs_on_step(JSContext *ctx, JSFunctionBytecode *b,
     /* Resolve this context's hook, then release the lock BEFORE calling it: the
        hook may block for the whole pause, and other contexts must stay free to
        attach/detach and run. */
-    RillQjsDebugHook hook = NULL;
+    KeelQjsDebugHook hook = NULL;
     void *opaque = NULL;
     int i;
-    pthread_mutex_lock(&rill_qjs_hooks_mtx);
-    for (i = 0; i < RILL_QJS_MAX_HOOKS; i++) {
-        if (rill_qjs_hooks[i].hook && rill_qjs_hooks[i].ctx == ctx) {
-            hook = rill_qjs_hooks[i].hook;
-            opaque = rill_qjs_hooks[i].opaque;
+    pthread_mutex_lock(&keel_qjs_hooks_mtx);
+    for (i = 0; i < KEEL_QJS_MAX_HOOKS; i++) {
+        if (keel_qjs_hooks[i].hook && keel_qjs_hooks[i].ctx == ctx) {
+            hook = keel_qjs_hooks[i].hook;
+            opaque = keel_qjs_hooks[i].opaque;
             break;
         }
     }
-    pthread_mutex_unlock(&rill_qjs_hooks_mtx);
+    pthread_mutex_unlock(&keel_qjs_hooks_mtx);
     if (hook)
         hook(ctx, b, line, depth, opaque);
 }
@@ -16739,10 +16739,10 @@ static void rill_qjs_on_step(JSContext *ctx, JSFunctionBytecode *b,
 /* An EXPRESSION (not a statement) so it can ride inside SWITCH's dispatch
    without splitting `if (...) BREAK;` — BREAK must stay a single statement.
    Gated on the attached-count so a detached interpreter pays one branch. */
-#define RILL_QJS_STEP(ctx, b, sf, pc) \
-    (unlikely(rill_qjs_debug_active) ? rill_qjs_on_step(ctx, b, sf, pc) : (void)0)
+#define KEEL_QJS_STEP(ctx, b, sf, pc) \
+    (unlikely(keel_qjs_debug_active) ? keel_qjs_on_step(ctx, b, sf, pc) : (void)0)
 #else
-#define RILL_QJS_STEP(ctx, b, sf, pc) ((void)0)
+#define KEEL_QJS_STEP(ctx, b, sf, pc) ((void)0)
 #endif
 
 static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
@@ -16765,7 +16765,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     // JS_FreeCString(caller_ctx, str);
 
 #if !DIRECT_DISPATCH
-#define SWITCH(pc)      switch (RILL_QJS_STEP(ctx, b, sf, pc), opcode = *pc++)
+#define SWITCH(pc)      switch (KEEL_QJS_STEP(ctx, b, sf, pc), opcode = *pc++)
 #define CASE(op)        case op
 #define DEFAULT         default
 #define BREAK           break
@@ -16780,7 +16780,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
 #include "quickjs-opcode.h"
         [ OP_COUNT ... 255 ] = &&case_default
     };
-#define SWITCH(pc)      goto *dispatch_table[(RILL_QJS_STEP(ctx, b, sf, pc), opcode = *pc++)];
+#define SWITCH(pc)      goto *dispatch_table[(KEEL_QJS_STEP(ctx, b, sf, pc), opcode = *pc++)];
 #define CASE(op)        case_ ## op
 #define DEFAULT         case_default
 #define BREAK           SWITCH(pc)
@@ -16794,7 +16794,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
             /* func_obj get contains a pointer to JSFuncAsyncState */
             /* the stack frame is already allocated */
             sf = &s->frame;
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
             sf->this_val = s->this_val;
 #endif
             p = JS_VALUE_GET_OBJ(sf->cur_func);
@@ -16861,7 +16861,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
     var_buf = local_buf + arg_allocated_size;
     sf->var_buf = var_buf;
     sf->arg_buf = arg_buf;
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
     sf->this_val = this_obj;
 #endif
 
@@ -19467,7 +19467,7 @@ static __exception int async_func_init(JSContext *ctx, JSAsyncFunctionState *s,
         return -1;
     sf->cur_func = JS_DupValue(ctx, func_obj);
     s->this_val = JS_DupValue(ctx, this_obj);
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
     sf->this_val = s->this_val;
 #endif
     s->argc = argc;
@@ -34222,7 +34222,7 @@ static JSValue __JS_EvalInternal(JSContext *ctx, JSValueConst this_obj,
         goto fail1;
     }
 
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
     /* Bellard QuickJS retains source only for function bodies, not the
        top-level program. Set it on the function def before js_create_function so
        the engine's own transfer (b->debug.source = fd->source) carries it, which

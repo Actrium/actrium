@@ -66,7 +66,7 @@ describe('E2E Multi-Instance: Independent Engines', () => {
   it('should run multiple engines independently', async () => {
     const guestCode = (id: number) => `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('View', {
@@ -75,7 +75,7 @@ describe('E2E Multi-Instance: Independent Engines', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     // Load different code into each engine
@@ -94,16 +94,16 @@ describe('E2E Multi-Instance: Independent Engines', () => {
   it('should maintain separate callback registries', async () => {
     const guestCode = (id: number) => `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
           testID: 'button',
-          onPress: () => globalThis.__rill_emitEvent('PRESSED', { engineId: ${id} })
+          onPress: () => globalThis.__keel_emitEvent('PRESSED', { engineId: ${id} })
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await Promise.all(ctx.engines.map((engine, i) => engine.loadBundle(guestCode(i))));
@@ -129,7 +129,7 @@ describe('E2E Multi-Instance: Independent Engines', () => {
     const guestCode = (initialCount: number) => `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [count, setCount] = useState(${initialCount});
@@ -144,7 +144,7 @@ describe('E2E Multi-Instance: Independent Engines', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     // Each engine starts with different initial count
@@ -185,13 +185,13 @@ describe('E2E Multi-Instance: Lifecycle', () => {
   it('should destroy engines independently', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('View', { testID: 'container' });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await Promise.all(ctx.engines.map((engine) => engine.loadBundle(guestCode)));
@@ -208,13 +208,13 @@ describe('E2E Multi-Instance: Lifecycle', () => {
   it('should handle staggered engine creation and destruction', async () => {
     const guestCode = (id: number) => `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('View', { testID: 'engine-${id}' });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     // Create and load first two engines
@@ -251,7 +251,7 @@ describe('E2E Multi-Instance: Resource Isolation', () => {
   it('should have separate callback registries', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -262,7 +262,7 @@ describe('E2E Multi-Instance: Resource Isolation', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await Promise.all(ctx.engines.map((engine) => engine.loadBundle(guestCode)));
@@ -282,13 +282,13 @@ describe('E2E Multi-Instance: Resource Isolation', () => {
   it('should isolate errors between engines', async () => {
     const workingCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('View', { testID: 'working' });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     const brokenCode = `
@@ -325,7 +325,7 @@ describe('E2E Multi-Instance: Concurrent Operations', () => {
   it('should handle concurrent callbacks across engines', async () => {
     const guestCode = (id: number) => `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -337,7 +337,7 @@ describe('E2E Multi-Instance: Concurrent Operations', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await Promise.all(ctx.engines.map((engine, i) => engine.loadBundle(guestCode(i))));
@@ -361,7 +361,7 @@ describe('E2E Multi-Instance: Concurrent Operations', () => {
     const guestCode = (id: number) => `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [count, setCount] = useState(0);
@@ -373,14 +373,14 @@ describe('E2E Multi-Instance: Concurrent Operations', () => {
             testID: 'action',
             onPress: () => {
               setCount(c => c + 1);
-              globalThis.__rill_emitEvent('ACTION', { engineId: ${id}, newCount: count + 1 });
+              globalThis.__keel_emitEvent('ACTION', { engineId: ${id}, newCount: count + 1 });
               return count + 1;
             }
           })
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await Promise.all(ctx.engines.map((engine, i) => engine.loadBundle(guestCode(i))));

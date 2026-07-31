@@ -3,7 +3,7 @@
  * engine (AdapterDebugTarget -> DebuggerAdapter -> QuickJSEngineDebugger -> core)
  * so the wasm speaks raw Chrome DevTools Protocol directly. The browser worker
  * (and the node CDP harness) is then a dumb pipe: raw CDP bytes in via
- * qjsd_cdp_dispatch, raw CDP bytes out via the __rillCdp.onMessage callback.
+ * qjsd_cdp_dispatch, raw CDP bytes out via the __keelCdp.onMessage callback.
  *
  * This is the single source of truth for CDP serialization — the SAME C++ the
  * native path uses and tests — instead of reimplementing RemoteObject / scope /
@@ -28,6 +28,7 @@
 #include "QuickJSEngineDebugger.h"
 #include "devtools/AdapterDebugTarget.h"
 #include "devtools/DebuggerAdapter.h"
+#include "qjs_wasm_limits.h"
 #include "quickjs.h"
 
 #include <emscripten.h>
@@ -37,9 +38,9 @@
 #include <string>
 #include <vector>
 
-using namespace rill::devtools;
-using rill::qjs_debug::QuickJSDebugCore;
-using rill::qjs_debug::QuickJSEngineDebugger;
+using namespace keel::devtools;
+using keel::qjs_debug::QuickJSDebugCore;
+using keel::qjs_debug::QuickJSEngineDebugger;
 
 namespace {
 JSRuntime* g_rt = nullptr;
@@ -51,10 +52,10 @@ std::unique_ptr<AdapterDebugTarget> g_target;
 }  // namespace
 
 // Outbound: hand one CDP message (response or event) to the JS host. The worker
-// installs globalThis.__rillCdp = { onMessage(connId, json) }. Synchronous JS —
+// installs globalThis.__keelCdp = { onMessage(connId, json) }. Synchronous JS —
 // never suspends — so it is safe to call from anywhere, including mid-pause.
-EM_JS(void, rill_qjs_cdp_out, (int connId, const char* json), {
-  const cdp = globalThis.__rillCdp;
+EM_JS(void, keel_qjs_cdp_out, (int connId, const char* json), {
+  const cdp = globalThis.__keelCdp;
   if (cdp && cdp.onMessage) cdp.onMessage(connId, UTF8ToString(json));
 });
 
@@ -66,6 +67,10 @@ int qjsd_cdp_init(void) {
   g_rt = JS_NewRuntime();
   if (!g_rt) return -1;
   JS_UpdateStackTop(g_rt);  // this thread owns the runtime
+  // Mandatory on wasm: QuickJS's own default stack size exceeds Emscripten's
+  // default stack, so leaving it unset underflows stack_limit and every eval
+  // throws "stack overflow" immediately. See qjs_wasm_limits.h.
+  JS_SetMaxStackSize(g_rt, KEEL_QJS_STACK_LIMIT_BYTES);
   g_ctx = JS_NewContext(g_rt);
   if (!g_ctx) return -1;
   g_core = new QuickJSDebugCore(g_rt, g_ctx);
@@ -89,7 +94,7 @@ void qjsd_cdp_connect(int connId) {
   if (!g_target) return;
   g_target->onClientConnect(
       static_cast<ConnectionId>(connId),
-      [connId](const RawCdpMessage& m) { rill_qjs_cdp_out(connId, m.c_str()); });
+      [connId](const RawCdpMessage& m) { keel_qjs_cdp_out(connId, m.c_str()); });
 }
 
 EMSCRIPTEN_KEEPALIVE

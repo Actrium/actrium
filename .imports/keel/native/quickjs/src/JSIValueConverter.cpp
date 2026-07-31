@@ -1,8 +1,8 @@
 // -----------------------------------------------------------------------------
-// TEST-ONLY JSI HOST - excluded from the shipped pod (see RillSandboxNative.podspec
+// TEST-ONLY JSI HOST - excluded from the shipped pod (see KeelSandboxNative.podspec
 // exclude_files). This file is part of a full jsi::Runtime over QuickJS. It is NOT
 // the sandbox product: production hosts install the *SandboxJSI HostObject into
-// their OWN runtime and never link this cluster (verified: no rill downstream links
+// their OWN runtime and never link this cluster (verified: no keel downstream links
 // it). It is retained solely as a self-contained, dependency-free JSI host that lets
 // the sandbox be unit- and leak-tested natively via native/quickjs/Makefile
 // (QuickJS builds with vendored sources on plain Linux - no RN/JSC/Hermes needed).

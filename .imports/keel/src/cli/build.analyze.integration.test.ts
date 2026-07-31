@@ -4,14 +4,14 @@ import os from 'os';
 import path from 'path';
 
 // Integration test: run full build via build() then run analyze() on the output
-// Ensures that a typical guest using rill/guest gets inlined and passes strict guard.
+// Ensures that a typical guest using keel/guest gets inlined and passes strict guard.
 describe('Analyze integration - build then analyze', () => {
   let tempDir: string;
   let originalCwd: string;
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-ana-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-ana-'));
     originalCwd = process.cwd();
     process.chdir(tempDir);
     fs.mkdirSync('src', { recursive: true });
@@ -24,12 +24,12 @@ describe('Analyze integration - build then analyze', () => {
     logSpy.mockRestore();
   });
 
-  it('should build a guest with rill/guest and pass strict guard', async () => {
+  it('should build a guest with keel/guest and pass strict guard', async () => {
     // Prepare minimal guest
     fs.writeFileSync(
       path.join('src', 'guest.tsx'),
       `import * as React from 'react';
-import { View, Text } from 'rill/guest';
+import { View, Text } from 'keel/guest';
 export default function Guest(){
   return <View><Text>OK</Text></View>;
 }
@@ -53,7 +53,7 @@ export default function Guest(){
 
     // Now run analyze manually (should pass and not throw)
     await analyze(bundlePath, {
-      whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/guest'],
+      whitelist: ['react', 'react-native', 'react/jsx-runtime', 'keel/guest'],
       failOnViolation: true,
       treatEvalAsViolation: true,
       treatDynamicNonLiteralAsViolation: true,

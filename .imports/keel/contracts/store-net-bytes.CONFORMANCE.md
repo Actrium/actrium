@@ -1,11 +1,11 @@
-# store-net-bytes (RBS1) envelope — cross-language conformance
+# store-net-bytes (KBS1) envelope — cross-language conformance
 
-The RBS1 binary-value envelope is a **third sibling** to the op-batch wire
+The KBS1 binary-value envelope is a **third sibling** to the op-batch wire
 ([`op-batch-wire.CONFORMANCE.md`](./op-batch-wire.CONFORMANCE.md)) and the canvas
 wire ([`canvas-wire.CONFORMANCE.md`](./canvas-wire.CONFORMANCE.md)). It shares
 their **single-source + golden-lock + generated-constants** discipline, but is a
 **different shape**: op-batch/canvas are opcode streams with a 16-byte header and
-an intern table, whereas RBS1 is a generic **two-plane frame** — a JSON *control
+an intern table, whereas KBS1 is a generic **two-plane frame** — a JSON *control
 plane* plus a length-prefixed *binary data plane* — that is **contract-agnostic**
 (the codec walks the JSON for `{"$b":N}` sentinels; it needs no per-call
 descriptor). What it carries is R2's promise: a byte-stream field crosses the seam
@@ -17,15 +17,15 @@ as raw bytes (a `Uint8Array` / guest `ptr+len`), never as a JSON number-array.
 
 > **Status: R2 delivered — codec (both sides) + golden lock + SDK wrappers +
 > QuickJS `$b64` + return-memory fix, all green, back-compat proven.** The guest
-> codec (`crates/rill-guest/src/store_net_encode.rs`) and the host codec
-> (`src/host/wire/store-net-envelope.ts`, live on `WasmGuestHost`'s receive/return
+> codec (`crates/keel-native-guest/src/store_net_encode.rs`) and the host codec
+> (`src/host/wire/store-net-envelope.ts`, live on `NativeGuestHost`'s receive/return
 > fork) are implemented; the golden vectors are locked cross-language (Rust encoder
 > is the oracle; the TS encoder reproduces its bytes and the TS decoder reconstructs
-> each source); the `rill-guest` byte SDK wrappers (`store::put_bytes`/`get_bytes`,
+> each source); the `keel-native-guest` byte SDK wrappers (`store::put_bytes`/`get_bytes`,
 > the `net` module) ride the codec; and the QuickJS JSON-string bridge carries the
 > `{"$b64":"…"}` sidecar with parity to the WASM path. All new code is compiled into
 > the shipped guest unconditionally (not `wip`-gated). Conformance sweep is green:
-> Rust `rill-guest` 58, TS `src/contract`+`src/host/wasm-guest`+`src/host/sandbox`
+> Rust `keel-native-guest` 58, TS `src/contract`+`src/host/native-guest`+`src/host/sandbox`
 > 193, TS `src/host/wire` 185, `tsc --noEmit` clean.
 
 ## 1. The envelope (framing byte layout)
@@ -34,7 +34,7 @@ A frame is, in order (**all `u32` little-endian**):
 
 ```
 offset      size      field
-0           4         magic    = 0x31534252  (bytes 52 42 53 31 = 'RBS1')
+0           4         magic    = 0x3153424b  (bytes 4B 42 53 31 = 'KBS1')
 4           4         jsonLen  : u32
 8           jsonLen   json     : UTF-8 control plane (sentinels in place of bytes)
 8+jsonLen   4         segCount : u32
@@ -44,7 +44,7 @@ then segCount times, tightly packed:
 ```
 
 - **No header struct, no intern table, no version field.** The wire version rides
-  the **4th magic byte** (`'1'`): a v2 frame is `'RBS2'` (a different `u32`), which
+  the **4th magic byte** (`'1'`): a v2 frame is `'KBS2'` (a different `u32`), which
   a v1 decoder rejects on the same magic compare. Framing overhead is `12 bytes +
   4 bytes/segment`.
 - **Symmetric — the two-direction lock.** The **exact same framing** is used for
@@ -104,7 +104,7 @@ so the existing whole-frame fail-closed rule already covers it.
    `maxEnvelopeBytes` — not `maxSegmentBytes` — is now the binding constraint on one
    value. Peak decoder residency is the frame plus the joined value (≤ 2×
    `maxEnvelopeBytes`), since segment bytes are copied into the join.
-6. **The magic stays `RBS1`.** The framing is unchanged; `magic.versionByte` is
+6. **The magic stays `KBS1`.** The framing is unchanged; `magic.versionByte` is
    bumped only for a breaking **framing** change. A decoder predating the array form
    rejects such a frame fail-closed with `bad-sentinel` (it requires an integer under
    `$b`), so it can never misread one — and combined with requirement 1, no call that
@@ -116,35 +116,35 @@ so the existing whole-frame fail-closed rule already covers it.
   JSON never holds the bytes, only the sentinel.
 - **QuickJS note.** The WASM transport uses this index form. The QuickJS JSON-string
   bridge instead uses the inline sibling `{"$b64":"<base64>"}` (design §B.5); both
-  deliver a `Uint8Array` to the same handler. RBS1 (this contract) locks only the
+  deliver a `Uint8Array` to the same handler. KBS1 (this contract) locks only the
   WASM index form. `$b` and `$b64` are reserved keys.
 
 ## 3. Back-compat invariant (the non-envelope rule)
 
 **Conformance requirement.** A call **or** return that carries **no** binary
-segments MUST NOT use the RBS1 envelope — it stays **byte-for-byte identical** to
+segments MUST NOT use the KBS1 envelope — it stays **byte-for-byte identical** to
 today's raw-JSON path (a UTF-8 JSON body leading with `{` `0x7B` or `[` `0x5B`).
 
 - **Host fork (guest→host):** key on the payload's leading bytes — full-`u32`
-  magic `RBS1` → envelope codec; `RCNV` → canvas; `RILL` → op-batch; anything else
+  magic `KBS1` → envelope codec; `KCNV` → canvas; `KEEL` → op-batch; anything else
   (a JSON body starts `{`/`[`, matching no magic) → the existing `JSON.parse` path,
   unchanged. The fork MUST compare the **full `u32`**, never byte 0 (all three
-  magics share `0x52 'R'`).
+  magics share `0x4B 'K'`).
 - **Return fork (host→guest):** symmetric — a result with no `Uint8Array` is
-  `JSON.stringify`'d exactly as today; only a result carrying bytes is an RBS1
-  frame. A guest treats a reply whose first `u32` is not the RBS1 magic as plain
+  `JSON.stringify`'d exactly as today; only a result carrying bytes is a KBS1
+  frame. A guest treats a reply whose first `u32` is not the KBS1 magic as plain
   JSON.
 - **Collision claim.** Pure-JSON calls are **never** sentinel-walked, so a literal
   `{"$b":N}` in an existing call's data is inert; it could only be misread as a
-  sentinel **inside** an RBS1 frame — i.e. only within a binary-declared call,
+  sentinel **inside** a KBS1 frame — i.e. only within a binary-declared call,
   where `$b` is reserved by contract. The reservation adds zero risk to any
   existing capability.
 - **Test lock *(delivered)*:** the `back-compat-no-segments` golden vector
   (`kind:"plain"`) asserts a segment-free value stays raw JSON and is **not** an
-  RBS1 frame; on the host side `encodeResult` returns `null` for any
+  KBS1 frame; on the host side `encodeResult` returns `null` for any
   `Uint8Array`-free result (so the reply is the identical `JSON.stringify`), proven
-  end-to-end by the whole pre-existing `wasm-guest` suite taking the unchanged path
-  and by a non-binary handler round-tripping as raw JSON (`isRbs1` false). The RBS1
+  end-to-end by the whole pre-existing `native-guest` suite taking the unchanged path
+  and by a non-binary handler round-tripping as raw JSON (`isKbs1` false). The KBS1
   fork is never taken for a segment-free call or return.
 
 ## 4. Fail-closed caps (single-sourced, generated)
@@ -159,7 +159,7 @@ directions**.
 
 | Constant | Schema (`store-net-bytes.json`) | Generated Rust (`build.rs`) | reason token |
 |----------|---------------------------------|-----------------------------|--------------|
-| magic | `magic.hex` = `0x31534252` (`RBS1`, `u32le` `827540050`) | `MAGIC = 827540050` (from `magic.hex`; LE bytes asserted == `asciiBytes`) | `bad-magic` |
+| magic | `magic.hex` = `0x3153424b` (`KBS1`, `u32le` `827540043`) | `MAGIC = 827540043` (from `magic.hex`; LE bytes asserted == `asciiBytes`) | `bad-magic` |
 | version | `protocolVersion.value` = `1` (4th magic byte `'1'`) | `PROTOCOL_VERSION = 1` | — |
 | maxSegments | `limits.maxSegments.value` = `16` | `limits::MAX_SEGMENTS = 16` | `too-many-segments` |
 | ↳ also bounds | the chunk count of one multi-segment value (§2a) | — | `too-many-segments` |
@@ -168,7 +168,7 @@ directions**.
 | maxJsonBytes | `limits.maxJsonBytes.value` = `262144` (256 KiB) | `limits::MAX_JSON_BYTES = 262144` | `json-too-big` |
 
 The Rust constants are **generated** from the schema by
-`crates/rill-guest/build.rs` (`generate_store_net_contract`): `MAGIC` is derived
+`crates/keel-native-guest/build.rs` (`generate_store_net_contract`): `MAGIC` is derived
 from `magic.hex` and its little-endian bytes are asserted at build time to spell
 `magic.asciiBytes`; every `limits.*` is read straight from the schema and emitted
 as a `SCREAMING_SNAKE` const. A renamed/removed key or a changed value fails the
@@ -179,7 +179,7 @@ build. A later-phase TS envelope codec pins the same literals, and the golden
 
 | reason | fired when |
 |--------|-----------|
-| `bad-magic` | first `u32` ≠ `0x31534252` (also catches a cross-fed `RILL`/`RCNV` buffer) |
+| `bad-magic` | first `u32` ≠ `0x3153424b` (also catches a cross-fed `KEEL`/`KCNV` buffer) |
 | `truncated` | a declared length overruns the buffer, or trailing bytes remain after `segCount` segments |
 | `json-too-big` | `jsonLen > maxJsonBytes` |
 | `bad-json` | the control-plane bytes are not well-formed JSON |
@@ -187,7 +187,7 @@ build. A later-phase TS envelope codec pins the same literals, and the golden
 | `segment-too-big` | a `segLen > maxSegmentBytes` |
 | `envelope-too-big` | whole-frame byte length `> maxEnvelopeBytes` |
 | `bad-segment-ref` | a `{"$b":N}` references `N` outside `[0, segCount)` |
-| `bad-sentinel` | the reserved key `$b` used with a malformed shape inside an RBS1 frame |
+| `bad-sentinel` | the reserved key `$b` used with a malformed shape inside a KBS1 frame |
 
 ## 5. The two-direction lock (conformance chain)
 
@@ -197,11 +197,11 @@ framing is **symmetric**, one vector locks **both** directions:
 
 | # | Assertion | Where | Direction |
 |---|-----------|-------|-----------|
-| 1 | Rust **encoder** == golden `hex`, byte-for-byte (envelope vectors); the at-cap 1 MiB vector locks length + structure | `crates/rill-guest/src/store_net_encode_tests.rs` (`golden_vectors_are_locked`) | value → bytes (request AND return) |
+| 1 | Rust **encoder** == golden `hex`, byte-for-byte (envelope vectors); the at-cap 1 MiB vector locks length + structure | `crates/keel-native-guest/src/store_net_encode_tests.rs` (`golden_vectors_are_locked`) | value → bytes (request AND return) |
 | 2 | TS **encoder** reproduces the golden `hex` and the TS **decoder** reconstructs each source | `src/host/wire/__tests__/store-net-envelope.test.ts` | bytes ⇄ value (request AND return) |
 | 3 | Round-trip parity: `encode_value(decode_value(bytes)) == bytes`; the same value encodes identically as request or return | both codecs | symmetry lock |
-| 4 | End-to-end through a real guest: `WasmGuestHost` decodes an RBS1 request into a `Uint8Array` and returns a byte-carrying result as an RBS1 frame | `src/host/wasm-guest/__tests__/rbs1-guest.test.ts` (fixture `rbs1-guest.wat`) | live receive + return fork |
-| 5 | End-to-end PUSH: `emitEvent` with a byte-carrying payload lands an RBS1 frame in a real Rust guest's memory (byte-free payloads stay byte-identical JSON) | `src/host/wasm-guest/__tests__/wasm-guest-host.test.ts` (fixture `event-guest.wasm`) | live event fork (host → guest) |
+| 4 | End-to-end through a real guest: `NativeGuestHost` decodes a KBS1 request into a `Uint8Array` and returns a byte-carrying result as a KBS1 frame | `src/host/native-guest/__tests__/kbs1-guest.test.ts` (fixture `kbs1-guest.wat`) | live receive + return fork |
+| 5 | End-to-end PUSH: `emitEvent` with a byte-carrying payload lands a KBS1 frame in a real Rust guest's memory (byte-free payloads stay byte-identical JSON) | `src/host/native-guest/__tests__/native-guest-host.test.ts` (fixture `event-guest.wasm`) | live event fork (host → guest) |
 
 Golden vectors (`store-net-bytes.golden.json`, 6 vectors, Rust encoder as oracle):
 `back-compat-no-segments` (raw JSON, asserted **not** a frame), `one-segment`,
@@ -217,7 +217,7 @@ including `decode_envelope_too_big_rejected`.
 
 The TypeScript contract framework (`src/contract/index.ts`) carries the
 **contract-level "this field is a byte stream" declaration** that R2 promises. It
-is **additive metadata only** — it does **not** drive the wire codec (the RBS1
+is **additive metadata only** — it does **not** drive the wire codec (the KBS1
 envelope above is self-describing via `{"$b":N}`); it drives type-gen, the
 manifest, and the dispatch backstop.
 
@@ -246,7 +246,7 @@ export interface BinaryEventFields<Event> {
 
 Declaring a direction the descriptor kind does not have (`binary.event` on an
 `rpc`, `binary.input`/`binary.output` on a `subscription`) is **rejected at
-`defineRillContract`**: it would otherwise be silently ignored, leaving a byte
+`defineKeelContract`**: it would otherwise be silently ignored, leaving a byte
 field that no backstop checks — exactly the fail-open the backstop exists to
 prevent.
 
@@ -255,7 +255,7 @@ includes) a `Uint8Array`, so a mistyped or non-byte field name is a **compile-ti
 error** where the Input/Output/Event types are known.
 
 **Back-compat (non-negotiable):** `binary` is optional and defaults absent. Every
-existing `rpc()` / `defineRillContract()` compiles and behaves **byte-for-byte
+existing `rpc()` / `defineKeelContract()` compiles and behaves **byte-for-byte
 unchanged**; a contract with no `binary` takes exactly today's dispatch path.
 
 ### Three consumers
@@ -277,16 +277,16 @@ unchanged**; a contract with no `binary` takes exactly today's dispatch path.
    the handler as anything else. A subscription's declared `binary.event` fields
    are asserted the same way on every event, **after** `parseEvent` narrows it
    (same order as rpc's output path) and before the guest handler sees it.
-3. **Validation** — `defineRillContract` rejects a malformed `binary` (non-object,
+3. **Validation** — `defineKeelContract` rejects a malformed `binary` (non-object,
    or a direction that is not an array of non-empty field-name strings, or a
    direction that does not exist on the descriptor kind).
 
 ### Type-gen mapping contract (platform-side generator)
 
 Type generation is **platform-side** — per
-[`host-module-types.md`](../docs/guides/host-module-types.md), rill fixes *where*
+[`host-module-types.md`](../docs/guides/host-module-types.md), keel fixes *where*
 the `host-modules.d.ts` lives and *how* the compiler finds it, but the **host/
-platform generates it** from its capability descriptors. rill fixes only the
+platform generates it** from its capability descriptors. keel fixes only the
 **mapping rule** the platform generator MUST honour:
 
 > For each capability descriptor, a field name listed in `binary.input` maps to a
@@ -320,13 +320,13 @@ exactly which capabilities carry the mapping.
 ```sh
 # Guest codec + golden lock + return-path no-leak proof (a renamed/removed/edited
 # schema key fails the build; a wire-byte drift fails the golden test):
-cd /ext/rill/crates && cargo test -p rill-guest
+cd crates && cargo test -p keel-native-guest
 
 # Regenerate the golden from the Rust oracle after an intentional wire change:
-cd /ext/rill/crates && RILL_WRITE_STORE_NET_GOLDEN=1 cargo test -p rill-guest golden_vectors_are_locked
+cd crates && KEEL_WRITE_STORE_NET_GOLDEN=1 cargo test -p keel-native-guest golden_vectors_are_locked
 
 # Host codec (unit + cross-language golden) and the end-to-end guest fork:
-cd /ext/rill && bun test src/host/wire src/host/wasm-guest
+bun test src/host/wire src/host/native-guest
 ```
 
 ## Current status — R2 delivered, golden-locked, back-compat proven
@@ -336,10 +336,10 @@ cd /ext/rill && bun test src/host/wire src/host/wasm-guest
 | `store-net-bytes.json` | single-source schema (magic, framing, sentinel, caps, reasons) | **LOCKED** |
 | `build.rs` `generate_store_net_contract` | `MAGIC` + `PROTOCOL_VERSION` + `limits::*` from schema | **generated, builds** |
 | `store-net-bytes.golden.json` | byte-exact oracle (Rust encoder), 6 vectors | **built + locked (Rust & TS)** |
-| `crates/rill-guest/src/store_net_encode.rs` | guest framing + value-walking codec (`no_std`) | **built, tested** |
-| `src/host/wire/store-net-envelope.ts` | host codec, live on `WasmGuestHost` receive/return fork | **built, tested** |
+| `crates/keel-native-guest/src/store_net_encode.rs` | guest framing + value-walking codec (`no_std`) | **built, tested** |
+| `src/host/wire/store-net-envelope.ts` | host codec, live on `NativeGuestHost` receive/return fork | **built, tested** |
 | `src/contract/index.ts` `binary` field | contract-level byte-field metadata (type-gen, manifest, dispatch backstop) | **built, tested, additive** |
-| `store::put_bytes`/`get_bytes`, `net::fetch_bytes` | `rill-guest` byte SDK wrappers on the codec | **built, round-trip tested** |
+| `store::put_bytes`/`get_bytes`, `net::fetch_bytes` | `keel-native-guest` byte SDK wrappers on the codec | **built, round-trip tested** |
 | QuickJS `$b64` sidecar (`quickjs-native-wasm-provider.ts`) | JSON-string bridge byte transport, parity with WASM path | **built, parity tested** |
 | Return-path leak (oversized fallback dealloc) | `rt::resolve` frees the guest's own fallback buffer | **fixed + no-leak test** |
 
@@ -347,7 +347,7 @@ cd /ext/rill && bun test src/host/wire src/host/wasm-guest
 
 | Suite | Command | Result |
 |---|---|---|
-| Rust guest (codec, golden, wrappers, no-leak, R3 plateau) | `cargo test -p rill-guest` | **58 passed** |
-| TS contract + wasm-guest + sandbox (RBS1 e2e, QuickJS `$b64` parity) | `bun test src/contract src/host/wasm-guest src/host/sandbox` | **193 passed** |
+| Rust guest (codec, golden, wrappers, no-leak, R3 plateau) | `cargo test -p keel-native-guest` | **58 passed** |
+| TS contract + native-guest + sandbox (KBS1 e2e, QuickJS `$b64` parity) | `bun test src/contract src/host/native-guest src/host/sandbox` | **193 passed** |
 | TS wire (host codec + cross-language golden) | `bun test src/host/wire` | **185 passed** |
 | Typecheck | `bunx tsc --noEmit` | **clean** |

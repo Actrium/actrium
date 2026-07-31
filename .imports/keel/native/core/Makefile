@@ -1,4 +1,4 @@
-# Rill Core C++ Test Makefile
+# Keel Core C++ Test Makefile
 
 CXX = clang++
 
@@ -34,7 +34,7 @@ SRC_DEVTOOLS = \
 	$(SRC_DIR)/devtools/DevToolsService.cpp
 
 # Source files under test (protocol subdirectory).
-# WIP — bodies gated behind RILL_WIP_BINARY_PROTOCOL (see WIP_DEFS below);
+# WIP — bodies gated behind KEEL_WIP_BINARY_PROTOCOL (see WIP_DEFS below);
 # compiles to an empty translation unit unless that flag is defined.
 SRC_PROTOCOL = \
 	$(SRC_DIR)/protocol/WireDecoder.cpp
@@ -75,10 +75,10 @@ TEST_BINARY = $(BUILD_DIR)/core_test
 EXTRA_CXXFLAGS ?=
 EXTRA_LDFLAGS ?=
 
-# WIP subsystems are gated out of production builds (see RillSandboxNative.podspec).
+# WIP subsystems are gated out of production builds (see KeelSandboxNative.podspec).
 # The test build always enables them so the CDP and native-security code keeps
 # compiling and running — tests are what stop "WIP" from rotting into "broken".
-WIP_DEFS = -DRILL_WIP_CDP_DEVTOOLS=1 -DRILL_WIP_NATIVE_SECURITY=1 -DRILL_WIP_BINARY_PROTOCOL=1
+WIP_DEFS = -DKEEL_WIP_CDP_DEVTOOLS=1 -DKEEL_WIP_NATIVE_SECURITY=1 -DKEEL_WIP_BINARY_PROTOCOL=1
 
 # C++ compiler flags
 CXXFLAGS = -std=c++17 -O2 -Wall -Wextra -Wpedantic

@@ -14,7 +14,7 @@
 #include <winrt/Windows.Storage.h>
 #include <pathcch.h>
 
-// Trace helper: write to rill_trace.txt in package LocalState folder (or D:\ fallback)
+// Trace helper: write to keel_trace.txt in package LocalState folder (or D:\ fallback)
 static char g_traceFilePath[MAX_PATH] = {};
 
 static void initTracePath() {
@@ -24,11 +24,11 @@ static void initTracePath() {
     auto path = localFolder.Path();
     char narrow[MAX_PATH];
     WideCharToMultiByte(CP_UTF8, 0, path.c_str(), -1, narrow, sizeof(narrow), nullptr, nullptr);
-    snprintf(g_traceFilePath, sizeof(g_traceFilePath), "%s\\rill_trace.txt", narrow);
+    snprintf(g_traceFilePath, sizeof(g_traceFilePath), "%s\\keel_trace.txt", narrow);
     return;
   } catch (...) {}
   // Fallback to D: drive
-  strcpy_s(g_traceFilePath, "D:\\rill_abort_trace.txt");
+  strcpy_s(g_traceFilePath, "D:\\keel_abort_trace.txt");
 }
 
 static void trace(const char *msg) {
@@ -41,7 +41,7 @@ static void trace(const char *msg) {
 }
 
 // WinRT-aware terminate handler — catches winrt::hresult_error
-static void rill_winrt_terminate_handler() {
+static void keel_winrt_terminate_handler() {
   trace("[TERMINATE] std::terminate() called in WindowsDemo");
   try {
     auto ep = std::current_exception();
@@ -84,12 +84,12 @@ struct CompReactPackageProvider
 _Use_decl_annotations_ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE, PSTR /* commandLine */, int showCmd) {
   // Earliest possible trace — raw file I/O, no WinRT, no CRT dependencies beyond stdio
   { FILE* f = nullptr;
-    fopen_s(&f, "D:\\rill_early_trace.txt", "w");
+    fopen_s(&f, "D:\\keel_early_trace.txt", "w");
     if (f) { fprintf(f, "WinMain entered\n"); fclose(f); }
   }
 
   // Install WinRT-aware terminate handler (overrides the one from quickjs compat header)
-  std::set_terminate(rill_winrt_terminate_handler);
+  std::set_terminate(keel_winrt_terminate_handler);
 
   try {
   // Initialize WinRT first (needed for trace path and class activation)
@@ -165,12 +165,12 @@ _Use_decl_annotations_ int CALLBACK WinMain(HINSTANCE instance, HINSTANCE, PSTR 
 
   // Get the AppWindow so we can configure its initial title and size
   auto appWindow{reactNativeWin32App.AppWindow()};
-  appWindow.Title(L"RillDemo");
+  appWindow.Title(L"KeelDemo");
   appWindow.Resize({600, 700});
 
   // Get the ReactViewOptions so we can set the initial RN component to load
   auto viewOptions{reactNativeWin32App.ReactViewOptions()};
-  viewOptions.ComponentName(L"RillDemo");
+  viewOptions.ComponentName(L"KeelDemo");
 
   trace("[MAIN] About to call Start()...");
   // Start the app

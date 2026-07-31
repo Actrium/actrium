@@ -4,7 +4,7 @@
 // NOT part of the normal test suite (has its own main(); not in Makefile's
 // TEST_SOURCES). Built + run only via test/fuzz.mk, which compiles it together
 // with ../src/protocol/WireDecoder.cpp under AddressSanitizer + UBSan and with
-// RILL_WIP_BINARY_PROTOCOL=1.
+// KEEL_WIP_BINARY_PROTOCOL=1.
 //
 // ROLE IN THE DIFFERENTIAL HARNESS
 //   This process is the SINGLE, deterministic corpus GENERATOR, so the TS side
@@ -15,14 +15,14 @@
 //        tamper, count inflation, tag corruption, reserved-byte tamper, header
 //        corruption) — the seed corpus is the 4 golden vectors from
 //        contracts/op-batch-wire.golden.json;
-//     2. feeds it to rill::protocol::wire::WireDecoder (under ASan: any OOB /
+//     2. feeds it to keel::protocol::wire::WireDecoder (under ASan: any OOB /
 //        UAF / UB in the decoder aborts the process = a CONFIRMED crash bug);
 //     3. writes the raw bytes to <corpus.bin> (length-prefixed) and a canonical
 //        result line to <cpp.results>: "A\t<canonical>" on accept, "R" on
 //        reject. On accept it re-serialises EVERY decoded field — walking every
 //        zero-copy string_view — so ASan also validates the views are in-bounds.
 //
-//   The TS driver (src/host/wasm-guest/wire-decoder.fuzz.ts) then decodes the
+//   The TS driver (src/host/native-guest/wire-decoder.fuzz.ts) then decodes the
 //   same corpus.bin with the TS decoder, builds the SAME canonical strings, and
 //   diffs the two result streams: TS-accepts iff C++-accepts, and on mutual
 //   accept the canonical forms must be equal. Any mismatch is a CONFIRMED drift.
@@ -40,7 +40,7 @@
 
 #include "../src/protocol/WireDecoder.h"
 
-using namespace rill::protocol::wire;
+using namespace keel::protocol::wire;
 
 // --------------------------------------------------------------------------
 // Deterministic PRNG (splitmix64) — identical stream for a given seed so a
@@ -65,14 +65,14 @@ struct Rng {
 // mutation seed corpus. Copied verbatim; the harness never hand-rolls a batch.
 const char* kGoldenHex[] = {
     // empty-batch
-    "52494c4c0100000000000000000000000000",
+    "4b45454c0100000000000000000000000000",
     // one-create
-    "52494c4c0100010000000100000000000100040056696577010100000000000000",
+    "4b45454c0100010000000100000000000100040056696577010100000000000000",
     // setprop-repeated-key
-    "52494c4c01000200000002000000000003000900636c6173734e616d6501006101006"
+    "4b45454c01000200000002000000000003000900636c6173734e616d6501006101006"
     "202010000000100000006010000000202000000010000000602000000",
     // mixed-five-ops
-    "52494c4c0100030000000500000000000600040056696577020069640400726f6f7404"
+    "4b45454c0100030000000500000000000600040056696577020069640400726f6f7404"
     "00546578740200486904006d61696e0101000000000001000100060200010200000003"
     "00000004000000000100000002000000080200000004000201000000010001000605000000",
 };
@@ -404,8 +404,8 @@ int main(int argc, char** argv) {
     return 2;
   }
 
-  // corpus.bin header: "RFZC" magic + u32 count.
-  const char magic[4] = {'R', 'F', 'Z', 'C'};
+  // corpus.bin header: "KFZC" magic + u32 count.
+  const char magic[4] = {'K', 'F', 'Z', 'C'};
   std::fwrite(magic, 1, 4, corpus);
   uint32_t count32 = static_cast<uint32_t>(iterations);
   std::fwrite(&count32, sizeof(count32), 1, corpus);

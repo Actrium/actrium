@@ -4,5 +4,5 @@ build/
 *.xcworkspace/
 DerivedData/
 package-lock.json
-.rill_pod_cache
+.keel_pod_cache
 *.jsbundle

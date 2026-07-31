@@ -22,9 +22,9 @@ INCLUDE="$HERMES_DESTROOT/include"
 FWDIR="$(dirname "$(find "$HERMES_DESTROOT/Library/Frameworks" -name hermes.framework -maxdepth 2 | head -1)")"
 [ -n "$FWDIR" ] || { echo "hermes.framework not found under $HERMES_DESTROOT" >&2; exit 1; }
 
-OUT="${TMPDIR:-/tmp}/rill_cdp_e2e"
+OUT="${TMPDIR:-/tmp}/keel_cdp_e2e"
 
-clang++ -std=c++17 -DRILL_WIP_CDP_DEVTOOLS=1 -DHERMES_ENABLE_DEBUGGER=1 \
+clang++ -std=c++17 -DKEEL_WIP_CDP_DEVTOOLS=1 -DHERMES_ENABLE_DEBUGGER=1 \
   -I "$INCLUDE" -I "$HERMES_SRC/devtools" -I "$CORE_SRC" \
   "$HERE/test_cdp_e2e.cpp" "$HERMES_SRC/devtools/CDPAgentTarget.cpp" \
   -F "$FWDIR" -framework hermes -Wl,-rpath,"$FWDIR" \

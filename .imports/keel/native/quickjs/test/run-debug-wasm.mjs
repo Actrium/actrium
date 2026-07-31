@@ -35,10 +35,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // Asyncify's rewind rebuilds QuickJS's deep interpreter call stack inside V8's
 // execution stack, which needs more headroom than the default. Re-exec once with
 // a larger V8 stack so a plain `node run-debug-wasm.mjs` just works.
-if (!process.env.RILL_DBG_REEXEC) {
+if (!process.env.KEEL_DBG_REEXEC) {
   const child = spawnSync(process.execPath, ['--stack-size=4000', fileURLToPath(import.meta.url)], {
     stdio: 'inherit',
-    env: { ...process.env, RILL_DBG_REEXEC: '1' },
+    env: { ...process.env, KEEL_DBG_REEXEC: '1' },
   });
   process.exit(child.status === null ? 1 : child.status);
 }
@@ -72,7 +72,7 @@ const factory = (await import(join(__dirname, '..', 'build-debug', 'quickjs-sand
 const Module = await factory();
 
 let pausedCount = 0;
-globalThis.__rillDbg = {
+globalThis.__keelDbg = {
   onPaused: () => {
     pausedCount++;
   },

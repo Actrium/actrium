@@ -1,6 +1,6 @@
-// WIP subsystem — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in devtools/CDPServer.h.
-#if RILL_WIP_CDP_DEVTOOLS
+#if KEEL_WIP_CDP_DEVTOOLS
 /**
  * DOMAdapter.cpp
  *
@@ -10,7 +10,7 @@
 #include "DOMAdapter.h"
 #include <sstream>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 DOMAdapter::DOMAdapter(CDPServer& server)
     : server_(server) {}
@@ -313,10 +313,10 @@ int DOMAdapter::generateNodeId() {
   return nextNodeId_.fetch_add(1);
 }
 
-int DOMAdapter::mapRillNodeId(TenantId tenantId, int rillNodeId) {
+int DOMAdapter::mapKeelNodeId(TenantId tenantId, int keelNodeId) {
   std::lock_guard<std::mutex> lock(mapMutex_);
   
-  uint64_t key = (static_cast<uint64_t>(tenantId) << 32) | static_cast<uint64_t>(rillNodeId);
+  uint64_t key = (static_cast<uint64_t>(tenantId) << 32) | static_cast<uint64_t>(keelNodeId);
   
   auto it = reverseNodeIdMap_.find(key);
   if (it != reverseNodeIdMap_.end()) {
@@ -324,13 +324,13 @@ int DOMAdapter::mapRillNodeId(TenantId tenantId, int rillNodeId) {
   }
   
   int cdpNodeId = generateNodeId();
-  nodeIdMap_[cdpNodeId] = {tenantId, rillNodeId};
+  nodeIdMap_[cdpNodeId] = {tenantId, keelNodeId};
   reverseNodeIdMap_[key] = cdpNodeId;
   
   return cdpNodeId;
 }
 
-int DOMAdapter::getRillNodeId(int cdpNodeId) {
+int DOMAdapter::getKeelNodeId(int cdpNodeId) {
   std::lock_guard<std::mutex> lock(mapMutex_);
   
   auto it = nodeIdMap_.find(cdpNodeId);
@@ -341,5 +341,5 @@ int DOMAdapter::getRillNodeId(int cdpNodeId) {
   return 0;
 }
 
-} // namespace rill::devtools
-#endif // RILL_WIP_CDP_DEVTOOLS
+} // namespace keel::devtools
+#endif // KEEL_WIP_CDP_DEVTOOLS

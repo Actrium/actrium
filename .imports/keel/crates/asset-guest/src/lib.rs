@@ -1,7 +1,7 @@
-//! Demo native (non-JS) rill guest for the ④ `host:asset` path.
+//! Demo native (non-JS) keel guest for the ④ `host:asset` path.
 //!
 //! On init it resolves an app-package asset to decoded RGBA entirely inside its
-//! OWN linear memory, using the `rill_guest::asset` SDK:
+//! OWN linear memory, using the `keel_native_guest::asset` SDK:
 //!   1. `asset::info("logo")`  -> the decoded `(w, h)`,
 //!   2. allocate a `w×h` RGBA8 `Surface` (guest memory),
 //!   3. `asset::blit("logo", &mut buffer)` -> the host WRITES the decoded pixels
@@ -21,10 +21,10 @@
 
 extern crate alloc;
 
-use rill_guest::asset;
-use rill_guest::canvas::Surface;
+use keel_native_guest::asset;
+use keel_native_guest::canvas::Surface;
 
-rill_guest::rill_guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 /// The app-package asset id this guest resolves. The host test's `host:asset`
 /// dispatch keys off this exact id.

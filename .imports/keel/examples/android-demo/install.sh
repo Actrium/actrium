@@ -177,7 +177,7 @@ echo "Device: $DEVICE_NAME"
 echo ""
 
 configure_node() {
-    local node_binary="${RILL_ANDROID_E2E_NODE_BINARY:-}"
+    local node_binary="${KEEL_ANDROID_E2E_NODE_BINARY:-}"
 
     if [ -z "$node_binary" ] && command -v n >/dev/null 2>&1; then
         node_binary="$(n which 22 2>/dev/null || true)"
@@ -246,12 +246,12 @@ ensure_gradle_wrapper() {
 ensure_gradle_wrapper
 
 GRADLE_COMMON_ARGS=()
-if [ -n "${RILL_ANDROID_GRADLE_INIT:-}" ]; then
-    GRADLE_COMMON_ARGS+=("-I" "$RILL_ANDROID_GRADLE_INIT")
+if [ -n "${KEEL_ANDROID_GRADLE_INIT:-}" ]; then
+    GRADLE_COMMON_ARGS+=("-I" "$KEEL_ANDROID_GRADLE_INIT")
 fi
-if [ -n "${RILL_ANDROID_GRADLE_ARGS:-}" ]; then
+if [ -n "${KEEL_ANDROID_GRADLE_ARGS:-}" ]; then
     # Intentional shell splitting: callers pass Gradle CLI flags as a single env string.
-    EXTRA_GRADLE_ARGS=($RILL_ANDROID_GRADLE_ARGS)
+    EXTRA_GRADLE_ARGS=($KEEL_ANDROID_GRADLE_ARGS)
     GRADLE_COMMON_ARGS+=("${EXTRA_GRADLE_ARGS[@]}")
 fi
 
@@ -278,8 +278,8 @@ bundle_js() {
     fi
 
     echo "[bundle] Creating JS bundle..."
-    local METRO_WORKERS="${RILL_ANDROID_E2E_METRO_WORKERS:-1}"
-    local METRO_TMPDIR="${RILL_ANDROID_E2E_METRO_TMPDIR:-/tmp/rill-android-demo-metro-${VARIANT}-$$}"
+    local METRO_WORKERS="${KEEL_ANDROID_E2E_METRO_WORKERS:-1}"
+    local METRO_TMPDIR="${KEEL_ANDROID_E2E_METRO_TMPDIR:-/tmp/keel-android-demo-metro-${VARIANT}-$$}"
     echo "[bundle] Metro workers: $METRO_WORKERS"
     rm -rf "$METRO_TMPDIR"
     mkdir -p "$METRO_TMPDIR"
@@ -296,7 +296,7 @@ bundle_js() {
     echo "[bundle] JS bundle created"
 }
 
-if [ "${RILL_ANDROID_E2E_PREBUNDLE:-0}" = "1" ]; then
+if [ "${KEEL_ANDROID_E2E_PREBUNDLE:-0}" = "1" ]; then
     bundle_js
 else
     echo "[bundle] Skipping pre-bundle; Gradle will package the React Native bundle"
@@ -365,7 +365,7 @@ echo ""
 echo "Installed apps:"
 for CONFIG in "${CONFIGS_TO_INSTALL[@]}"; do
     CONFIG_CAP=$(capitalize "$CONFIG")
-    echo "  - Rill-${CONFIG_CAP} (com.rill.demo.${CONFIG})"
+    echo "  - Keel-${CONFIG_CAP} (com.keel.demo.${CONFIG})"
 done
 echo ""
 echo "The JS bundle is pre-built into the APK."

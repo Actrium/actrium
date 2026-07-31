@@ -7,10 +7,10 @@
 1. Host 调用 `Engine.sendEvent()` 或 `sendToSandbox()`
 2. `Bridge.sendToGuest()` 完成 HostMessage 编解码
 3. Engine 将消息注入 `globalThis.__hostMessage`
-4. Engine 通过 `evalCode('globalThis.__rill_handleMessage(__hostMessage)')` 在 Guest runtime 内执行分发
-5. Guest 侧 `__rill.dispatchEvent()` 调用 `useHostEvent()` 注册的 listener
+4. Engine 通过 `evalCode('globalThis.__keel_handleMessage(__hostMessage)')` 在 Guest runtime 内执行分发
+5. Guest 侧 `__keel.dispatchEvent()` 调用 `useHostEvent()` 注册的 listener
 
-因此旧分支里直接引入 `__rillUseHostEvent` / `__rillHandleHostEvent` 的方案不再是当前最佳路径。当前架构已经避免了从 Host 直接调用 Guest function shell 的问题，真正需要补齐的是各 native sandbox adapter 在 `eval()` 和跨 runtime 函数调用后的调度语义。
+因此旧分支里直接引入 `__keelUseHostEvent` / `__keelHandleHostEvent` 的方案不再是当前最佳路径。当前架构已经避免了从 Host 直接调用 Guest function shell 的问题，真正需要补齐的是各 native sandbox adapter 在 `eval()` 和跨 runtime 函数调用后的调度语义。
 
 ## Bug 本质
 
@@ -35,7 +35,7 @@ Host -> Guest event 的 listener 可以被同步调用，但 listener 内部或 
 - 前置 `react-native/cli.js bundle` 在连续 quickjs/hermes 两个 flavor 时出现 Node/Jest worker 不退出，表现为长时间无输出
 - 首次 Android release 构建还要生成 CMake/NDK、Metro、dex、APK 产物，`examples/android-demo/android/app/build` 会增长到 GB 级，冷构建天然慢
 - 早期动态 autolinking 会经由 `file:` dependency 扫到 repo 根和 native build artifacts，进一步放大卡顿
-- Android demo 的 Metro `watchFolders` 指向 rill symlink realpath 后，若未显式关闭 `resolver.useWatchman`，Watchman 会尝试解析 repo 根并触发 `Resource deadlock avoided`；若未 block 根 `node_modules`，Metro 还会扫到根依赖里的 dataless `package.json`
+- Android demo 的 Metro `watchFolders` 指向 keel symlink realpath 后，若未显式关闭 `resolver.useWatchman`，Watchman 会尝试解析 repo 根并触发 `Resource deadlock avoided`；若未 block 根 `node_modules`，Metro 还会扫到根依赖里的 dataless `package.json`
 - 原 `bun test`/coverage 默认会触发仓库级发现和覆盖率扫描，遇到 GB 级 native/Android 生成物和 dataless 文件时非常慢；全量 unit 应改为显式测试文件列表
 
 修复后 Android runner 默认跳过前置 bundle，只让 Gradle/RN 官方 task 负责把 JS bundle 打进 APK；热缓存下完整 quickjs+hermes emulator E2E 已能在几十秒内完成。
@@ -64,7 +64,7 @@ Host -> Guest event 的 listener 可以被同步调用，但 listener 内部或 
 
 - Android/iOS demo runner 稳定性
   - Android demo 使用静态 autolinking，避免 RN CLI 扫描 repo 生成物卡住
-  - Metro 关闭 Watchman，block rill 根 `node_modules` 和 native/test build artifacts
+  - Metro 关闭 Watchman，block keel 根 `node_modules` 和 native/test build artifacts
   - Android install 默认跳过手动 pre-bundle，避免与 Gradle React Native bundle task 重复
   - Android Gradle 降并发、增加 HTTP timeout、禁 release lint 阻断
   - iOS/Android runner 明确选择 Node 22，限制 Metro/Xcode/Gradle 并发
@@ -84,7 +84,7 @@ Host -> Guest event 的 listener 可以被同步调用，但 listener 内部或 
 - `bun run test:native`
 - `bun run test:bundle`
 - `bun run test:e2e:wasm`
-- `RILL_ANDROID_E2E_AVD=Pixel_API_35 bun run test:e2e:android-emulator`
+- `KEEL_ANDROID_E2E_AVD=Pixel_API_35 bun run test:e2e:android-emulator`
 
 未在本轮重新声明通过：
 

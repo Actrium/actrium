@@ -2,14 +2,14 @@ import { describe, expect, it } from 'bun:test';
 import { Engine } from '../../engine';
 
 describe('Engine host→guest events', () => {
-  it('should inject __rill_onHostEvent polyfill and trigger callback when host sends event', async () => {
+  it('should inject __keel_onHostEvent polyfill and trigger callback when host sends event', async () => {
     const engine = new Engine({ sandbox: 'node-vm', debug: false });
 
     // load a tiny bundle using SDK-like API
     // Note: Must use globalThis.xxx in strict mode (mock provider shadows globalThis)
     const bundle = `
-      if (globalThis.__rill_onHostEvent) {
-        globalThis.__rill_onHostEvent('PING', (payload) => {
+      if (globalThis.__keel_onHostEvent) {
+        globalThis.__keel_onHostEvent('PING', (payload) => {
           globalThis.__PING_PAYLOAD = payload;
         });
       }

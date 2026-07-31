@@ -17,9 +17,9 @@ describe('DevTools Integration', () => {
   beforeEach(() => {
     // Save original state
     // biome-ignore lint/suspicious/noExplicitAny: Accessing custom global property for test
-    originalDevToolsFlag = (globalThis as any).__RILL_DEVTOOLS_ENABLED;
+    originalDevToolsFlag = (globalThis as any).__KEEL_DEVTOOLS_ENABLED;
     // biome-ignore lint/suspicious/noExplicitAny: Accessing custom global property for test
-    originalSendEventToHost = (globalThis as any).__rill_emitEvent;
+    originalSendEventToHost = (globalThis as any).__keel_emitEvent;
 
     // Reset tracking
     sentEvents = [];
@@ -29,37 +29,37 @@ describe('DevTools Integration', () => {
     // Restore original state
     if (originalDevToolsFlag !== undefined) {
       // biome-ignore lint/suspicious/noExplicitAny: Restoring custom global property after test
-      (globalThis as any).__RILL_DEVTOOLS_ENABLED = originalDevToolsFlag;
+      (globalThis as any).__KEEL_DEVTOOLS_ENABLED = originalDevToolsFlag;
     } else {
       // biome-ignore lint/suspicious/noExplicitAny: Restoring custom global property after test
-      delete (globalThis as any).__RILL_DEVTOOLS_ENABLED;
+      delete (globalThis as any).__KEEL_DEVTOOLS_ENABLED;
     }
 
     if (originalSendEventToHost !== undefined) {
       // biome-ignore lint/suspicious/noExplicitAny: Restoring custom global property after test
-      (globalThis as any).__rill_emitEvent = originalSendEventToHost;
+      (globalThis as any).__keel_emitEvent = originalSendEventToHost;
     } else {
       // biome-ignore lint/suspicious/noExplicitAny: Restoring custom global property after test
-      delete (globalThis as any).__rill_emitEvent;
+      delete (globalThis as any).__keel_emitEvent;
     }
   });
 
   describe('isDevToolsEnabled', () => {
     it('should return false when DevTools is not enabled', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Modifying custom global property for test
-      delete (globalThis as any).__RILL_DEVTOOLS_ENABLED;
+      delete (globalThis as any).__KEEL_DEVTOOLS_ENABLED;
       expect(isDevToolsEnabled()).toBe(false);
     });
 
     it('should return true when DevTools is enabled', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Modifying custom global property for test
-      (globalThis as any).__RILL_DEVTOOLS_ENABLED = true;
+      (globalThis as any).__KEEL_DEVTOOLS_ENABLED = true;
       expect(isDevToolsEnabled()).toBe(true);
     });
 
     it('should return false when DevTools flag is false', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Modifying custom global property for test
-      (globalThis as any).__RILL_DEVTOOLS_ENABLED = false;
+      (globalThis as any).__KEEL_DEVTOOLS_ENABLED = false;
       expect(isDevToolsEnabled()).toBe(false);
     });
 
@@ -70,9 +70,9 @@ describe('DevTools Integration', () => {
   });
 
   describe('sendDevToolsMessage', () => {
-    it('should send message when __rill_emitEvent is available', () => {
+    it('should send message when __keel_emitEvent is available', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Mocking custom global function for test
-      (globalThis as any).__rill_emitEvent = (type: string, data: unknown) => {
+      (globalThis as any).__keel_emitEvent = (type: string, data: unknown) => {
         sentEvents.push({ type, data });
       };
 
@@ -83,9 +83,9 @@ describe('DevTools Integration', () => {
       expect(sentEvents[0]!.data).toEqual({ foo: 'bar' });
     });
 
-    it('should not throw when __rill_emitEvent is missing', () => {
+    it('should not throw when __keel_emitEvent is missing', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Modifying custom global property for test
-      delete (globalThis as any).__rill_emitEvent;
+      delete (globalThis as any).__keel_emitEvent;
 
       expect(() => {
         sendDevToolsMessage('test-event', { data: 'test' });
@@ -94,7 +94,7 @@ describe('DevTools Integration', () => {
 
     it('should handle complex data structures', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Mocking custom global function for test
-      (globalThis as any).__rill_emitEvent = (type: string, data: unknown) => {
+      (globalThis as any).__keel_emitEvent = (type: string, data: unknown) => {
         sentEvents.push({ type, data });
       };
 
@@ -115,7 +115,7 @@ describe('DevTools Integration', () => {
 
     it('should send multiple messages', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Mocking custom global function for test
-      (globalThis as any).__rill_emitEvent = (type: string, data: unknown) => {
+      (globalThis as any).__keel_emitEvent = (type: string, data: unknown) => {
         sentEvents.push({ type, data });
       };
 
@@ -131,7 +131,7 @@ describe('DevTools Integration', () => {
 
     it('should handle null and undefined data', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Mocking custom global function for test
-      (globalThis as any).__rill_emitEvent = (type: string, data: unknown) => {
+      (globalThis as any).__keel_emitEvent = (type: string, data: unknown) => {
         sentEvents.push({ type, data });
       };
 
@@ -147,9 +147,9 @@ describe('DevTools Integration', () => {
   describe('DevTools E2E Scenarios', () => {
     it('should track render timings when enabled', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Modifying custom global property for test
-      (globalThis as any).__RILL_DEVTOOLS_ENABLED = true;
+      (globalThis as any).__KEEL_DEVTOOLS_ENABLED = true;
       // biome-ignore lint/suspicious/noExplicitAny: Mocking custom global function for test
-      (globalThis as any).__rill_emitEvent = (type: string, data: unknown) => {
+      (globalThis as any).__keel_emitEvent = (type: string, data: unknown) => {
         sentEvents.push({ type, data });
       };
 
@@ -170,13 +170,13 @@ describe('DevTools Integration', () => {
 
     it('should not send events when DevTools is disabled', () => {
       // biome-ignore lint/suspicious/noExplicitAny: Modifying custom global property for test
-      (globalThis as any).__RILL_DEVTOOLS_ENABLED = false;
+      (globalThis as any).__KEEL_DEVTOOLS_ENABLED = false;
       // biome-ignore lint/suspicious/noExplicitAny: Mocking custom global function for test
-      (globalThis as any).__rill_emitEvent = (type: string, data: unknown) => {
+      (globalThis as any).__keel_emitEvent = (type: string, data: unknown) => {
         sentEvents.push({ type, data });
       };
 
-      // Even if __rill_emitEvent exists, events can still be sent
+      // Even if __keel_emitEvent exists, events can still be sent
       // The logic to check isDevToolsEnabled before calling sendDevToolsMessage
       // should be in the calling code (host-config.ts)
       sendDevToolsMessage('test', { data: 'test' });

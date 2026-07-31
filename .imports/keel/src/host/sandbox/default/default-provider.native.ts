@@ -4,7 +4,7 @@
  * Implements JSEngineProvider directly, resolving the underlying provider at construction time.
  *
  * Auto-selects the best sandbox provider based on platform:
- * - Hermes sandbox: HermesProvider (when RILL_SANDBOX_ENGINE=hermes)
+ * - Hermes sandbox: HermesProvider (when KEEL_SANDBOX_ENGINE=hermes)
  * - Apple platforms: JSCProvider (uses system JSC, zero binary overhead)
  * - Other platforms: QuickJSProvider (cross-platform)
  * - No fallback - throws error if no provider available
@@ -37,7 +37,7 @@ export type DefaultProviderOptions = {
  * createRuntime() delegates to it.
  *
  * Selection priority (when sandbox option not specified):
- * 1. HermesProvider (when RILL_SANDBOX_ENGINE=hermes at build time)
+ * 1. HermesProvider (when KEEL_SANDBOX_ENGINE=hermes at build time)
  * 2. Apple platforms: JSCProvider (uses system JSC, zero overhead)
  * 3. All platforms: QuickJSProvider (if available)
  * 4. Error: No fallback (throws if no provider available)
@@ -59,12 +59,12 @@ export class DefaultProvider implements JSEngineProvider {
   }
 
   private static resolve(options?: DefaultProviderOptions): JSEngineProvider {
-    // Force-load the RillSandboxNative TurboModule to trigger installJSIBindingsWithRuntime.
+    // Force-load the KeelSandboxNative TurboModule to trigger installJSIBindingsWithRuntime.
     // This installs __JSCSandboxJSI / __HermesSandboxJSI / __QuickJSSandboxJSI globals.
     // NOTE: The TurboModuleRegistry import and this call MUST be used inside a function body.
     // A bare top-level `TurboModuleRegistry.get(...)` is eliminated by Metro/Hermes as dead
     // code when the return value is unused, causing the native module to never load.
-    TurboModuleRegistry.get('RillSandboxNative');
+    TurboModuleRegistry.get('KeelSandboxNative');
 
     // Cache availability checks to avoid repeated native calls and add diagnostics
     const hermesAvailable = isHermesAvailable();
@@ -72,7 +72,7 @@ export class DefaultProvider implements JSEngineProvider {
     const quickjsAvailable = isQuickJSAvailable();
     // One-time availability log to help debug sandbox loading issues
     if (typeof console?.log === 'function') {
-      console.log('[rill][DefaultProvider] availability', {
+      console.log('[keel][DefaultProvider] availability', {
         hermesAvailable,
         jscAvailable,
         quickjsAvailable,
@@ -92,7 +92,7 @@ export class DefaultProvider implements JSEngineProvider {
         return new HermesProvider(providerOptions);
       }
       throw new Error(
-        '[DefaultProvider] HermesProvider requested but Hermes sandbox not available (RILL_SANDBOX_ENGINE!=hermes or native module not linked).'
+        '[DefaultProvider] HermesProvider requested but Hermes sandbox not available (KEEL_SANDBOX_ENGINE!=hermes or native module not linked).'
       );
     }
 
@@ -118,7 +118,7 @@ export class DefaultProvider implements JSEngineProvider {
 
     // Auto-detect best provider
 
-    // Hermes sandbox (when built with RILL_SANDBOX_ENGINE=hermes)
+    // Hermes sandbox (when built with KEEL_SANDBOX_ENGINE=hermes)
     if (hermesAvailable) {
       return new HermesProvider(providerOptions);
     }
@@ -144,7 +144,7 @@ export class DefaultProvider implements JSEngineProvider {
     };
     throw new Error(
       `[DefaultProvider] No sandbox engine available. ` +
-        `Ensure 'RillSandboxNative' pod is linked (run \`pod install\`). ` +
+        `Ensure 'KeelSandboxNative' pod is linked (run \`pod install\`). ` +
         `diag=${JSON.stringify(diag)}`
     );
   }

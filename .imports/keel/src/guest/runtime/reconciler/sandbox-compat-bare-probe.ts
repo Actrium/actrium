@@ -9,7 +9,7 @@
  * as well as call time. Doing this inside the shared `bun test` process instead
  * would leak the deletions into every other test file in the run.
  *
- * Measured on QuickJS-WASM, all seven of these are absent from a real rill guest
+ * Measured on QuickJS-WASM, all seven of these are absent from a real keel guest
  * sandbox (see `sandbox-compat.ts`'s header), so this is the environment the
  * helpers actually ship into.
  */

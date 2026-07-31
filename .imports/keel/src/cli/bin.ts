@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Rill CLI
+ * Keel CLI
  *
  * Guest bundler tool
  */
@@ -19,8 +19,8 @@ type AnalyzeCommandOptions = Omit<AnalyzeOptions, 'contract' | 'contractFile'> &
 };
 
 program
-  .name('rill')
-  .description('Rill CLI - Build dynamic UI guests for React Native')
+  .name('keel')
+  .description('Keel CLI - Build dynamic UI guests for React Native')
   .version(version);
 
 program
@@ -82,7 +82,7 @@ program
     'react',
     'react-native',
     'react/jsx-runtime',
-    'rill/guest',
+    'keel/guest',
   ])
   .option('--contract <path>', 'Contract module path exporting `contract` or default contract')
   .option('--fail-on-violation', 'Fail when non-whitelisted deps are found')
@@ -112,7 +112,7 @@ program
 program
   .command('init')
   .description('Initialize a new guest project')
-  .argument('[name]', 'Project name', 'my-rill-guest')
+  .argument('[name]', 'Project name', 'my-keel-guest')
   .action(async (name: string) => {
     const fs = await import('fs');
     const path = await import('path');
@@ -133,8 +133,8 @@ program
         version: '0.1.0',
         private: true,
         scripts: {
-          build: 'rill build src/guest.tsx -o dist/bundle.js',
-          analyze: 'rill analyze dist/bundle.js',
+          build: 'keel build src/guest.tsx -o dist/bundle.js',
+          analyze: 'keel analyze dist/bundle.js',
         },
         devDependencies: {
           '@types/bun': 'latest',
@@ -142,7 +142,7 @@ program
         },
         dependencies: {
           react: '^18.0.0',
-          rill: 'latest',
+          keel: 'latest',
         },
       };
       fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2));
@@ -189,12 +189,12 @@ program
     const guestPath = path.join(srcDir, 'guest.tsx');
     if (!fs.existsSync(guestPath)) {
       const guest = `import * as React from 'react';
-import { View, Text } from 'rill/guest';
+import { View, Text } from 'keel/guest';
 
 export default function Guest() {
   return (
     <View>
-      <Text>Hello from Rill Guest</Text>
+      <Text>Hello from Keel Guest</Text>
     </View>
   );
 }
@@ -206,7 +206,7 @@ export default function Guest() {
     console.log('Next steps:');
     console.log(`  cd ${name}`);
     console.log('  npm install');
-    console.log('  npx rill build src/guest.tsx -o dist/bundle.js');
+    console.log('  npx keel build src/guest.tsx -o dist/bundle.js');
   });
 
 program.parse();

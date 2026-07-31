@@ -2,7 +2,7 @@
 
 [中文版本](./sandbox-comparison.zh.md)
 
-Rill hides JavaScript execution behind an internal `JSEngineProvider` interface. Five provider implementations ship with the project, one per runtime environment.
+Keel hides JavaScript execution behind an internal `JSEngineProvider` interface. Five provider implementations ship with the project, one per runtime environment.
 
 Note that these providers are **not public API**, and injecting a custom provider is not supported. The only knob exposed outward is `EngineOptions.sandbox`, which selects or hints at a sandbox backend; everything else the engine decides for itself (`DefaultProvider` integrating with TenantManager, for instance).
 
@@ -49,7 +49,7 @@ const isJSCAvailable = typeof (globalThis as any).__JSCSandboxJSI !== 'undefined
 
 **Characteristics:**
 
-- Requires the `RillSandboxNative` native module to be linked.
+- Requires the `KeelSandboxNative` native module to be linked.
 - Detected at runtime via `globalThis.__JSCSandboxJSI`.
 - No hard timeout interrupt by default: JavaScriptCore's only execution time
   limit API (`JSContextGroupSetExecutionTimeLimit`) is a private header, so it
@@ -72,7 +72,7 @@ Ideal for React Native apps that already run on the Hermes engine. Like JSC Nati
 
 **Source:** `src/host/sandbox/providers/HermesProvider.native.ts`
 
-**Build requirement:** The native module must be compiled with `RILL_SANDBOX_ENGINE=hermes`.
+**Build requirement:** The native module must be compiled with `KEEL_SANDBOX_ENGINE=hermes`.
 
 **Unique feature -- bytecode precompilation:**
 
@@ -82,7 +82,7 @@ hermesc -emit-binary -O -out guest.hbc guest.js
 ```
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({ sandbox: 'hermes' });
 // Note: provider-level bytecode APIs are internal.
@@ -134,15 +134,15 @@ Web platform solution. The same QuickJS C source is compiled to WebAssembly via 
 **Build from source:**
 
 ```bash
-cd rill/native/quickjs
+cd keel/native/quickjs
 ./build-wasm.sh release
-# Output: quickjs-sandbox.{js,wasm} -> rill/src/host/sandbox/wasm/
+# Output: quickjs-sandbox.{js,wasm} -> keel/src/host/sandbox/wasm/
 ```
 
 **Usage:**
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({ sandbox: 'wasm-quickjs' });
 // Note: WASM asset wiring is internal today.
@@ -169,7 +169,7 @@ Development and testing provider. Uses the Node.js `vm` module to create isolate
 **Usage:**
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({ sandbox: 'node-vm' });
 ```
@@ -204,7 +204,7 @@ const engine = new Engine({ sandbox: 'node-vm' });
 
 Used when the app runs inside React Native. Detection order:
 
-1. **HermesProvider** -- selected when `globalThis.__HermesSandboxJSI` is defined (native module built with `RILL_SANDBOX_ENGINE=hermes`).
+1. **HermesProvider** -- selected when `globalThis.__HermesSandboxJSI` is defined (native module built with `KEEL_SANDBOX_ENGINE=hermes`).
 2. **JSCProvider** -- selected when `globalThis.__JSCSandboxJSI` is defined (Apple platforms).
 3. **QuickJSProvider** -- selected when `globalThis.__QuickJSSandboxJSI` is defined (cross-platform fallback).
 4. **Error** -- throws with diagnostic information if no native module is found.
@@ -222,7 +222,7 @@ Used in Node.js, Bun, and web environments. Detection order:
 Pass the `sandbox` option to bypass auto-detection:
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 // Force JSC on an Apple platform
 const engine = new Engine({ sandbox: 'jsc' });
@@ -237,7 +237,7 @@ The `SandboxType` enum values are internal: `VM`, `JSC`, `Hermes`, `QuickJS`, `W
 
 ## Core Advantages Across All Providers
 
-Regardless of which provider is selected, every Rill sandbox guarantees the following properties:
+Regardless of which provider is selected, every Keel sandbox guarantees the following properties:
 
 - **True isolation.** Guest code cannot access host globals, the filesystem, network, or any capability not explicitly injected through `inject`.
 - **Rich data transfer.** All JSI-based providers (JSC, Hermes, QuickJS Native) pass functions, circular references, and complex object graphs directly -- no JSON serialization, no structural cloning, no message ports.

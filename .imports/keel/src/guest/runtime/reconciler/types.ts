@@ -25,7 +25,7 @@ export interface PublicInstance {
 /**
  * Reconciler instance type
  */
-export type RillReconciler = ReconcilerType<
+export type KeelReconciler = ReconcilerType<
   RootContainer, // Container
   VNode, // Instance
   VNode, // TextInstance

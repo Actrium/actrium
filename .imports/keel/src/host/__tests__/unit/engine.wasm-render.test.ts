@@ -1,9 +1,9 @@
 /**
  * Engine render round-trip on the wasm-quickjs provider (issue #8)
  *
- * Regression guard for the render channel: a guest `__rill_sendBatch(batch)` call must
+ * Regression guard for the render channel: a guest `__keel_sendBatch(batch)` call must
  * reach the host Bridge/Receiver. Before the WASM provider's inject(fn) fix, the engine
- * injected `__rill_sendBatch` as a host closure that the provider rewrote into a
+ * injected `__keel_sendBatch` as a host closure that the provider rewrote into a
  * self-referential `CALL_HOST_FN` stub — so the batch never reached the host (and
  * injecting it caused infinite recursion). This drives the real Engine on the real
  * wasm-quickjs sandbox and asserts the host received the batch.
@@ -31,7 +31,7 @@ describeIfWASM('Engine render channel on wasm-quickjs (issue #8)', () => {
     engine.createReceiver();
 
     await engine.loadBundle(`
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [

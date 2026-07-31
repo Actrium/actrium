@@ -11,10 +11,10 @@
 declare global {
   // DevTools flags
   // eslint-disable-next-line no-var
-  var __RILL_DEVTOOLS_ENABLED: boolean | undefined;
+  var __KEEL_DEVTOOLS_ENABLED: boolean | undefined;
   // eslint-disable-next-line no-var
   // Reason: DevTools payload can be any serializable type
-  var __rill_emitEvent: ((eventName: string, payload?: unknown) => void) | undefined;
+  var __keel_emitEvent: ((eventName: string, payload?: unknown) => void) | undefined;
 }
 
 // ============================================
@@ -34,11 +34,11 @@ export interface RenderTiming {
 // ============================================
 
 export function isDevToolsEnabled(): boolean {
-  return globalThis.__RILL_DEVTOOLS_ENABLED === true;
+  return globalThis.__KEEL_DEVTOOLS_ENABLED === true;
 }
 
 export function sendDevToolsMessage(type: string, data: unknown): void {
-  if (typeof globalThis.__rill_emitEvent === 'function') {
-    globalThis.__rill_emitEvent(type, data);
+  if (typeof globalThis.__keel_emitEvent === 'function') {
+    globalThis.__keel_emitEvent(type, data);
   }
 }

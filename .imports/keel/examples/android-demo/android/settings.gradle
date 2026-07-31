@@ -6,12 +6,12 @@ plugins {
 }
 
 extensions.configure(com.facebook.react.ReactSettingsExtension) { ex ->
-    // The demo links only the local Rill native module. The dynamic React Native
+    // The demo links only the local Keel native module. The dynamic React Native
     // CLI autolinker scans the repository root through the file: dependency and
     // can stall on generated native build artifacts in this workspace.
     ex.autolinkLibrariesFromConfigFile(file("autolinking.json"))
 }
 
-rootProject.name = 'RillDemo'
+rootProject.name = 'KeelDemo'
 include ':app'
 includeBuild('../node_modules/@react-native/gradle-plugin')

@@ -6,8 +6,8 @@ const { resolve } = require('metro-resolver');
 const rootDir = __dirname;
 const projectRoot = path.resolve(rootDir, 'RCTNApps');
 
-// Resolve rill from symlink in node_modules
-const rillPath = fs.realpathSync(path.resolve(rootDir, 'node_modules/rill'));
+// Resolve keel from symlink in node_modules
+const keelPath = fs.realpathSync(path.resolve(rootDir, 'node_modules/keel'));
 
 const defaultConfig = getDefaultConfig(projectRoot);
 
@@ -15,8 +15,8 @@ const defaultConfig = getDefaultConfig(projectRoot);
 const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 defaultConfig.resolver.blockList = [
   /.*node_modules\/react\/cjs\/react\.development\.js.*inline-requires-plugin.*/,
-  new RegExp(`${escapeRegExp(rillPath)}/node_modules/react/.*`),
-  new RegExp(`${escapeRegExp(rillPath)}/node_modules/react-reconciler/.*`),
+  new RegExp(`${escapeRegExp(keelPath)}/node_modules/react/.*`),
+  new RegExp(`${escapeRegExp(keelPath)}/node_modules/react-reconciler/.*`),
 ];
 
 /** @type {import('metro-config').MetroConfig} */
@@ -26,22 +26,22 @@ const customConfig = {
     watchman: { deferStates: [] },
     healthCheck: { enabled: false },
   },
-  watchFolders: [rillPath],
+  watchFolders: [keelPath],
   resolver: {
     unstable_enableSymlinks: true,
     nodeModulesPaths: [path.resolve(rootDir, 'node_modules')],
     resolveRequest: (context, moduleName, platform) => {
-      if (moduleName === 'rill') {
+      if (moduleName === 'keel') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(rillPath, 'src', 'host', 'index.ts'),
+          filePath: path.resolve(keelPath, 'src', 'host', 'index.ts'),
         };
       }
 
-      if (moduleName === 'rill/host/preset') {
+      if (moduleName === 'keel/host/preset') {
         return {
           type: 'sourceFile',
-          filePath: path.resolve(rillPath, 'src', 'host', 'preset', 'index.ts'),
+          filePath: path.resolve(keelPath, 'src', 'host', 'preset', 'index.ts'),
         };
       }
 

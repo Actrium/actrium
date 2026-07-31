@@ -2,7 +2,7 @@
 name = "asset-guest"
 version.workspace = true
 edition.workspace = true
-description = "Demo native rill guest that resolves an app-package asset to decoded RGBA in its own linear memory via host:asset.info + host:asset.blit (the ④ pixera path)."
+description = "Demo native keel guest that resolves an app-package asset to decoded RGBA in its own linear memory via host:asset.info + host:asset.blit (the ④ pixera path)."
 license.workspace = true
 publish = false
 
@@ -10,4 +10,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-rill-guest = { path = "../rill-guest" }
+keel-native-guest = { path = "../keel-native-guest" }

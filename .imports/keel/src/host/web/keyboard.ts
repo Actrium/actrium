@@ -17,9 +17,9 @@ import {
   KBD_EVENT,
   KBD_SUBSCRIBE,
   KBD_UNSUBSCRIBE,
+  type KeelKeyEvent,
   type KeyboardSubscribePayload,
   type KeyboardUnsubscribePayload,
-  type RillKeyEvent,
 } from '../../shared/keyboard';
 import type { Engine, GuestMessage } from '../engine';
 
@@ -75,12 +75,12 @@ function resolveTarget(target: KeyboardTarget | undefined): KeyboardTarget {
     return win;
   }
   throw new Error(
-    '[rill/host/web] attachKeyboard: no DOM target available; pass options.target explicitly'
+    '[keel/host/web] attachKeyboard: no DOM target available; pass options.target explicitly'
   );
 }
 
 /**
- * Bridge a DOM target's keyboard to a rill engine's guest. Returns a handle whose `detach()`
+ * Bridge a DOM target's keyboard to a keel engine's guest. Returns a handle whose `detach()`
  * fully unwinds the bridge.
  *
  * @example
@@ -149,7 +149,7 @@ export function attachKeyboard(
     if (shouldPreventDefault(key)) {
       event.preventDefault();
     }
-    const forwarded: RillKeyEvent = {
+    const forwarded: KeelKeyEvent = {
       type,
       key,
       code: event.code,

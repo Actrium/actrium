@@ -11,7 +11,7 @@
  * the JSON as {"$bin":id} (+ {"$view":kind} for typed-array views). Every id is consumed
  * exactly once by the receiving side; senders blanket-free their payload's ids in a
  * finally. These tests assert:
- *   - both directions deliver REAL binary values (parity with the wasm RBS1 path),
+ *   - both directions deliver REAL binary values (parity with the wasm KBS1 path),
  *   - typed-array view type AND window (byteOffset/byteLength) are preserved,
  *   - nesting inside objects/arrays, empty and large buffers survive,
  *   - the on-wire JSON carries {"$bin":id} — no byte bloat,
@@ -22,10 +22,10 @@
 import { describe, expect, it } from 'bun:test';
 import {
   createHostModuleDispatch,
-  defineRillContract,
+  defineKeelContract,
   type HostModuleDispatchTable,
   rpc,
-  type RillContractShape,
+  type KeelContractShape,
 } from '../../../contract';
 import { QuickJSNativeWASMProvider } from '../providers/quickjs-native-wasm-provider';
 
@@ -36,8 +36,8 @@ interface BinaryTableModule {
   _qjs_binary_count: () => number;
 }
 
-function buildContract(): RillContractShape {
-  return defineRillContract({
+function buildContract(): KeelContractShape {
+  return defineKeelContract({
     version: '1.0.0',
     hostModules: {
       'host:store': {
@@ -64,7 +64,7 @@ interface HostObservation {
 
 describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () => {
   // Spin up a fresh context wired to a mock host:store that records what the handler saw
-  // and echoes bytes back. `wire` captures every __rill_host_invoke payload string the
+  // and echoes bytes back. `wire` captures every __keel_host_invoke payload string the
   // guest sent across the JSON bridge (via debug console), so we can inspect the
   // transport. `binaryCount` reads the C staging table for the zero-leak assertions.
   async function setup() {
@@ -73,7 +73,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
     console.log = (...args: unknown[]) => {
       if (
         typeof args[0] === 'string' &&
-        args[0].includes('Host callback: __rill_host_invoke') &&
+        args[0].includes('Host callback: __keel_host_invoke') &&
         typeof args[1] === 'string'
       ) {
         wire.push(args[1]);
@@ -156,7 +156,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
         globalThis.__pr = undefined;
         (async function () {
           var input = new Uint8Array([0, 1, 127, 128, 254, 255]);
-          var res = await globalThis.__rill.hostModules['host:store'].putBytes({ key: 'k', value: input });
+          var res = await globalThis.__keel.hostModules['host:store'].putBytes({ key: 'k', value: input });
           var v = res.value;
           globalThis.__pr = {
             isU8: v instanceof Uint8Array,
@@ -202,8 +202,8 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
       context.eval(`
         globalThis.__gr = undefined;
         (async function () {
-          await globalThis.__rill.hostModules['host:store'].putBytes({ key: 'g', value: new Uint8Array([0, 255, 0, 255]) });
-          var got = await globalThis.__rill.hostModules['host:store'].getBytes({ key: 'g' });
+          await globalThis.__keel.hostModules['host:store'].putBytes({ key: 'g', value: new Uint8Array([0, 255, 0, 255]) });
+          var got = await globalThis.__keel.hostModules['host:store'].getBytes({ key: 'g' });
           var v = got && got.value;
           globalThis.__gr = { isU8: v instanceof Uint8Array, bytes: v instanceof Uint8Array ? Array.from(v) : v };
         })();
@@ -225,7 +225,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
       context.eval(`
         globalThis.__er = undefined;
         (async function () {
-          var res = await globalThis.__rill.hostModules['host:store'].putBytes({ key: 'e', value: new Uint8Array(0) });
+          var res = await globalThis.__keel.hostModules['host:store'].putBytes({ key: 'e', value: new Uint8Array(0) });
           var v = res.value;
           globalThis.__er = { isU8: v instanceof Uint8Array, len: v instanceof Uint8Array ? v.length : -1 };
         })();
@@ -249,7 +249,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
         (async function () {
           var input = new Uint8Array(256);
           for (var i = 0; i < 256; i++) input[i] = i;
-          var res = await globalThis.__rill.hostModules['host:store'].putBytes({ key: 'f', value: input });
+          var res = await globalThis.__keel.hostModules['host:store'].putBytes({ key: 'f', value: input });
           var v = res.value;
           globalThis.__fr = { isU8: v instanceof Uint8Array, bytes: v instanceof Uint8Array ? Array.from(v) : v };
         })();
@@ -275,7 +275,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
         (async function () {
           var input = new Uint8Array(512 * 1024);
           for (var i = 0; i < input.length; i++) input[i] = (i * 31) & 255;
-          var res = await globalThis.__rill.hostModules['host:store'].putBytes({ key: 'big', value: input });
+          var res = await globalThis.__keel.hostModules['host:store'].putBytes({ key: 'big', value: input });
           var v = res.value;
           var ok = v instanceof Uint8Array && v.length === input.length;
           if (ok) { for (var j = 0; j < v.length; j++) { if (v[j] !== ((j * 31) & 255)) { ok = false; break; } } }
@@ -305,7 +305,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
           var all = new Int16Array(backing);
           for (var i = 0; i < all.length; i++) all[i] = (i + 1) * 100;
           var win = new Int16Array(backing, 4, 3); // elements [300, 400, 500]
-          var res = await globalThis.__rill.hostModules['host:store'].echo({ value: win });
+          var res = await globalThis.__keel.hostModules['host:store'].echo({ value: win });
           var v = res.value;
           globalThis.__vr = {
             isI16: v instanceof Int16Array,
@@ -347,7 +347,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
         globalThis.__ar = undefined;
         (async function () {
           var ab = new Uint8Array([10, 20, 30]).buffer;
-          var res = await globalThis.__rill.hostModules['host:store'].echo({ value: ab });
+          var res = await globalThis.__keel.hostModules['host:store'].echo({ value: ab });
           var v = res.value;
           globalThis.__ar = {
             isAB: v instanceof ArrayBuffer,
@@ -377,7 +377,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
         (async function () {
           var backing = new Uint8Array([9, 9, 1, 2, 3, 9]).buffer;
           var dv = new DataView(backing, 2, 3); // bytes [1, 2, 3]
-          var res = await globalThis.__rill.hostModules['host:store'].echo({ value: dv });
+          var res = await globalThis.__keel.hostModules['host:store'].echo({ value: dv });
           var v = res.value;
           globalThis.__dr = {
             isDV: v instanceof DataView,
@@ -414,7 +414,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
             list: [new Uint8Array([1, 2]), { inner: new Uint8Array([3, 4, 5]).buffer }],
             plain: 42
           };
-          var res = await globalThis.__rill.hostModules['host:store'].echo({ value: payload });
+          var res = await globalThis.__keel.hostModules['host:store'].echo({ value: payload });
           var v = res.value;
           var first = v && v.list && v.list[0];
           var inner = v && v.list && v.list[1] && v.list[1].inner;
@@ -467,7 +467,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
     try {
       context.eval(`
         globalThis.__tr = undefined;
-        globalThis.__rill.hostModules['host:store'].putText({ key: 't', text: 'hello' }).then(function (r) { globalThis.__tr = r; });
+        globalThis.__keel.hostModules['host:store'].putText({ key: 't', text: 'hello' }).then(function (r) { globalThis.__tr = r; });
       `);
       await context.flushHostModuleCalls?.();
 
@@ -572,7 +572,7 @@ describeIfWASM('QuickJSNativeWASMProvider first-class binary marshalling', () =>
       // the host must reject the call AND release the staged bytes.
       context.eval(`
         globalThis.__rej = undefined;
-        globalThis.__rill.__invokeHostRpc('host:nope', 'missing', { v: new Uint8Array([1, 2, 3]) })
+        globalThis.__keel.__invokeHostRpc('host:nope', 'missing', { v: new Uint8Array([1, 2, 3]) })
           .catch(function (e) { globalThis.__rej = String(e && e.message); });
       `);
       await context.flushHostModuleCalls?.();

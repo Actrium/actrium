@@ -1,7 +1,7 @@
 /**
  * SDK unit tests
  *
- * Uses dynamic imports to ensure __RILL_GUEST_ENV__ is set before module loads.
+ * Uses dynamic imports to ensure __KEEL_GUEST_ENV__ is set before module loads.
  * This makes components return string identifiers instead of react-native components.
  */
 
@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from 'bun:te
 import * as React from 'react';
 
 // Set environment flag BEFORE any SDK imports
-(globalThis as Record<string, unknown>).__RILL_GUEST_ENV__ = true;
+(globalThis as Record<string, unknown>).__KEEL_GUEST_ENV__ = true;
 // Provide React hooks for SDK hooks tests (sdk reads hooks from globalThis.React)
 (globalThis as Record<string, unknown>).React = React;
 
@@ -112,18 +112,18 @@ describe('Hooks', () => {
   describe('useHostEvent', () => {
     beforeEach(() => {
       // Cleanup globalThis
-      delete (globalThis as Record<string, unknown>).__rill_onHostEvent;
+      delete (globalThis as Record<string, unknown>).__keel_onHostEvent;
     });
 
     afterEach(() => {
-      delete (globalThis as Record<string, unknown>).__rill_onHostEvent;
+      delete (globalThis as Record<string, unknown>).__keel_onHostEvent;
     });
 
     it('should subscribe and unsubscribe when component mounts/unmounts', async () => {
       const { useHostEvent } = await sdkImport;
       const mockUnsubscribe = mock();
       const mockUseHostEvent = mock(() => mockUnsubscribe);
-      (globalThis as Record<string, unknown>).__rill_onHostEvent = mockUseHostEvent;
+      (globalThis as Record<string, unknown>).__keel_onHostEvent = mockUseHostEvent;
 
       const callback = mock();
 
@@ -152,7 +152,7 @@ describe('Hooks', () => {
       expect(mockUnsubscribe).toHaveBeenCalled();
     });
 
-    it('should not throw when __rill_onHostEvent is not available', async () => {
+    it('should not throw when __keel_onHostEvent is not available', async () => {
       const { useHostEvent } = await sdkImport;
       const callback = mock();
 
@@ -164,7 +164,7 @@ describe('Hooks', () => {
       const ReactTestRenderer = await import('react-test-renderer');
       const { act } = ReactTestRenderer;
 
-      // Should not throw when __rill_onHostEvent is not available
+      // Should not throw when __keel_onHostEvent is not available
       let didThrow = false;
       try {
         await act(() => {
@@ -185,7 +185,7 @@ describe('Hooks', () => {
         callCount++;
         return callCount === 1 ? mockUnsubscribe1 : mockUnsubscribe2;
       });
-      (globalThis as Record<string, unknown>).__rill_onHostEvent = mockUseHostEvent;
+      (globalThis as Record<string, unknown>).__keel_onHostEvent = mockUseHostEvent;
 
       const callback = mock();
 
@@ -224,7 +224,7 @@ describe('Hooks', () => {
         set.add(cb);
         return () => set.delete(cb);
       };
-      (globalThis as Record<string, unknown>).__rill_onHostEvent = mockUseHostEvent;
+      (globalThis as Record<string, unknown>).__keel_onHostEvent = mockUseHostEvent;
 
       let renderCount = 0;
       const callback1 = () => {
@@ -265,24 +265,24 @@ describe('Hooks', () => {
 
   describe('useConfig', () => {
     beforeEach(() => {
-      delete (globalThis as Record<string, unknown>).__rill_getConfig;
+      delete (globalThis as Record<string, unknown>).__keel_getConfig;
     });
 
     afterEach(() => {
-      delete (globalThis as Record<string, unknown>).__rill_getConfig;
+      delete (globalThis as Record<string, unknown>).__keel_getConfig;
     });
 
-    it('should return config from global __rill_getConfig', async () => {
+    it('should return config from global __keel_getConfig', async () => {
       const { useConfig } = await sdkImport;
       const mockConfig = { theme: 'dark', fontSize: 14 };
-      (globalThis as Record<string, unknown>).__rill_getConfig = () => mockConfig;
+      (globalThis as Record<string, unknown>).__keel_getConfig = () => mockConfig;
 
       const config = useConfig<{ theme: string; fontSize: number }>();
 
       expect(config).toEqual(mockConfig);
     });
 
-    it('should return empty object when __rill_getConfig is not available', async () => {
+    it('should return empty object when __keel_getConfig is not available', async () => {
       const { useConfig } = await sdkImport;
       const config = useConfig();
 
@@ -297,7 +297,7 @@ describe('Hooks', () => {
       }
 
       const mockConfig: AppConfig = { theme: 'dark', language: 'en' };
-      (globalThis as Record<string, unknown>).__rill_getConfig = () => mockConfig;
+      (globalThis as Record<string, unknown>).__keel_getConfig = () => mockConfig;
 
       const config = useConfig<AppConfig>();
 
@@ -308,17 +308,17 @@ describe('Hooks', () => {
 
   describe('useSendToHost', () => {
     beforeEach(() => {
-      delete (globalThis as Record<string, unknown>).__rill_emitEvent;
+      delete (globalThis as Record<string, unknown>).__keel_emitEvent;
     });
 
     afterEach(() => {
-      delete (globalThis as Record<string, unknown>).__rill_emitEvent;
+      delete (globalThis as Record<string, unknown>).__keel_emitEvent;
     });
 
-    it('should return global __rill_emitEvent when available', async () => {
+    it('should return global __keel_emitEvent when available', async () => {
       const { useSendToHost } = await sdkImport;
       const mockSend = mock();
-      (globalThis as Record<string, unknown>).__rill_emitEvent = mockSend;
+      (globalThis as Record<string, unknown>).__keel_emitEvent = mockSend;
 
       const send = useSendToHost();
       send('TEST_EVENT', { data: 123 });
@@ -343,7 +343,7 @@ describe('Hooks', () => {
     it('should accept optional payload', async () => {
       const { useSendToHost } = await sdkImport;
       const mockSend = mock();
-      (globalThis as Record<string, unknown>).__rill_emitEvent = mockSend;
+      (globalThis as Record<string, unknown>).__keel_emitEvent = mockSend;
 
       const send = useSendToHost();
       send('EVENT_WITHOUT_PAYLOAD');
@@ -528,14 +528,14 @@ describe('Zero Runtime Dependencies', () => {
 
 // ============ React Native APIs Tests ============
 describe('React Native APIs', () => {
-  // Platform-info APIs read the optional host-injected __rill_platform channel;
+  // Platform-info APIs read the optional host-injected __keel_platform channel;
   // keep the global clean around every test in this block.
   beforeEach(() => {
-    delete (globalThis as Record<string, unknown>).__rill_platform;
+    delete (globalThis as Record<string, unknown>).__keel_platform;
   });
 
   afterEach(() => {
-    delete (globalThis as Record<string, unknown>).__rill_platform;
+    delete (globalThis as Record<string, unknown>).__keel_platform;
   });
 
   describe('StyleSheet', () => {
@@ -555,17 +555,17 @@ describe('React Native APIs', () => {
       expect(Platform.Version).toBeUndefined();
     });
 
-    it('should read OS from host-injected __rill_platform object', async () => {
+    it('should read OS from host-injected __keel_platform object', async () => {
       const { Platform } = await sdkImport;
-      (globalThis as Record<string, unknown>).__rill_platform = { os: 'web', version: '1.2' };
+      (globalThis as Record<string, unknown>).__keel_platform = { os: 'web', version: '1.2' };
       expect(Platform.OS).toBe('web');
       expect(Platform.Version).toBe('1.2');
       expect(Platform.isInjected).toBe(true);
     });
 
-    it('should read OS from host-injected __rill_platform function', async () => {
+    it('should read OS from host-injected __keel_platform function', async () => {
       const { Platform } = await sdkImport;
-      (globalThis as Record<string, unknown>).__rill_platform = () => ({ os: 'ios' });
+      (globalThis as Record<string, unknown>).__keel_platform = () => ({ os: 'ios' });
       expect(Platform.OS).toBe('ios');
     });
 
@@ -577,7 +577,7 @@ describe('React Native APIs', () => {
 
     it('select should pick the injected OS branch', async () => {
       const { Platform } = await sdkImport;
-      (globalThis as Record<string, unknown>).__rill_platform = { os: 'android' };
+      (globalThis as Record<string, unknown>).__keel_platform = { os: 'android' };
       const result = Platform.select({ ios: 'iOS', android: 'Android', default: 'Default' });
       expect(result).toBe('Android');
     });
@@ -592,7 +592,7 @@ describe('React Native APIs', () => {
 
     it('get() should return host-injected window metrics', async () => {
       const { Dimensions } = await sdkImport;
-      (globalThis as Record<string, unknown>).__rill_platform = {
+      (globalThis as Record<string, unknown>).__keel_platform = {
         window: { width: 390, height: 844, scale: 3, fontScale: 1.2 },
       };
       expect(Dimensions.isInjected).toBe(true);
@@ -606,7 +606,7 @@ describe('React Native APIs', () => {
 
     it('get("screen") should fall back to window metrics when screen is absent', async () => {
       const { Dimensions } = await sdkImport;
-      (globalThis as Record<string, unknown>).__rill_platform = {
+      (globalThis as Record<string, unknown>).__keel_platform = {
         window: { width: 390, height: 844 },
       };
       expect(Dimensions.get('screen').width).toBe(390);
@@ -648,7 +648,7 @@ describe('React Native APIs', () => {
 
     it('should read pixel ratio from injected info (pixelRatio or window.scale)', async () => {
       const { PixelRatio } = await sdkImport;
-      (globalThis as Record<string, unknown>).__rill_platform = {
+      (globalThis as Record<string, unknown>).__keel_platform = {
         window: { width: 390, height: 844, scale: 3 },
       };
       expect(PixelRatio.isInjected).toBe(true);
@@ -666,7 +666,7 @@ describe('React Native APIs', () => {
 
     it('getColorScheme should return the injected scheme', async () => {
       const { Appearance } = await sdkImport;
-      (globalThis as Record<string, unknown>).__rill_platform = { colorScheme: 'dark' };
+      (globalThis as Record<string, unknown>).__keel_platform = { colorScheme: 'dark' };
       expect(Appearance.isInjected).toBe(true);
       expect(Appearance.getColorScheme()).toBe('dark');
     });
@@ -686,7 +686,7 @@ describe('React Native APIs', () => {
 
     it('isRTL should reflect injected value', async () => {
       const { I18nManager } = await sdkImport;
-      (globalThis as Record<string, unknown>).__rill_platform = { isRTL: true };
+      (globalThis as Record<string, unknown>).__keel_platform = { isRTL: true };
       expect(I18nManager.isInjected).toBe(true);
       expect(I18nManager.isRTL).toBe(true);
     });
@@ -707,7 +707,7 @@ describe('React Native APIs', () => {
 
     it('currentState should reflect injected value', async () => {
       const { AppState } = await sdkImport;
-      (globalThis as Record<string, unknown>).__rill_platform = { appState: 'active' };
+      (globalThis as Record<string, unknown>).__keel_platform = { appState: 'active' };
       expect(AppState.isInjected).toBe(true);
       expect(AppState.currentState).toBe('active');
     });

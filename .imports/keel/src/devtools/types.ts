@@ -1,5 +1,5 @@
 /**
- * Rill DevTools Types
+ * Keel DevTools Types
  *
  * Shared type definitions for Host and Guest communication
  */

@@ -17,10 +17,10 @@ BIN = $(BUILD_DIR)/fuzz_wire_decoder
 
 SRC = fuzz_wire_decoder.cpp ../src/protocol/WireDecoder.cpp
 
-# RILL_WIP_BINARY_PROTOCOL=1 un-gates the WIP decoder. -fno-sanitize-recover so
+# KEEL_WIP_BINARY_PROTOCOL=1 un-gates the WIP decoder. -fno-sanitize-recover so
 # a UBSan finding aborts (nonzero exit) instead of merely logging.
 CXXFLAGS = -std=c++17 -g -O1 -Wall -Wextra \
-	-DRILL_WIP_BINARY_PROTOCOL=1 \
+	-DKEEL_WIP_BINARY_PROTOCOL=1 \
 	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
 LDFLAGS = -fsanitize=address,undefined
 

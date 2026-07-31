@@ -32,14 +32,14 @@ SOURCES=(
     "${SCRIPT_DIR}/asyncify_poc.c"
 )
 
-# QuickJS defines mirror the production build; RILL_QJS_DEBUG turns on the
+# QuickJS defines mirror the production build; KEEL_QJS_DEBUG turns on the
 # per-context debug seam this PoC drives.
 DEFINES=(
     -DCONFIG_VERSION='"2024-01-13"'
     -DCONFIG_BIGNUM
     -D_GNU_SOURCE
     -DEMSCRIPTEN
-    -DRILL_QJS_DEBUG
+    -DKEEL_QJS_DEBUG
 )
 
 COMMON_FLAGS=(

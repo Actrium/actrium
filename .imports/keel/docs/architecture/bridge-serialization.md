@@ -69,9 +69,9 @@ This prevents memory leaks from stale callbacks. When the Receiver processes a `
 
 ### Guest Environment Sharing
 
-In the guest sandbox, `CallbackRegistry` detects `globalThis.__RILL_GUEST_ENV__ === true` and shares the `globalThis.__rill.callbacks` Map directly. This ensures that functions registered by the reconciler are accessible by `__rill.invokeCallback` without cross-module coordination issues.
+In the guest sandbox, `CallbackRegistry` detects `globalThis.__KEEL_GUEST_ENV__ === true` and shares the `globalThis.__keel.callbacks` Map directly. This ensures that functions registered by the reconciler are accessible by `__keel.invokeCallback` without cross-module coordination issues.
 
-A global singleton (`globalCallbackRegistry`) is exported and installed on `globalThis.__rillGlobalCallbackRegistry` to ensure a single instance across all bundled modules.
+A global singleton (`globalCallbackRegistry`) is exported and installed on `globalThis.__keelGlobalCallbackRegistry` to ensure a single instance across all bundled modules.
 
 ### Methods
 
@@ -83,7 +83,7 @@ A global singleton (`globalCallbackRegistry`) is exported and installed on `glob
 | `invoke(fnId, args)` | Look up and call the function |
 | `has(fnId)` | Check if fnId is registered |
 | `clear()` | Remove all registrations |
-| `getMap()` | Access internal Map (for `globalThis.__rill.callbacks` sync) |
+| `getMap()` | Access internal Map (for `globalThis.__keel.callbacks` sync) |
 | `size` | Number of registered functions |
 
 ## bridge.ts: Bidirectional Communication
@@ -106,7 +106,7 @@ new Bridge({
 ### Guest to Host Flow
 
 ```
-Guest __rill_sendBatch(batch)
+Guest __keel_sendBatch(batch)
   -> Bridge.sendRawBatch(batch)
   -> Decode serialized props via TypeRules (functions become callable proxies)
   -> Extract fnIds for Receiver tracking (_fnIds annotation)
@@ -122,7 +122,7 @@ Engine.sendToSandbox(message)
   -> Encode args via TypeRules (functions become { __type: 'function', __fnId })
   -> onHostMessage(encodedMessage)
   -> context.inject + evalCode
-  -> Guest __rill_handleMessage
+  -> Guest __keel_handleMessage
 ```
 
 ### Transport Modes

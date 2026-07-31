@@ -26,7 +26,7 @@ import { deserializeProps, serializeProps } from './guest-encoder';
  * Marks components that wrap Guest function components
  */
 interface SandboxWrapper extends React.FC<Record<string, unknown>> {
-  __rillSandboxWrapper: true;
+  __keelSandboxWrapper: true;
   displayName?: string;
 }
 
@@ -35,8 +35,8 @@ interface SandboxWrapper extends React.FC<Record<string, unknown>> {
  * Extends GuestReactElement to access internal markers and fields
  */
 interface GuestElementRuntime {
-  __rillTypeMarker?: string;
-  __rillFragmentType?: string;
+  __keelTypeMarker?: string;
+  __keelFragmentType?: string;
   $$typeof?: symbol;
   type?: ReviewedUnknown;
   props?: Record<string, unknown>;
@@ -48,7 +48,7 @@ interface GuestElementRuntime {
  * Component type reference from sandbox
  */
 interface ComponentTypeRef {
-  __rillComponentId: string;
+  __keelComponentId: string;
   displayName?: string;
 }
 
@@ -59,8 +59,8 @@ function isComponentTypeRef(value: unknown): value is ComponentTypeRef {
   return (
     typeof value === 'object' &&
     value !== null &&
-    '__rillComponentId' in value &&
-    typeof (value as ComponentTypeRef).__rillComponentId === 'string'
+    '__keelComponentId' in value &&
+    typeof (value as ComponentTypeRef).__keelComponentId === 'string'
   );
 }
 
@@ -68,8 +68,8 @@ function isComponentTypeRef(value: unknown): value is ComponentTypeRef {
 // Constants
 // ============================================
 
-const RILL_ELEMENT_MARKER = '__rill_react_element__';
-const RILL_FRAGMENT_MARKER = '__rill_react_fragment__';
+const KEEL_ELEMENT_MARKER = '__keel_react_element__';
+const KEEL_FRAGMENT_MARKER = '__keel_react_fragment__';
 const REACT_FRAGMENT_TYPE = Symbol.for('react.fragment');
 
 // ============================================
@@ -150,37 +150,37 @@ function getOrCreateWrappedComponent(
         const deserialized = deserializeProps(rawProps);
         // Always shallow-copy to avoid mutating the original (React may freeze props)
         const safeProps = deserialized === rawProps ? { ...rawProps } : deserialized;
-        safeProps.__rillHookInstanceId = hookIdRef.current;
+        safeProps.__keelHookInstanceId = hookIdRef.current;
 
         // Set current instance ID for shims' hooks to use per-instance state
         // This enables multiple component instances to have separate hook state
         const globalState = globalThis as Record<string, unknown>;
-        const prevInstanceId = globalState.__rillCurrentInstanceId;
-        globalState.__rillCurrentInstanceId = hookIdRef.current;
+        const prevInstanceId = globalState.__keelCurrentInstanceId;
+        globalState.__keelCurrentInstanceId = hookIdRef.current;
 
         try {
           const result = originalType(safeProps);
           return transformGuestElement(result);
         } finally {
           // Restore previous instance ID (for nested component calls)
-          globalState.__rillCurrentInstanceId = prevInstanceId;
+          globalState.__keelCurrentInstanceId = prevInstanceId;
         }
       } catch (err) {
         // Surface error as simple strings to avoid JSI circular ref traversal
         const msg = err instanceof Error ? err.message : String(err);
         const stack = err instanceof Error ? (err.stack ?? '') : '';
-        console.error(`[rill:reconciler] render error in ${displayName ?? 'unknown'}: ${msg}`);
-        if (stack) console.error(`[rill:reconciler] stack: ${stack}`);
+        console.error(`[keel:reconciler] render error in ${displayName ?? 'unknown'}: ${msg}`);
+        if (stack) console.error(`[keel:reconciler] stack: ${stack}`);
         // Store on globalThis for Host-side inspection
         const g = globalThis as Record<string, unknown>;
-        if (!g.__rillRenderErrors) g.__rillRenderErrors = [];
-        (g.__rillRenderErrors as string[]).push(`${displayName ?? 'unknown'}: ${msg}`);
+        if (!g.__keelRenderErrors) g.__keelRenderErrors = [];
+        (g.__keelRenderErrors as string[]).push(`${displayName ?? 'unknown'}: ${msg}`);
         return null;
       }
     },
     {
       // Mark: this is a sandbox wrapper (for transformGuestElement to decide children handling)
-      __rillSandboxWrapper: true as const,
+      __keelSandboxWrapper: true as const,
       displayName: displayName,
     }
   ) as SandboxWrapper;
@@ -208,7 +208,7 @@ function getOrCreateWrappedComponent(
  * returns different Symbols in each engine. Additionally, JSI doesn't preserve
  * Symbols across the engine boundary at all - they become undefined.
  *
- * We use string markers (__rillTypeMarker, __rillFragmentType) that survive
+ * We use string markers (__keelTypeMarker, __keelFragmentType) that survive
  * JSI serialization to identify React elements from the Guest.
  *
  * This function recursively transforms Guest elements to use Host Symbols.
@@ -241,16 +241,16 @@ export function transformGuestElement(
 
   const el = element as GuestElementRuntime;
 
-  // Check if this is a Rill Guest element using the string marker
+  // Check if this is a Keel Guest element using the string marker
   // This marker survives JSI serialization while Symbols don't
-  const isRillElement = el.__rillTypeMarker === RILL_ELEMENT_MARKER;
+  const isKeelElement = el.__keelTypeMarker === KEEL_ELEMENT_MARKER;
 
   // Also check for $$typeof Symbol (works when not crossing JSI, e.g., NoSandbox provider)
   const hasSymbolType = typeof el.$$typeof === 'symbol';
 
-  // If already Host ReactElement (has $$typeof symbol but no Rill marker), return directly,
+  // If already Host ReactElement (has $$typeof symbol but no Keel marker), return directly,
   // avoiding double transform/wrap, especially avoiding passing Host ReactElement back to sandbox.
-  if (hasSymbolType && !isRillElement) {
+  if (hasSymbolType && !isKeelElement) {
     if (
       autoKey !== undefined &&
       (el.key === undefined || el.key === null) &&
@@ -268,19 +268,19 @@ export function transformGuestElement(
   // Heuristic: some elements lose both marker and $$typeof across JSI bridge.
   // If shape still looks like a React element (has type/props), treat it as one.
   const looksLikeElement =
-    !isRillElement && !hasSymbolType && Object.hasOwn(el, 'type') && Object.hasOwn(el, 'props');
+    !isKeelElement && !hasSymbolType && Object.hasOwn(el, 'type') && Object.hasOwn(el, 'props');
 
   // Note: looksLikeElement fires when elements lose markers across JSI bridge.
   // No console output here — see PERF comment at top of file.
 
-  if (!isRillElement && !hasSymbolType && !looksLikeElement) {
+  if (!isKeelElement && !hasSymbolType && !looksLikeElement) {
     // Not a React element, return as-is
     return element as ReactElement;
   }
 
   // Determine if this is a Fragment
   const isFragment =
-    el.__rillFragmentType === RILL_FRAGMENT_MARKER ||
+    el.__keelFragmentType === KEEL_FRAGMENT_MARKER ||
     (typeof el.type === 'symbol' && (el.type as symbol).description === 'react.fragment');
 
   // Transform the element type
@@ -289,7 +289,7 @@ export function transformGuestElement(
     transformedType = REACT_FRAGMENT_TYPE;
   } else if (isComponentTypeRef(transformedType)) {
     const ref = transformedType;
-    const resolved = componentTypeFnById.get(ref.__rillComponentId);
+    const resolved = componentTypeFnById.get(ref.__keelComponentId);
     if (resolved) {
       transformedType = getOrCreateWrappedComponent(resolved, ref.displayName);
     } else {
@@ -344,8 +344,8 @@ export function transformGuestElement(
   let transformedProps = props;
   const isSandboxWrapper =
     typeof transformedType === 'function' &&
-    '__rillSandboxWrapper' in transformedType &&
-    transformedType.__rillSandboxWrapper === true;
+    '__keelSandboxWrapper' in transformedType &&
+    transformedType.__keelSandboxWrapper === true;
   const shouldPreserveChildrenForSandboxWrapper =
     props && props.children !== undefined && isSandboxWrapper;
 

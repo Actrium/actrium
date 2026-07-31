@@ -1,6 +1,6 @@
 # 在 guest 工程里为 `host:*` 模块打类型
 
-rill guest 以环境模块(ambient module)的形式引入宿主能力:
+keel guest 以环境模块(ambient module)的形式引入宿主能力:
 
 ```ts
 import { getText, putText } from 'host:store'
@@ -12,7 +12,7 @@ import { fetch } from 'host:net'
 
 ## 类型只影响编辑器与类型检查 —— 从不影响构建
 
-rill CLI(`cli/build.ts`)在打包期自己解析 `host:*` import,把它们留作运行时能力调用。这套解析
+keel CLI(`cli/build.ts`)在打包期自己解析 `host:*` import,把它们留作运行时能力调用。这套解析
 **与 TypeScript 类型无关**:无论有没有 `.d.ts`,guest 都能正确构建与运行。所以打类型纯属开发体验层面 ——
 这里的一切都不改变 guest 如何编译或发布。
 
@@ -32,7 +32,7 @@ declare module 'host:net' {
 }
 ```
 
-宿主可以从自己的 rpc / 订阅描述符生成此文件;rill 只固定**文件放在哪**与**编译器如何找到它**(见下),
+宿主可以从自己的 rpc / 订阅描述符生成此文件;keel 只固定**文件放在哪**与**编译器如何找到它**(见下),
 不规定宿主如何生成。
 
 ## 约定:放在哪、如何被采信
@@ -46,15 +46,15 @@ declare module 'host:net' {
 因为是**环境**声明,无需在运行时 import 该文件 —— 它出现在编译中,`import ... from 'host:store'`
 就能通过类型检查。
 
-## 与 `rill/guest` 的稳定耦合
+## 与 `keel/guest` 的稳定耦合
 
-生成的 `host-modules.d.ts` 可能引用 rill 自己的 guest 类型,例如:
+生成的 `host-modules.d.ts` 可能引用 keel 自己的 guest 类型,例如:
 
 ```ts
-import type { RillKeyEvent } from 'rill/guest'
+import type { KeelKeyEvent } from 'keel/guest'
 ```
 
-rill 保持 **`rill/guest` 类型出口稳定**,好让宿主生成的声明可以依赖它而不被破坏。把 `rill/guest`
+keel 保持 **`keel/guest` 类型出口稳定**,好让宿主生成的声明可以依赖它而不被破坏。把 `keel/guest`
 视为 `host:*` 声明所引用的共享 guest 类型的唯一稳定来源。
 
 ## 完成标准

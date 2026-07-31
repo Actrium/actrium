@@ -4,9 +4,9 @@
 #include <cmath>
 #include <cstdint>
 #else
-#error "Rill Hermes sandbox requires Hermes headers. Enable Hermes in the host (hermes_enabled: true / USE_HERMES=1) or build with RILL_SANDBOX_ENGINE=jsc|quickjs."
+#error "Keel Hermes sandbox requires Hermes headers. Enable Hermes in the host (hermes_enabled: true / USE_HERMES=1) or build with KEEL_SANDBOX_ENGINE=jsc|quickjs."
 #endif
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
 #include <hermes/AsyncDebuggerAPI.h>
 #include <hermes/cdp/CDPDebugAPI.h>
 #include <ReactCommon/CallInvoker.h>
@@ -18,26 +18,26 @@
 // Cross-platform logging
 #if defined(__APPLE__)
 #include <os/log.h>
-static void rill_log(const char *tag, const std::string &msg) {
+static void keel_log(const char *tag, const std::string &msg) {
   os_log_with_type(OS_LOG_DEFAULT, OS_LOG_TYPE_INFO, "[%{public}s] %{public}s", tag, msg.c_str());
 }
 #elif defined(__ANDROID__)
 #include <android/log.h>
-static void rill_log(const char *tag, const std::string &msg) {
+static void keel_log(const char *tag, const std::string &msg) {
   __android_log_print(ANDROID_LOG_INFO, tag, "%s", msg.c_str());
 }
 #else
 #include <cstdio>
-static void rill_log(const char *tag, const std::string &msg) {
+static void keel_log(const char *tag, const std::string &msg) {
   fprintf(stderr, "[%s] %s\n", tag, msg.c_str());
 }
 #endif
 
 static const char *kLogTag = "HermesSandbox";
 
-static const char *kTaskQueueShimScript = R"RILL_JS(
+static const char *kTaskQueueShimScript = R"KEEL_JS(
 (function () {
-  if (typeof globalThis.__rill_drainImmediateQueue === 'function') {
+  if (typeof globalThis.__keel_drainImmediateQueue === 'function') {
     return;
   }
 
@@ -74,7 +74,7 @@ static const char *kTaskQueueShimScript = R"RILL_JS(
     };
   }
 
-  Object.defineProperty(globalThis, '__rill_drainImmediateQueue', {
+  Object.defineProperty(globalThis, '__keel_drainImmediateQueue', {
     configurable: false,
     enumerable: false,
     writable: false,
@@ -97,7 +97,7 @@ static const char *kTaskQueueShimScript = R"RILL_JS(
     },
   });
 })();
-)RILL_JS";
+)KEEL_JS";
 
 namespace hermes_sandbox {
 
@@ -479,8 +479,8 @@ jsi::Value HermesSandboxContext::wrapHostFunctionForSandbox(jsi::Runtime &hostRt
   bool isCached = false;
 
   try {
-    if (funcObj.hasProperty(hostRt, "__rill_proxy_id__")) {
-      jsi::Value idVal = funcObj.getProperty(hostRt, "__rill_proxy_id__");
+    if (funcObj.hasProperty(hostRt, "__keel_proxy_id__")) {
+      jsi::Value idVal = funcObj.getProperty(hostRt, "__keel_proxy_id__");
       if (idVal.isString()) {
         existingId = idVal.asString(hostRt).utf8(hostRt);
         std::string callbackId = "cb_" + existingId;
@@ -513,7 +513,7 @@ jsi::Value HermesSandboxContext::wrapHostFunctionForSandbox(jsi::Runtime &hostRt
 
     // Tag the original function with the ID for future identity checks
     try {
-      funcObj.setProperty(hostRt, "__rill_proxy_id__", jsi::String::createFromUtf8(hostRt, idStr));
+      funcObj.setProperty(hostRt, "__keel_proxy_id__", jsi::String::createFromUtf8(hostRt, idStr));
     } catch (...) {
       // Failed to tag, continue anyway
     }
@@ -550,7 +550,7 @@ jsi::Value HermesSandboxContext::wrapHostFunctionForSandbox(jsi::Runtime &hostRt
 
         auto it = self->callbacks_.find(cbId);
         if (it == self->callbacks_.end()) {
-          rill_log(kLogTag, "Callback not found: " + cbId);
+          keel_log(kLogTag, "Callback not found: " + cbId);
           return jsi::Value::undefined();
         }
 
@@ -576,10 +576,10 @@ jsi::Value HermesSandboxContext::wrapHostFunctionForSandbox(jsi::Runtime &hostRt
           // Convert result from host to sandbox
           return self->hostToSandbox(*hostRt, rt, result);
         } catch (const jsi::JSError &e) {
-          rill_log(kLogTag, std::string("Callback ") + cbId + " JSError: " + e.what());
+          keel_log(kLogTag, std::string("Callback ") + cbId + " JSError: " + e.what());
           throw jsi::JSError(rt, e.what());
         } catch (const std::exception &e) {
-          rill_log(kLogTag, std::string("Callback ") + cbId + " exception: " + e.what());
+          keel_log(kLogTag, std::string("Callback ") + cbId + " exception: " + e.what());
           return jsi::Value::undefined();
         }
       });
@@ -627,7 +627,7 @@ jsi::Value HermesSandboxContext::wrapSandboxFunctionForHost(jsi::Runtime & /*san
 
         auto it = self->sandboxFunctions_.find(fId);
         if (it == self->sandboxFunctions_.end()) {
-          rill_log(kLogTag, "Sandbox function not found: " + fId);
+          keel_log(kLogTag, "Sandbox function not found: " + fId);
           return jsi::Value::undefined();
         }
 
@@ -657,10 +657,10 @@ jsi::Value HermesSandboxContext::wrapSandboxFunctionForHost(jsi::Runtime & /*san
           // Convert result from sandbox to host
           return self->sandboxToHost(*sandboxRt, rt, result);
         } catch (const jsi::JSError &e) {
-          rill_log(kLogTag, std::string("Sandbox function ") + fId + " JSError: " + e.what());
+          keel_log(kLogTag, std::string("Sandbox function ") + fId + " JSError: " + e.what());
           throw jsi::JSError(rt, e.what());
         } catch (const std::exception &e) {
-          rill_log(kLogTag, std::string("Sandbox function ") + fId + " exception: " + e.what());
+          keel_log(kLogTag, std::string("Sandbox function ") + fId + " exception: " + e.what());
           return jsi::Value::undefined();
         }
       });
@@ -718,7 +718,7 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
             msg += "[object]";
           }
         }
-        rill_log(kLogTag, msg);
+        keel_log(kLogTag, msg);
         return jsi::Value::undefined();
       });
 
@@ -728,7 +728,7 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
           *sandboxRuntime_, jsi::PropNameID::forAscii(*sandboxRuntime_, "warn"), 1,
           [](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *args, size_t count) {
             if (count > 0 && args[0].isString()) {
-              rill_log(kLogTag, "[WARN] " + args[0].getString(rt).utf8(rt));
+              keel_log(kLogTag, "[WARN] " + args[0].getString(rt).utf8(rt));
             }
             return jsi::Value::undefined();
           }));
@@ -737,7 +737,7 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
           *sandboxRuntime_, jsi::PropNameID::forAscii(*sandboxRuntime_, "error"), 1,
           [](jsi::Runtime &rt, const jsi::Value &, const jsi::Value *args, size_t count) {
             if (count > 0 && args[0].isString()) {
-              rill_log(kLogTag, "[ERROR] " + args[0].getString(rt).utf8(rt));
+              keel_log(kLogTag, "[ERROR] " + args[0].getString(rt).utf8(rt));
             }
             return jsi::Value::undefined();
           }));
@@ -747,7 +747,7 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
 
   installTaskQueueShim(hostRuntime);
 
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
   // Create the CDP debug API alongside the runtime — its AsyncDebuggerAPI must
   // be constructed with the runtime. The API pauses nothing until a
   // DebuggerEventCallback is registered; note the watchdog callback added just
@@ -759,7 +759,7 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
   // Teardown gate shared with the CDPAgentTarget: guards the CDP enqueue paths
   // (dispatch/connect/disconnect) that touch the runtime at enqueue time
   // against a racing dispose() (issue #40, B1).
-  cdpTeardownGate_ = std::make_shared<rill::devtools::CdpTeardownGate>();
+  cdpTeardownGate_ = std::make_shared<keel::devtools::CdpTeardownGate>();
 
   // How many DevTools clients are currently attached (bumped by the
   // CDPAgentTarget on connect/disconnect). Read by the watchdog callback below
@@ -827,7 +827,7 @@ HermesSandboxContext::HermesSandboxContext(jsi::Runtime &hostRuntime,
           });
 #endif
 
-  rill_log(kLogTag, "Created new Hermes sandbox context");
+  keel_log(kLogTag, "Created new Hermes sandbox context");
 }
 
 HermesSandboxContext::~HermesSandboxContext() { dispose(); }
@@ -842,7 +842,7 @@ void HermesSandboxContext::dispose() {
   wrapperCache_.clear();
   callbacks_.clear();
   sandboxFunctions_.clear();
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
   // Detach the watchdog-pause observer (it captures this) before its owner dies.
   if (watchdogPauseCallbackId_ != 0 && cdpDebugAPI_) {
     cdpDebugAPI_->asyncDebuggerAPI().removeDebuggerEventCallback_TS(
@@ -872,11 +872,11 @@ void HermesSandboxContext::dispose() {
   cdpDebugAPI_.reset();
 #endif
   sandboxRuntime_.reset();
-  rill_log(kLogTag, "Disposed sandbox context");
+  keel_log(kLogTag, "Disposed sandbox context");
 }
 
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
-std::shared_ptr<rill::devtools::IEngineDebugTarget>
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+std::shared_ptr<keel::devtools::IEngineDebugTarget>
 HermesSandboxContext::createCdpDebugTarget(
     std::shared_ptr<facebook::react::CallInvoker> callInvoker,
     std::int32_t executionContextId) {
@@ -887,7 +887,7 @@ HermesSandboxContext::createCdpDebugTarget(
   // Runtime-task pump. Hermes emits tasks that must run on the runtime thread;
   // this guest runtime runs on the host JS thread, so bounce each task through
   // the host CallInvoker. Capturing the raw runtime pointer is safe because
-  // RillTenantManager tears the target down (resume + unregister) before it
+  // KeelTenantManager tears the target down (resume + unregister) before it
   // disposes this context, so no task outlives *rt.
   auto *rt = sandboxRuntime_.get();
   std::weak_ptr<int> alive = runtimeAlive_;
@@ -900,7 +900,7 @@ HermesSandboxContext::createCdpDebugTarget(
           // dispose() closes the gate the CDP resume that would end the pause
           // is itself refused at the gate — closeAndWait() would then hang.
           // The "resume before dispose" order is instead guaranteed upstream
-          // (RillTenantManager unregisters the target, force-resuming every
+          // (KeelTenantManager unregisters the target, force-resuming every
           // paused connection, before it disposes this context); this token
           // only guards a task that outlived the runtime for any other reason.
           if (auto keep = alive.lock()) {
@@ -908,7 +908,7 @@ HermesSandboxContext::createCdpDebugTarget(
           }
         });
       };
-  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+  auto target = std::make_shared<keel::devtools::CDPAgentTarget>(
       executionContextId, cdpDebugAPI_, std::move(enqueue), cdpTeardownGate_,
       cdpClientsAttached_);
   // Retain a weak handle so dispose() can sweep any still-attached CDPAgents
@@ -1023,7 +1023,7 @@ void HermesSandboxContext::installTaskQueueShim(jsi::Runtime &hostRt) {
   try {
     sandboxRuntime_->evaluateJavaScript(
         std::make_shared<jsi::StringBuffer>(kTaskQueueShimScript),
-        "<rill-task-queue-shim>");
+        "<keel-task-queue-shim>");
     drainMicrotasks(hostRt);
   } catch (const jsi::JSError &e) {
     throw jsi::JSError(hostRt,
@@ -1037,7 +1037,7 @@ void HermesSandboxContext::installTaskQueueShim(jsi::Runtime &hostRt) {
 int HermesSandboxContext::drainImmediateQueue(jsi::Runtime &hostRt) {
   try {
     jsi::Value drainValue = sandboxRuntime_->global().getProperty(
-        *sandboxRuntime_, "__rill_drainImmediateQueue");
+        *sandboxRuntime_, "__keel_drainImmediateQueue");
     if (!drainValue.isObject()) {
       return 0;
     }
@@ -1359,7 +1359,7 @@ void HermesSandboxModule::install(jsi::Runtime &runtime) {
   jsi::Object moduleObj = jsi::Object::createFromHostObject(runtime, module);
   runtime.global().setProperty(runtime, "__HermesSandboxJSI",
                                std::move(moduleObj));
-  rill_log(kLogTag, "Installed __HermesSandboxJSI");
+  keel_log(kLogTag, "Installed __HermesSandboxJSI");
 }
 
 // Wrapper function for external linkage (avoids JSValue symbol conflicts)

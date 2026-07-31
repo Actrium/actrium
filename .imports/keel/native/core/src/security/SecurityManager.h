@@ -1,5 +1,5 @@
 // ============================================================================
-// WIP — gated behind RILL_WIP_NATIVE_SECURITY (off by default in production).
+// WIP — gated behind KEEL_WIP_NATIVE_SECURITY (off by default in production).
 //
 // WHAT THIS IS
 //   A native, per-tenant file/network policy stack (defense-in-depth in C++):
@@ -12,15 +12,15 @@
 //        - web:    WASM QuickJS has no fetch/fs/socket/DOM primitives.
 //        - native: the JSI sandbox engine (JSC/Hermes/QuickJS as a HostObject)
 //                  likewise injects no native fetch/fs/socket — the guest gets
-//                  only the __rill dispatch bridge + control-plane globals.
+//                  only the __keel dispatch bridge + control-plane globals.
 //     2. Mediation: the ONLY way out is the contract capability layer
-//        (rill/contract) — declared rpc/subscription capabilities, fail-closed,
+//        (keel/contract) — declared rpc/subscription capabilities, fail-closed,
 //        every guest->host input and host->guest event schema-validated.
 //   Guest file/network today flows entirely through TS host modules over that
 //   bridge. So this native stack currently guards NO live data path:
-//   RillTenantManager builds a context per tenant, but nothing ever calls
+//   KeelTenantManager builds a context per tenant, but nothing ever calls
 //   getFileSandbox()/getNetworkSandbox(). Left ungated it also creates a false
-//   impression of enforcement to a reader of RillTenantManager.
+//   impression of enforcement to a reader of KeelTenantManager.
 //
 // WHEN THIS BECOMES REAL (the completion condition)
 //   Only if a host module is lowered to native C++ that touches fs/net directly
@@ -37,7 +37,7 @@
 // PROCESS / HOW TO BUILD WITH IT
 //   Tests always define the flag (native/core/Makefile) so this code keeps
 //   compiling. For an evaluation native build:
-//     RILL_WIP_NATIVE_SECURITY=1 pod install   (podspec forwards it as -D)
+//     KEEL_WIP_NATIVE_SECURITY=1 pod install   (podspec forwards it as -D)
 // ============================================================================
 
 #pragma once
@@ -49,7 +49,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rill::security {
+namespace keel::security {
 
 /// Unified security policy for creating a tenant's security context.
 struct SecurityPolicy {
@@ -102,4 +102,4 @@ private:
   mutable std::shared_mutex mutex_;
 };
 
-} // namespace rill::security
+} // namespace keel::security

@@ -6,17 +6,17 @@ import { Engine } from '../../engine';
  * so that async-only providers don't race (helpers not available yet).
  */
 describe('Engine - injectRuntimeAPI awaits runtime helpers', () => {
-  it('should make __rill_onHostEvent available before executing guest bundle (async provider)', async () => {
+  it('should make __keel_onHostEvent available before executing guest bundle (async provider)', async () => {
     // Use the built-in async provider to avoid exposing provider injection as public API.
     const engine = new Engine({ sandbox: 'wasm-quickjs', debug: false });
 
     // Guest bundle asserts runtime helpers exist at execution time.
     await engine.loadBundle(`
-      if (typeof globalThis.__rill_onHostEvent !== 'function') {
-        throw new Error('__rill_onHostEvent missing');
+      if (typeof globalThis.__keel_onHostEvent !== 'function') {
+        throw new Error('__keel_onHostEvent missing');
       }
-      if (!globalThis.__rill.callbacks || typeof globalThis.__rill.registerCallback !== 'function') {
-        throw new Error('__rill.callbacks missing');
+      if (!globalThis.__keel.callbacks || typeof globalThis.__keel.registerCallback !== 'function') {
+        throw new Error('__keel.callbacks missing');
       }
       globalThis.__OK = true;
     `);

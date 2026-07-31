@@ -1,5 +1,5 @@
 /**
- * @rill/shared/bridge - Communication Layer
+ * @keel/shared/bridge - Communication Layer
  *
  * Bridge is the communication layer between Host and Guest
  * - exposes exactly two methods: sendToHost() / sendToGuest()
@@ -191,7 +191,7 @@ export class Bridge {
         return this.registry.invoke(fnId, args);
       }
       // Not in Host registry -> route to Guest sandbox
-      // Covers both fn_N (sandbox __rill.registerCallback) and fn_xxx_N (Guest globalCallbackRegistry)
+      // Covers both fn_N (sandbox __keel.registerCallback) and fn_xxx_N (Guest globalCallbackRegistry)
       // NOTE: args encoding is handled by TypeRules (serialized-function decode)
       if (this.guestInvoker) {
         return this.guestInvoker(fnId, args);

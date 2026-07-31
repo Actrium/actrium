@@ -9,7 +9,7 @@
  * driven update never reached the host on web.
  *
  * The fix (approach B) registers callback arguments in the guest callback registry and
- * passes a {__rill_cb:id} marker across the bridge; the host reconstructs a proxy that
+ * passes a {__keel_cb:id} marker across the bridge; the host reconstructs a proxy that
  * invokes the guest callback by id. This drives the REAL Engine on the REAL wasm-quickjs
  * provider and asserts a deferred render batch — scheduled from a setImmediate callback —
  * reaches the host Receiver in addition to the initial batch.
@@ -17,7 +17,7 @@
  * Determinism: setImmediate is drained synchronously by the Engine after the bundle eval
  * (_drainPendingImmediates), so no timers/sleeps are needed to observe the second batch.
  * The FULL React scheduler path (useEffect + setTimeout completing a concurrent render) is
- * covered against real WASM in tests/wasm-sandbox/rill-useeffect.e2e.ts — the bun mock-react
+ * covered against real WASM in tests/wasm-sandbox/keel-useeffect.e2e.ts — the bun mock-react
  * environment can't host useEffect because react-reconciler captures setTimeout at import.
  */
 
@@ -40,7 +40,7 @@ describeIfWASM('Engine timer-callback render on wasm-quickjs (issue #10)', () =>
 
     await engine.loadBundle(`
       // Initial render (direct data batch — already worked after #8).
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1, batchId: 1,
         operations: [
           { op: 'CREATE', id: 1, type: 'View', props: {} },
@@ -51,7 +51,7 @@ describeIfWASM('Engine timer-callback render on wasm-quickjs (issue #10)', () =>
       // argument crosses the WASM bridge by id (#10) and is invoked when the engine drains
       // immediates — producing a SECOND batch the host must receive.
       setImmediate(function(){
-        globalThis.__rill_sendBatch({
+        globalThis.__keel_sendBatch({
           version: 1, batchId: 2,
           operations: [
             { op: 'CREATE', id: 2, type: 'Text', props: {} },
@@ -85,7 +85,7 @@ describeIfWASM('Engine timer-callback render on wasm-quickjs (issue #10)', () =>
     await engine.loadBundle(`
       if (typeof queueMicrotask === 'function') {
         queueMicrotask(function(){
-          globalThis.__rill_sendBatch({
+          globalThis.__keel_sendBatch({
             version: 1, batchId: 5,
             operations: [{ op: 'CREATE', id: 1, type: 'View', props: {} }, { op: 'APPEND', parentId: 0, childId: 1 }]
           });
@@ -93,7 +93,7 @@ describeIfWASM('Engine timer-callback render on wasm-quickjs (issue #10)', () =>
       } else {
         // Fallback: if the engine does not inject queueMicrotask, prove the path via setImmediate.
         setImmediate(function(){
-          globalThis.__rill_sendBatch({
+          globalThis.__keel_sendBatch({
             version: 1, batchId: 5,
             operations: [{ op: 'CREATE', id: 1, type: 'View', props: {} }, { op: 'APPEND', parentId: 0, childId: 1 }]
           });

@@ -27,10 +27,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Asyncify rewind rebuilds QuickJS's deep interpreter stack inside V8's stack;
 // re-exec once with more headroom so a plain `node run-cdp-wasm.mjs` just works.
-if (!process.env.RILL_DBG_REEXEC) {
+if (!process.env.KEEL_DBG_REEXEC) {
   const child = spawnSync(process.execPath, ['--stack-size=4000', fileURLToPath(import.meta.url)], {
     stdio: 'inherit',
-    env: { ...process.env, RILL_DBG_REEXEC: '1' },
+    env: { ...process.env, KEEL_DBG_REEXEC: '1' },
   });
   process.exit(child.status === null ? 1 : child.status);
 }
@@ -66,7 +66,7 @@ const Module = await factory();
 // The worker/relay installs this; here the harness IS the pipe. Collect every
 // outbound CDP message (responses carry "id"; events carry "method").
 const inbox = [];
-globalThis.__rillCdp = { onMessage: (_connId, json) => inbox.push(JSON.parse(json)) };
+globalThis.__keelCdp = { onMessage: (_connId, json) => inbox.push(JSON.parse(json)) };
 const responseFor = (id) => inbox.find((m) => m.id === id);
 const eventFor = (method) => inbox.find((m) => m.method === method);
 

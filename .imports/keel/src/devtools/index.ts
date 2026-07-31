@@ -1,7 +1,7 @@
 /**
- * @rill/devtools
+ * @keel/devtools
  *
- * Debug tools for rill - operation logging, performance profiling, and error tracking
+ * Debug tools for keel - operation logging, performance profiling, and error tracking
  *
  * Guest-side data is automatically collected by:
  * - DEVTOOLS_SHIM (console/error interception, injected by Engine)
@@ -10,7 +10,7 @@
  * Usage:
  *
  * ```typescript
- * import { createDevTools } from 'rill/devtools';
+ * import { createDevTools } from 'keel/devtools';
  *
  * const devtools = createDevTools();
  * devtools.enable();
@@ -129,7 +129,7 @@ export class DevTools {
   // ============ Engine Connection ============
 
   /**
-   * Connect to rill Engine
+   * Connect to keel Engine
    */
   connectEngine(engine: {
     getNodeMap(): Map<number, NodeInstance>;

@@ -12,7 +12,7 @@ const FULLWIDTH_PAREN = String.fromCodePoint(0xff08, 0xff09); // fullwidth ( )
 describe('check:cjk — what counts as a policed file', () => {
   it('polices source and English prose', () => {
     expect(isPoliced('src/shared/types.ts')).toBe(true);
-    expect(isPoliced('crates/rill-native-guest/src/lib.rs')).toBe(true);
+    expect(isPoliced('crates/keel-native-guest/src/lib.rs')).toBe(true);
     expect(isPoliced('README.md')).toBe(true);
     expect(isPoliced('scripts/build.sh')).toBe(true);
   });

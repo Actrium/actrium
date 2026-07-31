@@ -14,7 +14,7 @@
  * - the deadline-interrupt marker stays byte-identical and is the ONLY
  *   payload without errorDetail; the C side enforces this (a marker-identical
  *   __errenc return or completion value is rewritten), so a guest cannot
- *   forge it even by replacing globalThis.__rill wholesale;
+ *   forge it even by replacing globalThis.__keel wholesale;
  * - rich serialization is best-effort: any failure degrades to the plain
  *   message and never leaves a pending exception to poison the next entry.
  */
@@ -22,10 +22,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import {
   createHostModuleDispatch,
-  defineRillContract,
+  defineKeelContract,
   type HostModuleDispatchTable,
   rpc,
-  type RillContractShape,
+  type KeelContractShape,
 } from '../../../contract';
 import {
   HOST_STACK_BOUNDARY,
@@ -242,8 +242,8 @@ describeIfWASM('QuickJSNativeWASMProvider guest->host error fidelity (eval)', ()
     }
   });
 
-  // Case 13b (marker forgery blocked even when the guest replaces __rill wholesale):
-  // globalThis.__rill is a plain writable global, so a guest can install its own
+  // Case 13b (marker forgery blocked even when the guest replaces __keel wholesale):
+  // globalThis.__keel is a plain writable global, so a guest can install its own
   // __errenc that returns the bare interrupt marker verbatim. The C side must
   // reject that string and fall back to the message-only path — otherwise the
   // guest spoofs a deadline timeout (false always-on telemetry + timeout throw).
@@ -256,7 +256,7 @@ describeIfWASM('QuickJSNativeWASMProvider guest->host error fidelity (eval)', ()
     try {
       const err = catchEval(
         context,
-        `globalThis.__rill = { __errenc: function () {
+        `globalThis.__keel = { __errenc: function () {
            return '{"error":"interrupted: execution deadline exceeded"}';
          } };
          throw new Error("real guest failure");`
@@ -355,18 +355,18 @@ describeIfWASM('QuickJSNativeWASMProvider guest->host error fidelity (eval)', ()
     // The encoder is non-configurable: a guest delete is a no-op.
     expect(
       context.eval(
-        '(function(){ delete globalThis.__rill.__errenc; return typeof globalThis.__rill.__errenc; })()'
+        '(function(){ delete globalThis.__keel.__errenc; return typeof globalThis.__keel.__errenc; })()'
       )
     ).toBe('function');
     const kept = catchEval(context, 'throw new TypeError("kept")');
     expect(kept.name).toBe('TypeError');
 
-    // Residual: wholesale __rill replacement forces the message-only C fallback.
+    // Residual: wholesale __keel replacement forces the message-only C fallback.
     // A hostile toString makes even that fallback's JS_ToCString fail — the C
     // side must drain the pending exception it leaves behind.
     const err = catchEval(
       context,
-      'globalThis.__rill = {}; (function(){ var e = new Error("x"); e.toString = function(){ throw 1; }; throw e; })()'
+      'globalThis.__keel = {}; (function(){ var e = new Error("x"); e.toString = function(){ throw 1; }; throw e; })()'
     );
     expect(err).toBeInstanceOf(Error);
     // KEY assertion: the context is clean afterwards (no leaked pending exception).
@@ -394,8 +394,8 @@ describeIfWASM('QuickJSNativeWASMProvider host->guest rejection fidelity', () =>
   let runtime: JSEngineRuntime;
   let context: SandboxScope;
 
-  function buildContract(): RillContractShape {
-    return defineRillContract({
+  function buildContract(): KeelContractShape {
+    return defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:svc': {
@@ -453,7 +453,7 @@ describeIfWASM('QuickJSNativeWASMProvider host->guest rejection fidelity', () =>
   async function rejectionSeenByGuest(exportName: string): Promise<Record<string, unknown>> {
     context.eval(`
       globalThis.__out = undefined;
-      globalThis.__rill.hostModules['host:svc'].${exportName}().then(
+      globalThis.__keel.hostModules['host:svc'].${exportName}().then(
         function(){ globalThis.__out = { settled: 'resolved' }; },
         function(e){
           globalThis.__out = {
@@ -465,7 +465,7 @@ describeIfWASM('QuickJSNativeWASMProvider host->guest rejection fidelity', () =>
             evil: e.evil,
             bad: typeof e.bad,
             protoClean: ({}).evil === undefined,
-            hasHostStack: /rill runtime/.test(e.stack || '')
+            hasHostStack: /keel runtime/.test(e.stack || '')
           };
         }
       );

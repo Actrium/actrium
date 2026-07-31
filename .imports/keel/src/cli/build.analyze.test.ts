@@ -9,7 +9,7 @@ describe('CLI Analyze - whitelist scan', () => {
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-cli-test-'));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-cli-test-'));
     bundle = path.join(tmpDir, 'scan-bundle.js');
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
   });
