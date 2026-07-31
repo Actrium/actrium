@@ -147,6 +147,13 @@ pub fn verify_with_limits(
     let manifest = PackageManifest::from_toml(manifest_str)?;
     validate_manifest_integrity_fields(&manifest)?;
 
+    // Trust-boundary check: a valid signature proves provenance, not that the
+    // identity strings are safe to use (CWE-22 / CWE-73). Enforce the protocol
+    // identity rules before any caller can use this manifest for storage-path
+    // derivation, registry lookup, or AIS registration.
+    crate::identity::ValidatedActorIdentity::from_manifest(&manifest)
+        .map_err(|error| PackError::InvalidPackage(format!("invalid actor identity: {error}")))?;
+
     // Reject excessive declared work before decompressing any payload. Count
     // duplicate manifest paths separately because verification would otherwise
     // decompress and hash each occurrence separately.

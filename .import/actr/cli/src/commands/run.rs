@@ -330,6 +330,14 @@ impl RunCommand {
         };
         use std::sync::Arc;
 
+        // Honour `[hyper].storage_root` from the runtime config (already resolved
+        // to an absolute path by the parser); otherwise HyperConfig defaults to
+        // `<hyper_dir>/storage`.
+        let apply_storage_root = |cfg: HyperConfig| match &config.storage_root {
+            Some(root) => cfg.with_storage_root(root),
+            None => cfg,
+        };
+
         if config.trust.is_empty() {
             // Fallback: when no `[[trust]]` anchors are configured, auto-load
             // the package's sidecar `public-key.json` as a StaticTrust anchor.
@@ -339,7 +347,7 @@ impl RunCommand {
                 Arc::new(StaticTrust::new(public_key).map_err(|e| {
                     ActrCliError::command_error(format!("Invalid public key: {}", e))
                 })?);
-            return Hyper::new(HyperConfig::new(hyper_dir, trust))
+            return Hyper::new(apply_storage_root(HyperConfig::new(hyper_dir, trust)))
                 .await
                 .map_err(|e| {
                     ActrCliError::command_error(format!("Failed to initialize Hyper: {}", e))
@@ -372,7 +380,7 @@ impl RunCommand {
             Arc::new(ChainTrust::new(providers))
         };
 
-        Hyper::new(HyperConfig::new(hyper_dir, trust))
+        Hyper::new(apply_storage_root(HyperConfig::new(hyper_dir, trust)))
             .await
             .map_err(|e| ActrCliError::command_error(format!("Failed to initialize Hyper: {}", e)))
     }

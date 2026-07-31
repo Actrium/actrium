@@ -67,6 +67,7 @@ dependencies = [
 name = "actr-pack"
 version = "0.5.9"
 dependencies = [
+ "actr-protocol",
  "base64",
  "ed25519-dalek",
  "hex",
@@ -83,6 +84,7 @@ name = "actr-platform-traits"
 version = "0.5.9"
 dependencies = [
  "async-trait",
+ "hex",
  "thiserror 2.0.18",
 ]
 
@@ -175,6 +177,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
  "tracing",
  "tracing-opentelemetry",

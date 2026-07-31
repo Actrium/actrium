@@ -65,12 +65,37 @@ async fn verify_package_rejects_non_actr_format() {
     assert!(matches!(result, Err(HyperError::InvalidManifest(_))));
 }
 
-// ─── ActorStore helpers ────────────────────────────────────────────────
+/// A custom [`crate::verify::TrustProvider`] that returns a fixed
+/// [`VerifiedPackage`] without doing real verification — used to prove Hyper
+/// re-validates the identity at the trust boundary regardless of the provider.
+#[derive(Debug)]
+struct FakeTrust {
+    verified: VerifiedPackage,
+}
 
-#[allow(dead_code)]
-async fn open_test_store(dir: &TempDir) -> ActorStore {
-    let db_path = dir.path().join("test.db");
-    ActorStore::open(&db_path).await.unwrap()
+#[async_trait::async_trait]
+impl crate::verify::TrustProvider for FakeTrust {
+    async fn verify_package(&self, _bytes: &[u8]) -> HyperResult<VerifiedPackage> {
+        Ok(self.verified.clone())
+    }
+}
+
+#[tokio::test]
+async fn verify_package_rejects_invalid_identity_from_custom_provider() {
+    let dir = TempDir::new().unwrap();
+    let mut bad = fake_manifest();
+    // A signed-but-malicious identity: traversal attempt in the version field.
+    bad.manifest.version = "../../victim".to_string();
+    let config = HyperConfig::new(dir.path(), Arc::new(FakeTrust { verified: bad }));
+    let hyper = Hyper::new(config).await.unwrap();
+    let result = hyper
+        .verify_package(&WorkloadPackage::new(b"anything".to_vec()))
+        .await;
+    assert!(
+        matches!(result, Err(HyperError::InvalidManifest(_))),
+        "expected InvalidManifest for unsafe identity, got: {:?}",
+        result.err()
+    );
 }
 
 // ─── AIS integration tests (mockito mock server) ────────────────────────
@@ -210,6 +235,7 @@ fn linked_runtime_config(dir: &TempDir) -> actr_config::RuntimeConfig {
         trust: vec![],
         package_path: None,
         web: None,
+        storage_root: None,
     }
 }
 
@@ -427,8 +453,11 @@ async fn bootstrap_package_uses_manifest_auth() {
     );
 
     // Verify no legacy PSK keys are written to ActorStore.
-    let storage_path = hyper.resolve_storage_path(&manifest.manifest).unwrap();
-    let store = ActorStore::open(&storage_path).await.unwrap();
+    let namespace = storage_namespace_for(&manifest.manifest).unwrap();
+    let root = SecureStorageRoot::new(hyper.config().storage_root())
+        .await
+        .unwrap();
+    let store = ActorStore::open_under(&root, &namespace).await.unwrap();
     assert!(
         store.kv_get("hyper:psk:token").await.unwrap().is_none(),
         "PSK token must not be stored after PSK removal"
@@ -473,6 +502,53 @@ async fn bootstrap_ais_error_propagates() {
     );
 }
 
+/// A rejected AIS registration must not create the per-actor database
+/// (issue #350 acceptance; repeated rejected identities must not accumulate
+/// empty databases). The store is opened only after a successful response.
+#[tokio::test]
+async fn bootstrap_ais_rejection_creates_no_database() {
+    use actr_protocol::{ErrorResponse, RegisterResponse, register_response};
+
+    let error_resp = RegisterResponse {
+        result: Some(register_response::Result::Error(ErrorResponse {
+            code: 403,
+            message: "manufacturer not trusted".to_string(),
+        })),
+    }
+    .encode_to_vec();
+
+    let mut server = mockito::Server::new_async().await;
+    let _mock = server
+        .mock("POST", "/register")
+        .with_status(200)
+        .with_header("content-type", "application/x-protobuf")
+        .with_body(error_resp)
+        .create_async()
+        .await;
+
+    let dir = TempDir::new().unwrap();
+    let config = dev_config(&dir);
+    let hyper = Hyper::new(config).await.unwrap();
+
+    let manifest = fake_manifest();
+    let result = hyper
+        .bootstrap_credential(&manifest, &server.url(), 1, test_service_spec(), test_acl())
+        .await;
+    assert!(matches!(result, Err(HyperError::AisBootstrapFailed(_))));
+
+    // The would-be database path must not exist after a rejected registration.
+    let namespace = storage_namespace_for(&manifest.manifest).unwrap();
+    let root = SecureStorageRoot::new(hyper.config().storage_root())
+        .await
+        .unwrap();
+    let db_path = root.path_for(&namespace).unwrap();
+    assert!(
+        !db_path.exists(),
+        "rejected registration must not create a database at {}",
+        db_path.display()
+    );
+}
+
 // ── pure helper functions ───────────────────────────────────────────────
 
 use actr_protocol::{ActrType, Realm, RegisterAuthMode};
@@ -513,6 +589,7 @@ fn runtime_config_with_ws(port: Option<u16>, host: Option<&str>) -> actr_config:
         trust: vec![],
         package_path: None,
         web: None,
+        storage_root: None,
     }
 }
 

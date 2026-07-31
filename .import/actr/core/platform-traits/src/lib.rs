@@ -17,7 +17,7 @@ pub mod storage;
 
 pub use crypto::CryptoProvider;
 pub use platform::PlatformProvider;
-pub use storage::{KvOp, KvStore, KvStoreClone};
+pub use storage::{KvOp, KvStore, KvStoreClone, StorageNamespace};
 
 use thiserror::Error;
 

@@ -167,6 +167,27 @@ impl ParserV1 {
             .and_then(|pkg| pkg.path)
             .map(|path| self.resolve_manifest_path(&path));
 
+        // Surface the removed `[hyper].storage_path_template` as a migration error
+        // instead of silently ignoring it, and resolve `[hyper].storage_root`
+        // against the config dir so `actr run` honours it (CWE-22 / CWE-73).
+        let storage_root = match raw.hyper {
+            Some(hyper) => {
+                if hyper.removed_storage_path_template.is_some() {
+                    return Err(ConfigError::InvalidConfig(
+                        "`storage_path_template` was removed; actor storage now uses a fixed \
+                         hashed layout. Configure `[hyper].storage_root` instead."
+                            .to_string(),
+                    ));
+                }
+                hyper.storage_root.map(|p| {
+                    let expanded =
+                        crate::user_config::expand_tilde(p.to_string_lossy().into_owned());
+                    self.resolve_manifest_path(&expanded)
+                })
+            }
+            None => None,
+        };
+
         Ok(RuntimeConfig {
             package,
             signaling_url,
@@ -195,6 +216,7 @@ impl ParserV1 {
                 package_url: w.package_url,
                 runtime_wasm_url: w.runtime_wasm_url,
             }),
+            storage_root,
         })
     }
 
@@ -215,6 +237,16 @@ impl ParserV1 {
             name: raw.name.clone(),
             version: raw.version.clone(),
         };
+        // `version` defaults to "" when omitted (an empty version contributes
+        // nothing unsafe to the filename). When present it is interpolated into
+        // the default `actr build` filename, so validate the whole identity via
+        // the centralized protocol rule — this rejects traversal/separator content
+        // in `version` (CWE-22 / CWE-73), which was previously unchecked.
+        if !actr_type.version.is_empty() {
+            actr_type
+                .validate()
+                .map_err(|e| ConfigError::InvalidActrType(e.to_string()))?;
+        }
 
         Ok(PackageInfo {
             name: raw.name.clone(),
@@ -940,5 +972,109 @@ ca_cert_path = "certs/collector-ca.pem"
             config.observability.ca_cert_path,
             Some(tmpdir.path().join("config/certs/collector-ca.pem"))
         );
+    }
+
+    fn runtime_test_package() -> PackageInfo {
+        PackageInfo {
+            name: "test".to_string(),
+            actr_type: ActrType {
+                manufacturer: "acme".to_string(),
+                name: "test".to_string(),
+                version: "1.0.0".to_string(),
+            },
+            description: None,
+            authors: Vec::new(),
+            license: None,
+        }
+    }
+
+    fn parse_runtime_str(
+        config_path: &Path,
+        toml_body: &str,
+    ) -> crate::error::Result<RuntimeConfig> {
+        let raw: RuntimeRawConfig = toml::from_str(toml_body).unwrap();
+        ParserV1::new(config_path).parse_runtime(raw, runtime_test_package())
+    }
+
+    const RUNTIME_BASE: &str = r#"
+[signaling]
+url = "ws://localhost:8081/signaling/ws"
+
+[ais_endpoint]
+url = "http://localhost:8081/ais"
+
+[deployment]
+realm_id = 1
+"#;
+
+    #[test]
+    fn test_runtime_hyper_storage_root_resolves_from_config_directory() {
+        let tmpdir = TempDir::new().unwrap();
+        let config_path = tmpdir.path().join("config").join("actr.toml");
+        let config = parse_runtime_str(
+            &config_path,
+            &format!("{RUNTIME_BASE}\n[hyper]\nstorage_root = \"store\"\n"),
+        )
+        .unwrap();
+
+        // A relative storage_root resolves against the config file's directory.
+        assert_eq!(
+            config.storage_root,
+            Some(tmpdir.path().join("config/store"))
+        );
+    }
+
+    #[test]
+    fn test_runtime_hyper_storage_root_expands_tilde() {
+        let tmpdir = TempDir::new().unwrap();
+        let config_path = tmpdir.path().join("config").join("actr.toml");
+        let config = parse_runtime_str(
+            &config_path,
+            &format!("{RUNTIME_BASE}\n[hyper]\nstorage_root = \"~/actr-test-store\"\n"),
+        )
+        .unwrap();
+
+        // `~` expands to the home dir instead of a literal `~` component.
+        let expected = crate::user_config::expand_tilde("~/actr-test-store".to_string());
+        assert!(!expected.starts_with("~"));
+        assert_eq!(config.storage_root, Some(expected));
+    }
+
+    #[test]
+    fn test_runtime_hyper_storage_path_template_is_a_migration_error() {
+        let tmpdir = TempDir::new().unwrap();
+        let config_path = tmpdir.path().join("config").join("actr.toml");
+        let err = parse_runtime_str(
+            &config_path,
+            &format!("{RUNTIME_BASE}\n[hyper]\nstorage_path_template = \"{{data_dir}}/custom\"\n"),
+        )
+        .unwrap_err();
+
+        let msg = err.to_string();
+        assert!(
+            msg.contains("storage_path_template") && msg.contains("storage_root"),
+            "error should point to the storage_root migration, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_parse_package_rejects_traversal_version() {
+        let tmpdir = TempDir::new().unwrap();
+        let config_path = tmpdir.path().join("manifest.toml");
+        // `version` is interpolated into the default `actr build` filename, so any
+        // path-traversal / separator content must be rejected at manifest parsing.
+        // (An omitted/empty version is allowed — it contributes nothing unsafe.)
+        for bad_version in ["../../../outside", "1/0", "a\\b", "1 0"] {
+            let toml_content = format!(
+                "edition = 1\n\n[package]\nname = \"Echo\"\nmanufacturer = \"acme\"\nversion = \"{bad_version}\"\n"
+            );
+            fs::write(&config_path, &toml_content).unwrap();
+            let raw = ManifestRawConfig::from_file(&config_path).unwrap();
+            let parser = ParserV1::new(&config_path);
+            assert!(
+                parser.parse_manifest(raw).is_err(),
+                "version {bad_version:?} must be rejected"
+            );
+        }
     }
 }

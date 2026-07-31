@@ -10,7 +10,9 @@
 
 use std::sync::Arc;
 
-use actr_platform_traits::{CryptoProvider, KvStore, PlatformError, PlatformProvider};
+use actr_platform_traits::{
+    CryptoProvider, KvStore, PlatformError, PlatformProvider, StorageNamespace,
+};
 use async_trait::async_trait;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -52,6 +54,18 @@ impl Default for WebPlatformProvider {
     fn default() -> Self {
         Self::new("default")
     }
+}
+
+/// The IndexedDB database name for an actor's secret store: the provider root
+/// plus the opaque namespace key.
+///
+/// `root_namespace` disambiguates multiple Actr hosts living in the same browser
+/// origin (the web equivalent of native `data_dir`), so it must be part of the
+/// name — otherwise two roots would share a single credential store, violating
+/// the documented isolation contract. It is a logical key, never a filesystem
+/// path (IndexedDB names accept any characters).
+fn secret_store_db_name(root_namespace: &str, namespace: &StorageNamespace) -> String {
+    format!("{}/{}", root_namespace, namespace.opaque_key())
 }
 
 #[async_trait(?Send)]
@@ -98,9 +112,16 @@ impl PlatformProvider for WebPlatformProvider {
         Ok(new_id)
     }
 
-    async fn secret_store(&self, namespace: &str) -> Result<Arc<dyn KvStore>, PlatformError> {
-        let store = IndexedDbKvStore::new(namespace);
-        debug!(namespace = %namespace, "opened IndexedDB secret store");
+    async fn secret_store(
+        &self,
+        namespace: &StorageNamespace,
+    ) -> Result<Arc<dyn KvStore>, PlatformError> {
+        // Map the opaque namespace onto this provider's root, as an IndexedDB
+        // database name. It is a logical key, never a filesystem path (IndexedDB
+        // names accept any characters).
+        let key = secret_store_db_name(&self.root_namespace, namespace);
+        let store = IndexedDbKvStore::new(&key);
+        debug!(namespace = %key, "opened IndexedDB secret store");
         Ok(Arc::new(store))
     }
 
@@ -193,4 +214,22 @@ fn get_local_storage() -> Result<web_sys::Storage, PlatformError> {
     }
 
     Ok(web_sys::Storage::from(storage_val))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn secret_store_db_name_incorporates_root_namespace() {
+        let ns = StorageNamespace::actr_v1([0xAB; 32]);
+        let a = secret_store_db_name("host-a", &ns);
+        let b = secret_store_db_name("host-b", &ns);
+        // Distinct roots must not share a credential store.
+        assert_ne!(a, b);
+        assert!(a.starts_with("host-a/"));
+        assert!(b.starts_with("host-b/"));
+        // The opaque namespace key is preserved after the root prefix.
+        assert!(a.contains(&ns.opaque_key()));
+    }
 }

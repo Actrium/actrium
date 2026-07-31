@@ -1,7 +1,7 @@
 //! Actor isolated storage implementation
 //!
-//! Each Actor has an independent SQLite database file, with the path determined
-//! by Hyper's namespace resolver.
+//! Each Actor has an independent SQLite database file, located at the fixed
+//! hashed layout under the secure storage root (`{root}/actors/v1/<hash>/`).
 //! All read/write operations are confined to this namespace; an Actor cannot access another Actor's data.
 
 use std::path::{Path, PathBuf};
@@ -9,9 +9,10 @@ use std::sync::{Arc, Mutex};
 
 use tracing::{debug, error, info};
 
-use actr_platform_traits::{KvOp, KvStore, PlatformError};
+use actr_platform_traits::{KvOp, KvStore, PlatformError, StorageNamespace};
 use async_trait::async_trait;
 
+use super::root::SecureStorageRoot;
 use crate::error::{HyperError, HyperResult};
 
 /// Actor isolated storage handle
@@ -31,27 +32,37 @@ pub struct ActorStore {
 }
 
 impl ActorStore {
-    /// Open or create an Actor's SQLite database
+    /// Open or create an actor's SQLite database under a [`SecureStorageRoot`].
     ///
-    /// Automatically creates the table on first call. Parent directory is created automatically if missing.
-    pub async fn open(db_path: &Path) -> HyperResult<Self> {
+    /// The only public entry: the namespace directory is created with per-level
+    /// symlink checks by [`SecureStorageRoot::prepare_database_path`], and SQLite
+    /// opens the file with `SQLITE_OPEN_NOFOLLOW`.
+    pub async fn open_under(
+        root: &SecureStorageRoot,
+        namespace: &StorageNamespace,
+    ) -> HyperResult<Self> {
+        let db_path = root.prepare_database_path(namespace).await?;
+        Self::open_unchecked(&db_path).await
+    }
+
+    /// Open a database at an already-prepared path with `SQLITE_OPEN_NOFOLLOW`.
+    ///
+    /// Crate-private: only [`ActorStore::open_under`] (post-validation) and a
+    /// narrow set of unit tests may open an arbitrary path. Not a security
+    /// boundary — the caller must have created and symlink-checked the parent.
+    pub(crate) async fn open_unchecked(db_path: &Path) -> HyperResult<Self> {
         let db_path = db_path.to_path_buf();
-
-        // ensure parent directory exists
-        if let Some(parent) = db_path.parent() {
-            tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                HyperError::Storage(format!(
-                    "failed to create storage directory `{}`: {e}",
-                    parent.display()
-                ))
-            })?;
-        }
-
         let namespace = db_path.clone();
 
         // rusqlite is a sync API, execute in blocking thread pool via spawn_blocking
         let conn = tokio::task::spawn_blocking(move || -> HyperResult<rusqlite::Connection> {
-            let conn = rusqlite::Connection::open(&db_path).map_err(|e| {
+            // NOFOLLOW guards the final component; ancestors were checked during
+            // prepare_database_path. A one-shot OpenOptions + O_NOFOLLOW cannot
+            // substitute: SQLite re-opens the file by path.
+            let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_CREATE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NOFOLLOW;
+            let conn = rusqlite::Connection::open_with_flags(&db_path, flags).map_err(|e| {
                 error!(
                     path = %db_path.display(),
                     error = %e,

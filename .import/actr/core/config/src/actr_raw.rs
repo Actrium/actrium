@@ -121,6 +121,20 @@ pub struct RuntimeRawConfig {
     /// ```
     #[serde(default)]
     pub web: Option<RawWebConfig>,
+
+    /// Hyper-layer settings (`[hyper]` section).
+    ///
+    /// Only the fields `actr run` consumes are mapped here. Actor storage uses a
+    /// fixed hashed layout under `storage_root` (CWE-22 / CWE-73); the removed
+    /// `storage_path_template` key is kept as a tombstone that errors explicitly.
+    ///
+    /// Example:
+    /// ```toml
+    /// [hyper]
+    /// storage_root = "/var/lib/actr/storage"
+    /// ```
+    #[serde(default)]
+    pub hyper: Option<RawHyperConfig>,
 }
 
 /// Workload package path configuration
@@ -149,6 +163,25 @@ pub struct RawCapabilitiesConfig {
     /// Custom tags (key-value pairs)
     #[serde(default)]
     pub tags: Option<HashMap<String, String>>,
+}
+
+/// Hyper-layer settings (`[hyper]` section) consumed by `actr run`.
+///
+/// Actor storage uses a fixed hashed layout under `storage_root`
+/// (`{storage_root}/actors/v1/<sha256-hex>/store.sqlite3`); the actor identity
+/// never contributes a path component (CWE-22 / CWE-73).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RawHyperConfig {
+    /// Filesystem root for per-actor storage. Relative paths resolve against the
+    /// config file's directory; a leading `~` is expanded.
+    #[serde(default)]
+    pub storage_root: Option<std::path::PathBuf>,
+
+    /// Tombstone: the removed `storage_path_template` key. Kept only to produce
+    /// an explicit migration error instead of letting Serde silently ignore it
+    /// (the surrounding struct has no `deny_unknown_fields`).
+    #[serde(default, rename = "storage_path_template")]
+    pub removed_storage_path_template: Option<String>,
 }
 
 /// Web server configuration for `actr run --web`

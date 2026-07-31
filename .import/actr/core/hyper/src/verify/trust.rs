@@ -172,6 +172,30 @@ impl TrustProvider for StaticTrust {
 
 // ── RegistryTrust ────────────────────────────────────────────────────────────
 
+/// Pre-check a `signing_key_id` before it is used as a registry lookup locator.
+///
+/// The value is unauthenticated at this point — it only needs to be
+/// syntactically safe to place into a URL query pair / structured cache key.
+fn validate_key_id_for_lookup(key_id: &str) -> HyperResult<()> {
+    const MAX_KEY_ID_BYTES: usize = 64;
+    if key_id.is_empty() {
+        return Err(HyperError::InvalidManifest(
+            "signing_key_id is empty".to_string(),
+        ));
+    }
+    if key_id.len() > MAX_KEY_ID_BYTES {
+        return Err(HyperError::InvalidManifest(format!(
+            "signing_key_id exceeds {MAX_KEY_ID_BYTES} bytes"
+        )));
+    }
+    if let Some(ch) = key_id.chars().find(|c| c.is_control() || c.is_whitespace()) {
+        return Err(HyperError::InvalidManifest(format!(
+            "signing_key_id contains invalid character: {ch:?}"
+        )));
+    }
+    Ok(())
+}
+
 /// Resolve manufacturer public keys from an AIS HTTP registry and verify
 /// Ed25519 signatures against them. Internal cache with configurable TTL
 /// (default 1h).
@@ -207,6 +231,15 @@ impl RegistryTrust {
                     .to_string(),
             )
         })?;
+
+        // Pre-flight the unauthenticated locator fields before they are used for
+        // the key lookup. This is NOT a trust decision — the signature check
+        // below establishes authenticity. It only ensures the fields are
+        // syntactically safe to place into a registry URL / cache key (a bad
+        // identity must not trigger a certificate HTTP lookup at all).
+        actr_pack::ValidatedActorIdentity::from_manifest(&pack_manifest)
+            .map_err(|error| HyperError::InvalidManifest(error.to_string()))?;
+        validate_key_id_for_lookup(key_id)?;
 
         let pubkey = self
             .cache

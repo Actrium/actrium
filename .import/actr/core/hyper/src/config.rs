@@ -1,5 +1,4 @@
 #[cfg(not(target_arch = "wasm32"))]
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 #[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
@@ -7,34 +6,27 @@ use std::sync::Arc;
 use std::time::Duration;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::error::{HyperError, HyperResult};
+use crate::error::HyperError;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::verify::TrustProvider;
-
-/// Default storage path template: `{data_dir}/{actr_type}`.
-#[cfg(not(target_arch = "wasm32"))]
-const DEFAULT_STORAGE_TEMPLATE: &str = "{data_dir}/{actr_type}";
 
 /// Hyper initialization configuration.
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Clone)]
 pub struct HyperConfig {
-    /// Root data directory, corresponds to the namespace template variable `{data_dir}`
+    /// Root data directory (instance id, non-actor-storage state).
     pub data_dir: PathBuf,
 
-    /// Storage namespace path template, defaults to `{data_dir}/{actr_type}`
+    /// Filesystem root under which per-actor storage lives.
     ///
-    /// Available variables:
-    /// - `{data_dir}`      — root data directory
-    /// - `{instance_id}`   — locally unique ID generated and persisted at Hyper startup
-    /// - `{hostname}`      — OS hostname
-    /// - `{manufacturer}`  — Actor manufacturer name
-    /// - `{actr_name}`     — Actor name
-    /// - `{version}`       — Actor version
-    /// - `{actr_type}`     — full three-part type (`{manufacturer}/{actr_name}/{version}`)
-    /// - `{realm_id}`      — Actor's realm (available at runtime)
-    /// - `{env.VAR}`       — any environment variable
-    pub storage_path_template: String,
+    /// Actor storage is placed at a **fixed** layout derived from the validated
+    /// actor identity hash — `{storage_root}/actors/v1/<sha256-hex>/store.sqlite3`.
+    /// The actor identity never contributes a path component, so no template or
+    /// manifest string can influence the location (CWE-22 / CWE-73).
+    ///
+    /// Defaults to `data_dir.join("storage")`. Only used by the direct-filesystem
+    /// storage branch; `Hyper::with_platform()` providers own their own root.
+    pub storage_root: PathBuf,
 
     /// Pluggable package-signature verifier. Replaces the old `TrustMode` enum.
     ///
@@ -317,7 +309,7 @@ impl std::fmt::Debug for HyperConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("HyperConfig")
             .field("data_dir", &self.data_dir)
-            .field("storage_path_template", &self.storage_path_template)
+            .field("storage_root", &self.storage_root)
             .field("trust_provider", &self.trust_provider)
             .field("credential_expiry_warning", &self.credential_expiry_warning)
             .field(
@@ -339,13 +331,20 @@ impl std::fmt::Debug for HyperConfig {
 #[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 pub(crate) struct HyperSection {
-    /// Root data directory (`{data_dir}` template variable).
+    /// Root data directory.
     #[serde(default)]
     pub data_dir: Option<std::path::PathBuf>,
 
-    /// Override the default `{data_dir}/{actr_type}` storage template.
+    /// Filesystem root for per-actor storage. Relative paths resolve against the
+    /// directory containing the config file.
     #[serde(default)]
-    pub storage_path_template: Option<String>,
+    pub storage_root: Option<std::path::PathBuf>,
+
+    /// Tombstone: the old `storage_path_template` key was removed. Kept only to
+    /// produce an explicit migration error instead of letting Serde silently
+    /// ignore the unknown field (this struct has no `deny_unknown_fields`).
+    #[serde(default, rename = "storage_path_template")]
+    pub removed_storage_path_template: Option<String>,
 
     /// Single trust anchor; for chain composition use the top-level
     /// `[[trust]]` array instead.
@@ -466,12 +465,23 @@ pub(crate) async fn node_from_config_file_with_package(
         ))
     })?;
     let hyper_section = hyper_section.hyper;
+
+    // `storage_path_template` was removed in favour of the fixed hashed layout.
+    // Error explicitly rather than letting Serde silently drop the key.
+    if hyper_section.removed_storage_path_template.is_some() {
+        return Err(HyperError::Config(
+            "`storage_path_template` was removed; actor storage now uses a fixed \
+             hashed layout. Configure `[hyper].storage_root` instead."
+                .to_string(),
+        ));
+    }
+
     let membership_controller_enabled =
         hyper_section.membership_controller_enabled.unwrap_or(false);
 
     // Resolve the data_dir: [hyper].data_dir > CLI user-config default.
     let data_dir = if let Some(dir) = hyper_section.data_dir.clone() {
-        dir
+        expand_tilde_path(&dir)
     } else {
         actr_config::user_config::resolve_hyper_data_dir().map_err(|e| {
             HyperError::Config(format!(
@@ -481,7 +491,9 @@ pub(crate) async fn node_from_config_file_with_package(
     };
 
     // Resolve trust: prefer [hyper.trust], fall back to top-level [[trust]].
-    let base_dir = path.parent().unwrap_or_else(|| Path::new("."));
+    // Absolutize the config file's directory so a relative `storage_root` (and
+    // `pubkey_file`) resolves against the config location, not `data_dir`.
+    let base_dir = absolutize(path.parent().unwrap_or_else(|| Path::new(".")));
     let trust: Arc<dyn TrustProvider> = if let Some(anchor) = hyper_section.trust.clone() {
         match anchor {
             HyperTrustAnchor::DevOnly => {
@@ -496,7 +508,7 @@ pub(crate) async fn node_from_config_file_with_package(
                 pubkey_b64,
             } => {
                 let key_bytes = load_static_pubkey_bytes(
-                    pubkey_file.as_deref().map(|p| resolve_path(base_dir, p)),
+                    pubkey_file.as_deref().map(|p| resolve_path(&base_dir, p)),
                     pubkey_b64,
                 )?;
                 Arc::new(StaticTrust::new(key_bytes)?)
@@ -545,8 +557,14 @@ pub(crate) async fn node_from_config_file_with_package(
 
     // Build HyperConfig with the resolved values.
     let mut hyper_config = HyperConfig::new(&data_dir, trust);
-    if let Some(template) = hyper_section.storage_path_template {
-        hyper_config = hyper_config.with_storage_template(template);
+    if let Some(root) = &hyper_section.storage_root {
+        // A relative `storage_root` resolves against the config file's directory,
+        // never the process CWD at open time. `base_dir` is absolute (and any
+        // leading `~` is expanded), so `resolved` is absolute and
+        // `with_storage_root` keeps it as-is instead of rebasing onto `data_dir`.
+        let root = expand_tilde_path(root);
+        let resolved = resolve_path(&base_dir, &root);
+        hyper_config = hyper_config.with_storage_root(resolved);
     }
 
     // Build Hyper and return Node<Init>. Observability bring-up is left
@@ -568,6 +586,35 @@ fn resolve_path(base_dir: &Path, path: impl AsRef<Path>) -> std::path::PathBuf {
     } else {
         base_dir.join(p)
     }
+}
+
+/// Make `path` absolute by joining it onto the process CWD when relative.
+///
+/// Applied to the config file's directory so that a relative `[hyper].storage_root`
+/// resolves against the (now-absolute) config location. Without this, a relative
+/// config path makes `resolve_path` return a relative `storage_root`, which
+/// [`HyperConfig::with_storage_root`] would then rebase a second time against
+/// `data_dir` (e.g. `configs/actr.toml` + `storage_root = "store"` wrongly became
+/// `<data_dir>/configs/store`).
+#[cfg(not(target_arch = "wasm32"))]
+fn absolutize(path: &Path) -> std::path::PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map(|cwd| cwd.join(path))
+            .unwrap_or_else(|_| path.to_path_buf())
+    }
+}
+
+/// Expand a leading `~/` via the CLI's home-dir rule.
+///
+/// `PathBuf` does not expand `~`, so an explicit `~` in `[hyper].data_dir` or
+/// `[hyper].storage_root` would otherwise create a literal `~` directory. This
+/// makes an explicit tilde behave like the resolved default data_dir.
+#[cfg(not(target_arch = "wasm32"))]
+fn expand_tilde_path(path: &Path) -> std::path::PathBuf {
+    actr_config::user_config::expand_tilde(path.to_string_lossy().into_owned())
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -640,9 +687,10 @@ impl HyperConfig {
     /// are authenticated (see [`crate::verify::StaticTrust`] /
     /// [`crate::verify::RegistryTrust`] / [`crate::verify::ChainTrust`]).
     pub fn new(data_dir: impl AsRef<Path>, trust_provider: Arc<dyn TrustProvider>) -> Self {
+        let data_dir = data_dir.as_ref().to_path_buf();
         Self {
-            data_dir: data_dir.as_ref().to_path_buf(),
-            storage_path_template: DEFAULT_STORAGE_TEMPLATE.to_string(),
+            storage_root: data_dir.join("storage"),
+            data_dir,
             trust_provider,
             credential_expiry_warning: DEFAULT_CREDENTIAL_EXPIRY_WARNING,
             mailbox_backpressure_threshold: None,
@@ -651,9 +699,22 @@ impl HyperConfig {
         }
     }
 
-    pub fn with_storage_template(mut self, template: impl Into<String>) -> Self {
-        self.storage_path_template = template.into();
+    /// Override the filesystem root for per-actor storage (default
+    /// `data_dir.join("storage")`). Relative paths are resolved against
+    /// `data_dir` at Hyper init, never against the process CWD.
+    pub fn with_storage_root(mut self, storage_root: impl AsRef<Path>) -> Self {
+        let root = storage_root.as_ref();
+        self.storage_root = if root.is_absolute() {
+            root.to_path_buf()
+        } else {
+            self.data_dir.join(root)
+        };
         self
+    }
+
+    /// The filesystem root under which per-actor storage is placed.
+    pub fn storage_root(&self) -> &Path {
+        &self.storage_root
     }
 
     pub fn with_trust_provider(mut self, trust_provider: Arc<dyn TrustProvider>) -> Self {
@@ -719,104 +780,6 @@ impl HyperConfig {
     /// safety-critical, not a tuning surface).
     pub fn resolved_wasm_limits(&self) -> WasmRuntimeLimits {
         self.wasm_limits.unwrap_or_default()
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-/// Namespace template resolver
-///
-/// Holds runtime-known variables and resolves path templates on demand.
-/// Templates are resolved once during Hyper initialization and remain fixed afterwards.
-pub(crate) struct NamespaceResolver {
-    vars: HashMap<String, String>,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl NamespaceResolver {
-    pub fn new(config: &HyperConfig, instance_id: &str) -> HyperResult<Self> {
-        let mut vars = HashMap::new();
-
-        vars.insert(
-            "data_dir".to_string(),
-            config
-                .data_dir
-                .to_str()
-                .ok_or_else(|| {
-                    HyperError::Config("data_dir path contains non-UTF-8 characters".to_string())
-                })?
-                .to_string(),
-        );
-        vars.insert("instance_id".to_string(), instance_id.to_string());
-
-        if let Ok(hostname) = std::env::var("HOSTNAME").or_else(|_| {
-            // fallback: read system hostname
-            std::fs::read_to_string("/etc/hostname")
-                .map(|s| s.trim().to_string())
-                .map_err(|_| std::env::VarError::NotPresent)
-        }) {
-            vars.insert("hostname".to_string(), hostname);
-        }
-
-        Ok(Self { vars })
-    }
-
-    /// Inject Actor type variables (extracted from the verified manifest)
-    pub fn with_actor_type(mut self, manufacturer: &str, actr_name: &str, version: &str) -> Self {
-        self.vars
-            .insert("manufacturer".to_string(), manufacturer.to_string());
-        self.vars
-            .insert("actr_name".to_string(), actr_name.to_string());
-        self.vars.insert("version".to_string(), version.to_string());
-        self.vars.insert(
-            "actr_type".to_string(),
-            format!("{manufacturer}/{actr_name}/{version}"),
-        );
-        self
-    }
-
-    /// Inject runtime realm_id
-    #[allow(dead_code)]
-    pub fn with_realm(mut self, realm_id: u64) -> Self {
-        self.vars
-            .insert("realm_id".to_string(), realm_id.to_string());
-        self
-    }
-
-    /// Resolve a template string, returning the final path
-    pub fn resolve(&self, template: &str) -> HyperResult<PathBuf> {
-        let mut result = template.to_string();
-
-        // Handle {env.VAR} variables
-        let env_prefix = "{env.";
-        let mut pos = 0;
-        while let Some(start) = result[pos..].find(env_prefix) {
-            let abs_start = pos + start;
-            if let Some(end) = result[abs_start..].find('}') {
-                let var_name = &result[abs_start + env_prefix.len()..abs_start + end];
-                let value = std::env::var(var_name)
-                    .map_err(|_| HyperError::TemplateVariable(format!("env.{var_name}")))?;
-                let placeholder = format!("{{env.{var_name}}}");
-                result = result.replacen(&placeholder, &value, 1);
-                // do not advance position, re-scan the replaced string
-            } else {
-                pos = abs_start + 1;
-            }
-        }
-
-        // Handle regular variables
-        for (key, value) in &self.vars {
-            result = result.replace(&format!("{{{key}}}"), value);
-        }
-
-        // Check for unresolved variables
-        if let Some(start) = result.find('{') {
-            if let Some(end) = result[start..].find('}') {
-                let var = &result[start + 1..start + end];
-                return Err(HyperError::TemplateVariable(var.to_string()));
-            }
-        }
-
-        Ok(PathBuf::from(result))
     }
 }
 

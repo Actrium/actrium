@@ -22,6 +22,16 @@ struct CacheEntry {
     fetched_at: Instant,
 }
 
+/// Structured cert cache key: `(manufacturer, signing_key_id)`.
+///
+/// A tuple avoids the `manufacturer:key_id` string-concatenation collision, where
+/// e.g. `("a", "b:c")` and `("a:b", "c")` would otherwise map to the same key.
+type CertCacheKey = (String, Option<String>);
+
+fn cert_cache_key(manufacturer: &str, key_id: Option<&str>) -> CertCacheKey {
+    (manufacturer.to_string(), key_id.map(str::to_string))
+}
+
 /// Production mode MFR Ed25519 public key cache
 ///
 /// Fetches manufacturer public keys on demand from the AIS endpoint, cache TTL defaults to 1 hour.
@@ -30,7 +40,7 @@ pub struct MfrCertCache {
     ais_endpoint: String,
     http: reqwest::Client,
     ttl: Duration,
-    cache: RwLock<HashMap<String, CacheEntry>>,
+    cache: RwLock<HashMap<CertCacheKey, CacheEntry>>,
 }
 
 impl std::fmt::Debug for MfrCertCache {
@@ -55,10 +65,7 @@ impl MfrCertCache {
     /// Used in `RegistryTrust::verify_package` synchronous path;
     /// caller must ensure the cache has been warmed via `get_or_fetch` beforehand.
     pub fn get_from_cache(&self, manufacturer: &str, key_id: Option<&str>) -> Option<VerifyingKey> {
-        let cache_key = match key_id {
-            Some(id) => format!("{}:{}", manufacturer, id),
-            None => manufacturer.to_string(),
-        };
+        let cache_key = cert_cache_key(manufacturer, key_id);
         let cache = self.cache.read().expect("cert_cache read lock poisoned");
         cache.get(&cache_key).and_then(|entry| {
             if entry.fetched_at.elapsed() < self.ttl {
@@ -93,10 +100,7 @@ impl MfrCertCache {
         let key = self.fetch_from_ais(manufacturer, key_id).await?;
 
         // write to cache (brief blocking lock, just a HashMap insert)
-        let cache_key = match key_id {
-            Some(id) => format!("{}:{}", manufacturer, id),
-            None => manufacturer.to_string(),
-        };
+        let cache_key = cert_cache_key(manufacturer, key_id);
         {
             let mut cache = self.cache.write().expect("cert_cache write lock poisoned");
             cache.insert(
@@ -122,17 +126,21 @@ impl MfrCertCache {
         manufacturer: &str,
         key_id: Option<&str>,
     ) -> HyperResult<VerifyingKey> {
-        let url = if let Some(id) = key_id {
-            format!(
-                "{}/mfr/{}/verifying_key?key_id={}",
-                self.ais_endpoint, manufacturer, id
-            )
-        } else {
-            format!("{}/mfr/{}/verifying_key", self.ais_endpoint, manufacturer)
-        };
-        tracing::debug!(url, "fetching MFR pubkey from AIS");
+        // Build the URL with the url crate (not `format!`) so the manufacturer
+        // and key_id are percent-encoded as path segments / query pairs and can
+        // never inject extra path or query structure into the AIS request.
+        let mut url = reqwest::Url::parse(&self.ais_endpoint).map_err(|e| {
+            HyperError::Config(format!("invalid AIS endpoint `{}`: {e}", self.ais_endpoint))
+        })?;
+        url.path_segments_mut()
+            .map_err(|_| HyperError::Config("AIS endpoint cannot be a base URL".to_string()))?
+            .extend(["mfr", manufacturer, "verifying_key"]);
+        if let Some(id) = key_id {
+            url.query_pairs_mut().append_pair("key_id", id);
+        }
+        tracing::debug!(url = %url, "fetching MFR pubkey from AIS");
 
-        let resp = self.http.get(&url).send().await.map_err(|e| {
+        let resp = self.http.get(url).send().await.map_err(|e| {
             HyperError::UntrustedManufacturer(format!(
                 "failed to fetch MFR pubkey ({manufacturer}): {e}"
             ))

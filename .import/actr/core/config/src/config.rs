@@ -116,6 +116,14 @@ pub struct RuntimeConfig {
 
     /// Web server configuration for `actr run --web`
     pub web: Option<WebConfig>,
+
+    /// Filesystem root for per-actor storage, from the `[hyper]` section.
+    ///
+    /// Resolved to an absolute path against the config file's directory (with a
+    /// leading `~` expanded) by the parser. `None` means the host uses its
+    /// default (`<data_dir>/storage`). Actor storage uses a fixed hashed layout
+    /// under this root (CWE-22 / CWE-73).
+    pub storage_root: Option<PathBuf>,
 }
 
 /// Trust anchor config — a single `[[trust]]` table in `actr.toml`.
@@ -617,6 +625,7 @@ mod tests {
             trust: vec![],
             package_path: None,
             web: None,
+            storage_root: None,
         };
 
         assert_eq!(config.actr_type().name, "test-service");

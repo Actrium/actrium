@@ -105,13 +105,25 @@ fn default_package_file_name(config_path: &Path, target: &str) -> Result<String>
             config_path.display()
         )
     })?;
-    Ok(format!(
+    let file_name = format!(
         "{}-{}-{}-{}.actr",
         config.package.actr_type.manufacturer,
         config.package.actr_type.name,
         config.package.actr_type.version,
         target
-    ))
+    );
+    // Defense-in-depth: `parse_package` now validates the identity (including
+    // `version`), but require the generated filename to be exactly one normal
+    // path component so it can never escape `dist/` regardless of how it was
+    // produced (CWE-22 / CWE-73).
+    let mut components = Path::new(&file_name).components();
+    match (components.next(), components.next()) {
+        (Some(std::path::Component::Normal(_)), None) => Ok(file_name),
+        _ => anyhow::bail!(
+            "generated package filename `{}` is not a single path component",
+            file_name
+        ),
+    }
 }
 
 pub fn build_package(input: PackageBuildInput) -> Result<PackageBuildSummary> {
@@ -234,4 +246,52 @@ pub fn print_build_summary(summary: &PackageBuildSummary) {
     println!();
     println!("Public key (for verification):");
     println!("  {}", summary.public_key);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn write_manifest(dir: &TempDir, version: &str) -> PathBuf {
+        let path = dir.path().join("manifest.toml");
+        fs::write(
+            &path,
+            format!(
+                "edition = 1\n\n[package]\nname = \"Echo\"\nmanufacturer = \"acme\"\nversion = \"{version}\"\n"
+            ),
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn default_package_file_name_rejects_traversal_version() {
+        let dir = TempDir::new().unwrap();
+        // `../../../outside` would escape `dist/` if interpolated unchecked; it is
+        // now rejected at manifest parsing before any filename is produced.
+        let path = write_manifest(&dir, "../../../outside");
+        let err = default_package_file_name(&path, "wasm32-wasip2").unwrap_err();
+        let chain = format!("{:#}", err);
+        assert!(
+            chain.contains("version") || chain.contains("Invalid"),
+            "expected a version-validation error, got: {chain}"
+        );
+    }
+
+    #[test]
+    fn default_package_file_name_is_single_normal_component() {
+        let dir = TempDir::new().unwrap();
+        let path = write_manifest(&dir, "1.0.0");
+        let name = default_package_file_name(&path, "wasm32-wasip2").unwrap();
+        assert_eq!(name, "acme-Echo-1.0.0-wasm32-wasip2.actr");
+        // The generated filename is always exactly one normal path component.
+        let mut components = Path::new(&name).components();
+        assert!(matches!(
+            components.next(),
+            Some(std::path::Component::Normal(_))
+        ));
+        assert!(components.next().is_none());
+    }
 }

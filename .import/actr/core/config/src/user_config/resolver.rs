@@ -173,7 +173,9 @@ fn apply_defaults(cfg: CliConfig) -> EffectiveCliConfig {
     }
 }
 
-fn expand_tilde(path: String) -> PathBuf {
+/// Expand a leading `~/` to the user's home directory. Paths without a `~/`
+/// prefix are returned unchanged.
+pub fn expand_tilde(path: String) -> PathBuf {
     if let Some(stripped) = path.strip_prefix("~/") {
         if let Some(home) = dirs::home_dir() {
             return home.join(stripped);

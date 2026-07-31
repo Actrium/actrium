@@ -155,6 +155,7 @@ fn runtime_config(
         trust: vec![],
         package_path: None,
         web: None,
+        storage_root: None,
     }
 }
 

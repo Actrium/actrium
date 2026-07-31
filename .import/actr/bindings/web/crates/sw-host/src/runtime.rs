@@ -48,8 +48,9 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::{BinaryType, CloseEvent, MessageEvent, MessagePort, WebSocket};
 
-use actr_platform_traits::PlatformProvider;
+use actr_platform_traits::{PlatformProvider, StorageNamespace};
 use actr_platform_web::WebPlatformProvider;
+use sha2::{Digest, Sha256};
 
 use crate::context::RuntimeContext;
 use crate::inbound::{InboundPacketDispatcher, MailboxProcessor, Scheduler};
@@ -694,7 +695,7 @@ impl SwRuntime {
         realm_id: u32,
         acl: &Option<Acl>,
         platform: &WebPlatformProvider,
-        cred_kv_ns: &str,
+        cred_kv_ns: &StorageNamespace,
     ) -> Result<(ActrId, AIdCredential, Option<actr_protocol::TurnCredential>), JsValue> {
         // Try to restore persisted credential if still valid
         if let Some((actor_id, credential)) =
@@ -824,7 +825,7 @@ impl SwRuntime {
     /// Persist credential and actor_id to IndexedDB (static version).
     async fn persist_credentials_static(
         platform: &WebPlatformProvider,
-        cred_kv_ns: &str,
+        cred_kv_ns: &StorageNamespace,
         actor_id: &ActrId,
         credential: &AIdCredential,
     ) -> Result<(), JsValue> {
@@ -850,7 +851,7 @@ impl SwRuntime {
     /// Persist TurnCredential to IndexedDB (static version).
     async fn persist_turn_credential_static(
         platform: &WebPlatformProvider,
-        cred_kv_ns: &str,
+        cred_kv_ns: &StorageNamespace,
         turn_credential: &actr_protocol::TurnCredential,
     ) -> Result<(), JsValue> {
         let kv = platform
@@ -869,7 +870,7 @@ impl SwRuntime {
 
     async fn persist_renewal_token_static(
         platform: &WebPlatformProvider,
-        cred_kv_ns: &str,
+        cred_kv_ns: &StorageNamespace,
         renewal_token: &[u8],
         expires_at: u64,
     ) -> Result<(), JsValue> {
@@ -892,7 +893,7 @@ impl SwRuntime {
 
     async fn clear_persisted_identity_static(
         platform: &WebPlatformProvider,
-        cred_kv_ns: &str,
+        cred_kv_ns: &StorageNamespace,
     ) -> Result<(), JsValue> {
         let kv = platform
             .secret_store(cred_kv_ns)
@@ -915,7 +916,7 @@ impl SwRuntime {
     async fn try_renew_persisted_credential_static(
         ais: &WebAisClient,
         platform: &WebPlatformProvider,
-        cred_kv_ns: &str,
+        cred_kv_ns: &StorageNamespace,
     ) -> Result<Option<(ActrId, AIdCredential, Option<actr_protocol::TurnCredential>)>, JsValue>
     {
         let kv = platform
@@ -1021,7 +1022,7 @@ impl SwRuntime {
     /// Try to restore a valid TurnCredential from IndexedDB (static version).
     async fn try_restore_turn_credential_static(
         platform: &WebPlatformProvider,
-        cred_kv_ns: &str,
+        cred_kv_ns: &StorageNamespace,
     ) -> Result<Option<actr_protocol::TurnCredential>, JsValue> {
         let kv = platform
             .secret_store(cred_kv_ns)
@@ -1092,7 +1093,7 @@ impl SwRuntime {
     /// Try to restore valid credentials from IndexedDB (static version).
     async fn try_restore_credential_static(
         platform: &WebPlatformProvider,
-        cred_kv_ns: &str,
+        cred_kv_ns: &StorageNamespace,
     ) -> Result<Option<(ActrId, AIdCredential)>, JsValue> {
         let kv = platform
             .secret_store(cred_kv_ns)
@@ -1151,20 +1152,36 @@ impl SwRuntime {
     /// mock-actrix registry rebind would steal the relay binding from the
     /// original client. Partitioning by `client_id` guarantees every client
     /// page performs its own AIS registration and persists its own credential.
-    fn cred_kv_namespace(&self) -> String {
+    fn cred_kv_namespace(&self) -> StorageNamespace {
         Self::build_cred_kv_namespace(&self.client_actr_type, &self.client_id)
     }
 
     /// Build a credential KV namespace for a given `(actr_type, client_id)` pair.
     ///
     /// Exposed as a static helper so that `SwRuntime::new()` can build the
-    /// namespace before `self` exists without duplicating the format string.
-    fn build_cred_kv_namespace(client_actr_type: &ActrType, client_id: &str) -> String {
-        format!(
-            "actr_credentials_{}_{}",
-            client_actr_type.to_string_repr(),
-            client_id
-        )
+    /// namespace before `self` exists without duplicating the encoding.
+    ///
+    /// The identity fields and `client_id` are hashed into the opaque namespace
+    /// using a domain-separated, tagged, length-prefixed encoding, so distinct
+    /// field splits never collide — e.g. `("acme:Echo:1_a", "b")` vs
+    /// `("acme:Echo:1", "a_b")` would map to the same string under a
+    /// delimiter-joined encoding. Per-tab partitioning is preserved while the raw
+    /// identity stays out of any storage-location string.
+    fn build_cred_kv_namespace(client_actr_type: &ActrType, client_id: &str) -> StorageNamespace {
+        const DOMAIN: &[u8] = b"actr-web-cred-namespace\0v1";
+        fn field(h: &mut Sha256, tag: u8, bytes: &[u8]) {
+            h.update([tag]);
+            h.update((bytes.len() as u32).to_be_bytes());
+            h.update(bytes);
+        }
+        let mut h = Sha256::new();
+        h.update(DOMAIN);
+        field(&mut h, 1, client_actr_type.manufacturer.as_bytes());
+        field(&mut h, 2, client_actr_type.name.as_bytes());
+        field(&mut h, 3, client_actr_type.version.as_bytes());
+        field(&mut h, 4, client_id.as_bytes());
+        let digest: [u8; 32] = h.finalize().into();
+        StorageNamespace::actr_v1(digest)
     }
 
     /// Reconnect the signaling WebSocket after detecting a dead connection.
@@ -3962,4 +3979,36 @@ fn bytes_to_base64(data: &[u8]) -> String {
 /// URL-encode a string using JS `encodeURIComponent`.
 fn js_encode_uri_component(s: &str) -> String {
     js_sys::encode_uri_component(s).into()
+}
+
+#[cfg(test)]
+mod cred_ns_tests {
+    use super::*;
+
+    fn ty(m: &str, n: &str, v: &str) -> ActrType {
+        ActrType {
+            manufacturer: m.to_string(),
+            name: n.to_string(),
+            version: v.to_string(),
+        }
+    }
+
+    #[test]
+    fn cred_kv_namespace_avoids_delimiter_ambiguity() {
+        // ("acme:Echo:1_a", "b") vs ("acme:Echo:1", "a_b") produce the SAME string
+        // under a delimiter-joined encoding; the length-prefixed encoding must
+        // keep them distinct.
+        let a = SwRuntime::build_cred_kv_namespace(&ty("acme", "Echo", "1_a"), "b");
+        let b = SwRuntime::build_cred_kv_namespace(&ty("acme", "Echo", "1"), "a_b");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn cred_kv_namespace_partitions_by_client_id_and_is_deterministic() {
+        let a = SwRuntime::build_cred_kv_namespace(&ty("acme", "Echo", "1.0.0"), "tab1");
+        let b = SwRuntime::build_cred_kv_namespace(&ty("acme", "Echo", "1.0.0"), "tab2");
+        assert_ne!(a, b);
+        let a2 = SwRuntime::build_cred_kv_namespace(&ty("acme", "Echo", "1.0.0"), "tab1");
+        assert_eq!(a, a2);
+    }
 }

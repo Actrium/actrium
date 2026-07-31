@@ -133,6 +133,7 @@ fn runtime_config_with_type(
         trust: vec![],
         package_path: None,
         web: None,
+        storage_root: None,
     }
 }
 
