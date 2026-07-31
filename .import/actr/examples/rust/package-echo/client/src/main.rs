@@ -216,7 +216,7 @@ async fn main() -> Result<()> {
         match actr_ref
             .call(EchoRequest {
                 message: line.clone(),
-            })
+            }, 30_000)
             .await
         {
             Ok(response) => {

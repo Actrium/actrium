@@ -108,27 +108,33 @@ impl ActrRef {
 
     /// Call the local workload with a typed RPC request.
     ///
-    /// Convenience wrapper around `app_context().call(&Dest::Workload, request)`.
+    /// Convenience wrapper around `app_context().call(&Dest::Workload, request, timeout_ms)`.
     /// Use this from app-side code to invoke the local guest workload.
-    pub async fn call<R: RpcRequest>(&self, request: R) -> ActorResult<R::Response> {
+    pub async fn call<R: RpcRequest>(
+        &self,
+        request: R,
+        timeout_ms: i64,
+    ) -> ActorResult<R::Response> {
         self.app_context()
             .await
-            .call(&Dest::Workload, request)
+            .call(&Dest::Workload, request, timeout_ms)
             .await
     }
 
     /// Call a remote actor directly with a typed RPC request.
     ///
-    /// Convenience wrapper around `app_context().call(&Dest::Peer(target), request)`.
+    /// Convenience wrapper around
+    /// `app_context().call(&Dest::Peer(target), request, timeout_ms)`.
     /// Use this when the client has no local guest workload and calls the remote actor directly.
     pub async fn call_remote<R: RpcRequest>(
         &self,
         target: ActrId,
         request: R,
+        timeout_ms: i64,
     ) -> ActorResult<R::Response> {
         self.app_context()
             .await
-            .call(&Dest::Peer(target), request)
+            .call(&Dest::Peer(target), request, timeout_ms)
             .await
     }
 

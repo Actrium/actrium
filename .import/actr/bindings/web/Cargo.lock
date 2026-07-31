@@ -184,6 +184,7 @@ dependencies = [
  "wasm-bindgen-test",
  "wasm-logger",
  "web-sys",
+ "web-time",
 ]
 
 [[package]]

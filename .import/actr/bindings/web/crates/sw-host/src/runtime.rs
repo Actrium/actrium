@@ -2933,6 +2933,14 @@ impl RuntimeBridge for SwRuntimeBridge {
         }
     }
 
+    fn unregister_pending_rpc(&self, request_id: &str) {
+        if let Some(mut rt) = self.runtime.try_lock() {
+            rt.pending_rpcs.remove(request_id);
+        } else {
+            log::error!("[SwRuntimeBridge] Failed to lock runtime for pending RPC cleanup");
+        }
+    }
+
     async fn discover_target(&self, target_type: &ActrType) -> actr_protocol::ActorResult<ActrId> {
         let mut rt = self.runtime.lock().await;
         rt.discover_target_for_type(target_type)

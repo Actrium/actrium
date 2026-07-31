@@ -412,6 +412,8 @@ pub struct HostCallV1 {
     pub dest: DestV1,
     #[prost(bytes = "vec", tag = "3")]
     pub payload: Vec<u8>,
+    #[prost(int64, tag = "4")]
+    pub timeout_ms: i64,
 }
 
 /// Runtime guest->host tell payload.
@@ -434,6 +436,8 @@ pub struct HostCallRawV1 {
     pub target: ActrId,
     #[prost(bytes = "vec", tag = "3")]
     pub payload: Vec<u8>,
+    #[prost(int64, tag = "4")]
+    pub timeout_ms: i64,
 }
 
 /// Runtime guest->host discovery payload.

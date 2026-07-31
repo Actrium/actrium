@@ -93,7 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let request = RelayFrameRequest { frame: Some(frame) };
 
             // Call local workload via ActrRef, which forwards to remote actr-b
-            match actr_ref.call(request).await {
+            match actr_ref.call(request, 30_000).await {
                 Ok(response) => {
                     info!(
                         "   ✅ [...] #{} alreadysend，service[...]: success={}, received_at={}",

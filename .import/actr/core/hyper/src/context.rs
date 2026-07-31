@@ -531,52 +531,25 @@ impl Context for RuntimeContext {
             fields(actr_id = %self.self_id)
         )
     )]
-    async fn call<R: RpcRequest>(&self, target: &Dest, request: R) -> ActorResult<R::Response> {
-        // Typed call construction reuses call_raw's RPC-payload-type contract.
-        // The deadline is the fixed DEFAULT_CALL_TIMEOUT_MS (always > 0), so it
-        // needs no sender-side timeout validation here; the gate path validates
-        // caller-supplied timeouts (call_raw) instead.
-        const DEFAULT_CALL_TIMEOUT_MS: i64 = 30_000;
-        crate::outbound::ensure_rpc_payload_type(R::payload_type())?;
-
-        self.ensure_session_ready().await?;
-
+    async fn call<R: RpcRequest>(
+        &self,
+        target: &Dest,
+        request: R,
+        timeout_ms: i64,
+    ) -> ActorResult<R::Response> {
         use actr_protocol::prost::Message as ProstMessage;
 
-        // 1. Encode the request as protobuf bytes.
         let payload: Bytes = request.encode_to_vec().into();
+        let response_bytes = RuntimeContext::call_raw(
+            self,
+            target,
+            R::route_key().to_string(),
+            R::payload_type(),
+            payload,
+            timeout_ms,
+        )
+        .await?;
 
-        // 2. Get the compile-time route key from the RpcRequest trait.
-        let route_key = R::route_key().to_string();
-
-        // 3. Build the RpcEnvelope with W3C tracing fields.
-        #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
-        let mut envelope = RpcEnvelope {
-            route_key,
-            payload: Some(payload),
-            error: None,
-            direction: Some(Direction::Request as i32),
-            traceparent: None,
-            tracestate: None,
-            request_id: uuid::Uuid::new_v4().to_string(), // Generate a new request_id.
-            metadata: vec![],
-            timeout_ms: DEFAULT_CALL_TIMEOUT_MS, // Default to a 30-second timeout.
-        };
-        // Inject tracing context from current span
-        #[cfg(feature = "opentelemetry")]
-        inject_span_context_to_rpc(&tracing::Span::current(), &mut envelope);
-
-        // 4. Select a gate from Dest and extract the target ActrId.
-        let gate = self.select_gate(target)?;
-        let target_id = self.extract_target_id(target);
-
-        // 5. Send via Gate enum dispatch without virtual calls.
-        // Respect request's declared payload type (lane selection)
-        let response_bytes = gate
-            .send_request_with_type(target_id, R::payload_type(), envelope)
-            .await?;
-
-        // 6. Decode the typed response.
         R::Response::decode(&*response_bytes).map_err(|e| {
             ActrError::DecodeFailure(format!(
                 "Failed to decode {}: {}",
@@ -799,18 +772,15 @@ impl Context for RuntimeContext {
         target: &ActrId,
         route_key: &str,
         payload: Bytes,
+        timeout_ms: i64,
     ) -> ActorResult<Bytes> {
-        // Guest-facing trait entry: remote raw RPC with reliable lane and a
-        // 30 s default timeout. Delegate to the inherent `call_raw` so both
-        // entry points share one RpcEnvelope construction / gate-selection
-        // path and stay in sync.
         RuntimeContext::call_raw(
             self,
             &Dest::Peer(target.clone()),
             route_key.to_string(),
             PayloadType::RpcReliable,
             payload,
-            30_000,
+            timeout_ms,
         )
         .await
     }

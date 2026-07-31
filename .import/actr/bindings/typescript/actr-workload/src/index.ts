@@ -7,7 +7,7 @@ import {
   sendDataChunk as hostSendDataChunk,
   tell as hostTell,
   unregisterStream as hostUnregisterStream,
-} from 'actr:workload/host@0.2.0';
+} from 'actr:workload/host@0.3.0';
 
 export type PayloadBytes = Uint8Array | ArrayBuffer | ArrayLike<number>;
 
@@ -300,6 +300,7 @@ export async function call(
   target: Dest,
   routeKey: string,
   payload: PayloadBytes,
+  timeoutMs: bigint | number,
   ctx?: InvocationCtx,
 ): Promise<Uint8Array> {
   return hostCall(
@@ -307,6 +308,7 @@ export async function call(
     toWitDest(target),
     routeKey,
     toUint8Array(payload),
+    BigInt(timeoutMs),
   );
 }
 
@@ -328,6 +330,7 @@ export async function callRaw(
   target: ActrId,
   routeKey: string,
   payload: PayloadBytes,
+  timeoutMs: bigint | number,
   ctx?: InvocationCtx,
 ): Promise<Uint8Array> {
   return hostCallRaw(
@@ -335,6 +338,7 @@ export async function callRaw(
     toWitActrId(target),
     routeKey,
     toUint8Array(payload),
+    BigInt(timeoutMs),
   );
 }
 

@@ -21,7 +21,7 @@
 //! // Clone and use it across tasks
 //! let actr1 = actr.clone();
 //! wasm_bindgen_futures::spawn_local(async move {
-//!     actr1.call(SomeRequest { ... }).await?;
+//!     actr1.call(SomeRequest { ... }, 30_000).await?;
 //! });
 //!
 //! // Shut down
@@ -61,7 +61,7 @@ use actr_framework::Workload;
 /// ```rust,ignore
 /// impl ActrRef<EchoServiceWorkload> {
 ///     pub async fn echo(&self, request: EchoRequest) -> ActorResult<EchoResponse> {
-///         self.call(request).await
+///         self.call(request, 30_000).await
 ///     }
 /// }
 /// ```
@@ -123,14 +123,14 @@ impl<W: Workload> ActrRef<W> {
     /// // Generic call
     /// let response: EchoResponse = actr.call(EchoRequest {
     ///     message: "Hello".to_string(),
-    /// }).await?;
+    /// }, 30_000).await?;
     ///
     /// // Generated method (recommended)
     /// let response = actr.echo(EchoRequest {
     ///     message: "Hello".to_string(),
     /// }).await?;
     /// ```
-    pub async fn call<R>(&self, request: R) -> ActorResult<R::Response>
+    pub async fn call<R>(&self, request: R, timeout_ms: i64) -> ActorResult<R::Response>
     where
         R: actr_protocol::RpcRequest + ProstMessage,
     {
@@ -147,7 +147,7 @@ impl<W: Workload> ActrRef<W> {
             tracestate: None,
             request_id: format!("req-{}", js_sys::Math::random()),
             metadata: vec![],
-            timeout_ms: 30000,
+            timeout_ms,
         };
 
         // Inject trace context to RPC envelope

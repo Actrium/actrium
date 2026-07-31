@@ -41,7 +41,7 @@ async fn main() -> anyhow::Result<()> {
     let response = actr_ref
         .call(SendFileRequest {
             filename: "test-file.txt".to_string(),
-        })
+        }, 30_000)
         .await?;
     info!("✅ Response: {:?}", response);
 

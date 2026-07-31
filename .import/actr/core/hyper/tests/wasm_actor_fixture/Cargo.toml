@@ -22,6 +22,7 @@ actr-framework = { path = "../../../../core/framework" }
 actr-protocol = { path = "../../../../core/protocol" }
 async-trait = "0.1"
 bytes = "1.10"
+prost = "0.14"
 
 # actr-framework's `entry!` macro references `#[cfg(feature = "cdylib")]`
 # to select the native shared-library ABI. That feature lives on the

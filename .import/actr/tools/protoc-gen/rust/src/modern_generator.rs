@@ -182,7 +182,7 @@ use actr_protocol::{{ActrId, ActorResult, RpcRequest, RpcEnvelope, PayloadType}}
     /// type-safe API calls on the calling side:
     ///
     /// ```rust,ignore
-    /// let response: EchoResponse = ctx.call(&target, request).await?;
+    /// let response: EchoResponse = ctx.call(&target, request, 30_000).await?;
     /// //              ^^^^^^^^^^^^ inferred from EchoRequest::Response
     /// ```
     fn generate_message_impls(&self, methods: &[MethodDescriptorProto]) -> Result<String> {
@@ -212,7 +212,7 @@ use actr_protocol::{{ActrId, ActorResult, RpcRequest, RpcEnvelope, PayloadType}}
 ///
 /// This enables type-safe RPC calls with automatic response type inference:
 /// ```rust,ignore
-/// let response: {output_type_path} = ctx.call(&target, request).await?;
+/// let response: {output_type_path} = ctx.call(&target, request, 30_000).await?;
 /// ```
 impl RpcRequest for {input_type_path} {{
     type Response = {output_type_path};
@@ -395,6 +395,7 @@ impl RpcRequest for {input_type_path} {{
                         &target_id,
                         envelope.route_key.as_str(),
                         envelope.payload.clone().unwrap_or_default(),
+                        envelope.timeout_ms,
                     ).await
                 }
             });
@@ -524,8 +525,9 @@ impl RpcRequest for {input_type_path} {{
                     &self,
                     target: ActrId,
                     req: #input_type,
+                    timeout_ms: i64,
                 ) -> ActorResult<#output_type> {
-                    self.ctx.call(&Dest::from(target), req).await
+                    self.ctx.call(&Dest::from(target), req, timeout_ms).await
                 }
             });
         }
@@ -643,7 +645,7 @@ async fn call_remote_service(ctx: &impl Context, target: ActrId) -> ActorResult<
 
     // Type-safe remote call
     let response = ctx.{service_name_snake}()
-        .{method_name_snake}(target, request)
+        .{method_name_snake}(target, request, 30_000)
         .await?;
 
     Ok(())
@@ -826,6 +828,8 @@ mod tests {
         // Client code should also contain RpcRequest impl
         assert!(code.contains("impl RpcRequest for super::test_v1::EchoRequest"));
         assert!(code.contains("fn payload_type() -> PayloadType"));
+        assert!(code.contains("timeout_ms : i64"));
+        assert!(code.contains("self . ctx . call (& Dest :: from (target) , req , timeout_ms)"));
         assert!(code.contains("use actr_framework::{Context, Dest, MessageDispatcher, Workload}"));
         assert!(code.contains(
             "use actr_protocol::{ActrId, ActorResult, RpcRequest, RpcEnvelope, PayloadType}"
@@ -906,6 +910,7 @@ mod tests {
         assert!(code.contains("\"EchoService\""));
         assert!(code.contains("discover_route_candidate"));
         assert!(code.contains("call_raw"));
+        assert!(code.contains("envelope . timeout_ms"));
     }
 
     #[test]

@@ -20,7 +20,7 @@
 //!
 //! # Per-dispatch `WasmContext`
 //!
-//! Under the 0.2.0 async world each adapter method constructs a fresh
+//! Under the 0.3.0 async world each adapter method constructs a fresh
 //! [`super::WasmContext`] from the explicit `invocation-ctx` the host
 //! threads into every export ([`WasmContext::from_invocation`][fi]). The
 //! 0.1.0 getter imports (`get-self-id` / `get-caller-id` / `get-request-id`)

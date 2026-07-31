@@ -179,11 +179,13 @@ impl Context for DynclibContext {
         &self,
         target: &Dest,
         request: R,
+        timeout_ms: i64,
     ) -> ActorResult<R::Response> {
         let payload = HostCallV1 {
             route_key: R::route_key().to_string(),
             dest: dest_to_v1(target),
             payload: request.encode_to_vec(),
+            timeout_ms,
         };
         let frame = payload.to_frame().map_err(abi_error_to_actr)?;
         let reply = self.invoke_frame(frame)?;
@@ -289,11 +291,13 @@ impl Context for DynclibContext {
         target: &ActrId,
         route_key: &str,
         payload: Bytes,
+        timeout_ms: i64,
     ) -> ActorResult<Bytes> {
         let request = HostCallRawV1 {
             route_key: route_key.to_string(),
             target: target.clone(),
             payload: payload.to_vec(),
+            timeout_ms,
         };
         let frame = request.to_frame().map_err(abi_error_to_actr)?;
         let reply = self.invoke_frame(frame)?;

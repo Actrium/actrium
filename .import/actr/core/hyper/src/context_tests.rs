@@ -14,6 +14,26 @@ fn actr_type(mfr: &str, name: &str, ver: &str) -> ActrType {
     }
 }
 
+#[derive(Clone, PartialEq, prost::Message)]
+struct TimeoutRequest {
+    #[prost(bytes = "vec", tag = "1")]
+    payload: Vec<u8>,
+}
+
+#[derive(Clone, PartialEq, prost::Message)]
+struct TimeoutResponse {
+    #[prost(bytes = "vec", tag = "1")]
+    payload: Vec<u8>,
+}
+
+impl RpcRequest for TimeoutRequest {
+    type Response = TimeoutResponse;
+
+    fn route_key() -> &'static str {
+        "test.Timeout.Call"
+    }
+}
+
 // ── select_gate ─────────────────────────────────────────────────────────
 
 #[tokio::test]
@@ -305,6 +325,36 @@ async fn get_dependency_fingerprint_missing_dependency() {
 }
 
 // ── sender-side call/tell argument validation (#254 / #256) ──────────────
+
+#[tokio::test]
+async fn typed_call_rejects_non_positive_timeout() {
+    let c = ctx();
+
+    for timeout_ms in [0, -1] {
+        let err = c
+            .call(&Dest::Workload, TimeoutRequest::default(), timeout_ms)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, ActrError::InvalidArgument(_)),
+            "typed call must reject timeout_ms={timeout_ms}, got {err:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn typed_call_honors_caller_timeout() {
+    let c = ctx();
+    let err = c
+        .call(&Dest::Workload, TimeoutRequest::default(), 5)
+        .await
+        .unwrap_err();
+
+    assert!(
+        matches!(err, ActrError::TimedOut),
+        "typed call must propagate its timeout to the transport, got {err:?}"
+    );
+}
 
 #[tokio::test]
 async fn call_raw_rejects_zero_timeout() {

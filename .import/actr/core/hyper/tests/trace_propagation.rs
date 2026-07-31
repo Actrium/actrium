@@ -112,6 +112,7 @@ impl Context for MockCtx {
         &self,
         _target: &actr_framework::Dest,
         _req: R,
+        _timeout_ms: i64,
     ) -> ActorResult<R::Response> {
         Err(ActrError::NotImplemented("mock".to_string()))
     }
@@ -158,6 +159,7 @@ impl Context for MockCtx {
         _target: &ActrId,
         _route_key: &str,
         _payload: bytes::Bytes,
+        _timeout_ms: i64,
     ) -> ActorResult<bytes::Bytes> {
         Err(ActrError::NotImplemented("mock".to_string()))
     }

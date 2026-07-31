@@ -12,9 +12,12 @@
 //! - route `test/spin`: runs non-yielding guest compute forever. The host must
 //!   stop it through fuel or epoch interruption and rebuild the poisoned Store.
 //! - route `test/double`: decodes the payload as a 4-byte little-endian
-//!   i32 value `x`, calls `ctx.call_raw(self_id, "test/double_impl", payload)`,
+//!   i32 value `x`, calls
+//!   `ctx.call_raw(self_id, "test/double_impl", payload, 30_000)`,
 //!   and returns whatever the host responds with. Used by the async
 //!   round-trip / tick-probe / dispatch tests.
+//! - route `test/typed-double`: calls `ctx.call()` with an explicit 1234 ms
+//!   timeout and returns the decoded typed response.
 //! - route `test/boom-after-await`: same control flow as `test/double` up
 //!   to the `ctx.call_raw` await, then panics. Used to verify that a
 //!   guest panic after a real suspension surfaces as a wasmtime trap
@@ -23,12 +26,32 @@
 //! All other routes surface `ActrError::UnknownRoute(route_key)`,
 //! exercising guest→host structured error propagation.
 
-use actr_framework::{Context, MessageDispatcher, Workload, entry};
-use actr_protocol::{ActorResult, ActrError, RpcEnvelope};
+use actr_framework::{Context, Dest, MessageDispatcher, Workload, entry};
+use actr_protocol::{ActorResult, ActrError, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::UNIX_EPOCH;
+
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct TypedDoubleRequest {
+    #[prost(int32, tag = "1")]
+    value: i32,
+}
+
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct TypedDoubleResponse {
+    #[prost(int32, tag = "1")]
+    value: i32,
+}
+
+impl RpcRequest for TypedDoubleRequest {
+    type Response = TypedDoubleResponse;
+
+    fn route_key() -> &'static str {
+        "test/typed_double_impl"
+    }
+}
 
 async fn record_hook<C: Context>(ctx: &C, name: &'static str) {
     record_hook_value(ctx, name.to_string()).await;
@@ -36,7 +59,12 @@ async fn record_hook<C: Context>(ctx: &C, name: &'static str) {
 
 async fn record_hook_value<C: Context>(ctx: &C, value: String) {
     let _ = ctx
-        .call_raw(ctx.self_id(), "test/record_hook", Bytes::from(value))
+        .call_raw(
+            ctx.self_id(),
+            "test/record_hook",
+            Bytes::from(value),
+            30_000,
+        )
         .await;
 }
 
@@ -145,10 +173,26 @@ impl MessageDispatcher for DoubleDispatcher {
                         &target,
                         "test/double_impl",
                         Bytes::from(x.to_le_bytes().to_vec()),
+                        30_000,
                     )
                     .await?;
 
                 Ok(resp)
+            }
+            "test/typed-double" => {
+                let payload = envelope.payload.unwrap_or_default();
+                if payload.len() < 4 {
+                    return Err(ActrError::InvalidArgument("payload too short".into()));
+                }
+                let value = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+                let response = ctx
+                    .call(
+                        &Dest::Peer(ctx.self_id().clone()),
+                        TypedDoubleRequest { value },
+                        1_234,
+                    )
+                    .await?;
+                Ok(Bytes::from(response.value.to_le_bytes().to_vec()))
             }
             "test/inflight-probe" => {
                 // M5 same-instance interleave probe. Bump the shared in-flight
@@ -161,7 +205,7 @@ impl MessageDispatcher for DoubleDispatcher {
                 workload.max_seen.fetch_max(cur, Ordering::SeqCst);
                 let target = ctx.self_id().clone();
                 let payload = envelope.payload.unwrap_or_default();
-                let gate = ctx.call_raw(&target, "test/gate", payload).await;
+                let gate = ctx.call_raw(&target, "test/gate", payload, 30_000).await;
                 workload.in_flight.fetch_sub(1, Ordering::SeqCst);
                 gate?;
                 let peak = workload.max_seen.load(Ordering::SeqCst);
@@ -183,6 +227,7 @@ impl MessageDispatcher for DoubleDispatcher {
                                     callback_ctx.self_id(),
                                     "test/stream-callback",
                                     Bytes::from_static(b"stream-callback"),
+                                    30_000,
                                 )
                                 .await?;
                             Ok(())
@@ -199,7 +244,9 @@ impl MessageDispatcher for DoubleDispatcher {
                 // reply; the actual content is discarded.
                 let target = ctx.self_id().clone();
                 let payload = envelope.payload.unwrap_or_default();
-                let _ = ctx.call_raw(&target, "test/double_impl", payload).await?;
+                let _ = ctx
+                    .call_raw(&target, "test/double_impl", payload, 30_000)
+                    .await?;
                 panic!("fixture: intentional post-await panic for trap test");
             }
             _ => Err(ActrError::UnknownRoute(envelope.route_key)),

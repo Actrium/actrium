@@ -164,6 +164,7 @@ async fn assert_echo_rpc(caller: &ActrRef, target: ActrId, payload: &[u8]) {
             EchoRequest {
                 payload: payload.to_vec(),
             },
+            30_000,
         ),
     )
     .await
@@ -550,7 +551,11 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
 
     let err = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        caller_actr.call_remote::<UnknownRouteRequest>(target, UnknownRouteRequest::default()),
+        caller_actr.call_remote::<UnknownRouteRequest>(
+            target,
+            UnknownRouteRequest::default(),
+            30_000,
+        ),
     )
     .await
     .expect("unknown-route RPC must not hang")
@@ -788,6 +793,7 @@ async fn two_nodes_drop_ice_candidates_returns_bounded_rpc_result() {
             EchoRequest {
                 payload: b"x".to_vec(),
             },
+            30_000,
         ),
     )
     .await

@@ -57,6 +57,7 @@ gloo-timers.workspace = true
 # Async runtime
 futures.workspace = true
 async-trait.workspace = true
+web-time = "1.1"
 
 # Serialization
 serde.workspace = true

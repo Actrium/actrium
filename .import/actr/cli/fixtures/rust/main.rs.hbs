@@ -62,9 +62,12 @@ async fn main() -> Result<()> {
     info!("Calling {{MANUFACTURER}}:EchoService:1.0.0");
 
     let response = actr_ref
-        .call(EchoRequest {
-            message: "hello".to_string(),
-        })
+        .call(
+            EchoRequest {
+                message: "hello".to_string(),
+            },
+            30_000,
+        )
         .await
         .context("Echo RPC failed")?;
 

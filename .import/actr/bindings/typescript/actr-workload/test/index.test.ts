@@ -103,9 +103,9 @@ describe('@actrium/actr-workload', () => {
 
     await runtime.withInvocationCtx(ctx, async () => {
       expect(runtime.getCurrentInvocationCtx()).toBe(ctx);
-      await runtime.call('host', 'echo', payload);
+      await runtime.call('host', 'echo', payload, 30_000);
       await runtime.tell('workload', 'notify', payload);
-      await runtime.callRaw(testActorId(), 'raw', payload);
+      await runtime.callRaw(testActorId(), 'raw', payload, 30_000);
       await runtime.discover(targetType);
       await runtime.registerStream('als-stream', () => undefined);
       await runtime.unregisterStream('als-stream');
@@ -128,6 +128,7 @@ describe('@actrium/actr-workload', () => {
       'sendDataChunk',
       'logMessage',
     ]);
+    expect(host.hostCalls.timeouts).toEqual([30_000n, 30_000n]);
   });
 
   it('rejects host imports when no invocation context is active', async () => {

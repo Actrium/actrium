@@ -373,6 +373,7 @@ async fn distinct_keys_dispatch_concurrently_end_to_end() {
                     EchoRequest {
                         payload: b"room-A".to_vec(),
                     },
+                    30_000,
                 )
                 .await
         })
@@ -387,6 +388,7 @@ async fn distinct_keys_dispatch_concurrently_end_to_end() {
                     EchoRequest {
                         payload: b"room-B".to_vec(),
                     },
+                    30_000,
                 )
                 .await
         })
@@ -455,6 +457,7 @@ async fn undeclared_route_stays_serial_end_to_end() {
                     EchoRequest {
                         payload: b"room-A".to_vec(),
                     },
+                    30_000,
                 )
                 .await
         })
@@ -469,6 +472,7 @@ async fn undeclared_route_stays_serial_end_to_end() {
                     EchoRequest {
                         payload: b"room-B".to_vec(),
                     },
+                    30_000,
                 )
                 .await
         })

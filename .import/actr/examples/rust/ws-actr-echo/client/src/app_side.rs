@@ -43,7 +43,7 @@ impl AppSide {
 
             info!("[App] sendmessage: {}", line);
             let span = tracing::info_span!("app_side_call", line = line);
-            match self.actr_ref.call(request).instrument(span).await {
+            match self.actr_ref.call(request, 30_000).instrument(span).await {
                 Ok(response) => {
                     println!("\n[[...]] {}", response.reply);
                 }

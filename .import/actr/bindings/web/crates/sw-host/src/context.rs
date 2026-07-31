@@ -7,9 +7,10 @@ use std::rc::Rc;
 
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
-    ActorResult, ActrId, ActrType, Direction, MetadataEntry, RpcEnvelope, RpcRequest,
+    ActorResult, ActrError, ActrId, ActrType, Direction, MetadataEntry, RpcEnvelope, RpcRequest,
 };
 use bytes::Bytes;
+use futures::future::{Either, select};
 
 use crate::WebContext;
 use crate::outbound::Gate;
@@ -99,7 +100,8 @@ impl WebContext for RuntimeContext {
     ) -> ActorResult<Vec<u8>> {
         // Sender-side contract (#254): a REQUEST must carry a positive
         // deadline. Reject before registering a pending entry or sending.
-        crate::outbound::validate_rpc_timeout_ms(timeout_ms)?;
+        let timeout_ms = crate::outbound::validate_rpc_timeout_ms(timeout_ms)?;
+        let started_at = web_time::Instant::now();
 
         let request_id = js_sys::Math::random().to_string();
 
@@ -107,16 +109,38 @@ impl WebContext for RuntimeContext {
         // can treat it as a response instead of an inbound request.
         if let Some(bridge) = &self.bridge {
             bridge.register_pending_rpc(request_id.clone());
-            // Ensure the WebRTC connection to the target is ready.
-            if let Err(error) = bridge.ensure_connection(target).await {
-                log::warn!(
-                    "[Context] ensure_connection skipped for {}: {}",
-                    target,
-                    error
-                );
+            // Connection establishment consumes the same deadline budget as
+            // transport send and response waiting. In particular, WebRTC
+            // retries must not postpone the start of the caller's timeout.
+            let connection = bridge.ensure_connection(target);
+            let deadline = gloo_timers::future::TimeoutFuture::new(timeout_ms);
+            futures::pin_mut!(connection, deadline);
+            match select(connection, deadline).await {
+                Either::Left((result, _)) => {
+                    if let Err(error) = result {
+                        log::warn!(
+                            "[Context] ensure_connection skipped for {}: {}",
+                            target,
+                            error
+                        );
+                    }
+                }
+                Either::Right(((), _)) => {
+                    bridge.unregister_pending_rpc(&request_id);
+                    return Err(ActrError::TimedOut);
+                }
             }
         }
 
+        let Some(remaining_timeout_ms) = remaining_timeout_ms(timeout_ms, started_at.elapsed())
+        else {
+            if let Some(bridge) = &self.bridge {
+                bridge.unregister_pending_rpc(&request_id);
+            }
+            return Err(ActrError::TimedOut);
+        };
+
+        let pending_request_id = request_id.clone();
         let envelope = RpcEnvelope {
             route_key: route_key.to_string(),
             payload: Some(Bytes::from(payload.to_vec())),
@@ -129,10 +153,16 @@ impl WebContext for RuntimeContext {
                 key: "sender_actr_id".to_string(),
                 value: self.self_id.to_string_repr(),
             }],
-            timeout_ms,
+            timeout_ms: remaining_timeout_ms,
         };
 
-        let response_bytes = self.gate.send_request(target, envelope).await?;
+        let response = self.gate.send_request(target, envelope).await;
+        if response.is_err()
+            && let Some(bridge) = &self.bridge
+        {
+            bridge.unregister_pending_rpc(&pending_request_id);
+        }
+        let response_bytes = response?;
         Ok(response_bytes.to_vec())
     }
 
@@ -147,47 +177,18 @@ impl WebContext for RuntimeContext {
 
     // ========== Type-Safe Messaging ==========
 
-    async fn call<R: RpcRequest>(&self, target: &ActrId, request: R) -> ActorResult<R::Response> {
-        let request_id = js_sys::Math::random().to_string();
+    async fn call<R: RpcRequest>(
+        &self,
+        target: &ActrId,
+        request: R,
+        timeout_ms: i64,
+    ) -> ActorResult<R::Response> {
+        let payload = request.encode_to_vec();
+        let response_bytes = self
+            .call_raw(target, R::route_key(), &payload, timeout_ms)
+            .await?;
 
-        if let Some(bridge) = &self.bridge {
-            bridge.register_pending_rpc(request_id.clone());
-            if let Err(error) = bridge.ensure_connection(target).await {
-                log::warn!(
-                    "[Context] ensure_connection skipped for {}: {}",
-                    target,
-                    error
-                );
-            }
-        }
-
-        // 1. Encode the request into protobuf bytes.
-        let payload: Bytes = request.encode_to_vec().into();
-
-        // 2. Read the route key from the `RpcRequest` trait.
-        let route_key = R::route_key().to_string();
-
-        // 3. Build an `RpcEnvelope` carrying the current trace context.
-        let envelope = RpcEnvelope {
-            route_key,
-            payload: Some(payload),
-            error: None,
-            direction: Some(Direction::Request as i32),
-            traceparent: Some(self.traceparent.clone()),
-            tracestate: Some(self.tracestate.clone()),
-            request_id,
-            metadata: vec![MetadataEntry {
-                key: "sender_actr_id".to_string(),
-                value: self.self_id.to_string_repr(),
-            }],
-            timeout_ms: 30000,
-        };
-
-        // 4. Send through the gate.
-        let response_bytes = self.gate.send_request(target, envelope).await?;
-
-        // 5. Decode the response.
-        R::Response::decode(&*response_bytes).map_err(|e| {
+        R::Response::decode(response_bytes.as_slice()).map_err(|e| {
             actr_protocol::ActrError::DecodeFailure(format!(
                 "Failed to decode {}: {}",
                 std::any::type_name::<R::Response>(),
@@ -357,5 +358,34 @@ impl WebContext for RuntimeContext {
                 Bytes::from(payload),
             )
             .await
+    }
+}
+
+fn remaining_timeout_ms(timeout_ms: u32, elapsed: std::time::Duration) -> Option<i64> {
+    let remaining = std::time::Duration::from_millis(u64::from(timeout_ms))
+        .checked_sub(elapsed)?
+        .as_millis();
+    (remaining > 0).then(|| i64::try_from(remaining).expect("timeout is bounded by i32::MAX"))
+}
+
+#[cfg(test)]
+mod timeout_tests {
+    use super::remaining_timeout_ms;
+    use std::time::Duration;
+
+    #[test]
+    fn connection_time_is_deducted_from_call_timeout() {
+        assert_eq!(
+            remaining_timeout_ms(1_000, Duration::from_millis(250)),
+            Some(750)
+        );
+        assert_eq!(
+            remaining_timeout_ms(1_000, Duration::from_millis(1_000)),
+            None
+        );
+        assert_eq!(
+            remaining_timeout_ms(1_000, Duration::from_millis(1_001)),
+            None
+        );
     }
 }

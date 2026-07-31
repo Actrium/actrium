@@ -71,7 +71,7 @@ impl<T: ?Sized> MaybeSendSync for T {}
 /// ```rust,ignore
 /// async fn my_handler<C: Context>(ctx: &C) {
 ///     let id = ctx.self_id();
-///     let response = ctx.call(&target, request).await?;
+///     let response = ctx.call(&target, request, 30_000).await?;
 /// }
 /// ```
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -105,7 +105,7 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     ///
     /// ```rust,ignore
     /// let request = EchoRequest { message: "hello".to_string() };
-    /// let response: EchoResponse = ctx.call(&target, request).await?;
+    /// let response: EchoResponse = ctx.call(&target, request, 5_000).await?;
     /// //              ^^^^^^^^^^^^ Inferred from EchoRequest::Response
     /// ```
     ///
@@ -120,6 +120,7 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     ///
     /// - `target`: Target destination (`Dest::Host` for local, `Dest::Peer(id)` for remote)
     /// - `request`: Request message implementing `RpcRequest` trait
+    /// - `timeout_ms`: Positive timeout in milliseconds
     ///
     /// # Returns
     ///
@@ -128,6 +129,7 @@ pub trait Context: Clone + MaybeSendSync + 'static {
         &self,
         target: &crate::Dest,
         request: R,
+        timeout_ms: i64,
     ) -> ActorResult<R::Response>;
 
     /// Send a type-safe one-way message (no response expected)
@@ -220,6 +222,7 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     /// - `target`: Target Actor ID
     /// - `route_key`: Route key (e.g., "echo.EchoService/Echo")
     /// - `payload`: Raw request payload bytes
+    /// - `timeout_ms`: Positive timeout in milliseconds
     ///
     /// # Returns
     ///
@@ -233,6 +236,7 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     ///     &target_id,
     ///     "echo.EchoService/Echo",
     ///     request_bytes.into(),
+    ///     5_000,
     /// ).await?;
     /// ```
     async fn call_raw(
@@ -240,6 +244,7 @@ pub trait Context: Clone + MaybeSendSync + 'static {
         target: &ActrId,
         route_key: &str,
         payload: bytes::Bytes,
+        timeout_ms: i64,
     ) -> ActorResult<bytes::Bytes>;
 
     // ========== Fast Path: MediaTrack Methods (WebRTC Native) ==========

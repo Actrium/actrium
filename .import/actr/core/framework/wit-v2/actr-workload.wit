@@ -1,9 +1,10 @@
-// actr workload contract — Component Model WIT, v2 (async world)
+// actr workload contract — Component Model WIT, timeout-aware async world
 //
-// v2 (`actr:workload@0.2.0`) is the run_concurrent-ready contract. It is a
-// controlled fork of `actr:workload@0.1.0` (core/framework/wit/actr-workload.wit)
-// that turns every host import and every workload export into a real WIT
-// `async func`. That single change is what unlocks wasmtime 46's Component
+// `actr:workload@0.3.0` extends the run_concurrent-ready 0.2.0 contract with
+// explicit per-call timeout arguments. The async design is a controlled fork
+// of the retired `actr:workload@0.1.0` contract that turns every host import
+// and every workload export into a real WIT `async func`. That single change
+// is what unlocks wasmtime 46's Component
 // Model Concurrency: multiple `dispatch` calls may be IN FLIGHT on one
 // component instance, cooperatively interleaving at each host-import `.await`.
 //
@@ -40,7 +41,7 @@
 // stdlib-ish names during binding generation (e.g. `actr-error` rather
 // than bare `error`, which clashes with `wasi:io/error`).
 
-package actr:workload@0.2.0;
+package actr:workload@0.3.0;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared value types
@@ -243,6 +244,7 @@ interface host {
         target: dest,
         route-key: string,
         payload: list<u8>,
+        timeout-ms: s64,
     ) -> result<list<u8>, actr-error>;
 
     // Fire-and-forget: host forwards the message and returns without
@@ -260,6 +262,7 @@ interface host {
         target: actr-id,
         route-key: string,
         payload: list<u8>,
+        timeout-ms: s64,
     ) -> result<list<u8>, actr-error>;
 
     // Discovery: find a candidate actor serving the requested type.

@@ -33,6 +33,18 @@ use actr_protocol::{
     ActrId, ActrType, DataChunk, Realm, RpcEnvelope, prost::Message as ProstMessage,
 };
 
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct TypedDoubleRequest {
+    #[prost(int32, tag = "1")]
+    value: i32,
+}
+
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct TypedDoubleResponse {
+    #[prost(int32, tag = "1")]
+    value: i32,
+}
+
 #[path = "wasm_actor_fixture.rs"]
 mod wasm_actor_fixture;
 
@@ -99,6 +111,7 @@ fn doubling_bridge(sleep: Option<Duration>) -> (HostAbiFn, Arc<AtomicU64>) {
             }
             match op {
                 HostOperation::CallRaw(req) if req.route_key == "test/double_impl" => {
+                    assert_eq!(req.timeout_ms, 30_000, "timeout mismatch");
                     if req.payload.len() < 4 {
                         return HostOperationResult::AbiError(-1);
                     }
@@ -185,6 +198,44 @@ async fn component_model_basic_echo_round_trip() {
         .await
         .expect("echo dispatch should succeed");
     assert_eq!(reply, payload, "test/echo must round-trip the payload");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn component_model_typed_call_forwards_timeout() {
+    let host = fixture_host();
+    let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");
+    let bridge: HostAbiFn = Arc::new(|operation| {
+        Box::pin(async move {
+            match operation {
+                HostOperation::Call(request) => {
+                    assert_eq!(request.route_key, "test/typed_double_impl");
+                    assert_eq!(request.timeout_ms, 1_234);
+                    let request = TypedDoubleRequest::decode(request.payload.as_slice())
+                        .expect("decode typed request");
+                    HostOperationResult::Bytes(
+                        TypedDoubleResponse {
+                            value: request.value * 2,
+                        }
+                        .encode_to_vec(),
+                    )
+                }
+                _ => HostOperationResult::AbiError(-1),
+            }
+        })
+    });
+
+    let result = workload
+        .handle(
+            &make_envelope("test/typed-double", 7i32.to_le_bytes().to_vec()),
+            test_ctx(),
+            &bridge,
+        )
+        .await
+        .expect("typed call dispatch should succeed");
+    assert_eq!(
+        i32::from_le_bytes(result.try_into().expect("typed response bytes")),
+        14
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

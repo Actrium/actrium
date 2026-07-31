@@ -2,6 +2,7 @@
 //!
 //! A simple cdylib actor implementing:
 //! - "test/double": reads i32 from payload, calls ctx.call_raw() to get x*2
+//! - "test/typed-double": calls ctx.call() with an explicit 1234 ms timeout
 //! - "test/echo": returns payload as-is (no outbound calls)
 //! - "test/sleep": awaits a Tokio timer before returning
 //! - "test/spawn": spawns a Tokio task that calls the host after dispatch returns
@@ -10,10 +11,30 @@
 //! - unknown route: returns error
 
 use actr_framework::{Context, Dest, MessageDispatcher, Workload, entry};
-use actr_protocol::{ActorResult, ActrError, DataChunk, PayloadType, RpcEnvelope};
+use actr_protocol::{ActorResult, ActrError, DataChunk, PayloadType, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::time::UNIX_EPOCH;
+
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct TypedDoubleRequest {
+    #[prost(int32, tag = "1")]
+    value: i32,
+}
+
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct TypedDoubleResponse {
+    #[prost(int32, tag = "1")]
+    value: i32,
+}
+
+impl RpcRequest for TypedDoubleRequest {
+    type Response = TypedDoubleResponse;
+
+    fn route_key() -> &'static str {
+        "test/typed_double_impl"
+    }
+}
 
 async fn record_hook<C: Context>(ctx: &C, name: &'static str) {
     record_hook_value(ctx, name.to_string()).await;
@@ -21,7 +42,12 @@ async fn record_hook<C: Context>(ctx: &C, name: &'static str) {
 
 async fn record_hook_value<C: Context>(ctx: &C, value: String) {
     let _ = ctx
-        .call_raw(ctx.self_id(), "test/record_hook", Bytes::from(value))
+        .call_raw(
+            ctx.self_id(),
+            "test/record_hook",
+            Bytes::from(value),
+            30_000,
+        )
         .await;
 }
 
@@ -89,10 +115,26 @@ impl MessageDispatcher for DoubleDispatcher {
                         &target,
                         "test/double_impl",
                         Bytes::from(x.to_le_bytes().to_vec()),
+                        30_000,
                     )
                     .await?;
 
                 Ok(resp)
+            }
+            "test/typed-double" => {
+                let payload = envelope.payload.unwrap_or_default();
+                if payload.len() < 4 {
+                    return Err(ActrError::InvalidArgument("payload too short".into()));
+                }
+                let value = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
+                let response = ctx
+                    .call(
+                        &Dest::Peer(ctx.self_id().clone()),
+                        TypedDoubleRequest { value },
+                        1_234,
+                    )
+                    .await?;
+                Ok(Bytes::from(response.value.to_le_bytes().to_vec()))
             }
             "test/echo" => {
                 let payload = envelope.payload.unwrap_or_default();
@@ -110,7 +152,7 @@ impl MessageDispatcher for DoubleDispatcher {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     let target = background_ctx.self_id().clone();
                     let _ = background_ctx
-                        .call_raw(&target, "test/spawned", Bytes::from(payload))
+                        .call_raw(&target, "test/spawned", Bytes::from(payload), 30_000)
                         .await;
                 });
                 Ok(Bytes::from_static(b"spawned"))
@@ -120,7 +162,7 @@ impl MessageDispatcher for DoubleDispatcher {
                 actr_framework::guest::dynclib::spawn(async move {
                     let target = background_ctx.self_id().clone();
                     let _ = background_ctx
-                        .call_raw(&target, "test/background-started", Bytes::new())
+                        .call_raw(&target, "test/background-started", Bytes::new(), 30_000)
                         .await;
                     std::future::pending::<()>().await;
                 })?;
@@ -142,7 +184,10 @@ impl MessageDispatcher for DoubleDispatcher {
                     .await;
                 match result {
                     Err(ActrError::ConnectionNotReady(info)) => Ok(Bytes::from(
-                        info.retry_after_ms.unwrap_or_default().to_le_bytes().to_vec(),
+                        info.retry_after_ms
+                            .unwrap_or_default()
+                            .to_le_bytes()
+                            .to_vec(),
                     )),
                     Err(error) => Err(error),
                     Ok(()) => Err(ActrError::Internal(

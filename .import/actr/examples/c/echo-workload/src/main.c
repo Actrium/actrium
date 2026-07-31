@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// C implementation of the async actr:workload@0.2.0 guest contract.
+// C implementation of the async actr:workload@0.3.0 guest contract.
 //
 // Every export completes immediately, but still uses wit-bindgen's async-lift
 // entrypoints and explicit task-return helpers. The invocation context is

@@ -110,7 +110,7 @@
 //!         tracing::info!("trace_id: {}", ctx.trace_id());
 //!
 //!         // Type-safe RPC call
-//!         let response = ctx.call(&target, another_request).await?;
+//!         let response = ctx.call(&target, another_request, 30_000).await?;
 //!
 //!         Ok(EchoResponse {
 //!             reply: format!("Echo: {}", req.message),

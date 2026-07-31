@@ -25,6 +25,18 @@ use actr_protocol::{
     prost::Message as ProstMessage,
 };
 
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct TypedDoubleRequest {
+    #[prost(int32, tag = "1")]
+    value: i32,
+}
+
+#[derive(Clone, PartialEq, actr_protocol::prost::Message)]
+struct TypedDoubleResponse {
+    #[prost(int32, tag = "1")]
+    value: i32,
+}
+
 // ---- helpers ---------------------------------------------------------------
 
 fn fixture_so_path() -> PathBuf {
@@ -167,6 +179,7 @@ async fn dynclib_double_dispatch() {
                 HostOperation::CallRaw(req) => {
                     assert_eq!(req.route_key, "test/double_impl", "route_key mismatch");
                     assert_eq!(req.payload.len(), 4, "payload should be 4 bytes");
+                    assert_eq!(req.timeout_ms, 30_000, "timeout mismatch");
 
                     let val = i32::from_le_bytes([
                         req.payload[0],
@@ -196,6 +209,53 @@ async fn dynclib_double_dispatch() {
     assert_eq!(result.len(), 4, "response should be 4 bytes");
     let resp_val = i32::from_le_bytes([result[0], result[1], result[2], result[3]]);
     assert_eq!(resp_val, 14, "response should be 7 * 2 = 14");
+    instance.shutdown().await.expect("shutdown dynclib");
+}
+
+/// Typed call route -> carries the caller-provided timeout through HOST_CALL.
+#[tokio::test]
+async fn dynclib_typed_call_forwards_timeout() {
+    let _guard = DYNCLIB_SERIAL.lock().await;
+    let so_path = fixture_so_path();
+    let host = DynclibHost::load(&so_path).expect("load SO");
+    let mut instance = instantiate_dynclib_workload(host, &test_config()).expect("instantiate");
+
+    let executor: HostAbiFn = std::sync::Arc::new(|pending| {
+        Box::pin(async move {
+            match pending {
+                HostOperation::Call(req) => {
+                    assert_eq!(req.route_key, "test/typed_double_impl");
+                    assert_eq!(req.timeout_ms, 1_234);
+                    let request = TypedDoubleRequest::decode(req.payload.as_slice())
+                        .expect("decode typed request");
+                    HostOperationResult::Bytes(
+                        TypedDoubleResponse {
+                            value: request.value * 2,
+                        }
+                        .encode_to_vec(),
+                    )
+                }
+                other => panic!(
+                    "expected HostOperation::Call, got {:?}",
+                    std::mem::discriminant(&other)
+                ),
+            }
+        })
+    });
+
+    let result = instance
+        .handle(
+            &make_envelope("test/typed-double", 7i32.to_le_bytes().to_vec()),
+            test_ctx(),
+            &executor,
+        )
+        .await
+        .expect("typed call dispatch failed");
+
+    assert_eq!(
+        i32::from_le_bytes(result.try_into().expect("typed response bytes")),
+        14
+    );
     instance.shutdown().await.expect("shutdown dynclib");
 }
 
