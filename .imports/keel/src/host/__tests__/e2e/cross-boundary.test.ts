@@ -40,11 +40,11 @@ describe('Cross-Boundary: Function Serialization', () => {
     const guestCode = `
       // Guest: Create a function
       const handleClick = () => {
-        globalThis.__rill_emitEvent('CLICKED', { timestamp: Date.now() });
+        globalThis.__keel_emitEvent('CLICKED', { timestamp: Date.now() });
       };
 
       // Guest: Send function to Host via operations
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -84,7 +84,7 @@ describe('Cross-Boundary: Function Serialization', () => {
 
   it('should handle multiple function props', async () => {
     const guestCode = `
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -94,10 +94,10 @@ describe('Cross-Boundary: Function Serialization', () => {
             type: 'TouchableOpacity',
             props: {
               testID: 'button',
-              onPress: () => globalThis.__rill_emitEvent('PRESS'),
-              onPressIn: () => globalThis.__rill_emitEvent('PRESS_IN'),
-              onPressOut: () => globalThis.__rill_emitEvent('PRESS_OUT'),
-              onLongPress: () => globalThis.__rill_emitEvent('LONG_PRESS')
+              onPress: () => globalThis.__keel_emitEvent('PRESS'),
+              onPressIn: () => globalThis.__keel_emitEvent('PRESS_IN'),
+              onPressOut: () => globalThis.__keel_emitEvent('PRESS_OUT'),
+              onLongPress: () => globalThis.__keel_emitEvent('LONG_PRESS')
             }
           },
           { op: 'APPEND', parentId: 0, childId: 1 }
@@ -127,7 +127,7 @@ describe('Cross-Boundary: Function Serialization', () => {
 
   it('should pass arguments from Host to Guest function', async () => {
     const guestCode = `
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -138,7 +138,7 @@ describe('Cross-Boundary: Function Serialization', () => {
             props: {
               testID: 'input',
               onChangeText: (text) => {
-                globalThis.__rill_emitEvent('TEXT_CHANGED', { text, length: text.length });
+                globalThis.__keel_emitEvent('TEXT_CHANGED', { text, length: text.length });
               }
             }
           },
@@ -166,7 +166,7 @@ describe('Cross-Boundary: Function Serialization', () => {
 
   it('should handle complex event object arguments (like GestureResponderEvent)', async () => {
     const guestCode = `
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -178,7 +178,7 @@ describe('Cross-Boundary: Function Serialization', () => {
               testID: 'button',
               onPress: (event) => {
                 // Guest receives the event and extracts useful data
-                globalThis.__rill_emitEvent('PRESS_WITH_EVENT', {
+                globalThis.__keel_emitEvent('PRESS_WITH_EVENT', {
                   hasEvent: !!event,
                   locationX: event?.nativeEvent?.locationX,
                   locationY: event?.nativeEvent?.locationY,
@@ -242,7 +242,7 @@ describe('Cross-Boundary: Function Serialization', () => {
 
   it('should handle event with circular references gracefully', async () => {
     const guestCode = `
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -253,7 +253,7 @@ describe('Cross-Boundary: Function Serialization', () => {
             props: {
               testID: 'button',
               onPress: (event) => {
-                globalThis.__rill_emitEvent('PRESS_CIRCULAR', {
+                globalThis.__keel_emitEvent('PRESS_CIRCULAR', {
                   received: true,
                   hasNativeEvent: !!event?.nativeEvent,
                 });
@@ -312,7 +312,7 @@ describe('Cross-Boundary: Complex Data Types', () => {
 
   it('should serialize nested objects', async () => {
     const guestCode = `
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -353,7 +353,7 @@ describe('Cross-Boundary: Complex Data Types', () => {
 
   it('should serialize mixed arrays', async () => {
     const guestCode = `
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -370,7 +370,7 @@ describe('Cross-Boundary: Complex Data Types', () => {
                 null,
                 { key: 'value' },
                 [1, 2, 3],
-                () => globalThis.__rill_emitEvent('ARRAY_FUNC')
+                () => globalThis.__keel_emitEvent('ARRAY_FUNC')
               ]
             }
           },
@@ -399,7 +399,7 @@ describe('Cross-Boundary: Complex Data Types', () => {
   it('should serialize Date objects', async () => {
     const guestCode = `
       const now = new Date('2024-01-15T12:00:00Z');
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -425,7 +425,7 @@ describe('Cross-Boundary: Complex Data Types', () => {
     await wait(100);
 
     const node = receiver.findByTestId('view');
-    // Date props sent via __rill_sendBatch pass through JSON serialization:
+    // Date props sent via __keel_sendBatch pass through JSON serialization:
     // they arrive as ISO strings (JSON.stringify behavior)
     const createdAt = node?.props.createdAt;
     expect(typeof createdAt).toBe('string');
@@ -434,7 +434,7 @@ describe('Cross-Boundary: Complex Data Types', () => {
 
   it('should serialize RegExp objects', async () => {
     const guestCode = `
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -461,17 +461,17 @@ describe('Cross-Boundary: Complex Data Types', () => {
     await wait(100);
 
     const node = receiver.findByTestId('input');
-    // RegExp sent via __rill_sendBatch goes through JSON serialization:
+    // RegExp sent via __keel_sendBatch goes through JSON serialization:
     // JSON.stringify(RegExp) produces {} — RegExp is not JSON-serializable.
     // The Bridge's structured serialization handles this for the reconciler path,
-    // but direct __rill_sendBatch bypasses that layer.
+    // but direct __keel_sendBatch bypasses that layer.
     const pattern = node?.props.pattern;
     expect(pattern).toBeDefined();
   });
 
   it('should serialize Error objects', async () => {
     const guestCode = `
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1,
         batchId: 1,
         operations: [
@@ -495,10 +495,10 @@ describe('Cross-Boundary: Complex Data Types', () => {
     await wait(100);
 
     const node = receiver.findByTestId('view');
-    // Error sent via __rill_sendBatch goes through JSON serialization:
+    // Error sent via __keel_sendBatch goes through JSON serialization:
     // Error is not JSON-serializable (JSON.stringify produces {}).
     // The Bridge's structured serialization handles this for the reconciler path,
-    // but direct __rill_sendBatch bypasses that layer.
+    // but direct __keel_sendBatch bypasses that layer.
     const error = node?.props.error;
     expect(error).toBeDefined();
   });
@@ -524,7 +524,7 @@ describe('Cross-Boundary: Memory Management', () => {
       let updateCount = 0;
 
       globalThis.__createNode = () => {
-        globalThis.__rill_sendBatch({
+        globalThis.__keel_sendBatch({
           version: 1,
           batchId: 1,
           operations: [
@@ -544,7 +544,7 @@ describe('Cross-Boundary: Memory Management', () => {
 
       globalThis.__updateNode = () => {
         updateCount++;
-        globalThis.__rill_sendBatch({
+        globalThis.__keel_sendBatch({
           version: 1,
           batchId: 2 + updateCount,
           operations: [

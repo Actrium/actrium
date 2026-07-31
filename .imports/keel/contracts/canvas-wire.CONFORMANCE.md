@@ -26,7 +26,7 @@ loop:
 
 | # | Assertion | Where | Direction |
 |---|-----------|-------|-----------|
-| 1 | Rust **encoder**(source frame) == golden `hex`, byte-for-byte | `crates/rill-native-guest/src/canvas_encode.rs` (`golden_vectors_encode_byte_exact`) | frame → bytes |
+| 1 | Rust **encoder**(source frame) == golden `hex`, byte-for-byte | `crates/keel-native-guest/src/canvas_encode.rs` (`golden_vectors_encode_byte_exact`) | frame → bytes |
 | 2 | TS **decoder**(golden bytes) semantically == source op array | `src/host/wire/__tests__/canvas-wire-decoder.test.ts` (`toEqual(ops)`) | bytes → ops |
 
 Because Rust emits *exactly* the golden bytes and the decoder consumes *exactly*
@@ -39,7 +39,7 @@ iterator), so they cannot drift from each other either.
 
 Locking notes (so the pivot cannot silently rot):
 - The Rust codec constants (magic, protocol version, opcodes, flags, limits) are
-  **generated** from `canvas-wire.json` by `crates/rill-native-guest/build.rs`
+  **generated** from `canvas-wire.json` by `crates/keel-native-guest/build.rs`
   (`generate_canvas_contract`), so a renamed/removed key fails the build. `MAGIC`
   is derived from the schema's `magic.hex` and its little-endian bytes are
   asserted to spell `magic.asciiBytes` at build time — any edit to either field
@@ -49,28 +49,28 @@ Locking notes (so the pivot cannot silently rot):
   cap would fail the golden `at-limit-ops` (maxOps=20000) vector, and a magic
   drift would fail every vector — so the golden pivot enforces the TS side too.
 - The golden file is regenerated (never hand-edited) via
-  `RILL_REGEN_CANVAS_GOLDEN=1 cargo test -p rill-native-guest --features binary-protocol`;
+  `KEEL_REGEN_CANVAS_GOLDEN=1 cargo test -p keel-native-guest --features binary-protocol`;
   the Rust encoder is the oracle.
 
 ## How to run both (Linux)
 
 ```sh
 # 1. Rust encoder → golden hex (+ all cap / negative cases)
-cd /ext/rill/crates && cargo test -p rill-native-guest --features binary-protocol
+cd crates && cargo test -p keel-native-guest --features binary-protocol
 
 # 2. TS zero-DOM decoder ← golden bytes (+ fail-closed + cross-magic)
-cd /ext/rill && bun test src/host/wire
+bun test src/host/wire
 
 # 3. Capability handshake round-trip + JSON fallback + default-stays-JSON
-cd /ext/rill && bun test src/host/native-guest
+bun test src/host/native-guest
 ```
 
 Both codecs are WORK IN PROGRESS and gated OFF in shipped builds:
 - Rust: `--features binary-protocol` (Cargo feature, default off). The default
   `canvas::draw` path emits JSON, byte-identical to before.
-- TS: the decoder is exported (`rill/wire`) but no live receive path imports it;
+- TS: the decoder is exported (`keel/wire`) but no live receive path imports it;
   the host `onHostCall` only diverts to a binary-aware handler when a payload
-  starts with the `RCNV` magic, which the default guest never emits.
+  starts with the `KCNV` magic, which the default guest never emits.
 
 ## 1. The envelope (mirrors op-batch's shape)
 
@@ -166,7 +166,7 @@ any drift.
 
 | Constant | Schema (`canvas-wire.json`) | Rust | TypeScript |
 |----------|-----------------------------|------|------------|
-| magic | `magic.hex` = `0x564e4352` (`RCNV`, u32le `1447969618`) | `MAGIC = 1447969618` (build.rs, from `magic.hex`, LE bytes asserted == `asciiBytes`) | `CANVAS_MAGIC = 0x564e4352` |
+| magic | `magic.hex` = `0x564e434b` (`KCNV`, u32le `1447969611`) | `MAGIC = 1447969611` (build.rs, from `magic.hex`, LE bytes asserted == `asciiBytes`) | `CANVAS_MAGIC = 0x564e434b` |
 | version | `protocolVersion` = `1` | `PROTOCOL_VERSION = 1` | `PROTOCOL_VERSION = 1` |
 | maxOps | `limits.maxOps.value` = `20000` | `limits::MAX_OPS = 20000` (build.rs, from `limits`) | `MAX_OPS = 20000` |
 | maxInternStrings | `limits.maxInternStrings.value` = `4096` | `limits::MAX_INTERN_STRINGS = 4096` | `MAX_INTERN_STRINGS = 4096` |
@@ -200,7 +200,7 @@ the platform as `{ ok:false, dropped:<opCount>, reason:<token> }`:
 
 | reason | fired when |
 |--------|-----------|
-| `bad-magic` | first u32 ≠ `RCNV` (also catches a cross-fed op-batch buffer) |
+| `bad-magic` | first u32 ≠ `KCNV` (also catches a cross-fed op-batch buffer) |
 | `bad-version` | header version ≠ `1` |
 | `reserved-flag` | any reserved / unknown flag bit set (e.g. `COORDS_F32`) |
 | `op-budget` | `header.opCount > maxOps` (checked BEFORE the loop) |
@@ -228,16 +228,16 @@ concrete wiring:
 
 - One additive host method **`host:canvas.getInfo() → { binaryDraw:boolean,
   wireVersion:number }`**. The guest `await`s it **once** and caches the answer
-  (`host_supports_binary()` in `crates/rill-native-guest/src/lib.rs`, gated on
+  (`host_supports_binary()` in `crates/keel-native-guest/src/lib.rs`, gated on
   `binary-protocol`).
 - Binary is used **iff** the feature is compiled **and** `ok==1` **and**
   `binaryDraw==true` **and** `wireVersion` == the encoder's `WIRE_VERSION`. Any
   non-affirmative answer — an **old host that never registered `getInfo`** resolves
   `ok=0`, a missing field, `false`, or a version mismatch — ⇒ the guest stays on
-  JSON. Graceful degrade, no flag-day, no `rill_abi_version` bump (this is
+  JSON. Graceful degrade, no flag-day, no `keel_abi_version` bump (this is
   channel selection, not an ABI break).
 - Both encodings share the single `draw` method. The host forks on the **first
-  payload byte**: `0x52` (`R` of `RCNV`) → binary handler; `0x7B` (`{`) → the
+  payload byte**: `0x4B` (`K` of `KCNV`) → binary handler; `0x7B` (`{`) → the
   legacy `JSON.parse` path, byte-identical to before. The carve-out is keyed to
   the full 4-byte magic, so no existing module's trust boundary is weakened and
   genuinely malformed input still fails closed (`ok=0`).
@@ -280,26 +280,26 @@ Verified 2026-07-25 on Linux (rustc 1.93.0, bun 1.3.5).
 
 | Codec / suite | Role | Result |
 |---|---|---|
-| Rust `rill-native-guest` (`--features binary-protocol`) | encoder → golden hex + caps | **PASS** — 91 tests (canvas: golden byte-exact incl. the four new ops, all caps, per-frame color+font intern, header layout) |
-| Rust `rill-native-guest` (default) | shipped JSON path unaffected | **PASS** — 63 tests |
+| Rust `keel-native-guest` (`--features binary-protocol`) | encoder → golden hex + caps | **PASS** — 91 tests (canvas: golden byte-exact incl. the four new ops, all caps, per-frame color+font intern, header layout) |
+| Rust `keel-native-guest` (default) | shipped JSON path unaffected | **PASS** — 63 tests |
 | TS `canvas-wire-decoder` (`bun test src/host/wire`) | golden bytes → ops + fail-closed + cross-magic | **PASS** — 220 tests (59 in the canvas decoder file: 32 golden vectors decode to exact ops across all four entry points, a typed negative per reason, cross-magic both directions) |
 | TS `bun test src/host/native-guest` | handshake round-trip + JSON fallback + default-stays-JSON | **PASS** — 104 tests (incl. the three canvas handshake fixtures) |
 | `bunx tsc --noEmit` | typecheck | **PASS** — exit 0 |
 
-**Cross-magic (both directions), proven:** a canvas (`RCNV`) buffer fed to the
-op-batch decoder throws `WireDecodeError`; an op-batch (`RILL`) buffer fed to the
+**Cross-magic (both directions), proven:** a canvas (`KCNV`) buffer fed to the
+op-batch decoder throws `WireDecodeError`; an op-batch (`KEEL`) buffer fed to the
 canvas decoder throws `CanvasDecodeError('bad-magic')`. The two magics differ at
-byte 1 (`0x43 'C'` vs `0x49 'I'`), so the `u32` compare rejects immediately,
+byte 1 (`0x43 'C'` vs `0x45 'E'`), so the `u32` compare rejects immediately,
 before any field is read.
 
 The zero-DOM TS decoder is on the public export surface (`import { decodeCanvasBatch }
-from 'rill/wire'`), and as of issue #45 the Rust canvas encoder is **compiled into the
+from 'keel/wire'`), and as of issue #45 the Rust canvas encoder is **compiled into the
 shipped guest by default** (the `binary-protocol` feature is default-on). At RUNTIME
 the guest still emits JSON unless the async `host:canvas.getInfo` handshake answers
-`binaryDraw:true` for the encoder's `wireVersion` — and no rill-shipped host answers
-it, because `host:canvas` (decode `RCNV` + paint to a real surface) is an
+`binaryDraw:true` for the encoder's `wireVersion` — and no keel-shipped host answers
+it, because `host:canvas` (decode `KCNV` + paint to a real surface) is an
 embedder-supplied host module. So canvas binary is guest-ready and decoder-ready
 in-repo — `canvas-guests.test.ts` drives the real guest end-to-end through a
-binary-capable test host that decodes `RCNV` via `decodeCanvasFrame` — and **end-to-end
+binary-capable test host that decodes `KCNV` via `decodeCanvasFrame` — and **end-to-end
 promotion is gated on the downstream host implementing `getInfo` + `decodeCanvasBatch`**.
 Until then every host degrades gracefully to JSON.

@@ -1,6 +1,6 @@
 # 沙箱引擎选择与配置
 
-Rill 支持多种沙箱后端来隔离运行 guest bundle。每个后端针对特定平台，并在隔离强度、二进制大小开销和运行时性能之间提供不同的权衡。
+Keel 支持多种沙箱后端来隔离运行 guest bundle。每个后端针对特定平台，并在隔离强度、二进制大小开销和运行时性能之间提供不同的权衡。
 
 注意：provider 实现属于**内部实现**（不对外导出，也不支持用户注入自定义 provider）。公共 API 仅支持通过 `EngineOptions.sandbox` 选择/提示后端。
 
@@ -23,7 +23,7 @@ Rill 支持多种沙箱后端来隔离运行 guest bundle。每个后端针对�
 使用 Apple 平台上可用的平台 JavaScriptCore 引擎。无需打包额外的二进制文件,因为 JSC 随 iOS 和 macOS 一起发布。
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'jsc',
@@ -44,7 +44,7 @@ const engine = new Engine({
 使用 React Native 附带的 Hermes 引擎。当 host 应用已在 Hermes 上运行时,此 provider 重用相同的引擎二进制,避免任何额外开销。
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'hermes',
@@ -65,7 +65,7 @@ const engine = new Engine({
 一个轻量级、可嵌入的 JavaScript 引擎,编译为原生库。可在所有 React Native 平台上工作,无论 host 应用使用哪个 JS 引擎。
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'quickjs',
@@ -86,7 +86,7 @@ const engine = new Engine({
 QuickJS 的 WebAssembly 构建,用于浏览器和 web-worker 环境。
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'wasm-quickjs',
@@ -107,7 +107,7 @@ const engine = new Engine({
 使用内置的 `node:vm` 模块。可在 Node.js 和 Bun 环境中使用 -- 主要用于服务端渲染、测试和开发。
 
 ```ts
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   sandbox: 'node-vm',
@@ -125,11 +125,11 @@ const engine = new Engine({
 
 ## DefaultProvider 自动选择
 
-当未提供显式的 `sandbox` 选项时,Rill 使用以下优先级自动选择最佳可用 provider:
+当未提供显式的 `sandbox` 选项时,Keel 使用以下优先级自动选择最佳可用 provider:
 
 | 条件 | 选择的 Provider |
 |---|---|
-| React Native with Hermes (`RILL_SANDBOX_ENGINE=hermes`) | `HermesProvider` |
+| React Native with Hermes (`KEEL_SANDBOX_ENGINE=hermes`) | `HermesProvider` |
 | Apple 平台 (iOS / macOS) | `JSCProvider` |
 | 任何其他 React Native 平台 | `QuickJSProvider` |
 | Node.js 或 Bun 运行时 | `NodeVMProvider` |

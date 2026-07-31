@@ -1,14 +1,14 @@
 /**
  * Thin-DOM component preset for the web host (issue #19, L2).
  *
- * A tiny, auditable mapping of the common rill primitives onto native DOM elements
+ * A tiny, auditable mapping of the common keel primitives onto native DOM elements
  * (View→div, Text→span, Pressable→button, ScrollView→div, TextInput→input/textarea, …) —
  * no react-native-web. Every component is small and overridable, and none carries a
  * mandatory URL/network-bearing prop, so a sealing integrator doesn't have to fork. Use
  * `WebComponents` with `engine.register(...)`, or override any single entry.
  *
  * For RN cross-platform parity, integrators can keep the react-native-web preset
- * (`rill/host/preset`) instead — both are just fillings of the pluggable ComponentRegistry.
+ * (`keel/host/preset`) instead — both are just fillings of the pluggable ComponentRegistry.
  */
 
 import React, { type CSSProperties, type ReactNode } from 'react';

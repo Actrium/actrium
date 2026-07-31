@@ -1,5 +1,5 @@
 /**
- * Browser harness entry: bundles the real Rill Engine for the engine-in-browser e2e.
+ * Browser harness entry: bundles the real Keel Engine for the engine-in-browser e2e.
  *
  * Built with `bun build --target=browser` to dist/engine-harness.js and loaded by
  * engine-test.html. Exposes the Engine constructor on window so the Playwright spec can
@@ -12,6 +12,6 @@
 import { Engine } from '../../src/host/engine';
 
 // biome-ignore lint/suspicious/noExplicitAny: expose for the e2e page
-(globalThis as any).RillEngine = Engine;
+(globalThis as any).KeelEngine = Engine;
 // biome-ignore lint/suspicious/noExplicitAny: signal readiness to the spec
-(globalThis as any).RillEngineReady = true;
+(globalThis as any).KeelEngineReady = true;

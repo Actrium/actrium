@@ -44,7 +44,7 @@ DEFINES=(
     -DCONFIG_BIGNUM
     -D_GNU_SOURCE
     -DEMSCRIPTEN
-    -DRILL_QJS_DEBUG
+    -DKEEL_QJS_DEBUG
 )
 
 echo "Building QuickJS debug wasm (Asyncify ON)..."

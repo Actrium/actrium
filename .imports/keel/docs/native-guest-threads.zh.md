@@ -1,4 +1,4 @@
-# rill native guest 多线程计算 —— approach B 设计草稿（预研，未实现）
+# keel native guest 多线程计算 —— approach B 设计草稿（预研，未实现）
 
 > 状态：**设计 + 已落地 host 侧切片**。approach B 的 host 侧 worker 池已实现并带逐字节
 > 门禁 + 提速 bench（见第 8 节），**未改 seal、未改 guest、未加任何 wire/contract**。对应

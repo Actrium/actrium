@@ -1,17 +1,17 @@
 # CLI 构建工具
 
-Rill 提供了一个用于构建和分析 guest bundle 的 CLI。该 CLI 与 `rill` 包一起分发,可通过 `bunx rill` 调用。
+Keel 提供了一个用于构建和分析 guest bundle 的 CLI。该 CLI 与 `keel` 包一起分发,可通过 `bunx keel` 调用。
 
 ---
 
-## `rill build`
+## `keel build`
 
 将 guest React 组件编译成适合在沙箱中执行的自包含 bundle。
 
 ### 用法
 
 ```bash
-bunx rill build src/guest.tsx -o dist/bundle.js
+bunx keel build src/guest.tsx -o dist/bundle.js
 ```
 
 ### 选项
@@ -35,27 +35,27 @@ bunx rill build src/guest.tsx -o dist/bundle.js
 ### 工作原理
 
 1. **Bun.build** -- 构建步骤在底层委托给 `Bun.build`,实现快速的原生速度打包。
-2. **外部化** -- 以下模块 ID 会被外部化,永不包含在输出 bundle 中:`react`、`react/jsx-runtime`、`react/jsx-dev-runtime`、`react-native`、`rill/guest` 以及 `host:*` 能力模块。这些模块由 host engine 的 `injectRuntimeAPI` 步骤在运行时提供。
+2. **外部化** -- 以下模块 ID 会被外部化,永不包含在输出 bundle 中:`react`、`react/jsx-runtime`、`react/jsx-dev-runtime`、`react-native`、`keel/guest` 以及 `host:*` 能力模块。这些模块由 host engine 的 `injectRuntimeAPI` 步骤在运行时提供。
 3. **后处理包装器** -- 打包后,输出会被包装在一个轻量的运行时注入 shim 中,以便沙箱在 bundle 执行时提供外部化的模块。
 4. **严格依赖守卫** -- 除非传入 `--no-strict`,构建会扫描输出 bundle,如果引用了允许白名单之外的任何模块,则构建失败。这可防止意外包含 Node 内置模块、原生插件或其他会在沙箱内崩溃的包。
 
 ---
 
-## `rill analyze`
+## `keel analyze`
 
 静态分析步骤,扫描先前构建的 bundle 以查找不允许的运行时依赖,以及(可选)契约边界违规。
 
 ### 用法
 
 ```bash
-bunx rill analyze dist/bundle.js --fail-on-violation
+bunx keel analyze dist/bundle.js --fail-on-violation
 ```
 
 ### 选项
 
 | 选项 | 类型 | 默认值 | 描述 |
 |---|---|---|---|
-| `-w, --whitelist <mods...>` | string[] | `react`、`react-native`、`react/jsx-runtime`、`rill/guest` | 白名单模块 ID |
+| `-w, --whitelist <mods...>` | string[] | `react`、`react-native`、`react/jsx-runtime`、`keel/guest` | 白名单模块 ID |
 | `--contract <path>` | string | -- | 契约模块路径;启用针对契约的边界校验 |
 | `--fail-on-violation` | boolean | `false` | 发现违规时以非零状态码退出 |
 | `--treat-eval-as-violation` | boolean | `false` | 将 `eval()` 使用计为违规 |
@@ -72,12 +72,12 @@ bunx rill analyze dist/bundle.js --fail-on-violation
 
 ---
 
-## `rill init`
+## `keel init`
 
 初始化一个新的 guest 项目:创建 `package.json`、严格的 `tsconfig.json` 和一个最小化的 `src/guest.tsx`。
 
 ```bash
-bunx rill init my-rill-guest
+bunx keel init my-keel-guest
 ```
 
 ---
@@ -87,7 +87,7 @@ bunx rill init my-rill-guest
 两个命令也可作为函数使用,以集成到自定义构建脚本或工具中。
 
 ```ts
-import { build, analyze } from 'rill/cli';
+import { build, analyze } from 'keel/cli';
 
 // 构建 guest bundle
 await build({
@@ -105,7 +105,7 @@ await analyze('dist/bundle.js', {
     'react',
     'react-native',
     'react/jsx-runtime',
-    'rill/guest',
+    'keel/guest',
   ],
   failOnViolation: true,
 });
@@ -135,7 +135,7 @@ await analyze('dist/bundle.js', {
 | 参数 | 类型 | 必需 | 描述 |
 |---|---|---|---|
 | `bundlePath` | `string` | 是 | 要分析的 bundle 路径 |
-| `options.whitelist` | `string[]` | 否 | 允许的模块指定符(默认:`react`、`react-native`、`react/jsx-runtime`、`rill/guest`) |
+| `options.whitelist` | `string[]` | 否 | 允许的模块指定符(默认:`react`、`react-native`、`react/jsx-runtime`、`keel/guest`) |
 | `options.failOnViolation` | `boolean` | 否 | 发现违规时抛出错误(默认 `false` -- 违规仅记录为警告) |
 | `options.treatEvalAsViolation` | `boolean` | 否 | 将 `eval()` 使用计为违规(默认 `false`) |
 | `options.treatDynamicNonLiteralAsViolation` | `boolean` | 否 | 将非字面量动态导入计为违规(默认 `false`) |

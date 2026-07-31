@@ -5,7 +5,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rill::tenant_manager {
+namespace keel::tenant_manager {
 
 class TenantRegistry {
  public:
@@ -53,4 +53,4 @@ class TenantRegistry {
   uint32_t nextId_ = 1;
 };
 
-}  // namespace rill::tenant_manager
+}  // namespace keel::tenant_manager

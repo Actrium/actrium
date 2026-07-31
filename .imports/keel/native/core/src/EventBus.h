@@ -10,7 +10,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rill::tenant_manager {
+namespace keel::tenant_manager {
 
 using TenantId = uint32_t;
 
@@ -164,4 +164,4 @@ private:
   mutable std::shared_mutex mutex_;
 };
 
-} // namespace rill::tenant_manager
+} // namespace keel::tenant_manager

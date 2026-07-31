@@ -1,5 +1,5 @@
 /**
- * @rill/shared - Protocol Layer
+ * @keel/shared - Protocol Layer
  *
  * Host <-> Guest shared protocol surface:
  * - Bridge
@@ -28,9 +28,9 @@ export {
   KBD_EVENT,
   KBD_SUBSCRIBE,
   KBD_UNSUBSCRIBE,
+  type KeelKeyEvent,
   type KeyboardSubscribePayload,
   type KeyboardUnsubscribePayload,
-  type RillKeyEvent,
 } from './keyboard';
 // Serialization utilities ()
 export {

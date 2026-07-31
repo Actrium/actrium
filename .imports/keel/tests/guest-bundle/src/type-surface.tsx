@@ -5,7 +5,7 @@
  * script names `src/index.tsx`; this file is only in the tsconfig's `include`).
  * That separation is the point: `index.tsx` is a runnable example guest whose
  * output `verify.ts` asserts, so it answers "does the bundle work". This file
- * answers a different question — "does the public type surface of `rill/guest`
+ * answers a different question — "does the public type surface of `keel/guest`
  * compile the way its own documentation says it does" — and gets to use shapes
  * purely because they are the ones that used to fail.
  *
@@ -13,7 +13,7 @@
  * file IS the test failing; there is nothing to run.
  */
 
-import { FlatList, SectionList, Text, TextInput, useRemoteRef, View, VirtualizedList } from 'rill/guest';
+import { FlatList, SectionList, Text, TextInput, useRemoteRef, View, VirtualizedList } from 'keel/guest';
 
 // ============================================================
 // #79 — list components take an element type

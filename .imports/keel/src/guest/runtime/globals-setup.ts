@@ -55,16 +55,16 @@ function __safeArg(arg: unknown): unknown {
 
 type HostEventCallback = (payload: unknown) => void;
 
-// Ensure __rill namespace exists (init.ts should have created it)
-const __rill =
-  (globalThis as unknown as SandboxGlobals).__rill ||
-  ((globalThis as unknown as SandboxGlobals).__rill = {});
+// Ensure __keel namespace exists (init.ts should have created it)
+const __keel =
+  (globalThis as unknown as SandboxGlobals).__keel ||
+  ((globalThis as unknown as SandboxGlobals).__keel = {});
 
 const __eventListeners = new Map<string, Set<HostEventCallback>>();
-__rill.eventListeners = __eventListeners;
+__keel.eventListeners = __eventListeners;
 
-// Subscribe to host events (used by __rill_onHostEvent hook)
-(globalThis as Record<string, unknown>).__rill_onHostEvent = (
+// Subscribe to host events (used by __keel_onHostEvent hook)
+(globalThis as Record<string, unknown>).__keel_onHostEvent = (
   eventName: string,
   callback: HostEventCallback
 ): (() => void) => {
@@ -84,7 +84,7 @@ __rill.eventListeners = __eventListeners;
 
 // Called by Host to dispatch events to Guest listeners
 // Reason: Host event payload type is runtime-defined
-__rill.dispatchEvent = (eventName: string, payload: unknown): void => {
+__keel.dispatchEvent = (eventName: string, payload: unknown): void => {
   const set = __eventListeners.get(eventName);
   if (set) {
     set.forEach((cb) => {
@@ -92,7 +92,7 @@ __rill.dispatchEvent = (eventName: string, payload: unknown): void => {
         cb(payload);
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        console.error(`[rill] Host event listener error: ${msg}`);
+        console.error(`[keel] Host event listener error: ${msg}`);
       }
     });
   }
@@ -102,9 +102,9 @@ __rill.dispatchEvent = (eventName: string, payload: unknown): void => {
 // Callback Registry Helpers
 // ============================================
 
-if (typeof __rill.removeCallback !== 'function') {
-  __rill.removeCallback = (id: string): void => {
-    __rill.callbacks?.delete(id);
+if (typeof __keel.removeCallback !== 'function') {
+  __keel.removeCallback = (id: string): void => {
+    __keel.callbacks?.delete(id);
   };
 }
 

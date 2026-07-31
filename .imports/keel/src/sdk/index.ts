@@ -1,7 +1,7 @@
 /**
- * rill/guest
+ * keel/guest
  *
- * Guest-side SDK for rill - runs inside sandbox
+ * Guest-side SDK for keel - runs inside sandbox
  * Provides virtual components, hooks for Guest development
  *
  * Note: Guest runtime internals (reconciler/bridge) are in src/guest/runtime/
@@ -29,7 +29,7 @@ export {
   nowMs,
 } from '../guest/runtime/reconciler/sandbox-compat';
 // Web keyboard bridge (issue #19, L3)
-export type { RillKeyEvent } from '../shared/keyboard';
+export type { KeelKeyEvent } from '../shared/keyboard';
 // Component prop types and event types
 export type {
   ActivityIndicatorProps,
@@ -42,14 +42,14 @@ export type {
   ImageBackgroundProps,
   ImageProps,
   ImageSource,
+  KeelErrorBoundaryProps,
+  KeelPlatformInfo,
   KeyboardAvoidingViewProps,
   LayoutEvent,
   ModalProps,
   PressableProps,
   ReactNode,
   RefreshControlProps,
-  RillErrorBoundaryProps,
-  RillPlatformInfo,
   SafeAreaViewProps,
   ScrollEvent,
   ScrollViewProps,
@@ -78,7 +78,7 @@ export type {
 // APIs - Event Subscription
 // APIs - Host Capability
 // Hooks - React Native
-// Hooks - Rill
+// Hooks - Keel
 // Error Boundary
 export {
   ActivityIndicator,
@@ -93,6 +93,7 @@ export {
   I18nManager,
   Image,
   ImageBackground,
+  KeelErrorBoundary,
   Keyboard,
   KeyboardAvoidingView,
   Linking,
@@ -101,7 +102,6 @@ export {
   Platform,
   Pressable,
   RefreshControl,
-  RillErrorBoundary,
   SafeAreaView,
   ScrollView,
   SectionList,

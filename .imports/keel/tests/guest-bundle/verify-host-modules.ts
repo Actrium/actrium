@@ -2,10 +2,10 @@ import fs from 'fs';
 import React from 'react';
 import { implementHostModules } from '../../src/contract';
 import { Engine } from '../../src/host';
-import { contract } from './src/rill.contract';
+import { contract } from './src/keel.contract';
 
 const bundlePath = './dist/host-modules.bundle.js';
-const manifestPath = './dist/rill-capabilities.json';
+const manifestPath = './dist/keel-capabilities.json';
 
 function readRequiredFile(path: string): string {
   if (!fs.existsSync(path)) {
@@ -68,9 +68,9 @@ async function assertRejects(promise: Promise<unknown>, expected: string, messag
 const bundle = readRequiredFile(bundlePath);
 const manifest = JSON.parse(readRequiredFile(manifestPath));
 
-expectContains('bundle', bundle, 'globalThis.__rill_importHostModule("host:analytics")');
-expectContains('bundle', bundle, 'globalThis.__rill_importHostModule("host:navigation")');
-expectContains('bundle', bundle, 'globalThis.__rill_importHostModule("host:theme")');
+expectContains('bundle', bundle, 'globalThis.__keel_importHostModule("host:analytics")');
+expectContains('bundle', bundle, 'globalThis.__keel_importHostModule("host:navigation")');
+expectContains('bundle', bundle, 'globalThis.__keel_importHostModule("host:theme")');
 expectContains('bundle', bundle, 'Host module resolver');
 
 expectNotContains('bundle', bundle, 'require("host:analytics")');
@@ -110,7 +110,7 @@ console.log('Host module bundle verified (build-time).');
 // Loads the REAL built bundle into the Engine (vm sandbox — the headless sandbox
 // the guest-bundle suite already uses; the standalone WASM provider cannot return
 // host-function values), registers host module implementations, and drives the
-// bundle's own `__rill_importHostModule` resolver. This is the end-to-end path the
+// bundle's own `__keel_importHostModule` resolver. This is the end-to-end path the
 // build-time string/manifest checks above cannot cover: contract -> Engine
 // injection -> guest resolver -> boundary dispatch -> host implementation.
 // ============================================================================
@@ -186,7 +186,7 @@ async function runtimeVerify(): Promise<void> {
 
   // 1. Valid rpc call: the host implementation runs and the call resolves.
   await ctx.eval(
-    'globalThis.__rill_importHostModule("host:analytics").track({ name: "opened", props: { from: "verify" } })'
+    'globalThis.__keel_importHostModule("host:analytics").track({ name: "opened", props: { from: "verify" } })'
   );
   assert(
     calls.track.length === 1 && calls.track[0]?.name === 'opened',
@@ -195,7 +195,7 @@ async function runtimeVerify(): Promise<void> {
 
   // 2. parseInput fail-closed: malformed input throws and never reaches the impl.
   assertThrows(
-    () => ctx.eval('globalThis.__rill_importHostModule("host:analytics").track({ name: "" })'),
+    () => ctx.eval('globalThis.__keel_importHostModule("host:analytics").track({ name: "" })'),
     'track input.name must be a non-empty string',
     'malformed track input must be rejected at the boundary'
   );
@@ -203,7 +203,7 @@ async function runtimeVerify(): Promise<void> {
 
   // 3. A second declared capability dispatches independently.
   await ctx.eval(
-    'globalThis.__rill_importHostModule("host:navigation").openProfile({ userId: "42" })'
+    'globalThis.__keel_importHostModule("host:navigation").openProfile({ userId: "42" })'
   );
   assert(
     calls.openProfile.length === 1 && calls.openProfile[0]?.userId === '42',
@@ -211,7 +211,7 @@ async function runtimeVerify(): Promise<void> {
   );
   assertThrows(
     () =>
-      ctx.eval('globalThis.__rill_importHostModule("host:navigation").openProfile({ userId: "" })'),
+      ctx.eval('globalThis.__keel_importHostModule("host:navigation").openProfile({ userId: "" })'),
     'openProfile input.userId must be a non-empty string',
     'malformed openProfile input must be rejected at the boundary'
   );
@@ -219,7 +219,7 @@ async function runtimeVerify(): Promise<void> {
   // 4. Subscription: parseEvent runs on every event before it reaches the guest handler.
   const handlerIndex = calls.themeHandlers.length;
   ctx.eval(
-    'globalThis.__themeEvents = []; globalThis.__rill_importHostModule("host:theme").onThemeChanged(function(event){ globalThis.__themeEvents.push(event); });'
+    'globalThis.__themeEvents = []; globalThis.__keel_importHostModule("host:theme").onThemeChanged(function(event){ globalThis.__themeEvents.push(event); });'
   );
   const themeHandler = calls.themeHandlers[handlerIndex];
   assert(typeof themeHandler === 'function', 'theme subscription handler should be registered');
@@ -242,7 +242,7 @@ async function runtimeVerify(): Promise<void> {
 
   // 5. Fail-closed: an unregistered host module throws at the resolver.
   assertThrows(
-    () => ctx.eval('globalThis.__rill_importHostModule("host:secret")'),
+    () => ctx.eval('globalThis.__keel_importHostModule("host:secret")'),
     'Host module not registered: host:secret',
     'an unregistered host module must fail closed'
   );
@@ -260,11 +260,11 @@ async function runtimeVerify(): Promise<void> {
 }
 
 async function verifyParseOutput(): Promise<void> {
-  const localContract = (await import('rill/contract')).defineRillContract({
+  const localContract = (await import('keel/contract')).defineKeelContract({
     version: '1.0.0',
     hostModules: {
       'host:analytics': {
-        track: (await import('rill/contract')).rpc<{ name: string }, { ok: true }>({
+        track: (await import('keel/contract')).rpc<{ name: string }, { ok: true }>({
           schema: {
             parseOutput: (value) => {
               if ((value as { ok?: unknown })?.ok !== true) {
@@ -293,7 +293,7 @@ async function verifyParseOutput(): Promise<void> {
 
   try {
     await engine.loadBundle(
-      'globalThis.__call = function(){ return globalThis.__rill.hostModules["host:analytics"].track({ name: "x" }); };'
+      'globalThis.__call = function(){ return globalThis.__keel.hostModules["host:analytics"].track({ name: "x" }); };'
     );
     // biome-ignore lint/suspicious/noExplicitAny: reach into the private sandbox scope for verification
     const ctx = (engine as any).context;

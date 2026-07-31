@@ -4,13 +4,13 @@
 #include <fstream>
 
 namespace fs = std::filesystem;
-using namespace rill::security;
-using namespace rill::test;
+using namespace keel::security;
+using namespace keel::test;
 
 namespace {
 
 std::string createTempSandboxRoot(const std::string& suffix) {
-  auto path = fs::temp_directory_path() / ("rill_test_sandbox_" + suffix);
+  auto path = fs::temp_directory_path() / ("keel_test_sandbox_" + suffix);
   fs::create_directories(path);
   return path.string();
 }

@@ -84,11 +84,11 @@ jobs:
       # so a rename in the workspace can break it while --workspace above stays
       # green. Build it for real so the list can never drift again.
       - name: Build debug (DWARF) WASM guests
-        run: RILL_GUEST_DEBUG=1 bash build.sh
+        run: KEEL_GUEST_DEBUG=1 bash build.sh
 
       # Host-target unit tests for the SDK crate: wire codecs (op-batch / canvas /
-      # RBS1 golden vectors), the contract conformance suite, and the host-call
-      # wrapper wiretaps. `-p rill-native-guest` rather than --workspace on purpose: the
+      # KBS1 golden vectors), the contract conformance suite, and the host-call
+      # wrapper wiretaps. `-p keel-native-guest` rather than --workspace on purpose: the
       # guest cdylibs around it are wasm32-only (their panic handler uses
       # core::arch::wasm32, which collides with std's in a test harness), so a
       # workspace-wide `cargo test` cannot compile. Both feature configurations
@@ -97,5 +97,5 @@ jobs:
       # own pass to stay green.
       - name: Test SDK crate (host target)
         run: |
-          cargo test -p rill-native-guest
-          cargo test -p rill-native-guest --no-default-features
+          cargo test -p keel-native-guest
+          cargo test -p keel-native-guest --no-default-features

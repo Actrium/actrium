@@ -9,7 +9,7 @@ describe('Strict Guard - violation cases', () => {
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-cli-test-'));
+    distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-cli-test-'));
     file = (name: string) => path.join(distDir, name);
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -25,7 +25,7 @@ describe('Strict Guard - violation cases', () => {
 
     await expect(
       analyze(file('guard-lodash.js'), {
-        whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/guest'],
+        whitelist: ['react', 'react-native', 'react/jsx-runtime', 'keel/guest'],
         failOnViolation: true,
         treatEvalAsViolation: true,
         treatDynamicNonLiteralAsViolation: true,
@@ -35,11 +35,11 @@ describe('Strict Guard - violation cases', () => {
 
   it('should pass when bundle only contains whitelisted deps', async () => {
     const { analyze } = await import('./build');
-    fs.writeFileSync(file('guard-ok.js'), "require('react'); require('rill/guest');");
+    fs.writeFileSync(file('guard-ok.js'), "require('react'); require('keel/guest');");
     const warnSpy = spyOn(console, 'warn').mockImplementation(() => {});
 
     await analyze(file('guard-ok.js'), {
-      whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/guest'],
+      whitelist: ['react', 'react-native', 'react/jsx-runtime', 'keel/guest'],
       failOnViolation: true,
     });
 

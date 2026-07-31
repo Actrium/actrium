@@ -1,5 +1,5 @@
 /**
- * Rill Core Type Definitions
+ * Keel Core Type Definitions
  *
  *  bridge/types.ts
  *

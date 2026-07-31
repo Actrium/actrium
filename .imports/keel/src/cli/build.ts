@@ -1,5 +1,5 @@
 /**
- * Rill CLI - Build
+ * Keel CLI - Build
  *
  * Bun-based guest bundler
  */
@@ -8,7 +8,7 @@ import type { BunPlugin } from 'bun';
 import fs from 'fs';
 import path from 'path';
 import { pathToFileURL } from 'url';
-import { isHostModuleId, type RillContractShape, validateContract } from '../contract';
+import { isHostModuleId, type KeelContractShape, validateContract } from '../contract';
 
 /**
  * Build options
@@ -58,7 +58,7 @@ export interface BuildOptions {
   /**
    * Contract object used to validate host:* imports and Guest exports.
    */
-  contract?: RillContractShape;
+  contract?: KeelContractShape;
 
   /**
    * Path to a contract module. The module must export `contract` or a default contract.
@@ -88,7 +88,7 @@ export interface AnalyzeOptions {
   failOnViolation?: boolean;
   treatEvalAsViolation?: boolean;
   treatDynamicNonLiteralAsViolation?: boolean;
-  contract?: RillContractShape;
+  contract?: KeelContractShape;
   contractFile?: string;
 }
 
@@ -117,66 +117,66 @@ export interface GuestCapabilitiesManifest {
  * Sets up necessary global environment before bundle execution
  */
 const RUNTIME_INJECT = `
-// Rill Runtime Inject
+// Keel Runtime Inject
 (function() {
   'use strict';
 
-  // Initialize __rill namespace
-  if (!globalThis.__rill) { globalThis.__rill = {}; }
-  var __rill = globalThis.__rill;
+  // Initialize __keel namespace
+  if (!globalThis.__keel) { globalThis.__keel = {}; }
+  var __keel = globalThis.__keel;
 
   // Callback registry - persist across re-executions
-  if (!__rill.callbacks) {
-    __rill.callbacks = new Map();
+  if (!__keel.callbacks) {
+    __keel.callbacks = new Map();
   }
-  if (typeof __rill.callbackId !== 'number') {
-    __rill.callbackId = 0;
+  if (typeof __keel.callbackId !== 'number') {
+    __keel.callbackId = 0;
   }
 
   // Register callback
-  if (typeof __rill.registerCallback !== 'function') {
-    __rill.registerCallback = function(fn) {
-      var id = 'fn_' + (++__rill.callbackId);
-      __rill.callbacks.set(id, fn);
+  if (typeof __keel.registerCallback !== 'function') {
+    __keel.registerCallback = function(fn) {
+      var id = 'fn_' + (++__keel.callbackId);
+      __keel.callbacks.set(id, fn);
       return id;
     };
   }
 
   // Invoke callback
-  if (typeof __rill.invokeCallback !== 'function') {
-    __rill.invokeCallback = function(fnId, args) {
-      var fn = __rill.callbacks.get(fnId);
+  if (typeof __keel.invokeCallback !== 'function') {
+    __keel.invokeCallback = function(fnId, args) {
+      var fn = __keel.callbacks.get(fnId);
       if (fn) {
         try {
           return fn.apply(null, args || []);
         } catch (e) {
-          console.error('[rill] Callback execution error for', fnId);
-          console.error('[rill] Error message:', e && e.message ? e.message : String(e));
-          console.error('[rill] Error stack:', e && e.stack ? e.stack : 'no stack');
+          console.error('[keel] Callback execution error for', fnId);
+          console.error('[keel] Error message:', e && e.message ? e.message : String(e));
+          console.error('[keel] Error stack:', e && e.stack ? e.stack : 'no stack');
           throw e;
         }
       } else {
-        console.warn('[rill] Callback not found:', fnId);
+        console.warn('[keel] Callback not found:', fnId);
       }
     };
   }
 
   // Remove callback
-  if (typeof __rill.removeCallback !== 'function') {
-    __rill.removeCallback = function(fnId) {
-      __rill.callbacks.delete(fnId);
+  if (typeof __keel.removeCallback !== 'function') {
+    __keel.removeCallback = function(fnId) {
+      __keel.callbacks.delete(fnId);
     };
   }
 
   // Host event listeners
-  if (!__rill.eventListeners) {
-    __rill.eventListeners = new Map();
+  if (!__keel.eventListeners) {
+    __keel.eventListeners = new Map();
   }
-  var __eventListeners = __rill.eventListeners;
+  var __eventListeners = __keel.eventListeners;
 
   // Register host event listener
-  if (typeof globalThis.__rill_onHostEvent !== 'function') {
-    globalThis.__rill_onHostEvent = function(eventName, callback) {
+  if (typeof globalThis.__keel_onHostEvent !== 'function') {
+    globalThis.__keel_onHostEvent = function(eventName, callback) {
       if (!__eventListeners.has(eventName)) {
         __eventListeners.set(eventName, new Set());
       }
@@ -189,15 +189,15 @@ const RUNTIME_INJECT = `
   }
 
   // Handle host event
-  if (typeof __rill.dispatchEvent !== 'function') {
-    __rill.dispatchEvent = function(eventName, payload) {
+  if (typeof __keel.dispatchEvent !== 'function') {
+    __keel.dispatchEvent = function(eventName, payload) {
       var listeners = __eventListeners.get(eventName);
       if (listeners) {
         listeners.forEach(function(listener) {
           try {
             listener(payload);
           } catch (e) {
-            console.error('[rill] Host event listener error:', e);
+            console.error('[keel] Host event listener error:', e);
           }
         });
       }
@@ -205,18 +205,18 @@ const RUNTIME_INJECT = `
   }
 
   // Handle host message
-  if (typeof globalThis.__rill_handleMessage !== 'function') {
-    globalThis.__rill_handleMessage = function(message) {
+  if (typeof globalThis.__keel_handleMessage !== 'function') {
+    globalThis.__keel_handleMessage = function(message) {
       switch (message.type) {
         case 'CALL_FUNCTION':
-          __rill.invokeCallback(message.fnId, message.args);
+          __keel.invokeCallback(message.fnId, message.args);
           break;
         case 'HOST_EVENT':
-          __rill.dispatchEvent(message.eventName, message.payload);
+          __keel.dispatchEvent(message.eventName, message.payload);
           break;
         case 'CONFIG_UPDATE':
-          if (__rill.config) {
-            Object.assign(__rill.config, message.config);
+          if (__keel.config) {
+            Object.assign(__keel.config, message.config);
           }
           break;
         case 'DESTROY':
@@ -227,20 +227,20 @@ const RUNTIME_INJECT = `
   }
 
   // Config storage
-  if (!__rill.config) {
-    __rill.config = globalThis.__rill_getConfig ? globalThis.__rill_getConfig() : {};
+  if (!__keel.config) {
+    __keel.config = globalThis.__keel_getConfig ? globalThis.__keel_getConfig() : {};
   }
 
   // Host module resolver. Bundled host:* imports are rewritten to this hook.
-  // The host populates __rill.hostModules (see Engine.injectHostModules); an
+  // The host populates __keel.hostModules (see Engine.injectHostModules); an
   // unregistered capability fails closed.
-  if (typeof globalThis.__rill_importHostModule !== 'function') {
-    globalThis.__rill_importHostModule = function(moduleId) {
-      if (__rill.hostModules && __rill.hostModules[moduleId]) {
-        return __rill.hostModules[moduleId];
+  if (typeof globalThis.__keel_importHostModule !== 'function') {
+    globalThis.__keel_importHostModule = function(moduleId) {
+      if (__keel.hostModules && __keel.hostModules[moduleId]) {
+        return __keel.hostModules[moduleId];
       }
 
-      throw new Error('[rill] Host module not registered: ' + moduleId);
+      throw new Error('[keel] Host module not registered: ' + moduleId);
     };
   }
 
@@ -249,41 +249,41 @@ const RUNTIME_INJECT = `
 
 /**
  * Auto-render footer code (generic)
- * Uses RillReconciler.render for rendering default component export
+ * Uses KeelReconciler.render for rendering default component export
  *
  * For custom render logic (e.g., usePanels hook), use --footer option
  */
 const AUTO_RENDER_FOOTER = `
 /* Auto-render */
 (function() {
-  if (typeof __rill_sendBatch === 'function' && typeof globalThis.__rill !== 'undefined' && globalThis.__rill.guest) {
+  if (typeof __keel_sendBatch === 'function' && typeof globalThis.__keel !== 'undefined' && globalThis.__keel.guest) {
     try {
       var React = globalThis.React;
       if (!React) {
-        console.error('[rill] React not found, cannot auto-render');
+        console.error('[keel] React not found, cannot auto-render');
         return;
       }
 
-      var RillReconciler = globalThis.RillReconciler;
-      if (!RillReconciler || !RillReconciler.render) {
-        console.error('[rill] RillReconciler not found, cannot auto-render');
+      var KeelReconciler = globalThis.KeelReconciler;
+      if (!KeelReconciler || !KeelReconciler.render) {
+        console.error('[keel] KeelReconciler not found, cannot auto-render');
         return;
       }
 
-      var GuestExport = globalThis.__rill.guest;
+      var GuestExport = globalThis.__keel.guest;
       var Component = typeof GuestExport === 'function'
         ? GuestExport
         : (GuestExport.default || GuestExport);
 
       if (!Component || typeof Component !== 'function') {
-        console.warn('[rill] No valid component found in guest export');
+        console.warn('[keel] No valid component found in guest export');
         return;
       }
 
-      console.log('[rill] Auto-rendering guest component');
-      RillReconciler.render(React.createElement(Component), __rill_sendBatch);
+      console.log('[keel] Auto-rendering guest component');
+      KeelReconciler.render(React.createElement(Component), __keel_sendBatch);
     } catch (error) {
-      console.error('[rill] Auto-render failed:', error);
+      console.error('[keel] Auto-render failed:', error);
     }
   }
 })();
@@ -297,7 +297,7 @@ const EXTERNALS: Record<string, string> = {
   'react/jsx-runtime': 'ReactJSXRuntime',
   'react/jsx-dev-runtime': 'ReactJSXDevRuntime',
   'react-native': 'ReactNative',
-  'rill/guest': 'RillGuest',
+  'keel/guest': 'KeelGuest',
 };
 
 const HOST_MODULE_EXTERNAL = 'host:*';
@@ -351,7 +351,7 @@ function parserPluginsForPath(
 async function createBabelPlugin(options: { dev: boolean }): Promise<BunPlugin> {
   const babel = await import('@babel/core');
   // Pass the plugins as module objects, not strings: Babel resolves string
-  // plugin names against the build cwd, which silently fails when `rill build`
+  // plugin names against the build cwd, which silently fails when `keel build`
   // runs outside a tree where the package is hoisted.
   const arrowFunctionsTransform = (await import('@babel/plugin-transform-arrow-functions')).default;
   const blockScopingTransform = (await import('@babel/plugin-transform-block-scoping')).default;
@@ -494,7 +494,7 @@ try { if (typeof __ReactNative === 'undefined' && typeof ReactNative !== 'undefi
 type HostBoundaryScanResult = import('./oxc-adapter').HostBoundaryScanResult;
 
 interface ContractOptions {
-  contract?: RillContractShape;
+  contract?: KeelContractShape;
   contractFile?: string;
 }
 
@@ -505,7 +505,7 @@ interface CollectedHostBoundary {
   violations: string[];
 }
 
-async function resolveContract(options: ContractOptions): Promise<RillContractShape | undefined> {
+async function resolveContract(options: ContractOptions): Promise<KeelContractShape | undefined> {
   if (options.contract) {
     validateContract(options.contract);
     return options.contract;
@@ -548,7 +548,7 @@ function createHostBoundaryCollector(entryPath: string): {
 
   return {
     plugin: {
-      name: 'rill-host-boundary-analysis',
+      name: 'keel-host-boundary-analysis',
       setup(build) {
         build.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async (args) => {
           if (args.path.includes(`${path.sep}node_modules${path.sep}`)) {
@@ -614,7 +614,7 @@ function mergeHostBoundaryScan(
 
 function validateBoundaryAgainstContract(
   boundary: Pick<CollectedHostBoundary, 'hostCapabilities' | 'guestExports'>,
-  contract: RillContractShape,
+  contract: KeelContractShape,
   options: { checkMissingGuestExports?: boolean } = {}
 ): string[] {
   const violations: string[] = [];
@@ -666,7 +666,7 @@ function throwBoundaryViolations(violations: string[]): void {
     return;
   }
 
-  throw new Error(`Rill boundary violations:\n- ${violations.join('\n- ')}`);
+  throw new Error(`Keel boundary violations:\n- ${violations.join('\n- ')}`);
 }
 
 function rewriteHostModuleRequires(code: string, moduleIds: string[]): string {
@@ -676,7 +676,7 @@ function rewriteHostModuleRequires(code: string, moduleIds: string[]): string {
     const pattern = new RegExp(`require\\(["']${escapeRegExp(moduleId)}["']\\)`, 'g');
     rewritten = rewritten.replace(
       pattern,
-      `globalThis.__rill_importHostModule(${JSON.stringify(moduleId)})`
+      `globalThis.__keel_importHostModule(${JSON.stringify(moduleId)})`
     );
   }
 
@@ -685,7 +685,7 @@ function rewriteHostModuleRequires(code: string, moduleIds: string[]): string {
 
 function createGuestCapabilitiesManifest(
   boundary: Pick<CollectedHostBoundary, 'hostCapabilities' | 'guestExports'>,
-  contract?: RillContractShape
+  contract?: KeelContractShape
 ): GuestCapabilitiesManifest {
   // Of the capabilities actually used by the guest, flag those whose untrusted
   // input crosses unvalidated: rpc without parseInput / subscription without
@@ -849,13 +849,13 @@ export async function build(options: BuildOptions): Promise<void> {
   bundleCode = rewriteHostModuleRequires(bundleCode, hostBoundary.hostModuleIds);
 
   // For CJS output, module.exports carries the default export
-  // After transforming externals, capture default into globalThis.__rill.guest
+  // After transforming externals, capture default into globalThis.__keel.guest
   const captureExports = `
 try {
-  var __rillModuleExports = (typeof module !== 'undefined' && module && module.exports) ? module.exports : (typeof exports !== 'undefined' ? exports : undefined);
-  if (__rillModuleExports) {
-    if (!globalThis.__rill) { globalThis.__rill = {}; }
-    globalThis.__rill.guest = __rillModuleExports.default || __rillModuleExports;
+  var __keelModuleExports = (typeof module !== 'undefined' && module && module.exports) ? module.exports : (typeof exports !== 'undefined' ? exports : undefined);
+  if (__keelModuleExports) {
+    if (!globalThis.__keel) { globalThis.__keel = {}; }
+    globalThis.__keel.guest = __keelModuleExports.default || __keelModuleExports;
   }
 } catch {}
 `;
@@ -876,12 +876,12 @@ try {
 
   // Wrap with runtime inject and auto-render footer
   // JSI optimization is handled directly in createElement (see RUNTIME_INJECT)
-  const wrappedCode = `/* Rill Guest Bundle - Generated by rill-cli */
+  const wrappedCode = `/* Keel Guest Bundle - Generated by keel-cli */
 ${RUNTIME_INJECT}
 ${EXTERNAL_ALIAS_SHIM}
 ${modifiedBundle}
 ${footerCode}
-/* End of Rill Guest Bundle */`;
+/* End of Keel Guest Bundle */`;
 
   // Write final bundle
   await Bun.write(targetPath, wrappedCode);
@@ -912,7 +912,7 @@ ${footerCode}
   if (strict) {
     try {
       await analyze(targetPath, {
-        whitelist: ['react', 'react-native', 'react/jsx-runtime', 'rill/guest'],
+        whitelist: ['react', 'react-native', 'react/jsx-runtime', 'keel/guest'],
         failOnViolation: true,
         treatEvalAsViolation: true,
         treatDynamicNonLiteralAsViolation: true,
@@ -1035,7 +1035,7 @@ export async function analyze(
   ] as string[]);
 
   const whitelist = new Set(
-    options?.whitelist ?? ['react', 'react-native', 'react/jsx-runtime', 'rill/guest']
+    options?.whitelist ?? ['react', 'react-native', 'react/jsx-runtime', 'keel/guest']
   );
 
   const violations: string[] = Array.from(found).filter((m) => {
@@ -1090,7 +1090,7 @@ export async function analyze(
     );
     const msg = hasOnlyModuleViolations
       ? `Found non-whitelisted modules: ${violations.join(', ')}`
-      : `Found Rill boundary violations: ${violations.join(', ')}`;
+      : `Found Keel boundary violations: ${violations.join(', ')}`;
     if (options?.failOnViolation) {
       throw new Error(msg);
     } else {

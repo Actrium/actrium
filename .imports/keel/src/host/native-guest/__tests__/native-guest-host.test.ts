@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHostModuleDispatch, defineRillContract, implementHostModules, rpc } from '../../../contract';
+import { createHostModuleDispatch, defineKeelContract, implementHostModules, rpc } from '../../../contract';
 import { ComponentRegistry } from '../../registry';
 import { Receiver } from '../../receiver';
-import { decodeEnvelope, isRbs1, LIMITS, reviveSentinels } from '../../wire/store-net-envelope';
+import { decodeEnvelope, isKbs1, LIMITS, reviveSentinels } from '../../wire/store-net-envelope';
 import { NativeGuestHost } from '../native-guest-host';
 
 // A tiny host module defined IN the test, mirroring the platform's host:store
-// contract (putText/getText shapes from host-store.ts): rill knows nothing
+// contract (putText/getText shapes from host-store.ts): keel knows nothing
 // about specific capabilities, so this proves the native-guest ABI generically.
 function storeDispatch(options: { throwOnPut?: boolean } = {}) {
   const store = new Map<string, string>();
-  const contract = defineRillContract({
+  const contract = defineKeelContract({
     version: '1',
     hostModules: {
       'host:store': {
@@ -56,7 +56,7 @@ function storeDispatch(options: { throwOnPut?: boolean } = {}) {
 }
 
 const WASM = readFileSync(join(import.meta.dir, 'fixtures/roundtrip.wasm'));
-// Real Rust guest built via the rill-native-guest SDK (crates/build.sh).
+// Real Rust guest built via the keel-native-guest SDK (crates/build.sh).
 const RUST_GUEST = readFileSync(join(import.meta.dir, 'fixtures/kv-guest.wasm'));
 // Rust guest that renders UI via the SDK's declarative builder.
 const UI_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-guest.wasm'));
@@ -66,7 +66,7 @@ const SEQ_GUEST = readFileSync(join(import.meta.dir, 'fixtures/seq-guest.wasm'))
 const BAD_JSON = readFileSync(join(import.meta.dir, 'fixtures/bad-json.wasm'));
 const OOB = readFileSync(join(import.meta.dir, 'fixtures/oob.wasm'));
 const BAD_BATCH = readFileSync(join(import.meta.dir, 'fixtures/bad-batch.wasm'));
-// Rust guest that receives host->guest events via rill_on_event.
+// Rust guest that receives host->guest events via keel_on_event.
 const EVENT_GUEST = readFileSync(join(import.meta.dir, 'fixtures/event-guest.wasm'));
 // Guest authored in C via the C SDK (sdk/c) — proves the ABI is language-neutral.
 const C_GUEST = readFileSync(join(import.meta.dir, 'fixtures/c-guest.wasm'));
@@ -78,9 +78,9 @@ const BAD_IMPORT = readFileSync(join(import.meta.dir, 'fixtures/bad-import.wasm'
 // SIMD128 guest: a box-blur demo built with wasm v128 opcodes; proves enabling
 // SIMD adds no host import (opcodes, not imports) so the seal is unchanged (#57).
 const BLUR_GUEST = readFileSync(join(import.meta.dir, 'fixtures/blur-demo-guest.wasm'));
-// Adversarial guest whose rill_on_event traps.
+// Adversarial guest whose keel_on_event traps.
 const EVENT_TRAP = readFileSync(join(import.meta.dir, 'fixtures/event-trap.wasm'));
-// Adversarial guest whose rill_alloc always returns 0 (exhausted allocator).
+// Adversarial guest whose keel_alloc always returns 0 (exhausted allocator).
 const ALLOC_ZERO = readFileSync(join(import.meta.dir, 'fixtures/alloc-zero.wasm'));
 
 // --- tiny seeded PRNG + JSON generator for fuzzing (reproducible, no deps) ---
@@ -159,14 +159,14 @@ describe('NativeGuestHost — native (non-JS) guest host:* ABI', () => {
   });
 });
 
-describe('NativeGuestHost — real Rust guest via the rill-native-guest SDK', () => {
+describe('NativeGuestHost — real Rust guest via the keel-native-guest SDK', () => {
   it('drives an async Rust guest (store::put("a","b").await) end to end', async () => {
     const { table, store } = storeDispatch();
     const host = new NativeGuestHost({ dispatch: table });
     await host.load(RUST_GUEST);
     await host.drain();
 
-    // The guest's async continuation ran after rill_resolve and stashed the outcome.
+    // The guest's async continuation ran after keel_resolve and stashed the outcome.
     expect((host.exports.last_ok as () => number)()).toBe(1);
     const ptr = (host.exports.result_ptr as () => number)();
     const len = (host.exports.result_len as () => number)();
@@ -258,7 +258,7 @@ describe('NativeGuestHost — adversarial / boundary (the trust boundary)', () =
   });
 });
 
-describe('NativeGuestHost — allocation failure (rill_alloc returns 0)', () => {
+describe('NativeGuestHost — allocation failure (keel_alloc returns 0)', () => {
   // Address 0 is INSIDE linear memory, so a returned NULL passes a pure bounds
   // check. The host must treat ptr 0 + len > 0 as allocation failure and never
   // write there — the SDK's bump allocator returns NULL exactly when a
@@ -270,7 +270,7 @@ describe('NativeGuestHost — allocation failure (rill_alloc returns 0)', () => 
     await host.load(ALLOC_ZERO);
     await host.drain();
 
-    // rill_resolve never ran (the cb was abandoned, fail-closed) ...
+    // keel_resolve never ran (the cb was abandoned, fail-closed) ...
     expect((host.exports.resolve_ok as () => number)()).toBe(-1);
     // ... and the guest's request bytes at address 0 were NOT overwritten.
     expect(new TextDecoder().decode(host.readBytes(0, 10))).toBe('host:store');
@@ -281,7 +281,7 @@ describe('NativeGuestHost — allocation failure (rill_alloc returns 0)', () => 
     await host.load(ALLOC_ZERO);
 
     // emitEvent absorbs the allocation failure (same fail-closed contract as a
-    // trapping guest) — but rill_on_event must NOT have been invoked.
+    // trapping guest) — but keel_on_event must NOT have been invoked.
     expect(() => host.emitEvent('ping', { n: 1 })).not.toThrow();
     expect((host.exports.event_count as () => number)()).toBe(0);
     expect(new TextDecoder().decode(host.readBytes(0, 10))).toBe('host:store');
@@ -341,7 +341,7 @@ describe('NativeGuestHost — C guest via the C SDK (language-neutral ABI)', () 
   });
 });
 
-describe('NativeGuestHost — host->guest events (rill_on_event)', () => {
+describe('NativeGuestHost — host->guest events (keel_on_event)', () => {
   it('delivers an event to a native guest handler with its payload', async () => {
     const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_GUEST);
@@ -367,7 +367,7 @@ describe('NativeGuestHost — host->guest events (rill_on_event)', () => {
     expect(lastPayload()).toEqual({ n: 7 });
   });
 
-  it('pushes a byte-carrying payload as an RBS1 frame, leaving JSON events byte-identical', async () => {
+  it('pushes a byte-carrying payload as a KBS1 frame, leaving JSON events byte-identical', async () => {
     // The host->guest PUSH path for raw bytes (issue #82). A native guest cannot
     // subscribe to a host module (that needs a function reference), and it cannot
     // pull data that arrives because an external peer spoke — so the event
@@ -383,15 +383,15 @@ describe('NativeGuestHost — host->guest events (rill_on_event)', () => {
     // Byte-free payload: the plain-JSON path, byte-for-byte what it always was.
     host.emitEvent('ping', { n: 42 });
     const jsonRaw = lastRaw();
-    expect(isRbs1(jsonRaw)).toBe(false);
+    expect(isKbs1(jsonRaw)).toBe(false);
     expect([...jsonRaw]).toEqual([...new TextEncoder().encode(JSON.stringify({ n: 42 }))]);
 
-    // Byte-carrying payload: an RBS1 frame arrives in the guest's own memory,
+    // Byte-carrying payload: a KBS1 frame arrives in the guest's own memory,
     // with the bytes as a raw segment (not a number array, not base64).
     const chunk = new Uint8Array([0, 1, 2, 253, 254, 255]);
     host.emitEvent('ping', { seq: 3, chunk });
     const raw = lastRaw();
-    expect(isRbs1(raw)).toBe(true);
+    expect(isKbs1(raw)).toBe(true);
     const { json, segments } = decodeEnvelope(raw);
     const revived = reviveSentinels(JSON.parse(new TextDecoder().decode(json)), segments) as {
       seq: number;
@@ -465,7 +465,7 @@ describe('NativeGuestHost — host->guest events (rill_on_event)', () => {
       (host.exports.last_ptr as () => number)(),
       (host.exports.last_len as () => number)()
     );
-    expect(isRbs1(raw)).toBe(true);
+    expect(isKbs1(raw)).toBe(true);
     const { json, segments } = decodeEnvelope(raw);
     // Two segments, the array sentinel naming both, and each within the cap.
     expect(new TextDecoder().decode(json)).toBe('{"chunk":{"$b":[0,1]}}');
@@ -481,15 +481,15 @@ describe('NativeGuestHost — host->guest events (rill_on_event)', () => {
     expect([...revived.chunk.subarray(-64)]).toEqual([...chunk.subarray(-64)]);
   });
 
-  it('emitEvent is a no-op for a guest that does not export rill_on_event', async () => {
-    // A .wat guest with no rill_on_event export — must not throw.
+  it('emitEvent is a no-op for a guest that does not export keel_on_event', async () => {
+    // A .wat guest with no keel_on_event export — must not throw.
     const host = new NativeGuestHost({ dispatch: {} });
     await host.load(BAD_BATCH);
     expect(() => host.emitEvent('ping', { n: 1 })).not.toThrow();
   });
 
-  it('is fail-closed when the guest rill_on_event traps (emitEvent never throws)', async () => {
-    // event-trap.wasm exports a rill_on_event that traps. A hostile/broken guest
+  it('is fail-closed when the guest keel_on_event traps (emitEvent never throws)', async () => {
+    // event-trap.wasm exports a keel_on_event that traps. A hostile/broken guest
     // must not make host-side event delivery throw.
     const host = new NativeGuestHost({ dispatch: {} });
     await host.load(EVENT_TRAP);
@@ -511,7 +511,7 @@ describe('NativeGuestHost — host->guest events (rill_on_event)', () => {
 });
 
 describe('NativeGuestHost — the seal is an import allowlist (automated)', () => {
-  const ALLOWED = new Set(['rill_host_call', 'rill_send_batch', 'rill_log', 'rill_on_event']);
+  const ALLOWED = new Set(['keel_host_call', 'keel_send_batch', 'keel_log', 'keel_on_event']);
   const guests: Array<[string, Uint8Array]> = [
     ['roundtrip', WASM],
     ['kv-guest', RUST_GUEST],

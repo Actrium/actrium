@@ -24,7 +24,7 @@ describe('E2E Rendering: Basic Rendering', () => {
   it('should mount component and render initial UI', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement(
@@ -34,7 +34,7 @@ describe('E2E Rendering: Basic Rendering', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -54,7 +54,7 @@ describe('E2E Rendering: Basic Rendering', () => {
     const guestCode = `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [count, setCount] = useState(0);
@@ -68,7 +68,7 @@ describe('E2E Rendering: Basic Rendering', () => {
               testID: 'button',
               onPress: () => {
                 setCount(count + 1);
-                globalThis.__rill_emitEvent('PRESSED', { count: count + 1 });
+                globalThis.__keel_emitEvent('PRESSED', { count: count + 1 });
               }
             },
             React.createElement('Text', { testID: 'counter' }, 'Count: ' + count)
@@ -76,7 +76,7 @@ describe('E2E Rendering: Basic Rendering', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -105,24 +105,24 @@ describe('E2E Rendering: Basic Rendering', () => {
   it('should unmount and clean up', async () => {
     const guestCode = `
       const React = require('react');
-      const { render, unmount } = require('rill/reconciler');
+      const { render, unmount } = require('keel/reconciler');
 
       function App() {
         return React.createElement(
           'TouchableOpacity',
           {
             testID: 'button',
-            onPress: () => globalThis.__rill_emitEvent('CLICK')
+            onPress: () => globalThis.__keel_emitEvent('CLICK')
           },
           React.createElement('Text', {}, 'Button')
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
 
       // Expose unmount function
       globalThis.__unmountApp = () => {
-        unmount(globalThis.__rill_sendBatch);
+        unmount(globalThis.__keel_sendBatch);
       };
     `;
 
@@ -156,7 +156,7 @@ describe('E2E Rendering: Conditional Rendering', () => {
     const guestCode = `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [visible, setVisible] = useState(false);
@@ -176,7 +176,7 @@ describe('E2E Rendering: Conditional Rendering', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -221,7 +221,7 @@ describe('E2E Rendering: List Rendering', () => {
   it('should render lists of items', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const items = [
         { id: 1, text: 'Item 1' },
@@ -243,7 +243,7 @@ describe('E2E Rendering: List Rendering', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -264,7 +264,7 @@ describe('E2E Rendering: List Rendering', () => {
     const guestCode = `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [items, setItems] = useState([1, 2, 3]);
@@ -290,7 +290,7 @@ describe('E2E Rendering: List Rendering', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -327,7 +327,7 @@ describe('E2E Rendering: Deep Nesting', () => {
   it('should handle deeply nested components', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function Nested({ depth, maxDepth }) {
         if (depth >= maxDepth) {
@@ -345,7 +345,7 @@ describe('E2E Rendering: Deep Nesting', () => {
         return React.createElement(Nested, { depth: 0, maxDepth: 10 });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);

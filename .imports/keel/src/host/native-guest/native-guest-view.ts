@@ -9,9 +9,9 @@
  * is built from them, so host:* is written once and serves both guest kinds) and
  * the same `components`. It owns a `NativeGuestHost` + a `Receiver`; the guest's
  * render batches flow NativeGuestHost.onRenderBatch -> receiver.applyBatch, and
- * `sendEvent` forwards to the native event channel (rill_on_event).
+ * `sendEvent` forwards to the native event channel (keel_on_event).
  */
-import type { HostModuleImplementationMap, RillContractShape } from '../../contract';
+import type { HostModuleImplementationMap, KeelContractShape } from '../../contract';
 import { createHostModuleDispatch } from '../../contract';
 import { Receiver } from '../receiver';
 import type { ComponentType } from '../registry';
@@ -23,12 +23,12 @@ export interface NativeGuestViewOptions {
   /** The decoded native guest `.wasm` (the caller owns any base64/gzip decode). */
   wasmBytes: BufferSource;
   /** Host-capability contract — same one an `Engine` would take. */
-  contract: RillContractShape;
+  contract: KeelContractShape;
   /** Host-capability implementations — same shape as `Engine`'s `hostModules`. */
   hostModules: HostModuleImplementationMap;
   /** Sealed component materializers — same map as `Engine.register`. */
   components: Record<string, ComponentType>;
-  /** Sink for guest `rill_log`. */
+  /** Sink for guest `keel_log`. */
   onLog?: (message: string) => void;
 }
 
@@ -48,10 +48,10 @@ export interface NativeGuestEngine extends EngineViewEngine {
   /**
    * Raw guest wasm exports for diagnostics (e.g. kv-guest's `last_ok`);
    * undefined before `loadBundle` resolves. Diagnostics-only — calling
-   * state-mutating exports (rill_alloc, ...) through this can corrupt the guest.
+   * state-mutating exports (keel_alloc, ...) through this can corrupt the guest.
    */
   readonly exports: WebAssembly.Exports | undefined;
-  /** Named host->guest event channel (rill_on_event). */
+  /** Named host->guest event channel (keel_on_event). */
   // Reason: an event payload is any JSON-serializable value, forwarded as-is.
   sendEvent(name: string, payload?: unknown): void;
   destroy(): void;
@@ -167,7 +167,7 @@ export class NativeGuestView implements NativeGuestEngine {
     _options?: { bytecodeAssetPath?: string }
   ): Promise<void> {
     try {
-      await this.host.load(this.wasmBytes); // rill_init registers event handlers
+      await this.host.load(this.wasmBytes); // keel_init registers event handlers
       if (initialProps !== undefined) {
         // JS-parity: a native guest takes initial props over the NAMED event
         // channel (events::on('props')). Delivered before drain so a guest that
@@ -184,9 +184,9 @@ export class NativeGuestView implements NativeGuestEngine {
   }
 
   /**
-   * Forward an input / lifecycle event to the native guest (rill_on_event).
+   * Forward an input / lifecycle event to the native guest (keel_on_event).
    *
-   * The payload may carry `Uint8Array` values: they ride as raw RBS1 segments
+   * The payload may carry `Uint8Array` values: they ride as raw KBS1 segments
    * rather than being stringified, which is how a host pushes an UNSOLICITED
    * byte stream (a forwarded socket, a serial port, a subprocess's stdout) to a
    * native guest — the guest cannot know when to pull for those. A byte-free

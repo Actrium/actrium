@@ -2,7 +2,7 @@
 name = "ui-binary-guest"
 version.workspace = true
 edition.workspace = true
-description = "Test-fixture native rill guest that renders UI over the WIP binary op-batch wire when the host enables it via rill_wire_caps (else JSON)."
+description = "Test-fixture native keel guest that renders UI over the WIP binary op-batch wire when the host enables it via keel_wire_caps (else JSON)."
 license.workspace = true
 publish = false
 
@@ -14,4 +14,4 @@ crate-type = ["cdylib"]
 # build.sh in its OWN cargo invocation (separate feature resolve, alongside
 # canvas-binary-guest) so this feature never unifies into the default JSON
 # fixtures.
-rill-native-guest = { path = "../rill-native-guest", features = ["binary-protocol"] }
+keel-native-guest = { path = "../keel-native-guest", features = ["binary-protocol"] }

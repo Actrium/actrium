@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace rill::security {
+namespace keel::security {
 
 /// File system policy for a tenant sandbox.
 struct FilePolicy {
@@ -86,4 +86,4 @@ private:
   mutable std::mutex mutex_;
 };
 
-} // namespace rill::security
+} // namespace keel::security

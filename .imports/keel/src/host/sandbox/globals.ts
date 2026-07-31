@@ -8,10 +8,10 @@
 import type { HostMessage, ReviewedUnknown, SendToHost } from '../types';
 
 /**
- * RillReconciler interface - the Guest-side reconciler API
+ * KeelReconciler interface - the Guest-side reconciler API
  * Injected into sandbox as a global via GUEST_BUNDLE_CODE
  */
-export interface RillReconcilerGlobal {
+export interface KeelReconcilerGlobal {
   render: (element: ReviewedUnknown, sendToHost: SendToHost) => void;
   unmount: (sendToHost?: SendToHost) => void;
   unmountAll: () => void;
@@ -23,48 +23,48 @@ export interface RillReconcilerGlobal {
 }
 
 /**
- * Rill hooks state - used for useState/useEffect tracking
+ * Keel hooks state - used for useState/useEffect tracking
  */
-export interface RillHooksState {
+export interface KeelHooksState {
   index: number;
   rootElement?: ReviewedUnknown;
   sendToHost?: SendToHost;
 }
 
-export type RillEventCallback = (payload: ReviewedUnknown) => void;
+export type KeelEventCallback = (payload: ReviewedUnknown) => void;
 
-export type RillOnHostEvent = (eventName: string, callback: RillEventCallback) => () => void;
+export type KeelOnHostEvent = (eventName: string, callback: KeelEventCallback) => () => void;
 
 /**
  * Type-safe accessor for sandbox globals
  * Use this instead of `as any` when accessing sandbox context
  */
 export interface SandboxGlobals {
-  RillReconciler?: RillReconcilerGlobal;
-  __rillHooks?: RillHooksState;
+  KeelReconciler?: KeelReconcilerGlobal;
+  __keelHooks?: KeelHooksState;
   __REACT_SHIM__?: boolean;
-  __rill?: {
+  __keel?: {
     callbacks?: Map<string, (...args: ReviewedUnknown[]) => ReviewedUnknown>;
     callbackId?: number;
     registerCallback?: (fn: (...args: ReviewedUnknown[]) => ReviewedUnknown) => string;
     invokeCallback?: (fnId: string, args: ReviewedUnknown[]) => ReviewedUnknown;
     removeCallback?: (id: string) => void;
     config?: Record<string, ReviewedUnknown>;
-    eventListeners?: Map<string, Set<RillEventCallback>>;
+    eventListeners?: Map<string, Set<KeelEventCallback>>;
     dispatchEvent?: (eventName: string, payload: ReviewedUnknown) => void;
     guest?: ReviewedUnknown;
   };
-  __rill_emitEvent?: (eventName: string, payload?: ReviewedUnknown) => void;
-  __rill_onHostEvent?: RillOnHostEvent;
-  __rill_getConfig?: () => Record<string, ReviewedUnknown>;
-  __rill_sendBatch?: SendToHost;
-  __rill_sendOperation?: (op: ReviewedUnknown) => void;
-  __rill_handleMessage?: (message: HostMessage) => void;
-  __rill_scheduleRender?: () => void;
-  __rill_registerComponentType?: (fn: ReviewedUnknown) => string | null;
-  __RILL_GUEST_ENV__?: boolean;
-  __RILL_DEBUG__?: boolean;
-  __RILL_DEVTOOLS_ENABLED__?: boolean;
+  __keel_emitEvent?: (eventName: string, payload?: ReviewedUnknown) => void;
+  __keel_onHostEvent?: KeelOnHostEvent;
+  __keel_getConfig?: () => Record<string, ReviewedUnknown>;
+  __keel_sendBatch?: SendToHost;
+  __keel_sendOperation?: (op: ReviewedUnknown) => void;
+  __keel_handleMessage?: (message: HostMessage) => void;
+  __keel_scheduleRender?: () => void;
+  __keel_registerComponentType?: (fn: ReviewedUnknown) => string | null;
+  __KEEL_GUEST_ENV__?: boolean;
+  __KEEL_DEBUG__?: boolean;
+  __KEEL_DEVTOOLS_ENABLED__?: boolean;
   React?: ReviewedUnknown;
   ReactJSXRuntime?: ReviewedUnknown;
 }

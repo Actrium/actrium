@@ -1,6 +1,6 @@
 # Production Deployment
 
-This guide covers the configuration, hardening, monitoring, and optimization practices for deploying Rill in a production environment.
+This guide covers the configuration, hardening, monitoring, and optimization practices for deploying Keel in a production environment.
 
 ---
 
@@ -16,14 +16,14 @@ const engine = new Engine({
     'react',
     'react-native',
     'react/jsx-runtime',
-    'rill/guest',
-    'rill/*',
+    'keel/guest',
+    'keel/*',
   ],
   // ...
 });
 ```
 
-The default whitelist includes the entries above. The `rill/*` pattern matches all `rill/` sub-paths.
+The default whitelist includes the entries above. The `keel/*` pattern matches all `keel/` sub-paths.
 
 ### Execution Timeout
 
@@ -40,7 +40,7 @@ Enforcement is engine-specific: the QuickJS and Hermes (JSI) providers abort a r
 
 ### Error Classification
 
-Rill categorizes sandbox errors into well-defined types:
+Keel categorizes sandbox errors into well-defined types:
 
 | Error Class | Meaning |
 |---|---|
@@ -191,7 +191,7 @@ engine.destroy();
 
 ### useEffect Cleanup Pattern
 
-When using Rill inside a React component, destroy the engine in the cleanup function of a `useEffect`:
+When using Keel inside a React component, destroy the engine in the cleanup function of a `useEffect`:
 
 ```ts
 useEffect(() => {
@@ -219,6 +219,6 @@ Before shipping to production, verify the following:
 - `onMetric` is wired to your telemetry system.
 - `logger` is connected to your structured logging pipeline.
 - `engine.destroy()` is called on component unmount or when the engine is no longer needed.
-- The bundle has passed `rill analyze` with no violations.
+- The bundle has passed `keel analyze` with no violations.
 - Health checks (`engine.getDiagnostics()` -- the `health` and `resources` fields) are integrated into monitoring dashboards.
 - Error handling covers `RequireError`, `ExecutionError`, and `TimeoutError`.

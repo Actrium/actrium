@@ -1,5 +1,5 @@
 /**
- * @rill/runtime/bridge - Promise Manager Tests
+ * @keel/runtime/bridge - Promise Manager Tests
  *
  * Tests for cross-boundary Promise management:
  * - Registration and result sending

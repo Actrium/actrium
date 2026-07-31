@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "rill",
+      "name": "keel",
       "dependencies": {
         "@babel/runtime": "^7.28.6",
       },

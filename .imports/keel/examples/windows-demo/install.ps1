@@ -5,7 +5,7 @@
 #   powershell -ExecutionPolicy Bypass -File install.ps1
 #
 # Or from WSL:
-#   powershell.exe -ExecutionPolicy Bypass -File 'D:\rill\examples\windows-demo\install.ps1'
+#   powershell.exe -ExecutionPolicy Bypass -File 'D:\keel\examples\windows-demo\install.ps1'
 #
 # Prerequisites:
 #   - Node.js >= 18
@@ -19,7 +19,7 @@ $ErrorActionPreference = "Stop"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Definition
 Set-Location $scriptDir
 
-Write-Host "`n=== Rill Windows Demo Setup ===`n" -ForegroundColor Cyan
+Write-Host "`n=== Keel Windows Demo Setup ===`n" -ForegroundColor Cyan
 
 # 1. Check Node.js
 Write-Host "[1/5] Checking Node.js..." -ForegroundColor Yellow

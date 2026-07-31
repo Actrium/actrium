@@ -1,5 +1,5 @@
 /**
- * rill/cli
+ * keel/cli
  *
  * Importable programmatic API (side-effect free).
  *

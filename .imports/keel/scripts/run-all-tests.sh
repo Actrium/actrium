@@ -1,5 +1,5 @@
 #!/bin/bash
-# Rill - Master Test Runner
+# Keel - Master Test Runner
 # Runs all tests: unit, native, and E2E
 # Returns non-zero if any test suite fails
 
@@ -47,7 +47,7 @@ skip_suite() {
 }
 
 echo "======================================"
-echo "  Rill - Master Test Runner"
+echo "  Keel - Master Test Runner"
 echo "======================================"
 echo ""
 echo "Platform: $(uname -s)"

@@ -2,7 +2,7 @@
 name = "heap-churn-guest"
 version.workspace = true
 edition.workspace = true
-description = "Native rill guest that churns alloc/free far past the old 1 MiB heap cap, proving talc reclaims freed memory and keeps linear memory bounded."
+description = "Native keel guest that churns alloc/free far past the old 1 MiB heap cap, proving talc reclaims freed memory and keeps linear memory bounded."
 license.workspace = true
 publish = false
 
@@ -10,4 +10,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-rill-native-guest = { path = "../rill-native-guest" }
+keel-native-guest = { path = "../keel-native-guest" }

@@ -9,7 +9,7 @@ describe('CLI Analyze - ignore patterns', () => {
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-cli-test-'));
+    distDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-cli-test-'));
     bundle = (name: string) => path.join(distDir, name);
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
   });

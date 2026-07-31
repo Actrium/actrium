@@ -1,6 +1,6 @@
 /**
- * Web keyboard bridge protocol (issue #19, L3) — shared by the guest hook (`rill/guest`
- * useKeyboard) and the web host capture (`rill/host/web` attachKeyboard).
+ * Web keyboard bridge protocol (issue #19, L3) — shared by the guest hook (`keel/guest`
+ * useKeyboard) and the web host capture (`keel/host/web` attachKeyboard).
  *
  * Direction:
  *  - host → guest: `KBD_EVENT` carries a structured key event the guest dispatches.
@@ -10,11 +10,11 @@
  */
 
 /** Host → guest: a structured physical-keyboard event. */
-export const KBD_EVENT = '__rill_kbd';
+export const KBD_EVENT = '__keel_kbd';
 /** Guest → host: declare a key subscription (and whether to preventDefault its keys). */
-export const KBD_SUBSCRIBE = '__rill_kbd_subscribe';
+export const KBD_SUBSCRIBE = '__keel_kbd_subscribe';
 /** Guest → host: drop a previously declared subscription. */
-export const KBD_UNSUBSCRIBE = '__rill_kbd_unsubscribe';
+export const KBD_UNSUBSCRIBE = '__keel_kbd_unsubscribe';
 
 /**
  * A structured keyboard event forwarded from the host to the guest. Carries the fields apps
@@ -26,7 +26,7 @@ export const KBD_UNSUBSCRIBE = '__rill_kbd_unsubscribe';
  * separate text channel), but forwarding this flag lets a guest suppress its shortcut
  * handling for exactly that window instead of acting on the raw composition keystrokes.
  */
-export interface RillKeyEvent {
+export interface KeelKeyEvent {
   type: 'keydown' | 'keyup';
   key: string;
   code: string;

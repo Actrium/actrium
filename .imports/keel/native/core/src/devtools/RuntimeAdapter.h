@@ -16,7 +16,7 @@
 #include <string>
 #include <unordered_map>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 // ============================================
 // Evaluate Callback Types
@@ -139,4 +139,4 @@ private:
   GetPropertiesCallback getPropertiesCallback_;
 };
 
-} // namespace rill::devtools
+} // namespace keel::devtools

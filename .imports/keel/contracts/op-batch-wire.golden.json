@@ -6,10 +6,10 @@
       "name": "empty-batch",
       "description": "Zero operations: header + an empty intern table. The irreducible floor of the format = 18 bytes.",
       "batch": { "version": 1, "batchId": 0, "operations": [] },
-      "hex": "52494c4c0100000000000000000000000000",
+      "hex": "4b45454c0100000000000000000000000000",
       "byteLength": 18,
       "breakdown": [
-        { "bytes": "52494c4c", "field": "magic 'RILL' (0x4c4c4952 LE)" },
+        { "bytes": "4b45454c", "field": "magic 'KEEL' (0x4c45454b LE)" },
         { "bytes": "0100", "field": "version = 1" },
         { "bytes": "00000000", "field": "batchId = 0" },
         { "bytes": "0000", "field": "opCount = 0" },
@@ -26,10 +26,10 @@
         "batchId": 1,
         "operations": [{ "op": "CREATE", "id": 1, "type": "View", "props": {} }]
       },
-      "hex": "52494c4c0100010000000100000000000100040056696577010100000000000000",
+      "hex": "4b45454c0100010000000100000000000100040056696577010100000000000000",
       "byteLength": 33,
       "breakdown": [
-        { "bytes": "52494c4c", "field": "magic" },
+        { "bytes": "4b45454c", "field": "magic" },
         { "bytes": "0100", "field": "version = 1" },
         { "bytes": "01000000", "field": "batchId = 1" },
         { "bytes": "0100", "field": "opCount = 1" },
@@ -55,10 +55,10 @@
           { "op": "UPDATE", "id": 2, "props": { "className": "b" } }
         ]
       },
-      "hex": "52494c4c01000200000002000000000003000900636c6173734e616d6501006101006202010000000100000006010000000202000000010000000602000000",
+      "hex": "4b45454c01000200000002000000000003000900636c6173734e616d6501006101006202010000000100000006010000000202000000010000000602000000",
       "byteLength": 63,
       "breakdown": [
-        { "bytes": "52494c4c", "field": "magic" },
+        { "bytes": "4b45454c", "field": "magic" },
         { "bytes": "0100", "field": "version = 1" },
         { "bytes": "02000000", "field": "batchId = 2" },
         { "bytes": "0200", "field": "opCount = 2" },
@@ -101,10 +101,10 @@
           { "op": "UPDATE", "id": 1, "props": { "id": "main" } }
         ]
       },
-      "hex": "52494c4c0100030000000500000000000600040056696577020069640400726f6f740400546578740200486904006d61696e010100000000000100010006020001020000000300000004000000000100000002000000080200000004000201000000010001000605000000",
+      "hex": "4b45454c0100030000000500000000000600040056696577020069640400726f6f740400546578740200486904006d61696e010100000000000100010006020001020000000300000004000000000100000002000000080200000004000201000000010001000605000000",
       "byteLength": 107,
       "breakdown": [
-        { "bytes": "52494c4c", "field": "magic" },
+        { "bytes": "4b45454c", "field": "magic" },
         { "bytes": "0100", "field": "version = 1" },
         { "bytes": "03000000", "field": "batchId = 3" },
         { "bytes": "0500", "field": "opCount = 5" },

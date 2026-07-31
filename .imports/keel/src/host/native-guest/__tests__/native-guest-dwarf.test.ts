@@ -6,7 +6,7 @@ import { join } from 'node:path';
 // T1.1). The shipped, byte-reproducible release fixtures MUST NOT carry DWARF:
 // it would balloon them by hundreds of KiB (a debug guest is ~7x larger) and
 // leak absolute source paths. DWARF only ever belongs in the throwaway
-// crates/debug-artifacts/ built by `RILL_GUEST_DEBUG=1 crates/build.sh`.
+// crates/debug-artifacts/ built by `KEEL_GUEST_DEBUG=1 crates/build.sh`.
 // See docs/native-guest-debugging.zh.md.
 
 // Minimal wasm reader: list the module's custom-section names. Binary layout is

@@ -10,8 +10,8 @@
 #include "../src/devtools/RuntimeAdapter.h"
 #include "../src/devtools/DOMAdapter.h"
 
-using namespace rill::devtools;
-using namespace rill::test;
+using namespace keel::devtools;
+using namespace keel::test;
 
 namespace {
 

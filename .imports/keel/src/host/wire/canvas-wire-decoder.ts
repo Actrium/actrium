@@ -6,7 +6,7 @@
  * Zero-DOM host-side decoder for the guest→host CANVAS binary wire protocol.
  * The authoritative wire schema is contracts/canvas-wire.json; the golden oracle
  * is contracts/canvas-wire.golden.json (produced byte-for-byte by the Rust
- * encoder crates/rill-native-guest/src/canvas_encode.rs). This decoder is validated
+ * encoder crates/keel-native-guest/src/canvas_encode.rs). This decoder is validated
  * against those files and MUST NOT hand-copy any peer codec.
  *
  * ZERO-DOM: this module references NO `document`, `HTMLCanvasElement`,
@@ -42,10 +42,10 @@
 // Wire constants (locked to contracts/canvas-wire.json)
 // ============================================
 
-// magic.u32le — 0x564e4352 = 'RCNV' (bytes 52 43 4E 56). DISTINCT from op-batch's
-// 0x4c4c4952 ('RILL'): the two differ at the 2nd byte, so a canvas frame fed to
+// magic.u32le — 0x564e434b = 'KCNV' (bytes 4B 43 4E 56). DISTINCT from op-batch's
+// 0x4c45454b ('KEEL'): the two differ at the 2nd byte, so a canvas frame fed to
 // the op-batch decoder — and vice-versa — fails the u32 magic compare at once.
-const CANVAS_MAGIC = 0x564e4352;
+const CANVAS_MAGIC = 0x564e434b;
 const PROTOCOL_VERSION = 1;
 const HEADER_SIZE = 16;
 
@@ -140,7 +140,7 @@ export class CanvasDecodeError extends Error {
 
 /**
  * A decoded canvas op. The union is keyed on `op` and mirrors, field-for-field,
- * the guest DrawList JSON shape (crates/rill-native-guest/src/lib.rs canvas module and
+ * the guest DrawList JSON shape (crates/keel-native-guest/src/lib.rs canvas module and
  * the graphics-seams.json host:canvas.ops whitelist), so a golden vector's
  * `frame.ops` deep-equals `decodeCanvasBatch(fromHex(vector.hex))`.
  */

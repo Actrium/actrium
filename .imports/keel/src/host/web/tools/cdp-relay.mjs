@@ -29,7 +29,7 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 
 const DEFAULT_PORT = 9500;
-const BROWSER_ID = 'Rill-CDP-Relay/1.0';
+const BROWSER_ID = 'Keel-CDP-Relay/1.0';
 const PROTOCOL_VERSION = '1.3';
 
 /**
@@ -132,8 +132,8 @@ export function startRelay(opts = {}) {
         }
         const target = {
           id,
-          title: typeof msg.title === 'string' ? msg.title : `Rill Guest ${id}`,
-          url: typeof msg.url === 'string' ? msg.url : `rill://guest/${id}`,
+          title: typeof msg.title === 'string' ? msg.title : `Keel Guest ${id}`,
+          url: typeof msg.url === 'string' ? msg.url : `keel://guest/${id}`,
           agent: ws,
           devtools: null,
         };

@@ -1,8 +1,8 @@
 #include "test_framework.h"
 #include "../src/security/NetworkSandbox.h"
 
-using namespace rill::security;
-using namespace rill::test;
+using namespace keel::security;
+using namespace keel::test;
 
 namespace {
 

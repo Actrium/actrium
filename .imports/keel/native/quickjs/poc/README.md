@@ -3,7 +3,7 @@
 A self-contained proof of concept that VM-level pause/resume works for
 wasm-compiled QuickJS on a single JS thread, using Emscripten Asyncify. It drives
 the existing, unchanged per-context debug seam
-(`rill_qjs_set_debug_hook` / `RillQjsDebugHook` in
+(`keel_qjs_set_debug_hook` / `KeelQjsDebugHook` in
 `../vendor/quickjs-debug.h`) and touches nothing in the production build.
 
 ## What it proves
@@ -20,7 +20,7 @@ the existing, unchanged per-context debug seam
 ## Files
 
 - `asyncify_poc.c` — minimal C bindings. Registers a debug hook that calls the
-  async import `rill_qjs_dbg_suspend()` (an `EM_ASYNC_JS` that awaits a Promise)
+  async import `keel_qjs_dbg_suspend()` (an `EM_ASYNC_JS` that awaits a Promise)
   when the current line matches an armed breakpoint at depth >= 2. One-shot: the
   breakpoint disarms on first hit so the rewound eval runs to completion.
 - `build-asyncify-poc.sh` — direct `emcc` invocation for the vendor QuickJS
@@ -67,7 +67,7 @@ isolated to Milestone A and never enters the shipping build.
 ## Working emcc flags
 
 Compile defines: `-DCONFIG_VERSION='"2024-01-13"' -DCONFIG_BIGNUM -D_GNU_SOURCE
--DEMSCRIPTEN -DRILL_QJS_DEBUG`.
+-DEMSCRIPTEN -DKEEL_QJS_DEBUG`.
 
 Asyncify link flags that finally worked: `-sASYNCIFY=1
 -sASYNCIFY_STACK_SIZE=1048576` (the initial 16384 was far too small for

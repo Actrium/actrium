@@ -14,7 +14,7 @@ JSON) with its exact on-the-wire `hex`. Conformance is the closed loop:
 
 | # | Assertion | Where | Direction |
 |---|-----------|-------|-----------|
-| 1 | Rust **encoder**(source batch) == golden `hex`, byte-for-byte | `crates/rill-native-guest/src/wire_encode.rs` (`golden_vectors_encode_byte_exact`) | batch → bytes |
+| 1 | Rust **encoder**(source batch) == golden `hex`, byte-for-byte | `crates/keel-native-guest/src/wire_encode.rs` (`golden_vectors_encode_byte_exact`) | batch → bytes |
 | 2 | TS **decoder**(golden bytes) semantically == source batch | `src/host/native-guest/__tests__/wire-decoder.test.ts` (`toEqual(operations)`) | bytes → batch |
 | 3 | C++ **decoder**(golden bytes) semantically == source batch | `native/core/test/test_wire_decoder.cpp` (`golden: *`) | bytes → batch |
 
@@ -27,7 +27,7 @@ alarm.
 Locking notes (so the pivot cannot silently rot):
 - Rust and TS tests read `op-batch-wire.golden.json` **directly**; the Rust codec
   constants (magic, opcodes, value tags, flags, limits) are **generated** from
-  `op-batch-wire.json` by `crates/rill-native-guest/build.rs`, so a renamed/removed key
+  `op-batch-wire.json` by `crates/keel-native-guest/build.rs`, so a renamed/removed key
   fails the build.
 - The C++ test hard-copies the golden hex literals; those copies are verified
   byte-identical to the golden file as part of this conformance run (see below).
@@ -36,18 +36,18 @@ Locking notes (so the pivot cannot silently rot):
 
 ```sh
 # 1. Rust encoder → golden hex
-cd /ext/rill/crates && cargo test -p rill-native-guest --features binary-protocol
+cd crates && cargo test -p keel-native-guest --features binary-protocol
 
 # 2. TS streaming decoder ← golden bytes
-cd /ext/rill && bun test src/host/native-guest/__tests__/wire-decoder.test.ts
+bun test src/host/native-guest/__tests__/wire-decoder.test.ts
 
 # 3. C++ zero-copy decoder ← golden bytes
-make -C /ext/rill/native/core test
+make -C native/core test
 ```
 
 All three codecs are WORK IN PROGRESS and gated OFF in shipped builds:
 - Rust: `--features binary-protocol` (Cargo feature, default off).
-- C++: `-DRILL_WIP_BINARY_PROTOCOL=1` (the test Makefile defines it; a normal
+- C++: `-DKEEL_WIP_BINARY_PROTOCOL=1` (the test Makefile defines it; a normal
   build compiles `WireDecoder.cpp` to an empty translation unit).
 - TS: the decoder is not imported by any live receive path; the default
   `PayloadEncoding` is still `json`.
@@ -69,7 +69,7 @@ golden vectors still encode/decode byte-exact in all three languages:
 
 | Codec | Role | Result |
 |-------|------|--------|
-| Rust `rill-native-guest` | encoder → golden hex | **PASS** — 38 tests; all 4 vectors byte-exact (`golden_vectors_encode_byte_exact`); cross-batch intern stability + fail-closed (oversized string, non-finite float, `value_nesting_depth_is_enforced`, `total_value_nodes_cap_*`, the two broadened-cap cases `reorder_childids_count_toward_total_elements_cap` + `removed_props_and_intern_entries_count_toward_total_elements_cap`, `non_finite_date_is_rejected`, `out_of_range_date_is_rejected_at_cap_ok`) green |
+| Rust `keel-native-guest` | encoder → golden hex | **PASS** — 38 tests; all 4 vectors byte-exact (`golden_vectors_encode_byte_exact`); cross-batch intern stability + fail-closed (oversized string, non-finite float, `value_nesting_depth_is_enforced`, `total_value_nodes_cap_*`, the two broadened-cap cases `reorder_childids_count_toward_total_elements_cap` + `removed_props_and_intern_entries_count_toward_total_elements_cap`, `non_finite_date_is_rejected`, `out_of_range_date_is_rejected_at_cap_ok`) green |
 | TypeScript `wire-decoder` | golden bytes → batch | **PASS** — 29 tests; every vector `toEqual` its source batch; fail-closed rejections incl. depth cap, both the value-node and the broadened non-value maxTotalElements cases (REORDER childIds + UPDATE removedProps over-cap, and a mixed under-cap batch), and the DATE range guard green |
 | C++ `WireDecoder` | golden bytes → batch | **PASS** — 4 golden vectors + fail-closed cases incl. depth cap, the value-node total-elements cap, the broadened non-value cap (REORDER childIds + UPDATE removed refs over-cap, at-cap REORDER decodes, small mixed REORDER+UPDATE decodes), and `DATE NaN/Inf/out-of-range rejected (InvalidDate)` + `DATE at the range cap decodes`; hard-copied hex confirmed identical to the golden file (WireDecoder subsuite 23/23 green, 254/254 in the core suite, ASan-clean) |
 
@@ -84,15 +84,15 @@ single schema:
 
 | Constant | Schema (`op-batch-wire.json`) | Rust | TypeScript | C++ |
 |----------|-------------------------------|------|------------|-----|
-| magic | `magic.u32le` = `1280067922`, `magic.hex` = `0x4c4c4952` | `MAGIC = 1280067922` (build.rs, generated from `magic.hex`) | `RILL_MAGIC = 0x4c4c4952` | `kMagic = 0x4c4c4952u` |
+| magic | `magic.u32le` = `1279608139`, `magic.hex` = `0x4c45454b` | `MAGIC = 1279608139` (build.rs, generated from `magic.hex`) | `KEEL_MAGIC = 0x4c45454b` | `kMagic = 0x4c45454bu` |
 | maxValueDepth | `limits.maxValueDepth.value` = `64` | `limits::MAX_VALUE_DEPTH = 64` (build.rs, generated from `limits`) | `MAX_VALUE_DEPTH = 64` | `kMaxValueDepth = 64u` |
 | maxTotalElements | `limits.maxTotalElements.value` = `1048576` | `limits::MAX_TOTAL_ELEMENTS = 1048576` (build.rs, generated from `limits`) | `MAX_TOTAL_ELEMENTS = 1048576` | `kMaxTotalElements = 1048576u` |
 | maxDateMs | `limits.maxDateMs.value` = `8640000000000000` | `limits::MAX_DATE_MS = 8640000000000000` (build.rs, generated from `limits`) | `MAX_DATE_MS = 8.64e15` | `kMaxDateMs = 8.64e15` |
 
-`0x4c4c4952` = `1280067922` decimal, so the magic decimal, hex and every golden
-vector (`52494c4c` LE) now agree. Rust's `MAGIC`, `MAX_VALUE_DEPTH` and
+`0x4c45454b` = `1279608139` decimal, so the magic decimal, hex and every golden
+vector (`4b45454c` LE) now agree. Rust's `MAGIC`, `MAX_VALUE_DEPTH` and
 `MAX_TOTAL_ELEMENTS` are still generated from the schema by
-`crates/rill-native-guest/build.rs` (magic derived from `magic.hex`, every `limits.*`
+`crates/keel-native-guest/build.rs` (magic derived from `magic.hex`, every `limits.*`
 value read straight from `limits` and emitted as a `SCREAMING_SNAKE` const), so a
 renamed/removed key or a value change fails the build — the constants cannot
 drift from the contract.
@@ -118,13 +118,14 @@ drift.
 
 ### Former contract trap — RESOLVED
 
-`op-batch-wire.json`'s `magic.u32le` decimal previously read `1280592210`
-(`0x4c544952`, LE bytes `RITL`), inconsistent with `magic.hex` (`0x4c4c4952`),
-`magic.asciiBytes` (`RILL`) and every golden vector. It has been corrected to
-`1280067922` (`0x4c4c4952` = `RILL`), so all four now agree. The codecs never
-drifted (TS/C++ hard-code `0x4c4c4952`; Rust derives from `magic.hex` and asserts
-`hex` ↔ `asciiBytes`), and a future codec that naively trusts `magic.u32le` is now
-also correct.
+Back when the magic still spelled `RILL`, `op-batch-wire.json`'s `magic.u32le`
+decimal read `1280592210` (`0x4c544952`, LE bytes `RITL`) — a transposition,
+inconsistent with `magic.hex`, `magic.asciiBytes` and every golden vector. It was
+corrected then, and the same three-way agreement is re-asserted for the `KEEL`
+magic: `magic.u32le` `1279608139` = `magic.hex` `0x4c45454b` = `magic.asciiBytes`
+`4B 45 45 4C`. The codecs never drifted through either change (TS/C++ hard-code
+the hex; Rust derives from `magic.hex` and asserts `hex` ↔ `asciiBytes`), and a
+codec that naively trusts `magic.u32le` stays correct.
 
 ### Former memory-amplification residual — RESOLVED
 

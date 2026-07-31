@@ -1,11 +1,11 @@
-;; Minimal native (non-JS) rill guest — proves the linear-memory host:* ABI.
-;; On rill_init it makes ONE host call (host:store.putText); the host writes the
-;; result back into this module's memory (via rill_alloc) and calls rill_resolve,
+;; Minimal native (non-JS) keel guest — proves the linear-memory host:* ABI.
+;; On keel_init it makes ONE host call (host:store.putText); the host writes the
+;; result back into this module's memory (via keel_alloc) and calls keel_resolve,
 ;; which stashes ok/ptr/len into globals the test reads. Hand-written so the ABI
 ;; is visible at the wire level; see docs/native-guest.zh.md.
 (module
-  ;; host -> guest import: rill_host_call(mod_ptr,mod_len, method_ptr,method_len, in_ptr,in_len, cb_id)
-  (import "env" "rill_host_call"
+  ;; host -> guest import: keel_host_call(mod_ptr,mod_len, method_ptr,method_len, in_ptr,in_len, cb_id)
+  (import "env" "keel_host_call"
     (func $host_call (param i32 i32 i32 i32 i32 i32 i32)))
 
   (memory (export "memory") 1)
@@ -21,20 +21,20 @@
   (global $r_len (mut i32) (i32.const 0))
 
   ;; host requests the guest to allocate a buffer to write a result into
-  (func (export "rill_alloc") (param $size i32) (result i32)
+  (func (export "keel_alloc") (param $size i32) (result i32)
     (local $p i32)
     (local.set $p (global.get $bump))
     (global.set $bump (i32.add (global.get $bump) (local.get $size)))
     (local.get $p))
 
   ;; host resolves a pending call: stash ok/ptr/len for the test to inspect
-  (func (export "rill_resolve") (param $cb i32) (param $ok i32) (param $ptr i32) (param $len i32)
+  (func (export "keel_resolve") (param $cb i32) (param $ok i32) (param $ptr i32) (param $len i32)
     (global.set $r_ok  (local.get $ok))
     (global.set $r_ptr (local.get $ptr))
     (global.set $r_len (local.get $len)))
 
   ;; entry: make one host:* call
-  (func (export "rill_init")
+  (func (export "keel_init")
     (call $host_call
       (i32.const 0)  (i32.const 10)
       (i32.const 16) (i32.const 7)

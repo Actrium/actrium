@@ -2,7 +2,7 @@
  * HermesProvider - Hermes sandbox via native JSI bindings
  *
  * Extends NativeJSIProvider to add evalBytecode() support.
- * Available when RILL_SANDBOX_ENGINE=hermes is set during native build.
+ * Available when KEEL_SANDBOX_ENGINE=hermes is set during native build.
  */
 
 import type { SandboxContext } from '../native';
@@ -17,7 +17,7 @@ import { NativeJSIProvider, type NativeJSIProviderOptions } from './native-jsi-p
 export type HermesProviderOptions = NativeJSIProviderOptions;
 
 /**
- * HermesProvider - Wraps native Hermes JSI module for rill Engine
+ * HermesProvider - Wraps native Hermes JSI module for keel Engine
  *
  * Adds evalBytecode() to SandboxScope for precompiled Hermes bytecode support.
  */

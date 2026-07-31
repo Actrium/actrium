@@ -1,7 +1,7 @@
 /**
  * Pre-rename spellings of the native-guest host API (issue #58).
  *
- * These five names were the public surface of `rill/host` before the
+ * These five names were the public surface of `keel/host` before the
  * native-guest line got a self-describing name, so they stay exported rather
  * than breaking downstream silently. "Wasm" was never the axis that separated
  * the two guest lines: on the web BOTH compile to wasm, and what actually

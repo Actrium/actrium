@@ -176,62 +176,62 @@ export const CONSOLE_SETUP_CODE = `
  */
 export const RUNTIME_HELPERS_CODE = `
 (function(){
-  // Initialize __rill namespace
-  if (!globalThis.__rill) { globalThis.__rill = {}; }
-  var __rill = globalThis.__rill;
+  // Initialize __keel namespace
+  if (!globalThis.__keel) { globalThis.__keel = {}; }
+  var __keel = globalThis.__keel;
 
-  if (typeof __rill.eventListeners === 'undefined') {
+  if (typeof __keel.eventListeners === 'undefined') {
     var __eventListeners = new Map();
-    __rill.eventListeners = __eventListeners;
-    globalThis.__rill_onHostEvent = function(eventName, callback){
+    __keel.eventListeners = __eventListeners;
+    globalThis.__keel_onHostEvent = function(eventName, callback){
       if (!__eventListeners.has(eventName)) __eventListeners.set(eventName, new Set());
       var set = __eventListeners.get(eventName);
       set.add(callback);
       return function(){ try { set.delete(callback); } catch(_){} };
     };
-    __rill.dispatchEvent = function(eventName, payload){
+    __keel.dispatchEvent = function(eventName, payload){
       var set = __eventListeners.get(eventName);
       if (set) {
-        set.forEach(function(cb){ try { cb(payload); } catch(e) { console.error('[rill] Host event listener error: ' + (e && e.message ? e.message : String(e))); } });
+        set.forEach(function(cb){ try { cb(payload); } catch(e) { console.error('[keel] Host event listener error: ' + (e && e.message ? e.message : String(e))); } });
       }
     };
   }
 
   // Callback registry helpers
-  if (!__rill.callbacks) {
-    __rill.callbacks = new Map();
+  if (!__keel.callbacks) {
+    __keel.callbacks = new Map();
   }
-  if (typeof __rill.callbackId !== 'number') {
-    __rill.callbackId = 0;
+  if (typeof __keel.callbackId !== 'number') {
+    __keel.callbackId = 0;
   }
-  if (typeof __rill.registerCallback !== 'function') {
-    __rill.registerCallback = function(fn){
-      var id = 'fn_' + (++__rill.callbackId);
-      __rill.callbacks.set(id, fn);
+  if (typeof __keel.registerCallback !== 'function') {
+    __keel.registerCallback = function(fn){
+      var id = 'fn_' + (++__keel.callbackId);
+      __keel.callbacks.set(id, fn);
       return id;
     };
   }
-  if (typeof __rill.invokeCallback !== 'function') {
-    __rill.invokeCallback = function(id, args){
-      var fn = __rill.callbacks.get(id);
+  if (typeof __keel.invokeCallback !== 'function') {
+    __keel.invokeCallback = function(id, args){
+      var fn = __keel.callbacks.get(id);
       if (fn) {
         try {
           return fn.apply(null, args || []);
         } catch(e) {
           var msg = e && e.message ? e.message : String(e);
           var stack = e && e.stack ? e.stack : '';
-          console.error('[rill] Callback ' + id + ' threw: ' + msg);
-          if (stack) console.error('[rill] stack: ' + stack);
+          console.error('[keel] Callback ' + id + ' threw: ' + msg);
+          if (stack) console.error('[keel] stack: ' + stack);
           throw e;
         }
       } else {
-        console.warn('[rill] Callback not found:', id);
+        console.warn('[keel] Callback not found:', id);
       }
     };
   }
-  if (typeof __rill.removeCallback !== 'function') {
-    __rill.removeCallback = function(id){
-      __rill.callbacks.delete(id);
+  if (typeof __keel.removeCallback !== 'function') {
+    __keel.removeCallback = function(id){
+      __keel.callbacks.delete(id);
     };
   }
 })();`;

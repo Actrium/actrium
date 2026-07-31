@@ -14,7 +14,7 @@ void registerWireDecoderTests();
 
 int main() {
   std::cout << "==========================================" << std::endl;
-  std::cout << "Rill Core C++ Test Suite" << std::endl;
+  std::cout << "Keel Core C++ Test Suite" << std::endl;
   std::cout << "==========================================" << std::endl;
 
   // Register all test suites
@@ -30,5 +30,5 @@ int main() {
   registerWireDecoderTests();
 
   // Run all tests
-  return rill::test::TestRunner::instance().run();
+  return keel::test::TestRunner::instance().run();
 }

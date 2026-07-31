@@ -6,7 +6,7 @@
  *
  * TenantHandle holds each sandbox as an opaque jsi::HostObject. A sandbox that
  * can be debugged over CDP (today: Hermes) also implements ICdpDebuggable;
- * TenantHandle recovers it with a dynamic_cast and RillTenantManager calls
+ * TenantHandle recovers it with a dynamic_cast and KeelTenantManager calls
  * createCdpDebugTarget() generically. All Hermes-specific wiring (CDPDebugAPI,
  * the runtime-task enqueue over the host CallInvoker, CDPAgentTarget) stays
  * inside native/hermes — this header pulls in neither Hermes nor ReactCommon
@@ -23,7 +23,7 @@ class CallInvoker;
 }
 }  // namespace facebook
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 class IEngineDebugTarget;
 
@@ -40,4 +40,4 @@ public:
       std::int32_t executionContextId) = 0;
 };
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools

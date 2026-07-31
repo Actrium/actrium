@@ -22,7 +22,7 @@
 #include <chrono>
 #include <functional>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 // ============================================
 // Network Types
@@ -326,4 +326,4 @@ private:
   NetworkAdapter& adapter_;
 };
 
-} // namespace rill::devtools
+} // namespace keel::devtools

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.13)
-project(RillSandboxNative)
+project(KeelSandboxNative)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -49,13 +49,13 @@ set(QUICKJS_SANDBOX_SOURCES
 # JNI entry point
 # =============================================================================
 set(JNI_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/main/jni/RillSandboxAndroid.cpp
+    ${CMAKE_SOURCE_DIR}/src/main/jni/KeelSandboxAndroid.cpp
 )
 
 # =============================================================================
 # Shared library target
 # =============================================================================
-add_library(rillsandbox SHARED
+add_library(keelsandbox SHARED
     ${HERMES_SANDBOX_SOURCES}
     ${QUICKJS_ENGINE_SOURCES}
     ${QUICKJS_SANDBOX_SOURCES}
@@ -68,7 +68,7 @@ set_source_files_properties(${QUICKJS_ENGINE_SOURCES} PROPERTIES
     COMPILE_FLAGS "-w"
 )
 
-target_include_directories(rillsandbox PRIVATE
+target_include_directories(keelsandbox PRIVATE
     ${HERMES_DIR}/src
     ${QUICKJS_DIR}/src
     ${QUICKJS_DIR}/vendor
@@ -78,7 +78,7 @@ target_include_directories(rillsandbox PRIVATE
 # Link with React Native's JSI and Hermes
 find_package(ReactAndroid REQUIRED CONFIG)
 find_package(hermes-engine REQUIRED CONFIG)
-target_link_libraries(rillsandbox
+target_link_libraries(keelsandbox
     ReactAndroid::jsi
     ReactAndroid::hermestooling
     hermes-engine::hermesvm

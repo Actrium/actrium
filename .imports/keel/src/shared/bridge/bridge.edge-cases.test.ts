@@ -1,5 +1,5 @@
 /**
- * @rill/runtime/bridge - Edge Case Tests
+ * @keel/runtime/bridge - Edge Case Tests
  *
  * Tests for edge cases and complex scenarios:
  * - Circular references

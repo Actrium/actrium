@@ -1,13 +1,13 @@
 {
-  "$comment": "SINGLE SOURCE OF TRUTH for the guest->host CANVAS binary wire protocol — a per-frame flat 2D display list (the host:canvas.draw path: guest emits a serialized DrawList, host decodes it into Canvas2D ctx calls and replays them onto a sealed <Canvas>). This is a SISTER contract to op-batch-wire.json, deliberately SEPARATE: op-batch carries UI-tree DIFFS (CREATE/UPDATE/DELETE/... over a retained node graph, with recursive SerializedValue trees), whereas canvas is a FLAT, per-frame sequence of drawing ops with no nesting and no retained state on the wire. The two share the ENVELOPE SHAPE (magic + version + header + a per-batch u16 intern table + ops) and the SAME 'schema single-source + golden lock' discipline (this file + canvas-wire.golden.json + canvas-wire.CONFORMANCE.md, generated into the Rust codec by crates/rill-native-guest/build.rs and locked byte-exact by golden vectors), but they use DISTINCT magic so a buffer meant for one decoder fails fast in the other. Authoritative implementations (later phases): the Rust encoder (oracle) crates/rill-native-guest/src/canvas_encode.rs and the TS decoder on rill's public export surface (the platform's site/rill-runtime/src/host-canvas.ts imports it, replacing JSON.parse). A native codec generates its opcode + flag + limit constants FROM this file (never hand-copies a peer) and locks its record shapes to it via conformance tests + canvas-wire.golden.json. All integers are UNSIGNED unless the type says otherwise; every multi-byte scalar is LITTLE-ENDIAN. Numbers are f64 for v1 (correctness first, matches the current JSON semantics); the type-atom mechanism is retained so a future f32 coordinate variant is a purely additive flag, not a redesign.",
+  "$comment": "SINGLE SOURCE OF TRUTH for the guest->host CANVAS binary wire protocol — a per-frame flat 2D display list (the host:canvas.draw path: guest emits a serialized DrawList, host decodes it into Canvas2D ctx calls and replays them onto a sealed <Canvas>). This is a SISTER contract to op-batch-wire.json, deliberately SEPARATE: op-batch carries UI-tree DIFFS (CREATE/UPDATE/DELETE/... over a retained node graph, with recursive SerializedValue trees), whereas canvas is a FLAT, per-frame sequence of drawing ops with no nesting and no retained state on the wire. The two share the ENVELOPE SHAPE (magic + version + header + a per-batch u16 intern table + ops) and the SAME 'schema single-source + golden lock' discipline (this file + canvas-wire.golden.json + canvas-wire.CONFORMANCE.md, generated into the Rust codec by crates/keel-native-guest/build.rs and locked byte-exact by golden vectors), but they use DISTINCT magic so a buffer meant for one decoder fails fast in the other. Authoritative implementations (later phases): the Rust encoder (oracle) crates/keel-native-guest/src/canvas_encode.rs and the TS decoder on keel's public export surface (the platform's site/keel-runtime/src/host-canvas.ts imports it, replacing JSON.parse). A native codec generates its opcode + flag + limit constants FROM this file (never hand-copies a peer) and locks its record shapes to it via conformance tests + canvas-wire.golden.json. All integers are UNSIGNED unless the type says otherwise; every multi-byte scalar is LITTLE-ENDIAN. Numbers are f64 for v1 (correctness first, matches the current JSON semantics); the type-atom mechanism is retained so a future f32 coordinate variant is a purely additive flag, not a redesign.",
   "version": 1,
   "endianness": "little",
 
   "magic": {
-    "$comment": "First 4 bytes of every frame. The u32 value 0x564e4352 read little-endian spells the ASCII bytes 52 43 4E 56 = 'RCNV' (Rill CaNVas). DISTINCT from op-batch's 0x4c4c4952 ('RILL'): the two magics already differ at the SECOND byte (0x43 'C' vs 0x49 'I'), so a canvas frame fed to the op-batch decoder — and an op-batch batch fed to the canvas decoder — fails the u32 magic compare immediately (fail-closed, decode nothing) before any field is read. A decoder MUST read a u32 LE and reject if it is not exactly this value (reason 'bad-magic').",
-    "u32le": 1447969618,
-    "hex": "0x564e4352",
-    "asciiBytes": "52 43 4E 56"
+    "$comment": "First 4 bytes of every frame. The u32 value 0x564e434b read little-endian spells the ASCII bytes 4B 43 4E 56 = 'KCNV' (Keel CaNVas). DISTINCT from op-batch's 0x4c45454b ('KEEL'): the two magics already differ at the SECOND byte (0x43 'C' vs 0x45 'E'), so a canvas frame fed to the op-batch decoder — and an op-batch batch fed to the canvas decoder — fails the u32 magic compare immediately (fail-closed, decode nothing) before any field is read. A decoder MUST read a u32 LE and reject if it is not exactly this value (reason 'bad-magic').",
+    "u32le": 1447969611,
+    "hex": "0x564e434b",
+    "asciiBytes": "4B 43 4E 56"
   },
 
   "protocolVersion": {
@@ -33,8 +33,8 @@
       {
         "name": "magic",
         "type": "u32",
-        "value": 1447969618,
-        "note": "0x564e4352 = 'RCNV'; reject on mismatch (reason 'bad-magic')."
+        "value": 1447969611,
+        "note": "0x564e434b = 'KCNV'; reject on mismatch (reason 'bad-magic')."
       },
       {
         "name": "version",
@@ -118,7 +118,7 @@
   },
 
   "opcodes": {
-    "$comment": "u8 tag that leads every draw-op record. Flat map for codegen (name -> byte). The 25 canvas ops in the SAME order as the guest DrawList builder (crates/rill-native-guest/src/lib.rs canvas module) and the graphics-seams.json host:canvas.ops whitelist. Opcodes are APPEND-ONLY: setFont/strokeText/bezierCurveTo/quadraticCurveTo (22-25) were added after the original 21 and take the next free bytes so every existing opcode keeps its value (an additive, non-breaking wire change, no protocolVersion bump). An unknown opcode is a fail-closed whole-frame reject (reason 'bad-opcode').",
+    "$comment": "u8 tag that leads every draw-op record. Flat map for codegen (name -> byte). The 25 canvas ops in the SAME order as the guest DrawList builder (crates/keel-native-guest/src/lib.rs canvas module) and the graphics-seams.json host:canvas.ops whitelist. Opcodes are APPEND-ONLY: setFont/strokeText/bezierCurveTo/quadraticCurveTo (22-25) were added after the original 21 and take the next free bytes so every existing opcode keeps its value (an additive, non-breaking wire change, no protocolVersion bump). An unknown opcode is a fail-closed whole-frame reject (reason 'bad-opcode').",
     "beginPath": 1,
     "closePath": 2,
     "moveTo": 3,
@@ -405,7 +405,7 @@
 
   "reasons": {
     "$comment": "The fail-closed 'reason' vocabulary. On ANY violation the decoder drops the WHOLE frame (never a half-frame) and reports one of these reasons — surfaced in the host:canvas.draw response, whose shape becomes { ok:false, dropped:<opCount>, reason:<string> } (the platform recently added an ADDITIVE 'reason' field to its canvas-failure response; this vocabulary is chosen to align with it, and 'dropped' remains the pre-existing count field). A well-formed frame resolves { ok:true, dropped:0 }. These are stable string tokens (not numbers) so both codecs and the platform log the same words.",
-    "bad-magic": "header magic u32 != 0x564e4352 (wrong protocol or corrupt buffer; check FIRST).",
+    "bad-magic": "header magic u32 != 0x564e434b (wrong protocol or corrupt buffer; check FIRST).",
     "bad-version": "header version is not an implemented protocolVersion.",
     "reserved-flag": "header flags set a reserved bit (COORDS_F32 or any undefined bit).",
     "op-budget": "header opCount > limits.maxOps; checked BEFORE the decode loop (decode-amplification guard).",
@@ -420,7 +420,7 @@
   },
 
   "limits": {
-    "$comment": "FAIL-CLOSED caps. 'Fail-closed' means: on any breach the codec MUST abort the WHOLE frame and let NOTHING partial cross the seam — an encoder throws before/without emitting a truncated buffer; a decoder throws and discards the whole frame (with a reason) rather than replaying a partial op list. Canvas has NO recursive/nested value trees (unlike op-batch's SerializedValue), so there is deliberately NO maxValueDepth / maxTotalElements: the decoder's entire allocation footprint is bounded by (opCount <= maxOps) fixed-size records plus inline text/colors, the whole thing under maxBatchBytes — and opCount is validated against maxOps BEFORE the loop, so a small buffer can never claim a huge op stream. A native codec SHOULD generate these as constants (as crates/rill-native-guest/build.rs does for the graphics budget and the op-batch limits).",
+    "$comment": "FAIL-CLOSED caps. 'Fail-closed' means: on any breach the codec MUST abort the WHOLE frame and let NOTHING partial cross the seam — an encoder throws before/without emitting a truncated buffer; a decoder throws and discards the whole frame (with a reason) rather than replaying a partial op list. Canvas has NO recursive/nested value trees (unlike op-batch's SerializedValue), so there is deliberately NO maxValueDepth / maxTotalElements: the decoder's entire allocation footprint is bounded by (opCount <= maxOps) fixed-size records plus inline text/colors, the whole thing under maxBatchBytes — and opCount is validated against maxOps BEFORE the loop, so a small buffer can never claim a huge op stream. A native codec SHOULD generate these as constants (as crates/keel-native-guest/build.rs does for the graphics budget and the op-batch limits).",
     "maxOps": {
       "value": 20000,
       "reason": "Aligns with the platform's per-frame draw-op budget (20000 ops/frame). header.opCount is a u32 field (ample width) but its VALUE is capped here.",

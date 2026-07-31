@@ -1,5 +1,5 @@
 /**
- * @rill/runtime/bridge - Promise Manager
+ * @keel/runtime/bridge - Promise Manager
  *
  * Handles Promise lifecycle across the Bridge boundary:
  * - Registration of outgoing promises

@@ -1,7 +1,7 @@
 // Native integration e2e for the Hermes CDP relay.
 //
 // Wires a REAL facebook::hermes::HermesRuntime + CDPDebugAPI to our production
-// rill::devtools::CDPAgentTarget (the same class the pod ships) and drives it
+// keel::devtools::CDPAgentTarget (the same class the pod ships) and drives it
 // with raw CDP messages, exactly as CDPServer would. It proves the runtime
 // behaviour that syntax checks cannot:
 //   1. Debugger.enable / Runtime.enable round-trip responses through the
@@ -43,7 +43,7 @@
 #include <vector>
 
 // Activate the gated body of the production target.
-#define RILL_WIP_CDP_DEVTOOLS 1
+#define KEEL_WIP_CDP_DEVTOOLS 1
 #include "CDPAgentTarget.h"
 
 using namespace facebook;
@@ -113,8 +113,8 @@ struct Fixture {
   facebook::hermes::HermesRuntime* rt = nullptr;
   std::shared_ptr<hcdp::CDPDebugAPI> debugAPI;
   std::weak_ptr<hcdp::CDPDebugAPI> debugAPIWeak;  // to observe destruction
-  std::shared_ptr<rill::devtools::CdpTeardownGate> gate =
-      std::make_shared<rill::devtools::CdpTeardownGate>();
+  std::shared_ptr<keel::devtools::CdpTeardownGate> gate =
+      std::make_shared<keel::devtools::CdpTeardownGate>();
   std::shared_ptr<std::atomic<int>> clientsAttached =
       std::make_shared<std::atomic<int>>(0);
 
@@ -169,9 +169,9 @@ void test_disconnect_while_paused() {
   std::cout << "--- disconnect while paused ---\n";
   Fixture fx;
   Sink sink;
-  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+  auto target = std::make_shared<keel::devtools::CDPAgentTarget>(
       1, fx.debugAPI, fx.enqueue(), fx.gate, fx.clientsAttached);
-  const rill::devtools::ConnectionId conn = 1;
+  const keel::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
   target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
   check(sink.waitFor("\"id\":1", "enable ack"), "disconnect-paused: enable acked");
@@ -207,15 +207,15 @@ void test_disconnect_while_paused() {
 // B: many dispatch() calls racing a gate close (the sandbox dispose path). The
 // gate must serialize so closeAndWait() returns only after every in-flight
 // dispatch section has exited, and dispatches after the close are dropped, not
-// crashed. Correctness is under ASan (build-run.sh -DRILL_ASAN=1); here we
+// crashed. Correctness is under ASan (build-run.sh -DKEEL_ASAN=1); here we
 // assert progress + the post-close drop.
 void test_dispatch_vs_teardown_race() {
   std::cout << "--- dispatch vs teardown race ---\n";
   Fixture fx;
   Sink sink;
-  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+  auto target = std::make_shared<keel::devtools::CDPAgentTarget>(
       1, fx.debugAPI, fx.enqueue(), fx.gate, fx.clientsAttached);
-  const rill::devtools::ConnectionId conn = 1;
+  const keel::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
   target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
   check(sink.waitFor("\"id\":1", "enable ack"), "race: enable acked");
@@ -273,9 +273,9 @@ void test_destroy_with_pending_interrupt() {
   std::cout << "--- destroy with pending interrupt ---\n";
   Fixture fx;
   Sink sink;
-  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+  auto target = std::make_shared<keel::devtools::CDPAgentTarget>(
       1, fx.debugAPI, fx.enqueue(), fx.gate, fx.clientsAttached);
-  const rill::devtools::ConnectionId conn = 1;
+  const keel::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
   target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
   check(sink.waitFor("\"id\":1", "enable ack"), "pending-int: enable acked");
@@ -350,12 +350,12 @@ int main() {
   };
 
   Sink sink;
-  auto gate = std::make_shared<rill::devtools::CdpTeardownGate>();
+  auto gate = std::make_shared<keel::devtools::CdpTeardownGate>();
   auto clientsAttached = std::make_shared<std::atomic<int>>(0);
-  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+  auto target = std::make_shared<keel::devtools::CDPAgentTarget>(
       /*execCtxId=*/1, debugAPI, std::move(enqueue), gate, clientsAttached);
 
-  const rill::devtools::ConnectionId conn = 1;
+  const keel::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
 
   // 1. Enable domains and confirm responses come back through the sink.

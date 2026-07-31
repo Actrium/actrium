@@ -1,10 +1,10 @@
-//! Test-fixture native (non-JS) rill guest that exercises the WIP binary CANVAS
+//! Test-fixture native (non-JS) keel guest that exercises the WIP binary CANVAS
 //! wire end-to-end via the capability handshake.
 //!
-//! Built with `rill-native-guest`'s `binary-protocol` feature ON, so `canvas::draw`
+//! Built with `keel-native-guest`'s `binary-protocol` feature ON, so `canvas::draw`
 //! first probes `host:canvas.getInfo` (see `canvas-wire.DESIGN.md` §1):
 //!   - a host that advertises `binaryDraw:true` for the encoder's `wireVersion`
-//!     receives the binary `RCNV` frame;
+//!     receives the binary `KCNV` frame;
 //!   - any other host (no `getInfo`, or `binaryDraw:false`) transparently
 //!     receives the legacy JSON op-list — the graceful-degrade path.
 //!
@@ -15,9 +15,9 @@
 
 extern crate alloc;
 
-use rill_native_guest::canvas::{self, DrawList};
+use keel_native_guest::canvas::{self, DrawList};
 
-rill_native_guest::guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 /// The `<Canvas canvasId="scene" />` the host app mounts for this guest.
 const CANVAS_ID: &str = "scene";

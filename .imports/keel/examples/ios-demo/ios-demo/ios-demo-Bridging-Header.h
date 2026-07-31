@@ -2,7 +2,7 @@
 //  ios-demo-Bridging-Header.h
 //  ios-demo
 //
-//  Bridging header for React Native new architecture support and rill configuration
+//  Bridging header for React Native new architecture support and keel configuration
 //
 
 #import <React/RCTBundleURLProvider.h>
@@ -13,6 +13,6 @@
 // New architecture support
 #import "ReactNativeFactory.h"
 
-// Rill configuration detection
-#import "RillConfiguration.h"
+// Keel configuration detection
+#import "KeelConfiguration.h"
 

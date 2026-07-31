@@ -9,7 +9,7 @@
  * point.
  *
  * This file only consumes the existing, unchanged per-context debug seam from
- * quickjs-debug.h (rill_qjs_set_debug_hook / RillQjsDebugHook). It does not
+ * quickjs-debug.h (keel_qjs_set_debug_hook / KeelQjsDebugHook). It does not
  * touch quickjs.c, the debug core, or any production build.
  *
  * Licensed under the Apache License, Version 2.0.
@@ -46,14 +46,14 @@ static int g_armed = 0;
  * onPaused for parity but return immediately, so eval runs straight through and
  * the "paused while the Promise is pending" property is impossible to observe.
  */
-EM_JS(void, rill_qjs_dbg_suspend, (void), {
-    globalThis.__rillDbg.onPaused();
+EM_JS(void, keel_qjs_dbg_suspend, (void), {
+    globalThis.__keelDbg.onPaused();
 })
 #else
-EM_ASYNC_JS(void, rill_qjs_dbg_suspend, (void), {
+EM_ASYNC_JS(void, keel_qjs_dbg_suspend, (void), {
     await new Promise(function (res) {
-        globalThis.__rillDbg.onPaused();
-        globalThis.__rillDbg.resume = res;
+        globalThis.__keelDbg.onPaused();
+        globalThis.__keelDbg.resume = res;
     });
 })
 #endif
@@ -72,7 +72,7 @@ static void poc_debug_hook(JSContext *ctx, const void *script_token, int line,
     if (g_armed && g_breakpoint_line >= 0 && line == g_breakpoint_line &&
         depth >= 2) {
         g_armed = 0;
-        rill_qjs_dbg_suspend();
+        keel_qjs_dbg_suspend();
     }
 }
 
@@ -89,7 +89,7 @@ int qjs_poc_init(void)
         g_rt = NULL;
         return -1;
     }
-    rill_qjs_set_debug_hook(g_ctx, poc_debug_hook, NULL);
+    keel_qjs_set_debug_hook(g_ctx, poc_debug_hook, NULL);
     return 0;
 }
 

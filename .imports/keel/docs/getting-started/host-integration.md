@@ -7,7 +7,7 @@ This guide covers Engine configuration, component registration, event communicat
 The `Engine` class is the central entry point. Create one instance per logical sandbox:
 
 ```tsx
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   timeout: 5000,
@@ -38,7 +38,7 @@ const engine = new Engine({
 
 ## Component Registration
 
-By default, Rill maps guest elements to standard React Native primitives (`View`, `Text`, `Image`, etc.). To make custom host components available to guest code, register them on the engine:
+By default, Keel maps guest elements to standard React Native primitives (`View`, `Text`, `Image`, etc.). To make custom host components available to guest code, register them on the engine:
 
 ```tsx
 import { NativeStepList } from './components/NativeStepList';
@@ -54,7 +54,7 @@ Once registered, guest code can render these components by name:
 
 ```tsx
 // Inside guest code
-import { View } from 'rill/guest';
+import { View } from 'keel/guest';
 
 export default function Guest() {
   return (

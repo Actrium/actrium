@@ -13,21 +13,21 @@
  */
 #include <emscripten.h>
 
-/* Unwind the C stack and park until wake(). Fires globalThis.__rillDbg.onPaused
+/* Unwind the C stack and park until wake(). Fires globalThis.__keelDbg.onPaused
  * synchronously during the suspend, then stores the Promise resolver on
- * globalThis.__rillDbg.resume for wake() to call. */
-EM_ASYNC_JS(void, rill_qjs_dbg_suspend_async, (void), {
+ * globalThis.__keelDbg.resume for wake() to call. */
+EM_ASYNC_JS(void, keel_qjs_dbg_suspend_async, (void), {
   await new Promise((resolve) => {
-    globalThis.__rillDbg = globalThis.__rillDbg || {};
-    if (globalThis.__rillDbg.onPaused) globalThis.__rillDbg.onPaused();
-    globalThis.__rillDbg.resume = resolve;
+    globalThis.__keelDbg = globalThis.__keelDbg || {};
+    if (globalThis.__keelDbg.onPaused) globalThis.__keelDbg.onPaused();
+    globalThis.__keelDbg.resume = resolve;
   });
 });
 
 /* Resolve the parked promise so Asyncify rewinds and suspend() returns. Safe to
  * call when nothing is parked (no-op). */
-EM_JS(void, rill_qjs_dbg_wake, (void), {
-  const dbg = globalThis.__rillDbg;
+EM_JS(void, keel_qjs_dbg_wake, (void), {
+  const dbg = globalThis.__keelDbg;
   if (!dbg) return;
   const resolve = dbg.resume;
   dbg.resume = null;

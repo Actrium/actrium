@@ -1,14 +1,14 @@
 {
   "reactNativeVersion": "0.81.5",
   "dependencies": {
-    "rill": {
+    "keel": {
       "root": "../../..",
-      "name": "rill",
+      "name": "keel",
       "platforms": {
         "android": {
           "sourceDir": "../../../android",
-          "packageImportPath": "import com.rill.sandbox.RillSandboxNativePackage;",
-          "packageInstance": "new RillSandboxNativePackage()",
+          "packageImportPath": "import com.keel.sandbox.KeelSandboxNativePackage;",
+          "packageInstance": "new KeelSandboxNativePackage()",
           "buildTypes": ["debug", "release"],
           "componentDescriptors": [],
           "dependencyConfiguration": "implementation",
@@ -21,8 +21,8 @@
     "android": {
       "sourceDir": ".",
       "appName": "app",
-      "packageName": "com.rill.demo",
-      "applicationId": "com.rill.demo",
+      "packageName": "com.keel.demo",
+      "applicationId": "com.keel.demo",
       "mainActivity": ".MainActivity",
       "watchModeCommandParams": [],
       "dependencyConfiguration": "implementation"

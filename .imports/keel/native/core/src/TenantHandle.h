@@ -6,14 +6,14 @@
 #include <mutex>
 #include <string>
 
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
 #include "devtools/CdpDebuggable.h"
 #endif
 
-namespace rill::tenant_manager {
+namespace keel::tenant_manager {
 
 /// Unified wrapper around engine-specific sandbox contexts.
-/// Engine type is determined at compile time by RILL_SANDBOX_ENGINE.
+/// Engine type is determined at compile time by KEEL_SANDBOX_ENGINE.
 class TenantHandle {
 public:
   TenantHandle(TenantId id, std::unique_ptr<TenantContext> context);
@@ -55,12 +55,12 @@ public:
 
   bool isDisposed() const;
 
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
   // Recover the CDP debug capability from the opaque sandbox context. Returns
   // null unless the engine is CDP-capable (today: Hermes). RTTI is enabled in
   // this build (Meta's JSI implementation itself uses dynamic_cast).
-  rill::devtools::ICdpDebuggable *cdpDebuggable() {
-    return dynamic_cast<rill::devtools::ICdpDebuggable *>(sandboxContext_.get());
+  keel::devtools::ICdpDebuggable *cdpDebuggable() {
+    return dynamic_cast<keel::devtools::ICdpDebuggable *>(sandboxContext_.get());
   }
 #endif
 
@@ -77,4 +77,4 @@ private:
   bool disposed_ = false;
 };
 
-} // namespace rill::tenant_manager
+} // namespace keel::tenant_manager

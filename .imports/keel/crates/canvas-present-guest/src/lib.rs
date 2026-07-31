@@ -1,4 +1,4 @@
-//! Demo native (non-JS) rill guest for the stage ② framebuffer path.
+//! Demo native (non-JS) keel guest for the stage ② framebuffer path.
 //!
 //! It SOFTWARE-RENDERS an animated scene — a scrolling RGBA gradient with a
 //! bouncing white box — directly into its OWN linear memory (a `Surface`), then
@@ -8,13 +8,13 @@
 //! surface (third-party egress) is untouched; a same-origin blit is "more inner"
 //! than any network path.
 //!
-//! Control flow (see docs/rill-canvas.zh.md, the input + frame-loop section):
+//! Control flow (see docs/keel-canvas.zh.md, the input + frame-loop section):
 //!   host rAF -> onFrame subscription -> emitEvent("canvas.frame") -> our handler
 //!   -> wake the executor -> guest_main renders + `present(...).await`.
 //!
 //! Why a `wake()`: an event handler is SYNCHRONOUS (it cannot `.await`) and does
 //! NOT re-poll the async task. So the handler only bumps the frame counter, flips
-//! a "frame ready" flag, and calls `rill_native_guest::rt::wake()`; the awaited render +
+//! a "frame ready" flag, and calls `keel_native_guest::rt::wake()`; the awaited render +
 //! present loop lives in `guest_main`. A frame that arrives while the previous
 //! `present` is still in flight simply coalesces (the flag stays set), which is
 //! exactly the "at most one frame in flight" backpressure the host also enforces.
@@ -27,10 +27,10 @@ use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 
-use rill_native_guest::canvas::{self, Surface};
-use rill_native_guest::events;
+use keel_native_guest::canvas::{self, Surface};
+use keel_native_guest::events;
 
-rill_native_guest::guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 /// The `<Canvas canvasId="viewport" />` the host app mounts for this guest.
 const CANVAS_ID: &str = "viewport";
@@ -70,15 +70,15 @@ async fn guest_main() {
     events::on("canvas.frame", |_payload: &[u8]| unsafe {
         FRAME = FRAME.wrapping_add(1);
         READY = true;
-        rill_native_guest::rt::wake();
+        keel_native_guest::rt::wake();
     });
 
     // Mount the viewport: emit a <Canvas> so the host creates + registers the real
     // <canvas> that present() targets. One-shot descriptive-UI batch (here the whole
     // UI is the canvas; a real app nests it under View/Text chrome). Note the local
-    // `render` fn below is the SOFTWARE renderer — the UI batch is rill_native_guest::render.
-    let kids = alloc::vec![rill_native_guest::ui::canvas(CANVAS_ID, W, H)];
-    rill_native_guest::render(rill_native_guest::ui::view(kids));
+    // `render` fn below is the SOFTWARE renderer — the UI batch is keel_native_guest::render.
+    let kids = alloc::vec![keel_native_guest::ui::canvas(CANVAS_ID, W, H)];
+    keel_native_guest::render(keel_native_guest::ui::view(kids));
 
     // Allocate the framebuffer ONCE and reuse it every frame (BumpAlloc only
     // grows — a per-frame Surface would leak for the guest's life).

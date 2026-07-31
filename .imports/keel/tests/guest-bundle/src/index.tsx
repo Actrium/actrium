@@ -1,7 +1,7 @@
 /**
  * Example Guest
  *
- * Basic usage examples for the Rill SDK.
+ * Basic usage examples for the Keel SDK.
  */
 
 import { useState } from 'react';
@@ -13,7 +13,7 @@ import {
   useHostEvent,
   useSendToHost,
   View,
-} from 'rill/guest';
+} from 'keel/guest';
 
 interface Config {
   title?: string;
@@ -126,7 +126,7 @@ export default function Guest() {
             color: textColor,
           }}
         >
-          {config.title || 'Rill Guest'}
+          {config.title || 'Keel Guest'}
         </Text>
         <Text
           style={{

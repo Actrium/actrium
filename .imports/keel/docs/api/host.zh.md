@@ -1,10 +1,10 @@
 # Host API 参考
 
-Host API 是在 React Native 应用程序中嵌入 Rill 的主要接口。它提供沙箱生命周期管理、组件注册、双向通信和 React 元素树渲染。
+Host API 是在 React Native 应用程序中嵌入 Keel 的主要接口。它提供沙箱生命周期管理、组件注册、双向通信和 React 元素树渲染。
 
-导入路径：`rill/host`
+导入路径：`keel/host`
 
-声明式渲染与默认组件预设在：`rill/host/preset`。
+声明式渲染与默认组件预设在：`keel/host/preset`。
 
 ---
 
@@ -27,7 +27,7 @@ new Engine(options?: EngineOptions)
 | `timeout` | `number` | `5000` | 执行超时时间（毫秒）。 |
 | `debug` | `boolean` | `false` | 启用调试日志。 |
 | `logger` | `{ log, warn, error }` | `console` | 自定义日志实现。 |
-| `requireWhitelist` | `readonly string[]` | `['react', 'react-native', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'rill/guest', 'rill/reconciler']` | 沙箱 `require()` 允许的模块名称。支持简单的尾部 `*` 前缀匹配（例如 `rill/*`）。 |
+| `requireWhitelist` | `readonly string[]` | `['react', 'react-native', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'keel/guest', 'keel/reconciler']` | 沙箱 `require()` 允许的模块名称。支持简单的尾部 `*` 前缀匹配（例如 `keel/*`）。 |
 | `onMetric` | `(name: string, value: number, extra?: Record<string, unknown>) => void` | `undefined` | 性能指标报告回调。 |
 | `receiverMaxBatchSize` | `number` | `5000` | Receiver 应用的每批次最大操作数。超出的操作将被跳过以保护 Host 性能。 |
 | `diagnostics` | `{ activityWindowMs?, activityHistoryMs?, activityBucketMs? }` | 见下文 | Host 侧监控的诊断参数。 |
@@ -171,7 +171,7 @@ Engine 上没有单独的 `engine.getHealth()` 或 `engine.getResourceStats()` �
 
 ## EngineView
 
-**导入路径：** `rill/host/preset`
+**导入路径：** `keel/host/preset`
 
 一个提供 Engine 生命周期管理和渲染声明式接口的 React Native 组件。
 
@@ -193,7 +193,7 @@ Engine 上没有单独的 `engine.getHealth()` 或 `engine.getResourceStats()` �
 
 ## useEngineView（可选）
 
-导入路径：`rill/host`
+导入路径：`keel/host`
 
 用于自定义 `EngineView` 实现的 Hook。
 

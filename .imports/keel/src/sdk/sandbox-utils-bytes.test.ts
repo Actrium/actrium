@@ -1,5 +1,5 @@
 /**
- * The byte<->text half of `rill/guest`'s sandbox-safe utilities (issue #68):
+ * The byte<->text half of `keel/guest`'s sandbox-safe utilities (issue #68):
  * `createUtf8Decoder`, `encodeBase64` and `decodeBase64`.
  *
  * The decode direction's whole risk is MALFORMED input. Well-formed UTF-8 is easy
@@ -18,7 +18,7 @@
  * Imports the leaf source, not the `./index` barrel: the barrel eagerly loads the
  * React-based SDK, which poisons react-test-renderer's lazy React setup in
  * sibling tests sharing bun's process (same reason as `sandbox-utils.test.ts`).
- * That the names are actually EXPORTED from `rill/guest` is enforced by
+ * That the names are actually EXPORTED from `keel/guest` is enforced by
  * `check:types`; the bare-sandbox behaviour is covered in
  * `sandbox-compat-bare.test.ts`, which needs a fresh realm.
  */

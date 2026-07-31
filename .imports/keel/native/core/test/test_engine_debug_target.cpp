@@ -11,8 +11,8 @@
 #include <unordered_map>
 #include <vector>
 
-using namespace rill::devtools;
-using namespace rill::test;
+using namespace keel::devtools;
+using namespace keel::test;
 
 namespace {
 

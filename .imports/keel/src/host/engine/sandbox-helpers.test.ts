@@ -375,7 +375,7 @@ describe('SandboxHelpers', () => {
     test('should define global helpers', () => {
       const code = `
         ${RUNTIME_HELPERS_CODE}
-        return typeof globalThis.__rill.registerCallback === 'function';
+        return typeof globalThis.__keel.registerCallback === 'function';
       `;
       const fn = new Function(code);
       expect(fn()).toBe(true);
@@ -385,7 +385,7 @@ describe('SandboxHelpers', () => {
       // First, run once and capture the value
       const setupCode = `
         ${RUNTIME_HELPERS_CODE}
-        return globalThis.__rill.callbackId;
+        return globalThis.__keel.callbackId;
       `;
       const valueBefore = new Function(setupCode)();
 
@@ -393,7 +393,7 @@ describe('SandboxHelpers', () => {
       const code = `
         ${RUNTIME_HELPERS_CODE}
         ${RUNTIME_HELPERS_CODE}
-        return globalThis.__rill.callbackId;
+        return globalThis.__keel.callbackId;
       `;
       const fn = new Function(code);
       expect(fn()).toBe(valueBefore);

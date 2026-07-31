@@ -177,7 +177,7 @@ export class WorkerDispatch {
         // own GC handles unmounted trees). A no-op here; tracked as a follow-up.
         break;
       case 'config':
-        // updateConfig evals into the guest (CONFIG_UPDATE → __rill_handleMessage),
+        // updateConfig evals into the guest (CONFIG_UPDATE → __keel_handleMessage),
         // so it is guest-eval entry exactly like event/invoke and takes the gate.
         this.#runGuestTurn(() => this.#engine?.updateConfig(message.config as BridgeValueObject));
         break;
@@ -324,7 +324,7 @@ export class WorkerDispatch {
    */
   #handleDbgControlPlane(message: Extract<MainToWorkerMessage, { type: `dbg.${string}` }>): void {
     if (message.type === 'dbg.evaluateOnCallFrame') {
-      // TODO(milestone-b): evaluate in the paused frame's snapshot via __rillDbg.
+      // TODO(milestone-b): evaluate in the paused frame's snapshot via __keelDbg.
       this.#post({
         type: 'dbg.evalResult',
         requestId: message.requestId,

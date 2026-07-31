@@ -1,8 +1,8 @@
-# Rill
+# Keel
 
 轻量级、无头、沙箱化的 React Native 动态 UI 渲染引擎。
 
-> **rill** /rɪl/ n. 小溪 - 象征轻量、流畅的数据流动
+> **keel** /kiːl/ n. 龙骨 - 船体的脊梁，让整条船站得住、走得直
 
 ## 特性
 
@@ -15,7 +15,7 @@
 ## 包导出
 
 ```
-rill/
+keel/
 ├── /host            # Host 运行时（Engine, useEngineView）
 ├── /host/preset     # Host UI 工具（EngineView, DefaultComponents）
 ├── /guest           # Guest SDK（组件、Hooks、平台 API）
@@ -23,7 +23,7 @@ rill/
 └── /cli             # CLI 构建工具
 ```
 
-> `import ... from 'rill'` 被刻意禁用，请使用以上明确入口。
+> `import ... from 'keel'` 被刻意禁用，请使用以上明确入口。
 
 
 ## 快速开始
@@ -32,10 +32,10 @@ rill/
 
 ```bash
 # 使用 bun
-bun add rill
+bun add keel
 
 # 使用 npm
-npm install rill
+npm install keel
 ```
 
 **Peer 依赖：**
@@ -47,8 +47,8 @@ npm install rill
 
 ```tsx
 import React, { useMemo, useEffect } from 'react';
-import { Engine } from 'rill/host';
-import { EngineView } from 'rill/host/preset';
+import { Engine } from 'keel/host';
+import { EngineView } from 'keel/host/preset';
 import { NativeStepList } from './components/NativeStepList';
 
 function App() {
@@ -84,7 +84,7 @@ function App() {
 ### Guest 开发
 
 ```tsx
-import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'rill/guest';
+import { View, Text, TouchableOpacity, useHostEvent, useConfig } from 'keel/guest';
 
 export default function MyGuest() {
   const config = useConfig<{ theme: string }>();
@@ -109,13 +109,13 @@ export default function MyGuest() {
 
 ```bash
 # 构建 bundle
-bunx rill build src/guest.tsx -o dist/bundle.js
+bunx keel build src/guest.tsx -o dist/bundle.js
 
 # 开发模式
-bunx rill build src/guest.tsx --no-minify --sourcemap
+bunx keel build src/guest.tsx --no-minify --sourcemap
 
 # 分析 bundle
-bunx rill analyze dist/bundle.js
+bunx keel analyze dist/bundle.js
 ```
 
 ## 架构
@@ -147,18 +147,18 @@ bunx rill analyze dist/bundle.js
 
 | 模块 | 导入路径 | 描述 |
 |------|----------|------|
-| Host | `rill/host` | Host 运行时：Engine、useEngineView |
-| Host Preset | `rill/host/preset` | Host UI 工具：EngineView、DefaultComponents |
-| Guest | `rill/guest` | Guest 模块：组件、Hooks |
-| DevTools | `rill/devtools` | 调试工具：操作日志、树形检查 |
-| CLI | `rill` (bin) / `rill/cli` | Guest 打包器（基于 Bun） |
+| Host | `keel/host` | Host 运行时：Engine、useEngineView |
+| Host Preset | `keel/host/preset` | Host UI 工具：EngineView、DefaultComponents |
+| Guest | `keel/guest` | Guest 模块：组件、Hooks |
+| DevTools | `keel/devtools` | 调试工具：操作日志、树形检查 |
+| CLI | `keel` (bin) / `keel/cli` | Guest 打包器（基于 Bun） |
 
 ## API
 
 ### Engine
 
 ```typescript
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine({
   timeout: 5000,        // 执行超时（毫秒）
@@ -187,7 +187,7 @@ engine.destroy();
 ### SDK Hooks
 
 ```typescript
-import { useHostEvent, useConfig, useSendToHost, useRemoteRef, TextInputRef } from 'rill/guest';
+import { useHostEvent, useConfig, useSendToHost, useRemoteRef, TextInputRef } from 'keel/guest';
 
 // 订阅 Host 事件
 useHostEvent('EVENT_NAME', (payload) => { /* 处理 */ });
@@ -223,7 +223,7 @@ Guest 使用 SDK hook `useHostEvent(event, callback)` 订阅，Host 通过 `engi
 
 **Guest 示例：**
 ```tsx
-import { View, Text, useHostEvent, useSendToHost } from 'rill/guest';
+import { View, Text, useHostEvent, useSendToHost } from 'keel/guest';
 
 export default function Guest() {
   const send = useSendToHost();
@@ -238,7 +238,7 @@ export default function Guest() {
 
 **Host 示例：**
 ```tsx
-import { Engine } from 'rill/host';
+import { Engine } from 'keel/host';
 
 const engine = new Engine();
 engine.on('message', (m) => console.log(m.event, m.payload));

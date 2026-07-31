@@ -1,6 +1,6 @@
 # CDP Debugging Protocol
 
-Rill implements a Chrome DevTools Protocol (CDP) server that enables developers to connect Chrome DevTools or VS Code to inspect and debug guest sandboxes. Each tenant is exposed as a separate debuggable target.
+Keel implements a Chrome DevTools Protocol (CDP) server that enables developers to connect Chrome DevTools or VS Code to inspect and debug guest sandboxes. Each tenant is exposed as a separate debuggable target.
 
 ## CDPServer Architecture
 
@@ -74,8 +74,8 @@ Clients never guess the ws port: every `webSocketDebuggerUrl` the server hands o
   {
     "id": "42",
     "type": "node",
-    "title": "Rill Guest: MyApp",
-    "url": "rill://tenant/42",
+    "title": "Keel Guest: MyApp",
+    "url": "keel://tenant/42",
     "webSocketDebuggerUrl": "ws://127.0.0.1:9230/tenant/42",
     "devtoolsFrontendUrl": "devtools://devtools/bundled/inspector.html?ws=127.0.0.1:9230/tenant/42"
   }
@@ -87,13 +87,13 @@ Each registered tenant appears as a separate target. Targets are registered/unre
 ### Connecting
 
 1. Open `chrome://inspect` in Chrome and add `127.0.0.1:9229` (the configured port) under "Discover network targets"
-2. Rill targets appear under "Remote Target"
+2. Keel targets appear under "Remote Target"
 3. Click "inspect" to open DevTools connected to a specific tenant
 4. Alternatively, connect VS Code's JavaScript debugger to the `webSocketDebuggerUrl` reported by `http://127.0.0.1:9229/json` (on the Apple transport: `ws://localhost:9230/tenant/<id>`)
 
 ## Domain Adapters
 
-Domain adapters translate between CDP protocol methods and Rill's internal state.
+Domain adapters translate between CDP protocol methods and Keel's internal state.
 
 ### Console Domain
 
@@ -137,7 +137,7 @@ Maps the Receiver's component tree to CDP DOM nodes.
 | `DOM.requestChildNodes` | Returns children of a specific node |
 | `DOM.getAttributes` | Returns node props as attribute pairs |
 
-The adapter translates between Rill's `nodeMap` structure (integer IDs, component type strings, props objects) and CDP's DOM node model (nodeId, nodeName, attributes array).
+The adapter translates between Keel's `nodeMap` structure (integer IDs, component type strings, props objects) and CDP's DOM node model (nodeId, nodeName, attributes array).
 
 ### Debugger Domain
 

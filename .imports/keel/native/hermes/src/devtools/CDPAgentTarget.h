@@ -25,7 +25,7 @@
  */
 #pragma once
 
-#if defined(RILL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
+#if defined(KEEL_WIP_CDP_DEVTOOLS) && !defined(NDEBUG)
 
 #include "devtools/EngineDebugTarget.h"  // IEngineDebugTarget, ConnectionId, CdpOutboundFn
 
@@ -41,7 +41,7 @@
 #include <mutex>
 #include <unordered_map>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 class CDPAgentTarget : public IEngineDebugTarget {
 public:
@@ -95,6 +95,6 @@ private:
                      std::shared_ptr<facebook::hermes::cdp::CDPAgent>> agents_;
 };
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools
 
-#endif  // RILL_WIP_CDP_DEVTOOLS && !NDEBUG
+#endif  // KEEL_WIP_CDP_DEVTOOLS && !NDEBUG

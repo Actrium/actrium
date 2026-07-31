@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createHostModuleDispatch, defineRillContract, implementHostModules, rpc } from '../../../contract';
+import { createHostModuleDispatch, defineKeelContract, implementHostModules, rpc } from '../../../contract';
 import { NativeGuestHost } from '../native-guest-host';
 
-// Real Rust guest built via the rill-native-guest `asset` SDK (crates/build.sh). On init
+// Real Rust guest built via the keel-native-guest `asset` SDK (crates/build.sh). On init
 // it drives host:asset.info -> allocate a Surface -> host:asset.blit, resolving an
 // app-package asset to decoded RGBA in its OWN linear memory (the ④ pixera path).
-// rill knows nothing about host:asset, so a test-local dispatch RECORDS what the
+// keel knows nothing about host:asset, so a test-local dispatch RECORDS what the
 // guest emitted AND writes the decoded bytes back through the host's bounds-checked
 // writeBytes — exactly the seam the platform late-binds onto host:asset.blit.
 const ASSET_GUEST = readFileSync(join(import.meta.dir, 'fixtures/asset-guest.wasm'));
@@ -37,7 +37,7 @@ function assetDispatch(hostRef: { host?: NativeGuestHost }, options: AssetDispat
   // The exact RGBA bytes the host blitted, for the round-trip assertion.
   let blitted: Uint8Array | null = null;
 
-  const contract = defineRillContract({
+  const contract = defineKeelContract({
     version: '1',
     hostModules: {
       'host:asset': {
@@ -178,7 +178,7 @@ describe('asset guest — ④ host:asset.info + host:asset.blit into guest memor
   });
 
   it('the asset guest imports only host-provided functions (the seal)', () => {
-    const allowed = new Set(['rill_host_call', 'rill_send_batch', 'rill_log', 'rill_on_event']);
+    const allowed = new Set(['keel_host_call', 'keel_send_batch', 'keel_log', 'keel_on_event']);
     const imports = WebAssembly.Module.imports(new WebAssembly.Module(ASSET_GUEST));
     for (const imp of imports) {
       expect(imp.module).toBe('env');

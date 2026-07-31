@@ -1508,7 +1508,7 @@ describe('Guest component type markers', () => {
     unmount(sendToHost);
   });
 
-  it('should render a function component referenced by __rillComponentId marker', async () => {
+  it('should render a function component referenced by __keelComponentId marker', async () => {
     function Inner() {
       return React.createElement('Text', null, 'Inner');
     }
@@ -1518,9 +1518,9 @@ describe('Guest component type markers', () => {
     // biome-ignore lint/suspicious/noExplicitAny: Test element with dynamic structure
     const innerEl: any = {
       $$typeof: Symbol.for('react.element'),
-      __rillTypeMarker: '__rill_react_element__',
-      __rillFragmentType: null,
-      type: { __rillComponentId: innerId, displayName: 'Inner' },
+      __keelTypeMarker: '__keel_react_element__',
+      __keelFragmentType: null,
+      type: { __keelComponentId: innerId, displayName: 'Inner' },
       key: null,
       ref: null,
       props: {},
@@ -1532,8 +1532,8 @@ describe('Guest component type markers', () => {
       // Simulate Guest-created element tree (type strings + marker objects)
       return {
         $$typeof: Symbol.for('react.element'),
-        __rillTypeMarker: '__rill_react_element__',
-        __rillFragmentType: null,
+        __keelTypeMarker: '__keel_react_element__',
+        __keelFragmentType: null,
         type: 'View',
         key: null,
         ref: null,
@@ -1550,9 +1550,9 @@ describe('Guest component type markers', () => {
     // biome-ignore lint/suspicious/noExplicitAny: Test element with dynamic structure
     const rootEl: any = {
       $$typeof: Symbol.for('react.element'),
-      __rillTypeMarker: '__rill_react_element__',
-      __rillFragmentType: null,
-      type: { __rillComponentId: outerId, displayName: 'Outer' },
+      __keelTypeMarker: '__keel_react_element__',
+      __keelFragmentType: null,
+      type: { __keelComponentId: outerId, displayName: 'Outer' },
       key: null,
       ref: null,
       props: {},
@@ -1578,8 +1578,8 @@ describe('Guest component type markers', () => {
     // biome-ignore lint/suspicious/noExplicitAny: Test element with dynamic structure
     const childEl: any = {
       $$typeof: Symbol.for('react.element'),
-      __rillTypeMarker: '__rill_react_element__',
-      __rillFragmentType: null,
+      __keelTypeMarker: '__keel_react_element__',
+      __keelFragmentType: null,
       type: 'Text',
       key: null,
       ref: null,
@@ -1592,12 +1592,12 @@ describe('Guest component type markers', () => {
     function Parent(props: any) {
       observedChildMarker =
         props?.children && typeof props.children === 'object'
-          ? (props.children.__rillTypeMarker as string | null)
+          ? (props.children.__keelTypeMarker as string | null)
           : null;
       return {
         $$typeof: Symbol.for('react.element'),
-        __rillTypeMarker: '__rill_react_element__',
-        __rillFragmentType: null,
+        __keelTypeMarker: '__keel_react_element__',
+        __keelFragmentType: null,
         type: 'View',
         key: null,
         ref: null,
@@ -1614,9 +1614,9 @@ describe('Guest component type markers', () => {
     // biome-ignore lint/suspicious/noExplicitAny: Test element with dynamic structure
     const rootEl: any = {
       $$typeof: Symbol.for('react.element'),
-      __rillTypeMarker: '__rill_react_element__',
-      __rillFragmentType: null,
-      type: { __rillComponentId: parentId, displayName: 'Parent' },
+      __keelTypeMarker: '__keel_react_element__',
+      __keelFragmentType: null,
+      type: { __keelComponentId: parentId, displayName: 'Parent' },
       key: null,
       ref: null,
       props: { children: childEl },
@@ -1627,7 +1627,7 @@ describe('Guest component type markers', () => {
     render(rootEl, sendToHost);
     await waitForCondition(() => receivedBatches.length > 0);
 
-    expect(observedChildMarker).toBe('__rill_react_element__');
+    expect(observedChildMarker).toBe('__keel_react_element__');
 
     const ops = receivedBatches.flatMap((b) => b.operations);
     const createdTypes = ops
@@ -1641,8 +1641,8 @@ describe('Guest component type markers', () => {
     // biome-ignore lint/suspicious/noExplicitAny: Test element with dynamic structure
     const leftChildEl: any = {
       $$typeof: Symbol.for('react.element'),
-      __rillTypeMarker: '__rill_react_element__',
-      __rillFragmentType: null,
+      __keelTypeMarker: '__keel_react_element__',
+      __keelFragmentType: null,
       type: 'Text',
       key: null,
       ref: null,
@@ -1653,8 +1653,8 @@ describe('Guest component type markers', () => {
     // biome-ignore lint/suspicious/noExplicitAny: Test element with dynamic structure
     const rightChildEl: any = {
       $$typeof: Symbol.for('react.element'),
-      __rillTypeMarker: '__rill_react_element__',
-      __rillFragmentType: null,
+      __keelTypeMarker: '__keel_react_element__',
+      __keelFragmentType: null,
       type: 'Text',
       key: null,
       ref: null,
@@ -1667,8 +1667,8 @@ describe('Guest component type markers', () => {
     function Left(props: any) {
       return {
         $$typeof: Symbol.for('react.element'),
-        __rillTypeMarker: '__rill_react_element__',
-        __rillFragmentType: null,
+        __keelTypeMarker: '__keel_react_element__',
+        __keelFragmentType: null,
         type: 'PanelMarker',
         key: null,
         ref: null,
@@ -1682,8 +1682,8 @@ describe('Guest component type markers', () => {
     function Right(props: any) {
       return {
         $$typeof: Symbol.for('react.element'),
-        __rillTypeMarker: '__rill_react_element__',
-        __rillFragmentType: null,
+        __keelTypeMarker: '__keel_react_element__',
+        __keelFragmentType: null,
         type: 'PanelMarker',
         key: null,
         ref: null,
@@ -1702,9 +1702,9 @@ describe('Guest component type markers', () => {
     // biome-ignore lint/suspicious/noExplicitAny: Test element with dynamic structure
     const leftEl: any = {
       $$typeof: Symbol.for('react.element'),
-      __rillTypeMarker: '__rill_react_element__',
-      __rillFragmentType: null,
-      type: { __rillComponentId: leftId, displayName: 'Left' },
+      __keelTypeMarker: '__keel_react_element__',
+      __keelFragmentType: null,
+      type: { __keelComponentId: leftId, displayName: 'Left' },
       key: null,
       ref: null,
       props: { children: leftChildEl },
@@ -1714,9 +1714,9 @@ describe('Guest component type markers', () => {
     // biome-ignore lint/suspicious/noExplicitAny: Test element with dynamic structure
     const rightEl: any = {
       $$typeof: Symbol.for('react.element'),
-      __rillTypeMarker: '__rill_react_element__',
-      __rillFragmentType: null,
-      type: { __rillComponentId: rightId, displayName: 'Right' },
+      __keelTypeMarker: '__keel_react_element__',
+      __keelFragmentType: null,
+      type: { __keelComponentId: rightId, displayName: 'Right' },
       key: null,
       ref: null,
       props: { children: rightChildEl },
@@ -1727,8 +1727,8 @@ describe('Guest component type markers', () => {
     function App() {
       return {
         $$typeof: Symbol.for('react.element'),
-        __rillTypeMarker: '__rill_react_element__',
-        __rillFragmentType: null,
+        __keelTypeMarker: '__keel_react_element__',
+        __keelFragmentType: null,
         type: 'View',
         key: null,
         ref: null,
@@ -1743,9 +1743,9 @@ describe('Guest component type markers', () => {
     // biome-ignore lint/suspicious/noExplicitAny: Test element with dynamic structure
     const rootEl: any = {
       $$typeof: Symbol.for('react.element'),
-      __rillTypeMarker: '__rill_react_element__',
-      __rillFragmentType: null,
-      type: { __rillComponentId: appId, displayName: 'App' },
+      __keelTypeMarker: '__keel_react_element__',
+      __keelFragmentType: null,
+      type: { __keelComponentId: appId, displayName: 'App' },
       key: null,
       ref: null,
       props: {},

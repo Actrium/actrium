@@ -30,8 +30,8 @@
 #include <utility>
 #include <vector>
 
-using rill::qjs_debug::PauseReason;
-using rill::qjs_debug::QuickJSDebugCore;
+using keel::qjs_debug::PauseReason;
+using keel::qjs_debug::QuickJSDebugCore;
 
 namespace {
 JSRuntime* g_rt = nullptr;

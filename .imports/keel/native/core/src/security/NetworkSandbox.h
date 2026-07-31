@@ -10,7 +10,7 @@
 #include <unordered_set>
 #include <vector>
 
-namespace rill::security {
+namespace keel::security {
 
 /// Network security policy for a tenant.
 struct NetworkPolicy {
@@ -140,4 +140,4 @@ private:
   std::atomic<uint32_t> concurrentRequests_{0};
 };
 
-} // namespace rill::security
+} // namespace keel::security

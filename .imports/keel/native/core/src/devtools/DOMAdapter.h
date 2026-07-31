@@ -3,7 +3,7 @@
  *
  * P3-Y.5: DOM Domain Adapter
  *
- * Maps Rill component tree to CDP DOM domain.
+ * Maps Keel component tree to CDP DOM domain.
  * Handles:
  *   - DOM.getDocument
  *   - DOM.requestChildNodes
@@ -20,7 +20,7 @@
 #include <vector>
 #include <unordered_map>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 // ============================================
 // DOM Node Types
@@ -52,8 +52,8 @@ struct DOMNode {
   int childNodeCount = 0;
   std::vector<DOMNode> children;
   
-  // For mapping back to Rill
-  int rillNodeId = 0;       // Original Rill node ID
+  // For mapping back to Keel
+  int keelNodeId = 0;       // Original Keel node ID
 };
 
 /**
@@ -200,14 +200,14 @@ private:
   int generateNodeId();
   
   /**
-   * Map Rill node ID to CDP node ID
+   * Map Keel node ID to CDP node ID
    */
-  int mapRillNodeId(TenantId tenantId, int rillNodeId);
+  int mapKeelNodeId(TenantId tenantId, int keelNodeId);
   
   /**
-   * Get Rill node ID from CDP node ID
+   * Get Keel node ID from CDP node ID
    */
-  int getRillNodeId(int cdpNodeId);
+  int getKeelNodeId(int cdpNodeId);
   
   CDPServer& server_;
   
@@ -219,13 +219,13 @@ private:
   // Node ID management
   std::atomic<int> nextNodeId_{1};
   
-  // Mapping: CDP node ID -> (tenant ID, Rill node ID)
+  // Mapping: CDP node ID -> (tenant ID, Keel node ID)
   std::unordered_map<int, std::pair<TenantId, int>> nodeIdMap_;
   
-  // Reverse mapping: (tenant ID, Rill node ID) -> CDP node ID
+  // Reverse mapping: (tenant ID, Keel node ID) -> CDP node ID
   std::unordered_map<uint64_t, int> reverseNodeIdMap_;
   
   std::mutex mapMutex_;
 };
 
-} // namespace rill::devtools
+} // namespace keel::devtools

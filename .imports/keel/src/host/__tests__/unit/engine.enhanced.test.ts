@@ -6,7 +6,7 @@ function buildBundle(code: string) {
   return `
     var _React = require('react');
     var _jsx = require('react/jsx-runtime');
-    var _rill = require('rill/guest');
+    var _keel = require('keel/guest');
     ${code}
   `;
 }
@@ -40,9 +40,9 @@ describe('Engine enhanced behaviors', () => {
       sandbox: 'node-vm',
       debug: false,
       logger: silentLogger,
-      requireWhitelist: ['react', 'react/jsx-runtime', 'rill/*'],
+      requireWhitelist: ['react', 'react/jsx-runtime', 'keel/*'],
     });
-    const src = "require('rill/guest'); require('rill/reconciler');";
+    const src = "require('keel/guest'); require('keel/reconciler');";
     await expect(load(engine, src)).resolves.toBeUndefined();
   });
 

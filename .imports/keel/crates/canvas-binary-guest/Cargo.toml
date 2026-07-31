@@ -2,7 +2,7 @@
 name = "canvas-binary-guest"
 version.workspace = true
 edition.workspace = true
-description = "Test-fixture native rill guest that emits a canvas frame over the WIP binary wire when the host advertises support (else JSON)."
+description = "Test-fixture native keel guest that emits a canvas frame over the WIP binary wire when the host advertises support (else JSON)."
 license.workspace = true
 publish = false
 
@@ -13,4 +13,4 @@ crate-type = ["cdylib"]
 # Enable the WIP binary canvas wire in the SDK. This crate is built by build.sh
 # in its OWN cargo invocation (separate feature resolve) so this feature never
 # unifies into the default JSON fixtures.
-rill-native-guest = { path = "../rill-native-guest", features = ["binary-protocol"] }
+keel-native-guest = { path = "../keel-native-guest", features = ["binary-protocol"] }

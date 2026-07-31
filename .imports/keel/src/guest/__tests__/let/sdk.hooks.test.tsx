@@ -9,7 +9,7 @@ import {
   KBD_EVENT,
   KBD_SUBSCRIBE,
   KBD_UNSUBSCRIBE,
-  type RillKeyEvent,
+  type KeelKeyEvent,
 } from '../../../shared/keyboard';
 
 describe('SDK Hooks', () => {
@@ -24,7 +24,7 @@ describe('SDK Hooks', () => {
     TestRenderer = testRendererModule.default;
     act = testRendererModule.act;
 
-    // Set React on globalThis for SDK (especially RillErrorBoundary)
+    // Set React on globalThis for SDK (especially KeelErrorBoundary)
     (globalThis as Record<string, unknown>).React = React;
 
     sdk = await import('../../../sdk/sdk');
@@ -37,7 +37,7 @@ describe('SDK Hooks', () => {
       cleanup = [];
       // Setup mock global
       const listeners = new Map<string, Set<(payload: unknown) => void>>();
-      (globalThis as Record<string, unknown>).__rill_onHostEvent = (
+      (globalThis as Record<string, unknown>).__keel_onHostEvent = (
         eventName: string,
         callback: (payload: unknown) => void
       ) => {
@@ -64,7 +64,7 @@ describe('SDK Hooks', () => {
 
     afterEach(() => {
       cleanup.forEach((fn) => fn());
-      delete (globalThis as Record<string, unknown>).__rill_onHostEvent;
+      delete (globalThis as Record<string, unknown>).__keel_onHostEvent;
       delete (globalThis as Record<string, unknown>).__triggerHostEvent;
     });
 
@@ -184,8 +184,8 @@ describe('SDK Hooks', () => {
       });
     });
 
-    test('should handle missing __rill_onHostEvent gracefully', () => {
-      delete (globalThis as Record<string, unknown>).__rill_onHostEvent;
+    test('should handle missing __keel_onHostEvent gracefully', () => {
+      delete (globalThis as Record<string, unknown>).__keel_onHostEvent;
 
       const TestComponent = () => {
         sdk.useHostEvent('MISSING', () => {});
@@ -207,11 +207,11 @@ describe('SDK Hooks', () => {
 
   describe('useConfig()', () => {
     afterEach(() => {
-      delete (globalThis as Record<string, unknown>).__rill_getConfig;
+      delete (globalThis as Record<string, unknown>).__keel_getConfig;
     });
 
     test('should return config from global', () => {
-      (globalThis as Record<string, unknown>).__rill_getConfig = () => ({
+      (globalThis as Record<string, unknown>).__keel_getConfig = () => ({
         theme: 'dark',
         apiUrl: 'https://api.example.com',
       });
@@ -236,7 +236,7 @@ describe('SDK Hooks', () => {
       });
     });
 
-    test('should return empty object when __rill_getConfig is missing', () => {
+    test('should return empty object when __keel_getConfig is missing', () => {
       const TestComponent = () => {
         const config = sdk.useConfig();
         return React.createElement('div', null, Object.keys(config).length.toString());
@@ -258,13 +258,13 @@ describe('SDK Hooks', () => {
 
   describe('useSendToHost()', () => {
     afterEach(() => {
-      delete (globalThis as Record<string, unknown>).__rill_emitEvent;
+      delete (globalThis as Record<string, unknown>).__keel_emitEvent;
     });
 
     test('should return send function', () => {
       const sentEvents: Array<{ name: string; payload: unknown }> = [];
 
-      (globalThis as Record<string, unknown>).__rill_emitEvent = (
+      (globalThis as Record<string, unknown>).__keel_emitEvent = (
         eventName: string,
         payload?: unknown
       ) => {
@@ -292,7 +292,7 @@ describe('SDK Hooks', () => {
       });
     });
 
-    test('should handle missing __rill_emitEvent gracefully', () => {
+    test('should handle missing __keel_emitEvent gracefully', () => {
       const consoleLogs: string[] = [];
       const originalWarn = console.warn;
       console.warn = (...args: unknown[]) => consoleLogs.push(args.join(' '));
@@ -330,11 +330,11 @@ describe('SDK Hooks', () => {
       sentOps = [];
       eventListeners = new Map();
 
-      (globalThis as Record<string, unknown>).__rill_sendOperation = (op: unknown) => {
+      (globalThis as Record<string, unknown>).__keel_sendOperation = (op: unknown) => {
         sentOps.push(op);
       };
 
-      (globalThis as Record<string, unknown>).__rill_onHostEvent = (
+      (globalThis as Record<string, unknown>).__keel_onHostEvent = (
         eventName: string,
         callback: (payload: unknown) => void
       ) => {
@@ -347,8 +347,8 @@ describe('SDK Hooks', () => {
     });
 
     afterEach(() => {
-      delete (globalThis as Record<string, unknown>).__rill_sendOperation;
-      delete (globalThis as Record<string, unknown>).__rill_onHostEvent;
+      delete (globalThis as Record<string, unknown>).__keel_sendOperation;
+      delete (globalThis as Record<string, unknown>).__keel_onHostEvent;
     });
 
     test('should return refCallback and null initially', () => {
@@ -515,11 +515,11 @@ describe('SDK Hooks', () => {
       sentOps = [];
       eventListeners = new Map();
 
-      (globalThis as Record<string, unknown>).__rill_sendOperation = (op: unknown) => {
+      (globalThis as Record<string, unknown>).__keel_sendOperation = (op: unknown) => {
         sentOps.push(op);
       };
 
-      (globalThis as Record<string, unknown>).__rill_onHostEvent = (
+      (globalThis as Record<string, unknown>).__keel_onHostEvent = (
         eventName: string,
         callback: (payload: unknown) => void
       ) => {
@@ -532,8 +532,8 @@ describe('SDK Hooks', () => {
     });
 
     afterEach(() => {
-      delete (globalThis as Record<string, unknown>).__rill_sendOperation;
-      delete (globalThis as Record<string, unknown>).__rill_onHostEvent;
+      delete (globalThis as Record<string, unknown>).__keel_sendOperation;
+      delete (globalThis as Record<string, unknown>).__keel_onHostEvent;
     });
 
     test('should handle REF_METHOD_RESULT success', async () => {
@@ -679,8 +679,8 @@ describe('SDK Hooks', () => {
       });
     });
 
-    test('should handle missing __rill_sendOperation', async () => {
-      delete (globalThis as Record<string, unknown>).__rill_sendOperation;
+    test('should handle missing __keel_sendOperation', async () => {
+      delete (globalThis as Record<string, unknown>).__keel_sendOperation;
 
       let caughtError: Error | null = null;
 
@@ -708,15 +708,15 @@ describe('SDK Hooks', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       expect(caughtError).not.toBe(null);
-      expect(caughtError?.message).toContain('__rill_sendOperation not available');
+      expect(caughtError?.message).toContain('__keel_sendOperation not available');
 
       act(() => {
         renderer.unmount();
       });
     });
 
-    test('should handle missing __rill_onHostEvent', () => {
-      delete (globalThis as Record<string, unknown>).__rill_onHostEvent;
+    test('should handle missing __keel_onHostEvent', () => {
+      delete (globalThis as Record<string, unknown>).__keel_onHostEvent;
 
       const TestComponent = () => {
         const [refCallback, remoteRef] = sdk.useRemoteRef();
@@ -871,8 +871,8 @@ describe('SDK Hooks', () => {
     const makeKeyEvent = (
       type: 'keydown' | 'keyup',
       key: string,
-      extra: Partial<RillKeyEvent> = {}
-    ): RillKeyEvent => ({
+      extra: Partial<KeelKeyEvent> = {}
+    ): KeelKeyEvent => ({
       type,
       key,
       code: key,
@@ -889,14 +889,14 @@ describe('SDK Hooks', () => {
       listeners = new Map();
       cleanup = [];
 
-      (globalThis as Record<string, unknown>).__rill_emitEvent = (
+      (globalThis as Record<string, unknown>).__keel_emitEvent = (
         name: string,
         payload?: unknown
       ) => {
         emitted.push({ name, payload });
       };
 
-      (globalThis as Record<string, unknown>).__rill_onHostEvent = (
+      (globalThis as Record<string, unknown>).__keel_onHostEvent = (
         eventName: string,
         callback: (payload: unknown) => void
       ) => {
@@ -914,11 +914,11 @@ describe('SDK Hooks', () => {
 
     afterEach(() => {
       cleanup.forEach((fn) => fn());
-      delete (globalThis as Record<string, unknown>).__rill_emitEvent;
-      delete (globalThis as Record<string, unknown>).__rill_onHostEvent;
+      delete (globalThis as Record<string, unknown>).__keel_emitEvent;
+      delete (globalThis as Record<string, unknown>).__keel_onHostEvent;
     });
 
-    const deliver = (event: RillKeyEvent) => {
+    const deliver = (event: KeelKeyEvent) => {
       listeners.get(KBD_EVENT)?.forEach((cb) => cb(event));
     };
 
@@ -1061,9 +1061,9 @@ describe('SDK Hooks', () => {
 
     test('calls the latest callback without re-subscribing', () => {
       const seen: string[] = [];
-      let cb = (e: RillKeyEvent) => seen.push(`v1:${e.key}`);
+      let cb = (e: KeelKeyEvent) => seen.push(`v1:${e.key}`);
 
-      const TestComponent = ({ onDown }: { onDown: (e: RillKeyEvent) => void }) => {
+      const TestComponent = ({ onDown }: { onDown: (e: KeelKeyEvent) => void }) => {
         sdk.useKeyboard({ keys: ['a'], onKeyDown: onDown });
         return React.createElement('div', null, 'Test');
       };
@@ -1076,7 +1076,7 @@ describe('SDK Hooks', () => {
       const subscribeCount = () => emitted.filter((e) => e.name === KBD_SUBSCRIBE).length;
       expect(subscribeCount()).toBe(1);
 
-      cb = (e: RillKeyEvent) => seen.push(`v2:${e.key}`);
+      cb = (e: KeelKeyEvent) => seen.push(`v2:${e.key}`);
       act(() => {
         renderer.update(React.createElement(TestComponent, { onDown: cb }));
       });
@@ -1095,8 +1095,8 @@ describe('SDK Hooks', () => {
     });
 
     test('is a no-op when the host keyboard bridge is absent', () => {
-      delete (globalThis as Record<string, unknown>).__rill_emitEvent;
-      delete (globalThis as Record<string, unknown>).__rill_onHostEvent;
+      delete (globalThis as Record<string, unknown>).__keel_emitEvent;
+      delete (globalThis as Record<string, unknown>).__keel_onHostEvent;
 
       const TestComponent = () => {
         sdk.useKeyboard({ keys: ['a'], onKeyDown: () => {} });

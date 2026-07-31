@@ -58,8 +58,8 @@ export type CdpDebugFactory = () => Promise<CdpDebugModule>;
 /** A sink for every OUTBOUND raw CDP message. Responses carry `id`; events carry `method`. */
 export type CdpMessageSink = (connId: number, rawJson: string) => void;
 
-/** The `globalThis.__rillCdp` shape the wasm calls into for each outbound CDP message. */
-interface RillCdpGlobal {
+/** The `globalThis.__keelCdp` shape the wasm calls into for each outbound CDP message. */
+interface KeelCdpGlobal {
   onMessage(connId: number, json: string): void;
 }
 
@@ -130,7 +130,7 @@ export class CdpDebugSession {
 
   /**
    * Start a CDP connection. Lazily imports + initializes the debug wasm on first call
-   * (installing the `__rillCdp.onMessage` sink BEFORE `qjsd_cdp_init` so no early outbound
+   * (installing the `__keelCdp.onMessage` sink BEFORE `qjsd_cdp_init` so no early outbound
    * message is dropped), then `qjsd_cdp_connect`s the given connection id. Idempotent per id.
    */
   async startSession(connId: number): Promise<void> {
@@ -150,7 +150,7 @@ export class CdpDebugSession {
   sendCdp(connId: number, rawJson: string): void {
     const mod = this.#module;
     if (!mod) {
-      throw new Error('[rill] CdpDebugSession.sendCdp before startSession()');
+      throw new Error('[keel] CdpDebugSession.sendCdp before startSession()');
     }
     mod.ccall('qjsd_cdp_dispatch', null, ['number', 'string'], [connId, rawJson]);
   }
@@ -196,15 +196,15 @@ export class CdpDebugSession {
     const rc = mod.ccall('qjsd_cdp_init', 'number', [], []) as number;
     if (rc !== 0) {
       this.#initPromise = null;
-      throw new Error(`[rill] qjsd_cdp_init failed (rc=${rc})`);
+      throw new Error(`[keel] qjsd_cdp_init failed (rc=${rc})`);
     }
     this.#module = mod;
     return mod;
   }
 
   #installGlobalSink(): void {
-    const g = globalThis as { __rillCdp?: RillCdpGlobal };
-    g.__rillCdp = {
+    const g = globalThis as { __keelCdp?: KeelCdpGlobal };
+    g.__keelCdp = {
       onMessage: (connId, json) => this.#onOutbound(connId, json),
     };
   }

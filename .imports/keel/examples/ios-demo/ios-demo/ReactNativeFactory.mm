@@ -3,7 +3,7 @@
 //  ios-demo
 //
 //  Factory for creating React Native views with new architecture (bridgeless) support.
-//  Rill sandbox JSI bindings are auto-installed by RillSandboxNative's constructor swizzle.
+//  Keel sandbox JSI bindings are auto-installed by KeelSandboxNative's constructor swizzle.
 //
 
 #import "ReactNativeFactory.h"
@@ -42,7 +42,7 @@
 #import <React/RCTNetworkPlugins.h>
 
 // Sandbox bridge for performance measurement
-#import "RillSandboxBridge.h"
+#import "KeelSandboxBridge.h"
 
 @interface ReactNativeFactory () <RCTHostDelegate, RCTJSRuntimeConfiguratorProtocol, RCTTurboModuleManagerDelegate>
 @property (nonatomic, strong) RCTRootViewFactory *rootViewFactory;
@@ -150,10 +150,10 @@
 #pragma mark - RCTTurboModuleManagerDelegate
 
 - (Class)getModuleClassFromName:(const char *)name {
-    // RillPerformanceBridge: app-local TurboModule for performance measurement.
-    // Must be returned here so TurboModuleManager can resolve NativeModules.RillPerformanceBridge.
-    if (strcmp(name, "RillPerformanceBridge") == 0) {
-        return RillSandboxBridge.class;
+    // KeelPerformanceBridge: app-local TurboModule for performance measurement.
+    // Must be returned here so TurboModuleManager can resolve NativeModules.KeelPerformanceBridge.
+    if (strcmp(name, "KeelPerformanceBridge") == 0) {
+        return KeelSandboxBridge.class;
     }
 
     Class moduleClass = RCTCoreModulesClassProvider(name);
@@ -175,9 +175,9 @@
 }
 
 - (id<RCTTurboModule>)getModuleInstanceFromClass:(Class)moduleClass {
-    // Return the shared singleton for RillPerformanceBridge.
-    if (moduleClass == RillSandboxBridge.class) {
-        return (id<RCTTurboModule>)[RillSandboxBridge sharedInstance];
+    // Return the shared singleton for KeelPerformanceBridge.
+    if (moduleClass == KeelSandboxBridge.class) {
+        return (id<RCTTurboModule>)[KeelSandboxBridge sharedInstance];
     }
 
     if (moduleClass == RCTImageLoader.class) {

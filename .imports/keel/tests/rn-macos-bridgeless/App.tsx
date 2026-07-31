@@ -1,5 +1,5 @@
 /**
- * Rill macOS E2E Test App (Bridgeless Mode)
+ * Keel macOS E2E Test App (Bridgeless Mode)
  * Runs sandbox tests in real React Native runtime
  */
 
@@ -12,26 +12,26 @@ import {
   TouchableOpacity,
   Platform,
 } from 'react-native';
-import { registerRillSandboxTests, SandboxTarget } from './src/tests/rill-sandbox-tests';
+import { registerKeelSandboxTests, SandboxTarget } from './src/tests/keel-sandbox-tests';
 import { getTests, runTests, TestResult } from './src/runner/registry';
 import { nativeLog } from './src/native-logger';
 
 // Test result markers for CLI parsing
-const MARKER_START = '>>>RILL_TEST_START<<<';
-const MARKER_END = '>>>RILL_TEST_END<<<';
-const MARKER_RESULT = '>>>RILL_TEST_RESULT<<<';
+const MARKER_START = '>>>KEEL_TEST_START<<<';
+const MARKER_END = '>>>KEEL_TEST_END<<<';
+const MARKER_RESULT = '>>>KEEL_TEST_RESULT<<<';
 
 function normalizeTarget(v: unknown): SandboxTarget {
   if (v === 'quickjs' || v === 'jsc' || v === 'hermes' || v === 'auto') return v;
   return 'auto'; // Default to auto-detect injected JSI module
 }
 
-export default function App(props: { rillSandbox?: string; rillXpc?: boolean } = {}) {
+export default function App(props: { keelSandbox?: string; keelXpc?: boolean } = {}) {
   const [results, setResults] = useState<TestResult[]>([]);
   const [running, setRunning] = useState(false);
   const [finished, setFinished] = useState(false);
-  const sandboxTarget = normalizeTarget(props.rillSandbox);
-  const enableXpc = Boolean(props.rillXpc);
+  const sandboxTarget = normalizeTarget(props.keelSandbox);
+  const enableXpc = Boolean(props.keelXpc);
 
   const executeTests = useCallback(async () => {
     if (running) return;
@@ -46,7 +46,7 @@ export default function App(props: { rillSandbox?: string; rillXpc?: boolean } =
     nativeLog(`Target: ${sandboxTarget}`);
 
     // Register tests
-    registerRillSandboxTests(sandboxTarget, { enableXpc });
+    registerKeelSandboxTests(sandboxTarget, { enableXpc });
     const allTests = getTests();
     nativeLog(`Total tests: ${allTests.length}`);
 
@@ -107,7 +107,7 @@ export default function App(props: { rillSandbox?: string; rillXpc?: boolean } =
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Rill macOS E2E Tests</Text>
+        <Text style={styles.title}>Keel macOS E2E Tests</Text>
         <Text style={styles.subtitle}>
           Platform: {Platform.OS} | Mode: Bridgeless | Target: {sandboxTarget}
         </Text>

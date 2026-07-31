@@ -4,7 +4,7 @@
 
 ## 原理
 
-浏览器 V8 自带完整、支持 wasm **DWARF** 的调试能力;Chrome DevTools 装上「**C/C++ DevTools Support (DWARF)**」扩展后,能把 wasm 的机器地址映射回 **Rust 源码**,支持下断点、单步、看局部变量。rill 侧**不写任何调试器代码**——只要把带 DWARF 的 guest 交给 V8,DevTools 就能接管。
+浏览器 V8 自带完整、支持 wasm **DWARF** 的调试能力;Chrome DevTools 装上「**C/C++ DevTools Support (DWARF)**」扩展后,能把 wasm 的机器地址映射回 **Rust 源码**,支持下断点、单步、看局部变量。keel 侧**不写任何调试器代码**——只要把带 DWARF 的 guest 交给 V8,DevTools 就能接管。
 
 > 注意区分两种 web guest:本文只适用于**直接 wasm 的 Rust guest**。「wasm 里跑 QuickJS、业务用 JS」那种 guest,V8 只看得见 QuickJS 解释器本身、看不见里面的业务 JS——那条路要另一套机制(QuickJS 行级钩子 + asyncify),不在本文范围。
 
@@ -19,7 +19,7 @@
 **1. 构建带 DWARF 的调试 guest**
 
 ```bash
-RILL_GUEST_DEBUG=1 crates/build.sh
+KEEL_GUEST_DEBUG=1 crates/build.sh
 ```
 
 产物在 `crates/debug-artifacts/*.wasm`(已 gitignore)。它用 `[profile.debug-wasm]`(`debug=2`、`strip=none`、`opt-level=1`、无 LTO),且**不加** `--remap-path-prefix`,保留真实源路径供 DevTools 定位。

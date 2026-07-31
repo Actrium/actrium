@@ -4,16 +4,16 @@
  * Manages function references on the Guest side
  * - Generates a unique ID (fnId) for each function
  * - Uses reference counting to prevent memory leaks
- * - shares the __rill.callbacks Map the host injects (inside the guest environment)
+ * - shares the __keel.callbacks Map the host injects (inside the guest environment)
  */
 
 import type { SandboxGlobals } from '../host/sandbox/globals';
 import type { CallbackRegistry as ICallbackRegistry, ReviewedUnknown } from './types';
 
-// Extend globalThis to include Rill-specific properties
+// Extend globalThis to include Keel-specific properties
 declare global {
-  var __RILL_GUEST_ENV__: boolean | undefined;
-  // __rill namespace holds callbacks, callbackId, registerCallback, etc.
+  var __KEEL_GUEST_ENV__: boolean | undefined;
+  // __keel namespace holds callbacks, callbackId, registerCallback, etc.
 }
 
 export class CallbackRegistry implements ICallbackRegistry {
@@ -25,13 +25,13 @@ export class CallbackRegistry implements ICallbackRegistry {
 
   constructor() {
     // Check if we're in Guest environment
-    // Guest environment is marked by __RILL_GUEST_ENV__ flag set by Host injection
-    const isGuestEnv = globalThis.__RILL_GUEST_ENV__ === true;
-    const rillNs = (globalThis as unknown as SandboxGlobals).__rill;
-    const guestCallbacks = rillNs?.callbacks;
+    // Guest environment is marked by __KEEL_GUEST_ENV__ flag set by Host injection
+    const isGuestEnv = globalThis.__KEEL_GUEST_ENV__ === true;
+    const keelNs = (globalThis as unknown as SandboxGlobals).__keel;
+    const guestCallbacks = keelNs?.callbacks;
 
     if (isGuestEnv && guestCallbacks instanceof Map) {
-      // Guest environment: share the same Map with Host-injected __rill.callbacks
+      // Guest environment: share the same Map with Host-injected __keel.callbacks
       this.callbacks = guestCallbacks;
       this.useGuestCallbacks = true;
     } else {
@@ -42,7 +42,7 @@ export class CallbackRegistry implements ICallbackRegistry {
   }
 
   /**
-   * Get internal callbacks Map (for syncing with globalThis.__rill.callbacks)
+   * Get internal callbacks Map (for syncing with globalThis.__keel.callbacks)
    */
   getMap(): Map<string, (...args: ReviewedUnknown[]) => ReviewedUnknown> {
     return this.callbacks;
@@ -52,12 +52,12 @@ export class CallbackRegistry implements ICallbackRegistry {
    * Register callback function with initial reference count of 1
    */
   register(fn: (...args: ReviewedUnknown[]) => ReviewedUnknown): string {
-    // Use Guest's __rill.registerCallback if available (for consistent fnId format)
+    // Use Guest's __keel.registerCallback if available (for consistent fnId format)
     if (
       this.useGuestCallbacks &&
-      typeof (globalThis as unknown as SandboxGlobals).__rill?.registerCallback === 'function'
+      typeof (globalThis as unknown as SandboxGlobals).__keel?.registerCallback === 'function'
     ) {
-      const fnId = (globalThis as unknown as SandboxGlobals).__rill!.registerCallback!(fn);
+      const fnId = (globalThis as unknown as SandboxGlobals).__keel!.registerCallback!(fn);
       this.refCounts.set(fnId, 1);
       return fnId;
     }
@@ -102,12 +102,12 @@ export class CallbackRegistry implements ICallbackRegistry {
         // Error objects may contain React fiber tree references (circular).
         const msg = error instanceof Error ? error.message : String(error);
         const stack = error instanceof Error ? (error.stack ?? '') : '';
-        console.error(`[rill] Callback ${fnId} threw error: ${msg}`);
-        if (stack) console.error(`[rill] stack: ${stack}`);
+        console.error(`[keel] Callback ${fnId} threw error: ${msg}`);
+        if (stack) console.error(`[keel] stack: ${stack}`);
         throw error;
       }
     }
-    console.warn(`[rill] Callback ${fnId} not found`);
+    console.warn(`[keel] Callback ${fnId} not found`);
     return undefined;
   }
 
@@ -160,5 +160,5 @@ export class CallbackRegistry implements ICallbackRegistry {
  */
 const globals = globalThis as Record<string, unknown>;
 export const globalCallbackRegistry: ICallbackRegistry =
-  (globals.__rillGlobalCallbackRegistry as ICallbackRegistry) ??
-  (globals.__rillGlobalCallbackRegistry = new CallbackRegistry());
+  (globals.__keelGlobalCallbackRegistry as ICallbackRegistry) ??
+  (globals.__keelGlobalCallbackRegistry = new CallbackRegistry());

@@ -9,12 +9,12 @@
  * module eval) so a host that injects the globals after bundle load is picked
  * up, and so tests can simulate a bare sandbox by deleting them.
  *
- * These helpers are GUEST-FACING: `rill/guest` re-exports them (`src/sdk/index.ts`,
+ * These helpers are GUEST-FACING: `keel/guest` re-exports them (`src/sdk/index.ts`,
  * issue #68) because a sandboxed guest has no `TextEncoder` of its own to fall
  * back on. They are therefore public surface, not internal plumbing — do not
  * retire one because its last in-tree caller went away.
  *
- * Measured inside a rill guest running on QuickJS-WASM (issue #68), reporting
+ * Measured inside a keel guest running on QuickJS-WASM (issue #68), reporting
  * `typeof globalThis[name]` from inside the sandbox: `TextEncoder`,
  * `TextDecoder`, `performance`, `btoa`, `atob`, `Buffer` and `crypto` are all
  * ABSENT, while `Uint8Array`, `console` and `setTimeout` are present. That
@@ -98,7 +98,7 @@ function encodeUtf8Fallback(str: string): Uint8Array {
  * The counterpart to [`createUtf8Encoder`], and the direction that did not exist
  * before: a guest receiving bytes from a host capability (a file it asked the
  * host to read, a fetch response body) had neither a helper nor a documented
- * fallback, because rill's own wire path only ever needed to encode. Uses a
+ * fallback, because keel's own wire path only ever needed to encode. Uses a
  * single shared `TextDecoder` when the sandbox has one and a pure-JS fallback
  * otherwise; like the encoder, the check is per call, so a host that injects the
  * global late is picked up. Call once per batch/scope and reuse the returned

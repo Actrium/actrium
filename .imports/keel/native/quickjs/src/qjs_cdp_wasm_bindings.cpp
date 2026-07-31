@@ -3,7 +3,7 @@
  * engine (AdapterDebugTarget -> DebuggerAdapter -> QuickJSEngineDebugger -> core)
  * so the wasm speaks raw Chrome DevTools Protocol directly. The browser worker
  * (and the node CDP harness) is then a dumb pipe: raw CDP bytes in via
- * qjsd_cdp_dispatch, raw CDP bytes out via the __rillCdp.onMessage callback.
+ * qjsd_cdp_dispatch, raw CDP bytes out via the __keelCdp.onMessage callback.
  *
  * This is the single source of truth for CDP serialization — the SAME C++ the
  * native path uses and tests — instead of reimplementing RemoteObject / scope /
@@ -37,9 +37,9 @@
 #include <string>
 #include <vector>
 
-using namespace rill::devtools;
-using rill::qjs_debug::QuickJSDebugCore;
-using rill::qjs_debug::QuickJSEngineDebugger;
+using namespace keel::devtools;
+using keel::qjs_debug::QuickJSDebugCore;
+using keel::qjs_debug::QuickJSEngineDebugger;
 
 namespace {
 JSRuntime* g_rt = nullptr;
@@ -51,10 +51,10 @@ std::unique_ptr<AdapterDebugTarget> g_target;
 }  // namespace
 
 // Outbound: hand one CDP message (response or event) to the JS host. The worker
-// installs globalThis.__rillCdp = { onMessage(connId, json) }. Synchronous JS —
+// installs globalThis.__keelCdp = { onMessage(connId, json) }. Synchronous JS —
 // never suspends — so it is safe to call from anywhere, including mid-pause.
-EM_JS(void, rill_qjs_cdp_out, (int connId, const char* json), {
-  const cdp = globalThis.__rillCdp;
+EM_JS(void, keel_qjs_cdp_out, (int connId, const char* json), {
+  const cdp = globalThis.__keelCdp;
   if (cdp && cdp.onMessage) cdp.onMessage(connId, UTF8ToString(json));
 });
 
@@ -89,7 +89,7 @@ void qjsd_cdp_connect(int connId) {
   if (!g_target) return;
   g_target->onClientConnect(
       static_cast<ConnectionId>(connId),
-      [connId](const RawCdpMessage& m) { rill_qjs_cdp_out(connId, m.c_str()); });
+      [connId](const RawCdpMessage& m) { keel_qjs_cdp_out(connId, m.c_str()); });
 }
 
 EMSCRIPTEN_KEEPALIVE

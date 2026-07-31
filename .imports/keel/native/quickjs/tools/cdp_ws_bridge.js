@@ -1,5 +1,5 @@
 // WebSocket + /json-discovery bridge that puts a real Chrome DevTools front-end
-// in front of the QuickJS rill CDP host (cdp_stdio_host). Chrome discovers the
+// in front of the QuickJS keel CDP host (cdp_stdio_host). Chrome discovers the
 // target via /json, opens a WebSocket, and every frame is piped to the host's
 // stdin; every host stdout line is sent back as a frame.
 //
@@ -14,7 +14,7 @@ const PORT = parseInt(process.env.PORT || '9333', 10);
 const HOST = process.env.HOST || '127.0.0.1';
 const HOSTBIN = process.env.HOSTBIN || './cdp_stdio_host';
 
-const targetId = 'rill-quickjs-1';
+const targetId = 'keel-quickjs-1';
 const wsPath = `/devtools/page/${targetId}`;
 const wsAuthority = `${HOST}:${PORT}${wsPath}`;
 
@@ -23,9 +23,9 @@ function targets() {
     {
       id: targetId,
       type: 'node',
-      title: 'rill QuickJS guest',
+      title: 'keel QuickJS guest',
       url: 'guest.js',
-      description: 'rill CDP debugger (QuickJS engine)',
+      description: 'keel CDP debugger (QuickJS engine)',
       webSocketDebuggerUrl: `ws://${wsAuthority}`,
       devtoolsFrontendUrl: `devtools://devtools/bundled/js_app.html?ws=${wsAuthority}`,
     },
@@ -37,7 +37,7 @@ const server = http.createServer((req, res) => {
   if (req.url === '/json/version') {
     res.end(
       JSON.stringify({
-        Browser: 'rill/quickjs',
+        Browser: 'keel/quickjs',
         'Protocol-Version': '1.3',
         webSocketDebuggerUrl: `ws://${wsAuthority}`,
       })

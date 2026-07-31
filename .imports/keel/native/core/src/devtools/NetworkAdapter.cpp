@@ -1,6 +1,6 @@
-// WIP subsystem — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in devtools/CDPServer.h.
-#if RILL_WIP_CDP_DEVTOOLS
+#if KEEL_WIP_CDP_DEVTOOLS
 /**
  * NetworkAdapter.cpp
  *
@@ -11,7 +11,7 @@
 #include <sstream>
 #include <iomanip>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 NetworkAdapter::NetworkAdapter(CDPServer& server)
     : server_(server) {}
@@ -507,5 +507,5 @@ std::string NetworkAdapter::generateRequestId() {
   return "req-" + std::to_string(id);
 }
 
-} // namespace rill::devtools
-#endif // RILL_WIP_CDP_DEVTOOLS
+} // namespace keel::devtools
+#endif // KEEL_WIP_CDP_DEVTOOLS

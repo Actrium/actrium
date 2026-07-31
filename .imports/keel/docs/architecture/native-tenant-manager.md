@@ -10,9 +10,9 @@ The native tenant manager is a C++ singleton that provides multi-tenant sandbox 
 
 ## Component Overview
 
-### RillTenantManager (`native/core/src/RillTenantManager.h`)
+### KeelTenantManager (`native/core/src/KeelTenantManager.h`)
 
-Singleton installed as `globalThis.__RillTenantManager` via `jsi::HostObject`. All methods are exposed through the JSI `get()` interface and callable from TypeScript.
+Singleton installed as `globalThis.__KeelTenantManager` via `jsi::HostObject`. All methods are exposed through the JSI `get()` interface and callable from TypeScript.
 
 Key responsibilities:
 - Tenant lifecycle (create, load, pause, resume, destroy)
@@ -123,21 +123,21 @@ Host VM Thread                    Tenant Thread
 The tenant manager is installed in the host runtime during TurboModule initialization:
 
 ```cpp
-RillTenantManager::install(hostRuntime, callInvoker);
+KeelTenantManager::install(hostRuntime, callInvoker);
 ```
 
-This creates a singleton `RillTenantManager` and sets it as `globalThis.__RillTenantManager`. All methods are exposed via the `jsi::HostObject::get()` interface:
+This creates a singleton `KeelTenantManager` and sets it as `globalThis.__KeelTenantManager`. All methods are exposed via the `jsi::HostObject::get()` interface:
 
 ```
-__RillTenantManager.createTenant(config)
-__RillTenantManager.loadBundle(tenantId, code)
-__RillTenantManager.destroyTenant(tenantId)
-__RillTenantManager.sendEvent(tenantId, name, payload)
-__RillTenantManager.evalInTenant(tenantId, code)
-__RillTenantManager.setTenantGlobal(tenantId, name, value)
-__RillTenantManager.getTenantGlobal(tenantId, name)
-__RillTenantManager.setHostCallbacks(callbacks)
-__RillTenantManager.getMetrics()
+__KeelTenantManager.createTenant(config)
+__KeelTenantManager.loadBundle(tenantId, code)
+__KeelTenantManager.destroyTenant(tenantId)
+__KeelTenantManager.sendEvent(tenantId, name, payload)
+__KeelTenantManager.evalInTenant(tenantId, code)
+__KeelTenantManager.setTenantGlobal(tenantId, name, value)
+__KeelTenantManager.getTenantGlobal(tenantId, name)
+__KeelTenantManager.setHostCallbacks(callbacks)
+__KeelTenantManager.getMetrics()
 // ... EventBus methods, timer methods, etc.
 ```
 
@@ -151,13 +151,13 @@ Host callbacks (`onBatch`, `onEvent`, `onError`, `onLog`, `onTimer`) are `jsi::F
 
 ```typescript
 static isAvailable(): boolean {
-  return typeof globalThis.__RillTenantManager !== 'undefined';
+  return typeof globalThis.__KeelTenantManager !== 'undefined';
 }
 ```
 
 ### Engine Integration
 
-When `globalThis.__RillTenantManager` is available, `Engine` automatically delegates to it. Internally, the adapter wraps the raw JSI interface into a `JSEngineProvider` / `JSEngineRuntime` / `SandboxScope` implementation:
+When `globalThis.__KeelTenantManager` is available, `Engine` automatically delegates to it. Internally, the adapter wraps the raw JSI interface into a `JSEngineProvider` / `JSEngineRuntime` / `SandboxScope` implementation:
 
 - `createRuntime()` -- Calls `createTenant(config)`, returns a wrapper
 - `context.eval(code)` -- Calls `evalInTenant(tenantId, code)`

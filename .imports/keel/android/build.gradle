@@ -5,7 +5,7 @@ def safeExtGet(prop, fallback) {
 }
 
 android {
-    namespace 'com.rill.sandbox'
+    namespace 'com.keel.sandbox'
     compileSdk safeExtGet('compileSdkVersion', 35)
     ndkVersion safeExtGet('ndkVersion', '27.1.12297006')
 

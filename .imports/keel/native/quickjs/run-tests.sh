@@ -23,7 +23,7 @@ echo "[2/4] Running tests..."
 make test
 
 # Debugger e2e suites: portable C/C++, build locally with clang/gcc — no
-# external SDK. These exercise the RILL_QJS_DEBUG engine hook and the full
+# external SDK. These exercise the KEEL_QJS_DEBUG engine hook and the full
 # CDP relay stack, which the unit tests above compile out.
 echo ""
 echo "[3/4] Running engine debug-hook e2e..."

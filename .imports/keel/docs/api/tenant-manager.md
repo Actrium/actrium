@@ -6,24 +6,24 @@ The TenantManager is a native C++ multi-tenant sandbox manager exposed to the ho
 
 ## Engine Integration
 
-Rill integrates TenantManager via `EngineOptions.sandbox = 'tenant-manager'` (or auto-detection). Internally, `Engine` delegates sandbox operations to the native `__RillTenantManager` HostObject through an internal TypeScript adapter (`src/host/tenant manager/tenant manager-provider.ts`), but this adapter is not part of the public API.
+Keel integrates TenantManager via `EngineOptions.sandbox = 'tenant-manager'` (or auto-detection). Internally, `Engine` delegates sandbox operations to the native `__KeelTenantManager` HostObject through an internal TypeScript adapter (`src/host/tenant manager/tenant manager-provider.ts`), but this adapter is not part of the public API.
 
 ### Detection
 
 The native TenantManager is installed as a global on the host JS runtime:
 
 ```typescript
-globalThis.__RillTenantManager: RillTenantManagerJSI | undefined
+globalThis.__KeelTenantManager: KeelTenantManagerJSI | undefined
 ```
 
-If `globalThis.__RillTenantManager` is defined, TenantManager is available.
+If `globalThis.__KeelTenantManager` is defined, TenantManager is available.
 
 ### Usage
 
 The TenantManager is selected automatically when detected, or explicitly via the `sandbox` option:
 
 ```typescript
-// Auto-detection (used when __RillTenantManager is available)
+// Auto-detection (used when __KeelTenantManager is available)
 const engine = new Engine();
 
 // Explicit selection
@@ -38,9 +38,9 @@ const engine = new Engine({
 
 ---
 
-## RillTenantManagerJSI
+## KeelTenantManagerJSI
 
-The full JSI interface for the native `__RillTenantManager` HostObject. All methods are synchronous JSI calls unless otherwise noted.
+The full JSI interface for the native `__KeelTenantManager` HostObject. All methods are synchronous JSI calls unless otherwise noted.
 
 ### Tenant Lifecycle
 

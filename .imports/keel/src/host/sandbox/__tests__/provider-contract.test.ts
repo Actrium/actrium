@@ -12,7 +12,7 @@
  * - inject(object) + extract round-trip
  * - inject(host fn) one-way: a guest call reaches the host with its args intact
  * - inject(host fn) with return value: the guest receives it synchronously
- * - render channel: a guest __rill_sendBatch(batch) reaches the host
+ * - render channel: a guest __keel_sendBatch(batch) reaches the host
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
@@ -73,14 +73,14 @@ for (const providerCase of PROVIDERS) {
       expect(context.eval('var r = globalThis.__hostGet(); r.label + ":" + r.v')).toBe('ok:7');
     });
 
-    it('render channel: a guest __rill_sendBatch reaches the host with the batch intact', () => {
+    it('render channel: a guest __keel_sendBatch reaches the host with the batch intact', () => {
       // biome-ignore lint/suspicious/noExplicitAny: captured render batches
       const batches: any[] = [];
-      context.inject('__rill_sendBatch', (batch: unknown) => {
+      context.inject('__keel_sendBatch', (batch: unknown) => {
         batches.push(batch);
       });
       context.eval(
-        'globalThis.__rill_sendBatch({ version: 1, batchId: 9, operations: [{ op: "CREATE", id: 1, type: "View" }] })'
+        'globalThis.__keel_sendBatch({ version: 1, batchId: 9, operations: [{ op: "CREATE", id: 1, type: "View" }] })'
       );
       expect(batches).toEqual([
         { version: 1, batchId: 9, operations: [{ op: 'CREATE', id: 1, type: 'View' }] },

@@ -4,7 +4,7 @@ setlocal enabledelayedexpansion
 rem Use UTF-8 code page for Metro/Hermes Unicode output.
 chcp 65001 >nul
 set "CI=1"
-rem dev.cmd - Build & deploy Rill Windows Demo
+rem dev.cmd - Build & deploy Keel Windows Demo
 rem
 rem Interactive:  dev.cmd
 rem CLI:          dev.cmd -engine quickjs -release -clean -nolaunch
@@ -37,7 +37,7 @@ goto validate
 :menu
 echo.
 echo   ===================================
-echo      Rill Windows Demo  -  Build
+echo      Keel Windows Demo  -  Build
 echo   ===================================
 echo.
 echo   Engine:
@@ -92,7 +92,7 @@ if not defined CMAKE (
 if not defined CMAKE echo Error: CMake not found >&2 & exit /b 1
 
 rem ── Auto-clean on engine switch (prevents stale .obj from incremental build) ──
-set "ENGINE_STAMP=windows\x64\.rill_engine"
+set "ENGINE_STAMP=windows\x64\.keel_engine"
 if exist "!ENGINE_STAMP!" (
     set /p _PREV_ENGINE=<"!ENGINE_STAMP!"
     if not "!_PREV_ENGINE!"=="!ENGINE!" (
@@ -109,7 +109,7 @@ if "%CLEAN%"=="1" (
     if exist windows\x64 rd /s /q windows\x64
     if exist windows\WindowsDemo\x64 rd /s /q windows\WindowsDemo\x64
     if exist windows\WindowsDemo.Package\bin rd /s /q windows\WindowsDemo.Package\bin
-    if exist windows\RillSandboxNative\build rd /s /q windows\RillSandboxNative\build
+    if exist windows\KeelSandboxNative\build rd /s /q windows\KeelSandboxNative\build
     if exist windows\WindowsDemo.Package\Bundle\index.windows.bundle del /q windows\WindowsDemo.Package\Bundle\index.windows.bundle
     if exist windows\WindowsDemo.Package\Bundle\step1.bundle del /q windows\WindowsDemo.Package\Bundle\step1.bundle
     if exist windows\WindowsDemo.Package\Bundle\bytecode rd /s /q windows\WindowsDemo.Package\Bundle\bytecode
@@ -156,14 +156,14 @@ if /i "%ENGINE%"=="hermes" (
 )
 
 rem ── [3] CMake sandbox lib ──
-set "CMAKE_BD=windows\RillSandboxNative\build"
-set "STAMP=%CMAKE_BD%\.rill_engine_%CONFIG%"
+set "CMAKE_BD=windows\KeelSandboxNative\build"
+set "STAMP=%CMAKE_BD%\.keel_engine_%CONFIG%"
 set CMAKE_NEEDED=0
 if not exist "%STAMP%" ( set CMAKE_NEEDED=1 ) else (
     set /p PREV=<"%STAMP%"
     if not "!PREV!"=="%ENGINE%" set CMAKE_NEEDED=1
 )
-if not exist "%CMAKE_BD%\%CONFIG%\rill_sandbox.lib" set CMAKE_NEEDED=1
+if not exist "%CMAKE_BD%\%CONFIG%\keel_sandbox.lib" set CMAKE_NEEDED=1
 rem Auto-clean stale CMake cache (path mismatch)
 if exist "%CMAKE_BD%\CMakeCache.txt" (
     findstr /c:"%CD:\=/%" "%CMAKE_BD%\CMakeCache.txt" >nul 2>&1
@@ -176,7 +176,7 @@ if exist "%CMAKE_BD%\CMakeCache.txt" (
 
 if "%CMAKE_NEEDED%"=="1" (
     echo   [3/%TOTAL%] CMake sandbox [%ENGINE%] [%CONFIG%]...
-    "%CMAKE%" -S windows\RillSandboxNative -B %CMAKE_BD% -G "Visual Studio 17 2022" -DRILL_SANDBOX_ENGINE=%ENGINE%
+    "%CMAKE%" -S windows\KeelSandboxNative -B %CMAKE_BD% -G "Visual Studio 17 2022" -DKEEL_SANDBOX_ENGINE=%ENGINE%
     if !errorlevel! neq 0 echo Error: CMake configure failed >&2 & exit /b 1
     "%CMAKE%" --build %CMAKE_BD% --config %CONFIG%
     if !errorlevel! neq 0 echo Error: CMake build failed >&2 & exit /b 1
@@ -196,11 +196,11 @@ if exist "windows\WindowsDemo\obj\project.assets.json" (
 
 rem ── [5] MSBuild ──
 echo   [5/%TOTAL%] MSBuild [%ENGINE%] [%CONFIG%]...
-"%MSBUILD%" windows\WindowsDemo.sln /p:Configuration=%CONFIG% /p:Platform=x64 /p:RillSandboxEngine=%ENGINE% /p:Bundle=false /p:ReactNativeBundle=false /nologo /v:m
+"%MSBUILD%" windows\WindowsDemo.sln /p:Configuration=%CONFIG% /p:Platform=x64 /p:KeelSandboxEngine=%ENGINE% /p:Bundle=false /p:ReactNativeBundle=false /nologo /v:m
 if !errorlevel! neq 0 echo Error: MSBuild failed >&2 & exit /b 1
 rem Record engine for switch detection
 if not exist "windows\x64" mkdir "windows\x64"
->windows\x64\.rill_engine echo !ENGINE!
+>windows\x64\.keel_engine echo !ENGINE!
 
 rem ── [6] Sync AppX layout ──
 set "APPX=windows\WindowsDemo.Package\bin\x64\%CONFIG%"
