@@ -1,7 +1,7 @@
 /**
  * Shared Style Type Definitions
  *
- * Shared between Guest (rill/guest) and Host (runtime) sides.
+ * Shared between Guest (keel/guest) and Host (runtime) sides.
  * These types define the style system used across the boundary.
  */
 

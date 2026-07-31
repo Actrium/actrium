@@ -3,12 +3,12 @@
  * `parity-tenant-manager-no-real-roundtrip`).
  *
  * The production default path on a device with the native module is TenantManager:
- * Engine -> TenantManagerProvider -> __RillTenantManager (JSI) -> per-tenant sandbox.
+ * Engine -> TenantManagerProvider -> __KeelTenantManager (JSI) -> per-tenant sandbox.
  * The existing tenant-manager-provider.test.ts only asserts the TS delegation SHAPE
  * (spies that evalInTenant/setTenantGlobal are called) — `evalInTenant` returns a fake
  * string and never executes guest JS, so no real host<->guest contract is exercised.
  *
- * Here we install an in-process fake `__RillTenantManager` whose per-tenant
+ * Here we install an in-process fake `__KeelTenantManager` whose per-tenant
  * eval/inject/extract are backed by a REAL NodeVMProvider context (same process, so
  * function references cross the boundary just like the native JSI HostObject keeps the
  * guest realm in C++). That lets a real Engine drive the same core contracts it drives
@@ -21,15 +21,15 @@ import { HostMsg } from '../../../shared';
 import { Engine } from '../../engine';
 import { NodeVMProvider } from '../../sandbox/providers/node-vm-provider';
 import type { JSEngineRuntime, SandboxScope } from '../../sandbox/types/provider';
-import type { RillTenantManagerJSI } from '../../tenant-manager/types';
+import type { KeelTenantManagerJSI } from '../../tenant-manager/types';
 
 /**
- * A fake __RillTenantManager whose tenants are backed by real NodeVMProvider contexts.
+ * A fake __KeelTenantManager whose tenants are backed by real NodeVMProvider contexts.
  * Only the methods the Engine actually drives for a render + host-event round-trip
  * (createTenant / destroyTenant / evalInTenant / setTenantGlobal / getTenantGlobal) carry
  * real behaviour; the remaining JSI surface is stubbed (unused on this path).
  */
-function createVmBackedTenantManager(): RillTenantManagerJSI {
+function createVmBackedTenantManager(): KeelTenantManagerJSI {
   const nodeVm = new NodeVMProvider();
   const tenants = new Map<number, { runtime: JSEngineRuntime; ctx: SandboxScope }>();
   let nextId = 1;
@@ -131,13 +131,13 @@ function scope(engine: Engine): any {
 // biome-ignore lint/suspicious/noExplicitAny: test mock component
 const mockComponent = ((p: any) => p) as any;
 
-describe('Engine end-to-end on tenant-manager (vm-backed fake __RillTenantManager)', () => {
+describe('Engine end-to-end on tenant-manager (vm-backed fake __KeelTenantManager)', () => {
   beforeEach(() => {
-    (globalThis as Record<string, unknown>).__RillTenantManager = createVmBackedTenantManager();
+    (globalThis as Record<string, unknown>).__KeelTenantManager = createVmBackedTenantManager();
   });
 
   afterEach(() => {
-    delete (globalThis as Record<string, unknown>).__RillTenantManager;
+    delete (globalThis as Record<string, unknown>).__KeelTenantManager;
   });
 
   it('routes a guest render batch to the host Receiver', async () => {
@@ -149,7 +149,7 @@ describe('Engine end-to-end on tenant-manager (vm-backed fake __RillTenantManage
     engine.createReceiver();
 
     await engine.loadBundle(`
-      globalThis.__rill_sendBatch({
+      globalThis.__keel_sendBatch({
         version: 1, batchId: 9,
         operations: [
           { op: 'CREATE', id: 1, type: 'View', props: {} },
@@ -171,11 +171,11 @@ describe('Engine end-to-end on tenant-manager (vm-backed fake __RillTenantManage
     engine.destroy();
   });
 
-  it('delivers a host event to a guest __rill_onHostEvent listener', async () => {
+  it('delivers a host event to a guest __keel_onHostEvent listener', async () => {
     const engine = new Engine({ sandbox: 'tenant-manager', tenant: { appId: 'com.test.event' } });
     await engine.loadBundle(`
       globalThis.__pingPayload = null;
-      globalThis.__rill_onHostEvent('PING', function(p){ globalThis.__pingPayload = p; });
+      globalThis.__keel_onHostEvent('PING', function(p){ globalThis.__pingPayload = p; });
     `);
 
     await engine.sendToSandbox({
@@ -189,9 +189,9 @@ describe('Engine end-to-end on tenant-manager (vm-backed fake __RillTenantManage
     engine.destroy();
   });
 
-  it('exposes initial config to the guest via __rill_getConfig()', async () => {
+  it('exposes initial config to the guest via __keel_getConfig()', async () => {
     const engine = new Engine({ sandbox: 'tenant-manager', tenant: { appId: 'com.test.config' } });
-    await engine.loadBundle('globalThis.__cfg = globalThis.__rill_getConfig();', {
+    await engine.loadBundle('globalThis.__cfg = globalThis.__keel_getConfig();', {
       title: 'tenant',
       n: 3,
     });
@@ -226,18 +226,18 @@ describe('explicit tenant-manager selection without the native module', () => {
   // run after it and expect a pre-installed (fake) tenant manager.
   let saved: unknown;
   beforeEach(() => {
-    saved = (globalThis as Record<string, unknown>).__RillTenantManager;
-    delete (globalThis as Record<string, unknown>).__RillTenantManager;
+    saved = (globalThis as Record<string, unknown>).__KeelTenantManager;
+    delete (globalThis as Record<string, unknown>).__KeelTenantManager;
   });
   afterEach(() => {
     if (saved !== undefined) {
-      (globalThis as Record<string, unknown>).__RillTenantManager = saved;
+      (globalThis as Record<string, unknown>).__KeelTenantManager = saved;
     }
   });
 
   it('throws instead of silently falling back to another provider', () => {
     expect(
       () => new Engine({ sandbox: 'tenant-manager', tenant: { appId: 'com.test.missing' } })
-    ).toThrow(/__RillTenantManager/);
+    ).toThrow(/__KeelTenantManager/);
   });
 });

@@ -2,7 +2,7 @@
  * Engine Types and Interfaces
  */
 
-import type { HostModuleImplementationMap, RillContractShape } from '../../contract';
+import type { HostModuleImplementationMap, KeelContractShape } from '../../contract';
 import type { RuntimeCollectorConfig } from '../../devtools/runtime';
 import type { Receiver, ReceiverStats } from '../receiver';
 import type { ComponentMap, ComponentRegistry } from '../registry';
@@ -22,8 +22,8 @@ export interface EngineOptions {
    * - `hermes`: Uses Hermes via JSI (React Native runtimes with the Hermes sandbox binding).
    * - `quickjs`: Uses QuickJS via JSI (cross-platform native).
    * - `wasm-quickjs`: Uses QuickJS via WASM (cross-platform, web-compatible).
-   * - `tenant-manager`: Uses the native `__RillTenantManager` multi-tenant runtime
-   *   (requires the Rill native module; Apple platforms).
+   * - `tenant-manager`: Uses the native `__KeelTenantManager` multi-tenant runtime
+   *   (requires the Keel native module; Apple platforms).
    * Explicit selection never falls back silently: if the requested backend is
    * unavailable in the current environment, construction throws.
    * If not set, the best available provider for the environment is chosen automatically.
@@ -32,7 +32,7 @@ export interface EngineOptions {
 
   /**
    * TenantManager tenant configuration.
-   * Required when sandbox='tenant-manager' or when __RillTenantManager is auto-detected.
+   * Required when sandbox='tenant-manager' or when __KeelTenantManager is auto-detected.
    * At minimum, `appId` must be provided.
    */
   tenant?: TenantConfig;
@@ -43,7 +43,7 @@ export interface EngineOptions {
    * What this enforces depends on the backend — it is NOT a uniform hard CPU limit:
    * - Async providers (e.g. the off-main-thread worker path): hard limit for
    *   bundle execution — on expiry the engine emits `fatalError` and
-   *   force-destroys the sandbox; the `rill/host/web` WorkerEngine additionally
+   *   force-destroys the sandbox; the `keel/host/web` WorkerEngine additionally
    *   runs a `terminate()`-based watchdog that kills a runaway worker.
    * - `node-vm`: passed to `vm.Script.runInContext({ timeout })`, which
    *   hard-interrupts each synchronous eval of guest code; callbacks and timers
@@ -138,13 +138,13 @@ export interface EngineOptions {
    * supplies the boundary schemas (`parseInput`/`parseOutput`/`parseEvent`) that
    * the runtime enforces on every host-module call.
    */
-  contract?: RillContractShape;
+  contract?: KeelContractShape;
 
   /**
    * Host module implementations exposed to the Guest's `host:*` imports.
    *
    * Produce this with `implementHostModules(contract, { ... })` from
-   * `rill/contract`. The Engine wraps each capability with the contract's
+   * `keel/contract`. The Engine wraps each capability with the contract's
    * boundary schemas and injects them so the Guest's rewritten `host:*` imports
    * resolve to the (validated) host implementations. Requires
    * {@link EngineOptions.contract}.
@@ -156,7 +156,7 @@ export interface EngineOptions {
    * `{__fnId}` markers) instead of having the Engine decode and apply it locally. When set, the
    * Engine does NOT build a host-side operation batch — it forwards the serialized batch here.
    *
-   * Used by the off-main-thread worker host (`rill/host/web` WorkerEngine): the worker runs the
+   * Used by the off-main-thread worker host (`keel/host/web` WorkerEngine): the worker runs the
    * sandbox but has no renderer, so it ships serialized batches to the main thread for decode +
    * render. Most integrators never set this.
    */

@@ -1,12 +1,12 @@
 /**
- * RillErrorBoundary Tests
+ * KeelErrorBoundary Tests
  *
  * Tests for error boundary component
  */
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 
-describe('RillErrorBoundary', () => {
+describe('KeelErrorBoundary', () => {
   let React: typeof import('react');
   let TestRenderer: typeof import('react-test-renderer');
   let act: typeof import('react-test-renderer').act;
@@ -23,21 +23,21 @@ describe('RillErrorBoundary', () => {
     TestRenderer = testRendererModule.default;
     act = testRendererModule.act;
 
-    // Set React on globalThis for RillErrorBoundary
+    // Set React on globalThis for KeelErrorBoundary
     (globalThis as Record<string, unknown>).React = React;
 
     sdk = await import('../../../sdk/sdk');
   });
 
   afterEach(() => {
-    delete (globalThis as Record<string, unknown>).__rill_emitEvent;
+    delete (globalThis as Record<string, unknown>).__keel_emitEvent;
   });
 
   test('should render children when no error', () => {
     const Child = () => React.createElement('div', { testID: 'child' }, 'Hello');
 
     const TestComponent = () =>
-      React.createElement(sdk.RillErrorBoundary, null, React.createElement(Child));
+      React.createElement(sdk.KeelErrorBoundary, null, React.createElement(Child));
 
     let renderer: ReturnType<typeof TestRenderer.create>;
     act(() => {
@@ -66,7 +66,7 @@ describe('RillErrorBoundary', () => {
 
       const TestComponent = () =>
         React.createElement(
-          sdk.RillErrorBoundary,
+          sdk.KeelErrorBoundary,
           { fallback: React.createElement(Fallback) },
           React.createElement(ThrowingChild)
         );
@@ -101,7 +101,7 @@ describe('RillErrorBoundary', () => {
 
       const TestComponent = () =>
         React.createElement(
-          sdk.RillErrorBoundary,
+          sdk.KeelErrorBoundary,
           {
             onError: (error: Error, info: sdk.ErrorInfo) => {
               errors.push({ error, info });
@@ -142,7 +142,7 @@ describe('RillErrorBoundary', () => {
 
       const TestComponent = () =>
         React.createElement(
-          sdk.RillErrorBoundary,
+          sdk.KeelErrorBoundary,
           { fallback: fallbackFn },
           React.createElement(ThrowingChild)
         );
@@ -163,14 +163,14 @@ describe('RillErrorBoundary', () => {
     }
   });
 
-  test('should send error to host when __rill_emitEvent is available', () => {
+  test('should send error to host when __keel_emitEvent is available', () => {
     const originalError = console.error;
     console.error = () => {};
 
     try {
       const sentEvents: Array<{ name: string; payload: unknown }> = [];
 
-      (globalThis as Record<string, unknown>).__rill_emitEvent = (
+      (globalThis as Record<string, unknown>).__keel_emitEvent = (
         name: string,
         payload: unknown
       ) => {
@@ -183,7 +183,7 @@ describe('RillErrorBoundary', () => {
 
       const TestComponent = () =>
         React.createElement(
-          sdk.RillErrorBoundary,
+          sdk.KeelErrorBoundary,
           { fallback: React.createElement('div', null, 'Error') },
           React.createElement(ThrowingChild)
         );
@@ -215,7 +215,7 @@ describe('RillErrorBoundary', () => {
       };
 
       const TestComponent = () =>
-        React.createElement(sdk.RillErrorBoundary, null, React.createElement(ThrowingChild));
+        React.createElement(sdk.KeelErrorBoundary, null, React.createElement(ThrowingChild));
 
       let renderer: ReturnType<typeof TestRenderer.create>;
       act(() => {
@@ -249,7 +249,7 @@ describe('RillErrorBoundary', () => {
 
       const TestComponent = () =>
         React.createElement(
-          sdk.RillErrorBoundary,
+          sdk.KeelErrorBoundary,
           {
             onError: (error: Error) => errors.push(error),
             fallback: React.createElement('div', null, 'Caught'),
@@ -286,7 +286,7 @@ describe('RillErrorBoundary', () => {
 
       const TestComponent = () =>
         React.createElement(
-          sdk.RillErrorBoundary,
+          sdk.KeelErrorBoundary,
           {
             onError: (_error: Error, info: sdk.ErrorInfo) => {
               capturedInfo = info;
@@ -324,7 +324,7 @@ describe('RillErrorBoundary', () => {
 
       const TestComponent = () =>
         React.createElement(
-          sdk.RillErrorBoundary,
+          sdk.KeelErrorBoundary,
           {
             onError: () => {},
             fallback: React.createElement('div', null, 'Error'),
@@ -362,7 +362,7 @@ describe('RillErrorBoundary', () => {
 
       const TestComponent = () =>
         React.createElement(
-          sdk.RillErrorBoundary,
+          sdk.KeelErrorBoundary,
           { fallback: React.createElement('div', null, 'Handled') },
           React.createElement(SyncErrorChild)
         );

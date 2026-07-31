@@ -3,7 +3,7 @@
  *
  * It owns a real core {@link Engine} with the QuickJS-WASM sandbox, so the entire guest CPU
  * cost (module eval, callbacks, event handlers) runs off the main/UI thread. The synchronous
- * host-fn bridge (`__sendToHost` → `__rill_fn_ret`) stays fully inside this worker, untouched.
+ * host-fn bridge (`__sendToHost` → `__keel_fn_ret`) stays fully inside this worker, untouched.
  *
  * This module is intentionally thin: it only binds the worker's `self` (message in, postMessage
  * out) and constructs the real {@link Engine}. All message routing — guest-eval entry, the

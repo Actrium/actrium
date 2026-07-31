@@ -26,7 +26,7 @@ describe('E2E Map Serialization: Basic', () => {
   it('should serialize Map with primitive keys and values', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const config = new Map([
         ['theme', 'dark'],
@@ -41,7 +41,7 @@ describe('E2E Map Serialization: Basic', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -61,7 +61,7 @@ describe('E2E Map Serialization: Basic', () => {
   it('should serialize Map with number keys', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const scores = new Map([
         [1, 100],
@@ -76,7 +76,7 @@ describe('E2E Map Serialization: Basic', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -94,7 +94,7 @@ describe('E2E Map Serialization: Basic', () => {
   it('should serialize Map with object values', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const users = new Map([
         ['user1', { name: 'Alice', age: 25 }],
@@ -108,7 +108,7 @@ describe('E2E Map Serialization: Basic', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -137,7 +137,7 @@ describe('E2E Set Serialization: Basic', () => {
   it('should serialize Set with primitive values', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const tags = new Set(['urgent', 'important', 'reviewed']);
 
@@ -148,7 +148,7 @@ describe('E2E Set Serialization: Basic', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -168,7 +168,7 @@ describe('E2E Set Serialization: Basic', () => {
   it('should serialize Set with number values', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const ids = new Set([1, 2, 3, 5, 8, 13]);
 
@@ -179,7 +179,7 @@ describe('E2E Set Serialization: Basic', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -211,7 +211,7 @@ describe('E2E Map/Set Serialization: Nested Structures', () => {
   it('should serialize nested Map within object', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const data = {
         metadata: {
@@ -230,7 +230,7 @@ describe('E2E Map/Set Serialization: Nested Structures', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -248,7 +248,7 @@ describe('E2E Map/Set Serialization: Nested Structures', () => {
   it('should serialize Map with Set values', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const permissions = new Map([
         ['admin', new Set(['read', 'write', 'delete'])],
@@ -262,7 +262,7 @@ describe('E2E Map/Set Serialization: Nested Structures', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -288,7 +288,7 @@ describe('E2E Map/Set Serialization: Nested Structures', () => {
   it('should serialize Set with array values', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const coords = new Set([
         [0, 0],
@@ -303,7 +303,7 @@ describe('E2E Map/Set Serialization: Nested Structures', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -337,11 +337,11 @@ describe('E2E Map/Set Serialization: With Functions', () => {
   it('should serialize Map with function values', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const handlers = new Map([
-        ['onClick', () => globalThis.__rill_emitEvent('CLICK')],
-        ['onHover', () => globalThis.__rill_emitEvent('HOVER')]
+        ['onClick', () => globalThis.__keel_emitEvent('CLICK')],
+        ['onHover', () => globalThis.__keel_emitEvent('HOVER')]
       ]);
 
       function App() {
@@ -351,7 +351,7 @@ describe('E2E Map/Set Serialization: With Functions', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -394,7 +394,7 @@ describe('E2E Map/Set Serialization: Dynamic Updates', () => {
     const guestCode = `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [items, setItems] = useState(new Map([['a', 1]]));
@@ -403,7 +403,7 @@ describe('E2E Map/Set Serialization: Dynamic Updates', () => {
           const newItems = new Map(items);
           newItems.set('b', 2);
           setItems(newItems);
-          globalThis.__rill_emitEvent('ITEM_ADDED', { size: newItems.size });
+          globalThis.__keel_emitEvent('ITEM_ADDED', { size: newItems.size });
         };
 
         return React.createElement(
@@ -416,7 +416,7 @@ describe('E2E Map/Set Serialization: Dynamic Updates', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -442,7 +442,7 @@ describe('E2E Map/Set Serialization: Dynamic Updates', () => {
     const guestCode = `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [selectedIds, setSelectedIds] = useState(new Set([1]));
@@ -455,7 +455,7 @@ describe('E2E Map/Set Serialization: Dynamic Updates', () => {
             newSet.add(id);
           }
           setSelectedIds(newSet);
-          globalThis.__rill_emitEvent('SELECTION_CHANGED', {
+          globalThis.__keel_emitEvent('SELECTION_CHANGED', {
             size: newSet.size,
             selected: Array.from(newSet)
           });
@@ -475,7 +475,7 @@ describe('E2E Map/Set Serialization: Dynamic Updates', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);

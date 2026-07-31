@@ -28,18 +28,18 @@ describe('E2E Timer: Zero-delay setTimeout', () => {
   it('should fire setTimeout(fn, 0) promptly via microtask', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const t0 = Date.now();
       setTimeout(() => {
         const elapsed = Date.now() - t0;
-        globalThis.__rill_emitEvent('ZERO_TIMEOUT', { elapsed });
+        globalThis.__keel_emitEvent('ZERO_TIMEOUT', { elapsed });
       }, 0);
 
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -54,20 +54,20 @@ describe('E2E Timer: Zero-delay setTimeout', () => {
   it('should fire multiple setTimeout(fn, 0) in order', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const order = [];
       setTimeout(() => { order.push(1); }, 0);
       setTimeout(() => { order.push(2); }, 0);
       setTimeout(() => {
         order.push(3);
-        globalThis.__rill_emitEvent('ORDER_DONE', { order });
+        globalThis.__keel_emitEvent('ORDER_DONE', { order });
       }, 0);
 
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -92,22 +92,22 @@ describe('E2E Timer: clearTimeout', () => {
   it('should cancel a pending setTimeout', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const id = setTimeout(() => {
-        globalThis.__rill_emitEvent('SHOULD_NOT_FIRE');
+        globalThis.__keel_emitEvent('SHOULD_NOT_FIRE');
       }, 30);
       clearTimeout(id);
 
       // Fire a later timer to confirm execution continues
       setTimeout(() => {
-        globalThis.__rill_emitEvent('CONFIRM_CLEAR');
+        globalThis.__keel_emitEvent('CONFIRM_CLEAR');
       }, 60);
 
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -120,21 +120,21 @@ describe('E2E Timer: clearTimeout', () => {
   it('should cancel a zero-delay setTimeout', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const id = setTimeout(() => {
-        globalThis.__rill_emitEvent('ZERO_CANCELLED');
+        globalThis.__keel_emitEvent('ZERO_CANCELLED');
       }, 0);
       clearTimeout(id);
 
       setTimeout(() => {
-        globalThis.__rill_emitEvent('AFTER_CANCEL');
+        globalThis.__keel_emitEvent('AFTER_CANCEL');
       }, 30);
 
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -159,22 +159,22 @@ describe('E2E Timer: setInterval lifecycle', () => {
   it('should fire setInterval repeatedly and stop on clearInterval', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       let count = 0;
       const id = setInterval(() => {
         count++;
-        globalThis.__rill_emitEvent('TICK', { count });
+        globalThis.__keel_emitEvent('TICK', { count });
         if (count >= 3) {
           clearInterval(id);
-          globalThis.__rill_emitEvent('DONE', { totalTicks: count });
+          globalThis.__keel_emitEvent('DONE', { totalTicks: count });
         }
       }, 25);
 
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -190,21 +190,21 @@ describe('E2E Timer: setInterval lifecycle', () => {
   it('should not fire after clearInterval is called immediately', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const id = setInterval(() => {
-        globalThis.__rill_emitEvent('SHOULD_NOT_TICK');
+        globalThis.__keel_emitEvent('SHOULD_NOT_TICK');
       }, 20);
       clearInterval(id);
 
       setTimeout(() => {
-        globalThis.__rill_emitEvent('VERIFY_NO_TICKS');
+        globalThis.__keel_emitEvent('VERIFY_NO_TICKS');
       }, 100);
 
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -229,16 +229,16 @@ describe('E2E Timer: Pause / Resume', () => {
   it('should pause timers and resume them', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       setTimeout(() => {
-        globalThis.__rill_emitEvent('TIMER_FIRED');
+        globalThis.__keel_emitEvent('TIMER_FIRED');
       }, 30);
 
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -261,18 +261,18 @@ describe('E2E Timer: Pause / Resume', () => {
   it('should pause interval and resume ticking', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       let count = 0;
       setInterval(() => {
         count++;
-        globalThis.__rill_emitEvent('ITICK', { count });
+        globalThis.__keel_emitEvent('ITICK', { count });
       }, 25);
 
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -305,20 +305,20 @@ describe('E2E Timer: Cleanup on destroy', () => {
 
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       setInterval(() => {
-        globalThis.__rill_emitEvent('LEAK_TICK');
+        globalThis.__keel_emitEvent('LEAK_TICK');
       }, 20);
 
       setTimeout(() => {
-        globalThis.__rill_emitEvent('LEAK_TIMEOUT');
+        globalThis.__keel_emitEvent('LEAK_TIMEOUT');
       }, 500);
 
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -352,7 +352,7 @@ describe('E2E Timer: Concurrent timers', () => {
   it('should handle many concurrent timers with different delays', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const results = [];
       // 10 timers with staggered delays
@@ -360,7 +360,7 @@ describe('E2E Timer: Concurrent timers', () => {
         setTimeout(() => {
           results.push(i);
           if (results.length === 10) {
-            globalThis.__rill_emitEvent('ALL_FIRED', { results });
+            globalThis.__keel_emitEvent('ALL_FIRED', { results });
           }
         }, i * 10);
       }
@@ -368,7 +368,7 @@ describe('E2E Timer: Concurrent timers', () => {
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -384,7 +384,7 @@ describe('E2E Timer: Concurrent timers', () => {
   it('should handle mixed setTimeout and setInterval concurrently', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const log = [];
 
@@ -399,7 +399,7 @@ describe('E2E Timer: Concurrent timers', () => {
           clearInterval(iid);
           // Wait for T2 to finish
           setTimeout(() => {
-            globalThis.__rill_emitEvent('MIXED_DONE', { log });
+            globalThis.__keel_emitEvent('MIXED_DONE', { log });
           }, 50);
         }
       }, 20);
@@ -407,7 +407,7 @@ describe('E2E Timer: Concurrent timers', () => {
       function App() {
         return React.createElement('View', { testID: 'root' });
       }
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);

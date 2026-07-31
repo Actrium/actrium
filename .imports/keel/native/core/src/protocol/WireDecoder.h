@@ -1,9 +1,9 @@
 // ============================================================================
-// WIP — gated behind RILL_WIP_BINARY_PROTOCOL (off by default in production
+// WIP — gated behind KEEL_WIP_BINARY_PROTOCOL (off by default in production
 // builds). The ENTIRE body of this header is inside the #if, mirroring the
 // gating style of devtools/CDPServer.* and security/SecurityManager.* — in a
 // normal build this compiles to an empty translation unit (no binary weight,
-// no accidental use). Enable for evaluation with RILL_WIP_BINARY_PROTOCOL=1.
+// no accidental use). Enable for evaluation with KEEL_WIP_BINARY_PROTOCOL=1.
 //
 // WHAT THIS IS
 //   A fail-closed, zero-copy DECODER for the guest->host op-batch BINARY wire
@@ -33,7 +33,7 @@
 // ============================================================================
 #pragma once
 
-#if RILL_WIP_BINARY_PROTOCOL
+#if KEEL_WIP_BINARY_PROTOCOL
 
 #include <cstdint>
 #include <optional>
@@ -41,12 +41,12 @@
 #include <utility>
 #include <vector>
 
-namespace rill::protocol::wire {
+namespace keel::protocol::wire {
 
 // --- Constants generated from contracts/op-batch-wire.json (v1) -------------
 
-// magic.u32le: 0x4c4c4952 = 'RILL' read little-endian.
-constexpr uint32_t kMagic = 0x4c4c4952u;
+// magic.u32le: 0x4c45454b = 'KEEL' read little-endian.
+constexpr uint32_t kMagic = 0x4c45454bu;
 constexpr uint16_t kProtocolVersion = 1;
 constexpr size_t kHeaderBytes = 16;
 
@@ -255,6 +255,6 @@ private:
   WireError lastError_ = WireError::Ok;
 };
 
-} // namespace rill::protocol::wire
+} // namespace keel::protocol::wire
 
-#endif // RILL_WIP_BINARY_PROTOCOL
+#endif // KEEL_WIP_BINARY_PROTOCOL

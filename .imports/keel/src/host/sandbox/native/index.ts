@@ -1,10 +1,10 @@
 /**
- * @rill/sandbox-native
+ * @keel/sandbox-native
  *
  * Native JS sandbox for React Native using JSI bindings.
  *
  * Provides three implementations:
- * - Hermes: When RILL_SANDBOX_ENGINE=hermes (isolated Hermes runtime)
+ * - Hermes: When KEEL_SANDBOX_ENGINE=hermes (isolated Hermes runtime)
  * - QuickJS: Cross-platform (iOS, Android, macOS, Windows)
  * - JSC: Apple platforms only (iOS, macOS, tvOS, visionOS) - zero binary overhead
  */
@@ -87,12 +87,12 @@ export interface SandboxModule {
  * Get the best available sandbox module for the current platform
  *
  * Priority:
- * 1. Hermes (when RILL_SANDBOX_ENGINE=hermes)
+ * 1. Hermes (when KEEL_SANDBOX_ENGINE=hermes)
  * 2. JSC (Apple platforms - zero overhead)
  * 3. QuickJS (cross-platform)
  */
 export function getSandboxModule(): SandboxModule | null {
-  // Hermes sandbox (when built with RILL_SANDBOX_ENGINE=hermes)
+  // Hermes sandbox (when built with KEEL_SANDBOX_ENGINE=hermes)
   const hermesModule = getHermesModuleSafe();
   if (hermesModule) {
     return hermesModule;

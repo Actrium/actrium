@@ -43,10 +43,10 @@
     // === Paths ===
     "baseUrl": ".",
     "paths": {
-      "@rill/runtime": ["./src/host/index.ts"],
-      "rill": ["./src/host/index.ts"],
-      "rill/contract": ["./src/contract/index.ts"],
-      "rill/*": ["./src/*"],
+      "@keel/runtime": ["./src/host/index.ts"],
+      "keel": ["./src/host/index.ts"],
+      "keel/contract": ["./src/contract/index.ts"],
+      "keel/*": ["./src/*"],
       "react-native": ["./src/__mocks__/react-native.ts"]
     }
   },

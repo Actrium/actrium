@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   createCapabilitiesManifest,
   createHostModuleDispatch,
-  defineRillContract,
+  defineKeelContract,
   guestKindsFor,
   implementHostModules,
   isHostModuleId,
@@ -11,7 +11,7 @@ import {
   type GuestExportsClient,
 } from './index';
 
-describe('rill/contract', () => {
+describe('keel/contract', () => {
   test('creates rpc and subscription descriptors', () => {
     const parseInput = (value: unknown) => value as { id: string };
     const parseOutput = (value: unknown) => value as { ok: true };
@@ -47,7 +47,7 @@ describe('rill/contract', () => {
   });
 
   test('defines a frozen contract and creates a deterministic manifest', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:navigation': {
@@ -92,7 +92,7 @@ describe('rill/contract', () => {
   });
 
   test('a subscription dispatched from a native guest fails with the guest-kind reason', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: { 'host:theme': { onThemeChanged: subscription<{ theme: string }>() } },
       guestExports: {},
@@ -101,7 +101,7 @@ describe('rill/contract', () => {
       'host:theme': { onThemeChanged: () => undefined },
     });
 
-    // What a native guest's rill_host_call actually delivers: decoded data, not
+    // What a native guest's keel_host_call actually delivers: decoded data, not
     // a function. The error must name the guest kind and the way out, since no
     // argument the caller could pass would make this work.
     expect(() => dispatch['host:theme']!.onThemeChanged!({ theme: 'dark' })).toThrow(
@@ -110,7 +110,7 @@ describe('rill/contract', () => {
   });
 
   test('unschemed flags only capabilities missing untrusted-input validation', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:a': {
@@ -135,7 +135,7 @@ describe('rill/contract', () => {
   });
 
   test('validates host module implementations', async () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:math': {
@@ -176,7 +176,7 @@ describe('rill/contract', () => {
 
   test('rejects invalid contracts', () => {
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '',
         hostModules: {},
         guestExports: {},
@@ -184,7 +184,7 @@ describe('rill/contract', () => {
     ).toThrow('Contract version must be a non-empty string');
 
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: null,
         guestExports: {},
@@ -192,7 +192,7 @@ describe('rill/contract', () => {
     ).toThrow('hostModules must be an object');
 
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {},
         guestExports: null,
@@ -200,7 +200,7 @@ describe('rill/contract', () => {
     ).toThrow('guestExports must be an object');
 
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {
           'host:Bad': {
@@ -212,7 +212,7 @@ describe('rill/contract', () => {
     ).toThrow('Invalid host module id');
 
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {
           'host:navigation': {
@@ -224,7 +224,7 @@ describe('rill/contract', () => {
     ).toThrow('Invalid export name');
 
     expect(() =>
-      defineRillContract({
+      defineKeelContract({
         version: '1.0.0',
         hostModules: {},
         guestExports: {
@@ -235,7 +235,7 @@ describe('rill/contract', () => {
   });
 
   test('rejects invalid host module implementations', () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:navigation': {
@@ -279,7 +279,7 @@ describe('rill/contract', () => {
 
 describe('createHostModuleDispatch', () => {
   const buildContract = () =>
-    defineRillContract({
+    defineKeelContract({
       version: '2.0.0',
       hostModules: {
         'host:analytics': {
@@ -470,7 +470,7 @@ describe('createHostModuleDispatch', () => {
 
   test('no-input (void) rpc runs parseInput with undefined and rejects an unexpected arg', () => {
     const seenInputs: unknown[] = [];
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:lifecycle': {

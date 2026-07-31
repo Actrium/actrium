@@ -27,7 +27,7 @@ describe('E2E Stress: Large Data Volumes', () => {
   it('should handle large object props', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       // Create large data object
       const largeData = {};
@@ -50,8 +50,8 @@ describe('E2E Stress: Large Data Volumes', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
-      globalThis.__rill_emitEvent('RENDERED', { keyCount: Object.keys(largeData).length });
+      render(React.createElement(App), globalThis.__keel_sendBatch);
+      globalThis.__keel_emitEvent('RENDERED', { keyCount: Object.keys(largeData).length });
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -66,7 +66,7 @@ describe('E2E Stress: Large Data Volumes', () => {
   it('should handle large array props', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const items = Array.from({ length: 5000 }, (_, i) => ({
         id: i,
@@ -80,7 +80,7 @@ describe('E2E Stress: Large Data Volumes', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -93,7 +93,7 @@ describe('E2E Stress: Large Data Volumes', () => {
   it('should handle deeply nested structures', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       // Create deeply nested object
       const createNested = (depth) => {
@@ -110,7 +110,7 @@ describe('E2E Stress: Large Data Volumes', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -145,7 +145,7 @@ describe('E2E Stress: Concurrent Operations', () => {
   it('should handle many concurrent callback invocations', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       let callCount = 0;
 
@@ -159,7 +159,7 @@ describe('E2E Stress: Concurrent Operations', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -182,7 +182,7 @@ describe('E2E Stress: Concurrent Operations', () => {
     const guestCode = `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [count, setCount] = useState(0);
@@ -197,7 +197,7 @@ describe('E2E Stress: Concurrent Operations', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -231,7 +231,7 @@ describe('E2E Stress: Large Component Trees', () => {
   it('should handle wide component tree', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const ITEM_COUNT = 100;
 
@@ -247,7 +247,7 @@ describe('E2E Stress: Large Component Trees', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -265,7 +265,7 @@ describe('E2E Stress: Large Component Trees', () => {
   it('should handle deep component tree', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const MAX_DEPTH = 30;
 
@@ -285,7 +285,7 @@ describe('E2E Stress: Large Component Trees', () => {
         return React.createElement(Nested, { depth: 0 });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -314,7 +314,7 @@ describe('E2E Stress: Memory Pressure', () => {
     const guestCode = `
       const React = require('react');
       const { useState, useCallback } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [version, setVersion] = useState(0);
@@ -338,7 +338,7 @@ describe('E2E Stress: Memory Pressure', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -366,7 +366,7 @@ describe('E2E Stress: Memory Pressure', () => {
     const guestCode = `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function Child({ id }) {
         return React.createElement('View', {
@@ -404,7 +404,7 @@ describe('E2E Stress: Memory Pressure', () => {
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -443,7 +443,7 @@ describe('E2E Stress: Serialization Performance', () => {
   it('should handle large Map serialization', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const largeMap = new Map();
       for (let i = 0; i < 1000; i++) {
@@ -457,7 +457,7 @@ describe('E2E Stress: Serialization Performance', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     const startTime = Date.now();
@@ -476,7 +476,7 @@ describe('E2E Stress: Serialization Performance', () => {
   it('should handle large Set serialization', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const largeSet = new Set();
       for (let i = 0; i < 5000; i++) {
@@ -490,7 +490,7 @@ describe('E2E Stress: Serialization Performance', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     const startTime = Date.now();

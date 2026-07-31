@@ -1,10 +1,10 @@
 /**
  * store-net-envelope.ts
  *
- * Host-side codec for the RBS1 binary-value ENVELOPE (the R2 first-class-bytes
+ * Host-side codec for the KBS1 binary-value ENVELOPE (the R2 first-class-bytes
  * wire). The authoritative wire schema is contracts/store-net-bytes.json; the
  * byte-exact golden oracle is contracts/store-net-bytes.golden.json (produced by
- * the Rust encoder crates/rill-guest/src/store_net_encode.rs). This module is
+ * the Rust encoder crates/keel-native-guest/src/store_net_encode.rs). This module is
  * validated against those files and MUST NOT hand-copy any peer codec.
  *
  * ZERO-DOM: references no `document`, `HTMLCanvasElement`, `window`, or any other
@@ -12,13 +12,13 @@
  * dispatch, contract-agnostically — the wire is SELF-DESCRIBING via `{"$b":N}`
  * sentinels, so no per-call descriptor is consulted here.
  *
- * Unlike the op-batch/canvas decoders (opcode streams), RBS1 is a generic
+ * Unlike the op-batch/canvas decoders (opcode streams), KBS1 is a generic
  * two-plane frame: a JSON CONTROL PLANE plus a length-prefixed BINARY DATA PLANE.
  * The same framing is used in BOTH directions — a guest->host request and a
  * host->guest return — so there is one codec, exercised symmetrically.
  *
  * BACK-COMPAT (load-bearing): a call/return with NO byte streams is NEVER an
- * RBS1 frame — it is the plain raw-JSON body, byte-for-byte identical to today.
+ * KBS1 frame — it is the plain raw-JSON body, byte-for-byte identical to today.
  * `encodeResult` returns `null` for such a result so the caller emits the
  * unchanged `JSON.stringify` reply; `decodeRequest` is only reached when the
  * magic already matched.
@@ -32,15 +32,15 @@
 // Wire constants (locked to contracts/store-net-bytes.json)
 // ============================================
 
-// magic.u32le — 0x31534252 = 'RBS1' (bytes 52 42 53 31). DISTINCT from op-batch's
-// 0x4c4c4952 ('RILL') and canvas's 0x564e4352 ('RCNV'): all three share byte 0
-// (0x52 'R') but differ at byte 1, so a full-u32 magic compare routes a frame to
+// magic.u32le — 0x3153424b = 'KBS1' (bytes 4B 42 53 31). DISTINCT from op-batch's
+// 0x4c45454b ('KEEL') and canvas's 0x564e434b ('KCNV'): all three share byte 0
+// (0x4B 'K') but differ at byte 1, so a full-u32 magic compare routes a frame to
 // exactly one decoder. The 4th byte ('1') carries the wire version.
-export const RBS1_MAGIC = 0x31534252;
+export const KBS1_MAGIC = 0x3153424b;
 
 // The magic bytes in wire (little-endian) order, for a byte-wise peek that never
 // allocates a DataView.
-const MAGIC_B0 = 0x52; // 'R'
+const MAGIC_B0 = 0x4b; // 'K'
 const MAGIC_B1 = 0x42; // 'B'
 const MAGIC_B2 = 0x53; // 'S'
 const MAGIC_B3 = 0x31; // '1'
@@ -73,7 +73,7 @@ export type StoreNetReason =
 export class StoreNetEnvelopeError extends Error {
   readonly reason: StoreNetReason;
   constructor(reason: StoreNetReason, detail?: string) {
-    super(detail ? `RBS1 ${reason}: ${detail}` : `RBS1 ${reason}`);
+    super(detail ? `KBS1 ${reason}: ${detail}` : `KBS1 ${reason}`);
     this.name = 'StoreNetEnvelopeError';
     this.reason = reason;
   }
@@ -83,8 +83,8 @@ export class StoreNetEnvelopeError extends Error {
 // Magic peek (the host fork's routing primitive)
 // ============================================
 
-/** Whether `raw` begins with the full 4-byte RBS1 magic (compares all 4 bytes). */
-export function isRbs1(raw: Uint8Array): boolean {
+/** Whether `raw` begins with the full 4-byte KBS1 magic (compares all 4 bytes). */
+export function isKbs1(raw: Uint8Array): boolean {
   return (
     raw.length >= 4 &&
     raw[0] === MAGIC_B0 &&
@@ -100,7 +100,7 @@ export function isRbs1(raw: Uint8Array): boolean {
 
 /**
  * Frame a JSON control plane (already holding `{"$b":N}` sentinels) plus its
- * `segments` into RBS1 wire bytes. Enforces every cap; throws
+ * `segments` into KBS1 wire bytes. Enforces every cap; throws
  * `StoreNetEnvelopeError` (fail-closed) on any breach, emitting nothing.
  */
 export function encodeEnvelope(jsonControl: string, segments: Uint8Array[]): Uint8Array {
@@ -132,7 +132,7 @@ export function encodeEnvelope(jsonControl: string, segments: Uint8Array[]): Uin
   const out = new Uint8Array(total);
   const view = new DataView(out.buffer);
   let pos = 0;
-  view.setUint32(pos, RBS1_MAGIC, true);
+  view.setUint32(pos, KBS1_MAGIC, true);
   pos += 4;
   view.setUint32(pos, json.length, true);
   pos += 4;
@@ -156,7 +156,7 @@ export interface DecodedEnvelope {
 }
 
 /**
- * Unframe RBS1 wire bytes into the JSON control-plane slice + segment slices
+ * Unframe KBS1 wire bytes into the JSON control-plane slice + segment slices
  * (views over `buf`, zero-copy). Fail-closed: throws `StoreNetEnvelopeError` on
  * a bad magic (the caller's signal to treat `buf` as plain JSON), any length
  * overrun/over-cap, or trailing bytes (strict full consumption).
@@ -179,7 +179,7 @@ export function decodeEnvelope(buf: Uint8Array): DecodedEnvelope {
   };
 
   const magic = readU32();
-  if (magic !== RBS1_MAGIC) {
+  if (magic !== KBS1_MAGIC) {
     throw new StoreNetEnvelopeError('bad-magic', `0x${magic.toString(16)}`);
   }
   if (buf.length > LIMITS.maxEnvelopeBytes) {
@@ -496,12 +496,12 @@ export function reviveSentinels(value: unknown, segments: Uint8Array[]): unknown
 // ============================================
 
 /**
- * Decode a guest->host RBS1 request into contract-agnostic args: unframe, parse
+ * Decode a guest->host KBS1 request into contract-agnostic args: unframe, parse
  * the control-plane JSON, and revive each `{"$b":N}` into a `Uint8Array`. Throws
  * `StoreNetEnvelopeError` (fail-closed) on any malformed frame — the caller turns
- * that into an `ok=0` result. Only call this once `isRbs1(raw)` matched.
+ * that into an `ok=0` result. Only call this once `isKbs1(raw)` matched.
  */
-// Reason: returns contract-agnostic args parsed from the RBS1 control-plane JSON.
+// Reason: returns contract-agnostic args parsed from the KBS1 control-plane JSON.
 export function decodeRequest(raw: Uint8Array): unknown {
   const { json, segments } = decodeEnvelope(raw);
   let parsed: unknown;
@@ -515,12 +515,12 @@ export function decodeRequest(raw: Uint8Array): unknown {
 
 /**
  * Encode a host->guest return. If `result` contains at least one `Uint8Array`,
- * returns the framed RBS1 envelope; otherwise returns `null` so the caller emits
+ * returns the framed KBS1 envelope; otherwise returns `null` so the caller emits
  * the IDENTICAL `JSON.stringify` reply as today (the back-compat invariant — no
  * behaviour change for a non-binary result). Throws `StoreNetEnvelopeError`
  * (fail-closed) if a binary result breaches a cap.
  */
-// Reason: hoists any Uint8Array in an arbitrary host result into an RBS1 frame.
+// Reason: hoists any Uint8Array in an arbitrary host result into a KBS1 frame.
 export function encodeResult(result: unknown): Uint8Array | null {
   const { control, segments } = hoistSentinels(result);
   if (segments.length === 0) {

@@ -9,7 +9,7 @@
  * - SandboxScope: A single, isolated JS execution environment.
  */
 
-import type { HostModuleDispatchTable, RillContractShape } from '../../../contract';
+import type { HostModuleDispatchTable, KeelContractShape } from '../../../contract';
 
 /**
  * Available sandbox types for DefaultProvider.
@@ -17,7 +17,7 @@ import type { HostModuleDispatchTable, RillContractShape } from '../../../contra
  * Platform availability and communication:
  * - VM: Node.js / Bun only (native vm module)
  * - JSC: Apple platforms only via JSI (zero binary overhead)
- * - Hermes: Via JSI when RILL_SANDBOX_ENGINE=hermes (isolated Hermes runtime)
+ * - Hermes: Via JSI when KEEL_SANDBOX_ENGINE=hermes (isolated Hermes runtime)
  * - QuickJS: Cross-platform native via JSI (iOS, Android, macOS, Windows)
  * - WasmQuickJS: Web via JS↔WASM, React Native via JSI↔WASM
  */
@@ -26,7 +26,7 @@ export enum SandboxType {
   NodeVM = 'node-vm',
   /** JavaScriptCore via JSI (Apple platforms only, zero binary overhead) */
   JSC = 'jsc',
-  /** Hermes via JSI (when RILL_SANDBOX_ENGINE=hermes) */
+  /** Hermes via JSI (when KEEL_SANDBOX_ENGINE=hermes) */
   Hermes = 'hermes',
   /** QuickJS via JSI (cross-platform native) */
   QuickJS = 'quickjs',
@@ -119,7 +119,7 @@ export interface SandboxScope {
 
   /**
    * Install dispatch-wrapped `host:*` modules so the Guest's
-   * `globalThis.__rill.hostModules` resolves to them.
+   * `globalThis.__keel.hostModules` resolves to them.
    *
    * Optional: providers that share the host realm (vm) or support host functions
    * with return values (native JSI) don't need it — the Engine instead injects the
@@ -131,7 +131,7 @@ export interface SandboxScope {
    * `contract` supplies each capability's kind (rpc vs subscription) so the guest
    * receives the right stub; `table` supplies the boundary-enforcing implementations.
    */
-  installHostModules?: (table: HostModuleDispatchTable, contract: RillContractShape) => void;
+  installHostModules?: (table: HostModuleDispatchTable, contract: KeelContractShape) => void;
 
   /**
    * Drive any in-flight `host:*` calls to completion.

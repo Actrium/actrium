@@ -1,14 +1,14 @@
 # Guest API Reference
 
-The Guest module provides components, hooks, and platform APIs for building dynamic UI inside the Rill sandbox. Guest code uses standard React patterns (JSX, hooks) and communicates with the host through a well-defined protocol.
+The Guest module provides components, hooks, and platform APIs for building dynamic UI inside the Keel sandbox. Guest code uses standard React patterns (JSX, hooks) and communicates with the host through a well-defined protocol.
 
-Import path: `rill/guest`
+Import path: `keel/guest`
 
 ---
 
 ## Components
 
-All components listed below are available inside the sandbox via `require('rill/guest')` or JSX. They map to host-side React Native component implementations registered through `ComponentRegistry`.
+All components listed below are available inside the sandbox via `require('keel/guest')` or JSX. They map to host-side React Native component implementations registered through `ComponentRegistry`.
 
 ### View
 
@@ -241,12 +241,12 @@ return <TextInput ref={ref} placeholder="Enter text" />;
 
 ---
 
-## RillErrorBoundary
+## KeelErrorBoundary
 
 A React error boundary component for catching rendering errors in Guest code. Prevents a single component error from crashing the entire sandbox UI.
 
 ```typescript
-interface RillErrorBoundaryProps {
+interface KeelErrorBoundaryProps {
   children: ReactNode;
   fallback?: ReactElement | ((error: Error) => ReactElement);
   onError?: (error: Error, errorInfo: { componentStack: string }) => void;
@@ -317,7 +317,7 @@ const Linking: {
 
 A guest sandbox provides **only core ECMAScript**. Web platform globals are not
 part of that, and the ones you would reach for to handle bytes are missing.
-Measured from inside a rill guest running on QuickJS-WASM, reporting
+Measured from inside a keel guest running on QuickJS-WASM, reporting
 `typeof globalThis[name]`:
 
 | absent | present |
@@ -334,7 +334,7 @@ global is simply not there, in **both** directions.
 > is environment-dependent, so it survives local testing in a browser-hosted dev
 > loop and shows up on the device.
 
-`rill/guest` exports the helpers rill's own guest bundle uses, so you do not have
+`keel/guest` exports the helpers keel's own guest bundle uses, so you do not have
 to re-implement them. Each checks for the real global on **every call** — a host
 that injects globals late is still picked up — and falls back to pure JS.
 
@@ -345,7 +345,7 @@ import {
   encodeBase64,
   decodeBase64,
   nowMs,
-} from 'rill/guest';
+} from 'keel/guest';
 ```
 
 ### createUtf8Encoder()

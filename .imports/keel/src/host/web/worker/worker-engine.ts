@@ -3,7 +3,7 @@
  *
  * The real {@link Engine} + QuickJS-WASM sandbox live in a Web Worker (see `worker-host.ts`), so
  * a guest infinite loop or heavy compute no longer freezes the host page. Two robustness wins an
- * integrator cannot get without forking rill:
+ * integrator cannot get without forking keel:
  *  - **off-main-thread execution**: guest CPU is on the worker;
  *  - **hard kill**: a per-turn watchdog `terminate()`s a runaway guest (a true kill, not a flag).
  *
@@ -221,7 +221,7 @@ export class WorkerEngine {
       this.#onWorkerMessage(event.data as WorkerToMainMessage);
     };
     this.#worker.onerror = (event: ErrorEvent) => {
-      this.#emit('error', new Error(`[rill] worker error: ${event.message ?? 'unknown'}`));
+      this.#emit('error', new Error(`[keel] worker error: ${event.message ?? 'unknown'}`));
     };
 
     const init: MainToWorkerMessage = {
@@ -266,7 +266,7 @@ export class WorkerEngine {
 
   loadBundle(source: string, initialProps?: Record<string, unknown>): Promise<void> {
     if (this.#destroyed) {
-      return Promise.reject(new Error('[rill] WorkerEngine is destroyed'));
+      return Promise.reject(new Error('[keel] WorkerEngine is destroyed'));
     }
     return this.#readyPromise.then(
       () =>
@@ -449,7 +449,7 @@ export class WorkerEngine {
     if (this.#destroyed) return;
     this.#destroyed = true;
     this.#clearAllWatchdogs();
-    const destroyError = new Error('[rill] WorkerEngine destroyed');
+    const destroyError = new Error('[keel] WorkerEngine destroyed');
     this.#rejectAllPendingLoads(destroyError);
     this.#rejectAllDbgPending(destroyError);
     try {
@@ -475,7 +475,7 @@ export class WorkerEngine {
   // Reason: dbg replies resolve with differently-shaped serializable values
   #dbgRequest(build: (requestId: number) => MainToWorkerMessage): Promise<unknown> {
     if (this.#destroyed) {
-      return Promise.reject(new Error('[rill] WorkerEngine is destroyed'));
+      return Promise.reject(new Error('[keel] WorkerEngine is destroyed'));
     }
     // Reason: dbg replies resolve with differently-shaped serializable values
     return new Promise<unknown>((resolve, reject) => {
@@ -531,7 +531,7 @@ export class WorkerEngine {
       this.#warnedReceiverToSandbox = true;
       // Remote refs (useRemoteRef → host REF_CALL) are not bridged across the worker in v1.
       console.warn(
-        '[rill/host/web] WorkerEngine: host→guest REF_CALL (useRemoteRef) is not supported in ' +
+        '[keel/host/web] WorkerEngine: host→guest REF_CALL (useRemoteRef) is not supported in ' +
           'worker mode yet; the call was dropped.'
       );
     }
@@ -544,7 +544,7 @@ export class WorkerEngine {
       // running. Hold its watchdog; #updateDbgSuspension rearms it on resume.
       this.#heldWatchdogKinds.set(turnId, kind);
       console.debug(
-        `[rill/host/web] WorkerEngine: watchdog for turn ${turnId} (${kind}) held — debugger suspend active`
+        `[keel/host/web] WorkerEngine: watchdog for turn ${turnId} (${kind}) held — debugger suspend active`
       );
       return;
     }
@@ -591,7 +591,7 @@ export class WorkerEngine {
       this.#watchdogKinds.clear();
       if (this.#heldWatchdogKinds.size > 0) {
         console.debug(
-          `[rill/host/web] WorkerEngine: debugger suspend — holding ${this.#heldWatchdogKinds.size} turn watchdog(s)`
+          `[keel/host/web] WorkerEngine: debugger suspend — holding ${this.#heldWatchdogKinds.size} turn watchdog(s)`
         );
       }
     } else {
@@ -599,7 +599,7 @@ export class WorkerEngine {
       this.#heldWatchdogKinds.clear();
       if (held.length > 0) {
         console.debug(
-          `[rill/host/web] WorkerEngine: debugger resumed — rearming ${held.length} turn watchdog(s)`
+          `[keel/host/web] WorkerEngine: debugger resumed — rearming ${held.length} turn watchdog(s)`
         );
       }
       for (const [turnId, kind] of held) {
@@ -614,7 +614,7 @@ export class WorkerEngine {
     this.#disarmWatchdog(turnId);
 
     const error = new Error(
-      `[rill] worker watchdog: guest turn exceeded ${this.#watchdogTimeout}ms (${kind}); worker terminated`
+      `[keel] worker watchdog: guest turn exceeded ${this.#watchdogTimeout}ms (${kind}); worker terminated`
     );
 
     // Hard kill: a synchronously-wedged worker can't be recovered, only terminated.

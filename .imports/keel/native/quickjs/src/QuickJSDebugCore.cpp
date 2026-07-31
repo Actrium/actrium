@@ -1,6 +1,6 @@
 #include "QuickJSDebugCore.h"
 
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
 
 #include "quickjs-debug.h"
 
@@ -8,15 +8,15 @@
 // The Asyncify suspend/wake shim (native/quickjs/src/qjs_dbg_suspend.c), compiled
 // only into the debug wasm. suspend unwinds the whole C stack back to the JS
 // event loop and returns only after wake + rewind.
-extern "C" void rill_qjs_dbg_suspend_async(void);
-extern "C" void rill_qjs_dbg_wake(void);
+extern "C" void keel_qjs_dbg_suspend_async(void);
+extern "C" void keel_qjs_dbg_wake(void);
 #endif
 
-namespace rill::qjs_debug {
+namespace keel::qjs_debug {
 
 namespace {
 // extern "C" trampoline: the engine hook is a C function pointer.
-extern "C" void rill_qjs_hook_thunk(JSContext* ctx, const void* token, int line,
+extern "C" void keel_qjs_hook_thunk(JSContext* ctx, const void* token, int line,
                                     int depth, void* opaque) {
   static_cast<QuickJSDebugCore*>(opaque)->onStep(ctx, token, line, depth);
 }
@@ -27,8 +27,8 @@ struct RawFrame {
   int line;
   std::string name;
 };
-// extern "C" sink for rill_qjs_capture_frames; copies the borrowed name.
-extern "C" void rill_qjs_capture_sink(void* user, const void* token, int line,
+// extern "C" sink for keel_qjs_capture_frames; copies the borrowed name.
+extern "C" void keel_qjs_capture_sink(void* user, const void* token, int line,
                                       const char* name) {
   static_cast<std::vector<RawFrame>*>(user)->push_back(
       {token, line, name ? std::string(name) : std::string()});
@@ -41,7 +41,7 @@ struct VarCapture {
   JSContext* ctx;
   std::vector<QuickJSDebugCore::CapturedVar>* out;
 };
-extern "C" void rill_qjs_dup_var_sink(void* user, const char* name,
+extern "C" void keel_qjs_dup_var_sink(void* user, const char* name,
                                       JSValueConst value) {
   auto* c = static_cast<VarCapture*>(user);
   c->out->push_back(
@@ -53,11 +53,11 @@ extern "C" void rill_qjs_dup_var_sink(void* user, const char* name,
 QuickJSDebugCore::QuickJSDebugCore(JSRuntime* rt, JSContext* ctx) : ctx_(ctx) {
   (void)rt;  // runtime no longer needed: the hook is keyed per-context
   // The hook is keyed per-context, so each tenant attaches/detaches on its own.
-  rill_qjs_set_debug_hook(ctx_, &rill_qjs_hook_thunk, this);
+  keel_qjs_set_debug_hook(ctx_, &keel_qjs_hook_thunk, this);
 }
 
 QuickJSDebugCore::~QuickJSDebugCore() {
-  rill_qjs_set_debug_hook(ctx_, nullptr, nullptr);
+  keel_qjs_set_debug_hook(ctx_, nullptr, nullptr);
   // Defensive (web): if the core is torn down while a pause is still parked (an
   // unusual teardown-before-resume), free the snapshot dups here rather than
   // leaking them; ctx_ still outlives the core. No-op on native / when empty.
@@ -78,7 +78,7 @@ void QuickJSDebugCore::setResumingCallback(ResumingFn fn) {
 
 std::vector<QuickJSDebugCore::FrameSnapshot> QuickJSDebugCore::captureFrames() {
   std::vector<RawFrame> raw;
-  rill_qjs_capture_frames(ctx_, &rill_qjs_capture_sink, &raw);
+  keel_qjs_capture_frames(ctx_, &keel_qjs_capture_sink, &raw);
   std::vector<FrameSnapshot> out;
   out.reserve(raw.size());
   for (auto& r : raw) {
@@ -189,10 +189,10 @@ bool QuickJSDebugCore::runOnPausedThread(const EvalJob& job) {
     void* savedFrame;
     ~Restore() {
       *inEval = prevInEval;
-      rill_qjs_set_current_frame(ctx, savedFrame);
+      keel_qjs_set_current_frame(ctx, savedFrame);
     }
-  } restore{&inEval_, inEval_, ctx_, rill_qjs_current_frame(ctx_)};
-  rill_qjs_set_current_frame(ctx_, nullptr);
+  } restore{&inEval_, inEval_, ctx_, keel_qjs_current_frame(ctx_)};
+  keel_qjs_set_current_frame(ctx_, nullptr);
   inEval_ = true;
   job(ctx_);
   return true;
@@ -211,7 +211,7 @@ std::string QuickJSDebugCore::resolveScript(JSContext* ctx, const void* token) {
   auto it = scriptNames_.find(token);
   if (it != scriptNames_.end()) return it->second;
   std::string name;
-  const char* fn = rill_qjs_script_filename(ctx, token);
+  const char* fn = keel_qjs_script_filename(ctx, token);
   if (fn) {
     name = fn;
     JS_FreeCString(ctx, fn);
@@ -222,7 +222,7 @@ std::string QuickJSDebugCore::resolveScript(JSContext* ctx, const void* token) {
   if (!name.empty() && seenScripts_.insert(name).second && onScriptSeen_) {
     std::string source;
     std::size_t len = 0;
-    const char* src = rill_qjs_script_source(token, &len);  // borrowed
+    const char* src = keel_qjs_script_source(token, &len);  // borrowed
     if (src) source.assign(src, len);
     onScriptSeen_(name, name, source);
   }
@@ -317,13 +317,13 @@ void QuickJSDebugCore::suspendAtPause(JSContext* ctx,
 #if defined(__EMSCRIPTEN__)
   // Web (single JS thread, no real threads): capture the frames BEFORE the stack
   // unwinds — after the Asyncify unwind ctx->rt->current_stack_frame is gone —
-  // then hand control back to the JS event loop. rill_qjs_dbg_suspend_async()
+  // then hand control back to the JS event loop. keel_qjs_dbg_suspend_async()
   // returns only once resume()/step calls the stored resolver and Asyncify
   // rewinds. runOnPausedThread is unavailable here, so no cv_/job pump.
   (void)ctx;
   (void)lk;
   buildSnapshot();
-  rill_qjs_dbg_suspend_async();
+  keel_qjs_dbg_suspend_async();
   freeSnapshot();
 #else
   // Native: block the runtime thread on cv_, staying responsive to eval jobs
@@ -351,7 +351,7 @@ void QuickJSDebugCore::suspendAtPause(JSContext* ctx,
 
 void QuickJSDebugCore::wakeFromPause() {
 #if defined(__EMSCRIPTEN__)
-  rill_qjs_dbg_wake();
+  keel_qjs_dbg_wake();
 #else
   cv_.notify_all();
 #endif
@@ -364,21 +364,21 @@ void QuickJSDebugCore::buildSnapshot() {
   // so an evaluate arriving after the unwind — when the live frames are gone —
   // can reconstruct the frame scope from this immutable snapshot. Native reads
   // live frames instead and never populates this. Frame indexing matches
-  // captureFrames()/rill_qjs_nth_frame (located JS frames, top first).
+  // captureFrames()/keel_qjs_nth_frame (located JS frames, top first).
   freeSnapshotBindings();  // release any prior pause's dups before recapturing
   snapshotBindings_.resize(snapshotFrames_.size());
   for (std::size_t i = 0; i < snapshotFrames_.size(); ++i) {
     FrameBindings& fb = snapshotBindings_[i];
     VarCapture ac{ctx_, &fb.args};
-    rill_qjs_enumerate_frame_vars(ctx_, static_cast<int>(i), RILL_QJS_VAR_ARG,
-                                  &rill_qjs_dup_var_sink, &ac);
+    keel_qjs_enumerate_frame_vars(ctx_, static_cast<int>(i), KEEL_QJS_VAR_ARG,
+                                  &keel_qjs_dup_var_sink, &ac);
     VarCapture lc{ctx_, &fb.locals};
-    rill_qjs_enumerate_frame_vars(ctx_, static_cast<int>(i), RILL_QJS_VAR_LOCAL,
-                                  &rill_qjs_dup_var_sink, &lc);
+    keel_qjs_enumerate_frame_vars(ctx_, static_cast<int>(i), KEEL_QJS_VAR_LOCAL,
+                                  &keel_qjs_dup_var_sink, &lc);
     VarCapture cc{ctx_, &fb.closures};
-    rill_qjs_enumerate_frame_vars(ctx_, static_cast<int>(i), RILL_QJS_VAR_CLOSURE,
-                                  &rill_qjs_dup_var_sink, &cc);
-    fb.thisVal = JS_DupValue(ctx_, rill_qjs_frame_this(ctx_, static_cast<int>(i)));
+    keel_qjs_enumerate_frame_vars(ctx_, static_cast<int>(i), KEEL_QJS_VAR_CLOSURE,
+                                  &keel_qjs_dup_var_sink, &cc);
+    fb.thisVal = JS_DupValue(ctx_, keel_qjs_frame_this(ctx_, static_cast<int>(i)));
   }
 #endif
 }
@@ -400,6 +400,6 @@ void QuickJSDebugCore::freeSnapshotBindings() {
 #endif
 }
 
-}  // namespace rill::qjs_debug
+}  // namespace keel::qjs_debug
 
-#endif  // RILL_QJS_DEBUG
+#endif  // KEEL_QJS_DEBUG

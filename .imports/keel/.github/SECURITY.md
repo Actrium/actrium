@@ -9,7 +9,7 @@ discussions, or pull requests.
 
 Use GitHub's private vulnerability reporting to contact the maintainers:
 
-https://github.com/Actrium/rill/security/advisories/new
+https://github.com/Actrium/keel/security/advisories/new
 
 Please include as much of the following information as possible:
 

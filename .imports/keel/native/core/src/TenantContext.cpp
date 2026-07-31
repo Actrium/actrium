@@ -1,6 +1,6 @@
 #include "TenantContext.h"
 
-namespace rill::tenant_manager {
+namespace keel::tenant_manager {
 
 bool TenantContext::canUseComponent(const std::string& name) const {
   return components.allowAll ||
@@ -67,4 +67,4 @@ bool TenantContext::isNearQuota(float threshold) const {
   return false;
 }
 
-}  // namespace rill::tenant_manager
+}  // namespace keel::tenant_manager

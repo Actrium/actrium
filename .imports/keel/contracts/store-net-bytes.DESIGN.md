@@ -22,33 +22,33 @@ stream"** so that
 
 ### 1.1 WASM guest → host argument path
 
-1. **Guest builds bytes.** The rill-guest Rust SDK builds a request body and
+1. **Guest builds bytes.** The keel-native-guest Rust SDK builds a request body and
    hands it to `host_call(module, method, input: Vec<u8>)`
-   (`crates/rill-guest/src/lib.rs:312`). Today every wrapper builds a **UTF-8
+   (`crates/keel-native-guest/src/lib.rs:312`). Today every wrapper builds a **UTF-8
    JSON string** and calls `.into_bytes()` — e.g. `store::put`
-   (`crates/rill-guest/src/lib.rs:339-351`) emits `{"key":…,"text":…}`. There
+   (`crates/keel-native-guest/src/lib.rs:339-351`) emits `{"key":…,"text":…}`. There
    is **no binary store method in the Rust guest yet**; the doc comment at
    `lib.rs:328-331` notes that a raw-byte `put`/`get` would ride "as a JSON
    number array" via the generic `host_call` — i.e. the number-array hack is the
-   *documented placeholder*, not an implemented path in rill.
+   *documented placeholder*, not an implemented path in keel.
 
 2. **ABI call.** `HostCall::poll` (`lib.rs:284-308`) fires the import
-   `rill_host_call(mod_ptr,mod_len, method_ptr,method_len, in_ptr,in_len, cb_id)`
+   `keel_host_call(mod_ptr,mod_len, method_ptr,method_len, in_ptr,in_len, cb_id)`
    (`lib.rs:32-41`). `in_ptr/in_len` point at the guest's `Vec<u8>` in linear
    memory. **The ABI is already bytes-in/bytes-out** — nothing about it is JSON.
 
-3. **Host reads bytes.** `WasmGuestHost.onHostCall`
-   (`src/host/wasm-guest/wasm-guest-host.ts:231-289`) reads module/method via
+3. **Host reads bytes.** `NativeGuestHost.onHostCall`
+   (`src/host/native-guest/native-guest-host.ts:231-289`) reads module/method via
    `readString`, then reads the input:
    - `readBytes(ip, il)` copies the raw bytes out of guest memory bounds-checked
-     (`wasm-guest-host.ts:176-179`).
-   - **Framing fork** (`wasm-guest-host.ts:264-276`): if the first 4 bytes are
-     `RCNV` (`52 43 4E 56`) the raw `Uint8Array` is handed to the handler as-is
+     (`native-guest-host.ts:176-179`).
+   - **Framing fork** (`native-guest-host.ts:264-276`): if the first 4 bytes are
+     `KCNV` (`4B 43 4E 56`) the raw `Uint8Array` is handed to the handler as-is
      (the canvas binary carve-out); **otherwise `JSON.parse(TextDecoder.decode(raw))`**.
      So today, everything that is not a canvas frame is parsed as JSON here.
 
 4. **Contract boundary.** The parsed value goes to
-   `this.dispatch[moduleId]?.[method]` (`wasm-guest-host.ts:277-281`). The
+   `this.dispatch[moduleId]?.[method]` (`native-guest-host.ts:277-281`). The
    dispatch table comes from `createHostModuleDispatch(contract, impl)`
    (`src/contract/index.ts:224-257`). `wrapRpcDispatch`
    (`src/contract/index.ts:418-458`) runs `schema.parseInput(args[0])` **before**
@@ -56,10 +56,10 @@ stream"** so that
    throw → fail-closed.
 
 5. **Result back.** `onHostCall` `await`s the handler and calls
-   `this.resolve(cb, 1, result)` (`wasm-guest-host.ts:282`). `resolve`
-   (`wasm-guest-host.ts:293-313`) does `TextEncoder.encode(JSON.stringify(result))`,
-   `allocWrite`s it into guest memory (via the guest's `rill_alloc`), and calls
-   the guest export `rill_resolve(cb, ok, ptr, len)`. **The return path is
+   `this.resolve(cb, 1, result)` (`native-guest-host.ts:282`). `resolve`
+   (`native-guest-host.ts:293-313`) does `TextEncoder.encode(JSON.stringify(result))`,
+   `allocWrite`s it into guest memory (via the guest's `keel_alloc`), and calls
+   the guest export `keel_resolve(cb, ok, ptr, len)`. **The return path is
    JSON-only today** — no binary carve-out on the way back.
 
 6. **Guest receives.** `rt::resolve` (`lib.rs:168-183`) copies the bytes with
@@ -77,47 +77,47 @@ The QuickJS provider is `src/host/sandbox/providers/quickjs-native-wasm-provider
 
 - Guest calls `R.hostModules[mid][en](arg)` → `__invokeHostRpc`
   (`quickjs-native-wasm-provider.ts:626-633`), which does
-  `__sendToHost('__rill_host_invoke', { id, moduleId, exportName, args: arg })`.
+  `__sendToHost('__keel_host_invoke', { id, moduleId, exportName, args: arg })`.
 - The shell bridge marshals across the C boundary **as a JSON string**:
   host side does `JSON.parse(data)` (`:465`) and calls `fn(m.args)` (`:490`);
-  results go back via `injectJson('__rill_host_result', JSON.stringify(value))`
+  results go back via `injectJson('__keel_host_result', JSON.stringify(value))`
   (`:433`), errors via `JSON.stringify(message)` (`:442`).
 
 **Critical finding:** the QuickJS shell channel is a **synchronous JSON string
 bridge**, *not* `postMessage` structured-clone / `ArrayBuffer` transfer. So a
 `Uint8Array` argument on this path would be `JSON.stringify`'d into
 `{"0":…,"1":…}` — i.e. the QuickJS route **reproduces the number-array bloat at
-rill's own shell boundary**. (The `canvas-wire.DESIGN.md` §2.2 "Route A"
+keel's own shell boundary**. (The `canvas-wire.DESIGN.md` §2.2 "Route A"
 language assumes a structured-clone shell; the *actual* provider in the tree is
 the JSON-injection one. The design below handles both realities.)
 
 ### 1.3 Where the "number-array in JSON" encoding actually lives
 
-- **Not an implemented rill path.** In rill's Rust guest it is only a *doc
+- **Not an implemented keel path.** In keel's Rust guest it is only a *doc
   placeholder* (`lib.rs:328-331`) — there is no `store::put_bytes`.
-- **Platform-side for host:store/host:net.** rill does **not** define
+- **Platform-side for host:store/host:net.** keel does **not** define
   `host:store` or `host:net` anywhere (`grep host:net` over `.ts/.rs` is empty;
-  no `defineRillContract` in rill registers them). They are registered by the
+  no `defineKeelContract` in keel registers them). They are registered by the
   downstream platform's `host-store.ts` / `host-net.ts`. The platform's report
   that "host:store carries a value as a number array in JSON, host:net only
   supports text" describes **platform handler + platform contract** behaviour.
-- **rill owns the machinery that makes bytes first-class**: the contract
+- **keel owns the machinery that makes bytes first-class**: the contract
   framework (`src/contract/index.ts`), the WASM dispatch/return codec
-  (`wasm-guest-host.ts`), the QuickJS shell codec (the provider above), the
-  rill-guest Rust SDK wrappers, and type-gen.
+  (`native-guest-host.ts`), the QuickJS shell codec (the provider above), the
+  keel-native-guest Rust SDK wrappers, and type-gen.
 
-**rill-side vs platform-side split (summary):**
+**keel-side vs platform-side split (summary):**
 
 | Concern | Owner |
 |---|---|
-| `bytes` field type in the contract DSL + manifest + type-gen | **rill** (`src/contract`) |
-| WASM envelope codec (guest→host decode, host→guest encode) | **rill** (`wasm-guest-host.ts`) |
-| QuickJS shell bytes codec (Uint8Array ⇄ wire) | **rill** (quickjs provider) |
-| rill-guest Rust SDK `store::{put,get}_bytes`, `net` | **rill** (`crates/rill-guest`) |
-| JS-guest typed helpers (`putBytes`/`getBytes`) | **rill** (guest SDK) |
+| `bytes` field type in the contract DSL + manifest + type-gen | **keel** (`src/contract`) |
+| WASM envelope codec (guest→host decode, host→guest encode) | **keel** (`native-guest-host.ts`) |
+| QuickJS shell bytes codec (Uint8Array ⇄ wire) | **keel** (quickjs provider) |
+| keel-native-guest Rust SDK `store::{put,get}_bytes`, `net` | **keel** (`crates/keel-native-guest`) |
+| JS-guest typed helpers (`putBytes`/`getBytes`) | **keel** (guest SDK) |
 | `host-store.ts` / `host-net.ts` handlers that now take/return `Uint8Array` | **platform** |
 
-The invariant rill guarantees: **at the dispatch boundary the handler always
+The invariant keel guarantees: **at the dispatch boundary the handler always
 receives a `Uint8Array` for a declared bytes field and may return one**,
 regardless of guest kind. That is the entire "both guest kinds semantically
 identical" promise; the platform handler is written once against `Uint8Array`.
@@ -171,7 +171,7 @@ export interface RpcDescriptor<Input = void, Output = void> {
   existing readers ignore it.
 - **`parseInput`/`parseOutput` unchanged in mechanism.** A binary capability's
   `parseInput` now simply validates a real `Uint8Array` for the declared field
-  (e.g. `value instanceof Uint8Array`) because rill's codec has already
+  (e.g. `value instanceof Uint8Array`) because keel's codec has already
   reconstructed it before `parseInput` runs (§B step 4). This is the fail-closed
   backstop for the self-describing wire.
 
@@ -186,7 +186,7 @@ declare module 'host:store' {
 }
 ```
 
-rill only fixes the *rule* ("a `binary` field → `Uint8Array`"); the platform's
+keel only fixes the *rule* ("a `binary` field → `Uint8Array`"); the platform's
 generator emits it, exactly as the guide already frames type-gen as
 host-generated.
 
@@ -196,17 +196,17 @@ One self-describing wire framing, used **in both directions** on the WASM
 boundary. The request/response stays JSON (fields, options); byte-stream fields
 are **replaced by a sentinel** referencing an index into an attached binary
 segment list (multipart-like). The codec is generic and **contract-agnostic** —
-`WasmGuestHost` needs no descriptor knowledge (it only holds the dispatch
-table today, `wasm-guest-host.ts:58`).
+`NativeGuestHost` needs no descriptor knowledge (it only holds the dispatch
+table today, `native-guest-host.ts:58`).
 
 #### B.1 Byte layout (`Vec<u8>` input and response, identical)
 
 All integers **little-endian** (wasm is LE; matches canvas-wire). Magic is a
-distinct `u32` from `RCNV`/`RILL`:
+distinct `u32` from `KCNV`/`KEEL`:
 
 ```
 offset  size      field
-0       4         magic   = 'R' 'B' 'S' '1'  = 52 42 53 31   ("Rill Binary Segments, v1")
+0       4         magic   = 'K' 'B' 'S' '1'  = 4B 42 53 31   ("Keel Binary Segments, v1")
 4       4         jsonLen : u32
 8       jsonLen   json    : UTF-8 control plane (see sentinel below)
 8+L     4         segCount: u32          (L = jsonLen)
@@ -215,7 +215,7 @@ then, segCount times, tightly packed:
         segLen    seg bytes (raw byte stream; segment index = emission order, 0-based)
 ```
 
-- **Version rides the 4th magic byte** (`'1'`). A v2 wire is `'RBS2'` — a
+- **Version rides the 4th magic byte** (`'1'`). A v2 wire is `'KBS2'` — a
   distinct `u32`, so an old decoder rejects it on the magic compare (no separate
   version field, mirrors the canvas "distinct magic" discipline).
 - **Sentinel:** inside the JSON, a bytes field's value is the object
@@ -230,19 +230,19 @@ then, segCount times, tightly packed:
 
 #### B.2 Request direction (guest → host), WASM
 
-Guest SDK (§C) emits an `RBS1` envelope instead of a plain JSON body. In
-`WasmGuestHost.onHostCall` (`wasm-guest-host.ts:264-276`), add a **third fork**
+Guest SDK (§C) emits an `KBS1` envelope instead of a plain JSON body. In
+`NativeGuestHost.onHostCall` (`native-guest-host.ts:264-276`), add a **third fork**
 ahead of the current two, checking the full `u32` magic:
 
 ```
 raw = readBytes(ip, il)
-if magic == RCNV  -> hand raw bytes to handler (existing canvas carve-out)
-if magic == RBS1  -> decodeEnvelope(raw) -> { json, segments }
+if magic == KCNV  -> hand raw bytes to handler (existing canvas carve-out)
+if magic == KBS1  -> decodeEnvelope(raw) -> { json, segments }
                      input = reviveSentinels(JSON.parse(json), segments)   // {"$b":N} -> Uint8Array
 else              -> JSON.parse(...)   (existing path, unchanged)
 ```
 
-`RBS1` and `RCNV` both start with `0x52 'R'`, so — as canvas already does — the
+`KBS1` and `KCNV` both start with `0x4B 'K'`, so — as canvas already does — the
 fork compares all 4 magic bytes, never just byte 0. A plain JSON body begins
 with `{` (`0x7B`) and matches no magic → **existing capabilities take the exact
 same `JSON.parse` path, byte-for-byte unchanged**.
@@ -252,29 +252,29 @@ unchanged dispatch → `parseInput` validates → handler receives `Uint8Array`.
 
 #### B.3 Response direction (host → guest), WASM
 
-`WasmGuestHost.resolve` (`wasm-guest-host.ts:293-313`) is generic. Change it to:
+`NativeGuestHost.resolve` (`native-guest-host.ts:293-313`) is generic. Change it to:
 
 ```
 { json, segments } = extractSentinels(result)   // hoist every Uint8Array -> {"$b":N}
 if segments.length == 0:
     bytes = TextEncoder.encode(JSON.stringify(result))   // UNCHANGED — plain JSON reply
 else:
-    bytes = encodeEnvelope(json, segments)               // RBS1 frame
-allocWrite(bytes); rill_resolve(cb, ok, ptr, len)
+    bytes = encodeEnvelope(json, segments)               // KBS1 frame
+allocWrite(bytes); keel_resolve(cb, ok, ptr, len)
 ```
 
 - A result with **no** `Uint8Array` produces the **identical** JSON reply as
   today — no behaviour change for existing capabilities.
-- A result **with** `Uint8Array` produces an `RBS1` frame; the guest SDK decodes
+- A result **with** `Uint8Array` produces an `KBS1` frame; the guest SDK decodes
   it (§C). The guest already accepts arbitrary response bytes (`lib.rs:168-183`),
   so no ABI change.
 
 #### B.4 Caps and fail-closed discipline
 
 Reuse the existing bounds-check posture (`assertInBounds`,
-`wasm-guest-host.ts:206-216`; the `ok=0` fail-closed default). New constants
+`native-guest-host.ts:206-216`; the `ok=0` fail-closed default). New constants
 (host and guest, kept in lockstep — a conformance test locks them, like
-`MAX_BUFFER_BYTES` in `crates/rill-guest/src/conformance.rs:235`):
+`MAX_BUFFER_BYTES` in `crates/keel-native-guest/src/conformance.rs:235`):
 
 | cap | value | rationale |
 |---|---|---|
@@ -323,11 +323,11 @@ Enforcement:
 #### B.5 QuickJS path — the same *semantics*, a transport-appropriate wire
 
 The QuickJS shell is a **JSON string bridge** (§1.2), so raw segment bytes
-cannot ride structured clone there. rill wraps at the shell channel (the
+cannot ride structured clone there. keel wraps at the shell channel (the
 platform-stated preference), so the **handler still sees `Uint8Array`**:
 
 - **Guest → host:** before `JSON.stringify`, each binary value in `args` is
-  staged into wasm linear memory via the native `__rill_stageBinary` helper and
+  staged into wasm linear memory via the native `__keel_stageBinary` helper and
   replaced by `{"$bin": <id>}` (plus `{"$view": "<Kind>"}` for typed-array
   views). On the host side the payload is revived by copying the staged bytes
   out of `HEAPU8` (`qjs_binary_ptr`/`qjs_binary_len`) and freeing the slot
@@ -335,7 +335,7 @@ platform-stated preference), so the **handler still sees `Uint8Array`**:
 - **Host → guest:** the host stages bytes into wasm memory
   (`_malloc` + `qjs_binary_stage`) and sends `{"$bin": <id>}` in the JSON
   payload; the guest-side codec revives each id to a real `ArrayBuffer`
-  (zero-copy adoption via `__rill_takeBinary`) and rewraps the declared view
+  (zero-copy adoption via `__keel_takeBinary`) and rewraps the declared view
   kind.
 - The staging table is the transport *only inside the JSON string bridge*; each
   id is consumed exactly once and freed on consumption (error paths free in
@@ -343,24 +343,24 @@ platform-stated preference), so the **handler still sees `Uint8Array`**:
   linear memory rather than any text encoding, so payload size stays ~1× the
   raw bytes.
 
-So: **WASM** carries `RBS1` length-prefixed segments; **QuickJS** carries
+So: **WASM** carries `KBS1` length-prefixed segments; **QuickJS** carries
 `$bin` staging-table references in its JSON bridge; **both** deliver bytes to
 the same platform handler. The sentinel key differs (`$b` index vs `$bin`
 handle) because the transports differ, but the contract-level meaning ("this
 field is bytes") is one thing.
 
-### C. rill-guest SDK binary wrappers
+### C. keel-native-guest SDK binary wrappers
 
-Add a generic envelope helper next to `host_call` (`crates/rill-guest/src/lib.rs`),
+Add a generic envelope helper next to `host_call` (`crates/keel-native-guest/src/lib.rs`),
 `no_std`, no JSON crate (reuse `json_escape`, `lib.rs:1673`):
 
 ```rust
-/// Encode an RBS1 request: `json_control` already contains {"$b":N} sentinels
+/// Encode a KBS1 request: `json_control` already contains {"$b":N} sentinels
 /// for each segment, in order. Segments are borrowed guest memory, copied into
 /// the frame. Fails closed (None) if any cap is exceeded.
 pub fn encode_envelope(json_control: &str, segments: &[&[u8]]) -> Option<Vec<u8>>;
 
-/// Decode an RBS1 response into (json_bytes, segment_slices). None if the magic
+/// Decode a KBS1 response into (json_bytes, segment_slices). None if the magic
 /// is absent (caller falls back to treating the body as plain JSON) or a length
 /// is malformed / over-cap.
 pub fn decode_envelope(bytes: &[u8]) -> Option<(&[u8], Vec<&[u8]>)>;
@@ -383,7 +383,7 @@ pub mod store {
     }
 
     /// host:store.getBytes(key) -> Some(value) | None (absent). Request has no
-    /// bytes out, so it is a plain JSON body; the RESPONSE is an RBS1 envelope.
+    /// bytes out, so it is a plain JSON body; the RESPONSE is a KBS1 envelope.
     pub async fn get_bytes(key: &str) -> Result<Option<Vec<u8>>, Vec<u8>> {
         let mut json = String::from("{\"key\":");
         json_escape(&mut json, key);
@@ -431,7 +431,7 @@ await hostModules['host:store'].putBytes(key, value /* Uint8Array */)      // Pr
 const got = await hostModules['host:store'].getBytes(key)                  // { value: Uint8Array } | null
 ```
 
-The optional rill guest SDK sugar (`rill/guest`) would expose typed
+The optional keel guest SDK sugar (`keel/guest`) would expose typed
 `putBytes(key, value: Uint8Array)` / `getBytes(key): Promise<Uint8Array|null>`
 thin wrappers over those stubs — no encoding logic in the guest, since the shell
 does the `$bin` staging.
@@ -443,7 +443,7 @@ does the `$bin` staging.
    **at `MAX_SEGMENT_BYTES`** — `put_bytes(k, v)` then `get_bytes(k)` returns
    `Some(v_exact)`. Assert the returned bytes equal the input byte-for-byte.
    **Guard:** the test taps the wire (a recording host, cf. `RecordedCall`
-   at `lib.rs`) and asserts the request/response frames are `RBS1` envelopes and
+   at `lib.rs`) and asserts the request/response frames are `KBS1` envelopes and
    that **no array-of-numbers ever appears** — i.e. the control-plane JSON
    contains only the `{"$b":0}` sentinel and the value bytes appear exactly once,
    in the segment (a `grep` for the value's decimal-byte sequence in the JSON
@@ -460,7 +460,7 @@ does the `$bin` staging.
    leg.
 4. **Back-compat guard.** An existing text capability (`store::put`/`getText`)
    still sends a `{`-leading plain-JSON body and receives a plain-JSON reply —
-   assert the on-wire bytes are unchanged from a pre-change golden (the RBS1
+   assert the on-wire bytes are unchanged from a pre-change golden (the KBS1
    fork is never taken for a non-binary call).
 
 ---
@@ -469,7 +469,7 @@ does the `$bin` staging.
 
 1. **Sentinel collision.** A capability could legitimately send an object with
    key `$b`/`$b64`. *Mitigation:* sentinels are only interpreted **inside an
-   `RBS1` frame** (WASM) or by the **binary-declared shell path** (QuickJS);
+   `KBS1` frame** (WASM) or by the **binary-declared shell path** (QuickJS);
    plain JSON bodies are never sentinel-walked, and only `binary`-declared
    capabilities emit frames. Existing JSON capabilities are untouched. Document
    `$b`/`$b64` as reserved keys.
@@ -482,13 +482,13 @@ does the `$bin` staging.
    leaking talc fallback (`lib.rs:142-161`). *Mitigation:* conservative phase-1
    response caps + a named phase-4 follow-up to raise `WIRE_SIZE` or add a
    dealloc. Do not ship large `getBytes` before that.
-4. **Codec must be contract-agnostic.** `WasmGuestHost` holds only the dispatch
+4. **Codec must be contract-agnostic.** `NativeGuestHost` holds only the dispatch
    table, not descriptors. *Mitigation:* the self-describing sentinel wire (§B)
    needs no descriptor at the codec layer; `binary` metadata (§A) is only for
    type-gen/manifest/validation. Keeps layering intact.
 5. **Caps drift between Rust guest and TS host.** *Mitigation:* single-source the
    caps and lock them with a conformance test, exactly as `MAX_BUFFER_BYTES` is
-   locked (`crates/rill-guest/src/conformance.rs:235`).
+   locked (`crates/keel-native-guest/src/conformance.rs:235`).
 6. **`binary` must be optional everywhere.** Any non-optional addition to
    `RpcDescriptor`/`RpcOptions` would break every existing `rpc()` call.
    *Mitigation:* `binary?` optional; `rpc()` copies it only when present;
@@ -499,20 +499,20 @@ does the `$bin` staging.
 ## Part 4 — Phased implementation plan (workflow-ready)
 
 - **Phase 0 — envelope spec + golden.** Add `contracts/store-net-bytes.json`
-  (magic `RBS1`, layout §B.1, caps §B.4) + a `.golden.json` of hand-checked
+  (magic `KBS1`, layout §B.1, caps §B.4) + a `.golden.json` of hand-checked
   frames (empty value, `00`/`FF` value, at-cap value, multi-segment). Mirrors the
   canvas-wire single-source + golden-lock discipline. **No runtime code.**
-- **Phase 1 — contract `bytes` type (rill).** `binary?` on `RpcOptions`/
+- **Phase 1 — contract `bytes` type (keel).** `binary?` on `RpcOptions`/
   `RpcDescriptor`; validation; manifest `binaryCapabilities`; unit tests. Fully
   additive; existing contract tests must pass unchanged.
-- **Phase 2 — WASM codec (rill).** `encode/decodeEnvelope` + sentinel revive/
-  extract in `wasm-guest-host.ts` (request fork §B.2, response encode §B.3) with
+- **Phase 2 — WASM codec (keel).** `encode/decodeEnvelope` + sentinel revive/
+  extract in `native-guest-host.ts` (request fork §B.2, response encode §B.3) with
   caps + fail-closed; Rust-guest `encode_envelope`/`decode_envelope`. Lock caps
   with a conformance test. Golden-driven decode tests.
-- **Phase 3 — SDK wrappers (rill).** `store::{put,get}_bytes`, `net::fetch_bytes`
+- **Phase 3 — SDK wrappers (keel).** `store::{put,get}_bytes`, `net::fetch_bytes`
   (replace the `lib.rs:328-331` placeholder); the acceptance/property tests (§D
   1, 3, 4).
-- **Phase 4 — QuickJS shell codec + parity (rill).** `$b64` wrap/revive in the
+- **Phase 4 — QuickJS shell codec + parity (keel).** `$b64` wrap/revive in the
   provider (§B.5); parity test (§D 2). **Plus** the arena follow-up (raise
   `WIRE_SIZE` or add oversized-fallback dealloc) before enabling large responses.
 - **Phase 5 — type-gen rule + platform handoff.** Document the
@@ -520,5 +520,5 @@ does the `$bin` staging.
   platform switches `host-store.ts`/`host-net.ts` handlers to `Uint8Array` and
   declares the `binary` fields, retiring the number-array hack.
 
-Phases 1–4 are entirely rill-side and independently testable; Phase 5 is the
+Phases 1–4 are entirely keel-side and independently testable; Phase 5 is the
 platform cut-over that the whole design exists to unblock.

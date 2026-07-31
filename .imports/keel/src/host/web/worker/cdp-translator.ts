@@ -5,7 +5,7 @@
  *
  * QuickJS has no built-in CDP agent, so — exactly as on native — a central
  * translator is the only option: inbound raw CDP JSON-RPC (`Debugger.*` requests)
- * becomes rill's structured `dbg.*` messages, and the worker's outbound `dbg.*`
+ * becomes keel's structured `dbg.*` messages, and the worker's outbound `dbg.*`
  * replies/events become CDP responses and `Debugger.paused/resumed/scriptParsed`
  * events. It owns the `Debugger` domain end-to-end; `Runtime`/`DOM`/`Network`
  * stay on their own handlers (mirrors `AdapterDebugTarget::ownedDomains`).

@@ -34,7 +34,7 @@ function newEngine(opts: { watchdogTimeout?: number } = {}): WorkerEngine {
 
 const HELLO_BUNDLE = `
   const React = require('react');
-  const { render } = require('rill/reconciler');
+  const { render } = require('keel/reconciler');
   function App() {
     return React.createElement(
       'View',
@@ -42,13 +42,13 @@ const HELLO_BUNDLE = `
       React.createElement('Text', { testID: 'title' }, 'Hello Worker')
     );
   }
-  render(React.createElement(App), globalThis.__rill_sendBatch);
+  render(React.createElement(App), globalThis.__keel_sendBatch);
 `;
 
 const COUNTER_BUNDLE = `
   const React = require('react');
   const { useState } = React;
-  const { render } = require('rill/reconciler');
+  const { render } = require('keel/reconciler');
   function App() {
     const [count, setCount] = useState(0);
     return React.createElement(
@@ -60,14 +60,14 @@ const COUNTER_BUNDLE = `
           testID: 'button',
           onPress: () => {
             setCount(count + 1);
-            globalThis.__rill_emitEvent('PRESSED', { count: count + 1 });
+            globalThis.__keel_emitEvent('PRESSED', { count: count + 1 });
           },
         },
         React.createElement('Text', { testID: 'counter' }, 'Count: ' + count)
       )
     );
   }
-  render(React.createElement(App), globalThis.__rill_sendBatch);
+  render(React.createElement(App), globalThis.__keel_sendBatch);
 `;
 
 describe('WorkerEngine (off-main-thread)', () => {

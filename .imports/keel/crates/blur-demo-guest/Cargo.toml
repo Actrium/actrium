@@ -2,7 +2,7 @@
 name = "blur-demo-guest"
 version.workspace = true
 edition.workspace = true
-description = "Native rill guest demoing a wasm SIMD128 pixel filter: a box blur in scalar and hand-vectorized (core::arch::wasm32 v128) form, byte-for-byte identical, as the reference for #57's SIMD build path."
+description = "Native keel guest demoing a wasm SIMD128 pixel filter: a box blur in scalar and hand-vectorized (core::arch::wasm32 v128) form, byte-for-byte identical, as the reference for #57's SIMD build path."
 license.workspace = true
 publish = false
 
@@ -10,4 +10,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-rill-guest = { path = "../rill-guest" }
+keel-native-guest = { path = "../keel-native-guest" }

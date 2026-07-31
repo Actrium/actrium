@@ -43,13 +43,13 @@ describe('E2E Error Handling: Guest Runtime Errors', () => {
     // Then load working code - engine should still work
     const workingCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('View', { testID: 'recovered' });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(workingCode);
@@ -97,7 +97,7 @@ describe('E2E Error Handling: Callback Errors', () => {
   it('should catch sync callback errors without crashing', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -108,7 +108,7 @@ describe('E2E Error Handling: Callback Errors', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -125,7 +125,7 @@ describe('E2E Error Handling: Callback Errors', () => {
   it('should propagate async callback errors as rejections', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('TouchableOpacity', {
@@ -137,7 +137,7 @@ describe('E2E Error Handling: Callback Errors', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -154,7 +154,7 @@ describe('E2E Error Handling: Callback Errors', () => {
     const guestCode = `
       const React = require('react');
       const { useState } = React;
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         const [count, setCount] = useState(0);
@@ -172,14 +172,14 @@ describe('E2E Error Handling: Callback Errors', () => {
             testID: 'safe-button',
             onPress: () => {
               setCount(count + 1);
-              globalThis.__rill_emitEvent('COUNT_UPDATED', { count: count + 1 });
+              globalThis.__keel_emitEvent('COUNT_UPDATED', { count: count + 1 });
             }
           }),
           React.createElement('Text', { testID: 'counter' }, 'Count: ' + count)
         );
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -217,7 +217,7 @@ describe('E2E Error Handling: Error Serialization', () => {
   it('should serialize Error objects with all properties', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       const customError = new Error('Test error message');
       customError.name = 'CustomError';
@@ -229,7 +229,7 @@ describe('E2E Error Handling: Error Serialization', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -247,7 +247,7 @@ describe('E2E Error Handling: Error Serialization', () => {
   it('should serialize different error types', async () => {
     const guestCode = `
       const React = require('react');
-      const { render } = require('rill/reconciler');
+      const { render } = require('keel/reconciler');
 
       function App() {
         return React.createElement('View', {
@@ -258,7 +258,7 @@ describe('E2E Error Handling: Error Serialization', () => {
         });
       }
 
-      render(React.createElement(App), globalThis.__rill_sendBatch);
+      render(React.createElement(App), globalThis.__keel_sendBatch);
     `;
 
     await ctx.engine.loadBundle(guestCode);
@@ -291,5 +291,5 @@ describe('E2E Error Handling: Component Render Errors', () => {
 
   // NOTE: React catches render errors internally - use Error Boundaries in real apps
   // NOTE: useEffect error handling tests moved to Playwright E2E:
-  // @see tests/wasm-sandbox/rill-useeffect.e2e.ts
+  // @see tests/wasm-sandbox/keel-useeffect.e2e.ts
 });

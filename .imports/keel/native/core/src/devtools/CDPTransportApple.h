@@ -24,7 +24,7 @@
 #include <memory>
 #include <string>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 /**
  * Apple Network.framework WebSocket transport
@@ -138,6 +138,6 @@ private:
   std::unordered_map<ConnectionId, std::shared_ptr<std::string>> httpBuffers_;
 };
 
-} // namespace rill::devtools
+} // namespace keel::devtools
 
 #endif // __APPLE__

@@ -1,13 +1,13 @@
-# rill CDP 调试器 —— 测试清单与手册
+# keel CDP 调试器 —— 测试清单与手册
 
-覆盖 rill guest 引擎(Hermes / QuickJS)的 CDP(Chrome DevTools Protocol)
+覆盖 keel guest 引擎(Hermes / QuickJS)的 CDP(Chrome DevTools Protocol)
 调试能力:从纯 C++ 单元测试,到接真 `hermes.framework` 的原生 e2e,再到用真
 CDP 客户端库经真 WebSocket 驱动的前端联调,以及真 Chrome DevTools GUI 的人肉
 清单。
 
 > **门控与出货**:CDP 调试全部代码门控在编译期宏后,**生产默认不出货**:
-> - `RILL_WIP_CDP_DEVTOOLS=1` —— relay 接缝 / DebuggerAdapter / DevTools 服务
-> - `RILL_QJS_DEBUG` —— QuickJS 引擎逐行 hook 与调试核心(关闭时宏折叠成
+> - `KEEL_WIP_CDP_DEVTOOLS=1` —— relay 接缝 / DebuggerAdapter / DevTools 服务
+> - `KEEL_QJS_DEBUG` —— QuickJS 引擎逐行 hook 与调试核心(关闭时宏折叠成
 >   no-op,引擎字节不变)
 > - `HERMES_ENABLE_DEBUGGER=1` —— Hermes CDPAgent / CDPDebugAPI(pod 也须以此
 >   构建,否则运行期为 no-op 桩)
@@ -52,7 +52,7 @@ make clean && make test        # 改过 .h 必须 clean(无头依赖追踪)
 **期望**:末行 `Total: 388 passed, 0 failed, 388 total`(含 `/json` 发现端点与
 多 session 路由 20 例——一 socket 双租户、同租户双 session、split-port ws url、unregister/stop 释放——
 + service 层 1 例)。
-Makefile 已带 `WIP_DEFS = -DRILL_WIP_CDP_DEVTOOLS=1 …`,无需额外 flag。
+Makefile 已带 `WIP_DEFS = -DKEEL_WIP_CDP_DEVTOOLS=1 …`,无需额外 flag。
 
 可选消毒器:`make asan`(地址)、`make tsan`(线程)。
 
@@ -95,7 +95,7 @@ bash native/quickjs/test/build-run-cdp.sh
 列 `a=1`/`b="two"`/`nested`(子对象自带独立 objectId,可再往下钻到 `c=3`),
 `Debugger.resume` 后 objectId 全部失效(回空)。
 
-> 帧内作用域实现:门控引擎接缝 `rill_qjs_enumerate_frame_vars`/`rill_qjs_frame_this`
+> 帧内作用域实现:门控引擎接缝 `keel_qjs_enumerate_frame_vars`/`keel_qjs_frame_this`
 > 读实参/局部/闭包变量与 `this`,表达式在合成包装函数
 > `(function(<名字>){return(<expr>);})` 里带当前值调用求值;非调试构建字节不变
 > (已验:无接缝符号、归一化预处理输出一致)。
@@ -108,12 +108,12 @@ bash native/quickjs/test/build-run-cdp.sh
 >
 > 跨引擎差异(非缺陷):「objectId 绝不跨 resume 存活」是 **QuickJS 专属**语义——
 > QuickJS 一律把 objectId 绑定到暂停作用域并在暂停退出点释放(实现取舍,换 ASan
-> 干净)。Hermes 侧 rill 全量转发给上游 facebook `CDPAgent`(`native/hermes/src/
+> 干净)。Hermes 侧 keel 全量转发给上游 facebook `CDPAgent`(`native/hermes/src/
 > devtools/CDPAgentTarget.cpp`),objectId 生命周期由 CDPAgent 管理;按 CDP 规范,
 > `Runtime` object handle 的生命周期绑定到 releaseObject/releaseObjectGroup/上下文
 > 销毁而非 pause,故 Hermes 下 resume 后旧 `Runtime.evaluate` objectId 仍可解析,
 > 符合规范。因此「resume 后旧 objectId 是否失效」两引擎答案不同:QuickJS 失效、
-> Hermes 存活——属引擎实现差异,rill 不在 Hermes 适配层强行对齐(要对齐须 patch
+> Hermes 存活——属引擎实现差异,keel 不在 Hermes 适配层强行对齐(要对齐须 patch
 > 上游 CDPAgent,超出适配层职责)。
 >
 > 暂停态 `Debugger.enable` 回放的已知有界局限:`handleEnable` 在引擎已暂停时补发一次
@@ -132,7 +132,7 @@ bash native/quickjs/test/build-run-cdp.sh
 **须在 s67**(macOS,备有带 CDP 符号的 debug Hermes pod)。
 
 ```bash
-# s67 上,checkout 于 ~/rill-arch-check(rsync 同步)。destroot 必须是 DEBUG 版
+# s67 上,checkout 于 ~/keel-arch-check(rsync 同步)。destroot 必须是 DEBUG 版
 # hermes(带 CDP 符号,判别:nm <framework>/hermes | grep -c CDPAgent > 0);
 # rn-macos fixture 的 Pods destroot 是 Release 版、链接必失败。已验证可用的
 # 来源是 CocoaPods 缓存里的 debug 变体,例如:
@@ -174,13 +174,14 @@ resume 抛 `TimeoutError`(bug 坐实);开调和时不抛、程序存活跑完(`_
 - `cdp_client_probe.js` —— DevTools 前端所用同款 CDP 客户端库驱动完整会话
 
 ```bash
+REPO=$(pwd)                      # 仓库根目录，后面 cd 到 /tmp 之后还要用
 cd native/quickjs/tools
 OUT=/tmp/cdp_host bash build-cdp-host.sh
 
 mkdir -p /tmp/cdpbridge && cd /tmp/cdpbridge
 npm install ws chrome-remote-interface
-cp /ext/rill/native/quickjs/tools/cdp_ws_bridge.js \
-   /ext/rill/native/quickjs/tools/cdp_client_probe.js .
+cp "$REPO"/native/quickjs/tools/cdp_ws_bridge.js \
+   "$REPO"/native/quickjs/tools/cdp_client_probe.js .
 
 HOSTBIN=/tmp/cdp_host PORT=9411 node cdp_ws_bridge.js &   # 起桥
 PORT=9411 node cdp_client_probe.js                        # 跑探针
@@ -265,7 +266,7 @@ cd src && bun test host/web/worker/__tests__/
 turn 上的控制面子操作,直走调试路、**不取** `TurnGate` 槽——否则会排在被挂起的 turn
 后面死等(`worker-dispatch.test.ts` 实证:parked turn 下 evaluate/getProperties 仍往返、
 而新 eval turn 确排队,resume 后 FIFO 排空)。真 suspend/resume 接线(debug wasm 装进
-worker + `__rillDbg`)留 TODO 桩,见 §11。
+worker + `__keelDbg`)留 TODO 桩,见 §11。
 
 ---
 
@@ -276,7 +277,7 @@ worker + `__rillDbg`)留 TODO 桩,见 §11。
 
 - [ ] Chrome 开 `chrome://inspect` → **Discover network targets** → **Configure…**
       → 加 `127.0.0.1:9411` → 勾 Discover
-- [ ] 列表出现 **rill QuickJS guest**,点 **inspect** 开 DevTools
+- [ ] 列表出现 **keel QuickJS guest**,点 **inspect** 开 DevTools
 - [ ] **Sources** 面板能看到 `guest.js`,源码完整(`function greet …`)
 - [ ] 第 3 行(`var msg = …`)下断点
 - [ ] 触发运行(前端自动 `runIfWaitingForDebugger` 或手动)→ 命中,右侧显示
@@ -295,11 +296,11 @@ worker + `__rillDbg`)留 TODO 桩,见 §11。
 改动 `native/{core,hermes}` 后,对真 RN/Hermes/jsi 头做语法验:
 
 ```bash
-rsync -az native/quickjs/ leo@s67:~/rill-arch-check/native/quickjs/
-rsync -az native/core/src/ leo@s67:~/rill-arch-check/native/core/src/
+rsync -az native/quickjs/ leo@s67:~/keel-arch-check/native/quickjs/
+rsync -az native/core/src/ leo@s67:~/keel-arch-check/native/core/src/
 # 单文件语法验(双态:gated + ungated),示例:
-ssh leo@s67 'cd ~/rill-arch-check && clang++ -std=c++17 -fsyntax-only \
-  -DRILL_WIP_CDP_DEVTOOLS=1 -DHERMES_ENABLE_DEBUGGER=1 \
+ssh leo@s67 'cd ~/keel-arch-check && clang++ -std=c++17 -fsyntax-only \
+  -DKEEL_WIP_CDP_DEVTOOLS=1 -DHERMES_ENABLE_DEBUGGER=1 \
   -I native/core/src -I <Pods>/Headers/Public/{hermes-engine,React-jsi,React-callinvoker} \
   -x objective-c++ native/hermes/src/...'
 ```
@@ -312,9 +313,9 @@ ssh leo@s67 'cd ~/rill-arch-check && clang++ -std=c++17 -fsyntax-only \
 
 ## §10 出货零足迹核对
 
-- [ ] 全部 CDP 代码门控 `RILL_WIP_CDP_DEVTOOLS`(+ 引擎 `RILL_QJS_DEBUG` /
+- [ ] 全部 CDP 代码门控 `KEEL_WIP_CDP_DEVTOOLS`(+ 引擎 `KEEL_QJS_DEBUG` /
       `HERMES_ENABLE_DEBUGGER`);默认关 + `!NDEBUG` 门控
-- [ ] `quickjs.c` 无 `RILL_QJS_DEBUG` 编译:宏折叠成 no-op,引擎字节不变(已验)
+- [ ] `quickjs.c` 无 `KEEL_QJS_DEBUG` 编译:宏折叠成 no-op,引擎字节不变(已验)
 - [ ] release fixture 无 `.debug_*` 段(DWARF-free 守卫单测)
 - [ ] 扫描无 CJK / AI 痕迹 / `sleep` 同步
 - [ ] `native/quickjs/tools/` 为 dev 工具,不进任何构建(podspec / Makefile 均不含)

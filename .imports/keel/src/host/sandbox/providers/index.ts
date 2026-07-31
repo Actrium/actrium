@@ -1,5 +1,5 @@
 /**
- * Rill Sandbox Providers
+ * Keel Sandbox Providers
  *
  * All providers support high-performance direct object passing:
  * - Can pass functions, circular references, complex objects
@@ -8,7 +8,7 @@
  */
 
 export type { HermesProviderOptions } from './hermes-provider';
-// Hermes Native (React Native - when RILL_SANDBOX_ENGINE=hermes)
+// Hermes Native (React Native - when KEEL_SANDBOX_ENGINE=hermes)
 export { HermesProvider, isHermesAvailable } from './hermes-provider';
 export type { JSCProviderOptions } from './jsc-provider';
 // JSC Native (React Native - Apple platforms only)

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, spyOn } from 'bun:test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { defineRillContract, rpc, subscription } from '../contract';
+import { defineKeelContract, rpc, subscription } from '../contract';
 import { analyze, build } from './build';
 
 describe('CLI Host Modules', () => {
@@ -11,7 +11,7 @@ describe('CLI Host Modules', () => {
   let logSpy: ReturnType<typeof spyOn>;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-host-modules-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-host-modules-'));
     originalCwd = process.cwd();
     process.chdir(tempDir);
     fs.mkdirSync('src', { recursive: true });
@@ -132,7 +132,7 @@ export function run(): void {}
 
   it('should analyze host imports against a contract file', async () => {
     fs.writeFileSync(
-      path.join('src', 'rill.contract.ts'),
+      path.join('src', 'keel.contract.ts'),
       `
 export const contract = {
   version: '1.0.0',
@@ -160,7 +160,7 @@ export async function refresh() {
     );
 
     const result = await analyze(path.join('src', 'guest.tsx'), {
-      contractFile: path.join('src', 'rill.contract.ts'),
+      contractFile: path.join('src', 'keel.contract.ts'),
       failOnViolation: true,
     });
 
@@ -169,7 +169,7 @@ export async function refresh() {
   });
 
   it('should reject host imports that are not declared in the contract', async () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:navigation': {
@@ -201,7 +201,7 @@ export async function refresh() {
   });
 
   it('should reject host modules that are not declared in the contract', async () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:navigation': {
@@ -276,7 +276,7 @@ void navigation;
   });
 
   it('should reject missing guest exports declared by the contract during build', async () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {},
       guestExports: {
@@ -307,7 +307,7 @@ export default function Guest() {
   });
 
   it('should reject extra guest exports that are not declared by the contract during build', async () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {},
       guestExports: {},
@@ -338,7 +338,7 @@ export default function Guest() {
   });
 
   it('should externalize host modules and write a capability manifest', async () => {
-    const contract = defineRillContract({
+    const contract = defineKeelContract({
       version: '1.0.0',
       hostModules: {
         'host:analytics': {
@@ -360,7 +360,7 @@ export default function Guest() {
       path.join('src', 'guest.tsx'),
       `
 import * as React from 'react';
-import { View, Text } from 'rill/guest';
+import { View, Text } from 'keel/guest';
 import { track } from 'host:analytics';
 import { openProfile } from 'host:navigation';
 import { onThemeChanged } from 'host:theme';
@@ -386,20 +386,20 @@ export default function Guest() {
       watch: false,
       strict: true,
       contract,
-      capabilityManifest: 'dist/rill-capabilities.json',
+      capabilityManifest: 'dist/keel-capabilities.json',
     });
 
     const bundle = fs.readFileSync(path.join('dist', 'bundle.js'), 'utf-8');
     const manifest = JSON.parse(
-      fs.readFileSync(path.join('dist', 'rill-capabilities.json'), 'utf-8')
+      fs.readFileSync(path.join('dist', 'keel-capabilities.json'), 'utf-8')
     );
 
     expect(bundle).not.toContain('require("host:navigation")');
     expect(bundle).not.toContain('require("host:analytics")');
     expect(bundle).not.toContain('require("host:theme")');
-    expect(bundle).toContain('__rill_importHostModule("host:navigation")');
-    expect(bundle).toContain('__rill_importHostModule("host:analytics")');
-    expect(bundle).toContain('__rill_importHostModule("host:theme")');
+    expect(bundle).toContain('__keel_importHostModule("host:navigation")');
+    expect(bundle).toContain('__keel_importHostModule("host:analytics")');
+    expect(bundle).toContain('__keel_importHostModule("host:theme")');
     expect(manifest).toEqual({
       contractVersion: '1.0.0',
       hostCapabilities: [
@@ -436,11 +436,11 @@ export async function refresh() {
       sourcemap: false,
       watch: false,
       strict: true,
-      capabilityManifest: 'dist/rill-capabilities.json',
+      capabilityManifest: 'dist/keel-capabilities.json',
     });
 
     const manifest = JSON.parse(
-      fs.readFileSync(path.join('dist', 'rill-capabilities.json'), 'utf-8')
+      fs.readFileSync(path.join('dist', 'keel-capabilities.json'), 'utf-8')
     );
 
     expect(manifest).toEqual({

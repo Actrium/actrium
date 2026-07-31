@@ -1,5 +1,5 @@
 /**
- * Rill SDK
+ * Keel SDK
  *
  * Virtual components and Hooks for Guest development
  * Zero runtime dependencies - all implementations injected by reconciler at runtime
@@ -7,7 +7,7 @@
 
 import type { ReviewedUnknown } from '../shared';
 import { REF_RESULT_EVENT, RENDER_ERROR_EVENT } from '../shared/events';
-import { KBD_EVENT, KBD_SUBSCRIBE, KBD_UNSUBSCRIBE, type RillKeyEvent } from '../shared/keyboard';
+import { KBD_EVENT, KBD_SUBSCRIBE, KBD_UNSUBSCRIBE, type KeelKeyEvent } from '../shared/keyboard';
 import type {
   ImageSource,
   LayoutEvent,
@@ -31,7 +31,7 @@ export type ReactNode =
   // A structural element member ({type, props}) — a real @types/react
   // ReactElement is assignable to it, but React 19's ReactElement type does not
   // expose $$typeof, so requiring $$typeof (as before) broke typed JSX children.
-  // Reason: rill mirrors React's ReactNode without a React dependency.
+  // Reason: keel mirrors React's ReactNode without a React dependency.
   | { type: unknown; props: unknown };
 
 /** Component type - matches React.ComponentType */
@@ -55,7 +55,7 @@ interface ReactHooks {
 /**
  * Get React hooks from runtime-injected global.
  *
- * In rill sandbox, React is provided by the Guest runtime bundle via `globalThis.React`.
+ * In keel sandbox, React is provided by the Guest runtime bundle via `globalThis.React`.
  */
 function getReactHooks(): ReactHooks {
   const g = globalThis as { React?: ReactHooks };
@@ -65,7 +65,7 @@ function getReactHooks(): ReactHooks {
 
   // Fallback: hooks not available (will fail at runtime if used)
   const throwUnavailable = (hook: string) => () => {
-    throw new Error(`[rill/guest] ${hook} not available. Ensure running in rill sandbox.`);
+    throw new Error(`[keel/guest] ${hook} not available. Ensure running in keel sandbox.`);
   };
   return {
     useEffect: throwUnavailable('useEffect'),
@@ -128,9 +128,9 @@ function getComponents(): Record<ComponentName, string> {
 /**
  * Platform information a host can optionally inject for the guest.
  *
- * Convention: the host exposes this on `globalThis.__rill_platform`, either as a
+ * Convention: the host exposes this on `globalThis.__keel_platform`, either as a
  * plain object or as a zero-argument function returning one (the same injection
- * style as `__rill_getConfig`). The SDK re-reads the channel on every access, so
+ * style as `__keel_getConfig`). The SDK re-reads the channel on every access, so
  * a host may update the values over time (e.g. on window resize).
  *
  * Every field is optional: a host only injects what it truthfully knows. When a
@@ -138,7 +138,7 @@ function getComponents(): Record<ComponentName, string> {
  * falls back to a neutral, documented default instead of pretending to be a real
  * platform.
  */
-export interface RillPlatformInfo {
+export interface KeelPlatformInfo {
   /** Host OS identifier (e.g. 'ios', 'android', 'web'). */
   os?: string;
   /** OS or platform version. */
@@ -160,9 +160,9 @@ export interface RillPlatformInfo {
 }
 
 /** Read host-injected platform info; `null` when the host provided none. */
-function readPlatformInfo(): RillPlatformInfo | null {
-  const g = globalThis as { __rill_platform?: RillPlatformInfo | (() => RillPlatformInfo) };
-  const raw = g.__rill_platform;
+function readPlatformInfo(): KeelPlatformInfo | null {
+  const g = globalThis as { __keel_platform?: KeelPlatformInfo | (() => KeelPlatformInfo) };
+  const raw = g.__keel_platform;
   if (typeof raw === 'function') {
     const value = raw();
     return value && typeof value === 'object' ? value : null;
@@ -204,7 +204,7 @@ function readDimensions(dimension: 'window' | 'screen'): {
 
 function unavailableError(api: string): Error {
   return new Error(
-    `[rill] ${api} is not available: the host has not provided this capability. ` +
+    `[keel] ${api} is not available: the host has not provided this capability. ` +
       'Register it as a host:* module.'
   );
 }
@@ -237,7 +237,7 @@ function unavailableAsync<T = never>(api: string): Promise<T> {
  * - Pure JS (StyleSheet, Easing): real local implementations, no host involved.
  * - Platform info (Platform, Dimensions, PixelRatio, Appearance, I18nManager,
  *   AppState.currentState): read-only values from the optional host-injected
- *   `globalThis.__rill_platform` channel (see {@link RillPlatformInfo}); each
+ *   `globalThis.__keel_platform` channel (see {@link KeelPlatformInfo}); each
  *   exposes `isInjected` and falls back to a neutral, documented default when
  *   the host injects nothing.
  * - Host capabilities (Alert, Linking, Share, Vibration, Keyboard.dismiss) and
@@ -411,14 +411,14 @@ const _rnHooks = getRNHooks();
  * The declared return type is `null` deliberately: a virtual component's tag
  * string is never invoked, so the return is fiction — it only has to satisfy
  * React's JSX component contract (be assignable to `React.ReactNode`), and `null`
- * is the simplest such member nameable without a React type dependency. (rill's
+ * is the simplest such member nameable without a React type dependency. (keel's
  * own `ReactNode` is intentionally NOT used here: it is permissive on the INPUT
  * side so a real `@types/react` element assigns to `children`, which makes it a
  * superset of `React.ReactNode` and thus invalid as a component RETURN.)
  */
 export type GuestComponent<P> = (props: P) => null;
 
-// "Cast the declaration, keep the runtime" — the same pattern `RillErrorBoundary`
+// "Cast the declaration, keep the runtime" — the same pattern `KeelErrorBoundary`
 // uses below. The `as unknown as` double-cast is intentional and observed by
 // nothing at runtime (the value stays the tag string).
 function asComponent<P>(tag: string): GuestComponent<P> {
@@ -875,13 +875,13 @@ export function useHostEvent<T = unknown>(eventName: string, callback: (payload:
 
   useEffect(() => {
     const g = globalThis as Record<string, unknown>;
-    if ('__rill_onHostEvent' in globalThis) {
+    if ('__keel_onHostEvent' in globalThis) {
       // Create stable callback wrapper that always calls the latest callback
       const stableCallback = (payload: T) => callbackRef.current(payload);
 
       // Subscribe and get unsubscribe function
       const unsubscribe = (
-        g.__rill_onHostEvent as (name: string, cb: (payload: T) => void) => () => void
+        g.__keel_onHostEvent as (name: string, cb: (payload: T) => void) => () => void
       )(eventName, stableCallback);
 
       // React automatically calls this cleanup function when component unmounts
@@ -905,8 +905,8 @@ export function useHostEvent<T = unknown>(eventName: string, callback: (payload:
 export function useConfig<T = Record<string, unknown>>(): T {
   // Actual implementation injected by reconciler at runtime
   const g = globalThis as Record<string, unknown>;
-  if ('__rill_getConfig' in globalThis) {
-    return (g.__rill_getConfig as () => T)();
+  if ('__keel_getConfig' in globalThis) {
+    return (g.__keel_getConfig as () => T)();
   }
   return {} as T;
 }
@@ -925,11 +925,11 @@ export function useConfig<T = Record<string, unknown>>(): T {
 export function useSendToHost(): (eventName: string, payload?: ReviewedUnknown) => void {
   // Actual implementation injected by reconciler at runtime
   const g = globalThis as Record<string, unknown>;
-  if ('__rill_emitEvent' in globalThis) {
-    return g.__rill_emitEvent as (eventName: string, payload?: ReviewedUnknown) => void;
+  if ('__keel_emitEvent' in globalThis) {
+    return g.__keel_emitEvent as (eventName: string, payload?: ReviewedUnknown) => void;
   }
   return () => {
-    console.warn('[rill] sendToHost is not available outside sandbox');
+    console.warn('[keel] sendToHost is not available outside sandbox');
   };
 }
 
@@ -950,16 +950,16 @@ export interface UseKeyboardSpec {
    */
   preventDefault?: boolean;
   /** Called on key press (keydown). */
-  onKeyDown?: (event: RillKeyEvent) => void;
+  onKeyDown?: (event: KeelKeyEvent) => void;
   /** Called on key release (keyup). */
-  onKeyUp?: (event: RillKeyEvent) => void;
+  onKeyUp?: (event: KeelKeyEvent) => void;
 }
 
 /** Monotonic source of per-hook subscription ids (unique within a guest realm). */
 let _kbdSubscriptionSeq = 0;
 
 /**
- * Subscribe to physical keyboard events forwarded by a web host (`rill/host/web`
+ * Subscribe to physical keyboard events forwarded by a web host (`keel/host/web`
  * `attachKeyboard`). A no-op on hosts that don't bridge the keyboard (native, or web hosts
  * that never attached it), so it is always safe to call.
  *
@@ -1000,15 +1000,15 @@ export function useKeyboard(spec: UseKeyboardSpec): void {
 
   useEffect(() => {
     const g = globalThis as Record<string, unknown>;
-    if (!('__rill_emitEvent' in g) || !('__rill_onHostEvent' in g)) {
+    if (!('__keel_emitEvent' in g) || !('__keel_onHostEvent' in g)) {
       return undefined;
     }
     const id = idRef.current as string;
     // Reason: runtime-injected bridge; payload is any serializable guest->host value
-    const emit = g.__rill_emitEvent as (name: string, payload?: unknown) => void;
-    const onHostEvent = g.__rill_onHostEvent as (
+    const emit = g.__keel_emitEvent as (name: string, payload?: unknown) => void;
+    const onHostEvent = g.__keel_onHostEvent as (
       name: string,
-      cb: (payload: RillKeyEvent) => void
+      cb: (payload: KeelKeyEvent) => void
     ) => () => void;
 
     const keys = specRef.current.keys ?? null;
@@ -1069,7 +1069,7 @@ const DEFAULT_REMOTE_REF_TIMEOUT = 4000;
  *
  * @example
  * ```tsx
- * import { useRemoteRef, TextInput, TextInputRef } from 'rill/guest';
+ * import { useRemoteRef, TextInput, TextInputRef } from 'keel/guest';
  *
  * function MyComponent() {
  *   const [inputRef, remoteInput] = useRemoteRef<TextInputRef>();
@@ -1124,7 +1124,7 @@ export function useRemoteRef<T = unknown>(options?: {
   // Listen for REF_METHOD_RESULT events from Host
   useEffect(() => {
     const g = globalThis as Record<string, unknown>;
-    if (!('__rill_onHostEvent' in g)) {
+    if (!('__keel_onHostEvent' in g)) {
       return undefined;
     }
 
@@ -1156,7 +1156,7 @@ export function useRemoteRef<T = unknown>(options?: {
 
     // Subscribe to REF_RESULT_EVENT messages from the host
     const unsubscribe = (
-      g.__rill_onHostEvent as (name: string, cb: (payload: RefMethodResult) => void) => () => void
+      g.__keel_onHostEvent as (name: string, cb: (payload: RefMethodResult) => void) => () => void
     )(REF_RESULT_EVENT, handleResult);
 
     return unsubscribe;
@@ -1200,8 +1200,8 @@ export function useRemoteRef<T = unknown>(options?: {
 
         // Send REF_CALL operation to Host
         const g = globalThis as Record<string, unknown>;
-        if ('__rill_sendOperation' in g) {
-          const sendOp = g.__rill_sendOperation as (op: ReviewedUnknown) => void;
+        if ('__keel_sendOperation' in g) {
+          const sendOp = g.__keel_sendOperation as (op: ReviewedUnknown) => void;
           sendOp({
             op: 'REF_CALL',
             refId: nodeId,
@@ -1213,7 +1213,7 @@ export function useRemoteRef<T = unknown>(options?: {
           // No operation channel available
           clearTimeout(timeoutId);
           pendingCallsRef.current.delete(callId);
-          reject(new Error('[rill/guest] __rill_sendOperation not available'));
+          reject(new Error('[keel/guest] __keel_sendOperation not available'));
         }
       });
     };
@@ -1248,18 +1248,18 @@ export interface ErrorInfo {
 }
 
 /**
- * Props for RillErrorBoundary
+ * Props for KeelErrorBoundary
  */
-export interface RillErrorBoundaryProps {
+export interface KeelErrorBoundaryProps {
   children: ReactNode;
   fallback?: ReactNode | ((error: Error, errorInfo: ErrorInfo) => ReactNode);
   onError?: (error: Error, errorInfo: ErrorInfo) => void;
 }
 
 /**
- * State for RillErrorBoundary
+ * State for KeelErrorBoundary
  */
-interface RillErrorBoundaryState {
+interface KeelErrorBoundaryState {
   hasError: boolean;
   error: Error | null;
   errorInfo: ErrorInfo | null;
@@ -1270,11 +1270,11 @@ interface RillErrorBoundaryState {
  *
  * @example
  * ```tsx
- * import { RillErrorBoundary, View, Text } from 'rill/guest';
+ * import { KeelErrorBoundary, View, Text } from 'keel/guest';
  *
  * function App() {
  *   return (
- *     <RillErrorBoundary
+ *     <KeelErrorBoundary
  *       fallback={<Text>Something went wrong</Text>}
  *       onError={(error, info) => {
  *         // Report error to host
@@ -1282,7 +1282,7 @@ interface RillErrorBoundaryState {
  *       }}
  *     >
  *       <MyComponent />
- *     </RillErrorBoundary>
+ *     </KeelErrorBoundary>
  *   );
  * }
  * ```
@@ -1300,20 +1300,20 @@ type ReactNodeType = ReactType extends { Component: { prototype: { render(): inf
   ? R
   : unknown;
 
-export class RillErrorBoundary extends (React.Component as unknown as new (
-  props: RillErrorBoundaryProps
+export class KeelErrorBoundary extends (React.Component as unknown as new (
+  props: KeelErrorBoundaryProps
 ) => {
-  props: RillErrorBoundaryProps;
-  state: RillErrorBoundaryState;
-  setState: (state: Partial<RillErrorBoundaryState>) => void;
+  props: KeelErrorBoundaryProps;
+  state: KeelErrorBoundaryState;
+  setState: (state: Partial<KeelErrorBoundaryState>) => void;
   render(): ReactNodeType;
 }) {
-  constructor(props: RillErrorBoundaryProps) {
+  constructor(props: KeelErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false, error: null, errorInfo: null };
   }
 
-  static getDerivedStateFromError(error: Error): Partial<RillErrorBoundaryState> {
+  static getDerivedStateFromError(error: Error): Partial<KeelErrorBoundaryState> {
     return { hasError: true, error };
   }
 
@@ -1328,9 +1328,9 @@ export class RillErrorBoundary extends (React.Component as unknown as new (
 
     // Also send to host if sendToHost is available
     const g = globalThis as Record<string, unknown>;
-    if ('__rill_emitEvent' in g) {
+    if ('__keel_emitEvent' in g) {
       // Reason: Error payload can be any serializable type
-      const sendToHost = g.__rill_emitEvent as (name: string, payload: unknown) => void;
+      const sendToHost = g.__keel_emitEvent as (name: string, payload: unknown) => void;
       sendToHost(RENDER_ERROR_EVENT, {
         message: error.message,
         stack: error.stack,

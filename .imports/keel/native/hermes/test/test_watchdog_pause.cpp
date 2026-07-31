@@ -35,7 +35,7 @@
 #include <string>
 #include <thread>
 
-#define RILL_WIP_CDP_DEVTOOLS 1
+#define KEEL_WIP_CDP_DEVTOOLS 1
 #include "CDPAgentTarget.h"
 
 using namespace facebook;
@@ -137,7 +137,7 @@ int main() {
   // Shared client counter + teardown gate, wired into the CDPAgentTarget exactly
   // as HermesSandboxContext wires them. clientsAttached starts at 0 (no client);
   // the target bumps it on connect/disconnect.
-  auto gate = std::make_shared<rill::devtools::CdpTeardownGate>();
+  auto gate = std::make_shared<keel::devtools::CdpTeardownGate>();
   auto clientsAttached = std::make_shared<std::atomic<int>>(0);
   std::atomic<int> noClientResumes{0};  // proves the #77 branch actually ran
 
@@ -228,9 +228,9 @@ int main() {
   };
 
   Sink sink;
-  auto target = std::make_shared<rill::devtools::CDPAgentTarget>(
+  auto target = std::make_shared<keel::devtools::CDPAgentTarget>(
       /*execCtxId=*/1, debugAPI, std::move(enqueue), gate, clientsAttached);
-  const rill::devtools::ConnectionId conn = 1;
+  const keel::devtools::ConnectionId conn = 1;
   target->onClientConnect(conn, [&sink](const std::string& m) { sink(m); });
   target->dispatch(conn, R"({"id":1,"method":"Debugger.enable"})");
   sink.waitFor("\"id\":1", "Debugger.enable");

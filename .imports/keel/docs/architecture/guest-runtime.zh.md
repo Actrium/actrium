@@ -46,11 +46,11 @@ guest 运行时是在沙箱化的 JavaScript 引擎内执行的代码。它提�
 
 评估预构建的 IIFE,建立:
 - `React` 和 `ReactJSXRuntime` / `ReactJSXDevRuntime` 全局变量(轻量级 shim)
-- `RillGuest` 全局变量(组件构造器和钩子)
-- `RillReconciler` 全局变量(reconciler API: `render`、`invokeCallback`、`releaseCallback` 等)
-- `__rillHooks` 状态对象用于 useState/useEffect
-- `__rill.callbacks` Map 用于函数注册
-- `__rill.registerCallback`、`__rill.invokeCallback`、`__rill.dispatchEvent` 运行时助手
+- `KeelGuest` 全局变量(组件构造器和钩子)
+- `KeelReconciler` 全局变量(reconciler API: `render`、`invokeCallback`、`releaseCallback` 等)
+- `__keelHooks` 状态对象用于 useState/useEffect
+- `__keel.callbacks` Map 用于函数注册
+- `__keel.registerCallback`、`__keel.invokeCallback`、`__keel.dispatchEvent` 运行时助手
 
 ### 步骤 4: require() 模块加载器
 
@@ -58,26 +58,26 @@ guest 运行时是在沙箱化的 JavaScript 引擎内执行的代码。它提�
 - `react` -- 返回沙箱中的 `React` 全局变量
 - `react-native` -- 返回一个最小的 RN shim
 - `react/jsx-runtime` 和 `react/jsx-dev-runtime` -- 返回 JSX 运行时 shim
-- `rill/reconciler` -- 返回带有 Engine 绑定的 `render` 和 `scheduleRender` 的 `RillReconciler`
-- `rill/guest` -- 返回 `RillGuest`
+- `keel/reconciler` -- 返回带有 Engine 绑定的 `render` 和 `scheduleRender` 的 `KeelReconciler`
+- `keel/guest` -- 返回 `KeelGuest`
 
 任何其他模块名称都会抛出 `RequireError`。
 
 ### 步骤 5: 运行时 API 注入
 
 Engine 提供的全局变量:
-- `__rill_sendBatch(batch)` -- 通过 Bridge 将操作批次路由到 Receiver
-- `__rill_sendOperation(op)` -- 立即发送单个操作(由 Remote Ref 使用)
-- `__rill_getConfig()` -- 返回初始配置
-- `__rill_emitEvent(eventName, payload)` -- 向 host 发送命名事件
-- `__rill_handleMessage(message)` -- 分派传入的 host 消息(CALL_FUNCTION、HOST_EVENT 等)
-- `__rill_schedule_render()` -- 从 guest hooks 触发重新渲染(useState/useEffect)
-- `__rill_register_component_type(fn)` -- 为 JSI 传输注册 guest 函数组件
+- `__keel_sendBatch(batch)` -- 通过 Bridge 将操作批次路由到 Receiver
+- `__keel_sendOperation(op)` -- 立即发送单个操作(由 Remote Ref 使用)
+- `__keel_getConfig()` -- 返回初始配置
+- `__keel_emitEvent(eventName, payload)` -- 向 host 发送命名事件
+- `__keel_handleMessage(message)` -- 分派传入的 host 消息(CALL_FUNCTION、HOST_EVENT 等)
+- `__keel_schedule_render()` -- 从 guest hooks 触发重新渲染(useState/useEffect)
+- `__keel_register_component_type(fn)` -- 为 JSI 传输注册 guest 函数组件
 - 组件名称全局变量(例如 `View = 'View'`、`Text = 'Text'`)用于已注册的组件类型
 
 ### 步骤 6: 用户 Bundle 执行
 
-评估开发者的 guest 代码。通常它会调用 `require('rill/reconciler').render(element, __rill_sendBatch)` 来启动初始渲染。
+评估开发者的 guest 代码。通常它会调用 `require('keel/reconciler').render(element, __keel_sendBatch)` 来启动初始渲染。
 
 在 `eval` 之后,引擎显式排空 `setImmediate` 队列,以便 React 的调度协调在 `loadBundle` 返回之前同步完成。
 

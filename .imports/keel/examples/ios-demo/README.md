@@ -1,6 +1,6 @@
 # ios-demo
 
-iOS example app demonstrating **rill sandbox** across different JS engine configurations.
+iOS example app demonstrating **keel sandbox** across different JS engine configurations.
 
 **Bridgeless (New Architecture) only** — React Native 0.83+.
 
@@ -21,7 +21,7 @@ cd examples/ios-demo
 npm install
 
 # 2. Install pods (default: Hermes sandbox)
-RILL_SANDBOX=hermes pod install
+KEEL_SANDBOX=hermes pod install
 
 # 3. Open in Xcode
 open ios-demo.xcworkspace
@@ -52,7 +52,7 @@ open ios-demo.xcworkspace
 
 ```
 ios-demo/
-├── package.json               # rill: "file:../../" (node_modules at root)
+├── package.json               # keel: "file:../../" (node_modules at root)
 ├── metro.config.js            # Metro bundler config
 ├── babel.config.js            # Babel config
 ├── Podfile                    # CocoaPods config (Bridgeless only)
@@ -60,12 +60,12 @@ ios-demo/
 ├── install.sh                 # Build & install to simulator
 ├── ios-demo.xcodeproj/        # Xcode project (3 Bridgeless schemes)
 ├── ios-demo/                  # Swift/ObjC source
-│   ├── RillDemoApp.swift      # App entry point
+│   ├── KeelDemoApp.swift      # App entry point
 │   ├── ContentView.swift      # UI with performance dashboard
 │   ├── PerformanceMonitor.swift
 │   ├── ReactNativeFactory.h/.mm
-│   ├── RillConfiguration.h/.mm
-│   └── RillSandboxBridge.h/.mm
+│   ├── KeelConfiguration.h/.mm
+│   └── KeelSandboxBridge.h/.mm
 ├── RCTNApps/                  # React Native JS source
 │   ├── index.tsx
 │   └── src/App.tsx
@@ -81,4 +81,4 @@ ios-demo/
 - Xcode 16+
 - CocoaPods
 - Node.js / npm
-- `rill` (resolved via `file:../../../` symlink)
+- `keel` (resolved via `file:../../../` symlink)

@@ -15,7 +15,7 @@ import { decodeBatchStreaming, WireDecodeError } from '../wire-decoder';
 
 // The golden oracle: source frame (canvasId/frameId/ops in the guest DrawList
 // JSON shape) paired with its exact on-the-wire hex. Produced byte-for-byte by
-// the Rust encoder (crates/rill-guest/src/canvas_encode.rs) — same file the
+// the Rust encoder (crates/keel-native-guest/src/canvas_encode.rs) — same file the
 // Rust re-encode test locks against. contracts/canvas-wire.golden.json.
 interface GoldenVector {
   name: string;
@@ -158,9 +158,9 @@ describe('canvas decoder — fail-closed negatives', () => {
   const setFill = byName('set-fill-style').hex;
   const fillText = byName('fill-text').hex;
 
-  it('bad-magic: header magic is not RCNV', () => {
-    // Overwrite magic with 'RILL' (op-batch's) — differs at byte 1.
-    expectReason(() => decodeCanvasBatch(mutate(empty, 0, [0x52, 0x49, 0x4c, 0x4c])), 'bad-magic');
+  it('bad-magic: header magic is not KCNV', () => {
+    // Overwrite magic with 'KEEL' (op-batch's) — differs at byte 1.
+    expectReason(() => decodeCanvasBatch(mutate(empty, 0, [0x4b, 0x45, 0x45, 0x4c])), 'bad-magic');
   });
 
   it('bad-version: unsupported protocol version', () => {
@@ -282,12 +282,12 @@ describe('canvas decoder — fail-closed negatives', () => {
 // ============================================================
 
 describe('canvas / op-batch magics cross-reject', () => {
-  it('the op-batch decoder rejects a canvas (RCNV) buffer', () => {
+  it('the op-batch decoder rejects a canvas (KCNV) buffer', () => {
     const canvasBuf = toArrayBuffer(fromHex(byName('empty').hex));
     expect(() => decodeBatchStreaming(canvasBuf, () => {})).toThrow(WireDecodeError);
   });
 
-  it('the canvas decoder rejects an op-batch (RILL) buffer with bad-magic', () => {
+  it('the canvas decoder rejects an op-batch (KEEL) buffer with bad-magic', () => {
     const opBatchBuf = fromHex(OP_BATCH_GOLDEN.vectors[0]!.hex);
     expectReason(() => decodeCanvasBatch(opBatchBuf), 'bad-magic');
   });

@@ -1,6 +1,6 @@
 # Quick Start
 
-This guide walks you through setting up Rill in a React Native project, writing your first guest component, and rendering it on the host side.
+This guide walks you through setting up Keel in a React Native project, writing your first guest component, and rendering it on the host side.
 
 ## Prerequisites
 
@@ -11,7 +11,7 @@ This guide walks you through setting up Rill in a React Native project, writing 
 ## Installation
 
 ```bash
-bun add rill
+bun add keel
 ```
 
 Peer dependencies (install if not already present):
@@ -20,16 +20,16 @@ Peer dependencies (install if not already present):
 bun add react react-reconciler react-native
 ```
 
-Rill supports React 18.2+ and 19.x. The `react-reconciler` package is required for the guest runtime's custom reconciler.
+Keel supports React 18.2+ and 19.x. The `react-reconciler` package is required for the guest runtime's custom reconciler.
 
 ## Write a Guest Component
 
-A guest component runs inside Rill's sandboxed environment. It uses the `rill/guest` module to access primitives, configuration, and host communication.
+A guest component runs inside Keel's sandboxed environment. It uses the `keel/guest` module to access primitives, configuration, and host communication.
 
 Create a file at `src/guest.tsx`:
 
 ```tsx
-import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'rill/guest';
+import { View, Text, TouchableOpacity, useConfig, useSendToHost } from 'keel/guest';
 
 interface Config {
   title: string;
@@ -59,14 +59,14 @@ Key points:
 
 - `useConfig<T>()` reads the initial props provided by the host, typed with a generic parameter.
 - `useSendToHost()` returns a function to dispatch events from the guest to the host application.
-- All UI primitives (`View`, `Text`, `TouchableOpacity`, etc.) are imported from `rill/guest`, not from `react-native`.
+- All UI primitives (`View`, `Text`, `TouchableOpacity`, etc.) are imported from `keel/guest`, not from `react-native`.
 
 ## Build the Guest Bundle
 
-Rill includes a build command that compiles your guest component into a self-contained JavaScript bundle:
+Keel includes a build command that compiles your guest component into a self-contained JavaScript bundle:
 
 ```bash
-bunx rill build src/guest.tsx -o dist/bundle.js
+bunx keel build src/guest.tsx -o dist/bundle.js
 ```
 
 The output bundle can be served from a CDN, loaded from the filesystem, or embedded as a static asset.
@@ -78,8 +78,8 @@ On the host side, create an `Engine` instance and use the `EngineView` component
 ```tsx
 import React, { useMemo } from 'react';
 import { SafeAreaView, ActivityIndicator } from 'react-native';
-import { Engine } from 'rill/host';
-import { EngineView } from 'rill/host/preset';
+import { Engine } from 'keel/host';
+import { EngineView } from 'keel/host/preset';
 
 export default function App() {
   const engine = useMemo(() => new Engine({ debug: __DEV__ }), []);
@@ -89,7 +89,7 @@ export default function App() {
       <EngineView
         engine={engine}
         source="https://cdn.example.com/guest.js"
-        initialProps={{ title: 'Hello Rill', theme: 'light' }}
+        initialProps={{ title: 'Hello Keel', theme: 'light' }}
         onLoad={() => console.log('Guest loaded')}
         onError={(error) => console.error('Guest error:', error)}
         fallback={<ActivityIndicator />}

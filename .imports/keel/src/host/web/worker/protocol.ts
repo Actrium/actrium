@@ -27,7 +27,7 @@ export type WorkerSandbox = 'wasm-quickjs';
 // Debugger sub-protocol (dbg.*) — Milestone B web side
 //
 // The dbg.* messages carry a Chrome DevTools Protocol (CDP) Debugger conversation
-// across the worker boundary in rill's own structured-clone-safe shape. The main
+// across the worker boundary in keel's own structured-clone-safe shape. The main
 // thread {@link WorkerEngine} exposes typed dbg* methods and events; a pure
 // {@link CdpTranslator} (cdp-translator.ts) maps raw CDP JSON-RPC <-> these
 // messages. The shapes mirror the native structs in

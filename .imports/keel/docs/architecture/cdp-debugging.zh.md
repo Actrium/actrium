@@ -1,6 +1,6 @@
 # CDP 调试协议
 
-Rill 实现了 Chrome DevTools 协议(CDP)服务器,使开发者能够连接 Chrome DevTools 或 VS Code 来检查和调试 guest 沙箱。每个租户都作为单独的可调试目标公开。
+Keel 实现了 Chrome DevTools 协议(CDP)服务器,使开发者能够连接 Chrome DevTools 或 VS Code 来检查和调试 guest 沙箱。每个租户都作为单独的可调试目标公开。
 
 ## CDPServer 架构
 
@@ -74,8 +74,8 @@ Network.framework 的 WebSocket 监听器会自动完成协议升级、无法应
   {
     "id": "42",
     "type": "node",
-    "title": "Rill Guest: MyApp",
-    "url": "rill://tenant/42",
+    "title": "Keel Guest: MyApp",
+    "url": "keel://tenant/42",
     "webSocketDebuggerUrl": "ws://127.0.0.1:9230/tenant/42",
     "devtoolsFrontendUrl": "devtools://devtools/bundled/inspector.html?ws=127.0.0.1:9230/tenant/42"
   }
@@ -87,13 +87,13 @@ Network.framework 的 WebSocket 监听器会自动完成协议升级、无法应
 ### 连接
 
 1. 在 Chrome 中打开 `chrome://inspect`,在"Discover network targets"中添加 `127.0.0.1:9229`(配置端口)
-2. Rill 目标出现在"Remote Target"下
+2. Keel 目标出现在"Remote Target"下
 3. 点击"inspect"打开连接到特定租户的 DevTools
 4. 或者,将 VS Code 的 JavaScript 调试器连接到 `http://127.0.0.1:9229/json` 返回的 `webSocketDebuggerUrl`(Apple transport 上为 `ws://localhost:9230/tenant/<id>`)
 
 ## 域适配器
 
-域适配器在 CDP 协议方法和 Rill 的内部状态之间进行转换。
+域适配器在 CDP 协议方法和 Keel 的内部状态之间进行转换。
 
 ### Console Domain
 
@@ -137,7 +137,7 @@ Network.framework 的 WebSocket 监听器会自动完成协议升级、无法应
 | `DOM.requestChildNodes` | 返回特定节点的子节点 |
 | `DOM.getAttributes` | 将节点属性作为属性对返回 |
 
-适配器在 Rill 的 `nodeMap` 结构(整数 ID、组件类型字符串、属性对象)和 CDP 的 DOM 节点模型(nodeId、nodeName、属性数组)之间进行转换。
+适配器在 Keel 的 `nodeMap` 结构(整数 ID、组件类型字符串、属性对象)和 CDP 的 DOM 节点模型(nodeId、nodeName、属性数组)之间进行转换。
 
 ### Debugger Domain
 

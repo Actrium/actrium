@@ -28,17 +28,17 @@
 #include <vector>
 #include <unordered_map>
 
-namespace rill::protocol {
+namespace keel::protocol {
 
 // ============================================
 // Magic Number & Version
 // ============================================
 
 /**
- * Magic number: "RILL" in ASCII (0x52 0x49 0x4C 0x4C)
+ * Magic number: "KEEL" in ASCII (0x4B 0x45 0x45 0x4C)
  * Used to identify valid binary instruction batches
  */
-constexpr uint32_t RILL_MAGIC = 0x4C4C4952; // Little-endian "RILL"
+constexpr uint32_t KEEL_MAGIC = 0x4C45454B; // Little-endian "KEEL"
 
 /**
  * Current protocol version
@@ -55,7 +55,7 @@ constexpr uint16_t PROTOCOL_VERSION = 1;
  *
  * Layout:
  *   Offset  Size  Field
- *   0       4     magic (0x4C4C4952 = "RILL")
+ *   0       4     magic (0x4C45454B = "KEEL")
  *   4       2     version
  *   6       4     batchId
  *   10      2     opCount
@@ -64,7 +64,7 @@ constexpr uint16_t PROTOCOL_VERSION = 1;
  */
 #pragma pack(push, 1)
 struct BatchHeader {
-  uint32_t magic;      // Must be RILL_MAGIC
+  uint32_t magic;      // Must be KEEL_MAGIC
   uint16_t version;    // Protocol version
   uint32_t batchId;    // Batch sequence number
   uint16_t opCount;    // Number of operations in this batch
@@ -586,4 +586,4 @@ inline void writeF64LE(uint8_t* data, double value) {
   writeU64LE(data, bits);
 }
 
-} // namespace rill::protocol
+} // namespace keel::protocol

@@ -46,11 +46,11 @@ The `setImmediate` implementation uses a synchronous callback queue with explici
 
 The pre-built IIFE is evaluated, establishing:
 - `React` and `ReactJSXRuntime` / `ReactJSXDevRuntime` globals (lightweight shim)
-- `RillGuest` global (component constructors and hooks)
-- `RillReconciler` global (reconciler API: `render`, `invokeCallback`, `releaseCallback`, etc.)
-- `__rillHooks` state object for useState/useEffect
-- `__rill.callbacks` Map for function registration
-- `__rill.registerCallback`, `__rill.invokeCallback`, `__rill.dispatchEvent` runtime helpers
+- `KeelGuest` global (component constructors and hooks)
+- `KeelReconciler` global (reconciler API: `render`, `invokeCallback`, `releaseCallback`, etc.)
+- `__keelHooks` state object for useState/useEffect
+- `__keel.callbacks` Map for function registration
+- `__keel.registerCallback`, `__keel.invokeCallback`, `__keel.dispatchEvent` runtime helpers
 
 ### Step 4: require() Module Loader
 
@@ -58,26 +58,26 @@ A whitelisted `require()` function is injected. It supports exactly these module
 - `react` -- Returns the `React` global from the sandbox
 - `react-native` -- Returns a minimal RN shim
 - `react/jsx-runtime` and `react/jsx-dev-runtime` -- Returns JSX runtime shim
-- `rill/reconciler` -- Returns `RillReconciler` with Engine-bound `render` and `scheduleRender`
-- `rill/guest` -- Returns `RillGuest`
+- `keel/reconciler` -- Returns `KeelReconciler` with Engine-bound `render` and `scheduleRender`
+- `keel/guest` -- Returns `KeelGuest`
 
 Any other module name throws a `RequireError`.
 
 ### Step 5: Runtime API Injection
 
 Engine-provided globals:
-- `__rill_sendBatch(batch)` -- Routes operation batches through Bridge to Receiver
-- `__rill_sendOperation(op)` -- Sends a single operation immediately (used by Remote Ref)
-- `__rill_getConfig()` -- Returns initial configuration
-- `__rill_emitEvent(eventName, payload)` -- Sends named events to host
-- `__rill_handleMessage(message)` -- Dispatches incoming host messages (CALL_FUNCTION, HOST_EVENT, etc.)
-- `__rill_schedule_render()` -- Triggers re-render from guest hooks (useState/useEffect)
-- `__rill_register_component_type(fn)` -- Registers guest function components for JSI transport
+- `__keel_sendBatch(batch)` -- Routes operation batches through Bridge to Receiver
+- `__keel_sendOperation(op)` -- Sends a single operation immediately (used by Remote Ref)
+- `__keel_getConfig()` -- Returns initial configuration
+- `__keel_emitEvent(eventName, payload)` -- Sends named events to host
+- `__keel_handleMessage(message)` -- Dispatches incoming host messages (CALL_FUNCTION, HOST_EVENT, etc.)
+- `__keel_schedule_render()` -- Triggers re-render from guest hooks (useState/useEffect)
+- `__keel_register_component_type(fn)` -- Registers guest function components for JSI transport
 - Component name globals (e.g., `View = 'View'`, `Text = 'Text'`) for registered component types
 
 ### Step 6: User Bundle Execution
 
-The developer's guest code is evaluated. Typically it calls `require('rill/reconciler').render(element, __rill_sendBatch)` to kick off the initial render.
+The developer's guest code is evaluated. Typically it calls `require('keel/reconciler').render(element, __keel_sendBatch)` to kick off the initial render.
 
 After `eval`, the engine explicitly drains the `setImmediate` queue so that React's scheduled reconciliation completes synchronously before `loadBundle` returns.
 

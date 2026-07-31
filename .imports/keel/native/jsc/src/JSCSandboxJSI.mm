@@ -366,14 +366,14 @@ JSCSandboxContext::JSCSandboxContext(jsi::Runtime &hostRuntime,
     // Remote Inspector so a developer can attach Safari's Web Inspector to a
     // running JS guest (JSGlobalContextSetInspectable is public SDK API,
     // macOS 13.3 / iOS 16.4). Quadruple-gated so it can NEVER reach an App
-    // Store archive: (1) RILL_WIP_JSC_INSPECTOR compile flag (off by default),
+    // Store archive: (1) KEEL_WIP_JSC_INSPECTOR compile flag (off by default),
     // (2) !NDEBUG belt-and-suspenders — a release archive strips this branch
     // even if the flag leaks in, (3) _JSC_HAS_INSPECTABLE SDK guard,
     // (4) __builtin_available runtime OS guard. An inspectable, breakpoint-
     // pausable context is a data-exposure / tenant-isolation hole, so the
     // NDEBUG gate is load-bearing. Not CDP/Chrome — Safari Web Inspector only.
     // See docs/architecture/cdp-debugging.zh.md.
-#if defined(RILL_WIP_JSC_INSPECTOR) && !defined(NDEBUG)
+#if defined(KEEL_WIP_JSC_INSPECTOR) && !defined(NDEBUG)
 #if !defined(_JSC_HAS_INSPECTABLE)
 #if (defined(__IPHONE_OS_VERSION_MAX_ALLOWED) &&                                \
      __IPHONE_OS_VERSION_MAX_ALLOWED >= 160400) ||                             \
@@ -384,7 +384,7 @@ JSCSandboxContext::JSCSandboxContext(jsi::Runtime &hostRuntime,
 #endif
 #ifdef _JSC_HAS_INSPECTABLE
     if (__builtin_available(macOS 13.3, iOS 16.4, *)) {
-      ctx.name = @"rill guest (JSC, dev inspector)";
+      ctx.name = @"keel guest (JSC, dev inspector)";
       JSGlobalContextSetInspectable(ctx.JSGlobalContextRef, true);
       NSLog(@"[JSCSandbox] Remote Inspector ENABLED (dev-only) — attach via "
             @"Safari > Develop");
@@ -654,8 +654,8 @@ void *JSCSandboxContext::wrapFunctionForSandbox(jsi::Runtime &rt,
   bool isCached = false;
   
   try {
-    if (funcObj.hasProperty(rt, "__rill_proxy_id__")) {
-      jsi::Value idVal = funcObj.getProperty(rt, "__rill_proxy_id__");
+    if (funcObj.hasProperty(rt, "__keel_proxy_id__")) {
+      jsi::Value idVal = funcObj.getProperty(rt, "__keel_proxy_id__");
       if (idVal.isString()) {
         std::string id = idVal.asString(rt).utf8(rt);
         internalNameStr = "__jsc_fn_" + id + "__";
@@ -708,7 +708,7 @@ void *JSCSandboxContext::wrapFunctionForSandbox(jsi::Runtime &rt,
 
       // Tag the original function with the ID
       try {
-          funcObj.setProperty(rt, "__rill_proxy_id__", jsi::String::createFromUtf8(rt, idStr));
+          funcObj.setProperty(rt, "__keel_proxy_id__", jsi::String::createFromUtf8(rt, idStr));
       } catch (...) {
           // Failed to tag, skip caching
       }

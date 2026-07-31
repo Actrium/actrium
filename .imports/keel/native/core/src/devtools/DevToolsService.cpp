@@ -1,13 +1,13 @@
-// WIP subsystem — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in devtools/CDPServer.h.
 // This TU drives CDPServer (itself gated); guard it so an ungated build is an empty TU.
-#if RILL_WIP_CDP_DEVTOOLS
+#if KEEL_WIP_CDP_DEVTOOLS
 
 #include "DevToolsService.h"
 
 #include "EngineDebugTarget.h"
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 DevToolsService::DevToolsService(std::shared_ptr<CDPTransport> transport, uint16_t port) {
   CDPServerConfig config;
@@ -43,6 +43,6 @@ void DevToolsService::registerDebugTarget(TenantId id,
   server_->registerDebugTarget(id, std::move(target));
 }
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools
 
-#endif  // RILL_WIP_CDP_DEVTOOLS
+#endif  // KEEL_WIP_CDP_DEVTOOLS

@@ -26,9 +26,9 @@
 #include <string>
 #include <thread>
 
-using namespace rill::devtools;
-using rill::qjs_debug::QuickJSDebugCore;
-using rill::qjs_debug::QuickJSEngineDebugger;
+using namespace keel::devtools;
+using keel::qjs_debug::QuickJSDebugCore;
+using keel::qjs_debug::QuickJSEngineDebugger;
 
 static int g_failures = 0;
 static void check(bool ok, const std::string& what) {

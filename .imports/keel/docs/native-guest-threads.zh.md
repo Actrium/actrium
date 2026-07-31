@@ -1,4 +1,4 @@
-# rill native guest 多线程计算 —— approach B 设计草稿（预研，未实现）
+# keel native guest 多线程计算 —— approach B 设计草稿（预研，未实现）
 
 > 状态：**设计 + 已落地 host 侧切片**。approach B 的 host 侧 worker 池已实现并带逐字节
 > 门禁 + 提速 bench（见第 8 节），**未改 seal、未改 guest、未加任何 wire/contract**。对应
@@ -35,14 +35,14 @@
   │  切图：源 framebuffer → N 个瓦片(带 halo)
   │  postMessage(tile.buffer, [tile.buffer])   // transferable，零拷贝
   ▼
-worker[0..N)   每个 = 一个独立 WasmGuestHost + 一份 blur guest .wasm
+worker[0..N)   每个 = 一个独立 NativeGuestHost + 一份 blur guest .wasm
   │  guest.box_blur_simd(tilePtr, w, h, r)      // 各自线性内存内跑，互不可见
   ▼  postMessage(result.buffer, [result.buffer])
 主线程
      缝合：各瓦片内部区域写回目标 framebuffer → host:canvas.present
 ```
 
-现状对照：`WasmGuestHost`（`src/host/wasm-guest/wasm-guest-host.ts`）今天只实例化
+现状对照：`NativeGuestHost`（`src/host/native-guest/native-guest-host.ts`）今天只实例化
 **一个** guest。approach B = 在 worker 里跑 N 个这样的实例 + 一层「瓦片工作 API」。
 
 ## 3. 关键设计点
@@ -105,7 +105,7 @@ worker 池近线性：8 worker ~9×、16 worker ~12×（16 核，超线程税使
 
 ## 8. 已落地（approach B host 侧切片）
 
-host 侧 worker 池已实现，全在 `src/host/wasm-guest/`，复用 `blur-demo-guest.wasm`，**未改
+host 侧 worker 池已实现，全在 `src/host/native-guest/`，复用 `blur-demo-guest.wasm`，**未改
 seal / guest / 任何 wire·contract**：
 
 - **`blur-pool.ts`** —— 主线程 `BlurPool` 类：把整图切成**全宽行条**、每条带上下各 `radius`
@@ -113,7 +113,7 @@ seal / guest / 任何 wire·contract**：
   移交**给一个 worker，收回后只缝合内部行。fail-closed 维度/半径守卫（`maxPixels`/
   `maxRadius`，派发前检查，仿 host:asset「先卡维度再动 raster」）。池大小是构造参数
   （下游读 `navigator.hardwareConcurrency`），guest 不感知核数。
-- **`blur-pool-worker.ts`** —— worker 入口：一个独立 `WasmGuestHost` + blur guest（各自私有
+- **`blur-pool-worker.ts`** —— worker 入口：一个独立 `NativeGuestHost` + blur guest（各自私有
   线性内存，无共享内存/atomics），`writeBytes → box_blur_simd → readBytes` 后把结果
   transferable 移交回来;scratch 缓冲按最大瓦片惰性增长(blur_alloc 泄漏,故复用不重分配)。
 - **`blur-pool-protocol.ts`** —— 三进三出的极简消息协议(init/blur/destroy ↔ ready/result/error)。

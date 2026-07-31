@@ -1,10 +1,10 @@
 /**
  * Windows Demo — Full Engine + useEngineView test.
- * Creates a Rill Engine, registers DefaultComponents, and loads guest code
+ * Creates a Keel Engine, registers DefaultComponents, and loads guest code
  * that renders a counter, layout boxes, and callback test.
  * Includes a performance dashboard for JSI + sandbox benchmarking.
  *
- * Engine is selected at compile time via RILL_SANDBOX_ENGINE.
+ * Engine is selected at compile time via KEEL_SANDBOX_ENGINE.
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -16,8 +16,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Engine, useEngineView } from 'rill/host';
-import { DefaultComponents } from 'rill/host/preset';
+import { Engine, useEngineView } from 'keel/host';
+import { DefaultComponents } from 'keel/host/preset';
 
 // Guest code — runs inside the sandbox.
 // Uses React.createElement (no JSX in sandbox).
@@ -25,7 +25,7 @@ const GUEST_CODE = `
   var React = require('react');
   var useState = React.useState;
   var useCallback = React.useCallback;
-  var render = require('rill/reconciler').render;
+  var render = require('keel/reconciler').render;
   var h = React.createElement;
 
   function GuestApp() {
@@ -47,7 +47,7 @@ const GUEST_CODE = `
       h('View', { style: { padding: 20, paddingTop: 12 } },
 
         h('Text', { style: { fontSize: 22, fontWeight: '700', color: '#fff', marginBottom: 4 } },
-          'Rill Windows Demo'),
+          'Keel Windows Demo'),
         h('Text', { style: { fontSize: 12, color: '#555', marginBottom: 24 } },
           'Guest UI rendered via sandbox engine'),
 
@@ -89,13 +89,13 @@ const GUEST_CODE = `
           h('Text', { style: { fontSize: 11, fontWeight: '700', color: '#888', letterSpacing: 1, marginBottom: 8 } },
             'INFO'),
           h('Text', { style: { fontSize: 12, color: '#555' } },
-            'Guest code runs in a sandboxed engine. State, callbacks, and rendering all work through the Rill bridge.')
+            'Guest code runs in a sandboxed engine. State, callbacks, and rendering all work through the Keel bridge.')
         )
       )
     );
   }
 
-  render(h(GuestApp), globalThis.__rill_sendBatch);
+  render(h(GuestApp), globalThis.__keel_sendBatch);
 `;
 
 const GUEST_BYTECODE_ASSET = 'bytecode/guest.hbc';
@@ -204,7 +204,7 @@ function getHermesVersion(): string {
   return '';
 }
 
-const RillSandboxNative = NativeModules.RillSandboxNative as
+const KeelSandboxNative = NativeModules.KeelSandboxNative as
   | {
       install(): boolean;
       getCompiledSandboxEngine?(): string;
@@ -338,10 +338,10 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
 
   // Poll memory periodically
   useEffect(() => {
-    if (!RillSandboxNative) return;
+    if (!KeelSandboxNative) return;
     pollTimerRef.current = setInterval(() => {
       try {
-        const memory = RillSandboxNative.getMemoryUsage();
+        const memory = KeelSandboxNative.getMemoryUsage();
         setMetrics((prev) => ({ ...prev, memory }));
       } catch {
         // ignore
@@ -353,7 +353,7 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
   }, []);
 
   const runTests = useCallback(() => {
-    if (!RillSandboxNative || testing) return;
+    if (!KeelSandboxNative || testing) return;
 
     const safeNumber = (fn: () => number): number => {
       try {
@@ -365,13 +365,13 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
     };
 
     const canUseBytecode = Boolean(
-      engineKey === 'hermes' && RillSandboxNative.supportsBytecodeEval?.(engineKey)
+      engineKey === 'hermes' && KeelSandboxNative.supportsBytecodeEval?.(engineKey)
     );
 
     const runBench = (name: keyof typeof TEST_CODE, engineHint: string): number => {
-      if (RillSandboxNative.runSandboxBenchmark) {
+      if (KeelSandboxNative.runSandboxBenchmark) {
         return safeNumber(() =>
-          RillSandboxNative.runSandboxBenchmark!(
+          KeelSandboxNative.runSandboxBenchmark!(
             TEST_CODE[name],
             canUseBytecode ? TEST_BYTECODE_ASSET[name] : '',
             engineHint,
@@ -384,25 +384,25 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
     };
 
     const runEval = (name: keyof typeof TEST_CODE, engineHint: string): number => {
-      if (canUseBytecode && RillSandboxNative.evalBytecodeAsset) {
+      if (canUseBytecode && KeelSandboxNative.evalBytecodeAsset) {
         const bytecodeResult = safeNumber(() =>
-          RillSandboxNative.evalBytecodeAsset!(TEST_BYTECODE_ASSET[name], engineHint)
+          KeelSandboxNative.evalBytecodeAsset!(TEST_BYTECODE_ASSET[name], engineHint)
         );
         if (bytecodeResult >= 0) return bytecodeResult;
       }
-      return safeNumber(() => RillSandboxNative.evalInSandbox(TEST_CODE[name], engineHint));
+      return safeNumber(() => KeelSandboxNative.evalInSandbox(TEST_CODE[name], engineHint));
     };
 
     setTesting(true);
     try {
-      const memory = safeNumber(() => RillSandboxNative.getMemoryUsage());
+      const memory = safeNumber(() => KeelSandboxNative.getMemoryUsage());
 
       // Native returns ms/call; UI shows μs
-      const rttMs = safeNumber(() => RillSandboxNative.measureJSIRTT(20000));
+      const rttMs = safeNumber(() => KeelSandboxNative.measureJSIRTT(20000));
       const rtt = rttMs < 0 ? -1 : rttMs * 1000;
 
       // Native returns ops/s; UI shows K/s
-      const opsPerSecond = safeNumber(() => RillSandboxNative.measureOpsPerSecond(250));
+      const opsPerSecond = safeNumber(() => KeelSandboxNative.measureOpsPerSecond(250));
       const throughput = opsPerSecond < 0 ? -1 : opsPerSecond / 1000;
 
       const engine: EngineMetrics = {
@@ -427,7 +427,7 @@ function PerformanceDashboard({ engineKey }: { engineKey: string }) {
     }));
   }, []);
 
-  if (!RillSandboxNative) {
+  if (!KeelSandboxNative) {
     return (
       <View style={ui.dashboardContainer}>
         <Text style={ui.dashboardUnavailable}>Performance bridge unavailable</Text>
@@ -591,7 +591,7 @@ function EngineViewInner({ engine, sandbox }: { engine: Engine; sandbox: string 
 export default function App() {
   const hermesVersion = useMemo(() => getHermesVersion(), []);
   const preferredEngine = useMemo(
-    () => normalizeEngineKey(RillSandboxNative?.getCompiledSandboxEngine?.()),
+    () => normalizeEngineKey(KeelSandboxNative?.getCompiledSandboxEngine?.()),
     []
   );
   const detected = useMemo(() => getDetectedEngineWithHint(preferredEngine), [preferredEngine]);

@@ -1,8 +1,8 @@
-// WIP subsystem — gated behind RILL_WIP_CDP_DEVTOOLS (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_CDP_DEVTOOLS (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in devtools/CDPServer.h.
 // This TU references DebuggerAdapter (itself gated), so an ungated build would
 // link against symbols that collapse to an empty TU — guard it to match.
-#if RILL_WIP_CDP_DEVTOOLS
+#if KEEL_WIP_CDP_DEVTOOLS
 
 #include "AdapterDebugTarget.h"
 
@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 namespace {
 
@@ -189,6 +189,6 @@ void AdapterDebugTarget::dispatch(ConnectionId conn, const RawCdpMessage& raw) {
   }
 }
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools
 
-#endif  // RILL_WIP_CDP_DEVTOOLS
+#endif  // KEEL_WIP_CDP_DEVTOOLS

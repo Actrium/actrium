@@ -1,12 +1,12 @@
-// WIP subsystem — gated behind RILL_WIP_NATIVE_SECURITY (off by default in production builds).
+// WIP subsystem — gated behind KEEL_WIP_NATIVE_SECURITY (off by default in production builds).
 // Rationale, goals, current status, and completion TODO live in security/SecurityManager.h.
-#if RILL_WIP_NATIVE_SECURITY
+#if KEEL_WIP_NATIVE_SECURITY
 #include "NetworkSandbox.h"
 #include <algorithm>
 #include <cctype>
 #include <chrono>
 
-namespace rill::security {
+namespace keel::security {
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -282,5 +282,5 @@ NetworkPolicy NetworkSandbox::getPolicy() const {
   return policy_;
 }
 
-} // namespace rill::security
-#endif // RILL_WIP_NATIVE_SECURITY
+} // namespace keel::security
+#endif // KEEL_WIP_NATIVE_SECURITY

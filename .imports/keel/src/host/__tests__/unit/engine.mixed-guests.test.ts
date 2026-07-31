@@ -4,27 +4,27 @@ import { join } from 'node:path';
 import { Engine } from '../../engine';
 import { ComponentRegistry } from '../../registry';
 import { Receiver } from '../../receiver';
-import { WasmGuestHost } from '../../wasm-guest/wasm-guest-host';
+import { NativeGuestHost } from '../../native-guest/native-guest-host';
 import { MockComponents } from '../e2e/helpers/mock-components';
 import { waitFor } from '../e2e/helpers/test-utils';
 
-// The native guest from the wasm-guest suite: renders View > [Text, View > Text].
+// The native guest from the native-guest suite: renders View > [Text, View > Text].
 const UI_GUEST = readFileSync(
-  join(import.meta.dir, '../../wasm-guest/__tests__/fixtures/ui-guest.wasm')
+  join(import.meta.dir, '../../native-guest/__tests__/fixtures/ui-guest.wasm')
 );
 
 // A JS guest bundle (runs in the Engine's node-vm sandbox).
 const JS_GUEST = `
-  const { render } = require('rill/reconciler');
+  const { render } = require('keel/reconciler');
   function App() {
     return React.createElement('View', { testID: 'js-only' },
       React.createElement('Text', null, 'from js'));
   }
-  render(React.createElement(App), globalThis.__rill_sendBatch);
+  render(React.createElement(App), globalThis.__keel_sendBatch);
 `;
 
 // One host process, two guest kinds (QuickJS-style JS guest via Engine + native
-// WASM guest via WasmGuestHost). They must coexist and stay isolated — each
+// WASM guest via NativeGuestHost). They must coexist and stay isolated — each
 // renders into its own receiver with no cross-talk. Run from src/ (React interop).
 describe('mixed guests — a JS guest and a native WASM guest coexist, isolated', () => {
   it('each guest renders into its own receiver with no cross-talk', async () => {
@@ -39,7 +39,7 @@ describe('mixed guests — a JS guest and a native WASM guest coexist, isolated'
     await engine.loadBundle(JS_GUEST);
     await waitFor(() => jsReceiver.nodeCount > 0, 5000);
 
-    // --- native WASM guest via WasmGuestHost ---
+    // --- native WASM guest via NativeGuestHost ---
     const registry = new ComponentRegistry();
     // biome-ignore lint/suspicious/noExplicitAny: opaque materializer, irrelevant here.
     registry.register('View', 'View' as any);
@@ -50,7 +50,7 @@ describe('mixed guests — a JS guest and a native WASM guest coexist, isolated'
       () => {},
       () => {}
     );
-    const host = new WasmGuestHost({
+    const host = new NativeGuestHost({
       dispatch: {},
       onRenderBatch: (b) => nativeReceiver.applyBatch(b),
     });

@@ -1,5 +1,5 @@
 /**
- * rill/contract
+ * keel/contract
  *
  * Single source of truth for Host capabilities and Guest exports.
  */
@@ -42,7 +42,7 @@ export type BinaryFieldNames<T> = T extends object
  * ADDITIVE, OPTIONAL metadata: declares which top-level request/response fields
  * carry a raw byte stream (a `Uint8Array`) rather than JSON scalar data.
  *
- * It is metadata only — it does NOT drive the wire codec (the RBS1 envelope is
+ * It is metadata only — it does NOT drive the wire codec (the KBS1 envelope is
  * self-describing via `{"$b":N}` sentinels, see `contracts/store-net-bytes.json`).
  * It is consumed by: (a) type generation (a listed field maps to `Uint8Array` in
  * the emitted `declare module 'host:*'`), (b) the capabilities manifest
@@ -61,7 +61,7 @@ export interface BinaryFields<Input = unknown, Output = unknown> {
  * The subscription-side sibling of {@link BinaryFields}: a subscription has no
  * request/response pair, only a host->guest EVENT, so it declares one direction.
  * Same three consumers (type generation, `binaryCapabilities`, the dispatch
- * boundary backstop) and the same self-describing RBS1 wire.
+ * boundary backstop) and the same self-describing KBS1 wire.
  */
 export interface BinaryEventFields<Event = unknown> {
   /** Top-level event field names whose value is a byte stream (`Uint8Array`). */
@@ -74,7 +74,7 @@ export interface BinaryEventFields<Event = unknown> {
  * - `js` — the interpreted guest (QuickJS / Hermes), which holds real function
  *   references and so can pass a handler across the boundary.
  * - `native` — the wasm guest, whose only route into a host module is
- *   `rill_host_call` with a byte payload (JSON or an RBS1 envelope).
+ *   `keel_host_call` with a byte payload (JSON or a KBS1 envelope).
  *
  * This is a STRUCTURAL fact of each mechanism, not a policy the contract author
  * picks — see {@link guestKindsFor}.
@@ -118,7 +118,7 @@ export type HostCapabilityDescriptor = RpcDescriptor<unknown, unknown> | Subscri
 
 export type HostModuleSpec = Record<string, HostCapabilityDescriptor>;
 
-export interface RillContractShape {
+export interface KeelContractShape {
   version: string;
   hostModules: Record<HostModuleId, HostModuleSpec>;
   guestExports: Record<string, RpcDescriptor<unknown, unknown>>;
@@ -149,7 +149,7 @@ export type HostModuleImplementation<TModule extends HostModuleSpec> = {
       : never;
 };
 
-export type HostModulesImplementation<TContract extends RillContractShape> = {
+export type HostModulesImplementation<TContract extends KeelContractShape> = {
   [ModuleId in keyof TContract['hostModules']]: TContract['hostModules'][ModuleId] extends HostModuleSpec
     ? HostModuleImplementation<TContract['hostModules'][ModuleId]>
     : never;
@@ -168,7 +168,7 @@ export type HostModuleImplementationMap = Record<
   Record<string, (...args: never[]) => unknown>
 >;
 
-export type GuestExportsClient<TContract extends RillContractShape> = {
+export type GuestExportsClient<TContract extends KeelContractShape> = {
   [ExportName in keyof TContract['guestExports']]: TContract['guestExports'][ExportName] extends RpcDescriptor<
     infer Input,
     infer Output
@@ -177,7 +177,7 @@ export type GuestExportsClient<TContract extends RillContractShape> = {
     : never;
 };
 
-export interface RillCapabilitiesManifest {
+export interface KeelCapabilitiesManifest {
   contractVersion: string;
   hostCapabilities: string[];
   guestExports: string[];
@@ -272,14 +272,14 @@ export function subscription<Event = unknown>(
  * mechanism, never declared, so it cannot drift from what the runtime does:
  *
  * - `rpc` works from both guest kinds: its argument is data, and data crosses
- *   either boundary (JSON, or an RBS1 envelope when it carries bytes).
+ *   either boundary (JSON, or a KBS1 envelope when it carries bytes).
  * - `subscription` is `js`-ONLY. Subscribing means handing the host a HANDLER
  *   FUNCTION, and a native guest's only route into a host module is
- *   `rill_host_call`, which carries bytes — a decoded byte payload is never a
+ *   `keel_host_call`, which carries bytes — a decoded byte payload is never a
  *   function. So the call cannot be expressed, let alone dispatched. The
  *   host->guest push channel for a native guest is the named event channel
- *   (`WasmGuestView.sendEvent` -> the guest's `rill_on_event`), which since the
- *   RBS1 event fork carries JSON *and* raw bytes.
+ *   (`NativeGuestView.sendEvent` -> the guest's `keel_on_event`), which since the
+ *   KBS1 event fork carries JSON *and* raw bytes.
  *
  * Consumed by publish gates and type generators (via the manifest's
  * `jsOnlyCapabilities`) so the limit is visible BEFORE a native guest hits it.
@@ -298,19 +298,19 @@ export function isHostModuleId(value: string): value is HostModuleId {
 export function assertHostModuleId(value: string): asserts value is HostModuleId {
   if (!isHostModuleId(value)) {
     throw new Error(
-      `[rill/contract] Invalid host module id "${value}". Expected format: host:<domain>[/subdomain].`
+      `[keel/contract] Invalid host module id "${value}". Expected format: host:<domain>[/subdomain].`
     );
   }
 }
 
-export function defineRillContract<const TContract extends RillContractShape>(
+export function defineKeelContract<const TContract extends KeelContractShape>(
   contract: TContract
 ): Readonly<TContract> {
   validateContract(contract);
   return deepFreeze(contract);
 }
 
-export function implementHostModules<const TContract extends RillContractShape>(
+export function implementHostModules<const TContract extends KeelContractShape>(
   contract: TContract,
   implementation: HostModulesImplementation<TContract>
 ): HostModulesImplementation<TContract> {
@@ -324,7 +324,7 @@ export function implementHostModules<const TContract extends RillContractShape>(
  * This is the runtime counterpart of {@link implementHostModules}: it pairs each
  * contract descriptor with its implementation and returns boundary-enforcing
  * wrappers. The Engine injects the result into the sandbox as
- * `globalThis.__rill.hostModules`, where the Guest's rewritten `host:*` imports
+ * `globalThis.__keel.hostModules`, where the Guest's rewritten `host:*` imports
  * resolve it.
  *
  * Enforcement (fail-closed):
@@ -339,7 +339,7 @@ export function implementHostModules<const TContract extends RillContractShape>(
  * `host:*` import is rejected at build time and, defensively, by the runtime resolver.
  */
 export function createHostModuleDispatch(
-  contract: RillContractShape,
+  contract: KeelContractShape,
   implementation: HostModuleImplementationMap,
   options: HostModuleDispatchOptions = {}
 ): HostModuleDispatchTable {
@@ -373,7 +373,7 @@ export function createHostModuleDispatch(
   return table;
 }
 
-export function createCapabilitiesManifest(contract: RillContractShape): RillCapabilitiesManifest {
+export function createCapabilitiesManifest(contract: KeelContractShape): KeelCapabilitiesManifest {
   validateContract(contract);
 
   const hostCapabilities = Object.entries(contract.hostModules)
@@ -419,7 +419,7 @@ export function createCapabilitiesManifest(contract: RillContractShape): RillCap
     )
     .sort();
 
-  const manifest: RillCapabilitiesManifest = {
+  const manifest: KeelCapabilitiesManifest = {
     contractVersion: contract.version,
     hostCapabilities,
     guestExports,
@@ -446,29 +446,29 @@ function descriptorHasBinary(descriptor: HostCapabilityDescriptor): boolean {
   return Boolean(binary && ((binary.input?.length ?? 0) > 0 || (binary.output?.length ?? 0) > 0));
 }
 
-export function validateContract(contract: RillContractShape): void {
+export function validateContract(contract: KeelContractShape): void {
   if (!contract || typeof contract !== 'object') {
-    throw new Error('[rill/contract] Contract must be an object.');
+    throw new Error('[keel/contract] Contract must be an object.');
   }
 
   if (!contract.version || typeof contract.version !== 'string') {
-    throw new Error('[rill/contract] Contract version must be a non-empty string.');
+    throw new Error('[keel/contract] Contract version must be a non-empty string.');
   }
 
   validateHostModules(contract.hostModules);
   validateGuestExports(contract.guestExports);
 }
 
-function validateHostModules(hostModules: RillContractShape['hostModules']): void {
+function validateHostModules(hostModules: KeelContractShape['hostModules']): void {
   if (!hostModules || typeof hostModules !== 'object') {
-    throw new Error('[rill/contract] hostModules must be an object.');
+    throw new Error('[keel/contract] hostModules must be an object.');
   }
 
   for (const [moduleId, moduleSpec] of Object.entries(hostModules)) {
     assertHostModuleId(moduleId);
 
     if (!moduleSpec || typeof moduleSpec !== 'object') {
-      throw new Error(`[rill/contract] Host module "${moduleId}" must be an object.`);
+      throw new Error(`[keel/contract] Host module "${moduleId}" must be an object.`);
     }
 
     for (const [exportName, descriptor] of Object.entries(moduleSpec)) {
@@ -478,23 +478,23 @@ function validateHostModules(hostModules: RillContractShape['hostModules']): voi
   }
 }
 
-function validateGuestExports(guestExports: RillContractShape['guestExports']): void {
+function validateGuestExports(guestExports: KeelContractShape['guestExports']): void {
   if (!guestExports || typeof guestExports !== 'object') {
-    throw new Error('[rill/contract] guestExports must be an object.');
+    throw new Error('[keel/contract] guestExports must be an object.');
   }
 
   for (const [exportName, descriptor] of Object.entries(guestExports)) {
     validateExportName(exportName, 'guest exports');
 
     if (descriptor.kind !== 'rpc') {
-      throw new Error(`[rill/contract] Guest export "${exportName}" must be rpc().`);
+      throw new Error(`[keel/contract] Guest export "${exportName}" must be rpc().`);
     }
 
     validateDescriptor(descriptor, `guest.${exportName}`);
   }
 }
 
-function validateHostModulesImplementation<const TContract extends RillContractShape>(
+function validateHostModulesImplementation<const TContract extends KeelContractShape>(
   contract: TContract,
   implementation: HostModulesImplementation<TContract>
 ): void {
@@ -507,7 +507,7 @@ function validateHostModulesImplementation<const TContract extends RillContractS
  * (undeclared) modules or exports are present.
  */
 function assertImplementationMatchesContract(
-  contract: RillContractShape,
+  contract: KeelContractShape,
   implementation: HostModuleImplementationMap
 ): void {
   validateContract(contract);
@@ -516,7 +516,7 @@ function assertImplementationMatchesContract(
 
   for (const moduleId of Object.keys(implementationRecord)) {
     if (!(moduleId in contract.hostModules)) {
-      throw new Error(`[rill/contract] Host module implementation "${moduleId}" is not declared.`);
+      throw new Error(`[keel/contract] Host module implementation "${moduleId}" is not declared.`);
     }
   }
 
@@ -524,13 +524,13 @@ function assertImplementationMatchesContract(
     const moduleImpl = implementationRecord[moduleId];
 
     if (!moduleImpl || typeof moduleImpl !== 'object') {
-      throw new Error(`[rill/contract] Missing implementation for host module "${moduleId}".`);
+      throw new Error(`[keel/contract] Missing implementation for host module "${moduleId}".`);
     }
 
     for (const exportName of Object.keys(moduleImpl)) {
       if (!(exportName in moduleSpec)) {
         throw new Error(
-          `[rill/contract] Host module implementation "${moduleId}.${exportName}" is not declared.`
+          `[keel/contract] Host module implementation "${moduleId}.${exportName}" is not declared.`
         );
       }
     }
@@ -540,7 +540,7 @@ function assertImplementationMatchesContract(
 
       if (typeof impl !== 'function') {
         throw new Error(
-          `[rill/contract] Missing function implementation for "${moduleId}.${exportName}".`
+          `[keel/contract] Missing function implementation for "${moduleId}.${exportName}".`
         );
       }
     }
@@ -554,7 +554,7 @@ function validateDescriptor(
 ): asserts value is HostCapabilityDescriptor {
   if (!value || typeof value !== 'object') {
     throw new Error(
-      `[rill/contract] Descriptor "${label}" must be created with rpc() or subscription().`
+      `[keel/contract] Descriptor "${label}" must be created with rpc() or subscription().`
     );
   }
 
@@ -562,7 +562,7 @@ function validateDescriptor(
   const kind = (value as { kind?: unknown }).kind;
 
   if (kind !== 'rpc' && kind !== 'subscription') {
-    throw new Error(`[rill/contract] Descriptor "${label}" must be rpc() or subscription().`);
+    throw new Error(`[keel/contract] Descriptor "${label}" must be rpc() or subscription().`);
   }
 
   // Reason: `binary` is optional metadata on either descriptor kind; when set it
@@ -587,7 +587,7 @@ function validateBinaryFields(value: unknown, label: string, kind: 'rpc' | 'subs
   }
 
   if (!value || typeof value !== 'object') {
-    throw new Error(`[rill/contract] Descriptor "${label}" binary must be an object.`);
+    throw new Error(`[keel/contract] Descriptor "${label}" binary must be an object.`);
   }
 
   // Reason: narrowing the validated object; each direction is re-checked below.
@@ -597,7 +597,7 @@ function validateBinaryFields(value: unknown, label: string, kind: 'rpc' | 'subs
   for (const direction of ['input', 'output', 'event'] as const) {
     if (binary[direction] !== undefined && !(allowed as readonly string[]).includes(direction)) {
       throw new Error(
-        `[rill/contract] Descriptor "${label}" binary.${direction} is not valid on a ${kind} descriptor (expected ${allowed.join('/')}).`
+        `[keel/contract] Descriptor "${label}" binary.${direction} is not valid on a ${kind} descriptor (expected ${allowed.join('/')}).`
       );
     }
   }
@@ -610,7 +610,7 @@ function validateBinaryFields(value: unknown, label: string, kind: 'rpc' | 'subs
 
     if (!Array.isArray(list)) {
       throw new Error(
-        `[rill/contract] Descriptor "${label}" binary.${direction} must be an array of field names.`
+        `[keel/contract] Descriptor "${label}" binary.${direction} must be an array of field names.`
       );
     }
 
@@ -620,7 +620,7 @@ function validateBinaryFields(value: unknown, label: string, kind: 'rpc' | 'subs
       const fieldName = typeof name === 'string' && name.endsWith('?') ? name.slice(0, -1) : name;
       if (typeof fieldName !== 'string' || fieldName.length === 0) {
         throw new Error(
-          `[rill/contract] Descriptor "${label}" binary.${direction} must contain non-empty field-name strings.`
+          `[keel/contract] Descriptor "${label}" binary.${direction} must contain non-empty field-name strings.`
         );
       }
     }
@@ -629,7 +629,7 @@ function validateBinaryFields(value: unknown, label: string, kind: 'rpc' | 'subs
 
 function validateExportName(value: string, owner: string): void {
   if (!GUEST_EXPORT_NAME_PATTERN.test(value)) {
-    throw new Error(`[rill/contract] Invalid export name "${value}" in ${owner}.`);
+    throw new Error(`[keel/contract] Invalid export name "${value}" in ${owner}.`);
   }
 }
 
@@ -770,12 +770,12 @@ function wrapSubscriptionDispatch(
     const handler = args[0];
     if (typeof handler !== 'function') {
       // The only caller that can get here with a non-function is a NATIVE (wasm)
-      // guest: its route into a host module is rill_host_call, which carries
+      // guest: its route into a host module is keel_host_call, which carries
       // bytes, and a decoded byte payload is never a function. Say that, rather
       // than blaming the argument — the guest kind is the reason, and the fix is
       // a different channel, not a different argument. See guestKindsFor.
       throw new Error(
-        `[rill/contract] Subscription "${moduleId}.${exportName}" requires a handler function, so it is reachable only from a JS guest. A native (wasm) guest cannot subscribe (its calls carry bytes, not function references) — push to it over the named event channel instead.`
+        `[keel/contract] Subscription "${moduleId}.${exportName}" requires a handler function, so it is reachable only from a JS guest. A native (wasm) guest cannot subscribe (its calls carry bytes, not function references) — push to it over the named event channel instead.`
       );
     }
 
@@ -825,7 +825,7 @@ function runBoundary(
   } catch (cause) {
     const reason = cause instanceof Error ? cause.message : String(cause);
     const error = new Error(
-      `[rill/contract] Boundary ${phase} validation failed for "${moduleId}.${exportName}": ${reason}`
+      `[keel/contract] Boundary ${phase} validation failed for "${moduleId}.${exportName}": ${reason}`
     );
     // Reason: preserve the original validation error for host-side diagnostics.
     (error as { cause?: unknown }).cause = cause;

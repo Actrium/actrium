@@ -5,14 +5,14 @@
  * Provides true isolated sandbox where setTimeout/timers work correctly.
  *
  * Build:
- *   cd rill/native/quickjs
+ *   cd keel/native/quickjs
  *   ./build-wasm.sh release
  *
  * Output:
- *   quickjs-sandbox.{js,wasm} → copied to rill/src/host/sandbox/wasm/
+ *   quickjs-sandbox.{js,wasm} → copied to keel/src/host/sandbox/wasm/
  */
 
-import type { HostModuleDispatchTable, RillContractShape } from '../../../contract';
+import type { HostModuleDispatchTable, KeelContractShape } from '../../../contract';
 import type { ReviewedUnknown } from '../../types';
 import type { JSEngineProvider, JSEngineRuntime, SandboxScope } from '../types/provider';
 
@@ -128,8 +128,8 @@ export interface QuickJSNativeWASMProviderOptions {
 
 // Timer/microtask host functions whose FIRST argument is a guest callback. The isolated
 // WASM realm can't pass a function reference over the JSON bridge, so the guest shim
-// registers the callback in __rill.callbacks (the same registry the reconciler uses for
-// function props) and sends a {__rill_cb:id} marker instead (issue #10). Release lifetimes
+// registers the callback in __keel.callbacks (the same registry the reconciler uses for
+// function props) and sends a {__keel_cb:id} marker instead (issue #10). Release lifetimes
 // differ, so the timer family gets per-shape shims.
 const ONE_SHOT_CALLBACK_FNS = new Set(['setTimeout', 'setImmediate', 'queueMicrotask']);
 const REPEATING_CALLBACK_FNS = new Set(['setInterval']);
@@ -149,7 +149,7 @@ const CLEAR_TO_FAMILY: Record<string, string> = {
 // RUNTIME_HELPERS_CODE defines the registry — this seeds a compatible one (same Map, same
 // 'fn_N' id scheme, idempotent) so a callback argument is never silently dropped.
 const ENSURE_CB_REGISTRY = `
-  var R = globalThis.__rill || (globalThis.__rill = {});
+  var R = globalThis.__keel || (globalThis.__keel = {});
   if (!R.callbacks) { R.callbacks = new Map(); }
   if (typeof R.callbackId !== 'number') { R.callbackId = 0; }
   if (typeof R.registerCallback !== 'function') { R.registerCallback = function(fn){ var id = 'fn_' + (++R.callbackId); R.callbacks.set(id, fn); return id; }; }
@@ -170,10 +170,10 @@ const ENSURE_CB_REGISTRY = `
 // JSON as the reserved sentinel {"$bin":id} — plus {"$view":kind} for views, so the
 // receiving side rebuilds the same view type over the same byte window.
 //
-//   guest -> host: the guest codec calls the native __rill_stageBinary(view) -> id; after
+//   guest -> host: the guest codec calls the native __keel_stageBinary(view) -> id; after
 //     JSON.parse the host copies each referenced window out of HEAPU8 and frees the id.
 //   host -> guest: the host _malloc's the bytes into linear memory and parks them via
-//     qjs_binary_stage(ptr,len); the guest codec's __rill_takeBinary(id) adopts the block
+//     qjs_binary_stage(ptr,len); the guest codec's __keel_takeBinary(id) adopts the block
 //     into a JS ArrayBuffer (zero-copy) and removes the entry.
 //
 // Lifecycle discipline: every id is consumed EXACTLY ONCE, and consumption frees the
@@ -391,7 +391,7 @@ function reviveBinaryValue(module: QuickJSWASMModule, value: ReviewedUnknown): R
 
 // Guest-side twin of the codec above, installed once per context BEFORE any guest code
 // runs, so every later shim (host fns, host modules, inject/extract) can rely on
-// __rill.__binenc/__binrev. __rill_stageBinary/__rill_takeBinary are the native staging
+// __keel.__binenc/__binrev. __keel_stageBinary/__keel_takeBinary are the native staging
 // helpers registered by qjs_install_host_functions. Views are staged through a Uint8Array
 // wrapper so the native helper always receives an exact byte window (byteOffset/byteLength
 // respected — this includes DataView, which JS_GetTypedArrayBuffer does not cover); the
@@ -399,7 +399,7 @@ function reviveBinaryValue(module: QuickJSWASMModule, value: ReviewedUnknown): R
 // identity so non-binary payloads stringify byte-for-byte unchanged.
 const GUEST_BINARY_CODEC = `
   (function () {
-    var R = globalThis.__rill || (globalThis.__rill = {});
+    var R = globalThis.__keel || (globalThis.__keel = {});
     if (R.__binenc) return;
     var VIEWS = {};
     ['Int8Array','Uint8Array','Uint8ClampedArray','Int16Array','Uint16Array','Int32Array',
@@ -408,9 +408,9 @@ const GUEST_BINARY_CODEC = `
     function tag(v) { return Object.prototype.toString.call(v).slice(8, -1); }
     // stack: cycle guard (throws like JSON.stringify would; this walk runs first).
     R.__binenc = function enc(v, stack) {
-      if (v instanceof ArrayBuffer) { return { $bin: __rill_stageBinary(v) }; }
+      if (v instanceof ArrayBuffer) { return { $bin: __keel_stageBinary(v) }; }
       if (ArrayBuffer.isView(v)) {
-        return { $bin: __rill_stageBinary(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)), $view: tag(v) };
+        return { $bin: __keel_stageBinary(new Uint8Array(v.buffer, v.byteOffset, v.byteLength)), $view: tag(v) };
       }
       if (Array.isArray(v)) {
         stack = stack || [];
@@ -443,7 +443,7 @@ const GUEST_BINARY_CODEC = `
             ((keys.length === 1 && keys[0] === '$bin') ||
              (keys.length === 2 && typeof v.$view === 'string' &&
               keys.indexOf('$bin') >= 0 && keys.indexOf('$view') >= 0))) {
-          var ab = __rill_takeBinary(v.$bin);
+          var ab = __keel_takeBinary(v.$bin);
           if (typeof v.$view !== 'string') return ab;
           var C = VIEWS[v.$view];
           return C ? new C(ab) : new Uint8Array(ab);
@@ -463,7 +463,7 @@ const GUEST_BINARY_CODEC = `
 // in particular the deadline-interrupt marker (INTERRUPTED_ERROR_JSON) stays
 // byte-identical and is the ONLY payload in the system without an errorDetail
 // sibling. That invariant is ENFORCED in C (wasm_bindings.c), not just by
-// construction: globalThis.__rill is a plain writable global a guest can
+// construction: globalThis.__keel is a plain writable global a guest can
 // replace wholesale, so encode_guest_error discards a marker-identical
 // __errenc return (falling back to the message-only path, whose errorDetail
 // is mandatory), and qjs_eval rewrites a completion value whose JSON is
@@ -476,9 +476,9 @@ const GUEST_BINARY_CODEC = `
 // message + own JSON-safe props but NEVER the host stack (information
 // disclosure to an untrusted guest).
 
-// Separates guest frames (above) from rill-runtime host frames (below) in a
+// Separates guest frames (above) from keel-runtime host frames (below) in a
 // revived error's stack. Follows the quickjs-emscripten unwrapResult pattern.
-export const HOST_STACK_BOUNDARY = '    --- host stack (rill runtime; frames above are guest) ---';
+export const HOST_STACK_BOUNDARY = '    --- host stack (keel runtime; frames above are guest) ---';
 
 // Host-side DoS caps mirroring the guest encoder.
 const MAX_ERROR_PROPS = 64;
@@ -592,22 +592,22 @@ function serializeHostError(err: unknown): {
     return { message: typeof err === 'string' ? err : String(err), name: 'Error' };
   } catch {
     // Last-resort: guarantee a well-formed payload so the guest promise settles.
-    return { message: '[rill] host error', name: 'Error' };
+    return { message: '[keel] host error', name: 'Error' };
   }
 }
 
 // Guest-side error encoder, installed by the provider prelude right after the
 // binary codec (before ANY guest code runs). The C side (encode_guest_error in
-// wasm_bindings.c) looks up globalThis.__rill.__errenc and calls it with the
+// wasm_bindings.c) looks up globalThis.__keel.__errenc and calls it with the
 // thrown value; on any failure it falls back to a C-escaped message-only
 // payload. Both this encoder's catch fallback and the C fallback still emit
 // the errorDetail sibling — mandatory. This alone is NOT the marker-forgery
-// defense (a guest can replace globalThis.__rill and its __errenc wholesale);
+// defense (a guest can replace globalThis.__keel and its __errenc wholesale);
 // the C caller additionally rejects any __errenc return byte-identical to the
 // bare interrupt marker.
 const GUEST_ERROR_CODEC = `
   (function () {
-    var R = globalThis.__rill || (globalThis.__rill = {});
+    var R = globalThis.__keel || (globalThis.__keel = {});
     if (R.__errenc) return;
     var SKIP = { name: 1, message: 1, stack: 1 };
     var MAX_PROPS = 64;          // DoS cap: max own props copied
@@ -681,8 +681,8 @@ const GUEST_ERROR_CODEC = `
  * Build the guest-side shim for a by-name host function (issue #8 + #10).
  *
  * The shim posts the call to the host over __sendToHost and reads back the synchronous
- * return value (the host writes it to __rill_fn_ret). For #10, any FUNCTION argument is
- * replaced with a {__rill_cb:id} marker after registering it in __rill.callbacks; the host
+ * return value (the host writes it to __keel_fn_ret). For #10, any FUNCTION argument is
+ * replaced with a {__keel_cb:id} marker after registering it in __keel.callbacks; the host
  * reconstructs a proxy that invokes the guest callback by id (see onHostFnCall).
  *
  * Callback lifetime is managed guest-side so the registry doesn't leak:
@@ -691,13 +691,13 @@ const GUEST_ERROR_CODEC = `
  * - repeating (setInterval): the cb id lives until the matching clear releases it.
  * - clear (clearTimeout/clearInterval/clearImmediate): release the cb id paired to the
  *   host timer id, then forward the clear to the host.
- * - generic (everything else, e.g. __rill_sendBatch/__console_log): function args are
+ * - generic (everything else, e.g. __keel_sendBatch/__console_log): function args are
  *   markered so they survive the bridge, but without an auto-release lifetime (no host fn
  *   today keeps such a callback; timers are the only stateful case).
  */
 function buildHostFnShim(name: string): string {
   const nameKey = JSON.stringify(name);
-  const eventKey = JSON.stringify(`__rill_fn:${name}`);
+  const eventKey = JSON.stringify(`__keel_fn:${name}`);
 
   if (ONE_SHOT_CALLBACK_FNS.has(name)) {
     const keyPrefix = JSON.stringify(`${name}:`);
@@ -710,10 +710,10 @@ function buildHostFnShim(name: string): string {
         finally { fired = true; R.removeCallback(id); if (hostId != null) delete R.__timerCb[${keyPrefix} + hostId]; }
       };
       id = R.registerCallback(wrapper);
-      a[0] = { __rill_cb: id, __rill_marker: 1 };
-      globalThis.__rill_fn_ret = null;
+      a[0] = { __keel_cb: id, __keel_marker: 1 };
+      globalThis.__keel_fn_ret = null;
       __sendToHost(${eventKey}, { args: a });
-      hostId = globalThis.__rill_fn_ret;
+      hostId = globalThis.__keel_fn_ret;
       // Guard 'fired': if the host invoked the callback synchronously inside __sendToHost,
       // the wrapper already ran (with hostId undefined) — don't re-insert a stale mapping.
       if (hostId != null && !fired) R.__timerCb[${keyPrefix} + hostId] = id;
@@ -727,10 +727,10 @@ function buildHostFnShim(name: string): string {
       var a = Array.prototype.slice.call(arguments);${ENSURE_CB_REGISTRY}
       var cb = a[0];
       var id = R.registerCallback(function() { return (typeof cb === 'function') ? cb.apply(null, arguments) : undefined; });
-      a[0] = { __rill_cb: id, __rill_marker: 1 };
-      globalThis.__rill_fn_ret = null;
+      a[0] = { __keel_cb: id, __keel_marker: 1 };
+      globalThis.__keel_fn_ret = null;
       __sendToHost(${eventKey}, { args: a });
-      var hostId = globalThis.__rill_fn_ret;
+      var hostId = globalThis.__keel_fn_ret;
       if (hostId != null) R.__timerCb[${keyPrefix} + hostId] = id;
       return hostId;
     };`;
@@ -744,9 +744,9 @@ function buildHostFnShim(name: string): string {
       var hostId = a[0];
       var key = ${keyPrefix} + hostId;
       if (hostId != null && R.__timerCb[key] != null) { R.removeCallback(R.__timerCb[key]); delete R.__timerCb[key]; }
-      globalThis.__rill_fn_ret = null;
+      globalThis.__keel_fn_ret = null;
       __sendToHost(${eventKey}, { args: a });
-      return globalThis.__rill_fn_ret;
+      return globalThis.__keel_fn_ret;
     };`;
   }
 
@@ -761,20 +761,20 @@ function buildHostFnShim(name: string): string {
     var a = Array.prototype.slice.call(arguments);
     if (a.length === 1 && (a[0] instanceof ArrayBuffer || ArrayBuffer.isView(a[0])) &&
         typeof __sendBinaryToHost === 'function') {
-      globalThis.__rill_fn_ret = null;
+      globalThis.__keel_fn_ret = null;
       __sendBinaryToHost(${eventKey}, a[0]);
-      return globalThis.__rill_fn_ret;
+      return globalThis.__keel_fn_ret;
     }
     var hasFn = false;
     for (var i = 0; i < a.length; i++) { if (typeof a[i] === 'function') { hasFn = true; break; } }
     if (hasFn) {${ENSURE_CB_REGISTRY}
-      a = a.map(function(x){ return (typeof x === 'function') ? { __rill_cb: R.registerCallback(x), __rill_marker: 1 } : x; });
+      a = a.map(function(x){ return (typeof x === 'function') ? { __keel_cb: R.registerCallback(x), __keel_marker: 1 } : x; });
     }
-    var RB = globalThis.__rill;
+    var RB = globalThis.__keel;
     if (RB && RB.__binenc) { a = RB.__binenc(a); }
-    globalThis.__rill_fn_ret = null;
+    globalThis.__keel_fn_ret = null;
     __sendToHost(${eventKey}, { args: a });
-    return globalThis.__rill_fn_ret;
+    return globalThis.__keel_fn_ret;
   };`;
 }
 
@@ -822,13 +822,13 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
         let hostBinaryCallbackPtr = 0;
 
         // host:* module bridge handler. Assigned once the eval helpers below are
-        // defined; the guest reaches it by posting `__rill_host_*` events through
+        // defined; the guest reaches it by posting `__keel_host_*` events through
         // __sendToHost (see installHostModules).
         let onHostModuleEvent: ((event: string, data: string) => void) | null = null;
 
         // By-name host->guest function bridge (issue #8). The isolated WASM realm
         // can't receive a host function reference, so each function injected by name
-        // (render: __rill_sendBatch; events: __rill_emitEvent; config: __rill_getConfig;
+        // (render: __keel_sendBatch; events: __keel_emitEvent; config: __keel_getConfig;
         // etc.) is registered here and reached via __sendToHost -> onHostFnCall.
         let onHostFnCall: ((name: string, data: string) => void) | null = null;
         // Binary twin of onHostFnCall: receives the raw byte window a guest
@@ -847,13 +847,13 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
           }
 
           // host:* request/response bridge (issue #5)
-          if (event.indexOf('__rill_host_') === 0) {
+          if (event.indexOf('__keel_host_') === 0) {
             onHostModuleEvent?.(event, data);
             return;
           }
 
           // by-name host function bridge (issue #8)
-          if (event.indexOf('__rill_fn:') === 0) {
+          if (event.indexOf('__keel_fn:') === 0) {
             onHostFnCall?.(event.slice(10), data);
             return;
           }
@@ -877,7 +877,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
           if (this.options.debug) {
             console.log(`[QuickJSWASM] Host binary callback: ${event} (${len} bytes)`);
           }
-          if (event.indexOf('__rill_fn:') === 0) {
+          if (event.indexOf('__keel_fn:') === 0) {
             onHostBinaryFnCall?.(event.slice(10), module.HEAPU8.slice(dataPtr, dataPtr + len));
           }
         };
@@ -969,10 +969,10 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
 
         // Install the guest-side binary codec before ANY guest code runs, so every
         // later shim (host fns, host modules, inject/extract) can rely on
-        // __rill.__binenc/__binrev being present.
+        // __keel.__binenc/__binrev being present.
         evalVoid(GUEST_BINARY_CODEC);
         // Error encoder next (same first-writer-wins window): qjs_eval's
-        // exception branch calls __rill.__errenc for rich error payloads.
+        // exception branch calls __keel.__errenc for rich error payloads.
         evalVoid(GUEST_ERROR_CODEC);
 
         // ---- host:* module bridge (issue #5) ----
@@ -999,7 +999,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
         // back to a guest global lets the shim return it synchronously. One-way hooks
         // (render/event) simply ignore the written value.
         // Invoke a guest callback by id (issue #10). A function can't cross the JSON
-        // bridge, so the guest registered it in __rill.callbacks and passed an id; here the
+        // bridge, so the guest registered it in __keel.callbacks and passed an id; here the
         // host fires it later (e.g. when a TimerManager timer elapses) by evaluating
         // invokeCallback in the guest realm and draining the resulting microtasks.
         const invokeGuestCallback = (id: string, cbArgs: ReviewedUnknown[]): void => {
@@ -1009,14 +1009,14 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
           const stagedIds: number[] = [];
           try {
             injectJson(
-              '__rill_cb_args',
+              '__keel_cb_args',
               JSON.stringify(encodeBinaryValue(module, cbArgs ?? [], stagedIds))
             );
             // Surface a throwing guest callback to the host logger (via __console_error)
             // rather than swallowing it silently at the evalVoid C boundary; always clear the
             // shared arg global afterward.
             evalVoid(
-              `try { globalThis.__rill.invokeCallback(${JSON.stringify(id)},globalThis.__rill.__binrev(globalThis.__rill_cb_args)); } catch (e) { if (typeof __console_error === 'function') { __console_error('[rill] guest callback threw:', e && e.message ? e.message : String(e)); } } finally { delete globalThis.__rill_cb_args; }`
+              `try { globalThis.__keel.invokeCallback(${JSON.stringify(id)},globalThis.__keel.__binrev(globalThis.__keel_cb_args)); } catch (e) { if (typeof __console_error === 'function') { __console_error('[keel] guest callback threw:', e && e.message ? e.message : String(e)); } } finally { delete globalThis.__keel_cb_args; }`
             );
           } finally {
             // Consume-exactly-once: anything the guest did not revive (inject or eval
@@ -1026,18 +1026,18 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
           drainJobs();
         };
 
-        // Turn a {__rill_cb:id, __rill_marker:1} marker back into a host-side proxy function
+        // Turn a {__keel_cb:id, __keel_marker:1} marker back into a host-side proxy function
         // the host fn can store and call; non-marker args pass through unchanged. The
-        // __rill_marker brand (set only by buildHostFnShim) distinguishes a real callback
+        // __keel_marker brand (set only by buildHostFnShim) distinguishes a real callback
         // marker from a same-shaped data object a caller might legitimately pass.
         const reconstructCallbackArg = (a: ReviewedUnknown): ReviewedUnknown => {
           if (
             a &&
             typeof a === 'object' &&
-            (a as { __rill_marker?: ReviewedUnknown }).__rill_marker === 1 &&
-            typeof (a as { __rill_cb?: ReviewedUnknown }).__rill_cb === 'string'
+            (a as { __keel_marker?: ReviewedUnknown }).__keel_marker === 1 &&
+            typeof (a as { __keel_cb?: ReviewedUnknown }).__keel_cb === 'string'
           ) {
-            const id = (a as { __rill_cb: string }).__rill_cb;
+            const id = (a as { __keel_cb: string }).__keel_cb;
             return (...cbArgs: ReviewedUnknown[]) => invokeGuestCallback(id, cbArgs);
           }
           return a;
@@ -1050,7 +1050,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
             // bytes is an exact-size copy, so .buffer IS the payload: the
             // injected host fn (e.g. engine sendToHost) sees a real host-realm
             // ArrayBuffer and its instanceof branch finally matches. One-way:
-            // the guest shim pre-set __rill_fn_ret = null and returns that.
+            // the guest shim pre-set __keel_fn_ret = null and returns that.
             fn(bytes.buffer);
           } catch (err) {
             if (this.options.debug) {
@@ -1090,24 +1090,24 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
           const outboundIds: number[] = [];
           try {
             injectJson(
-              '__rill_fn_ret',
+              '__keel_fn_ret',
               JSON.stringify(
                 encodeBinaryValue(module, result === undefined ? null : result, outboundIds)
               )
             );
             if (outboundIds.length > 0) {
-              // The guest shim returns __rill_fn_ret verbatim once __sendToHost returns —
+              // The guest shim returns __keel_fn_ret verbatim once __sendToHost returns —
               // revive here, still inside the synchronous call, so it holds real buffers.
               evalVoid(
-                'globalThis.__rill_fn_ret = globalThis.__rill.__binrev(globalThis.__rill_fn_ret);'
+                'globalThis.__keel_fn_ret = globalThis.__keel.__binrev(globalThis.__keel_fn_ret);'
               );
             }
           } catch {
             // Result not serializable -> restore the documented 'guest sees null' contract.
-            // Must explicitly reset: __rill_fn_ret is a shared global and a nested host call
+            // Must explicitly reset: __keel_fn_ret is a shared global and a nested host call
             // may have left a value there, which the outer shim would otherwise return.
             try {
-              injectJson('__rill_fn_ret', 'null');
+              injectJson('__keel_fn_ret', 'null');
             } catch {
               /* ignore */
             }
@@ -1118,7 +1118,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
 
         const resolveHostCall = (id: number, value: ReviewedUnknown): void => {
           if (value === undefined) {
-            evalVoid(`globalThis.__rill.__resolveHostCall(${id},false)`);
+            evalVoid(`globalThis.__keel.__resolveHostCall(${id},false)`);
           } else {
             // Stage any binary in the result as a {"$bin":id} sentinel before it crosses
             // the JSON bridge; the guest __resolveHostCall revives (and thereby consumes)
@@ -1127,11 +1127,11 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
             const stagedIds: number[] = [];
             try {
               injectJson(
-                '__rill_host_result',
+                '__keel_host_result',
                 JSON.stringify(encodeBinaryValue(module, value, stagedIds))
               );
               evalVoid(
-                `globalThis.__rill.__resolveHostCall(${id},true,globalThis.__rill_host_result);delete globalThis.__rill_host_result`
+                `globalThis.__keel.__resolveHostCall(${id},true,globalThis.__keel_host_result);delete globalThis.__keel_host_result`
               );
             } finally {
               freeStagedIds(module, stagedIds);
@@ -1145,9 +1145,9 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
         // guest promise always settles.
         // Reason: a rejected host-call reason can be any thrown value.
         const rejectHostCall = (id: number, err: unknown): void => {
-          injectJson('__rill_host_error', JSON.stringify(serializeHostError(err)));
+          injectJson('__keel_host_error', JSON.stringify(serializeHostError(err)));
           evalVoid(
-            `globalThis.__rill.__rejectHostCall(${id},globalThis.__rill_host_error);delete globalThis.__rill_host_error`
+            `globalThis.__keel.__rejectHostCall(${id},globalThis.__keel_host_error);delete globalThis.__keel_host_error`
           );
           drainJobs();
         };
@@ -1159,13 +1159,13 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
           const stagedIds: number[] = [];
           try {
             injectJson(
-              '__rill_host_event',
+              '__keel_host_event',
               JSON.stringify(
                 encodeBinaryValue(module, event === undefined ? null : event, stagedIds)
               )
             );
             evalVoid(
-              `globalThis.__rill.__deliverHostEvent(${JSON.stringify(subId)},globalThis.__rill_host_event);delete globalThis.__rill_host_event`
+              `globalThis.__keel.__deliverHostEvent(${JSON.stringify(subId)},globalThis.__keel_host_event);delete globalThis.__keel_host_event`
             );
           } finally {
             freeStagedIds(module, stagedIds);
@@ -1203,18 +1203,18 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
           const stagedIds: number[] = [];
           collectBinIds(msg, stagedIds);
           try {
-            if (event === '__rill_host_invoke') {
+            if (event === '__keel_host_invoke') {
               const id = m.id ?? 0;
               if (typeof fn !== 'function') {
                 rejectHostCall(
                   id,
-                  `[rill] Host module not registered: ${m.moduleId}.${m.exportName}`
+                  `[keel] Host module not registered: ${m.moduleId}.${m.exportName}`
                 );
                 return;
               }
               // Revive {"$bin":…} sentinels in the guest-sent args back to real
               // ArrayBuffers/views BEFORE the boundary fn (parseInput + impl) runs, so the
-              // host handler sees the same binary values the wasm RBS1 path delivers.
+              // host handler sees the same binary values the wasm KBS1 path delivers.
               const revivedArgs = reviveBinaryValue(module, m.args);
               const chain = Promise.resolve()
                 .then(() => fn(revivedArgs))
@@ -1224,7 +1224,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
               return;
             }
 
-            if (event === '__rill_host_subscribe') {
+            if (event === '__keel_host_subscribe') {
               const subId = m.subId;
               if (!subId) return;
               if (typeof fn !== 'function') {
@@ -1250,7 +1250,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
               return;
             }
 
-            if (event === '__rill_host_unsubscribe') {
+            if (event === '__keel_host_unsubscribe') {
               const subId = m.subId;
               if (!subId) return;
               const unsubscribe = hostSubscriptions.get(subId);
@@ -1273,7 +1273,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
         // When the QuickJS-asyncify DEBUG wasm is available (proven in
         // native/quickjs/poc, Milestone A), add e.g. `evalDebug(code)` that calls
         // the Emscripten export via `ccall(..., { async: true })` so a breakpoint
-        // can suspend the C stack, and install the `globalThis.__rillDbg =
+        // can suspend the C stack, and install the `globalThis.__keelDbg =
         // { onPaused, resume }` bridge from run-poc.mjs. Gated on the debug wasm;
         // deferred from this headless milestone.
         return {
@@ -1313,9 +1313,9 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
             // Bridge a by-name host function into the isolated guest realm (issue #8).
             // The guest shim posts its arguments to the host synchronously via
             // __sendToHost (routed to onHostFnCall in hostCallback), then reads back the
-            // value the host wrote. This wires the render channel (__rill_sendBatch ->
-            // host Receiver), host events (__rill_emitEvent), config (__rill_getConfig),
-            // single ops (__rill_sendOperation), etc. — none of which worked before.
+            // value the host wrote. This wires the render channel (__keel_sendBatch ->
+            // host Receiver), host events (__keel_emitEvent), config (__keel_getConfig),
+            // single ops (__keel_sendOperation), etc. — none of which worked before.
             if (typeof value === 'function') {
               injectedHostFns.set(name, value as (...args: ReviewedUnknown[]) => ReviewedUnknown);
               evalVoid(buildHostFnShim(name));
@@ -1333,7 +1333,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
               if (stagedIds.length > 0) {
                 const nameLit = JSON.stringify(name);
                 evalVoid(
-                  `globalThis[${nameLit}] = globalThis.__rill.__binrev(globalThis[${nameLit}]);`
+                  `globalThis[${nameLit}] = globalThis.__keel.__binrev(globalThis[${nameLit}]);`
                 );
               }
             } finally {
@@ -1347,12 +1347,12 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
             // ArrayBuffer to "{}"); the staged bytes are copied out and consumed below.
             const nameLit = JSON.stringify(name);
             evalVoid(
-              `globalThis.__rill_extract = globalThis.__rill.__binenc(globalThis[${nameLit}]);`
+              `globalThis.__keel_extract = globalThis.__keel.__binenc(globalThis[${nameLit}]);`
             );
-            const resultPtr = extractJson('__rill_extract');
+            const resultPtr = extractJson('__keel_extract');
             const result = module.UTF8ToString(resultPtr);
             freeString(resultPtr);
-            evalVoid('delete globalThis.__rill_extract;');
+            evalVoid('delete globalThis.__keel_extract;');
 
             // Parse raw first WITHOUT throwing, register any staged $bin ids, then
             // run the error classification INSIDE the try so freeStagedIds always
@@ -1384,7 +1384,7 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
 
           installHostModules: (
             table: HostModuleDispatchTable,
-            contract: RillContractShape
+            contract: KeelContractShape
           ): void => {
             hostModuleTable = table;
 
@@ -1405,8 +1405,8 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
 
             evalVoid(`
               (function() {
-                if (!globalThis.__rill) { globalThis.__rill = {}; }
-                var R = globalThis.__rill;
+                if (!globalThis.__keel) { globalThis.__keel = {}; }
+                var R = globalThis.__keel;
                 if (!R.__hostCalls) {
                   R.__hostCalls = {}; R.__hostCallSeq = 0;
                   R.__hostSubs = {}; R.__hostSubSeq = 0;
@@ -1439,20 +1439,20 @@ export class QuickJSNativeWASMProvider implements JSEngineProvider {
                     var p = new Promise(function(resolve, reject) {
                       R.__hostCalls[id] = { resolve: resolve, reject: reject };
                     });
-                    __sendToHost('__rill_host_invoke', { id: id, moduleId: moduleId, exportName: exportName, args: R.__binenc(arg === undefined ? null : arg) });
+                    __sendToHost('__keel_host_invoke', { id: id, moduleId: moduleId, exportName: exportName, args: R.__binenc(arg === undefined ? null : arg) });
                     return p;
                   };
                   R.__invokeHostSubscription = function(moduleId, exportName, handler) {
                     if (typeof handler !== 'function') {
-                      throw new Error('[rill] Subscription "' + moduleId + '.' + exportName + '" requires a handler function.');
+                      throw new Error('[keel] Subscription "' + moduleId + '.' + exportName + '" requires a handler function.');
                     }
                     var subId = 'sub_' + (++R.__hostSubSeq);
                     R.__hostSubs[subId] = handler;
-                    __sendToHost('__rill_host_subscribe', { subId: subId, moduleId: moduleId, exportName: exportName });
+                    __sendToHost('__keel_host_subscribe', { subId: subId, moduleId: moduleId, exportName: exportName });
                     return function() {
                       if (R.__hostSubs[subId]) {
                         delete R.__hostSubs[subId];
-                        __sendToHost('__rill_host_unsubscribe', { subId: subId });
+                        __sendToHost('__keel_host_unsubscribe', { subId: subId });
                       }
                     };
                   };

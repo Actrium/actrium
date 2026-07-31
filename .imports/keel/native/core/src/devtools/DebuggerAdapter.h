@@ -25,7 +25,7 @@
 #include <unordered_map>
 #include <unordered_set>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 // ============================================
 // Debugger Types
@@ -374,4 +374,4 @@ public:
   bool isPaused(TenantId) override { return false; }
 };
 
-} // namespace rill::devtools
+} // namespace keel::devtools

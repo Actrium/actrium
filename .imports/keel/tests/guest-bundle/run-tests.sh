@@ -8,7 +8,7 @@ echo "=== Guest Bundle Tests ==="
 echo ""
 
 # Ensure Bun can write temp files in restricted environments
-export TMPDIR="${TMPDIR:-/tmp}/rill-guest-bundle"
+export TMPDIR="${TMPDIR:-/tmp}/keel-guest-bundle"
 mkdir -p "$TMPDIR"
 
 # Step 1: Build legacy guest bundle
@@ -24,8 +24,8 @@ bun run verify.ts
 echo "[3/4] Building host module guest bundle..."
 bun ../../src/cli/bin.ts build src/host-modules.tsx \
   -o dist/host-modules.bundle.js \
-  --contract src/rill.contract.ts \
-  --capability-manifest dist/rill-capabilities.json \
+  --contract src/keel.contract.ts \
+  --capability-manifest dist/keel-capabilities.json \
   --no-minify
 echo "     Host module guest bundle built."
 

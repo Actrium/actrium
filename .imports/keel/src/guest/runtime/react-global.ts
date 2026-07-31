@@ -5,8 +5,8 @@
  * - Guest bundles that reference globals (externalized builds)
  * - Engine.require('react' | 'react/jsx-runtime') resolution
  *
- * NOTE: This module must run before rill/guest is evaluated, because
- * rill/guest defines some exports (e.g., ErrorBoundary) at module init time.
+ * NOTE: This module must run before keel/guest is evaluated, because
+ * keel/guest defines some exports (e.g., ErrorBoundary) at module init time.
  */
 
 import * as React from 'react';

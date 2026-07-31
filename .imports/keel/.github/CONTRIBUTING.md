@@ -1,6 +1,6 @@
 # Contributing Guide
 
-Thank you for your interest in contributing to Rill!
+Thank you for your interest in contributing to Keel!
 
 [中文版本](./CONTRIBUTING.zh.md)
 
@@ -13,8 +13,8 @@ Thank you for your interest in contributing to Rill!
 
 ```bash
 # Clone the repository
-git clone https://github.com/GoAskAway/rill.git
-cd rill
+git clone https://github.com/Actrium/keel.git
+cd keel
 
 # Install dependencies
 bun install
@@ -87,7 +87,7 @@ Then create a Pull Request on GitHub.
 ## Project Structure
 
 ```
-rill/
+keel/
 ├── src/
 │   ├── runtime/        # Host runtime (Engine, Receiver)
 │   ├── let/            # Guest SDK (components, hooks)
@@ -124,4 +124,4 @@ rill/
 ## Need Help?
 
 - [Documentation](../README.md)
-- [Report Issues](https://github.com/GoAskAway/rill/issues)
+- [Report Issues](https://github.com/Actrium/keel/issues)

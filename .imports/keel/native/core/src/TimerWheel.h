@@ -5,7 +5,7 @@
 #include <optional>
 #include <vector>
 
-namespace rill::tenant_manager {
+namespace keel::tenant_manager {
 
 using TimerId = uint32_t;
 
@@ -42,4 +42,4 @@ private:
   double currentTimeMs() const;
 };
 
-} // namespace rill::tenant_manager
+} // namespace keel::tenant_manager

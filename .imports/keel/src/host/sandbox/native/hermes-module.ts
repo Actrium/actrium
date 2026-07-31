@@ -2,7 +2,7 @@
  * Hermes Native Module - JSI binding
  *
  * Provides access to the native Hermes sandbox via global.__HermesSandboxJSI
- * Available when RILL_SANDBOX_ENGINE=hermes is set during native build
+ * Available when KEEL_SANDBOX_ENGINE=hermes is set during native build
  */
 
 import type { ReviewedUnknown } from '../../types';

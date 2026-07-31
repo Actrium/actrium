@@ -6,7 +6,7 @@
  * injected — CDPTransportApple in production, a mock in tests — so the wiring
  * logic is unit-testable without the Apple-only transport or the RN/JSI stack.
  *
- * RillTenantManager owns one of these behind RILL_WIP_CDP_DEVTOOLS and forwards
+ * KeelTenantManager owns one of these behind KEEL_WIP_CDP_DEVTOOLS and forwards
  * its tenant lifecycle to onTenantCreated/onTenantDestroyed.
  */
 #pragma once
@@ -16,7 +16,7 @@
 #include <memory>
 #include <string>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 class IEngineDebugTarget;
 
@@ -45,4 +45,4 @@ private:
   std::unique_ptr<CDPServer> server_;
 };
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools

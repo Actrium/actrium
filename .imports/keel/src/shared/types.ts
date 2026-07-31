@@ -1,5 +1,5 @@
 /**
- * @rill/bridge - Protocol Type System
+ * @keel/bridge - Protocol Type System
  *
  * A complete type system built on what JSI can support natively
  * - types JSI supports natively: passed straight through, zero overhead
@@ -493,7 +493,7 @@ export interface CallbackRegistry {
   getRefCount(fnId: string): number;
 
   /**
-   * The backing Map, for syncing into globalThis.__rill.callbacks
+   * The backing Map, for syncing into globalThis.__keel.callbacks
    */
   getMap(): Map<string, (...args: ReviewedUnknown[]) => ReviewedUnknown>;
 

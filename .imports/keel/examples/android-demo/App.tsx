@@ -3,7 +3,7 @@
  *
  * The Host creates an Engine, registers default RN components,
  * and loads Guest code that contains all business logic.
- * Guest renders its UI through the rill bridge; the Host
+ * Guest renders its UI through the keel bridge; the Host
  * displays it via useEngineView.
  */
 
@@ -18,8 +18,8 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Engine, useEngineView } from 'rill/host';
-import { DefaultComponents } from 'rill/host/preset';
+import { Engine, useEngineView } from 'keel/host';
+import { DefaultComponents } from 'keel/host/preset';
 
 // ---------------------------------------------------------------------------
 // Guest code — runs inside the sandbox engine
@@ -29,7 +29,7 @@ const GUEST_CODE = `
   var React = require('react');
   var useState = React.useState;
   var useCallback = React.useCallback;
-  var render = require('rill/reconciler').render;
+  var render = require('keel/reconciler').render;
 
   // h() shorthand for React.createElement
   var h = React.createElement;
@@ -139,7 +139,7 @@ const GUEST_CODE = `
 
   // ── Mount ───────────────────────────────────────────────────────────────
 
-  render(h(GuestApp), globalThis.__rill_sendBatch);
+  render(h(GuestApp), globalThis.__keel_sendBatch);
 `;
 
 // ---------------------------------------------------------------------------
@@ -181,9 +181,9 @@ function getDetectedEngines(): string[] {
 // ---------------------------------------------------------------------------
 // Android-only wrapper UI (match iOS native wrapper)
 // ---------------------------------------------------------------------------
-const RillDemoConfig = NativeModules.RillDemoConfig as { sandboxEngine: string } | undefined;
+const KeelDemoConfig = NativeModules.KeelDemoConfig as { sandboxEngine: string } | undefined;
 
-const RillPerformanceBridge = NativeModules.RillPerformanceBridge as
+const KeelPerformanceBridge = NativeModules.KeelPerformanceBridge as
   | {
       getMemoryUsage(): number;
       startFPSTracking(): boolean;
@@ -291,38 +291,38 @@ function AndroidPerformanceDashboard({ sandboxEngine }: { sandboxEngine: string 
   const [testing, setTesting] = useState(false);
 
   useEffect(() => {
-    if (!RillPerformanceBridge) return;
-    RillPerformanceBridge.startFPSTracking();
+    if (!KeelPerformanceBridge) return;
+    KeelPerformanceBridge.startFPSTracking();
     const id = setInterval(() => {
-      const memory = RillPerformanceBridge.getMemoryUsage();
-      const fps = RillPerformanceBridge.getCurrentFPS();
+      const memory = KeelPerformanceBridge.getMemoryUsage();
+      const fps = KeelPerformanceBridge.getCurrentFPS();
       setMetrics((prev) => ({ ...prev, memory, fps }));
     }, 1000);
     return () => {
       clearInterval(id);
-      RillPerformanceBridge.stopFPSTracking();
+      KeelPerformanceBridge.stopFPSTracking();
     };
   }, []);
 
   const runTests = useCallback(() => {
-    if (!RillPerformanceBridge || testing) return;
+    if (!KeelPerformanceBridge || testing) return;
     setTesting(true);
     setTimeout(() => {
       const engine = sandboxEngine || 'quickjs';
-      const rttMs = RillPerformanceBridge.measureJSIRTT(100);
+      const rttMs = KeelPerformanceBridge.measureJSIRTT(100);
       const rtt = rttMs >= 0 ? rttMs * 1000 : -1; // us
-      const opsRaw = RillPerformanceBridge.measureOpsPerSecond(500);
+      const opsRaw = KeelPerformanceBridge.measureOpsPerSecond(500);
       const throughput = opsRaw >= 0 ? opsRaw / 1000 : -1; // K/s
 
-      const fibCode = RillPerformanceBridge.readAsset('TestCode/fib.js');
-      const jsonCode = RillPerformanceBridge.readAsset('TestCode/json.js');
-      const arrayCode = RillPerformanceBridge.readAsset('TestCode/array.js');
-      const stringCode = RillPerformanceBridge.readAsset('TestCode/string.js');
+      const fibCode = KeelPerformanceBridge.readAsset('TestCode/fib.js');
+      const jsonCode = KeelPerformanceBridge.readAsset('TestCode/json.js');
+      const arrayCode = KeelPerformanceBridge.readAsset('TestCode/array.js');
+      const stringCode = KeelPerformanceBridge.readAsset('TestCode/string.js');
 
-      const fib = fibCode ? RillPerformanceBridge.evalInSandbox(fibCode, engine) : -1;
-      const json = jsonCode ? RillPerformanceBridge.evalInSandbox(jsonCode, engine) : -1;
-      const array = arrayCode ? RillPerformanceBridge.evalInSandbox(arrayCode, engine) : -1;
-      const string = stringCode ? RillPerformanceBridge.evalInSandbox(stringCode, engine) : -1;
+      const fib = fibCode ? KeelPerformanceBridge.evalInSandbox(fibCode, engine) : -1;
+      const json = jsonCode ? KeelPerformanceBridge.evalInSandbox(jsonCode, engine) : -1;
+      const array = arrayCode ? KeelPerformanceBridge.evalInSandbox(arrayCode, engine) : -1;
+      const string = stringCode ? KeelPerformanceBridge.evalInSandbox(stringCode, engine) : -1;
 
       setMetrics((prev) => ({ ...prev, rtt, throughput, fib, json, array, string }));
       setTesting(false);
@@ -341,7 +341,7 @@ function AndroidPerformanceDashboard({ sandboxEngine }: { sandboxEngine: string 
     }));
   }, []);
 
-  if (!RillPerformanceBridge) {
+  if (!KeelPerformanceBridge) {
     return (
       <View style={ui.dashboardContainer}>
         <Text style={ui.dashboardUnavailable}>Performance bridge unavailable</Text>
@@ -451,7 +451,7 @@ function assertE2E(condition: unknown, message: string): asserts condition {
 function logE2E(message: string) {
   console.log(message);
   try {
-    RillPerformanceBridge?.log?.(message);
+    KeelPerformanceBridge?.log?.(message);
   } catch {
     // console.log is the source of truth for the adb logcat runner.
   }
@@ -464,12 +464,12 @@ async function runAndroidE2EChecks(engineHint: string) {
     try {
       await fn();
       results.push({ name, status: 'passed' });
-      logE2E(`>>>RILL_ANDROID_E2E_RESULT<<< ${JSON.stringify({ name, status: 'passed' })}`);
+      logE2E(`>>>KEEL_ANDROID_E2E_RESULT<<< ${JSON.stringify({ name, status: 'passed' })}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       results.push({ name, status: 'failed', error: message });
       logE2E(
-        `>>>RILL_ANDROID_E2E_RESULT<<< ${JSON.stringify({
+        `>>>KEEL_ANDROID_E2E_RESULT<<< ${JSON.stringify({
           name,
           status: 'failed',
           error: message,
@@ -478,7 +478,7 @@ async function runAndroidE2EChecks(engineHint: string) {
     }
   };
 
-  logE2E('>>>RILL_ANDROID_E2E_START<<<');
+  logE2E('>>>KEEL_ANDROID_E2E_START<<<');
   logE2E(`Target: ${engineHint || 'auto'}`);
 
   await run('detect requested sandbox module', () => {
@@ -506,13 +506,13 @@ async function runAndroidE2EChecks(engineHint: string) {
     const ctx = runtime.createContext();
     try {
       ctx.eval(`
-        globalThis.__rillPromiseValue = 'pending';
+        globalThis.__keelPromiseValue = 'pending';
         Promise.resolve(42).then(function(value) {
-          globalThis.__rillPromiseValue = value;
+          globalThis.__keelPromiseValue = value;
         });
       `);
       assertE2E(
-        ctx.extract('__rillPromiseValue') === 42,
+        ctx.extract('__keelPromiseValue') === 42,
         'promise microtask was not drained after eval'
       );
     } finally {
@@ -622,29 +622,29 @@ async function runAndroidE2EChecks(engineHint: string) {
   });
 
   await run('native performance bridge can reach sandbox', () => {
-    assertE2E(RillPerformanceBridge, 'RillPerformanceBridge is unavailable');
-    const evalMs = RillPerformanceBridge.evalInSandbox('1 + 1', engineHint);
+    assertE2E(KeelPerformanceBridge, 'KeelPerformanceBridge is unavailable');
+    const evalMs = KeelPerformanceBridge.evalInSandbox('1 + 1', engineHint);
     assertE2E(Number.isFinite(evalMs) && evalMs >= 0, `evalInSandbox returned ${evalMs}`);
-    const rttMs = RillPerformanceBridge.measureJSIRTT(100);
+    const rttMs = KeelPerformanceBridge.measureJSIRTT(100);
     assertE2E(Number.isFinite(rttMs) && rttMs >= 0, `measureJSIRTT returned ${rttMs}`);
   });
 
   const failed = results.filter((result) => result.status === 'failed');
   logE2E(`Summary: ${results.length - failed.length} passed, ${failed.length} failed`);
   logE2E(failed.length === 0 ? 'EXIT_CODE:0' : 'EXIT_CODE:1');
-  logE2E('>>>RILL_ANDROID_E2E_END<<<');
+  logE2E('>>>KEEL_ANDROID_E2E_END<<<');
 }
 
-export default function App(props: { rillE2E?: boolean; rillSandbox?: string }) {
+export default function App(props: { keelE2E?: boolean; keelSandbox?: string }) {
   const engines = useMemo(() => getDetectedEngines(), []);
   const e2eStartedRef = useRef(false);
 
   // Determine sandbox engine (Android only)
-  // 1. Try NativeModule (BuildConfig via RillDemoConfig)
+  // 1. Try NativeModule (BuildConfig via KeelDemoConfig)
   // 2. Fallback: detect from installed JSI globals
   const sandboxEngine = useMemo(() => {
     if (Platform.OS !== 'android') return '';
-    const fromConfig = normalizeSandboxEngine(props.rillSandbox) || RillDemoConfig?.sandboxEngine;
+    const fromConfig = normalizeSandboxEngine(props.keelSandbox) || KeelDemoConfig?.sandboxEngine;
     if (fromConfig) return fromConfig;
     // Bridgeless mode may not expose legacy NativeModules —
     // detect from the JSI globals that native side already installed.
@@ -652,7 +652,7 @@ export default function App(props: { rillE2E?: boolean; rillSandbox?: string }) 
     if (global.__QuickJSSandboxJSI?.isAvailable?.()) return 'quickjs';
     if (global.__JSCSandboxJSI?.isAvailable?.()) return 'jsc';
     return '';
-  }, [props.rillSandbox]);
+  }, [props.keelSandbox]);
 
   // Create Engine and register default RN components
   const engine = useMemo(() => {
@@ -669,7 +669,7 @@ export default function App(props: { rillE2E?: boolean; rillSandbox?: string }) 
     return e;
   }, [sandboxEngine]);
 
-  // Load Guest code via rill bridge
+  // Load Guest code via keel bridge
   const { loadingState, error, content } = useEngineView({
     engine,
     source: GUEST_CODE,
@@ -685,7 +685,7 @@ export default function App(props: { rillE2E?: boolean; rillSandbox?: string }) 
   const engineLabel = engines.length > 0 ? engines.join(', ') : 'None detected';
 
   useEffect(() => {
-    if (!props.rillE2E || e2eStartedRef.current || loadingState !== 'loaded') {
+    if (!props.keelE2E || e2eStartedRef.current || loadingState !== 'loaded') {
       return;
     }
 
@@ -693,16 +693,16 @@ export default function App(props: { rillE2E?: boolean; rillSandbox?: string }) 
     runAndroidE2EChecks(sandboxEngine).catch((error) => {
       const message = error instanceof Error ? error.message : String(error);
       logE2E(
-        `>>>RILL_ANDROID_E2E_RESULT<<< ${JSON.stringify({
+        `>>>KEEL_ANDROID_E2E_RESULT<<< ${JSON.stringify({
           name: 'runner',
           status: 'failed',
           error: message,
         })}`
       );
       logE2E('EXIT_CODE:1');
-      logE2E('>>>RILL_ANDROID_E2E_END<<<');
+      logE2E('>>>KEEL_ANDROID_E2E_END<<<');
     });
-  }, [props.rillE2E, loadingState, sandboxEngine]);
+  }, [props.keelE2E, loadingState, sandboxEngine]);
 
   return (
     <SafeAreaView style={hostStyles.container}>

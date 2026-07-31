@@ -1,6 +1,6 @@
 /**
  * QuickJSProvider stub for non-native environments
- * QuickJSProvider requires native JSI bindings (via @rill/sandbox-native)
+ * QuickJSProvider requires native JSI bindings (via @keel/sandbox-native)
  */
 
 import type { JSEngineProvider } from '../types/provider';

@@ -1,13 +1,13 @@
 {
-  "$comment": "SINGLE SOURCE OF TRUTH for the guest->host op-batch BINARY wire protocol (the reconciler flush path: guest emits a SerializedOperationBatch, host decodes it into DOM/UI mutations). Every codec MUST generate from or validate against THIS file, never hand-copy from a peer implementation. Authoritative implementations locked to it (M2): the Rust encoder crates/rill-guest/src/wire_encode.rs plus the two hardened streaming decoders src/host/wasm-guest/wire-decoder.ts (TS) and native/core/src/protocol/WireDecoder.cpp (C++), all conformance-tested against this schema and the golden/matrix vectors (op-batch-wire.golden.json, op-batch-wire.matrix.json). SUPERSEDED — pending reconciliation/retirement in M2: the old TS pair src/guest/runtime/reconciler/binary-encoder.ts (encoder) and src/shared/bridge/binary-protocol.ts (BinaryDecoder); they DIVERGE from this schema on FUNCTION (they still emit fnId-only + orphan intern entries for __name/__sourceFile, whereas this schema carries name/sourceFile/sourceLine on the wire via the FUNCTION flags byte). Do not treat the old pair as authoritative. A Rust/native codec generates its opcode + value-tag constants and its limit constants from this file the same way crates/rill-guest/build.rs generates from contracts/graphics-seams.json, and locks its record shapes to it via conformance tests + the golden vectors in op-batch-wire.golden.json. This is DELIBERATELY NOT FlatBuffers (see native/core/src/protocol/rill_protocol.fbs for the rejected eval): the whole point is the cross-batch string INTERN table, which FlatBuffers cannot express. DOM type names and prop names repeat ~80% across a batch, so interning is rill's key size win. Field names below are the exact record field order on the wire; opcode/tag numbers are the exact bytes. All integers are UNSIGNED unless the type says i32. Every multi-byte scalar is LITTLE-ENDIAN.",
+  "$comment": "SINGLE SOURCE OF TRUTH for the guest->host op-batch BINARY wire protocol (the reconciler flush path: guest emits a SerializedOperationBatch, host decodes it into DOM/UI mutations). Every codec MUST generate from or validate against THIS file, never hand-copy from a peer implementation. Authoritative implementations locked to it (M2): the Rust encoder crates/keel-native-guest/src/wire_encode.rs plus the two hardened streaming decoders src/host/native-guest/wire-decoder.ts (TS) and native/core/src/protocol/WireDecoder.cpp (C++), all conformance-tested against this schema and the golden/matrix vectors (op-batch-wire.golden.json, op-batch-wire.matrix.json). SUPERSEDED — pending reconciliation/retirement in M2: the old TS pair src/guest/runtime/reconciler/binary-encoder.ts (encoder) and src/shared/bridge/binary-protocol.ts (BinaryDecoder); they DIVERGE from this schema on FUNCTION (they still emit fnId-only + orphan intern entries for __name/__sourceFile, whereas this schema carries name/sourceFile/sourceLine on the wire via the FUNCTION flags byte). Do not treat the old pair as authoritative. A Rust/native codec generates its opcode + value-tag constants and its limit constants from this file the same way crates/keel-native-guest/build.rs generates from contracts/graphics-seams.json, and locks its record shapes to it via conformance tests + the golden vectors in op-batch-wire.golden.json. This is DELIBERATELY NOT FlatBuffers (see native/core/src/protocol/keel_protocol.fbs for the rejected eval): the whole point is the cross-batch string INTERN table, which FlatBuffers cannot express. DOM type names and prop names repeat ~80% across a batch, so interning is keel's key size win. Field names below are the exact record field order on the wire; opcode/tag numbers are the exact bytes. All integers are UNSIGNED unless the type says i32. Every multi-byte scalar is LITTLE-ENDIAN.",
   "version": 1,
   "endianness": "little",
 
   "magic": {
-    "$comment": "First 4 bytes of every batch. The u32 value 0x4c4c4952 read little-endian spells the ASCII bytes 52 49 4C 4C = 'RILL'. A decoder MUST read a u32 LE and reject (fail-closed, decode nothing) if it is not exactly this value.",
-    "u32le": 1280067922,
-    "hex": "0x4c4c4952",
-    "asciiBytes": "52 49 4C 4C"
+    "$comment": "First 4 bytes of every batch. The u32 value 0x4c45454b read little-endian spells the ASCII bytes 4B 45 45 4C = 'KEEL'. A decoder MUST read a u32 LE and reject (fail-closed, decode nothing) if it is not exactly this value.",
+    "u32le": 1279608139,
+    "hex": "0x4c45454b",
+    "asciiBytes": "4B 45 45 4C"
   },
 
   "protocolVersion": {
@@ -34,8 +34,8 @@
       {
         "name": "magic",
         "type": "u32",
-        "value": 1280067922,
-        "note": "0x4c4c4952 = 'RILL'; reject on mismatch."
+        "value": 1279608139,
+        "note": "0x4c45454b = 'KEEL'; reject on mismatch."
       },
       {
         "name": "version",
@@ -378,7 +378,7 @@
   },
 
   "limits": {
-    "$comment": "FAIL-CLOSED caps. 'Fail-closed' means: on any breach the codec MUST abort the whole batch and let NOTHING partial cross the seam — an encoder throws before/without emitting a truncated buffer; a decoder throws and discards the whole batch rather than yielding a partial op list. These are hard structural bounds of the format (mostly u16 field widths), not tunable budgets. A native codec SHOULD generate these as constants (as crates/rill-guest/build.rs does for the graphics budget).",
+    "$comment": "FAIL-CLOSED caps. 'Fail-closed' means: on any breach the codec MUST abort the whole batch and let NOTHING partial cross the seam — an encoder throws before/without emitting a truncated buffer; a decoder throws and discards the whole batch rather than yielding a partial op list. These are hard structural bounds of the format (mostly u16 field widths), not tunable budgets. A native codec SHOULD generate these as constants (as crates/keel-native-guest/build.rs does for the graphics budget).",
     "maxOps": {
       "value": 65535,
       "reason": "header.opCount is u16.",

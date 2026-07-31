@@ -1,9 +1,8 @@
 # Guest Lines: JS Guest vs Native Guest
 
-Rill runs guest apps in **two distinct execution lines**. Their SDK names differ by a
-single character (`rill/guest` vs `rill-guest`) yet mean opposite things, and the old
-"rill vs wasm" shorthand is misleading. This page fixes the canonical terminology and
-records the naming wart so docs, issues, and code all say the same thing.
+Keel runs guest apps in **two distinct execution lines**. They used to be told apart by
+the old "keel vs wasm" shorthand, which is misleading — see the axis below. This page
+fixes the canonical terminology so docs, issues, and code all say the same thing.
 
 ## The real axis: interpreted-JS vs compiled-native
 
@@ -15,21 +14,21 @@ authored and executed**: interpreted JavaScript, or compiled-native code.
 | | **JS guest** | **native guest** |
 |---|---|---|
 | App written in | JavaScript / React | Rust / C / Zig → wasm |
-| Executed by | a JS engine (interpreted) | `WasmGuestHost` (direct wasm) |
-| Selected via | `EngineOptions.sandbox` — `'node-vm' \| 'jsc' \| 'hermes' \| 'quickjs' \| 'wasm-quickjs' \| 'tenant-manager'` (`src/host/engine/types.ts`) | the `WasmGuestHost` path (`src/host/wasm-guest/`) |
-| SDK | **`rill/guest`** — JS package (`package.json` exports `"./guest" → ./src/sdk`) | **`rill-guest`** — Rust crate (`crates/rill-guest`) |
+| Executed by | a JS engine (interpreted) | `NativeGuestHost` (direct wasm) |
+| Selected via | `EngineOptions.sandbox` — `'node-vm' \| 'jsc' \| 'hermes' \| 'quickjs' \| 'wasm-quickjs' \| 'tenant-manager'` (`src/host/engine/types.ts`) | the `NativeGuestHost` path (`src/host/native-guest/`) |
+| SDK | **`keel/guest`** — JS package (`package.json` exports `"./guest" → ./src/sdk`) | **`keel-native-guest`** — Rust crate (`crates/keel-native-guest`) |
 | Isolation | JS engine context (QuickJS/JSC/Hermes/Node VM); on web, WASM linear-memory | WASM linear-memory boundary |
 
-The `rill-guest` crate describes itself as *"Rust SDK for writing rill **native
+The `keel-native-guest` crate describes itself as *"Rust SDK for writing keel **native
 (non-JS)** WASM guests"* — the code already knows what it is; only the name failed to
 say so.
 
 ## Canonical terms — use these everywhere
 
 - **JS guest** — the interpreted-JavaScript line: an app written in JS/React, run by any
-  JS engine (including `wasm-quickjs`), via the **`rill/guest`** SDK.
+  JS engine (including `wasm-quickjs`), via the **`keel/guest`** SDK.
 - **native guest** — the compiled-native line: an app written in Rust (or C/Zig),
-  compiled to wasm and run directly by `WasmGuestHost`, via the **`rill-guest`** crate.
+  compiled to wasm and run directly by `NativeGuestHost`, via the **`keel-native-guest`** crate.
   Docs also call this the *native (direct-wasm)* line.
 
 When you must distinguish the two in prose, say **"JS-guest line"** and
@@ -37,23 +36,36 @@ When you must distinguish the two in prose, say **"JS-guest line"** and
 
 ## Deprecated shorthand — do not use
 
-- ❌ **"the rill line" vs "the wasm line."** "wasm" is not a distinguishing axis (both
-  lines are wasm on the web), and "rill" names the whole project, not one line.
-- ❌ **`runtime: "rill"` / `runtime: "wasm"`.** This is **not a real code field** — it is
+- ❌ **"the keel line" vs "the wasm line."** "wasm" is not a distinguishing axis (both
+  lines are wasm on the web), and "keel" names the whole project, not one line.
+- ❌ **`runtime: "keel"` / `runtime: "wasm"`.** This is **not a real code field** — it is
   conceptual only. The real selector is `EngineOptions.sandbox` (JS line) versus the
-  `WasmGuestHost` path (native line).
+  `NativeGuestHost` path (native line).
 
-## Known naming wart
+## The naming wart, and how it was resolved
 
-`rill/guest` (JS SDK) and `rill-guest` (Rust/native crate) differ by one character
-(`/` vs `-`) yet name opposite lines — error-prone to read and to write.
+The Rust crate used to be called `keel-guest`, one character away from the JS SDK's
+`keel/guest` (`-` versus `/`) while naming the opposite line — error-prone to read and
+to write. Decided 2026-07-25, shipped since:
 
-**Decided (2026-07-25):** the crate becomes **`rill-native-guest`** and the host class
-becomes **`NativeGuestHost`** (the whole `NativeGuest*` family and the
-`src/host/native-guest/` dir), with `@deprecated` back-compat aliases so downstream
-isn't broken silently. Implementation is deferred until the in-flight feature PRs that
-touch the same files land, then done as one clean rename; it is tracked in the naming
-issue. Until it ships, this glossary is the source of truth for the terms.
+| was | is now |
+|---|---|
+| `keel-guest` crate (`crates/keel-guest`) | **`keel-native-guest`** (`crates/keel-native-guest`) |
+| `keel_guest::keel_guest_main!` | `keel_native_guest::guest_main!` |
+| `WasmGuestHost` / `WasmGuestView` / `WasmGuestEngine` (+ their `*Options`) | **`NativeGuestHost`** / `NativeGuestView` / `NativeGuestEngine` |
+| `createWasmGuestEngine` | `createNativeGuestEngine` |
+| `src/host/wasm-guest/` | `src/host/native-guest/` |
+
+The five TypeScript names were exported from `keel/host`, so the old spellings remain
+exported as `@deprecated` aliases rather than breaking downstream silently. The Rust
+side took a clean break: the crate is `publish = false` and every caller is in this
+repository, so there is no downstream to alias for.
+
+Two things deliberately kept their names. The public JS export stays **`keel/guest`** —
+it is the primary line and a published entry point, and `keel/js-guest` would buy
+symmetry at the cost of churning the API everyone actually uses. The C guest SDK stays
+`sdk/c/keel_guest.h`: renaming a language-neutral header and its `keel_guest_*` symbols
+is a separate breaking change that the naming issue never asked for.
 
 See also: [Sandbox Comparison](./sandbox-comparison.md) (the JS-guest engine backends)
 and the native-guest design docs under `docs/native-guest*.zh.md`.

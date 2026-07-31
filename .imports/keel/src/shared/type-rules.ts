@@ -1,5 +1,5 @@
 /**
- * @rill/bridge - Type Rules
+ * @keel/bridge - Type Rules
  *
  * Type rule system: the encode/decode strategy for data crossing the boundary
  * Host ↔ Guest
@@ -174,8 +174,8 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
           // Error objects may reference React fiber tree (circular).
           const errMsg = err instanceof Error ? err.message : String(err);
           const errStack = err instanceof Error ? (err.stack ?? '') : '';
-          console.error(`[rill:TypeRules] Callback ${__fnId} threw sync error: ${errMsg}`);
-          if (errStack) console.error(`[rill:TypeRules] stack: ${errStack}`);
+          console.error(`[keel:TypeRules] Callback ${__fnId} threw sync error: ${errMsg}`);
+          if (errStack) console.error(`[keel:TypeRules] stack: ${errStack}`);
           // Also use provided logger if available
           if (ctx.logger?.error) {
             ctx.logger.error(`[TypeRules] Callback ${__fnId} threw sync error: ${errMsg}`);
@@ -184,7 +184,7 @@ export const DEFAULT_TYPE_RULES: TypeRule[] = [
           // Check for global debug flag (set by Host or tests)
           if (
             typeof globalThis !== 'undefined' &&
-            (globalThis as { __RILL_DEBUG__?: boolean }).__RILL_DEBUG__
+            (globalThis as { __KEEL_DEBUG__?: boolean }).__KEEL_DEBUG__
           ) {
             throw err;
           }

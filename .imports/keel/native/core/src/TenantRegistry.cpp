@@ -3,7 +3,7 @@
 #include <mutex>
 #include <stdexcept>
 
-namespace rill::tenant_manager {
+namespace keel::tenant_manager {
 
 namespace {
 
@@ -176,4 +176,4 @@ size_t TenantRegistry::activeTenants() const {
   return count;
 }
 
-}  // namespace rill::tenant_manager
+}  // namespace keel::tenant_manager

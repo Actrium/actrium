@@ -7,8 +7,8 @@
 #include "test_framework.h"
 #include "../src/devtools/CDPServer.h"
 
-using namespace rill::devtools;
-using namespace rill::test;
+using namespace keel::devtools;
+using namespace keel::test;
 
 namespace {
 
@@ -258,7 +258,7 @@ TestSuite createCDPServerTests() {
   suite.cases.push_back({"CDPServer handleHttpRequest /json/version", []() {
     CDPServer server;
     std::string response = server.handleHttpRequest("/json/version");
-    assertTrue(response.find("Rill/1.0") != std::string::npos, "has browser");
+    assertTrue(response.find("Keel/1.0") != std::string::npos, "has browser");
     assertTrue(response.find("Protocol-Version") != std::string::npos, "has version");
   }});
 

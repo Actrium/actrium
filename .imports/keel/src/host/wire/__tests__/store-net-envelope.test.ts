@@ -3,13 +3,13 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   decodeEnvelope,
-  decodeRequest as decodeRbs1Request,
+  decodeRequest as decodeKbs1Request,
   encodeEnvelope,
-  encodeResult as encodeRbs1Result,
+  encodeResult as encodeKbs1Result,
   hoistSentinels,
-  isRbs1,
+  isKbs1,
   LIMITS,
-  RBS1_MAGIC,
+  KBS1_MAGIC,
   reviveSentinels,
   StoreNetEnvelopeError,
   type StoreNetReason,
@@ -38,7 +38,7 @@ describe('store-net-envelope — framing primitives', () => {
     const seg = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
     const out = encodeEnvelope(json, [seg]);
     const view = new DataView(out.buffer);
-    expect(view.getUint32(0, true)).toBe(RBS1_MAGIC);
+    expect(view.getUint32(0, true)).toBe(KBS1_MAGIC);
     expect(view.getUint32(4, true)).toBe(json.length);
     expect(new TextDecoder().decode(out.subarray(8, 8 + json.length))).toBe(json);
     expect(view.getUint32(8 + json.length, true)).toBe(1); // segCount
@@ -58,12 +58,12 @@ describe('store-net-envelope — framing primitives', () => {
     expect(dec.segments[1].length).toBe(0);
   });
 
-  it('isRbs1 compares the full u32 magic, not byte 0', () => {
-    expect(isRbs1(new Uint8Array([0x52, 0x42, 0x53, 0x31]))).toBe(true);
-    // shares byte 0 with RCNV / RILL but differs at byte 1 — must NOT match.
-    expect(isRbs1(new Uint8Array([0x52, 0x43, 0x4e, 0x56]))).toBe(false); // RCNV
-    expect(isRbs1(new Uint8Array([0x52, 0x49, 0x4c, 0x4c]))).toBe(false); // RILL
-    expect(isRbs1(new Uint8Array([0x7b]))).toBe(false); // '{' plain JSON
+  it('isKbs1 compares the full u32 magic, not byte 0', () => {
+    expect(isKbs1(new Uint8Array([0x4b, 0x42, 0x53, 0x31]))).toBe(true);
+    // shares byte 0 with KCNV / KEEL but differs at byte 1 — must NOT match.
+    expect(isKbs1(new Uint8Array([0x4b, 0x43, 0x4e, 0x56]))).toBe(false); // KCNV
+    expect(isKbs1(new Uint8Array([0x4b, 0x45, 0x45, 0x4c]))).toBe(false); // KEEL
+    expect(isKbs1(new Uint8Array([0x7b]))).toBe(false); // '{' plain JSON
   });
 });
 
@@ -89,22 +89,22 @@ describe('store-net-envelope — hoist / revive', () => {
   });
 
   it('encodeResult returns null (plain JSON) for a segment-free result — back-compat', () => {
-    expect(encodeRbs1Result({ version: 1 })).toBeNull();
-    expect(encodeRbs1Result(null)).toBeNull();
-    expect(encodeRbs1Result({ nested: { a: [1, 2, 3], b: 'x' } })).toBeNull();
+    expect(encodeKbs1Result({ version: 1 })).toBeNull();
+    expect(encodeKbs1Result(null)).toBeNull();
+    expect(encodeKbs1Result({ nested: { a: [1, 2, 3], b: 'x' } })).toBeNull();
   });
 
-  it('encodeResult frames an RBS1 envelope for a byte-carrying result', () => {
-    const frame = encodeRbs1Result({ value: new Uint8Array([1, 2, 3]), version: 4 });
+  it('encodeResult frames a KBS1 envelope for a byte-carrying result', () => {
+    const frame = encodeKbs1Result({ value: new Uint8Array([1, 2, 3]), version: 4 });
     expect(frame).not.toBeNull();
-    const revived = decodeRbs1Request(frame as Uint8Array) as { value: Uint8Array; version: number };
+    const revived = decodeKbs1Request(frame as Uint8Array) as { value: Uint8Array; version: number };
     expect([...revived.value]).toEqual([1, 2, 3]);
     expect(revived.version).toBe(4);
   });
 
-  it('decodeRbs1Request revives {"$b":N} into Uint8Array for dispatch', () => {
+  it('decodeKbs1Request revives {"$b":N} into Uint8Array for dispatch', () => {
     const frame = encodeEnvelope('{"key":"k","value":{"$b":0}}', [new Uint8Array([9, 9])]);
-    const args = decodeRbs1Request(frame) as { key: string; value: Uint8Array };
+    const args = decodeKbs1Request(frame) as { key: string; value: Uint8Array };
     expect(args.key).toBe('k');
     expect(args.value).toBeInstanceOf(Uint8Array);
     expect([...args.value]).toEqual([9, 9]);
@@ -138,7 +138,7 @@ describe('store-net-envelope — hoist / revive', () => {
     // The always-on host reply path (resolve -> encodeResult) must return null for
     // a non-binary result even when it contains `$b`, so the caller emits the
     // byte-for-byte-same JSON.stringify bytes as before this guard existed.
-    expect(encodeRbs1Result({ $b: 7, note: 'plain' })).toBeNull();
+    expect(encodeKbs1Result({ $b: 7, note: 'plain' })).toBeNull();
   });
 });
 
@@ -211,10 +211,10 @@ describe('store-net-envelope — random round-trip property', () => {
       // Root is always an object (store/net values are structured), values random.
       const root: Record<string, unknown> = {};
       for (let i = (Math.floor(rng() * 5) as number) + 1; i > 0; i--) root[`k${i}`] = gen(rng, 4);
-      // Full host path: hoist any bytes into an RBS1 frame, else plain JSON; then
+      // Full host path: hoist any bytes into a KBS1 frame, else plain JSON; then
       // decode back. `encodeResult` returns null when there are no byte streams.
-      const frame = encodeRbs1Result(root);
-      const decoded = frame === null ? JSON.parse(JSON.stringify(root)) : decodeRbs1Request(frame);
+      const frame = encodeKbs1Result(root);
+      const decoded = frame === null ? JSON.parse(JSON.stringify(root)) : decodeKbs1Request(frame);
       expect(norm(decoded)).toEqual(norm(root));
     }
   });
@@ -257,7 +257,7 @@ describe('store-net-envelope — fail-closed', () => {
     expectReason(() => encodeEnvelope('{}', segs), 'too-many-segments');
     // decode: forge a header with an over-cap segCount.
     const buf = new Uint8Array(12);
-    new DataView(buf.buffer).setUint32(0, RBS1_MAGIC, true);
+    new DataView(buf.buffer).setUint32(0, KBS1_MAGIC, true);
     new DataView(buf.buffer).setUint32(8, LIMITS.maxSegments + 1, true);
     expectReason(() => decodeEnvelope(buf), 'too-many-segments');
   });
@@ -267,7 +267,7 @@ describe('store-net-envelope — fail-closed', () => {
     expectReason(() => encodeEnvelope('{"v":{"$b":0}}', [big]), 'segment-too-big');
     const buf = new Uint8Array(16);
     const dv = new DataView(buf.buffer);
-    dv.setUint32(0, RBS1_MAGIC, true);
+    dv.setUint32(0, KBS1_MAGIC, true);
     dv.setUint32(8, 1, true); // segCount
     dv.setUint32(12, LIMITS.maxSegmentBytes + 1, true); // segLen over cap
     expectReason(() => decodeEnvelope(buf), 'segment-too-big');
@@ -278,29 +278,29 @@ describe('store-net-envelope — fail-closed', () => {
     expectReason(() => encodeEnvelope(big, []), 'json-too-big');
     const buf = new Uint8Array(8);
     const dv = new DataView(buf.buffer);
-    dv.setUint32(0, RBS1_MAGIC, true);
+    dv.setUint32(0, KBS1_MAGIC, true);
     dv.setUint32(4, LIMITS.maxJsonBytes + 1, true);
     expectReason(() => decodeEnvelope(buf), 'json-too-big');
   });
 
   it('envelope-too-big on a whole buffer over the aggregate cap', () => {
     const buf = new Uint8Array(LIMITS.maxEnvelopeBytes + 1);
-    new DataView(buf.buffer).setUint32(0, RBS1_MAGIC, true);
+    new DataView(buf.buffer).setUint32(0, KBS1_MAGIC, true);
     expectReason(() => decodeEnvelope(buf), 'envelope-too-big');
   });
 
   it('bad-segment-ref and bad-sentinel on revive', () => {
     const outOfRange = encodeEnvelope('{"v":{"$b":5}}', [new Uint8Array([1])]);
-    expectReason(() => decodeRbs1Request(outOfRange), 'bad-segment-ref');
+    expectReason(() => decodeKbs1Request(outOfRange), 'bad-segment-ref');
     const extraKey = encodeEnvelope('{"v":{"$b":0,"x":1}}', [new Uint8Array([1])]);
-    expectReason(() => decodeRbs1Request(extraKey), 'bad-sentinel');
+    expectReason(() => decodeKbs1Request(extraKey), 'bad-sentinel');
     const nonInt = encodeEnvelope('{"v":{"$b":"0"}}', [new Uint8Array([1])]);
-    expectReason(() => decodeRbs1Request(nonInt), 'bad-sentinel');
+    expectReason(() => decodeKbs1Request(nonInt), 'bad-sentinel');
   });
 
   it('bad-json when the control plane is not JSON', () => {
     const frame = encodeEnvelope('{not json', []);
-    expectReason(() => decodeRbs1Request(frame), 'bad-json');
+    expectReason(() => decodeKbs1Request(frame), 'bad-json');
   });
 
   it('envelope-too-big on the ENCODE side when segments aggregate past the cap', () => {
@@ -381,7 +381,7 @@ describe('store-net-envelope — golden cross-language lock', () => {
       magic: { u32le: number };
       limits: Record<string, { value: number }>;
     };
-    expect(RBS1_MAGIC).toBe(schema.magic.u32le);
+    expect(KBS1_MAGIC).toBe(schema.magic.u32le);
     expect(LIMITS.maxSegments).toBe(schema.limits.maxSegments.value);
     expect(LIMITS.maxSegmentBytes).toBe(schema.limits.maxSegmentBytes.value);
     expect(LIMITS.maxEnvelopeBytes).toBe(schema.limits.maxEnvelopeBytes.value);
@@ -394,7 +394,7 @@ describe('store-net-envelope — golden cross-language lock', () => {
         // Back-compat: raw JSON, NOT an envelope.
         const raw = new TextEncoder().encode(v.controlPlane);
         expect(toHex(raw)).toBe(v.rawJsonHex);
-        expect(isRbs1(raw)).toBe(false);
+        expect(isKbs1(raw)).toBe(false);
         return;
       }
       const segs = v.segments.map(segBytes);
@@ -481,11 +481,11 @@ describe('hoistSentinels prototype-pollution hardening (outbound twin)', () => {
 });
 
 describe('hoistSentinels toJSON semantics (byte-carrying results)', () => {
-  // A byte-carrying result takes the RBS1 path, where the control plane is walked
+  // A byte-carrying result takes the KBS1 path, where the control plane is walked
   // structurally instead of via JSON.stringify. Without honoring toJSON, an object
   // whose JSON form lives entirely in toJSON (Date, URL, custom) has no own data
   // props and collapses to `{}` — losing its value. A Uint8Array sibling is what
-  // forces the RBS1 path, so it must be present to reproduce the regression.
+  // forces the KBS1 path, so it must be present to reproduce the regression.
   it('encodes a sibling Date as its ISO string, not an empty object', () => {
     const iso = '2024-01-01T00:00:00.000Z';
     const result = { when: new Date(iso), blob: new Uint8Array([1, 2, 3]) };
@@ -516,7 +516,7 @@ describe('hoistSentinels toJSON semantics (byte-carrying results)', () => {
   it('passes the real property key / array index to toJSON, matching JSON.stringify', () => {
     // A key-sensitive toJSON must see the same key JSON.stringify would pass:
     // the property name for an object member, the index string for an array
-    // element, '' only at the root. A byte sibling forces the RBS1 walk path.
+    // element, '' only at the root. A byte sibling forces the KBS1 walk path.
     const result = {
       a: { toJSON: (k: string) => k },
       arr: [{ toJSON: (k: string) => k }],
@@ -538,7 +538,7 @@ describe('hoistSentinels toJSON semantics (byte-carrying results)', () => {
   it('passes the root key "" to a top-level toJSON', () => {
     // toJSON on the ROOT fires with key '' (JSON.stringify wraps the value as
     // { '': value }). Its return value carries the byte leaf, so the whole
-    // thing still takes the RBS1 path.
+    // thing still takes the KBS1 path.
     const result = {
       toJSON: (k: string) => ({ echoedKey: k, blob: new Uint8Array([1]) }),
     };
@@ -780,9 +780,9 @@ describe('store-net-envelope — multi-segment values (#84)', () => {
     // encodeResult -> decodeRequest is the real seam both directions use.
     const value = new Uint8Array(LIMITS.maxSegmentBytes + 100);
     for (let i = 0; i < value.length; i++) value[i] = i & 0xff;
-    const frame = encodeRbs1Result({ value });
+    const frame = encodeKbs1Result({ value });
     expect(frame instanceof Uint8Array).toBe(true);
-    const back = decodeRbs1Request(frame as Uint8Array) as { value: Uint8Array };
+    const back = decodeKbs1Request(frame as Uint8Array) as { value: Uint8Array };
     expect(back.value.length).toBe(value.length);
     expect([...back.value]).toEqual([...value]);
   });
@@ -792,8 +792,8 @@ describe('store-net-envelope — multi-segment values (#84)', () => {
     // one value's segments is bounded by the frame, which maxEnvelopeBytes already
     // caps before decoding.
     const value = new Uint8Array(LIMITS.maxSegmentBytes * 2);
-    const frame = encodeRbs1Result({ value }) as Uint8Array;
-    const back = decodeRbs1Request(frame) as { value: Uint8Array };
+    const frame = encodeKbs1Result({ value }) as Uint8Array;
+    const back = decodeKbs1Request(frame) as { value: Uint8Array };
     expect(back.value.length).toBeLessThanOrEqual(frame.length);
     expect(frame.length).toBeLessThanOrEqual(LIMITS.maxEnvelopeBytes);
   });

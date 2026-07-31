@@ -55,7 +55,7 @@ export class ComponentRegistry {
    */
   register(name: string, component: ComponentType): void {
     if (this.components.has(name)) {
-      console.warn(`[rill] Component "${name}" is already registered, overwriting`);
+      console.warn(`[keel] Component "${name}" is already registered, overwriting`);
     }
     this.components.set(name, component);
   }
@@ -92,12 +92,12 @@ export class ComponentRegistry {
           ? `Available: [${registeredList}${moreCount > 0 ? `, ... +${moreCount} more` : ''}]`
           : 'No components registered!';
 
-      console.error(`[rill:ComponentRegistry] ❌ Component "${name}" not found. ${availableHint}`);
+      console.error(`[keel:ComponentRegistry] ❌ Component "${name}" not found. ${availableHint}`);
 
       // In debug mode, throw for immediate visibility
       if (this.debug) {
         throw new Error(
-          `[rill] Component "${name}" not registered. Did you forget to register it? ${availableHint}`
+          `[keel] Component "${name}" not registered. Did you forget to register it? ${availableHint}`
         );
       }
     }
@@ -157,7 +157,7 @@ export class ComponentRegistry {
    * Print diagnostic summary to console
    */
   printDiagnostics(): void {
-    console.log('[rill:ComponentRegistry] === Diagnostics ===');
+    console.log('[keel:ComponentRegistry] === Diagnostics ===');
     console.log(`Registered components (${this.size}):`, this.getRegisteredNames());
 
     if (this.accessLog.size > 0) {
@@ -181,7 +181,7 @@ export function createRegistry(options?: ComponentRegistryOptions): ComponentReg
   const debug =
     options?.debug ??
     (typeof globalThis !== 'undefined' &&
-      (globalThis as { __RILL_DEBUG__?: boolean }).__RILL_DEBUG__);
+      (globalThis as { __KEEL_DEBUG__?: boolean }).__KEEL_DEBUG__);
 
   return new ComponentRegistry({ ...options, debug });
 }

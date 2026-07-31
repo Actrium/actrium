@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Text, TouchableOpacity, View } from 'rill/guest';
+import { Text, TouchableOpacity, View } from 'keel/guest';
 import { track } from 'host:analytics';
 import { openProfile } from 'host:navigation';
 import { onThemeChanged } from 'host:theme';

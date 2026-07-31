@@ -1,7 +1,7 @@
-//! Demo native (non-JS) rill guest, written in Rust against the `rill-guest`
+//! Demo native (non-JS) keel guest, written in Rust against the `keel-native-guest`
 //! SDK. It calls `store::put("a", "b")` (`host:store.putText` on the wire) and
 //! stashes the outcome behind exports the test reads. The whole thing compiles
-//! to a `.wasm` the Phase A `WasmGuestHost` loads unchanged — proving the
+//! to a `.wasm` the Phase A `NativeGuestHost` loads unchanged — proving the
 //! ergonomic SDK path end to end.
 #![no_std]
 #![allow(static_mut_refs)]
@@ -10,13 +10,13 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-rill_guest::rill_guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 static mut OK: i32 = -1;
 static mut RESULT: Vec<u8> = Vec::new();
 
 async fn guest_main() {
-    match rill_guest::store::put("a", "b").await {
+    match keel_native_guest::store::put("a", "b").await {
         Ok(bytes) => unsafe {
             OK = 1;
             RESULT = bytes;

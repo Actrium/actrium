@@ -29,12 +29,12 @@ import { readFileSync } from 'node:fs';
 import { decodeBatchStreaming, WireDecodeError } from '../src/host/wire/wire-decoder';
 import type { SerializedOperation, SerializedValue } from '../src/shared/types';
 
-// ---- corpus.bin reader ("RFZC" magic + u32 count + [u32 len, bytes]...) ----
+// ---- corpus.bin reader ("KFZC" magic + u32 count + [u32 len, bytes]...) ----
 
 function readCorpus(path: string): Uint8Array[] {
   const buf = readFileSync(path);
   const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-  if (buf.length < 8 || buf[0] !== 0x52 || buf[1] !== 0x46 || buf[2] !== 0x5a || buf[3] !== 0x43) {
+  if (buf.length < 8 || buf[0] !== 0x4b || buf[1] !== 0x46 || buf[2] !== 0x5a || buf[3] !== 0x43) {
     throw new Error('bad corpus magic');
   }
   const count = dv.getUint32(4, true);

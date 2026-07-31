@@ -55,7 +55,7 @@ function warnNodeVmAutoDefault(): void {
   if (warnedNodeVmAutoDefault) return;
   warnedNodeVmAutoDefault = true;
   console.warn(
-    "[rill] No sandbox specified; defaulting to 'node-vm' (Node's vm module), which is NOT a " +
+    "[keel] No sandbox specified; defaulting to 'node-vm' (Node's vm module), which is NOT a " +
       'security boundary. This is fine for tests, SSR, and trusted guests. For untrusted code, ' +
       "set sandbox to 'wasm-quickjs' | 'quickjs' | 'jsc' | 'tenant-manager'. Pass " +
       "sandbox: 'node-vm' explicitly to silence this warning."

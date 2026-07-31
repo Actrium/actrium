@@ -1,5 +1,5 @@
 /**
- * `rill/guest` re-exports the sandbox-safe utilities (issue #68): `createUtf8Encoder`
+ * `keel/guest` re-exports the sandbox-safe utilities (issue #68): `createUtf8Encoder`
  * and `nowMs`, which existed internally (guest sandboxes provide only core
  * ECMAScript -- `TextEncoder` / `performance` are not guaranteed) but were not
  * reachable from the guest entry. This asserts the guest entry now exposes them
@@ -36,7 +36,7 @@ const SAMPLES = [
   `a${String.fromCharCode(0xd800)}b`, // lone high surrogate -> U+FFFD
 ];
 
-describe('rill/guest sandbox utilities (#68)', () => {
+describe('keel/guest sandbox utilities (#68)', () => {
   it('re-exports createUtf8Encoder and nowMs from the guest entry', () => {
     expect(typeof createUtf8Encoder).toBe('function');
     expect(typeof nowMs).toBe('function');

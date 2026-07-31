@@ -19,7 +19,7 @@
 #include <functional>
 #include <string>
 
-namespace rill::devtools {
+namespace keel::devtools {
 
 // A raw CDP message on the wire (a full JSON-RPC object): a request from the
 // client, or a response/event going back to it. The relay seam moves WHOLE CDP
@@ -97,4 +97,4 @@ public:
   virtual void dispatch(ConnectionId conn, const RawCdpMessage& rawCdpRequest) = 0;
 };
 
-}  // namespace rill::devtools
+}  // namespace keel::devtools

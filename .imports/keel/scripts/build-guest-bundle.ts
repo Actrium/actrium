@@ -35,7 +35,7 @@ const OUTPUT_BUNDLE_TS = path.join(OUTPUT_DIR, 'bundle.ts');
 const OUTPUT_JS = path.join(OUTPUT_DIR, 'guest-bundle.js');
 const OUTPUT_TS_MERGED = path.join(OUTPUT_DIR, 'guest-bundle.merged.ts');
 
-const TEMP_DIR = '/tmp/rill-guest-build';
+const TEMP_DIR = '/tmp/keel-guest-build';
 const TEMP_FILE = path.join(TEMP_DIR, 'guest-bundle.js');
 
 // Flags
@@ -178,8 +178,8 @@ async function build(): Promise<void> {
  *
  * This code is injected into Guest sandbox to provide:
  * - React runtime + JSX runtimes
- * - rill/sdk (Guest SDK)
- * - RillReconciler (render/unmount/etc.)
+ * - keel/sdk (Guest SDK)
+ * - KeelReconciler (render/unmount/etc.)
  *
  * Size: ${jsSizeKB} KB (${isDebug ? 'debug' : 'minified'})
  * Generated: ${new Date().toISOString()}

@@ -1,6 +1,6 @@
 # Typing `host:*` modules in a guest project
 
-A rill guest imports host capabilities as ambient modules:
+A keel guest imports host capabilities as ambient modules:
 
 ```ts
 import { getText, putText } from 'host:store'
@@ -13,7 +13,7 @@ authors get editor completion and `tsc` passes with **no** `@ts-expect-error`.
 
 ## Types are editor/typecheck-only — they never affect the build
 
-The rill CLI (`cli/build.ts`) resolves `host:*` imports itself at bundle time and
+The keel CLI (`cli/build.ts`) resolves `host:*` imports itself at bundle time and
 leaves them as the runtime capability calls. That resolution is **independent of TypeScript
 types**: a guest builds and runs correctly whether or not a `.d.ts` is present. So typing is
 purely a developer-experience concern — nothing here changes how a guest is compiled or shipped.
@@ -35,14 +35,14 @@ declare module 'host:net' {
 }
 ```
 
-A host may generate this file from its own rpc / subscription descriptors; rill only fixes
-**where the file lives** and **how the compiler finds it** (below). rill does not prescribe how
+A host may generate this file from its own rpc / subscription descriptors; keel only fixes
+**where the file lives** and **how the compiler finds it** (below). keel does not prescribe how
 the host generates it.
 
 ## Binary fields map to `Uint8Array`
 
 A capability may declare that a request or response field is a **byte stream** rather
-than JSON-encoded data (see `binary` on `rpc()` in `src/contract/index.ts`). rill fixes
+than JSON-encoded data (see `binary` on `rpc()` in `src/contract/index.ts`). keel fixes
 the one **mapping rule** the host's generator MUST honour so a declared byte field types
 as bytes on both ends:
 
@@ -71,7 +71,7 @@ declare module 'host:store' {
 
 The manifest's `binaryCapabilities` list (emitted only when non-empty) names exactly the
 capabilities carrying such a mapping, so the generator — and any publish gate — knows which
-descriptors to apply the rule to. On the wire these fields cross as raw bytes (the RBS1
+descriptors to apply the rule to. On the wire these fields cross as raw bytes (the KBS1
 envelope, or the QuickJS `$b64` sidecar), never as a JSON number-array; the type simply
 reflects that. See [`../../contracts/store-net-bytes.CONFORMANCE.md`](../../contracts/store-net-bytes.CONFORMANCE.md).
 
@@ -82,7 +82,7 @@ the emitted event type.
 ## Subscriptions are reachable only from a JS guest
 
 Subscribing means handing the host a **handler function**. A native (wasm) guest's only route
-into a host module is `rill_host_call`, which carries **bytes**, and a decoded byte payload is
+into a host module is `keel_host_call`, which carries **bytes**, and a decoded byte payload is
 never a function — so a `subscription` cannot be expressed from there at all, let alone
 dispatched. This is structural, not a missing feature: `guestKindsFor(descriptor)` derives it
 from the mechanism rather than from anything the contract author declares.
@@ -93,7 +93,7 @@ a publish gate for a native-guest bundle should treat a use of one as an error �
 failure is otherwise a throw the guest author cannot act on.
 
 The host→guest push channel for a native guest is the **named event channel**
-(`WasmGuestView.sendEvent` → the guest's `rill_on_event`), whose payload takes the same RBS1
+(`NativeGuestView.sendEvent` → the guest's `keel_on_event`), whose payload takes the same KBS1
 fork as a call return: JSON by default, raw byte segments when it carries a `Uint8Array`. A host
 that today relays a subscription onto a named event keeps doing exactly that; what changed is
 that the relay is no longer limited to text.
@@ -110,16 +110,16 @@ that the relay is no longer limited to text.
 Because it is an **ambient** declaration, no runtime import of the file is needed — its presence
 in the compilation is enough for `import ... from 'host:store'` to type-check.
 
-## Stable coupling to `rill/guest`
+## Stable coupling to `keel/guest`
 
-A generated `host-modules.d.ts` may reference rill's own guest types, e.g.:
+A generated `host-modules.d.ts` may reference keel's own guest types, e.g.:
 
 ```ts
-import type { RillKeyEvent } from 'rill/guest'
+import type { KeelKeyEvent } from 'keel/guest'
 ```
 
-rill keeps the **`rill/guest` type export surface stable** so host-generated declarations can
-depend on it without breakage. Treat `rill/guest` as the single stable source of shared guest
+keel keeps the **`keel/guest` type export surface stable** so host-generated declarations can
+depend on it without breakage. Treat `keel/guest` as the single stable source of shared guest
 types referenced from `host:*` declarations.
 
 ## Done when

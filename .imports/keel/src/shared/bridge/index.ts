@@ -1,5 +1,5 @@
 /**
- * @rill/shared/bridge - Communication Layer
+ * @keel/shared/bridge - Communication Layer
  *
  * Host/Guest
  */

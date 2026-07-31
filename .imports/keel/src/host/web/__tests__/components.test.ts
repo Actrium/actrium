@@ -1,7 +1,7 @@
 /**
  * Thin-DOM web preset component tests (issue #19, L2).
  *
- * Uses react-test-renderer (no real DOM needed) to assert each rill primitive maps to the
+ * Uses react-test-renderer (no real DOM needed) to assert each keel primitive maps to the
  * right host element with the expected props/handlers — View→div (flex column), Text→span,
  * Pressable/Button→button (onPress→onClick), TextInput→input/textarea (onChange→onChangeText),
  * ScrollView→overflow div.
@@ -12,7 +12,7 @@ import { beforeAll, describe, expect, it, mock } from 'bun:test';
 // biome-ignore lint/suspicious/noExplicitAny: react-test-renderer JSON node is loosely typed
 type Json = any;
 
-describe('rill/host/web thin-DOM components', () => {
+describe('keel/host/web thin-DOM components', () => {
   let React: typeof import('react');
   let TestRenderer: typeof import('react-test-renderer');
   let act: typeof import('react-test-renderer').act;

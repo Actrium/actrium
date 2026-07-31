@@ -10,9 +10,9 @@
 
 ## 组件概述
 
-### RillTenantManager (`native/core/src/RillTenantManager.h`)
+### KeelTenantManager (`native/core/src/KeelTenantManager.h`)
 
-通过 `jsi::HostObject` 作为 `globalThis.__RillTenantManager` 安装的单例。所有方法都通过 JSI `get()` 接口公开,可从 TypeScript 调用。
+通过 `jsi::HostObject` 作为 `globalThis.__KeelTenantManager` 安装的单例。所有方法都通过 JSI `get()` 接口公开,可从 TypeScript 调用。
 
 主要职责:
 - 租户生命周期(创建、加载、暂停、恢复、销毁)
@@ -123,21 +123,21 @@ Host VM Thread                    Tenant Thread
 在 TurboModule 初始化期间,tenant manager 安装在 host 运行时中:
 
 ```cpp
-RillTenantManager::install(hostRuntime, callInvoker);
+KeelTenantManager::install(hostRuntime, callInvoker);
 ```
 
-这创建了一个单例 `RillTenantManager` 并将其设置为 `globalThis.__RillTenantManager`。所有方法都通过 `jsi::HostObject::get()` 接口公开:
+这创建了一个单例 `KeelTenantManager` 并将其设置为 `globalThis.__KeelTenantManager`。所有方法都通过 `jsi::HostObject::get()` 接口公开:
 
 ```
-__RillTenantManager.createTenant(config)
-__RillTenantManager.loadBundle(tenantId, code)
-__RillTenantManager.destroyTenant(tenantId)
-__RillTenantManager.sendEvent(tenantId, name, payload)
-__RillTenantManager.evalInTenant(tenantId, code)
-__RillTenantManager.setTenantGlobal(tenantId, name, value)
-__RillTenantManager.getTenantGlobal(tenantId, name)
-__RillTenantManager.setHostCallbacks(callbacks)
-__RillTenantManager.getMetrics()
+__KeelTenantManager.createTenant(config)
+__KeelTenantManager.loadBundle(tenantId, code)
+__KeelTenantManager.destroyTenant(tenantId)
+__KeelTenantManager.sendEvent(tenantId, name, payload)
+__KeelTenantManager.evalInTenant(tenantId, code)
+__KeelTenantManager.setTenantGlobal(tenantId, name, value)
+__KeelTenantManager.getTenantGlobal(tenantId, name)
+__KeelTenantManager.setHostCallbacks(callbacks)
+__KeelTenantManager.getMetrics()
 // ... EventBus 方法、定时器方法等
 ```
 
@@ -151,13 +151,13 @@ Host 回调(`onBatch`、`onEvent`、`onError`、`onLog`、`onTimer`)是通过 `s
 
 ```typescript
 static isAvailable(): boolean {
-  return typeof globalThis.__RillTenantManager !== 'undefined';
+  return typeof globalThis.__KeelTenantManager !== 'undefined';
 }
 ```
 
 ### Engine 集成
 
-当 `globalThis.__RillTenantManager` 可用时,`Engine` 会自动委托给它。内部适配器将原始 JSI 接口包装到 `JSEngineProvider` / `JSEngineRuntime` / `SandboxScope` 实现中:
+当 `globalThis.__KeelTenantManager` 可用时,`Engine` 会自动委托给它。内部适配器将原始 JSI 接口包装到 `JSEngineProvider` / `JSEngineRuntime` / `SandboxScope` 实现中:
 
 - `createRuntime()` -- 调用 `createTenant(config)`,返回包装器
 - `context.eval(code)` -- 调用 `evalInTenant(tenantId, code)`

@@ -2,7 +2,7 @@
 # Build + run the QuickJS engine debug-hook e2e (test_qjs_debug_e2e.cpp).
 #
 # QuickJS is portable C, so this builds locally with clang — no external SDK.
-# The vendored engine is compiled with -DRILL_QJS_DEBUG to enable the (otherwise
+# The vendored engine is compiled with -DKEEL_QJS_DEBUG to enable the (otherwise
 # compiled-out) interpreter debug hook.
 set -euo pipefail
 
@@ -14,8 +14,8 @@ trap 'rm -rf "$TMP"' EXIT
 
 CC="${CC:-clang}"
 CXX="${CXX:-clang++}"
-CFLAGS="-DRILL_QJS_DEBUG -D_GNU_SOURCE -O0 -g -funsigned-char -I $VENDOR"
-CXXFLAGS="-std=c++17 -DRILL_QJS_DEBUG -g -I $VENDOR -I $SRC"
+CFLAGS="-DKEEL_QJS_DEBUG -D_GNU_SOURCE -O0 -g -funsigned-char -I $VENDOR"
+CXXFLAGS="-std=c++17 -DKEEL_QJS_DEBUG -g -I $VENDOR -I $SRC"
 
 # Vendored engine (C). Bignum is optional and unused here, so libbf is skipped.
 for c in quickjs libregexp libunicode cutils; do

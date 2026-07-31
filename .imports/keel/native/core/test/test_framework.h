@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 
-namespace rill::test {
+namespace keel::test {
 
 struct TestCase {
   std::string name;
@@ -143,4 +143,4 @@ inline void assertLessOrEqual(double actual, double threshold,
   }
 }
 
-} // namespace rill::test
+} // namespace keel::test

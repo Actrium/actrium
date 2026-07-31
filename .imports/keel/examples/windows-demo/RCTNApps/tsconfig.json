@@ -15,8 +15,8 @@
       "react": ["../node_modules/@types/react/index.d.ts"],
       "react-native": ["../node_modules/@types/react-native/index.d.ts"],
       "react/jsx-runtime": ["../node_modules/@types/react/jsx-runtime.d.ts"],
-      "rill": ["../node_modules/rill/src/host/index.ts"],
-      "rill/*": ["../node_modules/rill/src/host/*"]
+      "keel": ["../node_modules/keel/src/host/index.ts"],
+      "keel/*": ["../node_modules/keel/src/host/*"]
     }
   },
   "include": ["index.tsx", "src"],

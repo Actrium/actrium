@@ -11,7 +11,7 @@ import { NativeJSIProvider, type NativeJSIProviderOptions } from './native-jsi-p
 export type QuickJSProviderOptions = NativeJSIProviderOptions;
 
 /**
- * QuickJSProvider - Wraps native QuickJS JSI module for rill Engine
+ * QuickJSProvider - Wraps native QuickJS JSI module for keel Engine
  */
 export class QuickJSProvider extends NativeJSIProvider {
   constructor(options?: QuickJSProviderOptions) {

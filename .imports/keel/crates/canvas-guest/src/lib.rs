@@ -1,8 +1,8 @@
-//! Demo native (non-JS) rill guest that draws a recognizable 2D scene — a house
-//! under a sun — with the `rill-guest` `canvas` SDK. It builds a `DrawList` and
+//! Demo native (non-JS) keel guest that draws a recognizable 2D scene — a house
+//! under a sun — with the `keel-native-guest` `canvas` SDK. It builds a `DrawList` and
 //! hands it to `host:canvas.draw`, which the host validates op-by-op and replays
 //! onto the real `<Canvas>` 2D context (stage ①). Compiles to a `.wasm` the
-//! `WasmGuestHost` loads unchanged — the first native guest to produce graphics.
+//! `NativeGuestHost` loads unchanged — the first native guest to produce graphics.
 //!
 //! It also constructs a `Surface` (stage ② framebuffer path) to exercise that
 //! SDK shape at compile time; it does not `present().await` because the host side
@@ -11,9 +11,9 @@
 
 extern crate alloc;
 
-use rill_guest::canvas::{self, DrawList, Surface};
+use keel_native_guest::canvas::{self, DrawList, Surface};
 
-rill_guest::rill_guest_main!(guest_main);
+keel_native_guest::guest_main!(guest_main);
 
 /// The `<Canvas canvasId="scene" />` the host app mounts for this guest.
 const CANVAS_ID: &str = "scene";
@@ -59,7 +59,7 @@ async fn guest_main() {
 
     // Label.
     dl.set_fill_style("#ffffff");
-    dl.fill_text("rill", 12.0, 30.0);
+    dl.fill_text("keel", 12.0, 30.0);
 
     let _ = canvas::draw(CANVAS_ID, &dl).await;
 

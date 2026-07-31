@@ -9,9 +9,9 @@
 #include <string>
 #include <unordered_map>
 
-#ifdef RILL_QJS_DEBUG
-#include "devtools/CdpDebuggable.h"  // rill::devtools::ICdpDebuggable (capability seam)
-namespace rill { namespace qjs_debug { class QuickJSDebugCore; } }
+#ifdef KEEL_QJS_DEBUG
+#include "devtools/CdpDebuggable.h"  // keel::devtools::ICdpDebuggable (capability seam)
+namespace keel { namespace qjs_debug { class QuickJSDebugCore; } }
 #endif
 
 namespace quickjs_sandbox {
@@ -101,9 +101,9 @@ private:
  * - dispose(): void
  */
 class QuickJSSandboxContext : public jsi::HostObject
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
     ,
-    public rill::devtools::ICdpDebuggable
+    public keel::devtools::ICdpDebuggable
 #endif
 {
 public:
@@ -125,12 +125,12 @@ public:
 
   bool isDisposed() const { return disposed_; }
 
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
   // ICdpDebuggable: build a per-tenant CDP target over this context's debug core
   // (the adapter path — QuickJS has no native CDP agent). callInvoker is unused:
   // QuickJS pauses by blocking its own runtime thread and resumes via the core's
   // condition variable from the CDP thread, so no runtime-task pump is needed.
-  std::shared_ptr<rill::devtools::IEngineDebugTarget> createCdpDebugTarget(
+  std::shared_ptr<keel::devtools::IEngineDebugTarget> createCdpDebugTarget(
       std::shared_ptr<facebook::react::CallInvoker> callInvoker,
       std::int32_t executionContextId) override;
 #endif
@@ -138,10 +138,10 @@ public:
 private:
   JSContext *qjsContext_;
   JSRuntime *qjsRuntime_; // Shared runtime (owned by QuickJSSandboxRuntime)
-#ifdef RILL_QJS_DEBUG
+#ifdef KEEL_QJS_DEBUG
   // Per-context engine debug controller (registers the interpreter hook). Reset
   // before the context is torn down. Dev-only.
-  std::unique_ptr<rill::qjs_debug::QuickJSDebugCore> debugCore_;
+  std::unique_ptr<keel::qjs_debug::QuickJSDebugCore> debugCore_;
 #endif
   jsi::Runtime *hostRuntime_;
   // Wall-clock execution budget per top-level eval; <= 0 means unlimited.

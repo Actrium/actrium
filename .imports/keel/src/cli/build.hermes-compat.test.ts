@@ -70,7 +70,7 @@ describe('Hermes compat (async arrow elimination)', () => {
   beforeEach(() => {
     logSpy = spyOn(console, 'log').mockImplementation(() => {});
     errorSpy = spyOn(console, 'error').mockImplementation(() => {});
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rill-hermes-test-'));
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'keel-hermes-test-'));
     originalCwd = process.cwd();
     process.chdir(tempDir);
 
@@ -86,7 +86,7 @@ describe('Hermes compat (async arrow elimination)', () => {
     fs.writeFileSync(
       path.join(srcDir, 'guest.tsx'),
       `
-      import { View, Text } from 'rill/guest';
+      import { View, Text } from 'keel/guest';
       import { loadRemote } from './loader.mjs';
 
       const fetchTitle = async () => {

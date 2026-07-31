@@ -10,9 +10,9 @@
     "types": ["react"],
     "baseUrl": ".",
     "paths": {
-      "rill/guest": ["../../src/sdk/index.ts"],
-      "rill/contract": ["../../src/contract/index.ts"],
-      "rill/*": ["../../src/*"]
+      "keel/guest": ["../../src/sdk/index.ts"],
+      "keel/contract": ["../../src/contract/index.ts"],
+      "keel/*": ["../../src/*"]
     }
   },
   // KNOWN COVERAGE BOUNDARY — a green `check:guest-types` does NOT mean the whole
@@ -23,7 +23,7 @@
   //
   // `src/type-surface.tsx` is type-checked but never bundled: it holds the cases
   // that used to fail (list element types #79, `ref` on any component #80) plus
-  // the shapes `rill/guest`'s own JSDoc claims compile. `src/index.tsx` stays the
+  // the shapes `keel/guest`'s own JSDoc claims compile. `src/index.tsx` stays the
   // runnable example guest that `verify.ts` executes.
   "include": ["src/index.tsx", "src/type-surface.tsx"]
 }

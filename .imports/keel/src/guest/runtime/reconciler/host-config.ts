@@ -26,7 +26,7 @@ import { isDevToolsEnabled, type RenderTiming, sendDevToolsMessage } from './dev
 import { serializeProps } from './guest-encoder';
 import { OperationCollector } from './operation-collector';
 import { nowMs } from './sandbox-compat';
-import type { ExtendedHostConfig, PublicInstance, RillReconciler, RootContainer } from './types';
+import type { ExtendedHostConfig, KeelReconciler, PublicInstance, RootContainer } from './types';
 import { getRemovedProps } from './types';
 
 // ============================================
@@ -85,7 +85,7 @@ export function createReconciler(
   sendToHost: SendToHost,
   callbackRegistry: CallbackRegistry
 ): {
-  reconciler: RillReconciler;
+  reconciler: KeelReconciler;
   callbackRegistry: CallbackRegistry;
   collector: OperationCollector;
 } {
@@ -99,11 +99,11 @@ export function createReconciler(
   let renderTimings: RenderTiming[] = [];
   let commitStartTime = 0;
 
-  // Sync callbackRegistry with globalThis.__rill.callbacks
-  // This allows Engine.handleCallFunction() to find callbacks via __rill.invokeCallback()
+  // Sync callbackRegistry with globalThis.__keel.callbacks
+  // This allows Engine.handleCallFunction() to find callbacks via __keel.invokeCallback()
   const _g = globalThis as unknown as SandboxGlobals;
-  _g.__rill = _g.__rill || {};
-  _g.__rill.callbacks = callbackRegistry.getMap();
+  _g.__keel = _g.__keel || {};
+  _g.__keel.callbacks = callbackRegistry.getMap();
 
   const hostConfig: ExtendedHostConfig = {
     // ============ Core Methods ============
@@ -355,7 +355,7 @@ export function createReconciler(
       // Send DevTools timing data
       if (isDevToolsEnabled() && renderTimings.length > 0) {
         const commitDuration = nowMs() - commitStartTime;
-        sendDevToolsMessage('RILL_RENDER_TIMINGS', {
+        sendDevToolsMessage('KEEL_RENDER_TIMINGS', {
           timings: renderTimings,
           commitDuration,
           totalNodes: renderTimings.length,
