@@ -272,6 +272,21 @@ jobs:
           [[ -n "$PREVIOUS_TAG" ]] && args+=(--notes-start-tag "$PREVIOUS_TAG")
           gh release create "$TAG" "${args[@]}"
 
+      - name: Prepend system-requirements header to release notes
+        if: ${{ needs.context.outputs.dry_run != 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          HEADER=.github/release-notes-header.md
+          if [ ! -f "$HEADER" ]; then
+            echo "no $HEADER on this branch; skipping"
+            exit 0
+          fi
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json body --jq .body > /tmp/generated-body.md
+          cat "$HEADER" /tmp/generated-body.md > /tmp/final-notes.md
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --notes-file /tmp/final-notes.md
+
   # ── Publish Rust ──────────────────────────────────────────────────────
   publish-rust:
     name: Publish Rust crates
