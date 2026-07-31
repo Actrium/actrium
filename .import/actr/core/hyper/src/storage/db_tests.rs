@@ -1,9 +1,11 @@
 use super::*;
+use actr_platform_traits::StorageNamespace;
 use tempfile::TempDir;
 
 async fn open_test_store(dir: &TempDir) -> ActorStore {
-    let db_path = dir.path().join("test.db");
-    ActorStore::open(&db_path).await.unwrap()
+    let root = SecureStorageRoot::new(dir.path()).await.unwrap();
+    let ns = StorageNamespace::actr_v1([0x01; 32]);
+    ActorStore::open_under(&root, &ns).await.unwrap()
 }
 
 #[tokio::test]
@@ -116,18 +118,19 @@ async fn kv_batch_atomic() {
 #[tokio::test]
 async fn data_persists_across_reopen() {
     let dir = TempDir::new().unwrap();
-    let db_path = dir.path().join("persist.db");
+    let root = SecureStorageRoot::new(dir.path()).await.unwrap();
+    let ns = StorageNamespace::actr_v1([0x02; 32]);
 
     {
-        let store = ActorStore::open(&db_path).await.unwrap();
+        let store = ActorStore::open_under(&root, &ns).await.unwrap();
         store
             .kv_set("persistent_key", b"persistent_value")
             .await
             .unwrap();
     }
 
-    // reopen the same file
-    let store2 = ActorStore::open(&db_path).await.unwrap();
+    // reopen the same namespace
+    let store2 = ActorStore::open_under(&root, &ns).await.unwrap();
     let val = store2.kv_get("persistent_key").await.unwrap();
     assert_eq!(
         val,

@@ -40,7 +40,7 @@ pub struct MethodName(String);
 /// - End with an alphanumeric character
 /// - Contain only alphanumeric characters, hyphens, underscores, and dots
 /// - Be non-empty
-/// - Not exceed 32 characters in length
+/// - Not exceed 32 bytes in length (UTF-8; this is a byte limit, not a char limit)
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct Name(String);
 
@@ -49,7 +49,7 @@ pub enum NameError {
     #[error("Name is empty")]
     Empty,
 
-    #[error("Name exceeds 32 characters, length: {0}")]
+    #[error("Name exceeds 32 bytes (UTF-8), length: {0}")]
     TooLong(usize),
 
     #[error("Name must start with an alphabetic character, found: {0}")]

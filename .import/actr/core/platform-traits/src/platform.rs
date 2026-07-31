@@ -6,7 +6,7 @@ use async_trait::async_trait;
 
 use crate::PlatformError;
 use crate::crypto::CryptoProvider;
-use crate::storage::KvStore;
+use crate::storage::{KvStore, StorageNamespace};
 
 /// Composite platform provider — the three OS-level services a Hyper needs.
 ///
@@ -32,9 +32,14 @@ pub trait PlatformProvider: Send + Sync {
 
     /// Open a namespaced KV store for per-actor credentials.
     ///
-    /// The namespace is supplied by the caller; the provider decides how to
-    /// combine it with its own root to produce a real storage location.
-    async fn secret_store(&self, namespace: &str) -> Result<Arc<dyn KvStore>, PlatformError>;
+    /// The namespace is an opaque, versioned [`StorageNamespace`] — **not** a
+    /// filesystem path. The provider maps it onto its own root to produce a real
+    /// storage location (e.g. a subdirectory on native, a keychain service on
+    /// Apple). Implementations must not assume it is an absolute path.
+    async fn secret_store(
+        &self,
+        namespace: &StorageNamespace,
+    ) -> Result<Arc<dyn KvStore>, PlatformError>;
 
     /// Cryptographic primitives (signature verification, hashing).
     fn crypto(&self) -> Arc<dyn CryptoProvider>;

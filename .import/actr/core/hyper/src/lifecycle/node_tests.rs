@@ -1217,6 +1217,7 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
         trust: vec![],
         package_path: None,
         web: None,
+        storage_root: None,
     }
 }
 

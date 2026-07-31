@@ -36,3 +36,4 @@ tracing.workspace = true
 rand.workspace = true
 tempfile.workspace = true
 tokio = { workspace = true }
+hex.workspace = true

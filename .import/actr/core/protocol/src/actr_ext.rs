@@ -14,6 +14,12 @@ use crate::{ActrId, ActrType, Realm, name::Name};
 use std::str::FromStr;
 use thiserror::Error;
 
+/// Maximum byte length of the `version` field in an [`ActrType`].
+///
+/// `version` must be 1–=`MAX_ACTR_VERSION_BYTES` UTF-8 bytes; see
+/// [`ActrType::validate`].
+pub const MAX_ACTR_VERSION_BYTES: usize = 64;
+
 /// Errors for actor identity parsing and formatting.
 ///
 /// Covers only syntactic/structural validity of `ActrId` and `ActrType` strings.
@@ -45,6 +51,22 @@ impl ActrType {
         format!("{}:{}:{}", self.manufacturer, self.name, self.version)
     }
 
+    /// Validate the identity fields against the protocol naming rules.
+    ///
+    /// `manufacturer`/`name` reuse [`Name`]; `version` uses its own 1–64 byte
+    /// ASCII allowlist (see [`validate_version`]). Because [`ActrType`] is a
+    /// protobuf type with public fields, callers can construct invalid values
+    /// without going through a parser — so every security-sensitive entry point
+    /// (package verification, registry lookup, AIS registration, storage
+    /// namespace derivation) must call `validate()` before trusting the identity.
+    pub fn validate(&self) -> Result<(), ActrIdError> {
+        Name::new(self.manufacturer.clone())
+            .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid manufacturer: {e}")))?;
+        Name::new(self.name.clone())
+            .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid type name: {e}")))?;
+        validate_version(&self.version)
+    }
+
     /// Parse from string representation.
     ///
     /// Accepts:
@@ -65,22 +87,52 @@ impl ActrType {
             _ => return Err(ActrIdError::InvalidTypeFormat(s.to_string())),
         };
 
-        Name::new(manufacturer.to_string())
-            .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid manufacturer: {e}")))?;
-        Name::new(name.to_string())
-            .map_err(|e| ActrIdError::InvalidComponent(format!("Invalid type name: {e}")))?;
-        if version.is_empty() {
-            return Err(ActrIdError::InvalidComponent(
-                "Invalid version: version cannot be empty".to_string(),
-            ));
-        }
-
-        Ok(ActrType {
+        let actr_type = ActrType {
             manufacturer: manufacturer.to_string(),
             name: name.to_string(),
             version: version.to_string(),
-        })
+        };
+        actr_type.validate()?;
+        Ok(actr_type)
     }
+}
+
+/// Validate the `version` field of an [`ActrType`].
+///
+/// Rules: 1–=[`MAX_ACTR_VERSION_BYTES`] UTF-8 bytes; first and last characters
+/// must be ASCII alphanumeric; interior characters are limited to ASCII
+/// alphanumeric plus `.` `_` `-` `+`. This forbids the protocol separators
+/// `:` `@` `/` as well as `\`, whitespace, and control characters, so a valid
+/// version can never corrupt the `manufacturer:name:version` or
+/// `<serial>@<realm>/<type>` string forms.
+fn validate_version(version: &str) -> Result<(), ActrIdError> {
+    if version.is_empty() {
+        return Err(ActrIdError::InvalidComponent(
+            "Invalid version: version cannot be empty".to_string(),
+        ));
+    }
+    if version.len() > MAX_ACTR_VERSION_BYTES {
+        return Err(ActrIdError::InvalidComponent(format!(
+            "Invalid version: exceeds {MAX_ACTR_VERSION_BYTES} UTF-8 bytes"
+        )));
+    }
+
+    let first = version.chars().next().expect("checked non-empty");
+    let last = version.chars().next_back().expect("checked non-empty");
+    if !first.is_ascii_alphanumeric() || !last.is_ascii_alphanumeric() {
+        return Err(ActrIdError::InvalidComponent(
+            "Invalid version: must start and end with an ASCII alphanumeric character".to_string(),
+        ));
+    }
+    if let Some(ch) = version
+        .chars()
+        .find(|ch| !ch.is_ascii_alphanumeric() && !matches!(ch, '.' | '_' | '-' | '+'))
+    {
+        return Err(ActrIdError::InvalidComponent(format!(
+            "Invalid version character: {ch:?}"
+        )));
+    }
+    Ok(())
 }
 
 impl std::fmt::Display for ActrType {
@@ -242,5 +294,66 @@ mod tests {
             ActrType::from_string_repr("acme:echo:"),
             Err(ActrIdError::InvalidComponent(_))
         ));
+    }
+
+    fn ty(manufacturer: &str, name: &str, version: &str) -> ActrType {
+        ActrType {
+            manufacturer: manufacturer.to_string(),
+            name: name.to_string(),
+            version: version.to_string(),
+        }
+    }
+
+    #[test]
+    fn test_validate_accepts_valid_identities() {
+        assert!(ty("acme", "echo-service", "1.0.0").validate().is_ok());
+        assert!(ty("acme", "x..y", "1.0.0").validate().is_ok()); // internal dots allowed by Name
+        assert!(ty("Acme_Corp", "Echo", "1.0.0-rc.1").validate().is_ok());
+        assert!(ty("acme", "echo", "1.0.0+build").validate().is_ok()); // semver build metadata
+        assert!(ty("acme", "echo", "v1").validate().is_ok());
+    }
+
+    #[test]
+    fn test_validate_rejects_bad_manufacturer_name() {
+        assert!(ty("", "echo", "1.0.0").validate().is_err());
+        assert!(ty("1acme", "echo", "1.0.0").validate().is_err()); // digit start (Name)
+        assert!(ty("acme", "echo!", "1.0.0").validate().is_err());
+        // `Name` limit is 32 UTF-8 bytes
+        assert!(ty(&"a".repeat(33), "echo", "1.0.0").validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_rejects_bad_version() {
+        assert!(ty("acme", "echo", "").validate().is_err()); // empty
+        assert!(ty("acme", "echo", &"1".repeat(65)).validate().is_err()); // >64 bytes
+        // protocol separators, backslash, whitespace, non-ASCII
+        for v in ["1:0", "1/0", "1@0", "1\\0", "1 0", "1.0 ", " 1.0", "café"] {
+            assert!(
+                ty("acme", "echo", v).validate().is_err(),
+                "version {v:?} must be rejected"
+            );
+        }
+        // first/last must be ASCII alphanumeric
+        assert!(ty("acme", "echo", "-1.0").validate().is_err());
+        assert!(ty("acme", "echo", "1.0-").validate().is_err());
+        assert!(ty("acme", "echo", ".1.0").validate().is_err());
+    }
+
+    #[test]
+    fn test_validate_roundtrip_consistency() {
+        for (m, n, v) in [
+            ("acme", "echo-service", "1.0.0"),
+            ("acme", "x..y", "2.0.0-rc.1"),
+            ("Acme_Corp", "Echo", "1.0.0+build"),
+        ] {
+            let t = ty(m, n, v);
+            t.validate().expect("identity should validate");
+            let s = t.to_string_repr();
+            let parsed = ActrType::from_string_repr(&s)
+                .unwrap_or_else(|e| panic!("round-trip failed for {s}: {e}"));
+            assert_eq!(parsed.manufacturer, t.manufacturer);
+            assert_eq!(parsed.name, t.name);
+            assert_eq!(parsed.version, t.version);
+        }
     }
 }

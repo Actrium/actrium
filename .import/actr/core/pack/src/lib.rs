@@ -22,6 +22,7 @@
 //! ```
 
 pub mod error;
+pub mod identity;
 pub mod load;
 pub mod manifest;
 pub mod pack;
@@ -30,6 +31,7 @@ pub mod verify;
 mod util;
 
 pub use error::PackError;
+pub use identity::{StorageNamespaceId, ValidatedActorIdentity};
 pub use load::{
     load_binary, load_binary_bounded, read_glue_js, read_glue_js_bounded, read_lock_file,
     read_lock_file_bounded, read_manifest, read_manifest_raw, read_proto_files,

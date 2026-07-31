@@ -21,6 +21,7 @@ base64.workspace = true
 hex = "0.4"
 thiserror.workspace = true
 tracing.workspace = true
+actr-protocol.workspace = true
 
 [dev-dependencies]
 rand.workspace = true

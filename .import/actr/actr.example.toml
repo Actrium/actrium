@@ -24,7 +24,13 @@ endpoint = "http://localhost:8081/ais"
 
 # Hyper-layer configuration (host runtime infrastructure). All fields
 # are optional; defaults resolve to ~/.actr/hyper for `data_dir` and
-# `{data_dir}/{actr_type}` for `storage_path_template`.
+# `{data_dir}/storage` for `storage_root`.
+#
+# Actor storage uses a fixed hashed layout under `storage_root`:
+#   {storage_root}/actors/v1/<sha256-hex>/store.sqlite3
+# The actor identity never appears as a path component (CWE-22 / CWE-73),
+# so there is no configurable per-actor path template. Set `storage_root`
+# to relocate all actor storage (e.g. to an external disk).
 #
 # `[hyper.trust]` is an alternative, singular form of the top-level
 # `[[trust]]` array. `Node::from_config_file` prefers `[hyper.trust]`
@@ -42,7 +48,7 @@ endpoint = "http://localhost:8081/ais"
 #
 # [hyper]
 # data_dir = "~/.actr/hyper"
-# storage_path_template = "{data_dir}/{actr_type}"
+# storage_root = "~/.actr/hyper/storage"
 
 [discovery]
 visible = true

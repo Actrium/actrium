@@ -5,38 +5,6 @@ fn stub_config(data_dir: &str) -> HyperConfig {
     HyperConfig::new(data_dir, Arc::new(StaticTrust::dev_only()))
 }
 
-#[test]
-fn resolve_basic_template() {
-    let config = stub_config("/var/lib/actr");
-    let resolver = NamespaceResolver::new(&config, "abc123")
-        .unwrap()
-        .with_actor_type("acme", "Sensor", "1.0.0");
-
-    let path = resolver.resolve("{data_dir}/{actr_type}").unwrap();
-    assert_eq!(path, PathBuf::from("/var/lib/actr/acme/Sensor/1.0.0"));
-}
-
-#[test]
-fn resolve_missing_var_returns_error() {
-    let config = stub_config("/tmp");
-    let resolver = NamespaceResolver::new(&config, "id1").unwrap();
-    let result = resolver.resolve("{data_dir}/{realm_id}");
-    assert!(matches!(result, Err(HyperError::TemplateVariable(_))));
-}
-
-#[test]
-fn resolve_with_realm() {
-    let config = stub_config("/tmp");
-    let resolver = NamespaceResolver::new(&config, "id1")
-        .unwrap()
-        .with_actor_type("acme", "Worker", "2.0")
-        .with_realm(42);
-    let path = resolver
-        .resolve("{data_dir}/{actr_type}/{realm_id}")
-        .unwrap();
-    assert_eq!(path, PathBuf::from("/tmp/acme/Worker/2.0/42"));
-}
-
 /// Minimal actr.toml body shared across tests. Callers append a
 /// `[hyper]` section (with an escaped `data_dir` pointing into the
 /// test's tempdir) so `node_from_config_file` never writes into the
@@ -67,6 +35,112 @@ async fn node_from_config_file_dev_only_succeeds() {
     let _node = node_from_config_file(&path)
         .await
         .expect("dev_only trust should be accepted");
+}
+
+#[tokio::test]
+async fn node_from_config_file_rejects_removed_storage_path_template() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("actr.toml");
+    let data_dir = dir.path().display().to_string().replace('\\', "/");
+    std::fs::write(
+        &path,
+        format!(
+            "{BASE_CONFIG_TOML}[hyper]\ndata_dir = \"{data_dir}\"\n\
+                 storage_path_template = \"{{data_dir}}/custom\"\n\
+                 [hyper.trust]\nkind = \"dev_only\"\n"
+        ),
+    )
+    .unwrap();
+    let err = match node_from_config_file(&path).await {
+        Ok(_) => panic!("removed storage_path_template must fail"),
+        Err(e) => e,
+    };
+    let msg = err.to_string();
+    assert!(
+        msg.contains("storage_path_template") && msg.contains("storage_root"),
+        "error should point to the storage_root migration, got: {msg}"
+    );
+}
+
+#[tokio::test]
+async fn node_from_config_file_resolves_relative_storage_root_against_config_dir() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("actr.toml");
+    let data_dir = dir.path().display().to_string().replace('\\', "/");
+    std::fs::write(
+        &path,
+        format!(
+            "{BASE_CONFIG_TOML}[hyper]\ndata_dir = \"{data_dir}\"\n\
+                 storage_root = \"store\"\n\
+                 [hyper.trust]\nkind = \"dev_only\"\n"
+        ),
+    )
+    .unwrap();
+    let node = node_from_config_file(&path)
+        .await
+        .expect("storage_root should be accepted");
+    // A relative storage_root resolves against the config file's directory.
+    let expected = dir.path().join("store");
+    assert_eq!(node.hyper.config.storage_root(), expected.as_path());
+}
+
+#[tokio::test]
+async fn node_from_config_file_relative_config_path_does_not_rebase_storage_root() {
+    // Regression test for the double-rebase: a relative *config filename* must
+    // not cause `storage_root` to be rebased a second time onto `data_dir`.
+    // Build the config in a unique dir under CWD and pass a *relative* path.
+    let unique = format!("actr-relcfg-{}", std::process::id());
+    let rel_dir = std::path::Path::new(&unique);
+    std::fs::create_dir_all(rel_dir).unwrap();
+    let config_path = rel_dir.join("actr.toml"); // relative config path
+    // data_dir is absolute so it can never equal the config-dir result.
+    let data_dir = std::env::temp_dir()
+        .join(&unique)
+        .display()
+        .to_string()
+        .replace('\\', "/");
+    std::fs::write(
+        &config_path,
+        format!(
+            "{BASE_CONFIG_TOML}[hyper]\ndata_dir = \"{data_dir}\"\n\
+                 storage_root = \"store\"\n\
+                 [hyper.trust]\nkind = \"dev_only\"\n"
+        ),
+    )
+    .unwrap();
+
+    let node = node_from_config_file(&config_path)
+        .await
+        .expect("relative config path should be accepted");
+
+    // storage_root resolves against the config file's (absolutized) directory:
+    // <cwd>/<unique>/store, NOT <data_dir>/<unique>/store.
+    let expected = std::env::current_dir().unwrap().join(rel_dir).join("store");
+    assert_eq!(node.hyper.config.storage_root(), expected.as_path());
+
+    std::fs::remove_dir_all(rel_dir).ok();
+}
+
+#[test]
+fn expand_tilde_path_expands_home_prefix() {
+    // A leading `~/` expands to the home dir (matching the CLI default),
+    // never producing a literal `~` path component.
+    let expanded = expand_tilde_path(Path::new("~/actr-store"));
+    let expected = actr_config::user_config::expand_tilde("~/actr-store".to_string());
+    assert_eq!(expanded, expected);
+    assert!(!expanded.starts_with("~"));
+}
+
+#[test]
+fn expand_tilde_path_leaves_other_paths_alone() {
+    assert_eq!(
+        expand_tilde_path(Path::new("/abs/path")),
+        Path::new("/abs/path")
+    );
+    assert_eq!(
+        expand_tilde_path(Path::new("rel/path")),
+        Path::new("rel/path")
+    );
 }
 
 #[tokio::test]
@@ -253,14 +327,26 @@ fn load_pubkey_file_not_json_errors() {
 #[test]
 fn hyper_config_builders_apply_overrides() {
     let cfg = stub_config("/data")
-        .with_storage_template("{data_dir}/custom")
+        .with_storage_root("/mnt/ssd/actr")
         .with_credential_expiry_warning(Duration::from_secs(120))
         .with_mailbox_backpressure_threshold(Some(2048));
 
-    assert_eq!(cfg.storage_path_template, "{data_dir}/custom");
+    assert_eq!(cfg.storage_root(), Path::new("/mnt/ssd/actr"));
     assert_eq!(cfg.credential_expiry_warning, Duration::from_secs(120));
     assert_eq!(cfg.mailbox_backpressure_threshold, Some(2048));
     assert_eq!(cfg.resolved_mailbox_backpressure_threshold(), 2048);
+}
+
+#[test]
+fn hyper_config_default_storage_root_is_under_data_dir() {
+    let cfg = stub_config("/data");
+    assert_eq!(cfg.storage_root(), Path::new("/data/storage"));
+}
+
+#[test]
+fn hyper_config_relative_storage_root_resolves_against_data_dir() {
+    let cfg = stub_config("/data").with_storage_root("store");
+    assert_eq!(cfg.storage_root(), Path::new("/data/store"));
 }
 
 #[test]
@@ -279,44 +365,6 @@ fn hyper_config_debug_formats_without_panic() {
     assert!(s.contains("HyperConfig"));
     assert!(s.contains("data_dir"));
     assert!(s.contains("credential_expiry_warning"));
-}
-
-// ── NamespaceResolver env-var substitution ──────────────────────────────
-
-#[test]
-fn resolve_env_var_substitution() {
-    // Unique var name to avoid cross-test coupling.
-    // env (de)mutation is `unsafe` in edition 2024.
-    unsafe { std::env::set_var("ACTR_COV_TEST_VAR", "envvalue") };
-    let config = stub_config("/tmp");
-    let resolver = NamespaceResolver::new(&config, "id").unwrap();
-    let path = resolver
-        .resolve("{env.ACTR_COV_TEST_VAR}/data")
-        .expect("env var should substitute");
-    assert_eq!(path, PathBuf::from("envvalue/data"));
-    unsafe { std::env::remove_var("ACTR_COV_TEST_VAR") };
-}
-
-#[test]
-fn resolve_missing_env_var_errors() {
-    let config = stub_config("/tmp");
-    let resolver = NamespaceResolver::new(&config, "id").unwrap();
-    let err = resolver
-        .resolve("{env.ACTR_DEFINITELY_MISSING_VAR_XYZ}")
-        .unwrap_err();
-    assert!(matches!(err, HyperError::TemplateVariable(_)));
-    assert!(
-        err.to_string()
-            .contains("env.ACTR_DEFINITELY_MISSING_VAR_XYZ")
-    );
-}
-
-#[test]
-fn resolve_plain_string_without_placeholders() {
-    let config = stub_config("/tmp");
-    let resolver = NamespaceResolver::new(&config, "id").unwrap();
-    let path = resolver.resolve("/plain/path/no/vars").unwrap();
-    assert_eq!(path, PathBuf::from("/plain/path/no/vars"));
 }
 
 // ── Dispatch concurrency (B2) ────────────────────────────────────────────────

@@ -163,7 +163,7 @@ pub(crate) mod resource;
 // Re-exports: Cross-platform
 // ═══════════════════════════════════════════════════════════════════════════════
 
-pub use actr_pack::{PackageManifest, VerifiedPackage};
+pub use actr_pack::{PackageManifest, ValidatedActorIdentity, VerifiedPackage};
 pub use config::HyperConfig;
 pub use error::HyperError;
 pub(crate) use error::HyperResult;
@@ -178,7 +178,9 @@ pub use actr_framework::{MediaSample, MediaType};
 pub use runtime_error::{ActorResult, ActrError, Classify, ErrorKind};
 
 // Platform traits re-exports
-pub use actr_platform_traits::{CryptoProvider, KvStore, PlatformError, PlatformProvider};
+pub use actr_platform_traits::{
+    CryptoProvider, KvStore, PlatformError, PlatformProvider, StorageNamespace,
+};
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Re-exports: Native-only
@@ -194,7 +196,7 @@ pub use dispatch::{
     ConflictKeyError, ConflictKeySpec, ConflictKeySpecBuilder, KeySource, PayloadFieldKind,
 };
 #[cfg(not(target_arch = "wasm32"))]
-pub use storage::ActorStore;
+pub use storage::{ActorStore, SecureStorageRoot};
 #[cfg(not(target_arch = "wasm32"))]
 pub use verify::{ChainTrust, MfrCertCache, RegistryTrust, StaticTrust, TrustProvider};
 
@@ -418,6 +420,9 @@ struct HyperInner {
     instance_id: String,
     /// Optional platform provider for cross-platform abstraction
     platform: Option<Arc<dyn PlatformProvider>>,
+    /// Secured per-actor storage root. `Some` only for the direct-filesystem
+    /// branch; `None` when a platform provider owns the real root.
+    secure_storage_root: Option<storage::SecureStorageRoot>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -704,12 +709,21 @@ impl Hyper {
         };
         debug!(instance_id, "Hyper instance_uid ready");
 
+        // Build the secured per-actor storage root only for the direct-filesystem
+        // branch; an injected platform provider owns and protects its own root.
+        let secure_storage_root = if platform.is_none() {
+            Some(storage::SecureStorageRoot::new(&config.storage_root).await?)
+        } else {
+            None
+        };
+
         Ok(Self {
             inner: Arc::new(HyperInner {
                 config,
                 membership_controller_enabled: false,
                 instance_id,
                 platform,
+                secure_storage_root,
             }),
         })
     }
@@ -732,12 +746,7 @@ impl Hyper {
     /// the provider decides how to authenticate the package (static key,
     /// registry lookup, keyless transparency log, etc).
     pub async fn verify_package(&self, package: &WorkloadPackage) -> HyperResult<VerifiedPackage> {
-        let max_entry_bytes = self.inner.config.resolved_wasm_limits().max_component_bytes;
-        self.inner
-            .config
-            .trust_provider
-            .verify_package_bounded(package.bytes(), max_entry_bytes)
-            .await
+        verify_package_for_hyper(&self.inner, package.bytes()).await
     }
 
     /// Verify a package, select the execution backend from `binary.target`,
@@ -1375,14 +1384,61 @@ impl Hyper {
     }
 }
 
+/// Derive the opaque storage namespace for a manifest's actor identity.
+///
+/// This is the trust-boundary check: it validates the identity against the
+/// protocol rules (`ActrType::validate`) and hashes it, so the returned value is
+/// the only thing ever used to locate storage — never the raw identity strings
+/// (CWE-22 / CWE-73). Shared by the direct-filesystem branch
+/// ([`ActorStore::open_under`]) and the platform branch (`secret_store`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn storage_namespace_for(manifest: &PackageManifest) -> HyperResult<StorageNamespace> {
+    let identity = actr_pack::ValidatedActorIdentity::from_manifest(manifest)
+        .map_err(|error| HyperError::InvalidManifest(error.to_string()))?;
+    Ok(StorageNamespace::actr_v1(
+        identity.namespace_id().into_bytes(),
+    ))
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn resolve_storage_path_for(
     inner: &HyperInner,
     manifest: &PackageManifest,
 ) -> HyperResult<PathBuf> {
-    let resolver = config::NamespaceResolver::new(&inner.config, &inner.instance_id)?
-        .with_actor_type(&manifest.manufacturer, &manifest.name, &manifest.version);
-    resolver.resolve(&inner.config.storage_path_template)
+    let namespace = storage_namespace_for(manifest)?;
+    // Platform-backed nodes have no local SecureStorageRoot; this diagnostic
+    // path only exists for the direct-filesystem branch.
+    let root = inner.secure_storage_root.as_ref().ok_or_else(|| {
+        HyperError::Config(
+            "resolve_storage_path is only available for direct-filesystem storage".to_string(),
+        )
+    })?;
+    root.path_for(&namespace)
+}
+
+/// Single internal entry that verifies a package AND enforces the identity
+/// trust boundary, closing the hole where a custom [`TrustProvider`] returns a
+/// [`VerifiedPackage`] whose manifest identity was never validated.
+///
+/// Both `Hyper::verify_package` and `load_workload_package_inner` must use this
+/// so a malicious or buggy provider cannot smuggle an unsafe identity into
+/// binary detection / workload loading / storage derivation (CWE-22 / CWE-73).
+#[cfg(not(target_arch = "wasm32"))]
+async fn verify_package_for_hyper(
+    inner: &HyperInner,
+    bytes: &[u8],
+) -> HyperResult<VerifiedPackage> {
+    let max_entry_bytes = inner.config.resolved_wasm_limits().max_component_bytes;
+    let verified = inner
+        .config
+        .trust_provider
+        .verify_package_bounded(bytes, max_entry_bytes)
+        .await?;
+
+    ValidatedActorIdentity::from_manifest(&verified.manifest)
+        .map_err(|error| HyperError::InvalidManifest(error.to_string()))?;
+
+    Ok(verified)
 }
 
 /// Free-function counterpart of [`Hyper::load_workload_package`] —
@@ -1394,12 +1450,7 @@ pub(crate) async fn load_workload_package_inner(
     package: &WorkloadPackage,
 ) -> HyperResult<LoadedWorkload> {
     let bytes = package.bytes();
-    let max_entry_bytes = inner.config.resolved_wasm_limits().max_component_bytes;
-    let verified = inner
-        .config
-        .trust_provider
-        .verify_package_bounded(bytes, max_entry_bytes)
-        .await?;
+    let verified = verify_package_for_hyper(inner, bytes).await?;
     let binary_kind = detect_binary_kind(&verified.manifest)?;
     let workload = match binary_kind {
         BinaryKind::Wasm => load_wasm_workload_inner(inner, bytes, &verified.manifest).await?,
@@ -1566,17 +1617,12 @@ async fn bootstrap_credential_inner(
         ais_endpoint, realm_id, "starting credential bootstrap with AIS"
     );
 
-    // 1. Open the Actor's secret store (via platform provider or direct ActorStore)
-    let storage_path = resolve_storage_path_for(inner, manifest)?;
-    let store: Arc<dyn KvStore> = if let Some(ref platform) = inner.platform {
-        let ns = storage_path.to_string_lossy().to_string();
-        platform
-            .secret_store(&ns)
-            .await
-            .map_err(|e| HyperError::Storage(format!("failed to open secret store: {e}")))?
-    } else {
-        Arc::new(ActorStore::open(&storage_path).await?)
-    };
+    // 1. Derive and validate the opaque namespace (pure; no I/O, no database).
+    // The raw identity never becomes a path component. The store is opened only
+    // AFTER the AIS registration succeeds, so a rejected identity leaves no
+    // database behind (issue #350 acceptance; repeated rejected identities must
+    // not accumulate empty databases).
+    let namespace = storage_namespace_for(manifest)?;
 
     // 2. Build RegisterRequest and send to AIS.
     // Package bootstrap always authenticates with manifest + MFR signature.
@@ -1645,7 +1691,23 @@ async fn bootstrap_credential_inner(
         }
     };
 
-    // 4. Store signing_pubkey + signing_key_id (for AisKeyCache use)
+    // 4. Registration succeeded — only now open the actor's secret store, so a
+    // rejected registration never creates a database.
+    let store: Arc<dyn KvStore> = if let Some(ref platform) = inner.platform {
+        platform
+            .secret_store(&namespace)
+            .await
+            .map_err(|e| HyperError::Storage(format!("failed to open secret store: {e}")))?
+    } else {
+        let root = inner.secure_storage_root.as_ref().ok_or_else(|| {
+            HyperError::Storage(
+                "no secure storage root available for direct-filesystem branch".to_string(),
+            )
+        })?;
+        Arc::new(ActorStore::open_under(root, &namespace).await?)
+    };
+
+    // 5. Store signing_pubkey + signing_key_id (for AisKeyCache use)
     let pubkey_bytes = ok.signing_pubkey.to_vec();
     let key_id_bytes = ok.signing_key_id.to_le_bytes().to_vec();
     store

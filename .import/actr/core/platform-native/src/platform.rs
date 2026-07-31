@@ -1,13 +1,16 @@
 //! Native platform provider (filesystem + SQLite).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
-use actr_platform_traits::{CryptoProvider, KvStore, PlatformError, PlatformProvider};
+use actr_hyper::SecureStorageRoot;
+use actr_platform_traits::{
+    CryptoProvider, KvStore, PlatformError, PlatformProvider, StorageNamespace,
+};
 
 use crate::crypto::NativeCryptoProvider;
 
@@ -21,6 +24,8 @@ pub struct NativePlatformProvider {
     data_dir: PathBuf,
     crypto: Arc<NativeCryptoProvider>,
     data_dir_ready: Mutex<bool>,
+    /// Lazily-initialized secured root for per-actor storage (`data_dir/storage`).
+    secure_root: Mutex<Option<Arc<SecureStorageRoot>>>,
 }
 
 impl NativePlatformProvider {
@@ -33,6 +38,7 @@ impl NativePlatformProvider {
             data_dir: data_dir.into(),
             crypto: Arc::new(NativeCryptoProvider),
             data_dir_ready: Mutex::new(false),
+            secure_root: Mutex::new(None),
         }
     }
 
@@ -51,6 +57,22 @@ impl NativePlatformProvider {
             })?;
         *ready = true;
         Ok(())
+    }
+
+    /// Lazily build the secured per-actor storage root owned by this provider.
+    async fn secure_root(&self) -> Result<Arc<SecureStorageRoot>, PlatformError> {
+        let mut guard = self.secure_root.lock().await;
+        if let Some(root) = guard.as_ref() {
+            return Ok(root.clone());
+        }
+        let root = SecureStorageRoot::new(&self.data_dir.join("storage"))
+            .await
+            .map_err(|e| {
+                PlatformError::Storage(format!("failed to init secure storage root: {e}"))
+            })?;
+        let root = Arc::new(root);
+        *guard = Some(root.clone());
+        Ok(root)
     }
 }
 
@@ -84,26 +106,17 @@ impl PlatformProvider for NativePlatformProvider {
         Ok(new_id)
     }
 
-    async fn secret_store(&self, namespace: &str) -> Result<Arc<dyn KvStore>, PlatformError> {
-        self.ensure_data_dir().await?;
-        // `namespace` is resolved as a filesystem path — ActorStore expects a
-        // writable SQLite location. Callers compose absolute paths through
-        // Hyper's NamespaceResolver today, so we pass it through verbatim.
-        let path = Path::new(namespace);
-        if let Some(parent) = path.parent()
-            && !parent.as_os_str().is_empty()
-        {
-            tokio::fs::create_dir_all(parent).await.map_err(|e| {
-                PlatformError::Io(format!(
-                    "failed to create secret store parent `{}`: {e}",
-                    parent.display()
-                ))
-            })?;
-        }
-        let store = actr_hyper::ActorStore::open(path)
+    async fn secret_store(
+        &self,
+        namespace: &StorageNamespace,
+    ) -> Result<Arc<dyn KvStore>, PlatformError> {
+        // The opaque namespace is mapped onto this provider's own secured root;
+        // it is never treated as a filesystem path.
+        let root = self.secure_root().await?;
+        let store = actr_hyper::ActorStore::open_under(&root, namespace)
             .await
             .map_err(|e| PlatformError::Storage(format!("failed to open ActorStore: {e}")))?;
-        debug!(namespace, "native secret store opened");
+        debug!(namespace = %namespace.opaque_key(), "native secret store opened");
         Ok(Arc::new(store))
     }
 
@@ -141,16 +154,36 @@ mod tests {
     #[tokio::test]
     async fn secret_store_roundtrip() {
         let dir = TempDir::new().unwrap();
-        let db_path = dir.path().join("test.db");
         let provider = NativePlatformProvider::new(dir.path());
+        let namespace = StorageNamespace::actr_v1([0xAB; 32]);
 
-        let store = provider
-            .secret_store(db_path.to_str().unwrap())
-            .await
-            .unwrap();
+        let store = provider.secret_store(&namespace).await.unwrap();
 
         store.set("key", b"value").await.unwrap();
         let val = store.get("key").await.unwrap();
         assert_eq!(val, Some(b"value".to_vec()));
+
+        // The opaque namespace maps under the provider's own root, as hex.
+        let expected = dir
+            .path()
+            .join("storage")
+            .join("actors")
+            .join("v1")
+            .join(hex::encode([0xAB; 32]))
+            .join("store.sqlite3");
+        assert!(
+            expected.exists(),
+            "expected store at {}",
+            expected.display()
+        );
+    }
+
+    #[tokio::test]
+    async fn secret_store_rejects_unknown_namespace_version() {
+        let dir = TempDir::new().unwrap();
+        let provider = NativePlatformProvider::new(dir.path());
+        // A namespace with an unsupported layout version must fail.
+        let bad = StorageNamespace::new_unchecked(5, [0x02; 32]);
+        assert!(provider.secret_store(&bad).await.is_err());
     }
 }

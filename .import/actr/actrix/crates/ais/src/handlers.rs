@@ -88,6 +88,20 @@ async fn register_actr(State(state): State<AISState>, headers: HeaderMap, body: 
         request.actr_type.name
     );
 
+    // AIS is an independent server-side trust boundary: do not assume Hyper
+    // already validated the identity. Reject any ActrType that violates the
+    // protocol naming rules before minting an ActrId or writing an ACL key
+    // (a key derived from an invalid identity would be unparseable later).
+    if let Err(e) = request.actr_type.validate() {
+        let error_result = RegisterResponse {
+            result: Some(register_response::Result::Error(ErrorResponse {
+                code: 400, // Bad Request
+                message: format!("Invalid actor identity: {e}"),
+            })),
+        };
+        return encode_result(error_result);
+    }
+
     // 验证 Realm 是否存在、状态正常、未过期
     if let Err(validation_err) = RealmEntity::validate_realm(request.realm.realm_id).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
