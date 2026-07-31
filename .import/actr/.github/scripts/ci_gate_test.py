@@ -262,7 +262,7 @@ def test_swift_echoapp_e2e_job_present() -> None:
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
     swift_job = _job(workflow, "swift-echo-app-e2e", "python-web-e2e")
 
-    assert "runs-on: macos-latest" in swift_job
+    assert "runs-on: macos-arm64-larger" in swift_job
     assert "bash e2e/swift-echo-app/run.sh" in swift_job
 
 
@@ -277,8 +277,8 @@ def test_e2e_actrix_uses_in_tree_install_instead_of_artifact_download() -> None:
     assert "Actrium/actrix" not in workflow
     assert "actions: read" not in workflow
 
-    assert "runs-on: ubuntu-latest" in pkg_job
-    assert "runs-on: macos-latest" in swift_job
+    assert "runs-on: ubuntu-latest-m" in pkg_job
+    assert "runs-on: macos-arm64-larger" in swift_job
 
 
 def test_e2e_no_private_actrix_checkout() -> None:
@@ -612,10 +612,10 @@ def test_nightly_e2e_includes_swift_datastream() -> None:
 
 
 def test_swift_datastream_job_runs_on_macos() -> None:
-    """Verify the datastream job uses runs-on: macos-latest."""
+    """Verify the datastream job uses runs-on: macos-arm64-larger."""
     workflow = CI_E2E_WORKFLOW.read_text(encoding="utf-8")
     ds_job = _job(workflow, "swift-datastream-app-e2e", "python-web-e2e")
-    assert "runs-on: macos-latest" in ds_job
+    assert "runs-on: macos-arm64-larger" in ds_job
 
 
 def test_swift_datastream_job_does_not_download_actrix_artifact() -> None:

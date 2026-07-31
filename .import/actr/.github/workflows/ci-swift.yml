@@ -10,7 +10,7 @@ permissions:
 jobs:
   lint-and-build:
     name: Swift Lint And Build
-    runs-on: macos-latest
+    runs-on: macos-arm64-larger
     steps:
       - uses: actions/checkout@v5
       - name: Set up Rust

@@ -15,7 +15,7 @@ env:
 jobs:
   audit:
     name: Dependency Audit
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
     steps:
@@ -33,7 +33,7 @@ jobs:
 
   format:
     name: Format Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
       actions: read
@@ -54,7 +54,7 @@ jobs:
   # fast-fails before the heavier build / test jobs.
   wit-lint:
     name: WIT shape consistency
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
       actions: read
@@ -68,7 +68,7 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
       actions: read
@@ -110,7 +110,7 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
       actions: read
@@ -142,7 +142,7 @@ jobs:
 
   dynclib-e2e:
     name: Dynclib E2E
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
       actions: read
