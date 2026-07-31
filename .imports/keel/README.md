@@ -2,7 +2,7 @@
 
 Lightweight, headless, sandboxed React Native dynamic UI rendering engine.
 
-> **keel** /kiːl/ n. the backbone of a hull - the spine that keeps a vessel upright and holding its course
+> **keel** [/kiːl/](https://ipa-reader.com/?text=ki%CB%90l&voice=Emma) n. the backbone of a hull - the spine that keeps a vessel upright and holding its course
 
 ## Features
 
