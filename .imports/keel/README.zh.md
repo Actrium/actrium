@@ -2,7 +2,7 @@
 
 轻量级、无头、沙箱化的 React Native 动态 UI 渲染引擎。
 
-> **keel** /kiːl/ n. 龙骨 - 船体的脊梁，让整条船站得住、走得直
+> **keel** [/kiːl/](https://ipa-reader.com/?text=ki%CB%90l&voice=Emma) n. 龙骨 - 船体的脊梁，让整条船站得住、走得直
 
 ## 特性
 
