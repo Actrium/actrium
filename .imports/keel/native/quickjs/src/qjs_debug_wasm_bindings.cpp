@@ -19,6 +19,7 @@
 #ifdef __EMSCRIPTEN__
 
 #include "QuickJSDebugCore.h"
+#include "qjs_wasm_limits.h"
 #include "quickjs.h"
 
 #include <emscripten.h>
@@ -48,6 +49,10 @@ int qjsd_init(void) {
   g_rt = JS_NewRuntime();
   if (!g_rt) return -1;
   JS_UpdateStackTop(g_rt);  // this thread owns the runtime
+  // Mandatory on wasm: QuickJS's own default stack size exceeds Emscripten's
+  // default stack, so leaving it unset underflows stack_limit and every eval
+  // throws "stack overflow" immediately. See qjs_wasm_limits.h.
+  JS_SetMaxStackSize(g_rt, KEEL_QJS_STACK_LIMIT_BYTES);
   g_ctx = JS_NewContext(g_rt);
   if (!g_ctx) return -1;
   g_core = new QuickJSDebugCore(g_rt, g_ctx);

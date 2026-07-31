@@ -39,12 +39,20 @@ SOURCES=(
     "${SRC_DIR}/qjs_debug_wasm_bindings.cpp"
 )
 
+# Wasm C stack, in bytes. Mirrors the shipping build's WASM_STACK_SIZE (512 KB);
+# Emscripten's own default is far smaller than QuickJS's default stack size.
+WASM_STACK_BYTES=524288
+
 DEFINES=(
     -DCONFIG_VERSION='"2024-01-13"'
     -DCONFIG_BIGNUM
     -D_GNU_SOURCE
     -DEMSCRIPTEN
     -DKEEL_QJS_DEBUG
+    # Must match -sSTACK_SIZE below: qjs_wasm_limits.h derives QuickJS's
+    # stack soft limit from it, and a runtime created without that limit
+    # throws "stack overflow" on its first eval.
+    -DKEEL_WASM_STACK_BYTES=${WASM_STACK_BYTES}
 )
 
 echo "Building QuickJS debug wasm (Asyncify ON)..."
@@ -55,6 +63,7 @@ emcc "${SOURCES[@]}" "${DEFINES[@]}" \
     -sASYNCIFY=1 \
     -sASYNCIFY_STACK_SIZE=1048576 \
     -sALLOW_MEMORY_GROWTH=1 \
+    -sSTACK_SIZE=${WASM_STACK_BYTES} \
     -sMODULARIZE=1 \
     -sEXPORT_ES6=1 \
     -sEXPORT_NAME=createQuickJSSandboxDebug \
