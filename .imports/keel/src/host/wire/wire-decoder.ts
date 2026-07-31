@@ -28,7 +28,7 @@
  *     silently-wrapped length.
  *
  * INTEGRATION STATUS: experimental. The live transport default is still JSON;
- * this decoder is reached only behind the WasmGuestHost `binaryOpBatch` gate
+ * this decoder is reached only behind the NativeGuestHost `binaryOpBatch` gate
  * (WIP, default off) on the native-guest render channel. This file changes no
  * defaults — it is here for the gated route, benchmarking, and eventual
  * promotion.

@@ -15,7 +15,7 @@ import { decodeBatchStreaming, WireDecodeError } from '../wire-decoder';
 
 // The golden oracle: source frame (canvasId/frameId/ops in the guest DrawList
 // JSON shape) paired with its exact on-the-wire hex. Produced byte-for-byte by
-// the Rust encoder (crates/rill-guest/src/canvas_encode.rs) — same file the
+// the Rust encoder (crates/rill-native-guest/src/canvas_encode.rs) — same file the
 // Rust re-encode test locks against. contracts/canvas-wire.golden.json.
 interface GoldenVector {
   name: string;

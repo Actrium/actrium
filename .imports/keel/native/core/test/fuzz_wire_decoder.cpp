@@ -22,7 +22,7 @@
 //        reject. On accept it re-serialises EVERY decoded field — walking every
 //        zero-copy string_view — so ASan also validates the views are in-bounds.
 //
-//   The TS driver (src/host/wasm-guest/wire-decoder.fuzz.ts) then decodes the
+//   The TS driver (src/host/native-guest/wire-decoder.fuzz.ts) then decodes the
 //   same corpus.bin with the TS decoder, builds the SAME canonical strings, and
 //   diffs the two result streams: TS-accepts iff C++-accepts, and on mutual
 //   accept the canonical forms must be equal. Any mismatch is a CONFIRMED drift.

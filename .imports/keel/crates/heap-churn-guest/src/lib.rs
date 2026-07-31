@@ -23,7 +23,7 @@ extern crate alloc;
 use alloc::collections::VecDeque;
 use alloc::vec::Vec;
 
-rill_guest::rill_guest_main!(guest_main);
+rill_native_guest::guest_main!(guest_main);
 
 async fn guest_main() {
     // No lifecycle behaviour; this fixture exists for the `heap_churn` hook the

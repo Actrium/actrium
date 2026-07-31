@@ -2,7 +2,7 @@
 name = "ui-guest"
 version.workspace = true
 edition.workspace = true
-description = "Demo native rill guest that renders UI (View > Text) via the rill-guest SDK."
+description = "Demo native rill guest that renders UI (View > Text) via the rill-native-guest SDK."
 license.workspace = true
 publish = false
 
@@ -16,7 +16,7 @@ crate-type = ["cdylib"]
 # `--no-default-features` build (no siblings) is the pre-promotion JSON-only guest.
 [features]
 default = ["binary-protocol"]
-binary-protocol = ["rill-guest/binary-protocol"]
+binary-protocol = ["rill-native-guest/binary-protocol"]
 
 [dependencies]
-rill-guest = { path = "../rill-guest", default-features = false }
+rill-native-guest = { path = "../rill-native-guest", default-features = false }

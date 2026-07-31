@@ -36,7 +36,7 @@ export {
 // --- store/net binary-value ENVELOPE (contracts/store-net-bytes.json) ---
 // The RBS1 two-plane frame (JSON control plane + length-prefixed binary data
 // plane). Unlike the two decoders above, this codec IS on a live receive path:
-// WasmGuestHost forks on the RBS1 magic to decode a byte-carrying request and
+// NativeGuestHost forks on the RBS1 magic to decode a byte-carrying request and
 // encodes a byte-carrying return. It is contract-agnostic (sentinel-driven).
 export {
   type DecodedEnvelope,

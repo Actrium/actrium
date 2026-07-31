@@ -25,7 +25,7 @@ fails the other's `u32` magic compare immediately.
 
 The guest SDK's `canvas::draw` today always serialises a JSON op-list and calls
 `host_call("host:canvas", "draw", {canvasId, ops:[...]})`
-(`crates/rill-guest/src/lib.rs`). The host `JSON.parse`s it. We want the guest to
+(`crates/rill-native-guest/src/lib.rs`). The host `JSON.parse`s it. We want the guest to
 send the **binary** frame (`canvas-wire.json`) instead — but only to a host that
 can decode it. Requirements, all mandated by the platform requirement R1
 (`platform-rill-requirements-2026-07`):
@@ -35,7 +35,7 @@ can decode it. Requirements, all mandated by the platform requirement R1
   old host must fall back to JSON on its own.
 - **No `rill_abi_version` bump.** The ABI wire and exports are unchanged; this is
   a *channel-selection* capability, not an ABI break. `RILL_ABI_VERSION` stays
-  `1` (`crates/rill-guest/src/lib.rs:53`). Bumping it would force every host to
+  `1` (`crates/rill-native-guest/src/lib.rs:53`). Bumping it would force every host to
   re-gate every guest for an additive, opt-in encoding — exactly the flag-day the
   platform said to avoid.
 - **Promotion = runtime handshake, not a compile flag.** The guest encoder is
@@ -53,8 +53,8 @@ can decode it. Requirements, all mandated by the platform requirement R1
 
 ### 1.2 The existing handshake surface (what we build ON)
 
-- The **native (WASM) guest** boundary is `WasmGuestHost`
-  (`src/host/wasm-guest/wasm-guest-host.ts`). The guest reaches host capabilities
+- The **native (WASM) guest** boundary is `NativeGuestHost`
+  (`src/host/native-guest/native-guest-host.ts`). The guest reaches host capabilities
   only through `rill_host_call(module, method, in, cb)` dispatched via
   `createHostModuleDispatch(contract, impl)` (`src/contract/index.ts`). **The
   import model is the sandbox**: a guest can only call a `host:*` module the host
@@ -108,7 +108,7 @@ host:canvas.getInfo()  ->  { binaryDraw: boolean, wireVersion: number }
 `getInfo` carries two distinct roles: **(a)** a *host-global* capability probe —
 the guest sends `getInfo({})` with an **empty payload, exactly once at startup,
 before it has bound any canvas** (`host_supports_binary` in
-`crates/rill-guest/src/lib.rs`) — and **(b)** *per-canvas* metadata (width /
+`crates/rill-native-guest/src/lib.rs`) — and **(b)** *per-canvas* metadata (width /
 height / dpr) for a named `canvasId`. The capability fields `binaryDraw` and
 `wireVersion` belong to role (a): they are a fact about the **host**, not about
 any one canvas. A host therefore **MUST** answer them affirmatively on the id-less
@@ -125,7 +125,7 @@ bytes and bypass the handshake — so this is stated as an explicit contract.
 **Why `getInfo` and not a host-info bit or `hostModules` string?**
 
 - It is **purely additive on an existing seam** — no new export, no ABI change,
-  no change to `createHostModuleDispatch`/`WasmGuestHost`. Registering the method
+  no change to `createHostModuleDispatch`/`NativeGuestHost`. Registering the method
   is a host change; not registering it *is* the "unsupported" answer, riding the
   seam's existing fail-closed default. That directly satisfies "old hosts keep
   JSON" with zero old-host code.
@@ -183,7 +183,7 @@ an op array first, replay only if the whole frame is valid, never a half-frame.
 ### 2.1 Today: canvas is Rust-only
 
 The typed `canvas::DrawList` + `canvas::draw` API lives only in the Rust guest
-SDK (`crates/rill-guest/src/lib.rs`). The JS SDK has **no** canvas API. So today a
+SDK (`crates/rill-native-guest/src/lib.rs`). The JS SDK has **no** canvas API. So today a
 QuickJS guest never emits canvas ops at all, and this contract has exactly one
 producer (Rust) and (soon) one binary consumer (the host TS decoder).
 
@@ -236,9 +236,9 @@ No wire redesign; the JS encoder must produce the golden `hex` byte-for-byte.
 
 ## 3. What the next phases own (not this file)
 
-1. **Rust encoder (oracle)** — `crates/rill-guest/src/canvas_encode.rs`, behind a
+1. **Rust encoder (oracle)** — `crates/rill-native-guest/src/canvas_encode.rs`, behind a
    Cargo feature (mirror `binary-protocol`), generating constants from the
-   already-added `canvas_contract.rs` (see `crates/rill-guest/build.rs`
+   already-added `canvas_contract.rs` (see `crates/rill-native-guest/build.rs`
    `generate_canvas_contract`). Produces `canvas-wire.golden.json`.
 2. **TS decoder on the public export surface** — a zero-DOM decoder the platform's
    `site/rill-runtime/src/host-canvas.ts` imports (one-shot **and** iterator

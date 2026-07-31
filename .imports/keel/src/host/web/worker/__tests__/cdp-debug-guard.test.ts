@@ -1,6 +1,6 @@
 /**
  * Code-split guard for the FAT CDP debug wasm (design P2), the debug-only counterpart of
- * the DWARF-free fixture guard (src/host/wasm-guest/__tests__/wasm-guest-dwarf.test.ts).
+ * the DWARF-free fixture guard (src/host/native-guest/__tests__/native-guest-dwarf.test.ts).
  *
  * The debug artifact (native/quickjs/build-debug/quickjs-cdp-debug.{mjs,wasm}) is ~3.6MB —
  * Asyncify roughly triples the wasm and the CDP engine is dev-only. It MUST reach a

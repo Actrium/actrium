@@ -10,4 +10,4 @@ publish = false
 crate-type = ["cdylib"]
 
 [dependencies]
-rill-guest = { path = "../rill-guest" }
+rill-native-guest = { path = "../rill-native-guest" }
