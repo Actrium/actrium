@@ -2,7 +2,7 @@
 
 > 站在 rill 的角度，把「非-JS 绑定的原生 WASM guest」这条扩展的**地基**设计并夯实：让 app 直接编译成 `.wasm`（Rust / C / Zig…）作为 sealed guest，host:* 作 WASM import。**canvas 只是它日后的消费者之一**（重计算/原生库复用/polyglot 同样受益）——本文不被 canvas 这个具体需求束缚。
 >
-> 本文既是设计，也记录**已落地的 Phase A + B + C**：宿主侧 ABI（`WasmGuestHost`）+ 人体工学 Rust guest SDK（`store::put(k,v).await`、声明式 `render(view([text(…)]))`）+ 真 Rust `.wasm` guest 的 host:* 往返、封口负向、**渲染批次经真 receiver 物化出 UI**，全部 `bun test` 跑绿。
+> 本文既是设计，也记录**已落地的 Phase A + B + C**：宿主侧 ABI（`NativeGuestHost`）+ 人体工学 Rust guest SDK（`store::put(k,v).await`、声明式 `render(view([text(…)]))`）+ 真 Rust `.wasm` guest 的 host:* 往返、封口负向、**渲染批次经真 receiver 物化出 UI**，全部 `bun test` 跑绿。
 
 ---
 
@@ -22,7 +22,7 @@ rill 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 ## 2. 地基三件
 
-**① 装载模型**（平行于现有 `loadBundle → evalCode(JS)`）：新增 `WebAssembly.instantiate(appWasm, importObject)`，注入 host:* + 运行时导入，调 guest 导出入口。它**不是** `JSEngineProvider`（那是「JS 引擎跑 JS」）——是「实例化 app 自己的 `.wasm`」这一新概念，由 `WasmGuestHost` 承载。
+**① 装载模型**（平行于现有 `loadBundle → evalCode(JS)`）：新增 `WebAssembly.instantiate(appWasm, importObject)`，注入 host:* + 运行时导入，调 guest 导出入口。它**不是** `JSEngineProvider`（那是「JS 引擎跑 JS」）——是「实例化 app 自己的 `.wasm`」这一新概念，由 `NativeGuestHost` 承载。
 
 **② host:\* ABI（线性内存，语言中立）—— 地基核心**：字节按**指针+长度**在 guest 线性内存里传，host 持 guest 的 `Memory` **零拷贝读**。比 QuickJS 路线的序列化拷贝 + `number[]` 绕 TypedArray 疤**更简单更快**。完整 wire 见 §4。
 
@@ -31,7 +31,7 @@ rill 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 ## 3. 与现有 QuickJS 兼容——加法式，不动现有
 
 **共享、一行不改**（兼容的根本）：
-- **host:\* 派发层**（`createHostModuleDispatch`）+ 契约 + 壳层 broker + 信任/闸门——两类 guest 打进**同一批 host 实现**，`host:store` 写一遍、JS guest 和原生 guest 都用。`WasmGuestHost` 直接复用 `createHostModuleDispatch` 的产物。
+- **host:\* 派发层**（`createHostModuleDispatch`）+ 契约 + 壳层 broker + 信任/闸门——两类 guest 打进**同一批 host 实现**，`host:store` 写一遍、JS guest 和原生 guest 都用。`NativeGuestHost` 直接复用 `createHostModuleDispatch` 的产物。
 - **渲染 receiver + 二进制 op 批次协议**——原生 guest（Phase C）发**同一套渲染批次**，receiver 照旧物化。
 - **异步 callback-resolve 模型**——现有 QuickJS 用的就是它，原生 ABI 用同一套（只换载体），异步语义一致、不是兼容裂缝。
 
@@ -75,22 +75,22 @@ rill 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 所以 SDK 的规矩是：**凡是契约声明了体内 `ok` 的方法，包装函数把两级折成一个 `Result`，`Ok` 就代表这件事真的发生了。** 被拒绝时原样返回宿主的响应体，`reason` 还在里面，从 `Err` 里读。两级仍然分得清 —— 传输失败的 body 里根本没有 `ok` 字段可读。
 
-判定是**失败关闭**的：没有明确 `"ok":true` 就算拒绝，包括契约声明了却漏掉这个字段的响应。实现在 `crate::module_result`，回归测试在 `crates/rill-guest/src/module_verdict_tests.rs`。
+判定是**失败关闭**的：没有明确 `"ok":true` 就算拒绝，包括契约声明了却漏掉这个字段的响应。实现在 `crate::module_result`，回归测试在 `crates/rill-native-guest/src/module_verdict_tests.rs`。
 
 ## 5. Phase A 已落地 + 后续
 
 **Phase A · 装载 + ABI（本 PR，已跑绿）**
-- `src/host/wasm-guest/wasm-guest-host.ts` —— `WasmGuestHost`：`instantiate` + `importObject` 注入 `rill_host_call`/`rill_log`，桥接 `rill_host_call → createHostModuleDispatch → rill_resolve`，`drain()` 等待在途调用。
-- `src/host/wasm-guest/__tests__/fixtures/roundtrip.wat`（+ 编译产物 `.wasm`）—— 一个**手写最小原生 guest**，`rill_init` 发一次 `host:store.putText`，wire 级看清 ABI。
-- `src/host/wasm-guest/__tests__/wasm-guest-host.test.ts` —— 两个真测试：**① 端到端往返**（guest 经线性内存调 host:* → 真派发 → `rill_resolve` 回传 → 断言结果 `{version:1}` + KV 实存了 guest 的写）；**② 封口 fail-closed**（未声明模块 → `ok=0` + `not registered`）。
+- `src/host/native-guest/native-guest-host.ts` —— `NativeGuestHost`：`instantiate` + `importObject` 注入 `rill_host_call`/`rill_log`，桥接 `rill_host_call → createHostModuleDispatch → rill_resolve`，`drain()` 等待在途调用。
+- `src/host/native-guest/__tests__/fixtures/roundtrip.wat`（+ 编译产物 `.wasm`）—— 一个**手写最小原生 guest**，`rill_init` 发一次 `host:store.putText`，wire 级看清 ABI。
+- `src/host/native-guest/__tests__/native-guest-host.test.ts` —— 两个真测试：**① 端到端往返**（guest 经线性内存调 host:* → 真派发 → `rill_resolve` 回传 → 断言结果 `{version:1}` + KV 实存了 guest 的写）；**② 封口 fail-closed**（未声明模块 → `ok=0` + `not registered`）。
 
-**Phase B · Rust guest SDK（本 PR 已落地）**：`crates/rill-guest`（lib）—— 人体工学 SDK，开发者写 `store::put(k, v).await`，crate 处理 alloc / host_call / resolve / **future**（一个 no_std 单任务 executor：host 调用是个 future，首 poll 发 `rill_host_call` 挂起，host 之后 `rill_resolve` 唤醒再 poll 完成——即 guest 侧的 callback-resolve）；ABI 导出（`rill_alloc`/`rill_resolve`/`rill_init`）+ 全局 bump 分配器 + panic handler 由 `rill_guest_main!` 宏在 guest cdylib 里生成。`crates/kv-guest` = 用它写的真 Rust guest，`crates/build.sh` 编成 `.wasm`（被 Phase A 的 `WasmGuestHost` 原样加载，测试驱动 `store::put("a","b").await` 端到端跑通）。
+**Phase B · Rust guest SDK（本 PR 已落地）**：`crates/rill-native-guest`（lib）—— 人体工学 SDK，开发者写 `store::put(k, v).await`，crate 处理 alloc / host_call / resolve / **future**（一个 no_std 单任务 executor：host 调用是个 future，首 poll 发 `rill_host_call` 挂起，host 之后 `rill_resolve` 唤醒再 poll 完成——即 guest 侧的 callback-resolve）；ABI 导出（`rill_alloc`/`rill_resolve`/`rill_init`）+ 全局 bump 分配器 + panic handler 由 `guest_main!` 宏在 guest cdylib 里生成。`crates/kv-guest` = 用它写的真 Rust guest，`crates/build.sh` 编成 `.wasm`（被 Phase A 的 `NativeGuestHost` 原样加载，测试驱动 `store::put("a","b").await` 端到端跑通）。
 
 > **封口自证**：编出的 `kv-guest.wasm` 的 import 列表**只有 `env.rill_host_call` 一个**——guest 能触达的全部就在这张表里，无 fetch / socket / 任何网络原语。import 模型即沙箱，肉眼可查。
 
 **Phase B 后续（未做）**：CLI 增加 `.wasm` guest 构建目标（现只出 JS bundle）、补 `host:net` 等更多能力的 typed 包装、host:store 活桥 e2e。
 
-**Phase C · 渲染（本 PR 已落地首版）**：原生 guest 第一次**出 UI**。SDK 加了声明式构建 `ui::view([ui::text("…")])` + `render(root)`——把元素树走成一个**渲染批次**（`{version,batchId,operations:[CREATE/APPEND…]}`，文本节点为 CREATE type `__TEXT__` + `props.text`，与 JS reconciler 一致）经**新增的单向 ABI 通道 `rill_send_batch(ptr,len)`** 交给 host；`WasmGuestHost` 解码成 `OperationBatch` → 转交 `onRenderBatch`（**decoupled**：host 不硬编码 receiver）→ 喂给**真 `receiver.applyBatch`** 物化。`crates/ui-guest` 渲染 `View > [Text("hello from rust"), View > Text("nested")]`，测试用 `receiver.getComponentTree()` 断言物化出的真实节点树。**这是 JS guest 用的同一条渲染路径，只是批次在 Rust 里构建。**
+**Phase C · 渲染（本 PR 已落地首版）**：原生 guest 第一次**出 UI**。SDK 加了声明式构建 `ui::view([ui::text("…")])` + `render(root)`——把元素树走成一个**渲染批次**（`{version,batchId,operations:[CREATE/APPEND…]}`，文本节点为 CREATE type `__TEXT__` + `props.text`，与 JS reconciler 一致）经**新增的单向 ABI 通道 `rill_send_batch(ptr,len)`** 交给 host；`NativeGuestHost` 解码成 `OperationBatch` → 转交 `onRenderBatch`（**decoupled**：host 不硬编码 receiver）→ 喂给**真 `receiver.applyBatch`** 物化。`crates/ui-guest` 渲染 `View > [Text("hello from rust"), View > Text("nested")]`，测试用 `receiver.getComponentTree()` 断言物化出的真实节点树。**这是 JS guest 用的同一条渲染路径，只是批次在 Rust 里构建。**
 
 **Phase C 后续（未做）**：批次 wire 从 JSON 换成现有**二进制 op 协议**（`BinaryProtocol`，与 JS guest 完全一致、高频优化）；输入 / 生命周期走 `rill_on_event(ptr,len)`（复用现有事件通道）；补 host:* 全集；扩 C/Zig SDK。
 
@@ -102,16 +102,16 @@ rill 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 **节点词汇边界（canvas-first，当前）**：原生 guest 能发的**全部**节点就三种——`ui::view`（容器）、`ui::text`（字符串）、`ui::canvas`（视口），而且 `View`/`Text` **不带 props / 样式 / id / 事件回调**。JS guest 的 21 名组件白名单（`src/sdk/sdk.ts`）从原生线**够不着**：原生 guest 挂不了任何可交互 RN 组件，连给 `View`/`Text` 定位、描边都做不到。真正的界面（工具栏、表单、下拉、文本框）要**自绘进一个 `Canvas`**——guest 自己做布局、命中测试、焦点，靠 canvas 的 `pointer` / `wheel` / `key` 事件流（经 `events::on` 投递）驱动。**这是当前能用的形态；把两条线收敛到一套组件模型（props + 事件回传通道）是已记录的 follow-up、不是永久设计**——见 issue #63 与 [native-guest-deferred.zh.md](native-guest-deferred.zh.md)。这条边界现在只有读 `lib.rs` 才发现，此处显式写明，避免作者对着它写完才知道。
 
-**事件（host→guest，已落地）**：guest 导出 `rill_on_event(name_ptr,name_len, payload_ptr,payload_len)`；host 调 `WasmGuestHost.emitEvent(name, payload)`（编码 payload → `rill_alloc` 写入 → 调 `rill_on_event`，guest 无此导出则 no-op；**全程 try/catch，guest 的坏 alloc/trap 不使 host 抛错**）。
+**事件（host→guest，已落地）**：guest 导出 `rill_on_event(name_ptr,name_len, payload_ptr,payload_len)`；host 调 `NativeGuestHost.emitEvent(name, payload)`（编码 payload → `rill_alloc` 写入 → 调 `rill_on_event`，guest 无此导出则 no-op；**全程 try/catch，guest 的坏 alloc/trap 不使 host 抛错**）。
 
 **事件 payload 的编码分叉（issue #82）**：payload 走**与 host 调用返回值同一套分叉**——不含字节时是 UTF-8 JSON（与改动前逐字节一致），含 `Uint8Array` 时编成 **RBS1 信封**（`contracts/store-net-bytes.json`），字节以原始段（segment）随行、不做 base64 / 数字数组膨胀。ABI 没变（`rill_on_event` 本来就是 `(ptr,len)` 字节区间），guest handler 拿到的也一直是原始 `&[u8]`：想要字节的 handler 自己 peek magic、`store_net_encode::decode_envelope` 零拷贝解框，不想要的照旧当 JSON 解。**这是原生 guest 唯一的 host→guest 推送通道**：宿主模块的 `subscription` 从原生线**结构性够不着**（订阅要递一个 handler 函数，而这条 ABI 只搬字节），所以外部对端主动送来的数据（转发的 socket、串口、子进程 stdout——guest 无从知道何时该拉）只能走事件。契约层的 `createCapabilitiesManifest` 会把这类导出列进 `jsOnlyCapabilities`，`subscription()` 也可用 `binary: { event: [...] }` 声明事件里的字节字段（派发处有 fail-closed 兜底：声明为字节的字段必须是真 `Uint8Array`，数字数组一律拒）。编码失败（段超 1 MiB 上限、循环引用）**不静默丢**：`console.warn` 报出事件名与原因（同 render 通道的告警上限，防洪）。SDK `events::on(name, |payload| …)` 注册同步 handler + `off(id)` 注销（`dispatch` 先快照 handler，允许 handler 内自删/新增而不 UAF）。这让原生 guest 从「只能画一帧」变**可收输入/生命周期 = 可交互**。**注**：handler 是同步的，暂不应在其中 `.await` host 调用——被 drop 的 future 不仅收不到结果，其结果槽还会在 guest 侧 `RESULTS` 累积（已加 64 上限兜底，避免无界泄漏）；异步 handler 是 follow-up。**canvas 的帧缓冲 present 是消费者层，地基不碰。**
 
 ## 7. 测试
 
-`wasm-guest-host.test.ts`（26 绿）+ `engine.mixed-guests.test.ts`（1 绿）。因这是**信任边界**（host 解引用 guest 控制的指针），覆盖不止 happy-path，还含对抗、fuzz 与不变量：
+`native-guest-host.test.ts`（26 绿）+ `engine.mixed-guests.test.ts`（1 绿）。因这是**信任边界**（host 解引用 guest 控制的指针），覆盖不止 happy-path，还含对抗、fuzz 与不变量：
 
 - **端到端**：手写最小 guest host:store.putText 往返；真 Rust guest `store::put().await`；渲染批次经真 receiver 物化成节点树；**host→guest 事件**（`emitEvent` → guest handler 收到 payload、名字过滤、重复投递、无导出则 no-op）；**C guest**（C SDK 写的 guest 经同一 host **渲染**成功 → ABI 语言中立在 C 上得证。**诚实注**：C SDK 首版只做单向 render 路径，`host:*` 异步往返/事件的语言中立目前**只在 Rust 上验证**，C 侧 executor 是 follow-up）。
-- **多 guest 共存**：同一进程挂一个 JS/node-vm guest（Engine）+ 一个原生 guest（WasmGuestHost），各渲染进各自 receiver、互不串（`engine.mixed-guests.test.ts`）。
+- **多 guest 共存**：同一进程挂一个 JS/node-vm guest（Engine）+ 一个原生 guest（NativeGuestHost），各渲染进各自 receiver、互不串（`engine.mixed-guests.test.ts`）。
 - **对抗 / 边界**（host 必须 fail-closed、绝不崩）：畸形 JSON 输入 → `ok=0`；**越界 `ptr/len` → `ok=0`、不读 OOB**；畸形渲染批次 → 丢弃不崩；host handler 抛错 → `ok=0`；模块在但方法缺 → `ok=0`。
 - **executor 压测**：真 Rust guest 连续两次 `await`（put→get，压 `cb_id` 匹配 + re-poll）；guest `Err` 分支（能力缺失 → `ok=0`）；JSON 转义（值含 `"`/`\`）双向往返。
 - **封口不变量（自动化）**：对每个 guest wasm 断言 import ⊆ host 提供集；**+ 正向强制**——一个 import 了未声明 `env.evil` 的 guest 被 `load()`（`WebAssembly.instantiate` → `LinkError`）**拒绝**（这才是真测 seal 强制，非同义反复）。
@@ -134,13 +134,13 @@ rill 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 | 关注点 | 位置 |
 |---|---|
-| 宿主侧原生 guest ABI | `src/host/wasm-guest/wasm-guest-host.ts`（`WasmGuestHost`） |
-| Rust guest SDK（future/executor/宏 + `store`/`ui`/`render`/`events`） | `crates/rill-guest/src/lib.rs` |
+| 宿主侧原生 guest ABI | `src/host/native-guest/native-guest-host.ts`（`NativeGuestHost`） |
+| Rust guest SDK（future/executor/宏 + `store`/`ui`/`render`/`events`） | `crates/rill-native-guest/src/lib.rs` |
 | 真 Rust guest：host:* 调用 / 连续 await / 渲染 / 收事件 | `crates/{kv,seq,ui,event,heap-churn}-guest/src/lib.rs`、`crates/build.sh` |
 | C guest SDK + 例子（语言中立自证） | `sdk/c/rill_guest.h`、`sdk/c/example-guest.c`、`sdk/c/build.sh`（clang -c → wasm-ld 两步） |
 | JS + 原生 guest 共存测试 | `src/host/__tests__/unit/engine.mixed-guests.test.ts` |
-| 最小原生 guest（wire 级 ABI，手写） | `src/host/wasm-guest/__tests__/fixtures/roundtrip.wat` |
-| 往返 + 封口负向 + Rust guest + 渲染物化测试 | `src/host/wasm-guest/__tests__/wasm-guest-host.test.ts` |
+| 最小原生 guest（wire 级 ABI，手写） | `src/host/native-guest/__tests__/fixtures/roundtrip.wat` |
+| 往返 + 封口负向 + Rust guest + 渲染物化测试 | `src/host/native-guest/__tests__/native-guest-host.test.ts` |
 | 渲染批次物化（复用） | `src/host/receiver/receiver.ts`（`applyBatch`）、`src/host/registry.ts` |
 | 复用的能力派发 | `src/contract/index.ts`（`createHostModuleDispatch`） |
 | 异步模型来源（现有 QuickJS 桥） | `src/host/sandbox/providers/quickjs-native-wasm-provider.ts` |
@@ -154,9 +154,9 @@ rill 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 ### 9.1 可选导出 `rill_abi_version() -> u32`
 
-guest 现在**可以**（不强制）导出 `rill_abi_version`，向宿主声明自己所讲的 ABI 版本。Rust SDK 的 `rill_guest_main!` 宏会自动生成该导出，值取自常量 `RILL_ABI_VERSION`（当前 = 1）。
+guest 现在**可以**（不强制）导出 `rill_abi_version`，向宿主声明自己所讲的 ABI 版本。Rust SDK 的 `guest_main!` 宏会自动生成该导出，值取自常量 `RILL_ABI_VERSION`（当前 = 1）。
 
-宿主端（`WasmGuestHost.load`）的处置规则：
+宿主端（`NativeGuestHost.load`）的处置规则：
 
 - **缺席即宽容**：guest 没有这个导出 = 版本化之前的 guest（v0/v1 wire 完全一致），照常加载，`guestAbiVersion` 记为 `null`。
 - **不识别即拒载（fail-closed）**：guest 声明了宿主不支持的版本号（`SUPPORTED_GUEST_ABI_VERSIONS` 之外），`load` 直接抛错，**不会**执行 `rill_init`。这是一处**有意的行为变更**——此前宿主完全无视版本导出。
@@ -166,7 +166,7 @@ guest 现在**可以**（不强制）导出 `rill_abi_version`，向宿主声明
 
 ### 9.2 `loadBundle` 的 `initialProps` 经命名事件 `props` 投递
 
-`WasmGuestView.loadBundle(source, initialProps, options)` 中，`initialProps` 现在会在 `load` 之后、`drain` 之前，通过命名事件通道投递给 guest（`events::on("props")`）——与 JS Engine 的 props 语义对齐。`source`/`options` 对原生 guest 无意义（wasm 字节在构造期已定），有意不使用。
+`NativeGuestView.loadBundle(source, initialProps, options)` 中，`initialProps` 现在会在 `load` 之后、`drain` 之前，通过命名事件通道投递给 guest（`events::on("props")`）——与 JS Engine 的 props 语义对齐。`source`/`options` 对原生 guest 无意义（wasm 字节在构造期已定），有意不使用。
 
 投递排在 drain 之前，是为了让「从 props 渲染」的 guest 在其第一次稳定状态里就能看到初始 props。现网 `useEngineView` 对 wasm 分支传的是 `initialProps: undefined`，故生产环境零行为差异；此处记录是为了避免将来再发明第二套 props 通道。
 
@@ -200,7 +200,7 @@ guest 现在**可以**（不强制）导出 `rill_abi_version`，向宿主声明
 
 ### 10.2 封口（seal）不变——SIMD 是 opcode，不是 import
 
-host-import 白名单（`env.{rill_host_call, rill_send_batch, rill_log, rill_on_event}`，在 `wasm-guest-host.test.ts` 自动断言）对 SIMD **透明**：v128 是模块内的**指令**，不引入任何 import。实测：真发射了 v128 指令的 guest，import 集合与非 SIMD 基线逐字节一致。**唯一会破封口的是 atomics/threads**——共享内存会引入 `env.memory` import，与 SIMD 无关，切勿顺手一起开。
+host-import 白名单（`env.{rill_host_call, rill_send_batch, rill_log, rill_on_event}`，在 `native-guest-host.test.ts` 自动断言）对 SIMD **透明**：v128 是模块内的**指令**，不引入任何 import。实测：真发射了 v128 指令的 guest，import 集合与非 SIMD 基线逐字节一致。**唯一会破封口的是 atomics/threads**——共享内存会引入 `env.memory` import，与 SIMD 无关，切勿顺手一起开。
 
 ### 10.3 逐字节正确性：标量与 SIMD 除法必须同法
 
@@ -209,8 +209,8 @@ host-import 白名单（`env.{rill_host_call, rill_send_batch, rill_log, rill_on
 ### 10.4 基线示例 + 门禁 + bench
 
 - `crates/blur-demo-guest/`：一个盒式模糊 demo guest，导出 `box_blur_scalar` 与 `box_blur_simd`（+ `blur_alloc`）。
-- `src/host/wasm-guest/__tests__/blur-demo-guest.test.ts`：**逐字节门禁**——多种尺寸/半径下 `simd === scalar`；随 `bun run preflight` 跑。
-- `src/host/wasm-guest/__benchmarks__/blur-bench.ts`：门控 bench（`bun <file>` 显式跑，非门禁）。
+- `src/host/native-guest/__tests__/blur-demo-guest.test.ts`：**逐字节门禁**——多种尺寸/半径下 `simd === scalar`；随 `bun run preflight` 跑。
+- `src/host/native-guest/__benchmarks__/blur-bench.ts`：门控 bench（`bun <file>` 显式跑，非门禁）。
 
 **实测提速（同内核、引擎相关）**：V8（node/浏览器/web host）约 **2.07×**，JSC（bun 测试运行时）约 **1.11×**——差异纯来自引擎的 wasm-SIMD 代码生成质量。web host 跑 V8，故 ~2× 是相关数字；bun 下看到的 ~1.1× 低估了真实收益。正确性与引擎无关。
 

@@ -10,9 +10,9 @@
 
 ## 为什么不能直接用出货 fixture
 
-出货的 release fixture(`src/host/wasm-guest/__tests__/fixtures/*.wasm`)是**字节可复现、且刻意不带 DWARF** 的:带上会让体积暴涨数百 KiB(调试版约 7× 大)、并泄漏构建机的**绝对源码路径**。所以 DWARF 只存在于一次性的 `crates/debug-artifacts/`,**永不提交**。
+出货的 release fixture(`src/host/native-guest/__tests__/fixtures/*.wasm`)是**字节可复现、且刻意不带 DWARF** 的:带上会让体积暴涨数百 KiB(调试版约 7× 大)、并泄漏构建机的**绝对源码路径**。所以 DWARF 只存在于一次性的 `crates/debug-artifacts/`,**永不提交**。
 
-这条边界由测试 `src/host/wasm-guest/__tests__/wasm-guest-dwarf.test.ts` 守卫:断言每个 fixture 都无 `.debug_*` 自定义段。
+这条边界由测试 `src/host/native-guest/__tests__/native-guest-dwarf.test.ts` 守卫:断言每个 fixture 都无 `.debug_*` 自定义段。
 
 ## 步骤
 
@@ -26,7 +26,7 @@ RILL_GUEST_DEBUG=1 crates/build.sh
 
 **2. 让宿主加载调试 guest**
 
-把宿主指向 `crates/debug-artifacts/<guest>.wasm` 而非出货 fixture(例如测试/示例里替换传给 `WasmGuestHost` 的 `wasmBinary`/`wasmPath`)。**v1 建议挂在主线程**上跑——Worker target 的 attach 更繁琐,后续再做。
+把宿主指向 `crates/debug-artifacts/<guest>.wasm` 而非出货 fixture(例如测试/示例里替换传给 `NativeGuestHost` 的 `wasmBinary`/`wasmPath`)。**v1 建议挂在主线程**上跑——Worker target 的 attach 更繁琐,后续再做。
 
 **3. 用 Chrome DevTools 接上**
 

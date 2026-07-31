@@ -12,70 +12,70 @@ checksum = "c880a97d28a3681c0267bd29cff89621202715b065127cd445fa0f0fe0aa2880"
 name = "asset-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "blur-demo-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "canvas-binary-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "canvas-escape-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "canvas-gpu-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "canvas-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "canvas-present-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "event-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "heap-churn-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "kv-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
@@ -88,7 +88,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rill-guest"
+name = "rill-native-guest"
 version = "0.0.0"
 dependencies = [
  "talc",
@@ -104,7 +104,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 name = "seq-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
@@ -121,12 +121,12 @@ dependencies = [
 name = "ui-binary-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]
 
 [[package]]
 name = "ui-guest"
 version = "0.0.0"
 dependencies = [
- "rill-guest",
+ "rill-native-guest",
 ]

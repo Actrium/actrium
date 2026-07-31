@@ -13,4 +13,4 @@ crate-type = ["cdylib"]
 # Enable the WIP binary canvas wire in the SDK. This crate is built by build.sh
 # in its OWN cargo invocation (separate feature resolve) so this feature never
 # unifies into the default JSON fixtures.
-rill-guest = { path = "../rill-guest", features = ["binary-protocol"] }
+rill-native-guest = { path = "../rill-native-guest", features = ["binary-protocol"] }

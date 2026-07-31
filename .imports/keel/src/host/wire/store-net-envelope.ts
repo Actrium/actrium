@@ -4,7 +4,7 @@
  * Host-side codec for the RBS1 binary-value ENVELOPE (the R2 first-class-bytes
  * wire). The authoritative wire schema is contracts/store-net-bytes.json; the
  * byte-exact golden oracle is contracts/store-net-bytes.golden.json (produced by
- * the Rust encoder crates/rill-guest/src/store_net_encode.rs). This module is
+ * the Rust encoder crates/rill-native-guest/src/store_net_encode.rs). This module is
  * validated against those files and MUST NOT hand-copy any peer codec.
  *
  * ZERO-DOM: references no `document`, `HTMLCanvasElement`, `window`, or any other

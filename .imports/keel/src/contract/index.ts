@@ -278,7 +278,7 @@ export function subscription<Event = unknown>(
  *   `rill_host_call`, which carries bytes — a decoded byte payload is never a
  *   function. So the call cannot be expressed, let alone dispatched. The
  *   host->guest push channel for a native guest is the named event channel
- *   (`WasmGuestView.sendEvent` -> the guest's `rill_on_event`), which since the
+ *   (`NativeGuestView.sendEvent` -> the guest's `rill_on_event`), which since the
  *   RBS1 event fork carries JSON *and* raw bytes.
  *
  * Consumed by publish gates and type generators (via the manifest's

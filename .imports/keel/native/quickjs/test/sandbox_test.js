@@ -618,7 +618,7 @@
   binCtx.inject('getFakeView', () => ({
     constructor: { name: 'Uint8Array' },
     buffer: new ArrayBuffer(4),
-    byteOffset: Math.pow(2, 64),
+    byteOffset: 2 ** 64,
     byteLength: 2,
   }));
   assert(

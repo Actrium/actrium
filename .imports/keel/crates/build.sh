@@ -16,7 +16,7 @@ set -euo pipefail
 cd "$(dirname "$0")"
 
 TARGET=wasm32-unknown-unknown
-FIXTURES=../src/host/wasm-guest/__tests__/fixtures
+FIXTURES=../src/host/native-guest/__tests__/fixtures
 # Single source of truth for both the debug (DWARF) and release fixture builds
 # below. Since the binary-protocol feature is now DEFAULT ON (issue #45), every
 # guest here is binary-capable (op-batch encoder + rill_wire_caps export, canvas

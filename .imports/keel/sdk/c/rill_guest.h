@@ -3,14 +3,14 @@
  *
  * Proves the linear-memory host:* ABI (docs/native-guest.zh.md) is genuinely
  * language-neutral: a guest compiled from C binds the SAME imports/exports the
- * Rust SDK (crates/rill-guest) uses, and the Phase A WasmGuestHost loads it
+ * Rust SDK (crates/rill-native-guest) uses, and the Phase A NativeGuestHost loads it
  * unchanged.
  *
  * This first cut covers the one-way RENDER path (sync, no host round-trip).
  * The async host:* call import (rill_host_call) is declared for reference
  * only — the callback-resolve executor around it, and the guest-side event
  * export (rill_on_event), are NOT provided here; a full async/event runtime
- * in C is a follow-up. See the Rust SDK (crates/rill-guest) for the reference
+ * in C is a follow-up. See the Rust SDK (crates/rill-native-guest) for the reference
  * implementation of both.
  */
 #ifndef RILL_GUEST_H

@@ -64,7 +64,7 @@ jobs:
     timeout-minutes: 15
 
     # crates/ is the native (non-JS) WASM guest workspace. The .wasm test
-    # fixtures under src/host/wasm-guest/__tests__/fixtures/ are committed to
+    # fixtures under src/host/native-guest/__tests__/fixtures/ are committed to
     # git and are NOT compared here (wasm output is not byte-reproducible
     # across toolchains): after changing crates/, rebuild them manually with
     # crates/build.sh. This job only keeps the Rust sources themselves green.
@@ -99,7 +99,7 @@ jobs:
 
       # Host-target unit tests for the SDK crate: wire codecs (op-batch / canvas /
       # RBS1 golden vectors), the contract conformance suite, and the host-call
-      # wrapper wiretaps. `-p rill-guest` rather than --workspace on purpose: the
+      # wrapper wiretaps. `-p rill-native-guest` rather than --workspace on purpose: the
       # guest cdylibs around it are wasm32-only (their panic handler uses
       # core::arch::wasm32, which collides with std's in a test harness), so a
       # workspace-wide `cargo test` cannot compile. Both feature configurations
@@ -108,5 +108,5 @@ jobs:
       # own pass to stay green.
       - name: Test SDK crate (host target)
         run: |
-          cargo test -p rill-guest
-          cargo test -p rill-guest --no-default-features
+          cargo test -p rill-native-guest
+          cargo test -p rill-native-guest --no-default-features

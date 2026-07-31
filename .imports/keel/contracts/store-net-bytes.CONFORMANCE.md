@@ -17,15 +17,15 @@ as raw bytes (a `Uint8Array` / guest `ptr+len`), never as a JSON number-array.
 
 > **Status: R2 delivered — codec (both sides) + golden lock + SDK wrappers +
 > QuickJS `$b64` + return-memory fix, all green, back-compat proven.** The guest
-> codec (`crates/rill-guest/src/store_net_encode.rs`) and the host codec
-> (`src/host/wire/store-net-envelope.ts`, live on `WasmGuestHost`'s receive/return
+> codec (`crates/rill-native-guest/src/store_net_encode.rs`) and the host codec
+> (`src/host/wire/store-net-envelope.ts`, live on `NativeGuestHost`'s receive/return
 > fork) are implemented; the golden vectors are locked cross-language (Rust encoder
 > is the oracle; the TS encoder reproduces its bytes and the TS decoder reconstructs
-> each source); the `rill-guest` byte SDK wrappers (`store::put_bytes`/`get_bytes`,
+> each source); the `rill-native-guest` byte SDK wrappers (`store::put_bytes`/`get_bytes`,
 > the `net` module) ride the codec; and the QuickJS JSON-string bridge carries the
 > `{"$b64":"…"}` sidecar with parity to the WASM path. All new code is compiled into
 > the shipped guest unconditionally (not `wip`-gated). Conformance sweep is green:
-> Rust `rill-guest` 58, TS `src/contract`+`src/host/wasm-guest`+`src/host/sandbox`
+> Rust `rill-native-guest` 58, TS `src/contract`+`src/host/native-guest`+`src/host/sandbox`
 > 193, TS `src/host/wire` 185, `tsc --noEmit` clean.
 
 ## 1. The envelope (framing byte layout)
@@ -143,7 +143,7 @@ today's raw-JSON path (a UTF-8 JSON body leading with `{` `0x7B` or `[` `0x5B`).
   (`kind:"plain"`) asserts a segment-free value stays raw JSON and is **not** an
   RBS1 frame; on the host side `encodeResult` returns `null` for any
   `Uint8Array`-free result (so the reply is the identical `JSON.stringify`), proven
-  end-to-end by the whole pre-existing `wasm-guest` suite taking the unchanged path
+  end-to-end by the whole pre-existing `native-guest` suite taking the unchanged path
   and by a non-binary handler round-tripping as raw JSON (`isRbs1` false). The RBS1
   fork is never taken for a segment-free call or return.
 
@@ -168,7 +168,7 @@ directions**.
 | maxJsonBytes | `limits.maxJsonBytes.value` = `262144` (256 KiB) | `limits::MAX_JSON_BYTES = 262144` | `json-too-big` |
 
 The Rust constants are **generated** from the schema by
-`crates/rill-guest/build.rs` (`generate_store_net_contract`): `MAGIC` is derived
+`crates/rill-native-guest/build.rs` (`generate_store_net_contract`): `MAGIC` is derived
 from `magic.hex` and its little-endian bytes are asserted at build time to spell
 `magic.asciiBytes`; every `limits.*` is read straight from the schema and emitted
 as a `SCREAMING_SNAKE` const. A renamed/removed key or a changed value fails the
@@ -197,11 +197,11 @@ framing is **symmetric**, one vector locks **both** directions:
 
 | # | Assertion | Where | Direction |
 |---|-----------|-------|-----------|
-| 1 | Rust **encoder** == golden `hex`, byte-for-byte (envelope vectors); the at-cap 1 MiB vector locks length + structure | `crates/rill-guest/src/store_net_encode_tests.rs` (`golden_vectors_are_locked`) | value → bytes (request AND return) |
+| 1 | Rust **encoder** == golden `hex`, byte-for-byte (envelope vectors); the at-cap 1 MiB vector locks length + structure | `crates/rill-native-guest/src/store_net_encode_tests.rs` (`golden_vectors_are_locked`) | value → bytes (request AND return) |
 | 2 | TS **encoder** reproduces the golden `hex` and the TS **decoder** reconstructs each source | `src/host/wire/__tests__/store-net-envelope.test.ts` | bytes ⇄ value (request AND return) |
 | 3 | Round-trip parity: `encode_value(decode_value(bytes)) == bytes`; the same value encodes identically as request or return | both codecs | symmetry lock |
-| 4 | End-to-end through a real guest: `WasmGuestHost` decodes an RBS1 request into a `Uint8Array` and returns a byte-carrying result as an RBS1 frame | `src/host/wasm-guest/__tests__/rbs1-guest.test.ts` (fixture `rbs1-guest.wat`) | live receive + return fork |
-| 5 | End-to-end PUSH: `emitEvent` with a byte-carrying payload lands an RBS1 frame in a real Rust guest's memory (byte-free payloads stay byte-identical JSON) | `src/host/wasm-guest/__tests__/wasm-guest-host.test.ts` (fixture `event-guest.wasm`) | live event fork (host → guest) |
+| 4 | End-to-end through a real guest: `NativeGuestHost` decodes an RBS1 request into a `Uint8Array` and returns a byte-carrying result as an RBS1 frame | `src/host/native-guest/__tests__/rbs1-guest.test.ts` (fixture `rbs1-guest.wat`) | live receive + return fork |
+| 5 | End-to-end PUSH: `emitEvent` with a byte-carrying payload lands an RBS1 frame in a real Rust guest's memory (byte-free payloads stay byte-identical JSON) | `src/host/native-guest/__tests__/native-guest-host.test.ts` (fixture `event-guest.wasm`) | live event fork (host → guest) |
 
 Golden vectors (`store-net-bytes.golden.json`, 6 vectors, Rust encoder as oracle):
 `back-compat-no-segments` (raw JSON, asserted **not** a frame), `one-segment`,
@@ -320,13 +320,13 @@ exactly which capabilities carry the mapping.
 ```sh
 # Guest codec + golden lock + return-path no-leak proof (a renamed/removed/edited
 # schema key fails the build; a wire-byte drift fails the golden test):
-cd /ext/rill/crates && cargo test -p rill-guest
+cd /ext/rill/crates && cargo test -p rill-native-guest
 
 # Regenerate the golden from the Rust oracle after an intentional wire change:
-cd /ext/rill/crates && RILL_WRITE_STORE_NET_GOLDEN=1 cargo test -p rill-guest golden_vectors_are_locked
+cd /ext/rill/crates && RILL_WRITE_STORE_NET_GOLDEN=1 cargo test -p rill-native-guest golden_vectors_are_locked
 
 # Host codec (unit + cross-language golden) and the end-to-end guest fork:
-cd /ext/rill && bun test src/host/wire src/host/wasm-guest
+cd /ext/rill && bun test src/host/wire src/host/native-guest
 ```
 
 ## Current status — R2 delivered, golden-locked, back-compat proven
@@ -336,10 +336,10 @@ cd /ext/rill && bun test src/host/wire src/host/wasm-guest
 | `store-net-bytes.json` | single-source schema (magic, framing, sentinel, caps, reasons) | **LOCKED** |
 | `build.rs` `generate_store_net_contract` | `MAGIC` + `PROTOCOL_VERSION` + `limits::*` from schema | **generated, builds** |
 | `store-net-bytes.golden.json` | byte-exact oracle (Rust encoder), 6 vectors | **built + locked (Rust & TS)** |
-| `crates/rill-guest/src/store_net_encode.rs` | guest framing + value-walking codec (`no_std`) | **built, tested** |
-| `src/host/wire/store-net-envelope.ts` | host codec, live on `WasmGuestHost` receive/return fork | **built, tested** |
+| `crates/rill-native-guest/src/store_net_encode.rs` | guest framing + value-walking codec (`no_std`) | **built, tested** |
+| `src/host/wire/store-net-envelope.ts` | host codec, live on `NativeGuestHost` receive/return fork | **built, tested** |
 | `src/contract/index.ts` `binary` field | contract-level byte-field metadata (type-gen, manifest, dispatch backstop) | **built, tested, additive** |
-| `store::put_bytes`/`get_bytes`, `net::fetch_bytes` | `rill-guest` byte SDK wrappers on the codec | **built, round-trip tested** |
+| `store::put_bytes`/`get_bytes`, `net::fetch_bytes` | `rill-native-guest` byte SDK wrappers on the codec | **built, round-trip tested** |
 | QuickJS `$b64` sidecar (`quickjs-native-wasm-provider.ts`) | JSON-string bridge byte transport, parity with WASM path | **built, parity tested** |
 | Return-path leak (oversized fallback dealloc) | `rt::resolve` frees the guest's own fallback buffer | **fixed + no-leak test** |
 
@@ -347,7 +347,7 @@ cd /ext/rill && bun test src/host/wire src/host/wasm-guest
 
 | Suite | Command | Result |
 |---|---|---|
-| Rust guest (codec, golden, wrappers, no-leak, R3 plateau) | `cargo test -p rill-guest` | **58 passed** |
-| TS contract + wasm-guest + sandbox (RBS1 e2e, QuickJS `$b64` parity) | `bun test src/contract src/host/wasm-guest src/host/sandbox` | **193 passed** |
+| Rust guest (codec, golden, wrappers, no-leak, R3 plateau) | `cargo test -p rill-native-guest` | **58 passed** |
+| TS contract + native-guest + sandbox (RBS1 e2e, QuickJS `$b64` parity) | `bun test src/contract src/host/native-guest src/host/sandbox` | **193 passed** |
 | TS wire (host codec + cross-language golden) | `bun test src/host/wire` | **185 passed** |
 | Typecheck | `bunx tsc --noEmit` | **clean** |

@@ -10,7 +10,7 @@ extern crate alloc;
 
 use alloc::vec::Vec;
 
-rill_guest::rill_guest_main!(guest_main);
+rill_native_guest::guest_main!(guest_main);
 
 // A value with characters that must be JSON-escaped: b " \ c
 const TRICKY: &str = "b\"\\c";
@@ -19,11 +19,11 @@ static mut STEP: i32 = 0; // how far the sequential chain progressed
 static mut GOT: Vec<u8> = Vec::new(); // the get() response body
 
 async fn guest_main() {
-    if rill_guest::store::put("a", TRICKY).await.is_err() {
+    if rill_native_guest::store::put("a", TRICKY).await.is_err() {
         return;
     }
     unsafe { STEP = 1 };
-    if let Ok(bytes) = rill_guest::store::get("a").await {
+    if let Ok(bytes) = rill_native_guest::store::get("a").await {
         unsafe {
             STEP = 2;
             GOT = bytes;
