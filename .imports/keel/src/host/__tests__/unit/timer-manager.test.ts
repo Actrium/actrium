@@ -53,6 +53,31 @@ async function waitMs(ms: number) {
   await flushMicrotasks();
 }
 
+/**
+ * Poll until `predicate` holds, flushing microtasks between attempts.
+ *
+ * The assertions that something DID happen used to sit behind a fixed `waitMs`
+ * sized just above the timer's delay -- 130 ms for three 30 ms ticks, say. That
+ * is a race rather than a wait: a loaded runner delivers fewer ticks inside the
+ * window and the test goes red while the code is perfectly correct, which it did
+ * on three separate pull requests. Polling asserts the same invariant (the
+ * callback fires; the interval repeats) without staking it on scheduling luck,
+ * and it still fails -- by timing out -- if the behaviour genuinely breaks.
+ *
+ * Assertions that something has NOT happened keep their fixed waits: for those,
+ * waiting longer only makes the check stricter.
+ */
+async function waitUntil(predicate: () => boolean, timeoutMs = 5000) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) {
+      throw new Error(`waitUntil: condition still false after ${timeoutMs}ms`);
+    }
+    await waitMs(5);
+  }
+  await flushMicrotasks();
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -89,7 +114,7 @@ describe('TimerManager', () => {
       set(() => { fired = true; }, 20);
 
       // Allow microtask (async schedule) + native timeout
-      await waitMs(80);
+      await waitUntil(() => fired);
       expect(fired).toBe(true);
     });
 
@@ -98,7 +123,7 @@ describe('TimerManager', () => {
       set(() => {}, 10);
       expect(tm.getStats().timeouts).toBe(1);
 
-      await waitMs(50);
+      await waitUntil(() => tm.getStats().timeouts === 0);
       expect(tm.getStats().timeouts).toBe(0);
     });
 
@@ -225,8 +250,8 @@ describe('TimerManager', () => {
       let count = 0;
       setI(() => { count++; }, 30);
 
-      // Wait enough for ~3 ticks (30ms * 3 = 90ms) + buffer
-      await waitMs(130);
+      // Two ticks prove it repeats; how long that takes is the runner's business
+      await waitUntil(() => count >= 2);
       expect(count).toBeGreaterThanOrEqual(2);
     });
 
@@ -308,7 +333,7 @@ describe('TimerManager', () => {
       await waitMs(50); // Time passes while paused
 
       tm.resume();
-      await waitMs(80); // After resume, remaining time fires
+      await waitUntil(() => fired); // the remaining time runs once resumed
       expect(fired).toBe(true);
     });
 
@@ -332,7 +357,7 @@ describe('TimerManager', () => {
       expect(count).toBe(0);
 
       tm.resume();
-      await waitMs(100); // Should fire at least once after resume
+      await waitUntil(() => count >= 1); // fires again once resumed
       expect(count).toBeGreaterThanOrEqual(1);
     });
 
@@ -346,7 +371,7 @@ describe('TimerManager', () => {
       expect(fired).toBe(false);
 
       tm.resume();
-      await waitMs(60);
+      await waitUntil(() => fired);
       expect(fired).toBe(true);
     });
 
@@ -360,7 +385,7 @@ describe('TimerManager', () => {
       expect(count).toBe(0);
 
       tm.resume();
-      await waitMs(80);
+      await waitUntil(() => count >= 1);
       expect(count).toBeGreaterThanOrEqual(1);
     });
 
@@ -401,7 +426,7 @@ describe('TimerManager', () => {
 
       // Resume should reschedule
       tm.resume();
-      await waitMs(100);
+      await waitUntil(() => fired);
       expect(fired).toBe(true);
     });
   });
