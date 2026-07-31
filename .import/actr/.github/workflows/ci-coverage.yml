@@ -14,7 +14,7 @@ env:
 jobs:
   coverage-rust:
     name: Rust Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
     steps:
@@ -62,7 +62,7 @@ jobs:
 
   coverage-web-rust:
     name: Web Rust Host Unit Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
     defaults:
@@ -124,7 +124,7 @@ jobs:
 
   coverage-web-wasm:
     name: Web Rust Wasm Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
     defaults:
@@ -194,7 +194,7 @@ jobs:
 
   coverage-typescript:
     name: TypeScript Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
     defaults:
@@ -237,7 +237,7 @@ jobs:
 
   coverage-kotlin:
     name: Kotlin Coverage
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
     defaults:
@@ -268,7 +268,7 @@ jobs:
 
   coverage-summary:
     name: Coverage Summary
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     needs:
       - coverage-rust
       - coverage-web-rust
@@ -323,7 +323,7 @@ jobs:
 
   publish-pages:
     name: Publish Coverage Pages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     needs:
       - coverage-rust
       - coverage-web-rust

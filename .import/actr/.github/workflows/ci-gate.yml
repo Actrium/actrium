@@ -86,7 +86,7 @@ jobs:
     name: Rust
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
       actions: read
@@ -150,7 +150,7 @@ jobs:
     name: Test (Rust)
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
       actions: read
@@ -248,7 +248,7 @@ jobs:
     name: Rust MSRV (1.95)
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
       actions: read
@@ -296,7 +296,7 @@ jobs:
     name: TypeScript
     needs: determine
     if: needs.determine.outputs.ts_binding == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
     steps:
@@ -531,7 +531,7 @@ jobs:
     name: Swift
     needs: determine
     if: needs.determine.outputs.swift_binding == 'true'
-    runs-on: macos-latest
+    runs-on: macos-arm64-larger
     permissions:
       contents: read
     steps:
@@ -666,7 +666,7 @@ jobs:
     name: C and Go Workloads
     needs: determine
     if: needs.determine.outputs.c_go_workloads == 'true'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     permissions:
       contents: read
     steps:

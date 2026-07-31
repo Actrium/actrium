@@ -81,7 +81,7 @@ jobs:
 
   gen-test:
     name: Kotlin Codegen Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
