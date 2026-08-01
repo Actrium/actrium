@@ -565,7 +565,7 @@ pub struct WebSocketSignalingClient {
     /// lock-free read). Absent for clients not wired to lifecycle recovery.
     supervisor_fact_sink: OnceLock<SupervisorFactSink>,
     /// Deterministic two-phase barrier for the generation/publication race.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-utils"))]
     connection_publish_barrier: OnceLock<Arc<tokio::sync::Barrier>>,
     /// Membership authority wiring (set once when the membership controller is
     /// enabled). When present:
@@ -613,10 +613,20 @@ impl WebSocketSignalingClient {
             reconnect_backoff_reset_generation: AtomicU64::new(0),
             hook_callback: OnceLock::new(),
             supervisor_fact_sink: OnceLock::new(),
-            #[cfg(test)]
+            #[cfg(any(test, feature = "test-utils"))]
             connection_publish_barrier: OnceLock::new(),
             membership: OnceLock::new(),
         }
+    }
+
+    /// Install a deterministic two-phase gate immediately before signaling
+    /// publication. Integration tests use the first rendezvous to observe the
+    /// commit boundary and the second to release it after invalidation.
+    #[cfg(feature = "test-utils")]
+    pub fn set_connection_publish_barrier_for_test(&self, barrier: Arc<tokio::sync::Barrier>) {
+        self.connection_publish_barrier
+            .set(barrier)
+            .expect("signaling publication barrier should only be installed once");
     }
 
     fn lock_connection_commit(&self) -> MutexGuard<'_, ()> {
@@ -1386,7 +1396,7 @@ impl WebSocketSignalingClient {
             return self.discard_cancelled_connection(intent, sink).await;
         }
 
-        #[cfg(test)]
+        #[cfg(any(test, feature = "test-utils"))]
         if let Some(barrier) = self.connection_publish_barrier.get() {
             barrier.wait().await;
             barrier.wait().await;

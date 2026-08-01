@@ -436,8 +436,23 @@ impl WireBuilder for DefaultWireBuilder {
                         Ok(webrtc_conn) => {
                             // Check cancellation again after creation.
                             if let Err(e) = check_cancelled(&cancel_token) {
-                                // Clean up the newly created connection.
-                                if let Err(close_err) = webrtc_conn.close().await {
+                                // Clean up the newly created connection through
+                                // the coordinator's session-guarded path: the
+                                // peers-map entry is removed before the physical
+                                // close. A bare `close()` here relies on the
+                                // ConnectionClosed broadcast reaching the
+                                // internal listener, which can be dropped under
+                                // channel lag and would leave the peer entry
+                                // (and the ICE UDP sockets it pins) behind.
+                                if let Some(target) = dest.as_peer_id() {
+                                    coordinator
+                                        .cleanup_failed_connection(
+                                            target,
+                                            webrtc_conn,
+                                            "connection factory cancelled after creation",
+                                        )
+                                        .await;
+                                } else if let Err(close_err) = webrtc_conn.close().await {
                                     tracing::warn!(
                                         "⚠️ [Factory] Failed to close cancelled connection: {}",
                                         close_err

@@ -3,6 +3,33 @@
 
 use super::super::classification::{FixedEntropy, ParkCause};
 use super::*;
+use std::sync::{Arc, Mutex as StdMutex};
+
+#[derive(Clone, Default)]
+struct CapturedLogs(Arc<StdMutex<Vec<u8>>>);
+
+struct CapturedLogWriter(Arc<StdMutex<Vec<u8>>>);
+
+impl std::io::Write for CapturedLogWriter {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .write(bytes)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl<'writer> tracing_subscriber::fmt::MakeWriter<'writer> for CapturedLogs {
+    type Writer = CapturedLogWriter;
+
+    fn make_writer(&'writer self) -> Self::Writer {
+        CapturedLogWriter(Arc::clone(&self.0))
+    }
+}
 
 fn config() -> PolicyConfig {
     PolicyConfig::defaults()
@@ -2191,6 +2218,87 @@ fn composite_offline_disconnect_requires_committed_offline_path() {
     assert_eq!(
         composite_action(&view),
         Some(Action::ConfirmedOfflineDisconnect)
+    );
+}
+
+#[test]
+fn inv29_composite_table_fall_through_is_logged_never_silent() {
+    let logs = CapturedLogs::default();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::ERROR)
+        .with_writer(logs.clone())
+        .finish();
+    let mut view = View::initial();
+    view.network_path = NetworkPathState::Online;
+    view.offline_work = OfflineWorkState::DisconnectPending;
+    view.offline_record = Some(PendingRecord::teardown(1));
+
+    tracing::subscriber::with_default(subscriber, || {
+        assert_eq!(composite_action(&view), None);
+    });
+
+    let output = String::from_utf8(
+        logs.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone(),
+    )
+    .expect("captured recovery log should be UTF-8");
+    assert!(
+        output.contains("ERROR"),
+        "fall-through must be ERROR: {output}"
+    );
+    assert!(
+        output.contains("recovery composite-table fall-through"),
+        "fall-through must use the centralized diagnostic: {output}"
+    );
+    assert!(
+        output.contains("DisconnectPending requires an Offline network path"),
+        "diagnostic must identify the violated implication: {output}"
+    );
+    assert!(
+        output.contains("invariant=29"),
+        "diagnostic must carry the structured invariant field: {output}"
+    );
+}
+
+#[test]
+fn inv29_cleanup_shadowing_cannot_silence_the_fall_through() {
+    let logs = CapturedLogs::default();
+    let subscriber = tracing_subscriber::fmt()
+        .without_time()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::ERROR)
+        .with_writer(logs.clone())
+        .finish();
+    let mut view = View::initial();
+    view.network_path = NetworkPathState::Online;
+    view.offline_work = OfflineWorkState::DisconnectPending;
+    view.offline_record = Some(PendingRecord::teardown(1));
+    view.cleanup_work = CleanupWorkState::CleanupPending;
+    view.cleanup_record = Some(PendingRecord::teardown(1));
+
+    tracing::subscriber::with_default(subscriber, || {
+        // Action precedence is unchanged: cleanup still shadows lower domains.
+        assert_eq!(composite_action(&view), Some(Action::Cleanup));
+    });
+
+    let output = String::from_utf8(
+        logs.0
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone(),
+    )
+    .expect("captured recovery log should be UTF-8");
+    assert!(
+        output.contains("recovery composite-table fall-through"),
+        "a pending cleanup must not shadow the INV-29 diagnostic: {output}"
+    );
+    assert!(
+        output.contains("invariant=29"),
+        "diagnostic must carry the structured invariant field: {output}"
     );
 }
 

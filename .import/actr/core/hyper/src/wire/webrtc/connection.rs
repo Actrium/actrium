@@ -3,7 +3,8 @@
 use crate::transport::lane::classify_peer_connection_error;
 use crate::transport::session::ConnectionSession;
 use crate::transport::{
-    ConnType, DataLane, NetworkError, NetworkResult, WebRtcDataLane, WireHandle,
+    ConnType, DataChannelStateSignal, DataLane, NetworkError, NetworkResult, WebRtcDataLane,
+    WireHandle,
 };
 use crate::transport::{ConnectionEvent, ConnectionState};
 use crate::wire::webrtc::WebRtcInboundMessage;
@@ -26,8 +27,19 @@ type MediaTracks = Arc<RwLock<HashMap<String, (Arc<TrackLocalStaticRTP>, Arc<RTC
 /// Type alias for lane cache array (PayloadType index → cached DataLane)
 type LaneCache<const N: usize> = Arc<RwLock<[Option<Arc<dyn DataLane>>; N]>>;
 
+/// Test-seam slot pausing one received-channel registration before its
+/// first cache commit (payload type + rendezvous barrier).
+#[cfg(any(test, feature = "test-utils"))]
+type RegistrationCommitBarrier =
+    Arc<std::sync::Mutex<Option<(PayloadType, Arc<tokio::sync::Barrier>)>>>;
+
 const PEER_CONNECTION_CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
 const DATA_CHANNEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+/// Shared bound on closing every cached DataChannel during connection
+/// teardown. `RTCDataChannel::close` flips the state to `Closing` before its
+/// first suspension point, so a timed-out close still leaves lane waiters a
+/// terminal state to observe once the signals below are published.
+const DATA_CHANNEL_CLOSE_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum WebRtcCloseMode {
@@ -122,6 +134,20 @@ pub(crate) struct WebRtcConnection {
     /// MediaTrack not cached in array, uses HashMap
     lane_cache: LaneCache<4>,
 
+    /// State signals stored by production lanes, one per PayloadType slot.
+    ///
+    /// `close_with_mode` publishes to these before replacing the DataChannel
+    /// callbacks with no-ops, so lane waiters armed on a still-Connecting
+    /// channel observe a terminal transition instead of parking until their
+    /// failure timeout.
+    data_channel_state_signals: Arc<RwLock<[Option<DataChannelStateSignal>; 4]>>,
+
+    /// Test seam: pauses a received-channel registration after its handlers
+    /// are installed and before the first cache commit, so tests can
+    /// interleave a full teardown into the exact commit window.
+    #[cfg(any(test, feature = "test-utils"))]
+    registration_commit_barrier_for_test: RegistrationCommitBarrier,
+
     /// Event broadcaster for connection state changes
     event_tx: broadcast::Sender<ConnectionEvent>,
 
@@ -164,6 +190,9 @@ impl WebRtcConnection {
             track_sequence_numbers: Arc::new(RwLock::new(HashMap::new())),
             track_ssrcs: Arc::new(RwLock::new(HashMap::new())),
             lane_cache: Arc::new(RwLock::new([None, None, None, None])),
+            data_channel_state_signals: Arc::new(RwLock::new([None, None, None, None])),
+            #[cfg(any(test, feature = "test-utils"))]
+            registration_commit_barrier_for_test: Arc::new(std::sync::Mutex::new(None)),
             event_tx,
             session: ConnectionSession::new(),
             connected: Arc::new(RwLock::new(true)),
@@ -173,6 +202,56 @@ impl WebRtcConnection {
     /// Get session ID
     pub(crate) fn session_id(&self) -> u64 {
         self.session.session_id
+    }
+
+    /// Return the signal actually stored inside the production lane.
+    ///
+    /// Reading it back from the constructed lane, rather than retaining the
+    /// constructor argument, makes callback-to-lane wiring regressions visible:
+    /// a callback publishing to a different signal will not wake test waiters.
+    #[cfg(feature = "test-utils")]
+    pub(crate) async fn data_channel_state_signal_for_test(
+        &self,
+        payload_type: PayloadType,
+    ) -> Option<DataChannelStateSignal> {
+        self.data_channel_state_signals.read().await[payload_type as usize].clone()
+    }
+
+    /// Pause the next received-channel registration for `payload_type`
+    /// immediately before its first cache commit.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub(crate) fn set_registration_commit_barrier_for_test(
+        &self,
+        payload_type: PayloadType,
+        barrier: Arc<tokio::sync::Barrier>,
+    ) {
+        let mut slot = self
+            .registration_commit_barrier_for_test
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(
+            slot.replace((payload_type, barrier)).is_none(),
+            "registration commit barrier should only be installed once"
+        );
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn hit_registration_commit_barrier_for_test(&self, payload_type: PayloadType) {
+        let barrier = {
+            let mut slot = self
+                .registration_commit_barrier_for_test
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if slot.as_ref().is_some_and(|(pt, _)| *pt == payload_type) {
+                slot.take().map(|(_, barrier)| barrier)
+            } else {
+                None
+            }
+        };
+        if let Some(barrier) = barrier {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
     }
 
     /// Whether this connection has entered its terminal close path.
@@ -424,6 +503,38 @@ impl WebRtcConnection {
             session_id: self.session.session_id,
         });
 
+        // Fail armed lane waiters fast, before the lower-level close. A lane
+        // send waits exclusively on the DataChannel state signal (bounded by
+        // INITIAL_CONNECTION_TIMEOUT), and the on_close callback — the only
+        // terminal publisher — is replaced with a no-op below; when the
+        // lower-level close times out and the channel reaches Closed only
+        // afterward, waiters would otherwise park until that timeout. Closing
+        // each channel flips its state toward Closing (terminal for lane
+        // waits), and publishing the stored signal wakes every armed waiter
+        // immediately. All channels close concurrently under ONE shared
+        // deadline: `RTCDataChannel::close` flips `Closing` synchronously
+        // before its first suspension point, so even a wedged lower-level
+        // close leaves every waiter a terminal state once the signals below
+        // are published.
+        {
+            let channels = self.data_channels.read().await.clone();
+            let signals = self.data_channel_state_signals.read().await.clone();
+            let close_all = futures_util::future::join_all(channels.into_iter().flatten().map(
+                |channel| async move {
+                    let _ = channel.close().await;
+                },
+            ));
+            let _ = crate::timer::timeout(
+                crate::timer::ids::DATA_CHANNEL_CLOSE,
+                DATA_CHANNEL_CLOSE_TIMEOUT,
+                close_all,
+            )
+            .await;
+            for signal in signals.into_iter().flatten() {
+                signal.publish();
+            }
+        }
+
         tracing::debug!(
             "🔒 [close] serial={} step 2: closing peer_connection",
             self.peer_id
@@ -462,11 +573,13 @@ impl WebRtcConnection {
         // sockets.
         //
         // Handlers are cleared only AFTER the pc.close() await above, so the
-        // final state-change event may or may not be observed — nothing
-        // downstream relies on it: the ConnectionClosed broadcast above already
-        // drives coordinator cleanup (the peers-map entry is removed first),
-        // and the health check polls connection_state() directly instead of
-        // listening for state-change events.
+        // final state-change event may or may not be observed. Downstream
+        // consumers do not depend on it: lane waiters were already released by
+        // the explicit channel close + signal publish above, the
+        // ConnectionClosed broadcast drives coordinator cleanup (the peers-map
+        // entry is removed first), and the health check reconciles its cached
+        // state against connection_state() instead of trusting the callback
+        // alone.
         self.peer_connection
             .on_peer_connection_state_change(Box::new(move |_state| Box::pin(async move {})));
         self.peer_connection
@@ -478,7 +591,9 @@ impl WebRtcConnection {
         // on_message holds the lane's receive-channel sender. Replacing them
         // with capture-free no-ops breaks the channel self-cycles and lets the
         // receive loops terminate, so the channels (and anything they pin) can
-        // actually be dropped once the caches below are cleared.
+        // actually be dropped once the caches below are cleared. Lane waiters
+        // were already released above, so suppressing a late on_close here
+        // cannot strand them.
         {
             let channels = self.data_channels.read().await.clone();
             for channel in channels.into_iter().flatten() {
@@ -497,6 +612,10 @@ impl WebRtcConnection {
         {
             let mut channels = self.data_channels.write().await;
             *channels = [None, None, None, None];
+        }
+        {
+            let mut signals = self.data_channel_state_signals.write().await;
+            *signals = [None, None, None, None];
         }
         {
             let mut tracks = self.media_tracks.write().await;
@@ -587,6 +706,19 @@ impl WebRtcConnection {
             ));
         }
 
+        // A closing connection must not hand out new lanes: teardown cleared
+        // (or is about to clear) every cache and replaces DataChannel
+        // callbacks with no-ops, so a lane registered now would outlive its
+        // channel's terminal publication and park its sender until the
+        // failure timeout.
+        if self.is_closing_or_closed() {
+            return Err(NetworkError::ConnectionClosed(format!(
+                "connection to {} is closing; refusing to create a {:?} lane",
+                self.peer_id.to_string_repr(),
+                payload_type,
+            )));
+        }
+
         let idx = payload_type as usize;
 
         // 1. Check cache
@@ -619,9 +751,21 @@ impl WebRtcConnection {
         // 2. Create new DataLane
         let lane = self.create_lane_internal(payload_type).await?;
 
-        // 3. Cache
+        // 3. Cache — the session check lives INSIDE the lane-cache critical
+        // section: teardown cancels before any clear, so an insert attempted
+        // after the cancel observes the closed session here and can never
+        // repopulate a cleared cache. The channel/signal entries created
+        // above are still swept by teardown's post-cancel snapshot, so the
+        // fresh lane is released correctly.
         {
             let mut cache = self.lane_cache.write().await;
+            if self.is_closing_or_closed() {
+                return Err(NetworkError::ConnectionClosed(format!(
+                    "connection to {} closed during {:?} lane creation",
+                    self.peer_id.to_string_repr(),
+                    payload_type,
+                )));
+            }
             cache[idx] = Some(Arc::clone(&lane));
         }
 
@@ -673,7 +817,7 @@ impl WebRtcConnection {
         let peer_id_for_open = self.peer_id.clone();
         let session_id_for_open = self.session.session_id;
         let payload_type_for_open = payload_type;
-        let data_channel_state_changed = Arc::new(tokio::sync::Notify::new());
+        let data_channel_state_changed = DataChannelStateSignal::new();
         let state_changed_for_open = data_channel_state_changed.clone();
 
         data_channel.on_open(Box::new(move || {
@@ -685,7 +829,7 @@ impl WebRtcConnection {
             tracing::info!("🔄 WebRTC DataChannel opened: {:?}", payload_type);
 
             Box::pin(async move {
-                state_changed.notify_waiters();
+                state_changed.publish();
                 let _ = event_tx.send(ConnectionEvent::DataChannelOpened {
                     peer_id,
                     session_id: session_id_for_open,
@@ -738,7 +882,7 @@ impl WebRtcConnection {
             let dc_weak = dc_for_close.clone();
             let state_changed = state_changed_for_close.clone();
             Box::pin(async move {
-                state_changed.notify_waiters();
+                state_changed.publish();
                 // Guard: if session is cancelled (connection already cleaned up),
                 // skip all side effects to avoid corrupting a new connection
                 if session.is_cancelled() {
@@ -811,16 +955,50 @@ impl WebRtcConnection {
             },
         ));
 
+        // Re-check the session before caching: teardown cancels it before
+        // taking its close snapshot, so a channel refused here can never be
+        // missed by teardown's explicit close/publish, and an accepted one is
+        // always swept by it.
+        if self.is_closing_or_closed() {
+            drop(channels);
+            let _ = crate::timer::timeout(
+                crate::timer::ids::DATA_CHANNEL_CLOSE,
+                DATA_CHANNEL_CLOSE_TIMEOUT,
+                data_channel.close(),
+            )
+            .await;
+            return Err(NetworkError::ConnectionClosed(format!(
+                "connection to {} closed during {:?} channel creation",
+                self.peer_id.to_string_repr(),
+                payload_type,
+            )));
+        }
+
         // Cache DataChannel（ index reference directly using PayloadType value ）
         let idx = payload_type as usize;
         channels[idx] = Some(Arc::clone(&data_channel));
 
         // Returns Lane
-        Ok(Arc::new(WebRtcDataLane::new(
+        let lane = Arc::new(WebRtcDataLane::new(
             data_channel,
             rx,
             data_channel_state_changed,
-        )))
+        ));
+        {
+            let mut signals = self.data_channel_state_signals.write().await;
+            if self.is_closing_or_closed() {
+                // The channel committed above is inside teardown's
+                // post-cancel snapshot and is closed/published there; only
+                // the signal and lane-cache publication must be skipped.
+                return Err(NetworkError::ConnectionClosed(format!(
+                    "connection to {} closed during {:?} lane creation",
+                    self.peer_id.to_string_repr(),
+                    payload_type,
+                )));
+            }
+            signals[idx] = Some(lane.state_signal());
+        }
+        Ok(lane)
     }
 
     /// Add media track to PeerConnection
@@ -968,6 +1146,25 @@ impl WebRtcConnection {
             ));
         }
 
+        // A closing connection must not accept late channels: teardown
+        // already replaced (or is about to replace) every DataChannel
+        // callback with a no-op and cleared the caches, so a registration now
+        // would miss the terminal publication, repopulate cleared caches, and
+        // pin a receive task on a dead connection.
+        if self.is_closing_or_closed() {
+            let _ = crate::timer::timeout(
+                crate::timer::ids::DATA_CHANNEL_CLOSE,
+                DATA_CHANNEL_CLOSE_TIMEOUT,
+                data_channel.close(),
+            )
+            .await;
+            return Err(NetworkError::ConnectionClosed(format!(
+                "connection to {} is closing; refusing received {:?} channel",
+                self.peer_id.to_string_repr(),
+                payload_type,
+            )));
+        }
+
         let idx = payload_type as usize;
         tracing::debug!(
             "🔄 WebRTC DataChannel registered received: {:?}, idx={}",
@@ -981,7 +1178,7 @@ impl WebRtcConnection {
         let peer_id_for_open = self.peer_id.clone();
         let session_id_for_open = self.session.session_id;
         let payload_type_for_open = payload_type;
-        let data_channel_state_changed = Arc::new(tokio::sync::Notify::new());
+        let data_channel_state_changed = DataChannelStateSignal::new();
         let state_changed_for_open = data_channel_state_changed.clone();
 
         data_channel.on_open(Box::new(move || {
@@ -996,7 +1193,7 @@ impl WebRtcConnection {
             );
 
             Box::pin(async move {
-                state_changed.notify_waiters();
+                state_changed.publish();
                 let _ = event_tx.send(ConnectionEvent::DataChannelOpened {
                     peer_id,
                     session_id: session_id_for_open,
@@ -1051,7 +1248,7 @@ impl WebRtcConnection {
             let state_changed = state_changed_for_close.clone();
 
             Box::pin(async move {
-                state_changed.notify_waiters();
+                state_changed.publish();
                 // Guard: if session is cancelled (connection already cleaned up),
                 // skip all side effects to avoid corrupting a new connection
                 if session.is_cancelled() {
@@ -1122,20 +1319,68 @@ impl WebRtcConnection {
             },
         ));
 
-        // Cache DataChannel
+        #[cfg(any(test, feature = "test-utils"))]
+        self.hit_registration_commit_barrier_for_test(payload_type)
+            .await;
+
+        // Commit under each cache lock itself, never check-then-lock:
+        // teardown cancels the session BEFORE taking its close snapshot, so
+        // an insert accepted before the snapshot is always swept (closed +
+        // published), and one attempted after the cancel observes the closed
+        // session inside the same critical section and is refused. No insert
+        // can slip between a passed check and the cache clear. Refusing here
+        // skips every later insert and the receive task below.
         {
             let mut channels = self.data_channels.write().await;
+            if self.is_closing_or_closed() {
+                // Not swept by any snapshot: the fresh channel exists only in
+                // this frame, so close it ourselves.
+                drop(channels);
+                let _ = crate::timer::timeout(
+                    crate::timer::ids::DATA_CHANNEL_CLOSE,
+                    DATA_CHANNEL_CLOSE_TIMEOUT,
+                    data_channel.close(),
+                )
+                .await;
+                return Err(NetworkError::ConnectionClosed(format!(
+                    "connection to {} closed while registering received {:?} channel",
+                    self.peer_id.to_string_repr(),
+                    payload_type,
+                )));
+            }
             channels[idx] = Some(Arc::clone(&data_channel));
         }
 
         // Create and cache Lane
-        let lane: Arc<dyn DataLane> = Arc::new(WebRtcDataLane::new(
+        let lane = Arc::new(WebRtcDataLane::new(
             data_channel,
             rx,
             data_channel_state_changed,
         ));
         {
+            let mut signals = self.data_channel_state_signals.write().await;
+            if self.is_closing_or_closed() {
+                // The channel committed above is inside teardown's
+                // post-cancel snapshot and is closed/published there; only
+                // the signal and lane publication must be skipped.
+                return Err(NetworkError::ConnectionClosed(format!(
+                    "connection to {} closed during received {:?} lane registration",
+                    self.peer_id.to_string_repr(),
+                    payload_type,
+                )));
+            }
+            signals[idx] = Some(lane.state_signal());
+        }
+        let lane: Arc<dyn DataLane> = lane;
+        {
             let mut cache = self.lane_cache.write().await;
+            if self.is_closing_or_closed() {
+                return Err(NetworkError::ConnectionClosed(format!(
+                    "connection to {} closed during received {:?} lane registration",
+                    self.peer_id.to_string_repr(),
+                    payload_type,
+                )));
+            }
             cache[idx] = Some(Arc::clone(&lane));
         }
 

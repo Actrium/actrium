@@ -43,7 +43,7 @@ use tracing::Instrument as _;
 /// into a `FuturesUnordered` and keep dequeuing.
 pub(crate) type IncomingContinuation = Pin<Box<dyn Future<Output = ActorResult<Bytes>> + Send>>;
 
-type MailboxTail = Pin<Box<dyn Future<Output = ()> + Send>>;
+pub(crate) type MailboxTail = Pin<Box<dyn Future<Output = ()> + Send>>;
 type MailboxDepthCallback = Arc<dyn Fn(usize) + Send + Sync + 'static>;
 
 struct EnqueueObserver {
@@ -59,7 +59,7 @@ impl actr_runtime_mailbox::MailboxDepthObserver for EnqueueObserver {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MailboxIdleOutcome {
+pub(crate) enum MailboxIdleOutcome {
     Shutdown,
     Progress,
 }
@@ -67,7 +67,7 @@ enum MailboxIdleOutcome {
 /// While durable storage is empty, keep polling the reply/ack tails that were
 /// already admitted. Waiting only for a future enqueue would leave completed
 /// tails parked indefinitely on an otherwise idle mailbox.
-async fn wait_for_mailbox_idle<F>(
+pub(crate) async fn wait_for_mailbox_idle<F>(
     shutdown: &CancellationToken,
     inflight: &mut futures_util::stream::FuturesUnordered<MailboxTail>,
     idle_wake: F,

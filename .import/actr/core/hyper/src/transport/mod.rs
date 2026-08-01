@@ -30,9 +30,9 @@ pub use actr_framework::Dest;
 
 // DataLane core abstraction (trait kept pub for sw-host/peer_transport).
 #[cfg(feature = "test-utils")]
-pub use lane::DataLane;
+pub use lane::{DataChannelStateSignal, DataLane};
 #[cfg(not(feature = "test-utils"))]
-pub(crate) use lane::DataLane;
+pub(crate) use lane::{DataChannelStateSignal, DataLane};
 pub(crate) use lane::{MpscLane, WebRtcDataLane, WebSocketDataLane, WsSink};
 pub(crate) use route_table::{PayloadTypeExt, RetryPolicy};
 

@@ -298,7 +298,7 @@ async fn inflight_trap_fails_all_siblings_then_rebuilds() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn quota_denied_rebuild_waits_for_one_release_event_then_recovers() {
+async fn inv21_quota_denied_rebuild_waits_for_one_release_event_then_recovers() {
     let _quota_isolation = wasm_process_quota_test_lock().lock().await;
     // Rebuild retains the logical active-store permit and reacquires only the
     // short-lived instantiation permit. Pin that actual quota to one so a test

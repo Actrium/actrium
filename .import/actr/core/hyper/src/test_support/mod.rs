@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 #[path = "../../tests/common/harness.rs"]
 pub mod harness;
+mod real_data_channel;
 #[path = "../../tests/common/signaling.rs"]
 pub mod signaling;
 #[path = "../../tests/common/utils.rs"]
@@ -27,6 +28,7 @@ pub mod vnet;
 pub mod wait;
 
 pub use harness::{TestHarness, TestPeer};
+pub use real_data_channel::RealDataChannelPair;
 pub use signaling::TestSignalingServer;
 pub use utils::{
     create_credential_state_for_test, create_peer_with_vnet, create_peer_with_websocket,
@@ -35,6 +37,73 @@ pub use utils::{
 };
 pub use vnet::{VNetPair, create_vnet_pair};
 pub use wait::*;
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TimerObservation {
+    pub armed: u64,
+    pub finished: u64,
+    pub expired: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TimerInventoryEntry {
+    pub id: &'static str,
+    pub category: &'static str,
+}
+
+/// Return the source-controlled timer inventory through the public test seam.
+pub fn timer_inventory() -> Vec<TimerInventoryEntry> {
+    crate::timer::ids::ALL
+        .iter()
+        .map(|definition| TimerInventoryEntry {
+            id: definition.id,
+            category: definition.category.as_str(),
+        })
+        .collect()
+}
+
+/// Snapshot audited-timer activity for one stable inventory ID.
+pub fn timer_observation(id: &str) -> TimerObservation {
+    let observation = crate::timer::test_timer_observation(id);
+    TimerObservation {
+        armed: observation.armed,
+        finished: observation.finished,
+        expired: observation.expired,
+    }
+}
+
+/// Drive one already-admitted reply/ack tail while a real SQLite mailbox is
+/// empty, through the same idle select used by the production node loop.
+pub async fn drive_mailbox_tail_while_storage_idle<F>(tail: F) -> bool
+where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    use actr_runtime_mailbox::{Mailbox as _, SqliteMailbox};
+    use futures_util::stream::FuturesUnordered;
+
+    let mailbox = SqliteMailbox::new(":memory:")
+        .await
+        .expect("in-memory mailbox should open");
+    assert!(
+        mailbox
+            .dequeue()
+            .await
+            .expect("empty mailbox dequeue should succeed")
+            .is_empty(),
+        "mailbox probe must begin with empty durable storage"
+    );
+
+    let mut inflight = FuturesUnordered::<crate::lifecycle::node::MailboxTail>::new();
+    inflight.push(Box::pin(tail));
+    crate::lifecycle::node::wait_for_mailbox_idle(
+        &tokio_util::sync::CancellationToken::new(),
+        &mut inflight,
+        std::future::pending(),
+    )
+    .await
+        == crate::lifecycle::node::MailboxIdleOutcome::Progress
+        && inflight.is_empty()
+}
 
 pub use crate::transport::lane::{
     WebRtcFragmentSendEvent, WebRtcFragmentSendHook, WebRtcFragmentSendHookGuard,
