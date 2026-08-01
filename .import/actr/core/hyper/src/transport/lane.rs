@@ -42,7 +42,7 @@ use std::future::Future;
 #[cfg(feature = "test-utils")]
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 #[cfg(feature = "test-utils")]
 use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::Instant;
@@ -348,6 +348,50 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     }
 }
 
+/// Event-driven DataChannel state signal shared by the real Open/Closed
+/// callbacks and every lane waiter.
+///
+/// The generation closes the `Notify` registration window: a transition that
+/// lands immediately before a waiter arms its notification is still observable
+/// through [`Self::wait_after`].
+#[derive(Clone, Debug, Default)]
+pub struct DataChannelStateSignal {
+    generation: Arc<AtomicU64>,
+    changed: Arc<tokio::sync::Notify>,
+}
+
+impl DataChannelStateSignal {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn snapshot(&self) -> u64 {
+        self.generation.load(Ordering::Acquire)
+    }
+
+    pub fn publish(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+        self.changed.notify_waiters();
+    }
+
+    pub async fn wait_after(&self, observed_generation: u64) {
+        loop {
+            if self.snapshot() != observed_generation {
+                return;
+            }
+
+            let changed = self.changed.notified();
+            tokio::pin!(changed);
+            changed.as_mut().enable();
+
+            if self.snapshot() != observed_generation {
+                return;
+            }
+            changed.await;
+        }
+    }
+}
+
 // ── MpscLane ──────────────────────────────────────────────────────────────────
 
 /// Mpsc Lane - Intra-process communication (zero serialization)
@@ -451,7 +495,7 @@ pub(crate) struct WebRtcDataLane {
     reassembly: Arc<Mutex<ReassemblyBuffer>>,
 
     /// Woken by the DataChannel open/close callbacks.
-    state_changed: Arc<tokio::sync::Notify>,
+    state_changed: DataChannelStateSignal,
 }
 
 impl std::fmt::Debug for WebRtcDataLane {
@@ -466,7 +510,7 @@ impl WebRtcDataLane {
     pub(crate) fn new(
         data_channel: Arc<RTCDataChannel>,
         rx: mpsc::Receiver<bytes::Bytes>,
-        state_changed: Arc<tokio::sync::Notify>,
+        state_changed: DataChannelStateSignal,
     ) -> Self {
         Self {
             data_channel,
@@ -475,6 +519,13 @@ impl WebRtcDataLane {
             reassembly: Arc::new(Mutex::new(ReassemblyBuffer::new())),
             state_changed,
         }
+    }
+
+    /// The signal this lane's waiters observe. `WebRtcConnection` retains one
+    /// copy per slot so teardown can publish a terminal transition after the
+    /// DataChannel callbacks have been detached.
+    pub(crate) fn state_signal(&self) -> DataChannelStateSignal {
+        self.state_changed.clone()
     }
 }
 
@@ -560,6 +611,7 @@ impl DataLane for WebRtcDataLane {
         // Open/close callbacks drive the wait; the timer is only a failure bound.
         let deadline = tokio::time::Instant::now() + INITIAL_CONNECTION_TIMEOUT;
         loop {
+            let observed_generation = self.state_changed.snapshot();
             let state = self.data_channel.ready_state();
             if state == RTCDataChannelState::Open {
                 break;
@@ -567,16 +619,14 @@ impl DataLane for WebRtcDataLane {
             if state == RTCDataChannelState::Closed || state == RTCDataChannelState::Closing {
                 return Err(NetworkError::DataChannelClosed(format!("{state:?}")));
             }
-            let changed = self.state_changed.notified();
-            tokio::pin!(changed);
-            changed.as_mut().enable();
-
             // Close the callback-registration race before awaiting the event.
             let state_after_subscribe = self.data_channel.ready_state();
             if state_after_subscribe != state {
                 continue;
             }
 
+            let changed = self.state_changed.wait_after(observed_generation);
+            tokio::pin!(changed);
             if crate::timer::timeout_at(
                 crate::timer::ids::LANE_INITIAL_READY,
                 deadline,

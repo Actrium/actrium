@@ -3,38 +3,51 @@ use bytes::Bytes;
 use std::time::Duration;
 
 #[tokio::test]
-async fn inv17_data_channel_state_change_wakes_every_waiter() {
-    let state_changed = Arc::new(tokio::sync::Notify::new());
+async fn inv17_data_channel_state_signal_wakes_every_waiter() {
+    let signal = DataChannelStateSignal::new();
+    let observed = signal.snapshot();
+    let armed = std::sync::Arc::new(tokio::sync::Barrier::new(9));
     let mut waiters = Vec::new();
 
     for _ in 0..8 {
-        let state_changed = Arc::clone(&state_changed);
-        let (armed_tx, armed_rx) = tokio::sync::oneshot::channel();
+        let signal = signal.clone();
+        let armed = armed.clone();
         waiters.push(tokio::spawn(async move {
-            let mut changed = Box::pin(state_changed.notified());
-            changed.as_mut().enable();
-            armed_tx
-                .send(())
-                .expect("waiter should report that its notification is armed");
-            changed.await;
+            armed.wait().await;
+            signal.wait_after(observed).await;
         }));
-        armed_rx
-            .await
-            .expect("waiter should arm before the state transition");
     }
-
-    // The production DataChannel Open and Closed callbacks use
-    // `notify_waiters()`: a single state transition must release every send
-    // currently waiting for readiness, not just one of them.
-    state_changed.notify_waiters();
+    armed.wait().await;
+    // Let every waiter reach its parked wait point before the transition:
+    // `notify_waiters` must release all of them, not just one. A waiter that
+    // starts late still completes via the generation check.
+    for _ in 0..16 {
+        tokio::task::yield_now().await;
+    }
+    // The production DataChannel Open/Closed callbacks call
+    // `DataChannelStateSignal::publish`.
+    signal.publish();
     tokio::time::timeout(
         Duration::from_millis(100),
         futures_util::future::join_all(waiters),
     )
     .await
-    .expect("all DataChannel state waiters should wake from one transition")
+    .expect("one publish must release every state waiter")
     .into_iter()
     .for_each(|result| result.expect("state waiter should not panic"));
+}
+
+#[tokio::test]
+async fn inv17_data_channel_state_signal_observes_a_publish_that_landed_before_the_wait() {
+    let signal = DataChannelStateSignal::new();
+    let observed = signal.snapshot();
+    signal.publish();
+    // The generation already advanced: `wait_after` must return immediately.
+    // A bare `Notify` retains no permit here, so this pins the generation
+    // protocol that closes the callback-registration race.
+    tokio::time::timeout(Duration::from_millis(100), signal.wait_after(observed))
+        .await
+        .expect("a publish that landed before the wait must still be observed");
 }
 
 #[test]

@@ -38,6 +38,8 @@ use actr_protocol::{
 };
 use actr_protocol::{ActorResult, ActrError};
 use std::collections::{HashMap, VecDeque, hash_map::Entry};
+#[cfg(any(test, feature = "test-utils"))]
+use std::sync::Mutex as StdMutex;
 use std::{
     sync::{
         Arc, RwLock as StdRwLock, Weak,
@@ -74,6 +76,11 @@ const CLEANUP_BARRIER_WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const PEER_CONNECTION_CLOSE_FALLBACK_TIMEOUT: Duration = Duration::from_millis(500);
 const REMOTE_CANDIDATE_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSE_ALL_HOOK_TIMEOUT: Duration = Duration::from_secs(1);
+/// Bound on delivering the `WebRtcDisconnected` lifecycle hook during
+/// single-peer teardown. A stalled custom hook must not hold the removed
+/// peer's physical resources; close-all bounds its hook batch the same way
+/// through one shared deadline.
+const PEER_TEARDOWN_HOOK_TIMEOUT: Duration = Duration::from_secs(1);
 #[cfg(not(test))]
 const CLOSE_ALL_QUIESCE_TIMEOUT: Duration = Duration::from_secs(6);
 #[cfg(test)]
@@ -129,8 +136,67 @@ const MAX_FAILED_DURATION: Duration = Duration::from_secs(60); // 1 minute
 /// forever.
 const MAX_DISCONNECTED_DURATION: Duration = Duration::from_secs(90);
 
-/// Decide whether the health check should reap a peer, given its real-time
-/// connection state and how long it has been in that state.
+/// How long a peer may sit in `New`/`Connecting` before the health check
+/// reaps it.
+///
+/// Initial establishment is bounded well below this: the connection factory
+/// applies a 30s overall timeout and the readiness wait has its own smaller
+/// budgets. A peer still in `New`/`Connecting` after 120s has had its
+/// establishment flight abandoned without any close — e.g. a connection
+/// creator task that was aborted after coordinator state was inserted (the
+/// dropped future cannot observe the cancellation token, so nothing marks
+/// the session closed) — and would otherwise pin its RTCPeerConnection and
+/// ICE UDP sockets forever. ICE restarts do not pass through `New`/
+/// `Connecting` (they reuse the established PeerConnection), so a
+/// legitimate peer never trips this threshold.
+const MAX_CONNECTING_DURATION: Duration = Duration::from_secs(120);
+
+/// How long a `Connected` peer may go without ever opening a DataChannel.
+///
+/// Establishment treats ICE/DTLS `Connected` as only the first stage: a
+/// connection is not ready until a DataChannel opens (budgets: 10s ICE +
+/// 2s DataChannel). A creator aborted in between leaves the peer
+/// `Connected` with `ever_data_channel_opened == false` and no close ever
+/// called — neither the session-closed reconciliation nor the
+/// New/Connecting threshold converges it. 120s is far past every
+/// establishment budget, and the flag sticks once any DataChannel has
+/// opened, so an established connection is never touched by this rule.
+const MAX_NEVER_READY_DURATION: Duration = Duration::from_secs(120);
+
+/// How long the health check may wait between reconciliation scans.
+///
+/// State transitions normally wake the task (`health_check_wake`), and a
+/// pending reap deadline wakes it at the deadline — but a terminal
+/// transition can be lost entirely (callback suppressed by teardown,
+/// `ConnectionClosed` broadcast dropped under lag), producing no
+/// notification at all. Capping EVERY wait at this interval — whether or
+/// not a deadline is pending — bounds the discovery of a lost transition
+/// to one interval; the total convergence is then one interval plus the
+/// applicable reap threshold.
+const STALE_PEER_IDLE_INTERVAL: Duration = Duration::from_secs(30);
+
+/// The state the reaper should reason about for one peer.
+///
+/// A closed `WebRtcConnection` session is authoritative-terminal: our own
+/// close path flips it before any fallible step, whereas
+/// `RTCPeerConnection::connection_state()` only reaches `Closed` at the end
+/// of webrtc's multi-stop `close()` — a future the bounded close may cancel
+/// before the update lands (a retry then returns early, so the live state
+/// can report `Connected` forever). Prefer the session over the live state.
+fn reap_relevant_state(
+    session_closed: bool,
+    live_state: RTCPeerConnectionState,
+) -> RTCPeerConnectionState {
+    if session_closed {
+        RTCPeerConnectionState::Closed
+    } else {
+        live_state
+    }
+}
+
+/// Decide whether the health check should reap a peer, given its cached
+/// connection state, whether it ever became fully ready, and how long it
+/// has been in that state.
 ///
 /// - `Failed`/`Closed` are terminal and reaped after `MAX_FAILED_DURATION`.
 /// - `Disconnected` is reaped after `MAX_DISCONNECTED_DURATION` (90s), which
@@ -141,26 +207,48 @@ const MAX_DISCONNECTED_DURATION: Duration = Duration::from_secs(90);
 ///   worse, a flag stuck at `true` (e.g. a restart task aborted after setting
 ///   it) would suppress reaping forever and recreate the very leak this check
 ///   exists to stop. The generous time threshold is the actual guard.
+/// - `New`/`Connecting` are reaped after `MAX_CONNECTING_DURATION` (120s),
+///   which strictly exceeds every establishment budget — see the constant's
+///   docs. This bounds flights abandoned without any close.
+/// - `Connected` that never opened a DataChannel is reaped after
+///   `MAX_NEVER_READY_DURATION` (120s): establishment completed ICE/DTLS but
+///   the readiness stage never landed, so the flight was abandoned mid-way —
+///   see the constant's docs.
 ///
 /// Returns the cleanup reason, or `None` if the peer should be kept.
 fn stale_peer_reap_reason(
     current_state: RTCPeerConnectionState,
+    ever_data_channel_opened: bool,
     duration_since_change: Duration,
 ) -> Option<String> {
-    let threshold = stale_peer_reap_threshold(current_state)?;
+    let threshold = stale_peer_reap_threshold(current_state, ever_data_channel_opened)?;
     (duration_since_change >= threshold).then(|| {
-        format!(
-            "{:?} for {}s",
-            current_state,
-            duration_since_change.as_secs()
-        )
+        if current_state == RTCPeerConnectionState::Connected && !ever_data_channel_opened {
+            format!(
+                "Connected without ever opening a DataChannel for {}s",
+                duration_since_change.as_secs()
+            )
+        } else {
+            format!(
+                "{:?} for {}s",
+                current_state,
+                duration_since_change.as_secs()
+            )
+        }
     })
 }
 
-fn stale_peer_reap_threshold(current_state: RTCPeerConnectionState) -> Option<Duration> {
+fn stale_peer_reap_threshold(
+    current_state: RTCPeerConnectionState,
+    ever_data_channel_opened: bool,
+) -> Option<Duration> {
+    if current_state == RTCPeerConnectionState::Connected && !ever_data_channel_opened {
+        return Some(MAX_NEVER_READY_DURATION);
+    }
     Some(match current_state {
         RTCPeerConnectionState::Failed | RTCPeerConnectionState::Closed => MAX_FAILED_DURATION,
         RTCPeerConnectionState::Disconnected => MAX_DISCONNECTED_DURATION,
+        RTCPeerConnectionState::New | RTCPeerConnectionState::Connecting => MAX_CONNECTING_DURATION,
         _ => return None,
     })
 }
@@ -444,6 +532,28 @@ impl Default for PeerSignalingCommitState {
 struct CoordinatorBackgroundTasks {
     lifecycle_gate: Mutex<()>,
     handles: Mutex<Vec<JoinHandle<()>>>,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+struct TestPeerBarrier {
+    peer_id: ActrId,
+    barrier: Arc<tokio::sync::Barrier>,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+struct TestPeerStateBarrier {
+    peer_id: ActrId,
+    state: RTCPeerConnectionState,
+    barrier: Arc<tokio::sync::Barrier>,
+}
+
+#[cfg(any(test, feature = "test-utils"))]
+#[derive(Default)]
+struct CoordinatorTestBarriers {
+    peer_publish: StdMutex<Option<TestPeerBarrier>>,
+    peer_sendable_subscribed: StdMutex<Option<TestPeerBarrier>>,
+    initial_readiness_subscribed: StdMutex<Option<TestPeerBarrier>>,
+    peer_state_transition: StdMutex<Option<TestPeerStateBarrier>>,
 }
 
 #[derive(Clone)]
@@ -831,6 +941,9 @@ pub struct WebRtcCoordinator {
     /// Long-running tasks created by `start`, owned for deterministic shutdown.
     background_tasks: CoordinatorBackgroundTasks,
 
+    #[cfg(any(test, feature = "test-utils"))]
+    test_barriers: CoordinatorTestBarriers,
+
     /// Root tracing contexts for connection initiation (ActrId → Context)
     #[cfg(feature = "opentelemetry")]
     root_context_map: Arc<RwLock<HashMap<ActrId, opentelemetry::Context>>>,
@@ -1040,6 +1153,8 @@ impl WebRtcCoordinator {
             cleanup_notify: Arc::new(tokio::sync::Notify::new()),
             peer_signaling: Arc::new(PeerSignalingCommitState::default()),
             background_tasks: CoordinatorBackgroundTasks::default(),
+            #[cfg(any(test, feature = "test-utils"))]
+            test_barriers: CoordinatorTestBarriers::default(),
             #[cfg(feature = "opentelemetry")]
             root_context_map: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -1072,6 +1187,164 @@ impl WebRtcCoordinator {
             .local_id
             .write()
             .expect("WebRtcCoordinator local_id lock poisoned") = actor_id;
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    fn take_peer_barrier(
+        slot: &StdMutex<Option<TestPeerBarrier>>,
+        peer_id: &ActrId,
+    ) -> Option<Arc<tokio::sync::Barrier>> {
+        let mut slot = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if slot
+            .as_ref()
+            .is_some_and(|installed| installed.peer_id == *peer_id)
+        {
+            slot.take().map(|installed| installed.barrier)
+        } else {
+            None
+        }
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn hit_peer_publish_barrier_for_test(&self, peer_id: &ActrId) {
+        if let Some(barrier) = Self::take_peer_barrier(&self.test_barriers.peer_publish, peer_id) {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn hit_peer_sendable_subscribed_barrier_for_test(&self, peer_id: &ActrId) {
+        if let Some(barrier) =
+            Self::take_peer_barrier(&self.test_barriers.peer_sendable_subscribed, peer_id)
+        {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn hit_initial_readiness_subscribed_barrier_for_test(&self, peer_id: &ActrId) {
+        if let Some(barrier) =
+            Self::take_peer_barrier(&self.test_barriers.initial_readiness_subscribed, peer_id)
+        {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    async fn hit_peer_state_transition_barrier_for_test(
+        &self,
+        peer_id: &ActrId,
+        state: RTCPeerConnectionState,
+    ) {
+        let barrier = {
+            let mut slot = self
+                .test_barriers
+                .peer_state_transition
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if slot
+                .as_ref()
+                .is_some_and(|installed| installed.peer_id == *peer_id && installed.state == state)
+            {
+                slot.take().map(|installed| installed.barrier)
+            } else {
+                None
+            }
+        };
+        if let Some(barrier) = barrier {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+    }
+
+    #[cfg(feature = "test-utils")]
+    fn install_peer_barrier(
+        slot: &StdMutex<Option<TestPeerBarrier>>,
+        peer_id: ActrId,
+        barrier: Arc<tokio::sync::Barrier>,
+        description: &str,
+    ) {
+        let mut slot = slot.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(
+            slot.replace(TestPeerBarrier { peer_id, barrier }).is_none(),
+            "{description} should only be installed once"
+        );
+    }
+
+    /// Pause the next publication of `peer_id` immediately before its
+    /// lifecycle-generation commit.
+    #[cfg(feature = "test-utils")]
+    pub fn set_peer_publish_barrier_for_test(
+        &self,
+        peer_id: ActrId,
+        barrier: Arc<tokio::sync::Barrier>,
+    ) {
+        Self::install_peer_barrier(
+            &self.test_barriers.peer_publish,
+            peer_id,
+            barrier,
+            "peer publication barrier",
+        );
+    }
+
+    /// Pause a sendability waiter after event subscription and before its
+    /// authoritative state recheck.
+    #[cfg(feature = "test-utils")]
+    pub fn set_peer_sendable_subscribed_barrier_for_test(
+        &self,
+        peer_id: ActrId,
+        barrier: Arc<tokio::sync::Barrier>,
+    ) {
+        Self::install_peer_barrier(
+            &self.test_barriers.peer_sendable_subscribed,
+            peer_id,
+            barrier,
+            "peer sendability subscription barrier",
+        );
+    }
+
+    /// Pause the production initial/restart readiness waiter after subscribing
+    /// to connection events and before its authoritative state recheck.
+    #[cfg(feature = "test-utils")]
+    pub fn set_initial_readiness_subscribed_barrier_for_test(
+        &self,
+        peer_id: ActrId,
+        barrier: Arc<tokio::sync::Barrier>,
+    ) {
+        Self::install_peer_barrier(
+            &self.test_barriers.initial_readiness_subscribed,
+            peer_id,
+            barrier,
+            "initial readiness subscription barrier",
+        );
+    }
+
+    /// Pause the selected real PeerConnection callback before it publishes the
+    /// new cached state and timestamp.
+    #[cfg(feature = "test-utils")]
+    pub fn set_peer_state_transition_barrier_for_test(
+        &self,
+        peer_id: ActrId,
+        state: RTCPeerConnectionState,
+        barrier: Arc<tokio::sync::Barrier>,
+    ) {
+        let mut slot = self
+            .test_barriers
+            .peer_state_transition
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        assert!(
+            slot.replace(TestPeerStateBarrier {
+                peer_id,
+                state,
+                barrier,
+            })
+            .is_none(),
+            "peer state transition barrier should only be installed once"
+        );
     }
 
     #[cfg(test)]
@@ -1758,15 +2031,33 @@ impl WebRtcCoordinator {
         }
 
         Self::clear_peer_recovering_in(network_recovering_peers, target, session_id, reason).await;
-        Self::notify_removed_peer_idle_if_needed(
-            hook_emission,
-            target,
-            session_id,
-            &mut state,
-            reason,
-            None,
+        // Bound the lifecycle hook: a stalled custom callback must not hold
+        // the removed peer's physical resources. Close-all is unaffected —
+        // it passes `callback: None` here after bounding its hook batch
+        // against one shared deadline.
+        if crate::timer::timeout(
+            crate::timer::ids::WEBRTC_PEER_TEARDOWN_HOOK,
+            PEER_TEARDOWN_HOOK_TIMEOUT,
+            Self::notify_removed_peer_idle_if_needed(
+                hook_emission,
+                target,
+                session_id,
+                &mut state,
+                reason,
+                None,
+            ),
         )
-        .await;
+        .await
+        .is_err()
+        {
+            tracing::warn!(
+                peer_id = %target.to_string_repr(),
+                session_id,
+                timeout_ms = PEER_TEARDOWN_HOOK_TIMEOUT.as_millis(),
+                "Timed out invoking WebRTC lifecycle hook during peer teardown; \
+                 proceeding to physical close"
+            );
+        }
 
         let close_result = match close_mode {
             PeerCloseMode::Graceful => state.webrtc_conn.close().await,
@@ -1832,15 +2123,34 @@ impl WebRtcCoordinator {
                 lock: &hook_emission_lock,
             };
             if let Some(replacement_guard) = replacement_guard {
-                Self::notify_removed_peer_idle_if_needed(
-                    hook_emission,
-                    &target,
-                    state.session_id,
-                    &mut state,
-                    &reason,
-                    Some(replacement_guard),
+                // Bound the lifecycle hook here too: this is the emission
+                // site for the single-peer path, and a stalled custom
+                // callback must not hold the removed peer's physical
+                // resources. On timeout the hook future is cancelled and
+                // teardown proceeds to the physical close.
+                if crate::timer::timeout(
+                    crate::timer::ids::WEBRTC_PEER_TEARDOWN_HOOK,
+                    PEER_TEARDOWN_HOOK_TIMEOUT,
+                    Self::notify_removed_peer_idle_if_needed(
+                        hook_emission,
+                        &target,
+                        state.session_id,
+                        &mut state,
+                        &reason,
+                        Some(replacement_guard),
+                    ),
                 )
-                .await;
+                .await
+                .is_err()
+                {
+                    tracing::warn!(
+                        peer_id = %target.to_string_repr(),
+                        session_id = state.session_id,
+                        timeout_ms = PEER_TEARDOWN_HOOK_TIMEOUT.as_millis(),
+                        "Timed out invoking WebRTC lifecycle hook during peer teardown; \
+                         proceeding to physical close"
+                    );
+                }
             }
             Self::teardown_removed_peer_state_with(
                 &network_recovering_peers,
@@ -1942,6 +2252,112 @@ impl WebRtcCoordinator {
     pub async fn get_peer_session_id(&self, peer_id: &ActrId) -> Option<u64> {
         let peers = self.peers.read().await;
         peers.get(peer_id).map(|state| state.session_id)
+    }
+
+    /// Backdate only the cached transition timestamp while preserving the
+    /// cached state. Used to place the stale-peer reaper at the exact
+    /// state-publication race boundary.
+    ///
+    /// Also wakes the health check: like `update_connection_state`, a
+    /// timestamp change is deadline-relevant, so a task sleeping on a later
+    /// deadline must recompute.
+    #[cfg(feature = "test-utils")]
+    pub async fn backdate_peer_state_for_test(
+        &self,
+        peer_id: &ActrId,
+        age: Duration,
+    ) -> ActorResult<std::time::Instant> {
+        let timestamp = std::time::Instant::now()
+            .checked_sub(age)
+            .ok_or_else(|| ActrError::Internal("monotonic clock is too young".to_string()))?;
+        let mut peers = self.peers.write().await;
+        let state = peers.get_mut(peer_id).ok_or_else(|| {
+            ActrError::Internal(format!("Peer not found: {}", peer_id.to_string_repr()))
+        })?;
+        state.last_state_change = timestamp;
+        state.health_check_wake.notify_one();
+        Ok(timestamp)
+    }
+
+    /// Replay the current cached state through the production update method and
+    /// return its transition timestamp. A duplicate must leave it unchanged.
+    #[cfg(feature = "test-utils")]
+    pub async fn replay_current_peer_state_for_test(
+        &self,
+        peer_id: &ActrId,
+    ) -> ActorResult<std::time::Instant> {
+        let mut peers = self.peers.write().await;
+        let state = peers.get_mut(peer_id).ok_or_else(|| {
+            ActrError::Internal(format!("Peer not found: {}", peer_id.to_string_repr()))
+        })?;
+        let current_state = state.current_state;
+        state.update_connection_state(current_state);
+        Ok(state.last_state_change)
+    }
+
+    /// Run the production stale-peer reap pass once.
+    #[cfg(feature = "test-utils")]
+    pub async fn check_stale_peers_for_test(&self) {
+        self.check_and_cleanup_stale_connections().await;
+    }
+
+    /// Read the cached (callback-published) connection state for one peer.
+    /// Tests use it to observe reconciliation without touching production
+    /// state: a resynchronized terminal state becomes visible here without
+    /// any callback publication.
+    #[cfg(feature = "test-utils")]
+    pub async fn cached_peer_state_for_test(
+        &self,
+        peer_id: &ActrId,
+    ) -> Option<RTCPeerConnectionState> {
+        self.peers
+            .read()
+            .await
+            .get(peer_id)
+            .map(|state| state.current_state)
+    }
+
+    /// Forget the sticky `ever_data_channel_opened` fact for one peer. Tests
+    /// use it to model a DataChannelOpened event lost to broadcast lag: the
+    /// live channels stay open while the recorded readiness fact disappears.
+    #[cfg(feature = "test-utils")]
+    pub async fn clear_data_channel_opened_for_test(&self, peer_id: &ActrId) -> ActorResult<()> {
+        let mut peers = self.peers.write().await;
+        let state = peers.get_mut(peer_id).ok_or_else(|| {
+            ActrError::Internal(format!("Peer not found: {}", peer_id.to_string_repr()))
+        })?;
+        state.ever_data_channel_opened = false;
+        Ok(())
+    }
+
+    /// Read the sticky `ever_data_channel_opened` fact for one peer.
+    #[cfg(feature = "test-utils")]
+    pub async fn data_channel_opened_flag_for_test(&self, peer_id: &ActrId) -> Option<bool> {
+        self.peers
+            .read()
+            .await
+            .get(peer_id)
+            .map(|state| state.ever_data_channel_opened)
+    }
+
+    /// Close the physical PeerConnection without first removing coordinator
+    /// state. This drives the real state-change callback used by the reaper
+    /// race test.
+    #[cfg(feature = "test-utils")]
+    pub async fn close_physical_peer_for_test(&self, peer_id: &ActrId) -> ActorResult<()> {
+        let peer_connection = {
+            let peers = self.peers.read().await;
+            peers
+                .get(peer_id)
+                .map(|state| Arc::clone(&state.peer_connection))
+                .ok_or_else(|| {
+                    ActrError::Internal(format!("Peer not found: {}", peer_id.to_string_repr()))
+                })?
+        };
+        peer_connection
+            .close()
+            .await
+            .map_err(|error| ActrError::Internal(format!("Failed to close test peer: {error}")))
     }
 
     /// Remove only the offer-throttle timestamp so virtual-time integration
@@ -2161,6 +2577,9 @@ impl WebRtcCoordinator {
     /// no ICE restart is in flight.
     pub async fn wait_for_peer_sendable(&self, peer_id: &ActrId, timeout: Duration) -> Option<u64> {
         let mut event_rx = self.event_broadcaster.subscribe();
+        #[cfg(any(test, feature = "test-utils"))]
+        self.hit_peer_sendable_subscribed_barrier_for_test(peer_id)
+            .await;
         if let Some(session_id) = self.peer_sendable_session(peer_id).await {
             return Some(session_id);
         }
@@ -3053,10 +3472,9 @@ impl WebRtcCoordinator {
     /// observe ICE Connected before any DataChannel evidence is accepted.
     #[allow(clippy::too_many_arguments)]
     async fn wait_for_connection_ready_event(
+        &self,
         peer_id: &ActrId,
         expected_session_id: u64,
-        peers: &Arc<RwLock<HashMap<ActrId, PeerState>>>,
-        event_broadcaster: &ConnectionEventBroadcaster,
         webrtc_conn: &super::connection::WebRtcConnection,
         ice_connected_timeout: Duration,
         data_channel_after_ice_timeout: Duration,
@@ -3065,11 +3483,14 @@ impl WebRtcCoordinator {
         // Subscribe before the initial state observation. A DataChannel may
         // open between two await points; installing the receiver first makes
         // that transition visible either through the event or the state read.
-        let mut event_rx = event_broadcaster.subscribe();
+        let mut event_rx = self.event_broadcaster.subscribe();
+        #[cfg(any(test, feature = "test-utils"))]
+        self.hit_initial_readiness_subscribed_barrier_for_test(peer_id)
+            .await;
 
         let target_peer = peer_id.clone();
         let mut ice_connected =
-            Self::is_peer_session_connected(peer_id, expected_session_id, peers).await;
+            Self::is_peer_session_connected(peer_id, expected_session_id, &self.peers).await;
 
         // Quick check: if the DataChannel is already open, return immediately —
         // except during an ICE restart, where a pre-existing Open DataChannel
@@ -3213,7 +3634,7 @@ impl WebRtcCoordinator {
                                 && Self::is_peer_session_connected(
                                     &target_peer,
                                     expected_session_id,
-                                    peers,
+                                    &self.peers,
                                 )
                                 .await
                             {
@@ -3267,7 +3688,36 @@ impl WebRtcCoordinator {
     /// - connections stuck in Disconnected for longer than
     ///   `MAX_DISCONNECTED_DURATION` (past the ICE restart budget, so the
     ///   restart mechanism can no longer bring them back)
+    /// - connections stuck in New/Connecting for longer than
+    ///   `MAX_CONNECTING_DURATION` (past every establishment budget, so the
+    ///   flight must have been abandoned without a close)
+    /// - `Connected` connections that never opened a DataChannel for longer
+    ///   than `MAX_NEVER_READY_DURATION` (past every readiness budget, so
+    ///   the flight was abandoned between ICE and readiness)
+    ///
+    /// Every wait between scans is capped at `STALE_PEER_IDLE_INTERVAL`
+    /// whether or not a deadline is pending: a terminal transition whose
+    /// callback AND `ConnectionClosed` broadcast were both lost produces no
+    /// wake notification, and the reconciliation scan that discovers it must
+    /// not be deferred by an unrelated long deadline.
     fn spawn_health_check_task(self: &Arc<Self>) -> JoinHandle<()> {
+        self.spawn_health_check_task_with_idle_interval(STALE_PEER_IDLE_INTERVAL)
+    }
+
+    /// Test seam: same production task with a faster idle tick so scheduling
+    /// behavior can be observed without virtual time.
+    #[cfg(feature = "test-utils")]
+    pub fn spawn_health_check_task_with_idle_interval_for_test(
+        self: &Arc<Self>,
+        idle_interval: Duration,
+    ) -> JoinHandle<()> {
+        self.spawn_health_check_task_with_idle_interval(idle_interval)
+    }
+
+    fn spawn_health_check_task_with_idle_interval(
+        self: &Arc<Self>,
+        idle_interval: Duration,
+    ) -> JoinHandle<()> {
         let coordinator = Arc::downgrade(self);
         let health_check_wake = Arc::clone(&self.health_check_wake);
 
@@ -3288,15 +3738,28 @@ impl WebRtcCoordinator {
 
                 match next_deadline {
                     Some(deadline) => {
+                        // Wake at the reap deadline, but never later than the
+                        // idle interval: a lost transition produces no
+                        // notification, and an unrelated long deadline must
+                        // not defer the reconciliation scan past it.
+                        let capped = deadline.min(std::time::Instant::now() + idle_interval);
                         tokio::select! {
                             _ = &mut changed => {}
                             _ = crate::timer::sleep_until(
                                 crate::timer::ids::STALE_PEER_EXPIRY,
-                                deadline.into(),
+                                capped.into(),
                             ) => {}
                         }
                     }
-                    None => changed.await,
+                    None => {
+                        tokio::select! {
+                            _ = &mut changed => {}
+                            _ = crate::timer::sleep(
+                                crate::timer::ids::STALE_PEER_IDLE_TICK,
+                                idle_interval,
+                            ) => {}
+                        }
+                    }
                 }
             }
 
@@ -3310,6 +3773,14 @@ impl WebRtcCoordinator {
     /// - Failed/Closed state duration exceeding `MAX_FAILED_DURATION`
     /// - Disconnected state duration exceeding `MAX_DISCONNECTED_DURATION`
     ///   (past the ICE restart budget; see `stale_peer_reap_reason`)
+    /// - New/Connecting duration exceeding `MAX_CONNECTING_DURATION`
+    ///   (past every establishment budget; abandoned flights)
+    /// - Connected-without-ever-opening-a-DataChannel duration exceeding
+    ///   `MAX_NEVER_READY_DURATION` (past every readiness budget). The sticky
+    ///   readiness fact is populated through the lossy event-broadcast
+    ///   listener (lag drops events), so a never-ready verdict is revalidated
+    ///   against the live DataChannels before cleanup: an actually-open
+    ///   channel heals the flag instead of reaping a healthy connection.
     ///
     /// A peer stuck in Disconnected past the restart budget will not recover
     /// on its own: when ICE restart exhausts without reaching Failed (or never
@@ -3317,28 +3788,54 @@ impl WebRtcCoordinator {
     /// RTCPeerConnection and the per-interface ICE UDP sockets it holds,
     /// leaking fds for the process lifetime.
     async fn check_and_cleanup_stale_connections(&self) -> Option<std::time::Instant> {
-        let (peers_to_cleanup, next_deadline) = {
+        self.reconcile_live_peer_states().await;
+
+        let (peers_to_cleanup, never_ready_candidates, next_deadline) = {
             let peers = self.peers.read().await;
             let now = std::time::Instant::now();
             let mut peers_to_cleanup = Vec::new();
+            let mut never_ready_candidates = Vec::new();
             let mut next_deadline: Option<std::time::Instant> = None;
 
             for (peer_id, state) in peers.iter() {
-                // Get current real-time state from RTCPeerConnection.
-                let current_state = state.peer_connection.connection_state();
+                // The callback publishes the cached state and its timestamp
+                // atomically under the same peer-map lock. Sampling the live
+                // PeerConnection here could pair a newly visible state with
+                // the previous state's timestamp and reap it immediately.
+                let current_state = state.current_state;
                 let duration_since_change = now.duration_since(state.last_state_change);
 
-                if let Some(reason) = stale_peer_reap_reason(current_state, duration_since_change) {
-                    tracing::warn!("🧹 Marking peer {} for cleanup: {}", peer_id, reason);
-                    peers_to_cleanup.push((peer_id.clone(), state.session_id, reason));
-                } else if let Some(threshold) = stale_peer_reap_threshold(current_state) {
+                if let Some(reason) = stale_peer_reap_reason(
+                    current_state,
+                    state.ever_data_channel_opened,
+                    duration_since_change,
+                ) {
+                    if current_state == RTCPeerConnectionState::Connected
+                        && !state.ever_data_channel_opened
+                    {
+                        // The readiness fact is lossy (broadcast lag can drop
+                        // the open event): revalidate against the live
+                        // channels before treating the peer as abandoned.
+                        never_ready_candidates.push((
+                            peer_id.clone(),
+                            state.session_id,
+                            state.webrtc_conn.clone(),
+                            reason,
+                        ));
+                    } else {
+                        tracing::warn!("🧹 Marking peer {} for cleanup: {}", peer_id, reason);
+                        peers_to_cleanup.push((peer_id.clone(), state.session_id, reason));
+                    }
+                } else if let Some(threshold) =
+                    stale_peer_reap_threshold(current_state, state.ever_data_channel_opened)
+                {
                     let deadline = state.last_state_change + threshold;
                     next_deadline =
                         Some(next_deadline.map_or(deadline, |current| current.min(deadline)));
                 }
             }
 
-            (peers_to_cleanup, next_deadline)
+            (peers_to_cleanup, never_ready_candidates, next_deadline)
         };
 
         // Cleanup marked peers
@@ -3359,7 +3856,100 @@ impl WebRtcCoordinator {
             }
         }
 
+        // Revalidate never-ready verdicts against the authoritative live
+        // channels: the sticky flag is populated through the lossy broadcast
+        // listener, so a healthy connection whose open event was dropped must
+        // be healed, not reaped.
+        for (peer_id, session_id, webrtc_conn, reason) in never_ready_candidates {
+            if webrtc_conn.has_open_data_channel().await {
+                let mut peers = self.peers.write().await;
+                if let Some(state) = peers
+                    .get_mut(&peer_id)
+                    .filter(|state| state.session_id == session_id)
+                {
+                    tracing::warn!(
+                        peer_id = %peer_id.to_string_repr(),
+                        session_id,
+                        "⚠️ Peer has an open DataChannel but the sticky readiness flag was \
+                         never recorded (open event lost to listener lag); healing the flag"
+                    );
+                    state.mark_data_channel_opened();
+                }
+            } else {
+                tracing::warn!("🧹 Marking peer {} for cleanup: {}", peer_id, reason);
+                self.cleanup_connection_if_session(&peer_id, session_id, true, &reason)
+                    .await;
+            }
+        }
+
         next_deadline
+    }
+
+    /// Resynchronize cached peer states with the authoritative terminal
+    /// signals.
+    ///
+    /// The cached state is normally published by the PeerConnection state
+    /// callback, but that callback is best-effort: connection teardown
+    /// replaces it with a no-op and explicitly tolerates losing the final
+    /// transition (see `WebRtcConnection::close_with_mode`), and the
+    /// `ConnectionClosed` broadcast that would otherwise drive cleanup can be
+    /// dropped under channel lag. When both are missed, the cache would sit in
+    /// a non-reapable state forever while the peers-map entry pins the
+    /// RTCPeerConnection — and the per-interface ICE UDP sockets that webrtc
+    /// 0.14 releases only on drop.
+    ///
+    /// Two signals are consulted per peer (see `reap_relevant_state`):
+    /// the connection's own closed session (authoritative-terminal) and the
+    /// live `connection_state()` (which may legitimately never reach `Closed`
+    /// when the bounded close cancels webrtc's multi-stop `close()` early).
+    ///
+    /// A diverged state is installed with a FRESH timestamp via
+    /// `update_connection_state`, so a newly discovered state still receives
+    /// its full reap threshold; this never pairs a newly visible state with
+    /// the previous state's timestamp, and a late callback arriving afterward
+    /// is an idempotent duplicate.
+    async fn reconcile_live_peer_states(&self) {
+        let diverged: Vec<(ActrId, u64)> = {
+            let peers = self.peers.read().await;
+            peers
+                .iter()
+                .filter_map(|(peer_id, state)| {
+                    let expected = reap_relevant_state(
+                        state.webrtc_conn.is_closing_or_closed(),
+                        state.peer_connection.connection_state(),
+                    );
+                    (expected != state.current_state).then(|| (peer_id.clone(), state.session_id))
+                })
+                .collect()
+        };
+        if diverged.is_empty() {
+            return;
+        }
+
+        let mut peers = self.peers.write().await;
+        for (peer_id, session_id) in diverged {
+            if let Some(state) = peers
+                .get_mut(&peer_id)
+                .filter(|state| state.session_id == session_id)
+            {
+                // Re-sample under the write lock: a callback that published
+                // between the two phases must win over the stale sample.
+                let expected = reap_relevant_state(
+                    state.webrtc_conn.is_closing_or_closed(),
+                    state.peer_connection.connection_state(),
+                );
+                if expected != state.current_state {
+                    tracing::warn!(
+                        peer_id = %peer_id.to_string_repr(),
+                        expected_state = ?expected,
+                        cached_state = ?state.current_state,
+                        "⚠️ Authoritative peer state diverged from cached state; \
+                         resynchronizing (state callback was missed or is still in flight)"
+                    );
+                    state.update_connection_state(expected);
+                }
+            }
+        }
     }
 
     /// Start signaling coordinator (listen for ActrRelay messages)
@@ -4344,7 +4934,12 @@ impl WebRtcCoordinator {
                             target
                         );
                         // Cleanup failed connection attempt
-                        self.cleanup_failed_connection(target, webrtc_conn).await;
+                        self.cleanup_failed_connection(
+                            target,
+                            webrtc_conn,
+                            "failed connection attempt",
+                        )
+                        .await;
                         Err(ActrError::Internal(
                             "Connection ready channel closed".to_string(),
                         ))
@@ -4352,7 +4947,12 @@ impl WebRtcCoordinator {
                     Err(_) => {
                         tracing::warn!("⚠️ Connection timed out for serial={}", target);
                         // Cleanup failed connection attempt
-                        self.cleanup_failed_connection(target, webrtc_conn).await;
+                        self.cleanup_failed_connection(
+                            target,
+                            webrtc_conn,
+                            "failed connection attempt",
+                        )
+                        .await;
                         Err(ActrError::TimedOut)
                     }
                 }
@@ -4364,14 +4964,28 @@ impl WebRtcCoordinator {
         }
     }
 
-    /// Cleanup a failed connection attempt
+    /// Cleanup a failed or abandoned connection attempt
     ///
     /// NOTE: Releases the write lock BEFORE calling close() to avoid blocking
     /// other operations on `peers` during potentially slow close operations.
-    async fn cleanup_failed_connection(&self, target: &ActrId, webrtc_conn: WebRtcConnection) {
+    ///
+    /// Factory callers that abandon a just-created connection (e.g. after a
+    /// cancellation observed post-creation) SHOULD route through this instead
+    /// of a bare `WebRtcConnection::close`: the session-guarded removal below
+    /// deletes the peers-map entry before the physical close, making teardown
+    /// prompt and deterministic. A bare close is still CONVERGED — the closed
+    /// session is reconciled to `Closed` by the health check and reaped within
+    /// one reap threshold — but only after up to one idle tick plus
+    /// `MAX_FAILED_DURATION`, pinning the ICE UDP sockets for that window.
+    pub(crate) async fn cleanup_failed_connection(
+        &self,
+        target: &ActrId,
+        webrtc_conn: WebRtcConnection,
+        reason: &str,
+    ) {
         let session_id = webrtc_conn.session_id();
         let removed = self
-            .cleanup_connection_if_session(target, session_id, true, "failed connection attempt")
+            .cleanup_connection_if_session(target, session_id, true, reason)
             .await;
 
         // If a newer session replaced the failed attempt, close only the stale
@@ -4380,7 +4994,7 @@ impl WebRtcCoordinator {
             if let Err(e) = webrtc_conn.close().await {
                 tracing::warn!(
                     "⚠️ Failed to close stale WebRtcConnection during cleanup for {} (session_id={}): {}",
-                    target,
+                    target.to_string_repr(),
                     session_id,
                     e
                 );
@@ -4388,10 +5002,11 @@ impl WebRtcCoordinator {
         }
 
         tracing::debug!(
-            "🧹 Cleaned up failed connection attempt for serial={}, session_id={}, removed_active={}",
-            target,
+            "🧹 Cleaned up connection attempt for serial={}, session_id={}, removed_active={}, reason={}",
+            target.to_string_repr(),
             session_id,
-            removed
+            removed,
+            reason
         );
     }
 
@@ -4722,6 +5337,9 @@ impl WebRtcCoordinator {
         state: PeerState,
         expected_epoch: u64,
     ) -> Result<(), PeerState> {
+        #[cfg(any(test, feature = "test-utils"))]
+        self.hit_peer_publish_barrier_for_test(&peer_id).await;
+
         let _lifecycle_guard = self.peer_signaling.lifecycle_gate.lock().await;
         if self.peer_signaling.closing_all.load(Ordering::Acquire)
             || self
@@ -5729,19 +6347,19 @@ impl WebRtcCoordinator {
         let webrtc_conn_for_wait = webrtc_conn.clone();
         let wait_session_id = webrtc_conn.session_id();
         let event_broadcaster = self.event_broadcaster.clone();
+        let coordinator_for_wait = Arc::clone(self);
 
         tokio::spawn(async move {
-            let opened = Self::wait_for_connection_ready_event(
-                &from_id,
-                wait_session_id,
-                &peers,
-                &event_broadcaster,
-                &webrtc_conn_for_wait,
-                ICE_CONNECTED_TIMEOUT,
-                DATA_CHANNEL_AFTER_ICE_TIMEOUT,
-                restart_inflight,
-            )
-            .await;
+            let opened = coordinator_for_wait
+                .wait_for_connection_ready_event(
+                    &from_id,
+                    wait_session_id,
+                    &webrtc_conn_for_wait,
+                    ICE_CONNECTED_TIMEOUT,
+                    DATA_CHANNEL_AFTER_ICE_TIMEOUT,
+                    restart_inflight,
+                )
+                .await;
 
             if opened {
                 tracing::info!("✅ DataChannel verified open, connection fully ready");
@@ -6414,11 +7032,9 @@ impl WebRtcCoordinator {
         };
         let has_connection = match existing {
             Some((RTCPeerConnectionState::Connected, _, session_id, webrtc_conn)) => {
-                Self::wait_for_connection_ready_event(
+                self.wait_for_connection_ready_event(
                     target,
                     session_id,
-                    &self.peers,
-                    &self.event_broadcaster,
                     &webrtc_conn,
                     Duration::ZERO,
                     DATA_CHANNEL_AFTER_ICE_TIMEOUT,
@@ -6437,11 +7053,9 @@ impl WebRtcCoordinator {
                     "⏳ Connection to {} is being established; waiting for its state event",
                     target
                 );
-                Self::wait_for_connection_ready_event(
+                self.wait_for_connection_ready_event(
                     target,
                     session_id,
-                    &self.peers,
-                    &self.event_broadcaster,
                     &webrtc_conn,
                     remaining,
                     DATA_CHANNEL_AFTER_ICE_TIMEOUT,
@@ -8801,6 +9415,7 @@ impl WebRtcCoordinator {
             let peers = Arc::clone(&self.peers);
             let event_broadcaster = self.event_broadcaster.clone();
             let from_id = from.clone();
+            let coordinator_for_wait = Arc::clone(self);
             let ready_handle = tokio::spawn(async move {
                 let webrtc_conn = {
                     let peers_guard = peers.read().await;
@@ -8809,17 +9424,16 @@ impl WebRtcCoordinator {
                         _ => return,
                     }
                 };
-                let opened = Self::wait_for_connection_ready_event(
-                    &from_id,
-                    session_id,
-                    &peers,
-                    &event_broadcaster,
-                    &webrtc_conn,
-                    ICE_CONNECTED_TIMEOUT,
-                    DATA_CHANNEL_AFTER_ICE_TIMEOUT,
-                    true,
-                )
-                .await;
+                let opened = coordinator_for_wait
+                    .wait_for_connection_ready_event(
+                        &from_id,
+                        session_id,
+                        &webrtc_conn,
+                        ICE_CONNECTED_TIMEOUT,
+                        DATA_CHANNEL_AFTER_ICE_TIMEOUT,
+                        true,
+                    )
+                    .await;
                 if opened {
                     tracing::info!(
                         "✅ ICE restart answer verified ready for serial={}, session_id={}",
@@ -9249,9 +9863,14 @@ impl WebRtcCoordinator {
                 let target = target.clone();
                 let webrtc_conn = webrtc_conn.clone();
                 Box::pin(async move {
+                    #[cfg(any(test, feature = "test-utils"))]
+                    if let Some(c) = coord.upgrade() {
+                        c.hit_peer_state_transition_barrier_for_test(&target, state)
+                            .await;
+                    }
+
                     // First run the base WebRtcConnection cleanup.
                     webrtc_conn.handle_state_change(state).await;
-
                     if let Some(c) = coord.upgrade() {
                         c.handle_peer_state_change(&webrtc_conn, &target, session_id, state)
                             .await;

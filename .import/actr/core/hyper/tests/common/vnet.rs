@@ -54,6 +54,7 @@ use webrtc_util::vnet::router::{Router, RouterConfig};
 ///
 /// The router has a chunk filter that can be toggled to simulate
 /// network disconnection/reconnection at the UDP level.
+#[derive(Clone)]
 pub struct VNetPair {
     /// Virtual network for the Offerer — pass to `SettingEngine::set_vnet()`
     pub net_offerer: Arc<Net>,

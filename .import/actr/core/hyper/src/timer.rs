@@ -27,7 +27,7 @@ pub(crate) enum TimerCategory {
 }
 
 impl TimerCategory {
-    const fn as_str(self) -> &'static str {
+    pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::BusinessHysteresis => "business_hysteresis",
             Self::ProtocolSelection => "protocol_selection",
@@ -324,6 +324,12 @@ timer_inventory! {
         success: "buffered-low notification", interrupt: "peer connection terminal state",
         expiry: "continue close with residual", reset: "new close only", external: false
     },
+    DATA_CHANNEL_CLOSE => {
+        id: "webrtc.data_channel.close", owner: "webrtc_connection", category: FailureDeadline,
+        duration: "DATA_CHANNEL_CLOSE_TIMEOUT", arm: "connection teardown closes all cached channels, or a refused registration closes its fresh channel",
+        success: "every data channel close returns", interrupt: "connection drop",
+        expiry: "states already flipped to Closing; continue teardown", reset: "new close only", external: false
+    },
     PEER_CONNECTION_CLOSE => {
         id: "webrtc.peer_connection.close", owner: "webrtc_connection", category: FailureDeadline,
         duration: "PEER_CONNECTION_CLOSE_TIMEOUT", arm: "physical peer close starts",
@@ -356,9 +362,15 @@ timer_inventory! {
     },
     STALE_PEER_EXPIRY => {
         id: "webrtc.coordinator.stale_peer_expiry", owner: "webrtc_coordinator", category: RetentionExpiry,
-        duration: "nearest peer-state retention deadline", arm: "peer enters retained non-ready state",
+        duration: "nearest peer-state retention deadline, capped at STALE_PEER_IDLE_INTERVAL", arm: "peer enters retained non-ready state",
         success: "peer state changes", interrupt: "state-change notification or shutdown",
-        expiry: "reap exact stale peer", reset: "material peer-state transition only", external: false
+        expiry: "reap due peers and resynchronize lost transitions", reset: "material peer-state transition only", external: false
+    },
+    STALE_PEER_IDLE_TICK => {
+        id: "webrtc.coordinator.stale_peer_idle_tick", owner: "webrtc_coordinator", category: ProtocolSchedule,
+        duration: "STALE_PEER_IDLE_INTERVAL", arm: "no peer holds a reap deadline",
+        success: "fallback reconciliation scan runs", interrupt: "state-change notification or shutdown",
+        expiry: "run reconciliation scan (lost transitions have no wake)", reset: "next scan only", external: false
     },
     WEBRTC_CLOSE_ALL_QUIESCE => {
         id: "webrtc.coordinator.close_all_quiesce", owner: "webrtc_coordinator", category: FailureDeadline,
@@ -371,6 +383,12 @@ timer_inventory! {
         duration: "shared CLOSE_ALL_HOOK_TIMEOUT deadline", arm: "close-all invokes peer hooks",
         success: "hook completes", interrupt: "shared overall deadline",
         expiry: "skip unfinished hook and close peer", reset: "one close-all operation", external: false
+    },
+    WEBRTC_PEER_TEARDOWN_HOOK => {
+        id: "webrtc.coordinator.peer_teardown_hook", owner: "webrtc_coordinator", category: FailureDeadline,
+        duration: "PEER_TEARDOWN_HOOK_TIMEOUT", arm: "single-peer teardown delivers the disconnected lifecycle hook",
+        success: "hook future completes", interrupt: "hook completion",
+        expiry: "skip hook and proceed to physical close", reset: "new teardown only", external: false
     },
     WEBRTC_CONNECTION_READY => {
         id: "webrtc.coordinator.connection_ready", owner: "webrtc_coordinator", category: FailureDeadline,
@@ -500,7 +518,42 @@ timer_inventory! {
     }
 }
 
+#[cfg(feature = "test-utils")]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct TestTimerObservation {
+    pub(crate) armed: u64,
+    pub(crate) finished: u64,
+    pub(crate) expired: u64,
+}
+
+#[cfg(feature = "test-utils")]
+type TestTimerObservations =
+    std::sync::Mutex<std::collections::HashMap<&'static str, TestTimerObservation>>;
+
+#[cfg(feature = "test-utils")]
+fn test_timer_observations() -> &'static TestTimerObservations {
+    static OBSERVATIONS: std::sync::OnceLock<TestTimerObservations> = std::sync::OnceLock::new();
+    OBSERVATIONS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+#[cfg(feature = "test-utils")]
+pub(crate) fn test_timer_observation(id: &str) -> TestTimerObservation {
+    test_timer_observations()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(id)
+        .copied()
+        .unwrap_or_default()
+}
+
 fn trace_armed(definition: TimerDefinition, duration: Duration, deadline: Instant) {
+    #[cfg(feature = "test-utils")]
+    {
+        let mut observations = test_timer_observations()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        observations.entry(definition.id).or_default().armed += 1;
+    }
     tracing::trace!(
         timer_id = definition.id,
         timer_category = definition.category.as_str(),
@@ -512,6 +565,15 @@ fn trace_armed(definition: TimerDefinition, duration: Duration, deadline: Instan
 }
 
 fn trace_finished(definition: TimerDefinition, started: Instant, deadline: Instant, expired: bool) {
+    #[cfg(feature = "test-utils")]
+    {
+        let mut observations = test_timer_observations()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let observation = observations.entry(definition.id).or_default();
+        observation.finished += 1;
+        observation.expired += u64::from(expired);
+    }
     tracing::trace!(
         timer_id = definition.id,
         timer_category = definition.category.as_str(),

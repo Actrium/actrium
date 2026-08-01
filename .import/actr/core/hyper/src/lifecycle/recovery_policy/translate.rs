@@ -1916,12 +1916,42 @@ fn gate_ready(record: &Option<PendingRecord>) -> bool {
         .is_some_and(|r| r.gate == RetryGateState::Ready)
 }
 
+fn log_composite_fallthrough(view: &View, reason: &'static str) {
+    tracing::error!(
+        target: "actr_hyper::lifecycle::recovery_policy",
+        invariant = 29,
+        reason,
+        network_path = ?view.network_path,
+        offline_work = ?view.offline_work,
+        cleanup_work = ?view.cleanup_work,
+        recovery_mode = ?view.recovery_mode,
+        recovery_intent = ?view.recovery_intent,
+        execution = ?view.execution,
+        "recovery composite-table fall-through"
+    );
+}
+
 /// Derive at most one executable action, evaluating the composite decision
 /// table top to bottom. Returns `None` when no action is currently admissible.
 pub(crate) fn composite_action(view: &View) -> Option<Action> {
+    // INV-29 is a property of the view, not of the selected action: validate
+    // the implication BEFORE action precedence so a pending cleanup cannot
+    // shadow the violation. This only records the fall-through; the action
+    // precedence below is unchanged.
+    let invalid_disconnect_pending = view.offline_work == OfflineWorkState::DisconnectPending
+        && view.network_path != NetworkPathState::Offline;
+    if invalid_disconnect_pending {
+        log_composite_fallthrough(
+            view,
+            "DisconnectPending requires an Offline network path at reconciliation",
+        );
+    }
     // Cleanup shadows every lower domain, even while backing off or parked.
     if view.cleanup_work == CleanupWorkState::CleanupPending {
         return gate_ready(&view.cleanup_record).then_some(Action::Cleanup);
+    }
+    if invalid_disconnect_pending {
+        return None;
     }
     // Confirmed offline disconnect, only once the path has committed to Offline.
     if view.network_path == NetworkPathState::Offline
