@@ -152,13 +152,57 @@ impl CompatLockFile {
                     source: e,
                 })?;
 
-        let lock_file: Self =
+        let mut lock_file: Self =
             toml::from_str(&content).map_err(|e| CompatLockError::ParseError {
                 path: file_path,
                 source: e,
             })?;
 
+        lock_file.clamp_expirations();
+
         Ok(Some(lock_file))
+    }
+
+    /// Clamp each entry's `expires_at` to the authoritative TTL from both its
+    /// recorded negotiation time and the current wall-clock reading.
+    ///
+    /// The lock file lives in the temp directory and can be corrupted or
+    /// written under a wall-clock jump. Bounding only from `negotiated_at`
+    /// does not protect against a future-dated write or a later clock rollback
+    /// because both stored timestamps move together. Entries written by
+    /// [`NegotiationEntry::new`] use exactly this TTL, so well-formed files
+    /// under a stable clock are unaffected.
+    fn clamp_expirations(&mut self) {
+        self.clamp_expirations_at(Utc::now());
+    }
+
+    fn clamp_expirations_at(&mut self, now: DateTime<Utc>) {
+        let ttl = Duration::hours(DEFAULT_TTL_HOURS);
+        let current_limit = now.checked_add_signed(ttl).unwrap_or(now);
+
+        for entry in &mut self.negotiation {
+            let negotiated_limit = match entry.negotiated_at.checked_add_signed(ttl) {
+                Some(limit) => limit,
+                None => {
+                    warn!(
+                        service_name = %entry.service_name,
+                        negotiated_at = %entry.negotiated_at,
+                        "compat.lock negotiation time overflows its TTL; expiring entry"
+                    );
+                    now
+                }
+            };
+            let max_expires_at = negotiated_limit.min(current_limit);
+            if entry.expires_at > max_expires_at {
+                warn!(
+                    service_name = %entry.service_name,
+                    expires_at = %entry.expires_at,
+                    clamped_to = %max_expires_at,
+                    "compat.lock entry expiry exceeds the negotiated TTL; clamping"
+                );
+                entry.expires_at = max_expires_at;
+            }
+        }
     }
 
     /// Save to file
@@ -274,13 +318,16 @@ impl NegotiationEntry {
         compatibility_check: CompatibilityCheck,
     ) -> Self {
         let now = Utc::now();
+        let expires_at = now
+            .checked_add_signed(Duration::hours(DEFAULT_TTL_HOURS))
+            .unwrap_or(now);
         Self {
             service_name,
             requested_fingerprint,
             resolved_fingerprint,
             compatibility_check,
             negotiated_at: now,
-            expires_at: now + Duration::hours(DEFAULT_TTL_HOURS),
+            expires_at,
         }
     }
 

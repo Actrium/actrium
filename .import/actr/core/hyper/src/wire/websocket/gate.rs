@@ -376,7 +376,8 @@ impl WebSocketGate {
             }
         };
 
-        // Check expires_at
+        // AIS TTLs are configurable and claims do not carry an issued-at
+        // value, so only the signed absolute expiry can be evaluated here.
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()

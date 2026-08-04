@@ -16,6 +16,25 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::{BinaryType, CloseEvent, MessageEvent, WebSocket};
 
+/// Milliseconds from `performance.now()`: monotonic per RFC-0419, unlike
+/// `Date.now()`, which jumps when the wall clock changes (NTP, manual set).
+///
+/// Fails explicitly if the Performance API is unavailable: falling back to
+/// wall time would allow a clock adjustment to fire the connection timeout
+/// early or stall it indefinitely.
+fn monotonic_now_ms() -> LaneResult<f64> {
+    js_sys::global()
+        .unchecked_into::<web_sys::WorkerGlobalScope>()
+        .performance()
+        .map(|p| p.now())
+        .ok_or_else(|| {
+            WebError::Transport(
+                "Performance API unavailable; cannot enforce a monotonic WebSocket connect timeout"
+                    .to_string(),
+            )
+        })
+}
+
 /// Builder for a WebSocket lane.
 ///
 /// Creates and configures a `WebSocket`-backed `DataLane`.
@@ -137,7 +156,7 @@ impl WebSocketLaneBuilder {
         // Wait for the connection to open, up to 5 seconds.
         let ws_clone = ws.clone();
         let connect_future = async move {
-            let start = js_sys::Date::now();
+            let start = monotonic_now_ms()?;
             loop {
                 if ws_clone.ready_state() == WebSocket::OPEN {
                     return Ok(());
@@ -151,7 +170,7 @@ impl WebSocketLaneBuilder {
                     ));
                 }
 
-                if js_sys::Date::now() - start > 5000.0 {
+                if monotonic_now_ms()? - start > 5000.0 {
                     return Err(WebError::Transport(
                         "WebSocket connection timed out (5s)".to_string(),
                     ));

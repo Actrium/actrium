@@ -533,8 +533,12 @@ pub struct WebSocketSignalingClient {
     ping_task: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
     /// Connection state broadcast channel (event-driven)
     event_tx: broadcast::Sender<SignalingEvent>,
-    /// Last time we saw inbound traffic (pong/any message), unix epoch seconds
-    last_pong: Arc<AtomicU64>,
+    /// Incremented whenever the current connection observes inbound traffic.
+    ///
+    /// The ping task measures silence in completed active-time ticks instead
+    /// of comparing `std::time::Instant` values, whose suspend behavior is not
+    /// portable (Windows counts sleep).
+    liveness_generation: Arc<AtomicU64>,
     /// Flag to track if reconnect manager has been started
     reconnector_started: Arc<AtomicBool>,
     /// Notify channel to wake up the reconnect manager
@@ -601,7 +605,7 @@ impl WebSocketSignalingClient {
             receiver_task: Arc::new(tokio::sync::Mutex::new(None)),
             ping_task: tokio::sync::Mutex::new(None),
             event_tx,
-            last_pong: Arc::new(AtomicU64::new(0)),
+            liveness_generation: Arc::new(AtomicU64::new(0)),
             reconnector_started: Arc::new(AtomicBool::new(false)),
             reconnect_notify: Arc::new(tokio::sync::Notify::new()),
             reconnect_manager_shutdown: CancellationToken::new(),
@@ -1425,7 +1429,7 @@ impl WebSocketSignalingClient {
                     self.auto_reconnect_suppressed
                         .store(false, Ordering::Release);
                 }
-                self.last_pong.store(current_unix_secs(), Ordering::Release);
+                self.liveness_generation.fetch_add(1, Ordering::Release);
                 self.stats.connections.fetch_add(1, Ordering::Relaxed);
                 self.emit_signaling_committed(generation, SignalingFactOrigin::External);
                 true
@@ -1625,7 +1629,7 @@ impl WebSocketSignalingClient {
         let stats = self.stats.clone();
         let connected = self.connected.clone();
         let event_tx = self.event_tx.clone();
-        let last_pong = self.last_pong.clone();
+        let liveness_generation = self.liveness_generation.clone();
         let pending_pongs = self.pending_pongs.clone();
         let reconnect_notify = self.reconnect_notify.clone();
         let reconnect_enabled = self.config.reconnect_config.enabled;
@@ -1639,7 +1643,7 @@ impl WebSocketSignalingClient {
                 match msg {
                     Ok(tokio_tungstenite::tungstenite::Message::Binary(data)) => {
                         // Any inbound traffic counts as liveness
-                        last_pong.store(current_unix_secs(), Ordering::Release);
+                        liveness_generation.fetch_add(1, Ordering::Release);
                         match SignalingEnvelope::decode(&data[..]) {
                             Ok(envelope) => {
                                 #[cfg(feature = "opentelemetry")]
@@ -1683,14 +1687,14 @@ impl WebSocketSignalingClient {
                     }
                     Ok(tokio_tungstenite::tungstenite::Message::Pong(payload)) => {
                         tracing::debug!("Received pong");
-                        last_pong.store(current_unix_secs(), Ordering::Release);
+                        liveness_generation.fetch_add(1, Ordering::Release);
                         if let Some(sender) = pending_pongs.lock().await.remove(&payload.to_vec()) {
                             let _ = sender.send(());
                         }
                     }
                     Ok(tokio_tungstenite::tungstenite::Message::Ping(_)) => {
                         tracing::debug!("Received ping");
-                        last_pong.store(current_unix_secs(), Ordering::Release);
+                        liveness_generation.fetch_add(1, Ordering::Release);
                     }
                     Ok(other) => {
                         tracing::warn!("Received non-binary frame, ignoring: {other:?}");
@@ -1747,7 +1751,7 @@ impl WebSocketSignalingClient {
         let connected = self.connected.clone();
         let stats = self.stats.clone();
         let event_tx = self.event_tx.clone();
-        let last_pong = self.last_pong.clone();
+        let liveness_generation = self.liveness_generation.clone();
         let receiver_task_clone = Arc::clone(&self.receiver_task);
         let reconnect_notify = self.reconnect_notify.clone();
         let reconnect_enabled = self.config.reconnect_config.enabled;
@@ -1756,6 +1760,7 @@ impl WebSocketSignalingClient {
         let socket_generation = self.connection_generation.load(Ordering::Acquire);
 
         let handle = tokio::spawn(async move {
+            let mut watchdog = PongWatchdog::new(liveness_generation.load(Ordering::Acquire));
             loop {
                 crate::timer::sleep(
                     crate::timer::ids::SIGNALING_PING_SCHEDULE,
@@ -1817,13 +1822,17 @@ impl WebSocketSignalingClient {
                     break;
                 }
 
-                // Check for stale pong
-                let now = current_unix_secs();
-                let last = last_pong.load(Ordering::Acquire);
-                if now.saturating_sub(last) > PONG_TIMEOUT_SECS {
+                // Count one active scheduling interval without liveness. A
+                // delayed wake after device suspend still contributes only
+                // this one tick, so sleep time cannot expire the watchdog.
+                let silent_active_secs = watchdog.tick(
+                    liveness_generation.load(Ordering::Acquire),
+                    PING_INTERVAL_SECS,
+                );
+                if silent_active_secs > PONG_TIMEOUT_SECS {
                     tracing::warn!(
                         "Signaling pong timeout (last seen {}s ago), marking disconnected",
-                        now.saturating_sub(last)
+                        silent_active_secs
                     );
                     if let Some(handle) = receiver_task_clone.lock().await.take() {
                         handle.abort();
@@ -2386,7 +2395,7 @@ impl SignalingClient for WebSocketSignalingClient {
 
         match crate::timer::timeout(crate::timer::ids::SIGNALING_PROBE, timeout, rx).await {
             Ok(Ok(())) => {
-                self.last_pong.store(current_unix_secs(), Ordering::Release);
+                self.liveness_generation.fetch_add(1, Ordering::Release);
                 Ok(())
             }
             Ok(Err(_)) => {
@@ -2861,6 +2870,37 @@ fn current_unix_secs() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[derive(Debug)]
+struct PongWatchdog {
+    observed_generation: u64,
+    silent_active_secs: u64,
+}
+
+impl PongWatchdog {
+    fn new(observed_generation: u64) -> Self {
+        Self {
+            observed_generation,
+            silent_active_secs: 0,
+        }
+    }
+
+    /// Advance after one completed ping interval.
+    ///
+    /// The caller invokes this once per scheduled wake, so a wake delayed by
+    /// suspend or scheduler throttling counts as one interval rather than the
+    /// wall duration of the delay. Late timeout is allowed; early timeout
+    /// after resume is not.
+    fn tick(&mut self, current_generation: u64, interval_secs: u64) -> u64 {
+        if current_generation != self.observed_generation {
+            self.observed_generation = current_generation;
+            self.silent_active_secs = 0;
+        } else {
+            self.silent_active_secs = self.silent_active_secs.saturating_add(interval_secs);
+        }
+        self.silent_active_secs
+    }
 }
 
 #[cfg(test)]

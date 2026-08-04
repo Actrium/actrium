@@ -216,6 +216,47 @@ async fn send_envelope_times_out_while_waiting_for_sink_lock() {
         .expect("send timeout should wake the reconnect manager");
 }
 
+/// RFC-0419 §6 R4 double-sided deadline boundary for the signaling send
+/// timeout: one millisecond before `SIGNALING_SEND_TIMEOUT_SECS` the send is
+/// still pending; once the virtual clock reaches the deadline it times out
+/// (fires no earlier than its instant).
+#[tokio::test(start_paused = true)]
+async fn send_envelope_timeout_fires_no_earlier_than_its_deadline() {
+    let client = make_ws_client(make_config());
+    client.connected.store(true, Ordering::Release);
+    let _sink_guard = client.ws_sink.lock().await;
+
+    let send_task = {
+        let client = Arc::clone(&client);
+        tokio::spawn(async move { client.send_envelope(SignalingEnvelope::default()).await })
+    };
+    // Let the send reach the stalled sink lock so its timeout timer is armed
+    // at the current virtual instant.
+    tokio::task::yield_now().await;
+
+    tokio::time::advance(
+        Duration::from_secs(SIGNALING_SEND_TIMEOUT_SECS) - Duration::from_millis(1),
+    )
+    .await;
+    for _ in 0..50 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        !send_task.is_finished(),
+        "signaling send must stay pending one tick before its deadline"
+    );
+
+    tokio::time::advance(Duration::from_millis(1)).await;
+    let err = send_task
+        .await
+        .expect("send task should join")
+        .expect_err("reaching the deadline must time out the send");
+    assert!(
+        err.to_string().contains("sink lock/send timed out"),
+        "unexpected error: {err}"
+    );
+}
+
 #[tokio::test]
 async fn send_envelope_failure_publishes_disconnect_and_requests_reconnect() {
     let client = make_ws_client(make_config());
@@ -1948,4 +1989,38 @@ fn reacquire_pacing_with_production_backoff_never_returns_none_after_first_round
         assert!(delay >= Duration::from_secs(1));
         assert!(delay <= Duration::from_secs(60));
     }
+}
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 14. Pong liveness watchdog active-time accounting
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[test]
+fn pong_watchdog_counts_only_completed_active_ticks() {
+    let mut watchdog = PongWatchdog::new(7);
+
+    assert_eq!(watchdog.tick(7, PING_INTERVAL_SECS), 5);
+    assert_eq!(watchdog.tick(7, PING_INTERVAL_SECS), 10);
+    assert_eq!(watchdog.tick(7, PING_INTERVAL_SECS), 15);
+}
+
+#[test]
+fn pong_watchdog_resets_when_liveness_advances() {
+    let mut watchdog = PongWatchdog::new(7);
+    assert_eq!(watchdog.tick(7, PING_INTERVAL_SECS), 5);
+
+    assert_eq!(watchdog.tick(8, PING_INTERVAL_SECS), 0);
+    assert_eq!(watchdog.tick(8, PING_INTERVAL_SECS), 5);
+}
+
+#[test]
+fn delayed_resume_wake_counts_as_one_ping_interval() {
+    let mut watchdog = PongWatchdog::new(7);
+
+    // The scheduling delay is deliberately absent from the input: whether
+    // this tick arrived after 5 seconds or after an hour of device suspend,
+    // it represents only one completed active-time interval.
+    let silent_active_secs = watchdog.tick(7, PING_INTERVAL_SECS);
+
+    assert_eq!(silent_active_secs, PING_INTERVAL_SECS);
+    assert!(silent_active_secs <= PONG_TIMEOUT_SECS);
 }

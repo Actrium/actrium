@@ -21,6 +21,24 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::{MessageEvent, RtcDataChannel, RtcDataChannelInit, RtcDataChannelState};
 
+/// Milliseconds from `performance.now()`: monotonic per RFC-0419, unlike
+/// `Date.now()`, which jumps when the wall clock changes (NTP, manual set).
+///
+/// Fails explicitly if the Performance API is unavailable: falling back to
+/// wall time would allow a clock adjustment to fire the open timeout early or
+/// stall it indefinitely.
+fn monotonic_now_ms() -> LaneResult<f64> {
+    web_sys::window()
+        .and_then(|w| w.performance())
+        .map(|p| p.now())
+        .ok_or_else(|| {
+            WebError::Transport(
+                "Performance API unavailable; cannot enforce a monotonic DataChannel open timeout"
+                    .to_string(),
+            )
+        })
+}
+
 /// WebRTC DataChannel lane builder.
 ///
 /// Creates and configures a WebRTC DataChannel lane.
@@ -146,7 +164,7 @@ impl WebRtcDataChannelLaneBuilder {
         // Wait for the DataChannel to open if it is not open yet.
         let dc_clone = self.data_channel.clone();
         let wait_future = async move {
-            let start = js_sys::Date::now();
+            let start = monotonic_now_ms()?;
             loop {
                 let state = dc_clone.ready_state();
                 if state == RtcDataChannelState::Open {
@@ -159,7 +177,7 @@ impl WebRtcDataChannelLaneBuilder {
                     ));
                 }
 
-                if js_sys::Date::now() - start > 10000.0 {
+                if monotonic_now_ms()? - start > 10000.0 {
                     return Err(WebError::Transport(
                         "WebRTC DataChannel timed out after 10 seconds".to_string(),
                     ));
