@@ -117,11 +117,35 @@ if(MSVC)
     # These use compound literals which work in C11+ but not in MSVC C++.
     # Replace with a block that uses inline functions for C++ and keeps
     # compound literals for C.
+    #
+    # JS_NAN stays a MACRO that passes JS_FLOAT64_NAN in, rather than becoming a
+    # nullary helper that reads it. JS_FLOAT64_NAN is `NAN`, which lives in
+    # <math.h> -- a header quickjs.h does not include, and one this file must not
+    # include either: consumers pull quickjs.h in inside `extern "C"` (see
+    # KeelSandboxNativeModule.cpp), where dragging in a C++ standard header is
+    # not allowed. As a macro the reference stays lazy, exactly as upstream, so
+    # NAN only has to be visible where JS_NAN is actually USED. Written as a
+    # helper instead, the header stopped compiling on its own with
+    # `error C2065: 'NAN': undeclared identifier`, and only appeared to work
+    # because the demo's precompiled header happened to define NAN first.
     string(REPLACE
         "#define JS_MKVAL(tag, val) (JSValue){ (JSValueUnion){ .int32 = val }, tag }\n#define JS_MKPTR(tag, p) (JSValue){ (JSValueUnion){ .ptr = p }, tag }\n\n#define JS_TAG_IS_FLOAT64(tag) ((unsigned)(tag) == JS_TAG_FLOAT64)\n\n#define JS_NAN (JSValue){ .u.float64 = JS_FLOAT64_NAN, JS_TAG_FLOAT64 }"
-        "#if defined(_MSC_VER) && defined(__cplusplus)\n/* MSVC C++ does not support compound literals. Use inline helpers. */\nstatic inline JSValue JS_MKVAL_fn_(int64_t tag, int32_t val) { JSValue v; v.u.int32 = val; v.tag = tag; return v; }\nstatic inline JSValue JS_MKPTR_fn_(int64_t tag, void *p) { JSValue v; v.u.ptr = p; v.tag = tag; return v; }\nstatic inline JSValue JS_NAN_fn_(void) { JSValue v; v.tag = JS_TAG_FLOAT64; v.u.float64 = JS_FLOAT64_NAN; return v; }\n#define JS_MKVAL(tag, val) JS_MKVAL_fn_((tag), (val))\n#define JS_MKPTR(tag, p) JS_MKPTR_fn_((tag), (p))\n#define JS_NAN JS_NAN_fn_()\n#else\n#define JS_MKVAL(tag, val) (JSValue){ (JSValueUnion){ .int32 = val }, tag }\n#define JS_MKPTR(tag, p) (JSValue){ (JSValueUnion){ .ptr = p }, tag }\n#define JS_NAN (JSValue){ .u.float64 = JS_FLOAT64_NAN, JS_TAG_FLOAT64 }\n#endif\n\n#define JS_TAG_IS_FLOAT64(tag) ((unsigned)(tag) == JS_TAG_FLOAT64)"
+        "#if defined(_MSC_VER) && defined(__cplusplus)\n/* MSVC C++ does not support compound literals. Use inline helpers. */\nstatic inline JSValue JS_MKVAL_fn_(int64_t tag, int32_t val) { JSValue v; v.u.int32 = val; v.tag = tag; return v; }\nstatic inline JSValue JS_MKPTR_fn_(int64_t tag, void *p) { JSValue v; v.u.ptr = p; v.tag = tag; return v; }\nstatic inline JSValue JS_MKNAN_fn_(double d) { JSValue v; v.tag = JS_TAG_FLOAT64; v.u.float64 = d; return v; }\n#define JS_MKVAL(tag, val) JS_MKVAL_fn_((tag), (val))\n#define JS_MKPTR(tag, p) JS_MKPTR_fn_((tag), (p))\n#define JS_NAN JS_MKNAN_fn_(JS_FLOAT64_NAN)\n#else\n#define JS_MKVAL(tag, val) (JSValue){ (JSValueUnion){ .int32 = val }, tag }\n#define JS_MKPTR(tag, p) (JSValue){ (JSValueUnion){ .ptr = p }, tag }\n#define JS_NAN (JSValue){ .u.float64 = JS_FLOAT64_NAN, JS_TAG_FLOAT64 }\n#endif\n\n#define JS_TAG_IS_FLOAT64(tag) ((unsigned)(tag) == JS_TAG_FLOAT64)"
         _QJH_SRC "${_QJH_SRC}"
     )
+
+    # A silent no-op here is worse than a hard failure: the generated header
+    # would be byte-identical to the vendor one, the CMake target would still
+    # build (it compiles QuickJS as C, where compound literals are legal), and
+    # only the .vcxproj C++ compile would fail -- with C4576 pointing at the
+    # vendor header, which reads like a vendor bug rather than a stale patch.
+    string(FIND "${_QJH_SRC}" "JS_MKVAL_fn_" _QJH_PATCHED)
+    if(_QJH_PATCHED EQUAL -1)
+        message(FATAL_ERROR
+            "quickjs.h MSVC/C++ patch did not apply: the JS_MKVAL/JS_MKPTR/JS_NAN "
+            "block in ${QUICKJS_DIR}/vendor/quickjs.h no longer matches the text this "
+            "file replaces. Re-sync the string(REPLACE) above with the vendored header.")
+    endif()
 
     file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/quickjs.h "${_QJH_SRC}")
     message(STATUS "Wrote patched quickjs.h to ${CMAKE_CURRENT_BINARY_DIR}/quickjs.h")
