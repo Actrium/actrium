@@ -13,14 +13,14 @@ use crate::transport::{
     ConnectionEvent, ConnectionState, Dest, DestTransportRef, NetworkResult, PayloadTypeExt,
     PeerTransport, WireIdentity,
 };
-use crate::wire::webrtc::{NETWORK_RECOVERY_TIMEOUT, NetworkRecoveryStatus, WebRtcCoordinator};
+use crate::wire::webrtc::{NetworkRecoveryStatus, WebRtcCoordinator};
 use actr_framework::{Bytes, MediaSample};
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
     ActorResult, ActrError, ActrId, Classify, ConnectionNotReadyInfo, Direction, PayloadType,
     RpcEnvelope,
 };
-use std::collections::{HashMap, HashSet, hash_map::Entry};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, oneshot, watch};
@@ -46,10 +46,6 @@ const DATA_CHUNK_SEND_TIMEOUT: Duration = Duration::from_secs(15);
 /// attempts themselves, so a reliable tell can still complete all retries
 /// while a stalled transport is capped instead of hanging indefinitely.
 const TELL_SEND_TIMEOUT: Duration = Duration::from_secs(13);
-const RECOVERY_REASON_PEER_DISCONNECTED: &str = "peer state Disconnected";
-const RECOVERY_REASON_PEER_FAILED: &str = "peer state Failed";
-const RECOVERY_REASON_ICE_NETWORK_STARTED: &str = "ice/network recovery started";
-
 /// Per-operation send authority captured at outbound admission.
 ///
 /// Once an operation observes `ExistingOnly`, later policy relaxation must
@@ -94,10 +90,6 @@ pub struct PeerGate {
     /// todo: Peers currently being cleaned up (block new requests) ,closed requests will be cleaned up in event listener
     closing_peers: Arc<RwLock<HashSet<ActrId>>>,
 
-    /// Peers in the network/WebRTC recovery window. The stored session id keeps
-    /// late events from older sessions from unblocking a newer recovery.
-    recovering_peers: Arc<RwLock<HashMap<ActrId, NetworkRecoveryStatus>>>,
-
     /// Recently sent `send_data_chunk` chunks used to surface delivery
     /// uncertainty when WebRTC/DataChannel state changes mid-stream.
     active_data_chunks: Arc<RwLock<DataChunkActivityTracker>>,
@@ -107,47 +99,10 @@ pub struct PeerGate {
 }
 
 impl PeerGate {
-    fn remember_recovering_peer(
-        recovering: &mut HashMap<ActrId, NetworkRecoveryStatus>,
-        peer_id: &ActrId,
-        session_id: u64,
-        reason: &str,
-    ) {
-        match recovering.entry(peer_id.clone()) {
-            Entry::Occupied(mut entry) if entry.get().session_id == session_id => {
-                tracing::debug!(
-                    peer_id = ?peer_id,
-                    session_id,
-                    elapsed_ms = entry.get().elapsed_ms(),
-                    recovery_reason = entry.get().reason.as_str(),
-                    "Peer already blocked for recovery",
-                );
-                if entry.get().reason.as_str() == RECOVERY_REASON_PEER_FAILED
-                    && reason == RECOVERY_REASON_ICE_NETWORK_STARTED
-                {
-                    entry.get_mut().reason = reason.to_string();
-                }
-            }
-            Entry::Occupied(mut entry) => {
-                entry.insert(NetworkRecoveryStatus::new(session_id, reason));
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(NetworkRecoveryStatus::new(session_id, reason));
-            }
-        }
-    }
-
     fn connection_not_ready_error(status: &NetworkRecoveryStatus) -> ActrError {
         ActrError::ConnectionNotReady(ConnectionNotReadyInfo::new(
-            status.elapsed_ms() as u64,
-            Self::connection_not_ready_retry_window_ms(),
-        ))
-    }
-
-    fn recovery_timeout_error(status: &NetworkRecoveryStatus) -> ActrError {
-        ActrError::ConnectionNotReady(ConnectionNotReadyInfo::new(
-            status.elapsed_ms() as u64,
-            Self::connection_not_ready_retry_window_ms(),
+            status.elapsed_ms(),
+            status.timeout_ms(),
         ))
     }
 
@@ -168,10 +123,6 @@ impl PeerGate {
         admission: SendAdmission,
     ) -> ActorResult<SendAdmission> {
         Ok(admission.tighten(self.current_send_admission()?))
-    }
-
-    fn connection_not_ready_retry_window_ms() -> u64 {
-        NETWORK_RECOVERY_TIMEOUT.as_millis() as u64
     }
 
     async fn notify_active_data_chunks_uncertain(
@@ -248,7 +199,6 @@ impl PeerGate {
         send_projection_rx: watch::Receiver<SendProjection>,
     ) -> Self {
         let closing_peers = Arc::new(RwLock::new(HashSet::new()));
-        let recovering_peers = Arc::new(RwLock::new(HashMap::new()));
         let active_data_chunks = Arc::new(RwLock::new(DataChunkActivityTracker::default()));
 
         // Start event listener if coordinator is available
@@ -258,7 +208,6 @@ impl PeerGate {
                 Arc::clone(coordinator),
                 Arc::clone(&pending_requests),
                 Arc::clone(&closing_peers),
-                Arc::clone(&recovering_peers),
                 Arc::clone(&active_data_chunks),
                 Arc::clone(&transport_manager),
             );
@@ -269,7 +218,6 @@ impl PeerGate {
             pending_requests,
             webrtc_coordinator,
             closing_peers,
-            recovering_peers,
             active_data_chunks,
             send_projection_rx,
         }
@@ -305,7 +253,6 @@ impl PeerGate {
         webrtc_coordinator: Arc<WebRtcCoordinator>,
         pending_requests: PendingRequestsMap,
         closing_peers: Arc<RwLock<HashSet<ActrId>>>,
-        recovering_peers: Arc<RwLock<HashMap<ActrId, NetworkRecoveryStatus>>>,
         active_data_chunks: Arc<RwLock<DataChunkActivityTracker>>,
         transport_manager: Arc<PeerTransport>,
     ) {
@@ -327,63 +274,6 @@ impl PeerGate {
                 };
                 tracing::debug!("PeerGate received connection event: {:?}", event);
                 match &event {
-                    // Block new requests when connection enters Disconnected/Failed state
-                    ConnectionEvent::StateChanged {
-                        peer_id,
-                        session_id,
-                        state: state @ (ConnectionState::Disconnected | ConnectionState::Failed),
-                        ..
-                    } => {
-                        if !webrtc_coordinator
-                            .is_active_session(peer_id, *session_id)
-                            .await
-                        {
-                            tracing::debug!(
-                                peer_id = ?peer_id,
-                                event_session_id = session_id,
-                                "Ignoring stale recovery state event",
-                            );
-                            continue;
-                        }
-
-                        let reason = match state {
-                            ConnectionState::Disconnected => RECOVERY_REASON_PEER_DISCONNECTED,
-                            ConnectionState::Failed => RECOVERY_REASON_PEER_FAILED,
-                            _ => unreachable!("state pattern only matches recovery states"),
-                        };
-                        {
-                            let mut recovering = recovering_peers.write().await;
-                            Self::remember_recovering_peer(
-                                &mut recovering,
-                                peer_id,
-                                *session_id,
-                                reason,
-                            );
-                        }
-                        closing_peers.write().await.insert(peer_id.clone());
-                        tracing::debug!(
-                            "Blocking new requests to peer {} (state: {:?})",
-                            peer_id,
-                            event
-                        );
-                    }
-
-                    ConnectionEvent::IceRestartStarted {
-                        peer_id,
-                        session_id,
-                    } => {
-                        {
-                            let mut recovering = recovering_peers.write().await;
-                            Self::remember_recovering_peer(
-                                &mut recovering,
-                                peer_id,
-                                *session_id,
-                                RECOVERY_REASON_ICE_NETWORK_STARTED,
-                            );
-                        }
-                        tracing::debug!("Peer {} entered ICE/network recovery", peer_id);
-                    }
-
                     ConnectionEvent::StateChanged {
                         peer_id,
                         session_id,
@@ -395,20 +285,11 @@ impl PeerGate {
                         session_id,
                         ..
                     } => {
-                        let should_clear = {
-                            let recovering = recovering_peers.read().await;
-                            recovering
-                                .get(peer_id)
-                                .map(|status| status.session_id == *session_id)
-                                .unwrap_or(true)
-                        };
-
                         let is_sendable = webrtc_coordinator
                             .is_peer_sendable_session(peer_id, *session_id)
                             .await;
 
-                        if should_clear && is_sendable {
-                            recovering_peers.write().await.remove(peer_id);
+                        if is_sendable {
                             closing_peers.write().await.remove(peer_id);
                             tracing::debug!("Peer {} is sendable again", peer_id);
                         } else {
@@ -427,26 +308,11 @@ impl PeerGate {
                         success: true,
                         ..
                     } => {
-                        let should_clear = {
-                            let recovering = recovering_peers.read().await;
-                            recovering
-                                .get(peer_id)
-                                .map(|status| status.session_id == *session_id)
-                                .unwrap_or(true)
-                        };
-
-                        // This event is the authoritative recovery resolution,
-                        // so only transport-level state is re-validated here.
-                        // The guard-aware business predicate would race the
-                        // coordinator listener that clears the coordinator
-                        // guard for this same event; preflight still consults
-                        // the coordinator guard before any send.
                         let is_sendable = webrtc_coordinator
-                            .is_peer_transport_sendable_session(peer_id, *session_id)
+                            .is_peer_sendable_session(peer_id, *session_id)
                             .await;
 
-                        if should_clear && is_sendable {
-                            recovering_peers.write().await.remove(peer_id);
+                        if is_sendable {
                             closing_peers.write().await.remove(peer_id);
                             tracing::debug!("Peer {} is sendable again", peer_id);
                         } else {
@@ -465,39 +331,21 @@ impl PeerGate {
                         success: false,
                         ..
                     } => {
-                        let should_update = {
-                            let recovering = recovering_peers.read().await;
-                            recovering
-                                .get(peer_id)
-                                .map(|status| status.session_id == *session_id)
-                                .unwrap_or(true)
-                        };
-
-                        if should_update {
-                            let mut recovering = recovering_peers.write().await;
-                            Self::remember_recovering_peer(
-                                &mut recovering,
+                        if webrtc_coordinator
+                            .is_active_session(peer_id, *session_id)
+                            .await
+                        {
+                            Self::notify_active_data_chunks_uncertain(
+                                &webrtc_coordinator,
+                                &active_data_chunks,
                                 peer_id,
                                 *session_id,
                                 "ice restart failed",
-                            );
-                            closing_peers.write().await.insert(peer_id.clone());
-                            if webrtc_coordinator
-                                .is_active_session(peer_id, *session_id)
-                                .await
-                            {
-                                Self::notify_active_data_chunks_uncertain(
-                                    &webrtc_coordinator,
-                                    &active_data_chunks,
-                                    peer_id,
-                                    *session_id,
-                                    "ice restart failed",
-                                )
-                                .await;
-                            }
+                            )
+                            .await;
                         }
                         tracing::debug!(
-                            "Peer {} ICE restart failed; keeping sends blocked",
+                            "Peer {} ICE restart failed; coordinator teardown owns the session",
                             peer_id
                         );
                     }
@@ -538,25 +386,6 @@ impl PeerGate {
                             "connection closed",
                         )
                         .await;
-
-                        {
-                            let mut recovering = recovering_peers.write().await;
-                            let should_remove = recovering
-                                .get(peer_id)
-                                .map(|status| status.session_id == *event_session_id)
-                                .unwrap_or(false);
-                            if should_remove {
-                                recovering.remove(peer_id);
-                                tracing::debug!(
-                                    peer_id = ?peer_id,
-                                    session_id = event_session_id,
-                                    "Cleared recovery guard for closed peer",
-                                );
-                            }
-                        }
-                        webrtc_coordinator
-                            .expire_peer_recovery(peer_id, *event_session_id, "connection closed")
-                            .await;
 
                         // A close event may belong to a failed intermediate WebRTC attempt while
                         // the factory is still retrying. In that case the original RPC should keep
@@ -727,121 +556,18 @@ impl PeerGate {
         envelope
     }
 
-    async fn clear_local_recovery_guard(&self, target: &ActrId, session_id: u64) {
-        let mut recovering = self.recovering_peers.write().await;
-        let should_remove = recovering
-            .get(target)
-            .map(|status| status.session_id == session_id)
-            .unwrap_or(false);
-        if should_remove {
-            recovering.remove(target);
-        }
-        drop(recovering);
-        self.closing_peers.write().await.remove(target);
-    }
-
-    async fn handle_recovery_timeout(
-        &self,
-        target: &ActrId,
-        dest: &Dest,
-        status: &NetworkRecoveryStatus,
-        source: &str,
-    ) {
-        tracing::warn!(
-            peer = ?target,
-            session_id = status.session_id,
-            elapsed_ms = status.elapsed_ms(),
-            recovery_reason = status.reason.as_str(),
-            source,
-            "Connection recovery timed out; closing stale WebRTC transport",
-        );
-
-        self.clear_local_recovery_guard(target, status.session_id)
-            .await;
-
-        if let Some(coordinator) = &self.webrtc_coordinator {
-            coordinator
-                .close_recovering_peer(target, status.session_id, "send preflight recovery timeout")
-                .await;
-        }
-
-        match self
-            .transport_manager
-            .close_webrtc_transport_if_session(dest, target, status.session_id)
-            .await
-        {
-            Ok(true) => tracing::debug!(
-                peer = ?target,
-                session_id = status.session_id,
-                "Closed timed-out WebRTC recovery session; WebSocket fallback kept alive"
-            ),
-            Ok(false) => tracing::debug!(
-                peer = ?target,
-                session_id = status.session_id,
-                "Skipped recovery-timeout close because WebRTC session was replaced"
-            ),
-            Err(e) => {
-                tracing::warn!(
-                    peer = ?target,
-                    session_id = status.session_id,
-                    "Failed to close WebRTC transport after recovery timeout: {}",
-                    e,
-                );
-            }
-        }
-
-        tracing::debug!(
-            peer = ?target,
-            session_id = status.session_id,
-            "Recovery timeout cleanup completed"
-        );
-    }
-
     async fn preflight_send(&self, target: &ActrId, dest: &Dest) -> ActorResult<SendAdmission> {
-        // Read before any await so globally blocked work fails fast rather than
-        // accidentally waiting on a cleanup or recovery deadline.
+        // Admission is a pure, fail-fast read of authoritative state. It never
+        // advances recovery, tears down transports, or waits for a guard: those
+        // effects belong to the coordinator's event/deadline drivers.
         let admission = self.current_send_admission()?;
 
         if let Some(coordinator) = &self.webrtc_coordinator {
-            coordinator.wait_cleanup_complete().await;
+            if coordinator.cleanup_in_progress() {
+                return Err(Self::send_projection_not_ready_error());
+            }
 
             if let Some(status) = coordinator.peer_recovery_status(target).await {
-                if status.is_timed_out() {
-                    self.handle_recovery_timeout(target, dest, &status, "coordinator")
-                        .await;
-                    return Err(Self::recovery_timeout_error(&status));
-                }
-                return Err(Self::connection_not_ready_error(&status));
-            }
-        }
-
-        let local_recovery = {
-            let recovering = self.recovering_peers.read().await;
-            recovering.get(target).cloned()
-        };
-        if let Some(status) = local_recovery {
-            let mut cleared_locally = false;
-            if let Some(coordinator) = &self.webrtc_coordinator {
-                if let Some(current_session_id) = coordinator.get_peer_session_id(target).await {
-                    if current_session_id != status.session_id
-                        || (status.reason.as_str() != RECOVERY_REASON_PEER_FAILED
-                            && coordinator
-                                .is_peer_sendable_session(target, status.session_id)
-                                .await)
-                    {
-                        self.clear_local_recovery_guard(target, status.session_id)
-                            .await;
-                        cleared_locally = true;
-                    }
-                }
-            }
-
-            if !cleared_locally && status.is_timed_out() {
-                self.handle_recovery_timeout(target, dest, &status, "peer gate")
-                    .await;
-                return Err(Self::recovery_timeout_error(&status));
-            }
-            if !cleared_locally {
                 return Err(Self::connection_not_ready_error(&status));
             }
         }
@@ -1912,9 +1638,15 @@ mod tests {
 
     #[test]
     fn connection_not_ready_window_matches_the_recovery_deadline() {
-        assert_eq!(
-            PeerGate::connection_not_ready_retry_window_ms(),
-            NETWORK_RECOVERY_TIMEOUT.as_millis() as u64
+        let now = tokio::time::Instant::now();
+        let status = NetworkRecoveryStatus::new_for_test(7, "test recovery", now);
+        let ActrError::ConnectionNotReady(info) = PeerGate::connection_not_ready_error(&status)
+        else {
+            panic!("recovery admission must return ConnectionNotReady");
+        };
+        assert!(
+            info.retry_after_ms
+                .is_some_and(|retry_after_ms| retry_after_ms <= status.timeout_ms())
         );
     }
 

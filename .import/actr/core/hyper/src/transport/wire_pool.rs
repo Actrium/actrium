@@ -4,6 +4,7 @@
 //! Uses watch channels to broadcast connection status, implementing zero-polling event-driven architecture.
 
 use super::backoff::ExponentialBackoff;
+use super::error::{NetworkError, NetworkResult};
 use super::wire_handle::{WireHandle, WireIdentity, WireStatus};
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -11,6 +12,8 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, watch};
 use tokio_util::sync::CancellationToken;
+
+const WIRE_CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Connection type identifier
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -139,10 +142,12 @@ impl WirePool {
 
         tokio::spawn(async move {
             // Create exponential backoff iterator
-            let backoff = retry_config.create_backoff();
+            let mut backoff = retry_config.create_backoff();
 
-            // Retry loop using ExponentialBackoff iterator
-            for (attempt, delay) in backoff.enumerate() {
+            // The first attempt starts immediately. Backoff values belong to
+            // the gaps before retries, so the first retry consumes the
+            // configured initial delay rather than silently skipping it.
+            for attempt in 0..retry_config.max_attempts {
                 // Check if pool has been closed
                 if closed.load(Ordering::Relaxed) {
                     tracing::debug!(
@@ -154,6 +159,9 @@ impl WirePool {
 
                 // Wait for delay (first attempt has 0 delay built into iterator)
                 if attempt > 0 {
+                    let delay = backoff
+                        .next()
+                        .unwrap_or_else(|| Duration::from_millis(retry_config.max_delay_ms));
                     tracing::debug!(
                         "⏱️ [{:?}] Waiting {:?} before retry {}",
                         conn_type,
@@ -193,7 +201,7 @@ impl WirePool {
                     retry_config.max_attempts
                 );
 
-                let result = tokio::select! {
+                let result: NetworkResult<()> = tokio::select! {
                     biased;
                     _ = shutdown.cancelled() => {
                         tracing::debug!(
@@ -210,7 +218,17 @@ impl WirePool {
                         }
                         return;
                     }
-                    result = connection.connect() => result,
+                    result = crate::timer::timeout(
+                        crate::timer::ids::WIRE_POOL_CONNECT_ATTEMPT,
+                        WIRE_CONNECT_ATTEMPT_TIMEOUT,
+                        connection.connect(),
+                    ) => result.unwrap_or_else(|_| {
+                        Err(NetworkError::TimeoutError(format!(
+                            "{:?} connection attempt timed out after {:?}",
+                            conn_type,
+                            WIRE_CONNECT_ATTEMPT_TIMEOUT,
+                        )))
+                    }),
                 };
                 pending.fetch_sub(1, Ordering::Relaxed);
 

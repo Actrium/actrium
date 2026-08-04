@@ -19,6 +19,42 @@ struct BlockingWire {
 }
 
 #[derive(Debug)]
+struct CountingFailWire {
+    attempts: std::sync::atomic::AtomicUsize,
+    changed: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl WireHandle for CountingFailWire {
+    fn connection_type(&self) -> ConnType {
+        ConnType::WebSocket
+    }
+
+    fn priority(&self) -> u8 {
+        1
+    }
+
+    async fn connect(&self) -> NetworkResult<()> {
+        self.attempts
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        self.changed.notify_one();
+        Err(NetworkError::ConnectionError("forced failure".into()))
+    }
+
+    fn is_connected(&self) -> bool {
+        false
+    }
+
+    async fn close(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+
+    async fn get_lane(&self, _: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        Err(NetworkError::NotImplemented("mock has no lane".into()))
+    }
+}
+
+#[derive(Debug)]
 struct CommitRaceWire {
     started: tokio::sync::Notify,
     release_connect: tokio::sync::Barrier,
@@ -335,6 +371,61 @@ async fn add_connection_failure_marks_failed_and_exhausts() {
     // Failed → no connection retrievable.
     assert!(pool.get_connection(ConnType::WebRTC).await.is_none());
     assert!(!pool.has_live_candidate(&[ConnType::WebRTC]).await);
+}
+
+#[tokio::test(start_paused = true)]
+async fn first_wire_retry_uses_the_configured_initial_delay() {
+    let pool = WirePool::new(RetryConfig {
+        max_attempts: 2,
+        initial_delay_ms: 1_000,
+        max_delay_ms: 10_000,
+        multiplier: 2.0,
+    });
+    let wire = Arc::new(CountingFailWire {
+        attempts: std::sync::atomic::AtomicUsize::new(0),
+        changed: tokio::sync::Notify::new(),
+    });
+
+    pool.add_connection(wire.clone()).await;
+    while wire.attempts.load(std::sync::atomic::Ordering::SeqCst) < 1 {
+        wire.changed.notified().await;
+    }
+
+    tokio::time::advance(Duration::from_millis(999)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(wire.attempts.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+    tokio::time::advance(Duration::from_millis(1)).await;
+    tokio::task::yield_now().await;
+    assert_eq!(
+        wire.attempts.load(std::sync::atomic::Ordering::SeqCst),
+        2,
+        "the first retry should use initial_delay_ms, not the second backoff step"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn stalled_wire_connect_attempt_has_one_failure_deadline() {
+    let pool = WirePool::new(RetryConfig {
+        max_attempts: 1,
+        initial_delay_ms: 1_000,
+        max_delay_ms: 10_000,
+        multiplier: 2.0,
+    });
+    let wire = Arc::new(BlockingWire {
+        started: tokio::sync::Notify::new(),
+        closed: tokio::sync::Notify::new(),
+    });
+
+    pool.add_connection(wire.clone()).await;
+    wire.started.notified().await;
+
+    tokio::time::advance(Duration::from_secs(30) + Duration::from_millis(1)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        !pool.has_live_candidate(&[ConnType::WebSocket]).await,
+        "a stalled connect future must not leave the pool in Connecting forever"
+    );
 }
 
 // ── identity-aware close on a Ready slot ─────────────────────────────────

@@ -651,15 +651,8 @@ async fn dequeue_barrier_is_held_until_send_projection_is_published() {
         tp::SendProjection::Normal
     );
 
-    let projection_after_barrier = send_projection_rx.clone();
-    let coordinator_for_wait = coordinator.clone();
-    let barrier_wait = tokio::spawn(async move {
-        coordinator_for_wait.wait_cleanup_complete().await;
-        *projection_after_barrier.borrow()
-    });
-    tokio::task::yield_now().await;
     assert!(
-        !barrier_wait.is_finished(),
+        coordinator.cleanup_in_progress(),
         "dequeued lifecycle work must hold the coordinator barrier during preparation"
     );
 
@@ -676,8 +669,12 @@ async fn dequeue_barrier_is_held_until_send_projection_is_published() {
         .await
         .expect("network event task should join")
         .expect("network event should be accepted");
+    assert!(
+        !coordinator.cleanup_in_progress(),
+        "accepted lifecycle work must release mutation authority"
+    );
     assert_eq!(
-        barrier_wait.await.expect("barrier waiter should join"),
+        *send_projection_rx.borrow(),
         tp::SendProjection::ExistingOnly,
         "the barrier must not release before the stricter projection is visible"
     );

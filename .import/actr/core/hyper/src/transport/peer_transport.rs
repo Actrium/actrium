@@ -21,7 +21,10 @@ use std::sync::OnceLock;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 use tokio::sync::{Notify, RwLock};
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
+
+const PEER_TRANSPORT_CREATE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Wire builder trait: asynchronously creates Wire components based on Dest
 ///
@@ -81,6 +84,7 @@ pub trait WireBuilder: Send + Sync {
 struct ConnectionFlight {
     completion: Notify,
     cancel: CancellationToken,
+    deadline: Instant,
 }
 
 impl ConnectionFlight {
@@ -88,6 +92,7 @@ impl ConnectionFlight {
         Self {
             completion: Notify::new(),
             cancel: CancellationToken::new(),
+            deadline: Instant::now() + PEER_TRANSPORT_CREATE_TIMEOUT,
         }
     }
 }
@@ -384,9 +389,9 @@ impl PeerTransport {
                     continue;
                 }
 
-                crate::timer::timeout(
+                crate::timer::timeout_at(
                     crate::timer::ids::PEER_TRANSPORT_CREATE,
-                    Duration::from_secs(10),
+                    flight.deadline,
                     &mut completed,
                 )
                 .await
@@ -407,7 +412,10 @@ impl PeerTransport {
             );
             let cancel_token = flight.cancel.clone();
 
-            let result = async {
+            let result = crate::timer::timeout_at(
+                crate::timer::ids::PEER_TRANSPORT_CREATE,
+                flight.deadline,
+                async {
                 let connections = self
                     .conn_factory
                     .create_connections_with_cancel(dest, Some(cancel_token.clone()))
@@ -465,8 +473,15 @@ impl PeerTransport {
                 }
 
                 Ok(transport_guard)
-            }
-            .await;
+                },
+            )
+            .await
+            .unwrap_or_else(|error| {
+                flight.cancel.cancel();
+                Err(NetworkError::TimeoutError(format!(
+                    "Connection flight deadline expired for {dest:?}: {error}"
+                )))
+            });
 
             #[cfg(test)]
             if let Some(barrier) = self.final_commit_barrier.get() {
