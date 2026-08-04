@@ -15,7 +15,7 @@ async fn main() -> Result<()> {
     let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actr.toml");
     let config = actr_config::ConfigParser::from_file(&config_path)?;
 
-    // initialize[...]（log/[...]）
+    // initialize[...] (log/[...])
     let _obs_guard = actr_hyper::init_observability(&config.observability)?;
 
     info!("🚀 Echo Client App - [...]");
@@ -49,7 +49,7 @@ async fn main() -> Result<()> {
     info!("🎯 [...]service[...]: {:?}", server_id);
     workload.set_server_id(server_id).await;
     let local_id = actr_ref.actor_id().clone();
-    info!("✅ ActrNode startsuccess，ID: {:?}", local_id);
+    info!("✅ ActrNode startsuccess, ID: {:?}", local_id);
 
     // [...]client ID [...]requestmessage
     use generated::echo::{EchoRequest, EchoResponse};
@@ -73,14 +73,14 @@ async fn main() -> Result<()> {
 
             // [...]response[...]client ID
             if response.reply.contains(&client_id_str) {
-                println!("\n✅ success！response[...]client");
+                println!("\n✅ success! response[...]client");
                 println!("  client ID:  {}", client_id_str);
                 println!("  sendmessage:   {}", message);
                 println!("  service[...]response: {}", response.reply);
                 println!("  [...]:     {}", response.timestamp);
                 println!("  ✓ [...]via/through: response[...]client ID");
             } else {
-                println!("\n⚠️  warning！response[...]");
+                println!("\n⚠️  warning! response[...]");
                 println!("  [...]:   {}", client_id_str);
                 println!("  [...]response:   {}", response.reply);
             }

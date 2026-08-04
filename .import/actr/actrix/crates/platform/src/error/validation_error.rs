@@ -1,10 +1,10 @@
-//! 验证相关错误类型
+//! Validation error types
 //!
-//! 定义所有与数据验证、权限检查、规则验证相关的错误
+//! Defines all errors related to data validation, permission checks, and rule verification
 
 use thiserror::Error;
 
-/// 验证相关错误
+/// Validation-related errors
 #[derive(Error, Debug)]
 pub enum ValidationError {
     #[error("Invalid input: {field}")]

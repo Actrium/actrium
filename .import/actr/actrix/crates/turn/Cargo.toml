@@ -3,7 +3,7 @@ name = "actrix-turn"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
-description = "WebRTC TURN服务实现，作为aux-servers的组件"
+description = "WebRTC TURN service implementation, as a component of aux-servers"
 license.workspace = true
 rust-version.workspace = true
 

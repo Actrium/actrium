@@ -116,11 +116,11 @@ pub(crate) struct WebRtcConnection {
     peer_connection: Arc<RTCPeerConnection>,
 
     // TODO: useless property, remove this
-    /// DataChannel Cache：PayloadType → DataChannel（4 types use DataChannel）
-    /// index reference mapping：RpcReliable(0), RpcSignal(1), StreamReliable(2), StreamLatencyFirst(3)
+    /// DataChannel Cache: PayloadType -> DataChannel (4 types use DataChannel)
+    /// index reference mapping: RpcReliable(0), RpcSignal(1), StreamReliable(2), StreamLatencyFirst(3)
     data_channels: Arc<RwLock<[Option<Arc<RTCDataChannel>>; 4]>>,
 
-    /// MediaTrack Cache：track_id → (Track, RtpSender)
+    /// MediaTrack Cache: track_id -> (Track, RtpSender)
     media_tracks: MediaTracks,
 
     /// RTP sequence numbers per track (track_id → sequence_number)
@@ -936,14 +936,14 @@ impl WebRtcConnection {
             })
         }));
 
-        // CreateReceive channel （using Bytes）
+        // CreateReceive channel (using Bytes)
         let (tx, rx) = mpsc::channel(100);
 
         // Set onmessage return adjust
         let tx_clone = tx.clone();
         data_channel.on_message(Box::new(
             move |msg: webrtc::data_channel::data_channel_message::DataChannelMessage| {
-                // zero-copy： directly using msg.data (Bytes)
+                // zero-copy: directly using msg.data (Bytes)
                 let data = msg.data;
                 tracing::debug!("🔄 WebRTC DataChannel message received1111: {:?}", data);
                 let tx = tx_clone.clone();
@@ -974,7 +974,7 @@ impl WebRtcConnection {
             )));
         }
 
-        // Cache DataChannel（ index reference directly using PayloadType value ）
+        // Cache DataChannel (index reference directly using PayloadType value)
         let idx = payload_type as usize;
         channels[idx] = Some(Arc::clone(&data_channel));
 

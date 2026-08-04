@@ -11,7 +11,7 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # 提交格式检查
+  # Commit format check
   commit-check:
     name: Commit Format Check
     runs-on: ubuntu-latest
@@ -26,7 +26,7 @@ jobs:
       with:
         configFile: .commitlintrc.yml
 
-  # 代码格式和质量检查
+  # Code format and quality check
   lint:
     name: Lint and Format
     runs-on: ubuntu-latest
@@ -57,7 +57,7 @@ jobs:
     - name: Run clippy
       run: cargo clippy --all-targets --all-features -- -D warnings
 
-  # 单元测试
+  # Unit tests
   test:
     name: Test Suite
     runs-on: ubuntu-latest
@@ -91,7 +91,7 @@ jobs:
     - name: Run doc tests
       run: cargo test --doc
 
-  # 代码覆盖率
+  # Code coverage
   coverage:
     name: Code Coverage
     runs-on: ubuntu-latest
@@ -131,7 +131,7 @@ jobs:
         name: codecov-umbrella
         fail_ci_if_error: false
 
-  # 安全审计
+  # Security audit
   security:
     name: Security Audit
     runs-on: ubuntu-latest
@@ -147,7 +147,7 @@ jobs:
     - name: Run security audit
       run: cargo audit
 
-  # 依赖检查
+  # Dependency check
   dependency-check:
     name: Dependency Check
     runs-on: ubuntu-latest
@@ -164,7 +164,7 @@ jobs:
       run: cargo outdated --exit-code 1
       continue-on-error: true
 
-  # 构建测试 (多平台)
+  # Build test (multi-platform)
   build:
     name: Build Test
     runs-on: ${{ matrix.os }}
@@ -199,7 +199,7 @@ jobs:
     - name: Build release
       run: cargo build --release --verbose --all-features
 
-  # 最终状态检查
+  # Final status check
   ci-success:
     name: CI Success
     runs-on: ubuntu-latest

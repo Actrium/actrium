@@ -1,9 +1,9 @@
 //! Rate limiting middleware for AIS service
 //!
-//! 限流策略：
-//! - **IP 级别**：每个 IP 最多 100 req/min（突发 100 请求）
+//! Rate limiting policy:
+//! - **IP level**: max 100 req/min per IP (burst of 100 requests)
 //!
-//! 使用 tower-governor v0.8 实现限流，防止 DoS 攻击和资源耗尽
+//! Uses tower-governor v0.8 to implement rate limiting, preventing DoS attacks and resource exhaustion
 
 use axum::body::Body;
 use governor::middleware::NoOpMiddleware;
@@ -12,19 +12,19 @@ use tower_governor::{
     GovernorLayer, governor::GovernorConfigBuilder, key_extractor::SmartIpKeyExtractor,
 };
 
-/// IP 级别限流配置
+/// IP-level rate limiter configuration
 ///
-/// 限制策略：
-/// - 每秒 2 个请求（120 req/min）
-/// - 突发允许 100 个请求
-/// - 基于客户端 IP 地址限流
+/// Limiting policy:
+/// - 2 requests per second (120 req/min)
+/// - Burst of 100 requests allowed
+/// - Rate limited by client IP address
 ///
-/// 使用 tower_governor v0.8.0 API
+/// Uses tower_governor v0.8.0 API
 pub fn ip_rate_limiter() -> GovernorLayer<SmartIpKeyExtractor, NoOpMiddleware, Body> {
     let governor_conf = Arc::new(
         GovernorConfigBuilder::default()
-            .per_second(2) // 每秒 2 个请求
-            .burst_size(100) // 允许突发 100 个请求
+            .per_second(2) // 2 requests per second
+            .burst_size(100) // allow a burst of 100 requests
             .key_extractor(SmartIpKeyExtractor)
             .finish()
             .unwrap(),
@@ -40,6 +40,6 @@ mod tests {
     #[test]
     fn test_ip_rate_limiter_creation() {
         let _limiter = ip_rate_limiter();
-        // 如果能创建成功，说明配置正确
+        // If creation succeeds, the configuration is valid
     }
 }

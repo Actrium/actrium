@@ -1,4 +1,4 @@
-//! TURN服务实现
+//! TURN service implementation
 
 use crate::service::IceService;
 use anyhow::Result;
@@ -12,7 +12,7 @@ use std::sync::Arc;
 use tokio::net::UdpSocket;
 use url::Url;
 
-/// TURN服务实现
+/// TURN service implementation
 #[derive(Debug, Clone)]
 pub struct TurnService {
     info: ServiceInfo,
@@ -71,7 +71,7 @@ impl IceService for TurnService {
 
         platform::recording::info!("Starting TURN service on {}", addr);
 
-        // 绑定UDP套接字
+        // Bind UDP socket
         let socket = match UdpSocket::bind(addr).await {
             Ok(socket) => {
                 platform::recording::info!("TURN service listening on: {}", addr);
@@ -86,7 +86,7 @@ impl IceService for TurnService {
 
         self.socket = Some(socket.clone());
 
-        // 创建TURN服务器
+        // Create TURN server
         let realm = self.config.turn.realm.clone();
         let auth_handler = Arc::new(
             turn::Authenticator::new(self.config.turn.turn_secret.clone())
@@ -126,11 +126,11 @@ impl IceService for TurnService {
             }
         };
 
-        // 等待关闭信号
+        // Wait for shutdown signal
         let _ = shutdown_rx.recv().await;
         platform::recording::info!("TURN service received shutdown signal");
 
-        // 关闭TURN服务器
+        // Shut down TURN server
         if let Err(e) = turn::shutdown_turn_server(&turn_server).await {
             platform::recording::error!("Error shutting down TURN server: {}", e);
         }

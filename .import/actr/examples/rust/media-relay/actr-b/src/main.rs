@@ -41,7 +41,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 3. Start ActrNode (connect to signaling, register, start receiving)
     info!("🚀 start ActrNode...");
     let actr_ref = node.start().await?;
-    info!("✅ ActrNode startsuccess！");
+    info!("✅ ActrNode startsuccess!");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("🎉 Actr B alreadyfully/completelystart[...]register[...] signaling server");
     info!("📥 waiting/wait for Actr A send[...]...");

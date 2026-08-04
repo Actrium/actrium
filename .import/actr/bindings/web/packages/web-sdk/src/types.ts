@@ -55,7 +55,8 @@ export interface RpcOptions {
 /**
  * Subscription callback
  *
- * ，metadata  WASM ，UI
+ * Receives decoded data; the WASM layer strips metadata, so the UI
+ * receives the payload directly.
  */
 export type SubscriptionCallback<T> = (data: T) => void;
 

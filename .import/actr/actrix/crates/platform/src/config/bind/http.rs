@@ -1,75 +1,75 @@
 use serde::{Deserialize, Serialize};
 
-/// HTTP/HTTPS 服务绑定配置
+/// HTTP/HTTPS service binding configuration
 ///
-/// 统一的 HTTP 绑定配置。配置了 `cert` 和 `key` 即启用 TLS (HTTPS)，
-/// 否则为纯 HTTP 模式。
+/// Unified HTTP binding configuration. Configuring `cert` and `key` enables TLS (HTTPS),
+/// otherwise it is plain HTTP mode.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct HttpBindConfig {
-    /// 域名
+    /// Domain name
     ///
-    /// 服务绑定的域名，用于生成正确的 URL 和证书验证。
+    /// The domain name the service is bound to, used for generating correct URLs and certificate validation.
     pub domain_name: String,
 
-    /// 公网 IP 地址
+    /// Public IP address
     ///
-    /// 服务对外宣告的 IP 地址，客户端将使用此地址连接。
-    /// 在 NAT 环境中，这通常是路由器的公网 IP。
+    /// The IP address advertised by the service to the public; clients will use this to connect.
+    /// In NAT environments, this is typically the router's public IP.
     pub advertised_ip: String,
 
-    /// 绑定 IP 地址
+    /// Bind IP address
     ///
-    /// 服务实际绑定的网络接口 IP 地址。
-    /// 默认使用 "::" 以在支持双栈的系统上同时覆盖 IPv4/IPv6。
+    /// The network interface IP address the service actually binds to.
+    /// Defaults to "::" to cover both IPv4/IPv6 on dual-stack systems.
     pub ip: String,
 
-    /// 绑定端口
+    /// Bind port
     ///
-    /// 服务监听的端口号。
+    /// The port number the service listens on.
     pub port: u16,
 
-    /// 公网宣告端口（可选）
+    /// Public advertised port (optional)
     ///
-    /// 对外宣告的端口号。在 NAT/反向代理环境中可能与绑定端口不同。
-    /// 默认与 `port` 相同。
+    /// The port number advertised to the public. In NAT/reverse proxy environments, this may differ from the bind port.
+    /// Defaults to the same as `port`.
     #[serde(default)]
     pub advertised_port: Option<u16>,
 
-    /// TLS 证书文件路径（可选）
+    /// TLS certificate file path (optional)
     ///
-    /// PEM 格式的 TLS 证书文件路径。配置此字段和 `key` 即启用 HTTPS。
+    /// Path to the PEM-format TLS certificate file. Configuring this field and `key` enables HTTPS.
     #[serde(default)]
     pub cert: Option<String>,
 
-    /// TLS 私钥文件路径（可选）
+    /// TLS private key file path (optional)
     ///
-    /// 与证书对应的 PEM 格式私钥文件路径。
+    /// Path to the PEM-format private key file corresponding to the certificate.
     #[serde(default)]
     pub key: Option<String>,
 }
 
 impl HttpBindConfig {
-    /// 是否启用 TLS
+    /// Whether TLS is enabled
     ///
-    /// 当 `cert` 和 `key` 都配置了非空值时返回 true。
+    /// Returns true when both `cert` and `key` are configured with non-empty values.
     pub fn is_tls(&self) -> bool {
         self.cert.as_ref().is_some_and(|c| !c.is_empty())
             && self.key.as_ref().is_some_and(|k| !k.is_empty())
     }
 
-    /// 返回有效的宣告端口
+    /// Returns the effective advertised port
     ///
-    /// 优先使用 `advertised_port`，未配置则回退到 `port`。
+    /// Prefers `advertised_port`; falls back to `port` if not configured.
     pub fn effective_advertised_port(&self) -> u16 {
         self.advertised_port.unwrap_or(self.port)
     }
 
-    /// 返回协议方案字符串
+    /// Returns the protocol scheme string
     pub fn scheme(&self) -> &'static str {
         if self.is_tls() { "https" } else { "http" }
     }
 
-    /// 返回 WebSocket 协议方案字符串
+    /// Returns the WebSocket protocol scheme string
     pub fn ws_scheme(&self) -> &'static str {
         if self.is_tls() { "wss" } else { "ws" }
     }

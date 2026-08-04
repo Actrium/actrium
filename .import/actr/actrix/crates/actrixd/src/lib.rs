@@ -1,6 +1,6 @@
 //! # aux-servers
 //!
-//! WebRTC 辅助服务器集合，包括信令服务、STUN 和 TURN 服务
+//! Collection of WebRTC auxiliary servers including Signaling, STUN and TURN services
 
 pub mod service;
 

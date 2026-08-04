@@ -1,6 +1,6 @@
-//! 监控模块
+//! Monitoring module
 //!
-//! 提供服务状态监控功能
+//! Provides service status monitoring functionality
 
 pub mod metrics_store;
 pub mod service_info;

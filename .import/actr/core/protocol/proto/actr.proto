@@ -211,7 +211,7 @@ message RegisterResponse {
     optional google.protobuf.Timestamp credential_expires_at = 4;
     // Operational advice: heartbeat interval for subsequent Signaling Server connection
     required uint32        signaling_heartbeat_interval_secs = 5;
-    required bytes         signing_pubkey                   = 6; // AIS Ed25519 verifying key，32 bytes
+    required bytes         signing_pubkey                   = 6; // AIS Ed25519 verifying key, 32 bytes
     required uint32        signing_key_id                   = 7;
     // Bearer token bound to actr_id and used by POST /ais/renew.
     optional bytes         renewal_token                    = 12;

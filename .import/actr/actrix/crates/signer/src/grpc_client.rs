@@ -1,4 +1,4 @@
-//! Signer gRPC 客户端
+//! Signer gRPC client
 
 use crate::error::SignerError;
 use actrix_proto::admin::v1::NonceCredential;
@@ -13,51 +13,51 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 
-/// Signer gRPC 客户端配置
+/// Signer gRPC client configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct GrpcClientConfig {
-    /// Signer 服务地址 (gRPC endpoint)
+    /// Signer service address (gRPC endpoint)
     ///
-    /// 例如: "http://127.0.0.1:8080" 或 "https://ks.example.com:8443"
+    /// Example: "http://127.0.0.1:8080" or "https://ks.example.com:8443"
     pub endpoint: String,
 
-    /// Actrix 共享密钥（用于认证）
+    /// Actrix shared key (for authentication)
     pub actrix_shared_key: String,
 
-    /// 请求超时时间（秒）
+    /// Request timeout (seconds)
     pub timeout_seconds: u64,
 
-    /// 是否启用 TLS
+    /// Whether TLS is enabled
     pub enable_tls: bool,
 
-    /// TLS 域名（启用 TLS 时必需）
+    /// TLS domain name (required when TLS is enabled)
     pub tls_domain: Option<String>,
 
-    /// CA 证书路径（用于验证服务端）
+    /// CA certificate path (for server verification)
     pub ca_cert: Option<String>,
 
-    /// 客户端证书路径（mTLS）
+    /// Client certificate path (mTLS)
     pub client_cert: Option<String>,
 
-    /// 客户端私钥路径（mTLS）
+    /// Client private key path (mTLS)
     pub client_key: Option<String>,
 }
 
-/// Signer gRPC 客户端
+/// Signer gRPC client
 pub struct GrpcClient {
     client: SignerClient<Channel>,
     actrix_shared_key: String,
 }
 
 impl GrpcClient {
-    /// 创建新的 Signer gRPC 客户端
+    /// Create a new Signer gRPC client
     pub async fn new(config: &GrpcClientConfig) -> Result<Self, SignerError> {
         let mut endpoint = Endpoint::from_shared(config.endpoint.clone())
             .map_err(|e| SignerError::Internal(format!("Invalid endpoint: {e}")))?
             .timeout(Duration::from_secs(config.timeout_seconds))
             .connect_timeout(Duration::from_secs(config.timeout_seconds));
 
-        // 如果启用 TLS，配置 TLS/mTLS
+        // If TLS is enabled, configure TLS/mTLS
         if config.enable_tls {
             let tls_config = Self::build_tls_config(config)?;
             endpoint = endpoint
@@ -79,7 +79,7 @@ impl GrpcClient {
         })
     }
 
-    /// 构建 TLS 配置
+    /// Build TLS configuration
     fn build_tls_config(config: &GrpcClientConfig) -> Result<ClientTlsConfig, SignerError> {
         let tls_domain = config.tls_domain.as_ref().ok_or_else(|| {
             SignerError::Config("tls_domain is required when enable_tls is true".to_string())
@@ -89,7 +89,7 @@ impl GrpcClient {
 
         crate::recording::debug!("Configuring TLS with domain: {}", tls_domain);
 
-        // 加载信任根：显式 ca_cert 作为证书 pin，否则回退到 OS 原生根库
+        // Load trust roots: explicit ca_cert as certificate pin, otherwise fall back to OS native root store
         if let Some(ca_cert_path) = &config.ca_cert {
             crate::recording::debug!("Loading CA certificate from: {}", ca_cert_path);
             let ca_cert_pem = std::fs::read(ca_cert_path).map_err(|e| {
@@ -102,13 +102,13 @@ impl GrpcClient {
             tls_config = tls_config.ca_certificate(ca_cert);
             crate::recording::info!("CA certificate loaded for server verification");
         } else {
-            // 无显式 pin：信任平台原生根库（依赖 tonic 的 tls-native-roots feature）。
-            // 若未启用该 feature，with_native_roots() 不存在且根库为空，TLS 验证会失败。
+            // No explicit pin: trust platform native root store (relies on tonic's tls-native-roots feature).
+            // If that feature is not enabled, with_native_roots() does not exist and the root store is empty, causing TLS verification to fail.
             tls_config = tls_config.with_native_roots();
             crate::recording::info!("Using platform native root store for server verification");
         }
 
-        // 加载客户端证书和私钥（mTLS）
+        // Load client certificate and private key (mTLS)
         if let (Some(cert_path), Some(key_path)) = (&config.client_cert, &config.client_key) {
             crate::recording::debug!("Loading client certificate from: {}", cert_path);
             crate::recording::debug!("Loading client private key from: {}", key_path);
@@ -137,18 +137,18 @@ impl GrpcClient {
         Ok(tls_config)
     }
 
-    /// 从 Signer 服务生成新的 Ed25519 签名密钥对
+    /// Generate a new Ed25519 signing key pair from the Signer service
     ///
-    /// 返回 (key_id, verifying_key_bytes[32], expires_at, tolerance_seconds)
-    /// 私钥保留在 Signer 服务端，不返回给调用方
+    /// Returns (key_id, verifying_key_bytes[32], expires_at, tolerance_seconds)
+    /// Private key remains on the Signer service side, not returned to the caller
     pub async fn generate_signing_key(&mut self) -> Result<(u32, [u8; 32], u64, u64), SignerError> {
         let request_data = "generate_signing_key";
 
-        // 创建 nonce credential
+        // Create nonce credential
         let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
             .sign(request_data.as_bytes())?;
 
-        // 转换为 protobuf NonceCredential
+        // Convert to protobuf NonceCredential
         let credential = NonceCredential {
             timestamp: nonce_credential.timestamp,
             nonce: nonce_credential.nonce,
@@ -167,7 +167,7 @@ impl GrpcClient {
 
         let resp = response.into_inner();
 
-        // 解码 verifying key（32 字节 Ed25519 公钥）
+        // Decode verifying key (32-byte Ed25519 public key)
         let verifying_key_bytes = BASE64_STANDARD
             .decode(&resp.verifying_key)
             .map_err(|e| SignerError::Crypto(format!("Failed to decode verifying key: {e}")))?;
@@ -179,7 +179,7 @@ impl GrpcClient {
             )));
         }
 
-        // 验证 verifying key 合法性
+        // Validate verifying key legitimacy
         let vk_array: [u8; 32] = verifying_key_bytes.try_into().map_err(|_| {
             SignerError::Crypto("Failed to convert verifying key to array".to_string())
         })?;
@@ -202,18 +202,18 @@ impl GrpcClient {
         ))
     }
 
-    /// 使用 Signer 服务中的密钥对消息进行 Ed25519 签名
+    /// Sign a message with a key stored in the Signer service (Ed25519)
     ///
-    /// 返回 64 字节 Ed25519 签名
-    /// 私钥不离开 Signer 服务
+    /// Returns 64-byte Ed25519 signature
+    /// Private key does not leave the Signer service
     pub async fn sign(&mut self, key_id: u32, message: &[u8]) -> Result<Vec<u8>, SignerError> {
         let request_data = format!("sign:{key_id}");
 
-        // 创建 nonce credential
+        // Create nonce credential
         let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
             .sign(request_data.as_bytes())?;
 
-        // 转换为 protobuf NonceCredential
+        // Convert to protobuf NonceCredential
         let credential = NonceCredential {
             timestamp: nonce_credential.timestamp,
             nonce: nonce_credential.nonce,
@@ -254,9 +254,9 @@ impl GrpcClient {
         Ok(resp.signature)
     }
 
-    /// 获取指定 key_id 的验证公钥（verifying key）
+    /// Get the verifying public key for the specified key_id
     ///
-    /// 返回 (verifying_key_bytes [u8;32], expires_at, tolerance_seconds)
+    /// Returns (verifying_key_bytes [u8;32], expires_at, tolerance_seconds)
     pub async fn get_verifying_key(
         &mut self,
         key_id: u32,
@@ -289,14 +289,14 @@ impl GrpcClient {
             .try_into()
             .map_err(|_| SignerError::Internal("Verifying key must be 32 bytes".to_string()))?;
 
-        // 验证是有效的 Ed25519 公钥
+        // Validate as a valid Ed25519 public key
         VerifyingKey::from_bytes(&key_array)
             .map_err(|e| SignerError::Internal(format!("Invalid verifying key: {e}")))?;
 
         Ok((key_array, resp.expires_at, resp.tolerance_seconds))
     }
 
-    /// 健康检查
+    /// Health check
     pub async fn health_check(&mut self) -> Result<String, SignerError> {
         let request_data = "health_check";
         let nonce_credential = CredentialBuilder::new(self.actrix_shared_key.as_bytes())
@@ -349,7 +349,7 @@ mod tests {
             actrix_shared_key: "test-key".to_string(),
             timeout_seconds: 30,
             enable_tls: true,
-            tls_domain: None, // 缺少 tls_domain
+            tls_domain: None, // missing tls_domain
             ca_cert: None,
             client_cert: None,
             client_key: None,
@@ -369,7 +369,7 @@ mod tests {
             tls_domain: Some("ks.example.com".to_string()),
             ca_cert: None,
             client_cert: Some("/path/to/cert.pem".to_string()),
-            client_key: None, // 缺少 client_key
+            client_key: None, // missing client_key
         };
 
         let result = GrpcClient::build_tls_config(&config);

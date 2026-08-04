@@ -1,11 +1,11 @@
-//! AId 错误类型定义
+//! AId error type definitions
 //!
-//! 定义了 AId Token 相关操作的各种错误类型
+//! Defines error types for various AId Token operations
 
 use crate::realm::error::RealmError;
 use thiserror::Error;
 
-/// AId Token 相关错误类型
+/// AId Token error types
 #[derive(Debug, Error)]
 pub enum AidError {
     #[error("Invalid credential format")]

@@ -1,55 +1,55 @@
 #!/bin/bash
-# Actrix 完整性能基准测试套件
+# Actrix complete performance benchmark suite
 
 set -e
 
 RESULTS_DIR="benchmarks/results/$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$RESULTS_DIR"
 
-echo "🚀 Actrix 性能基准测试"
-echo "结果目录: $RESULTS_DIR"
+echo "🚀 Actrix performance benchmarks"
+echo "Results directory: $RESULTS_DIR"
 echo
 
-# 检查服务是否运行
+# Check if service is running
 if ! curl -k -s https://localhost:8443/ks/health > /dev/null 2>&1; then
-    echo "❌ 服务未运行，请先启动 actrix"
+    echo "❌ Service is not running, please start actrix first"
     exit 1
 fi
 
-echo "✅ 服务运行正常"
+echo "✅ Service is running normally"
 echo
 
-# === 1. Health Check 基准 ===
-echo "1️⃣  Health Check 基准测试..."
+# === 1. Health Check benchmark ===
+echo "1️⃣  Health Check benchmark..."
 if command -v wrk &> /dev/null; then
     wrk -t4 -c100 -d30s --latency \
         https://localhost:8443/ks/health \
         > "$RESULTS_DIR/wrk_health.txt" 2>&1
 
-    echo "  ✅ 完成"
+    echo "  ✅ Done"
     grep "Requests/sec" "$RESULTS_DIR/wrk_health.txt"
     grep "Latency" "$RESULTS_DIR/wrk_health.txt" | head -3
 else
-    echo "  ⚠️  wrk 未安装，跳过"
+    echo "  ⚠️  wrk not installed, skipping"
 fi
 echo
 
-# === 2. Metrics Endpoint 基准 ===
-echo "2️⃣  Metrics Endpoint 基准测试..."
+# === 2. Metrics Endpoint benchmark ===
+echo "2️⃣  Metrics Endpoint benchmark..."
 if command -v wrk &> /dev/null; then
     wrk -t4 -c100 -d30s --latency \
         https://localhost:8443/metrics \
         > "$RESULTS_DIR/wrk_metrics.txt" 2>&1
 
-    echo "  ✅ 完成"
+    echo "  ✅ Done"
     grep "Requests/sec" "$RESULTS_DIR/wrk_metrics.txt"
 else
-    echo "  ⚠️  wrk 未安装，跳过"
+    echo "  ⚠️  wrk not installed, skipping"
 fi
 echo
 
-# === 3. KS gRPC 基准 ===
-echo "3️⃣  KS gRPC 基准测试..."
+# === 3. KS gRPC benchmark ===
+echo "3️⃣  KS gRPC benchmark..."
 if command -v ghz &> /dev/null; then
     cd crates/ks
     ghz --insecure \
@@ -61,63 +61,63 @@ if command -v ghz &> /dev/null; then
         > "$RESULTS_DIR/ghz_ks_health.txt" 2>&1
     cd ../..
 
-    echo "  ✅ 完成"
+    echo "  ✅ Done"
     grep "Requests/sec" "$RESULTS_DIR/ghz_ks_health.txt" || true
 else
-    echo "  ⚠️  ghz 未安装，跳过"
-    echo "     安装: go install github.com/bojand/ghz/cmd/ghz@latest"
+    echo "  ⚠️  ghz not installed, skipping"
+    echo "     Install: go install github.com/bojand/ghz/cmd/ghz@latest"
 fi
 echo
 
-# === 4. K6 负载测试 ===
-echo "4️⃣  K6 负载测试..."
+# === 4. K6 load test ===
+echo "4️⃣  K6 load test..."
 if command -v k6 &> /dev/null; then
     if [ -f "benchmarks/k6/load_test.js" ]; then
         k6 run benchmarks/k6/load_test.js \
             --out json="$RESULTS_DIR/k6_load.json"
-        echo "  ✅ 完成"
+        echo "  ✅ Done"
     else
-        echo "  ⚠️  K6 脚本不存在"
+        echo "  ⚠️  K6 script not found"
     fi
 else
-    echo "  ⚠️  k6 未安装，跳过"
-    echo "     安装: https://k6.io/docs/getting-started/installation/"
+    echo "  ⚠️  k6 not installed, skipping"
+    echo "     Install: https://k6.io/docs/getting-started/installation/"
 fi
 echo
 
-# === 5. 生成汇总报告 ===
-echo "5️⃣  生成汇总报告..."
+# === 5. Generate summary report ===
+echo "5️⃣  Generating summary report..."
 cat > "$RESULTS_DIR/summary.txt" <<EOF
-Actrix 性能基准测试报告
+Actrix performance benchmark report
 =====================
-测试时间: $(date)
+Test time: $(date)
 Git Commit: $(git rev-parse --short HEAD 2>/dev/null || echo "N/A")
 
 EOF
 
 if [ -f "$RESULTS_DIR/wrk_health.txt" ]; then
-    echo "Health Check 性能:" >> "$RESULTS_DIR/summary.txt"
+    echo "Health Check performance:" >> "$RESULTS_DIR/summary.txt"
     grep "Requests/sec" "$RESULTS_DIR/wrk_health.txt" >> "$RESULTS_DIR/summary.txt"
     grep "99%" "$RESULTS_DIR/wrk_health.txt" >> "$RESULTS_DIR/summary.txt"
     echo "" >> "$RESULTS_DIR/summary.txt"
 fi
 
 if [ -f "$RESULTS_DIR/wrk_metrics.txt" ]; then
-    echo "Metrics Endpoint 性能:" >> "$RESULTS_DIR/summary.txt"
+    echo "Metrics Endpoint performance:" >> "$RESULTS_DIR/summary.txt"
     grep "Requests/sec" "$RESULTS_DIR/wrk_metrics.txt" >> "$RESULTS_DIR/summary.txt"
     echo "" >> "$RESULTS_DIR/summary.txt"
 fi
 
-echo "  ✅ 完成"
+echo "  ✅ Done"
 echo
 
-# === 显示汇总 ===
-echo "📊 测试汇总:"
+# === Display summary ===
+echo "📊 Test summary:"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 cat "$RESULTS_DIR/summary.txt"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo
-echo "✅ 所有测试完成"
-echo "详细结果: $RESULTS_DIR/"
+echo "✅ All tests completed"
+echo "Detailed results: $RESULTS_DIR/"
 echo
-echo "查看汇总: cat $RESULTS_DIR/summary.txt"
+echo "View summary: cat $RESULTS_DIR/summary.txt"

@@ -1,21 +1,21 @@
-//! 负载均衡模块
+//! Load balancing module
 //!
-//! 实现基于多种因素的服务实例排序和选择算法
+//! Implements service instance ranking and selection algorithm based on multiple factors
 //!
-//! # 支持的排序因子
-//! - `MAXIMUM_POWER_RESERVE`: 按剩余处理能力降序（优先选择负载轻的）
-//! - `MINIMUM_MAILBOX_BACKLOG`: 按消息积压升序（优先选择积压少的）
-//! - `BEST_COMPATIBILITY`: 精确匹配 fingerprint 优先（ExactMatchFirst 策略）
-//! - `NEAREST`: 按地理距离最近（基于 Haversine 公式）
-//! - `CLIENT_AFFINITY`: 按客户端亲和性（会话保持）
+//! # Supported ranking factors
+//! - `MAXIMUM_POWER_RESERVE`: descending by remaining capacity (prefer lighter load)
+//! - `MINIMUM_MAILBOX_BACKLOG`: ascending by message backlog (prefer smaller backlog)
+//! - `BEST_COMPATIBILITY`: exact fingerprint match first (ExactMatchFirst strategy)
+//! - `NEAREST`: by geographic distance (based on Haversine formula)
+//! - `CLIENT_AFFINITY`: by client affinity (session stickiness)
 //!
-//! # 使用示例
+//! # Usage example
 //! ```ignore
 //! use signaling::load_balancer::LoadBalancer;
 //! use signaling::service_registry::ServiceInfo;
 //! use actr_protocol::route_candidates_request::node_selection_criteria::NodeRankingFactor;
 //!
-//! let mut candidates: Vec<ServiceInfo> = vec![]; // 获取候选列表
+//! let mut candidates: Vec<ServiceInfo> = vec![]; // get candidate list
 //! let criteria = Some(&NodeSelectionCriteria {
 //!     candidate_count: 3,
 //!     ranking_factors: vec![
@@ -27,7 +27,7 @@
 //! });
 //!
 //! let ranked = LoadBalancer::rank_candidates(candidates, criteria, "", None, None);
-//! // 返回排序后的候选 ActrId 列表
+//! // Returns a ranked list of candidate ActrIds
 //! ```
 
 use crate::service_registry::ServiceInfo;
@@ -36,28 +36,29 @@ use actr_protocol::{
     route_candidates_request::{NodeSelectionCriteria, node_selection_criteria::NodeRankingFactor},
 };
 
-/// 负载均衡器
+/// Load balancer
 pub struct LoadBalancer;
 
 impl LoadBalancer {
-    /// 根据选择标准对候选服务进行排序
+    /// Ranks candidate services according to selection criteria
     ///
-    /// 调用前提：候选已经过 ACL 过滤（realm 访问控制），且均与请求方 ActrType 匹配。
+    /// Precondition: candidates have already passed ACL filtering (realm access control)
+    /// and all match the requester's ActrType.
     ///
-    /// # 参数
-    /// - `candidates`: 候选服务列表（已通过 ACL 过滤）
-    /// - `criteria`: 节点选择标准（排序因子、健康/依赖要求）
-    /// - `client_fingerprint`: 客户端 fingerprint（用于 EXACT_MATCH_FIRST 因子标记）
-    /// - `client_id`: 客户端 ID（用于 CLIENT_AFFINITY）
-    /// - `client_location`: 客户端地理坐标（用于 NEAREST）
+    /// # Parameters
+    /// - `candidates`: list of candidate services (already ACL-filtered)
+    /// - `criteria`: node selection criteria (ranking factors, health/dependency requirements)
+    /// - `client_fingerprint`: client fingerprint (used for EXACT_MATCH_FIRST factor marking)
+    /// - `client_id`: client ID (used for CLIENT_AFFINITY)
+    /// - `client_location`: client geographic coordinates (used for NEAREST)
     ///
-    /// # 返回
-    /// 排序后的 ActrId 列表（最多返回 candidate_count 个）
+    /// # Returns
+    /// Ranked list of ActrIds (at most candidate_count returned)
     ///
-    /// # 实现逻辑
-    /// 1. 应用健康和依赖过滤
-    /// 2. 按排序因子依次排序
-    /// 3. 返回前 N 个候选
+    /// # Implementation logic
+    /// 1. Apply health and dependency filtering
+    /// 2. Sort by ranking factors in order
+    /// 3. Return the top N candidates
     pub fn rank_candidates(
         candidates: &[ServiceInfo],
         criteria: Option<&NodeSelectionCriteria>,
@@ -69,18 +70,20 @@ impl LoadBalancer {
             return Vec::new();
         }
 
-        // 如果没有指定标准，返回所有候选
+        // If no criteria specified, return all candidates
         let criteria = match criteria {
             Some(c) => c,
             None => {
-                platform::recording::info!("未指定选择标准，返回所有候选");
+                platform::recording::info!(
+                    "No selection criteria specified, returning all candidates"
+                );
                 return candidates.iter().map(|s| s.actor_id.clone()).collect();
             }
         };
 
         let mut candidates: Vec<ServiceInfo> = candidates.to_vec();
 
-        // 标记 is_exact_match：fingerprint 对比在 LB 内完成
+        // Mark is_exact_match: fingerprint comparison done inside the LB
         if !client_fingerprint.is_empty() {
             for c in &mut candidates {
                 let fp = c
@@ -93,37 +96,37 @@ impl LoadBalancer {
         }
 
         platform::recording::info!(
-            "负载均衡排序: 候选数量={}, 排序因子数量={}",
+            "Load balancing rank: candidate_count={}, ranking_factor_count={}",
             candidates.len(),
             criteria.ranking_factors.len()
         );
 
-        // 1. 应用健康要求过滤
+        // 1. Apply health requirement filtering
         if let Some(min_health) = criteria.minimal_health_requirement {
             candidates = Self::filter_by_health(&candidates, min_health);
-            platform::recording::debug!("健康过滤后剩余: {} 个", candidates.len());
+            platform::recording::debug!("Remaining after health filter: {}", candidates.len());
         }
 
-        // 2. 应用依赖要求过滤
+        // 2. Apply dependency requirement filtering
         if let Some(min_dependency) = criteria.minimal_dependency_requirement {
             candidates = Self::filter_by_dependency(&candidates, min_dependency);
-            platform::recording::debug!("依赖过滤后剩余: {} 个", candidates.len());
+            platform::recording::debug!("Remaining after dependency filter: {}", candidates.len());
         }
 
         if candidates.is_empty() {
-            platform::recording::warn!("过滤后无可用候选");
+            platform::recording::warn!("No available candidates after filtering");
             return Vec::new();
         }
 
-        // 3. 若启用 ExactMatchFirst 且存在非精确匹配候选，记录日志
+        // 3. If ExactMatchFirst is enabled and non-exact-match candidates exist, log a warning
         if !client_fingerprint.is_empty() && candidates.iter().any(|c| !c.is_exact_match) {
             platform::recording::warn!(
-                "路由结果中包含非精确匹配候选（fingerprint 不同但 ActrType 兼容）"
+                "Routing result includes non-exact-match candidates (different fingerprint but compatible ActrType)"
             );
         }
 
-        // 4. 多键排序：按因子列表顺序依次比较，第一个不相等的因子决定结果
-        //    后续因子只在前面所有因子均相等时才生效（真正的优先级排序）
+        // 4. Multi-key sort: compare by factor list order; the first unequal factor decides the result
+        //    Subsequent factors only take effect when all preceding factors are equal (true priority ordering)
         let factors: Vec<NodeRankingFactor> = criteria
             .ranking_factors
             .iter()
@@ -142,7 +145,7 @@ impl LoadBalancer {
             });
         }
 
-        // 5. 返回前 N 个候选
+        // 5. Return the top N candidates
         let limit = criteria.candidate_count as usize;
         candidates
             .into_iter()
@@ -151,13 +154,13 @@ impl LoadBalancer {
             .collect()
     }
 
-    /// 按健康要求过滤
+    /// Filter by health requirement
     ///
-    /// 健康状态优先级排序：FULL > DEGRADED > None(未知) > OVERLOADED > UNAVAILABLE
-    /// 过滤掉所有低于 min_health 要求的候选
+    /// Health state priority order: FULL > DEGRADED > None(unknown) > OVERLOADED > UNAVAILABLE
+    /// Filters out all candidates below the min_health requirement
     fn filter_by_health(candidates: &[ServiceInfo], min_health: i32) -> Vec<ServiceInfo> {
         platform::recording::debug!(
-            "应用健康过滤: min_health={}",
+            "Applying health filter: min_health={}",
             ServiceAvailabilityState::try_from(min_health)
                 .map(|s| format!("{s:?}"))
                 .unwrap_or_else(|_| "Invalid".to_string())
@@ -168,13 +171,13 @@ impl LoadBalancer {
             .filter(|s| {
                 match s.service_availability_state {
                     Some(service_availability_state) => {
-                        // 数值越小越健康（FULL=0, DEGRADED=1, OVERLOADED=2, UNAVAILABLE=3）
+                        // Lower value means healthier (FULL=0, DEGRADED=1, OVERLOADED=2, UNAVAILABLE=3)
                         service_availability_state <= min_health
                     }
                     None => {
-                        // None 视为亚健康（介于 DEGRADED 和 OVERLOADED 之间）
-                        // 如果要求 FULL 或 DEGRADED，则 None 符合
-                        // 如果要求 OVERLOADED 或 UNAVAILABLE，则 None 也符合
+                        // None is treated as sub-healthy (between DEGRADED and OVERLOADED)
+                        // If FULL or DEGRADED is required, None passes
+                        // If OVERLOADED or UNAVAILABLE is required, None also passes
                         min_health >= ServiceAvailabilityState::Degraded as i32
                     }
                 }
@@ -183,14 +186,14 @@ impl LoadBalancer {
             .collect();
 
         platform::recording::debug!(
-            "健康过滤后: {} -> {} 个候选",
+            "After health filter: {} -> {} candidates",
             candidates.len(),
             filtered.len()
         );
 
-        // 按健康状态排序：FULL(0) > DEGRADED(1) > None(视为1.5) > OVERLOADED(2) > UNAVAILABLE(3)
+        // Sort by health state: FULL(0) > DEGRADED(1) > None(treated as 1.5) > OVERLOADED(2) > UNAVAILABLE(3)
         filtered.sort_by(|a, b| {
-            let a_health = a.service_availability_state.unwrap_or(2); // None 视为介于 DEGRADED 和 OVERLOADED 之间
+            let a_health = a.service_availability_state.unwrap_or(2); // None treated as between DEGRADED and OVERLOADED
             let b_health = b.service_availability_state.unwrap_or(2);
             a_health.cmp(&b_health)
         });
@@ -198,13 +201,13 @@ impl LoadBalancer {
         filtered
     }
 
-    /// 按依赖要求过滤
+    /// Filter by dependency requirement
     ///
-    /// 依赖状态优先级排序：HEALTHY > WARNING > None(未知) > BROKEN
-    /// 过滤掉所有低于 min_dependency 要求的候选
+    /// Dependency state priority order: HEALTHY > WARNING > None(unknown) > BROKEN
+    /// Filters out all candidates below the min_dependency requirement
     fn filter_by_dependency(candidates: &[ServiceInfo], min_dependency: i32) -> Vec<ServiceInfo> {
         platform::recording::debug!(
-            "应用依赖过滤: min_dependency={}",
+            "Applying dependency filter: min_dependency={}",
             ServiceDependencyState::try_from(min_dependency)
                 .map(|s| format!("{s:?}"))
                 .unwrap_or_else(|_| "Invalid".to_string())
@@ -215,11 +218,11 @@ impl LoadBalancer {
             .filter(|s| {
                 match s.worst_dependency_health_state {
                     Some(worst_dependency_health_state) => {
-                        // 数值越小依赖越健康（HEALTHY=0, WARNING=1, BROKEN=2）
+                        // Lower value means healthier dependency (HEALTHY=0, WARNING=1, BROKEN=2)
                         worst_dependency_health_state <= min_dependency
                     }
                     None => {
-                        // None 视为警告状态（介于 WARNING 和 BROKEN 之间）
+                        // None is treated as warning state (between WARNING and BROKEN)
                         min_dependency >= ServiceDependencyState::Warning as i32
                     }
                 }
@@ -228,14 +231,14 @@ impl LoadBalancer {
             .collect();
 
         platform::recording::debug!(
-            "依赖过滤后: {} -> {} 个候选",
+            "After dependency filter: {} -> {} candidates",
             candidates.len(),
             filtered.len()
         );
 
-        // 按依赖健康状态排序：HEALTHY(0) > WARNING(1) > None(视为1.5) > BROKEN(2)
+        // Sort by dependency health state: HEALTHY(0) > WARNING(1) > None(treated as 1.5) > BROKEN(2)
         filtered.sort_by(|a, b| {
-            let a_dep = a.worst_dependency_health_state.unwrap_or(2); // None 视为介于 WARNING 和 BROKEN 之间
+            let a_dep = a.worst_dependency_health_state.unwrap_or(2); // None treated as between WARNING and BROKEN
             let b_dep = b.worst_dependency_health_state.unwrap_or(2);
             a_dep.cmp(&b_dep)
         });
@@ -243,7 +246,7 @@ impl LoadBalancer {
         filtered
     }
 
-    /// 按单个因子比较两个候选（用于多键排序）
+    /// Compare two candidates by a single factor (for multi-key sorting)
     fn cmp_by_factor(
         a: &ServiceInfo,
         b: &ServiceInfo,
@@ -275,7 +278,7 @@ impl LoadBalancer {
     }
 
     fn cmp_exact_match(a: &ServiceInfo, b: &ServiceInfo) -> std::cmp::Ordering {
-        // 精确匹配者排前面（true > false）
+        // Exact matches rank first (true > false)
         match (a.is_exact_match, b.is_exact_match) {
             (true, false) => std::cmp::Ordering::Less,
             (false, true) => std::cmp::Ordering::Greater,
@@ -333,33 +336,33 @@ impl LoadBalancer {
         }
     }
 
-    /// 按剩余处理能力排序（供测试直接调用）
+    /// Sort by remaining capacity (for direct test invocation)
     #[cfg(test)]
     fn sort_by_power_reserve(candidates: &mut [ServiceInfo]) {
         candidates.sort_by(Self::cmp_power_reserve);
     }
 
-    /// 按消息积压排序（供测试直接调用）
+    /// Sort by message backlog (for direct test invocation)
     #[cfg(test)]
     fn sort_by_mailbox_backlog(candidates: &mut [ServiceInfo]) {
         candidates.sort_by(Self::cmp_mailbox_backlog);
     }
 
-    /// 按精确匹配优先排序（供测试直接调用）
+    /// Sort by exact match priority (for direct test invocation)
     #[cfg(test)]
     #[allow(dead_code)]
     fn sort_by_exact_match(candidates: &mut [ServiceInfo]) {
         candidates.sort_by(Self::cmp_exact_match);
     }
 
-    /// 按地理距离排序（供测试直接调用）
+    /// Sort by geographic distance (for direct test invocation)
     #[cfg(test)]
     #[allow(dead_code)]
     fn sort_by_distance(candidates: &mut [ServiceInfo], client_location: Option<(f64, f64)>) {
         candidates.sort_by(|a, b| Self::cmp_distance(a, b, client_location));
     }
 
-    /// 按客户端会话粘滞排序（供测试直接调用）
+    /// Sort by client session stickiness (for direct test invocation)
     #[cfg(test)]
     fn sort_by_affinity(candidates: &mut [ServiceInfo], client_id: Option<&str>) {
         candidates.sort_by(|a, b| Self::cmp_affinity(a, b, client_id));
@@ -439,7 +442,7 @@ mod tests {
     }
 
     // ========================================================================
-    // 健康和依赖过滤测试
+    // Health and dependency filter tests
     // ========================================================================
 
     #[test]
@@ -469,14 +472,14 @@ mod tests {
 
         let candidates = vec![s1.clone(), s2.clone(), s3];
 
-        // 要求 DEGRADED 或更好，None 应该通过
+        // Requires DEGRADED or better; None should pass
         let filtered =
             LoadBalancer::filter_by_health(&candidates, ServiceAvailabilityState::Degraded as i32);
-        assert_eq!(filtered.len(), 2); // s1(FULL) 和 s2(None)
+        assert_eq!(filtered.len(), 2); // s1(FULL) and s2(None)
 
-        // 排序应该是 FULL < None
-        assert_eq!(filtered[0].actor_id.serial_number, 1); // FULL 排第一
-        assert_eq!(filtered[1].actor_id.serial_number, 2); // None 排第二
+        // Sort order should be FULL < None
+        assert_eq!(filtered[0].actor_id.serial_number, 1); // FULL ranks first
+        assert_eq!(filtered[1].actor_id.serial_number, 2); // None ranks second
     }
 
     #[test]
@@ -497,7 +500,7 @@ mod tests {
     }
 
     // ========================================================================
-    // 单因子排序测试
+    // Single-factor sorting tests
     // ========================================================================
 
     #[test]
@@ -513,7 +516,7 @@ mod tests {
         let mut candidates = vec![s1, s2, s3, s4];
         LoadBalancer::sort_by_power_reserve(&mut candidates);
 
-        // 应该是降序：0.9 > 0.5 > 0.3，None 在最后
+        // Should be descending: 0.9 > 0.5 > 0.3, None last
         assert_eq!(candidates[0].actor_id.serial_number, 2); // 0.9
         assert_eq!(candidates[1].actor_id.serial_number, 3); // 0.5
         assert_eq!(candidates[2].actor_id.serial_number, 1); // 0.3
@@ -533,7 +536,7 @@ mod tests {
         let mut candidates = vec![s1, s2, s3, s4];
         LoadBalancer::sort_by_mailbox_backlog(&mut candidates);
 
-        // 应该是升序：0.2 < 0.5 < 0.7，None 在最后
+        // Should be ascending: 0.2 < 0.5 < 0.7, None last
         assert_eq!(candidates[0].actor_id.serial_number, 2); // 0.2
         assert_eq!(candidates[1].actor_id.serial_number, 3); // 0.5
         assert_eq!(candidates[2].actor_id.serial_number, 1); // 0.7
@@ -546,28 +549,28 @@ mod tests {
         s1.sticky_client_ids = vec!["client-A".to_string(), "client-B".to_string()];
         let mut s2 = create_test_service(2, "s2");
         s2.sticky_client_ids = vec!["client-C".to_string()];
-        let s3 = create_test_service(3, "s3"); // 空列表
+        let s3 = create_test_service(3, "s3"); // empty list
 
         let mut candidates = vec![s1.clone(), s2.clone(), s3.clone()];
 
-        // 测试：client-C 应该路由到 s2
+        // Test: client-C should route to s2
         LoadBalancer::sort_by_affinity(&mut candidates, Some("client-C"));
-        assert_eq!(candidates[0].actor_id.serial_number, 2); // s2 粘滞匹配
+        assert_eq!(candidates[0].actor_id.serial_number, 2); // s2 sticky match
 
-        // 测试：client-A 应该路由到 s1
+        // Test: client-A should route to s1
         let mut candidates = vec![s1.clone(), s2.clone(), s3.clone()];
         LoadBalancer::sort_by_affinity(&mut candidates, Some("client-A"));
-        assert_eq!(candidates[0].actor_id.serial_number, 1); // s1 粘滞匹配
+        assert_eq!(candidates[0].actor_id.serial_number, 1); // s1 sticky match
 
-        // 测试：client-X（不在任何粘滞列表）所有候选同等优先级
+        // Test: client-X (not in any sticky list) — all candidates equally prioritized
         let mut candidates = vec![s1, s2, s3];
         LoadBalancer::sort_by_affinity(&mut candidates, Some("client-X"));
-        // 无粘滞匹配，保持原序
+        // No sticky match, original order preserved
         assert_eq!(candidates[0].actor_id.serial_number, 1);
     }
 
     // ========================================================================
-    // 多因子组合排序测试
+    // Multi-factor combined sorting tests
     // ========================================================================
 
     #[test]
@@ -577,12 +580,12 @@ mod tests {
         s1.mailbox_backlog = Some(0.3);
 
         let mut s2 = create_test_service(2, "s2");
-        s2.power_reserve = Some(0.8); // 相同 power
-        s2.mailbox_backlog = Some(0.1); // 但 backlog 更小
+        s2.power_reserve = Some(0.8); // same power
+        s2.mailbox_backlog = Some(0.1); // but smaller backlog
 
         let mut s3 = create_test_service(3, "s3");
         s3.power_reserve = Some(0.5);
-        s3.mailbox_backlog = Some(0.05); // backlog 最小，但 power 低
+        s3.mailbox_backlog = Some(0.05); // smallest backlog, but lower power
 
         let candidates = vec![s1, s2, s3];
         let criteria = NodeSelectionCriteria {
@@ -597,16 +600,16 @@ mod tests {
 
         let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "", None, None);
 
-        // 多键排序：power_reserve 为主键，mailbox_backlog 为次键
-        // s1 和 s2 的 power 相同(0.8)，此时 backlog 决定顺序：s2(0.1) < s1(0.3)
-        // s3 的 power(0.5) < s1/s2(0.8)，排最后
+        // Multi-key sort: power_reserve is primary key, mailbox_backlog is secondary key
+        // s1 and s2 have the same power (0.8); here backlog decides order: s2(0.1) < s1(0.3)
+        // s3 power (0.5) < s1/s2 (0.8), ranks last
         assert_eq!(ranked[0].serial_number, 2); // power=0.8, backlog=0.1
         assert_eq!(ranked[1].serial_number, 1); // power=0.8, backlog=0.3
         assert_eq!(ranked[2].serial_number, 3); // power=0.5
     }
 
     // ========================================================================
-    // 边界情况测试
+    // Edge case tests
     // ========================================================================
 
     #[test]
@@ -628,7 +631,7 @@ mod tests {
         };
 
         let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "", None, None);
-        assert_eq!(ranked.len(), 3); // 全部保留，顺序不变
+        assert_eq!(ranked.len(), 3); // all retained, order unchanged
     }
 
     #[test]
@@ -643,7 +646,7 @@ mod tests {
         let mut candidates = vec![s1, s2, s3];
         LoadBalancer::sort_by_power_reserve(&mut candidates);
 
-        // 所有值相同，应该保持稳定排序
+        // All values equal, should maintain stable sort order
         assert_eq!(candidates[0].actor_id.serial_number, 1);
         assert_eq!(candidates[1].actor_id.serial_number, 2);
         assert_eq!(candidates[2].actor_id.serial_number, 3);
@@ -665,17 +668,17 @@ mod tests {
         };
 
         let ranked = LoadBalancer::rank_candidates(&candidates, Some(&criteria), "", None, None);
-        assert_eq!(ranked.len(), 0); // 全部被过滤
+        assert_eq!(ranked.len(), 0); // all filtered out
     }
 
     #[test]
     fn test_sort_by_distance_with_client_location() {
         use crate::service_registry::ServiceLocation;
 
-        // 客户端位置：北京（39.9042, 116.4074）
+        // Client location: Beijing (39.9042, 116.4074)
         let client_location = Some((39.9042, 116.4074));
 
-        // 候选服务：上海、深圳、北京
+        // Candidate services: Shanghai, Shenzhen, Beijing
         let mut s1 = create_test_service(1, "shanghai");
         s1.geo_location = Some(ServiceLocation {
             region: "cn-east".to_string(),
@@ -697,7 +700,7 @@ mod tests {
             longitude: Some(116.4074),
         });
 
-        let s4 = create_test_service(4, "unknown"); // 无坐标
+        let s4 = create_test_service(4, "unknown"); // no coordinates
 
         let candidates = vec![s1, s2, s3, s4];
         let criteria = NodeSelectionCriteria {
@@ -710,16 +713,16 @@ mod tests {
         let ranked =
             LoadBalancer::rank_candidates(&candidates, Some(&criteria), "", None, client_location);
 
-        // 排序结果应该是：北京(0km) < 上海(~1067km) < 深圳(~1943km)，无坐标的在最后
+        // Sort result should be: Beijing(0km) < Shanghai(~1067km) < Shenzhen(~1943km), no coordinates last
         assert_eq!(ranked.len(), 4);
-        assert_eq!(ranked[0].serial_number, 3); // 北京（最近）
-        assert_eq!(ranked[1].serial_number, 1); // 上海
-        assert_eq!(ranked[2].serial_number, 2); // 深圳
-        assert_eq!(ranked[3].serial_number, 4); // 无坐标
+        assert_eq!(ranked[0].serial_number, 3); // Beijing (nearest)
+        assert_eq!(ranked[1].serial_number, 1); // Shanghai
+        assert_eq!(ranked[2].serial_number, 2); // Shenzhen
+        assert_eq!(ranked[3].serial_number, 4); // no coordinates
     }
 
     // ========================================================================
-    // EXACT_MATCH_FIRST 因子排序测试
+    // EXACT_MATCH_FIRST factor sorting tests
     // ========================================================================
 
     fn with_fingerprint(mut s: ServiceInfo, fp: &str) -> ServiceInfo {
@@ -737,7 +740,7 @@ mod tests {
 
     #[test]
     fn test_exact_match_first_factor() {
-        // s2 的 fingerprint 与 client_fingerprint 一致 → 精确匹配
+        // s2 fingerprint matches client_fingerprint → exact match
         let s1 = create_test_service(1, "api");
         let s2 = with_fingerprint(create_test_service(2, "api"), "fp-v1");
         let s3 = create_test_service(3, "api");
@@ -753,7 +756,7 @@ mod tests {
         let ranked =
             LoadBalancer::rank_candidates(&candidates, Some(&criteria), "fp-v1", None, None);
 
-        // 精确匹配的 s2 应该排第一
+        // Exact-matched s2 should rank first
         assert_eq!(ranked[0].serial_number, 2);
         assert_eq!(ranked[1].serial_number, 1);
         assert_eq!(ranked[2].serial_number, 3);
@@ -761,11 +764,11 @@ mod tests {
 
     #[test]
     fn test_exact_match_with_power_reserve() {
-        // s1、s3 的 fingerprint 与 client_fingerprint 一致 → 精确匹配
+        // s1, s3 fingerprints match client_fingerprint → exact match
         let mut s1 = with_fingerprint(create_test_service(1, "api"), "fp-v1");
         s1.power_reserve = Some(0.3);
 
-        let mut s2 = create_test_service(2, "api"); // 无 fingerprint → 非精确
+        let mut s2 = create_test_service(2, "api"); // no fingerprint → non-exact
         s2.power_reserve = Some(0.9);
 
         let mut s3 = with_fingerprint(create_test_service(3, "api"), "fp-v1");
@@ -785,10 +788,10 @@ mod tests {
         let ranked =
             LoadBalancer::rank_candidates(&candidates, Some(&criteria), "fp-v1", None, None);
 
-        // ExactMatchFirst 优先：exact 组(s1,s3)排在 compat 组(s2)前面
-        // exact 组内再按 power 降序：s3(0.8) > s1(0.3)
+        // ExactMatchFirst priority: exact group (s1, s3) ranks before compat group (s2)
+        // Within exact group, sort by power descending: s3(0.8) > s1(0.3)
         assert_eq!(ranked[0].serial_number, 3); // exact, power=0.8
         assert_eq!(ranked[1].serial_number, 1); // exact, power=0.3
-        assert_eq!(ranked[2].serial_number, 2); // compat, power=0.9（exact 优先，power 不能覆盖）
+        assert_eq!(ranked[2].serial_number, 2); // compat, power=0.9 (exact priority overrides power)
     }
 }

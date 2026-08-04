@@ -6,7 +6,7 @@
 //! issues signed AIdCredential tokens, generates time-limited TURN credentials,
 //! and returns renewal tokens for `/ais/renew`.
 //!
-//! # 架构设计
+//! # Architecture
 //!
 //! ```text
 //! ┌──────────────┐
@@ -28,7 +28,7 @@
 //!                │ KS Client
 //!                ▼
 //!         ┌─────────────┐
-//!         │ KS Service  │ (密钥生成)
+//!         │ KS Service  │ (key generation)
 //!         └─────────────┘
 //! ```
 //!
@@ -44,13 +44,13 @@
 //! 6. Return `RegisterResponse` with ActrId, access credential, TURN credential,
 //!    and renewal token.
 //!
-//! ## 密钥管理
+//! ## Key Management
 //!
-//! - **获取**：启动时从本地 SQLite 加载缓存密钥，如果过期则从 Signer 获取
-//! - **刷新**：后台任务每 10 分钟检查，提前 10 分钟刷新即将过期的密钥
-//! - **容忍**：密钥过期后 24 小时内仍可使用（避免时钟偏差导致服务中断）
+//! - **Fetch**: On startup, load the cached key from local SQLite; if expired, fetch from Signer
+//! - **Refresh**: Background task checks every 10 minutes; refreshes keys expiring within 10 minutes
+//! - **Tolerance**: Keys remain usable for 24 hours after expiry (avoids clock skew disruptions)
 //!
-//! # 使用示例
+//! # Usage Example
 //!
 //! ```no_run
 //! use ais::create_ais_router;
@@ -58,30 +58,30 @@
 //! use tokio_util::sync::CancellationToken;
 //!
 //! # async fn example() -> anyhow::Result<()> {
-//! // 创建配置
+//! // Create configuration
 //! let global_config = ActrixConfig::default();
 //! let ais_config = AisConfig::default();
 //! let cancel = CancellationToken::new();
 //!
-//! // 创建 AIS 路由器
+//! // Create the AIS router
 //! let router = create_ais_router(&ais_config, &global_config, cancel).await?;
 //!
-//! // 集成到主 HTTP 服务
+//! // Integrate into the main HTTP service
 //! // let app = Router::new().nest("/ais", router);
 //! # Ok(())
 //! # }
 //! ```
 //!
-//! # 安全考虑
+//! # Security Considerations
 //!
 //! - **Renewal token rotation**: renewal tokens are stored as hashes and rotated on use.
-//! - **加密传输**：Token 使用 ECIES 加密，只有持有私钥的服务才能解密
-//! - **序列号唯一性**：Snowflake 算法保证分布式环境下的全局唯一性
+//! - **Encrypted transport**: Tokens are encrypted using ECIES; only services holding the private key can decrypt them
+//! - **Serial number uniqueness**: The Snowflake algorithm guarantees global uniqueness in distributed environments
 //! - **Key rotation**: old keys remain verifiable during the tolerance window.
 //!
-//! # 配置选项
+//! # Configuration Options
 //!
-//! 参见 [`platform::config::AisConfig`] 获取完整配置说明。
+//! See [`platform::config::AisConfig`] for the full configuration reference.
 #![deny(clippy::disallowed_macros)]
 
 pub mod handlers;
@@ -102,7 +102,7 @@ use platform::config::AisConfig;
 use platform::monitoring::ServiceCounters;
 use std::sync::Arc;
 
-/// 创建 AIS 路由器，遵循项目的 HttpRouterService 架构
+/// Create the AIS router, following the project's HttpRouterService architecture
 pub async fn create_ais_router(
     config: &AisConfig,
     global_config: &platform::config::ActrixConfig,
@@ -120,12 +120,12 @@ pub async fn create_ais_router_with_counters(
 ) -> Result<Router> {
     platform::recording::info!("Creating AIS router with config");
 
-    // 获取 Signer 客户端配置
+    // Get the Signer client configuration
     let signer_client_config = config
         .get_signer_client_config(global_config)
         .context("Failed to get Signer client config. Ensure Signer is enabled or ais.dependencies.signer is configured.")?;
 
-    // 创建 KS gRPC 客户端
+    // Create the KS gRPC client
     let signer_client =
         create_signer_client(&signer_client_config, &global_config.actrix_shared_key)
             .await
@@ -133,7 +133,7 @@ pub async fn create_ais_router_with_counters(
 
     platform::recording::info!("Signer gRPC client created successfully");
 
-    // 创建 Issuer 配置
+    // Create the Issuer configuration
     if config.server.renewal_token_secret.is_empty() {
         anyhow::bail!("services.ais.server.renewal_token_secret is required");
     }
@@ -152,10 +152,10 @@ pub async fn create_ais_router_with_counters(
     let issuer_config = IssuerConfig {
         token_ttl_secs: config.server.token_ttl_secs,
         signaling_heartbeat_interval_secs: config.server.signaling_heartbeat_interval_secs,
-        key_refresh_interval_secs: 3600, // 1 小时
+        key_refresh_interval_secs: 3600, // 1 hour
         key_storage_file: global_config.sqlite_path.join("ais_keys.db"),
-        enable_periodic_rotation: false, // 默认禁用，可通过配置文件开启
-        key_rotation_interval_secs: 86400, // 24 小时
+        enable_periodic_rotation: false, // disabled by default, can be enabled via config
+        key_rotation_interval_secs: 86400, // 24 hours
         turn_secret: global_config.turn.turn_secret.clone(),
         sqlite_path: global_config.sqlite_path.clone(),
         renewal_token_ttl_secs: config.server.renewal_token_ttl_secs,
@@ -163,7 +163,7 @@ pub async fn create_ais_router_with_counters(
         renewal_token_secret,
     };
 
-    // 创建 AId Token 签发器
+    // Create the AId Token issuer
     let issuer = AIdIssuer::new(signer_client, issuer_config, cancel)
         .await
         .context("Failed to create AIS issuer")?;
@@ -174,7 +174,7 @@ pub async fn create_ais_router_with_counters(
         AISState::new(issuer)
     };
 
-    // 创建路由器
+    // Create the router
     let router = create_router(state);
 
     platform::recording::info!("AIS router created successfully");
@@ -184,7 +184,7 @@ pub async fn create_ais_router_with_counters(
 #[cfg(test)]
 mod tests {
 
-    // Note: 完整的集成测试需要 KS 服务运行
-    // 这里仅做基本的单元测试
-    // 实际测试在主程序启动后通过 HTTP 端点进行
+    // Note: Full integration tests require a running KS service.
+    // Only basic unit tests here.
+    // Actual testing is performed through HTTP endpoints after the main program starts.
 }

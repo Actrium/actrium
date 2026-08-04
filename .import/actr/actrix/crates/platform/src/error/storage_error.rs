@@ -1,10 +1,10 @@
-//! 存储相关错误类型
+//! Storage error types
 //!
-//! 定义所有与文件系统、存储后端相关的错误
+//! Defines all errors related to filesystem and storage backends
 
 use thiserror::Error;
 
-/// 存储相关错误
+/// Storage-related errors
 #[derive(Error, Debug)]
 pub enum StorageError {
     #[error("File not found: {path}")]

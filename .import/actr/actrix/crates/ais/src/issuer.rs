@@ -9,32 +9,32 @@
 //! - Renewal token issuance and hash persistence.
 //! - Signing key lifecycle management through Signer.
 //!
-//! # 密钥管理策略
+//! # Key Management Strategy
 //!
-//! ## 安全设计
+//! ## Security Design
 //!
-//! - Ed25519 私钥永不离开 KS 服务
-//! - AIS 只保存 verifying key（公钥）用于凭证携带
-//! - 所有签名操作通过 KS 的 Sign RPC 完成
+//! - Ed25519 private keys never leave the KS service
+//! - AIS only stores the verifying key (public key) for credential carriage
+//! - All signing operations go through the KS Sign RPC
 //!
-//! ## 初始化阶段
+//! ## Initialization Phase
 //!
-//! 1. 尝试从本地 SQLite 加载缓存的密钥
-//! 2. 如果密钥不存在或过期超过容忍时间，从 KS 获取新密钥
-//! 3. 启动后台刷新任务
+//! 1. Attempt to load cached key from local SQLite
+//! 2. If the key does not exist or has expired beyond the tolerance window, fetch a new key from KS
+//! 3. Start the background refresh task
 //!
-//! ## 运行时刷新
+//! ## Runtime Refresh
 //!
-//! - 检查频率：每 10 分钟
-//! - 刷新触发：距离过期时间 < 10 分钟
-//! - 容忍时间：过期后 24 小时内仍可使用
+//! - Check frequency: every 10 minutes
+//! - Refresh trigger: time to expiry < 10 minutes
+//! - Tolerance window: keys remain usable for 24 hours after expiry
 //!
-//! ## 错误处理
+//! ## Error Handling
 //!
-//! - 后台刷新失败：记录 warn 日志，下次继续重试
-//! - 同步刷新失败：返回 `AidError::GenerationFailed`
+//! - Background refresh failure: log a warning and retry on the next cycle
+//! - Synchronous refresh failure: return `AidError::GenerationFailed`
 //!
-//! # 示例
+//! # Example
 //!
 //! ```no_run
 //! use ais::issuer::{AIdIssuer, IssuerConfig};
@@ -56,7 +56,7 @@
 //!
 //! let issuer = AIdIssuer::new(signer_client, config, tokio_util::sync::CancellationToken::new()).await?;
 //!
-//! // 处理注册请求
+//! // Process registration request
 //! // let response = issuer.issue_credential(&request).await?;
 //! # Ok(())
 //! # }
@@ -66,12 +66,12 @@ use crate::signer_client_wrapper::SignerClientWrapper;
 use crate::sn::{AIdSerialNumberIssuer, SerialNumber};
 use crate::storage::{KeyRecord, KeyStorage};
 
-// ========== 常量配置 ==========
+// ========== Constants ==========
 
-/// 密钥刷新检查间隔（秒）
+/// Key refresh check interval (seconds)
 ///
-/// 后台任务每隔此时间检查一次密钥是否需要刷新
-const KEY_REFRESH_CHECK_INTERVAL_SECS: u64 = 600; // 10 分钟
+/// The background task checks whether the key needs refreshing at this interval
+const KEY_REFRESH_CHECK_INTERVAL_SECS: u64 = 600; // 10 minutes
 const MANUFACTURER_SIGNED_AT_MAX_AGE_SECS: u64 = 5 * 60;
 const MANUFACTURER_SIGNED_AT_FUTURE_SKEW_SECS: u64 = 60;
 const MANUFACTURER_NONCE_TTL_SECS: u64 = 10 * 60;
@@ -172,30 +172,31 @@ impl ReissueFailure {
     }
 }
 
-/// AId Token 签发器配置
+/// AId Token issuer configuration
 #[derive(Debug, Clone)]
 pub struct IssuerConfig {
-    /// Token 有效期（秒）
+    /// Token TTL (seconds)
     pub token_ttl_secs: u64,
-    /// Signaling Server 心跳间隔（秒）
+    /// Signaling server heartbeat interval (seconds)
     pub signaling_heartbeat_interval_secs: u32,
-    /// 密钥缓存刷新间隔（秒，默认 1 小时）
+    /// Key cache refresh interval (seconds, default 1 hour)
     pub key_refresh_interval_secs: u64,
-    /// 密钥存储数据库文件路径
+    /// Key storage database file path
     pub key_storage_file: std::path::PathBuf,
-    /// 是否启用定期密钥轮替
+    /// Whether to enable periodic key rotation
     pub enable_periodic_rotation: bool,
-    /// 密钥轮替间隔（秒，默认 24 小时）
+    /// Key rotation interval (seconds, default 24 hours)
     ///
-    /// 仅当 enable_periodic_rotation = true 时生效
-    /// 到达此间隔后会主动生成新密钥，即使旧密钥未过期
+    /// Only effective when enable_periodic_rotation = true.
+    /// When this interval is reached, a new key is actively generated even if the old key has not expired.
     pub key_rotation_interval_secs: u64,
-    /// TURN 共享密钥（与 TURN 服务器共享，用于生成时效凭证）
+    /// TURN shared secret (shared with TURN server, used to generate time-limited credentials)
     pub turn_secret: String,
-    /// SQLite 数据目录（与 signaling 共享，用于写入 verifying key 供其验证凭证）
+    /// SQLite data directory (shared with signaling, used to write the verifying key for credential verification)
     ///
-    /// AIS 在加载或刷新 signing key 后，会把 verifying key 写入此目录下的
-    /// `signaling_key_cache.db`，让 signaling 的 `AIdCredentialValidator` 能够验证凭证。
+    /// After loading or refreshing the signing key, AIS writes the verifying key
+    /// to `signaling_key_cache.db` in this directory, so that the signaling
+    /// `AIdCredentialValidator` can verify credentials.
     pub sqlite_path: std::path::PathBuf,
     /// Renewal token TTL in seconds.
     pub renewal_token_ttl_secs: u64,
@@ -208,12 +209,12 @@ pub struct IssuerConfig {
 impl Default for IssuerConfig {
     fn default() -> Self {
         Self {
-            token_ttl_secs: 3600,                  // 1 小时
-            signaling_heartbeat_interval_secs: 30, // 30 秒
-            key_refresh_interval_secs: 3600,       // 1 小时
+            token_ttl_secs: 3600,                  // 1 hour
+            signaling_heartbeat_interval_secs: 30, // 30 seconds
+            key_refresh_interval_secs: 3600,       // 1 hour
             key_storage_file: std::path::PathBuf::from("ais_keys.db"),
-            enable_periodic_rotation: false,   // 默认禁用定期轮替
-            key_rotation_interval_secs: 86400, // 24 小时
+            enable_periodic_rotation: false, // periodic rotation disabled by default
+            key_rotation_interval_secs: 86400, // 24 hours
             turn_secret: "actrix-turn-secret-change-in-production".to_string(),
             sqlite_path: std::path::PathBuf::from("."),
             renewal_token_ttl_secs: 86400,
@@ -223,7 +224,7 @@ impl Default for IssuerConfig {
     }
 }
 
-/// 密钥缓存（只保存 verifying key，私钥由 KS 保管）
+/// Key cache (stores only the verifying key; private key is held by KS)
 struct KeyCache {
     key_id: u32,
     verifying_key: VerifyingKey,
@@ -233,7 +234,7 @@ struct KeyCache {
     tolerance_seconds: u64,
 }
 
-/// AId Token 签发器 - 专注于签发新的 Actor Identity Token
+/// AId Token issuer - focused on issuing new Actor Identity Tokens
 pub struct AIdIssuer {
     signer_client: SignerClientWrapper,
     key_storage: Arc<KeyStorage>,
@@ -243,7 +244,7 @@ pub struct AIdIssuer {
 }
 
 impl AIdIssuer {
-    /// 创建新的 AIdIssuer
+    /// Create a new AIdIssuer
     pub async fn new(
         signer_client: SignerClientWrapper,
         config: IssuerConfig,
@@ -262,31 +263,31 @@ impl AIdIssuer {
             config,
         };
 
-        // 初始化时尝试加载/获取密钥。主端口复用场景下，
-        // KS 可能在同进程稍后就绪，因此这里失败不阻塞服务启动。
+        // On initialization, attempt to load/fetch the key. In a port-reuse scenario,
+        // KS may become ready later in the same process, so failure here does not block service startup.
         if let Err(e) = issuer.ensure_key_loaded().await {
             platform::recording::warn!("Initial KS key load deferred, will retry on demand: {}", e);
         }
 
-        // 启动后台密钥刷新任务
+        // Start the background key refresh task
         issuer.spawn_key_refresh_task(cancel);
 
         Ok(issuer)
     }
 
-    /// 确保密钥已加载
+    /// Ensure the key has been loaded
     async fn ensure_key_loaded(&self) -> Result<(), AidError> {
-        // 先尝试从缓存加载
+        // Try loading from cache first
         if self.key_cache.read().await.is_some() {
             platform::recording::debug!("Key already in cache");
             return Ok(());
         }
 
-        // 尝试从存储加载
+        // Try loading from storage
         if let Some(record) = self.key_storage.get_current_key().await.map_err(|e| {
             AidError::GenerationFailed(format!("Failed to get key from storage: {e}"))
         })? {
-            // 检查是否过期超出容忍时间
+            // Check if expired beyond the tolerance window
             if self
                 .key_storage
                 .is_expired_beyond_tolerance()
@@ -302,7 +303,7 @@ impl AIdIssuer {
                 self.load_key_from_record(&record)?;
             }
         } else {
-            // 没有存储的密钥，从 KS 获取
+            // No stored key, fetch from KS
             platform::recording::info!("No stored key found, fetching from KS");
             self.refresh_key_from_ks().await?;
         }
@@ -310,9 +311,9 @@ impl AIdIssuer {
         Ok(())
     }
 
-    /// 从 KeyRecord 加载 Ed25519 verifying key 到缓存
+    /// Load the Ed25519 verifying key from a KeyRecord into the cache
     ///
-    /// AIS DB 中的 `public_key` 存储 base64 编码的 Ed25519 verifying key（32 字节）
+    /// The `public_key` in the AIS DB stores a base64-encoded Ed25519 verifying key (32 bytes)
     fn load_key_from_record(&self, record: &KeyRecord) -> Result<(), AidError> {
         let key_bytes = BASE64_STANDARD
             .decode(&record.public_key)
@@ -336,14 +337,14 @@ impl AIdIssuer {
         let key_id = record.key_id;
         let expires_at = record.expires_at;
 
-        // 同步加载，阻塞等待
+        // Synchronous load, blocking until complete
         tokio::task::block_in_place(|| {
             let rt = tokio::runtime::Handle::current();
             rt.block_on(async {
                 *self.key_cache.write().await = Some(cache);
-                // 将 verifying key 持久化写入 signaling_key_cache.db，
-                // 保证即使 AIdCredentialValidator::init 尚未调用也能落盘，
-                // 后续 init 会从 DB 读取到该密钥。
+                // Persist the verifying key to signaling_key_cache.db,
+                // ensuring it is on disk even if AIdCredentialValidator::init
+                // has not been called yet; init will read it from DB later.
                 if let Err(e) =
                     platform::aid::credential::validator::AIdCredentialValidator::persist_key(
                         &self.config.sqlite_path,
@@ -354,7 +355,7 @@ impl AIdIssuer {
                     .await
                 {
                     platform::recording::warn!(
-                        "写入 verifying key 到 key_cache DB 失败（非致命，key_id={}）: {}",
+                        "Failed to write verifying key to key_cache DB (non-fatal, key_id={}): {}",
                         key_id,
                         e
                     );
@@ -365,7 +366,7 @@ impl AIdIssuer {
         Ok(())
     }
 
-    /// 从 KS 刷新密钥
+    /// Refresh the key from KS
     async fn refresh_key_from_ks(&self) -> Result<(), AidError> {
         platform::recording::info!("Fetching new key from KS");
 
@@ -381,10 +382,10 @@ impl AIdIssuer {
         Ok(())
     }
 
-    /// 手动触发密钥轮替
+    /// Manually trigger key rotation
     ///
-    /// 立即从 KS 生成新密钥并更新缓存
-    /// 返回新的 key_id
+    /// Immediately generates a new key from KS and updates the cache.
+    /// Returns the new key_id.
     pub async fn rotate_key(&self) -> Result<u32, AidError> {
         platform::recording::info!("Manual key rotation triggered");
 
@@ -396,7 +397,7 @@ impl AIdIssuer {
         )
         .await?;
 
-        // 读取新的 key_id
+        // Read the new key_id
         let cache = self.key_cache.read().await;
         let key_id = cache.as_ref().map(|c| c.key_id).ok_or_else(|| {
             AidError::GenerationFailed("No key available after rotation".to_string())
@@ -406,7 +407,7 @@ impl AIdIssuer {
         Ok(key_id)
     }
 
-    /// 获取当前使用的 key_id
+    /// Get the current key_id
     pub async fn get_current_key_id(&self) -> Result<u32, AidError> {
         let cache = self.key_cache.read().await;
         cache
@@ -415,10 +416,10 @@ impl AIdIssuer {
             .ok_or_else(|| AidError::GenerationFailed("No key loaded".to_string()))
     }
 
-    /// 返回当前签名公钥（key_id + raw 32-byte verifying key）
+    /// Return the current signing public key (key_id + raw 32-byte verifying key)
     ///
-    /// 供 `/ais/signing-pubkey` HTTP 端点使用，
-    /// 也可被 signaling 服务在 key_cache miss 时按需拉取。
+    /// Used by the `/ais/signing-pubkey` HTTP endpoint,
+    /// and can be pulled on demand by the signaling service on a key_cache miss.
     pub async fn get_current_signing_pubkey(&self) -> Result<(u32, Vec<u8>), AidError> {
         let cache = self.key_cache.read().await;
         cache
@@ -427,7 +428,7 @@ impl AIdIssuer {
             .ok_or_else(|| AidError::GenerationFailed("No signing key loaded".to_string()))
     }
 
-    /// 启动后台密钥刷新任务
+    /// Start the background key refresh task
     fn spawn_key_refresh_task(&self, cancel: tokio_util::sync::CancellationToken) {
         let signer_client = self.signer_client.clone();
         let key_storage = self.key_storage.clone();
@@ -446,7 +447,7 @@ impl AIdIssuer {
 
                 let mut should_rotate = false;
 
-                // 检查是否需要刷新（密钥即将过期）
+                // Check if refresh is needed (key expiring soon)
                 let should_refresh = match key_storage.should_refresh().await {
                     Ok(should) => should,
                     Err(e) => {
@@ -460,7 +461,7 @@ impl AIdIssuer {
                     should_rotate = true;
                 }
 
-                // 检查是否需要定期轮替
+                // Check if periodic rotation is needed
                 if config.enable_periodic_rotation && !should_rotate {
                     match Self::should_periodic_rotate(&key_storage, &config).await {
                         Ok(true) => {
@@ -487,7 +488,7 @@ impl AIdIssuer {
 
                 platform::recording::debug!("Background key rotation triggered");
 
-                // 轮替密钥
+                // Rotate the key
                 match Self::refresh_key_internal(&signer_client, &key_storage, &key_cache, &config)
                     .await
                 {
@@ -506,9 +507,9 @@ impl AIdIssuer {
         platform::recording::info!("Background key refresh task started");
     }
 
-    /// 检查是否需要定期轮替密钥
+    /// Check whether periodic key rotation is needed
     ///
-    /// 根据 fetched_at 时间和配置的 key_rotation_interval_secs 判断
+    /// Decides based on the fetched_at time and the configured key_rotation_interval_secs
     async fn should_periodic_rotate(
         key_storage: &KeyStorage,
         config: &IssuerConfig,
@@ -519,7 +520,7 @@ impl AIdIssuer {
             .map_err(|e| AidError::GenerationFailed(format!("Failed to get current key: {e}")))?;
 
         let Some(key_record) = current_key else {
-            // 没有密钥，需要生成
+            // No key, need to generate one
             return Ok(true);
         };
 
@@ -533,17 +534,17 @@ impl AIdIssuer {
         Ok(time_since_fetched >= config.key_rotation_interval_secs)
     }
 
-    /// 内部密钥刷新方法（供后台任务使用）
+    /// Internal key refresh method (used by the background task)
     ///
-    /// 从 KS 生成新 Ed25519 签名密钥对，只保存 verifying key；
-    /// 私钥由 KS 保管，AIS 仅通过 Sign RPC 进行签名。
+    /// Generates a new Ed25519 signing key pair from KS; only the verifying key is stored.
+    /// The private key is retained by KS; AIS only signs through the Sign RPC.
     async fn refresh_key_internal(
         signer_client: &SignerClientWrapper,
         key_storage: &KeyStorage,
         key_cache: &RwLock<Option<KeyCache>>,
         config: &IssuerConfig,
     ) -> Result<(), AidError> {
-        // 从 KS 申请新的 Ed25519 签名密钥（私钥由 KS 保管）
+        // Request a new Ed25519 signing key from KS (private key retained by KS)
         let (key_id, verifying_key_bytes, expires_at, tolerance_seconds) = signer_client
             .generate_signing_key()
             .await
@@ -558,7 +559,7 @@ impl AIdIssuer {
             .unwrap_or_default()
             .as_secs();
 
-        // 更新缓存（只存 verifying key）
+        // Update the cache (storing only the verifying key)
         let cache = KeyCache {
             key_id,
             verifying_key,
@@ -568,7 +569,7 @@ impl AIdIssuer {
 
         *key_cache.write().await = Some(cache);
 
-        // 保存到存储（以 base64 编码的 verifying key 存储）
+        // Save to storage (storing the base64-encoded verifying key)
         let key_str = BASE64_STANDARD.encode(verifying_key.as_bytes());
         let record = KeyRecord {
             key_id,
@@ -583,7 +584,7 @@ impl AIdIssuer {
             .await
             .map_err(|e| AidError::GenerationFailed(format!("Failed to save key: {e}")))?;
 
-        // 将 verifying key 持久化写入 signaling_key_cache.db（同时更新内存缓存）。
+        // Persist the verifying key to signaling_key_cache.db (also updates the in-memory cache).
         if let Err(e) = platform::aid::credential::validator::AIdCredentialValidator::persist_key(
             &config.sqlite_path,
             key_id,
@@ -593,18 +594,21 @@ impl AIdIssuer {
         .await
         {
             platform::recording::warn!(
-                "写入 verifying key 到 key_cache DB 失败（非致命，key_id={}）: {}",
+                "Failed to write verifying key to key_cache DB (non-fatal, key_id={}): {}",
                 key_id,
                 e
             );
         } else {
-            platform::recording::info!("verifying key 已持久化到 key_cache DB (key_id={})", key_id);
+            platform::recording::info!(
+                "verifying key persisted to key_cache DB (key_id={})",
+                key_id
+            );
         }
 
         Ok(())
     }
 
-    /// 处理 register 请求并签发 credential
+    /// Process a register request and issue credentials
     pub async fn issue_credential(
         &self,
         request: &RegisterRequest,
@@ -613,7 +617,7 @@ impl AIdIssuer {
             .await
     }
 
-    /// 处理 register 请求并签发 credential，携带 handler 已完成的 realm secret 校验结果。
+    /// Process a register request and issue credentials, with the realm secret check result already completed by the handler.
     pub async fn issue_credential_with_realm_secret_check(
         &self,
         request: &RegisterRequest,
@@ -769,35 +773,35 @@ impl AIdIssuer {
         })
     }
 
-    /// 内部处理逻辑（Ed25519 签名，通过 KS Sign RPC）
+    /// Internal processing logic (Ed25519 signing via KS Sign RPC)
     async fn issue_credential_inner(
         &self,
         request: &RegisterRequest,
         realm_secret_check: Option<&RealmSecretCheck>,
     ) -> Result<register_response::RegisterOk, AidError> {
-        // 确保有可用的密钥
+        // Ensure a usable key is available
         self.ensure_key_loaded().await?;
 
         self.verify_registration_identity(request, realm_secret_check)
             .await?;
 
-        // 生成 ActrId
+        // Generate ActrId
         let actr_id = self.generate_actr_id(&request.actr_type, &request.realm)?;
 
-        // 生成过期时间
+        // Generate expiry time
         let expr_time = self.calculate_expiry_time();
 
-        // 构建 IdentityClaims（proto 类型，明文）
+        // Build IdentityClaims (proto type, plaintext)
         let claims_proto = IdentityClaims {
             realm_id: actr_id.realm.realm_id,
             actor_id: actr_id.to_string_repr(),
             expires_at: expr_time,
         };
 
-        // Proto 编码 claims bytes
+        // Proto-encode claims bytes
         let claims_bytes = claims_proto.encode_to_vec();
 
-        // 从缓存读取 key_id 和 verifying_key（释放读锁后进行异步签名）
+        // Read key_id and verifying_key from cache (release read lock before async signing)
         let (key_id, verifying_key) = {
             let cache = self.key_cache.read().await;
             let cache = cache
@@ -806,21 +810,21 @@ impl AIdIssuer {
             (cache.key_id, cache.verifying_key)
         };
 
-        // 通过 KS Sign RPC 签名（私钥不离开 KS）
+        // Sign via KS Sign RPC (private key never leaves KS)
         let signature_bytes = self
             .signer_client
             .sign(key_id, &claims_bytes)
             .await
             .map_err(|e| AidError::GenerationFailed(format!("KS sign failed: {e}")))?;
 
-        // 创建 AIdCredential（Ed25519 格式）
+        // Create AIdCredential (Ed25519 format)
         let credential = AIdCredential {
             key_id,
             claims: Bytes::from(claims_bytes),
             signature: Bytes::from(signature_bytes),
         };
 
-        // 创建过期时间的 Timestamp
+        // Create expiry timestamp
         let credential_expires_at = Some(Timestamp {
             seconds: expr_time as i64,
             nanos: 0,
@@ -1327,9 +1331,9 @@ impl AIdIssuer {
         }
     }
 
-    /// 生成 ActrId
+    /// Generate ActrId
     fn generate_actr_id(&self, actr_type: &ActrType, realm: &Realm) -> Result<ActrId, AidError> {
-        // 使用 Snowflake 算法生成序列号
+        // Generate serial number using the Snowflake algorithm
         let serial_number = SerialNumber::sn(realm.realm_id);
 
         Ok(ActrId {
@@ -1339,7 +1343,7 @@ impl AIdIssuer {
         })
     }
 
-    /// 计算过期时间 (Unix timestamp, seconds)
+    /// Calculate expiry time (Unix timestamp, seconds)
     fn calculate_expiry_time(&self) -> u64 {
         SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1348,7 +1352,7 @@ impl AIdIssuer {
             + self.config.token_ttl_secs
     }
 
-    /// 计算 renewal token 过期时间（Unix timestamp，seconds，i64 for SQLite）
+    /// Calculate renewal token expiry time (Unix timestamp, seconds, i64 for SQLite)
     fn calculate_renewal_expiry_time(&self) -> i64 {
         (SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -1357,7 +1361,7 @@ impl AIdIssuer {
             + self.config.renewal_token_ttl_secs) as i64
     }
 
-    /// 使用 CSPRNG 生成 32 字节 renewal token
+    /// Generate a 32-byte renewal token using CSPRNG
     fn generate_renewal_token(&self) -> Vec<u8> {
         let mut token = vec![0u8; 32];
         use rand::RngCore;
@@ -1481,20 +1485,20 @@ impl AIdIssuer {
         ))
     }
 
-    /// 为已有 ActrId 重新签发 credential（供 /ais/renew 使用）
+    /// Re-issue credentials for an existing ActrId (used by /ais/renew)
     ///
-    /// 接收已验证的 `ActrId`，不调用 `generate_actr_id()`，也不重新执行注册认证。
+    /// Accepts an already-verified `ActrId`; does not call `generate_actr_id()` or re-run registration authentication.
     pub async fn issue_credential_for_actor(
         &self,
         actor_id: &ActrId,
     ) -> Result<register_response::RegisterOk, AidError> {
-        // 确保有可用的签名密钥
+        // Ensure a usable signing key is available
         self.ensure_key_loaded().await?;
 
-        // 生成过期时间
+        // Generate expiry time
         let expr_time = self.calculate_expiry_time();
 
-        // 构建 IdentityClaims
+        // Build IdentityClaims
         let claims_proto = IdentityClaims {
             realm_id: actor_id.realm.realm_id,
             actor_id: actor_id.to_string_repr(),
@@ -1503,7 +1507,7 @@ impl AIdIssuer {
 
         let claims_bytes = claims_proto.encode_to_vec();
 
-        // 从缓存读取 key_id 和 verifying_key
+        // Read key_id and verifying_key from cache
         let (key_id, verifying_key) = {
             let cache = self.key_cache.read().await;
             let cache = cache
@@ -1512,7 +1516,7 @@ impl AIdIssuer {
             (cache.key_id, cache.verifying_key)
         };
 
-        // 通过 KS Sign RPC 签名
+        // Sign via KS Sign RPC
         let signature_bytes = self
             .signer_client
             .sign(key_id, &claims_bytes)
@@ -1530,7 +1534,7 @@ impl AIdIssuer {
             nanos: 0,
         });
 
-        // 生成 TURN 时效凭证
+        // Generate time-limited TURN credential
         let turn_credential = self.generate_turn_credential(&actor_id.to_string_repr(), expr_time);
 
         Ok(register_response::RegisterOk {
@@ -1546,7 +1550,7 @@ impl AIdIssuer {
         })
     }
 
-    /// 生成 TURN 时效凭证（coturn --use-auth-secret 兼容格式）
+    /// Generate time-limited TURN credential (coturn --use-auth-secret compatible format)
     ///
     /// `username = "<expires_at>:<actor_id>"`
     /// `password = base64(HMAC-SHA1(turn_secret, username))`
@@ -1569,9 +1573,9 @@ impl AIdIssuer {
         }
     }
 
-    // ========== 健康检查方法 ==========
+    // ========== Health check methods ==========
 
-    /// 检查数据库健康状态
+    /// Check database health status
     pub async fn check_database_health(&self) -> Result<(), AidError> {
         self.key_storage
             .health_check()
@@ -1579,9 +1583,9 @@ impl AIdIssuer {
             .map_err(|e| AidError::GenerationFailed(format!("Database unhealthy: {e}")))
     }
 
-    /// 检查 KS 服务健康状态
+    /// Check KS service health status
     ///
-    /// 通过 health_check RPC 验证 KS 服务可用性
+    /// Verifies KS service availability via the health_check RPC
     pub async fn check_ks_health(&self) -> Result<(), AidError> {
         self.signer_client
             .health_check()
@@ -1590,7 +1594,7 @@ impl AIdIssuer {
             .map_err(|e| AidError::GenerationFailed(format!("KS service unhealthy: {e}")))
     }
 
-    /// 检查密钥缓存健康状态
+    /// Check key cache health status
     pub async fn check_key_cache_health(&self) -> Result<KeyCacheInfo, AidError> {
         let has_cache = self.key_cache.read().await.is_some();
         if !has_cache {
@@ -1616,7 +1620,7 @@ impl AIdIssuer {
     }
 }
 
-/// 密钥缓存健康信息
+/// Key cache health info
 pub struct KeyCacheInfo {
     pub key_id: u32,
     pub expires_in: u64,
@@ -1625,6 +1629,6 @@ pub struct KeyCacheInfo {
 #[cfg(test)]
 mod tests {
 
-    // Note: 完整测试需要 KS 服务运行，这里只做基本单元测试
-    // 集成测试在 lib.rs 中
+    // Note: Full tests require a running KS service; only basic unit tests here.
+    // Integration tests are in lib.rs.
 }

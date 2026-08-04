@@ -1,6 +1,6 @@
-//! Realm 核心数据结构与数据库操作
+//! Realm core data structures and database operations
 //!
-//! 定义 Realm 实体的核心数据结构、数据库 CRUD 操作
+//! Defines the core data structures and database CRUD operations for the Realm entity.
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use strum::{Display, EnumString};
 use super::error::RealmError;
 use crate::storage::db::get_database;
 
-/// Realm 状态枚举
+/// Realm status enum
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq, Display, EnumString)]
 pub enum RealmStatus {
     #[default]
@@ -19,10 +19,10 @@ pub enum RealmStatus {
     Suspended,
 }
 
-/// Realm 是用于分离不同应用程序资源的虚拟概念。
+/// Realm is a virtual concept used to isolate resources of different applications.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Realm {
-    /// DB 自增主键，起点 2^25 = 33554432
+    /// DB auto-increment primary key, starting at 2^25 = 33554432
     pub id: u32,
     pub name: String,
     pub status: RealmStatus,
@@ -30,7 +30,7 @@ pub struct Realm {
     pub expires_at: Option<u64>,
     pub created_at: u64,
     pub updated_at: Option<u64>,
-    /// SHA256 hash of current secret (必填)
+    /// SHA256 hash of current secret (required)
     pub secret_current: String,
     /// (hash, valid_until) for previous secret during rotation grace window
     pub secret_previous: Option<(String, u64)>,

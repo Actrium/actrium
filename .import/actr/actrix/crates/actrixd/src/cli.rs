@@ -1,6 +1,6 @@
-//! 命令行界面定义
+//! Command-line interface definition
 //!
-//! 定义了主程序的命令行参数和选项
+//! Defines the command-line arguments and options for the main program.
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 

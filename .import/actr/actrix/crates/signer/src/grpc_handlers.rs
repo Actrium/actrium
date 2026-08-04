@@ -1,16 +1,16 @@
-//! Signer gRPC 服务实现
+//! Signer gRPC service implementation
 
 use crate::{error::SignerError, storage::KeyStorage};
 use nonce_auth::{CredentialVerifier, NonceError, storage::NonceStorage};
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
 
-// 导入生成的 protobuf 代码
+// Import generated protobuf code
 use actrix_proto::admin::v1::NonceCredential;
 use actrix_proto::signer::v1::signer_server::{Signer, SignerServer};
 use actrix_proto::signer::v1::*;
 
-/// KS gRPC 服务状态
+/// Signer gRPC service state
 #[derive(Clone)]
 pub struct SignerGrpcService {
     pub storage: KeyStorage,
@@ -20,7 +20,7 @@ pub struct SignerGrpcService {
 }
 
 impl SignerGrpcService {
-    /// 创建新的 gRPC 服务实例
+    /// Create a new gRPC service instance
     pub fn new<N: NonceStorage + Send + Sync + 'static>(
         storage: KeyStorage,
         nonce_storage: N,
@@ -35,13 +35,13 @@ impl SignerGrpcService {
         }
     }
 
-    /// 验证请求的 nonce 凭证
+    /// Verify the nonce credential of a request
     async fn verify_credential(
         &self,
         credential: &NonceCredential,
         request_payload: &str,
     ) -> Result<(), SignerError> {
-        // 将 protobuf NonceCredential 转换为 nonce_auth::NonceCredential
+        // Convert protobuf NonceCredential to nonce_auth::NonceCredential
         let nonce_credential = nonce_auth::NonceCredential {
             timestamp: credential.timestamp,
             nonce: credential.nonce.clone(),
@@ -72,7 +72,7 @@ impl SignerGrpcService {
 
 #[tonic::async_trait]
 impl Signer for SignerGrpcService {
-    /// 生成新的 Ed25519 签名密钥对
+    /// Generate a new Ed25519 signing key pair
     async fn generate_signing_key(
         &self,
         request: Request<GenerateSigningKeyRequest>,
@@ -86,14 +86,14 @@ impl Signer for SignerGrpcService {
             .await
             .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
 
-        // 生成 Ed25519 密钥对（私钥存储于后端）
+        // Generate Ed25519 key pair (private key stored in backend)
         let key_pair = self
             .storage
             .generate_and_store_key()
             .await
             .map_err(|e| Status::internal(format!("Failed to generate signing key: {e}")))?;
 
-        // 获取密钥记录以获取过期时间
+        // Get the key record to obtain the expiration time
         let key_record = self
             .storage
             .get_key_record(key_pair.key_id)
@@ -116,20 +116,20 @@ impl Signer for SignerGrpcService {
         Ok(Response::new(response))
     }
 
-    /// 使用指定密钥对消息进行 Ed25519 签名
+    /// Sign a message with the specified key (Ed25519)
     async fn sign(&self, request: Request<SignRequest>) -> Result<Response<SignResponse>, Status> {
         let req = request.into_inner();
         let key_id = req.key_id;
 
         crate::recording::info!("Received gRPC Sign request for key_id: {}", key_id);
 
-        // nonce payload 绑定到特定 key_id，防止重用
+        // nonce payload is bound to a specific key_id to prevent reuse
         let request_data = format!("sign:{key_id}");
         self.verify_credential(&req.credential, &request_data)
             .await
             .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
 
-        // 检查密钥是否在容忍期内有效
+        // Check whether the key is still valid within the tolerance period
         let key_record = self
             .storage
             .get_key_record(key_id)
@@ -153,7 +153,7 @@ impl Signer for SignerGrpcService {
             }
         }
 
-        // 在后端内部完成签名，私钥不离开 KS
+        // Signing is performed internally in the backend; private key does not leave Signer
         let signature = self
             .storage
             .sign(key_id, &req.message)
@@ -170,7 +170,7 @@ impl Signer for SignerGrpcService {
         Ok(Response::new(SignResponse { signature }))
     }
 
-    /// 获取指定 key_id 的验证公钥
+    /// Get the verifying public key for the specified key_id
     async fn get_verifying_key(
         &self,
         request: Request<GetVerifyingKeyRequest>,
@@ -195,7 +195,7 @@ impl Signer for SignerGrpcService {
             .map_err(|e| Status::internal(format!("Failed to get key record: {e}")))?
             .ok_or_else(|| Status::not_found(format!("Key not found: {key_id}")))?;
 
-        // 检查是否超过容忍期
+        // Check whether the tolerance period has been exceeded
         if key_record.expires_at > 0 {
             let now = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -217,7 +217,7 @@ impl Signer for SignerGrpcService {
         }))
     }
 
-    /// 健康检查
+    /// Health check
     async fn health_check(
         &self,
         request: Request<HealthCheckRequest>,
@@ -225,7 +225,7 @@ impl Signer for SignerGrpcService {
         crate::recording::debug!("gRPC health check requested");
         let req = request.into_inner();
 
-        // 与其他方法一致，health 也要求 nonce-auth
+        // Consistent with other methods: health also requires nonce-auth
         self.verify_credential(&req.credential, "health_check")
             .await
             .map_err(|e| Status::unauthenticated(format!("Authentication failed: {e}")))?;
@@ -251,7 +251,7 @@ impl Signer for SignerGrpcService {
     }
 }
 
-/// 创建 gRPC 服务器
+/// Create a gRPC server
 pub fn create_grpc_service<N: NonceStorage + Send + Sync + 'static>(
     storage: KeyStorage,
     nonce_storage: N,

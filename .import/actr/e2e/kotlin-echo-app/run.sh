@@ -191,7 +191,7 @@ export HOST_IP
 section "🌐 Host LAN IP for emulator connectivity: $HOST_IP"
 render_runtime_configs
 # The shared template's enable=25 = SIGNALING|AIS|SIGNER (STUN/TURN bits NOT set),
-# so actrix logs "ICE服务(STUN/TURN)已禁用" and never starts the STUN/TURN server.
+# so actrix logs "ICE service (STUN/TURN) is disabled" and never starts the STUN/TURN server.
 # The Android emulator needs STUN+TURN (direct ICE can't cross the QEMU NAT), so
 # add ENABLE_STUN(2) + ENABLE_TURN(4) → enable=31.
 perl -0pi -e 's/^enable = 25$/enable = 31/m' "$ACTRIX_CONFIG_PATH"

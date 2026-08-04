@@ -1,41 +1,41 @@
-//! 地理位置和距离计算工具
+//! Geographic location and distance calculation utilities
 //!
-//! 提供 Haversine 公式计算地球表面两点间的大圆距离
+//! Provides the Haversine formula to compute the great-circle distance between two points on Earth
 
 use std::f64::consts::PI;
 
-/// 地球半径（千米）
+/// Earth radius (kilometers)
 const EARTH_RADIUS_KM: f64 = 6371.0;
 
-/// 使用 Haversine 公式计算两个地理坐标之间的距离
+/// Compute the distance between two geographic coordinates using the Haversine formula
 ///
 /// # Arguments
-/// * `lat1` - 点 1 纬度（度数）
-/// * `lon1` - 点 1 经度（度数）
-/// * `lat2` - 点 2 纬度（度数）
-/// * `lon2` - 点 2 经度（度数）
+/// * `lat1` - Point 1 latitude (degrees)
+/// * `lon1` - Point 1 longitude (degrees)
+/// * `lat2` - Point 2 latitude (degrees)
+/// * `lon2` - Point 2 longitude (degrees)
 ///
 /// # Returns
-/// 两点之间的大圆距离（千米）
+/// Great-circle distance between the two points (kilometers)
 ///
 /// # Example
 /// ```
 /// use signaling::geo::haversine_distance;
 ///
-/// // 北京到上海的距离
+/// // Distance from Beijing to Shanghai
 /// let beijing = (39.9042, 116.4074);
 /// let shanghai = (31.2304, 121.4737);
 /// let distance = haversine_distance(beijing.0, beijing.1, shanghai.0, shanghai.1);
-/// assert!((distance - 1067.0).abs() < 10.0); // 约 1067 公里
+/// assert!((distance - 1067.0).abs() < 10.0); // approximately 1067 km
 /// ```
 pub fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    // 转换为弧度
+    // Convert to radians
     let lat1_rad = lat1 * PI / 180.0;
     let lat2_rad = lat2 * PI / 180.0;
     let delta_lat = (lat2 - lat1) * PI / 180.0;
     let delta_lon = (lon2 - lon1) * PI / 180.0;
 
-    // Haversine 公式
+    // Haversine formula
     let a = (delta_lat / 2.0).sin().powi(2)
         + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
     let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
@@ -43,7 +43,7 @@ pub fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
     EARTH_RADIUS_KM * c
 }
 
-/// 地理坐标点
+/// Geographic coordinate point
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GeoPoint {
     pub latitude: f64,
@@ -51,7 +51,7 @@ pub struct GeoPoint {
 }
 
 impl GeoPoint {
-    /// 创建新的地理坐标点
+    /// Create a new geographic coordinate point
     pub fn new(latitude: f64, longitude: f64) -> Self {
         Self {
             latitude,
@@ -59,7 +59,7 @@ impl GeoPoint {
         }
     }
 
-    /// 计算到另一个点的距离（千米）
+    /// Compute distance to another point (kilometers)
     pub fn distance_to(&self, other: &GeoPoint) -> f64 {
         haversine_distance(
             self.latitude,
@@ -82,20 +82,20 @@ mod tests {
 
     #[test]
     fn test_haversine_beijing_shanghai() {
-        // 北京: 39.9042°N, 116.4074°E
-        // 上海: 31.2304°N, 121.4737°E
-        // 实际距离约 1067 公里
+        // Beijing: 39.9042°N, 116.4074°E
+        // Shanghai: 31.2304°N, 121.4737°E
+        // Actual distance approximately 1067 km
         let distance = haversine_distance(39.9042, 116.4074, 31.2304, 121.4737);
-        assert!((distance - 1067.0).abs() < 20.0); // 允许 20km 误差
+        assert!((distance - 1067.0).abs() < 20.0); // allow 20km error
     }
 
     #[test]
     fn test_haversine_new_york_london() {
-        // 纽约: 40.7128°N, 74.0060°W
-        // 伦敦: 51.5074°N, 0.1278°W
-        // 实际距离约 5570 公里
+        // New York: 40.7128°N, 74.0060°W
+        // London: 51.5074°N, 0.1278°W
+        // Actual distance approximately 5570 km
         let distance = haversine_distance(40.7128, -74.0060, 51.5074, -0.1278);
-        assert!((distance - 5570.0).abs() < 50.0); // 允许 50km 误差
+        assert!((distance - 5570.0).abs() < 50.0); // allow 50km error
     }
 
     #[test]

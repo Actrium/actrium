@@ -1,10 +1,10 @@
-//! Signaling 服务速率限制
+//! Signaling server rate limiting
 //!
-//! 实现双重速率限制：
-//! 1. **连接速率限制**：限制每个 IP 建立新 WebSocket 连接的速率
-//! 2. **消息速率限制**：限制每个连接发送消息的速率
+//! Implements dual rate limiting:
+//! 1. **Connection rate limiting**: limits the rate of new WebSocket connections per IP
+//! 2. **Message rate limiting**: limits the rate of messages sent per connection
 //!
-//! 使用 governor crate 实现，支持配置化
+//! Implemented using the governor crate, configurable
 
 use governor::{DefaultDirectRateLimiter, Quota, RateLimiter};
 use platform::config::signaling::{ConnectionRateLimit, MessageRateLimit};
@@ -14,19 +14,19 @@ use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// 连接速率限制器（基于 IP）
+/// Connection rate limiter (per IP)
 #[derive(Debug)]
 pub struct ConnectionRateLimiter {
-    /// 配置
+    /// Configuration
     config: ConnectionRateLimit,
-    /// 每个 IP 的速率限制器
+    /// Per-IP rate limiter
     limiters: Arc<RwLock<HashMap<IpAddr, DefaultDirectRateLimiter>>>,
-    /// 每个 IP 的当前连接数
+    /// Current connection count per IP
     connections: Arc<RwLock<HashMap<IpAddr, u32>>>,
 }
 
 impl ConnectionRateLimiter {
-    /// 创建新的连接速率限制器
+    /// Create a new connection rate limiter
     pub fn new(config: ConnectionRateLimit) -> Self {
         Self {
             config,
@@ -35,15 +35,15 @@ impl ConnectionRateLimiter {
         }
     }
 
-    /// 检查是否允许新连接
+    /// Check whether a new connection is allowed
     ///
-    /// 返回 Ok(()) 如果允许，否则返回 Err
+    /// Returns Ok(()) if allowed, Err otherwise
     pub async fn check_connection(&self, ip: IpAddr) -> Result<(), String> {
         if !self.config.enabled {
             return Ok(());
         }
 
-        // 检查并发连接数
+        // Check concurrent connection count
         let connections = self.connections.read().await;
         if let Some(&count) = connections.get(&ip)
             && count >= self.config.max_concurrent_per_ip
@@ -61,10 +61,10 @@ impl ConnectionRateLimiter {
         }
         drop(connections);
 
-        // 检查连接速率
+        // Check connection rate
         let mut limiters = self.limiters.write().await;
         let limiter = limiters.entry(ip).or_insert_with(|| {
-            // 每分钟 per_minute 个连接，转换为每秒
+            // per_minute connections per minute, convert to per second
             let per_second =
                 NonZeroU32::new((self.config.per_minute as f64 / 60.0).ceil().max(1.0) as u32)
                     .unwrap();
@@ -90,7 +90,7 @@ impl ConnectionRateLimiter {
         }
     }
 
-    /// 增加连接计数
+    /// Increment connection count
     pub async fn increment_connection(&self, ip: IpAddr) {
         if !self.config.enabled {
             return;
@@ -105,7 +105,7 @@ impl ConnectionRateLimiter {
         );
     }
 
-    /// 减少连接计数
+    /// Decrement connection count
     pub async fn decrement_connection(&self, ip: IpAddr) {
         if !self.config.enabled {
             return;
@@ -116,14 +116,14 @@ impl ConnectionRateLimiter {
             *count = count.saturating_sub(1);
             platform::recording::debug!("IP {} connection count decreased to: {}", ip, count);
 
-            // 如果连接数为 0，移除记录以节省内存
+            // If connection count is 0, remove the entry to save memory
             if *count == 0 {
                 connections.remove(&ip);
             }
         }
     }
 
-    /// 获取统计信息
+    /// Get statistics
     pub async fn stats(&self) -> (usize, usize) {
         let limiters = self.limiters.read().await;
         let connections = self.connections.read().await;
@@ -131,17 +131,17 @@ impl ConnectionRateLimiter {
     }
 }
 
-/// 消息速率限制器（基于连接 ID）
+/// Message rate limiter (per connection ID)
 #[derive(Debug)]
 pub struct MessageRateLimiter {
-    /// 配置
+    /// Configuration
     config: MessageRateLimit,
-    /// 每个连接的速率限制器
+    /// Per-connection rate limiter
     limiters: Arc<RwLock<HashMap<String, DefaultDirectRateLimiter>>>,
 }
 
 impl MessageRateLimiter {
-    /// 创建新的消息速率限制器
+    /// Create a new message rate limiter
     pub fn new(config: MessageRateLimit) -> Self {
         Self {
             config,
@@ -149,9 +149,9 @@ impl MessageRateLimiter {
         }
     }
 
-    /// 检查是否允许发送消息
+    /// Check whether sending a message is allowed
     ///
-    /// 返回 Ok(()) 如果允许，否则返回 Err
+    /// Returns Ok(()) if allowed, Err otherwise
     pub async fn check_message(&self, connection_id: &str) -> Result<(), String> {
         if !self.config.enabled {
             return Ok(());
@@ -189,7 +189,7 @@ impl MessageRateLimiter {
         }
     }
 
-    /// 移除连接的速率限制器（连接关闭时调用）
+    /// Remove the rate limiter for a connection (called on connection close)
     pub async fn remove_connection(&self, connection_id: &str) {
         if !self.config.enabled {
             return;
@@ -200,7 +200,7 @@ impl MessageRateLimiter {
         platform::recording::debug!("Removed rate limiter for connection {}", connection_id);
     }
 
-    /// 获取统计信息
+    /// Get statistics
     pub async fn stats(&self) -> usize {
         let limiters = self.limiters.read().await;
         limiters.len()
@@ -245,11 +245,11 @@ mod tests {
         let limiter = MessageRateLimiter::new(config);
         let conn_id = "test-connection-1";
 
-        // 发送一条消息以创建限制器
+        // Send a message to create the limiter
         let _ = limiter.check_message(conn_id).await;
         assert_eq!(limiter.stats().await, 1);
 
-        // 移除连接
+        // Remove the connection
         limiter.remove_connection(conn_id).await;
         assert_eq!(limiter.stats().await, 0);
     }

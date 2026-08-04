@@ -22,7 +22,7 @@ use prost::Message;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-/// AIS 服务状态
+/// AIS service state
 #[derive(Clone)]
 pub struct AISState {
     pub issuer: Arc<AIdIssuer>,
@@ -44,10 +44,10 @@ impl AISState {
     }
 }
 
-/// 创建 AIS 服务的路由
+/// Create the AIS service router
 ///
-/// 应用限流中间件：
-/// - IP 级别：100 req/min（防止单个 IP 的 DoS 攻击）
+/// Apply rate limiting middleware:
+/// - IP level: 100 req/min (prevents DoS attacks from a single IP)
 pub fn create_router(state: AISState) -> Router {
     Router::new()
         .route("/register", post(register_actr))
@@ -61,12 +61,12 @@ pub fn create_router(state: AISState) -> Router {
         .with_state(state)
 }
 
-/// ActrId 注册处理器 - 严格按照 proto 定义返回 RegisterResponse
+/// ActrId registration handler - returns RegisterResponse strictly per the proto definition
 /// RegisterRequest -> RegisterResponse
 async fn register_actr(State(state): State<AISState>, headers: HeaderMap, body: Bytes) -> Bytes {
     let start = std::time::Instant::now();
 
-    // 解析 protobuf 请求
+    // Decode protobuf request
     let request = match RegisterRequest::decode(body) {
         Ok(req) => req,
         Err(err) => {
@@ -102,7 +102,7 @@ async fn register_actr(State(state): State<AISState>, headers: HeaderMap, body: 
         return encode_result(error_result);
     }
 
-    // 验证 Realm 是否存在、状态正常、未过期
+    // Validate realm exists, is in good status, and is not expired
     if let Err(validation_err) = RealmEntity::validate_realm(request.realm.realm_id).await {
         let (code, message) = RealmEntity::map_validation_error(validation_err);
         let error_result = RegisterResponse {
@@ -114,7 +114,7 @@ async fn register_actr(State(state): State<AISState>, headers: HeaderMap, body: 
         return encode_result(error_result);
     }
 
-    // 校验 realm secret（历史 realm 未配置 secret 时兼容放行）
+    // Verify realm secret (legacy realms without a configured secret are allowed through)
     let provided_secret = headers
         .get(REALM_SECRET_HEADER)
         .and_then(|v| v.to_str().ok())
@@ -160,7 +160,7 @@ async fn register_actr(State(state): State<AISState>, headers: HeaderMap, body: 
             }
         };
 
-    // 调用 issuer 签发 credential
+    // Call issuer to sign credentials
     let result = match state
         .issuer
         .issue_credential_with_realm_secret_check(&request, Some(realm_secret_check))
@@ -374,9 +374,9 @@ async fn reissue_credential(
     encode_result(result)
 }
 
-/// POST /ais/renew — 为已有 ActrId 续期 credentials
+/// POST /ais/renew — renew credentials for an existing ActrId
 ///
-/// 处理流程：
+/// Processing flow:
 /// 1. Decode and validate `RenewCredentialRequest`.
 /// 2. Validate realm state.
 /// 3. Validate and rotate renewal token in a transaction.
@@ -542,12 +542,12 @@ async fn renew_credential(State(state): State<AISState>, body: Bytes) -> Respons
     )
 }
 
-/// 健康检查端点
+/// Health check endpoint
 ///
-/// 执行以下检查：
-/// 1. 数据库连接是否正常
-/// 2. KS 服务是否可访问
-/// 3. 密钥缓存是否有效
+/// Performs the following checks:
+/// 1. Database connectivity
+/// 2. KS service reachability
+/// 3. Key cache validity
 async fn health_check(State(state): State<AISState>) -> Json<Value> {
     let mut checks = json!({
         "service": "ais",
@@ -555,7 +555,7 @@ async fn health_check(State(state): State<AISState>) -> Json<Value> {
         "status": "healthy"
     });
 
-    // 检查数据库连接
+    // Check database connectivity
     let db_status = match state.issuer.check_database_health().await {
         Ok(()) => "ok",
         Err(e) => {
@@ -566,7 +566,7 @@ async fn health_check(State(state): State<AISState>) -> Json<Value> {
     };
     checks["database"] = json!(db_status);
 
-    // 检查 KS 服务连通性
+    // Check KS service reachability
     let ks_status = match state.issuer.check_ks_health().await {
         Ok(()) => "ok",
         Err(e) => {
@@ -577,7 +577,7 @@ async fn health_check(State(state): State<AISState>) -> Json<Value> {
     };
     checks["ks_service"] = json!(ks_status);
 
-    // 检查密钥缓存状态
+    // Check key cache status
     let cache_status = match state.issuer.check_key_cache_health().await {
         Ok(info) => json!({"status": "ok", "key_id": info.key_id, "expires_in": info.expires_in}),
         Err(e) => {
@@ -591,10 +591,10 @@ async fn health_check(State(state): State<AISState>) -> Json<Value> {
     Json(checks)
 }
 
-/// 手动触发密钥轮替
+/// Manually trigger key rotation
 ///
-/// 立即从 KS 生成新密钥并更新缓存
-/// 返回新的 key_id
+/// Immediately generates a new key from KS and updates the cache.
+/// Returns the new key_id.
 async fn rotate_key(State(state): State<AISState>) -> Json<Value> {
     match state.issuer.rotate_key().await {
         Ok(new_key_id) => Json(json!({
@@ -612,9 +612,9 @@ async fn rotate_key(State(state): State<AISState>) -> Json<Value> {
     }
 }
 
-/// 获取当前使用的密钥 ID
+/// Get the current key ID
 ///
-/// 用于监控和调试
+/// For monitoring and debugging
 async fn get_current_key(State(state): State<AISState>) -> Json<Value> {
     match state.issuer.get_current_key_id().await {
         Ok(key_id) => Json(json!({
@@ -631,9 +631,10 @@ async fn get_current_key(State(state): State<AISState>) -> Json<Value> {
     }
 }
 
-/// 返回当前 AIS 签名公钥（key_id + base64 pubkey）
+/// Return the current AIS signing public key (key_id + base64 pubkey)
 ///
-/// 供信令服务器或其他服务在 key_cache miss 时按需拉取公钥进行 credential 验签。
+/// Allows signaling servers or other services to fetch the public key on
+/// demand for credential signature verification when a key_cache miss occurs.
 async fn get_signing_pubkey(State(state): State<AISState>) -> Json<Value> {
     match state.issuer.get_current_signing_pubkey().await {
         Ok((key_id, pubkey_bytes)) => {
@@ -655,12 +656,12 @@ async fn get_signing_pubkey(State(state): State<AISState>) -> Json<Value> {
     }
 }
 
-/// 编码 RegisterResponse 为 protobuf 字节
+/// Encode RegisterResponse as protobuf bytes
 fn encode_result(result: RegisterResponse) -> Bytes {
     let mut buf = Vec::new();
     if let Err(err) = result.encode(&mut buf) {
         platform::recording::error!("Failed to encode RegisterResponse: {}", err);
-        // 返回一个编码错误的 ErrorResponse
+        // Return an ErrorResponse for encoding failure
         let error_result = RegisterResponse {
             result: Some(register_response::Result::Error(ErrorResponse {
                 code: 500,
@@ -674,7 +675,7 @@ fn encode_result(result: RegisterResponse) -> Bytes {
     Bytes::from(buf)
 }
 
-/// 编码 RenewCredentialResponse 为 protobuf 字节，并设置匹配的 HTTP status。
+/// Encode RenewCredentialResponse as protobuf bytes and set the matching HTTP status.
 fn encode_renew_result(status: StatusCode, result: RenewCredentialResponse) -> Response {
     let mut buf = Vec::new();
     let body = if let Err(err) = result.encode(&mut buf) {
@@ -709,10 +710,10 @@ fn status_for_error_code(code: u32) -> StatusCode {
     }
 }
 
-/// 将 AidError 转换为 (code, message) 元组
+/// Convert AidError to a (code, message) tuple
 fn aid_error_to_response(err: AidError) -> (u32, String) {
     let code = match &err {
-        // 客户端错误 (4xx)
+        // Client errors (4xx)
         AidError::InvalidFormat => 400,
         AidError::InvalidPrefix => 400,
         AidError::EmptyId => 400,
@@ -724,9 +725,9 @@ fn aid_error_to_response(err: AidError) -> (u32, String) {
         AidError::ManufacturerNotVerified => 403,
         AidError::PackageRevoked => 403,
 
-        // 服务端错误 (5xx)
+        // Server errors (5xx)
         AidError::GenerationFailed(msg) => {
-            // 如果是 KS 不可用，返回 503 (Service Unavailable)
+            // If KS is unavailable, return 503 (Service Unavailable)
             if msg.contains("KS unavailable") || msg.contains("KS service") {
                 503
             } else {
@@ -739,11 +740,11 @@ fn aid_error_to_response(err: AidError) -> (u32, String) {
     (code, err.to_string())
 }
 
-/// 将 AidError 转换为 proto ErrorResponse
+/// Convert AidError to a proto ErrorResponse
 ///
-/// 错误码映射策略：
-/// - 4xx: 客户端错误（格式、过期、验证失败）
-/// - 5xx: 服务端错误（生成失败、内部错误）
+/// Error code mapping strategy:
+/// - 4xx: client errors (format, expiry, validation failure)
+/// - 5xx: server errors (generation failure, internal error)
 fn aid_error_to_error_response(err: AidError) -> ErrorResponse {
     let (code, message) = aid_error_to_response(err);
     ErrorResponse { code, message }
@@ -757,7 +758,7 @@ mod tests {
 
     #[test]
     fn test_protobuf_request_encoding_decoding() {
-        // 测试完整的 protobuf 请求编解码
+        // Test full protobuf request encoding/decoding
         let actr_type = ActrType {
             manufacturer: "apple".to_string(),
             name: "iPhone15".to_string(),
@@ -782,11 +783,11 @@ mod tests {
             manufacturer_auth_nonce: None,
         };
 
-        // 编码
+        // Encode
         let mut buf = Vec::new();
         request.encode(&mut buf).unwrap();
 
-        // 解码
+        // Decode
         let decoded_request = RegisterRequest::decode(buf.as_slice()).unwrap();
         assert_eq!(decoded_request.realm.realm_id, 12345);
         assert_eq!(decoded_request.actr_type.manufacturer, "apple");
@@ -795,7 +796,7 @@ mod tests {
 
     #[test]
     fn test_protobuf_minimal_request() {
-        // 测试最小字段的 protobuf 请求
+        // Test minimal-field protobuf request
         let request = RegisterRequest {
             actr_type: ActrType {
                 manufacturer: "test".to_string(),
@@ -816,7 +817,7 @@ mod tests {
             manufacturer_auth_nonce: None,
         };
 
-        // 编码解码循环
+        // Encode/decode round-trip
         let mut buf = Vec::new();
         request.encode(&mut buf).unwrap();
         let decoded_request = RegisterRequest::decode(buf.as_slice()).unwrap();
@@ -831,7 +832,7 @@ mod tests {
         use actr_protocol::{ActrId, register_response::RegisterOk};
         use prost_types::Timestamp;
 
-        // 测试成功的 RegisterResponse
+        // Test successful RegisterResponse
         let register_ok = RegisterOk {
             actr_id: ActrId {
                 realm: Realm { realm_id: 1 },
@@ -863,7 +864,7 @@ mod tests {
             result: Some(register_response::Result::Success(register_ok)),
         };
 
-        // 编码解码循环
+        // Encode/decode round-trip
         let mut buf = Vec::new();
         response.encode(&mut buf).unwrap();
         let decoded_response = RegisterResponse::decode(buf.as_slice()).unwrap();
@@ -881,7 +882,7 @@ mod tests {
 
     #[test]
     fn test_register_response_error() {
-        // 测试错误的 RegisterResponse
+        // Test error RegisterResponse
         let error = ErrorResponse {
             code: 400,
             message: "Bad request".to_string(),
@@ -891,7 +892,7 @@ mod tests {
             result: Some(register_response::Result::Error(error)),
         };
 
-        // 编码解码循环
+        // Encode/decode round-trip
         let mut buf = Vec::new();
         response.encode(&mut buf).unwrap();
         let decoded_response = RegisterResponse::decode(buf.as_slice()).unwrap();

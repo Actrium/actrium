@@ -1,26 +1,26 @@
 use serde::{Deserialize, Serialize};
 
-/// TURN 服务配置
+/// TURN service configuration
 ///
-/// TURN 中继服务的专用配置参数。
+/// Dedicated configuration parameters for the TURN relay service.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct TurnConfig {
-    /// 中继端口范围
+    /// Relay port range
     ///
-    /// TURN 服务用于数据中继的 UDP 端口范围。
-    /// 格式：开始端口-结束端口，如 "49152-65535"。
-    /// 范围越大，可支持的并发中继会话越多。
+    /// UDP port range used by the TURN service for data relay.
+    /// Format: start_port-end_port, e.g. "49152-65535".
+    /// The larger the range, the more concurrent relay sessions can be supported.
     pub relay_port_range: String,
 
-    /// TURN 认证域
+    /// TURN authentication realm
     ///
-    /// TURN 服务的认证域名，用于 TURN 协议的认证机制。
+    /// The authentication realm for the TURN service, used in the TURN protocol authentication mechanism.
     pub realm: String,
 
-    /// TURN 共享密钥（HMAC 时效凭证）
+    /// TURN shared secret (HMAC time-limited credentials)
     ///
-    /// 用于生成和验证 TURN 时效凭证（coturn --use-auth-secret 兼容格式）。
-    /// AIS 生成 TurnCredential 时使用此密钥，TURN 服务器验证时使用相同密钥。
+    /// Used to generate and verify TURN time-limited credentials (coturn --use-auth-secret compatible format).
+    /// AIS uses this secret when generating TurnCredentials; the TURN server uses the same secret for verification.
     #[serde(default = "default_turn_secret")]
     pub turn_secret: String,
 }

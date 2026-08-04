@@ -12,16 +12,16 @@ use serde::{Deserialize, Serialize};
 /// Resource quota
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ResourceQuota {
-    /// CPU quota（CPU cores）
+    /// CPU quota (CPU cores)
     pub cpu_cores: f64,
 
-    /// memory quota（bytes）
+    /// memory quota (bytes)
     pub memory_bytes: u64,
 
-    /// network bandwidth quota（bytes/sec）
+    /// network bandwidth quota (bytes/sec)
     pub network_bandwidth_bps: u64,
 
-    /// disk IO quota（bytes/sec）
+    /// disk IO quota (bytes/sec)
     pub disk_io_bps: u64,
 }
 

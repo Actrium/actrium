@@ -1,10 +1,10 @@
-//! 数据库相关错误类型
+//! Database error types
 //!
-//! 定义所有与数据库连接、查询、事务相关的错误
+//! Defines all errors related to database connections, queries, and transactions
 
 use thiserror::Error;
 
-/// 数据库相关错误
+/// Database-related errors
 #[derive(Error, Debug)]
 pub enum DatabaseError {
     #[error("Connection failed: {message}")]

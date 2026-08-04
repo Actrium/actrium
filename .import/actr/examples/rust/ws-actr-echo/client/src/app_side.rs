@@ -13,7 +13,7 @@ impl AppSide {
         info!("[App] started");
         println!("===== WS Echo Client App =====");
         println!("messagewillvia/through WebSocket direct connectionchannelsend[...]server");
-        println!("[...]messagesend（[...] 'quit' [...]）：");
+        println!("[...]messagesend ([...] 'quit' [...]):");
 
         use tokio::io::{AsyncBufReadExt, BufReader, stdin};
         let stdin = stdin();

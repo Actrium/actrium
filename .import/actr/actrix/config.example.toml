@@ -184,7 +184,7 @@ key_ttl_seconds = 3600
 
 # AIS automatically uses local KS if enabled, or configure explicitly (optional):
 # [services.ais.dependencies.ks]
-# endpoint = "http://remote-ks:8080"  # gRPC endpoint（复用该实例主端口）
+# endpoint = "http://remote-ks:8080"  # gRPC endpoint (reuses the instance main port)
 
 # MFR (Manufacturer Registry) Configuration (optional)
 # Controls publish nonce retention for audit / replay investigation.

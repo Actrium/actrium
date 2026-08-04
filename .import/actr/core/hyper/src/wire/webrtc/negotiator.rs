@@ -550,7 +550,7 @@ impl WebRtcNegotiator {
         peer_connection: &RTCPeerConnection,
         offer_sdp: String,
     ) -> NetworkResult<String> {
-        // Set remote Description（Offer）
+        // Set remote Description (Offer)
         let offer = RTCSessionDescription::offer(offer_sdp)?;
         peer_connection.set_remote_description(offer).await?;
 

@@ -1,7 +1,7 @@
 /**
  * Fast Path Forwarder -
  *
- *  WebRTC DataChannel  Service Worker WASM
+ * Forwards WebRTC DataChannel messages to the Service Worker WASM layer.
  */
 
 import { ServiceWorkerBridge } from './sw-bridge';
@@ -13,23 +13,23 @@ export interface FastPathData {
 }
 
 /**
- * Fast Path
+ * Fast Path forwarder.
  */
 export class FastPathForwarder {
   private swBridge: ServiceWorkerBridge;
   private batchQueue: FastPathData[] = [];
   private batchTimer: number | null = null;
-  private batchSize = 10; //
-  private batchTimeoutMs = 5; // （）
+  private batchSize = 10; // max items per batch
+  private batchTimeoutMs = 5; // flush timeout in ms
 
   constructor(swBridge: ServiceWorkerBridge) {
     this.swBridge = swBridge;
   }
 
   /**
-   *  Fast Path  Service Worker
+   * Forward data immediately via the Fast Path to the Service Worker.
    *
-   *  Transferable ArrayBuffer
+   * Uses Transferable ArrayBuffer for zero-copy transfer.
    */
   forward(streamId: string, data: ArrayBuffer): void {
     const fastPathData: FastPathData = {
@@ -38,14 +38,14 @@ export class FastPathForwarder {
       timestamp: Date.now(),
     };
 
-    // （）
+    // Forward immediately (no batching)
     this.forwardImmediate(fastPathData);
   }
 
   /**
-   *  Fast Path
+   * Forward data in batches via the Fast Path.
    *
-   * ， PostMessage
+   * Buffers messages and flushes via PostMessage when batch is full or timer fires.
    */
   forwardBatch(streamId: string, data: ArrayBuffer): void {
     this.batchQueue.push({
@@ -54,11 +54,11 @@ export class FastPathForwarder {
       timestamp: Date.now(),
     });
 
-    // ，
+    // If batch is full, flush immediately
     if (this.batchQueue.length >= this.batchSize) {
       this.flushBatch();
     } else if (this.batchTimer === null) {
-      //
+      // Otherwise, start the flush timer
       this.batchTimer = window.setTimeout(() => {
         this.flushBatch();
       }, this.batchTimeoutMs);
@@ -66,7 +66,7 @@ export class FastPathForwarder {
   }
 
   /**
-   *
+   * Forward a single message immediately.
    */
   private forwardImmediate(fastPathData: FastPathData): void {
     const view = new Uint8Array(fastPathData.data);
@@ -84,7 +84,7 @@ export class FastPathForwarder {
   }
 
   /**
-   *
+   * Forward a single message immediately.
    */
   private flushBatch(): void {
     if (this.batchQueue.length === 0) {
@@ -123,7 +123,7 @@ export class FastPathForwarder {
   }
 
   /**
-   *
+   * Forward a single message immediately.
    */
   setBatchParams(size: number, timeoutMs: number): void {
     this.batchSize = size;
@@ -131,7 +131,7 @@ export class FastPathForwarder {
   }
 
   /**
-   *
+   * Forward a single message immediately.
    */
   getMetrics(): {
     queueLength: number;
@@ -144,7 +144,7 @@ export class FastPathForwarder {
   }
 
   /**
-   *
+   * Forward a single message immediately.
    */
   dispose(): void {
     if (this.batchTimer !== null) {

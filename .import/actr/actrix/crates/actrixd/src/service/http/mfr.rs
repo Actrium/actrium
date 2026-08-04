@@ -1,6 +1,6 @@
-//! MFR (Manufacturer Registry) HTTP 服务实现
+//! MFR (Manufacturer Registry) HTTP service implementation
 //!
-//! 提供厂商注册、域名验证、Actor 包发布与查询的 HTTP API 服务
+//! Provides HTTP API services for manufacturer registration, domain verification, and Actor package publishing and querying
 
 use crate::service::HttpRouterService;
 use actrix_mfr::{
@@ -14,7 +14,7 @@ use platform::config::ActrixConfig;
 use platform::{ServiceInfo, ServiceType};
 use std::sync::Arc;
 
-/// MFR HTTP 服务实现
+/// MFR HTTP service implementation
 #[derive(Debug)]
 pub struct MfrService {
     info: ServiceInfo,
@@ -28,7 +28,7 @@ impl MfrService {
             info: ServiceInfo::new(
                 "MFR Service",
                 ServiceType::Mfr,
-                Some("Manufacturer Registry - 厂商注册和 Actor 包签名服务".to_string()),
+                Some("Manufacturer Registry - manufacturer registration and Actor package signing service".to_string()),
                 &config,
             ),
             config,

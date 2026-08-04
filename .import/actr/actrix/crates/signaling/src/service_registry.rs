@@ -1,12 +1,12 @@
-//! 服务注册表实现
+//! Service registry implementation
 //!
-//! 负责管理所有已注册的服务，提供服务发现功能
+//! Responsible for managing all registered services and providing service discovery
 //!
-//! ## 持久化策略
+//! ## Persistence strategy
 //!
-//! - **内存 HashMap**：主存储，快速查询
-//! - **SQLite 缓存**：可选，用于重启恢复
-//! - **后台写入**：不阻塞主逻辑，异步写入数据库
+//! - **In-memory HashMap**: primary store, fast lookups
+//! - **SQLite cache**: optional, used for restart recovery
+//! - **Background writes**: non-blocking, async writes to the database
 
 use actr_protocol::{ActrId, ActrType};
 use platform::RealmError;
@@ -18,26 +18,26 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::service_registry_storage::ServiceRegistryStorage;
 
-/// 服务过期阈值（秒）- 超过此时间未收到心跳则认为服务过期
+/// Service expiry threshold (seconds) - a service is considered expired if no heartbeat is received within this time
 pub const SERVICE_EXPIRY_THRESHOLD_SECS: u64 = 60;
 
-/// 清理任务执行间隔（秒）
+/// Cleanup task execution interval (seconds)
 pub const CLEANUP_INTERVAL_SECS: u64 = 30;
 
-/// 服务能力描述
+/// Service capability description
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceCapabilities {
-    /// 最大并发处理数
+    /// Maximum concurrent requests
     pub max_concurrent_requests: Option<u32>,
-    /// 支持的版本范围
+    /// Supported version range
     pub version_range: Option<String>,
-    /// 所在区域
+    /// Region
     pub region: Option<String>,
-    /// 自定义标签
+    /// Custom tags
     pub tags: Option<HashMap<String, String>>,
 }
 
-/// 服务状态
+/// Service status
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum ServiceStatus {
     Available,
@@ -46,7 +46,7 @@ pub enum ServiceStatus {
     Unavailable,
 }
 
-/// 服务信息
+/// Service info
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceInfo {
     pub actor_id: ActrId,
@@ -56,98 +56,99 @@ pub struct ServiceInfo {
     pub status: ServiceStatus,
     pub last_heartbeat_time_secs: u64, // Unix timestamp
 
-    // 新增字段：协议规格
-    /// 服务协议规格（包含 fingerprint、protobufs、tags 等）
+    // New field: protocol spec
+    /// Service protocol spec (includes fingerprint, protobufs, tags, etc.)
     #[serde(skip)]
     pub service_spec: Option<actr_protocol::ServiceSpec>,
 
-    // 新增字段：访问控制列表
-    /// ACL 规则
+    // New field: access control list
+    /// ACL rules
     #[serde(skip)]
     pub acl: Option<actr_protocol::Acl>,
 
-    // 新增字段：负载指标（来自 Ping 消息）
-    /// 服务可用性状态（protobuf enum ServiceAvailabilityState，使用 i32 存储）
+    // New field: load metrics (from Ping messages)
+    /// Service availability state (protobuf enum ServiceAvailabilityState, stored as i32)
     /// FULL=0, DEGRADED=1, OVERLOADED=2, UNAVAILABLE=3
     pub service_availability_state: Option<i32>,
-    /// 剩余处理能力 (0.0 ~ 1.0)
+    /// Remaining processing capacity (0.0 ~ 1.0)
     pub power_reserve: Option<f32>,
-    /// 消息积压 (0.0 ~ 1.0)
+    /// Message backlog (0.0 ~ 1.0)
     pub mailbox_backlog: Option<f32>,
 
-    // 新增字段：依赖健康状态（protobuf enum，使用 i32 存储）
-    /// 最坏依赖健康状态（多个依赖聚合结果，worst-case first 策略）
+    // New field: dependency health state (protobuf enum, stored as i32)
+    /// Worst dependency health state (aggregated across multiple dependencies, worst-case first strategy)
     /// protobuf enum ServiceDependencyState: HEALTHY=0, WARNING=1, BROKEN=2
     pub worst_dependency_health_state: Option<i32>,
 
-    // 新增字段：负载均衡排序所需的复杂指标
-    /// 地理位置信息（区域 + 经纬度）
+    // New field: complex metrics for load-balancing sort
+    /// Geographic location (region + lat/long)
     pub geo_location: Option<ServiceLocation>,
-    /// 是否精确匹配客户端 fingerprint（由 LoadBalancer 标记）
+    /// Whether the client fingerprint matches exactly (marked by LoadBalancer)
     #[serde(skip)]
     pub is_exact_match: bool,
-    /// 粘滞客户端 ID 列表（会话保持，从 Ping 消息获取）
+    /// Sticky client ID list (session affinity, obtained from Ping messages)
     pub sticky_client_ids: Vec<String>,
 
-    // WebSocket 直连地址
-    /// 该服务当前开启的 WebSocket 服务端地址（如 "ws://192.168.1.10:9100"）。
-    /// 来自注册时的 `RegisterRequest::ws_address` 字段。
-    /// `None` 表示该服务不支持 WebSocket 直连。
+    // WebSocket direct connection address
+    /// The WebSocket server address currently open for this service (e.g. "ws://192.168.1.10:9100").
+    /// Comes from the `RegisterRequest::ws_address` field at registration time.
+    /// `None` means this service does not support WebSocket direct connection.
     #[serde(default)]
     pub ws_address: Option<String>,
 
-    /// 是否来自 SQLite 持久化恢复（actrix 重启时 restore_from_storage 加载）。
+    /// Whether this entry was restored from SQLite persistence (loaded via restore_from_storage on actrix restart).
     ///
-    /// 标记为 true 时，该条目为"预备候选"：等待服务进程重新建立 WebSocket 连接并调用
-    /// `register_service_full()` 完成确认。若同 service_name 下有新的活跃注册到来，
-    /// 预备候选将被清除，以避免幽灵候选影响路由决策。
+    /// When marked as true, this entry is a "preliminary candidate": it waits for the service process
+    /// to re-establish a WebSocket connection and call `register_service_full()` to complete confirmation.
+    /// If a new active registration arrives under the same service_name, the preliminary candidate
+    /// will be cleared to prevent ghost candidates from affecting routing decisions.
     #[serde(default)]
     pub is_restored_from_storage: bool,
 }
 
-/// 服务地理位置信息
+/// Service geographic location
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceLocation {
-    /// 地理区域（如 "us-west", "cn-beijing"）
+    /// Geographic region (e.g. "us-west", "cn-beijing")
     pub region: String,
-    /// 经度（可选）
+    /// Longitude (optional)
     pub longitude: Option<f64>,
-    /// 纬度（可选）
+    /// Latitude (optional)
     pub latitude: Option<f64>,
 }
 
-/// 服务需求描述
+/// Service requirement description
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceRequirements {
-    /// 最小版本要求
+    /// Minimum version requirement
     pub min_version: Option<String>,
-    /// 区域偏好
+    /// Preferred regions
     pub preferred_regions: Option<Vec<String>>,
-    /// 必需标签
+    /// Required tags
     pub required_tags: Option<HashMap<String, String>>,
 }
 
-/// 服务性能指标
+/// Service performance metrics
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ServiceMetrics {
-    /// 当前活跃连接数
+    /// Current active connection count
     pub active_connections: u32,
-    /// 平均响应时间（毫秒）
+    /// Average response time (milliseconds)
     pub avg_response_time_ms: f64,
-    /// 错误率
+    /// Error rate
     pub error_rate: f64,
 }
 
-/// 服务注册表
+/// Service registry
 #[derive(Debug, Default)]
 pub struct ServiceRegistry {
-    /// 服务映射表：service_name -> 服务实例列表
+    /// Service map: service_name -> list of service instances
     services: HashMap<String, Vec<ServiceInfo>>,
-    /// 消息类型映射表：message_type -> service_name 列表
+    /// Message type index: message_type -> list of service names
     message_type_index: HashMap<String, Vec<String>>,
-    /// Actor ID 映射表：actor_id -> 服务列表
+    /// Actor ID index: actor_id -> list of services
     actor_index: HashMap<ActrId, Vec<String>>,
-    /// SQLite 持久化缓存（可选）
+    /// SQLite persistence cache (optional)
     storage: Option<Arc<ServiceRegistryStorage>>,
 }
 
@@ -197,18 +198,18 @@ impl ServiceRegistry {
         }
     }
 
-    /// 设置持久化存储（启动时调用）
+    /// Set persistence storage (called at startup)
     pub fn set_storage(&mut self, storage: Arc<ServiceRegistryStorage>) {
-        platform::recording::info!("ServiceRegistry 启用 SQLite 持久化缓存");
+        platform::recording::info!("ServiceRegistry enabling SQLite persistence cache");
         self.storage = Some(storage);
     }
 
-    /// 从存储恢复服务列表（启动时调用）
+    /// Restore service list from storage (called at startup)
     pub async fn restore_from_storage(&mut self) -> Result<usize, String> {
         let storage = match &self.storage {
             Some(s) => s,
             None => {
-                platform::recording::warn!("未配置存储，跳过恢复");
+                platform::recording::warn!("No storage configured, skipping recovery");
                 return Ok(0);
             }
         };
@@ -216,22 +217,22 @@ impl ServiceRegistry {
         match storage.load_all_services().await {
             Ok(services) => {
                 let count = services.len();
-                platform::recording::info!("从缓存恢复 {} 个服务", count);
+                platform::recording::info!("Restored {} services from cache", count);
 
-                // 将服务加载到内存，标记为 storage-restored（等待 WebSocket 重连确认）
+                // Load services into memory, mark as storage-restored (awaiting WebSocket reconnect confirmation)
                 for mut service in services {
                     service.is_restored_from_storage = true;
                     let actor_id = service.actor_id.clone();
                     let service_name = service.service_name.clone();
                     let message_types = service.message_types.clone();
 
-                    // 添加到服务映射表
+                    // Add to service map
                     self.services
                         .entry(service_name.clone())
                         .or_default()
                         .push(service);
 
-                    // 更新消息类型索引
+                    // Update message type index
                     for message_type in &message_types {
                         self.message_type_index
                             .entry(message_type.clone())
@@ -239,7 +240,7 @@ impl ServiceRegistry {
                             .push(service_name.clone());
                     }
 
-                    // 更新 Actor 索引
+                    // Update Actor index
                     self.actor_index
                         .entry(actor_id)
                         .or_default()
@@ -249,13 +250,13 @@ impl ServiceRegistry {
                 Ok(count)
             }
             Err(e) => {
-                platform::recording::error!("从缓存恢复服务失败: {}", e);
-                Err(format!("恢复失败: {e}"))
+                platform::recording::error!("Failed to restore services from cache: {}", e);
+                Err(format!("Recovery failed: {e}"))
             }
         }
     }
 
-    /// 注册服务（完整版本，支持 ServiceSpec 和 ACL）
+    /// Register service (full version, supports ServiceSpec and ACL)
     #[allow(clippy::too_many_arguments)]
     pub fn register_service_full(
         &mut self,
@@ -268,7 +269,7 @@ impl ServiceRegistry {
         ws_address: Option<String>,
     ) -> Result<(), String> {
         platform::recording::info!(
-            "注册服务: {} (Actor {}), has_spec={}, has_acl={}, ws_address={:?}",
+            "Register service: {} (Actor {}), has_spec={}, has_acl={}, ws_address={:?}",
             service_name,
             actor_id.to_string_repr(),
             service_spec.is_some(),
@@ -296,18 +297,19 @@ impl ServiceRegistry {
             is_restored_from_storage: false,
         };
 
-        // 异步写入 SQLite 缓存（后台任务，不阻塞）
+        // Async write to SQLite cache (background task, non-blocking)
         if let Some(storage) = self.storage.clone() {
             let service_to_save = service_info.clone();
             tokio::spawn(async move {
                 if let Err(e) = storage.save_service(&service_to_save).await {
-                    platform::recording::error!("保存服务到缓存失败: {}", e);
+                    platform::recording::error!("Failed to save service to cache: {}", e);
                 }
             });
         }
 
-        // 添加到服务映射表。清理 storage-restored 幽灵候选，并替换同一 Actor
-        // 对同一服务的已有注册。其他活跃 Actor 的实例继续保留，以支持水平扩展。
+        // Add to service map. Clear storage-restored ghost candidates and replace the same Actor's
+        // existing registration for the same service. Other active Actor instances are retained
+        // to support horizontal scaling.
         let entry = self.services.entry(service_name.clone()).or_default();
         let ghost_actor_ids: Vec<ActrId> = entry
             .iter()
@@ -319,7 +321,7 @@ impl ServiceRegistry {
 
         for ghost_id in &ghost_actor_ids {
             platform::recording::info!(
-                "清除 storage-restored 幽灵候选: service={}, actor={}",
+                "Cleared storage-restored ghost candidate: service={}, actor={}",
                 service_name,
                 ghost_id.to_string_repr()
             );
@@ -330,7 +332,7 @@ impl ServiceRegistry {
         Ok(())
     }
 
-    /// 注册服务（简化版本，向后兼容）
+    /// Register service (simplified version, backward compatible)
     pub fn register_service(
         &mut self,
         actor_id: ActrId,
@@ -349,7 +351,7 @@ impl ServiceRegistry {
         )
     }
 
-    /// 更新服务的负载指标（从 Ping 消息中获取）
+    /// Update service load metrics (from Ping messages)
     pub fn update_load_metrics(
         &mut self,
         actor_id: &ActrId,
@@ -358,14 +360,14 @@ impl ServiceRegistry {
         mailbox_backlog: f32,
     ) -> Result<(), String> {
         platform::recording::debug!(
-            "更新 Actor {} 负载指标: service_availability_state={}, power={:.2}, backlog={:.2}",
+            "Update Actor {} load metrics: service_availability_state={}, power={:.2}, backlog={:.2}",
             actor_id.to_string_repr(),
             service_availability_state,
             power_reserve,
             mailbox_backlog
         );
 
-        // 查找该 Actor 的所有服务
+        // Find all services for this Actor
         if let Some(service_names) = self.actor_index.get(actor_id) {
             for service_name in service_names {
                 if let Some(services) = self.services.get_mut(service_name) {
@@ -375,9 +377,12 @@ impl ServiceRegistry {
                             service.power_reserve = Some(power_reserve);
                             service.mailbox_backlog = Some(mailbox_backlog);
                             service.last_heartbeat_time_secs = current_timestamp();
-                            platform::recording::debug!("负载指标更新成功: {}", service_name);
+                            platform::recording::debug!(
+                                "Load metrics updated successfully: {}",
+                                service_name
+                            );
 
-                            // 异步更新 SQLite 缓存的心跳时间（后台任务，不阻塞）
+                            // Async update heartbeat time in SQLite cache (background task, non-blocking)
                             if let Some(storage) = self.storage.clone() {
                                 let actor_id_clone = actor_id.clone();
                                 let service_name_clone = service_name.clone();
@@ -386,7 +391,10 @@ impl ServiceRegistry {
                                         .update_heartbeat(&actor_id_clone, &service_name_clone)
                                         .await
                                     {
-                                        platform::recording::error!("更新缓存心跳失败: {}", e);
+                                        platform::recording::error!(
+                                            "Failed to update cache heartbeat: {}",
+                                            e
+                                        );
                                     }
                                 });
                             }
@@ -397,15 +405,15 @@ impl ServiceRegistry {
             Ok(())
         } else {
             Err(format!(
-                "未找到 Actor {} 的服务注册",
+                "No service registration found for Actor {}",
                 actor_id.serial_number
             ))
         }
     }
 
-    /// 获取服务的 ServiceSpec（用于兼容性检查）
+    /// Get service's ServiceSpec (for compatibility checking)
     pub fn get_service_spec(&self, actor_id: &ActrId) -> Option<&actr_protocol::ServiceSpec> {
-        // 从 actor_index 找到服务名，再从 services 中找到实例
+        // Find service name from actor_index, then find the instance from services
         self.actor_index.get(actor_id).and_then(|service_names| {
             service_names.first().and_then(|service_name| {
                 self.services.get(service_name).and_then(|services| {
@@ -418,7 +426,7 @@ impl ServiceRegistry {
         })
     }
 
-    /// 获取服务的 ACL（用于访问控制）
+    /// Get service's ACL (for access control)
     pub fn get_acl(&self, actor_id: &ActrId) -> Option<&actr_protocol::Acl> {
         self.actor_index.get(actor_id).and_then(|service_names| {
             service_names.first().and_then(|service_name| {
@@ -432,20 +440,20 @@ impl ServiceRegistry {
         })
     }
 
-    /// 获取 ServiceRegistryStorage 引用（用于兼容性协商时查询 proto specs）
+    /// Get ServiceRegistryStorage reference (for querying proto specs during compatibility negotiation)
     pub fn get_storage(&self) -> Option<Arc<ServiceRegistryStorage>> {
         self.storage.clone()
     }
 
-    /// 根据消息类型发现服务
+    /// Discover services by message type
     pub fn discover_by_message_type(&self, message_type: &str) -> Vec<&ServiceInfo> {
-        platform::recording::debug!("根据消息类型发现服务: {}", message_type);
+        platform::recording::debug!("Discovering services by message type: {}", message_type);
 
         if let Some(service_names) = self.message_type_index.get(message_type) {
             let mut services = Vec::new();
             for service_name in service_names {
                 if let Some(service_instances) = self.services.get(service_name) {
-                    // 只返回可用的服务实例
+                    // Only return available service instances
                     services.extend(
                         service_instances
                             .iter()
@@ -455,14 +463,17 @@ impl ServiceRegistry {
             }
             services
         } else {
-            platform::recording::debug!("未找到支持消息类型 {} 的服务", message_type);
+            platform::recording::debug!(
+                "No services found supporting message type {}",
+                message_type
+            );
             Vec::new()
         }
     }
 
-    /// 根据服务名发现服务
+    /// Discover services by service name
     pub fn discover_by_service_name(&self, service_name: &str) -> Vec<&ServiceInfo> {
-        platform::recording::debug!("根据服务名发现服务: {}", service_name);
+        platform::recording::debug!("Discovering services by name: {}", service_name);
 
         if let Some(services) = self.services.get(service_name) {
             services
@@ -470,12 +481,12 @@ impl ServiceRegistry {
                 .filter(|s| s.status == ServiceStatus::Available)
                 .collect()
         } else {
-            platform::recording::debug!("未找到服务: {}", service_name);
+            platform::recording::debug!("Service not found: {}", service_name);
             Vec::new()
         }
     }
 
-    /// 根据 ServiceSpec name 发现服务（跨所有服务类型搜索）
+    /// Discover services by ServiceSpec name (search across all service types)
     pub fn discover_by_spec_name(&self, spec_name: &str) -> Vec<&ServiceInfo> {
         self.services
             .values()
@@ -489,12 +500,12 @@ impl ServiceRegistry {
             .collect()
     }
 
-    /// 根据需求发现服务
+    /// Discover services by requirements
     pub fn discover_by_requirements(
         &self,
         requirements: &ServiceRequirements,
     ) -> Vec<&ServiceInfo> {
-        platform::recording::debug!("根据需求发现服务: {:?}", requirements);
+        platform::recording::debug!("Discovering services by requirements: {:?}", requirements);
 
         let mut matching_services = Vec::new();
 
@@ -504,18 +515,18 @@ impl ServiceRegistry {
                     continue;
                 }
 
-                // 检查版本要求
+                // Check version requirements
                 if let (Some(min_version), Some(capabilities)) =
                     (&requirements.min_version, &service.capabilities)
                     && let Some(version_range) = &capabilities.version_range
                 {
-                    // 简单的版本比较，实际应该使用语义版本
+                    // Simple version comparison; should use semantic versioning in practice
                     if version_range < min_version {
                         continue;
                     }
                 }
 
-                // 检查区域偏好
+                // Check region preference
                 if let (Some(preferred_regions), Some(capabilities)) =
                     (&requirements.preferred_regions, &service.capabilities)
                     && let Some(region) = &capabilities.region
@@ -524,7 +535,7 @@ impl ServiceRegistry {
                     continue;
                 }
 
-                // 检查必需标签
+                // Check required tags
                 if let (Some(required_tags), Some(capabilities)) =
                     (&requirements.required_tags, &service.capabilities)
                 {
@@ -540,7 +551,7 @@ impl ServiceRegistry {
                             continue;
                         }
                     } else {
-                        // 服务没有标签但要求有标签
+                        // Service has no tags but tags are required
                         continue;
                     }
                 }
@@ -552,7 +563,7 @@ impl ServiceRegistry {
         matching_services
     }
 
-    /// 更新服务状态
+    /// Update service status
     pub fn update_service_status(
         &mut self,
         actor_id: &ActrId,
@@ -561,7 +572,7 @@ impl ServiceRegistry {
         metrics: Option<ServiceMetrics>,
     ) -> Result<(), String> {
         platform::recording::debug!(
-            "更新服务状态: {} (Actor {}) -> {:?}",
+            "Update service status: {} (Actor {}) -> {:?}",
             service_name,
             actor_id.to_string_repr(),
             status
@@ -574,8 +585,8 @@ impl ServiceRegistry {
                     service.last_heartbeat_time_secs = current_timestamp();
 
                     if let Some(_metrics) = metrics {
-                        // 这里可以存储性能指标，暂时忽略
-                        platform::recording::debug!("收到服务性能指标数据");
+                        // Performance metrics could be stored here; ignored for now
+                        platform::recording::debug!("Received service performance metrics data");
                     }
 
                     return Ok(());
@@ -584,40 +595,40 @@ impl ServiceRegistry {
         }
 
         Err(format!(
-            "未找到服务实例: {} (Actor {})",
+            "Service instance not found: {} (Actor {})",
             service_name, actor_id.serial_number
         ))
     }
 
-    /// 注销服务
+    /// Unregister service
     pub fn unregister_service(
         &mut self,
         actor_id: &ActrId,
         service_name: &str,
     ) -> Result<(), String> {
         platform::recording::info!(
-            "注销服务: {} (Actor {})",
+            "Unregister service: {} (Actor {})",
             service_name,
             actor_id.to_string_repr()
         );
 
-        // 从服务映射表中移除
+        // Remove from service map
         if let Some(services) = self.services.get_mut(service_name) {
             let original_len = services.len();
             services.retain(|s| s.actor_id != *actor_id);
 
             if services.len() == original_len {
                 return Err(format!(
-                    "未找到要注销的服务实例: {} (Actor {})",
+                    "Service instance to unregister not found: {} (Actor {})",
                     service_name, actor_id.serial_number
                 ));
             }
 
-            // 如果这是最后一个实例，清理消息类型索引
+            // If this is the last instance, clean up the message type index
             if services.is_empty() {
                 self.services.remove(service_name);
 
-                // 从消息类型索引中移除
+                // Remove from message type index
                 self.message_type_index.retain(|_, service_names| {
                     service_names.retain(|name| name != service_name);
                     !service_names.is_empty()
@@ -625,7 +636,7 @@ impl ServiceRegistry {
             }
         }
 
-        // 从 Actor 索引中移除
+        // Remove from Actor index
         if let Some(actor_services) = self.actor_index.get_mut(actor_id) {
             actor_services.retain(|name| name != service_name);
 
@@ -634,7 +645,7 @@ impl ServiceRegistry {
             }
         }
 
-        // 异步从 SQLite 缓存删除（后台任务，不阻塞）
+        // Async delete from SQLite cache (background task, non-blocking)
         if let Some(storage) = self.storage.clone() {
             let actor_id_clone = actor_id.clone();
             let service_name_owned = service_name.to_string();
@@ -643,7 +654,7 @@ impl ServiceRegistry {
                     .delete_service(&actor_id_clone, &service_name_owned)
                     .await
                 {
-                    platform::recording::error!("从缓存删除服务失败: {}", e);
+                    platform::recording::error!("Failed to delete service from cache: {}", e);
                 }
             });
         }
@@ -651,9 +662,12 @@ impl ServiceRegistry {
         Ok(())
     }
 
-    /// 注销 Actor 的所有服务
+    /// Unregister all services for an Actor
     pub fn unregister_actor(&mut self, actor_id: &ActrId) {
-        platform::recording::info!("注销 Actor {} 的所有服务", actor_id.to_string_repr());
+        platform::recording::info!(
+            "Unregistering all services for Actor {}",
+            actor_id.to_string_repr()
+        );
 
         if let Some(service_names) = self.actor_index.remove(actor_id) {
             for service_name in &service_names {
@@ -662,13 +676,14 @@ impl ServiceRegistry {
         }
     }
 
-    /// 只从内存中注销 Actor 的所有服务，不删除数据库缓存。
+    /// Unregister all services for an Actor from memory only, without deleting the database cache.
     ///
-    /// 用于 WebSocket 连接断开这类瞬时离线场景，保留数据库数据以便同一 Actor
-    /// 重连后通过心跳恢复服务注册。
+    /// Used for transient offline scenarios such as WebSocket disconnection. Database data is
+    /// preserved so the same Actor can restore its service registration via heartbeat after
+    /// reconnecting.
     pub fn unregister_actor_memory_only(&mut self, actor_id: &ActrId) {
         platform::recording::info!(
-            "仅从内存注销 Actor {} 的所有服务",
+            "Unregistering all services for Actor {} (memory only)",
             actor_id.to_string_repr()
         );
 
@@ -679,11 +694,11 @@ impl ServiceRegistry {
         }
     }
 
-    /// 清理过期服务（超过指定时间未更新）
+    /// Clean up expired services (not updated within the specified time)
     ///
-    /// 注意：此方法只清理内存中的服务，不删除数据库中的数据。
-    /// 这样可以在断网 5-60 分钟后通过心跳从数据库恢复服务。
-    /// 数据库的清理由独立的定时任务处理（TTL = 1小时）。
+    /// Note: This method only cleans up in-memory services; it does not delete database data.
+    /// This allows services to be restored from the database via heartbeat after a 5-60 minute
+    /// network outage. Database cleanup is handled by a separate scheduled task (TTL = 1 hour).
     pub fn cleanup_expired_services(&mut self) {
         let current_time = current_timestamp();
         let expiry_threshold = SERVICE_EXPIRY_THRESHOLD_SECS;
@@ -700,40 +715,40 @@ impl ServiceRegistry {
 
         for (actor_id, service_name) in services_to_remove {
             platform::recording::warn!(
-                "清理内存中的过期服务: {} (Actor {}) [数据库保留用于恢复]",
+                "Cleaning expired service from memory: {} (Actor {}) [database retained for recovery]",
                 service_name,
                 actor_id.to_string_repr()
             );
-            // 只清理内存，不删除数据库
+            // Only clean up memory; do not delete from database
             let _ = self.unregister_service_memory_only(&actor_id, &service_name);
         }
     }
 
-    /// 只从内存中注销服务，不删除数据库数据
+    /// Unregister service from memory only, without deleting database data
     ///
-    /// 用于过期服务清理，保留数据库数据以便后续恢复。
+    /// Used for expired service cleanup; preserves database data for later recovery.
     fn unregister_service_memory_only(
         &mut self,
         actor_id: &ActrId,
         service_name: &str,
     ) -> Result<(), String> {
-        // 从服务映射表中移除
+        // Remove from service map
         if let Some(services) = self.services.get_mut(service_name) {
             let original_len = services.len();
             services.retain(|s| s.actor_id != *actor_id);
 
             if services.len() == original_len {
                 return Err(format!(
-                    "未找到要注销的服务实例: {} (Actor {})",
+                    "Service instance to unregister not found: {} (Actor {})",
                     service_name, actor_id.serial_number
                 ));
             }
 
-            // 如果这是最后一个实例，清理消息类型索引
+            // If this is the last instance, clean up the message type index
             if services.is_empty() {
                 self.services.remove(service_name);
 
-                // 从消息类型索引中移除
+                // Remove from message type index
                 self.message_type_index.retain(|_, service_names| {
                     service_names.retain(|name| name != service_name);
                     !service_names.is_empty()
@@ -741,7 +756,7 @@ impl ServiceRegistry {
             }
         }
 
-        // 从 Actor 索引中移除
+        // Remove from Actor index
         if let Some(actor_services) = self.actor_index.get_mut(actor_id) {
             actor_services.retain(|name| name != service_name);
 
@@ -750,30 +765,31 @@ impl ServiceRegistry {
             }
         }
 
-        // 注意：不删除数据库数据，保留用于后续恢复
+        // Note: do not delete database data; preserve for later recovery
 
         Ok(())
     }
 
-    /// 从数据库恢复服务（心跳恢复时使用）
+    /// Restore service from database (used during heartbeat recovery)
     ///
-    /// 当收到心跳但内存中找不到服务时，尝试从数据库恢复。
-    /// 这通常发生在断网超过 5 分钟（内存清理阈值）但小于 1 小时（数据库 TTL）的情况。
+    /// When a heartbeat is received but the service is not found in memory, attempt to
+    /// restore from the database. This typically occurs when the network has been down
+    /// for more than 5 minutes (memory cleanup threshold) but less than 1 hour (database TTL).
     ///
     /// # Arguments
     ///
-    /// * `actor_id` - 要恢复的 Actor ID
+    /// * `actor_id` - The Actor ID to restore
     ///
     /// # Returns
     ///
-    /// * `Ok(true)` - 成功从数据库恢复了至少一个服务
-    /// * `Ok(false)` - 数据库中没有找到该 Actor 的服务（可能已过期或从未注册）
-    /// * `Err(String)` - 恢复过程出错
+    /// * `Ok(true)` - Successfully restored at least one service from the database
+    /// * `Ok(false)` - No services found in the database for this Actor (possibly expired or never registered)
+    /// * `Err(String)` - Error during the recovery process
     pub async fn restore_service_from_storage(
         &mut self,
         actor_id: &ActrId,
     ) -> Result<bool, String> {
-        // 检查是否有存储后端
+        // Check if a storage backend is available
         let storage = match &self.storage {
             Some(s) => s,
             None => {
@@ -782,7 +798,7 @@ impl ServiceRegistry {
             }
         };
 
-        // 从数据库加载该 Actor 的服务
+        // Load this Actor's services from the database
         let services = storage
             .load_services_by_actor_id(actor_id)
             .await
@@ -804,7 +820,7 @@ impl ServiceRegistry {
 
         let mut restored_count = 0;
 
-        // 将每个服务重新注册到内存
+        // Re-register each service into memory
         for mut service in services {
             if service.actor_id != *actor_id {
                 platform::recording::warn!(
@@ -829,7 +845,7 @@ impl ServiceRegistry {
                 true
             };
 
-            // 消息类型索引存储 service_name；确保每个映射只出现一次。
+            // The message type index stores service_name; ensure each mapping appears only once.
             let mut message_index_updated = false;
             for message_type in &service.message_types {
                 let service_names = self
@@ -842,7 +858,7 @@ impl ServiceRegistry {
                 }
             }
 
-            // 更新 Actor 索引
+            // Update Actor index
             let actor_services = self
                 .actor_index
                 .entry(service.actor_id.clone())
@@ -875,7 +891,7 @@ impl ServiceRegistry {
         Ok(restored_count > 0)
     }
 
-    /// 获取所有服务统计信息
+    /// Get all service statistics
     pub fn get_service_stats(&self) -> HashMap<String, usize> {
         self.services
             .iter()
@@ -889,7 +905,7 @@ impl ServiceRegistry {
             .collect()
     }
 
-    /// 获取消息类型映射统计
+    /// Get message type mapping statistics
     pub fn get_message_type_stats(&self) -> HashMap<String, usize> {
         self.message_type_index
             .iter()
@@ -897,24 +913,24 @@ impl ServiceRegistry {
             .collect()
     }
 
-    /// 获取所有服务（用于服务发现）
+    /// Get all services (for service discovery)
     ///
-    /// # 参数
-    /// - `manufacturer`: 可选的制造商过滤器
+    /// # Arguments
+    /// - `manufacturer`: Optional manufacturer filter
     ///
-    /// # 返回
-    /// 所有匹配的服务实例列表
+    /// # Returns
+    /// List of all matching service instances
     pub fn discover_all(&self, manufacturer: Option<&str>) -> Vec<&ServiceInfo> {
         let mut results = Vec::new();
 
         for services in self.services.values() {
             for service in services {
-                // 只返回可用的服务
+                // Only return available services
                 if service.status != ServiceStatus::Available {
                     continue;
                 }
 
-                // 按 manufacturer 过滤
+                // Filter by manufacturer
                 if let Some(mfr) = manufacturer
                     && service.actor_id.r#type.manufacturer != mfr
                 {
@@ -928,24 +944,24 @@ impl ServiceRegistry {
         results
     }
 
-    /// 按 ActrType 查询服务实例（用于负载均衡路由）
+    /// Find service instances by ActrType (for load-balancing routing)
     ///
-    /// # 参数
-    /// - `target_type`: 目标 Actor 类型
+    /// # Arguments
+    /// - `target_type`: Target Actor type
     ///
-    /// # 返回
-    /// 所有匹配该类型的可用服务实例（克隆）
+    /// # Returns
+    /// All available service instances matching the type (cloned)
     pub fn find_by_actr_type(&self, target_type: &ActrType) -> Vec<ServiceInfo> {
         let mut results = Vec::new();
 
         for services in self.services.values() {
             for service in services {
-                // 只返回可用的服务
+                // Only return available services
                 if service.status != ServiceStatus::Available {
                     continue;
                 }
 
-                // 精确匹配 ActrType (manufacturer + name + version)
+                // Exact match ActrType (manufacturer + name + version)
                 if service.actor_id.r#type.manufacturer == target_type.manufacturer
                     && service.actor_id.r#type.name == target_type.name
                     && service.actor_id.r#type.version == target_type.version
@@ -1042,9 +1058,9 @@ impl ServiceRegistry {
         ActorAcl::can_discover(from_realm, to_realm, &from_type, &to_type).await
     }
 
-    /// 模拟 restore_from_storage 场景：将指定 service_name 下所有条目标记为 storage-restored。
+    /// Simulate restore_from_storage scenario: mark all entries under the given service_name as storage-restored.
     ///
-    /// 仅用于测试，验证幽灵候选清除逻辑。
+    /// Test-only helper for verifying ghost candidate cleanup logic.
     #[cfg(test)]
     pub fn mark_all_as_restored(&mut self, service_name: &str) {
         if let Some(entries) = self.services.get_mut(service_name) {
@@ -1055,7 +1071,7 @@ impl ServiceRegistry {
     }
 }
 
-/// 获取当前时间戳
+/// Get current timestamp
 fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1204,15 +1220,15 @@ mod tests {
             )
             .unwrap();
 
-        // 验证服务已注册
+        // Verify service is registered
         let services = registry.discover_by_message_type("TestMessage");
         assert_eq!(services.len(), 1);
 
-        // 注销服务
+        // Unregister service
         let result = registry.unregister_service(&actor_id, "test_service");
         assert!(result.is_ok());
 
-        // 验证服务已移除
+        // Verify service has been removed
         let services = registry.discover_by_message_type("TestMessage");
         assert_eq!(services.len(), 0);
     }
@@ -1222,12 +1238,12 @@ mod tests {
         let mut registry = ServiceRegistry::new();
         let actor_id = create_test_actor_id(1);
 
-        // 注意：当前实现中，注销不存在的服务名会返回 Ok(())
-        // 只有当服务名存在但找不到对应 actor_id 时才返回 Err
+        // Note: in the current implementation, unregistering a nonexistent service name returns Ok(())
+        // Only when the service name exists but the actor_id doesn't match does it return Err
         let result = registry.unregister_service(&actor_id, "nonexistent");
         assert!(result.is_ok());
 
-        // 测试服务名存在但 actor_id 不匹配的情况
+        // Test case: service name exists but actor_id doesn't match
         let actor_id1 = create_test_actor_id(1);
         let actor_id2 = create_test_actor_id(2);
 
@@ -1240,9 +1256,9 @@ mod tests {
             )
             .unwrap();
 
-        // 尝试用错误的 actor_id 注销
+        // Attempt to unregister with wrong actor_id
         let result = registry.unregister_service(&actor_id2, "test_service");
-        assert!(result.is_err()); // 这种情况才返回错误
+        assert!(result.is_err()); // Only this case returns an error
     }
 
     #[test]
@@ -1259,16 +1275,20 @@ mod tests {
             )
             .unwrap();
 
-        // 更新服务状态为 Busy
+        // Update service status to Busy
         let result =
             registry.update_service_status(&actor_id, "test_service", ServiceStatus::Busy, None);
         assert!(result.is_ok());
 
-        // 验证状态已更新（Busy 服务不应出现在发现结果中）
+        // Verify status updated (Busy services should not appear in discovery results)
         let services = registry.discover_by_message_type("TestMessage");
-        assert_eq!(services.len(), 0, "Busy 状态的服务不应被发现");
+        assert_eq!(
+            services.len(),
+            0,
+            "Services in Busy state should not be discovered"
+        );
 
-        // 更新回 Available
+        // Update back to Available
         registry
             .update_service_status(&actor_id, "test_service", ServiceStatus::Available, None)
             .unwrap();
@@ -1290,11 +1310,11 @@ mod tests {
             )
             .unwrap();
 
-        // 更新负载指标
+        // Update load metrics
         let result = registry.update_load_metrics(&actor_id, 0, 0.8, 0.3);
         assert!(result.is_ok());
 
-        // 验证指标已更新
+        // Verify metrics have been updated
         let services = registry.discover_by_service_name("test_service");
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].service_availability_state, Some(0));
@@ -1308,7 +1328,7 @@ mod tests {
         let actor_id1 = create_test_actor_id(1);
         let actor_id2 = create_test_actor_id(2);
 
-        // 注册两个相同服务名的实例
+        // Register two instances with the same service name
         registry
             .register_service(
                 actor_id1,
@@ -1339,7 +1359,7 @@ mod tests {
         let mut registry = ServiceRegistry::new();
         let actor_id = create_test_actor_id(1);
 
-        // 注册多个服务
+        // Register multiple services
         registry
             .register_service(
                 actor_id.clone(),
@@ -1358,14 +1378,14 @@ mod tests {
             )
             .unwrap();
 
-        // 验证服务已注册
+        // Verify service is registered
         assert_eq!(registry.discover_by_message_type("Message1").len(), 1);
         assert_eq!(registry.discover_by_message_type("Message2").len(), 1);
 
-        // 注销 Actor 的所有服务
+        // Unregister all services for the Actor
         registry.unregister_actor(&actor_id);
 
-        // 验证所有服务已移除
+        // Verify all services have been removed
         assert_eq!(registry.discover_by_message_type("Message1").len(), 0);
         assert_eq!(registry.discover_by_message_type("Message2").len(), 0);
     }
@@ -1409,7 +1429,7 @@ mod tests {
         let actor_id1 = create_test_actor_id(1);
         let actor_id2 = create_test_actor_id(2);
 
-        // 注册带区域标签的服务
+        // Register services with region tags
         let mut tags_us = HashMap::new();
         tags_us.insert("env".to_string(), "prod".to_string());
 
@@ -1444,7 +1464,7 @@ mod tests {
             )
             .unwrap();
 
-        // 按区域查询
+        // Query by region
         let requirements = ServiceRequirements {
             min_version: None,
             preferred_regions: Some(vec!["us-west".to_string()]),
@@ -1455,7 +1475,7 @@ mod tests {
         assert_eq!(services.len(), 1);
         assert_eq!(services[0].service_name, "service_us");
 
-        // 按标签查询
+        // Query by tags
         let requirements = ServiceRequirements {
             min_version: None,
             preferred_regions: None,
@@ -1473,7 +1493,7 @@ mod tests {
         let actor_id1 = create_test_actor_id(1);
         let actor_id2 = create_test_actor_id(2);
 
-        // 两个不同的服务名，都支持 Message1
+        // Two different service names, both support Message1
         registry
             .register_service(
                 actor_id1,
@@ -1493,13 +1513,13 @@ mod tests {
             .unwrap();
 
         let stats = registry.get_service_stats();
-        assert_eq!(stats.get("service1"), Some(&1)); // service1 有 1 个实例
-        assert_eq!(stats.get("service2"), Some(&1)); // service2 有 1 个实例
+        assert_eq!(stats.get("service1"), Some(&1)); // service1 has 1 instance
+        assert_eq!(stats.get("service2"), Some(&1)); // service2 has 1 instance
 
-        // get_message_type_stats() 返回的是每个消息类型对应的服务名数量
-        // 注意：当前实现会为每个注册的服务实例重复添加服务名到索引
+        // get_message_type_stats() returns the number of service names per message type
+        // Note: the current implementation may add duplicate service names to the index for each registered service instance
         let msg_stats = registry.get_message_type_stats();
-        assert_eq!(msg_stats.get("Message1"), Some(&2)); // Message1 被 2 个服务名支持
+        assert_eq!(msg_stats.get("Message1"), Some(&2)); // Message1 is supported by 2 service names
     }
 
     #[test]
@@ -1530,12 +1550,12 @@ mod tests {
 
         assert!(result.is_ok());
 
-        // 验证 ServiceSpec 可以被获取
+        // Verify ServiceSpec can be retrieved
         let spec = registry.get_service_spec(&actor_id);
         assert!(spec.is_some());
         assert_eq!(spec.unwrap().fingerprint, "sha256:test123");
 
-        // 验证 ACL 可以被获取
+        // Verify ACL can be retrieved
         let acl = registry.get_acl(&actor_id);
         assert!(acl.is_some());
         assert_eq!(acl.unwrap().rules.len(), 0);
@@ -1647,11 +1667,11 @@ mod tests {
             .register_service(actor_id2, "s2".to_string(), vec!["M2".to_string()], None)
             .unwrap();
 
-        // 不过滤
+        // No filter
         let all = registry.discover_all(None);
         assert_eq!(all.len(), 2);
 
-        // 按制造商过滤
+        // Filter by manufacturer
         let acme_only = registry.discover_all(Some("acme"));
         assert_eq!(acme_only.len(), 1);
         assert_eq!(acme_only[0].actor_id.r#type.manufacturer, "acme");
@@ -1714,14 +1734,15 @@ mod tests {
         Ok(())
     }
 
-    /// 复现 Ghost Candidates Bug：
+    /// Reproduce Ghost Candidates Bug:
     ///
-    /// 真实场景：actrix 重启后 restore_from_storage() 把 ActorId A（serial=xxx1）放进内存，
-    /// 随后新服务进程启动，AIS 分配新 ActorId B（serial=xxx2），调用 register_service_full()，
-    /// 由于没有去重检查，内存里同时存在 A（幽灵）和 B（真实），service_name 相同。
+    /// Real scenario: after actrix restart, restore_from_storage() loads ActorId A (serial=xxx1)
+    /// into memory. Then a new service process starts, AIS assigns a new ActorId B (serial=xxx2),
+    /// and calls register_service_full(). Without deduplication, both A (ghost) and B (real)
+    /// coexist in memory under the same service_name.
     ///
-    /// 期望 (Bug 存在时)：find_by_actr_type 返回 2 个候选（A + B）。
-    /// 期望 (Bug 修复后)：find_by_actr_type 返回 1 个候选（只有 B）。
+    /// Expected (with bug): find_by_actr_type returns 2 candidates (A + B).
+    /// Expected (after fix): find_by_actr_type returns 1 candidate (only B).
     #[test]
     fn test_ghost_candidates_double_register_same_actor_id() {
         let mut registry = ServiceRegistry::new();
@@ -1732,22 +1753,22 @@ mod tests {
             version: "0.0.1".to_string(),
         };
 
-        // ActorId A：来自 SQLite 恢复（actrix 重启时 restore_from_storage 加载）
+        // ActorId A: from SQLite restore (loaded by restore_from_storage during actrix restart)
         let actor_id_a = ActrId {
-            serial_number: 11111, // 旧 serial
+            serial_number: 11111, // old serial
             realm: actr_protocol::Realm { realm_id: 1 },
             r#type: actr_type.clone(),
         };
 
-        // ActorId B：新服务进程注册，AIS 分配的新 serial
+        // ActorId B: new service process registration, new serial assigned by AIS
         let actor_id_b = ActrId {
-            serial_number: 22222, // 新 serial，与 A 不同
+            serial_number: 22222, // new serial, different from A
             realm: actr_protocol::Realm { realm_id: 1 },
             r#type: actr_type.clone(),
         };
 
-        // 第一次注册：模拟 actrix 重启后 restore_from_storage() 加载 ActorId A
-        // 注册后立即标记为 storage-restored（restore_from_storage 真实流程中的行为）
+        // First registration: simulate actrix restart loading ActorId A via restore_from_storage()
+        // Immediately mark as storage-restored (matching the real restore_from_storage behavior)
         registry
             .register_service_full(
                 actor_id_a.clone(),
@@ -1765,11 +1786,11 @@ mod tests {
         assert_eq!(
             candidates.len(),
             1,
-            "第一次注册（ActorId A）后应只有 1 个候选"
+            "After first registration (ActorId A) there should be only 1 candidate"
         );
 
-        // 第二次注册：模拟新服务进程启动，AIS 分配新 ActorId B，调用 register_service_full
-        // 内存里已有 A（幽灵），B 直接 push → 产生 2 条
+        // Second registration: simulate a new service process starting, AIS assigns new ActorId B, calls register_service_full
+        // Memory already has A (ghost), B is pushed directly -> produces 2 entries
         registry
             .register_service_full(
                 actor_id_b.clone(),
@@ -1784,14 +1805,14 @@ mod tests {
 
         let candidates_after = registry.find_by_actr_type(&actr_type);
 
-        // Bug 存在时：内存 [ActorId A（幽灵）, ActorId B（真实）] → 返回 2 个候选 → FAIL
-        // Bug 修复后：注册 B 时清除旧条目 → 只保留 B → 返回 1 个候选 → PASS
+        // With bug: memory [ActorId A (ghost), ActorId B (real)] -> returns 2 candidates -> FAIL
+        // After fix: registering B clears old entry -> only B retained -> returns 1 candidate -> PASS
         assert_eq!(
             candidates_after.len(),
             1,
-            "[BUG DETECTED] 注册 ActorId B（serial=22222）后内存同时存在 ActorId A（serial=11111，幽灵）和 B，\
-             find_by_actr_type 返回 {} 个候选，应为 1。\
-             \n原因：register_service_full() 没有清除同 service_name 下的旧条目（不同 actor_id）。",
+            "[BUG DETECTED] After registering ActorId B (serial=22222), memory contains both ActorId A (serial=11111, ghost) and B, \
+             find_by_actr_type returned {} candidates, expected 1.\
+             \nCause: register_service_full() did not clear old entries under the same service_name (different actor_id).",
             candidates_after.len()
         );
     }

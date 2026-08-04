@@ -1,68 +1,68 @@
-//! AIS (Actor Identity Service) 配置
+//! AIS (Actor Identity Service) configuration
 
 use crate::config::signer::SignerClientConfig;
 use serde::{Deserialize, Serialize};
 
-/// AIS 服务配置
+/// AIS service configuration
 ///
 /// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
 /// The ENABLE_AIS bit (bit 3) must be set to enable this service.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AisConfig {
-    /// AIS 服务器配置
+    /// AIS server configuration
     #[serde(default)]
     pub server: AisServerConfig,
 
-    /// AIS 的依赖服务配置
+    /// AIS dependency service configuration
     #[serde(default)]
     pub dependencies: AisDependencies,
 }
 
-/// AIS 服务器配置
+/// AIS server configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AisServerConfig {
-    /// Signaling Server 心跳间隔（秒）
+    /// Signaling Server heartbeat interval (seconds)
     ///
-    /// 在 RegisterResponse 中返回，指导客户端连接 Signaling Server 后的心跳频率
+    /// Returned in RegisterResponse, guides the client heartbeat frequency after connecting to the Signaling Server
     #[serde(default = "default_signaling_heartbeat_interval_secs")]
     pub signaling_heartbeat_interval_secs: u32,
 
-    /// Token 有效期（秒）
+    /// Token validity period (seconds)
     ///
-    /// 生成的 AIdCredential 的过期时间
+    /// Expiration time of the generated AIdCredential
     #[serde(default = "default_token_ttl_secs")]
     pub token_ttl_secs: u64,
 
-    /// Renewal token 有效期（秒）
+    /// Renewal token validity period (seconds)
     ///
-    /// 初始签发 renewal token 时的 TTL。到达 rotation window 时
-    /// 确定性派生 successor token，旧 token 在自身 expiry 前持续有效。
+    /// TTL for the initial issuance of the renewal token. When the rotation window is reached,
+    /// a successor token is deterministically derived; the old token remains valid until its own expiry.
     #[serde(default = "default_renewal_token_ttl_secs")]
     pub renewal_token_ttl_secs: u64,
 
-    /// Renewal rotation window（秒）
+    /// Renewal rotation window (seconds)
     ///
-    /// 当 renewal token 剩余有效期小于此值时进入 rotation window，
-    /// 开始确定性派生 successor token。
+    /// When the remaining validity of the renewal token is less than this value, the rotation window begins,
+    /// and a successor token is deterministically derived.
     #[serde(default = "default_renewal_rotation_window_secs")]
     pub renewal_rotation_window_secs: u64,
 
-    /// Renewal token secret（base64 编码，解码后至少 32 字节）
+    /// Renewal token secret (base64-encoded, at least 32 bytes after decoding)
     ///
-    /// 用于确定性派生 successor token（HMAC-SHA256）。
-    /// 必须在同一 actrix 集群内一致。不得使用 `actrix_shared_key` 作为回退。
+    /// Used for deterministic derivation of the successor token (HMAC-SHA256).
+    /// Must be consistent within the same actrix cluster. Must not use `actrix_shared_key` as a fallback.
     #[serde(default)]
     pub renewal_token_secret: String,
 }
 
-/// AIS 依赖的外部服务
+/// External services that AIS depends on
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct AisDependencies {
-    /// Signer 客户端配置
+    /// Signer client configuration
     ///
-    /// 如果未配置，AIS 会自动查找本地 Signer 服务：
-    /// - 如果 Signer 服务已启用（ENABLE_SIGNER 位已设置），使用 localhost:SIGNER_PORT
-    /// - 否则返回配置错误
+    /// If not configured, AIS will auto-detect the local Signer service:
+    /// - If the Signer service is enabled (ENABLE_SIGNER bit is set), use localhost:SIGNER_PORT
+    /// - Otherwise returns a configuration error
     #[serde(default)]
     pub signer: Option<SignerClientConfig>,
 }
@@ -79,46 +79,46 @@ impl Default for AisServerConfig {
     }
 }
 
-/// 默认 Signaling Server 心跳间隔：30 秒
+/// Default Signaling Server heartbeat interval: 30 seconds
 fn default_signaling_heartbeat_interval_secs() -> u32 {
     30
 }
 
-/// 默认 Token 有效期：1 小时（3600 秒）
+/// Default Token validity period: 1 hour (3600 seconds)
 fn default_token_ttl_secs() -> u64 {
     3600
 }
 
-/// 默认 Renewal Token 有效期：24 小时（86400 秒）
+/// Default Renewal Token validity period: 24 hours (86400 seconds)
 fn default_renewal_token_ttl_secs() -> u64 {
     86400
 }
 
-/// 默认 Renewal Rotation Window：6 小时（21600 秒）
+/// Default Renewal Rotation Window: 6 hours (21600 seconds)
 fn default_renewal_rotation_window_secs() -> u64 {
     21600
 }
 
 impl AisConfig {
-    /// 获取 Signer 客户端配置
+    /// Get the Signer client configuration
     ///
-    /// 支持智能默认：
-    /// 1. 如果显式配置了 dependencies.signer，直接返回
-    /// 2. 如果本地启用了 Signer 服务，返回指向本地 KS 的配置
-    /// 3. 否则返回 None
+    /// Supports smart defaults:
+    /// 1. If dependencies.signer is explicitly configured, return it directly
+    /// 2. If the local Signer service is enabled, return configuration pointing to the local Signer
+    /// 3. Otherwise return None
     pub fn get_signer_client_config(
         &self,
         global_config: &super::ActrixConfig,
     ) -> Option<SignerClientConfig> {
-        // 优先使用显式配置
+        // Prefer explicit configuration
         if let Some(ref signer_config) = self.dependencies.signer {
             return Some(signer_config.clone());
         }
 
-        // 回退：检查是否启用了本地 Signer 服务
+        // Fallback: check if local Signer service is enabled
         if global_config.is_signer_enabled() && global_config.services.signer.is_some() {
-            // 自动生成指向本地 Signer 的客户端配置
-            // Signer gRPC 复用实例主 HTTP/HTTPS 端口
+            // Auto-generate client configuration pointing to local Signer
+            // Signer gRPC reuses the instance's main HTTP/HTTPS port
             let http_cfg = global_config.bind.http.as_ref();
             let port = http_cfg.map(|h| h.port).unwrap_or(8080);
             let use_tls = http_cfg.is_some_and(|h| h.is_tls());

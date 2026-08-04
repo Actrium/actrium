@@ -1,7 +1,7 @@
-//! 统一配置管理系统
+//! Unified configuration management system
 //!
-//! 本模块是 Actrix 辅助服务配置的"单一真理之源"。
-//! 所有配置项的定义、文档、默认值都在这里统一管理。
+//! This module is the "single source of truth" for Actrix auxiliary service configuration.
+//! All configuration item definitions, documentation, and default values are managed here.
 
 pub mod ais;
 pub mod bind;
@@ -25,18 +25,18 @@ use ::signer::storage::StorageBackend;
 use std::path::{Path, PathBuf};
 use url::Url;
 
-/// Actrix 辅助服务的主配置结构体
+/// Main configuration structure for Actrix auxiliary services
 ///
-/// 这是系统的核心配置，包含了所有服务的配置信息。
-/// 配置文件使用 TOML 格式，支持完整的类型安全加载。
+/// This is the core configuration of the system, containing all service configuration information.
+/// Configuration files use TOML format with full type-safe loading.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ActrixConfig {
-    /// Service enable flags (bitmask) - Primary switch for业务服务
+    /// Service enable flags (bitmask) - Primary switch for business services
     ///
-    /// This is the primary control mechanism for enabling业务服务。
-    /// `control` 是常驻控制面能力，不受该位掩码控制。
+    /// This is the primary control mechanism for enabling business services.
+    /// `control` is a resident control plane capability, not controlled by this bitmask.
     ///
-    /// Bit positions（仅业务服务）:
+    /// Bit positions (business services only):
     /// - Bit 0 (1): Signaling service
     /// - Bit 1 (2): STUN service
     /// - Bit 2 (4): TURN service
@@ -50,92 +50,92 @@ pub struct ActrixConfig {
     #[serde(default = "default_enable")]
     pub enable: u8,
 
-    /// 服务器实例名称
+    /// Server instance name
     ///
-    /// 用于标识不同的服务器实例，在集群部署中用于区分节点。
-    /// 建议使用有意义的命名规则，如：actrix-01, actrix-prod-east-1 等。
+    /// Used to identify different server instances, distinguishing nodes in cluster deployments.
+    /// Recommended to use meaningful naming conventions, e.g.: actrix-01, actrix-prod-east-1.
     pub name: String,
 
-    /// 运行环境标识
+    /// Environment identifier
     ///
-    /// 指定当前运行环境，影响安全策略和默认行为：
-    /// - "dev": 开发环境，允许 HTTP，证书检查较松
-    /// - "prod": 生产环境，强制 HTTPS，严格的安全检查
-    /// - "test": 测试环境，用于自动化测试
+    /// Specifies the current running environment, affecting security policies and default behavior:
+    /// - "dev": Development environment, allows HTTP, relaxed certificate checks
+    /// - "prod": Production environment, enforces HTTPS, strict security checks
+    /// - "test": Test environment, used for automated testing
     pub env: String,
 
-    /// 运行用户（可选）
+    /// Run user (optional)
     ///
-    /// 指定服务运行的系统用户。服务会在绑定端口后切换到此用户运行，
-    /// 以提高安全性。留空则保持当前用户。
+    /// Specifies the system user the service runs as. The service will switch to this user after binding ports,
+    /// to improve security. Leave empty to keep the current user.
     pub user: Option<String>,
 
-    /// 运行用户组（可选）
+    /// Run user group (optional)
     ///
-    /// 指定服务运行的系统用户组。与 user 配置配合使用。
+    /// Specifies the system user group the service runs as. Used in conjunction with the user config.
     pub group: Option<String>,
 
-    /// PID 文件路径（可选）
+    /// PID file path (optional)
     ///
-    /// 用于存储进程 ID 的文件路径。系统管理工具可以使用此文件
-    /// 来监控和管理服务进程。
+    /// File path used to store the process ID. System management tools can use this file
+    /// to monitor and manage the service process.
     pub pid: Option<String>,
 
-    /// 网络绑定配置
+    /// Network binding configuration
     ///
-    /// 定义各种网络服务的绑定地址和端口配置。
+    /// Defines bind addresses and port configurations for various network services.
     pub bind: BindConfig,
 
-    /// TURN 服务特定配置
+    /// TURN service-specific configuration
     ///
-    /// TURN 中继服务的专用配置，包括公网地址、端口范围、认证域等。
+    /// Dedicated configuration for the TURN relay service, including public address, port range, authentication realm, etc.
     pub turn: TurnConfig,
 
-    /// 位置标签
+    /// Location tag
     ///
-    /// 用于标识服务器的地理位置或逻辑分组，便于运维管理和监控。
-    /// 例如：us-west-1, office-beijing, edge-node-01
+    /// Used to identify the geographic location or logical grouping of the server, for operations management and monitoring.
+    /// e.g.: us-west-1, office-beijing, edge-node-01
     pub location_tag: String,
 
-    /// 控制面配置（常驻）
+    /// Control plane configuration (resident)
     ///
-    /// 控制面始终可用，不受 `enable` 位掩码控制。
+    /// The control plane is always available and not controlled by the `enable` bitmask.
     #[serde(default)]
     pub control: ControlConfig,
 
-    /// 服务配置集合
+    /// Service configuration collection
     ///
-    /// 包含所有业务服务的配置，每个服务可以独立配置自己的参数和依赖。
-    /// 采用服务级别的配置结构，实现高内聚低耦合。
+    /// Contains all business service configurations; each service can independently configure its own parameters and dependencies.
+    /// Uses a service-level configuration structure to achieve high cohesion and low coupling.
     #[serde(default)]
     pub services: ServicesConfig,
 
-    /// SQLite 数据库文件存储目录路径
+    /// SQLite database file storage directory path
     ///
-    /// 指定用于存储所有 SQLite 数据库文件的目录路径。
-    /// 主数据库文件将存储为 `{sqlite_path}/actrix.db`。
-    /// 包括 Realm 信息、访问控制列表、nonce 缓存等。
+    /// Specifies the directory path for storing all SQLite database files.
+    /// The main database file will be stored as `{sqlite_path}/actrix.db`.
+    /// Includes Realm information, access control lists, nonce cache, etc.
     #[serde(
         serialize_with = "serialize_pathbuf",
         deserialize_with = "deserialize_pathbuf"
     )]
     pub sqlite_path: PathBuf,
 
-    /// Actrix 内部服务通信共享密钥
+    /// Actrix internal service communication shared secret
     ///
-    /// 用于 Actrix 各服务之间的内部通信认证，如 AIS 与 Signer 之间的通信。
-    /// 这是系统级的内部认证密钥，仅用于服务间通信，不应用于对外业务。
+    /// Used for internal communication authentication between Actrix services, such as between AIS and Signer.
+    /// This is a system-level internal authentication key, used only for inter-service communication, not for external business.
     ///
-    /// 注意：
-    /// - 此密钥仅限 Actrix 内部服务使用
-    /// - 不应用于 Realm 业务或外部 API 访问
-    /// - 在生产环境中应使用强随机密钥
-    /// - 字段名保留 actrix_shared_key 以保持向后兼容
+    /// Note:
+    /// - This key is for Actrix internal services only
+    /// - Not for Realm business or external API access
+    /// - A strong random key should be used in production environments
+    /// - Field name retains actrix_shared_key for backward compatibility
     pub actrix_shared_key: String,
 
-    /// 记录管线配置（日志 + 追踪）
+    /// Recording pipeline configuration (logging + tracing)
     ///
-    /// 将日志和 OpenTelemetry 追踪配置合并到统一的 recording 段，便于统一管理。
+    /// Merges logging and OpenTelemetry tracing configuration into a unified recording section for centralized management.
     #[serde(default)]
     pub recording: RecordingConfig,
 
@@ -149,34 +149,34 @@ pub struct ActrixConfig {
     pub monitoring: MonitoringConfig,
 }
 
-/// 记录管线配置
+/// Recording pipeline configuration
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct RecordingConfig {
-    /// 全局记录出口 URI（single sink）
+    /// Global recording sink URI (single sink)
     ///
-    /// 作为所有通道默认出口；可被 [recording.<channel>] 覆盖。
+    /// Serves as the default sink for all channels; can be overridden by [recording.<channel>].
     ///
-    /// 支持：
+    /// Supported:
     /// - file://...
     /// - otlp+http://...
     /// - otlp+grpc://...
     #[serde(default)]
     pub sink: Option<String>,
 
-    /// OTLP 上报 service.name
+    /// OTLP reporting service.name
     #[serde(default = "default_recording_service_name")]
     pub service_name: String,
 
-    /// observability 通道配置
+    /// observability channel configuration
     #[serde(default = "default_observability_channel")]
     pub observability: RecordingChannelConfig,
-    /// audit 通道配置
+    /// audit channel configuration
     #[serde(default = "default_audit_channel")]
     pub audit: RecordingChannelConfig,
-    /// security 通道配置
+    /// security channel configuration
     #[serde(default = "default_security_channel")]
     pub security: RecordingChannelConfig,
-    /// operations 通道配置
+    /// operations channel configuration
     #[serde(default = "default_operations_channel")]
     pub operations: RecordingChannelConfig,
 
@@ -191,12 +191,12 @@ pub struct RecordingConfig {
     pub logs_enabled: Option<bool>,
 }
 
-/// 单通道配置：语义过滤器 + 出口覆盖
+/// Single channel configuration: semantic filter + sink override
 #[derive(Debug, Default, Serialize, Deserialize, Clone, PartialEq)]
 pub struct RecordingChannelConfig {
-    /// 通道语义过滤器
+    /// Channel semantic filter
     ///
-    /// 每个通道有自己的过滤词汇：
+    /// Each channel has its own filter vocabulary:
     /// - observability: off / digest / detailed / full
     /// - audit: off / mutations / all
     /// - security: off / critical / high / medium / all
@@ -204,9 +204,9 @@ pub struct RecordingChannelConfig {
     #[serde(default)]
     pub filter: String,
 
-    /// 记录出口 URI（single sink）
+    /// Recording sink URI (single sink)
     ///
-    /// 支持：
+    /// Supported:
     /// - file://...
     /// - otlp+http://...
     /// - otlp+grpc://...
@@ -397,7 +397,7 @@ where
 impl Default for ActrixConfig {
     fn default() -> Self {
         Self {
-            enable: default_enable(), // 默认启用 STUN + TURN
+            enable: default_enable(), // Default: enable STUN + TURN
             name: "actrix-default".to_string(),
             env: "dev".to_string(),
             user: None,
@@ -416,7 +416,7 @@ impl Default for ActrixConfig {
     }
 }
 
-// 服务启用标志位常量
+// Service enable flag bit constants
 pub const ENABLE_SIGNALING: u8 = 0b00001;
 pub const ENABLE_STUN: u8 = 0b00010;
 pub const ENABLE_TURN: u8 = 0b00100;
@@ -424,43 +424,43 @@ pub const ENABLE_AIS: u8 = 0b01000;
 pub const ENABLE_SIGNER: u8 = 0b10000;
 
 impl ActrixConfig {
-    /// 检查是否启用了信令服务
+    /// Check if the signaling service is enabled
     ///
     /// Service is enabled if the ENABLE_SIGNALING bit is set in the enable bitmask.
     pub fn is_signaling_enabled(&self) -> bool {
         self.enable & ENABLE_SIGNALING != 0
     }
 
-    /// 检查是否启用了 STUN 服务
+    /// Check if the STUN service is enabled
     pub fn is_stun_enabled(&self) -> bool {
         self.enable & ENABLE_STUN != 0
     }
 
-    /// 检查是否启用了 TURN 服务
+    /// Check if the TURN service is enabled
     pub fn is_turn_enabled(&self) -> bool {
         self.enable & ENABLE_TURN != 0
     }
 
-    /// 检查是否启用了 AIS (AId Issue Service) 身份认证服务
+    /// Check if the AIS (AId Issue Service) identity service is enabled
     ///
     /// Service is enabled if the ENABLE_AIS bit is set in the enable bitmask.
     pub fn is_ais_enabled(&self) -> bool {
         self.enable & ENABLE_AIS != 0
     }
 
-    /// 检查是否启用了 Signer 密钥服务
+    /// Check if the Signer key service is enabled
     ///
     /// Service is enabled if the ENABLE_SIGNER bit is set in the enable bitmask.
     pub fn is_signer_enabled(&self) -> bool {
         self.enable & ENABLE_SIGNER != 0
     }
 
-    /// 检查是否启用了 ICE 服务（STUN 或 TURN）
+    /// Check if the ICE service (STUN or TURN) is enabled
     pub fn is_ice_enabled(&self) -> bool {
         self.is_stun_enabled() || self.is_turn_enabled()
     }
 
-    /// 当前控制面头类型
+    /// Current control plane head type
     pub fn control_head(&self) -> ControlHead {
         if self.control.grpc_api_enabled() && !self.control.admin_ui_enabled() {
             ControlHead::GrpcApi
@@ -469,50 +469,50 @@ impl ActrixConfig {
         }
     }
 
-    /// Admin UI 是否启用。
+    /// Whether Admin UI is enabled.
     pub fn admin_ui_enabled(&self) -> bool {
         self.control.admin_ui_enabled()
     }
 
-    /// NodeAdminService gRPC API 是否启用。
+    /// Whether NodeAdminService gRPC API is enabled.
     pub fn grpc_api_enabled(&self) -> bool {
         self.control.grpc_api_enabled()
     }
 
-    /// 是否处于 superv 接管模式。
+    /// Whether in superv takeover mode.
     pub fn superv_managed(&self) -> bool {
         self.control.superv_managed()
     }
 
-    /// 获取 PID 文件路径，如果没有配置则使用默认值
+    /// Get the PID file path, using the default if not configured
     pub fn get_pid_path(&self) -> Option<String> {
         self.pid.clone().or_else(|| {
-            // 如果没有配置 pid，使用默认值 logs/actrix.pid
+            // If pid is not configured, use the default value logs/actrix.pid
             Some("logs/actrix.pid".to_string())
         })
     }
 
-    /// 获取 Actrix 内部服务通信共享密钥
+    /// Get the Actrix internal service communication shared secret
     ///
-    /// 此密钥用于 Actrix 系统内部服务间的认证通信，
-    /// 如 AIS 与 Signer 之间的服务调用。
+    /// This key is used for authenticated communication between Actrix internal services,
+    /// such as service calls between AIS and Signer.
     ///
-    /// 注意：此密钥仅用于内部服务通信，不应用于对外业务
+    /// Note: This key is for internal service communication only, not for external business
     pub fn get_actrix_shared_key(&self) -> &str {
         &self.actrix_shared_key
     }
 
-    /// 返回记录管线配置引用
+    /// Returns a reference to the recording pipeline configuration
     pub fn recording_config(&self) -> &RecordingConfig {
         &self.recording
     }
 
-    /// 返回 OTLP service.name
+    /// Returns the OTLP service.name
     pub fn recording_service_name(&self) -> &str {
         &self.recording.service_name
     }
 
-    /// 获取复合日志/追踪过滤级别，优先使用 RUST_LOG。
+    /// Get the composite log/trace filter level; prefers RUST_LOG.
     ///
     /// With semantic filters, channel targets are set to TRACE so that
     /// all events reach the recording layer (which applies its own gate).
@@ -528,7 +528,7 @@ impl ActrixConfig {
         "info,actrix::observability=trace,actrix::audit=trace,actrix::security=trace,actrix::operations=trace".to_string()
     }
 
-    /// 从文件加载配置
+    /// Load configuration from file
     pub fn from_file<P: AsRef<std::path::Path>>(
         path: P,
     ) -> Result<Self, Box<dyn std::error::Error>> {
@@ -553,27 +553,27 @@ impl ActrixConfig {
         Ok(config)
     }
 
-    /// 从 TOML 字符串加载配置
+    /// Load configuration from a TOML string
     pub fn from_toml(content: &str) -> Result<Self, toml::de::Error> {
         toml::from_str(content)
     }
 
-    /// 将配置序列化为 TOML 字符串
+    /// Serialize configuration to a TOML string
     pub fn to_toml(&self) -> Result<String, toml::ser::Error> {
         toml::to_string(self)
     }
 
-    /// 验证配置有效性
+    /// Validate configuration
     ///
-    /// 检查所有配置项的合法性，包括：
-    /// - 必需字段是否存在
-    /// - 数值范围是否合理
-    /// - 文件路径是否有效
-    /// - 服务配置是否一致
+    /// Checks the validity of all configuration items, including:
+    /// - Whether required fields are present
+    /// - Whether value ranges are reasonable
+    /// - Whether file paths are valid
+    /// - Whether service configurations are consistent
     pub fn validate(&self) -> Result<(), Vec<String>> {
         let mut errors = Vec::new();
 
-        // 验证位掩码值范围 (0-31, 5 bits)
+        // Validate bitmask value range (0-31, 5 bits)
         if self.enable > 31 {
             errors.push(format!(
                 "Invalid enable bitmask value: {}. Must be between 0 and 31 (5 bits)",
@@ -581,12 +581,12 @@ impl ActrixConfig {
             ));
         }
 
-        // 验证实例名称
+        // Validate instance name
         if self.name.trim().is_empty() {
             errors.push("Instance name cannot be empty".to_string());
         }
 
-        // 验证环境
+        // Validate environment
         if !["dev", "prod", "test"].contains(&self.env.as_str()) {
             errors.push(format!(
                 "Invalid environment '{}', must be one of: dev, prod, test",
@@ -594,14 +594,14 @@ impl ActrixConfig {
             ));
         }
 
-        // control 始终挂载在主 HTTP 端口，必须存在绑定。
+        // Control is always mounted on the main HTTP port; binding must exist.
         if self.bind.http.is_none() {
             errors.push(
                 "Control plane requires bind.http because /admin is always served".to_string(),
             );
         }
 
-        // 验证各通道语义过滤器（空字符串 = 使用通道默认值，跳过验证）
+        // Validate channel semantic filters (empty string = use channel default, skip validation)
         {
             let check = |name: &str, value: &str, valid: &[&str]| -> Option<String> {
                 if value.is_empty() || valid.contains(&value) {
@@ -647,7 +647,7 @@ impl ActrixConfig {
             errors.push("recording.service_name cannot be empty".to_string());
         }
 
-        // 验证新的 URI 记录出口配置（single sink, global + per-channel）
+        // Validate new URI recording sink configuration (single sink, global + per-channel)
         validate_recording_sink_field("recording.sink", &self.recording.sink, &mut errors);
         validate_recording_sink_field(
             "recording.observability.sink",
@@ -670,7 +670,7 @@ impl ActrixConfig {
             &mut errors,
         );
 
-        // 验证 actrix_shared_key
+        // Validate actrix_shared_key
         if self.actrix_shared_key.contains("default") || self.actrix_shared_key.contains("change") {
             errors.push("Security warning: actrix_shared_key appears to be a default value. Please change it!".to_string());
         }
@@ -678,7 +678,7 @@ impl ActrixConfig {
             errors.push("Security warning: actrix_shared_key is too short, recommend at least 16 characters".to_string());
         }
 
-        // 验证 SQLite 路径
+        // Validate SQLite path
         if self
             .sqlite_path
             .to_str()
@@ -688,14 +688,14 @@ impl ActrixConfig {
             errors.push("SQLite database path cannot be empty".to_string());
         }
 
-        // 验证 ICE 配置（如果启用 STUN 或 TURN）
+        // Validate ICE configuration (if STUN or TURN is enabled)
         if self.is_ice_enabled() {
             if self.bind.ice.advertised_ip.trim().is_empty() {
                 errors.push(
                     "bind.ice.advertised_ip is required when ICE services are enabled".to_string(),
                 );
             }
-            // 验证 advertised_ip 格式
+            // Validate advertised_ip format
             if self
                 .bind
                 .ice
@@ -710,15 +710,15 @@ impl ActrixConfig {
             }
         }
 
-        // 验证 TURN 配置（如果启用）
+        // Validate TURN configuration (if enabled)
         if self.is_turn_enabled() && self.turn.realm.trim().is_empty() {
             errors.push("TURN realm is required when TURN is enabled".to_string());
         }
 
-        // 验证 Signer 配置（如果启用）
+        // Validate Signer configuration (if enabled)
         if self.is_signer_enabled() {
             if let Some(ref signer_cfg) = self.services.signer {
-                // 验证存储配置
+                // Validate storage configuration
                 match signer_cfg.storage.backend {
                     StorageBackend::Sqlite => {}
                     StorageBackend::Postgres => {
@@ -731,16 +731,16 @@ impl ActrixConfig {
                     }
                 }
             } else {
-                // Signer 位掩码已设置但 services.signer 配置缺失
+                // Signer bitmask is set but services.signer configuration is missing
                 errors.push(
                     "Signer service is enabled (ENABLE_SIGNER bit is set) but services.signer configuration is missing".to_string(),
                 );
             }
         }
 
-        // 验证 AIS 配置（如果启用）
+        // Validate AIS configuration (if enabled)
         if self.is_ais_enabled() {
-            // 检查是否能获取 KS 配置（显式配置或自动默认）
+            // Check if Signer config can be obtained (explicit config or auto default)
             if let Some(ref ais) = self.services.ais {
                 if ais.get_signer_client_config(self).is_none() {
                     errors.push(
@@ -749,7 +749,7 @@ impl ActrixConfig {
                             .to_string(),
                     );
                 }
-                // 验证 renewal_token_secret 配置
+                // Validate renewal_token_secret configuration
                 if ais.server.renewal_token_secret.is_empty() {
                     errors.push("services.ais.server.renewal_token_secret is required".to_string());
                 } else {
@@ -774,14 +774,14 @@ impl ActrixConfig {
                     }
                 }
             } else {
-                // AIS 位掩码已设置但 services.ais 配置缺失
+                // AIS bitmask is set but services.ais configuration is missing
                 errors.push(
                     "AIS service is enabled (ENABLE_AIS bit is set) but services.ais configuration is missing".to_string(),
                 );
             }
         }
 
-        // 验证 Signaling 配置（如果启用）
+        // Validate Signaling configuration (if enabled)
         if self.is_signaling_enabled() {
             if let Some(ref signaling) = self.services.signaling {
                 if signaling.dependencies.signer.is_none()
@@ -809,9 +809,9 @@ impl ActrixConfig {
             }
         }
 
-        // 生产环境额外检查
+        // Production environment additional checks
         if self.env == "prod" {
-            // 生产环境应使用 HTTPS (bind.http 必须存在且 is_tls() == true)
+            // Production environment should use HTTPS (bind.http must exist and is_tls() == true)
             if let Some(ref http) = self.bind.http {
                 if !http.is_tls() {
                     errors.push(
@@ -822,7 +822,7 @@ impl ActrixConfig {
                 errors.push("Production environment requires bind.http configuration".to_string());
             }
 
-            // 生产环境建议至少配置一个 file:// 出口
+            // Production environment should configure at least one file:// sink
             if !any_recording_file_sink(&self.recording) {
                 errors.push("Warning: Production environment should configure recording.sink (file://...) or channel-specific recording.<channel>.sink".to_string());
             }
@@ -871,7 +871,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ActrixConfig::default();
-        assert_eq!(config.enable, 31); // 默认启用所有服务
+        assert_eq!(config.enable, 31); // Default: all services enabled
         assert_eq!(config.name, "actrix-default");
         assert_eq!(config.env, "dev");
         assert!(config.is_signaling_enabled());
@@ -994,7 +994,7 @@ mod tests {
             "XDDYE8d+yMfdXcdWMrXprcUk2uzjnmoX6nCfFw1gGIg="
         );
 
-        // 测试自定义共享密钥
+        // Test custom shared secret
         let mut custom_config = config;
         custom_config.actrix_shared_key = "custom-shared-key".to_string();
         assert_eq!(custom_config.get_actrix_shared_key(), "custom-shared-key");
@@ -1092,7 +1092,7 @@ mod tests {
             ..ActrixConfig::default()
         };
 
-        // 场景 1: 启用本地 KS，AIS 不配置 KS 客户端，应自动使用本地 KS
+        // Scenario 1: Local Signer enabled, AIS has no Signer client config, should auto-use local Signer
         config.enable = ENABLE_SIGNER | ENABLE_AIS; // Enable both KS and AIS via bitmask
         config.services.signer = Some(SignerServiceConfig {
             ..Default::default()
@@ -1100,10 +1100,10 @@ mod tests {
 
         config.services.ais = Some(AisConfig {
             server: valid_ais_server_config(),
-            dependencies: ais::AisDependencies { signer: None }, // 未配置 KS
+            dependencies: ais::AisDependencies { signer: None }, // Signer not configured
         });
 
-        // 应该能获取到自动生成的 KS 配置
+        // Should be able to get the auto-generated Signer config
         let ks_config = config
             .services
             .ais
@@ -1112,10 +1112,10 @@ mod tests {
             .get_signer_client_config(&config);
         assert!(ks_config.is_some());
         let ks_config = ks_config.unwrap();
-        // KS gRPC 复用主 HTTP 端口（默认 8080）
+        // Signer gRPC reuses the main HTTP port (default 8080)
         assert_eq!(ks_config.endpoint, "http://127.0.0.1:8080");
 
-        // 场景 2: 显式配置 KS 客户端，应使用显式配置
+        // Scenario 2: Explicit Signer client config, should use the explicit config
         config.services.ais = Some(AisConfig {
             server: valid_ais_server_config(),
             dependencies: ais::AisDependencies {
@@ -1139,9 +1139,9 @@ mod tests {
             .get_signer_client_config(&config);
         assert!(ks_config.is_some());
         let ks_config = ks_config.unwrap();
-        assert_eq!(ks_config.endpoint, "http://remote-ks:8080"); // 使用显式配置
+        assert_eq!(ks_config.endpoint, "http://remote-ks:8080"); // Uses explicit config
 
-        // 场景 3: 没有本地 KS，也没有显式配置，应返回 None
+        // Scenario 3: No local Signer, no explicit config, should return None
         config.services.signer = None;
         config.services.ais = Some(AisConfig {
             server: valid_ais_server_config(),
@@ -1165,7 +1165,7 @@ mod tests {
             ..ActrixConfig::default()
         };
 
-        // 启用本地 KS 和 Signaling
+        // Enable local Signer and Signaling
         config.enable = ENABLE_SIGNER | ENABLE_SIGNALING; // Enable both via bitmask
         config.services.signer = Some(SignerServiceConfig {
             ..Default::default()
@@ -1179,7 +1179,7 @@ mod tests {
             },
         });
 
-        // Signaling 应该能获取到自动生成的 KS 配置
+        // Signaling should be able to get the auto-generated Signer config
         let ks_config = config
             .services
             .signaling
@@ -1188,7 +1188,7 @@ mod tests {
             .get_signer_client_config(&config);
         assert!(ks_config.is_some());
         let ks_config = ks_config.unwrap();
-        // KS gRPC 复用主 HTTP 端口（默认 8080）
+        // Signer gRPC reuses the main HTTP port (default 8080)
         assert_eq!(ks_config.endpoint, "http://127.0.0.1:8080");
     }
 

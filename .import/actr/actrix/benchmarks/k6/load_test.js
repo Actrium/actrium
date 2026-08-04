@@ -1,22 +1,22 @@
-// Actrix K6 负载测试脚本
+// Actrix K6 load test script
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Rate } from 'k6/metrics';
 
-// 自定义指标
+// Custom metrics
 const errorRate = new Rate('errors');
 
 export const options = {
   stages: [
-    { duration: '30s', target: 50 },   // 爬坡到 50 VU
-    { duration: '1m', target: 100 },   // 爬坡到 100 VU
-    { duration: '2m', target: 100 },   // 稳定在 100 VU
-    { duration: '30s', target: 0 },    // 降回 0
+    { duration: '30s', target: 50 },   // ramp up to 50 VU
+    { duration: '1m', target: 100 },   // ramp up to 100 VU
+    { duration: '2m', target: 100 },   // hold at 100 VU
+    { duration: '30s', target: 0 },    // ramp down to 0
   ],
   thresholds: {
     http_req_duration: ['p(95)<200', 'p(99)<500'], // 95% < 200ms, 99% < 500ms
-    http_req_failed: ['rate<0.01'],                 // 错误率 < 1%
-    errors: ['rate<0.1'],                           // 自定义错误率 < 10%
+    http_req_failed: ['rate<0.01'],                 // error rate < 1%
+    errors: ['rate<0.1'],                           // custom error rate < 10%
   },
 };
 
@@ -100,7 +100,7 @@ function htmlReport(data) {
 }
 
 function textSummary(data, options) {
-  // 简化的文本汇总
+  // Simplified text summary
   return `
   ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   K6 Load Test Summary

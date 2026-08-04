@@ -1,6 +1,6 @@
-//! Realm 错误类型定义
+//! Realm error type definitions
 //!
-//! 定义了 Realm 管理相关的错误类型
+//! Defines error types related to realm management.
 
 use thiserror::Error;
 

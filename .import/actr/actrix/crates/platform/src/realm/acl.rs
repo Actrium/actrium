@@ -1,6 +1,6 @@
-//! Actor 访问控制列表
+//! Actor access control list
 //!
-//! 定义了 Actor 的权限控制数据结构
+//! Defines the data structures for actor permission control.
 use anyhow::Result;
 
 use serde::{Deserialize, Serialize};
@@ -12,15 +12,15 @@ const ANONYMOUS_ACTOR_TYPE: &str = "ANONCLNT";
 const VOICE_ACTOR_TYPE: &str = "VOICE";
 const CHAT_ACTOR_TYPE: &str = "CHAT";
 
-/// Actor 访问控制列表
+/// Actor access control list
 ///
-/// 管理不同类型 Actor 之间的访问权限
+/// Manages access permissions between different actor types.
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct ActorAcl {
     pub rowid: Option<i64>,
-    /// 目标（被访问方）所在 realm
+    /// Target (accessed party) realm
     pub realm_id: u32,
-    /// 来源（访问方）所在 realm；None 表示未设置来源范围
+    /// Source (accessing party) realm; None means no source scope set
     pub source_realm_id: Option<u32>,
     pub from_type: String,
     pub to_type: String,
@@ -45,13 +45,13 @@ impl<'r> sqlx::FromRow<'r, sqlx::sqlite::SqliteRow> for ActorAcl {
 }
 
 impl ActorAcl {
-    /// 创建新的访问控制规则
+    /// Create a new access control rule
     pub fn new(realm_id: u32, from_type: String, to_type: String, access: bool) -> Self {
-        // 兼容历史语义：不显式指定来源 realm 时，默认仅同 realm 生效
+        // Legacy semantics: when no source realm is explicitly specified, default to same-realm only
         Self::new_with_source_realm(realm_id, Some(realm_id), from_type, to_type, access)
     }
 
-    /// 创建带来源 realm 约束的访问控制规则
+    /// Create an access control rule with a source realm constraint
     pub fn new_with_source_realm(
         realm_id: u32,
         source_realm_id: Option<u32>,
@@ -81,7 +81,7 @@ impl ActorAcl {
         let pool = db.get_pool();
 
         if let Some(rowid) = self.rowid {
-            // 更新现有记录
+            // Update existing record
             sqlx::query(
                 "UPDATE actoracl
                  SET realm_id = ?, source_realm_id = ?, from_type = ?, to_type = ?, access = ?
@@ -98,7 +98,7 @@ impl ActorAcl {
 
             Ok(rowid)
         } else {
-            // 插入新记录
+            // Insert new record
             let result = sqlx::query(
                 "INSERT INTO actoracl (realm_id, source_realm_id, from_type, to_type, access)
                  VALUES (?, ?, ?, ?, ?)",
@@ -168,7 +168,7 @@ impl ActorAcl {
         Ok(result)
     }
 
-    /// 获取指定 Realm 的所有访问控制规则
+    /// Get all access control rules for the specified realm
     pub async fn get_by_realm(realm_id: u32) -> Result<Vec<Self>, RealmError> {
         let db = get_database();
         let pool = db.get_pool();
@@ -185,7 +185,7 @@ impl ActorAcl {
         Ok(acls)
     }
 
-    /// 根据类型获取访问控制规则
+    /// Get access control rule by type
     pub async fn get_by_types(
         target_realm_id: u32,
         source_realm_id: u32,
@@ -212,7 +212,7 @@ impl ActorAcl {
         Ok(result)
     }
 
-    /// 删除指定目标类型的全部 ACL（用于服务重注册时替换旧 ACL）
+    /// Delete all ACL rules for the specified target type (used when re-registering a service to replace old ACLs)
     pub async fn delete_by_target(realm_id: u32, to_type: &str) -> Result<u64, RealmError> {
         let db = get_database();
         let pool = db.get_pool();
@@ -236,8 +236,8 @@ impl ActorAcl {
     ///
     /// # Arguments
     ///
-    /// - `source_realm_id`: 来源 Actor 的 realm
-    /// - `target_realm_id`: 目标 Actor 的 realm
+    /// - `source_realm_id`: Source actor's realm
+    /// - `target_realm_id`: Target actor's realm
     /// - `from_type`: Source actor type
     /// - `to_type`: Target actor type
     ///

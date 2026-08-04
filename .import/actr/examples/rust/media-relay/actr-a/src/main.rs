@@ -45,7 +45,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let actr_ref = node.start().await?;
 
-    info!("✅ ActrNode startsuccess！");
+    info!("✅ ActrNode startsuccess!");
     info!("📍 [...] Actor ID: {:?}", actr_ref.actor_id());
 
     // 3.1 Discover remote actr-b
@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             match actr_ref.call(request, 30_000).await {
                 Ok(response) => {
                     info!(
-                        "   ✅ [...] #{} alreadysend，service[...]: success={}, received_at={}",
+                        "   ✅ [...] #{} alreadysend, service[...]: success={}, received_at={}",
                         i, response.success, response.received_at
                     );
                 }

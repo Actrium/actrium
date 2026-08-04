@@ -1,6 +1,6 @@
-//! gRPC 服务模块
+//! gRPC service module
 //!
-//! 管理各种 gRPC 服务的实现
+//! Manages the implementation of various gRPC services
 
 pub mod signer;
 

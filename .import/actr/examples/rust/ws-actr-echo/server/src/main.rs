@@ -1,10 +1,10 @@
 //! WS Echo Server - using/use WebSocket channel[...] Actor server
 //!
-//! via/throughconfig [system.websocket] [...] WebSocket direct connection[...]：
+//! via/throughconfig [system.websocket] [...] WebSocket direct connection[...]:
 //! - listen_port: [...]portlisten[...] WebSocket connection
 //! - advertised_host: register[...]signalingservice[...]accessibleaddress
 //!
-//! clientvia/throughsignalingservice[...]discover ws_address [...]，directlyvia/through WebSocket establishconnection。
+//! clientvia/throughsignalingservice[...]discover ws_address [...], directlyvia/through WebSocket establishconnection.
 
 mod echo_service;
 mod generated;
@@ -24,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actr.toml");
     let config = actr_config::ConfigParser::from_file(&config_path)?;
 
-    // initialize[...]（log/[...]）
+    // initialize[...] (log/[...])
     let _obs_guard = actr_runtime::init_observability(&config.observability)?;
 
     info!("🚀 WS Echo Server start");
@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("✅ EchoService workload created");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // 3. start ActrNode（connectionsignalingservice[...]、register ws_address、listenport）
+    // 3. start ActrNode (connectionsignalingservice[...], register ws_address, listenport)
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     info!("🚀 start ActrNode...");
     info!("   (nodewill[...] WebSocket addressregister[...]signalingservice[...])");
@@ -70,12 +70,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(actr) => actr,
         Err(e) => {
             error!("❌ ActrNode startfailed: {:?}", e);
-            error!("💡 tip/hint：please ensure signaling-server already[...] realm configured");
+            error!("💡 tip/hint: please ensure signaling-server already[...] realm configured");
             return Err(e.into());
         }
     };
 
-    info!("✅ ActrNode startsuccess！");
+    info!("✅ ActrNode startsuccess!");
     info!("🆔 Server ID: {:?}", actr_ref.actor_id());
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("🎉 WS Echo Server alreadyfully/completelystart[...]register");

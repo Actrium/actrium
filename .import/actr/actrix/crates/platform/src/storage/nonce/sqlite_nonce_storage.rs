@@ -1,6 +1,6 @@
-//! SQLite Nonce 存储实现
+//! SQLite nonce storage implementation
 //!
-//! 提供基于 SQLite 的 Nonce 存储功能实现，使用 sqlx 提供异步支持
+//! Provides SQLite-based nonce storage implementation with async support via sqlx
 
 use anyhow::Result;
 use nonce_auth::NonceError;
@@ -21,11 +21,11 @@ pub struct SqliteNonceStorage {
 }
 
 impl SqliteNonceStorage {
-    /// 创建新的 Nonce 存储实例（同步方法，适用于非 async 上下文）
+    /// Create a new nonce storage instance (synchronous method, for non-async contexts)
     pub fn new<P: AsRef<Path>>(db_path: P) -> Result<Self> {
         let db_file = db_path.as_ref().join("nonce.db");
 
-        // 创建新的运行时来初始化（仅用于非 async 上下文）
+        // Create a new runtime for initialization (only for non-async contexts)
         let rt = tokio::runtime::Runtime::new()?;
         let pool = rt.block_on(Self::init_pool(&db_file))?;
 
@@ -35,7 +35,7 @@ impl SqliteNonceStorage {
         })
     }
 
-    /// 创建新的 Nonce 存储实例（异步方法，适用于 async 上下文）
+    /// Create a new nonce storage instance (async method, for async contexts)
     pub async fn new_async<P: AsRef<Path>>(db_path: P) -> Result<Self> {
         let db_file = db_path.as_ref().join("nonce.db");
         let pool = Self::init_pool(&db_file).await?;
@@ -59,7 +59,7 @@ impl SqliteNonceStorage {
             .connect_with(options)
             .await?;
 
-        // 初始化数据库表
+        // Initialize database table
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS nonce_entries (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,7 +73,7 @@ impl SqliteNonceStorage {
         .execute(&pool)
         .await?;
 
-        // 创建索引
+        // Create indexes
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_nonce_context ON nonce_entries(nonce, context)",
         )
@@ -133,7 +133,7 @@ impl NonceStorage for SqliteNonceStorage {
     ) -> Result<Option<NonceEntry>, NonceError> {
         let db_entry = self.get(nonce, context).await?;
 
-        // 检查是否过期
+        // Check if expired
         if let Some(entry) = db_entry {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -141,7 +141,7 @@ impl NonceStorage for SqliteNonceStorage {
                 .as_secs() as i64;
 
             if entry.expires_at <= now {
-                // 已过期，返回 None
+                // Expired, return None
                 return Ok(None);
             }
 
@@ -192,7 +192,7 @@ impl NonceStorage for SqliteNonceStorage {
     }
 
     async fn cleanup_expired(&self, current_time: i64) -> Result<usize, NonceError> {
-        // 使用锁防止并发清理
+        // Use lock to prevent concurrent cleanup
         let _lock = self.cleanup_lock.write().await;
 
         let result = sqlx::query("DELETE FROM nonce_entries WHERE expires_at < ?")
@@ -273,19 +273,19 @@ mod tests {
             .as_secs();
         println!("Before insert: {before_insert}");
 
-        // 添加即将过期的 nonce（1 秒TTL）
+        // Add a nonce about to expire (1 second TTL)
         storage
             .set("expired", None, Duration::from_secs(1))
             .await
             .unwrap();
 
-        // 添加未过期的 nonce (1小时TTL)
+        // Add a non-expiring nonce (1 hour TTL)
         storage
             .set("valid", None, Duration::from_secs(3600))
             .await
             .unwrap();
 
-        // 等待确保第一个过期（等待 2 秒）
+        // Wait to ensure the first one expires (wait 2 seconds)
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
         let after_sleep = SystemTime::now()
@@ -295,12 +295,12 @@ mod tests {
         println!("After sleep: {after_sleep}");
         println!("Time elapsed: {} seconds", after_sleep - before_insert);
 
-        // 通过 NonceStorage trait 调用（会检查过期）
+        // Call through NonceStorage trait (checks expiration)
         use nonce_auth::storage::NonceStorage;
         let expired_entry = NonceStorage::get(&storage, "expired", None).await.unwrap();
         println!("Expired entry after trait call: {expired_entry:?}");
 
-        // 验证：过期的应该查不到（trait方法内部会检查过期）
+        // Verify: expired nonce should not be found (trait method checks expiration internally)
         assert!(
             expired_entry.is_none(),
             "Expected expired nonce to return None"
@@ -317,7 +317,7 @@ mod tests {
             .await
             .unwrap();
 
-        // 添加一些 nonce
+        // Add some nonces
         storage
             .set("n1", None, Duration::from_secs(1))
             .await

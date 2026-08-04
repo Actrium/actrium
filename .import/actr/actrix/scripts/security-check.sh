@@ -1,67 +1,67 @@
 #!/bin/bash
-# Actrix 安全检查脚本
+# Actrix security check script
 
 set -e
 
-echo "🔍 Actrix 安全检查..."
+echo "🔍 Actrix security check..."
 echo
 
-# 检查数据库文件权限
-echo "1. 检查数据库文件权限..."
+# Check database file permissions
+echo "1. Checking database file permissions..."
 find . -name "*.db" -type f | while read -r db; do
     perm=$(stat -c "%a" "$db" 2>/dev/null || stat -f "%A" "$db" 2>/dev/null)
     if [ "$perm" != "600" ]; then
-        echo "  ⚠️  $db 权限为 $perm，应该是 600"
-        echo "     修复: chmod 600 $db"
+        echo "  ⚠️  $db permission is $perm, should be 600"
+        echo "     Fix: chmod 600 $db"
     else
         echo "  ✅ $db"
     fi
 done
 
-# 检查配置文件中的默认密钥
+# Check for default keys in config
 echo
-echo "2. 检查默认密钥..."
+echo "2. Checking for default keys..."
 if grep -r "default-.*-key\|change-in-production" config*.toml 2>/dev/null; then
-    echo "  ⚠️  发现默认密钥，请修改！"
+    echo "  ⚠️  Default key found, please change it!"
 else
-    echo "  ✅ 未发现默认密钥"
+    echo "  ✅ No default keys found"
 fi
 
-# 检查密钥长度
+# Check key length
 echo
-echo "3. 检查 actrix_shared_key 长度..."
+echo "3. Checking actrix_shared_key length..."
 if [ -f "config.toml" ]; then
     key=$(grep "actrix_shared_key" config.toml | cut -d'"' -f2)
     if [ ${#key} -lt 16 ]; then
-        echo "  ⚠️  密钥长度 ${#key}，建议至少 16 字符"
+        echo "  ⚠️  Key length ${#key}, recommend at least 16 characters"
     else
-        echo "  ✅ 密钥长度 ${#key}"
+        echo "  ✅ Key length ${#key}"
     fi
 fi
 
-# 检查 TLS 证书
+# Check TLS certificates
 echo
-echo "4. 检查 TLS 证书..."
+echo "4. Checking TLS certificates..."
 if [ -f "config.toml" ]; then
     cert=$(grep "cert =" config.toml | cut -d'"' -f2 | head -1)
     if [ -n "$cert" ] && [ -f "$cert" ]; then
         expiry=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2)
-        echo "  ✅ 证书存在: $cert"
-        echo "     过期时间: $expiry"
+        echo "  ✅ Certificate exists: $cert"
+        echo "     Expiry: $expiry"
     else
-        echo "  ⚠️  未配置或证书不存在"
+        echo "  ⚠️  Not configured or certificate not found"
     fi
 fi
 
-# 检查依赖漏洞
+# Check dependency vulnerabilities
 echo
-echo "5. 检查依赖漏洞..."
+echo "5. Checking dependency vulnerabilities..."
 if command -v cargo-audit &> /dev/null; then
     cargo audit
 else
-    echo "  ⚠️  cargo-audit 未安装，跳过"
-    echo "     安装: cargo install cargo-audit"
+    echo "  ⚠️  cargo-audit not installed, skipping"
+    echo "     Install: cargo install cargo-audit"
 fi
 
 echo
-echo "✅ 安全检查完成"
+echo "✅ Security check completed"

@@ -1,4 +1,4 @@
-//! Signer HTTP 处理器
+//! Signer HTTP handlers
 
 use crate::{
     crypto::KeyEncryptor,
@@ -21,7 +21,7 @@ use std::sync::{
 use std::time::Instant;
 
 lazy_static! {
-    /// Signer 服务指标
+    /// Signer service metrics
     static ref KS_KEYS_GENERATED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_keys_generated_total", "Total number of keys generated")
             .namespace("actrix"),
@@ -48,7 +48,7 @@ lazy_static! {
     ).unwrap();
 }
 
-/// 注册 Signer metrics 到全局 registry
+/// Register Signer metrics to the global registry
 pub fn register_signer_metrics(registry: &prometheus::Registry) -> Result<(), prometheus::Error> {
     registry.register(Box::new(KS_KEYS_GENERATED.clone()))?;
     registry.register(Box::new(KS_REQUEST_DURATION.clone()))?;
@@ -57,19 +57,19 @@ pub fn register_signer_metrics(registry: &prometheus::Registry) -> Result<(), pr
     Ok(())
 }
 
-/// 惰性清理触发条件
-const CLEANUP_CHECK_INTERVAL: u32 = 100; // 每 100 次请求检查一次
-const CLEANUP_MIN_KEYS: u32 = 10; // 至少有 10 个密钥时才清理
+/// Lazy cleanup trigger conditions
+const CLEANUP_CHECK_INTERVAL: u32 = 100; // Check every 100 requests
+const CLEANUP_MIN_KEYS: u32 = 10; // Only clean up when at least 10 keys exist
 
-/// Signer 服务状态
+/// Signer service state
 #[derive(Clone)]
 pub struct SignerState {
     pub storage: KeyStorage,
     pub nonce_storage: Arc<dyn NonceStorage + Send + Sync>,
     pub psk: String,
-    /// 容忍期（秒）
+    /// Tolerance period (seconds)
     pub tolerance_seconds: u64,
-    /// 请求计数器（用于惰性清理触发）
+    /// Request counter (for lazy cleanup triggering)
     request_counter: Arc<AtomicU32>,
 }
 
@@ -89,11 +89,11 @@ impl SignerState {
         }
     }
 
-    /// 惰性清理：在请求时检查是否需要清理过期密钥
+    /// Lazy cleanup: check whether expired keys need to be cleaned up during request handling
     ///
-    /// 触发条件：
-    /// - 每 CLEANUP_CHECK_INTERVAL 次请求检查一次
-    /// - 数据库中至少有 CLEANUP_MIN_KEYS 个密钥
+    /// Trigger conditions:
+    /// - Every CLEANUP_CHECK_INTERVAL requests
+    /// - At least CLEANUP_MIN_KEYS keys in the database
     async fn maybe_cleanup_expired_keys(&self) {
         let count = self.request_counter.fetch_add(1, Ordering::Relaxed);
 
@@ -102,11 +102,11 @@ impl SignerState {
             return;
         }
 
-        // 在后台异步清理，不阻塞当前请求
+        // Clean up asynchronously in the background without blocking the current request
         let storage = self.storage.clone();
         let tolerance = self.tolerance_seconds;
         tokio::spawn(async move {
-            // 先检查密钥总数
+            // First check the total key count
             let total_keys = match storage.get_key_count().await {
                 Ok(count) => count,
                 Err(e) => {
@@ -124,7 +124,7 @@ impl SignerState {
                 return;
             }
 
-            // 执行清理（仅删除超出容忍期的密钥）
+            // Perform cleanup (only delete keys beyond the tolerance period)
             match storage.cleanup_expired_keys(tolerance).await {
                 Ok(cleaned) => {
                     if cleaned > 0 {
@@ -169,7 +169,7 @@ impl SignerState {
     }
 }
 
-/// 从 KS 配置创建 SignerState
+/// Create SignerState from Signer configuration
 ///
 /// Note: Nonce storage must be provided by the caller to avoid circular dependencies
 /// between ks and platform crates.
@@ -181,7 +181,7 @@ pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
 ) -> Result<SignerState, SignerError> {
     crate::recording::info!("Initializing Signer state from SignerServiceConfig");
 
-    // 创建密钥加密器
+    // Create key encryptor
     let encryptor = match service_config.get_kek_source() {
         Some(kek_source) => {
             crate::recording::info!("KEK configured, enabling private key encryption");
@@ -193,7 +193,7 @@ pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
         }
     };
 
-    // 从配置创建存储实例（异步）
+    // Create storage instance from configuration (async)
     let key_storage =
         KeyStorage::from_config(&service_config.storage, encryptor, sqlite_path).await?;
 
@@ -205,7 +205,7 @@ pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
     ))
 }
 
-/// 创建 KS 服务的路由
+/// Create the Signer service routes
 pub fn create_router(state: SignerState) -> Router {
     Router::new()
         .route("/generate-signing-key", post(generate_signing_key_handler))
@@ -214,13 +214,13 @@ pub fn create_router(state: SignerState) -> Router {
         .with_state(state)
 }
 
-/// 获取服务统计信息
+/// Get service statistics
 pub async fn get_stats(state: &SignerState) -> Result<ServiceStats, SignerError> {
     let key_count = state.storage.get_key_count().await?;
     Ok(ServiceStats { key_count })
 }
 
-/// 服务统计信息
+/// Service statistics
 #[derive(Debug, Clone)]
 pub struct ServiceStats {
     pub key_count: u32,
@@ -233,14 +233,14 @@ async fn generate_signing_key_handler(
     let start_time = Instant::now();
     crate::recording::info!("Received Ed25519 signing key generation request");
 
-    // 验证凭据
+    // Verify credential
     let request_data = request.request_payload();
     let verify_result = app_state
         .verify_credential(&request.credential, &request_data)
         .await;
 
     if let Err(ref e) = verify_result {
-        // 记录认证失败指标
+        // Record authentication failure metrics
         let reason = match e {
             SignerError::ReplayAttack(_) => "replay_attack",
             SignerError::Authentication(_) => "invalid_signature",
@@ -262,20 +262,20 @@ async fn generate_signing_key_handler(
     }
     verify_result?;
 
-    // 生成并存储 Ed25519 密钥对
+    // Generate and store Ed25519 key pair
     let key_pair = app_state.storage.generate_and_store_key().await?;
 
-    // 获取密钥记录以获取正确的过期时间
+    // Get key record to obtain the correct expiration time
     let key_record = app_state
         .storage
         .get_key_record(key_pair.key_id)
         .await?
         .ok_or_else(|| SignerError::Internal("Failed to get key record after creation".into()))?;
 
-    // 惰性清理
+    // Lazy cleanup
     app_state.maybe_cleanup_expired_keys().await;
 
-    // 记录密钥生成指标
+    // Record key generation metrics
     KS_KEYS_GENERATED.with_label_values(&["ed25519"]).inc();
 
     let response = GenerateSigningKeyResponse {
@@ -308,7 +308,7 @@ async fn sign_handler(
     let start_time = Instant::now();
     crate::recording::info!("Received sign request for key_id: {}", key_id);
 
-    // 验证凭据
+    // Verify credential
     let request_data = request.request_payload();
     let verify_result = app_state
         .verify_credential(&request.credential, &request_data)
@@ -336,7 +336,7 @@ async fn sign_handler(
     }
     verify_result?;
 
-    // 检查密钥是否在容忍期内有效
+    // Check whether the key is still valid within the tolerance period
     let key_record = app_state
         .storage
         .get_key_record(key_id)
@@ -362,7 +362,7 @@ async fn sign_handler(
         }
     }
 
-    // 在后端内部签名，私钥不离开 KS
+    // Sign internally in the backend; private key does not leave Signer
     let signature = app_state
         .storage
         .sign(key_id, &request.message)

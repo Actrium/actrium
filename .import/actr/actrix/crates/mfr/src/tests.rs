@@ -1,6 +1,7 @@
-/// MFR 模块集成测试
-///
-/// 所有需要数据库的测试使用 in-process SQLite 内存库，每个测试独立 pool，互不干扰。
+//! MFR module integration tests
+//!
+//! All tests requiring a database use an in-process SQLite in-memory store,
+//! each with its own independent pool so they do not interfere with each other.
 use sqlx::SqlitePool;
 
 use crate::{
@@ -23,7 +24,7 @@ struct SignablePublishBody<'a> {
     nonce: &'a str,
 }
 
-// ─── 测试辅助 ────────────────────────────────────────────────────────────────
+// ─── Test helpers ────────────────────────────────────────────────────────────
 
 async fn setup_test_pool() -> SqlitePool {
     let pool = sqlx::sqlite::SqlitePoolOptions::new()
@@ -258,7 +259,7 @@ fn test_validate_github_login_valid() {
     assert!(validate_github_login(&max).is_ok());
 }
 
-// ─── crypto.rs 纯单元测试 ────────────────────────────────────────────────────
+// ─── crypto.rs pure unit tests ────────────────────────────────────────────────
 
 #[test]
 fn test_generate_keypair_roundtrip() {
@@ -352,7 +353,7 @@ fn test_verify_signature_bad_pubkey_encoding() {
     );
 }
 
-// ─── model/manufacturer.rs 测试（需 DB）─────────────────────────────────────
+// ─── model/manufacturer.rs tests (requires DB) ──────────────────────────────
 
 #[tokio::test]
 async fn test_manufacturer_create_and_get() {
@@ -517,7 +518,7 @@ async fn test_manufacturer_delete() {
     assert!(found.is_none());
 }
 
-// ─── model/challenge.rs 测试（需 DB）─────────────────────────────────────────
+// ─── model/challenge.rs tests (requires DB) ──────────────────────────────────
 
 #[tokio::test]
 async fn test_challenge_create() {
@@ -596,7 +597,7 @@ async fn test_challenge_token_unique() {
     );
 }
 
-// ─── model/package.rs 测试（需 DB）──────────────────────────────────────────
+// ─── model/package.rs tests (requires DB) ───────────────────────────────────
 
 #[tokio::test]
 async fn test_package_publish_and_get() {
@@ -847,7 +848,7 @@ async fn test_verify_legacy_package_without_signing_key_id_after_expiry() {
     assert_eq!(resolved_key_id, mfr.key_id);
 }
 
-// ─── manager.rs 测试（需 DB）─────────────────────────────────────────────────
+// ─── manager.rs tests (requires DB) ──────────────────────────────────────────
 
 #[tokio::test]
 async fn test_lookup_package_no_reserved_shortcut() {
@@ -1322,7 +1323,7 @@ async fn test_manager_list_packages_by_mfr() {
     assert_eq!(all.len(), 2);
 }
 
-// ─── dual key mode 测试 ──────────────────────────────────────────────────────
+// ─── dual key mode tests ──────────────────────────────────────────────────────
 
 #[test]
 fn test_validate_public_key_valid() {

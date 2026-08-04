@@ -12,19 +12,19 @@
 
 **新用户**: 按此顺序阅读
 1. [README.md](../README.md) - 项目简介
-2. [CONFIGURATION.md](./CONFIGURATION.md) - 配置你的服务
+2. [CONFIGURATION.md](./CONFIGURATION.zh.md) - 配置你的服务
 3. [deploy/README.md](../deploy/README.md) - 部署到生产环境
 
 **开发者**: 深入了解
-1. [ARCHITECTURE.md](./ARCHITECTURE.md) - 整体架构
-2. [CRATES.md](./CRATES.md) - 代码实现细节
-3. [DEVELOPMENT.md](./DEVELOPMENT.md) - 开发指南
+1. [ARCHITECTURE.md](./ARCHITECTURE.zh.md) - 整体架构
+2. [CRATES.md](./CRATES.zh.md) - 代码实现细节
+3. [DEVELOPMENT.md](./DEVELOPMENT.zh.md) - 开发指南
 
 ---
 
 ## 📚 核心文档
 
-### [ARCHITECTURE.md](./ARCHITECTURE.md)
+### [ARCHITECTURE.md](./ARCHITECTURE.zh.md)
 **类型**: 架构设计
 **篇幅**: ~880 行
 **适合**: 架构师、高级开发者
@@ -40,7 +40,7 @@
 
 ---
 
-### [CRATES.md](./CRATES.md)
+### [CRATES.md](./CRATES.zh.md)
 **类型**: 代码实现参考
 **篇幅**: ~800 行
 **适合**: 核心开发者
@@ -56,7 +56,7 @@
 
 ---
 
-### [SERVICES.md](./SERVICES.md)
+### [SERVICES.md](./SERVICES.zh.md)
 **类型**: 服务管理指南
 **篇幅**: ~1000 行
 **适合**: 运维工程师、DevOps
@@ -72,7 +72,7 @@
 
 ---
 
-### [API.md](./API.md)
+### [API.md](./API.zh.md)
 **类型**: API 参考
 **篇幅**: ~200 行
 **适合**: 集成开发者
@@ -88,7 +88,7 @@
 
 ---
 
-### [CONFIGURATION.md](./CONFIGURATION.md)
+### [CONFIGURATION.md](./CONFIGURATION.zh.md)
 **类型**: 配置参考
 **篇幅**: ~585 行
 **适合**: 所有用户
@@ -118,7 +118,7 @@
 
 ---
 
-### [DEVELOPMENT.md](./DEVELOPMENT.md)
+### [DEVELOPMENT.md](./DEVELOPMENT.zh.md)
 **类型**: 开发指南
 **篇幅**: ~200 行
 
@@ -130,7 +130,7 @@
 
 ---
 
-### [ENHANCEMENTS.md](../ENHANCEMENTS.md)
+### ENHANCEMENTS.md（已移除）
 **类型**: 改进总结
 **篇幅**: ~880 行
 
@@ -154,29 +154,29 @@
 
 ### 场景 1: 我想部署 Actrix
 
-1. [CONFIGURATION.md](./CONFIGURATION.md) - 了解配置选项
+1. [CONFIGURATION.md](./CONFIGURATION.zh.md) - 了解配置选项
 2. [config.example.toml](../config.example.toml) - 复制配置模板
 3. [deploy/README.md](../deploy/README.md) - 按步骤部署
-4. [SERVICES.md](./SERVICES.md) - 故障排查
+4. [SERVICES.md](./SERVICES.zh.md) - 故障排查
 
 ### 场景 2: 我想集成 KS API
 
-1. [API.md](./API.md) - 查看 API 端点
-2. [CRATES.md](./CRATES.md) - 了解客户端实现
+1. [API.md](./API.zh.md) - 查看 API 端点
+2. [CRATES.md](./CRATES.zh.md) - 了解客户端实现
 3. [config.example.toml](../config.example.toml) - 配置 KS 服务
 
 ### 场景 3: 我想开发新功能
 
-1. [ARCHITECTURE.md](./ARCHITECTURE.md) - 理解系统架构
-2. [CRATES.md](./CRATES.md) - 找到相关代码
-3. [DEVELOPMENT.md](./DEVELOPMENT.md) - 开发流程
-4. [SERVICES.md](./SERVICES.md) - 服务管理机制
+1. [ARCHITECTURE.md](./ARCHITECTURE.zh.md) - 理解系统架构
+2. [CRATES.md](./CRATES.zh.md) - 找到相关代码
+3. [DEVELOPMENT.md](./DEVELOPMENT.zh.md) - 开发流程
+4. [SERVICES.md](./SERVICES.zh.md) - 服务管理机制
 
 ### 场景 4: 我遇到了问题
 
-1. [SERVICES.md](./SERVICES.md) - 故障排查章节
+1. [SERVICES.md](./SERVICES.zh.md) - 故障排查章节
 2. [deploy/README.md](../deploy/README.md) - 部署问题
-3. [CONFIGURATION.md](./CONFIGURATION.md) - 配置验证
+3. [CONFIGURATION.md](./CONFIGURATION.zh.md) - 配置验证
 4. [GitHub Issues](https://github.com/Actrium/actrix/issues)
 
 ---

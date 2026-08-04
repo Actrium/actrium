@@ -5,7 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "WebRTC信令服务实现，作为aux-servers的组件"
+description = "WebRTC signaling server implementation, as a component of aux-servers"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -35,7 +35,7 @@ actr-protocol = { workspace = true }
 prost = { workspace = true }
 base64 = { workspace = true }
 
-# 内部依赖
+# Internal dependencies
 platform = { path = "../platform", package = "actrix-platform", version = "0.5.9" }
 
 # Database

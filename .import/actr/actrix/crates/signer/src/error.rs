@@ -1,4 +1,4 @@
-//! Signer 服务错误定义
+//! Signer service error definitions
 
 use axum::{
     Json,
@@ -8,54 +8,54 @@ use axum::{
 use serde_json::json;
 use thiserror::Error;
 
-/// Signer 服务错误类型
+/// Signer service error type
 #[derive(Error, Debug)]
 pub enum SignerError {
-    /// 数据库错误
+    /// Database error
     #[error("Database error: {0}")]
     Database(#[from] sqlx::Error),
 
-    /// 加密/解密错误
+    /// Encryption/decryption error
     #[error("Crypto error: {0}")]
     Crypto(String),
 
-    /// 认证错误
+    /// Authentication error
     #[error("Authentication error: {0}")]
     Authentication(String),
 
-    /// 重放攻击检测
+    /// Replay attack detected
     #[error("Replay attack detected: {0}")]
     ReplayAttack(String),
 
-    /// 无效的请求参数
+    /// Invalid request parameters
     #[error("Invalid request: {0}")]
     InvalidRequest(String),
 
-    /// 密钥未找到
+    /// Key not found
     #[error("Key not found: key_id={0}")]
     KeyNotFound(u32),
 
-    /// 资源未找到
+    /// Resource not found
     #[error("Not found: {0}")]
     NotFound(String),
 
-    /// 内部服务器错误
+    /// Internal server error
     #[error("Internal server error: {0}")]
     Internal(String),
 
-    /// 配置错误
+    /// Configuration error
     #[error("Configuration error: {0}")]
     Config(String),
 
-    /// Base64 编码/解码错误
+    /// Base64 encoding/decoding error
     #[error("Base64 error: {0}")]
     Base64(#[from] base64::DecodeError),
 
-    /// JSON 序列化/反序列化错误
+    /// JSON serialization/deserialization error
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
-    /// HTTP 客户端错误
+    /// HTTP client error
     #[error("HTTP client error: {0}")]
     HttpClient(#[from] reqwest::Error),
 
@@ -81,11 +81,11 @@ impl IntoResponse for SignerError {
                 "Invalid request parameters".to_string(),
             ),
             SignerError::KeyNotFound(_) | SignerError::NotFound(_) => {
-                // 生产环境不泄露具体的 key_id
+                // Do not leak specific key_id in production
                 (StatusCode::NOT_FOUND, "Resource not found".to_string())
             }
             SignerError::Database(_) | SignerError::Internal(_) | SignerError::Crypto(_) => {
-                // 不向客户端暴露内部错误详情
+                // Do not expose internal error details to the client
                 crate::recording::error!("Internal error: {:?}", self);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
@@ -110,8 +110,8 @@ impl IntoResponse for SignerError {
     }
 }
 
-/// Signer 结果类型别名
+/// Signer result type alias
 pub type SignerResult<T> = Result<T, SignerError>;
 
-// ECIES 错误处理 - 由于 ecies 库的错误类型变化，暂时简化处理
-// 后续可以根据具体需要添加更详细的错误转换
+// ECIES error handling - temporarily simplified due to error type changes in the ecies library
+// More detailed error conversion can be added later as needed

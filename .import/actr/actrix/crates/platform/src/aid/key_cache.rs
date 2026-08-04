@@ -1,7 +1,7 @@
-//! AIS 签名公钥缓存
+//! AIS signing public key cache
 //!
-//! 为验证器提供本地 SQLite 缓存，避免重复从 AIS 注册响应中重新获取 Ed25519 公钥。
-//! 缓存项以 key_id 为索引，存储对应的 Ed25519 verifying key（32 bytes）和过期时间。
+//! Provides a local SQLite cache for the verifier, avoiding repeated retrieval of Ed25519 public keys from AIS registration responses.
+//! Cache entries are indexed by key_id, storing the corresponding Ed25519 verifying key (32 bytes) and expiration time.
 
 use crate::aid::credential::error::AidError;
 use base64::prelude::*;
@@ -13,10 +13,10 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// AIS 签名公钥缓存管理器
+/// AIS signing public key cache manager
 ///
-/// 缓存 AIS Ed25519 verifying key，以 key_id 为索引。
-/// 用于 signaling 等服务在验证 AIdCredential 时按 key_id 查找对应公钥。
+/// Caches AIS Ed25519 verifying keys, indexed by key_id.
+/// Used by signaling and other services to look up the corresponding public key by key_id when verifying AIdCredential.
 #[derive(Debug, Clone)]
 pub struct KeyCache {
     pool: SqlitePool,
@@ -24,7 +24,7 @@ pub struct KeyCache {
 }
 
 impl KeyCache {
-    /// 创建新的密钥缓存实例并初始化 SQLite 表
+    /// Create a new key cache instance and initialize the SQLite table
     pub async fn new<P: AsRef<Path>>(cache_db_file: P) -> Result<Self, AidError> {
         let database_url = format!("sqlite:{}", cache_db_file.as_ref().display());
         let options = SqliteConnectOptions::from_str(&database_url)
@@ -50,15 +50,15 @@ impl KeyCache {
         cache.init_tables().await?;
 
         crate::recording::info!(
-            "AIS 公钥缓存初始化完成，数据库：{}",
+            "AIS public key cache initialized, database: {}",
             cache_db_file.as_ref().display()
         );
         Ok(cache)
     }
 
-    /// 初始化缓存数据库表
+    /// Initialize cache database tables
     async fn init_tables(&self) -> Result<(), AidError> {
-        // key_cache 表：存储 Ed25519 verifying key（base64 编码，32 bytes）和过期时间
+        // key_cache table: stores Ed25519 verifying key (base64-encoded, 32 bytes) and expiration time
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS key_cache (
@@ -80,13 +80,13 @@ impl KeyCache {
                 AidError::DecodeFailure(format!("failed to create key_cache index: {e}"))
             })?;
 
-        crate::recording::debug!("AIS 公钥缓存数据库表已就绪");
+        crate::recording::debug!("AIS public key cache database tables ready");
         Ok(())
     }
 
-    /// 从缓存中获取 Ed25519 verifying key
+    /// Get the Ed25519 verifying key from the cache
     ///
-    /// 返回 `(VerifyingKey, expires_at)`；若缓存不存在或已过期则返回 `None`。
+    /// Returns `(VerifyingKey, expires_at)`; returns `None` if the cache entry does not exist or has expired.
     pub async fn get_cached_key(
         &self,
         key_id: u32,
@@ -103,7 +103,11 @@ impl KeyCache {
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| {
-                crate::recording::error!("查询 AIS 公钥缓存失败：key_id={}, {}", key_id, e);
+                crate::recording::error!(
+                    "Failed to query AIS public key cache: key_id={}, {}",
+                    key_id,
+                    e
+                );
                 AidError::DecodeFailure(format!("key cache query error: {e}"))
             })?;
 
@@ -116,9 +120,12 @@ impl KeyCache {
                     AidError::DecodeFailure(format!("failed to read expires_at column: {e}"))
                 })?;
 
-                // 缓存条目已过期，删除并返回 None
+                // Cache entry expired, delete and return None
                 if expires_at > 0 && (expires_at as u64) <= now {
-                    crate::recording::debug!("AIS 公钥缓存已过期，删除：key_id={}", key_id);
+                    crate::recording::debug!(
+                        "AIS public key cache expired, deleting: key_id={}",
+                        key_id
+                    );
                     let _ = sqlx::query("DELETE FROM key_cache WHERE key_id = ?1")
                         .bind(key_id as i64)
                         .execute(&self.pool)
@@ -126,14 +133,15 @@ impl KeyCache {
                     return Ok(None);
                 }
 
-                // base64 解码 → 32 bytes → VerifyingKey
+                // base64 decode -> 32 bytes -> VerifyingKey
                 let pubkey_bytes = BASE64_STANDARD.decode(&pubkey_b64).map_err(|e| {
                     AidError::DecodeFailure(format!("failed to base64 decode pubkey: {e}"))
                 })?;
 
                 let pubkey_array: [u8; 32] = pubkey_bytes.try_into().map_err(|_| {
                     AidError::DecodeFailure(
-                        "pubkey 长度无效，期望 32 bytes（Ed25519 VerifyingKey）".to_string(),
+                        "Invalid pubkey length, expected 32 bytes (Ed25519 VerifyingKey)"
+                            .to_string(),
                     )
                 })?;
 
@@ -141,19 +149,19 @@ impl KeyCache {
                     AidError::DecodeFailure(format!("invalid Ed25519 verifying key: {e}"))
                 })?;
 
-                crate::recording::debug!("命中 AIS 公钥缓存：key_id={}", key_id);
+                crate::recording::debug!("AIS public key cache hit: key_id={}", key_id);
                 Ok(Some((verifying_key, expires_at as u64)))
             }
             None => {
-                crate::recording::debug!("AIS 公钥缓存未命中：key_id={}", key_id);
+                crate::recording::debug!("AIS public key cache miss: key_id={}", key_id);
                 Ok(None)
             }
         }
     }
 
-    /// 将 Ed25519 verifying key 写入缓存
+    /// Write the Ed25519 verifying key to the cache
     ///
-    /// `expires_at` 为 Unix 秒时间戳，传 0 表示永不过期。
+    /// `expires_at` is a Unix second timestamp; pass 0 to indicate never expires.
     pub async fn cache_key(
         &self,
         key_id: u32,
@@ -179,14 +187,14 @@ impl KeyCache {
         .map_err(|e| AidError::DecodeFailure(format!("failed to write key cache: {e}")))?;
 
         crate::recording::debug!(
-            "AIS 公钥已写入缓存：key_id={}, expires_at={}",
+            "AIS public key written to cache: key_id={}, expires_at={}",
             key_id,
             expires_at
         );
         Ok(())
     }
 
-    /// 清理所有已过期的缓存条目
+    /// Clean up all expired cache entries
     pub async fn cleanup_expired_keys(&self) -> Result<u32, AidError> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -201,12 +209,15 @@ impl KeyCache {
 
         let deleted = result.rows_affected() as u32;
         if deleted > 0 {
-            crate::recording::info!("AIS 公钥缓存：已清理 {} 条过期记录", deleted);
+            crate::recording::info!(
+                "AIS public key cache: cleaned up {} expired records",
+                deleted
+            );
         }
         Ok(deleted)
     }
 
-    /// 返回缓存中的条目总数（用于监控/调试）
+    /// Returns the total number of entries in the cache (for monitoring/debugging)
     pub async fn get_cached_key_count(&self) -> Result<u32, AidError> {
         let row = sqlx::query("SELECT COUNT(*) as count FROM key_cache")
             .fetch_one(&self.pool)
@@ -220,7 +231,7 @@ impl KeyCache {
         Ok(count as u32)
     }
 
-    /// 内部：每小时触发一次过期清理
+    /// Internal: trigger expired entry cleanup once per hour
     async fn maybe_cleanup(&self) {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -233,11 +244,14 @@ impl KeyCache {
         };
 
         if should_cleanup {
-            crate::recording::debug!("触发 AIS 公钥缓存定时清理");
+            crate::recording::debug!("Triggering scheduled AIS public key cache cleanup");
             match self.cleanup_expired_keys().await {
-                Ok(n) if n > 0 => crate::recording::info!("AIS 公钥缓存清理完成，删除 {} 条", n),
+                Ok(n) if n > 0 => crate::recording::info!(
+                    "AIS public key cache cleanup complete, deleted {} entries",
+                    n
+                ),
                 Ok(_) => {}
-                Err(e) => crate::recording::error!("AIS 公钥缓存清理失败：{}", e),
+                Err(e) => crate::recording::error!("AIS public key cache cleanup failed: {}", e),
             }
             let mut last = self.last_cleanup_time.lock().unwrap();
             *last = now;
@@ -299,7 +313,7 @@ mod tests {
             .unwrap();
 
         let verifying_key = generate_test_key();
-        // 设置已过期的时间戳
+        // Set an expired timestamp
         let expires_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -310,7 +324,7 @@ mod tests {
             .cache_key(1, &verifying_key, expires_at)
             .await
             .unwrap();
-        // 过期条目应返回 None
+        // Expired entry should return None
         let cached = cache.get_cached_key(1).await.unwrap();
         assert!(cached.is_none());
     }

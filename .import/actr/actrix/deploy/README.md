@@ -1,3 +1,4 @@
+<!-- cjk-allow-file: README.zh.md in this directory is already the deploy-helper doc, so the deploy-tool guide keeps the README.md name GitHub displays and stays Chinese. -->
 # Actrix 部署工具（actrix-deploy）
 
 `actrix-deploy` 是 actrix 二进制安装与 systemd 部署的统一工具：从 GitHub Release 下载或

@@ -1,128 +1,128 @@
-//! 顶层错误枚举
+//! Top-level error enum
 //!
-//! 聚合所有子模块的错误类型，提供统一的错误处理接口
+//! Aggregates all submodule error types, providing a unified error handling interface
 
 use super::{
     ConfigError, DatabaseError, NetworkError, SerializationError, StorageError, ValidationError,
 };
 use thiserror::Error;
 
-/// 顶层错误枚举，聚合所有子 crate 的错误
+/// Top-level error enum, aggregating all sub-crate error types
 #[derive(Error, Debug)]
 pub enum BaseError {
-    // ========== Identity 管理错误 ==========
-    /// AId Token 相关错误
+    // ========== Identity management errors ==========
+    /// AId Token-related errors
     #[error("AId error: {0}")]
     Aid(#[from] crate::aid::credential::AidError),
 
-    /// Realm 管理错误
+    /// Realm management errors
     #[error("Realm error: {0}")]
     Realm(#[from] crate::realm::RealmError),
 
-    // ========== 服务层错误 ==========
-    /// 身份服务错误
+    // ========== Service layer errors ==========
+    /// Identity service error
     #[error("Identity service error: {message}")]
     IdentityService { message: String },
 
-    /// 信令服务错误
+    /// Signaling service error
     #[error("Signaling service error: {message}")]
     SignalingService { message: String },
 
-    /// 监管服务错误
+    /// Control service error
     #[error("Admin service error: {message}")]
     ControlService { message: String },
 
-    /// TURN 服务错误
+    /// TURN service error
     #[error("TURN service error: {message}")]
     TurnService { message: String },
 
-    /// STUN 服务错误
+    /// STUN service error
     #[error("STUN service error: {message}")]
     StunService { message: String },
 
-    // ========== 基础设施错误 ==========
-    /// 配置错误
+    // ========== Infrastructure errors ==========
+    /// Configuration error
     #[error("Configuration error: {0}")]
     Config(#[from] ConfigError),
 
-    /// 网络错误
+    /// Network error
     #[error("Network error: {0}")]
     Network(#[from] NetworkError),
 
-    /// 数据库错误
+    /// Database error
     #[error("Database error: {0}")]
     Database(#[from] DatabaseError),
 
-    /// 存储错误
+    /// Storage error
     #[error("Storage error: {0}")]
     Storage(#[from] StorageError),
 
-    // ========== 通用错误 ==========
-    /// IO 错误
+    // ========== General errors ==========
+    /// IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// 序列化错误
+    /// Serialization error
     #[error("Serialization error: {0}")]
     Serialization(#[from] SerializationError),
 
-    /// 验证错误
+    /// Validation error
     #[error("Validation error: {0}")]
     Validation(#[from] ValidationError),
 
-    /// 通用错误（用于不适合其他类别的错误）
+    /// General error (for errors that don't fit other categories)
     #[error("General error: {message}")]
     General { message: String },
 
-    /// 内部错误（通常表示编程错误）
+    /// Internal error (usually indicates a programming error)
     #[error("Internal error: {message}")]
     Internal { message: String },
 }
 
 impl BaseError {
-    /// 创建通用错误
+    /// Create a general error
     pub fn general(message: impl Into<String>) -> Self {
         Self::General {
             message: message.into(),
         }
     }
 
-    /// 创建内部错误
+    /// Create an internal error
     pub fn internal(message: impl Into<String>) -> Self {
         Self::Internal {
             message: message.into(),
         }
     }
 
-    /// 创建身份服务错误
+    /// Create an identity service error
     pub fn identity_service(message: impl Into<String>) -> Self {
         Self::IdentityService {
             message: message.into(),
         }
     }
 
-    /// 创建信令服务错误
+    /// Create a signaling service error
     pub fn signaling_service(message: impl Into<String>) -> Self {
         Self::SignalingService {
             message: message.into(),
         }
     }
 
-    /// 创建监管服务错误
+    /// Create a control service error
     pub fn control_service(message: impl Into<String>) -> Self {
         Self::ControlService {
             message: message.into(),
         }
     }
 
-    /// 创建 TURN 服务错误
+    /// Create a TURN service error
     pub fn turn_service(message: impl Into<String>) -> Self {
         Self::TurnService {
             message: message.into(),
         }
     }
 
-    /// 创建 STUN 服务错误
+    /// Create a STUN service error
     pub fn stun_service(message: impl Into<String>) -> Self {
         Self::StunService {
             message: message.into(),
@@ -130,5 +130,5 @@ impl BaseError {
     }
 }
 
-/// 统一的 Result 类型
+/// Unified Result type
 pub type Result<T> = std::result::Result<T, BaseError>;

@@ -1,6 +1,6 @@
-//! AIS 集成测试（自举式）
+//! AIS integration tests (self-bootstrapping)
 //!
-//! 在测试进程内启动临时 Signer gRPC 服务，验证 AIS 的签发与校验链路。
+//! Starts a temporary Signer gRPC service within the test process to verify the AIS issuance and validation chain.
 
 use actr_protocol::{
     ActrType, Realm, RegisterAuthMode, RegisterRequest, RegisterResponse, ReissueCredentialRequest,
@@ -2575,7 +2575,7 @@ async fn test_path2_identity_mismatch_rejected() {
 }
 
 // ============================================================================
-// Manufacturer signature matrix tests (组 A / B / C + dedicated cases)
+// Manufacturer signature matrix tests (Group A / B / C + dedicated cases)
 //
 // These cover the gaps left by the scenario matrix in the design doc:
 // missing-field, tamper/signature-invalidity, time-window, concurrent nonce,
@@ -2690,7 +2690,7 @@ async fn post_renew(app: Router, request: RenewCredentialRequest) -> RenewCreden
 type FieldBlank<'a> = &'a dyn Fn(&mut RegisterRequest);
 type TamperMutation<'a> = &'a dyn Fn(&mut RegisterRequest, &Path2Fixture, u64);
 
-/// 组 A: any one of the manufacturer triple missing → rejected (ManufacturerNotVerified).
+/// Group A: any one of the manufacturer triple missing → rejected (ManufacturerNotVerified).
 /// Covers scenario-matrix #2 / #3 / #4 as a single table.
 #[tokio::test]
 #[serial]
@@ -2733,7 +2733,7 @@ async fn test_path2_missing_manufacturer_field_matrix() {
     }
 }
 
-/// 组 B: tamper / wrong-key matrix. A valid proof is signed first, then one
+/// Group B: tamper / wrong-key matrix. A valid proof is signed first, then one
 /// field is mutated per row. All tamper rows must be rejected (403); the
 /// control row succeeds (covers #5 happy path).
 /// Covers scenario-matrix #5 / #6 / #7 / #9 / #10 / #11 / #12.
@@ -2794,7 +2794,7 @@ async fn test_path2_tamper_and_signature_matrix() {
     }
 }
 
-/// 组 C: `manufacturer_auth_signed_at` time window. `verify_manufacturer_auth_signed_at` has two
+/// Group C: `manufacturer_auth_signed_at` time window. `verify_manufacturer_auth_signed_at` has two
 /// branches (Expired / InvalidTimestamp) with zero coverage today.
 /// Covers scenario-matrix #13 / #14 plus both boundaries.
 #[tokio::test]

@@ -4,7 +4,7 @@
 #
 # Usage:
 #   ./start.sh              # Use default message "TestMsg"
-#   ./start.sh "你好世界"    # Send custom message
+#   ./start.sh "Hello World"    # Send custom message
 
 set -e
 set -o pipefail
@@ -321,7 +321,7 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
     fi
     
     # Check if server has successfully connected to signaling server
-    if grep -q "ActrNode 启动成功\|Echo Server 已完全启动并注册\|ActrNode started" "$LOG_DIR/shell-actr-echo-server.log" 2>/dev/null; then
+    if grep -q "ActrNode started\|Echo Server ready\|ActrNode started" "$LOG_DIR/shell-actr-echo-server.log" 2>/dev/null; then
         echo -e "${GREEN}✅ Server is running and registered${NC}"
         break
     fi

@@ -1,13 +1,14 @@
-//! Presence 订阅管理模块
+//! Presence subscription management module
 //!
-//! 负责管理 Actor 上线事件的订阅与通知机制
+//! Responsible for managing the subscription and notification mechanism
+//! for Actor online events
 //!
-//! # 功能
-//! - 订阅特定 ActrType 的上线事件
-//! - 取消订阅
-//! - 当新 Actor 注册时，通知所有订阅者
+//! # Features
+//! - Subscribe to online events for a specific ActrType
+//! - Unsubscribe
+//! - Notify all subscribers when a new Actor registers
 //!
-//! # 使用示例
+//! # Usage example
 //! ```ignore
 //! use signaling::presence::PresenceManager;
 //! use actr_protocol::{ActrId, ActrType, Realm};
@@ -21,12 +22,12 @@
 //!     version: "1.0.0".to_string(),
 //! };
 //!
-//! // Actor A 订阅 user-service 类型的上线事件
+//! // Actor A subscribes to online events for the user-service type
 //! manager.subscribe(actor_a_id, user_service_type.clone());
 //!
-//! // 当新的 user-service 实例注册时
+//! // When a new user-service instance registers
 //! let subscribers = manager.get_subscribers(&user_service_type);
-//! // 向 subscribers 推送 ActrUpEvent
+//! // Push ActrUpEvent to subscribers
 //! ```
 
 use actr_protocol::{ActrId, ActrType};
@@ -34,37 +35,37 @@ use platform::RealmError;
 use platform::realm::acl::ActorAcl;
 use std::collections::HashMap;
 
-/// Presence 订阅管理器
+/// Presence subscription manager
 #[derive(Debug, Default)]
 pub struct PresenceManager {
-    /// 订阅映射表：target_type -> Vec<subscriber_actor_id>
+    /// Subscription map: target_type -> Vec<subscriber_actor_id>
     ///
-    /// Key: 被订阅的服务类型（ActrType）
-    /// Value: 订阅该类型的 Actor 列表
+    /// Key: the subscribed service type (ActrType)
+    /// Value: list of Actors subscribed to that type
     subscriptions: HashMap<ActrType, Vec<ActrId>>,
 }
 
 impl PresenceManager {
-    /// 创建新的 PresenceManager
+    /// Create a new PresenceManager
     pub fn new() -> Self {
         Self {
             subscriptions: HashMap::new(),
         }
     }
 
-    /// 订阅特定类型的 Actor 上线事件
+    /// Subscribe to Actor online events for a specific type
     ///
-    /// # 参数
-    /// - `subscriber`: 订阅者的 ActrId
-    /// - `target_type`: 要订阅的服务类型
+    /// # Arguments
+    /// - `subscriber`: the subscriber's ActrId
+    /// - `target_type`: the service type to subscribe to
     ///
-    /// # 示例
+    /// # Example
     /// ```ignore
     /// manager.subscribe(client_actor_id, user_service_type);
     /// ```
     pub fn subscribe(&mut self, subscriber: ActrId, target_type: ActrType) {
         platform::recording::info!(
-            "Actor {} 订阅 {}/{} 上线事件",
+            "Actor {} subscribed to {}/{} online events",
             subscriber.to_string_repr(),
             target_type.manufacturer,
             target_type.name
@@ -72,27 +73,33 @@ impl PresenceManager {
 
         let subscribers = self.subscriptions.entry(target_type).or_default();
 
-        // 避免重复订阅
+        // Avoid duplicate subscriptions
         if !subscribers.iter().any(|id| id == &subscriber) {
             subscribers.push(subscriber);
-            platform::recording::debug!("订阅成功，当前订阅者数量: {}", subscribers.len());
+            platform::recording::debug!(
+                "Subscription successful, current subscriber count: {}",
+                subscribers.len()
+            );
         } else {
-            platform::recording::warn!("Actor {} 已经订阅过该类型", subscriber.to_string_repr());
+            platform::recording::warn!(
+                "Actor {} has already subscribed to this type",
+                subscriber.to_string_repr()
+            );
         }
     }
 
-    /// 取消订阅特定类型的 Actor 上线事件
+    /// Unsubscribe from Actor online events for a specific type
     ///
-    /// # 参数
-    /// - `subscriber`: 订阅者的 ActrId
-    /// - `target_type`: 要取消订阅的服务类型
+    /// # Arguments
+    /// - `subscriber`: the subscriber's ActrId
+    /// - `target_type`: the service type to unsubscribe from
     ///
-    /// # 返回
-    /// - `true`: 成功取消订阅
-    /// - `false`: 该订阅不存在
+    /// # Returns
+    /// - `true`: successfully unsubscribed
+    /// - `false`: subscription does not exist
     pub fn unsubscribe(&mut self, subscriber: &ActrId, target_type: &ActrType) -> bool {
         platform::recording::info!(
-            "Actor {} 取消订阅 {}/{} 上线事件",
+            "Actor {} unsubscribed from {}/{} online events",
             subscriber.to_string_repr(),
             target_type.manufacturer,
             target_type.name
@@ -104,21 +111,29 @@ impl PresenceManager {
 
             let removed = subscribers.len() < original_len;
             if removed {
-                platform::recording::debug!("取消订阅成功，剩余订阅者数量: {}", subscribers.len());
+                platform::recording::debug!(
+                    "Unsubscribe successful, remaining subscriber count: {}",
+                    subscribers.len()
+                );
 
-                // 如果没有订阅者了，删除整个条目
+                // If no subscribers remain, remove the entire entry
                 if subscribers.is_empty() {
                     self.subscriptions.remove(target_type);
-                    platform::recording::debug!("该类型已无订阅者，移除订阅表条目");
+                    platform::recording::debug!(
+                        "No subscribers left for this type, removing subscription entry"
+                    );
                 }
             } else {
-                platform::recording::warn!("Actor {} 未订阅该类型", subscriber.to_string_repr());
+                platform::recording::warn!(
+                    "Actor {} has not subscribed to this type",
+                    subscriber.to_string_repr()
+                );
             }
 
             removed
         } else {
             platform::recording::warn!(
-                "类型 {}/{} 不存在任何订阅",
+                "Type {}/{} has no subscriptions",
                 target_type.manufacturer,
                 target_type.name
             );
@@ -126,47 +141,51 @@ impl PresenceManager {
         }
     }
 
-    /// 取消指定 Actor 的所有订阅
+    /// Unsubscribe a specific Actor from all subscriptions
     ///
-    /// 用于 Actor 下线或断开连接时清理
+    /// Used for cleanup when an Actor goes offline or disconnects
     ///
-    /// # 参数
-    /// - `subscriber`: 订阅者的 ActrId
+    /// # Arguments
+    /// - `subscriber`: the subscriber's ActrId
     ///
-    /// # 返回
-    /// 取消的订阅数量
+    /// # Returns
+    /// The number of subscriptions removed
     pub fn unsubscribe_all(&mut self, subscriber: &ActrId) -> usize {
-        platform::recording::info!("清理 Actor {} 的所有订阅", subscriber.to_string_repr());
+        platform::recording::info!(
+            "Clearing all subscriptions for Actor {}",
+            subscriber.to_string_repr()
+        );
 
         let mut removed_count = 0;
 
-        // 从所有订阅列表中移除该订阅者
+        // Remove this subscriber from all subscription lists
         self.subscriptions.retain(|_target_type, subscribers| {
             let original_len = subscribers.len();
             subscribers.retain(|id| id != subscriber);
             removed_count += original_len - subscribers.len();
 
-            // 如果列表为空，返回 false 以删除该条目
+            // If the list is empty, return false to remove the entry
             !subscribers.is_empty()
         });
 
         if removed_count > 0 {
-            platform::recording::info!("清理了 {} 个订阅", removed_count);
+            platform::recording::info!("Cleared {} subscriptions", removed_count);
         }
 
         removed_count
     }
 
-    /// 获取订阅了特定类型的所有 Actor
+    /// Get all Actors subscribed to a specific type
     ///
-    /// # 参数
-    /// - `target_type`: 服务类型
+    /// # Arguments
+    /// - `target_type`: the service type
     ///
-    /// # 返回
-    /// 订阅者的 ActrId 列表（引用）
+    /// # Returns
+    /// A list of subscriber ActrIds (references)
     ///
-    /// # 用途
-    /// 当有新的 target_type 实例注册时，使用此方法获取所有需要通知的订阅者
+    /// # Usage
+    /// When a new target_type instance registers, use this method to get
+    /// all subscribers that need to be notified
     pub fn get_subscribers(&self, target_type: &ActrType) -> Vec<&ActrId> {
         self.subscriptions
             .get(target_type)
@@ -174,10 +193,10 @@ impl PresenceManager {
             .unwrap_or_default()
     }
 
-    /// 获取订阅统计信息
+    /// Get subscription statistics
     ///
-    /// # 返回
-    /// (订阅的服务类型数量, 总订阅者数量)
+    /// # Returns
+    /// (number of subscribed service types, total subscriber count)
     pub fn stats(&self) -> (usize, usize) {
         let type_count = self.subscriptions.len();
         let subscriber_count: usize = self
@@ -189,7 +208,7 @@ impl PresenceManager {
         (type_count, subscriber_count)
     }
 
-    /// 检查特定 Actor 是否订阅了某个类型
+    /// Check if a specific Actor is subscribed to a type
     pub fn is_subscribed(&self, subscriber: &ActrId, target_type: &ActrType) -> bool {
         self.subscriptions
             .get(target_type)
@@ -357,10 +376,10 @@ mod tests {
         let target_type = create_test_actor_type("user-service");
 
         manager.subscribe(actor1.clone(), target_type.clone());
-        manager.subscribe(actor1.clone(), target_type.clone()); // 重复订阅
+        manager.subscribe(actor1.clone(), target_type.clone()); // duplicate subscription
 
         let subscribers = manager.get_subscribers(&target_type);
-        assert_eq!(subscribers.len(), 1); // 应该只有一个
+        assert_eq!(subscribers.len(), 1); // should only have one
     }
 
     #[test]
@@ -376,7 +395,7 @@ mod tests {
         manager.subscribe(actor1.clone(), type2.clone());
 
         let (type_count, subscriber_count) = manager.stats();
-        assert_eq!(type_count, 2); // 2 种类型
-        assert_eq!(subscriber_count, 3); // 3 个订阅关系
+        assert_eq!(type_count, 2); // 2 types
+        assert_eq!(subscriber_count, 3); // 3 subscriptions
     }
 }

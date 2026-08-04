@@ -1,7 +1,7 @@
 //! WebRTC subsystem
 //!
-//! Complete WebRTC P2P ConnectManage， package include ：
-//! - signaling protocol quotient （Offer/Answer/ICE）
+//! Complete WebRTC P2P ConnectManage, package include:
+//! - signaling protocol quotient (Offer/Answer/ICE)
 //! - Connect build independent andManage
 //! - OutboundGate Implementation
 

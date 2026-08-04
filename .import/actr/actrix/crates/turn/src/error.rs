@@ -1,140 +1,140 @@
-//! TURN 服务错误类型
+//! TURN service error types
 //!
-//! 定义 TURN 服务相关的所有错误类型
+//! Defines all error types related to the TURN service.
 
 use thiserror::Error;
 
-/// TURN 服务错误枚举
+/// TURN service error enumeration
 #[derive(Error, Debug)]
 pub enum TurnError {
-    // ========== 服务器错误 ==========
-    /// 服务器启动失败
+    // ========== Server errors ==========
+    /// Server start failed
     #[error("Failed to start TURN server: {reason}")]
     ServerStartFailed { reason: String },
 
-    /// 服务器关闭失败
+    /// Server shutdown failed
     #[error("Failed to shutdown TURN server: {reason}")]
     ServerShutdownFailed { reason: String },
 
-    /// 端口绑定失败
+    /// Port binding failed
     #[error("Failed to bind TURN server to port {port}: {reason}")]
     PortBindFailed { port: u16, reason: String },
 
-    // ========== 认证错误 ==========
-    /// 认证失败
+    // ========== Authentication errors ==========
+    /// Authentication failed
     #[error("TURN authentication failed for user '{username}': {reason}")]
     AuthenticationFailed { username: String, reason: String },
 
-    /// 认证器创建失败
+    /// Authenticator creation failed
     #[error("Failed to create authenticator: {reason}")]
     AuthenticatorCreationFailed { reason: String },
 
-    /// 无效的认证凭据
+    /// Invalid credentials
     #[error("Invalid credentials: {details}")]
     InvalidCredentials { details: String },
 
-    /// Token 验证失败
+    /// Token validation failed
     #[error("Token validation failed: {reason}")]
     TokenValidationFailed { reason: String },
 
-    // ========== 协议错误 ==========
-    /// 无效的 TURN 消息
+    // ========== Protocol errors ==========
+    /// Invalid TURN message
     #[error("Invalid TURN message: {details}")]
     InvalidMessage { details: String },
 
-    /// 不支持的消息类型
+    /// Unsupported message type
     #[error("Unsupported message type: {message_type}")]
     UnsupportedMessageType { message_type: String },
 
-    /// 分配失败
+    /// Allocation failed
     #[error("Allocation failed: {reason}")]
     AllocationFailed { reason: String },
 
-    /// 权限错误
+    /// Permission denied
     #[error("Permission denied: {reason}")]
     PermissionDenied { reason: String },
 
-    // ========== 网络错误 ==========
-    /// 网络连接错误
+    // ========== Network errors ==========
+    /// Network connection error
     #[error("Network connection error: {details}")]
     NetworkConnection { details: String },
 
-    /// 数据包发送失败
+    /// Packet send failed
     #[error("Failed to send packet: {reason}")]
     PacketSendFailed { reason: String },
 
-    /// 数据包接收失败
+    /// Packet receive failed
     #[error("Failed to receive packet: {reason}")]
     PacketReceiveFailed { reason: String },
 
-    /// 地址解析失败
+    /// Address resolution failed
     #[error("Address resolution failed: {address}")]
     AddressResolutionFailed { address: String },
 
-    // ========== 配置错误 ==========
-    /// 配置错误
+    // ========== Configuration errors ==========
+    /// Configuration error
     #[error("Configuration error: {field} = {value}")]
     Configuration { field: String, value: String },
 
-    /// 缺少必需的配置
+    /// Missing required configuration
     #[error("Missing required configuration: {field}")]
     MissingConfiguration { field: String },
 
-    /// 无效的 IP 地址
+    /// Invalid IP address
     #[error("Invalid IP address: {address}")]
     InvalidIpAddress { address: String },
 
-    /// 端口范围无效
+    /// Invalid port range
     #[error("Invalid port range: {range}")]
     InvalidPortRange { range: String },
 
-    // ========== 资源错误 ==========
-    /// 资源耗尽
+    // ========== Resource errors ==========
+    /// Resource exhausted
     #[error("Resource exhausted: {resource}")]
     ResourceExhausted { resource: String },
 
-    /// 分配表已满
+    /// Allocation table full
     #[error("Allocation table full")]
     AllocationTableFull,
 
-    /// 端口池耗尽
+    /// Port pool exhausted
     #[error("Port pool exhausted")]
     PortPoolExhausted,
 
-    /// 内存不足
+    /// Out of memory
     #[error("Out of memory")]
     OutOfMemory,
 
-    // ========== 外部错误包装 ==========
-    /// IO 错误
+    // ========== External error wrappers ==========
+    /// IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// WebRTC 库错误
+    /// WebRTC library error
     #[error("WebRTC error: {0}")]
     WebRtc(#[from] webrtc::Error),
 
-    /// 地址解析错误
+    /// Address parse error
     #[error("Address parse error: {0}")]
     AddrParse(#[from] std::net::AddrParseError),
 
-    /// 通用错误
+    /// General error
     #[error("General error: {message}")]
     General { message: String },
 }
 
-/// TURN 服务专用的 Result 类型
+/// Result type specific to the TURN service
 pub type Result<T> = std::result::Result<T, TurnError>;
 
 impl TurnError {
-    /// 创建通用错误
+    /// Create a general error
     pub fn general(message: impl Into<String>) -> Self {
         Self::General {
             message: message.into(),
         }
     }
 
-    /// 创建认证失败错误
+    /// Create an authentication failure error
     pub fn auth_failed(username: impl Into<String>, reason: impl Into<String>) -> Self {
         Self::AuthenticationFailed {
             username: username.into(),
@@ -142,7 +142,7 @@ impl TurnError {
         }
     }
 
-    /// 创建配置错误
+    /// Create a configuration error
     pub fn config_error(field: impl Into<String>, value: impl Into<String>) -> Self {
         Self::Configuration {
             field: field.into(),
@@ -150,7 +150,7 @@ impl TurnError {
         }
     }
 
-    /// 检查是否为可重试错误
+    /// Check if this is a retryable error
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::NetworkConnection { .. }
@@ -165,7 +165,7 @@ impl TurnError {
         }
     }
 
-    /// 获取错误严重级别
+    /// Get the error severity level
     pub fn severity(&self) -> ErrorSeverity {
         match self {
             Self::ServerStartFailed { .. } | Self::ServerShutdownFailed { .. } => {
@@ -184,27 +184,27 @@ impl TurnError {
     }
 }
 
-/// 错误严重级别
+/// Error severity level
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorSeverity {
-    /// 信息级别
+    /// Info level
     Info,
-    /// 警告级别
+    /// Warning level
     Warning,
-    /// 错误级别
+    /// Error level
     Error,
-    /// 严重错误级别
+    /// Critical error level
     Critical,
 }
 
-// 为向后兼容性提供从 anyhow::Error 的转换
+// Provide conversion from anyhow::Error for backward compatibility
 impl From<anyhow::Error> for TurnError {
     fn from(err: anyhow::Error) -> Self {
         Self::general(err.to_string())
     }
 }
 
-// 为常见字符串类型提供转换
+// Provide conversions for common string types
 impl From<String> for TurnError {
     fn from(message: String) -> Self {
         Self::general(message)
@@ -217,7 +217,7 @@ impl From<&str> for TurnError {
     }
 }
 
-// 转换到统一的 BaseError
+// Convert to the unified BaseError
 impl From<TurnError> for platform::error::BaseError {
     fn from(err: TurnError) -> Self {
         platform::error::BaseError::turn_service(err.to_string())

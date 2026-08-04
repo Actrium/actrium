@@ -1,151 +1,151 @@
-//! STUN 服务错误类型
+//! STUN service error types
 //!
-//! 定义 STUN 服务相关的所有错误类型
+//! Defines all error types related to the STUN service.
 
 use thiserror::Error;
 
-/// STUN 服务错误枚举
+/// STUN service error enumeration
 #[derive(Error, Debug)]
 pub enum StunError {
-    // ========== 服务器错误 ==========
-    /// 服务器启动失败
+    // ========== Server errors ==========
+    /// Server start failed
     #[error("Failed to start STUN server: {reason}")]
     ServerStartFailed { reason: String },
 
-    /// 服务器关闭失败
+    /// Server shutdown failed
     #[error("Failed to shutdown STUN server: {reason}")]
     ServerShutdownFailed { reason: String },
 
-    /// 端口绑定失败
+    /// Port binding failed
     #[error("Failed to bind STUN server to port {port}: {reason}")]
     PortBindFailed { port: u16, reason: String },
 
-    // ========== 协议错误 ==========
-    /// 无效的 STUN 消息
+    // ========== Protocol errors ==========
+    /// Invalid STUN message
     #[error("Invalid STUN message: {details}")]
     InvalidMessage { details: String },
 
-    /// STUN 消息解析失败
+    /// STUN message parse failed
     #[error("Failed to parse STUN message: {reason}")]
     MessageParseFailed { reason: String },
 
-    /// STUN 消息编码失败
+    /// STUN message encode failed
     #[error("Failed to encode STUN message: {reason}")]
     MessageEncodeFailed { reason: String },
 
-    /// 不支持的消息类型
+    /// Unsupported message type
     #[error("Unsupported STUN message type: {message_type}")]
     UnsupportedMessageType { message_type: u16 },
 
-    /// 无效的魔数
+    /// Invalid magic cookie
     #[error("Invalid STUN magic cookie")]
     InvalidMagicCookie,
 
-    /// 消息长度错误
+    /// Invalid message length
     #[error("Invalid message length: expected {expected}, got {actual}")]
     InvalidMessageLength { expected: usize, actual: usize },
 
-    /// 无效的属性
+    /// Invalid attribute
     #[error("Invalid STUN attribute: {attribute_type}")]
     InvalidAttribute { attribute_type: u16 },
 
-    // ========== 网络错误 ==========
-    /// 网络连接错误
+    // ========== Network errors ==========
+    /// Network connection error
     #[error("Network connection error: {details}")]
     NetworkConnection { details: String },
 
-    /// 数据包发送失败
+    /// Packet send failed
     #[error("Failed to send STUN packet: {reason}")]
     PacketSendFailed { reason: String },
 
-    /// 数据包接收失败
+    /// Packet receive failed
     #[error("Failed to receive STUN packet: {reason}")]
     PacketReceiveFailed { reason: String },
 
-    /// 地址解析失败
+    /// Address resolution failed
     #[error("Address resolution failed: {address}")]
     AddressResolutionFailed { address: String },
 
-    /// Socket 操作失败
+    /// Socket operation failed
     #[error("Socket operation failed: {operation}")]
     SocketOperationFailed { operation: String },
 
-    // ========== 配置错误 ==========
-    /// 配置错误
+    // ========== Configuration errors ==========
+    /// Configuration error
     #[error("Configuration error: {field} = {value}")]
     Configuration { field: String, value: String },
 
-    /// 缺少必需的配置
+    /// Missing required configuration
     #[error("Missing required configuration: {field}")]
     MissingConfiguration { field: String },
 
-    /// 无效的 IP 地址
+    /// Invalid IP address
     #[error("Invalid IP address: {address}")]
     InvalidIpAddress { address: String },
 
-    /// 无效的端口
+    /// Invalid port
     #[error("Invalid port: {port}")]
     InvalidPort { port: String },
 
-    // ========== 资源错误 ==========
-    /// 资源耗尽
+    // ========== Resource errors ==========
+    /// Resource exhausted
     #[error("Resource exhausted: {resource}")]
     ResourceExhausted { resource: String },
 
-    /// 内存不足
+    /// Out of memory
     #[error("Out of memory")]
     OutOfMemory,
 
-    /// 连接表已满
+    /// Connection table full
     #[error("Connection table full")]
     ConnectionTableFull,
 
-    // ========== 超时错误 ==========
-    /// 操作超时
+    // ========== Timeout errors ==========
+    /// Operation timed out
     #[error("Operation timed out after {duration_ms}ms")]
     Timeout { duration_ms: u64 },
 
-    /// 响应超时
+    /// Response timeout
     #[error("Response timeout for transaction {transaction_id}")]
     ResponseTimeout { transaction_id: String },
 
-    // ========== 外部错误包装 ==========
-    /// IO 错误
+    // ========== External error wrappers ==========
+    /// IO error
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// WebRTC 库错误
+    /// WebRTC library error
     #[error("WebRTC error: {0}")]
     WebRtc(#[from] webrtc::Error),
 
-    /// 地址解析错误
+    /// Address parse error
     #[error("Address parse error: {0}")]
     AddrParse(#[from] std::net::AddrParseError),
 
-    /// 通用错误
+    /// General error
     #[error("General error: {message}")]
     General { message: String },
 }
 
-/// STUN 服务专用的 Result 类型
+/// Result type specific to the STUN service
 pub type Result<T> = std::result::Result<T, StunError>;
 
 impl StunError {
-    /// 创建通用错误
+    /// Create a general error
     pub fn general(message: impl Into<String>) -> Self {
         Self::General {
             message: message.into(),
         }
     }
 
-    /// 创建消息解析错误
+    /// Create a message parse error
     pub fn parse_failed(reason: impl Into<String>) -> Self {
         Self::MessageParseFailed {
             reason: reason.into(),
         }
     }
 
-    /// 创建配置错误
+    /// Create a configuration error
     pub fn config_error(field: impl Into<String>, value: impl Into<String>) -> Self {
         Self::Configuration {
             field: field.into(),
@@ -153,12 +153,12 @@ impl StunError {
         }
     }
 
-    /// 创建超时错误
+    /// Create a timeout error
     pub fn timeout(duration_ms: u64) -> Self {
         Self::Timeout { duration_ms }
     }
 
-    /// 检查是否为可重试错误
+    /// Check if this is a retryable error
     pub fn is_retryable(&self) -> bool {
         match self {
             Self::NetworkConnection { .. }
@@ -172,7 +172,7 @@ impl StunError {
         }
     }
 
-    /// 获取错误严重级别
+    /// Get the error severity level
     pub fn severity(&self) -> ErrorSeverity {
         match self {
             Self::ServerStartFailed { .. } | Self::ServerShutdownFailed { .. } => {
@@ -190,7 +190,7 @@ impl StunError {
         }
     }
 
-    /// 检查是否为协议相关错误
+    /// Check if this is a protocol-related error
     pub fn is_protocol_error(&self) -> bool {
         matches!(
             self,
@@ -204,7 +204,7 @@ impl StunError {
         )
     }
 
-    /// 检查是否为网络相关错误
+    /// Check if this is a network-related error
     pub fn is_network_error(&self) -> bool {
         matches!(
             self,
@@ -219,27 +219,27 @@ impl StunError {
     }
 }
 
-/// 错误严重级别
+/// Error severity level
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorSeverity {
-    /// 信息级别
+    /// Info level
     Info,
-    /// 警告级别
+    /// Warning level
     Warning,
-    /// 错误级别
+    /// Error level
     Error,
-    /// 严重错误级别
+    /// Critical error level
     Critical,
 }
 
-// 为向后兼容性提供从 anyhow::Error 的转换
+// Provide conversion from anyhow::Error for backward compatibility
 impl From<anyhow::Error> for StunError {
     fn from(err: anyhow::Error) -> Self {
         Self::general(err.to_string())
     }
 }
 
-// 从 webrtc-stun 库的错误转换
+// Conversion from webrtc-stun library errors
 impl From<webrtc_stun::Error> for StunError {
     fn from(err: webrtc_stun::Error) -> Self {
         Self::MessageParseFailed {
@@ -248,7 +248,7 @@ impl From<webrtc_stun::Error> for StunError {
     }
 }
 
-// 为常见字符串类型提供转换
+// Provide conversions for common string types
 impl From<String> for StunError {
     fn from(message: String) -> Self {
         Self::general(message)
@@ -261,7 +261,7 @@ impl From<&str> for StunError {
     }
 }
 
-// 转换到统一的 BaseError
+// Convert to the unified BaseError
 impl From<StunError> for platform::error::BaseError {
     fn from(err: StunError) -> Self {
         platform::error::BaseError::stun_service(err.to_string())

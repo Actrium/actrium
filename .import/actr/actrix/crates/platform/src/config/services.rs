@@ -1,10 +1,10 @@
-//! 服务配置集合
+//! Service configuration collection
 
 use super::ais::AisConfig;
 use super::signaling::SignalingConfig;
 use serde::{Deserialize, Serialize};
 
-/// MFR (Manufacturer Registry) 配置
+/// MFR (Manufacturer Registry) configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MfrConfig {
     /// How long (in seconds) to retain expired/used publish nonces for auditing.
@@ -25,22 +25,22 @@ impl Default for MfrConfig {
     }
 }
 
-/// 所有服务的配置集合
+/// Collection of all service configurations
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ServicesConfig {
-    /// Signer 服务配置
+    /// Signer service configuration
     #[serde(default)]
     pub signer: Option<signer::SignerServiceConfig>,
 
-    /// AIS (Actor Identity Service) 服务配置
+    /// AIS (Actor Identity Service) service configuration
     #[serde(default)]
     pub ais: Option<AisConfig>,
 
-    /// Signaling 服务配置
+    /// Signaling service configuration
     #[serde(default)]
     pub signaling: Option<SignalingConfig>,
-    // 注意：STUN/TURN 不依赖 Signer，保持原有配置方式
-    /// MFR (Manufacturer Registry) 服务配置
+    // Note: STUN/TURN do not depend on Signer, keeping the original configuration approach
+    /// MFR (Manufacturer Registry) service configuration
     #[serde(default)]
     pub mfr: MfrConfig,
 }

@@ -1,83 +1,83 @@
-//! Signaling 服务配置
+//! Signaling service configuration
 
 use crate::config::signer::SignerClientConfig;
 use serde::{Deserialize, Serialize};
 
-/// Signaling 服务配置
+/// Signaling service configuration
 ///
 /// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
 /// The ENABLE_SIGNALING bit (bit 0) must be set to enable this service.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SignalingConfig {
-    /// Signaling 服务器配置
+    /// Signaling server configuration
     #[serde(default)]
     pub server: SignalingServerConfig,
 
-    /// Signaling 的依赖服务配置
+    /// Signaling dependency service configuration
     #[serde(default)]
     pub dependencies: SignalingDependencies,
 }
 
-/// Signaling 服务器配置
+/// Signaling server configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SignalingServerConfig {
-    /// WebSocket 路径
+    /// WebSocket path
     pub ws_path: String,
 
-    /// 速率限制配置
+    /// Rate limiting configuration
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
 }
 
-/// 速率限制配置
+/// Rate limiting configuration
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct RateLimitConfig {
-    /// 连接速率限制配置
+    /// Connection rate limiting configuration
     #[serde(default)]
     pub connection: ConnectionRateLimit,
 
-    /// 消息速率限制配置
+    /// Message rate limiting configuration
     #[serde(default)]
     pub message: MessageRateLimit,
 }
 
-/// 连接速率限制配置
+/// Connection rate limiting configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ConnectionRateLimit {
-    /// 是否启用连接速率限制
+    /// Whether to enable connection rate limiting
     #[serde(default = "default_true")]
     pub enabled: bool,
 
-    /// 每分钟允许的新连接数
+    /// Allowed new connections per minute
     #[serde(default = "default_connections_per_minute")]
     pub per_minute: u32,
 
-    /// 突发允许的连接数
+    /// Burst allowance for connections
     #[serde(default = "default_connection_burst")]
     pub burst_size: u32,
 
-    /// 每个 IP 的最大并发连接数
+    /// Maximum concurrent connections per IP
     #[serde(default = "default_max_concurrent_connections")]
     pub max_concurrent_per_ip: u32,
 }
 
-/// 消息速率限制配置
+/// Message rate limiting configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MessageRateLimit {
-    /// 是否启用消息速率限制
+    /// Whether to enable message rate limiting
     #[serde(default = "default_true")]
     pub enabled: bool,
 
-    /// 每秒允许的消息数
+    /// Allowed messages per second
     #[serde(default = "default_messages_per_second")]
     pub per_second: u32,
 
-    /// 突发允许的消息数
+    /// Burst allowance for messages
     #[serde(default = "default_message_burst")]
     pub burst_size: u32,
 }
 
-// 默认值函数
+// Default value functions
 fn default_true() -> bool {
     true
 }
@@ -102,32 +102,32 @@ fn default_message_burst() -> u32 {
     50
 }
 
-/// Signaling 依赖的外部服务
+/// External services that Signaling depends on
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SignalingDependencies {
-    /// Signer 客户端配置（可选，如果需要加密）
+    /// Signer client configuration (optional, needed if encryption is required)
     ///
-    /// 如果未配置但需要 Signer，会自动查找本地 Signer 服务：
-    /// - 如果 Signer 服务已启用（ENABLE_SIGNER 位已设置），使用 localhost:SIGNER_PORT
-    /// - 否则返回 None（Signaling 可以不依赖 Signer）
+    /// If not configured but Signer is needed, it will auto-detect the local Signer service:
+    /// - If the Signer service is enabled (ENABLE_SIGNER bit is set), use localhost:SIGNER_PORT
+    /// - Otherwise return None (Signaling can operate without Signer)
     #[serde(default)]
     pub signer: Option<SignerClientConfig>,
 
-    /// AIS 客户端配置（可选，用于 Credential 刷新）
+    /// AIS client configuration (optional, for Credential refresh)
     ///
-    /// 如果未配置但需要 AIS，会自动查找本地 AIS 服务：
-    /// - 如果 AIS 服务已启用（ENABLE_AIS 位已设置），使用 localhost:AIS_PORT
-    /// - 否则返回 None
+    /// If not configured but AIS is needed, it will auto-detect the local AIS service:
+    /// - If the AIS service is enabled (ENABLE_AIS bit is set), use localhost:AIS_PORT
+    /// - Otherwise return None
     #[serde(default)]
     pub ais: Option<AisClientConfig>,
 }
 
-/// AIS 客户端配置
+/// AIS client configuration
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AisClientConfig {
-    /// AIS 服务端点 URL
+    /// AIS service endpoint URL
     pub endpoint: String,
-    /// 请求超时时间（秒）
+    /// Request timeout (seconds)
     #[serde(default = "default_timeout")]
     pub timeout_seconds: u64,
 }
@@ -167,25 +167,25 @@ impl Default for MessageRateLimit {
 }
 
 impl SignalingConfig {
-    /// 获取 Signer 客户端配置
+    /// Get the Signer client configuration
     ///
-    /// 支持智能默认：
-    /// 1. 如果显式配置了 dependencies.signer，直接返回
-    /// 2. 如果本地启用了 Signer 服务，返回指向本地 Signer 的配置
-    /// 3. 否则返回 None（Signaling 可以不依赖 Signer）
+    /// Supports smart defaults:
+    /// 1. If dependencies.signer is explicitly configured, return it directly
+    /// 2. If the local Signer service is enabled, return configuration pointing to the local Signer
+    /// 3. Otherwise return None (Signaling can operate without Signer)
     pub fn get_signer_client_config(
         &self,
         global_config: &super::ActrixConfig,
     ) -> Option<SignerClientConfig> {
-        // 优先使用显式配置
+        // Prefer explicit configuration
         if let Some(ref signer_config) = self.dependencies.signer {
             return Some(signer_config.clone());
         }
 
-        // 回退：检查是否启用了本地 Signer 服务
+        // Fallback: check if local Signer service is enabled
         if global_config.is_signer_enabled() && global_config.services.signer.is_some() {
-            // 自动生成指向本地 Signer 的客户端配置
-            // Signer gRPC 复用实例主 HTTP/HTTPS 端口
+            // Auto-generate client configuration pointing to local Signer
+            // Signer gRPC reuses the instance's main HTTP/HTTPS port
             let http_cfg = global_config.bind.http.as_ref();
             let port = http_cfg.map(|h| h.port).unwrap_or(8080);
             let use_tls = http_cfg.is_some_and(|h| h.is_tls());
@@ -210,25 +210,25 @@ impl SignalingConfig {
         None
     }
 
-    /// 获取 AIS 客户端配置
+    /// Get the AIS client configuration
     ///
-    /// 支持智能默认：
-    /// 1. 如果显式配置了 dependencies.ais，直接返回
-    /// 2. 如果本地启用了 AIS 服务，返回指向本地 AIS 的配置
-    /// 3. 否则返回 None
+    /// Supports smart defaults:
+    /// 1. If dependencies.ais is explicitly configured, return it directly
+    /// 2. If the local AIS service is enabled, return configuration pointing to the local AIS
+    /// 3. Otherwise return None
     pub fn get_ais_client_config(
         &self,
         global_config: &super::ActrixConfig,
     ) -> Option<AisClientConfig> {
-        // 优先使用显式配置
+        // Prefer explicit configuration
         if let Some(ref ais_config) = self.dependencies.ais {
             return Some(ais_config.clone());
         }
 
-        // 回退：检查是否启用了本地 AIS 服务
+        // Fallback: check if local AIS service is enabled
         if global_config.is_ais_enabled() && global_config.services.ais.is_some() {
-            // 自动生成指向本地 AIS 的客户端配置
-            // AIS 作为 HTTP router service 共享同一个 HTTP/HTTPS 端口
+            // Auto-generate client configuration pointing to local AIS
+            // AIS as an HTTP router service shares the same HTTP/HTTPS port
             let http_cfg = global_config.bind.http.as_ref();
             let port = http_cfg.map(|h| h.port).unwrap_or(8080);
             let protocol = if http_cfg.is_some_and(|h| h.is_tls()) {

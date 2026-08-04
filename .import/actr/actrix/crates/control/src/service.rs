@@ -1145,7 +1145,7 @@ pub struct KeyInfo {
     pub is_expired: bool,
 }
 
-/// Realm secret 轮转结果（明文 secret 仅返回一次）。
+/// Realm secret rotation result (plaintext secret is returned only once).
 #[derive(Debug, Clone, Serialize)]
 pub struct RealmSecretRotationResult {
     pub realm_id: u32,

@@ -1,6 +1,6 @@
-//! Realm 验证逻辑
+//! Realm validation logic
 //!
-//! 包含 Realm 相关的业务规则验证和检查
+//! Contains business rule validation and checks related to realms.
 
 use super::model::{Realm, RealmStatus};
 
@@ -31,12 +31,12 @@ impl std::fmt::Display for RealmValidationError {
 
 impl std::error::Error for RealmValidationError {}
 
-/// Realm 验证相关实现
+/// Realm validation implementations
 impl Realm {
-    /// 验证 Realm 是否可用（存在、未过期、状态正常）
+    /// Validate that a realm is usable (exists, not expired, status is normal)
     ///
-    /// 返回 Ok(Realm) 表示 Realm 可用
-    /// 返回 Err(RealmValidationError) 表示 Realm 不可用或数据库错误
+    /// Returns Ok(Realm) if the realm is usable.
+    /// Returns Err(RealmValidationError) if the realm is unavailable or a database error occurred.
     pub async fn validate_realm(realm_id: u32) -> Result<Realm, RealmValidationError> {
         let realm = Self::get(realm_id)
             .await

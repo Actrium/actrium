@@ -1,6 +1,6 @@
-//! 数据库连接和操作管理
+//! Database connection and operation management
 //!
-//! 提供基于 sqlx 的数据库连接池和基本操作
+//! Provides sqlx-based database connection pool and basic operations
 
 use anyhow::Result;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePool, SqlitePoolOptions};
@@ -8,29 +8,29 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::Duration;
 
-/// 数据库管理器
+/// Database manager
 #[derive(Clone)]
 pub struct Database {
     pool: SqlitePool,
 }
 
 impl Database {
-    /// 创建新的数据库实例
+    /// Create a new database instance
     ///
     /// # Arguments
-    /// * `path` - 数据库文件存储目录路径，必须已存在
-    ///   主数据库文件将存储为 `{path}/actrix.db`
+    /// * `path` - Directory path for database file storage, must already exist
+    ///   The main database file will be stored as `{path}/actrix.db`
     pub async fn new<P: AsRef<Path>>(path: P) -> Result<Self> {
         let db_file = path.as_ref().join("actrix.db");
 
-        // 创建连接选项并启用 WAL 模式
+        // Create connection options and enable WAL mode
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_file.display()))?
             .create_if_missing(true)
             .journal_mode(sqlx::sqlite::SqliteJournalMode::Wal)
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
             .busy_timeout(Duration::from_secs(5));
 
-        // 创建连接池
+        // Create connection pool
         let pool = SqlitePoolOptions::new()
             .max_connections(10)
             .connect_with(options)
@@ -38,15 +38,15 @@ impl Database {
 
         let db = Self { pool };
 
-        // 初始化数据库表结构
+        // Initialize database schema
         db.initialize_schema().await?;
 
         Ok(db)
     }
 
-    /// 初始化数据库表结构
+    /// Initialize database schema
     async fn initialize_schema(&self) -> Result<()> {
-        // 创建 Realm 表
+        // Create Realm table
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS realm (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,7 +70,7 @@ impl Database {
             .execute(&self.pool)
             .await?;
 
-        // 创建访问控制列表表
+        // Create access control list table
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS actoracl (
                 rowid INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,7 +84,7 @@ impl Database {
         .execute(&self.pool)
         .await?;
 
-        // 创建索引
+        // Create indexes
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_realm_name
              ON realm(name)",
@@ -343,12 +343,12 @@ impl Database {
         Ok(())
     }
 
-    /// 获取数据库连接池
+    /// Get the database connection pool
     pub fn get_pool(&self) -> &SqlitePool {
         &self.pool
     }
 
-    /// 执行 SQL 语句并返回影响的行数
+    /// Execute SQL statement and return the number of affected rows
     pub async fn execute(&self, sql: &str) -> Result<u64> {
         let result = sqlx::query(sql).execute(&self.pool).await?;
         Ok(result.rows_affected())
@@ -357,10 +357,10 @@ impl Database {
 
 use tokio::sync::OnceCell;
 
-/// 全局数据库实例
+/// Global database instance
 static GLOBAL_DATABASE: OnceCell<Database> = OnceCell::const_new();
 
-/// 设置全局数据库路径
+/// Set global database path
 pub async fn set_db_path(path: &Path) -> Result<()> {
     let database = Database::new(path).await?;
     GLOBAL_DATABASE
@@ -369,14 +369,14 @@ pub async fn set_db_path(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// 获取全局数据库实例
+/// Get global database instance
 pub fn get_database() -> &'static Database {
     GLOBAL_DATABASE
         .get()
         .expect("Database not initialized. Call set_db_path first.")
 }
 
-/// 检查数据库是否已初始化
+/// Check if database is initialized
 pub fn is_database_initialized() -> bool {
     GLOBAL_DATABASE.get().is_some()
 }

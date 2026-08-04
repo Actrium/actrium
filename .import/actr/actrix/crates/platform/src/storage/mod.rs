@@ -1,6 +1,6 @@
-//! 存储模块
+//! Storage module
 //!
-//! 提供数据存储功能，包括 nonce 存储等
+//! Provides data storage functionality, including nonce storage, etc.
 
 pub mod db;
 pub mod nonce;

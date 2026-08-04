@@ -1,23 +1,23 @@
 //! # Echo [...]
 //!
-//! [...] `actr gen` [...]。
-//! [...]。
+//! [...] `actr gen` [...].
+//! [...].
 
 use crate::generated::{EchoHandler, EchoActor};
-// [...]，[...]need/require[...] sqlite
+// [...], [...]need/require[...] sqlite
 // use actr_framework::prelude::*;
 use std::sync::Arc;
 
 /// Echo service[...]
 /// 
-/// TODO: [...]need/require[...]，[...]：
+/// TODO: [...]need/require[...], [...]:
 /// - data[...]connection[...]
 /// - config[...]
 /// - [...]client
 /// - log[...]
 pub struct MyEchoService {
     // TODO: [...]service[...]
-    // [...]：
+    // [...]:
     // pub db_pool: Arc<DatabasePool>,
     // pub config: Arc<ServiceConfig>,
     // pub metrics: Arc<Metrics>,
@@ -33,7 +33,7 @@ impl MyEchoService {
         }
     }
     
-    /// using/use[...]configcreateservice[...]（[...]）
+    /// using/use[...]configcreateservice[...] ([...])
     pub fn default_for_testing() -> Self {
         Self {
             // TODO: [...]
@@ -42,10 +42,10 @@ impl MyEchoService {
 }
 
 // TODO: [...] EchoHandler trait [...]
-// [...]：impl_user_code_scaffold! [...]already[...]，
-// [...]need/requirewill[...]real[...]。
+// [...]: impl_user_code_scaffold! [...]already[...],
+// [...]need/requirewill[...]real[...].
 //
-// [...]：
+// [...]:
 // #[async_trait]
 // impl EchoHandler for MyEchoService {
 //     async fn method_name(&self, req: RequestType) -> ActorResult<ResponseType> {
@@ -74,16 +74,16 @@ mod tests {
 
 ## 🚀 [...]
 
-1. **[...]**：
+1. **[...]**:
    [...] `MyEchoService` [...] `EchoHandler` trait [...]
 
-2. **[...]**：
-   [...] `Cargo.toml` [...]need/require[...]，[...]data[...]client、HTTP client[...]
+2. **[...]**:
+   [...] `Cargo.toml` [...]need/require[...], [...]data[...]client, HTTP client[...]
 
-3. **configservice**：
-   [...] `new()` [...]，[...]
+3. **configservice**:
+   [...] `new()` [...], [...]
 
-4. **startservice**：
+4. **startservice**:
    ```rust
    #[tokio::main]
    async fn main() -> ActorResult<()> {

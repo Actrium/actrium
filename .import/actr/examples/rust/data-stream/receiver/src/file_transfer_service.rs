@@ -10,7 +10,7 @@ use tokio::sync::Mutex;
 
 /// FileTransfer service[...] - receive[...]
 ///
-/// [...]：
+/// [...]:
 /// 1. [...] StartTransfer RPC - register DataChunk [...]
 /// 2. receive DataChunk data[...]
 /// 3. [...] EndTransfer RPC - [...]
@@ -82,7 +82,7 @@ impl FileTransferServiceHandler for FileTransferService {
                     *bytes
                 );
 
-                // [...]data，[...]
+                // [...]data, [...]
                 if let Ok(text) = String::from_utf8(data_chunk.payload.to_vec()) {
                     let preview = &text[..text.len().min(80)];
                     tracing::debug!("   Content preview: {}", preview);

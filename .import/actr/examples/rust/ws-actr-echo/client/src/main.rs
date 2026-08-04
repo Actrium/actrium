@@ -53,11 +53,11 @@ async fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("[...] WsEchoService [...]"))?;
 
     info!("🎯 [...]service[...]: {:?}", server_id);
-    info!("🔌 alreadyvia/throughsignalingdiscover WebSocket address，[...]willusing/use WebSocket direct connection");
+    info!("🔌 alreadyvia/throughsignalingdiscover WebSocket address, [...]willusing/use WebSocket direct connection");
     workload.set_server_id(server_id).await;
 
     let local_id = actr_ref.actor_id().clone();
-    info!("✅ ActrNode startsuccess，ID: {:?}", local_id);
+    info!("✅ ActrNode startsuccess, ID: {:?}", local_id);
 
     // [...]
     let app_side = AppSide {

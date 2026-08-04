@@ -1,4 +1,4 @@
-//! STUN服务实现
+//! STUN service implementation
 
 use crate::service::IceService;
 use anyhow::Result;
@@ -13,7 +13,7 @@ use stun;
 use tokio::net::UdpSocket;
 use url::Url;
 
-/// STUN服务实现
+/// STUN service implementation
 #[derive(Debug)]
 pub struct StunService {
     info: ServiceInfo,
@@ -72,7 +72,7 @@ impl IceService for StunService {
 
         platform::recording::info!("Starting STUN service on {}", addr);
 
-        // 绑定UDP套接字
+        // Bind UDP socket
         let socket = match UdpSocket::bind(addr).await {
             Ok(socket) => {
                 platform::recording::info!("STUN service listening on: {}", addr);
@@ -87,7 +87,7 @@ impl IceService for StunService {
 
         self.socket = Some(socket.clone());
 
-        // 设置运行状态
+        // Set running status
         let url = Url::parse(&format!("stun:{}:{}", ice_bind.ip, ice_bind.port))?;
         self.info.set_running(url);
         if let Some(ref ctr) = self.counters {
@@ -98,7 +98,7 @@ impl IceService for StunService {
             .map_err(|e| anyhow::anyhow!("Failed to send STUN service info: {e:?}"))?;
         platform::recording::info!("STUN service started successfully");
 
-        // 启动STUN服务器（带优雅关闭支持）
+        // Start STUN server (with graceful shutdown support)
         if let Err(e) = stun::create_stun_server_with_shutdown_and_counters(
             socket.clone(),
             shutdown_rx,
@@ -120,7 +120,7 @@ impl IceService for StunService {
     async fn stop(&mut self) -> Result<()> {
         platform::recording::info!("Stopping STUN service");
 
-        // 清理状态
+        // Clean up state
         self.socket = None;
         self.info.status = ServiceState::Unknown;
 

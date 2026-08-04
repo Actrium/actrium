@@ -1621,7 +1621,7 @@ async fn actrix_exits_when_ks_kek_is_invalid() {
                 log.contains("KEK")
                     || log.contains("key encryptor")
                     || log.contains("Invalid")
-                    || log.contains("初始化失败"),
+                    || log.contains("initialization failed"),
                 "expected invalid kek startup error in logs, got: {log}"
             );
             return;
@@ -2027,9 +2027,7 @@ async fn actrix_exits_when_database_path_is_unavailable() {
             let log = fs::read_to_string(&log_path).unwrap_or_default();
             let log_lower = log.to_lowercase();
             assert!(
-                log_lower.contains("database")
-                    || log.contains("数据库")
-                    || log_lower.contains("sqlite"),
+                log_lower.contains("database") || log_lower.contains("sqlite"),
                 "expected database failure hint in logs, got: {log}"
             );
             return;
@@ -2202,8 +2200,7 @@ async fn actrix_exits_on_incompatible_existing_schema() {
             assert!(
                 log_lower.contains("name")
                     || log_lower.contains("idx_realm_name")
-                    || log_lower.contains("database")
-                    || log.contains("数据库"),
+                    || log_lower.contains("database"),
                 "expected schema/index failure hint in logs, got: {log}"
             );
             return;

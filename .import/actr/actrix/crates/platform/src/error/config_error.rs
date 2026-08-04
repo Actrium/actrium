@@ -1,10 +1,10 @@
-//! 配置相关错误类型
+//! Configuration error types
 //!
-//! 定义所有与配置解析、验证、加载相关的错误
+//! Defines all errors related to configuration parsing, validation, and loading
 
 use thiserror::Error;
 
-/// 配置相关错误
+/// Configuration-related errors
 #[derive(Error, Debug)]
 pub enum ConfigError {
     #[error("Invalid configuration format: {message}")]

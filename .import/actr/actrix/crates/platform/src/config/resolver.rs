@@ -1,7 +1,7 @@
-//! 三层配置解析器
+//! Three-layer configuration resolver
 //!
-//! L0 默认值 → L1 配置文件 → L2 动态覆盖（API 写入）
-//! 最终有效值 = L2 ?? L1 ?? L0
+//! L0 defaults -> L1 config file -> L2 dynamic override (API writes)
+//! Final effective value = L2 ?? L1 ?? L0
 
 use super::config_store::ConfigOverride;
 use super::registry::{self, ConfigFieldDef, ConfigValueType};

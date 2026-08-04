@@ -1,7 +1,7 @@
-//\! 服务容器
+//\! Service container
 //\!
-//\! 管理各种服务的容器和生命周期
-//! 服务容器模块 - 封装不同类型的服务
+//\! Manages the container and lifecycle of various services
+//! Service container module - encapsulates different service types
 
 use super::{AisService, MfrService, SignalingService, StunService, TurnService};
 use super::{HttpRouterService, IceService};
@@ -9,7 +9,7 @@ use axum::Router;
 use platform::ServiceInfo;
 use url::Url;
 
-/// 服务容器，用于封装不同类型的服务
+/// Service container for encapsulating different service types
 #[derive(Debug)]
 #[allow(clippy::large_enum_variant)]
 pub enum ServiceContainer {
@@ -22,28 +22,28 @@ pub enum ServiceContainer {
 }
 
 impl ServiceContainer {
-    /// 创建Signaling服务容器
+    /// Create a Signaling service container
     pub fn signaling(service: SignalingService) -> Self {
         Self::Signaling(service)
     }
 
-    /// 创建AIS服务容器
+    /// Create an AIS service container
     pub fn ais(service: AisService) -> Self {
         Self::Ais(service)
     }
 
-    /// 创建MFR服务容器
+    /// Create an MFR service container
     #[allow(dead_code)]
     pub fn mfr(service: MfrService) -> Self {
         Self::Mfr(service)
     }
 
-    /// 创建STUN服务容器
+    /// Create a STUN service container
     pub fn stun(service: StunService) -> Self {
         Self::Stun(service)
     }
 
-    /// 创建TURN服务容器
+    /// Create a TURN service container
     pub fn turn(service: TurnService) -> Self {
         Self::Turn(service)
     }
@@ -80,7 +80,7 @@ impl ServiceContainer {
         matches!(self, ServiceContainer::Stun(_) | ServiceContainer::Turn(_))
     }
 
-    /// 获取路由前缀（仅适用于 HTTP 路由服务）
+    /// Get route prefix (only applies to HTTP route services)
     #[allow(dead_code)]
     pub fn route_prefix(&self) -> Option<&str> {
         match self {
@@ -91,7 +91,7 @@ impl ServiceContainer {
         }
     }
 
-    /// 构建路由器（仅适用于 HTTP 路由服务）
+    /// Build router (only applies to HTTP route services)
     #[allow(dead_code)]
     pub async fn build_router(&mut self) -> Option<Result<Router, anyhow::Error>> {
         match self {
@@ -102,7 +102,7 @@ impl ServiceContainer {
         }
     }
 
-    /// 服务启动回调（仅适用于 HTTP 路由服务）
+    /// Service start callback (only applies to HTTP route services)
     pub async fn on_start(&mut self, base_url: Url) -> Option<Result<(), anyhow::Error>> {
         match self {
             ServiceContainer::Signaling(service) => Some(service.on_start(base_url).await),

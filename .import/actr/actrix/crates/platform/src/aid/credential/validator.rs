@@ -1,8 +1,8 @@
-//! AId Credential 验证器
+//! AId Credential verifier
 //!
-//! 基于 Ed25519 签名验证 AId Credential：
-//! - claims 是明文 proto bytes，由 AIS 的 Ed25519 私钥签名
-//! - 验证方通过 `key_cache` 按 key_id 查找对应 VerifyingKey 完成验证
+//! Verifies AId Credential based on Ed25519 signatures:
+//! - claims are plaintext proto bytes, signed by the AIS Ed25519 private key
+//! - The verifier looks up the corresponding VerifyingKey by key_id via `key_cache` to complete verification
 
 use super::error::AidError;
 use super::verifier::AIdCredentialVerifier;
@@ -14,13 +14,13 @@ use std::sync::Arc;
 
 static KEY_CACHE: OnceCell<Arc<KeyCache>> = OnceCell::new();
 
-/// AId Token 验证器 - 静态方法验证 AIdCredential（Ed25519 签名）
+/// AId Token verifier - verifies AIdCredential via static methods (Ed25519 signature)
 pub struct AIdCredentialValidator;
 
 impl AIdCredentialValidator {
-    /// 初始化全局 KeyCache 实例（通常在服务启动时调用一次）
+    /// Initialize the global KeyCache instance (typically called once at service startup)
     ///
-    /// 可多次调用，首次调用有效；后续调用被忽略（幂等）。
+    /// Can be called multiple times; the first call takes effect, subsequent calls are ignored (idempotent).
     pub async fn init(sqlite_path: &std::path::Path) -> Result<(), AidError> {
         if KEY_CACHE.get().is_some() {
             return Ok(());
@@ -32,15 +32,15 @@ impl AIdCredentialValidator {
         Ok(())
     }
 
-    /// 获取全局 KeyCache 实例
+    /// Get the global KeyCache instance
     fn get_cache() -> Result<Arc<KeyCache>, AidError> {
         KEY_CACHE.get().cloned().ok_or(AidError::InvalidFormat)
     }
 
-    /// 校验 AIdCredential：Ed25519 签名验证 + realm_id 检查
+    /// Verify AIdCredential: Ed25519 signature verification + realm_id check
     ///
     /// # Returns
-    /// `Ok((IdentityClaims, false))` — Ed25519 模式无容忍期概念，第二个值恒为 `false`
+    /// `Ok((IdentityClaims, false))` — Ed25519 mode has no grace period concept, the second value is always `false`
     pub async fn check(
         credential: &AIdCredential,
         realm_id: u32,
@@ -62,17 +62,17 @@ impl AIdCredentialValidator {
         Ok((claims, false))
     }
 
-    /// 返回 key_id 对应的 Ed25519 公钥字节（用于 GetSigningKeyRequest 响应）
+    /// Returns the Ed25519 public key bytes for the given key_id (used for GetSigningKeyRequest responses)
     pub async fn get_key_bytes(key_id: u32) -> Result<Option<Vec<u8>>, AidError> {
         let cache = Self::get_cache()?;
         let result = cache.get_cached_key(key_id).await?;
         Ok(result.map(|(verifying_key, _expires_at)| verifying_key.as_bytes().to_vec()))
     }
 
-    /// 将 Ed25519 verifying key 写入全局 KeyCache（由 AIS 签发器调用）
+    /// Write the Ed25519 verifying key into the global KeyCache (called by the AIS issuer)
     ///
-    /// AIS 在加载或刷新 signing key 后调用此方法，让 signaling 等服务能验证凭证。
-    /// 若 KeyCache 尚未初始化（`init` 未调用），此方法是无操作（non-fatal）。
+    /// AIS calls this method after loading or refreshing the signing key, so that signaling and other services can verify credentials.
+    /// If the KeyCache is not yet initialized (`init` not called), this method is a no-op (non-fatal).
     pub async fn populate_key(
         key_id: u32,
         verifying_key: &VerifyingKey,
@@ -82,10 +82,10 @@ impl AIdCredentialValidator {
         cache.cache_key(key_id, verifying_key, expires_at).await
     }
 
-    /// 将 Ed25519 verifying key 持久化写入 SQLite DB，无需 KeyCache 已初始化。
+    /// Persistently write the Ed25519 verifying key to the SQLite DB; does not require KeyCache to be initialized.
     ///
-    /// 供 AIS 签发器在 `init` 调用前写入密钥，确保后续 `init` 能从 DB 读取到该密钥。
-    /// 若全局 KeyCache 已初始化，同时更新内存缓存。
+    /// Used by the AIS issuer to write keys before `init` is called, ensuring that subsequent `init` calls can read the key from the DB.
+    /// If the global KeyCache is already initialized, also updates the in-memory cache.
     pub async fn persist_key(
         sqlite_path: &std::path::Path,
         key_id: u32,
@@ -96,7 +96,7 @@ impl AIdCredentialValidator {
         let cache = KeyCache::new(&cache_db).await?;
         cache.cache_key(key_id, verifying_key, expires_at).await?;
 
-        // 如果全局缓存已初始化，同步更新内存
+        // If the global cache is initialized, sync the in-memory cache
         if let Some(global_cache) = KEY_CACHE.get() {
             let _ = global_cache
                 .cache_key(key_id, verifying_key, expires_at)
@@ -106,7 +106,7 @@ impl AIdCredentialValidator {
         Ok(())
     }
 
-    /// 同步校验（用于非 async 上下文，如 TURN 认证）
+    /// Synchronous verification (for non-async contexts, e.g. TURN authentication)
     pub fn check_sync(
         credential: &AIdCredential,
         realm_id: u32,

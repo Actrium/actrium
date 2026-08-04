@@ -75,7 +75,7 @@ The system uses a **modular service architecture** with fine-grained control:
 1. **ServiceManager** (`crates/actrixd/src/service/manager.rs`): Orchestrates all services with unified shutdown handling
 
 2. **Configuration System** (`crates/platform/src/config/`): Single source of truth using TOML
-   - Uses bitmask for service enable/disable (位掩码控制)
+   - Uses bitmask for service enable/disable
    - Supports environment-specific settings (dev/prod/test)
 
 3. **Authentication**: Uses `nonce-auth` library for replay-attack prevention

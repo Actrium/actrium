@@ -418,7 +418,7 @@ async fn ensure_realm(sqlite_dir: &Path, realm_id: u32) {
     .expect("insert realm");
 }
 
-/// 通过 AIS HTTP 注册，返回 RegisterOk
+/// Register via AIS HTTP, returns RegisterOk
 async fn ais_register_http(
     base_url: &str,
     realm_id: u32,
@@ -496,7 +496,7 @@ async fn ais_register_http_with_secret(
     }
 }
 
-/// 带认证参数连接 WS
+/// Connect WS with authentication parameters
 async fn connect_ws_authenticated(
     port: u16,
     ok: &register_response::RegisterOk,
@@ -517,7 +517,7 @@ async fn connect_ws_authenticated(
     ws_stream.split()
 }
 
-/// 不带认证的裸 WS 连接（预期会被拒绝 — 仅供负面测试）
+/// Bare WS connection without authentication (expected to be rejected - for negative testing only)
 async fn connect_ws_raw(
     port: u16,
 ) -> Result<(WsWrite, WsRead), tokio_tungstenite::tungstenite::Error> {
@@ -1209,7 +1209,7 @@ async fn ais_register_enforces_realm_secret_when_configured() {
         manufacturer_auth_nonce: None,
     };
 
-    // 1) 未携带 realm_secret，AIS HTTP 注册应被拒绝
+    // 1) Without realm_secret, AIS HTTP registration should be rejected
     {
         let rsp_bytes = client
             .post(format!("{base}/ais/register"))
@@ -1236,7 +1236,7 @@ async fn ais_register_enforces_realm_secret_when_configured() {
         }
     }
 
-    // 2) 携带错误 realm_secret，AIS HTTP 注册应被拒绝
+    // 2) With wrong realm_secret, AIS HTTP registration should be rejected
     {
         let rsp_bytes = client
             .post(format!("{base}/ais/register"))
@@ -1264,7 +1264,7 @@ async fn ais_register_enforces_realm_secret_when_configured() {
         }
     }
 
-    // 3) 携带正确 realm_secret，AIS HTTP 注册应成功
+    // 3) With correct realm_secret, AIS HTTP registration should succeed
     {
         let rsp_bytes = client
             .post(format!("{base}/ais/register"))
@@ -1368,7 +1368,7 @@ async fn ais_health_and_endpoints_degrade_when_ks_dependency_is_unreachable() {
 async fn signaling_rejects_unauthenticated_ws_connection() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
 
-    // 不带凭证的裸连接应被拒绝（401 Unauthorized → WS upgrade 失败）
+    // Bare connection without credentials should be rejected (401 Unauthorized -> WS upgrade fails)
     let result = connect_ws_raw(harness.port).await;
     assert!(
         result.is_err(),
@@ -1479,7 +1479,7 @@ async fn signaling_peer_payload_none_is_ignored_and_connection_remains_usable() 
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let (mut write, mut read, ok) = ws_register(harness.port, "acme", "peer-none", None).await;
 
-    // 发送空 peer payload
+    // Send empty peer payload
     send_envelope(
         &mut write,
         make_envelope(signaling_envelope::Flow::PeerToServer(
@@ -1494,7 +1494,7 @@ async fn signaling_peer_payload_none_is_ignored_and_connection_remains_usable() 
         "empty peer payload should be ignored without server response"
     );
 
-    // 连接仍可用：发送 Ping 应收到 Pong
+    // Connection still usable: send Ping should receive Pong
     let ping_msg = actr_protocol::ActrToSignaling {
         source: ok.actr_id.clone(),
         credential: ok.credential.clone(),
@@ -1626,14 +1626,14 @@ async fn signaling_connection_rate_limit_rejects_second_concurrent_connection() 
     wait_for_health(&format!("{base}/ais/health"), &mut child, &log_path).await;
     wait_for_health(&format!("{base}/signaling/health"), &mut child, &log_path).await;
 
-    // 注册两个不同的 actor 用于测试连接速率限制
+    // Register two different actors for testing connection rate limiting
     let base_url = format!("http://127.0.0.1:{port}");
     let ok1 = ais_register_http(&base_url, 1001, "acme", "rate1", None, None).await;
     let ok2 = ais_register_http(&base_url, 1001, "acme", "rate2", None, None).await;
 
     let (_first_write, _first_read) = connect_ws_authenticated(port, &ok1).await;
 
-    // 第二个连接应被 concurrent limit 拒绝
+    // Second connection should be rejected by concurrent limit
     let actor_id_str = ok2.actr_id.to_string_repr();
     let signature_b64 = base64::engine::general_purpose::STANDARD.encode(&ok2.credential.signature);
     let claims_b64_2 = base64::engine::general_purpose::STANDARD.encode(&ok2.credential.claims);
@@ -3134,7 +3134,7 @@ async fn signaling_rejects_register_request_via_ws() {
 
     let (mut write, mut read, _ok) = ws_register(port, "acme", "dup-client", None).await;
 
-    // 通过 WS 发送 RegisterRequest 应返回 410（已迁移到 AIS HTTP）
+    // Sending RegisterRequest via WS should return 410 (migrated to AIS HTTP)
     let register_req = RegisterRequest {
         actr_type: ActrType {
             manufacturer: "acme".into(),

@@ -215,23 +215,23 @@ Design Advantage: enum dispatch provides static dispatch with zero virtual funct
 
 ### 6.1 Business Dispatch Layer (actr-runtime)
 
-**ActrDispatch<W>**：
+**ActrDispatch<W>**:
 - Responsibility: Pure business dispatcher — ACL check → routing → handler execution → panic capture
 - No IO dependency, compilable on native and wasm32 targets
 - Key methods: `dispatch()`, `on_start()`, `on_stop()`
 
-**check_acl_permission**：
+**check_acl_permission**:
 - Responsibility: Pure function ACL permission judgment
 - Evaluation Rules: Local call allowed → No ACL allowed → Empty rule rejected → Deny-first → Allow hit allowed → Default denied
 
 ### 6.2 Lifecycle Management (actr-hyper/lifecycle/)
 
-**ActrNode**：
+**ActrNode**:
 - Responsibility: Provides runtime infrastructure (Mailbox, SignalingClient, ContextFactory)
 - Lifecycle: Built directly from config, then started into a running actor reference
 - Key methods: `new()`, `new_client()`, `start()`
 
-**ActrNode**：
+**ActrNode**:
 - Responsibility: Runtime node, optionally holding one guest workload plus runtime components
 - Dispatch Path: Uses `Workload::handle(...)` when a workload is attached
 - Key methods: `start()`, `handle_incoming()`, `shutdown()`
@@ -239,24 +239,24 @@ Design Advantage: enum dispatch provides static dispatch with zero virtual funct
 
 ### 6.3 Inbound Processing (actr-hyper/inbound/)
 
-**WebRtcGate**：
+**WebRtcGate**:
 - Responsibility: Consumes inbound data aggregated by `WebRtcCoordinator`, dispatching directly based on PayloadType
 - Routing Rules:
   - RpcReliable/RpcSignal → Check pending_requests first; if hit, treat as Response and wake continuation, otherwise enter Mailbox by priority
   - StreamReliable/StreamLatencyFirst → DataChunkRegistry (fast path callback)
   - MediaRtp → Drop directly and hint to use WebRTC Track (MediaFrameRegistry registered by PeerConnection)
 
-**Inproc Receive Loop**：
+**Inproc Receive Loop**:
 - Responsibility: Two tokio loops inside `ActrNode` (Shell→Workload, Workload→Shell) receive directly from `HostTransport`'s `DataLane::Mpsc`
 - Shell→Workload: Extract `RpcEnvelope` then call `handle_incoming()`
 - Workload→Shell: Call `complete_response()` based on `request_id` to wake requester
 
-**DataChunkRegistry**：
+**DataChunkRegistry**:
 - Responsibility: Manage DataChunk callback registry (stream_id → callback)
 - Concurrency Safety: Use DashMap to support multi-threaded concurrent access
 - Callback Signature: `FnMut(DataChunk, ActrId) -> BoxFuture<ActorResult<()>>`
 
-**MediaFrameRegistry**：
+**MediaFrameRegistry**:
 - Responsibility: Manage MediaTrack callback registry (track_id → callback)
 - Concurrency Safety: Use DashMap
 - Callback Signature: `FnMut(MediaSample, ActrId) -> BoxFuture<ActorResult<()>>`

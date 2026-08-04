@@ -340,7 +340,7 @@ private final class ProbeHandlerImpl: ProbeServiceHandler, @unchecked Sendable {
         let runner = DuplexEchoProbeRunner(ctx: ctx, target: target)
 
         if let count = streamEchoCount(from: req.probeName) {
-            // ── call 验证：Echo RPC ──
+            // ── call verification: Echo RPC ──
             var callOk = false
             do {
                 let token = "ping-\(UUID().uuidString)"
@@ -360,7 +360,7 @@ private final class ProbeHandlerImpl: ProbeServiceHandler, @unchecked Sendable {
                 fileLog("[SwiftTsWorkloadApp] ❌ Echo call failed: \(error)")
             }
 
-            // ── stream 验证：duplex echo ──
+            // ── stream verification: duplex echo ──
             let result = await runner.runHelloStream(count: count) { line, receivedLine in
                 await MainActor.run {
                     svc?.appendStreamLog(line, receivedLine: receivedLine)
