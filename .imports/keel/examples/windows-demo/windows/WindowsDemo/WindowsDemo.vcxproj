@@ -182,6 +182,6 @@
        is how it was first reported (issue #100). -->
   <Target Name="EnsureKeelSandboxNative" BeforeTargets="ClCompile">
     <Error Condition="'$(KeelSandboxEngine)'!='hermes' And !Exists('$(MSBuildThisFileDirectory)..\KeelSandboxNative\build\quickjs.h')"
-           Text="Patched quickjs.h not found at windows\KeelSandboxNative\build\quickjs.h. Run the CMake sandbox step first (dev.cmd does this as step [3]): cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build -G &quot;Visual Studio 17 2022&quot; -DKEEL_SANDBOX_ENGINE=quickjs &amp;&amp; cmake --build windows\KeelSandboxNative\build --config $(Configuration)" />
+           Text="Patched quickjs.h not found at windows\KeelSandboxNative\build\quickjs.h. Run the CMake sandbox step first (dev.cmd does this as step [3]): cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build -A x64 -DKEEL_SANDBOX_ENGINE=quickjs &amp;&amp; cmake --build windows\KeelSandboxNative\build --config $(Configuration)" />
   </Target>
 </Project>
