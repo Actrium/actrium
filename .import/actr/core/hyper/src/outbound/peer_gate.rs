@@ -22,8 +22,9 @@ use actr_protocol::{
 };
 use std::collections::{HashMap, HashSet, hash_map::Entry};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, broadcast, oneshot, watch};
+use tokio::time::Instant;
 
 /// Pending requests map type: request_id -> (target_actor_id, oneshot response sender)
 pub(crate) type PendingRequestsMap =
@@ -794,21 +795,6 @@ impl PeerGate {
             session_id = status.session_id,
             "Recovery timeout cleanup completed"
         );
-    }
-
-    #[cfg(feature = "test-utils")]
-    pub async fn force_recovery_started_at_for_test(
-        &self,
-        target: &ActrId,
-        started_at: Instant,
-    ) -> bool {
-        let mut recovering = self.recovering_peers.write().await;
-        if let Some(status) = recovering.get_mut(target) {
-            status.started_at = started_at;
-            true
-        } else {
-            false
-        }
     }
 
     async fn preflight_send(&self, target: &ActrId, dest: &Dest) -> ActorResult<SendAdmission> {

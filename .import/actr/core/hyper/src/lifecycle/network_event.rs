@@ -71,7 +71,11 @@ use std::sync::{
     Arc,
     atomic::{AtomicU64, Ordering},
 };
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// Recovery bookkeeping (debounce windows, last successful connect, reconciler
+// latency) reads the same clock the supervisor arms its timers on, so a paused
+// clock advances both sides of every recovery decision together.
+use tokio::time::Instant;
 
 use crate::transport::{NetworkError, PeerTransport};
 use crate::wire::webrtc::{CleanupGuard, SignalingClient, WebRtcCoordinator};
@@ -387,7 +391,13 @@ pub struct NetworkEventResult {
     /// Error message (if failed)
     pub error: Option<String>,
 
-    /// Processing duration (milliseconds)
+    /// Processing duration (milliseconds).
+    ///
+    /// Measured on the Tokio clock, the same one the recovery timers are armed
+    /// on. Under a paused clock this reports *virtual* elapsed time — normally
+    /// 0, or exactly what the test advanced — not wall-clock latency. Treat it
+    /// as an observation of the supervisor's own time line, not as a
+    /// wall-clock performance metric.
     pub duration_ms: u64,
 }
 
@@ -1467,7 +1477,7 @@ pub struct NetworkEventRequest {
     ///
     /// This stays out of [`NetworkSnapshot`] so the platform FFI schema does
     /// not need to expose a runtime-specific clock representation.
-    observed_at: tokio::time::Instant,
+    observed_at: Instant,
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -1479,7 +1489,7 @@ impl NetworkEventRequest {
         event: NetworkEvent,
         result_tx: oneshot::Sender<NetworkEventResult>,
         source_epoch: u64,
-        observed_at: tokio::time::Instant,
+        observed_at: Instant,
     ) -> Self {
         Self {
             event,
@@ -1629,7 +1639,7 @@ pub struct SupervisorInternalChannel {
     rx: mpsc::UnboundedReceiver<tp::Input>,
     send_projection_tx: watch::Sender<tp::SendProjection>,
     profile: tp::LifecycleProfile,
-    clock_origin: tokio::time::Instant,
+    clock_origin: Instant,
 }
 
 impl SupervisorInternalChannel {
@@ -1645,7 +1655,7 @@ impl SupervisorInternalChannel {
 #[derive(Debug, Clone, Copy)]
 struct ReconcilerConfig {
     profile: tp::LifecycleProfile,
-    clock_origin: tokio::time::Instant,
+    clock_origin: Instant,
 }
 
 /// Create the supervisor's internal input channel plus a [`SupervisorFactSink`]
@@ -1672,7 +1682,7 @@ pub(crate) fn supervisor_internal_channel_with_profile(
 ) -> (SupervisorFactSink, SupervisorInternalChannel) {
     let (tx, rx) = mpsc::unbounded_channel::<tp::Input>();
     let (send_projection_tx, _send_projection_rx) = watch::channel(tp::SendProjection::Normal);
-    let clock_origin = tokio::time::Instant::now();
+    let clock_origin = Instant::now();
     (
         SupervisorFactSink::new(tx.clone()),
         SupervisorInternalChannel {
@@ -1725,7 +1735,7 @@ pub async fn run_network_event_reconciler(
     processor: Arc<dyn NetworkEventProcessor>,
     shutdown_token: CancellationToken,
 ) {
-    let clock_origin = tokio::time::Instant::now();
+    let clock_origin = Instant::now();
     let (internal_tx, internal_rx) = mpsc::unbounded_channel::<tp::Input>();
     let (status_tx, _status_rx) = watch::channel(SupervisorStatus::default());
     let (send_projection_tx, _send_projection_rx) = watch::channel(tp::SendProjection::Normal);
@@ -1757,7 +1767,7 @@ pub async fn run_network_event_reconciler_with_status(
     shutdown_token: CancellationToken,
     status_tx: watch::Sender<SupervisorStatus>,
 ) {
-    let clock_origin = tokio::time::Instant::now();
+    let clock_origin = Instant::now();
     let (internal_tx, internal_rx) = mpsc::unbounded_channel::<tp::Input>();
     let (send_projection_tx, _send_projection_rx) = watch::channel(tp::SendProjection::Normal);
     reconcile_loop(
@@ -1979,7 +1989,7 @@ fn shutdown_teardown_discharged(supervisor: &RecoverySupervisor) -> bool {
 
 fn arm_timer(
     timers: &mut HashMap<tp::TimerId, tokio::task::AbortHandle>,
-    start: tokio::time::Instant,
+    start: Instant,
     internal_tx: &mpsc::UnboundedSender<tp::Input>,
     op: TimerOp,
 ) {
@@ -2030,7 +2040,7 @@ fn handle_supervisor_input(
     supervisor: &mut RecoverySupervisor,
     input: tp::Input,
     now: Duration,
-    start: tokio::time::Instant,
+    start: Instant,
     internal_tx: &mpsc::UnboundedSender<tp::Input>,
     timers: &mut HashMap<tp::TimerId, tokio::task::AbortHandle>,
     effect: &mut Option<RunningEffect>,
@@ -2406,7 +2416,7 @@ impl NetworkEventHandle {
             event: event.clone(),
             result_tx,
             source_epoch: self.source_epoch,
-            observed_at: tokio::time::Instant::now(),
+            observed_at: Instant::now(),
         };
 
         tracing::info!(

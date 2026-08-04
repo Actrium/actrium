@@ -848,6 +848,45 @@ mod tests {
         }
     }
 
+    /// Return the flattened `use` statement that pulls `Instant` out of
+    /// `std`, if the file has one.
+    ///
+    /// Import lists are collapsed to a single whitespace-free string first, so
+    /// every nesting shape is covered: `use std::time::Instant;`,
+    /// `use std::time::{Duration, Instant};` and the rustfmt-wrapped
+    /// `use std::{sync::Arc, time::{Duration, Instant}};` all match.
+    fn std_instant_import(source: &str) -> Option<String> {
+        let mut statement: Option<String> = None;
+        for line in source.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with("//") {
+                continue;
+            }
+            if statement.is_none()
+                && !trimmed.starts_with("use ")
+                && !trimmed.starts_with("pub use")
+            {
+                continue;
+            }
+            statement.get_or_insert_with(String::new).push_str(trimmed);
+            if !trimmed.ends_with(';') {
+                continue;
+            }
+            let flattened: String = statement
+                .take()
+                .expect("statement accumulator is populated")
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect();
+            if (flattened.starts_with("usestd::") || flattened.starts_with("pubusestd::"))
+                && flattened.contains("Instant")
+            {
+                return Some(flattened);
+            }
+        }
+        None
+    }
+
     #[test]
     fn inv24_production_timer_calls_and_inventory_do_not_drift() {
         let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -863,8 +902,53 @@ mod tests {
             "tokio::time::timeout(",
             "tokio::time::timeout_at(",
         ];
+
+        // The forbidden list above only governs "how long until"; this list
+        // governs "how long since". The facade arms every production deadline
+        // on `tokio::time`, so a file that also reads `std::time::Instant`
+        // splits its decisions across two clocks: under a paused clock the
+        // deadline side advances and the elapsed side does not. That is how a
+        // passive `elapsed() >= TIMEOUT` predicate silently became untestable.
+        //
+        // The bar for an exemption is not "this timestamp does not decide
+        // whether recovery happens" — it is "this timestamp never has to be
+        // observed alongside the recovery flow in a test". A record that
+        // merely rides along on the teardown path still has to age in step
+        // with it, or a paused clock freezes half the picture. Exemption
+        // reasons are asserted to stay accurate: a removed file fails this
+        // test rather than leaving the list to rot.
+        let wall_clock_exempt = [
+            (
+                "dispatch/conflict_key.rs",
+                "process-uptime origin for span correlation only; never gates a lifecycle transition",
+            ),
+            (
+                "inbound/media_frame_registry.rs",
+                "measures per-sample dispatch latency for logging; no lifecycle decision",
+            ),
+            (
+                "lifecycle/dedup.rs",
+                "request-id dedup TTL; independent of connection or recovery state",
+            ),
+            (
+                "lifecycle/recovery_policy/translate_bench.rs",
+                "benchmark harness throughput measurement; must observe real elapsed time",
+            ),
+            (
+                "transport/lane.rs",
+                "fragment reassembly TTL on the inbound path; not a recovery predicate",
+            ),
+            (
+                "verify/cert_cache.rs",
+                "certificate cache freshness; deliberately tracks real elapsed time",
+            ),
+        ];
+
         let mut production = String::new();
         let mut violations = Vec::new();
+        let mut wall_clock_violations = Vec::new();
+        let mut bridge_violations = Vec::new();
+        let mut exemptions_seen = HashSet::new();
         for path in files {
             if path == facade {
                 continue;
@@ -883,6 +967,48 @@ mod tests {
                     ));
                 }
             }
+
+            let relative = path
+                .strip_prefix(&source_root)
+                .expect("production source lives under src/")
+                .components()
+                .map(|component| component.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>()
+                .join("/");
+            if wall_clock_exempt.iter().any(|(file, _)| *file == relative) {
+                exemptions_seen.insert(relative);
+            } else {
+                for (line_index, line) in source.lines().enumerate() {
+                    if line.contains("std::time::Instant") && !line.trim_start().starts_with("//") {
+                        wall_clock_violations.push(format!(
+                            "{}:{}: {}",
+                            path.display(),
+                            line_index + 1,
+                            line.trim()
+                        ));
+                    }
+                }
+                if let Some(import) = std_instant_import(&source) {
+                    wall_clock_violations.push(format!("{}: {}", path.display(), import));
+                }
+            }
+
+            // Bridging is never exempt: reinterpreting an instant from one
+            // clock as the same point on the other is silently wrong the
+            // moment the clocks are paused apart, and nothing errors.
+            for (line_index, line) in source.lines().enumerate() {
+                if (line.contains(".into_std()") || line.contains("Instant::from_std("))
+                    && !line.trim_start().starts_with("//")
+                {
+                    bridge_violations.push(format!(
+                        "{}:{}: {}",
+                        path.display(),
+                        line_index + 1,
+                        line.trim()
+                    ));
+                }
+            }
+
             production.push_str(&source);
         }
         assert!(
@@ -890,6 +1016,34 @@ mod tests {
             "raw production timers bypass the audited facade:\n{}",
             violations.join("\n")
         );
+        assert!(
+            wall_clock_violations.is_empty(),
+            "production clock reads must stay on `tokio::time::Instant`, the same \
+             time line the audited timer facade arms deadlines on. Mixing in \
+             `std::time::Instant` means `tokio::time::advance` moves the deadline \
+             but not the matching `elapsed()`, so recovery timeouts cannot be \
+             exercised in virtual time. Import `tokio::time::Instant`, or add the \
+             file to `wall_clock_exempt` with a reason if it is genuinely off the \
+             connection/recovery lifecycle path:\n{}",
+            wall_clock_violations.join("\n")
+        );
+        assert!(
+            bridge_violations.is_empty(),
+            "production code must not convert instants between the wall clock and \
+             the Tokio clock. The two clocks share an origin only while the Tokio \
+             clock runs free; once it is paused they drift apart, and a converted \
+             deadline then expires immediately or never — without any error. Carry \
+             the deadline on the clock it will be awaited on instead:\n{}",
+            bridge_violations.join("\n")
+        );
+        for (file, reason) in wall_clock_exempt {
+            assert!(
+                exemptions_seen.contains(file),
+                "stale wall-clock exemption for {} ({}): file no longer exists under src/",
+                file,
+                reason
+            );
+        }
 
         for entry in ids::ALL {
             let needle = format!("timer::ids::{}", entry.symbol);

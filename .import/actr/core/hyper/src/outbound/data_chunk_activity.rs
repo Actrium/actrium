@@ -1,6 +1,12 @@
 use actr_protocol::ActrId;
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// The tracker never reads a clock itself — every method takes `now`. It still
+// pins the type to the Tokio clock, because the record it gates
+// (`DataChunkDeliveryUncertain`) is emitted from the peer teardown path: its
+// TTL has to age in step with the ICE restart budget when a test pauses the
+// clock to walk that budget end to end.
+use tokio::time::Instant;
 
 pub(crate) const DATA_CHUNK_ACTIVITY_TTL: Duration = Duration::from_secs(30);
 

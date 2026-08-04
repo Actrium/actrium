@@ -401,7 +401,7 @@ async fn enter_half_open_recovery_window(
     );
     mobile.coordinator.clear_pending_restarts().await;
 
-    let started_at = Instant::now()
+    let started_at = tokio::time::Instant::now()
         .checked_sub(semantic_elapsed)
         .expect("semantic elapsed should be representable");
     assert!(
