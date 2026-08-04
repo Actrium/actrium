@@ -587,6 +587,25 @@ fn test_l0_documented_event_action_matrix() {
             events: vec![background_event(), foreground_event(5_000), online_event(1)],
             expected: NetworkRecoveryAction::Restore,
         },
+        // Exact boundary of the 30 s long-background reconnect threshold
+        // (`LONG_BACKGROUND_RECONNECT_THRESHOLD_MS`): the comparison is
+        // inclusive (`>=`), so 29 999 ms probes while 30 000 ms forces a
+        // reconnect.
+        Case {
+            case_id: "L0-29 foreground one ms below reconnect threshold probes",
+            events: vec![foreground_event(29_999)],
+            expected: NetworkRecoveryAction::Probe,
+        },
+        Case {
+            case_id: "L0-30 foreground exactly at reconnect threshold forces reconnect",
+            events: vec![foreground_event(30_000)],
+            expected: NetworkRecoveryAction::ForceReconnect,
+        },
+        Case {
+            case_id: "L0-31 foreground one ms above reconnect threshold forces reconnect",
+            events: vec![foreground_event(30_001)],
+            expected: NetworkRecoveryAction::ForceReconnect,
+        },
     ];
 
     for case in cases {

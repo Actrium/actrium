@@ -1024,6 +1024,9 @@ fn is_expired(expires_at: i64) -> bool {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs() as i64;
+    // AIS TTLs are configurable and the token carries no authoritative
+    // issuance-time bound, so a large remaining lifetime is not evidence of
+    // a local clock rollback.
     expires_at <= now
 }
 

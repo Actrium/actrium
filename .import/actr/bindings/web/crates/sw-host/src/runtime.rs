@@ -57,6 +57,24 @@ use crate::inbound::{InboundPacketDispatcher, MailboxProcessor, Scheduler};
 use crate::outbound::Gate;
 use crate::web_context::RuntimeBridge;
 
+/// Milliseconds from `performance.now()`: monotonic per RFC-0419, unlike
+/// `Date.now()`, which jumps when the wall clock changes (NTP, manual set).
+///
+/// Fails explicitly if the Performance API is unavailable: falling back to
+/// wall time would allow a clock adjustment to fire the connection timeout
+/// early or stall it indefinitely.
+fn monotonic_now_ms() -> Result<f64, JsValue> {
+    js_sys::global()
+        .unchecked_into::<web_sys::WorkerGlobalScope>()
+        .performance()
+        .map(|p| p.now())
+        .ok_or_else(|| {
+            JsValue::from_str(
+                "Performance API unavailable; cannot enforce a monotonic WebSocket connect timeout",
+            )
+        })
+}
+
 type StreamHandler = Rc<RefCell<Box<dyn FnMut(Bytes)>>>;
 
 #[derive(Serialize)]
@@ -172,7 +190,7 @@ impl SignalingClient {
         // Wait for open (max 15s)
         let ws_clone = ws.clone();
         let open_future = async move {
-            let start = js_sys::Date::now();
+            let start = monotonic_now_ms()?;
             loop {
                 if ws_clone.ready_state() == WebSocket::OPEN {
                     return Ok(());
@@ -180,7 +198,7 @@ impl SignalingClient {
                 if ws_clone.ready_state() == WebSocket::CLOSED {
                     return Err(JsValue::from_str("WebSocket closed"));
                 }
-                if js_sys::Date::now() - start > 15000.0 {
+                if monotonic_now_ms()? - start > 15000.0 {
                     return Err(JsValue::from_str("WebSocket connect timeout"));
                 }
                 TimeoutFuture::new(10).await;
@@ -951,6 +969,8 @@ impl SwRuntime {
         }
         let expires_at = u64::from_le_bytes(expires_bytes.as_slice().try_into().unwrap());
         let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+        // The issuer TTL and rotation window are configurable; the persisted
+        // token has no authoritative issuance-time bound.
         if now_secs >= expires_at {
             let _ = kv.delete("renewal_token").await;
             let _ = kv.delete("renewal_token_expires_at").await;
@@ -1041,7 +1061,8 @@ impl SwRuntime {
             JsValue::from_str(&format!("Failed to decode persisted TurnCredential: {e}"))
         })?;
 
-        // Check if TurnCredential is still valid
+        // The issuer TTL is configurable and the credential carries no
+        // authoritative issuance-time bound.
         let now_secs = (js_sys::Date::now() / 1000.0) as u64;
         if tc.expires_at <= now_secs {
             log::info!(
@@ -1124,6 +1145,8 @@ impl SwRuntime {
             .map_err(|e| JsValue::from_str(&format!("Failed to decode identity claims: {e}")))?;
 
         let now_secs = (js_sys::Date::now() / 1000.0) as u64;
+        // The issuer TTL is configurable and claims do not carry an issued-at
+        // value, so only the signed absolute expiry can be evaluated here.
         if claims.expires_at <= now_secs {
             log::info!(
                 "[SW] persisted credential expired (expires_at={}, now={})",
