@@ -45,10 +45,14 @@ use std::{
         Arc, RwLock as StdRwLock, Weak,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 use tokio::sync::{Mutex, RwLock, mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
+// Connection and recovery lifecycle timestamps share the clock the timer facade
+// arms its deadlines on, so `tokio::time::advance` moves both the "how long
+// until" and the "how long since" side of every decision in this file.
+use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 #[cfg(feature = "opentelemetry")]
@@ -695,7 +699,7 @@ struct PeerState {
     last_ice_restart_offer_at: Option<Instant>,
 
     /// Last state change timestamp (for health check)
-    last_state_change: std::time::Instant,
+    last_state_change: Instant,
 
     /// Current connection state (for health check)
     current_state: RTCPeerConnectionState,
@@ -730,7 +734,7 @@ impl PeerState {
             return;
         }
         self.current_state = state;
-        self.last_state_change = std::time::Instant::now();
+        self.last_state_change = Instant::now();
         if matches!(state, RTCPeerConnectionState::Connected) {
             self.ever_ice_connected = true;
         }
@@ -2266,8 +2270,8 @@ impl WebRtcCoordinator {
         &self,
         peer_id: &ActrId,
         age: Duration,
-    ) -> ActorResult<std::time::Instant> {
-        let timestamp = std::time::Instant::now()
+    ) -> ActorResult<Instant> {
+        let timestamp = Instant::now()
             .checked_sub(age)
             .ok_or_else(|| ActrError::Internal("monotonic clock is too young".to_string()))?;
         let mut peers = self.peers.write().await;
@@ -2285,7 +2289,7 @@ impl WebRtcCoordinator {
     pub async fn replay_current_peer_state_for_test(
         &self,
         peer_id: &ActrId,
-    ) -> ActorResult<std::time::Instant> {
+    ) -> ActorResult<Instant> {
         let mut peers = self.peers.write().await;
         let state = peers.get_mut(peer_id).ok_or_else(|| {
             ActrError::Internal(format!("Peer not found: {}", peer_id.to_string_repr()))
@@ -2358,16 +2362,6 @@ impl WebRtcCoordinator {
             .close()
             .await
             .map_err(|error| ActrError::Internal(format!("Failed to close test peer: {error}")))
-    }
-
-    /// Remove only the offer-throttle timestamp so virtual-time integration
-    /// tests can drive consecutive real ICE restart attempts without waiting
-    /// for `std::time::Instant` to advance.
-    #[cfg(feature = "test-utils")]
-    pub async fn clear_ice_restart_offer_throttle_for_test(&self, peer_id: &ActrId) {
-        if let Some(state) = self.peers.write().await.get_mut(peer_id) {
-            state.last_ice_restart_offer_at = None;
-        }
     }
 
     fn should_retrigger_existing_recovery(existing_reason: &str, new_reason: &str) -> bool {
@@ -2710,6 +2704,14 @@ impl WebRtcCoordinator {
         Ok(DetachedPeerForTest { state: Some(state) })
     }
 
+    /// Backdate an active recovery guard so a test can observe the timeout
+    /// branch without waiting out `NETWORK_RECOVERY_TIMEOUT`.
+    ///
+    /// This is not a workaround for a split clock: `started_at` is a point on
+    /// the same recovery time line the coordinator reads. It exists for the
+    /// socket-driven integration tests, which must let real WebRTC and
+    /// WebSocket I/O run and therefore cannot pause the clock — which in turn
+    /// rules out `tokio::time::advance`.
     #[cfg(feature = "test-utils")]
     pub async fn force_peer_recovery_started_at_for_test(
         &self,
@@ -3581,7 +3583,7 @@ impl WebRtcCoordinator {
                             if !ice_connected {
                                 ice_connected = true;
                                 sleep.as_mut().reset(
-                                    tokio::time::Instant::now() + data_channel_after_ice_timeout
+                                    Instant::now() + data_channel_after_ice_timeout
                                 );
                                 tracing::info!(
                                     "✅ ICE connected for peer {} (session_id={}); waiting {:?} for DataChannel",
@@ -3652,7 +3654,7 @@ impl WebRtcCoordinator {
                                     return true;
                                 }
                                 sleep.as_mut().reset(
-                                    tokio::time::Instant::now() + data_channel_after_ice_timeout
+                                    Instant::now() + data_channel_after_ice_timeout
                                 );
                                 tracing::info!(
                                     "✅ ICE connected after event lag for peer {} (session_id={}); waiting {:?} for DataChannel",
@@ -3742,12 +3744,12 @@ impl WebRtcCoordinator {
                         // idle interval: a lost transition produces no
                         // notification, and an unrelated long deadline must
                         // not defer the reconciliation scan past it.
-                        let capped = deadline.min(std::time::Instant::now() + idle_interval);
+                        let capped = deadline.min(Instant::now() + idle_interval);
                         tokio::select! {
                             _ = &mut changed => {}
                             _ = crate::timer::sleep_until(
                                 crate::timer::ids::STALE_PEER_EXPIRY,
-                                capped.into(),
+                                capped,
                             ) => {}
                         }
                     }
@@ -3787,15 +3789,15 @@ impl WebRtcCoordinator {
     /// runs, on the answerer side) the peer lingers forever — and with it the
     /// RTCPeerConnection and the per-interface ICE UDP sockets it holds,
     /// leaking fds for the process lifetime.
-    async fn check_and_cleanup_stale_connections(&self) -> Option<std::time::Instant> {
+    async fn check_and_cleanup_stale_connections(&self) -> Option<Instant> {
         self.reconcile_live_peer_states().await;
 
         let (peers_to_cleanup, never_ready_candidates, next_deadline) = {
             let peers = self.peers.read().await;
-            let now = std::time::Instant::now();
+            let now = Instant::now();
             let mut peers_to_cleanup = Vec::new();
             let mut never_ready_candidates = Vec::new();
-            let mut next_deadline: Option<std::time::Instant> = None;
+            let mut next_deadline: Option<Instant> = None;
 
             for (peer_id, state) in peers.iter() {
                 // The callback publishes the cached state and its timestamp
@@ -4247,7 +4249,7 @@ impl WebRtcCoordinator {
             restart_handles
         };
 
-        let state_phase_deadline = tokio::time::Instant::now() + CLOSE_ALL_QUIESCE_TIMEOUT;
+        let state_phase_deadline = Instant::now() + CLOSE_ALL_QUIESCE_TIMEOUT;
         let restart_count = restart_handles.len();
         if crate::timer::timeout_at(
             crate::timer::ids::WEBRTC_CLOSE_ALL_QUIESCE,
@@ -4413,7 +4415,7 @@ impl WebRtcCoordinator {
         // bounded by one deadline for the whole batch. Once a hook completes
         // (or is cancelled at the deadline), physical teardown owns the peer.
         let mut close_tasks = Vec::new();
-        let hook_deadline = tokio::time::Instant::now() + CLOSE_ALL_HOOK_TIMEOUT;
+        let hook_deadline = Instant::now() + CLOSE_ALL_HOOK_TIMEOUT;
         while let Some((peer_id, state)) = drained_peers.last_mut() {
             for handle in &state.receive_handles {
                 handle.abort();
@@ -5458,7 +5460,7 @@ impl WebRtcCoordinator {
             ice_gathering_changed,
             health_check_wake: Arc::clone(&self.health_check_wake),
             last_ice_restart_offer_at: None,
-            last_state_change: std::time::Instant::now(),
+            last_state_change: Instant::now(),
             current_state: initial_connection_state,
             ever_ice_connected: initially_connected,
             ever_data_channel_opened: false,
@@ -5858,7 +5860,7 @@ impl WebRtcCoordinator {
             ice_gathering_changed,
             health_check_wake: Arc::clone(&self.health_check_wake),
             last_ice_restart_offer_at: None,
-            last_state_change: std::time::Instant::now(),
+            last_state_change: Instant::now(),
             current_state: initial_connection_state,
             ever_ice_connected: initially_connected,
             ever_data_channel_opened: false,

@@ -1197,7 +1197,7 @@ async fn test_stale_answerer_recovery_closes_old_session_on_network_restore() {
             .coordinator
             .force_peer_recovery_started_at_for_test(
                 &offerer_id,
-                Instant::now() - Duration::from_secs(61),
+                tokio::time::Instant::now() - Duration::from_secs(61),
             )
             .await,
         "test should be able to age the answerer recovery guard"
@@ -1275,7 +1275,7 @@ async fn test_duplicate_network_recovery_same_session_is_coalesced() {
     .await
     .expect("first recovery event should emit IceRestartStarted");
 
-    let aged_started_at = Instant::now() - Duration::from_secs(3);
+    let aged_started_at = tokio::time::Instant::now() - Duration::from_secs(3);
     assert!(
         peer_100
             .coordinator
@@ -1669,7 +1669,7 @@ async fn test_network_recovery_guard_times_out_after_6s_and_closes_transport() {
     expect_connection_recovering(early, "request inside recovery window").await;
 
     tracing::info!("Step 4: Age the guard beyond 6s and verify timeout cleanup");
-    let expired_started_at = Instant::now() - Duration::from_secs(7);
+    let expired_started_at = tokio::time::Instant::now() - Duration::from_secs(7);
     assert!(
         harness
             .peer(100)

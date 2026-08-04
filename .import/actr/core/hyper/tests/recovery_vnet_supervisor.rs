@@ -1073,13 +1073,10 @@ async fn exhausted_real_ice_restart_falls_back_to_new_session_bidirectionally() 
         .restart_network_recovery_connections_for(&recovery_targets)
         .await;
 
+    // The offer throttle now ages on the same clock the restart deadlines are
+    // armed on, so advancing virtual time is enough to unblock each attempt.
     for _ in 0..160 {
         tokio::time::advance(Duration::from_secs(1)).await;
-        harness
-            .peer(100)
-            .coordinator
-            .clear_ice_restart_offer_throttle_for_test(&target)
-            .await;
         for _ in 0..4 {
             tokio::task::yield_now().await;
         }
