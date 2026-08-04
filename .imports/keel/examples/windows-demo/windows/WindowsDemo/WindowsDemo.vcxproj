@@ -171,4 +171,17 @@
     <Error Condition="!Exists('$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.props')" Text="$([System.String]::Format('$(ErrorText)', '$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.props'))" />
     <Error Condition="!Exists('$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.targets')" Text="$([System.String]::Format('$(ErrorText)', '$(ReactNativeWindowsDir)\PropertySheets\External\Microsoft.ReactNative.Composition.CppApp.targets'))" />
   </Target>
+  <!-- KeelSandboxNativeModule.cpp includes <quickjs.h> as C++. The vendored
+       header is C-only there: JS_MKVAL/JS_MKPTR/JS_NAN are compound literals,
+       which MSVC rejects outside C. The header this project must see is the
+       patched copy CMake writes into KeelSandboxNative\build, which is why that
+       directory precedes native\quickjs\vendor in AdditionalIncludeDirectories.
+       Without this check a missing CMake step is not reported as a missing step:
+       the include search silently falls through to the vendor header and the
+       build dies with four C4576 errors pointing INTO third-party code, which
+       is how it was first reported (issue #100). -->
+  <Target Name="EnsureKeelSandboxNative" BeforeTargets="ClCompile">
+    <Error Condition="'$(KeelSandboxEngine)'!='hermes' And !Exists('$(MSBuildThisFileDirectory)..\KeelSandboxNative\build\quickjs.h')"
+           Text="Patched quickjs.h not found at windows\KeelSandboxNative\build\quickjs.h. Run the CMake sandbox step first (dev.cmd does this as step [3]): cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build -G &quot;Visual Studio 17 2022&quot; -DKEEL_SANDBOX_ENGINE=quickjs &amp;&amp; cmake --build windows\KeelSandboxNative\build --config $(Configuration)" />
+  </Target>
 </Project>
