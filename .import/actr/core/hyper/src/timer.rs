@@ -284,7 +284,7 @@ timer_inventory! {
     },
     PEER_TRANSPORT_CREATE => {
         id: "transport.peer.create", owner: "peer_transport", category: FailureDeadline,
-        duration: "fixed 10s", arm: "transport creator awaits flight completion",
+        duration: "one absolute ConnectionFlight deadline", arm: "transport flight is created",
         success: "flight publishes or fails", interrupt: "close or creator cancellation",
         expiry: "release creator ownership and fail", reset: "replacement flight only", external: false
     },
@@ -299,6 +299,12 @@ timer_inventory! {
         duration: "wire connection retry policy", arm: "wire creation attempt fails",
         success: "backoff deadline", interrupt: "pool close",
         expiry: "retry wire creation", reset: "successful connection or new flight", external: false
+    },
+    WIRE_POOL_CONNECT_ATTEMPT => {
+        id: "transport.wire_pool.connect_attempt", owner: "wire_pool", category: FailureDeadline,
+        duration: "WIRE_CONNECT_ATTEMPT_TIMEOUT", arm: "one physical wire connect starts",
+        success: "wire connect future completes", interrupt: "pool close",
+        expiry: "classify attempt as failed and continue policy", reset: "new physical attempt only", external: false
     },
     WASM_INSTANTIATION => {
         id: "wasm.instantiation", owner: "wasm_host", category: FailureDeadline,
@@ -335,12 +341,6 @@ timer_inventory! {
         duration: "PEER_CONNECTION_CLOSE_TIMEOUT", arm: "physical peer close starts",
         success: "peer connection closes", interrupt: "connection drop",
         expiry: "return bounded close error", reset: "new connection only", external: false
-    },
-    WEBRTC_CLEANUP_BARRIER => {
-        id: "webrtc.coordinator.cleanup_barrier", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "CLEANUP_BARRIER_WAIT_TIMEOUT", arm: "peer operation waits for cleanup barrier",
-        success: "barrier clears", interrupt: "session replacement",
-        expiry: "return cleanup timeout", reset: "new guarded operation", external: false
     },
     WEBRTC_CLOSE_FALLBACK => {
         id: "webrtc.coordinator.close_fallback", owner: "webrtc_coordinator", category: FailureDeadline,
@@ -390,6 +390,14 @@ timer_inventory! {
         success: "hook future completes", interrupt: "hook completion",
         expiry: "skip hook and proceed to physical close", reset: "new teardown only", external: false
     },
+    WEBRTC_PEER_RECOVERY_DEADLINE => {
+        id: "webrtc.coordinator.peer_recovery_deadline", owner: "peer_recovery", category: FailureDeadline,
+        duration: "NETWORK_RECOVERY_TIMEOUT (the authoritative total recovery budget)", arm: "an exact peer session enters Recovering",
+        success: "verified recovery, explicit failure, transport close, or session replacement",
+        interrupt: "matching recovery transition or coordinator shutdown",
+        expiry: "enqueue identity-checked teardown for the exact stale session",
+        reset: "new session/recovery revision only; duplicate facts never extend it", external: false
+    },
     WEBRTC_CONNECTION_READY => {
         id: "webrtc.coordinator.connection_ready", owner: "webrtc_coordinator", category: FailureDeadline,
         duration: "INITIAL_CONNECTION_TIMEOUT or caller wait budget", arm: "connection attempt awaits ready signal",
@@ -410,9 +418,9 @@ timer_inventory! {
     },
     WEBRTC_RETRY_BACKOFF => {
         id: "webrtc.coordinator.retry_backoff", owner: "webrtc_coordinator", category: FailureBackoff,
-        duration: "connection/send/ICE retry policy", arm: "retryable WebRTC operation fails",
-        success: "absolute retry deadline", interrupt: "shutdown, wake notification, or generation replacement",
-        expiry: "retry current generation", reset: "material state transition only", external: false
+        duration: "connection/send/ICE retry pacing", arm: "retryable WebRTC operation fails or a prerequisite is unavailable",
+        success: "retry eligibility becomes true", interrupt: "shutdown, wake notification, or generation replacement",
+        expiry: "retry current generation", reset: "successful readiness transition or new generation", external: false
     },
     WEBRTC_ICE_GATHERING => {
         id: "webrtc.coordinator.ice_gathering", owner: "webrtc_coordinator", category: FailureDeadline,
@@ -425,12 +433,6 @@ timer_inventory! {
         duration: "per-attempt restart timeout", arm: "ICE restart attempt awaits committed connected state",
         success: "state event plus authoritative state", interrupt: "restart wake or session replacement",
         expiry: "classify attempt timeout", reset: "new restart attempt", external: false
-    },
-    ANSWERER_SIGNALING_RECONNECT => {
-        id: "webrtc.coordinator.answerer_signaling_reconnect", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "ANSWERER_SIGNALING_RECONNECT_WAIT_TIMEOUT", arm: "answerer restart needs signaling recovery",
-        success: "signaling Connected event", interrupt: "session replacement",
-        expiry: "fail restart precondition", reset: "new restart attempt", external: false
     },
     WEBRTC_ROLE_NEGOTIATION => {
         id: "webrtc.coordinator.role_negotiation", owner: "webrtc_coordinator", category: FailureDeadline,
@@ -476,13 +478,13 @@ timer_inventory! {
     },
     SIGNALING_DISCONNECT_LOCK => {
         id: "signaling.disconnect_lock", owner: "signaling_client", category: FailureDeadline,
-        duration: "DISCONNECT_LOCK_TIMEOUT_SECS", arm: "disconnect acquires task/sink/stream ownership",
+        duration: "one absolute disconnect teardown deadline", arm: "disconnect starts",
         success: "ownership lock acquired", interrupt: "disconnect cancellation",
         expiry: "skip blocked resource and continue teardown", reset: "one disconnect operation", external: false
     },
     SIGNALING_DISCONNECT_CLOSE => {
         id: "signaling.disconnect_close", owner: "signaling_client", category: FailureDeadline,
-        duration: "DISCONNECT_CLOSE_TIMEOUT_SECS", arm: "disconnect closes WebSocket sink",
+        duration: "remaining absolute disconnect teardown deadline", arm: "disconnect closes WebSocket sink",
         success: "close frame completes", interrupt: "socket drop",
         expiry: "drop sink and continue teardown", reset: "one signaling generation", external: false
     },
@@ -494,7 +496,7 @@ timer_inventory! {
     },
     SIGNALING_PROBE => {
         id: "signaling.probe", owner: "signaling_client", category: FailureDeadline,
-        duration: "caller probe timeout", arm: "liveness probe sends ping",
+        duration: "remaining caller probe deadline after ping send", arm: "liveness probe sends ping",
         success: "matching pong", interrupt: "disconnect or generation replacement",
         expiry: "report path unreachable", reset: "new probe only", external: false
     },

@@ -464,19 +464,18 @@ impl RecoverySupervisor {
                 observed_at: _,
                 semantic_path,
                 route_fingerprint,
-            } => {
+            } if snapshot_accepted(&self.view.last_snapshot, *source_epoch, *sequence) => {
                 // Record the last accepted snapshot on any accepted (newer)
                 // (epoch, sequence), even a structural duplicate, so the epoch
                 // ordering keeps advancing.
-                if snapshot_accepted(&self.view.last_snapshot, *source_epoch, *sequence) {
-                    self.view.last_snapshot = Some(tp::AcceptedSnapshot {
-                        source_epoch: *source_epoch,
-                        sequence: *sequence,
-                        semantic_path: *semantic_path,
-                        route_fingerprint: *route_fingerprint,
-                    });
-                }
+                self.view.last_snapshot = Some(tp::AcceptedSnapshot {
+                    source_epoch: *source_epoch,
+                    sequence: *sequence,
+                    semantic_path: *semantic_path,
+                    route_fingerprint: *route_fingerprint,
+                });
             }
+            tp::Input::NetworkSnapshot { .. } => {}
             tp::Input::SessionActivated { session_generation } if advanced => {
                 self.view.committed_session_generation = Some(*session_generation);
             }

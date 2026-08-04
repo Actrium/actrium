@@ -177,6 +177,154 @@ async fn probe_alive_times_out_when_sink_lock_is_stalled() {
     );
 }
 
+#[tokio::test]
+async fn probe_send_and_pong_wait_share_one_absolute_deadline() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.expect("server should accept");
+        let _ws = tokio_tungstenite::accept_async(stream)
+            .await
+            .expect("server handshake should complete");
+        std::future::pending::<()>().await;
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test URL should parse");
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+    client
+        .connect_once()
+        .await
+        .expect("test signaling socket should connect");
+
+    let sink_guard = client.ws_sink.lock().await;
+    let probe_client = client.clone();
+    let probe =
+        tokio::spawn(async move { probe_client.probe_alive(Duration::from_millis(100)).await });
+    tokio::time::sleep(Duration::from_millis(70)).await;
+    drop(sink_guard);
+
+    let result = tokio::time::timeout(Duration::from_millis(60), probe)
+        .await
+        .expect("probe must spend one 100ms budget across send and pong wait")
+        .expect("probe task should not panic");
+    assert!(result.is_err(), "server deliberately withholds pong");
+
+    client.disconnect().await.ok();
+    server.abort();
+}
+
+#[tokio::test(start_paused = true)]
+async fn concurrent_connect_waiter_uses_the_active_attempt_deadline() {
+    let mut config = make_config();
+    config.connection_timeout = 30;
+    let client = make_ws_client(config);
+    client.connecting.store(true, Ordering::Release);
+
+    let waiter_client = client.clone();
+    let waiter = tokio::spawn(async move { waiter_client.wait_for_connection_result(0).await });
+    tokio::task::yield_now().await;
+
+    tokio::time::advance(
+        Duration::from_secs(CONCURRENT_CONNECT_WAIT_TIMEOUT_SECS) + Duration::from_millis(1),
+    )
+    .await;
+    tokio::task::yield_now().await;
+    assert!(
+        !waiter.is_finished(),
+        "a waiter must not time out before the active 30-second handshake attempt"
+    );
+
+    client.connected.store(true, Ordering::Release);
+    client.connection_attempt_notify.notify_waiters();
+    waiter
+        .await
+        .expect("waiter task should not panic")
+        .expect("waiter should observe the shared attempt success");
+}
+
+#[tokio::test(start_paused = true)]
+async fn disconnect_lock_waits_share_one_absolute_deadline() {
+    let client = make_ws_client(make_config());
+    let ping_guard = client.ping_task.lock().await;
+    let receiver_guard = client.receiver_task.lock().await;
+
+    let disconnect_client = client.clone();
+    let disconnect = tokio::spawn(async move { disconnect_client.disconnect_internal(true).await });
+    tokio::task::yield_now().await;
+
+    tokio::time::advance(
+        Duration::from_secs(DISCONNECT_LOCK_TIMEOUT_SECS) + Duration::from_millis(1),
+    )
+    .await;
+    for _ in 0..4 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        disconnect.is_finished(),
+        "disconnect must not restart a full timeout for every blocked lock"
+    );
+
+    drop(receiver_guard);
+    drop(ping_guard);
+    disconnect
+        .await
+        .expect("disconnect task should not panic")
+        .expect("disconnect should continue after its shared teardown deadline");
+}
+
+#[tokio::test]
+async fn final_auto_reconnect_failure_enters_cooldown_without_extra_backoff() {
+    let mut config = make_config();
+    config.connection_timeout = 1;
+    config.reconnect_config = ReconnectConfig {
+        enabled: true,
+        max_attempts: 1,
+        initial_delay: 30,
+        max_delay: 30,
+        backoff_multiplier: 2.0,
+    };
+    let client = make_ws_client(config);
+    let mut events = client.subscribe_events();
+    let reconnect_client = client.clone();
+    let reconnect = tokio::spawn(async move {
+        reconnect_client.run_reconnect_cycle().await;
+    });
+
+    loop {
+        match tokio::time::timeout(Duration::from_secs(2), events.recv())
+            .await
+            .expect("the failed attempt should emit an event promptly")
+            .expect("event channel should remain open")
+        {
+            SignalingEvent::Disconnected { .. } => break,
+            SignalingEvent::ConnectStart { .. } | SignalingEvent::Connected => {}
+        }
+    }
+    tokio::task::yield_now().await;
+
+    // One wake must interrupt the cooldown. In the buggy implementation it
+    // is consumed by a useless post-final-attempt backoff, after which a new
+    // cooldown is armed and the cycle remains stuck.
+    client.schedule_auto_reconnect();
+    for _ in 0..4 {
+        tokio::task::yield_now().await;
+    }
+    assert!(
+        reconnect.is_finished(),
+        "no retry delay is valid after the final attempt has already failed"
+    );
+    reconnect.await.expect("reconnect task should not panic");
+}
+
 #[tokio::test(start_paused = true)]
 async fn send_envelope_times_out_while_waiting_for_sink_lock() {
     let client = make_ws_client(make_config());
@@ -1318,9 +1466,11 @@ async fn test_explicit_disconnect_suppresses_in_flight_auto_reconnect_connected_
             .await
             .expect("test server should accept tcp connection");
         let _ = release_rx.await;
-        let ws_stream = tokio_tungstenite::accept_async(stream)
-            .await
-            .expect("test server should complete websocket handshake");
+        let Ok(ws_stream) = tokio_tungstenite::accept_async(stream).await else {
+            // The client may drop the TCP stream immediately when explicit
+            // disconnect invalidates the handshake generation.
+            return;
+        };
         tokio::time::sleep(Duration::from_millis(100)).await;
         drop(ws_stream);
     });
@@ -1377,10 +1527,11 @@ async fn test_explicit_disconnect_suppresses_in_flight_auto_reconnect_connected_
         "cancelled auto-reconnect must not clear lifecycle suppression"
     );
 
-    tokio::time::timeout(Duration::from_secs(1), server_task)
-        .await
-        .expect("test server task should finish")
-        .expect("test server task should not panic");
+    // The client now drops the stalled handshake as soon as its generation is
+    // invalidated, so the deliberately non-progressing server no longer owns
+    // a successful handshake path to finish.
+    server_task.abort();
+    let _ = server_task.await;
 }
 
 #[tokio::test]
@@ -1541,6 +1692,48 @@ async fn test_explicit_disconnect_cancels_in_flight_explicit_connect() {
         .await
         .expect("test server task should finish")
         .expect("test server task should not panic");
+}
+
+#[tokio::test]
+async fn explicit_disconnect_interrupts_a_stalled_handshake_without_server_progress() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("test listener should bind");
+    let server_url = format!(
+        "ws://{}/signaling/ws",
+        listener
+            .local_addr()
+            .expect("test listener should have local addr")
+    );
+    let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        let (_stream, _) = listener.accept().await.expect("server should accept");
+        accepted_tx.send(()).ok();
+        std::future::pending::<()>().await;
+    });
+
+    let mut config = make_config();
+    config.server_url = Url::parse(&server_url).expect("test URL should parse");
+    config.connection_timeout = 30;
+    config.reconnect_config.enabled = false;
+    let client = make_ws_client(config);
+    let connecting_client = client.clone();
+    let connect = tokio::spawn(async move { connecting_client.connect_once().await });
+    accepted_rx
+        .await
+        .expect("connect attempt should reach the stalled server");
+
+    client
+        .disconnect()
+        .await
+        .expect("disconnect should invalidate the active generation");
+    let result = tokio::time::timeout(Duration::from_millis(250), connect)
+        .await
+        .expect("generation invalidation must interrupt the handshake immediately")
+        .expect("connect task should not panic");
+    assert!(result.is_err(), "the invalidated handshake cannot commit");
+
+    server.abort();
 }
 
 #[tokio::test]

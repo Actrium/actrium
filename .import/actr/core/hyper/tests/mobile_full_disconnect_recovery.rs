@@ -522,50 +522,34 @@ async fn test_mobile_half_open_65s_semantics_rebuilds_webrtc() {
         enter_half_open_recovery_window(&harness, case, &label, REBUILD_SEMANTIC_ELAPSED).await;
         restore_half_open_and_process_network_available(&harness, case, &label).await;
 
-        if case.mobile_is_offerer() {
-            harness
-                .wait_for_ice_restart_count(1, Duration::from_secs(3))
-                .await;
-            wait_for_mobile_recovery_cleared(&harness, case, &label).await;
+        assert_eq!(
+            mobile_peer_session_id(&harness, case).await,
+            None,
+            "{label} should close the stale session before new sends"
+        );
+        assert_eq!(
+            harness.server.get_ice_restart_count(),
+            0,
+            "{label} is beyond the recovery deadline and must not restart stale ICE"
+        );
+        assert_eq!(
+            harness.server.get_ice_restart_request_count(),
+            0,
+            "{label} is beyond the recovery deadline and must not request stale ICE restart"
+        );
 
-            let responses = expect_direction_requests_ok(&harness, case, &verify_id).await;
-            let recovered_session = mobile_peer_session_id(&harness, case)
-                .await
-                .expect("mobile offerer should keep a WebRTC session after ICE restart");
+        let responses = expect_direction_requests_ok(&harness, case, &verify_id).await;
+        let rebuilt_session = mobile_peer_session_id(&harness, case)
+            .await
+            .expect("mobile peer should rebuild a WebRTC session after the next RPC");
 
-            assert_eq!(
-                recovered_session, old_session,
-                "{label} should keep the offerer session and recover via ICE restart"
-            );
-            assert!(
-                responses.iter().all(|(_, response_len)| *response_len > 0),
-                "{label} should recover requests in both directions: {responses:?}"
-            );
-        } else {
-            assert_eq!(
-                mobile_peer_session_id(&harness, case).await,
-                None,
-                "{label} should close the stale answerer session before new sends"
-            );
-            assert_eq!(
-                harness.server.get_ice_restart_request_count(),
-                0,
-                "{label} should rebuild instead of requesting ICE restart"
-            );
-
-            let responses = expect_direction_requests_ok(&harness, case, &verify_id).await;
-            let rebuilt_session = mobile_peer_session_id(&harness, case)
-                .await
-                .expect("mobile answerer should rebuild a WebRTC session after the next RPC");
-
-            assert_ne!(
-                rebuilt_session, old_session,
-                "{label} should rebuild with a new WebRTC session"
-            );
-            assert!(
-                responses.iter().all(|(_, response_len)| *response_len > 0),
-                "{label} should recover requests in both directions: {responses:?}"
-            );
-        }
+        assert_ne!(
+            rebuilt_session, old_session,
+            "{label} should rebuild with a new WebRTC session"
+        );
+        assert!(
+            responses.iter().all(|(_, response_len)| *response_len > 0),
+            "{label} should recover requests in both directions: {responses:?}"
+        );
     }
 }

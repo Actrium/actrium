@@ -820,6 +820,53 @@ async fn flight_waiter_is_event_driven_and_cannot_miss_completion() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn flight_waiter_does_not_expire_before_its_creator() {
+    let first_wire = Arc::new(CountingWire::new(ConnType::WebSocket, None));
+    let factory = Arc::new(SupersedableFactory {
+        calls: AtomicUsize::new(0),
+        first_started: Notify::new(),
+        first_release: Notify::new(),
+        first_wire,
+        replacement_wire: Arc::new(CountingWire::new(ConnType::WebSocket, None)),
+    });
+    let manager = Arc::new(PeerTransport::new(ActrId::default(), factory.clone()));
+    let dest = Dest::host();
+
+    let creator_manager = manager.clone();
+    let creator_dest = dest.clone();
+    let creator =
+        tokio::spawn(async move { creator_manager.get_or_create_transport(&creator_dest).await });
+    factory.first_started.notified().await;
+
+    let waiter_manager = manager.clone();
+    let waiter_dest = dest.clone();
+    let waiter =
+        tokio::spawn(async move { waiter_manager.get_or_create_transport(&waiter_dest).await });
+    tokio::task::yield_now().await;
+
+    // The WebRTC factory legitimately owns a 30-second creation budget. A
+    // follower of that exact flight must not invent a shorter ten-second
+    // deadline and report failure while the owner is still making progress.
+    tokio::time::advance(Duration::from_secs(10) + Duration::from_millis(1)).await;
+    tokio::task::yield_now().await;
+    assert!(
+        !waiter.is_finished(),
+        "a follower must share the creator flight deadline"
+    );
+
+    factory.first_release.notify_one();
+    let created = creator
+        .await
+        .expect("creator task should not panic")
+        .expect("creator should succeed within its flight budget");
+    let observed = waiter
+        .await
+        .expect("waiter task should not panic")
+        .expect("waiter should observe the creator result");
+    assert!(Arc::ptr_eq(&created, &observed));
+}
+
 /// Build a `PeerTransport` whose `dest` maps to a ready `DestTransport` carrying
 /// both a WebRTC wire (with the given session identity) and a WebSocket wire.
 ///

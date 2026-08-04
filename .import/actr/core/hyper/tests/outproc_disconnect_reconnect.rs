@@ -28,8 +28,8 @@ use actr_hyper::lifecycle::{
 use actr_hyper::test_support::TestHarness;
 use actr_hyper::transport::{ConnectionEvent, ConnectionState, Dest};
 use actr_protocol::{
-    ActrId, PayloadType, SignalingEnvelope, actr_relay, session_description::Type as SdpType,
-    signaling_envelope,
+    ActrError, ActrId, PayloadType, SignalingEnvelope, actr_relay,
+    session_description::Type as SdpType, signaling_envelope,
 };
 use std::time::{Duration, Instant};
 
@@ -1164,7 +1164,7 @@ async fn test_answerer_ice_restart_answer_does_not_unblock_before_connected() {
 }
 
 #[tokio::test]
-async fn test_stale_answerer_recovery_closes_old_session_on_network_restore() {
+async fn test_stale_answerer_recovery_closes_old_session_on_deadline() {
     init_tracing();
 
     let mut harness = TestHarness::new().await;
@@ -1203,11 +1203,9 @@ async fn test_stale_answerer_recovery_closes_old_session_on_network_restore() {
         "test should be able to age the answerer recovery guard"
     );
 
-    tracing::info!("Step 3: Network restore should close stale answerer session, not request ICE");
-    answerer
-        .coordinator
-        .restart_network_recovery_connections()
-        .await;
+    tracing::info!(
+        "Step 3: The deadline driver should close the stale answerer without a restore or RPC"
+    );
 
     wait_for_connection_closed(
         &mut answerer_events,
@@ -1621,7 +1619,7 @@ async fn test_default_network_processor_mobile_restore_wakes_existing_restart_re
 }
 
 #[tokio::test]
-async fn test_network_recovery_guard_times_out_after_6s_and_closes_transport() {
+async fn test_network_recovery_deadline_closes_transport_without_business_traffic() {
     init_tracing();
 
     let mut harness = TestHarness::new().await;
@@ -1657,19 +1655,16 @@ async fn test_network_recovery_guard_times_out_after_6s_and_closes_transport() {
         status.session_id > 0,
         "recovery guard should record the active WebRTC session id"
     );
-    assert!(
-        !status.is_timed_out(),
-        "fresh network recovery guard should not be timed out"
-    );
+    assert!(status.elapsed() < Duration::from_secs(60));
 
-    tracing::info!("Step 3: Sends inside the 6s recovery window fail fast");
+    tracing::info!("Step 3: Sends inside the recovery window fail fast");
     let early = harness
         .peer(100)
         .spawn_request(200, "recovery-window-fast-fail", 30_000);
     expect_connection_recovering(early, "request inside recovery window").await;
 
-    tracing::info!("Step 4: Age the guard beyond 6s and verify timeout cleanup");
-    let expired_started_at = tokio::time::Instant::now() - Duration::from_secs(7);
+    tracing::info!("Step 4: Expire the absolute deadline without sending another RPC");
+    let expired_started_at = tokio::time::Instant::now() - Duration::from_secs(61);
     assert!(
         harness
             .peer(100)
@@ -1679,43 +1674,23 @@ async fn test_network_recovery_guard_times_out_after_6s_and_closes_transport() {
         "test should be able to age the coordinator recovery guard"
     );
 
-    let timed_out = harness
-        .peer(100)
-        .spawn_request(200, "recovery-window-timeout", 30_000);
-    match tokio::time::timeout(Duration::from_secs(3), timed_out).await {
-        Ok(Ok(Err(err))) => {
-            let msg = err.to_string();
-            assert!(
-                msg.contains("connection not ready"),
-                "expected connection-not-ready error, got: {msg}"
-            );
-            assert!(
-                msg.contains("retry_after_ms=None"),
-                "expired recovery guard should not expose a retry hint: {msg}"
-            );
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let transport_closed = !harness.peer(100).transport_manager.has_dest(&dest).await;
+            let guard_cleared = harness
+                .peer(100)
+                .coordinator
+                .peer_recovery_status(&target_id)
+                .await
+                .is_none();
+            if transport_closed && guard_cleared {
+                break;
+            }
+            tokio::task::yield_now().await;
         }
-        Ok(Ok(Ok(response))) => panic!(
-            "timed-out recovery request unexpectedly succeeded with {} bytes",
-            response.len()
-        ),
-        Ok(Err(err)) => panic!("timed-out recovery request task panicked: {err}"),
-        Err(_) => panic!("timed-out recovery request did not fail fast"),
-    }
-
-    tokio::time::sleep(Duration::from_millis(300)).await;
-    assert!(
-        !harness.peer(100).transport_manager.has_dest(&dest).await,
-        "recovery timeout should close and remove the stale DestTransport"
-    );
-    assert!(
-        harness
-            .peer(100)
-            .coordinator
-            .peer_recovery_status(&target_id)
-            .await
-            .is_none(),
-        "recovery timeout should clear the coordinator guard"
-    );
+    })
+    .await
+    .expect("autonomous deadline should close the stale session and clear its guard");
 }
 
 #[tokio::test]
@@ -1727,30 +1702,50 @@ async fn test_connection_closed_clears_recovery_guard_when_transport_already_rem
     harness.add_peer(200).await;
 
     let target_id = harness.peer(200).id.clone();
-    let synthetic_session_id = 77;
+    let dest = Dest::peer(target_id.clone());
 
-    tracing::info!("Step 1: Simulate a recovery guard for a session with no cached transport");
+    tracing::info!("Step 1: Establish a real session and arm its recovery guard");
+    harness.connect(100, 200).await;
+    let session_id = harness
+        .peer(100)
+        .coordinator
+        .peer_session_id_for_test(&target_id)
+        .await
+        .expect("connected peer should expose its current session");
+    let recovery = harness
+        .peer(100)
+        .coordinator
+        .mark_peer_recovering_for_test(&target_id, session_id, "integration test")
+        .await;
+    assert_eq!(
+        recovery.session_id, session_id,
+        "the current-session recovery guard should be installed before close"
+    );
+
+    tracing::info!("Step 2: Detach the transport before its close event is consumed");
     harness
         .peer(100)
-        .send_event(ConnectionEvent::IceRestartStarted {
-            peer_id: target_id.clone(),
-            session_id: synthetic_session_id,
-        });
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let blocked = harness
-        .peer(100)
-        .spawn_request(200, "synthetic-recovery-blocks-send", 5_000);
-    expect_connection_recovering(blocked, "request before close event").await;
-
-    tracing::info!("Step 2: Close the same session after the transport was already removed");
-    harness
-        .peer(100)
-        .send_event(ConnectionEvent::ConnectionClosed {
-            peer_id: target_id,
-            session_id: synthetic_session_id,
-        });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+        .transport_manager
+        .close_transport(&dest)
+        .await
+        .expect("test transport should close");
+    assert!(
+        !harness.peer(100).transport_manager.has_dest(&dest).await,
+        "close_transport must detach the transport before downstream close handling"
+    );
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while harness
+            .peer(100)
+            .coordinator
+            .peer_recovery_status(&target_id)
+            .await
+            .is_some()
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("the matching close event should clear the transport-less recovery guard");
 
     tracing::info!("Step 3: A later send should create a fresh transport instead of waiting 15s");
     harness
@@ -2614,11 +2609,12 @@ async fn repro_network_event_returns_before_webrtc_ready_causing_early_rpc_timeo
 /// Before the cleanup barrier, the fresh WebRTC negotiation could be
 /// interrupted after SDP exchange but before usable ICE candidate exchange,
 /// then wait for the 10s connection-establishment timeout plus the 5s factory
-/// retry backoff. With the fix, the send waits for cleanup and avoids that slow
-/// retry path.
+/// retry backoff. Admission now fails immediately while cleanup owns mutation;
+/// the caller retries after cleanup rather than hiding lifecycle time inside a
+/// send operation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "log-timeline foreground cleanup/request-overlap regression"]
-async fn regression_log_timeline_foreground_cleanup_waits_before_new_send() {
+async fn regression_log_timeline_foreground_cleanup_fails_fast_before_new_send() {
     init_tracing();
 
     const SERVER: u64 = 100;
@@ -2693,12 +2689,16 @@ async fn regression_log_timeline_foreground_cleanup_waits_before_new_send() {
     )
     .await;
 
-    let response = match tokio::time::timeout(Duration::from_secs(35), request).await {
-        Ok(Ok(Ok(response))) => response,
-        Ok(Ok(Err(err))) => panic!("overlapped foreground send failed: {err}"),
+    match tokio::time::timeout(Duration::from_secs(1), request).await {
+        Ok(Ok(Err(ActrError::ConnectionNotReady(_)))) => {}
+        Ok(Ok(Err(err))) => panic!("expected cleanup fast-fail, got: {err}"),
+        Ok(Ok(Ok(response))) => panic!(
+            "overlapped foreground send unexpectedly returned {} bytes",
+            response.len()
+        ),
         Ok(Err(err)) => panic!("overlapped foreground send task panicked: {err}"),
-        Err(_) => panic!("overlapped foreground send did not complete within 35s"),
-    };
+        Err(_) => panic!("overlapped foreground send waited inside cleanup admission"),
+    }
     let send_elapsed = send_started.elapsed();
 
     let cleanup_result = cleanup_task.await.expect("cleanup task panicked");
@@ -2708,16 +2708,20 @@ async fn regression_log_timeline_foreground_cleanup_waits_before_new_send() {
         cleanup_result
     );
 
-    tracing::info!(
-        "Log-timeline foreground-overlap send completed in {:?} with {} response bytes",
-        send_elapsed,
-        response.len()
-    );
-
-    assert_eq!(&response[..], b"pong");
     assert!(
-        send_elapsed < Duration::from_secs(8),
-        "send should wait for cleanup instead of hitting the 10s timeout + 5s retry path, got {:?}",
+        send_elapsed < Duration::from_secs(1),
+        "cleanup admission should fail fast, got {:?}",
         send_elapsed
     );
+
+    let response = expect_request_eventually_ok(
+        &harness,
+        CLIENT,
+        SERVER,
+        "log-timeline-post-cleanup-retry",
+        Duration::from_secs(15),
+        5_000,
+    )
+    .await;
+    assert_eq!(&response[..], b"pong");
 }

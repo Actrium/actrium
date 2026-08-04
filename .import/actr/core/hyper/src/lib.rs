@@ -246,7 +246,7 @@ pub use workload::{HostAbiFn, HostOperation, HostOperationResult, InvocationCont
 // ═══════════════════════════════════════════════════════════════════════════════
 
 pub(crate) const INITIAL_CONNECTION_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(10);
+    std::time::Duration::from_secs(12);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Prelude

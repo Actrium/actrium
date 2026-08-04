@@ -761,7 +761,7 @@ async fn test_call_succeeds_after_full_disconnect_reconnect_cycle() {
 }
 
 // ─── Scenario 10 ────────────────────────────────────────────────────────────
-// When a call is blocked in `preflight_send` (peer is in the 6s recovery
+// When a call is blocked in `preflight_send` (peer is inside its recovery
 // window), it returns `ConnectionNotReady` immediately — it does NOT wait
 // for the recovery to complete. This is not a retry; it is a fast-fail so the
 // caller can decide what to do and retry after `on_webrtc_connected`.
@@ -814,6 +814,45 @@ async fn test_call_fast_fails_during_recovery_window() {
         Ok(Err(e)) => panic!("task panicked: {}", e),
         Err(_) => panic!("call timed out — preflight_send did not fast-fail"),
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn test_call_fast_fails_while_cleanup_owns_mutation_authority() {
+    init_tracing();
+
+    let mut harness = TestHarness::new().await;
+    harness.add_peer(100).await;
+    harness.add_peer(200).await;
+    harness.connect(100, 200).await;
+
+    let cleanup_guard = harness.peer(100).coordinator.cleanup_guard();
+    let started = Instant::now();
+    let attempt = harness
+        .peer(100)
+        .spawn_request(200, "cleanup_authority_fast_fail", 30_000);
+
+    let error = tokio::time::timeout(Duration::from_secs(1), attempt)
+        .await
+        .expect("send admission must not wait for cleanup")
+        .expect("request task should not panic")
+        .expect_err("cleanup must reject new transport work");
+    assert!(matches!(error, ActrError::ConnectionNotReady(_)));
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "cleanup admission should fail immediately"
+    );
+
+    drop(cleanup_guard);
+    let response = expect_request_eventually_ok(
+        &harness,
+        100,
+        200,
+        "cleanup_authority_retry",
+        Duration::from_secs(10),
+        2_000,
+    )
+    .await;
+    assert_eq!(&response[..], b"pong");
 }
 
 // ─── Scenario 11 ────────────────────────────────────────────────────────────
