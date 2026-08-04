@@ -211,6 +211,28 @@ export class TimerManager {
     // it to invalidate anything still in flight.
     entry.pendingToken++;
 
+    // Cancel whatever this entry is currently armed on before overwriting the
+    // handle, or that timer's id is lost and NOTHING can stop it firing.
+    //
+    // The token above only invalidates microtasks that have not run yet, so it
+    // cannot cover a native timer that a microtask already created. That gap is
+    // reachable whenever a callbackRunner (the worker debug harness's TurnGate)
+    // holds a tick: the native timer has fired, but `entry.handle` still names
+    // it, so pause() clears an already-fired timer, resume() arms a fresh one --
+    // and then the gate releases the held tick, which re-arms straight from here
+    // and orphans the one resume created. Both fire, each re-arms, and the
+    // interval doubles on every pause/resume (issue #107).
+    //
+    // On the release path this is a no-op clear of the timer that just fired.
+    // The sentinels are not native ids and must never be passed to clearTimeout.
+    if (
+      entry.handle !== null &&
+      !this.isPendingHandle(entry.handle) &&
+      !this.isMicrotaskHandle(entry.handle)
+    ) {
+      this.nativeClearTimeout(entry.handle);
+    }
+
     // The WHOLE tick body goes through the guest-callback runner, not just
     // the callback: rescheduling only after the (possibly gate-deferred)
     // callback actually ran means a debugger suspend defers ticks one at a
