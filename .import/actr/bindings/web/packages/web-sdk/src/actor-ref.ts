@@ -1,7 +1,7 @@
 /**
- * ActorRef - Actor
+ * ActorRef - Actor reference
  *
- * ： @actrium/actr-dom  Service Worker WASM
+ * Bridges: @actrium/actr-dom and Service Worker WASM
  */
 
 import {
@@ -23,18 +23,18 @@ export interface RpcRequest<T = unknown> {
 }
 
 /**
- * Actor
+ * Actor reference.
  *
- *  API：
- * - call(): -（State Path，30-40ms）
- * - subscribe(): （Fast Path，6-13ms）
- * - on(): （<5ms）
+ * High-level API:
+ * - call(): RPC (State Path, 30-40ms)
+ * - subscribe(): subscribe to topic (Fast Path, 6-13ms)
+ * - on(): event listener (<5ms)
  */
 export class ActorRef {
   private domRuntime: ActrDomRuntime;
   private requestId = 0;
 
-  /**  RPC  */
+  /** Pending RPC requests */
   private pendingRequests = new Map<
     string,
     {
@@ -56,7 +56,7 @@ export class ActorRef {
   }
 
   /**
-   *  Service Worker
+   * Set up Service Worker message handlers.
    */
   private setupMessageHandlers(): void {
     const bridge = this.domRuntime.getSWBridge();
@@ -86,7 +86,7 @@ export class ActorRef {
   }
 
   /**
-   *  RPC
+   * Handle RPC response.
    */
   private handleRpcResponse(payload: RpcResponsePayload): void {
     const { request_id, data, error } = payload;
@@ -108,7 +108,7 @@ export class ActorRef {
   }
 
   /**
-   *
+   * Handle subscription data.
    */
   private handleSubscriptionData(payload: SubscriptionDataPayload): void {
     const { topic, data } = payload;
@@ -160,12 +160,12 @@ export class ActorRef {
   }
 
   /**
-   * call() - -（State Path）
+   * call() - RPC call (State Path)
    *
-   * @param service -
-   * @param method -
-   * @param params -
-   * @param timeout - （）， 30000ms
+   * @param service - service name
+   * @param method - method name
+   * @param params - request params
+   * @param timeout - timeout in ms, default 30000ms
    */
   async call<TReq = unknown, TRes = unknown>(
     service: string,
@@ -208,7 +208,7 @@ export class ActorRef {
   }
 
   /**
-   * callRaw() -  RPC payload（Raw bytes）。
+   * callRaw() - Send raw RPC payload (Raw bytes).
    * TODO: Prefer typed call() once Phase 1 RPC path is fully wired.
    */
   async callRaw(
@@ -249,7 +249,7 @@ export class ActorRef {
   }
 
   /**
-   * subscribe() - （Fast Path）
+   * subscribe() - subscribe to topic (Fast Path)
    *
    * @param topic -
    * @param callback -
@@ -322,7 +322,7 @@ export class ActorRef {
   }
 
   /**
-   * emit() - （）
+   * emit() - emit event to listeners
    */
   private emit(event: string, data: unknown): void {
     const callbacks = this.eventListeners.get(event);
@@ -356,7 +356,7 @@ export class ActorRef {
   }
 
   /**
-   *
+   * Handle subscription data.
    */
   dispose(): void {
     for (const [_requestId, pending] of this.pendingRequests) {

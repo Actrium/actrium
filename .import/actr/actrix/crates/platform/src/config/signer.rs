@@ -1,72 +1,72 @@
-//! Signer 配置
+//! Signer configuration
 //!
-//! Signer 服务用于生成和管理加密密钥，为其他服务提供密钥生成和公钥查询功能。
+//! The Signer service is used to generate and manage cryptographic keys, providing key generation and public key query functionality for other services.
 
 use serde::{Deserialize, Serialize};
 
-/// Signer 服务器配置
+/// Signer server configuration
 ///
-/// 配置 KS 服务的服务器端参数
-/// 注意：只存储 key_id 和 public_key，不存储 secret_key。
+/// Configures server-side parameters for the Signer service
+/// Note: Only stores key_id and public_key, not the secret_key.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct SignerServerConfig {}
 
-/// Signer 客户端配置
+/// Signer client configuration
 ///
-/// 其他服务作为客户端连接 Signer 服务时使用的配置
+/// Configuration used by other services when connecting to the Signer service as clients
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SignerClientConfig {
-    /// Signer 服务地址
+    /// Signer service address
     ///
-    /// gRPC endpoint，例如: "http://127.0.0.1:8080" 或 "https://ks.example.com:8443"
+    /// gRPC endpoint, e.g.: "http://127.0.0.1:8080" or "https://ks.example.com:8443"
     pub endpoint: String,
 
-    /// 请求超时时间（秒）
+    /// Request timeout (seconds)
     ///
-    /// 连接 Signer 服务的超时时间
+    /// Timeout for connecting to the Signer service
     pub timeout_seconds: u64,
 
-    /// 是否启用 TLS
+    /// Whether to enable TLS
     ///
-    /// 默认为 false（使用 HTTP）。设为 true 时使用 HTTPS/gRPC over TLS。
+    /// Defaults to false (using HTTP). When set to true, uses HTTPS/gRPC over TLS.
     #[serde(default)]
     pub enable_tls: bool,
 
-    /// TLS 域名（启用 TLS 时必需）
+    /// TLS domain name (required when TLS is enabled)
     ///
-    /// 用于 TLS 证书验证的域名
+    /// Domain name used for TLS certificate validation
     pub tls_domain: Option<String>,
 
-    /// CA 证书路径（用于验证服务端证书）
+    /// CA certificate path (for verifying server certificate)
     ///
-    /// 用于验证 Signer 服务端证书的 CA 证书文件路径
+    /// Path to the CA certificate file used to verify the Signer server certificate
     pub ca_cert: Option<String>,
 
-    /// 客户端证书路径（mTLS）
+    /// Client certificate path (mTLS)
     ///
-    /// 用于双向 TLS 认证的客户端证书文件路径
+    /// Path to the client certificate file used for mutual TLS authentication
     pub client_cert: Option<String>,
 
-    /// 客户端私钥路径（mTLS）
+    /// Client private key path (mTLS)
     ///
-    /// 用于双向 TLS 认证的客户端私钥文件路径
+    /// Path to the client private key file used for mutual TLS authentication
     pub client_key: Option<String>,
 }
 
-/// Signer 配置（包含服务器和客户端配置）
+/// Signer configuration (includes server and client configuration)
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SignerConfig {
-    /// Signer 服务器配置（当本实例作为 KS 服务器时使用）
+    /// Signer server configuration (used when this instance acts as a Signer server)
     pub server: Option<SignerServerConfig>,
 
-    /// Signer 客户端配置（当需要连接其他 KS 服务时使用）
+    /// Signer client configuration (used when connecting to other Signer services)
     pub client: Option<SignerClientConfig>,
 }
 
 impl Default for SignerClientConfig {
     fn default() -> Self {
         Self {
-            endpoint: "http://127.0.0.1:8080".to_string(), // 默认复用主 HTTP 端口
+            endpoint: "http://127.0.0.1:8080".to_string(), // Default: reuses main HTTP port
             timeout_seconds: 30,
             enable_tls: false,
             tls_domain: None,

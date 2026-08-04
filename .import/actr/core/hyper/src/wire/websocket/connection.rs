@@ -18,7 +18,7 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async};
 
 /// WebSocket transmitting messagesprotocol
 ///
-/// Forin single WebSocket Connect for multiple route reuse different Type'smessage。
+/// Forin single WebSocket Connect for multiple route reuse different Type'smessage.
 ///
 /// ## Message format
 ///
@@ -210,7 +210,7 @@ impl WebSocketConnection {
         *self.sink.lock().await = Some(sink);
         *self.connected.write().await = true;
 
-        // 3. Startmessage dispatch device （in background task， not retain handle）
+        // 3. Startmessage dispatch device (in background task, not retain handle)
         let router = self.router.clone();
         let connected = self.connected.clone();
         Self::spawn_dispatcher(stream, router, connected);
@@ -220,7 +220,7 @@ impl WebSocketConnection {
         Ok(())
     }
 
-    /// Startmessage dispatch device （in background task）
+    /// Startmessage dispatch device (in background task)
     fn spawn_dispatcher(
         mut stream: SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>,
         router: Arc<RwLock<[Option<mpsc::Sender<bytes::Bytes>>; 5]>>,
@@ -235,11 +235,11 @@ impl WebSocketConnection {
                         // decodemessage
                         match TransportMessage::decode(&data) {
                             Ok(transport_msg) => {
-                                // Route to corresponding 's Lane（using array index reference ）
+                                // Route to corresponding 's Lane (using array index reference)
                                 let idx = transport_msg.payload_type as usize;
                                 let router_guard = router.read().await;
                                 if let Some(tx) = &router_guard[idx] {
-                                    // convert exchange as Bytes（ zero-copy）
+                                    // convert exchange as Bytes (zero-copy)
                                     let data = bytes::Bytes::from(transport_msg.data);
                                     if let Err(e) = tx.send(data).await {
                                         tracing::warn!(
@@ -373,7 +373,7 @@ impl WebSocketConnection {
     pub async fn close(&self) -> NetworkResult<()> {
         *self.connected.write().await = false;
 
-        // Close WebSocket（Send Close message）
+        // Close WebSocket (Send Close message)
         let mut sink_opt = self.sink.lock().await;
         if let Some(sink) = sink_opt.as_mut() {
             let _ = sink.close().await;

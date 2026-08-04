@@ -723,7 +723,7 @@ async function suitePageRefresh(browser) {
 async function suiteSwLifecycle(browser) {
     console.log(C.bold('\n── III. Service Worker Lifecycle Tests ──'));
 
-    // 3-1 SW Idle Termination（check keep-alive prevents termination）
+    // 3-1 SW Idle Termination (check keep-alive prevents termination)
     if (!SLOW) {
         skipTest('3-1', 'SW Idle Termination (keep-alive)', 'Requires SLOW=1 (30-60s wait)');
     } else {

@@ -1,83 +1,83 @@
-//! 密钥存储后端抽象接口
+//! Key storage backend abstract interface
 //!
-//! 定义了所有存储后端必须实现的统一异步接口
+//! Defines the unified async interface that all storage backends must implement
 
 use crate::error::SignerResult;
 use crate::types::{KeyPair, KeyRecord};
 use async_trait::async_trait;
 
-/// 密钥存储后端抽象接口
+/// Key storage backend abstract interface
 ///
-/// 所有存储后端（SQLite, PostgreSQL）都需要实现此 trait
-/// 提供统一的异步 API 用于密钥的生成、存储、查询和管理
-/// 私钥永不离开存储后端，所有签名操作在后端内部完成
+/// All storage backends (SQLite, PostgreSQL) must implement this trait
+/// Provides a unified async API for key generation, storage, querying, and management
+/// Private keys never leave the storage backend; all signing operations are performed internally
 #[async_trait]
 pub trait KeyStorageBackend: Send + Sync {
-    /// 初始化存储后端
+    /// Initialize the storage backend
     ///
-    /// 执行必要的初始化操作，如创建表、索引等
+    /// Performs necessary initialization operations such as creating tables, indexes, etc.
     async fn init(&self) -> SignerResult<()>;
 
-    /// 生成并存储新的 Ed25519 签名密钥对
+    /// Generate and store a new Ed25519 signing key pair
     ///
-    /// 自动生成 Ed25519 密钥对，存储到后端，返回包含 key_id 和 verifying key 的结构
-    /// 私钥（signing key）只存储于后端，不返回给调用方
+    /// Automatically generates an Ed25519 key pair, stores it in the backend, and returns a structure containing key_id and verifying key
+    /// The private key (signing key) is only stored in the backend and not returned to the caller
     ///
     /// # Returns
-    /// 包含 key_id 和 verifying_key（Base64 编码的 32 字节验证公钥）的密钥对结构
+    /// Key pair structure containing key_id and verifying_key (Base64-encoded 32-byte verifying public key)
     async fn generate_and_store_key(&self) -> SignerResult<KeyPair>;
 
-    /// 根据 key_id 查询验证公钥
+    /// Query the verifying public key by key_id
     ///
     /// # Arguments
-    /// * `key_id` - 密钥 ID
+    /// * `key_id` - Key ID
     ///
     /// # Returns
-    /// * `Ok(Some(verifying_key))` - 找到验证公钥（Base64 编码）
-    /// * `Ok(None)` - 密钥不存在
-    /// * `Err(...)` - 存储错误
+    /// * `Ok(Some(verifying_key))` - Verifying public key found (Base64-encoded)
+    /// * `Ok(None)` - Key does not exist
+    /// * `Err(...)` - Storage error
     async fn get_public_key(&self, key_id: u32) -> SignerResult<Option<String>>;
 
-    /// 使用指定密钥对消息进行 Ed25519 签名
+    /// Sign a message with the specified key (Ed25519)
     ///
-    /// 私钥从存储中读取并解密，签名在内部完成，原始私钥不返回给调用方
+    /// The private key is read from storage and decrypted; signing is performed internally; the raw private key is not returned to the caller
     ///
     /// # Arguments
-    /// * `key_id` - 密钥 ID
-    /// * `message` - 待签名的消息字节
+    /// * `key_id` - Key ID
+    /// * `message` - Message bytes to sign
     ///
     /// # Returns
-    /// * `Ok(signature)` - 64 字节 Ed25519 签名
-    /// * `Err(SignerError::NotFound)` - 密钥不存在
-    /// * `Err(...)` - 存储或加密错误
+    /// * `Ok(signature)` - 64-byte Ed25519 signature
+    /// * `Err(SignerError::NotFound)` - Key does not exist
+    /// * `Err(...)` - Storage or encryption error
     async fn sign(&self, key_id: u32, message: &[u8]) -> SignerResult<Vec<u8>>;
 
-    /// 获取完整的密钥记录（包含元数据）
+    /// Get the complete key record (including metadata)
     ///
     /// # Arguments
-    /// * `key_id` - 密钥 ID
+    /// * `key_id` - Key ID
     ///
     /// # Returns
-    /// * `Ok(Some(record))` - 找到密钥记录
-    /// * `Ok(None)` - 密钥不存在
-    /// * `Err(...)` - 存储错误
+    /// * `Ok(Some(record))` - Key record found
+    /// * `Ok(None)` - Key does not exist
+    /// * `Err(...)` - Storage error
     async fn get_key_record(&self, key_id: u32) -> SignerResult<Option<KeyRecord>>;
 
-    /// 获取存储中的密钥总数
+    /// Get the total number of keys in storage
     ///
     /// # Returns
-    /// 密钥总数（包括过期和未过期的）
+    /// Total key count (including expired and non-expired keys)
     async fn get_key_count(&self) -> SignerResult<u32>;
 
-    /// 清理过期的密钥
+    /// Clean up expired keys
     ///
-    /// 删除所有已过期且超出容忍期的密钥记录
-    /// （expires_at > 0 且 expires_at + tolerance_seconds < 当前时间）
+    /// Deletes all key records that have expired and exceeded the tolerance period
+    /// (expires_at > 0 and expires_at + tolerance_seconds < current time)
     ///
     /// # Arguments
-    /// * `tolerance_seconds` - 过期后的容忍期（秒）
+    /// * `tolerance_seconds` - Tolerance period after expiration (seconds)
     ///
     /// # Returns
-    /// 被清理的密钥数量
+    /// Number of keys cleaned up
     async fn cleanup_expired_keys(&self, tolerance_seconds: u64) -> SignerResult<u32>;
 }

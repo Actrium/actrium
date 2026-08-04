@@ -1,11 +1,11 @@
-//! Serial Number (SN) Generator - 基于 Snowflake 算法的 54-bit 序列号生成器
+//! Serial Number (SN) Generator - a 54-bit serial number generator based on the Snowflake algorithm
 //!
-//! # 协议约束
+//! # Protocol Constraints
 //!
-//! 根据 [actr-protocol](https://github.com/Actrium/proto) 定义：
+//! Per [actr-protocol](https://github.com/Actrium/proto) definition:
 //! ```proto
 //! message ActorId {
-//!     uint64 serial_number  = 1;  // 54-bit 限制
+//!     uint64 serial_number  = 1;  // 54-bit limit
 //!     ActorType type        = 2;
 //! }
 //!
@@ -15,9 +15,9 @@
 //! }
 //! ```
 //!
-//! # Bit 布局
+//! # Bit Layout
 //!
-//! 54-bit serial_number 的内部结构（Snowflake 算法变体）：
+//! Internal structure of the 54-bit serial_number (Snowflake algorithm variant):
 //!
 //! ```text
 //! ┌─────────────┬───────────┬────────────┐
@@ -25,46 +25,46 @@
 //! │  41 bits    │  5 bits   │  8 bits    │
 //! └─────────────┴───────────┴────────────┘
 //!
-//! - Timestamp (41 bits): 相对于 2023-01-01 的毫秒数
-//!   - 可表示范围: ~69.7 年 (2**41 / 1000 / 3600 / 24 / 365)
-//! - Worker ID (5 bits): 节点标识 (0-31)
-//!   - 基于 hostname + PID 哈希生成
-//! - Sequence (8 bits): 同毫秒内的序列号 (0-255)
-//!   - 单毫秒最多 256 个 ID
+//! - Timestamp (41 bits): milliseconds relative to 2023-01-01
+//!   - Representable range: ~69.7 years (2**41 / 1000 / 3600 / 24 / 365)
+//! - Worker ID (5 bits): node identifier (0-31)
+//!   - Generated from hostname + PID hash
+//! - Sequence (8 bits): sequence number within the same millisecond (0-255)
+//!   - Max 256 IDs per millisecond
 //! ```
 //!
-//! # 特性
+//! # Features
 //!
-//! - **全局唯一**: 分布式环境下保证唯一性（假设 worker_id 不冲突）
-//! - **时间排序**: ID 大致按生成时间递增
-//! - **高性能**: 单节点支持 256K IDs/秒 (256 * 1000)
-//! - **无中心化**: 无需中心协调服务
+//! - **Globally unique**: guarantees uniqueness in distributed environments (assuming no worker_id conflicts)
+//! - **Time-ordered**: IDs are roughly increasing by generation time
+//! - **High performance**: single node supports 256K IDs/sec (256 * 1000)
+//! - **Decentralized**: no central coordination service required
 //!
-//! # 时钟回拨处理
+//! # Clock Rollback Handling
 //!
-//! - **小幅回拨**: 使用上次时间戳 + 递增序列号
-//! - **序列号耗尽**: 强制推进时间戳（可能导致与真实时钟偏差）
+//! - **Minor rollback**: use the last timestamp + incrementing sequence number
+//! - **Sequence exhausted**: force the timestamp forward (may cause deviation from the real clock)
 //!
-//! # 示例
+//! # Example
 //!
 //! ```ignore
 //! use ais::sn::{SerialNumber, AIdSerialNumberIssuer};
 //!
-//! // 生成序列号
-//! let sn1 = SerialNumber::sn(1);  // realm_id = 1 (当前未使用)
+//! // Generate serial number
+//! let sn1 = SerialNumber::sn(1);  // realm_id = 1 (currently unused)
 //! let sn2 = SerialNumber::sn(1);
 //!
-//! // 序列号自动递增
+//! // Serial number auto-increments
 //! assert!(sn2.value() > sn1.value());
 //!
-//! // 保证在 54-bit 范围内
+//! // Guaranteed within the 54-bit range
 //! assert!(sn1.value() <= SerialNumber::MAX_VALUE);
 //! ```
 //!
-//! # 注意事项
+//! # Notes
 //!
-//! ⚠️ **realm_id 参数当前未使用**：序列号全局唯一，不按 realm 隔离。
-//! 如需 realm 隔离，考虑将 realm_id 嵌入 worker_id 的高位。
+//! Warning: **realm_id parameter is currently unused**: serial numbers are globally unique and not isolated by realm.
+//! For realm isolation, consider embedding realm_id into the high bits of worker_id.
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -72,10 +72,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The number of bits used for the serial number.
 ///
-/// ActrId 协议定义 serial_number 字段使用 54 bits：
-/// - 41 bits: timestamp (毫秒，相对于自定义 epoch)
-/// - 5 bits: worker_id (支持 32 个并发节点)
-/// - 8 bits: sequence (每毫秒最多 256 个 ID)
+/// ActrId protocol defines the serial_number field using 54 bits:
+/// - 41 bits: timestamp (milliseconds, relative to a custom epoch)
+/// - 5 bits: worker_id (supports 32 concurrent nodes)
+/// - 8 bits: sequence (max 256 IDs per millisecond)
 pub const BITS_LEN_SERIAL_NUMBER: usize = 54;
 
 /// Snowflake-like algorithm constants for 54-bit SN
@@ -93,27 +93,27 @@ pub const MAX_SEQUENCE: u64 = (1 << SEQUENCE_BITS) - 1; // 255
 
 /// Snowflake generator state using lock-free atomics
 ///
-/// 性能优化：使用原子操作替代 Mutex，提升高并发性能
-/// - AtomicU64 编码：[41-bit timestamp][8-bit sequence][15-bit padding]
-/// - Worker ID 只初始化一次，存储在 OnceLock 中
+/// Performance optimization: use atomic operations instead of Mutex to improve high-concurrency performance
+/// - AtomicU64 encoding: [41-bit timestamp][8-bit sequence][15-bit padding]
+/// - Worker ID is initialized only once, stored in OnceLock
 static SNOWFLAKE_STATE: AtomicU64 = AtomicU64::new(0);
 static WORKER_ID: OnceLock<u64> = OnceLock::new();
 
-/// 从 AtomicU64 中解码 timestamp 和 sequence
+/// Decode timestamp and sequence from AtomicU64
 #[inline]
 fn decode_state(state: u64) -> (u64, u64) {
-    let timestamp = state >> 8; // 高 56 位中的 timestamp
-    let sequence = state & 0xFF; // 低 8 位是 sequence
+    let timestamp = state >> 8; // timestamp in the high 56 bits
+    let sequence = state & 0xFF; // sequence in the low 8 bits
     (timestamp, sequence)
 }
 
-/// 将 timestamp 和 sequence 编码为 AtomicU64
+/// Encode timestamp and sequence into AtomicU64
 #[inline]
 fn encode_state(timestamp: u64, sequence: u64) -> u64 {
     (timestamp << 8) | (sequence & 0xFF)
 }
 
-/// 初始化 worker_id（只执行一次）
+/// Initialize worker_id (executed only once)
 fn init_worker_id() -> u64 {
     *WORKER_ID.get_or_init(|| {
         // Generate worker ID based on process ID and hostname hash

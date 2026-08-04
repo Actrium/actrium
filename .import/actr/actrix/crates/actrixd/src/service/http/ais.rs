@@ -1,6 +1,6 @@
-//! AIS (Actor Identity Service) HTTP 服务实现
+//! AIS (Actor Identity Service) HTTP service implementation
 //!
-//! 提供 ActrId 注册和 Token 签发的 HTTP API 服务
+//! Provides HTTP API services for ActrId registration and Token issuance
 
 use crate::service::HttpRouterService;
 use ais::create_ais_router_with_counters;
@@ -12,7 +12,7 @@ use platform::monitoring::ServiceCounters;
 use platform::{ServiceInfo, ServiceType};
 use std::sync::Arc;
 
-/// AIS HTTP 服务实现
+/// AIS HTTP service implementation
 #[derive(Debug)]
 pub struct AisService {
     info: ServiceInfo,
@@ -29,7 +29,10 @@ impl AisService {
             info: ServiceInfo::new(
                 "AIS Service",
                 ServiceType::Ais,
-                Some("Actor Identity Service - ActrId 注册和凭证签发服务".to_string()),
+                Some(
+                    "Actor Identity Service - ActrId registration and credential issuance service"
+                        .to_string(),
+                ),
                 &config,
             ),
             config,
@@ -58,7 +61,7 @@ impl HttpRouterService for AisService {
     async fn build_router(&mut self) -> Result<Router> {
         platform::recording::info!("Building AIS router");
 
-        // 获取 AIS 配置
+        // Get AIS configuration
         let ais_config = self
             .config
             .services
@@ -66,7 +69,7 @@ impl HttpRouterService for AisService {
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("AIS config not found"))?;
 
-        // 创建 AIS 路由器（传递配置和计数器）
+        // Create AIS router (passing config and counters)
         let ais_router = create_ais_router_with_counters(
             ais_config,
             &self.config,

@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tonic::{Request, Response, Status};
 
-/// 请求体需要提供认证载荷与凭证
+/// The request body must provide authentication payload and credentials.
 pub trait CredentialPayload {
     fn credential(&self) -> &NonceCredential;
     fn auth_payload(&self, node_id: &str) -> String;
@@ -78,7 +78,7 @@ impl VerifierState {
     }
 }
 
-/// 在进入业务实现前统一做 NonceCredential 校验的包装服务
+/// Wrapper service that performs NonceCredential verification before delegating to the business implementation.
 #[derive(Clone)]
 pub struct AuthService<S> {
     inner: S,
@@ -223,7 +223,7 @@ where
     }
 }
 
-// ========= 请求类型的载荷构造实现 =========
+// ========= Request type payload construction implementations =========
 
 impl CredentialPayload for UpdateConfigRequest {
     fn credential(&self) -> &NonceCredential {

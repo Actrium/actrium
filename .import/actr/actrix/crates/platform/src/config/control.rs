@@ -1,9 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-/// Control 头类型。
+/// Control head type.
 ///
-/// - `admin_ui`: 提供本地管理 UI（HTTP）。
-/// - `grpc_api`: 提供给集群 supervisor 的 gRPC API（复用主 HTTP 端口）。
+/// - `admin_ui`: Provides a local admin UI (HTTP).
+/// - `grpc_api`: Provides a gRPC API for the cluster supervisor (reuses the main HTTP port).
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ControlHead {
@@ -12,58 +12,58 @@ pub enum ControlHead {
     GrpcApi,
 }
 
-/// gRPC 控制面配置。
+/// gRPC control plane configuration.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ControlGrpcApiConfig {
-    /// 是否启用 NodeAdminService gRPC API。
+    /// Whether to enable the NodeAdminService gRPC API.
     #[serde(default)]
     pub enabled: bool,
 
-    /// 节点 ID（用于认证载荷）
+    /// Node ID (used for authentication payloads)
     #[serde(default = "default_grpc_node_id")]
     pub node_id: String,
 
-    /// 节点展示名（为空时回退到 node_id）
+    /// Node display name (falls back to node_id when empty)
     #[serde(default = "default_grpc_node_name")]
     pub node_name: String,
 
-    /// nonce-auth 共享密钥（hex, 至少 64 个字符）
+    /// nonce-auth shared secret (hex, at least 64 characters)
     #[serde(default)]
     pub shared_secret: String,
 
-    /// 允许的最大时钟偏差（秒）
+    /// Allowed maximum clock skew (seconds)
     #[serde(default = "default_max_clock_skew_secs")]
     pub max_clock_skew_secs: u64,
 }
 
-/// Admin UI 配置。
+/// Admin UI configuration.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AdminUiConfig {
-    /// 是否启用本地 Admin UI。
+    /// Whether to enable the local Admin UI.
     #[serde(default = "default_admin_ui_enabled")]
     pub enabled: bool,
 
-    /// 登录密码（admin_ui 模式必填，≥8 字符）
+    /// Login password (required in admin_ui mode, >= 8 characters)
     #[serde(default)]
     pub password: String,
 
-    /// JWT 会话过期时间（秒），默认 86400（24 小时）
+    /// JWT session expiration time (seconds), default 86400 (24 hours)
     #[serde(default = "default_session_expiry_secs")]
     pub session_expiry_secs: u64,
 }
 
-/// Control 常驻配置。
+/// Control resident configuration.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ControlConfig {
-    /// 旧版二选一头模式。新配置优先使用 admin_ui.enabled/grpc_api.enabled。
+    /// Legacy either-or head mode. New configurations should prefer admin_ui.enabled/grpc_api.enabled.
     #[serde(default)]
     pub head: Option<ControlHead>,
 
-    /// gRPC 头参数（仅 grpc_api 模式使用）
+    /// gRPC head parameters (used only in grpc_api mode)
     #[serde(default)]
     pub grpc_api: ControlGrpcApiConfig,
 
-    /// Admin UI 参数（仅 admin_ui 模式使用）
+    /// Admin UI parameters (used only in admin_ui mode)
     #[serde(default)]
     pub admin_ui: AdminUiConfig,
 }

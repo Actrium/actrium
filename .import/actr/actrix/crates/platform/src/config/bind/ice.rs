@@ -1,29 +1,29 @@
 use serde::{Deserialize, Serialize};
 
-/// ICE 服务绑定配置
+/// ICE service binding configuration
 ///
-/// 用于 STUN 和 TURN 服务的 UDP 网络配置。
+/// UDP network configuration for STUN and TURN services.
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct IceBindConfig {
-    /// 绑定 IP 地址
+    /// Bind IP address
     ///
-    /// UDP 服务绑定的网络接口 IP 地址。
+    /// The network interface IP address the UDP service binds to.
     pub ip: String,
 
-    /// 绑定端口
+    /// Bind port
     ///
-    /// STUN/TURN 服务监听的 UDP 端口。标准端口为 3478。
+    /// The UDP port the STUN/TURN service listens on. Standard port is 3478.
     pub port: u16,
 
-    /// 公网 IP 地址
+    /// Public IP address
     ///
-    /// ICE 服务对外宣告的公网 IP 地址。客户端通过此地址进行 STUN/TURN 通信。
-    /// 必须是真实可路由的公网 IP，不能使用 "0.0.0.0"。
+    /// The public IP address advertised by the ICE service. Clients use this address for STUN/TURN communication.
+    /// Must be a real routable public IP; cannot use "0.0.0.0".
     pub advertised_ip: String,
 
-    /// 公网端口
+    /// Public port
     ///
-    /// ICE 服务对外宣告的端口号，通常与绑定端口相同。
+    /// The port number advertised by the ICE service to the public, usually the same as the bind port.
     #[serde(default = "default_advertised_port")]
     pub advertised_port: u16,
 }

@@ -234,7 +234,9 @@ fn actrix_test_command_fails_for_invalid_config_content() {
 
     assert!(!output.status.success(), "command should fail");
     assert!(
-        stderr.contains("配置解析失败") || stderr.contains("parse") || stderr.contains("invalid"),
+        stderr.contains("Configuration parse failed")
+            || stderr.contains("parse")
+            || stderr.contains("invalid"),
         "unexpected stderr: {stderr}"
     );
 }
@@ -248,7 +250,7 @@ fn actrix_test_command_fails_for_validation_errors() {
 
     assert!(!output.status.success(), "command should fail");
     assert!(
-        stderr.contains("配置验证失败")
+        stderr.contains("Configuration validation failed")
             || stderr.contains("validation")
             || stderr.contains("services.signer"),
         "unexpected stderr: {stderr}"
@@ -313,8 +315,8 @@ fn actrix_run_mode_fails_for_invalid_config_content() {
 
     assert!(!output.status.success(), "run mode should fail");
     assert!(
-        stderr.contains("配置加载失败")
-            || stderr.contains("配置解析失败")
+        stderr.contains("Configuration load failed")
+            || stderr.contains("Configuration parse failed")
             || stderr.contains("parse")
             || stderr.contains("invalid"),
         "unexpected stderr: {stderr}"
@@ -333,7 +335,7 @@ fn actrix_run_mode_fails_for_validation_errors() {
 
     assert!(!output.status.success(), "run mode should fail");
     assert!(
-        stderr.contains("配置验证失败")
+        stderr.contains("Configuration validation failed")
             || stderr.contains("services.signer")
             || stderr.contains("validation"),
         "unexpected stderr: {stderr}"

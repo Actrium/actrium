@@ -390,7 +390,7 @@ while [ $COUNTER -lt $MAX_WAIT ]; do
     fi
     
     # Check if receiver has successfully connected to signaling server
-    if grep -q "ActrNode 启动成功\|Receiver ready to accept file transfers\|ActrNode started" "$LOG_DIR/data-stream-receiver.log" 2>/dev/null; then
+    if grep -q "ActrNode started\|Receiver ready to accept file transfers\|ActrNode started" "$LOG_DIR/data-stream-receiver.log" 2>/dev/null; then
         echo -e "${GREEN}✅ Receiver is running and registered${NC}"
         break
     fi

@@ -1,10 +1,10 @@
-//! 序列化相关错误类型
+//! Serialization error types
 //!
-//! 定义所有与数据序列化、反序列化、编码相关的错误
+//! Defines all errors related to data serialization, deserialization, and encoding
 
 use thiserror::Error;
 
-/// 序列化相关错误
+/// Serialization-related errors
 #[derive(Error, Debug)]
 pub enum SerializationError {
     #[error("JSON error: {0}")]

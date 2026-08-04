@@ -1,20 +1,20 @@
-//! KS 存储模块
+//! Signer storage module
 //!
-//! 提供多种存储后端支持：SQLite, PostgreSQL
+//! Provides multiple storage backend support: SQLite, PostgreSQL
 //!
-//! # 设计
+//! # Design
 //!
-//! - `KeyStorageBackend` trait 定义统一的异步接口
-//! - `KeyStorage` enum 封装不同的后端实现
-//! - 通过 `StorageConfig` 配置选择和初始化后端
-//! - 私钥永不离开存储后端，签名在后端内部完成
+//! - `KeyStorageBackend` trait defines the unified async interface
+//! - `KeyStorage` enum encapsulates different backend implementations
+//! - `StorageConfig` configures and initializes the backend
+//! - Private keys never leave the storage backend; signing is performed internally
 
 use std::path::Path;
 
 pub mod backend;
 pub mod config;
 
-// SQLite 始终可用（使用 sqlx）
+// SQLite is always available (uses sqlx)
 pub mod sqlite;
 
 #[cfg(feature = "backend-postgres")]
@@ -32,37 +32,37 @@ use sqlite::SqliteBackend;
 #[cfg(feature = "backend-postgres")]
 use postgres::PostgresBackend;
 
-/// 密钥存储统一接口
+/// Unified key storage interface
 ///
-/// 使用 enum 而不是 trait object 的好处：
-/// - 零成本抽象（无虚函数调用）
-/// - 可以 Clone
-/// - 编译期类型检查
+/// Benefits of using an enum instead of a trait object:
+/// - Zero-cost abstraction (no virtual function calls)
+/// - Can be Clone
+/// - Compile-time type checking
 #[derive(Clone, Debug)]
 pub enum KeyStorage {
-    /// SQLite 存储后端（始终可用）
+    /// SQLite storage backend (always available)
     Sqlite(Box<SqliteBackend>),
 
-    /// PostgreSQL 存储后端
+    /// PostgreSQL storage backend
     #[cfg(feature = "backend-postgres")]
     Postgres(PostgresBackend),
 }
 
 impl KeyStorage {
-    /// 从配置创建存储实例
+    /// Create a storage instance from configuration
     ///
     /// # Arguments
-    /// * `config` - 存储配置
-    /// * `encryptor` - 密钥加密器
-    /// * `db_path` - 数据库文件存储目录路径（当 backend = "sqlite" 时必需，来自 ActrixConfig.sqlite_path）
+    /// * `config` - Storage configuration
+    /// * `encryptor` - Key encryptor
+    /// * `db_path` - Database file storage directory path (required when backend = "sqlite", from ActrixConfig.sqlite_path)
     ///
     /// # Returns
-    /// 初始化完成的存储实例
+    /// Initialized storage instance
     ///
     /// # Errors
-    /// - 缺少对应后端的配置
-    /// - 后端初始化失败
-    /// - 后端功能未启用（feature flag）
+    /// - Missing configuration for the corresponding backend
+    /// - Backend initialization failed
+    /// - Backend feature not enabled (feature flag)
     pub async fn from_config<P: AsRef<Path>>(
         config: &StorageConfig,
         encryptor: KeyEncryptor,
@@ -97,7 +97,7 @@ impl KeyStorage {
         }
     }
 
-    /// 生成并存储新的 Ed25519 签名密钥对
+    /// Generate and store a new Ed25519 signing key pair
     pub async fn generate_and_store_key(&self) -> SignerResult<KeyPair> {
         match self {
             Self::Sqlite(b) => b.generate_and_store_key().await,
@@ -107,7 +107,7 @@ impl KeyStorage {
         }
     }
 
-    /// 根据 key_id 查询验证公钥
+    /// Query the verifying public key by key_id
     pub async fn get_public_key(&self, key_id: u32) -> SignerResult<Option<String>> {
         match self {
             Self::Sqlite(b) => b.get_public_key(key_id).await,
@@ -117,9 +117,9 @@ impl KeyStorage {
         }
     }
 
-    /// 使用指定密钥对消息进行 Ed25519 签名
+    /// Sign a message with the specified key (Ed25519)
     ///
-    /// 私钥不离开存储后端，签名在内部完成
+    /// Private key does not leave the storage backend; signing is performed internally
     pub async fn sign(&self, key_id: u32, message: &[u8]) -> SignerResult<Vec<u8>> {
         match self {
             Self::Sqlite(b) => b.sign(key_id, message).await,
@@ -129,7 +129,7 @@ impl KeyStorage {
         }
     }
 
-    /// 获取完整的密钥记录
+    /// Get the complete key record
     pub async fn get_key_record(&self, key_id: u32) -> SignerResult<Option<KeyRecord>> {
         match self {
             Self::Sqlite(b) => b.get_key_record(key_id).await,
@@ -139,7 +139,7 @@ impl KeyStorage {
         }
     }
 
-    /// 获取密钥总数
+    /// Get the total key count
     pub async fn get_key_count(&self) -> SignerResult<u32> {
         match self {
             Self::Sqlite(b) => b.get_key_count().await,
@@ -149,7 +149,7 @@ impl KeyStorage {
         }
     }
 
-    /// 清理过期的密钥（仅删除超出容忍期的）
+    /// Clean up expired keys (only delete keys beyond the tolerance period)
     pub async fn cleanup_expired_keys(&self, tolerance_seconds: u64) -> SignerResult<u32> {
         match self {
             Self::Sqlite(b) => b.cleanup_expired_keys(tolerance_seconds).await,
@@ -159,7 +159,7 @@ impl KeyStorage {
         }
     }
 
-    /// 获取后端类型名称
+    /// Get the backend type name
     pub fn backend_name(&self) -> &'static str {
         match self {
             Self::Sqlite(_) => "SQLite",
@@ -194,7 +194,7 @@ mod tests {
         .unwrap();
         assert_eq!(storage.backend_name(), "SQLite");
 
-        // 测试基本操作
+        // Test basic operations
         let key_pair = storage.generate_and_store_key().await.unwrap();
         assert!(key_pair.key_id > 0);
 
@@ -207,7 +207,7 @@ mod tests {
         let config = StorageConfig {
             backend: StorageBackend::Sqlite,
             key_ttl_seconds: 3600,
-            sqlite: None, // 缺少配置
+            sqlite: None, // missing configuration
             postgres: None,
         };
 

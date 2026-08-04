@@ -1,4 +1,4 @@
-//! Signaling WebSocket服务实现
+//! Signaling WebSocket service implementation
 
 use crate::service::HttpRouterService;
 use anyhow::Result;
@@ -10,7 +10,7 @@ use platform::{ServiceInfo, ServiceType};
 use signaling::create_signaling_router_with_config_and_counters;
 use std::sync::Arc;
 
-/// Signaling WebSocket服务实现
+/// Signaling WebSocket service implementation
 #[derive(Debug)]
 pub struct SignalingService {
     info: ServiceInfo,

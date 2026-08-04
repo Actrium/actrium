@@ -1,6 +1,6 @@
-//! 测试工具模块
+//! Test utilities module
 //!
-//! 提供测试相关的工具函数和辅助功能
+//! Provides test-related utility functions and helper functionality
 
 #[cfg(test)]
 pub mod utils {

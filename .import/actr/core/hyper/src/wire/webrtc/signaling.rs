@@ -77,10 +77,10 @@ pub struct SignalingConfig {
     /// signaling server URL
     pub server_url: Url,
 
-    /// Connecttimeout temporal duration （seconds）
+    /// Connecttimeout temporal duration (seconds)
     pub connection_timeout: u64,
 
-    /// center skipinterval（seconds）
+    /// center skipinterval (seconds)
     pub heartbeat_interval: u64,
 
     /// reconnection configuration
@@ -102,10 +102,10 @@ pub struct ReconnectConfig {
     /// maximum reconnection attempts
     pub max_attempts: u32,
 
-    /// initial reconnection delay（seconds）
+    /// initial reconnection delay (seconds)
     pub initial_delay: u64,
 
-    /// maximum reconnection delay（seconds）
+    /// maximum reconnection delay (seconds)
     pub max_delay: u64,
 
     /// Backoff multiplier factor
@@ -155,7 +155,7 @@ pub enum AuthType {
 ///
 /// # interior mutability
 /// allMethodusing `&self` and non `&mut self`, with for conveniencein Arc in shared.
-/// Implementation class needs interior mutability （ like Mutex）to manage WebSocket connection status.
+/// Implementation class needs interior mutability (like Mutex) to manage WebSocket connection status.
 #[async_trait]
 pub trait SignalingClient: Send + Sync {
     /// Connecttosignaling server
@@ -233,7 +233,7 @@ pub trait SignalingClient: Send + Sync {
         reason: Option<String>,
     ) -> NetworkResult<UnregisterResponse>;
 
-    /// Send center skip（Registerafter stream process, using ActrToSignaling）
+    /// Send center skip (Registerafter stream process, using ActrToSignaling)
     /// Returns Pong response if received, error if timeout or no response
     async fn send_heartbeat(
         &self,
@@ -263,7 +263,7 @@ pub trait SignalingClient: Send + Sync {
         key_id: u32,
     ) -> NetworkResult<(u32, Vec<u8>)>;
 
-    /// Sendsignalingsignal seal （ pass usage Method）
+    /// Sendsignalingsignal seal (pass usage Method)
     async fn send_envelope(&self, envelope: SignalingEnvelope) -> NetworkResult<()>;
 
     /// Receivesignalingsignal seal
@@ -504,9 +504,9 @@ pub struct WebSocketSignalingClient {
     config: SignalingConfig,
     actor_id: tokio::sync::Mutex<Option<ActrId>>,
     credential_state: tokio::sync::Mutex<Option<CredentialState>>,
-    /// WebSocket write end （using Mutex Implementation interior mutability ）
+    /// WebSocket write end (using Mutex Implementation interior mutability)
     ws_sink: WsSink,
-    /// WebSocket read end （using Mutex Implementation interior mutability ）
+    /// WebSocket read end (using Mutex Implementation interior mutability)
     ws_stream: tokio::sync::Mutex<
         Option<futures_util::stream::SplitStream<WebSocketStream<MaybeTlsStream<TcpStream>>>>,
     >,
@@ -2410,7 +2410,7 @@ impl SignalingClient for WebSocketSignalingClient {
         &self,
         request: RegisterRequest,
     ) -> NetworkResult<RegisterResponse> {
-        // Create PeerToSignaling stream process （Register front ）
+        // Create PeerToSignaling stream process (Register front)
         let flow = signaling_envelope::Flow::PeerToServer(PeerToSignaling {
             payload: Some(peer_to_signaling::Payload::RegisterRequest(request)),
         });

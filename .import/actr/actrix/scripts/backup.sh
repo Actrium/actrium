@@ -1,5 +1,5 @@
 #!/bin/bash
-# Actrix 数据备份脚本
+# Actrix data backup script
 
 set -e
 
@@ -7,26 +7,26 @@ BACKUP_DIR="${BACKUP_DIR:-./backup}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 BACKUP_PATH="$BACKUP_DIR/$TIMESTAMP"
 
-echo "🔄 开始备份 Actrix 数据..."
-echo "备份目录: $BACKUP_PATH"
+echo "🔄 Starting Actrix data backup..."
+echo "Backup directory: $BACKUP_PATH"
 echo
 
-# 创建备份目录
+# Create backup directory
 mkdir -p "$BACKUP_PATH"
 
-# 备份配置文件
-echo "1. 备份配置文件..."
+# Backup config files
+echo "1. Backing up config files..."
 if [ -f "config.toml" ]; then
     cp config.toml "$BACKUP_PATH/config.toml"
     echo "  ✅ config.toml"
 fi
 
-# 备份数据库文件
+# Backup database files
 echo
-echo "2. 备份数据库..."
+echo "2. Backing up databases..."
 find . -name "*.db" -type f | while read -r db; do
     db_name=$(basename "$db")
-    # 使用 SQLite VACUUM INTO 创建干净的备份副本
+    # Use SQLite VACUUM INTO to create a clean backup copy
     if command -v sqlite3 &> /dev/null; then
         sqlite3 "$db" "VACUUM INTO '$BACKUP_PATH/$db_name'"
         echo "  ✅ $db_name (VACUUM)"
@@ -36,30 +36,30 @@ find . -name "*.db" -type f | while read -r db; do
     fi
 done
 
-# 备份日志（最近7天）
+# Backup logs (last 7 days)
 echo
-echo "3. 备份最近日志..."
+echo "3. Backing up recent logs..."
 if [ -d "logs" ]; then
     mkdir -p "$BACKUP_PATH/logs"
     find logs -name "*.log" -mtime -7 -exec cp {} "$BACKUP_PATH/logs/" \;
-    echo "  ✅ 最近7天日志"
+    echo "  ✅ Logs from last 7 days"
 fi
 
-# 压缩备份
+# Compress backup
 echo
-echo "4. 压缩备份..."
+echo "4. Compressing backup..."
 cd "$BACKUP_DIR"
 tar -czf "${TIMESTAMP}.tar.gz" "$TIMESTAMP"
 rm -rf "$TIMESTAMP"
 echo "  ✅ ${TIMESTAMP}.tar.gz"
 
-# 清理旧备份（保留最近30天）
+# Clean old backups (keep last 30 days)
 echo
-echo "5. 清理旧备份..."
+echo "5. Cleaning old backups..."
 find . -name "*.tar.gz" -mtime +30 -delete
 count=$(find . -name "*.tar.gz" | wc -l)
-echo "  ✅ 保留 $count 个备份文件"
+echo "  ✅ Kept $count backup files"
 
 echo
-echo "✅ 备份完成: $BACKUP_DIR/${TIMESTAMP}.tar.gz"
-echo "恢复命令: tar -xzf $BACKUP_DIR/${TIMESTAMP}.tar.gz"
+echo "✅ Backup completed: $BACKUP_DIR/${TIMESTAMP}.tar.gz"
+echo "Restore command: tar -xzf $BACKUP_DIR/${TIMESTAMP}.tar.gz"

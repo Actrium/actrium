@@ -363,9 +363,9 @@ sink = "otlp+grpc://jaeger:4317"
 
 ## 📚 相关文档
 
-- [CRATES.md](./CRATES.md) - KS 实现细节
-- [SERVICES.md](./SERVICES.md) - 服务部署和管理
-- [CONFIGURATION.md](./CONFIGURATION.md) - 配置参考
+- [CRATES.md](./CRATES.zh.md) - KS 实现细节
+- [SERVICES.md](./SERVICES.zh.md) - 服务部署和管理
+- [CONFIGURATION.md](./CONFIGURATION.zh.md) - 配置参考
 
 **文件**: `crates/ks/src/types.rs` - API 数据类型定义
 **文件**: `crates/ks/src/handlers.rs` - API 处理器实现

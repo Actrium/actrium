@@ -1,6 +1,6 @@
-//! Actor Identity Token 管理模块
+//! Actor Identity Token management module
 //!
-//! 提供 Actor Identity Token 验证功能（签发功能已移至 ais crate）
+//! Provides Actor Identity Token verification (issuing has been moved to the ais crate)
 
 pub mod error;
 pub mod validator;

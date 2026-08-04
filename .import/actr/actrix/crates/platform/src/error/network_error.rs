@@ -1,10 +1,10 @@
-//! 网络相关错误类型
+//! Network error types
 //!
-//! 定义所有与网络连接、通信、传输相关的错误
+//! Defines all errors related to network connections, communication, and transport
 
 use thiserror::Error;
 
-/// 网络相关错误
+/// Network-related errors
 #[derive(Error, Debug)]
 pub enum NetworkError {
     #[error("Connection failed: {address}")]

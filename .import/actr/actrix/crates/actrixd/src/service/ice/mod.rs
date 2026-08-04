@@ -1,7 +1,7 @@
-//\! ICE服务模块
+//\! ICE service module
 //\!
-//\! 管理ICE相关的服务
-//! ICE服务模块（STUN/TURN）
+//\! Manages ICE-related services
+//! ICE service module (STUN/TURN)
 
 mod stun;
 mod turn;

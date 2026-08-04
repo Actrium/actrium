@@ -387,6 +387,6 @@ cargo run --bin actrix -- test --config config.toml
 
 ## 参考
 
-- [配置文件参考](./CONFIGURATION.md)
-- [KS 完全指南](./KS_GUIDE.md)
-- [服务架构](./SERVICES.md)
+- [配置文件参考](./CONFIGURATION.zh.md)
+- [KS 完全指南](./KS_GUIDE.zh.md)
+- [服务架构](./SERVICES.zh.md)

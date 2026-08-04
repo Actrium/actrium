@@ -9,7 +9,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # 创建 GitHub Release
+  # Create GitHub Release
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
@@ -50,7 +50,7 @@ jobs:
           - [API Documentation](https://docs.rs/actr-version)
           - [Crate Page](https://crates.io/crates/actr-version)
 
-  # 发布到 crates.io
+  # Publish to crates.io
   publish:
     name: Publish to crates.io
     runs-on: ubuntu-latest

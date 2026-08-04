@@ -42,7 +42,7 @@ impl actr_framework::MessageDispatcher for ClientDispatcher {
         ctx: &C,
     ) -> actr_protocol::ActorResult<Bytes> {
         info!(
-            "[ClientWorkload] [...] App request，route_key={}",
+            "[ClientWorkload] [...] App request, route_key={}",
             envelope.route_key
         );
 
@@ -69,7 +69,7 @@ impl actr_framework::MessageDispatcher for ClientDispatcher {
 
         info!("[ClientWorkload] via/through WebSocket [...]request[...]service[...]...");
 
-        // via/through Dest::Peer [...]service[...]（willusing/use WebSocket channel）
+        // via/through Dest::Peer [...]service[...] (willusing/use WebSocket channel)
         let response: EchoResponse = ctx.call(&Dest::Peer(server_id), request, 30_000).await?;
 
         info!(

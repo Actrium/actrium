@@ -1825,10 +1825,10 @@ sqlite3 /var/lib/actrix/ks.db \
 
 ### C. 相关文档
 
-- [CRATES.md](./CRATES.md) - KS 实现细节
-- [API.md](./API.md) - KS API 参考
-- [CONFIGURATION.md](./CONFIGURATION.md) - 配置指南
-- [SERVICES.md](./SERVICES.md) - 服务部署
+- [CRATES.md](./CRATES.zh.md) - KS 实现细节
+- [API.md](./API.zh.md) - KS API 参考
+- [CONFIGURATION.md](./CONFIGURATION.zh.md) - 配置指南
+- [SERVICES.md](./SERVICES.zh.md) - 服务部署
 
 ### D. 文件位置索引
 

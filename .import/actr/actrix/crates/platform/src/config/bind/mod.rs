@@ -5,19 +5,19 @@ pub use crate::config::bind::http::HttpBindConfig;
 pub use crate::config::bind::ice::IceBindConfig;
 use serde::{Deserialize, Serialize};
 
-/// 网络绑定配置
+/// Network binding configuration
 ///
-/// 定义不同类型服务的网络绑定参数。
+/// Defines network binding parameters for different types of services.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct BindConfig {
-    /// HTTP/HTTPS 服务绑定配置（可选）
+    /// HTTP/HTTPS service binding configuration (optional)
     ///
-    /// 统一的 HTTP 绑定。配置了 cert+key 即为 HTTPS，否则为 HTTP。
+    /// Unified HTTP binding. Configuring cert+key enables HTTPS; otherwise HTTP.
     pub http: Option<HttpBindConfig>,
 
-    /// ICE 服务绑定配置
+    /// ICE service binding configuration
     ///
-    /// 用于 STUN/TURN 服务的 UDP 绑定配置。
+    /// UDP binding configuration for STUN/TURN services.
     pub ice: IceBindConfig,
 }
 

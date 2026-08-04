@@ -1,10 +1,10 @@
-//! 配置注册表
+//! Configuration registry
 //!
-//! 静态注册表，声明每个可配置字段的元信息（类型、默认值、是否支持动态覆盖/热重载）。
+//! Static registry declaring metadata for each configurable field (type, default value, whether dynamic override/hot reload is supported).
 
 use serde::Serialize;
 
-/// 配置值类型
+/// Configuration value type
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ConfigValueType {
@@ -84,7 +84,7 @@ impl std::fmt::Display for ConfigValueType {
     }
 }
 
-/// 配置字段定义
+/// Configuration field definition
 #[derive(Debug, Clone, Serialize)]
 pub struct ConfigFieldDef {
     /// Dot-separated key, e.g. "turn.realm"

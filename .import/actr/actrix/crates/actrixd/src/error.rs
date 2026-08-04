@@ -1,62 +1,62 @@
-//! 统一错误处理模型
+//! Unified error handling model
 //!
-//! 提供主应用 actrix 的顶层错误类型，聚合所有子模块和依赖 crate 的错误
+//! Provides the top-level error type for the main actrix application, aggregating errors from all sub-modules and dependency crates.
 
 use thiserror::Error;
 
-/// 主应用的统一错误枚举
+/// Unified error enum for the main application
 ///
-/// 聚合来自所有子模块和依赖 crate 的错误类型，提供类型安全的错误处理
+/// Aggregates error types from all sub-modules and dependency crates, providing type-safe error handling.
 #[derive(Debug, Error)]
 pub enum Error {
-    // ========== 配置相关错误 ==========
-    /// 配置文件相关错误
+    // ========== Configuration errors ==========
+    /// Configuration file related error
     #[error("Configuration error: {0}")]
     Config(#[from] Box<dyn std::error::Error>),
 
-    // ========== 基础库错误 ==========
-    /// Base crate 聚合错误
+    // ========== Base library errors ==========
+    /// Base crate aggregated error
     #[error("Base library error: {0}")]
     Base(Box<platform::error::BaseError>),
 
-    // ========== 服务相关错误 ==========
-    // Identity 错误类型已删除，因为 AIS 服务已被移除
-    // TODO: 新版 signaling crate 没有导出 SignalingError，暂时禁用
-    // /// 信令服务错误
+    // ========== Service errors ==========
+    // Identity error type removed because AIS service has been removed.
+    // TODO: The new signaling crate does not export SignalingError, temporarily disabled.
+    // /// Signaling service error
     // #[error("Signaling service error: {0}")]
     // Signaling(#[from] signaling::SignalingError),
-    /// STUN 服务错误
+    /// STUN service error
     #[error("STUN service error: {0}")]
     Stun(#[from] stun::StunError),
 
-    /// TURN 服务错误
+    /// TURN service error
     #[error("TURN service error: {0}")]
     Turn(#[from] turn::TurnError),
 
-    // ========== 系统级错误 ==========
-    /// I/O 操作错误
+    // ========== System-level errors ==========
+    /// I/O operation error
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    /// 序列化/反序列化错误
+    /// Serialization/deserialization error
     #[error("Serialization error: {0}")]
     Serde(#[from] serde_json::Error),
 
-    /// 网络错误
+    /// Network error
     #[error("Network error: {0}")]
     Network(#[from] tokio::task::JoinError),
 
-    // ========== 业务逻辑错误 ==========
-    /// 服务配置验证失败  
+    // ========== Business logic errors ==========
+    /// Service configuration validation failed
     #[error("Service configuration validation failed: {message}")]
     ServiceValidation { message: String },
 
-    // ========== 通用错误 ==========
-    /// Anyhow 错误兼容层
+    // ========== Generic errors ==========
+    /// Anyhow error compatibility layer
     #[error("Legacy error: {0}")]
     Anyhow(#[from] anyhow::Error),
 
-    /// 自定义错误消息
+    /// Custom error message
     #[error("Application error: {message}")]
     Custom { message: String },
 }
@@ -67,20 +67,20 @@ impl From<platform::error::BaseError> for Error {
     }
 }
 
-/// 统一的 Result 类型
+/// Unified Result type
 ///
-/// 为主应用提供统一的错误处理结果类型
+/// Provides a unified error-handling result type for the main application.
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {
-    /// 创建自定义错误
+    /// Create a custom error
     pub fn custom(message: impl Into<String>) -> Self {
         Self::Custom {
             message: message.into(),
         }
     }
 
-    /// 创建服务配置验证失败错误
+    /// Create a service configuration validation failure error
     pub fn service_validation(message: impl Into<String>) -> Self {
         Self::ServiceValidation {
             message: message.into(),

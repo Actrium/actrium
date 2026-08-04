@@ -1,6 +1,6 @@
-//! Nonce 存储模块
+//! Nonce storage module
 //!
-//! 提供 Nonce 的存储和管理功能，防止重放攻击
+//! Provides nonce storage and management functionality, preventing replay attacks
 
 pub mod db_nonce_entry;
 pub mod sqlite_nonce_storage;

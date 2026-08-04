@@ -4,7 +4,7 @@ use crate::error::{AdminError, Result};
 use actrix_proto::{ServiceStatus, SystemMetrics};
 use std::sync::Arc;
 
-/// 收集系统指标
+/// Collect system metrics.
 ///
 /// pwrzv 0.7 returns ratio-based metrics (0.0–1.0 for most dimensions).
 /// We map the available ratios into the proto `SystemMetrics` as percentages
@@ -34,20 +34,20 @@ pub async fn collect_system_metrics() -> Result<SystemMetrics> {
     })
 }
 
-/// 服务状态提供者类型（用于 ReportRequest）
+/// Service status provider type (used for ReportRequest)
 pub type ServiceStatusProviderForReport = Arc<dyn Fn() -> Vec<ServiceStatus> + Send + Sync>;
 
-/// 收集服务状态
+/// Collect service status.
 ///
-/// 如果提供了 `service_status_provider`，则使用它来获取服务状态；
-/// 否则返回空列表（向后兼容）。
+/// If `service_status_provider` is provided, uses it to obtain service status;
+/// otherwise returns an empty list (backward compatibility).
 pub fn collect_service_status(
     service_status_provider: Option<ServiceStatusProviderForReport>,
 ) -> Vec<ServiceStatus> {
     if let Some(provider) = service_status_provider {
         provider()
     } else {
-        // 向后兼容：如果没有提供 provider，返回空列表
+        // Backward compatibility: return empty list if no provider is given
         Vec::new()
     }
 }
@@ -57,7 +57,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    #[ignore] // 依赖系统环境，CI 可能失败
+    #[ignore] // Depends on system environment; CI may fail
     async fn test_collect_metrics() {
         if let Ok(metrics) = collect_system_metrics().await {
             assert!(metrics.memory_total_bytes > 0);

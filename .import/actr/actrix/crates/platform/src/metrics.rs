@@ -1,6 +1,6 @@
-//! Prometheus 监控指标模块
+//! Prometheus metrics module
 //!
-//! 提供全局指标收集和导出功能
+//! Provides global metric collection and export functionality
 
 use lazy_static::lazy_static;
 use prometheus::{
@@ -13,48 +13,48 @@ use std::time::Instant;
 static METRICS_INIT: Once = Once::new();
 
 lazy_static! {
-    /// 全局 Prometheus Registry
+    /// Global Prometheus Registry
     pub static ref REGISTRY: Registry = Registry::new();
 
-    // ========== 业务指标 ==========
+    // ========== Business metrics ==========
 
-    /// 当前注册的 Actor 总数（按 realm 分组）
+    /// Total number of registered actors (grouped by realm)
     pub static ref ACTORS_TOTAL: IntGaugeVec = IntGaugeVec::new(
         Opts::new("actrix_actors_total", "Total number of registered actors")
             .namespace("actrix"),
         &["realm_id", "service"]
     ).unwrap();
 
-    /// 当前注册的服务总数
+    /// Total number of registered services
     pub static ref SERVICES_TOTAL: IntGaugeVec = IntGaugeVec::new(
         Opts::new("actrix_services_total", "Total number of registered services")
             .namespace("actrix"),
         &["service_name"]
     ).unwrap();
 
-    /// WebSocket 连接数
+    /// Number of WebSocket connections
     pub static ref WEBSOCKET_CONNECTIONS: IntGauge = IntGauge::new(
         "actrix_websocket_connections",
         "Number of active WebSocket connections"
     ).unwrap();
 
-    /// Token 颁发次数（AIS）
+    /// Token issuance count (AIS)
     pub static ref TOKENS_ISSUED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_tokens_issued_total", "Total number of tokens issued")
             .namespace("actrix"),
         &["realm_id", "status"]
     ).unwrap();
 
-    /// Token 验证次数（Signaling/TURN）
+    /// Token validation count (Signaling/TURN)
     pub static ref TOKENS_VALIDATED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_tokens_validated_total", "Total number of tokens validated")
             .namespace("actrix"),
         &["service", "status"]
     ).unwrap();
 
-    // ========== 性能指标 ==========
+    // ========== Performance metrics ==========
 
-    /// HTTP 请求延迟（秒）
+    /// HTTP request latency (seconds)
     pub static ref REQUEST_DURATION: HistogramVec = HistogramVec::new(
         HistogramOpts::new("actrix_request_duration_seconds", "HTTP request duration in seconds")
             .namespace("actrix")
@@ -62,98 +62,98 @@ lazy_static! {
         &["service", "method", "path", "status"]
     ).unwrap();
 
-    /// HTTP 请求总数
+    /// Total HTTP request count
     pub static ref REQUESTS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_requests_total", "Total number of HTTP requests")
             .namespace("actrix"),
         &["service", "method", "path", "status"]
     ).unwrap();
 
-    /// 错误次数
+    /// Error count
     pub static ref ERRORS_TOTAL: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_errors_total", "Total number of errors")
             .namespace("actrix"),
         &["service", "error_type"]
     ).unwrap();
 
-    // ========== 系统指标 ==========
+    // ========== System metrics ==========
 
-    /// 缓存命中次数
+    /// Cache hit count
     pub static ref CACHE_HITS: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_cache_hits_total", "Total number of cache hits")
             .namespace("actrix"),
         &["cache_type"]
     ).unwrap();
 
-    /// 缓存未命中次数
+    /// Cache miss count
     pub static ref CACHE_MISSES: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_cache_misses_total", "Total number of cache misses")
             .namespace("actrix"),
         &["cache_type"]
     ).unwrap();
 
-    /// 数据库连接池状态
+    /// Database connection pool status
     pub static ref DB_CONNECTIONS: IntGaugeVec = IntGaugeVec::new(
         Opts::new("actrix_db_connections", "Number of database connections")
             .namespace("actrix"),
         &["pool", "state"]
     ).unwrap();
 
-    // ========== 安全指标 ==========
+    // ========== Security metrics ==========
 
-    /// 速率限制触发次数
+    /// Rate limit trigger count
     pub static ref RATE_LIMIT_EXCEEDED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_rate_limit_exceeded_total", "Total number of rate limit violations")
             .namespace("actrix"),
         &["service", "limiter_type"]
     ).unwrap();
 
-    /// 认证失败次数
+    /// Authentication failure count
     pub static ref AUTH_FAILURES: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_auth_failures_total", "Total number of authentication failures")
             .namespace("actrix"),
         &["service", "reason"]
     ).unwrap();
 
-    /// 非法请求次数
+    /// Invalid request count
     pub static ref INVALID_REQUESTS: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_invalid_requests_total", "Total number of invalid requests")
             .namespace("actrix"),
         &["service", "reason"]
     ).unwrap();
 
-    // ========== KS 特定指标 ==========
+    // ========== KS-specific metrics ==========
 
-    /// 密钥生成次数
+    /// Key generation count
     pub static ref KEYS_GENERATED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_keys_generated_total", "Total number of keys generated")
             .namespace("actrix"),
         &["key_type"]
     ).unwrap();
 
-    /// 密钥轮转次数
+    /// Key rotation count
     pub static ref KEY_ROTATIONS: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_key_rotations_total", "Total number of key rotations")
             .namespace("actrix"),
         &["reason"]
     ).unwrap();
 
-    // ========== TURN 特定指标 ==========
+    // ========== TURN-specific metrics ==========
 
-    /// TURN 分配请求
+    /// TURN allocation requests
     pub static ref TURN_ALLOCATIONS: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_turn_allocations_total", "Total number of TURN allocations")
             .namespace("actrix"),
         &["status"]
     ).unwrap();
 
-    /// TURN 活跃会话数
+    /// TURN active session count
     pub static ref TURN_ACTIVE_SESSIONS: IntGauge = IntGauge::new(
         "actrix_turn_active_sessions",
         "Number of active TURN sessions"
     ).unwrap();
 
-    /// TURN 流量统计（字节）
+    /// TURN traffic statistics (bytes)
     pub static ref TURN_BYTES_RELAYED: IntCounterVec = IntCounterVec::new(
         Opts::new("actrix_turn_bytes_relayed_total", "Total bytes relayed by TURN")
             .namespace("actrix"),
@@ -232,7 +232,7 @@ lazy_static! {
     pub static ref SERVICE_REGISTRIES: ServiceMetricsRegistry = ServiceMetricsRegistry::new();
 }
 
-/// 注册所有指标到全局 Registry
+/// Register all metrics into the global Registry
 ///
 /// This function is idempotent - calling it multiple times is safe.
 /// Only the first call will actually register the metrics.
@@ -241,33 +241,33 @@ pub fn register_metrics() -> Result<(), prometheus::Error> {
 
     METRICS_INIT.call_once(|| {
         let register_result = (|| {
-            // 业务指标
+            // Business metrics
             REGISTRY.register(Box::new(ACTORS_TOTAL.clone()))?;
             REGISTRY.register(Box::new(SERVICES_TOTAL.clone()))?;
             REGISTRY.register(Box::new(WEBSOCKET_CONNECTIONS.clone()))?;
             REGISTRY.register(Box::new(TOKENS_ISSUED.clone()))?;
             REGISTRY.register(Box::new(TOKENS_VALIDATED.clone()))?;
 
-            // 性能指标
+            // Performance metrics
             REGISTRY.register(Box::new(REQUEST_DURATION.clone()))?;
             REGISTRY.register(Box::new(REQUESTS_TOTAL.clone()))?;
             REGISTRY.register(Box::new(ERRORS_TOTAL.clone()))?;
 
-            // 系统指标
+            // System metrics
             REGISTRY.register(Box::new(CACHE_HITS.clone()))?;
             REGISTRY.register(Box::new(CACHE_MISSES.clone()))?;
             REGISTRY.register(Box::new(DB_CONNECTIONS.clone()))?;
 
-            // 安全指标
+            // Security metrics
             REGISTRY.register(Box::new(RATE_LIMIT_EXCEEDED.clone()))?;
             REGISTRY.register(Box::new(AUTH_FAILURES.clone()))?;
             REGISTRY.register(Box::new(INVALID_REQUESTS.clone()))?;
 
-            // KS 特定指标
+            // KS-specific metrics
             REGISTRY.register(Box::new(KEYS_GENERATED.clone()))?;
             REGISTRY.register(Box::new(KEY_ROTATIONS.clone()))?;
 
-            // TURN 特定指标
+            // TURN-specific metrics
             REGISTRY.register(Box::new(TURN_ALLOCATIONS.clone()))?;
             REGISTRY.register(Box::new(TURN_ACTIVE_SESSIONS.clone()))?;
             REGISTRY.register(Box::new(TURN_BYTES_RELAYED.clone()))?;
@@ -283,7 +283,7 @@ pub fn register_metrics() -> Result<(), prometheus::Error> {
     result
 }
 
-/// HTTP 请求计时器
+/// HTTP request timer
 pub struct RequestTimer {
     start: Instant,
     service: String,
@@ -292,7 +292,7 @@ pub struct RequestTimer {
 }
 
 impl RequestTimer {
-    /// 创建计时器
+    /// Create a timer
     pub fn new(service: &str, method: &str, path: &str) -> Self {
         Self {
             start: Instant::now(),
@@ -302,7 +302,7 @@ impl RequestTimer {
         }
     }
 
-    /// 完成计时并记录指标
+    /// Finish timing and record metrics
     pub fn observe(self, status: u16) {
         let duration = self.start.elapsed().as_secs_f64();
         let status_str = status.to_string();
@@ -317,7 +317,7 @@ impl RequestTimer {
     }
 }
 
-/// 导出 Prometheus 格式的指标
+/// Export metrics in Prometheus format
 pub fn export_metrics() -> String {
     use prometheus::Encoder;
     let encoder = prometheus::TextEncoder::new();
@@ -335,9 +335,9 @@ mod tests {
 
     #[test]
     fn test_register_metrics() {
-        // 注册应该成功（或者已经注册过了）
+        // Registration should succeed (or already be registered)
         let result = register_metrics();
-        // 如果已注册，会返回错误，但不影响功能
+        // If already registered, it returns an error but does not affect functionality
         assert!(result.is_ok() || result.is_err());
     }
 
@@ -349,7 +349,7 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(10));
         timer.observe(200);
 
-        // 验证计数器增加
+        // Verify counter incremented
         let before = REQUESTS_TOTAL
             .with_label_values(&["test-service", "GET", "/test", "200"])
             .get();

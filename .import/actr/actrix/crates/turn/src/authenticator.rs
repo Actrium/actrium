@@ -1,13 +1,14 @@
-//! TURN 认证器
+//! TURN authenticator
 //!
-//! 实现 TURN 服务器的认证和授权功能，基于 HMAC-SHA1 时效凭证（coturn --use-auth-secret 兼容格式）。
+//! Implements authentication and authorization for the TURN server,
+//! based on HMAC-SHA1 time-limited credentials (coturn --use-auth-secret compatible format).
 //!
-//! # 认证流程
+//! # Authentication flow
 //!
-//! 1. AIS 生成 TurnCredential { username = "<expires_at>:<actor_id>", password = base64(HMAC-SHA1(turn_secret, username)) }
-//! 2. 客户端使用 (username, password) 向 TURN 服务器认证
-//! 3. TURN 服务器计算 MD5(username:realm:password) 作为 long-term credential key
-//! 4. turn_crate 用此 key 验证请求中的 HMAC-SHA1 message integrity
+//! 1. AIS generates TurnCredential { username = "<expires_at>:<actor_id>", password = base64(HMAC-SHA1(turn_secret, username)) }
+//! 2. Client authenticates to the TURN server using (username, password)
+//! 3. TURN server computes MD5(username:realm:password) as the long-term credential key
+//! 4. turn_crate uses this key to verify HMAC-SHA1 message integrity in requests
 
 use base64::prelude::*;
 use hmac::{Hmac, Mac};
@@ -25,9 +26,9 @@ use twox_hash::XxHash64;
 
 type HmacSha1 = Hmac<Sha1>;
 
-// 全局 LRU 缓存，用于存储认证密钥
-// 缓存键: (username, realm) 的哈希值 (u128)
-// 缓存值: MD5(username:realm:password) 的结果 (Vec<u8>)
+// Global LRU cache for storing authentication keys
+// Cache key: hash of (username, realm) as u128
+// Cache value: result of MD5(username:realm:password) as Vec<u8>
 const AUTH_CACHE_CAPACITY: usize = 4096;
 
 static AUTH_KEY_CACHE: Lazy<Mutex<LruCache<u128, Vec<u8>>>> = Lazy::new(|| {
@@ -35,32 +36,34 @@ static AUTH_KEY_CACHE: Lazy<Mutex<LruCache<u128, Vec<u8>>>> = Lazy::new(|| {
     Mutex::new(LruCache::new(cap))
 });
 
-/// TURN 认证器（HMAC 时效凭证模式）
+/// TURN authenticator (HMAC time-limited credential mode)
 pub struct Authenticator {
     turn_secret: String,
 }
 
 impl Authenticator {
     pub fn new(turn_secret: String) -> Result<Self, Error> {
-        platform::recording::info!("TURN 认证器初始化完成 (HMAC 时效凭证模式, LRU 缓存)");
+        platform::recording::info!(
+            "TURN authenticator initialized (HMAC time-limited credential mode, LRU cache)"
+        );
         Ok(Self { turn_secret })
     }
 
-    /// 获取缓存统计信息（用于监控和调试）
+    /// Get cache statistics (for monitoring and debugging)
     pub fn cache_stats() -> (usize, usize) {
         let cache = AUTH_KEY_CACHE.lock().expect("auth cache poisoned");
         (cache.len(), cache.cap().get())
     }
 
-    /// 清空缓存（用于测试或手动重置）
+    /// Clear the cache (for testing or manual reset)
     #[allow(dead_code)]
     pub fn clear_cache() {
         let mut cache = AUTH_KEY_CACHE.lock().expect("auth cache poisoned");
         cache.clear();
-        platform::recording::info!("TURN 认证密钥缓存已清空");
+        platform::recording::info!("TURN auth key cache cleared");
     }
 
-    /// 计算 HMAC-SHA1 password（base64 编码）
+    /// Compute HMAC-SHA1 password (base64 encoded)
     ///
     /// `password = base64(HMAC-SHA1(turn_secret, username))`
     fn compute_password(&self, username: &str) -> String {
@@ -71,7 +74,7 @@ impl Authenticator {
     }
 }
 
-/// 计算缓存键
+/// Compute cache key
 #[inline]
 fn compute_cache_key(username: &str, realm: &str) -> u128 {
     let mut h1 = XxHash64::with_seed(0);
@@ -99,7 +102,7 @@ impl AuthHandler for Authenticator {
             src_addr
         );
 
-        // 1️⃣ 缓存命中检查
+        // 1. Cache hit check
         let cache_key = compute_cache_key(username, server_realm);
         if let Some(cached) = AUTH_KEY_CACHE
             .lock()
@@ -107,14 +110,14 @@ impl AuthHandler for Authenticator {
             .get(&cache_key)
             .cloned()
         {
-            platform::recording::debug!("TURN 认证缓存命中: username={}", username);
+            platform::recording::debug!("TURN auth cache hit: username={}", username);
             return Ok(cached);
         }
 
-        // 2️⃣ 解析 username = "<expires_at>:<actor_id>"
+        // 2. Parse username = "<expires_at>:<actor_id>"
         let (expires_at_str, actor_id) = username.split_once(':').ok_or_else(|| {
             platform::recording::warn!(
-                "TURN username 格式错误（期望 '<expires_at>:<actor_id>'）: username={}",
+                "TURN username format invalid (expected '<expires_at>:<actor_id>'): username={}",
                 username
             );
             Error::Other("invalid username format".to_string())
@@ -122,14 +125,14 @@ impl AuthHandler for Authenticator {
 
         let expires_at: u64 = expires_at_str.parse().map_err(|e| {
             platform::recording::warn!(
-                "TURN username expires_at 解析失败: username={}, error={}",
+                "TURN username expires_at parse failed: username={}, error={}",
                 username,
                 e
             );
             Error::Other(format!("invalid expires_at in username: {e}"))
         })?;
 
-        // 3️⃣ 检查凭证是否过期
+        // 3. Check if credential is expired
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
@@ -137,7 +140,7 @@ impl AuthHandler for Authenticator {
 
         if expires_at <= now {
             platform::recording::warn!(
-                "TURN 凭证已过期: username={}, expires_at={}, now={}",
+                "TURN credential expired: username={}, expires_at={}, now={}",
                 username,
                 expires_at,
                 now
@@ -145,22 +148,22 @@ impl AuthHandler for Authenticator {
             return Err(Error::Other("TURN credential expired".to_string()));
         }
 
-        // 4️⃣ 计算 HMAC-SHA1 密码
+        // 4. Compute HMAC-SHA1 password
         let password = self.compute_password(username);
 
-        // 5️⃣ 计算 long-term credential key: MD5(username:realm:password)
+        // 5. Compute long-term credential key: MD5(username:realm:password)
         let integrity_text = format!("{username}:{server_realm}:{password}");
         let digest = md5::compute(integrity_text.as_bytes());
         let result = digest.to_vec();
 
-        // 6️⃣ 存入缓存
+        // 6. Store in cache
         AUTH_KEY_CACHE
             .lock()
             .expect("auth cache poisoned")
             .put(cache_key, result.clone());
 
         platform::recording::debug!(
-            "TURN 认证成功: actor_id={}, expires_at={}, cache_size={}/{}",
+            "TURN auth succeeded: actor_id={}, expires_at={}, cache_size={}/{}",
             actor_id,
             expires_at,
             Self::cache_stats().0,
@@ -237,7 +240,7 @@ mod tests {
         let auth = make_auth();
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
 
-        // 已过期的 username（expires_at 在过去）
+        // Expired username (expires_at in the past)
         let username = "1000000000:test-actor"; // timestamp in the past
         let err = auth
             .auth_handle(username, "actrix.local", src_addr)
@@ -256,7 +259,7 @@ mod tests {
         let auth = make_auth();
         let src_addr: SocketAddr = "127.0.0.1:3478".parse().expect("valid socket addr");
 
-        // 未过期的凭证
+        // Non-expired credential
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()

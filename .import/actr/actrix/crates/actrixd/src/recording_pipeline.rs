@@ -370,7 +370,7 @@ fn build_log_writer(
     let security_override_uri = normalize_optional_string(&recording_config.security.sink);
     let operations_override_uri = normalize_optional_string(&recording_config.operations.sink);
 
-    println!("日志写入模式: sink");
+    println!("Log write mode: sink");
     if let Some(uri) = &global_sink_uri {
         println!("  - recording.sink: {uri}");
     }

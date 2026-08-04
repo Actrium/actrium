@@ -1,6 +1,6 @@
-//! Signer gRPC 路由构建
+//! Signer gRPC router builder
 //!
-//! 将 Signer gRPC 服务挂载到主 HTTP/HTTPS 监听端口。
+//! Mounts the Signer gRPC service onto the main HTTP/HTTPS listener port.
 
 use anyhow::Result;
 use axum::Router;
@@ -27,13 +27,13 @@ pub async fn build_signer_grpc_router(
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("Signer service configuration not found"))?;
 
-    // 创建 nonce storage 实例（用于防重放攻击）
-    // 使用 sqlite_path 作为目录路径，内部会自动拼接 nonce.db
+    // Create nonce storage instance (for replay attack prevention)
+    // Uses sqlite_path as directory path, automatically appends nonce.db internally
     let nonce_storage = SqliteNonceStorage::new_async(&config.sqlite_path)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to create nonce storage: {e}"))?;
 
-    // 创建密钥加密器
+    // Create key encryptor
     let encryptor = match signer_service_config.get_kek_source() {
         Some(kek_source) => {
             platform::recording::info!("KEK configured, enabling private key encryption");
@@ -48,7 +48,7 @@ pub async fn build_signer_grpc_router(
         }
     };
 
-    // 创建 Signer storage
+    // Create Signer storage
     let storage = KeyStorage::from_config(
         &signer_service_config.storage,
         encryptor,
@@ -57,7 +57,7 @@ pub async fn build_signer_grpc_router(
     .await
     .map_err(|e| anyhow::anyhow!("Failed to create Signer storage: {e}"))?;
 
-    // 创建 gRPC 服务
+    // Create gRPC service
     let grpc_service = create_grpc_service(
         storage,
         nonce_storage,

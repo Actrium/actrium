@@ -1,14 +1,14 @@
 /**
  * @actrium/actr-dom - Actor-RTC DOM-side Fixed Forwarding Layer
  *
- *  JS （Hardware Abstraction Layer），。
+ * Provides the JS Hardware Abstraction Layer (HAL) between the DOM and the WASM runtime.
  *
- * ：
- * 1.  WebRTC （DOM  WebRTC API）
- * 2.  WebRTC  Service Worker WASM
- * 3.  Service Worker  PostMessage
+ * Responsibilities:
+ * 1. Manage WebRTC connections (via DOM WebRTC API)
+ * 2. Forward WebRTC messages to the Service Worker WASM layer
+ * 3. Bridge Service Worker communication via PostMessage
  *
- * ：docs/architecture/wasm-dom-integration.md
+ * See: docs/architecture/wasm-dom-integration.md
  */
 
 import { ServiceWorkerBridge } from './sw-bridge';

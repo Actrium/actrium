@@ -1,6 +1,6 @@
-//! STUN 服务器实现
+//! STUN server implementation
 //!
-//! 提供 STUN 协议服务器功能，用于 NAT 发现和网络穿越
+//! Provides STUN protocol server functionality for NAT discovery and traversal.
 #![deny(clippy::disallowed_macros)]
 
 pub mod error;

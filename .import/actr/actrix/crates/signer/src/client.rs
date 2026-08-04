@@ -1,4 +1,4 @@
-//! KS 客户端 - 简单的 HTTP 客户端（仅用于测试）
+//! Signer client - simple HTTP client (for testing only)
 
 use crate::types::{
     GenerateSigningKeyRequest, GenerateSigningKeyResponse, SignRequest, SignResponse,
@@ -9,7 +9,7 @@ use nonce_auth::CredentialBuilder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-/// KS 服务客户端
+/// Signer service client
 #[derive(Debug, Clone)]
 pub struct Client {
     endpoint: String,
@@ -17,30 +17,30 @@ pub struct Client {
     actrix_shared_key: String,
 }
 
-/// KS 客户端配置
+/// Signer client configuration
 ///
-/// 其他服务作为客户端连接 KS 服务时使用的配置
+/// Configuration used by other services when connecting to the Signer service as a client
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ClientConfig {
-    /// KS 服务地址
+    /// Signer service address
     ///
-    /// KS 服务的完整 URL 地址，包括协议、主机和端口。
-    /// 例如: "http://127.0.0.1:8090" 或 "https://ks.example.com"
+    /// Full URL of the Signer service, including protocol, host, and port.
+    /// Example: "http://127.0.0.1:8090" or "https://ks.example.com"
     pub endpoint: String,
 
-    /// PSK (Pre-Shared Key) - 用于认证
+    /// PSK (Pre-Shared Key) - for authentication
     ///
-    /// 用于内部服务间的认证密钥，通常从全局配置的 `actrix_shared_key` 获取
+    /// Authentication key for internal service-to-service communication, typically obtained from the global `actrix_shared_key` config
     pub psk: String,
 
-    /// 请求超时时间（秒）
+    /// Request timeout (seconds)
     ///
-    /// 连接 KS 服务的超时时间
+    /// Timeout for connecting to the Signer service
     pub timeout_seconds: u64,
 }
 
 impl Client {
-    /// 创建新的 KS 客户端
+    /// Create a new Signer client
     pub fn new(config: &ClientConfig) -> Self {
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.timeout_seconds))
@@ -54,10 +54,10 @@ impl Client {
         }
     }
 
-    /// 从 KS 服务生成新的 Ed25519 签名密钥对
+    /// Generate a new Ed25519 signing key pair from the Signer service
     ///
-    /// 返回 (key_id, verifying_key_bytes[32], expires_at)
-    /// 私钥保留在 KS 服务端
+    /// Returns (key_id, verifying_key_bytes[32], expires_at)
+    /// Private key remains on the Signer service side
     pub async fn generate_signing_key(
         &self,
     ) -> Result<(u32, VerifyingKey, u64), crate::error::SignerError> {
@@ -105,9 +105,9 @@ impl Client {
         Ok((response.key_id, verifying_key, response.expires_at))
     }
 
-    /// 使用 KS 服务中的密钥对消息进行签名
+    /// Sign a message using a key stored in the Signer service
     ///
-    /// 返回 64 字节 Ed25519 签名
+    /// Returns 64-byte Ed25519 signature
     pub async fn sign(
         &self,
         key_id: u32,

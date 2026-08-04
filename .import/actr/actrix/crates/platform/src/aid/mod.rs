@@ -1,6 +1,6 @@
-//! Actor Identity 管理模块
+//! Actor Identity management module
 //!
-//! 基于 aid proto 提供 Actor Identity Token 验证功能（签发功能已移至 ais crate）
+//! Provides Actor Identity Token verification based on aid proto (issuing has been moved to the ais crate)
 
 pub mod credential;
 pub mod identity_claims;

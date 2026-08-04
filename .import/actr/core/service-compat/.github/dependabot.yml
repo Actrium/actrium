@@ -19,7 +19,7 @@ updates:
     allow:
       - dependency-type: "all"
     ignore:
-      # 忽略主要版本更新 (需要手动审查)
+      # Ignore major version updates (require manual review)
       - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 

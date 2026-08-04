@@ -1,6 +1,6 @@
-//! 服务状态定义
+//! Service status definitions
 //!
-//! 定义了服务状态枚举，用于表示各种服务的运行状态
+//! Defines the service state enum used to represent the running state of various services
 
 use serde::{Deserialize, Serialize};
 

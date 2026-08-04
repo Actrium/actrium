@@ -1,34 +1,34 @@
-//! Actrix 信令服务器 - 基于 protobuf SignalingEnvelope
+//! Actrix Signaling Server - based on protobuf SignalingEnvelope
 //!
-//! 完全基于 protobuf 协议，使用 WebSocket Binary 消息传输
+//! Fully based on the protobuf protocol, using WebSocket Binary message transport
 //!
-//! # 功能概览
+//! # Feature Overview
 //!
-//! ## 已实现的核心功能
+//! ## Core Features Implemented
 //!
-//! ### 基础信令流程
-//! - ✅ Actor 注销 (`UnregisterRequest`)
-//! - ✅ 心跳机制 (`Ping` / `Pong`)
-//! - ✅ WebRTC 信令中继 (`ActrRelay` - ICE / SDP)
+//! ### Basic Signaling Flow
+//! - ✅ Actor unregistration (`UnregisterRequest`)
+//! - ✅ Heartbeat mechanism (`Ping` / `Pong`)
+//! - ✅ WebRTC signaling relay (`ActrRelay` - ICE / SDP)
 //!
-//! ### 扩展功能
-//! - ✅ 服务发现 (`DiscoveryRequest` / `DiscoveryResponse`)
-//! - ✅ 负载均衡路由 (`RouteCandidatesRequest` / `RouteCandidatesResponse`)
-//!   - 多因素排序：功率储备、邮箱积压、地理距离、客户端粘性
-//!   - 精确匹配优先策略
-//! - ✅ Presence 订阅 (`SubscribeActrUpRequest` / `ActrUpEvent`)
-//! - ❌ Credential 刷新已迁移到 AIS HTTP
-//! - ✅ 负载指标存储 (`handle_ping()` - 存储到 ServiceRegistry 用于负载均衡)
+//! ### Extended Features
+//! - ✅ Service discovery (`DiscoveryRequest` / `DiscoveryResponse`)
+//! - ✅ Load-balanced routing (`RouteCandidatesRequest` / `RouteCandidatesResponse`)
+//!   - Multi-factor ranking: power reserve, mailbox backlog, geographic distance, client stickiness
+//!   - Exact match priority strategy
+//! - ✅ Presence subscription (`SubscribeActrUpRequest` / `ActrUpEvent`)
+//! - ❌ Credential refresh has been migrated to AIS HTTP
+//! - ✅ Load metric storage (`handle_ping()` - stored in ServiceRegistry for load balancing)
 //!
-//! ## 待完成的功能（可选增强）
+//! ## Pending Features (optional enhancements)
 //!
-//! 1. **Credential 验证** (可选安全增强)
-//!    - `handle_actr_to_server()` - 验证 Actor 消息中的 credential
-//!    - `handle_actr_relay()` - 验证中继消息的 credential
+//! 1. **Credential validation** (optional security enhancement)
+//!    - `handle_actr_to_server()` - validate credential in Actor messages
+//!    - `handle_actr_relay()` - validate credential in relay messages
 //!
-//! 2. **ServiceSpec 和 ACL 持久化** (可选访问控制)
-//!    - `handle_register_request()` - 持久化服务规格和访问控制规则
-//!    - 用于细粒度的服务间访问控制
+//! 2. **ServiceSpec and ACL persistence** (optional access control)
+//!    - `handle_register_request()` - persist service specs and access control rules
+//!    - Used for fine-grained inter-service access control
 
 use actr_protocol::{
     AIdCredential, ActrId, ActrRelay, ActrToSignaling, ActrType, ErrorResponse, PeerToSignaling,
@@ -65,24 +65,24 @@ fn type_key(actor_type: &ActrType) -> String {
     )
 }
 
-/// 信令服务器状态
+/// Signaling server state
 #[derive(Debug)]
 pub struct SignalingServer {
-    /// 已连接的客户端
+    /// Connected clients
     pub clients: Arc<RwLock<HashMap<String, ClientConnection>>>,
-    /// 通过 ActorId 查找 client_id 的索引
+    /// Index for looking up client_id by ActorId
     pub actor_id_index: Arc<RwLock<HashMap<ActrId, String>>>,
-    /// 服务注册表
+    /// Service registry
     pub service_registry: Arc<RwLock<ServiceRegistry>>,
-    /// Presence 订阅管理器
+    /// Presence subscription manager
     pub presence_manager: Arc<RwLock<PresenceManager>>,
-    /// 连接速率限制器
+    /// Connection rate limiter
     pub connection_rate_limiter: Option<Arc<crate::ratelimit::ConnectionRateLimiter>>,
-    /// 消息速率限制器
+    /// Message rate limiter
     pub message_rate_limiter: Option<Arc<crate::ratelimit::MessageRateLimiter>>,
 }
 
-/// 客户端连接信息
+/// Client connection info
 #[derive(Debug)]
 pub struct ClientConnection {
     pub id: String,
@@ -90,7 +90,7 @@ pub struct ClientConnection {
     pub credential: Option<AIdCredential>,
     pub direct_sender: tokio::sync::mpsc::UnboundedSender<WsMessage>,
     pub client_ip: Option<std::net::IpAddr>,
-    /// WebRTC 角色：\"answer\" 或 None (默认为 offer)
+    /// WebRTC role: "answer" or None (defaults to offer)
     pub webrtc_role: Option<String>,
 }
 
@@ -105,7 +105,7 @@ struct StaleClient {
     direct_sender: tokio::sync::mpsc::UnboundedSender<WsMessage>,
 }
 
-/// 信令服务器句柄 - 用于在异步任务中操作服务器
+/// Signaling server handle - used to operate the server in async tasks
 #[derive(Debug, Clone)]
 pub struct SignalingServerHandle {
     pub clients: Arc<RwLock<HashMap<String, ClientConnection>>>,
@@ -116,7 +116,7 @@ pub struct SignalingServerHandle {
     pub message_rate_limiter: Option<Arc<crate::ratelimit::MessageRateLimiter>>,
 }
 impl SignalingServerHandle {
-    /// 创建 SignalingEnvelope
+    /// Create a SignalingEnvelope
     #[cfg_attr(
         feature = "opentelemetry",
         instrument(level = "debug", skip_all, fields(reply_for))
@@ -161,13 +161,13 @@ impl SignalingServer {
             actor_id_index: Arc::new(RwLock::new(HashMap::new())),
             service_registry: Arc::new(RwLock::new(ServiceRegistry::new())),
             presence_manager: Arc::new(RwLock::new(PresenceManager::new())),
-            connection_rate_limiter: None, // 在 axum_router 中根据配置初始化
-            message_rate_limiter: None,    // 在 axum_router 中根据配置初始化
+            connection_rate_limiter: None, // Initialized in axum_router based on config
+            message_rate_limiter: None,    // Initialized in axum_router based on config
         }
     }
 }
 
-/// 处理 WebSocket 连接
+/// Handle WebSocket connection
 pub async fn handle_websocket_connection(
     websocket: WebSocket,
     server: SignalingServerHandle,
@@ -177,19 +177,19 @@ pub async fn handle_websocket_connection(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let client_id = Uuid::new_v4().to_string();
     platform::recording::info!(
-        "🔗 新 WebSocket 客户端连接: {} (IP: {:?})",
+        "🔗 New WebSocket client connection: {} (IP: {:?})",
         client_id,
         client_ip
     );
 
-    // 分离读写流
+    // Split read and write streams
     let (mut ws_sender, mut ws_receiver) = websocket.split();
 
-    // 创建专用的发送通道用于点对点消息
+    // Create a dedicated send channel for peer-to-peer messages
     let (direct_tx, mut direct_rx) = tokio::sync::mpsc::unbounded_channel();
     let control_tx = direct_tx.clone();
 
-    // 注册客户端（包含专用发送器）
+    // Register client (including dedicated sender)
     let (actor_id, credential) = match url_identity {
         Some(identity) => (Some(identity.0), Some(identity.1)),
         None => (None, None),
@@ -198,12 +198,12 @@ pub async fn handle_websocket_connection(
     let stale_clients = {
         let mut clients_guard = server.clients.write().await;
 
-        // 移除已有相同 actor 的连接（避免 stale 映射），并发送 WS Close 帧让旧连接干净退出。
+        // Remove existing connections for the same actor (to avoid stale mappings), and send a WS Close frame to let the old connection exit cleanly.
         let stale_clients = if let Some(ref aid) = actor_id {
             let stale_clients = remove_stale_actor_clients(&mut clients_guard, aid);
 
-            // 同步更新 actor_id_index：在持有 clients write lock 时获取 actor_id_index write lock
-            // 保持锁顺序 clients -> actor_id_index
+            // Synchronously update actor_id_index: acquire actor_id_index write lock while holding clients write lock
+            // Maintain lock order: clients -> actor_id_index
             let mut actor_index = server.actor_id_index.write().await;
             actor_index.insert(aid.clone(), client_id.clone());
 
@@ -311,7 +311,7 @@ pub async fn handle_websocket_connection(
         }
     }
 
-    // 处理客户端消息的任务
+    // Task for handling client messages
     let server_for_receive = server.clone();
     let client_id_for_receive = client_id.clone();
 
@@ -323,12 +323,12 @@ pub async fn handle_websocket_connection(
                         handle_client_envelope(&data, &client_id_for_receive, &server_for_receive)
                             .await
                     {
-                        platform::recording::error!("处理客户端信令错误: {}", e);
+                        platform::recording::error!("Error handling client signaling: {}", e);
                         break;
                     }
                 }
                 Err(e) => {
-                    platform::recording::error!("WebSocket 错误: {}", e);
+                    platform::recording::error!("WebSocket error: {}", e);
                     break;
                 }
                 Ok(message) => {
@@ -343,7 +343,7 @@ pub async fn handle_websocket_connection(
             }
         }
 
-        // 清理客户端
+        // Clean up client
         cleanup_client(
             &client_id_for_receive,
             &server_for_receive,
@@ -352,11 +352,11 @@ pub async fn handle_websocket_connection(
         .await;
     });
 
-    // 处理发送消息的任务
+    // Task for sending messages
     let mut send_task = tokio::spawn(async move {
         loop {
             tokio::select! {
-                // 处理点对点消息
+                // Handle peer-to-peer messages
                 msg = direct_rx.recv() => {
                     match msg {
                         Some(message) => {
@@ -376,7 +376,7 @@ pub async fn handle_websocket_connection(
     });
     let mut receive_task = receive_task;
 
-    // 等待任一任务完成
+    // Wait for either task to complete
     tokio::select! {
         result = &mut receive_task => {
             if let Err(e) = result {
@@ -402,9 +402,9 @@ pub async fn handle_websocket_connection(
         },
     }
 
-    // 清理客户端连接
+    // Clean up client connection
     cleanup_client(&client_id, &server, CleanupMode::ConnectionClosed).await;
-    platform::recording::info!("🔌 客户端 {} 已断开连接", client_id);
+    platform::recording::info!("🔌 Client {} disconnected", client_id);
 
     Ok(())
 }
@@ -465,7 +465,7 @@ fn handle_websocket_control_message(
 ) -> bool {
     match message {
         WsMessage::Ping(payload) => {
-            platform::recording::debug!("收到 WebSocket Ping，回复 Pong: {}", client_id);
+            platform::recording::debug!("Received WebSocket Ping, replying Pong: {}", client_id);
             if control_tx.send(WsMessage::Pong(payload)).is_err() {
                 platform::recording::warn!(
                     "WebSocket Pong send queue closed for client {}",
@@ -476,36 +476,43 @@ fn handle_websocket_control_message(
             true
         }
         WsMessage::Pong(_) => {
-            platform::recording::debug!("收到 WebSocket Pong: {}", client_id);
+            platform::recording::debug!("Received WebSocket Pong: {}", client_id);
             true
         }
         WsMessage::Close(_) => {
-            platform::recording::info!("客户端 {} 主动断开连接", client_id);
+            platform::recording::info!("Client {} initiated disconnect", client_id);
             false
         }
         WsMessage::Text(_) => {
-            platform::recording::warn!("收到 Text WebSocket 消息，忽略: {}", client_id);
+            platform::recording::warn!("Received Text WebSocket message, ignoring: {}", client_id);
             true
         }
         _ => {
-            platform::recording::warn!("收到未支持的非 Binary WebSocket 消息，忽略: {}", client_id);
+            platform::recording::warn!(
+                "Received unsupported non-Binary WebSocket message, ignoring: {}",
+                client_id
+            );
             true
         }
     }
 }
 
-/// 处理客户端发送的 SignalingEnvelope
+/// Handle a SignalingEnvelope sent by the client
 async fn handle_client_envelope(
     data: &[u8],
     client_id: &str,
     server: &SignalingServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // 检查消息速率限制
+    // Check message rate limit
     if let Some(ref limiter) = server.message_rate_limiter
         && let Err(e) = limiter.check_message(client_id).await
     {
-        platform::recording::warn!("🚫 连接 {} 消息速率限制触发: {}", client_id, e);
-        // 发送错误响应
+        platform::recording::warn!(
+            "🚫 Connection {} message rate limit triggered: {}",
+            client_id,
+            e
+        );
+        // Send error response
         let error_response = ErrorResponse {
             code: 429,
             message: e,
@@ -516,7 +523,7 @@ async fn handle_client_envelope(
         return Ok(());
     }
 
-    // 解码 protobuf 消息
+    // Decode protobuf message
     let envelope = SignalingEnvelope::decode(data)?;
 
     #[cfg(feature = "opentelemetry")]
@@ -534,9 +541,12 @@ async fn handle_client_envelope(
     }
 
     async move {
-        platform::recording::debug!("📨 收到信令消息 envelope_id={}", envelope.envelope_id);
+        platform::recording::debug!(
+            "📨 Received signaling message envelope_id={}",
+            envelope.envelope_id
+        );
 
-        // 根据流向处理消息
+        // Handle message based on flow direction
         match envelope.flow {
             Some(signaling_envelope::Flow::PeerToServer(peer_to_server)) => {
                 handle_peer_to_server(peer_to_server, client_id, server, &envelope.envelope_id)
@@ -565,14 +575,14 @@ async fn handle_client_envelope(
             }
             Some(signaling_envelope::Flow::EnvelopeError(error)) => {
                 platform::recording::error!(
-                    "收到 envelope 错误: code={}, message={}",
+                    "Received envelope error: code={}, message={}",
                     error.code,
                     error.message
                 );
                 Ok(())
             }
             _ => {
-                platform::recording::warn!("未知的信令流向");
+                platform::recording::warn!("Unknown signaling flow direction");
                 Ok(())
             }
         }
@@ -581,7 +591,7 @@ async fn handle_client_envelope(
     .await
 }
 
-/// 处理 PeerToSignaling 流程（注册前）
+/// Handle PeerToSignaling flow (pre-registration)
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_peer_to_server(
     peer_to_server: PeerToSignaling,
@@ -591,7 +601,7 @@ async fn handle_peer_to_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     match peer_to_server.payload {
         Some(peer_to_signaling::Payload::RegisterRequest(_)) => {
-            // 注册功能已迁移到 AIS HTTP，信令不再中转注册请求
+            // Registration has been migrated to AIS HTTP; signaling no longer relays registration requests
             platform::recording::warn!(
                 "⚠️  RegisterRequest rejected: use /ais/register HTTP endpoint instead"
             );
@@ -605,13 +615,13 @@ async fn handle_peer_to_server(
             .await?;
         }
         None => {
-            platform::recording::warn!("PeerToSignaling 消息缺少 payload");
+            platform::recording::warn!("PeerToSignaling message missing payload");
         }
     }
     Ok(())
 }
 
-/// 发送注册错误响应
+/// Send registration error response
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn send_register_error(
     client_id: &str,
@@ -629,7 +639,7 @@ async fn send_register_error(
         result: Some(register_response::Result::Error(error_response)),
     };
 
-    // 创建临时 ActrId（用于响应）
+    // Create temporary ActrId (for response)
     let temp_actor_id = ActrId {
         realm: Realm { realm_id: 0 },
         serial_number: 0,
@@ -652,7 +662,7 @@ async fn send_register_error(
     Ok(())
 }
 
-/// 处理 ActrToSignaling 流程（注册后）
+/// Handle ActrToSignaling flow (after registration)
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id, actr_id = %actr_to_server.source.to_string_repr())))]
 async fn handle_actr_to_server(
     actr_to_server: ActrToSignaling,
@@ -662,14 +672,17 @@ async fn handle_actr_to_server(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = actr_to_server.source.clone();
 
-    platform::recording::info!("📬 处理来自 Actor {} 的消息", source.to_string_repr());
+    platform::recording::info!(
+        "📬 Processing message from Actor {}",
+        source.to_string_repr()
+    );
 
-    // 验证 Realm 是否存在、未过期、状态正常
+    // Validate that Realm exists, is not expired, and is in normal state
     let realm_id = source.realm.realm_id;
     if let Err(e) = RealmEntity::validate_realm(realm_id).await {
         let (code, msg) = RealmEntity::map_validation_error(e);
         platform::recording::warn!(
-            "⚠️  Actor {} realm 验证失败: {}",
+            "⚠️  Actor {} realm validation failed: {}",
             source.to_string_repr(),
             msg
         );
@@ -685,7 +698,7 @@ async fn handle_actr_to_server(
         return Ok(());
     }
 
-    // 验证 credential 并获取容忍期状态
+    // Validate credential and get tolerance period status
     let in_tolerance_period = match AIdCredentialValidator::check(
         &actr_to_server.credential,
         source.realm.realm_id,
@@ -695,11 +708,11 @@ async fn handle_actr_to_server(
         Ok((_claims, in_tolerance)) => in_tolerance,
         Err(e) => {
             platform::recording::warn!(
-                "⚠️  Actor {} credential 验证失败: {}",
+                "⚠️  Actor {} credential validation failed: {}",
                 source.to_string_repr(),
                 e
             );
-            // 发送错误响应
+            // Send error response
             send_error_response(
                 client_id,
                 &source,
@@ -751,21 +764,21 @@ async fn handle_actr_to_server(
         }
         Some(actr_to_signaling::Payload::Error(error)) => {
             platform::recording::error!(
-                "收到客户端错误报告 (Actor {}): code={}, message={}",
+                "Received client error report (Actor {}): code={}, message={}",
                 source.to_string_repr(),
                 error.code,
                 error.message
             );
         }
         None => {
-            platform::recording::warn!("ActrToSignaling 消息缺少 payload");
+            platform::recording::warn!("ActrToSignaling message missing payload");
         }
     }
 
     Ok(())
 }
 
-/// 处理心跳
+/// Handle heartbeat (Ping)
 async fn handle_ping(
     source: ActrId,
     ping: Ping,
@@ -775,7 +788,7 @@ async fn handle_ping(
     in_tolerance_period: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
-        "💓 收到 Actor {} 心跳: availability={}, power_reserve={:.2}, mailbox_backlog={:.2}, sticky_clients={}{}",
+        "💓 Received Actor {} heartbeat: availability={}, power_reserve={:.2}, mailbox_backlog={:.2}, sticky_clients={}{}",
         source.to_string_repr(),
         ping.availability,
         ping.power_reserve,
@@ -788,7 +801,7 @@ async fn handle_ping(
         }
     );
 
-    // 存储负载指标到 ServiceRegistry
+    // Store load metrics in ServiceRegistry
     let mut registry = server.service_registry.write().await;
     if let Err(e) = registry.update_load_metrics(
         &source,
@@ -797,20 +810,20 @@ async fn handle_ping(
         ping.mailbox_backlog,
     ) {
         platform::recording::warn!(
-            "更新 Actor {} 负载指标失败: {}, 尝试从数据库恢复服务",
+            "Failed to update load metrics for Actor {}: {}, attempting to restore service from database",
             source.to_string_repr(),
             e
         );
 
-        // 尝试从数据库恢复服务
+        // Attempt to restore service from database
         match registry.restore_service_from_storage(&source).await {
             Ok(true) => {
                 platform::recording::info!(
-                    "✅ 成功从数据库恢复 Actor {} 的服务注册",
+                    "✅ Successfully restored service registration for Actor {} from database",
                     source.to_string_repr()
                 );
 
-                // 恢复后再次尝试更新负载指标
+                // Retry load metrics update after restoration
                 if let Err(e2) = registry.update_load_metrics(
                     &source,
                     ping.availability,
@@ -818,27 +831,27 @@ async fn handle_ping(
                     ping.mailbox_backlog,
                 ) {
                     platform::recording::error!(
-                        "❌ 从数据库恢复后仍无法更新 Actor {} 的负载指标: {}",
+                        "❌ Still unable to update load metrics for Actor {} after database restoration: {}",
                         source.to_string_repr(),
                         e2
                     );
                 } else {
                     platform::recording::info!(
-                        "✅ Actor {} 服务恢复后负载指标更新成功",
+                        "✅ Load metrics updated successfully after service restoration for Actor {}",
                         source.to_string_repr()
                     );
                 }
             }
             Ok(false) => {
                 platform::recording::warn!(
-                    "⚠️  数据库中未找到 Actor {} 的服务信息 (可能已过期或从未注册)",
+                    "⚠️  Service info for Actor {} not found in database (may have expired or was never registered)",
                     source.to_string_repr()
                 );
-                // TODO: 可选 - 在 Pong 响应中添加警告，提示客户端重新注册
+                // TODO: optional - add a warning in Pong response to prompt client to re-register
             }
             Err(e) => {
                 platform::recording::error!(
-                    "❌ 从数据库恢复 Actor {} 的服务失败: {}",
+                    "❌ Failed to restore service for Actor {} from database: {}",
                     source.to_string_repr(),
                     e
                 );
@@ -847,14 +860,14 @@ async fn handle_ping(
     }
     drop(registry);
 
-    // 创建 Pong 响应
+    // Create Pong response
     let mut pong = Pong {
         seq: chrono::Utc::now().timestamp() as u64,
         suggest_interval_secs: Some(30),
         credential_warning: None,
     };
 
-    // 如果密钥在容忍期，添加警告
+    // If credential key is in tolerance period, add a warning
     if in_tolerance_period {
         platform::recording::warn!(
             "⚠️  Actor {} credential key is in tolerance period",
@@ -880,7 +893,7 @@ async fn handle_ping(
     Ok(())
 }
 
-/// 处理注销
+/// Handle unregistration
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_unregister(
     source: ActrId,
@@ -890,12 +903,12 @@ async fn handle_unregister(
     request_envelope_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
-        "👋 Actor {} 注销: reason={:?}",
+        "👋 Actor {} unregistered: reason={:?}",
         source.to_string_repr(),
-        req.reason.as_deref().unwrap_or("未提供")
+        req.reason.as_deref().unwrap_or("not provided")
     );
 
-    // 发送 UnregisterResponse
+    // Send UnregisterResponse
     let response = actr_protocol::UnregisterResponse {
         result: Some(actr_protocol::unregister_response::Result::Success(
             actr_protocol::unregister_response::UnregisterOk {},
@@ -910,13 +923,13 @@ async fn handle_unregister(
     let response_envelope = server.create_envelope(flow, Some(request_envelope_id));
     send_envelope_to_client(client_id, response_envelope, server).await?;
 
-    // 清理客户端连接
+    // Clean up client connection
     cleanup_client(client_id, server, CleanupMode::ExplicitUnregister).await;
 
     Ok(())
 }
 
-/// 通过 actor_id_index 快速解析 client_id，保持索引与 clients 同步
+/// Resolve client_id via actor_id_index, keeping the index in sync with clients
 #[allow(dead_code)]
 async fn resolve_client_id_by_actor_id(
     actor_id: &ActrId,
@@ -930,7 +943,7 @@ async fn resolve_client_id_by_actor_id(
         Some(id) => id,
         None => {
             platform::recording::warn!(
-                "⚠️  Actor {} 缺少 client_id 索引，可能尚未注册或已清理",
+                "⚠️  Actor {} missing client_id index, may not be registered yet or already cleaned up",
                 actor_id.to_string_repr()
             );
             return Err("client_id not found for actor_id".into());
@@ -939,7 +952,7 @@ async fn resolve_client_id_by_actor_id(
 
     if !clients_guard.contains_key(&client_id) {
         platform::recording::warn!(
-            "⚠️  Actor {} 索引指向不存在的客户端 {}，索引可能已过期",
+            "⚠️  Actor {} index points to non-existent client {}, index may be stale",
             actor_id.to_string_repr(),
             client_id
         );
@@ -984,7 +997,7 @@ async fn relay_source_connection_status(
     }
 }
 
-/// 处理 ActrRelay（WebRTC 信令中继）
+/// Handle ActrRelay (WebRTC signaling relay)
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id, actr_id = %relay.source.to_string_repr(), target_id = %relay.target.to_string_repr())))]
 async fn handle_actr_relay(
     relay: ActrRelay,
@@ -995,12 +1008,12 @@ async fn handle_actr_relay(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = relay.source.clone();
     let target = &relay.target;
-    // 验证源 Actor 的 realm（存在、未过期且状态正常）
+    // Validate source Actor realm (exists, not expired, and in normal state)
     let realm_id = source.realm.realm_id;
     if let Err(e) = RealmEntity::validate_realm(realm_id).await {
         let (code, msg) = RealmEntity::map_validation_error(e);
         platform::recording::warn!(
-            "⚠️  Actor {} realm 验证失败: {}",
+            "⚠️  Actor {} realm validation failed: {}",
             source.to_string_repr(),
             msg
         );
@@ -1017,7 +1030,7 @@ async fn handle_actr_relay(
     }
 
     platform::recording::info!(
-        "🔀 中继信令: {} -> {}",
+        "🔀 Relay signaling: {} -> {}",
         source.to_string_repr(),
         target.to_string_repr()
     );
@@ -1029,7 +1042,7 @@ async fn handle_actr_relay(
     let source_realm = source.realm.realm_id;
     let target_realm = target.realm.realm_id;
 
-    // ACL 统一判定：同 realm / 跨 realm 都走同一规则查询
+    // Unified ACL check: same-realm / cross-realm both go through the same rule query
     let source_type = type_key(&source.r#type);
     let target_type = type_key(&target.r#type);
 
@@ -1116,14 +1129,14 @@ async fn handle_actr_relay(
     {
         let clients_guard = server.clients.read().await;
 
-        // 使用 determine_webrtc_role 函数确定角色
+        // Use determine_webrtc_role function to determine role
         let is_offerer = determine_webrtc_role(&from, &to, &clients_guard);
 
         drop(clients_guard);
 
-        // 发送给 from 的 RoleAssignment
+        // Send RoleAssignment to from
         let new_relay = ActrRelay {
-            // source: peer actor (对端)，target: 该 assignment 的接收方
+            // source: peer actor, target: receiver of this assignment
             source: from.clone(),
             credential: relay.credential.clone(),
             target: to.clone(),
@@ -1141,9 +1154,9 @@ async fn handle_actr_relay(
         )
         .await?;
 
-        // 发送给 to 的 RoleAssignment
+        // Send RoleAssignment to to
         let new_relay = ActrRelay {
-            // source: peer actor (对端)，target: 该 assignment 的接收方
+            // source: peer actor, target: receiver of this assignment
             source: from.clone(),
             credential: relay.credential.clone(),
             target: to.clone(),
@@ -1165,7 +1178,7 @@ async fn handle_actr_relay(
         return Ok(());
     }
 
-    // 查找目标客户端并转发其他中继消息
+    // Find target client and forward other relay messages
     let clients_guard = server.clients.read().await;
     let target_client_id = clients_guard.iter().find_map(|(id, client)| {
         client.actor_id.as_ref().and_then(|actor_id| {
@@ -1180,7 +1193,7 @@ async fn handle_actr_relay(
     });
 
     if let Some(target_client_id) = target_client_id {
-        // 重新构造 envelope 并转发
+        // Reconstruct envelope and forward
         let flow = signaling_envelope::Flow::ActrRelay(relay);
         #[allow(unused_mut)]
         let mut forward_envelope = server.create_new_envelope(flow);
@@ -1190,15 +1203,15 @@ async fn handle_actr_relay(
         inject_trace_context(&remote_context, &mut forward_envelope);
         send_envelope_to_client(&target_client_id, forward_envelope, server).await?;
 
-        platform::recording::info!("✅ 信令中继成功");
+        platform::recording::info!("✅ Signaling relay successful");
     } else {
-        platform::recording::warn!("⚠️ 未找到目标 Actor {}", target.to_string_repr());
+        platform::recording::warn!("⚠️ Target Actor {} not found", target.to_string_repr());
     }
 
     Ok(())
 }
 
-// 计算用于排序的 ActorId key，确保角色分配可重复
+// Compute ActorId key for sorting, ensuring role assignment is deterministic
 fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
     (
         id.realm.realm_id,
@@ -1208,26 +1221,26 @@ fn actor_order_key(id: &ActrId) -> (u32, u64, String, String) {
     )
 }
 
-/// 根据双方的角色偏好和 ActorId 确定发起方是否为 offerer
+/// Determine whether the initiator is the offerer based on both parties role preferences and ActorId
 ///
-/// # 角色判定规则:
-/// 1. 如果一方明确要求当 "answer" 而另一方没有要求，则满足该要求
-/// 2. 如果双方都有相同偏好（都想当 "answer" 或都没要求），则回退到 ActrId 静态排序逻辑
+/// # Role determination rules:
+/// 1. If one party explicitly requests to be "answer" and the other does not, satisfy that request
+/// 2. If both parties have the same preference (both want "answer" or neither specifies), fall back to ActrId static sorting logic
 ///
 /// # Arguments
-/// * `from` - 发起方的 ActorId
-/// * `to` - 接收方的 ActorId
-/// * `clients` - 客户端连接映射表,用于查找角色偏好
+/// * `from` - initiator ActorId
+/// * `to` - receiver ActorId
+/// * `clients` - client connection map, used to look up role preferences
 ///
 /// # Returns
-/// * `true` - 发起方应该是 offerer
-/// * `false` - 发起方应该是 answerer
+/// * `true` - initiator should be offerer
+/// * `false` - initiator should be answerer
 fn determine_webrtc_role(
     from: &ActrId,
     to: &ActrId,
     clients: &HashMap<String, ClientConnection>,
 ) -> bool {
-    // 从客户端连接中查找双方的角色偏好
+    // Look up both parties role preferences from client connections
     let from_role = clients
         .values()
         .find(|c| c.actor_id.as_ref() == Some(from))
@@ -1243,12 +1256,12 @@ fn determine_webrtc_role(
     } else if to_role == Some("answer") && from_role != Some("answer") {
         true
     } else {
-        // 其他情况(双方都偏好 answer 或都无偏好)，使用 ActorId 逆序
+        // Other cases (both prefer answer or both have no preference), use ActorId reverse ordering
         actor_order_key(from) > actor_order_key(to)
     };
 
     platform::recording::info!(
-        "⚖️ 角色协商完成: {} (role={:?}) -> {} (role={:?}), is_offerer={}",
+        "⚖️ Role negotiation complete: {} (role={:?}) -> {} (role={:?}), is_offerer={}",
         from.to_string_repr(),
         from_role,
         to.to_string_repr(),
@@ -1284,7 +1297,7 @@ async fn send_role_assignment(
         })
     }) {
         platform::recording::debug!(
-            "send_role_assignment: 发送 envelope 到客户端 {:?}",
+            "send_role_assignment: sending envelope to client {:?}",
             client.actor_id
         );
         client
@@ -1293,14 +1306,14 @@ async fn send_role_assignment(
             .map_err(|e| e.into())
     } else {
         platform::recording::warn!(
-            "⚠️ send_role_assignment: 未找到目标 Actor {}",
+            "⚠️ send_role_assignment: target Actor {} not found",
             target_actor.to_string_repr()
         );
         Ok(())
     }
 }
 
-/// 发送 SignalingEnvelope 到客户端
+/// Send SignalingEnvelope to client
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = envelope.envelope_id)))]
 async fn send_envelope_to_client(
     client_id: &str,
@@ -1317,28 +1330,28 @@ async fn send_envelope_to_client(
             inject_trace_context(&context, &mut envelope);
         }
 
-        // 编码 protobuf
+        // Encode protobuf
         let mut buf = Vec::new();
         envelope.encode(&mut buf)?;
 
-        // 发送 Binary 消息
+        // Send Binary message
         match client.direct_sender.send(WsMessage::Binary(buf.into())) {
             Ok(_) => {
-                platform::recording::info!("✅ 成功发送 envelope 到客户端 {}", client_id);
+                platform::recording::info!("✅ Successfully sent envelope to client {}", client_id);
                 Ok(())
             }
             Err(e) => {
-                platform::recording::error!("❌ 发送失败: {}", e);
-                Err(format!("发送失败: {e}").into())
+                platform::recording::error!("❌ Send failed: {}", e);
+                Err(format!("Send failed: {e}").into())
             }
         }
     } else {
-        platform::recording::warn!("⚠️ 未找到客户端 {}", client_id);
-        Err(format!("客户端 {client_id} 未找到").into())
+        platform::recording::warn!("⚠️ Client {} not found", client_id);
+        Err(format!("Client {client_id} not found").into())
     }
 }
 
-/// 清理客户端连接
+/// Clean up client connection
 async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: CleanupMode) {
     let (removed_client, actor_cleanup) = {
         let mut clients_guard = server.clients.write().await;
@@ -1365,7 +1378,7 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
                     if let Some(replacement_client_id) = replacement_client_id {
                         actor_index.insert(actor_id.clone(), replacement_client_id.clone());
                         platform::recording::info!(
-                            "🔁 Actor {} 已切换到新客户端 {}，保留索引",
+                            "🔁 Actor {} switched to new client {}, preserving index",
                             actor_id.to_string_repr(),
                             replacement_client_id
                         );
@@ -1375,7 +1388,7 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
                 }
                 Some(mapped_client) => {
                     platform::recording::warn!(
-                        "⚠️  Actor {} 索引指向其他客户端 {}，保留索引",
+                        "⚠️  Actor {} index points to another client {}, preserving index",
                         actor_id.to_string_repr(),
                         mapped_client
                     );
@@ -1384,13 +1397,13 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
                     if let Some(replacement_client_id) = replacement_client_id {
                         actor_index.insert(actor_id.clone(), replacement_client_id.clone());
                         platform::recording::warn!(
-                            "⚠️  Actor {} 清理时索引缺失，已修复为新客户端 {}",
+                            "⚠️  Actor {} index missing during cleanup, fixed to new client {}",
                             actor_id.to_string_repr(),
                             replacement_client_id
                         );
                     } else {
                         platform::recording::warn!(
-                            "⚠️  Actor {} 清理时未找到索引条目",
+                            "⚠️  Actor {} no index entry found during cleanup",
                             actor_id.to_string_repr()
                         );
                     }
@@ -1403,11 +1416,14 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
 
     if let Some(_client) = removed_client {
         if let Some((actor_id, replacement_client_id)) = actor_cleanup {
-            platform::recording::info!("🧹 清理 Actor {} 的连接", actor_id.to_string_repr());
+            platform::recording::info!(
+                "🧹 Cleaning up Actor {} connection",
+                actor_id.to_string_repr()
+            );
 
             if let Some(replacement_client_id) = replacement_client_id {
                 platform::recording::info!(
-                    "⏭️ Actor {} 已有新连接 {}，跳过服务注销",
+                    "⏭️ Actor {} already has new connection {}, skipping service unregistration",
                     actor_id.to_string_repr(),
                     replacement_client_id
                 );
@@ -1424,14 +1440,14 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
             }
         }
 
-        // 移除消息速率限制器
+        // Remove message rate limiter
         if let Some(ref limiter) = server.message_rate_limiter {
             limiter.remove_connection(client_id).await;
         }
     }
 }
 
-/// 处理服务发现请求
+/// Handle service discovery request
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_discovery_request(
     source: ActrId,
@@ -1441,13 +1457,13 @@ async fn handle_discovery_request(
     request_envelope_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
-        "🔍 处理 Actor {} 的 Discovery 请求: manufacturer={:?}, limit={}",
+        "🔍 Processing Discovery request from Actor {}: manufacturer={:?}, limit={}",
         source.to_string_repr(),
         req.manufacturer.as_deref().unwrap_or("*"),
         req.limit.unwrap_or(64)
     );
 
-    // 从 ServiceRegistry 查询所有服务
+    // Query all services from ServiceRegistry
     let registry = server.service_registry.read().await;
     let services = registry.discover_all(req.manufacturer.as_deref());
     let total_count = services.len(); // Save count before moving
@@ -1493,7 +1509,7 @@ async fn handle_discovery_request(
         acl_filtered_services.len()
     );
 
-    // 按 ActrType 聚合服务（使用 HashMap 去重）
+    // Aggregate services by ActrType (using HashMap for deduplication)
     use std::collections::HashMap;
     let mut type_map: HashMap<String, actr_protocol::discovery_response::TypeEntry> =
         HashMap::new();
@@ -1501,7 +1517,7 @@ async fn handle_discovery_request(
     for service in acl_filtered_services {
         let type_key = type_key(&service.actor_id.r#type);
 
-        // 如果该类型还未添加，创建新条目
+        // If this type has not been added yet, create a new entry
         type_map.entry(type_key).or_insert_with(|| {
             let (fingerprint, description, published_at, tags) = service
                 .service_spec
@@ -1527,7 +1543,7 @@ async fn handle_discovery_request(
         });
     }
 
-    // 转换为 Vec 并应用 limit
+    // Convert to Vec and apply limit
     let mut entries: Vec<_> = type_map.into_values().collect();
     let limit = req.limit.unwrap_or(64) as usize;
     entries.truncate(limit);
@@ -1535,7 +1551,7 @@ async fn handle_discovery_request(
     drop(registry);
 
     platform::recording::info!(
-        "✅ 为 Actor {} 返回 {} 个服务类型",
+        "✅ Returned {} service types for Actor {}",
         source.to_string_repr(),
         entries.len()
     );
@@ -1557,7 +1573,7 @@ async fn handle_discovery_request(
     Ok(())
 }
 
-/// 处理路由候选请求（负载均衡）
+/// Handle route candidates request (load balancing)
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_route_candidates_request(
     source: ActrId,
@@ -1567,20 +1583,20 @@ async fn handle_route_candidates_request(
     request_envelope_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
-        "🎯 处理 Actor {} 的 RouteCandidates 请求: target_type={}/{}",
+        "🎯 Processing RouteCandidates request from Actor {}: target_type={}/{}",
         source.to_string_repr(),
         req.target_type.manufacturer,
         req.target_type.name,
     );
 
-    // 从 ServiceRegistry 查询所有匹配 target_type 的实例
+    // Query all instances matching target_type from ServiceRegistry
     let registry = server.service_registry.read().await;
     let candidates_raw = registry.find_by_actr_type(&req.target_type);
     drop(registry);
 
-    // 过滤掉无活跃 WebSocket 连接的幽灵候选（ghost candidates）。
-    // ServiceRegistry 可能因断网等原因短暂保留已离线的条目，
-    // 通过与 clients 映射交叉校验消除它们。
+    // Filter out ghost candidates with no active WebSocket connection.
+    // ServiceRegistry may briefly retain offline entries due to network disruptions,
+    // Cross-checking against the clients map eliminates them.
     let connected_actor_ids: std::collections::HashSet<ActrId> = {
         let clients = server.clients.read().await;
         clients
@@ -1594,7 +1610,7 @@ async fn handle_route_candidates_request(
             let connected = connected_actor_ids.contains(&c.actor_id);
             if !connected {
                 platform::recording::warn!(
-                    "🚫 过滤幽灵候选: Actor {} (无活跃连接)",
+                    "🚫 Filtered ghost candidate: Actor {} (no active connection)",
                     c.actor_id.to_string_repr()
                 );
             }
@@ -1606,13 +1622,13 @@ async fn handle_route_candidates_request(
 
     if candidates.is_empty() {
         platform::recording::info!(
-            "⚠️  未找到 {}/{} 类型的服务实例",
+            "⚠️  No service instances found for type {}/{}",
             req.target_type.manufacturer,
             req.target_type.name
         );
     } else {
         platform::recording::info!(
-            "📋 找到 {} 个 {}/{} 类型的候选实例",
+            "📋 Found {} candidate instances for type {}/{}",
             total_candidates,
             req.target_type.manufacturer,
             req.target_type.name
@@ -1658,7 +1674,7 @@ async fn handle_route_candidates_request(
         acl_filtered_candidates.len()
     );
 
-    // 从请求中提取客户端位置（如果提供）
+    // Extract client location from request (if provided)
     let client_location = req.client_location.as_ref().and_then(|loc| {
         if let (Some(lat), Some(lon)) = (loc.latitude, loc.longitude) {
             Some((lat, lon))
@@ -1667,14 +1683,14 @@ async fn handle_route_candidates_request(
         }
     });
 
-    // 提取 ws_address（rank_candidates 会 move candidates，需提前收集）
+    // Extract ws_address (rank_candidates moves candidates, collect beforehand)
     let ws_address_map: Vec<(ActrId, Option<String>)> = acl_filtered_candidates
         .iter()
         .map(|c| (c.actor_id.clone(), c.ws_address.clone()))
         .collect();
 
-    // 排序：ACL 已过滤，相同 ActrType 即协议兼容，按 ranking_factors 顺序依次应用
-    // is_exact_match 标记在 LB 内部按 client_fingerprint 完成
+    // Ranking: ACL filtered, same ActrType means protocol compatible, apply ranking_factors in order
+    // is_exact_match flag handled internally by LB via client_fingerprint
     let ranked_actor_ids = LoadBalancer::rank_candidates(
         &acl_filtered_candidates,
         req.criteria.as_ref(),
@@ -1684,7 +1700,7 @@ async fn handle_route_candidates_request(
     );
 
     platform::recording::info!(
-        "✅ 为 Actor {} 返回 {} 个候选",
+        "✅ Returned {} candidates for Actor {}",
         source.to_string_repr(),
         ranked_actor_ids.len(),
     );
@@ -1835,7 +1851,7 @@ async fn handle_get_signing_key_request(
     Ok(())
 }
 
-/// 处理订阅 Actor 上线事件
+/// Handle subscribe to Actor up events
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_subscribe_actr_up(
     source: ActrId,
@@ -1845,13 +1861,13 @@ async fn handle_subscribe_actr_up(
     request_envelope_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
-        "📢 Actor {} 订阅服务上线事件: target_type={}/{}",
+        "📢 Actor {} subscribed to service up events: target_type={}/{}",
         source.to_string_repr(),
         req.target_type.manufacturer,
         req.target_type.name
     );
 
-    // 添加订阅到 PresenceManager
+    // Add subscription to PresenceManager
     let mut presence = server.presence_manager.write().await;
     presence.subscribe(source.clone(), req.target_type);
     drop(presence);
@@ -1875,7 +1891,7 @@ async fn handle_subscribe_actr_up(
     Ok(())
 }
 
-/// 处理取消订阅 Actor 上线事件
+/// Handle unsubscribe from Actor up events
 #[cfg_attr(feature = "opentelemetry", tracing::instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id)))]
 async fn handle_unsubscribe_actr_up(
     source: ActrId,
@@ -1885,20 +1901,20 @@ async fn handle_unsubscribe_actr_up(
     request_envelope_id: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     platform::recording::info!(
-        "🔕 Actor {} 取消订阅服务上线事件: target_type={}/{}",
+        "🔕 Actor {} unsubscribed from service up events: target_type={}/{}",
         source.to_string_repr(),
         req.target_type.manufacturer,
         req.target_type.name
     );
 
-    // 从 PresenceManager 移除订阅
+    // Remove subscription from PresenceManager
     let mut presence = server.presence_manager.write().await;
     let removed = presence.unsubscribe(&source, &req.target_type);
     drop(presence);
 
     if !removed {
         platform::recording::warn!(
-            "Actor {} 未订阅过 {}/{}",
+            "Actor {} was not subscribed to {}/{}",
             source.to_string_repr(),
             req.target_type.manufacturer,
             req.target_type.name
@@ -1926,7 +1942,7 @@ async fn handle_unsubscribe_actr_up(
     Ok(())
 }
 
-/// 发送通用错误响应
+/// Send generic error response
 #[cfg_attr(feature = "opentelemetry", tracing::instrument(level = "debug", skip_all, fields(client_id, reply_for = ?reply_for, target = ?target)))]
 async fn send_error_response(
     client_id: &str,
@@ -1960,7 +1976,7 @@ mod tests {
     use actr_protocol::{ActrType, Realm};
     use std::collections::HashMap;
 
-    /// 创建测试用的 ActrId
+    /// Create test ActrId
     fn create_test_actr_id(serial: u64) -> ActrId {
         ActrId {
             serial_number: serial,
@@ -1973,7 +1989,7 @@ mod tests {
         }
     }
 
-    /// 创建测试用的 ClientConnection
+    /// Create test ClientConnection
     fn create_test_client(actor_id: ActrId, webrtc_role: Option<String>) -> ClientConnection {
         create_test_client_with_id(&uuid::Uuid::new_v4().to_string(), actor_id, webrtc_role)
     }
@@ -2222,16 +2238,23 @@ mod tests {
 
     #[test]
     fn test_determine_webrtc_role() {
-        // 测试数据: (from_serial, to_serial, from_role, to_role, expected_is_offerer, description)
+        // Test data: (from_serial, to_serial, from_role, to_role, expected_is_offerer, description)
         let test_cases = vec![
-            (2, 1, None, None, true, "双方都没有偏好,使用 ActorId 逆序"),
+            (
+                2,
+                1,
+                None,
+                None,
+                true,
+                "Neither has preference, use ActorId reverse order",
+            ),
             (
                 2,
                 1,
                 None,
                 Some("answer"),
                 true,
-                "接收方偏好 answer,发起方应该是 offerer",
+                "Receiver prefers answer, initiator should be offerer",
             ),
             (
                 2,
@@ -2239,7 +2262,7 @@ mod tests {
                 Some("answer"),
                 None,
                 false,
-                "发起方偏好 answer,发起方应该是 answerer",
+                "Initiator prefers answer, initiator should be answerer",
             ),
             (
                 2,
@@ -2247,7 +2270,7 @@ mod tests {
                 Some("answer"),
                 Some("answer"),
                 true,
-                "双方都偏好 answer,回退到 ActorId 逆序",
+                "Both prefer answer, fall back to ActorId reverse order",
             ),
             (
                 1,
@@ -2255,7 +2278,7 @@ mod tests {
                 None,
                 None,
                 false,
-                "serial 1 < serial 2,发起方应该是 answerer",
+                "serial 1 < serial 2, initiator should be answerer",
             ),
             (
                 1,
@@ -2263,7 +2286,7 @@ mod tests {
                 Some("answer"),
                 Some("answer"),
                 false,
-                "双方都偏好 answer,serial 1 应该是 answerer",
+                "Both prefer answer, serial 1 should be answerer",
             ),
         ];
 
@@ -2271,7 +2294,7 @@ mod tests {
             let from = create_test_actr_id(from_serial);
             let to = create_test_actr_id(to_serial);
 
-            // 创建 clients map
+            // Create clients map
             let mut clients = HashMap::new();
             clients.insert(
                 format!("client_{from_serial}"),
@@ -2286,7 +2309,7 @@ mod tests {
 
             assert_eq!(
                 is_offerer, expected,
-                "测试失败: {desc} (from={from_serial}, to={to_serial}, from_role={from_role:?}, to_role={to_role:?})"
+                "Test failed: {desc} (from={from_serial}, to={to_serial}, from_role={from_role:?}, to_role={to_role:?})"
             );
         }
     }

@@ -1,26 +1,26 @@
-//! 存储后端配置
+//! Storage backend configuration
 //!
-//! 定义各种存储后端的配置结构
+//! Defines configuration structures for various storage backends
 
 use serde::{Deserialize, Serialize};
 
-/// 存储配置
+/// Storage configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorageConfig {
-    /// 存储后端类型
+    /// Storage backend type
     pub backend: StorageBackend,
 
-    /// 密钥有效期（秒）
+    /// Key TTL (seconds)
     ///
-    /// 生成的密钥的有效期时间，超过此时间的密钥将被视为过期
-    /// 设置为 0 表示永不过期
+    /// Validity period for generated keys; keys older than this are considered expired
+    /// Set to 0 for no expiration
     pub key_ttl_seconds: u64,
 
-    /// SQLite 配置（当 backend = "sqlite" 时必需）
+    /// SQLite configuration (required when backend = "sqlite")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sqlite: Option<SqliteConfig>,
 
-    /// PostgreSQL 配置（当 backend = "postgres" 时必需）
+    /// PostgreSQL configuration (required when backend = "postgres")
     #[serde(skip_serializing_if = "Option::is_none")]
     pub postgres: Option<PostgresConfig>,
 }
@@ -36,46 +36,46 @@ impl Default for StorageConfig {
     }
 }
 
-/// 存储后端类型枚举
+/// Storage backend type enum
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum StorageBackend {
-    /// SQLite 数据库
+    /// SQLite database
     Sqlite,
-    /// PostgreSQL 数据库
+    /// PostgreSQL database
     Postgres,
 }
 
-/// SQLite 配置
+/// SQLite configuration
 ///
-/// 注意：数据库路径通过 KeyStorage::from_config 的 db_path 参数传入
+/// Note: The database path is passed via the db_path parameter of KeyStorage::from_config
 /// TODO: define grain config for sqlite
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SqliteConfig {}
 
-/// PostgreSQL 配置
+/// PostgreSQL configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PostgresConfig {
-    /// 数据库主机地址
+    /// Database host address
     pub host: String,
 
-    /// 数据库端口
+    /// Database port
     pub port: u16,
 
-    /// 数据库名称
+    /// Database name
     pub database: String,
 
-    /// 用户名
+    /// Username
     pub username: String,
 
-    /// 密码
+    /// Password
     pub password: String,
 
-    /// 连接池大小
+    /// Connection pool size
     #[serde(default = "default_postgres_pool_size")]
     pub pool_size: u32,
 
-    /// 连接最大生命周期（秒）
+    /// Connection maximum lifetime (seconds)
     #[serde(default = "default_max_lifetime_secs")]
     pub max_lifetime_secs: u64,
 }

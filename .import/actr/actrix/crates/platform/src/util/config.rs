@@ -1,6 +1,6 @@
-//! TLS 配置实现
+//! TLS configuration implementation
 //!
-//! 提供 TLS 服务器配置和加密提供者管理功能
+//! Provides TLS server configuration and crypto provider management functionality
 
 use anyhow::Result;
 use rustls::ServerConfig;
@@ -13,7 +13,7 @@ use tokio_rustls::TlsAcceptor;
 pub struct TlsConfigurer;
 
 impl TlsConfigurer {
-    /// 创建 TLS 配置
+    /// Create TLS configuration
     pub fn create_tls_config(cert_path: &str, key_path: &str) -> Result<ServerConfig> {
         let cert_file = fs::File::open(cert_path)?;
         let key_file = fs::File::open(key_path)?;
@@ -34,13 +34,13 @@ impl TlsConfigurer {
         Ok(config)
     }
 
-    /// 创建 Tokio TLS 配置
+    /// Create Tokio TLS configuration
     pub fn create_tokio_tls_config(cert_path: &str, key_path: &str) -> Result<TlsAcceptor> {
         let config = Self::create_tls_config(cert_path, key_path)?;
         Ok(TlsAcceptor::from(std::sync::Arc::new(config)))
     }
 
-    /// 安装加密提供程序
+    /// Install crypto provider
     pub fn install_crypto_provider() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     }

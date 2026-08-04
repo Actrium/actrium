@@ -1,6 +1,6 @@
-//! Axum Router 集成
+//! Axum Router integration
 //!
-//! 提供 SignalingServer 的 Axum Router 适配器
+//! Provides an Axum Router adapter for SignalingServer
 
 use crate::server::{SignalingServer, SignalingServerHandle};
 use actr_protocol::{AIdCredential, ActrId};
@@ -22,7 +22,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::{collections::HashMap, str::FromStr};
 
-/// Signaling Server 状态（用于 Axum State）
+/// Signaling Server state (for Axum State)
 #[derive(Clone)]
 pub struct SignalingState {
     pub server: Arc<SignalingServer>,
@@ -34,9 +34,9 @@ pub struct SignalingState {
     pub require_url_auth: bool,
 }
 
-/// 创建 Signaling Axum Router
+/// Create a Signaling Axum Router
 ///
-/// 返回一个可以挂载到主 HTTP 服务器的 Router
+/// Returns a Router that can be mounted onto the main HTTP server
 pub async fn create_signaling_router() -> Result<Router> {
     platform::recording::info!("Creating Signaling Axum router");
 
@@ -55,9 +55,9 @@ pub async fn create_signaling_router() -> Result<Router> {
     Ok(router)
 }
 
-/// 创建 Signaling Axum Router（带配置）
+/// Create a Signaling Axum Router (with config)
 ///
-/// 初始化 AIdCredentialValidator，并返回可挂载的 Router
+/// Initializes AIdCredentialValidator and returns a mountable Router
 pub async fn create_signaling_router_with_config(
     config: &ActrixConfig,
     cancel: tokio_util::sync::CancellationToken,
@@ -73,7 +73,7 @@ pub async fn create_signaling_router_with_config_and_counters(
 ) -> Result<Router> {
     platform::recording::info!("Creating Signaling Axum router with config");
 
-    // 初始化 AIdCredentialValidator（Ed25519 模式，使用本地 key_cache DB）
+    // Initialize AIdCredentialValidator (Ed25519 mode, using local key_cache DB)
     AIdCredentialValidator::init(&config.sqlite_path)
         .await
         .map_err(|e| {
@@ -82,10 +82,10 @@ pub async fn create_signaling_router_with_config_and_counters(
         })?;
     platform::recording::info!("✅ AIdCredentialValidator (Ed25519) initialized");
 
-    // 创建 SignalingServer
+    // Create SignalingServer
     let mut server = SignalingServer::new();
 
-    // 初始化 ServiceRegistry 持久化缓存（用于重启恢复）
+    // Initialize ServiceRegistry persistent cache (for restart recovery)
     let cache_ttl_secs = crate::service_registry_storage::DEFAULT_SERVICE_TTL_SECS;
 
     if !config.sqlite_path.exists() {
@@ -111,12 +111,12 @@ pub async fn create_signaling_router_with_config_and_counters(
                 cache_db_file.display()
             );
 
-            // 设置存储到 ServiceRegistry
+            // Set storage on ServiceRegistry
             {
                 let mut registry = server.service_registry.write().await;
                 registry.set_storage(storage_arc.clone());
 
-                // 从缓存恢复服务列表
+                // Restore service list from cache
                 match registry.restore_from_storage().await {
                     Ok(count) => {
                         if count > 0 {
@@ -132,17 +132,17 @@ pub async fn create_signaling_router_with_config_and_counters(
                 }
             }
 
-            // 启动定期清理任务（每 5 分钟清理一次过期数据）
+            // Start periodic cleanup task (clean expired data every 5 minutes)
             let storage_for_cleanup = storage_arc.clone();
             let cancel_for_storage = cancel.clone();
             tokio::spawn(async move {
-                let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // 5 分钟
+                let mut interval = tokio::time::interval(std::time::Duration::from_secs(300)); // 5 minutes
                 loop {
                     tokio::select! {
                         _ = cancel_for_storage.cancelled() => break,
                         _ = interval.tick() => {}
                     }
-                    // 清理过期的服务注册
+                    // Clean up expired service registrations
                     match storage_for_cleanup.cleanup_expired().await {
                         Ok(deleted) => {
                             if deleted > 0 {
@@ -191,11 +191,11 @@ pub async fn create_signaling_router_with_config_and_counters(
         });
     }
 
-    // 初始化速率限制器（如果配置存在）
+    // Initialize rate limiter (if config exists)
     if let Some(signaling_config) = &config.services.signaling {
         let rate_limit_config = &signaling_config.server.rate_limit;
 
-        // 初始化连接速率限制器
+        // Initialize connection rate limiter
         if rate_limit_config.connection.enabled {
             platform::recording::info!(
                 "Initializing connection rate limiter: {}/min, burst: {}, max concurrent: {}/IP",
@@ -211,7 +211,7 @@ pub async fn create_signaling_router_with_config_and_counters(
             platform::recording::info!("⚠️  Connection rate limiting is disabled");
         }
 
-        // 初始化消息速率限制器
+        // Initialize message rate limiter
         if rate_limit_config.message.enabled {
             platform::recording::info!(
                 "Initializing message rate limiter: {}/sec, burst: {}",
@@ -227,7 +227,7 @@ pub async fn create_signaling_router_with_config_and_counters(
         }
     }
 
-    // 创建 Router
+    // Create Router
     let state = SignalingState {
         server: Arc::new(server),
         counters,
@@ -242,7 +242,7 @@ pub async fn create_signaling_router_with_config_and_counters(
     Ok(router)
 }
 
-/// WebSocket 升级处理器
+/// WebSocket upgrade handler
 async fn websocket_handler(
     ws: WebSocketUpgrade,
     State(state): State<SignalingState>,
@@ -251,11 +251,11 @@ async fn websocket_handler(
 ) -> impl IntoResponse {
     let client_ip = addr.ip();
 
-    // 检查连接速率限制
+    // Check connection rate limit
     if let Some(ref limiter) = state.server.connection_rate_limiter
         && let Err(e) = limiter.check_connection(client_ip).await
     {
-        platform::recording::warn!("🚫 IP {} 连接速率限制触发: {}", client_ip, e);
+        platform::recording::warn!("🚫 IP {} connection rate limit triggered: {}", client_ip, e);
         if let Some(ref ctr) = state.counters {
             ctr.record_request(false, 0.0).await;
         }
@@ -268,7 +268,7 @@ async fn websocket_handler(
             Ok(identity) => identity,
             Err(e) => {
                 platform::recording::warn!(
-                    "🚫 WebSocket 鉴权参数缺失/无效: ip={} reason={}",
+                    "🚫 WebSocket auth params missing/invalid: ip={} reason={}",
                     client_ip,
                     e
                 );
@@ -281,7 +281,7 @@ async fn websocket_handler(
                 let expected_actor_id = actor_id.to_string_repr();
                 if claims.actor_id != expected_actor_id {
                     platform::recording::warn!(
-                        "🚫 WebSocket 凭证与 actor_id 不匹配: ip={} claim_actor_id={} query_actor_id={}",
+                        "🚫 WebSocket credential does not match actor_id: ip={} claim_actor_id={} query_actor_id={}",
                         client_ip,
                         claims.actor_id,
                         expected_actor_id
@@ -291,7 +291,7 @@ async fn websocket_handler(
             }
             Err(e) => {
                 platform::recording::warn!(
-                    "🚫 WebSocket credential 验证失败: ip={} error={}",
+                    "🚫 WebSocket credential verification failed: ip={} error={}",
                     client_ip,
                     e
                 );
@@ -306,7 +306,7 @@ async fn websocket_handler(
 
     let webrtc_role = params.get("webrtc_role").cloned();
     if let Some(ref role) = webrtc_role {
-        platform::recording::info!("🎭 WebRTC 角色: {}", role);
+        platform::recording::info!("🎭 WebRTC role: {}", role);
     }
 
     // Record successful WebSocket upgrade request
@@ -319,7 +319,7 @@ async fn websocket_handler(
     })
 }
 
-/// WebSocket 连接处理
+/// WebSocket connection handler
 async fn handle_websocket(
     socket: WebSocket,
     state: SignalingState,
@@ -327,19 +327,19 @@ async fn handle_websocket(
     url_identity: Option<(ActrId, AIdCredential)>,
     webrtc_role: Option<String>,
 ) {
-    platform::recording::info!("📡 新 WebSocket 连接: IP={}", client_ip);
+    platform::recording::info!("📡 New WebSocket connection: IP={}", client_ip);
 
     // Increment service-level active connections counter
     if let Some(ref ctr) = state.counters {
         ctr.inc_conns();
     }
 
-    // 增加连接计数
+    // Increment connection count
     if let Some(ref limiter) = state.server.connection_rate_limiter {
         limiter.increment_connection(client_ip).await;
     }
 
-    // 创建 SignalingServerHandle
+    // Create SignalingServerHandle
     let server_handle = SignalingServerHandle {
         clients: state.server.clients.clone(),
         actor_id_index: state.server.actor_id_index.clone(),
@@ -349,7 +349,7 @@ async fn handle_websocket(
         message_rate_limiter: state.server.message_rate_limiter.clone(),
     };
 
-    // 调用 SignalingServer 的 WebSocket 处理函数
+    // Call SignalingServer's WebSocket handler function
     if let Err(e) = crate::handle_websocket_connection(
         socket,
         server_handle,
@@ -367,7 +367,7 @@ async fn handle_websocket(
         ctr.dec_conns();
     }
 
-    // 减少连接计数
+    // Decrement connection count
     if let Some(ref limiter) = state.server.connection_rate_limiter {
         limiter.decrement_connection(client_ip).await;
     }

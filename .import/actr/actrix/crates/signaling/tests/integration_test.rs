@@ -1,6 +1,7 @@
-//! Signaling 服务集成测试
+//! Signaling service integration tests
 //!
-//! 测试核心信令流程，确保 WebSocket 连接、注册、心跳、信令中继等功能正常
+//! Tests core signaling flows to ensure WebSocket connection, registration,
+//! heartbeat, and signaling relay functionality work correctly
 
 use actr_protocol::{
     AIdCredential, ActrToSignaling, ActrType, Ping, Realm, SIGNALING_ENVELOPE_VERSION,
@@ -21,7 +22,7 @@ use tokio::time::timeout;
 use tokio_tungstenite::{connect_async, tungstenite::Message as TungsteniteMessage};
 use uuid::Uuid;
 
-/// 测试辅助：创建最小配置
+/// Test helper: create minimal config
 #[allow(dead_code)]
 fn create_test_config() -> ActrixConfig {
     toml::from_str(
@@ -40,10 +41,10 @@ fn create_test_config() -> ActrixConfig {
     .expect("Failed to parse test config")
 }
 
-/// 测试辅助：创建信令服务器
+/// Test helper: create signaling server
 async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
-    // 初始化测试数据库（确保全局数据库已设置）
-    // 使用临时目录作为数据库目录，避免污染本地状态
+    // Initialize test database (ensure global database is set up)
+    // Use a temp directory for the database to avoid polluting local state
     static INIT: OnceCell<()> = OnceCell::const_new();
 
     INIT.get_or_init(|| async {
@@ -62,7 +63,7 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
             .to_str()
             .expect("Failed to convert DB directory path to string");
 
-        // 尝试设置全局数据库路径，忽略已初始化的错误
+        // Try to set the global database path, ignoring already-initialized errors
         match set_db_path(Path::new(db_dir_str)).await {
             Ok(()) => {}
             Err(e) => {
@@ -76,7 +77,7 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
     })
     .await;
 
-    // 确保测试所需的 realm 存在——避免因为 realm 不存在导致 403 错误
+    // Ensure the test-required realm exists — avoids 403 errors due to missing realm
     if RealmEntity::get_by_name("test_realm")
         .await
         .unwrap_or(None)
@@ -85,17 +86,17 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
         let _ = RealmEntity::create("test_realm".to_string(), String::new()).await;
     }
 
-    // 使用 create_signaling_router 创建路由器
+    // Create router using create_signaling_router
     let app = create_signaling_router()
         .await
         .expect("Failed to create router");
 
-    // 绑定到随机端口
+    // Bind to a random port
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let ws_url = format!("ws://{addr}/ws");
 
-    // 启动服务器（添加 ConnectInfo 支持）
+    // Start server (with ConnectInfo support)
     let handle = tokio::spawn(async move {
         let _ = axum::serve(
             listener,
@@ -104,13 +105,13 @@ async fn create_test_server() -> (String, tokio::task::JoinHandle<()>) {
         .await;
     });
 
-    // 等待服务器启动
+    // Wait for server to start
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     (ws_url, handle)
 }
 
-/// 测试辅助：创建 SignalingEnvelope
+/// Test helper: create SignalingEnvelope
 fn create_envelope(flow: signaling_envelope::Flow) -> SignalingEnvelope {
     SignalingEnvelope {
         envelope_version: SIGNALING_ENVELOPE_VERSION,
@@ -122,7 +123,7 @@ fn create_envelope(flow: signaling_envelope::Flow) -> SignalingEnvelope {
     }
 }
 
-/// 测试辅助：创建测试 credential（占位符，不用于实际验证）
+/// Test helper: create test credential (placeholder, not used for actual verification)
 fn create_test_credential() -> AIdCredential {
     AIdCredential {
         key_id: 1,
@@ -131,7 +132,7 @@ fn create_test_credential() -> AIdCredential {
     }
 }
 
-/// 测试辅助：创建测试 ActrId（用于中继）
+/// Test helper: create test ActrId (for relay)
 fn create_test_actr_id(serial: u64) -> actr_protocol::ActrId {
     actr_protocol::ActrId {
         serial_number: serial,
@@ -144,7 +145,7 @@ fn create_test_actr_id(serial: u64) -> actr_protocol::ActrId {
     }
 }
 
-/// 测试辅助：发送 protobuf 消息
+/// Test helper: send protobuf message
 async fn send_protobuf(
     ws: &mut futures_util::stream::SplitSink<
         tokio_tungstenite::WebSocketStream<
@@ -161,7 +162,7 @@ async fn send_protobuf(
     Ok(())
 }
 
-/// 测试辅助：接收 protobuf 消息
+/// Test helper: receive protobuf message
 async fn receive_protobuf(
     ws: &mut futures_util::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<
@@ -184,17 +185,17 @@ async fn receive_protobuf(
 
 #[tokio::test]
 async fn test_websocket_connection() {
-    // 创建服务器
+    // Create server
     let (ws_url, _handle) = create_test_server().await;
 
-    // 连接 WebSocket
+    // Connect WebSocket
     let result = connect_async(&ws_url).await;
     assert!(result.is_ok(), "WebSocket connection failed");
 
     let (ws_stream, _) = result.unwrap();
     let (mut write, mut read) = ws_stream.split();
 
-    // 发送 Ping 测试连接（使用占位符 credential）
+    // Send Ping to test connection (using placeholder credential)
     let ping_msg = ActrToSignaling {
         source: create_test_actr_id(999),
         credential: create_test_credential(),
@@ -202,7 +203,7 @@ async fn test_websocket_connection() {
             availability: 100,
             mailbox_backlog: 0.0,
             power_reserve: 80.0,
-            // 其他字段使用默认值
+            // Other fields use default values
             ..Default::default()
         })),
     };
@@ -210,7 +211,7 @@ async fn test_websocket_connection() {
 
     send_protobuf(&mut write, &ping).await.unwrap();
 
-    // 接收响应（因为 credential 无效，应该收到错误）
+    // Receive response (expect error due to invalid credential)
     let response = receive_protobuf(&mut read).await;
     assert!(response.is_ok(), "Failed to receive response");
 
@@ -223,7 +224,7 @@ async fn test_websocket_connection() {
         "Expected ServerToActr flow"
     );
 
-    // 验证收到错误响应（realm 或 credential 验证失败）
+    // Verify error response received (realm or credential validation failed)
     if let Some(signaling_envelope::Flow::ServerToActr(signaling_msg)) = envelope.flow {
         match signaling_msg.payload {
             Some(signaling_to_actr::Payload::Error(ref err)) => {
@@ -250,7 +251,7 @@ async fn test_credential_validation() {
     let (ws_stream, _) = connect_async(&ws_url).await.unwrap();
     let (mut write, mut read) = ws_stream.split();
 
-    // 发送多个带无效 credential 的 Ping
+    // Send multiple Pings with invalid credentials
     for i in 0..3 {
         let ping_msg = ActrToSignaling {
             source: create_test_actr_id(999),
@@ -266,11 +267,11 @@ async fn test_credential_validation() {
 
         send_protobuf(&mut write, &ping).await.unwrap();
 
-        // 接收错误响应
+        // Receive error response
         let response = receive_protobuf(&mut read).await.unwrap();
 
         if let Some(signaling_envelope::Flow::ServerToActr(signaling_msg)) = response.flow {
-            // 验证返回错误（realm 或 credential 验证失败）
+            // Verify error returned (realm or credential validation failed)
             assert!(
                 matches!(
                     signaling_msg.payload,
@@ -292,7 +293,7 @@ async fn test_invalid_message_handling() {
     let (ws_stream, _) = connect_async(&ws_url).await.unwrap();
     let (mut write, mut read) = ws_stream.split();
 
-    // 发送无效的 protobuf 数据
+    // Send invalid protobuf data
     write
         .send(TungsteniteMessage::Binary(Bytes::from_static(&[
             0xFF, 0xFF, 0xFF,
@@ -300,16 +301,16 @@ async fn test_invalid_message_handling() {
         .await
         .unwrap();
 
-    // 服务器应该关闭连接或发送错误
+    // Server should close connection or send error
     let response = timeout(Duration::from_secs(2), read.next()).await;
 
-    // 可能是连接关闭或错误响应
+    // Could be connection close or error response
     match response {
         Ok(Some(Ok(TungsteniteMessage::Close(_)))) => {
             println!("✅ Server closed connection on invalid message");
         }
         Ok(Some(Ok(TungsteniteMessage::Binary(data)))) => {
-            // 尝试解析错误响应
+            // Try to parse error response
             if let Ok(envelope) = SignalingEnvelope::decode(&data[..]) {
                 println!("✅ Server sent error response: {envelope:?}");
             }

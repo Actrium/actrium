@@ -215,15 +215,15 @@ export class ServiceWorkerBridge {
   }
 
   /**
-   *  DataChannel MessagePort  Service Worker
+   * Send a DataChannel MessagePort to the Service Worker.
    *
-   * DOM  DataChannel ：
-   * 1.  MessageChannel  DataChannel ↔ SW
-   * 2. port1  DOM （ DataChannel ）
-   * 3. port2  Transferable  SW
+   * DOM-side DataChannel bridging:
+   * 1. Create a MessageChannel to bridge DataChannel <-> SW
+   * 2. port1 stays on the DOM side (handles DataChannel events)
+   * 3. port2 is transferred to the SW as a Transferable
    *
-   * SW  WirePool，
-   *  DataLane::PostMessage(port2) 。
+   * The SW side registers this in WirePool,
+   * using it as DataLane::PostMessage(port2).
    */
   sendDataChannelPort(peerId: string, port: MessagePort): void {
     this.sendToSW({ type: 'register_datachannel_port', payload: { peerId, port } }, [port]);

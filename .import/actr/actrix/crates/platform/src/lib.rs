@@ -1,6 +1,6 @@
-//! Base 基础设施库
+//! Base infrastructure library
 //!
-//! 为 Actrix 辅助服务提供基础设施组件，包括身份管理、加密、监控、存储、Realm 管理等核心功能
+//! Provides infrastructure components for Actrix auxiliary services, including identity management, encryption, monitoring, storage, Realm management, and other core functionality
 #![deny(clippy::disallowed_macros)]
 
 pub mod aid;

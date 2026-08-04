@@ -1,6 +1,6 @@
-//! PostgreSQL 存储后端实现
+//! PostgreSQL storage backend implementation
 //!
-//! 使用 sqlx 提供 PostgreSQL 存储支持
+//! Uses sqlx to provide PostgreSQL storage support
 
 use crate::error::{SignerError, SignerResult};
 use crate::storage::backend::KeyStorageBackend;
@@ -13,7 +13,7 @@ use rand::rngs::OsRng;
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// PostgreSQL 存储后端
+/// PostgreSQL storage backend
 #[derive(Clone)]
 pub struct PostgresBackend {
     pool: PgPool,
@@ -29,19 +29,19 @@ impl std::fmt::Debug for PostgresBackend {
 }
 
 impl PostgresBackend {
-    /// 创建新的 PostgreSQL 后端实例
+    /// Create a new PostgreSQL backend instance
     ///
     /// # Arguments
-    /// * `config` - PostgreSQL 配置
-    /// * `key_ttl` - 密钥有效期（秒），0 表示永不过期
+    /// * `config` - PostgreSQL configuration
+    /// * `key_ttl` - Key TTL (seconds); 0 means never expires
     pub async fn new(config: &PostgresConfig, key_ttl: u64) -> SignerResult<Self> {
-        // 构建连接 URL
+        // Build connection URL
         let url = format!(
             "postgres://{}:{}@{}:{}/{}",
             config.username, config.password, config.host, config.port, config.database
         );
 
-        // 创建连接池
+        // Create connection pool
         let pool = PgPoolOptions::new()
             .max_connections(config.pool_size)
             .max_lifetime(Duration::from_secs(config.max_lifetime_secs))
@@ -51,7 +51,7 @@ impl PostgresBackend {
 
         let backend = Self { pool, key_ttl };
 
-        // 初始化数据库表
+        // Initialize database tables
         backend.init().await?;
 
         crate::recording::info!(
@@ -69,7 +69,7 @@ impl PostgresBackend {
 #[async_trait]
 impl KeyStorageBackend for PostgresBackend {
     async fn init(&self) -> SignerResult<()> {
-        // 创建密钥表（secret_key 列存储加密后的 Ed25519 signing key，public_key 存储 verifying key）
+        // Create keys table (secret_key column stores the encrypted Ed25519 signing key, public_key stores the verifying key)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS keys (
@@ -85,7 +85,7 @@ impl KeyStorageBackend for PostgresBackend {
         .await
         .map_err(|e| SignerError::Internal(format!("Failed to create keys table: {e}")))?;
 
-        // 创建索引以提高过期查询性能
+        // Create index to improve expired key query performance
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_keys_expires_at ON keys(expires_at) WHERE expires_at > 0",
         )
@@ -98,11 +98,11 @@ impl KeyStorageBackend for PostgresBackend {
     }
 
     async fn generate_and_store_key(&self) -> SignerResult<KeyPair> {
-        // 生成 Ed25519 密钥对
+        // Generate Ed25519 key pair
         let signing_key = SigningKey::generate(&mut OsRng);
         let verifying_key = signing_key.verifying_key();
 
-        // 编码为 Base64
+        // Encode as Base64
         let verifying_key_b64 = BASE64_STANDARD.encode(verifying_key.as_bytes());
         let signing_key_b64 = BASE64_STANDARD.encode(signing_key.as_bytes());
 
@@ -111,14 +111,14 @@ impl KeyStorageBackend for PostgresBackend {
             .unwrap()
             .as_secs() as i64;
 
-        // 计算过期时间
+        // Calculate expiration time
         let expires_at = if self.key_ttl == 0 {
-            0 // 永不过期
+            0 // Never expires
         } else {
             now + self.key_ttl as i64
         };
 
-        // 插入密钥并获取自动生成的 key_id（public_key 存储 verifying key，secret_key 存储 signing key）
+        // Insert key and get the auto-generated key_id (public_key stores the verifying key, secret_key stores the signing key)
         let row = sqlx::query_as::<_, (i32,)>(
             r#"
             INSERT INTO keys (public_key, secret_key, created_at, expires_at)
@@ -173,7 +173,7 @@ impl KeyStorageBackend for PostgresBackend {
     }
 
     async fn sign(&self, key_id: u32, message: &[u8]) -> SignerResult<Vec<u8>> {
-        // 从数据库读取 signing key（PostgreSQL 版本未加密）
+        // Read signing key from database (PostgreSQL version is not encrypted)
         let result =
             sqlx::query_scalar::<_, String>("SELECT secret_key FROM keys WHERE key_id = $1")
                 .bind(key_id as i32)
@@ -196,7 +196,7 @@ impl KeyStorageBackend for PostgresBackend {
             }
         };
 
-        // Base64 解码
+        // Base64 decode
         let signing_key_bytes = BASE64_STANDARD
             .decode(&signing_key_b64)
             .map_err(|e| SignerError::Crypto(format!("Failed to decode signing key: {e}")))?;
@@ -205,7 +205,7 @@ impl KeyStorageBackend for PostgresBackend {
             .try_into()
             .map_err(|_| SignerError::Crypto("Signing key must be exactly 32 bytes".to_string()))?;
 
-        // 重建 SigningKey 并签名
+        // Reconstruct SigningKey and sign
         let signing_key = SigningKey::from_bytes(&signing_key_array);
         let signature = signing_key.sign(message);
 
@@ -312,7 +312,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // 需要 PostgreSQL 服务器
+    #[ignore] // Requires a PostgreSQL server
     async fn test_postgres_init() {
         let backend = create_test_backend().await;
         cleanup_test_data(&backend).await;
@@ -322,21 +322,21 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // 需要 PostgreSQL 服务器
+    #[ignore] // Requires a PostgreSQL server
     async fn test_generate_and_query() {
         let backend = create_test_backend().await;
         cleanup_test_data(&backend).await;
 
-        // 生成密钥
+        // Generate key
         let key_pair = backend.generate_and_store_key().await.unwrap();
         assert!(key_pair.key_id > 0);
         assert!(!key_pair.verifying_key.is_empty());
 
-        // 验证 verifying key 为 32 字节
+        // Verify verifying key is 32 bytes
         let vk_bytes = BASE64_STANDARD.decode(&key_pair.verifying_key).unwrap();
         assert_eq!(vk_bytes.len(), 32);
 
-        // 查询公钥
+        // Query public key
         let public_key = backend.get_public_key(key_pair.key_id).await.unwrap();
         assert_eq!(public_key, Some(key_pair.verifying_key.clone()));
 
@@ -344,7 +344,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // 需要 PostgreSQL 服务器
+    #[ignore] // Requires a PostgreSQL server
     async fn test_sign() {
         let backend = create_test_backend().await;
         cleanup_test_data(&backend).await;
@@ -358,7 +358,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // 需要 PostgreSQL 服务器
+    #[ignore] // Requires a PostgreSQL server
     async fn test_query_nonexistent_key() {
         let backend = create_test_backend().await;
         cleanup_test_data(&backend).await;
@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // 需要 PostgreSQL 服务器
+    #[ignore] // Requires a PostgreSQL server
     async fn test_key_count() {
         let backend = create_test_backend().await;
         cleanup_test_data(&backend).await;
@@ -387,7 +387,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // 需要 PostgreSQL 服务器
+    #[ignore] // Requires a PostgreSQL server
     async fn test_cleanup_expired_keys() {
         let config = PostgresConfig {
             host: std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string()),
@@ -402,18 +402,18 @@ mod tests {
             max_lifetime_secs: 3600,
         };
 
-        // 创建 TTL 为 1 秒的后端
+        // Create backend with 1-second TTL
         let backend = PostgresBackend::new(&config, 1).await.unwrap();
         cleanup_test_data(&backend).await;
 
-        // 生成密钥
+        // Generate key
         backend.generate_and_store_key().await.unwrap();
         assert_eq!(backend.get_key_count().await.unwrap(), 1);
 
-        // 等待过期
+        // Wait for expiration
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-        // 清理过期密钥
+        // Clean up expired keys
         let cleaned = backend.cleanup_expired_keys(0).await.unwrap();
         assert_eq!(cleaned, 1);
         assert_eq!(backend.get_key_count().await.unwrap(), 0);
@@ -422,7 +422,7 @@ mod tests {
     }
 
     #[tokio::test]
-    #[ignore] // 需要 PostgreSQL 服务器
+    #[ignore] // Requires a PostgreSQL server
     async fn test_zero_ttl_never_expires() {
         let config = PostgresConfig {
             host: std::env::var("POSTGRES_HOST").unwrap_or_else(|_| "localhost".to_string()),
@@ -437,14 +437,14 @@ mod tests {
             max_lifetime_secs: 3600,
         };
 
-        // TTL 为 0（永不过期）
+        // TTL is 0 (never expires)
         let backend = PostgresBackend::new(&config, 0).await.unwrap();
         cleanup_test_data(&backend).await;
 
         backend.generate_and_store_key().await.unwrap();
         assert_eq!(backend.get_key_count().await.unwrap(), 1);
 
-        // 清理不应删除永不过期的密钥
+        // Cleanup should not delete keys that never expire
         let cleaned = backend.cleanup_expired_keys(0).await.unwrap();
         assert_eq!(cleaned, 0);
         assert_eq!(backend.get_key_count().await.unwrap(), 1);

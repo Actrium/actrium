@@ -1,7 +1,7 @@
 /**
- * WebRTC Coordinator - WebRTC （DOM ）
+ * WebRTC Coordinator - Manages WebRTC connections (DOM side)
  *
- *  RTCPeerConnection， WebRTC
+ * Creates and manages RTCPeerConnection instances, handles WebRTC events.
  */
 
 import { ServiceWorkerBridge, WebRtcCommandPayload, WebRtcEventPayload } from './sw-bridge';
@@ -31,7 +31,7 @@ interface FragmentEntry {
 }
 
 /**
- * WebRTC （DOM ）
+ * WebRTC coordinator (DOM side).
  */
 export class WebRtcCoordinator {
   private static readonly FRAGMENT_HEADER_SIZE = 8;
@@ -189,7 +189,7 @@ export class WebRtcCoordinator {
     //  RTCPeerConnection
     const connection = new RTCPeerConnection(rtcConfig);
 
-    // TODO: ： 4  negotiated DataChannels ？
+    // TODO: Decide whether to create 4 negotiated DataChannels here or elsewhere.
     //  .cursor/plans/webrtc-datachannel-negotiation-strategy.md
     // DataChannels will be created by offerer or received via ondatachannel.
     const dataChannels = new Map<number, RTCDataChannel>();
@@ -266,7 +266,7 @@ export class WebRtcCoordinator {
     channelId: number,
     data: ArrayBuffer | Blob
   ): void {
-    //  Blob， ArrayBuffer
+    // Handle Blob or ArrayBuffer data
     if (data instanceof Blob) {
       // [DEBUG] Keep for now
       console.log(
@@ -764,8 +764,8 @@ export class WebRtcCoordinator {
         label: channel.label,
       });
 
-      //  MessagePort ：SW → port2 → port1 → DataChannel → Remote
-      //  port ，
+      // MessagePort binding: SW -> port2 -> port1 -> DataChannel -> Remote
+      // The port carries SW-to-remote traffic;
       //
       // NOTE: Only the RPC_RELIABLE lane registers a MessagePort with the SW.
       // The SW transport header still carries PayloadType, and the DOM bridge

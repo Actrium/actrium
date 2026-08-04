@@ -1,18 +1,18 @@
-//! ServiceRegistry SQLite 持久化缓存层
+//! ServiceRegistry SQLite persistent cache layer
 //!
-//! ## 设计原则
+//! ## Design Principles
 //!
-//! 1. **SQLite 作为缓存**：不是主数据源，用于重启恢复
-//! 2. **数据有 TTL**：默认 1 小时过期，自动清理
-//! 3. **内存优先**：HashMap 是主存储，SQLite 是备份
+//! 1. **SQLite as cache**: Not the primary data source; used for restart recovery
+//! 2. **Data has TTL**: Default 1-hour expiration with automatic cleanup
+//! 3. **Memory first**: HashMap is the primary store, SQLite is the backup
 //!
-//! ## 数据流
+//! ## Data Flow
 //!
-//! - 启动：SQLite → HashMap（恢复缓存）
-//! - 注册：HashMap + SQLite（双写）
-//! - 查询：HashMap（快速）
-//! - 心跳：HashMap + SQLite（更新 TTL）
-//! - 清理：定期清理过期数据
+//! - Startup: SQLite -> HashMap (cache recovery)
+//! - Register: HashMap + SQLite (dual write)
+//! - Query: HashMap (fast path)
+//! - Heartbeat: HashMap + SQLite (update TTL)
+//! - Cleanup: Periodic cleanup of expired data
 
 use crate::service_registry::{ServiceCapabilities, ServiceInfo, ServiceLocation, ServiceStatus};
 use actr_protocol::{Acl, ActrId, ServiceSpec};
@@ -28,23 +28,23 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-/// ServiceRegistry 持久化存储
+/// ServiceRegistry persistent storage
 #[derive(Debug)]
 pub struct ServiceRegistryStorage {
     pool: SqlitePool,
-    /// TTL（秒），默认 3600 秒（1 小时）
+    /// TTL (seconds), default 3600 seconds (1 hour)
     default_ttl_secs: u64,
 }
 
-/// 默认服务 TTL（1 小时）
-pub const DEFAULT_SERVICE_TTL_SECS: u64 = 12 * 3600; // 临时方案
+/// Default service TTL (1 hour)
+pub const DEFAULT_SERVICE_TTL_SECS: u64 = 12 * 3600; // temporary workaround
 
 impl ServiceRegistryStorage {
-    /// 创建存储实例
+    /// Create a storage instance
     pub async fn new(database_file: impl AsRef<Path>, ttl_secs: Option<u64>) -> Result<Self> {
         let db_path = database_file.as_ref();
 
-        // 确保数据库目录存在
+        // Ensure the database directory exists
         if let Some(parent) = db_path.parent()
             && !parent.exists()
         {
@@ -74,23 +74,23 @@ impl ServiceRegistryStorage {
         Ok(storage)
     }
 
-    /// 初始化数据库表结构
+    /// Initialize database schema
     async fn init_schema(&self) -> Result<()> {
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS service_registry (
-                -- ActorId 字段
+                -- ActorId fields
                 actor_serial_number INTEGER NOT NULL,
                 actor_realm_id INTEGER NOT NULL,
                 actor_manufacturer TEXT NOT NULL,
                 actor_device_name TEXT NOT NULL,
                 actor_version TEXT NOT NULL,
 
-                -- 服务基本信息
+                -- Service basic info
                 service_name TEXT NOT NULL,
                 message_types TEXT NOT NULL,  -- JSON array
 
-                -- 能力和状态
+                -- Capabilities and status
                 capabilities_json TEXT,  -- JSON, nullable
                 status TEXT NOT NULL,  -- Available/Busy/Maintenance/Unavailable
 
@@ -100,27 +100,27 @@ impl ServiceRegistryStorage {
                 -- ACL (protobuf BLOB)
                 acl_blob BLOB,
 
-                -- 负载指标
+                -- Load metrics
                 service_availability_state INTEGER,
                 power_reserve REAL,
                 mailbox_backlog REAL,
                 worst_dependency_health_state INTEGER,
 
-                -- 地理位置
+                -- Geographic location
                 geo_region TEXT,
                 geo_longitude REAL,
                 geo_latitude REAL,
 
-                -- 粘滞客户端
+                -- Sticky clients
                 sticky_client_ids TEXT,  -- JSON array
 
-                -- WebSocket 地址（可选，用于直连）
+                -- WebSocket address (optional, for direct connection)
                 ws_address TEXT,
 
-                -- 时间戳（Unix timestamp）
+                -- Timestamps (Unix timestamp)
                 registered_at INTEGER NOT NULL,
                 last_heartbeat_at INTEGER NOT NULL,
-                expires_at INTEGER NOT NULL,  -- TTL 过期时间
+                expires_at INTEGER NOT NULL,  -- TTL expiration time
 
                 PRIMARY KEY (actor_serial_number, actor_realm_id, service_name)
             );
@@ -133,21 +133,21 @@ impl ServiceRegistryStorage {
         .await
         .with_context(|| "Failed to create service_registry table")?;
 
-        // 迁移：为旧版 service_registry 表添加 ws_address 列
+        // Migration: add ws_address column to legacy service_registry table
         let _ = sqlx::query("ALTER TABLE service_registry ADD COLUMN ws_address TEXT")
             .execute(&self.pool)
-            .await; // 若列已存在则忽略错误
+            .await; // Ignore error if column already exists
 
         platform::recording::info!("Database schema initialized");
         Ok(())
     }
 
-    /// 保存服务信息
+    /// Save service info
     pub async fn save_service(&self, service: &ServiceInfo) -> Result<()> {
         let now = current_timestamp();
         let expires_at = now + self.default_ttl_secs;
 
-        // 序列化复杂字段
+        // Serialize complex fields
         let message_types_json = serde_json::to_string(&service.message_types)?;
         let capabilities_json = service
             .capabilities
@@ -156,21 +156,21 @@ impl ServiceRegistryStorage {
             .transpose()?;
         let sticky_client_ids_json = serde_json::to_string(&service.sticky_client_ids)?;
 
-        // ServiceSpec 序列化为 protobuf bytes
+        // Serialize ServiceSpec to protobuf bytes
         let service_spec_blob = service.service_spec.as_ref().and_then(|spec| {
             let mut buf = Vec::new();
             spec.encode(&mut buf).ok()?;
             Some(buf)
         });
 
-        // ACL 序列化为 protobuf bytes
+        // Serialize ACL to protobuf bytes
         let acl_blob = service.acl.as_ref().and_then(|acl| {
             let mut buf = Vec::new();
             acl.encode(&mut buf).ok()?;
             Some(buf)
         });
 
-        // 提取 ActorId 字段
+        // Extract ActorId fields
         let actor_type = &service.actor_id.r#type;
         let actor_realm = &service.actor_id.realm;
 
@@ -257,7 +257,7 @@ impl ServiceRegistryStorage {
         Ok(())
     }
 
-    /// 更新心跳时间和 TTL
+    /// Update heartbeat time and TTL
     pub async fn update_heartbeat(&self, actor_id: &ActrId, service_name: &str) -> Result<()> {
         let now = current_timestamp();
         let expires_at = now + self.default_ttl_secs;
@@ -290,7 +290,7 @@ impl ServiceRegistryStorage {
         Ok(())
     }
 
-    /// 删除服务
+    /// Delete service
     pub async fn delete_service(&self, actor_id: &ActrId, service_name: &str) -> Result<()> {
         sqlx::query(
             r#"
@@ -312,7 +312,7 @@ impl ServiceRegistryStorage {
         Ok(())
     }
 
-    /// 加载所有有效服务（启动时恢复）
+    /// Load all valid services (recovery on startup)
     pub async fn load_all_services(&self) -> Result<Vec<ServiceInfo>> {
         let now = current_timestamp();
 
@@ -355,10 +355,11 @@ impl ServiceRegistryStorage {
         Ok(services)
     }
 
-    /// 根据 ActorId 加载服务（用于心跳恢复）
+    /// Load services by ActorId (for heartbeat recovery)
     ///
-    /// 当收到心跳时发现内存中没有该服务注册，尝试从数据库恢复。
-    /// 只返回未过期的服务（expires_at > now）。
+    /// When a heartbeat is received but the service is not found in memory,
+    /// attempt to restore it from the database.
+    /// Only returns non-expired services (expires_at > now).
     ///
     /// # Arguments
     ///
@@ -366,7 +367,7 @@ impl ServiceRegistryStorage {
     ///
     /// # Returns
     ///
-    /// 该 Actor 的所有未过期服务列表
+    /// All non-expired services for this Actor
     pub async fn load_services_by_actor_id(&self, actor_id: &ActrId) -> Result<Vec<ServiceInfo>> {
         let now = current_timestamp();
 
@@ -427,7 +428,7 @@ impl ServiceRegistryStorage {
         Ok(services)
     }
 
-    /// 清理过期数据
+    /// Clean up expired data
     pub async fn cleanup_expired(&self) -> Result<u64> {
         let now = current_timestamp();
 
@@ -448,7 +449,7 @@ impl ServiceRegistryStorage {
         Ok(deleted_count)
     }
 
-    /// 将数据库行转换为 ServiceInfo
+    /// Convert a database row to ServiceInfo
     fn row_to_service_info(&self, row: sqlx::sqlite::SqliteRow) -> Result<ServiceInfo> {
         let actor_version: String = row.get("actor_version");
 
@@ -465,12 +466,12 @@ impl ServiceRegistryStorage {
             },
         };
 
-        // 基本字段
+        // Basic fields
         let service_name: String = row.get("service_name");
         let message_types: Vec<String> = serde_json::from_str(row.get("message_types"))?;
         let status = string_to_status(row.get("status"))?;
 
-        // 可选字段
+        // Optional fields
         let capabilities: Option<ServiceCapabilities> = row
             .get::<Option<String>, _>("capabilities_json")
             .map(|s| serde_json::from_str(&s))
@@ -492,7 +493,7 @@ impl ServiceRegistryStorage {
             .ok()
             .flatten();
 
-        // 地理位置
+        // Geographic location
         let geo_location =
             row.get::<Option<String>, _>("geo_region")
                 .map(|region| ServiceLocation {
@@ -501,7 +502,7 @@ impl ServiceRegistryStorage {
                     latitude: row.get("geo_latitude"),
                 });
 
-        // 粘滞客户端
+        // Sticky clients
         let sticky_client_ids: Vec<String> = serde_json::from_str(row.get("sticky_client_ids"))?;
 
         Ok(ServiceInfo {
@@ -527,11 +528,11 @@ impl ServiceRegistryStorage {
             is_exact_match: false,
             sticky_client_ids,
             ws_address: row.get::<Option<String>, _>("ws_address"),
-            is_restored_from_storage: false, // 由 restore_from_storage 调用方设置
+            is_restored_from_storage: false, // Set by the caller of restore_from_storage
         })
     }
 
-    /// 获取统计信息
+    /// Get statistics
     pub async fn get_stats(&self) -> Result<CacheStats> {
         let now = current_timestamp();
 
@@ -553,7 +554,7 @@ impl ServiceRegistryStorage {
     }
 }
 
-/// 缓存统计信息
+/// Cache statistics
 #[derive(Debug, Clone)]
 pub struct CacheStats {
     pub total_services: u64,
@@ -561,7 +562,7 @@ pub struct CacheStats {
     pub valid_services: u64,
 }
 
-/// ServiceStatus 转字符串
+/// Convert ServiceStatus to string
 fn status_to_string(status: &ServiceStatus) -> &'static str {
     match status {
         ServiceStatus::Available => "Available",
@@ -571,7 +572,7 @@ fn status_to_string(status: &ServiceStatus) -> &'static str {
     }
 }
 
-/// 字符串转 ServiceStatus
+/// Convert string to ServiceStatus
 fn string_to_status(s: &str) -> Result<ServiceStatus> {
     match s {
         "Available" => Ok(ServiceStatus::Available),
@@ -582,7 +583,7 @@ fn string_to_status(s: &str) -> Result<ServiceStatus> {
     }
 }
 
-/// 获取当前 Unix 时间戳（秒）
+/// Get current Unix timestamp (seconds)
 fn current_timestamp() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -679,14 +680,14 @@ mod tests {
         let service = create_test_service(1, "expiring-service");
         storage.save_service(&service).await.unwrap();
 
-        // 立即加载应该能找到
+        // Loading immediately should find the service
         let loaded = storage.load_all_services().await.unwrap();
         assert_eq!(loaded.len(), 1);
 
-        // 等待过期
+        // Wait for expiration
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-        // 过期后加载为空
+        // After expiration, load returns empty
         let loaded = storage.load_all_services().await.unwrap();
         assert_eq!(loaded.len(), 0);
     }
@@ -700,14 +701,14 @@ mod tests {
         let service = create_test_service(1, "test-service");
         storage.save_service(&service).await.unwrap();
 
-        // 等待过期
+        // Wait for expiration
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-        // 清理
+        // Cleanup
         let deleted = storage.cleanup_expired().await.unwrap();
         assert_eq!(deleted, 1);
 
-        // 验证已删除
+        // Verify deletion
         let stats = storage.get_stats().await.unwrap();
         assert_eq!(stats.total_services, 0);
     }
@@ -721,13 +722,13 @@ mod tests {
         let service = create_test_service(1, "test-service");
         storage.save_service(&service).await.unwrap();
 
-        // 更新心跳
+        // Update heartbeat
         storage
             .update_heartbeat(&service.actor_id, &service.service_name)
             .await
             .unwrap();
 
-        // 验证更新成功
+        // Verify update succeeded
         let loaded = storage.load_all_services().await.unwrap();
         assert_eq!(loaded.len(), 1);
     }

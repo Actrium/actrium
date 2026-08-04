@@ -1,7 +1,7 @@
-//! Realm secret 管理
+//! Realm secret management
 //!
-//! 用于 Admin 分配、AIS 校验 realm secret。
-//! Secret 数据直接存储在 Realm 表的 secret_current / secret_previous 字段中。
+//! Used by Admin to assign and by AIS to verify realm secrets.
+//! Secret data is stored directly in the Realm table's secret_current / secret_previous fields.
 
 use super::{Realm, RealmError};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
@@ -9,35 +9,35 @@ use chrono::Utc;
 use rand::RngCore;
 use sha2::{Digest, Sha256};
 
-/// signaling -> AIS 传递 realm secret 的 HTTP 头
+/// HTTP header for signaling -> AIS to pass the realm secret
 pub const REALM_SECRET_HEADER: &str = "x-actrix-realm-secret";
 
-/// 旧 secret 的默认兼容窗口（4 小时）
+/// Default grace window for the previous secret (4 hours)
 pub const DEFAULT_REALM_SECRET_PREVIOUS_GRACE_SECS: u64 = 4 * 3600;
 
-/// Realm secret 校验结果
+/// Realm secret verification result
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RealmSecretCheck {
-    /// realm 未配置 secret（兼容历史 realm）
+    /// Realm has no secret configured (backward compatible with legacy realms)
     NotConfigured,
-    /// 命中当前 secret
+    /// Matches the current secret
     ValidCurrent,
-    /// 命中上一代 secret（且仍在兼容窗口内）
+    /// Matches the previous secret (and still within the grace window)
     ValidPrevious,
-    /// realm 已配置 secret，但请求未提供
+    /// Realm has a secret configured, but the request did not provide one
     MissingRequired,
-    /// 请求提供了 secret，但不匹配当前/可用上一代
+    /// Request provided a secret, but it does not match the current or usable previous secret
     Invalid,
 }
 
-/// 轮转结果（仅返回明文给调用方一次）
+/// Rotation result (plaintext is returned to the caller only once)
 #[derive(Debug, Clone)]
 pub struct RealmSecretRotation {
     pub new_secret: String,
     pub previous_valid_until: Option<u64>,
 }
 
-/// Secret 状态元数据
+/// Secret state metadata
 #[derive(Debug, Clone, Default)]
 pub struct RealmSecretState {
     pub current_hash: Option<String>,
@@ -45,7 +45,7 @@ pub struct RealmSecretState {
     pub previous_valid_until: Option<u64>,
 }
 
-/// 生成用于加入 realm 的 secret（URL-safe，便于 CLI / URL 透传）
+/// Generate a secret for joining a realm (URL-safe, convenient for CLI / URL passthrough)
 pub fn generate_realm_secret() -> String {
     let mut bytes = [0u8; 24];
     rand::thread_rng().fill_bytes(&mut bytes);
@@ -59,9 +59,9 @@ pub fn hash_realm_secret(secret: &str) -> String {
     hex::encode(hasher.finalize())
 }
 
-/// 轮转 realm secret（旧 secret 进入兼容窗口）
+/// Rotate the realm secret (the old secret enters the grace window)
 ///
-/// 加载 Realm → current→previous → 生成新 hash → save
+/// Load Realm -> current -> previous -> generate new hash -> save
 pub async fn rotate_realm_secret(
     realm_id: u32,
     previous_grace_secs: Option<u64>,
@@ -93,7 +93,7 @@ pub async fn rotate_realm_secret(
     })
 }
 
-/// 获取 realm secret 状态元数据（仅 hash，不含明文）
+/// Get realm secret state metadata (hash only, no plaintext)
 pub async fn get_realm_secret_state(realm_id: u32) -> Result<RealmSecretState, RealmError> {
     let realm = Realm::get(realm_id).await?.ok_or(RealmError::NotFound)?;
 
@@ -115,14 +115,14 @@ pub async fn get_realm_secret_state(realm_id: u32) -> Result<RealmSecretState, R
     })
 }
 
-/// 按 realm id 校验请求 secret。
+/// Verify the request secret by realm id.
 pub async fn verify_realm_secret(
     realm_id: u32,
     provided_secret: Option<&str>,
 ) -> Result<RealmSecretCheck, RealmError> {
     let realm = Realm::get(realm_id).await?.ok_or(RealmError::NotFound)?;
 
-    // 历史 realm 未配置 secret：保持兼容
+    // Legacy realm with no secret configured: maintain backward compatibility
     if realm.secret_current.is_empty() {
         return Ok(RealmSecretCheck::NotConfigured);
     }

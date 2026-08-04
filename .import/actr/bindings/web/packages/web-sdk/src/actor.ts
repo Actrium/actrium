@@ -121,7 +121,7 @@ export class Actor {
   }
 
   /**
-   *  RPC（ payload）
+   * Perform RPC call (raw payload).
    */
   async callRaw(routeKey: string, payload: Uint8Array, timeout?: number): Promise<Uint8Array> {
     if (!this.actorRef) {
@@ -227,7 +227,7 @@ export class Actor {
 }
 
 /**
- *  Actor （ API）
+ * Create an Actor (high-level API).
  *
  * @example
  * ```typescript
@@ -239,7 +239,7 @@ export class Actor {
  *   serviceWorkerPath: '/actor.sw.js',
  * });
  *
- * //  Actor
+ * // Use the actor
  * const response = await actor.callRaw('echo.EchoService.Echo', encoded);
  * ```
  */

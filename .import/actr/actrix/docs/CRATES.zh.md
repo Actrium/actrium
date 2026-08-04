@@ -2349,10 +2349,10 @@ async fn main() -> anyhow::Result<()> {
 - ✅ **实际使用示例** - 可运行的代码片段
 
 **相关文档**:
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - 整体架构设计
-- [SERVICES.md](./SERVICES.md) - 服务管理和部署 (待创建)
-- [API.md](./API.md) - HTTP/WebSocket API 参考 (待创建)
-- [CONFIGURATION.md](./CONFIGURATION.md) - 配置参考 (待更新)
+- [ARCHITECTURE.md](./ARCHITECTURE.zh.md) - 整体架构设计
+- [SERVICES.md](./SERVICES.zh.md) - 服务管理和部署 (待创建)
+- [API.md](./API.zh.md) - HTTP/WebSocket API 参考 (待创建)
+- [CONFIGURATION.md](./CONFIGURATION.zh.md) - 配置参考 (待更新)
 
 **最后验证时间**: 2025-11-03
 **代码版本**: v0.1.0+enhancements

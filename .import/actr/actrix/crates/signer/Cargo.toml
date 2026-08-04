@@ -3,13 +3,13 @@ name = "actrix-signer"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
-description = "Signer - Ed25519 签名密钥生成和管理服务，私钥永不离开 Signer"
+description = "Signer - Ed25519 signing key generation and management service; private keys never leave Signer"
 license.workspace = true
 rust-version.workspace = true
 
 [features]
 default = ["backend-sqlite"]
-backend-sqlite = ["sqlx"]                                             # SQLite 使用 sqlx
+backend-sqlite = ["sqlx"]                                             # SQLite uses sqlx
 backend-postgres = ["sqlx"]
 backend-all = ["backend-sqlite", "backend-postgres"]
 
@@ -37,7 +37,7 @@ base64 = { workspace = true }
 aes-gcm = "0.10"              # AES-256-GCM for KEK encryption
 
 # Storage backends
-# SQLite and PostgreSQL - 使用 sqlx 统一异步接口
+# SQLite and PostgreSQL - unified async interface via sqlx
 sqlx = { workspace = true, default-features = false, features = [
     "runtime-tokio-rustls",
     "sqlite",

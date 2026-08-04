@@ -3,10 +3,10 @@
  *
  * High-level TypeScript SDK for Actor-RTC Web platform
  *
- *  WASM-DOM ：
- * - DOM ：@actrium/actr-dom ()
- * - Service Worker ：WASM
- * - UI ： SDK  WASM
+ * WASM-DOM architecture:
+ * - DOM layer: @actrium/actr-dom (HAL)
+ * - Service Worker layer: hosts WASM runtime
+ * - UI layer: SDK wraps WASM for application use
  */
 
 export * from './actor';

@@ -1,49 +1,49 @@
-//! Signer 配置
+//! Signer configuration
 //!
-//! Signer 服务用于生成和管理加密密钥，为其他服务提供密钥生成和公钥查询功能
+//! The Signer service generates and manages cryptographic keys, providing key generation and public key query capabilities for other services
 
 use crate::crypto::KekSource;
 use crate::storage::StorageConfig;
 use serde::{Deserialize, Serialize};
 
-/// Signer 服务配置
+/// Signer service configuration
 ///
 /// Service enable/disable is controlled by the bitmask in ActrixConfig.enable.
 /// The ENABLE_SIGNER bit (bit 4) must be set to enable this service.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SignerServiceConfig {
-    /// 存储配置
+    /// Storage configuration
     #[serde(default)]
     pub storage: StorageConfig,
 
-    /// 容忍期 (秒)
+    /// Tolerance period (seconds)
     ///
-    /// 密钥过期后的一段时间内，仍然允许获取私钥，用于平滑过渡
-    /// 默认: 3600 (1小时)
+    /// A period after key expiration during which private key retrieval is still allowed, for smooth transitions
+    /// Default: 3600 (1 hour)
     #[serde(default = "default_tolerance")]
     pub tolerance_seconds: u64,
 
-    /// KEK (Key Encryption Key) - 直接配置
+    /// KEK (Key Encryption Key) - direct configuration
     ///
-    /// 用于加密存储的私钥。支持两种格式：
-    /// - 64 字符的十六进制字符串（32 字节）
-    /// - 44 字符的 Base64 字符串（32 字节）
+    /// Used to encrypt stored private keys. Supports two formats:
+    /// - 64-character hex string (32 bytes)
+    /// - 44-character Base64 string (32 bytes)
     ///
-    /// 注意：直接在配置文件中存储 KEK 不够安全，生产环境建议使用 kek_env 或 kek_file
+    /// Note: storing the KEK directly in the config file is not secure; production environments should use kek_env or kek_file
     #[serde(default)]
     pub kek: Option<String>,
 
-    /// KEK 环境变量名称
+    /// KEK environment variable name
     ///
-    /// 从指定的环境变量读取 KEK，比直接配置更安全
-    /// 例如：kek_env = "ACTRIX_KS_KEK"
+    /// Read the KEK from the specified environment variable, more secure than direct configuration
+    /// Example: kek_env = "ACTRIX_KS_KEK"
     #[serde(default)]
     pub kek_env: Option<String>,
 
-    /// KEK 文件路径
+    /// KEK file path
     ///
-    /// 从文件读取 KEK，文件应该包含 64 字符的十六进制字符串或 44 字符的 Base64 字符串
-    /// 文件权限应设置为 600 (仅所有者可读写)
+    /// Read the KEK from a file; the file should contain a 64-character hex string or a 44-character Base64 string
+    /// File permissions should be set to 600 (owner read/write only)
     #[serde(default)]
     pub kek_file: Option<String>,
 }
@@ -65,10 +65,10 @@ impl Default for SignerServiceConfig {
 }
 
 impl SignerServiceConfig {
-    /// 获取 KEK 源
+    /// Get the KEK source
     ///
-    /// 优先级: kek_file > kek_env > kek
-    /// 如果都未配置，返回 None（使用无加密模式）
+    /// Priority: kek_file > kek_env > kek
+    /// Returns None if none configured (uses no-encryption mode)
     pub fn get_kek_source(&self) -> Option<KekSource> {
         if let Some(path) = &self.kek_file {
             return Some(KekSource::File(path.clone()));
@@ -119,11 +119,11 @@ mod tests {
 
     #[test]
     fn test_kek_source_priority() {
-        // 未配置 KEK
+        // No KEK configured
         let config = SignerServiceConfig::default();
         assert!(config.get_kek_source().is_none());
 
-        // 仅配置 kek
+        // Only kek configured
         let config = SignerServiceConfig {
             kek: Some("test_kek".to_string()),
             ..Default::default()
@@ -133,7 +133,7 @@ mod tests {
             _ => panic!("Expected Direct KEK source"),
         }
 
-        // 配置 kek 和 kek_env，优先使用 kek_env
+        // kek and kek_env configured; kek_env takes priority
         let config = SignerServiceConfig {
             kek: Some("test_kek".to_string()),
             kek_env: Some("TEST_ENV".to_string()),
@@ -144,7 +144,7 @@ mod tests {
             _ => panic!("Expected Environment KEK source"),
         }
 
-        // 配置所有三个，优先使用 kek_file
+        // All three configured; kek_file takes priority
         let config = SignerServiceConfig {
             kek: Some("test_kek".to_string()),
             kek_env: Some("TEST_ENV".to_string()),

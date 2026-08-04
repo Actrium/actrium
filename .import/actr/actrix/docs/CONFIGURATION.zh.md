@@ -584,5 +584,5 @@ lsof -i :3478
 ## 参考
 
 - [config.example.toml](../config.example.toml) - 完整示例
-- [DEVELOPMENT.md](DEVELOPMENT.md) - 开发指南
+- [DEVELOPMENT.md](DEVELOPMENT.zh.md) - 开发指南
 - [deploy/README.md](../deploy/README.md) - 部署指南

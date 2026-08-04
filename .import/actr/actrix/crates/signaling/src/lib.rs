@@ -1,17 +1,17 @@
-//! Actrix 信令服务
+//! Actrix signaling service
 //!
-//! 基于 protobuf SignalingEnvelope 协议的 WebSocket 信令服务
+//! WebSocket signaling service based on the protobuf SignalingEnvelope protocol
 //!
-//! # 模块结构
+//! # Module structure
 //!
-//! ## 核心模块
-//! - [`server`]: WebSocket 服务器和协议处理
-//! - [`service_registry`][]: 服务注册与发现
+//! ## Core modules
+//! - [`server`]: WebSocket server and protocol handling
+//! - [`service_registry`][]: Service registration and discovery
 //!
-//! ## 扩展模块
-//! - [`presence`] - Presence 订阅管理
-//! - [`load_balancer`] - 负载均衡算法
-//! - [`geo`] - 地理位置和距离计算
+//! ## Extension modules
+//! - [`presence`] - Presence subscription management
+//! - [`load_balancer`] - Load balancing algorithms
+//! - [`geo`] - Geographic location and distance calculation
 #![deny(clippy::disallowed_macros)]
 
 pub mod geo;

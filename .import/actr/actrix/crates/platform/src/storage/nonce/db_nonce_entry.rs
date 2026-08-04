@@ -1,6 +1,6 @@
-//! 数据库 Nonce 条目
+//! Database nonce entry
 //!
-//! 定义了存储在数据库中的 Nonce 条目结构
+//! Defines the nonce entry structure stored in the database
 
 use serde::{Deserialize, Serialize};
 

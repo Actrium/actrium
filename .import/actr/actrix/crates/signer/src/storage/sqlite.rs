@@ -1,6 +1,6 @@
-//! SQLite 存储后端实现
+//! SQLite storage backend implementation
 //!
-//! 使用 sqlx 提供原生异步 SQLite 存储支持
+//! Uses sqlx to provide native async SQLite storage support
 
 use crate::crypto::KeyEncryptor;
 use crate::error::{SignerError, SignerResult};
@@ -16,7 +16,7 @@ use std::path::Path;
 use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// SQLite 存储后端
+/// SQLite storage backend
 #[derive(Clone)]
 pub struct SqliteBackend {
     pool: SqlitePool,
@@ -34,13 +34,13 @@ impl std::fmt::Debug for SqliteBackend {
 }
 
 impl SqliteBackend {
-    /// 创建新的 SQLite 后端实例
+    /// Create a new SQLite backend instance
     ///
     /// # Arguments
-    /// * `_config` - SQLite 配置（暂时保留，未使用）
-    /// * `key_ttl` - 密钥有效期（秒），0 表示永不过期
-    /// * `encryptor` - 密钥加密器
-    /// * `db_path` - 数据库文件存储目录路径（来自 ActrixConfig.sqlite_path）
+    /// * `_config` - SQLite configuration (currently unused, reserved for future use)
+    /// * `key_ttl` - Key TTL (seconds); 0 means never expires
+    /// * `encryptor` - Key encryptor
+    /// * `db_path` - Database file storage directory path (from ActrixConfig.sqlite_path)
     pub async fn new(
         _config: &SqliteConfig,
         key_ttl: u64,
@@ -49,7 +49,7 @@ impl SqliteBackend {
     ) -> SignerResult<Self> {
         let file = db_path.join("signer_keys.db");
 
-        // 创建连接选项并启用 WAL 模式
+        // Create connection options and enable WAL mode
         let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", file.display()))
             .map_err(|e| SignerError::Internal(format!("Failed to parse SQLite URL: {e}")))?
             .create_if_missing(true)
@@ -57,7 +57,7 @@ impl SqliteBackend {
             .synchronous(sqlx::sqlite::SqliteSynchronous::Normal)
             .busy_timeout(std::time::Duration::from_secs(5));
 
-        // 创建连接池
+        // Create connection pool
         let pool = SqlitePoolOptions::new()
             .max_connections(10)
             .connect_with(options)
@@ -70,7 +70,7 @@ impl SqliteBackend {
             encryptor,
         };
 
-        // 初始化数据库表
+        // Initialize database tables
         backend.init().await?;
 
         crate::recording::info!(
@@ -87,7 +87,7 @@ impl SqliteBackend {
 #[async_trait]
 impl KeyStorageBackend for SqliteBackend {
     async fn init(&self) -> SignerResult<()> {
-        // 创建密钥表（secret_key 列存储加密后的 Ed25519 signing key，public_key 存储 verifying key）
+        // Create keys table (secret_key column stores the encrypted Ed25519 signing key, public_key stores the verifying key)
         sqlx::query(
             r#"
             CREATE TABLE IF NOT EXISTS keys (
@@ -103,7 +103,7 @@ impl KeyStorageBackend for SqliteBackend {
         .await
         .map_err(|e| SignerError::Internal(format!("Failed to create keys table: {e}")))?;
 
-        // 创建索引
+        // Create index
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_keys_expires_at ON keys(expires_at)")
             .execute(&self.pool)
             .await
@@ -114,15 +114,15 @@ impl KeyStorageBackend for SqliteBackend {
     }
 
     async fn generate_and_store_key(&self) -> SignerResult<KeyPair> {
-        // 生成 Ed25519 密钥对
+        // Generate Ed25519 key pair
         let signing_key = SigningKey::generate(&mut OsRng);
         let verifying_key = signing_key.verifying_key();
 
-        // 编码为 Base64
+        // Encode as Base64
         let verifying_key_b64 = BASE64_STANDARD.encode(verifying_key.as_bytes());
         let signing_key_b64 = BASE64_STANDARD.encode(signing_key.as_bytes());
 
-        // 加密 signing key（如果启用）
+        // Encrypt signing key (if enabled)
         let encrypted_signing_key = self.encryptor.encrypt(&signing_key_b64)?;
 
         let now = SystemTime::now()
@@ -130,14 +130,14 @@ impl KeyStorageBackend for SqliteBackend {
             .unwrap()
             .as_secs() as i64;
 
-        // 计算过期时间
+        // Calculate expiration time
         let expires_at = if self.key_ttl == 0 {
-            0 // 永不过期
+            0 // Never expires
         } else {
             now + self.key_ttl as i64
         };
 
-        // 插入密钥并返回 ID（public_key 存储 verifying key，secret_key 存储加密的 signing key）
+        // Insert key and return ID (public_key stores the verifying key, secret_key stores the encrypted signing key)
         let result = sqlx::query(
             r#"INSERT INTO keys (public_key, secret_key, created_at, expires_at)
                VALUES (?1, ?2, ?3, ?4)"#,
@@ -181,7 +181,7 @@ impl KeyStorageBackend for SqliteBackend {
     }
 
     async fn sign(&self, key_id: u32, message: &[u8]) -> SignerResult<Vec<u8>> {
-        // 从数据库读取加密的 signing key
+        // Read encrypted signing key from database
         let result = sqlx::query_as::<_, (String,)>("SELECT secret_key FROM keys WHERE key_id = ?")
             .bind(key_id as i64)
             .fetch_optional(&self.pool)
@@ -200,10 +200,10 @@ impl KeyStorageBackend for SqliteBackend {
             }
         };
 
-        // 解密 signing key
+        // Decrypt signing key
         let signing_key_b64 = self.encryptor.decrypt(&encrypted_signing_key)?;
 
-        // Base64 解码
+        // Base64 decode
         let signing_key_bytes = BASE64_STANDARD
             .decode(&signing_key_b64)
             .map_err(|e| SignerError::Crypto(format!("Failed to decode signing key: {e}")))?;
@@ -212,7 +212,7 @@ impl KeyStorageBackend for SqliteBackend {
             .try_into()
             .map_err(|_| SignerError::Crypto("Signing key must be exactly 32 bytes".to_string()))?;
 
-        // 重建 SigningKey 并签名
+        // Reconstruct SigningKey and sign
         let signing_key = SigningKey::from_bytes(&signing_key_array);
         let signature = signing_key.sign(message);
 
@@ -313,20 +313,20 @@ mod tests {
         let temp_dir = tempdir().unwrap();
         let backend = create_test_backend(temp_dir.path()).await;
 
-        // 生成密钥
+        // Generate key
         let key_pair = backend.generate_and_store_key().await.unwrap();
         assert!(key_pair.key_id > 0);
         assert!(!key_pair.verifying_key.is_empty());
 
-        // 验证 verifying key 为 32 字节（base64 解码后）
+        // Verify verifying key is 32 bytes (after base64 decode)
         let vk_bytes = BASE64_STANDARD.decode(&key_pair.verifying_key).unwrap();
         assert_eq!(vk_bytes.len(), 32, "Ed25519 verifying key must be 32 bytes");
 
-        // 查询公钥
+        // Query public key
         let public_key = backend.get_public_key(key_pair.key_id).await.unwrap();
         assert_eq!(public_key, Some(key_pair.verifying_key.clone()));
 
-        // 查询完整记录
+        // Query full record
         let record = backend.get_key_record(key_pair.key_id).await.unwrap();
         assert!(record.is_some());
         let record = record.unwrap();
@@ -345,7 +345,7 @@ mod tests {
         let signature = backend.sign(key_pair.key_id, message).await.unwrap();
         assert_eq!(signature.len(), 64, "Ed25519 signature must be 64 bytes");
 
-        // 验证签名
+        // Verify signature
         let vk_bytes = BASE64_STANDARD.decode(&key_pair.verifying_key).unwrap();
         let vk_array: [u8; 32] = vk_bytes.try_into().unwrap();
         let verifying_key = ed25519_dalek::VerifyingKey::from_bytes(&vk_array).unwrap();
@@ -398,7 +398,7 @@ mod tests {
     async fn test_cleanup_expired_keys() {
         let temp_dir = tempdir().unwrap();
 
-        // 创建 TTL 为 1 秒的后端
+        // Create backend with 1-second TTL
         let config = SqliteConfig {};
         let backend = SqliteBackend::new(
             &config,
@@ -409,14 +409,14 @@ mod tests {
         .await
         .unwrap();
 
-        // 生成密钥
+        // Generate key
         backend.generate_and_store_key().await.unwrap();
         assert_eq!(backend.get_key_count().await.unwrap(), 1);
 
-        // 等待过期
+        // Wait for expiration
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
-        // 清理过期密钥（tolerance=0 表示过期即删）
+        // Clean up expired keys (tolerance=0 means delete immediately upon expiration)
         let cleaned = backend.cleanup_expired_keys(0).await.unwrap();
         assert_eq!(cleaned, 1);
         assert_eq!(backend.get_key_count().await.unwrap(), 0);
@@ -426,7 +426,7 @@ mod tests {
     async fn test_zero_ttl_never_expires() {
         let temp_dir = tempdir().unwrap();
 
-        // TTL 为 0（永不过期）
+        // TTL is 0 (never expires)
         let config = SqliteConfig {};
         let backend = SqliteBackend::new(
             &config,
@@ -440,7 +440,7 @@ mod tests {
         backend.generate_and_store_key().await.unwrap();
         assert_eq!(backend.get_key_count().await.unwrap(), 1);
 
-        // 清理不应删除永不过期的密钥
+        // Cleanup should not delete keys that never expire
         let cleaned = backend.cleanup_expired_keys(0).await.unwrap();
         assert_eq!(cleaned, 0);
         assert_eq!(backend.get_key_count().await.unwrap(), 1);

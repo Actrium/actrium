@@ -1,10 +1,10 @@
-//! Signer - Ed25519 签名密钥生成和管理服务
+//! Signer - Ed25519 signing key generation and management service
 //!
-//! Signer 服务提供以下功能：
-//! 1. 生成 Ed25519 签名密钥对，私钥永不离开 Signer
-//! 2. 对外提供 Sign API，代替调用方执行签名操作
-//! 3. PSK 签名验证和防重放攻击保护
-//! 4. 多存储后端支持：SQLite, PostgreSQL
+//! The Signer service provides the following functionality:
+//! 1. Generate Ed25519 signing key pairs; private keys never leave Signer
+//! 2. Expose a Sign API, performing signing operations on behalf of callers
+//! 3. PSK signature verification and replay attack protection
+//! 4. Multiple storage backend support: SQLite, PostgreSQL
 #![deny(clippy::disallowed_macros)]
 
 #[cfg(test)]
@@ -62,7 +62,7 @@ mod tests {
             tolerance_seconds: 3600,
         };
 
-        // 使用内存存储进行测试（避免文件系统依赖）
+        // Use in-memory storage for testing (avoid file system dependency)
         let nonce_storage = MemoryStorage::new();
         let state = create_signer_state(
             &config,

@@ -1588,10 +1588,10 @@ journalctl -u actrix | grep "HTTP POST /ks/generate" | wc -l
 - ✅ **故障排查** - 常见问题和解决方案
 
 **相关文档**:
-- [ARCHITECTURE.md](./ARCHITECTURE.md) - 整体架构
-- [CRATES.md](./CRATES.md) - Crate 详细文档
-- [API.md](./API.md) - API 参考 (待创建)
-- [CONFIGURATION.md](./CONFIGURATION.md) - 配置参考 (待更新)
+- [ARCHITECTURE.md](./ARCHITECTURE.zh.md) - 整体架构
+- [CRATES.md](./CRATES.zh.md) - Crate 详细文档
+- [API.md](./API.zh.md) - API 参考 (待创建)
+- [CONFIGURATION.md](./CONFIGURATION.zh.md) - 配置参考 (待更新)
 - [deploy/README.md](../deploy/README.md) - 部署指南
 
 **最后验证时间**: 2025-11-03

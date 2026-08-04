@@ -1,6 +1,6 @@
-//! TURN 服务器实现
+//! TURN server implementation
 //!
-//! 提供 TURN 中继服务器功能，用于 NAT 穿越和网络中继
+//! Provides TURN relay server functionality for NAT traversal and network relay.
 #![deny(clippy::disallowed_macros)]
 
 // TURN server implementation modules

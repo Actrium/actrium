@@ -1,15 +1,15 @@
-//! Realm 管理模块
+//! Realm management module
 //!
-//! 提供多 Realm 管理功能，包括 Realm 配置、权限控制、数据迁移等
+//! Provides multi-realm management functionality, including realm configuration, access control, data migration, etc.
 
-// 子模块
+// Submodules
 pub mod acl;
 pub mod error;
 pub mod model;
 pub mod secret;
 pub mod validation;
 
-// 公共API导出
+// Public API exports
 pub use acl::ActorAcl;
 pub use error::RealmError;
 pub use model::{Realm, RealmStatus};

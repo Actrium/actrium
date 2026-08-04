@@ -220,4 +220,4 @@ When `geoip` feature is disabled:
 ### Related Documentation
 
 - MaxMind GeoLite2: https://dev.maxmind.com/geoip/geolite2-free-geolocation-data
-- Signaling Service Geographic Load Balancing: `actrix-signaling/crates/signaling/README_GEOIP.md`
+- Signaling Service Geographic Load Balancing: `actrix/crates/signaling/README_GEOIP.zh.md`

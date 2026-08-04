@@ -1,7 +1,7 @@
-//! 服务管理器
+//! Service manager
 //!
-//! 实现了服务的启动、停止和管理逻辑
-//! 服务管理器模块 - 负责管理多个服务的生命周期
+//! Implements service start, stop, and management logic
+//! Service manager module - responsible for managing the lifecycle of multiple services
 
 use super::{HttpRouterService, IceService, http::build_control_router};
 use crate::service::container::ServiceContainer;
@@ -85,7 +85,7 @@ impl Service<SocketAddr> for SwappableMakeService {
     }
 }
 
-/// 服务管理器，负责管理多个服务的生命周期
+/// Service manager, responsible for managing the lifecycle of multiple services
 #[derive(Debug)]
 pub struct ServiceManager {
     services: Vec<ServiceContainer>,
@@ -118,7 +118,7 @@ pub struct ServiceManager {
 }
 
 impl ServiceManager {
-    /// 创建新的服务管理器
+    /// Create a new service manager
     pub fn new(
         config: ActrixConfig,
         shutdown_tx: tokio::sync::broadcast::Sender<()>,
@@ -157,15 +157,15 @@ impl ServiceManager {
         Arc::new(map)
     }
 
-    /// 添加服务到管理器
+    /// Add a service to the manager
     pub fn add_service(&mut self, service: ServiceContainer) {
         platform::recording::info!("Adding service '{}' to manager", service.info().name);
         self.services.push(service);
     }
 
-    /// 注册服务到管理平台
+    /// Register services to the management platform
     pub async fn register_services(&self, services: Vec<ServiceInfo>) -> Result<()> {
-        // 当前控制面为 pull 模式（/admin），不做主动注册。
+        // Control plane is pull-based (/admin), no active registration.
         platform::recording::debug!(
             "Control plane is pull-based, skipping active service registration for {} services",
             services.len()
@@ -410,7 +410,7 @@ impl ServiceManager {
         Ok(app)
     }
 
-    /// 启动所有服务
+    /// Start all services
     pub async fn start_all(&mut self) -> Result<Vec<JoinHandle<()>>> {
         platform::recording::info!(
             "Starting all {} types ({}) services.",
@@ -487,7 +487,7 @@ impl ServiceManager {
         Ok(handle_futs)
     }
 
-    /// 启动HTTP服务器，合并所有HTTP路由服务
+    /// Start HTTP server, merging all HTTP route services
     async fn start_http_services(
         &mut self,
         mut service_containers: Vec<ServiceContainer>,
@@ -621,7 +621,7 @@ impl ServiceManager {
         Ok(fut)
     }
 
-    /// 启动单个ICE服务
+    /// Start a single ICE service
     async fn start_ice_service(
         &mut self,
         service: ServiceContainer,

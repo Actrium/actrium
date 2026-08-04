@@ -1,6 +1,6 @@
 # actr-ts
 
-[中文](./README.zh-CN.md) | English
+[中文](./README.zh.md) | English
 
 TypeScript/Node.js bindings for ACTR. The binding is now `package-first`:
 local source-defined workloads were removed. `actr-ts` currently supports

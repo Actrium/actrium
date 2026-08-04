@@ -1,7 +1,7 @@
 //! # File [...]
 //!
-//! [...] `actr gen` [...]。
-//! [...]。
+//! [...] `actr gen` [...].
+//! [...].
 
 use crate::generated::{
     file_transfer::*, local_file::*, file_actor::LocalFileServiceHandler,

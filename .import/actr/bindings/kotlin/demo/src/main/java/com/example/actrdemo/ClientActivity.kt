@@ -408,8 +408,8 @@ class ClientActivity : AppCompatActivity() {
             val retryAfter = e.info.retryAfterMs
             withContext(Dispatchers.Main) {
                 logMessage(
-                    "⏳ 连接恢复中，等待 on_webrtc_connected" +
-                        (retryAfter?.let { " 或 ${it}ms 兜底重试" } ?: "（无兜底重试）"),
+                    "⏳ Connection recovering, waiting for on_webrtc_connected" +
+                        (retryAfter?.let { " or ${it}ms fallback retry" } ?: " (no fallback retry)"),
                 )
                 refreshUi()
             }

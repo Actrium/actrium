@@ -113,7 +113,7 @@ relay_port_range = "49152-65535"
 realm = "example.com"
 ```
 
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for complete reference.
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.zh.md) for complete reference.
 
 ## Recording
 
@@ -256,13 +256,13 @@ actrix/
 └── AGENTS.md        # AI development guide
 ```
 
-See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) for development guide.
+See [docs/DEVELOPMENT.md](docs/DEVELOPMENT.zh.md) for development guide.
 
 ## Documentation
 
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - System architecture
-- [CONFIGURATION.md](docs/CONFIGURATION.md) - Configuration reference
-- [DEVELOPMENT.md](docs/DEVELOPMENT.md) - Development guide
+- [ARCHITECTURE.md](docs/ARCHITECTURE.zh.md) - System architecture
+- [CONFIGURATION.md](docs/CONFIGURATION.zh.md) - Configuration reference
+- [DEVELOPMENT.md](docs/DEVELOPMENT.zh.md) - Development guide
 - [deploy/README.md](deploy/README.md) - Deployment guide
 - [AGENTS.md](AGENTS.md) - AI assistant guide
 - [CLAUDE.md](CLAUDE.md) - Project context
@@ -333,16 +333,16 @@ Apache License 2.0
 
 ## Documentation
 
-完整文档系统 (~4800 行精炼文档):
+Full documentation system (~4800 lines of refined docs):
 
-- **[INDEX.md](docs/INDEX.md)** - 文档导航索引 (从这里开始)
-- **[ARCHITECTURE.md](docs/ARCHITECTURE.md)** - 架构设计 (含代码行号引用)
-- **[CRATES.md](docs/CRATES.md)** - 代码实现详解
-- **[SERVICES.md](docs/SERVICES.md)** - 服务管理、部署、运维
-- **[API.md](docs/API.md)** - HTTP API 参考
-- **[CONFIGURATION.md](docs/CONFIGURATION.md)** - 配置参考
-- **[deploy/README.md](deploy/README.md)** - 生产部署指南
-- **[DEVELOPMENT.md](docs/DEVELOPMENT.md)** - 开发指南
+- **[INDEX.md](docs/INDEX.zh.md)** - Documentation navigation index (start here)
+- **[ARCHITECTURE.md](docs/ARCHITECTURE.zh.md)** - Architecture design (with code line references)
+- **[CRATES.md](docs/CRATES.zh.md)** - Code implementation details
+- **[SERVICES.md](docs/SERVICES.zh.md)** - Service management, deployment, operations
+- **[API.md](docs/API.zh.md)** - HTTP API reference
+- **[CONFIGURATION.md](docs/CONFIGURATION.zh.md)** - Configuration reference
+- **[deploy/README.md](deploy/README.md)** - Production deployment guide
+- **[DEVELOPMENT.md](docs/DEVELOPMENT.zh.md)** - Development guide
 
 ## Related Projects
 
@@ -352,7 +352,7 @@ Apache License 2.0
 ## Support
 
 - GitHub Issues: https://github.com/Actrium/actrix/issues
-- Documentation: [docs/INDEX.md](docs/INDEX.md)
+- Documentation: [docs/INDEX.md](docs/INDEX.zh.md)
 
 ---
 

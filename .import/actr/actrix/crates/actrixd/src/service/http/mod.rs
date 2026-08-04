@@ -1,6 +1,6 @@
-//! HTTP服务模块
+//! HTTP service module
 //!
-//! 管理HTTP相关的服务
+//! Manages HTTP-related services
 
 pub mod admin_api;
 mod ais;

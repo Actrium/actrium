@@ -1,6 +1,6 @@
 //! Echo Real Server - real Actor server
 //!
-//! using/use ActrNode start，via/through signaling server register
+//! using/use ActrNode start, via/through signaling server register
 
 mod echo_service;
 mod generated;
@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("actr.toml");
     let config = actr_config::ConfigParser::from_file(&config_path)?;
 
-    // initialize[...]（log/[...]）
+    // initialize[...] (log/[...])
     let _obs_guard = actr_hyper::init_observability(&config.observability)?;
 
     info!("🚀 Echo Real Server start");
@@ -57,12 +57,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(actr) => actr,
         Err(e) => {
             error!("❌ ActrNode startfailed: {:?}", e);
-            error!("💡 tip/hint：please ensure signaling-server already[...]: cd signaling-server && cargo run");
+            error!("💡 tip/hint: please ensure signaling-server already[...]: cd signaling-server && cargo run");
             return Err(e.into());
         }
     };
 
-    info!("✅ ActrNode startsuccess！");
+    info!("✅ ActrNode startsuccess!");
     info!("🆔 Server ID: {:?}", actr_ref.actor_id());
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("🎉 Echo Server alreadyfully/completelystart[...]register");
