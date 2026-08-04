@@ -110,3 +110,76 @@ jobs:
         run: |
           cargo test -p keel-native-guest
           cargo test -p keel-native-guest --no-default-features
+
+  # Windows-only native code that nothing else compiles: the MSVC source patches
+  # for QuickJS (compound literals, __builtin_frame_address, the infinity
+  # constant), the force-included compat header, and msvc-shims/ standing in for
+  # pthread.h and sys/time.h. Until this job existed the only thing exercising
+  # any of it was a human running examples/windows-demo/dev.cmd, which is how a
+  # compile break survived from the demo landing until someone happened to build
+  # on Windows (issue #100).
+  #
+  # This is the build-and-typecheck half of issue #106, not the behaviour half.
+  # An end-to-end run needs a generated RNW project, MSIX packaging components
+  # and Developer Mode on the runner; the two gates here are what turns "nobody
+  # has compiled this in months" into a per-PR signal, and they stand on their
+  # own if the e2e half never happens.
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    defaults:
+      run:
+        working-directory: examples/windows-demo
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      # npm, not bun: this demo is a react-native-windows app and its toolchain
+      # (the RNW CLI, the autolinking targets, NuGet restore) reads
+      # package-lock.json. The demo's typecheck is self-contained -- everything
+      # the linked keel sources need resolves inside this directory -- so the
+      # repository root does not have to be installed for the step below.
+      - name: Install demo dependencies
+        run: npm ci
+
+      - name: Typecheck the demo
+        run: npm run typecheck
+
+      # The sandbox library needs Microsoft.ReactNative.Cxx (and, for the Hermes
+      # engine, Microsoft.JavaScript.Hermes) unpacked under ~/.nuget/packages:
+      # CMakeLists.txt globs them from there rather than taking a path.
+      - name: Restore NuGet packages
+        run: msbuild windows\WindowsDemo.sln /t:Restore /p:Platform=x64 /p:Configuration=Release /nologo /v:m
+
+      # Both engines, because they compile different sources: quickjs pulls in
+      # the patched vendor C, hermes pulls in the N-API adapter. A green build of
+      # one says nothing about the other.
+      #
+      # These cover the C++ side of issue #100 as well, which is not obvious:
+      # the target is not C-only. QuickJSSandboxJSI.h includes <quickjs.h> and is
+      # compiled as C++ here, against the patched header CMake writes into the
+      # binary dir -- so a patch that stops applying breaks this job. What it
+      # cannot cover is the OTHER consumer, WindowsDemo.vcxproj, whose include
+      # order can silently reach the unpatched vendor header; that one is
+      # asserted at build time by the EnsureKeelSandboxNative target in the
+      # .vcxproj, because reproducing it here would mean running Metro and the
+      # MSIX packaging chain for one header check.
+      - name: Build the sandbox library (QuickJS)
+        run: |
+          cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build -G "Visual Studio 17 2022" -A x64 -DKEEL_SANDBOX_ENGINE=quickjs
+          cmake --build windows\KeelSandboxNative\build --config Release
+
+      - name: Build the sandbox library (Hermes)
+        run: |
+          cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build-hermes -G "Visual Studio 17 2022" -A x64 -DKEEL_SANDBOX_ENGINE=hermes
+          cmake --build windows\KeelSandboxNative\build-hermes --config Release
