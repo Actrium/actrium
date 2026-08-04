@@ -174,12 +174,18 @@ jobs:
       # asserted at build time by the EnsureKeelSandboxNative target in the
       # .vcxproj, because reproducing it here would mean running Metro and the
       # MSIX packaging chain for one header check.
+      # No -G: the runner image is not a fixed Visual Studio. windows-latest is
+      # windows-2025-vs2026 as of this writing, so pinning "Visual Studio 17 2022"
+      # fails with "could not find any instance of Visual Studio" -- and pinning
+      # 2026 instead only moves the breakage to the next image bump. CMake's
+      # default generator on Windows is the newest installed VS, which is what we
+      # actually want; -A x64 still pins the architecture.
       - name: Build the sandbox library (QuickJS)
         run: |
-          cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build -G "Visual Studio 17 2022" -A x64 -DKEEL_SANDBOX_ENGINE=quickjs
+          cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build -A x64 -DKEEL_SANDBOX_ENGINE=quickjs
           cmake --build windows\KeelSandboxNative\build --config Release
 
       - name: Build the sandbox library (Hermes)
         run: |
-          cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build-hermes -G "Visual Studio 17 2022" -A x64 -DKEEL_SANDBOX_ENGINE=hermes
+          cmake -S windows\KeelSandboxNative -B windows\KeelSandboxNative\build-hermes -A x64 -DKEEL_SANDBOX_ENGINE=hermes
           cmake --build windows\KeelSandboxNative\build-hermes --config Release
