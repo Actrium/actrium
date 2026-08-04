@@ -9,8 +9,20 @@ import type React from 'react';
 /**
  * Component type - React component for rendering
  * Core still uses React for rendering via receiver/reconciler
+ *
+ * The props are deliberately unconstrained. Everything the registry hands a
+ * component is a `Record<string, unknown>` decoded off the guest wire, so no
+ * static prop signature can be honoured here -- and typing the slot as
+ * `React.ComponentType<Record<string, unknown>>` does not express "props are
+ * unknown", it demands "every prop is optional". That rules out any component
+ * with a REQUIRED prop, including the library's own preset `Image` (`source`),
+ * which made `register(DefaultComponents)` a type error for every consumer that
+ * resolves real react-native types (issue #105). Whether the guest actually sent
+ * a required prop is a runtime question the component itself answers; the
+ * registry cannot answer it and should not pretend to.
  */
-export type ComponentType = React.ComponentType<Record<string, unknown>>;
+// biome-ignore lint/suspicious/noExplicitAny: wire boundary -- props arrive as Record<string,unknown> off the guest wire; see JSDoc above
+export type ComponentType = React.ComponentType<any>;
 
 /**
  * Component map

@@ -80,7 +80,10 @@ echo   Engine: %ENGINE%  Config: %CONFIG%  Clean: %CLEAN%  Launch: %LAUNCH%
 echo.
 
 rem ── Find MSBuild ──
-for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe 2^>nul`) do set "MSBUILD=%%i"
+rem -products * is required: vswhere defaults to the IDE product family
+rem (Community/Professional/Enterprise) and reports nothing on a host that has
+rem only Visual Studio Build Tools, even though MSBuild is installed there.
+for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -products * -latest -requires Microsoft.Component.MSBuild -find MSBuild\**\Bin\MSBuild.exe 2^>nul`) do set "MSBUILD=%%i"
 if not defined MSBUILD echo Error: MSBuild not found >&2 & exit /b 1
 
 rem ── Find CMake ──
@@ -176,7 +179,13 @@ if exist "%CMAKE_BD%\CMakeCache.txt" (
 
 if "%CMAKE_NEEDED%"=="1" (
     echo   [3/%TOTAL%] CMake sandbox [%ENGINE%] [%CONFIG%]...
-    "%CMAKE%" -S windows\KeelSandboxNative -B %CMAKE_BD% -G "Visual Studio 17 2022" -DKEEL_SANDBOX_ENGINE=%ENGINE%
+    rem No -G: CMake's default generator on Windows is the newest installed
+    rem Visual Studio. Pinning "Visual Studio 17 2022" fails outright with
+    rem "could not find any instance of Visual Studio" on a host that has a
+    rem newer VS and no 2022 -- and pinning the newer one only moves the
+    rem problem. -A x64 keeps the architecture explicit, since the .vcxproj
+    rem links build\%%CONFIG%%\keel_sandbox.lib for x64.
+    "%CMAKE%" -S windows\KeelSandboxNative -B %CMAKE_BD% -A x64 -DKEEL_SANDBOX_ENGINE=%ENGINE%
     if !errorlevel! neq 0 echo Error: CMake configure failed >&2 & exit /b 1
     "%CMAKE%" --build %CMAKE_BD% --config %CONFIG%
     if !errorlevel! neq 0 echo Error: CMake build failed >&2 & exit /b 1
