@@ -21,8 +21,7 @@ import type React from 'react';
  * a required prop is a runtime question the component itself answers; the
  * registry cannot answer it and should not pretend to.
  */
-// biome-ignore lint/suspicious/noExplicitAny: see above -- the registry slot is a
-// wire boundary, and `unknown` props would invert the variance rather than fix it.
+// biome-ignore lint/suspicious/noExplicitAny: wire boundary -- props arrive as Record<string,unknown> off the guest wire; see JSDoc above
 export type ComponentType = React.ComponentType<any>;
 
 /**
