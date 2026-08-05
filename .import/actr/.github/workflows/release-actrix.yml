@@ -55,8 +55,9 @@ jobs:
             echo "::error::Expected a stable release tag in vX.Y.Z form, got $TAG"
             exit 1
           }
-          git ls-remote --exit-code --tags \
-            "https://github.com/$GITHUB_REPOSITORY.git" "refs/tags/$TAG" >/dev/null
+          # gh api uses GH_TOKEN; unauthenticated git ls-remote fails on the
+          # now-private repository ("could not read Username").
+          gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/$TAG" >/dev/null
           gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
 
   publish-actrix:
