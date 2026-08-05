@@ -11,6 +11,7 @@ use tracing::{debug, info, warn};
 pub struct RustGenerator;
 
 const HANDLER_SCAFFOLD_MARKER: &str = "// ACTR: generated Rust handler scaffold";
+const ENTRY_PLACEHOLDER_MARKER: &str = "// ACTR: generated Rust workload entry placeholder";
 const ENTRY_SCAFFOLD_MARKER: &str = "// ACTR: generated Rust workload entry scaffold";
 
 #[async_trait]
@@ -489,7 +490,7 @@ impl RustGenerator {
             return Ok(true);
         }
 
-        Ok(is_default_cargo_lib_rs(&content))
+        Ok(is_generated_entry_placeholder(&content) || is_default_cargo_lib_rs(&content))
     }
 
     fn generate_entry_scaffold_content(&self, service: &ScaffoldService) -> String {
@@ -1114,6 +1115,40 @@ fn rust_scaffold_type_name(type_ref: &crate::commands::codegen::TypeRef, fallbac
 fn is_default_cargo_lib_rs(content: &str) -> bool {
     content.contains("pub fn add(left: u64, right: u64) -> u64")
         && content.contains("fn it_works()")
+}
+
+fn is_generated_entry_placeholder(content: &str) -> bool {
+    let mut lines = content.lines();
+    let Some(marker) = lines.next() else {
+        return false;
+    };
+
+    // `ENTRY_SCAFFOLD_MARKER` was used by the empty project template before
+    // placeholders received their own marker. Match the complete placeholder
+    // shape so legacy projects are migrated without treating a full scaffold
+    // or a user-edited placeholder as tool-owned.
+    if marker != ENTRY_PLACEHOLDER_MARKER && marker != ENTRY_SCAFFOLD_MARKER {
+        return false;
+    }
+
+    let Some(title) = lines.next() else {
+        return false;
+    };
+    if !title.starts_with("//! ") || !title.ends_with(" - empty Actor-RTC workload shell") {
+        return false;
+    }
+
+    [
+        "//!",
+        "//! Add service definitions to `protos/local/local.proto`, then run",
+        "//! `actr gen -l rust` to generate framework code under `src/generated/`.",
+        "",
+        "#[cfg(actr_has_generated)]",
+        "pub mod generated;",
+    ]
+    .into_iter()
+    .all(|expected| lines.next() == Some(expected))
+        && lines.next().is_none()
 }
 
 /// Recursively make all files in a directory (or a file) writable.
