@@ -1,8 +1,11 @@
-use super::RustGenerator;
+use super::{ENTRY_PLACEHOLDER_MARKER, ENTRY_SCAFFOLD_MARKER, RustGenerator};
 use crate::commands::codegen::scaffold::{ScaffoldCatalog, ScaffoldMethod, ScaffoldService};
 use crate::commands::codegen::{
     ActrGenMetadata, GenContext, LanguageGenerator, ProtoModel, SupportedLanguage, TypeRef,
     write_metadata,
+};
+use crate::templates::{
+    DEFAULT_MANUFACTURER, ProjectTemplate, ProjectTemplateName, TemplateContext,
 };
 use actr_config::ConfigParser;
 use std::path::PathBuf;
@@ -59,6 +62,101 @@ fn modified_generated_handler_scaffold_is_preserved() {
 }
 
 #[test]
+fn generated_entry_placeholder_is_overwritten_and_regeneration_is_idempotent() {
+    let tmp = TempDir::new().unwrap();
+    let output = tmp.path().join("src/generated");
+    let path = tmp.path().join("src/lib.rs");
+
+    let template = ProjectTemplate::new(ProjectTemplateName::Empty, SupportedLanguage::Rust);
+    let context = TemplateContext::new(
+        "empty-shell",
+        "ws://localhost:8080",
+        DEFAULT_MANUFACTURER,
+        "empty-service",
+        true,
+    );
+    template.generate(tmp.path(), &context).unwrap();
+
+    let placeholder = std::fs::read_to_string(&path).unwrap();
+    assert!(placeholder.contains(ENTRY_PLACEHOLDER_MARKER));
+
+    let generator = RustGenerator;
+    let scaffold = generator.generate_entry_scaffold_content(&scaffold_service());
+    std::fs::create_dir_all(&output).unwrap();
+
+    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_service(), &output, false))
+        .unwrap();
+
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), scaffold);
+
+    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_service(), &output, false))
+        .unwrap();
+
+    assert_eq!(std::fs::read_to_string(path).unwrap(), scaffold);
+}
+
+#[test]
+fn legacy_generated_entry_placeholder_is_overwritten_with_full_scaffold() {
+    let tmp = TempDir::new().unwrap();
+    let output = tmp.path().join("src/generated");
+    let path = tmp.path().join("src/lib.rs");
+
+    let template = ProjectTemplate::new(ProjectTemplateName::Empty, SupportedLanguage::Rust);
+    let context = TemplateContext::new(
+        "legacy-empty-shell",
+        "ws://localhost:8080",
+        DEFAULT_MANUFACTURER,
+        "empty-service",
+        true,
+    );
+    template.generate(tmp.path(), &context).unwrap();
+
+    let placeholder = std::fs::read_to_string(&path).unwrap().replacen(
+        ENTRY_PLACEHOLDER_MARKER,
+        ENTRY_SCAFFOLD_MARKER,
+        1,
+    );
+    std::fs::write(&path, placeholder).unwrap();
+
+    let generator = RustGenerator;
+    let scaffold = generator.generate_entry_scaffold_content(&scaffold_service());
+    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_service(), &output, false))
+        .unwrap();
+
+    assert_eq!(std::fs::read_to_string(path).unwrap(), scaffold);
+}
+
+#[test]
+fn user_modified_entry_placeholder_is_preserved() {
+    let tmp = TempDir::new().unwrap();
+    let output = tmp.path().join("src/generated");
+    let path = tmp.path().join("src/lib.rs");
+
+    let template = ProjectTemplate::new(ProjectTemplateName::Empty, SupportedLanguage::Rust);
+    let context = TemplateContext::new(
+        "custom-empty-shell",
+        "ws://localhost:8080",
+        DEFAULT_MANUFACTURER,
+        "empty-service",
+        true,
+    );
+    template.generate(tmp.path(), &context).unwrap();
+
+    let mut user_content = std::fs::read_to_string(&path).unwrap();
+    user_content.push_str("\npub fn user_customization() {}\n");
+    std::fs::write(&path, &user_content).unwrap();
+
+    tokio_test::block_on(RustGenerator.generate_entry_scaffold(
+        &scaffold_service(),
+        &output,
+        false,
+    ))
+    .unwrap();
+
+    assert_eq!(std::fs::read_to_string(path).unwrap(), user_content);
+}
+
+#[test]
 fn modified_generated_entry_scaffold_is_preserved() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("lib.rs");
@@ -72,6 +170,23 @@ fn modified_generated_entry_scaffold_is_preserved() {
             .should_overwrite_entry_scaffold(&path, &scaffold)
             .unwrap()
     );
+}
+
+#[test]
+fn user_modified_entry_without_actr_marker_is_preserved() {
+    let tmp = TempDir::new().unwrap();
+    let output = tmp.path().join("src/generated");
+    let path = tmp.path().join("src/lib.rs");
+    std::fs::create_dir_all(&output).unwrap();
+
+    let generator = RustGenerator;
+    let user_content = "pub mod generated;\n\npub fn user_customization() {}\n";
+    std::fs::write(&path, user_content).unwrap();
+
+    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_service(), &output, false))
+        .unwrap();
+
+    assert_eq!(std::fs::read_to_string(path).unwrap(), user_content);
 }
 
 #[test]
