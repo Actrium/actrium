@@ -321,9 +321,7 @@ detect_conventional_bump() {
       break
     fi
     if [[ "$highest" != "major" ]] && echo "$commit_msg" | grep -qE '^feat(\([^)]+\))?:'; then
-      # TEMPORARY: treat feat as patch (not minor) so 0.x feature commits
-      # bump 0.y.z -> 0.y.(z+1) instead of 0.(y+1).0. Revert when 1.0 lands.
-      highest="patch"
+      highest="minor"
     fi
     if [[ "$highest" == "none" ]] && echo "$commit_msg" | grep -qE '^fix(\([^)]+\))?:'; then
       highest="patch"
