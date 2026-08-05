@@ -86,7 +86,12 @@ jobs:
           - { os: ubuntu-latest, asset: actrix-linux-x86_64, exe_ext: "" }
           - { os: ubuntu-24.04-arm, asset: actrix-linux-arm64, exe_ext: "" }
           - { os: macos-14, asset: actrix-macos-arm64, exe_ext: "" }
-          - { os: windows-latest, asset: actrix-windows-x86_64, exe_ext: ".exe" }
+          # Windows actrix build temporarily skipped: the opentelemetry feature
+          # (#486) pushes the Windows release build past the 30m timeout on a
+          # cold cache, cancelling the job and skipping Upload actrix assets
+          # (so NO actrix binaries publish at all). Re-enable once a Windows
+          # larger runner is provisioned or the timeout is raised.
+          # - { os: windows-latest, asset: actrix-windows-x86_64, exe_ext: ".exe" }
     runs-on: ${{ matrix.target.os }}
     timeout-minutes: 30
     steps:
@@ -155,7 +160,7 @@ jobs:
           pnpm run build
 
       - name: Build actrix (release)
-        run: cargo build --release -p actrix
+        run: cargo build --release -p actrix --features opentelemetry
         working-directory: source
 
       - name: Stage binary
@@ -224,7 +229,8 @@ jobs:
 
       - name: Verify complete asset set
         env:
-          ASSETS: actrix-linux-x86_64 actrix-linux-arm64 actrix-macos-arm64 actrix-windows-x86_64 actrix-deploy-linux-x86_64 actrix-deploy-linux-arm64
+          # actrix-windows-x86_64 omitted: Windows build skipped per #489 (30m timeout).
+          ASSETS: actrix-linux-x86_64 actrix-linux-arm64 actrix-macos-arm64 actrix-deploy-linux-x86_64 actrix-deploy-linux-arm64
         run: |
           set -euo pipefail
           for asset in $ASSETS; do
