@@ -1,6 +1,6 @@
 {
   "name": "@actrium/actr-web",
-  "version": "0.5.9",
+  "version": "0.6.0",
   "description": "High-level browser SDK for Actrium",
   "type": "module",
   "main": "./dist/index.js",
