@@ -54,6 +54,45 @@ pub async fn wait_for_data_channel_opened(
     }
 }
 
+/// Wait until ICE recovery starts for the given peer.
+///
+/// This is the stable recovery boundary for two-peer tests: either side may
+/// observe the underlying ICE disconnect first, but the local coordinator
+/// always emits `IceRestartStarted` before it begins or accepts recovery.
+/// Returns the `session_id` of the recovering connection.
+pub async fn wait_for_ice_restart_started(
+    event_rx: &mut tokio::sync::broadcast::Receiver<ConnectionEvent>,
+    peer_id: &ActrId,
+    timeout: Duration,
+) -> u64 {
+    let deadline = tokio::time::Instant::now() + timeout;
+
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "timed out waiting for ICE restart to start for peer {peer_id}"
+        );
+
+        match tokio::time::timeout(remaining, event_rx.recv()).await {
+            Ok(Ok(ConnectionEvent::IceRestartStarted {
+                peer_id: event_peer,
+                session_id,
+            })) if &event_peer == peer_id => return session_id,
+            Ok(Ok(_)) => {}
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
+                tracing::warn!("Connection event receiver lagged by {} events", n);
+            }
+            Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
+                panic!("connection event channel closed while waiting for ICE restart");
+            }
+            Err(_) => {
+                panic!("timed out waiting for ICE restart to start for peer {peer_id}");
+            }
+        }
+    }
+}
+
 /// Wait until the full close chain (DataChannelClosed → PeerConnection Closed
 /// → ConnectionClosed) is observed for the given peer and session.
 ///
