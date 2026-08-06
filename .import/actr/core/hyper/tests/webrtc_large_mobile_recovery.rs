@@ -1170,6 +1170,46 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
                 "unexpected in-flight DataChunk failure: {msg}"
             );
         } else {
+            // A successful send only means SCTP accepted the bytes. While the
+            // offline session is still recoverable, no uncertainty may be
+            // reported (#69): the sticky hook could never be retracted if the
+            // restart went on to succeed and SCTP retransmitted the buffer.
+            let premature = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if let Some(event) = hook_rx.recv().await {
+                        if matches!(event, HookEvent::DataChunkDeliveryUncertain { .. }) {
+                            return event;
+                        }
+                    }
+                }
+            })
+            .await;
+            assert!(
+                premature.is_err(),
+                "{} recoverable offline must not emit delivery uncertainty: {premature:?}",
+                direction.name
+            );
+
+            // The terminal outcome — the system giving up on the session —
+            // is what reports the uncertainty. Compress the restart-exhaustion
+            // budget (~60s) by closing the recovering session directly: it
+            // drives the same channel-close path as the real exhaustion.
+            let session_id = harness
+                .peer(direction.from_serial)
+                .coordinator
+                .get_peer_session_id(&target_id)
+                .await
+                .expect("recovering peer should still have a session");
+            harness
+                .peer(direction.from_serial)
+                .coordinator
+                .close_recovering_peer_for_test(
+                    &target_id,
+                    session_id,
+                    "test: terminal give-up after long offline",
+                )
+                .await;
+
             let event = tokio::time::timeout(Duration::from_secs(5), async {
                 loop {
                     if let Some(event) = hook_rx.recv().await {
@@ -1180,7 +1220,7 @@ async fn inflight_data_chunk_long_offline_is_bounded_or_delivery_uncertain(case:
                 }
             })
             .await
-            .expect("successful in-flight DataChunk during offline must emit delivery uncertainty");
+            .expect("terminal session close after successful in-flight DataChunk must emit delivery uncertainty");
 
             match event {
                 HookEvent::DataChunkDeliveryUncertain { stream_id, .. } => {

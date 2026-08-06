@@ -2266,6 +2266,17 @@ impl Inner {
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             tracing::info!("🌐 Initializing WebRTC infrastructure");
 
+            // Fail fast on WebRTC options the v0.20 integration cannot honor
+            // (file-based config is already rejected at parse time; this
+            // covers programmatically built configs). A fixed UDP port is a
+            // deployment precondition, so silently ignoring it would present
+            // as "node healthy but unreachable".
+            self.config
+                .webrtc
+                .advanced
+                .validate()
+                .map_err(|e| ActrError::InvalidArgument(e.to_string()))?;
+
             let media_frame_registry = self.media_frame_registry.clone();
 
             // Create WebRtcCoordinator

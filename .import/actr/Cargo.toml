@@ -150,6 +150,7 @@ thiserror = "2.0"
 anyhow = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
 url = "2.5"
+if-addrs = "0.15"
 pwrzv = "0.6.2"
 yasm = "0.6.0"
 
@@ -165,7 +166,9 @@ opentelemetry-appender-tracing = "0.32.0"
 tracing-opentelemetry = "0.33.0"
 
 # === WebRTC (WebRTC) ===
-webrtc = "0.14"
+webrtc = { version = "0.20.0", default-features = false, features = ["runtime-tokio"] }
+rtc = "0.20.0"
+rtc-rtp = "0.20.0"
 
 # === actrix server deps (imported) ===
 turn_crate = { package = "turn", version = "0.11.0" }

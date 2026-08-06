@@ -20,6 +20,10 @@ fn is_ipv4_candidate_allowed(cand: &str) -> bool {
 // - Create and cache WebRtcConnection instances
 // - Aggregate messages from all peers
 
+use super::adapter::{
+    RTCDataChannel, RTCDataChannelState, RTCIceCandidate, RTCIceCandidateInit,
+    RTCIceGatheringState, RTCPeerConnection, RTCPeerConnectionState, RTCSessionDescription,
+};
 use super::connection::WebRtcConnection;
 use super::negotiator::WebRtcNegotiator;
 use super::peer_recovery::{BeginRecoveryOutcome, NetworkRecoveryStatus, PeerRecoveryRegistry};
@@ -39,6 +43,7 @@ use actr_protocol::{
     session_description::Type as SdpType, signaling_envelope,
 };
 use actr_protocol::{ActorResult, ActrError};
+use rtc::rtp_transceiver::rtp_sender::RtpCodecKind;
 use std::collections::{HashMap, VecDeque};
 #[cfg(any(test, feature = "test-utils"))]
 use std::sync::Mutex as StdMutex;
@@ -59,12 +64,8 @@ use tokio_util::sync::CancellationToken;
 use tracing::Instrument;
 #[cfg(feature = "opentelemetry")]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::ice_transport::ice_candidate::{RTCIceCandidate, RTCIceCandidateInit};
-use webrtc::ice_transport::ice_gathering_state::RTCIceGatheringState;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
-use webrtc::peer_connection::{RTCPeerConnection, peer_connection_state::RTCPeerConnectionState};
-use webrtc::track::track_local::TrackLocalWriter;
+use webrtc::media_stream::track_local::TrackLocal;
+use webrtc::media_stream::track_remote::TrackRemoteEvent;
 
 const ICE_RESTART_MAX_RETRIES: u32 = 10;
 const ICE_RESTART_TIMEOUT: Duration = Duration::from_secs(6);
@@ -96,6 +97,8 @@ const WEBRTC_RELIABLE_INBOUND_QUEUE_DEPTH: usize = 64;
 const WEBRTC_LATENCY_FIRST_INBOUND_QUEUE_DEPTH: usize = 64;
 const MAX_PENDING_ICE_CANDIDATES_PER_PEER: usize = 256;
 const MAX_KNOWN_REMOTE_ICE_GENERATIONS: usize = 8;
+const SIGNALING_PEER_QUEUE_WARN_DEPTH: usize = 256;
+const SIGNALING_PEER_WORKER_IDLE_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn arm_notification(
     notify: &tokio::sync::Notify,
@@ -537,6 +540,13 @@ impl Default for PeerSignalingCommitState {
 struct CoordinatorBackgroundTasks {
     lifecycle_gate: Mutex<()>,
     handles: Mutex<Vec<JoinHandle<()>>>,
+    signaling_workers: Mutex<HashMap<ActrId, SignalingPeerWorker>>,
+}
+
+struct SignalingPeerWorker {
+    tx: mpsc::UnboundedSender<SignalingEnvelope>,
+    queued: Arc<AtomicUsize>,
+    handle: JoinHandle<()>,
 }
 
 #[cfg(any(test, feature = "test-utils"))]
@@ -555,6 +565,7 @@ struct TestPeerStateBarrier {
 #[cfg(any(test, feature = "test-utils"))]
 #[derive(Default)]
 struct CoordinatorTestBarriers {
+    signaling_envelope: StdMutex<Option<TestPeerBarrier>>,
     peer_publish: StdMutex<Option<TestPeerBarrier>>,
     peer_sendable_subscribed: StdMutex<Option<TestPeerBarrier>>,
     initial_readiness_subscribed: StdMutex<Option<TestPeerBarrier>>,
@@ -1278,6 +1289,16 @@ impl WebRtcCoordinator {
     }
 
     #[cfg(any(test, feature = "test-utils"))]
+    async fn hit_signaling_envelope_barrier_for_test(&self, peer_id: &ActrId) {
+        if let Some(barrier) =
+            Self::take_peer_barrier(&self.test_barriers.signaling_envelope, peer_id)
+        {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
     async fn hit_peer_publish_barrier_for_test(&self, peer_id: &ActrId) {
         if let Some(barrier) = Self::take_peer_barrier(&self.test_barriers.peer_publish, peer_id) {
             barrier.wait().await;
@@ -1332,7 +1353,7 @@ impl WebRtcCoordinator {
         }
     }
 
-    #[cfg(feature = "test-utils")]
+    #[cfg(any(test, feature = "test-utils"))]
     fn install_peer_barrier(
         slot: &StdMutex<Option<TestPeerBarrier>>,
         peer_id: ActrId,
@@ -1343,6 +1364,21 @@ impl WebRtcCoordinator {
         assert!(
             slot.replace(TestPeerBarrier { peer_id, barrier }).is_none(),
             "{description} should only be installed once"
+        );
+    }
+
+    /// Pause the next signaling envelope dispatched for `peer_id`.
+    #[cfg(feature = "test-utils")]
+    pub fn set_signaling_envelope_barrier_for_test(
+        &self,
+        peer_id: ActrId,
+        barrier: Arc<tokio::sync::Barrier>,
+    ) {
+        Self::install_peer_barrier(
+            &self.test_barriers.signaling_envelope,
+            peer_id,
+            barrier,
+            "signaling envelope barrier",
         );
     }
 
@@ -1746,13 +1782,7 @@ impl WebRtcCoordinator {
     }
 
     async fn selected_pair_is_relayed(peer_connection: &Arc<RTCPeerConnection>) -> bool {
-        let sctp = peer_connection.sctp();
-        let dtls = sctp.transport();
-        let ice = dtls.ice_transport();
-        ice.get_selected_candidate_pair()
-            .await
-            .map(|pair| pair.to_string().contains("relay"))
-            .unwrap_or(false)
+        peer_connection.selected_pair_is_relayed().await
     }
 
     async fn notify_webrtc_connected_if_sendable(
@@ -2226,10 +2256,10 @@ impl WebRtcCoordinator {
         }
     }
 
-    /// Inject a virtual network for integration testing.
+    /// Attach the legacy VNet context used by integration tests.
     ///
-    /// **Must be called before `start()`** — all subsequently created
-    /// RTCPeerConnections will use this VNet instead of real OS networking.
+    /// webrtc-rs v0.20 owns its UDP sockets, so packet loss is applied by
+    /// `set_test_packet_blocked` rather than by injecting this VNet directly.
     ///
     /// # Example
     /// ```rust,ignore
@@ -2238,8 +2268,18 @@ impl WebRtcCoordinator {
     /// coordinator.start().await?;
     /// ```
     #[cfg(feature = "test-utils")]
-    pub fn set_vnet(&mut self, vnet: std::sync::Arc<webrtc::util::vnet::net::Net>) {
+    pub fn set_vnet(&mut self, vnet: std::sync::Arc<webrtc_util::vnet::net::Net>) {
         self.negotiator.set_vnet(vnet);
+    }
+
+    /// Install the packet gate used by v0.20 integration tests.
+    ///
+    /// The v0.20 async builder owns its UDP sockets and no longer accepts the
+    /// legacy VNet socket provider. The test runtime therefore wraps those real
+    /// sockets and drops packets while this shared flag is set.
+    #[cfg(feature = "test-utils")]
+    pub fn set_test_packet_blocked(&mut self, blocked: Arc<AtomicBool>) {
+        self.negotiator.set_test_packet_blocked(blocked);
     }
 
     /// Close a cached WebRTC DataChannel for integration tests.
@@ -2874,6 +2914,28 @@ impl WebRtcCoordinator {
             return false;
         };
         self.close_claimed_peer_recovery(peer_id, claimed, abort_restart_task, reason)
+            .await
+    }
+
+    /// Drive the terminal give-up path for one peer session on demand.
+    ///
+    /// Integration tests use this to compress the restart-exhaustion budget
+    /// instead of waiting out `NETWORK_RECOVERY_TIMEOUT`. The registry claim
+    /// is best-effort: the side under test may never have observed the
+    /// disconnect (e.g. only the remote ran a network change), in which case
+    /// there is no Recovering entry to claim. The session teardown itself is
+    /// unconditional, since the terminal channel-close path is what the test
+    /// exercises.
+    #[cfg(feature = "test-utils")]
+    pub async fn close_recovering_peer_for_test(
+        &self,
+        peer_id: &ActrId,
+        session_id: u64,
+        reason: &str,
+    ) -> bool {
+        self.fail_peer_recovery(peer_id, session_id, true, reason)
+            .await;
+        self.cleanup_connection_if_session(peer_id, session_id, true, reason)
             .await
     }
 
@@ -4107,26 +4169,7 @@ impl WebRtcCoordinator {
                 // 1. Receive message from SignalingClient
                 match coordinator.signaling_client.receive_envelope().await {
                     Ok(Some(envelope)) => {
-                        #[cfg(feature = "opentelemetry")]
-                        let (span, remote_ctx) = {
-                            let remote_ctx = trace::extract_trace_context(&envelope);
-                            let span = tracing::info_span!(
-                                "WebRtcCoordinator.handle_envelope",
-                                envelope_id = envelope.envelope_id,
-                                reply_for = ?envelope.reply_for
-                            );
-                            let _ = span.set_parent(remote_ctx.clone());
-                            (span, remote_ctx)
-                        };
-
-                        let handle_envelope_fut = coordinator.handle_envelope(
-                            envelope,
-                            #[cfg(feature = "opentelemetry")]
-                            remote_ctx,
-                        );
-                        #[cfg(feature = "opentelemetry")]
-                        let handle_envelope_fut = handle_envelope_fut.instrument(span);
-                        handle_envelope_fut.await;
+                        coordinator.dispatch_signaling_envelope(envelope).await;
                     }
                     Ok(None) => {
                         tracing::info!(
@@ -4171,6 +4214,159 @@ impl WebRtcCoordinator {
         for handle in handles {
             let _ = handle.await;
         }
+
+        // The signaling receiver only routes envelopes. Peer-scoped workers
+        // own the actual WebRTC awaits, so abort and join them separately after
+        // the router is stopped and can no longer publish new work.
+        let workers = {
+            let mut workers = self.background_tasks.signaling_workers.lock().await;
+            std::mem::take(&mut *workers)
+        };
+        for worker in workers.values() {
+            worker.handle.abort();
+        }
+        for (_, worker) in workers {
+            let _ = worker.handle.await;
+        }
+    }
+
+    fn signaling_peer_for_envelope(&self, envelope: &SignalingEnvelope) -> Option<ActrId> {
+        let Some(signaling_envelope::Flow::ActrRelay(relay)) = &envelope.flow else {
+            return None;
+        };
+        let local_id = self.local_id_snapshot();
+        Some(if relay.source == local_id {
+            relay.target.clone()
+        } else {
+            relay.source.clone()
+        })
+    }
+
+    async fn process_signaling_envelope(self: &Arc<Self>, envelope: SignalingEnvelope) {
+        #[cfg(feature = "opentelemetry")]
+        let (span, remote_ctx) = {
+            let remote_ctx = trace::extract_trace_context(&envelope);
+            let span = tracing::info_span!(
+                "WebRtcCoordinator.handle_envelope",
+                envelope_id = envelope.envelope_id,
+                reply_for = ?envelope.reply_for
+            );
+            let _ = span.set_parent(remote_ctx.clone());
+            (span, remote_ctx)
+        };
+
+        let handle_envelope_fut = self.handle_envelope(
+            envelope,
+            #[cfg(feature = "opentelemetry")]
+            remote_ctx,
+        );
+        #[cfg(feature = "opentelemetry")]
+        let handle_envelope_fut = handle_envelope_fut.instrument(span);
+        handle_envelope_fut.await;
+    }
+
+    /// Route signaling through one FIFO worker per peer.
+    ///
+    /// webrtc-rs 0.20 exposes async methods backed by the connection driver's
+    /// shared core lock. A stale connection can therefore suspend one handler
+    /// for a long time. Keeping order within a peer preserves SDP/ICE
+    /// semantics, while independent workers prevent that stale session from
+    /// blocking offers from newly registered mobile instances.
+    async fn dispatch_signaling_envelope(self: &Arc<Self>, envelope: SignalingEnvelope) {
+        let Some(peer_id) = self.signaling_peer_for_envelope(&envelope) else {
+            self.process_signaling_envelope(envelope).await;
+            return;
+        };
+
+        let mut pending = Some(envelope);
+        for _ in 0..2 {
+            let mut workers = self.background_tasks.signaling_workers.lock().await;
+            workers.retain(|_, worker| !worker.handle.is_finished());
+
+            let worker = workers.entry(peer_id.clone()).or_insert_with(|| {
+                let (tx, mut rx) = mpsc::unbounded_channel::<SignalingEnvelope>();
+                let queued = Arc::new(AtomicUsize::new(0));
+                let queued_for_worker = Arc::clone(&queued);
+                let coordinator = Arc::downgrade(self);
+                let worker_peer_id = peer_id.clone();
+                let handle = tokio::spawn(async move {
+                    loop {
+                        tokio::select! {
+                            envelope = rx.recv() => {
+                                let Some(envelope) = envelope else {
+                                    break;
+                                };
+                                queued_for_worker.fetch_sub(1, Ordering::AcqRel);
+                                let Some(coordinator) = coordinator.upgrade() else {
+                                    break;
+                                };
+                                coordinator.process_signaling_envelope(envelope).await;
+                            }
+                            _ = crate::timer::sleep(
+                                crate::timer::ids::WEBRTC_SIGNALING_WORKER_IDLE,
+                                SIGNALING_PEER_WORKER_IDLE_TIMEOUT,
+                            ) => {
+                                let Some(coordinator) = coordinator.upgrade() else {
+                                    break;
+                                };
+                                // Serialize retirement with dispatch. If a
+                                // sender queued work first, its depth is
+                                // visible and this worker stays alive; if
+                                // retirement wins, the next dispatch creates
+                                // a fresh worker instead of sending into a
+                                // receiver that is about to disappear.
+                                let mut workers = coordinator
+                                    .background_tasks
+                                    .signaling_workers
+                                    .lock()
+                                    .await;
+                                let owns_slot = workers.get(&worker_peer_id).is_some_and(|worker| {
+                                    Arc::ptr_eq(&worker.queued, &queued_for_worker)
+                                });
+                                if owns_slot
+                                    && queued_for_worker.load(Ordering::Acquire) == 0
+                                {
+                                    workers.remove(&worker_peer_id);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    tracing::debug!(
+                        peer_id = %worker_peer_id,
+                        "WebRTC peer signaling worker exited"
+                    );
+                });
+                SignalingPeerWorker { tx, queued, handle }
+            });
+
+            let envelope = pending.take().expect("signaling envelope must be pending");
+            let depth = worker.queued.fetch_add(1, Ordering::AcqRel) + 1;
+            match worker.tx.send(envelope) {
+                Ok(()) => {
+                    if depth == SIGNALING_PEER_QUEUE_WARN_DEPTH {
+                        tracing::warn!(
+                            peer_id = %peer_id,
+                            queued_envelopes = depth,
+                            "WebRTC peer signaling queue reached its high-water mark"
+                        );
+                    }
+                    return;
+                }
+                Err(err) => {
+                    worker.queued.fetch_sub(1, Ordering::AcqRel);
+                    pending = Some(err.0);
+                    if let Some(worker) = workers.remove(&peer_id) {
+                        worker.handle.abort();
+                    }
+                }
+            }
+        }
+
+        tracing::error!(
+            peer_id = %peer_id,
+            "Failed to dispatch WebRTC signaling envelope after replacing a stopped worker"
+        );
     }
 
     /// Handle received signaling envelope
@@ -4179,6 +4375,11 @@ impl WebRtcCoordinator {
         envelope: SignalingEnvelope,
         #[cfg(feature = "opentelemetry")] remote_ctx: opentelemetry::Context,
     ) {
+        #[cfg(any(test, feature = "test-utils"))]
+        if let Some(peer_id) = self.signaling_peer_for_envelope(&envelope) {
+            self.hit_signaling_envelope_barrier_for_test(&peer_id).await;
+        }
+
         // Decode SignalingEnvelope
         match envelope.flow {
             Some(signaling_envelope::Flow::ActrRelay(relay)) => {
@@ -5674,28 +5875,29 @@ impl WebRtcCoordinator {
         // 4. Register on_track callback for receiving MediaTrack (WebRTC native media)
         let media_registry = Arc::clone(&self.media_frame_registry);
         let sender_id = target.clone();
-        peer_connection_arc.on_track(Box::new(move |track, _receiver, _transceiver| {
+        peer_connection_arc.on_track(Box::new(move |track| {
             let media_registry = Arc::clone(&media_registry);
             let sender_id = sender_id.clone();
 
-            // Extract codec and media type from track metadata before spawning
-            let track_codec = track.codec();
-            let codec_name = track_codec
-                .capability
-                .mime_type
-                .split('/')
-                .next_back()
-                .unwrap_or("unknown")
-                .to_uppercase();
-            let media_type = match track.kind() {
-                webrtc::rtp_transceiver::rtp_codec::RTPCodecType::Audio => {
-                    actr_framework::MediaType::Audio
-                }
-                _ => actr_framework::MediaType::Video,
-            };
-
             Box::pin(async move {
-                let track_id = track.id();
+                let track_id = track.track_id().await;
+                let first_ssrc = track.ssrcs().await.into_iter().next().unwrap_or_default();
+                let codec_name = track
+                    .codec(first_ssrc)
+                    .await
+                    .map(|codec| {
+                        codec
+                            .mime_type
+                            .split('/')
+                            .next_back()
+                            .unwrap_or("unknown")
+                            .to_uppercase()
+                    })
+                    .unwrap_or_else(|| "UNKNOWN".to_owned());
+                let media_type = match track.kind().await {
+                    RtpCodecKind::Audio => actr_framework::MediaType::Audio,
+                    _ => actr_framework::MediaType::Video,
+                };
                 tracing::info!(
                     "📹 Received MediaTrack: track_id={}, codec={}, media_type={:?}, sender={}",
                     track_id,
@@ -5704,17 +5906,13 @@ impl WebRtcCoordinator {
                     sender_id
                 );
 
-                let codec_name = codec_name.clone();
-                let media_type = media_type;
                 tokio::spawn(async move {
-                    loop {
-                        match track.read_rtp().await {
-                            Ok((rtp_packet, _attributes)) => {
-                                let payload_data = rtp_packet.payload.clone();
-                                let timestamp = rtp_packet.header.timestamp;
+                    while let Some(event) = track.poll().await {
+                        match event {
+                            TrackRemoteEvent::OnRtpPacket(rtp_packet) => {
                                 let sample = actr_framework::MediaSample {
-                                    data: payload_data,
-                                    timestamp,
+                                    data: rtp_packet.payload,
+                                    timestamp: rtp_packet.header.timestamp,
                                     codec: codec_name.clone(),
                                     media_type,
                                 };
@@ -5722,14 +5920,15 @@ impl WebRtcCoordinator {
                                     .dispatch(&track_id, sample, sender_id.clone())
                                     .await;
                             }
-                            Err(e) => {
+                            TrackRemoteEvent::OnError => {
                                 tracing::error!(
-                                    "❌ Failed to read RTP from track {}: {}",
-                                    track_id,
-                                    e
+                                    "❌ Remote MediaTrack error: track_id={}",
+                                    track_id
                                 );
                                 break;
                             }
+                            TrackRemoteEvent::OnEnded => break,
+                            _ => {}
                         }
                     }
                     tracing::info!("🛑 MediaTrack reader task exited for track_id={}", track_id);
@@ -6171,28 +6370,29 @@ impl WebRtcCoordinator {
         // 4. Register on_track callback for receiving MediaTrack (WebRTC native media)
         let media_registry = Arc::clone(&self.media_frame_registry);
         let sender_id = from.clone();
-        peer_connection_arc.on_track(Box::new(move |track, _receiver, _transceiver| {
+        peer_connection_arc.on_track(Box::new(move |track| {
             let media_registry = Arc::clone(&media_registry);
             let sender_id = sender_id.clone();
 
-            // Extract codec and media type from track metadata before spawning
-            let track_codec = track.codec();
-            let codec_name = track_codec
-                .capability
-                .mime_type
-                .split('/')
-                .next_back()
-                .unwrap_or("unknown")
-                .to_uppercase();
-            let media_type = match track.kind() {
-                webrtc::rtp_transceiver::rtp_codec::RTPCodecType::Audio => {
-                    actr_framework::MediaType::Audio
-                }
-                _ => actr_framework::MediaType::Video,
-            };
-
             Box::pin(async move {
-                let track_id = track.id();
+                let track_id = track.track_id().await;
+                let first_ssrc = track.ssrcs().await.into_iter().next().unwrap_or_default();
+                let codec_name = track
+                    .codec(first_ssrc)
+                    .await
+                    .map(|codec| {
+                        codec
+                            .mime_type
+                            .split('/')
+                            .next_back()
+                            .unwrap_or("unknown")
+                            .to_uppercase()
+                    })
+                    .unwrap_or_else(|| "UNKNOWN".to_owned());
+                let media_type = match track.kind().await {
+                    RtpCodecKind::Audio => actr_framework::MediaType::Audio,
+                    _ => actr_framework::MediaType::Video,
+                };
                 tracing::info!(
                     "📹 Received MediaTrack: track_id={}, codec={}, media_type={:?}, sender={}",
                     track_id,
@@ -6201,17 +6401,13 @@ impl WebRtcCoordinator {
                     sender_id
                 );
 
-                let codec_name = codec_name.clone();
-                let media_type = media_type;
                 tokio::spawn(async move {
-                    loop {
-                        match track.read_rtp().await {
-                            Ok((rtp_packet, _attributes)) => {
-                                let payload_data = rtp_packet.payload.clone();
-                                let timestamp = rtp_packet.header.timestamp;
+                    while let Some(event) = track.poll().await {
+                        match event {
+                            TrackRemoteEvent::OnRtpPacket(rtp_packet) => {
                                 let sample = actr_framework::MediaSample {
-                                    data: payload_data,
-                                    timestamp,
+                                    data: rtp_packet.payload,
+                                    timestamp: rtp_packet.header.timestamp,
                                     codec: codec_name.clone(),
                                     media_type,
                                 };
@@ -6219,14 +6415,15 @@ impl WebRtcCoordinator {
                                     .dispatch(&track_id, sample, sender_id.clone())
                                     .await;
                             }
-                            Err(e) => {
+                            TrackRemoteEvent::OnError => {
                                 tracing::error!(
-                                    "❌ Failed to read RTP from track {}: {}",
-                                    track_id,
-                                    e
+                                    "❌ Remote MediaTrack error: track_id={}",
+                                    track_id
                                 );
                                 break;
                             }
+                            TrackRemoteEvent::OnEnded => break,
+                            _ => {}
                         }
                     }
                     tracing::info!("🛑 MediaTrack reader task exited for track_id={}", track_id);
@@ -6917,8 +7114,35 @@ impl WebRtcCoordinator {
 
         match peer_opt {
             Some((peer_connection, session_id, known_remote_ufrags)) => {
+                // `remote_description()` takes webrtc-rs 0.20's shared core
+                // lock. A stale driver must not pin this peer's signaling FIFO
+                // indefinitely; retain the candidate and let the normal flush
+                // path retry after SDP has made progress.
+                let remote_description = match crate::timer::timeout(
+                    crate::timer::ids::WEBRTC_CANDIDATE_FLUSH,
+                    REMOTE_CANDIDATE_FLUSH_TIMEOUT,
+                    peer_connection.remote_description(),
+                )
+                .await
+                {
+                    Ok(remote_description) => remote_description,
+                    Err(_) => {
+                        tracing::warn!(
+                            peer_id = %from,
+                            session_id,
+                            timeout_ms = REMOTE_CANDIDATE_FLUSH_TIMEOUT.as_millis(),
+                            "Timed out reading remote description; buffering ICE candidate"
+                        );
+                        self.buffer_pending_remote_candidate_if_session_current(
+                            from, session_id, candidate,
+                        )
+                        .await;
+                        return Ok(());
+                    }
+                };
+
                 // Check if remote description is set
-                if let Some(remote_description) = peer_connection.remote_description().await {
+                if let Some(remote_description) = remote_description {
                     let Some(current_ufrag) = ice_ufrag_from_description(
                         &remote_description,
                         candidate.sdp_mid.as_deref(),
@@ -7749,12 +7973,17 @@ impl WebRtcCoordinator {
             })
     }
 
-    /// Map codec name to RTP dynamic payload type
+    /// Map codec name to RTP dynamic payload type.
+    ///
+    /// These MUST match the `payload_type` each `register_codec` call in
+    /// `WebRtcNegotiator::register_default_codecs` pins. rtc 0.20 validates
+    /// the RTP packet's payload type against the registered codec and rejects
+    /// a mismatch asynchronously after `send_media_sample` returns success,
+    /// so a stale mapping here silently discards media.
     fn codec_to_payload_type(codec: &str) -> u8 {
         match codec.to_uppercase().as_str() {
             "VP8" => 96,
-            "H264" => 97,
-            "VP9" => 98,
+            "H264" => 102,
             "OPUS" => 111,
             _ => 96,
         }
@@ -7775,8 +8004,7 @@ impl WebRtcCoordinator {
         track_id: &str,
         sample: actr_framework::MediaSample,
     ) -> ActorResult<()> {
-        use webrtc::rtp::header::Header as RtpHeader;
-        use webrtc::rtp::packet::Packet as RtpPacket;
+        use rtc_rtp::{Header as RtpHeader, Packet as RtpPacket};
 
         // 1. Get PeerState for target
         let peers = self.peers.read().await;
@@ -7827,8 +8055,9 @@ impl WebRtcCoordinator {
         };
 
         // 6. Send RTP packet via track
+        let payload_len = rtp_packet.payload.len();
         track
-            .write_rtp(&rtp_packet)
+            .write_rtp(rtp_packet)
             .await
             .map_err(|e| ActrError::Internal(format!("Failed to write RTP: {e}")))?;
 
@@ -7838,7 +8067,7 @@ impl WebRtcCoordinator {
             sequence_number,
             ssrc,
             sample.timestamp,
-            rtp_packet.payload.len()
+            payload_len
         );
 
         Ok(())
@@ -9755,13 +9984,9 @@ impl WebRtcCoordinator {
         };
 
         // 2. Set remote description (new Offer)
-        let offer =
-            webrtc::peer_connection::sdp::session_description::RTCSessionDescription::offer(
-                offer_sdp,
-            )
-            .map_err(|e| {
-                ActrError::Internal(format!("Failed to parse renegotiation offer: {e}"))
-            })?;
+        let offer = RTCSessionDescription::offer(offer_sdp).map_err(|e| {
+            ActrError::Internal(format!("Failed to parse renegotiation offer: {e}"))
+        })?;
         peer_connection
             .set_remote_description(offer)
             .await
@@ -10064,6 +10289,20 @@ impl WebRtcCoordinator {
                 return Err(err.into());
             }
         };
+
+        // Applying the restart offer begins a new ICE generation, but the
+        // stack reports PeerConnection leaving Connected asynchronously. Until
+        // that callback lands, this session's cached state still reads
+        // Connected and the readiness wait below would accept the old
+        // generation's open DataChannel as proof the restart is ready.
+        {
+            let mut peers = self.peers.write().await;
+            if let Some(state) = peers.get_mut(from)
+                && state.session_id == session_id
+            {
+                state.update_connection_state(RTCPeerConnectionState::Connecting);
+            }
+        }
         let answer_description = match RTCSessionDescription::answer(answer_sdp.clone()) {
             Ok(answer_description) => answer_description,
             Err(err) => {
@@ -10625,26 +10864,38 @@ impl WebRtcCoordinator {
             return;
         }
 
-        // Log buffered_amount for all open DataChannels so callers can assess
-        // how much data may not have been delivered due to the abrupt disconnect.
+        // A successful DataChannel send only means the bytes were accepted by
+        // WebRTC, so log stream-channel bytes still buffered at disconnect —
+        // useful context when correlating the uncertainty hooks fired later.
+        // The user-facing signal itself stays terminal-only (#69):
+        // Disconnected/Failed is exactly the state the ICE restart below
+        // exists to recover from (with SCTP retransmitting the buffer on
+        // success), and the sticky notification cannot be retracted after a
+        // successful recovery. Terminal outcomes are already covered: PeerGate
+        // notifies on IceRestartCompleted{success:false}, DataChannelClosed,
+        // and ConnectionClosed.
         {
-            use webrtc::data_channel::data_channel_state::RTCDataChannelState;
             let channels = webrtc_conn.data_channels().await;
             for (idx, channel_opt) in channels.iter().enumerate() {
-                if let Some(channel) = channel_opt {
-                    if channel.ready_state() == RTCDataChannelState::Open {
-                        let buffered = channel.buffered_amount().await;
-                        tracing::warn!(
-                            peer_id = %target,
-                            channel = %channel.label(),
-                            channel_idx = idx,
-                            connection_state = ?state,
-                            buffered_bytes = buffered,
-                            "Abnormal disconnect detected; \
-                             buffered data may not have been delivered to peer",
-                        );
-                    }
+                let Some(channel) = channel_opt else {
+                    continue;
+                };
+                if channel.ready_state() != RTCDataChannelState::Open {
+                    continue;
                 }
+                let buffered = channel.buffered_amount().await;
+                if buffered == 0 {
+                    continue;
+                }
+                tracing::warn!(
+                    peer_id = %target,
+                    channel = %channel.label(),
+                    channel_idx = idx,
+                    connection_state = ?state,
+                    buffered_bytes = buffered,
+                    "Abnormal disconnect with buffered stream data; \
+                     delivery uncertainty is reported only if recovery fails",
+                );
             }
         }
 

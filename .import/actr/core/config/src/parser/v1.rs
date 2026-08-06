@@ -500,6 +500,21 @@ impl ParserV1 {
     }
 
     fn parse_webrtc(&self, raw: &crate::raw::RawWebRtcConfig) -> Result<WebRtcConfig> {
+        // Reject before the port-range mapping below, which silently drops
+        // public_ips when no range is set: rtc 0.20 never applies the NAT
+        // 1:1 mapping, so the option must fail startup loudly no matter how
+        // it is combined.
+        if !raw.public_ips.is_empty() {
+            return Err(ConfigError::InvalidConfig(format!(
+                "public_ips = {:?} is not supported with webrtc-rs 0.20: rtc \
+                 stores nat_1to1_ips but never applies it, so SDP would keep \
+                 advertising internal addresses while the mapping appears \
+                 configured. Remove the option; front the node with TURN or \
+                 run it on a public interface",
+                raw.public_ips
+            )));
+        }
+
         let mut ice_servers = Vec::new();
 
         // Parse STUN URLs
@@ -552,10 +567,9 @@ impl ParserV1 {
         let ice_prflx_acceptance_min_wait = raw.ice_prflx_acceptance_min_wait.unwrap_or(40);
         let ice_relay_acceptance_min_wait = raw.ice_relay_acceptance_min_wait.unwrap_or(100);
 
-        // Note: udp_ports and ice_udp_mux_port are mutually exclusive; the
-        // conflict is tolerated here (the crate has no logging facility) and
-        // warned about at runtime by the WebRTC negotiator, where the shared
-        // mux takes precedence and udp_ports is ignored.
+        // Note: ice_udp_mux_port is rejected by validation below (webrtc-rs
+        // 0.20 does not expose the shared ICE UDP mux), so udp_ports is the
+        // only fixed-port mechanism that reaches the runtime.
         let advanced = WebRtcAdvancedConfig {
             udp_ports,
             ice_udp_mux_port: raw.ice_udp_mux_port,
@@ -565,6 +579,7 @@ impl ParserV1 {
             ice_prflx_acceptance_min_wait,
             ice_relay_acceptance_min_wait,
         };
+        advanced.validate()?;
 
         Ok(WebRtcConfig {
             ice_servers,
@@ -891,30 +906,71 @@ manufacturer = "acme"
         let tmpdir = TempDir::new().unwrap();
         let parser = ParserV1::new(tmpdir.path().join("actr.toml"));
 
-        // Default: unset (mux disabled, per-connection ephemeral UDP)
+        // Default: unset (per-connection ephemeral UDP), parses fine
         let raw = crate::raw::RawWebRtcConfig::default();
         let config = parser.parse_webrtc(&raw).unwrap();
         assert_eq!(config.advanced.ice_udp_mux_port, None);
 
-        // Explicitly set: plumbed through to the resolved config
+        // Explicitly set: rejected — webrtc-rs 0.20 does not expose the
+        // shared ICE UDP mux, so the option would silently bind an ephemeral
+        // port instead of the configured one.
         let raw = crate::raw::RawWebRtcConfig {
             ice_udp_mux_port: Some(19302),
             ..Default::default()
         };
-        let config = parser.parse_webrtc(&raw).unwrap();
-        assert_eq!(config.advanced.ice_udp_mux_port, Some(19302));
+        let err = parser.parse_webrtc(&raw).unwrap_err();
+        assert!(
+            err.to_string().contains("ice_udp_mux_port"),
+            "unexpected error: {err}"
+        );
 
-        // Coexists with a port range: both are resolved; precedence (mux wins,
-        // udp_ports ignored with a warning) is enforced by the negotiator.
+        // Also rejected when combined with a port range: the legacy "mux
+        // wins, range ignored" precedence must not silently disable both
+        // fixed-port mechanisms.
         let raw = crate::raw::RawWebRtcConfig {
             ice_udp_mux_port: Some(19302),
             port_range_start: Some(50000),
             port_range_end: Some(50100),
             ..Default::default()
         };
-        let config = parser.parse_webrtc(&raw).unwrap();
-        assert_eq!(config.advanced.ice_udp_mux_port, Some(19302));
-        assert_eq!(config.advanced.udp_ports, Some((50000, 50100)));
+        let err = parser.parse_webrtc(&raw).unwrap_err();
+        assert!(
+            err.to_string().contains("ice_udp_mux_port"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_webrtc_public_ips_rejected() {
+        let tmpdir = TempDir::new().unwrap();
+        let parser = ParserV1::new(tmpdir.path().join("actr.toml"));
+
+        // With a port range: rejected — rtc 0.20 stores nat_1to1_ips but
+        // never applies it, so the mapping would silently not take effect.
+        let raw = crate::raw::RawWebRtcConfig {
+            port_range_start: Some(50000),
+            port_range_end: Some(50100),
+            public_ips: vec!["203.0.113.10".to_string()],
+            ..Default::default()
+        };
+        let err = parser.parse_webrtc(&raw).unwrap_err();
+        assert!(
+            err.to_string().contains("public_ips"),
+            "unexpected error: {err}"
+        );
+
+        // Without a port range: also rejected. The resolved config used to
+        // drop public_ips silently in this combination, so the raw check must
+        // fire before that mapping.
+        let raw = crate::raw::RawWebRtcConfig {
+            public_ips: vec!["203.0.113.10".to_string()],
+            ..Default::default()
+        };
+        let err = parser.parse_webrtc(&raw).unwrap_err();
+        assert!(
+            err.to_string().contains("public_ips"),
+            "unexpected error: {err}"
+        );
     }
 
     #[test]

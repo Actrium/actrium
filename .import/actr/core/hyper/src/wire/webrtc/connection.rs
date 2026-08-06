@@ -8,6 +8,10 @@ use crate::transport::{
 };
 use crate::transport::{ConnectionEvent, ConnectionState};
 use crate::wire::webrtc::WebRtcInboundMessage;
+use crate::wire::webrtc::adapter::{
+    RTCDataChannel, RTCDataChannelInit, RTCDataChannelMessage, RTCDataChannelState,
+    RTCPeerConnection, RTCPeerConnectionState,
+};
 use actr_protocol::prost::Message;
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
@@ -16,13 +20,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::time::Duration;
 use tokio::sync::{RwLock, broadcast, mpsc};
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::peer_connection::{RTCPeerConnection, peer_connection_state::RTCPeerConnectionState};
-use webrtc::rtp_transceiver::rtp_sender::RTCRtpSender;
-use webrtc::track::track_local::track_local_static_rtp::TrackLocalStaticRTP;
+use webrtc::media_stream::track_local::TrackLocal;
+use webrtc::media_stream::track_local::static_rtp::TrackLocalStaticRTP;
+use webrtc::rtp_transceiver::RtpSender;
 
 /// Type alias for media track storage (track_id → (Track, Sender))
-type MediaTracks = Arc<RwLock<HashMap<String, (Arc<TrackLocalStaticRTP>, Arc<RTCRtpSender>)>>>;
+type MediaTracks = Arc<RwLock<HashMap<String, (Arc<TrackLocalStaticRTP>, Arc<dyn RtpSender>)>>>;
 
 /// Type alias for lane cache array (PayloadType index → cached DataLane)
 type LaneCache<const N: usize> = Arc<RwLock<[Option<Arc<dyn DataLane>>; N]>>;
@@ -33,7 +36,13 @@ type LaneCache<const N: usize> = Arc<RwLock<[Option<Arc<dyn DataLane>>; N]>>;
 type RegistrationCommitBarrier =
     Arc<std::sync::Mutex<Option<(PayloadType, Arc<tokio::sync::Barrier>)>>>;
 
-const PEER_CONNECTION_CLOSE_TIMEOUT: Duration = Duration::from_millis(500);
+/// Bound on `RTCPeerConnection::close`. rtc 0.20's close takes the driver
+/// handle and polls it for up to 2 s before aborting a wedged driver (so its
+/// reactor task and sockets are reclaimed). Cancelling before that 2 s bound
+/// drops the already-taken handle and leaves the stalled driver running, so
+/// this ceiling must clear the upstream 2 s wait. The loop returns early once
+/// the driver finishes, so a non-wedged shutdown pays no extra latency.
+const PEER_CONNECTION_CLOSE_TIMEOUT: Duration = Duration::from_secs(3);
 const DATA_CHANNEL_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 /// Shared bound on closing every cached DataChannel during connection
 /// teardown. `RTCDataChannel::close` flips the state to `Closing` before its
@@ -358,8 +367,6 @@ impl WebRtcConnection {
 
     /// Check if any DataChannel is open
     pub async fn has_open_data_channel(&self) -> bool {
-        use webrtc::data_channel::data_channel_state::RTCDataChannelState;
-
         let channels = self.data_channels.read().await;
         for channel in channels.iter().flatten() {
             if channel.ready_state() == RTCDataChannelState::Open {
@@ -384,8 +391,6 @@ impl WebRtcConnection {
         close_mode: WebRtcCloseMode,
         drain_timeout: Duration,
     ) -> DataChannelDrainReport {
-        use webrtc::data_channel::data_channel_state::RTCDataChannelState;
-
         let mut report = DataChannelDrainReport::default();
 
         if close_mode == WebRtcCloseMode::Immediate {
@@ -564,13 +569,14 @@ impl WebRtcConnection {
         // strong `WebRtcConnection` clone, which itself owns an
         // `Arc<RTCPeerConnection>` -- so the connection keeps itself alive through
         // its own callbacks. `RTCPeerConnection::close()` closes the ICE transport
-        // but does NOT clear these handlers, and in webrtc 0.14 the ICE agent's
-        // per-interface UDP sockets are released on drop, not on close(). Without
-        // clearing the handlers the connection never drops, so those sockets leak
-        // for the life of the process and eventually exhaust the fd limit.
-        // Replacing the handlers with no-ops drops the captured clones and breaks
-        // the cycle, so releasing the last `Arc<RTCPeerConnection>` frees the
-        // sockets.
+        // but does NOT clear these handlers. Under webrtc-rs 0.20 the driver
+        // releases its UDP sockets once the `closing` flag is observed or the
+        // Close event is processed — independent of whether this handle's
+        // close() future survives — but the driver task keeps the handler (and
+        // thus the whole cycle) alive until it exits. Replacing the handlers
+        // with no-ops drops the captured clones and breaks the cycle, so
+        // releasing the last `Arc<RTCPeerConnection>` lets the driver task and
+        // its sockets actually be freed.
         //
         // Handlers are cleared only AFTER the pc.close() await above, so the
         // final state-change event may or may not be observed. Downstream
@@ -658,29 +664,25 @@ impl WebRtcConnection {
     }
 
     /// based on PayloadType configuration DataChannel
-    fn get_data_channel_config(
-        payload_type: &PayloadType,
-    ) -> webrtc::data_channel::data_channel_init::RTCDataChannelInit {
-        use webrtc::data_channel::data_channel_init::RTCDataChannelInit;
-
+    fn get_data_channel_config(payload_type: &PayloadType) -> RTCDataChannelInit {
         match payload_type {
             PayloadType::StreamLatencyFirst => {
                 // partial reliable transmission (low latency priority)
                 RTCDataChannelInit {
-                    ordered: Some(false),
+                    ordered: false,
                     max_retransmits: Some(3),
                     max_packet_life_time: None,
-                    protocol: Some("".to_string()),
+                    protocol: String::new(),
                     negotiated: None,
                 }
             }
             _ => {
                 // default reliable transmission
                 RTCDataChannelInit {
-                    ordered: Some(true),
+                    ordered: true,
                     max_retransmits: None,
                     max_packet_life_time: None,
-                    protocol: Some("".to_string()),
+                    protocol: String::new(),
                     negotiated: None,
                 }
             }
@@ -941,19 +943,17 @@ impl WebRtcConnection {
 
         // Set onmessage return adjust
         let tx_clone = tx.clone();
-        data_channel.on_message(Box::new(
-            move |msg: webrtc::data_channel::data_channel_message::DataChannelMessage| {
-                // zero-copy: directly using msg.data (Bytes)
-                let data = msg.data;
-                tracing::debug!("🔄 WebRTC DataChannel message received1111: {:?}", data);
-                let tx = tx_clone.clone();
-                Box::pin(async move {
-                    if let Err(e) = tx.send(data).await {
-                        tracing::warn!("❌ WebRTC DataChannel messageSend to Lane failure: {}", e);
-                    }
-                })
-            },
-        ));
+        data_channel.on_message(Box::new(move |msg: RTCDataChannelMessage| {
+            // zero-copy: directly using msg.data (Bytes)
+            let data = msg.data.freeze();
+            tracing::debug!("🔄 WebRTC DataChannel message received1111: {:?}", data);
+            let tx = tx_clone.clone();
+            Box::pin(async move {
+                if let Err(e) = tx.send(data).await {
+                    tracing::warn!("❌ WebRTC DataChannel messageSend to Lane failure: {}", e);
+                }
+            })
+        }));
 
         // Re-check the session before caching: teardown cancels it before
         // taking its close snapshot, so a channel refused here can never be
@@ -1019,10 +1019,13 @@ impl WebRtcConnection {
         codec: &str,
         media_type: &str,
     ) -> NetworkResult<Arc<TrackLocalStaticRTP>> {
-        use webrtc::api::media_engine::MIME_TYPE_H264;
-        use webrtc::api::media_engine::MIME_TYPE_OPUS;
-        use webrtc::api::media_engine::MIME_TYPE_VP8;
-        use webrtc::rtp_transceiver::rtp_codec::RTCRtpCodecCapability;
+        use rtc::media_stream::MediaStreamTrack;
+        use rtc::peer_connection::configuration::media_engine::{
+            MIME_TYPE_H264, MIME_TYPE_OPUS, MIME_TYPE_VP8,
+        };
+        use rtc::rtp_transceiver::rtp_sender::{
+            RTCRtpCodec, RTCRtpCodingParameters, RTCRtpEncodingParameters, RtpCodecKind,
+        };
 
         // Reuse existing track so repeated start/stop flows can safely retry.
         if let Some((track, _sender)) = self.media_tracks.read().await.get(&track_id).cloned() {
@@ -1030,34 +1033,47 @@ impl WebRtcConnection {
             return Ok(track);
         }
 
-        // Determine MIME type based on codec and media_type
-        let mime_type = match (media_type, codec.to_uppercase().as_str()) {
-            ("video", "H264") => MIME_TYPE_H264,
-            ("video", "VP8") => MIME_TYPE_VP8,
-            ("audio", "OPUS") => MIME_TYPE_OPUS,
-            _ => {
-                return Err(NetworkError::WebRtcError(format!(
-                    "Unsupported codec: {codec} for {media_type}"
-                )));
-            }
-        };
+        // Determine MIME type and media kind based on codec and media_type.
+        let (mime_type, kind, clock_rate, channels) =
+            match (media_type, codec.to_uppercase().as_str()) {
+                ("video", "H264") => (MIME_TYPE_H264, RtpCodecKind::Video, 90_000, 0),
+                ("video", "VP8") => (MIME_TYPE_VP8, RtpCodecKind::Video, 90_000, 0),
+                ("audio", "OPUS") => (MIME_TYPE_OPUS, RtpCodecKind::Audio, 48_000, 2),
+                _ => {
+                    return Err(NetworkError::WebRtcError(format!(
+                        "Unsupported codec: {codec} for {media_type}"
+                    )));
+                }
+            };
 
-        // Create TrackLocalStaticRTP
-        let track = Arc::new(TrackLocalStaticRTP::new(
-            RTCRtpCodecCapability {
-                mime_type: mime_type.to_string(),
-                ..Default::default()
-            },
+        let ssrc = rand::random::<u32>();
+        let track = Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
+            format!("actr-{media_type}"),
             track_id.clone(),
-            format!("actr-{media_type}"), // stream_id
-        ));
+            track_id.clone(),
+            kind,
+            vec![RTCRtpEncodingParameters {
+                rtp_coding_parameters: RTCRtpCodingParameters {
+                    ssrc: Some(ssrc),
+                    ..Default::default()
+                },
+                codec: RTCRtpCodec {
+                    mime_type: mime_type.to_string(),
+                    clock_rate,
+                    channels,
+                    sdp_fmtp_line: String::new(),
+                    rtcp_feedback: vec![],
+                },
+                active: true,
+                ..Default::default()
+            }],
+        )));
 
         // Add track to PeerConnection
-        let rtp_sender =
-            self.peer_connection
-                .add_track(Arc::clone(&track)
-                    as Arc<dyn webrtc::track::track_local::TrackLocal + Send + Sync>)
-                .await?;
+        let rtp_sender = self
+            .peer_connection
+            .add_track(Arc::clone(&track) as Arc<dyn TrackLocal>)
+            .await?;
 
         // Cache track and sender
         let mut tracks = self.media_tracks.write().await;
@@ -1067,8 +1083,6 @@ impl WebRtcConnection {
         let mut seq_nums = self.track_sequence_numbers.write().await;
         seq_nums.insert(track_id.clone(), Arc::new(AtomicU16::new(0)));
 
-        // Generate unique SSRC for this track (random u32)
-        let ssrc = rand::random::<u32>();
         let mut ssrcs = self.track_ssrcs.write().await;
         ssrcs.insert(track_id.clone(), ssrc);
 
@@ -1307,17 +1321,15 @@ impl WebRtcConnection {
 
         // Set on_message callback
         let tx_clone = tx.clone();
-        data_channel.on_message(Box::new(
-            move |msg: webrtc::data_channel::data_channel_message::DataChannelMessage| {
-                let data = msg.data;
-                let tx = tx_clone.clone();
-                Box::pin(async move {
-                    if let Err(e) = tx.send(data).await {
-                        tracing::warn!("❌ WebRTC DataChannel message send to Lane failed: {}", e);
-                    }
-                })
-            },
-        ));
+        data_channel.on_message(Box::new(move |msg: RTCDataChannelMessage| {
+            let data = msg.data.freeze();
+            let tx = tx_clone.clone();
+            Box::pin(async move {
+                if let Err(e) = tx.send(data).await {
+                    tracing::warn!("❌ WebRTC DataChannel message send to Lane failed: {}", e);
+                }
+            })
+        }));
 
         #[cfg(any(test, feature = "test-utils"))]
         self.hit_registration_commit_barrier_for_test(payload_type)

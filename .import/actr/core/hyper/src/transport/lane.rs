@@ -32,6 +32,7 @@
 
 use super::error::{NetworkError, NetworkResult, is_tungstenite_closed};
 use crate::INITIAL_CONNECTION_TIMEOUT;
+use crate::wire::webrtc::adapter::{RTCDataChannel, RTCDataChannelState, RTCPeerConnectionState};
 use actr_protocol::PayloadType;
 use async_trait::async_trait;
 use futures_util::SinkExt;
@@ -50,9 +51,6 @@ use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
-use webrtc::data_channel::RTCDataChannel;
-use webrtc::data_channel::data_channel_state::RTCDataChannelState;
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 
 // ── WebRTC DataChannel fragmentation constants ────────────────────────────────
 
@@ -530,34 +528,24 @@ impl WebRtcDataLane {
 }
 
 fn classify_data_channel_send_error(
-    error: webrtc::Error,
+    error: webrtc::error::Error,
     state: RTCDataChannelState,
     operation: &str,
 ) -> NetworkError {
-    use webrtc::{data, sctp};
-
     let is_closed = matches!(
         &error,
-        webrtc::Error::ErrConnectionClosed
-            | webrtc::Error::ErrClosedPipe
-            | webrtc::Error::Data(data::Error::ErrStreamClosed)
-            | webrtc::Error::Data(data::Error::Sctp(
-                sctp::Error::ErrStreamClosed
-                    | sctp::Error::ErrAssociationClosedBeforeConn
-                    | sctp::Error::ErrAssociationHandshakeClosed
-            ))
-            | webrtc::Error::Sctp(
-                sctp::Error::ErrStreamClosed
-                    | sctp::Error::ErrAssociationClosedBeforeConn
-                    | sctp::Error::ErrAssociationHandshakeClosed
-            )
+        webrtc::error::Error::ErrConnectionClosed
+            | webrtc::error::Error::ErrClosedPipe
+            | webrtc::error::Error::ErrDataChannelClosed
+            | webrtc::error::Error::ErrStreamClosed
+            | webrtc::error::Error::ErrAssociationClosedBeforeConn
+            | webrtc::error::Error::ErrAssociationHandshakeClosed
     );
     let is_not_open = matches!(
         &error,
-        webrtc::Error::ErrDataChannelNotOpen
-            | webrtc::Error::ErrSCTPNotEstablished
-            | webrtc::Error::Data(data::Error::Sctp(sctp::Error::ErrPayloadDataStateNotExist))
-            | webrtc::Error::Sctp(sctp::Error::ErrPayloadDataStateNotExist)
+        webrtc::error::Error::ErrDataChannelNotOpen
+            | webrtc::error::Error::ErrSCTPNotEstablished
+            | webrtc::error::Error::ErrPayloadDataStateNotExist
     );
     let detail = format!("{operation}: {error}");
 
@@ -584,12 +572,12 @@ fn classify_data_channel_send_error(
 /// connection as closed, so relying on the state alone would misclassify a
 /// dead connection as a generic `WebRtcError`.
 pub(crate) fn classify_peer_connection_error(
-    error: webrtc::Error,
+    error: webrtc::error::Error,
     state: RTCPeerConnectionState,
 ) -> NetworkError {
     let is_closed = matches!(
         &error,
-        webrtc::Error::ErrConnectionClosed | webrtc::Error::ErrClosedPipe
+        webrtc::error::Error::ErrConnectionClosed | webrtc::error::Error::ErrClosedPipe
     );
 
     if is_closed
@@ -793,7 +781,6 @@ impl DataLane for WebRtcDataLane {
     }
 
     fn is_healthy(&self) -> bool {
-        use webrtc::data_channel::data_channel_state::RTCDataChannelState;
         let state = self.data_channel.ready_state();
         !matches!(
             state,

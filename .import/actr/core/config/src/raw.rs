@@ -299,17 +299,19 @@ pub struct RawWebRtcConfig {
 
     /// Fixed local UDP port for a process-shared ICE UDP mux (optional, opt-in)
     ///
-    /// When configured, all peer connections share one UDP socket bound to
-    /// this port, bounding fd usage under connection churn. In webrtc-ice
-    /// 0.14 muxed mode disables server-reflexive (srflx) candidate
-    /// gathering, so this is only suitable for nodes that are directly
-    /// reachable or have TURN configured; NAT-ed nodes relying on STUN
-    /// should leave it unset. Mutually exclusive with the port range above
-    /// (the mux wins when both are set).
+    /// **Unsupported since the webrtc-rs 0.20 migration: parsing fails when
+    /// set.** webrtc-rs 0.20 does not expose the shared ICE UDP mux, so the
+    /// configured port would never be bound; failing fast beats silently
+    /// falling back to an ephemeral port that the firewall does not open.
+    /// Use the port range above for fixed-port deployments.
     #[serde(default)]
     pub ice_udp_mux_port: Option<u16>,
 
     /// NAT 1:1 public IP mapping (optional)
+    ///
+    /// **Unsupported since the webrtc-rs 0.20 migration: parsing fails when
+    /// set.** rtc 0.20 stores the mapping but never applies it, so the
+    /// configured public addresses would never appear in SDP.
     #[serde(default)]
     pub public_ips: Vec<String>,
 }

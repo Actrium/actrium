@@ -4,18 +4,27 @@
 
 use crate::lifecycle::CredentialState;
 use crate::transport::NetworkResult;
-use actr_protocol::IceCandidate;
-use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::peer_connection::sdp::session_description::RTCSessionDescription;
+use crate::wire::webrtc::adapter::{
+    RTCConfiguration, RTCConfigurationBuilder, RTCIceCandidateInit, RTCIceServer,
+    RTCIceTransportPolicy, RTCPeerConnection, RTCSessionDescription, SettingEngine,
+};
+use actr_protocol::{IceCandidate, TurnCredential};
 
 use std::sync::Arc;
-use tokio::sync::OnceCell;
-use webrtc::ice::udp_mux::UDPMux;
+#[cfg(any(test, feature = "test-utils"))]
+use std::sync::atomic::AtomicBool;
 #[cfg(feature = "test-utils")]
-use webrtc::util::vnet::net::Net;
+use webrtc_util::vnet::net::Net;
 
 // Re-export types from actr-config
 pub use actr_config::{IceTransportPolicy, WebRtcConfig};
+
+/// Keep the sans-I/O drivers off the application runtime. The pool is lazy,
+/// process-global, and bounded: fewer than eight connections create only one
+/// reactor thread each; additional connections share the existing threads.
+/// Eight slots also keep the five-round abrupt-mobile regression isolated
+/// even if an old v0.20 driver is temporarily non-cooperative while timing out.
+const WEBRTC_REACTOR_POOL_SIZE: usize = 8;
 
 /// WebRTC negotiator
 #[derive(Clone)]
@@ -24,16 +33,26 @@ pub(crate) struct WebRtcNegotiator {
     config: WebRtcConfig,
     /// Latest credential state (updated on register/renew, contains TurnCredential)
     credential_state: CredentialState,
-    /// Process-shared ICE UDP mux, used only when `ice_udp_mux_port` is
-    /// configured (opt-in): a single UDP socket reused by every
-    /// RTCPeerConnection this negotiator creates, so ICE gathering no longer
-    /// opens a fresh socket per interface per connection. Lazily bound on
-    /// first use; shared across clones via the outer `Arc`.
-    udp_mux: Arc<OnceCell<Arc<dyn UDPMux + Send + Sync>>>,
     /// Optional virtual network for integration testing.
     /// When set, RTCPeerConnection will use this VNet instead of real OS networking.
     #[cfg(feature = "test-utils")]
     vnet: Option<Arc<Net>>,
+    /// Shared packet gate used to preserve outage simulation with the v0.20
+    /// builder, which owns its UDP sockets and cannot consume the legacy VNet.
+    #[cfg(feature = "test-utils")]
+    packet_blocked: Option<Arc<AtomicBool>>,
+    /// Per-instance assertion seam proving production construction selects
+    /// Runtime::spawn_reactor rather than the ambient Runtime::spawn path.
+    #[cfg(test)]
+    reactor_spawn_probe: Arc<AtomicBool>,
+    /// Serializes fixed-port selection + builder bind across concurrent
+    /// answerer `PeerConnection` creations sharing this negotiator, so two
+    /// creations cannot both probe-select the same first free port and race
+    /// one into `AddrInUse`. v0.20's `with_udp_addrs` takes addr strings, not
+    /// bound sockets, so the probe cannot be handed over atomically; this
+    /// lock is the bounded substitute. Per-coordinator (per-node), not
+    /// process-global.
+    port_select_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl WebRtcNegotiator {
@@ -42,159 +61,42 @@ impl WebRtcNegotiator {
     /// - `config`: WebRTC configuration
     /// - `credential_state`: shared credential state containing TurnCredential
     pub fn new(config: WebRtcConfig, credential_state: CredentialState) -> Self {
-        if config.advanced.ice_udp_mux_port.is_some() && config.advanced.udp_ports.is_some() {
-            tracing::warn!(
-                ice_udp_mux_port = ?config.advanced.ice_udp_mux_port,
-                udp_ports = ?config.advanced.udp_ports,
-                "Both ice_udp_mux_port and udp_ports (port range) are configured; \
-                 they are mutually exclusive — the shared ICE UDP mux takes \
-                 precedence and the UDP port range is ignored"
-            );
-        }
         Self {
             config,
             credential_state,
-            udp_mux: Arc::new(OnceCell::new()),
             #[cfg(feature = "test-utils")]
             vnet: None,
+            #[cfg(feature = "test-utils")]
+            packet_blocked: None,
+            #[cfg(test)]
+            reactor_spawn_probe: Arc::new(AtomicBool::new(false)),
+            port_select_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
-    /// Get (or lazily bind) the process-shared ICE UDP mux. A single UDP socket
-    /// is bound on the configured `ice_udp_mux_port` the first time this is
-    /// called and reused by every subsequent RTCPeerConnection, so the
-    /// process's UDP socket count stays O(1) instead of growing
-    /// one-per-interface per connection.
+    /// Record the legacy virtual network used by the integration harness.
     ///
-    /// Lifecycle: the mux socket (and its read task) is held for the lifetime
-    /// of the coordinator that owns this negotiator; `UDPMux::close` is never
-    /// called. ICE restarts change the local ufrag, and agent close only
-    /// removes the current ufrag from the mux, so stale ufrag entries can
-    /// accumulate in the mux across many restarts — bounded memory growth,
-    /// no fd growth.
-    async fn shared_udp_mux(&self, port: u16) -> NetworkResult<Arc<dyn UDPMux + Send + Sync>> {
-        use webrtc::ice::udp_mux::{UDPMuxDefault, UDPMuxParams};
-
-        let mux = self
-            .udp_mux
-            .get_or_try_init(|| async {
-                let socket = tokio::net::UdpSocket::bind((std::net::Ipv4Addr::UNSPECIFIED, port))
-                    .await
-                    .map_err(|e| {
-                        crate::transport::NetworkError::Other(anyhow::anyhow!(
-                            "failed to bind shared ICE UDP mux socket: {e}"
-                        ))
-                    })?;
-                let local = socket.local_addr().ok();
-                let mux: Arc<dyn UDPMux + Send + Sync> =
-                    UDPMuxDefault::new(UDPMuxParams::new(socket));
-                tracing::info!(
-                    ?local,
-                    "🔌 Bound shared ICE UDP mux (one socket for all peers)"
-                );
-                Ok::<_, crate::transport::NetworkError>(mux)
-            })
-            .await?;
-        Ok(mux.clone())
-    }
-
-    /// Set the virtual network for testing.
-    ///
-    /// When set, all RTCPeerConnections created by this negotiator will use
-    /// the provided VNet instead of the real OS network stack. This enables
-    /// simulating network disconnection/reconnection at the UDP transport level.
+    /// webrtc-rs v0.20 no longer accepts this socket provider. The companion
+    /// packet-blocked flag installs a runtime wrapper around the builder-owned
+    /// UDP sockets and supplies the actual outage behavior.
     ///
     /// # Arguments
     /// - `vnet`: The virtual network instance (from `webrtc_util::vnet::net::Net`)
     #[cfg(feature = "test-utils")]
     pub fn set_vnet(&mut self, vnet: Arc<Net>) {
-        tracing::info!("🌐 VNet injected into WebRtcNegotiator");
+        tracing::info!("🌐 Legacy VNet test context attached to WebRtcNegotiator");
         self.vnet = Some(vnet);
     }
 
-    /// Create RTCPeerConnection
-    ///
-    /// # Arguments
-    /// - `is_answerer`: true if this node is the answerer (passive side), false if offerer (default)
-    /// - `remote_fixed`: true if remote peer has fixed network configuration
-    ///
-    /// # Returns
-    /// newCreate's PeerConnection
-    #[cfg_attr(
-        feature = "opentelemetry",
-        tracing::instrument(level = "info", skip(self), fields(ice_servers = self.config.ice_servers.len(), is_answerer, remote_fixed))
-    )]
-    pub async fn create_peer_connection(
+    #[cfg(feature = "test-utils")]
+    pub fn set_test_packet_blocked(&mut self, blocked: Arc<AtomicBool>) {
+        self.packet_blocked = Some(blocked);
+    }
+
+    fn build_rtc_configuration(
         &self,
-        is_answerer: bool,
-        remote_fixed: bool,
-    ) -> NetworkResult<RTCPeerConnection> {
-        use webrtc::api::APIBuilder;
-        use webrtc::api::media_engine::MediaEngine;
-        use webrtc::ice_transport::ice_server::RTCIceServer;
-        use webrtc::peer_connection::configuration::RTCConfiguration;
-        use webrtc::peer_connection::policy::ice_transport_policy::RTCIceTransportPolicy;
-        use webrtc::rtp_transceiver::rtp_codec::{
-            RTCRtpCodecCapability, RTCRtpCodecParameters, RTPCodecType,
-        };
-
-        // Create MediaEngine and register codecs
-        let mut media_engine = MediaEngine::default();
-
-        // Register VP8 video codec
-        media_engine.register_codec(
-            RTCRtpCodecParameters {
-                capability: RTCRtpCodecCapability {
-                    mime_type: "video/VP8".to_owned(),
-                    clock_rate: 90000,
-                    channels: 0,
-                    sdp_fmtp_line: "".to_owned(),
-                    rtcp_feedback: vec![],
-                },
-                payload_type: 96,
-                ..Default::default()
-            },
-            RTPCodecType::Video,
-        )?;
-
-        // Register H264 video codec
-        media_engine.register_codec(
-            RTCRtpCodecParameters {
-                capability: RTCRtpCodecCapability {
-                    mime_type: "video/H264".to_owned(),
-                    clock_rate: 90000,
-                    channels: 0,
-                    sdp_fmtp_line:
-                        "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
-                            .to_owned(),
-                    rtcp_feedback: vec![],
-                },
-                payload_type: 102,
-                ..Default::default()
-            },
-            RTPCodecType::Video,
-        )?;
-
-        // Register OPUS audio codec
-        media_engine.register_codec(
-            RTCRtpCodecParameters {
-                capability: RTCRtpCodecCapability {
-                    mime_type: "audio/opus".to_owned(),
-                    clock_rate: 48000,
-                    channels: 2,
-                    sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
-                    rtcp_feedback: vec![],
-                },
-                payload_type: 111,
-                ..Default::default()
-            },
-            RTPCodecType::Audio,
-        )?;
-
-        // Get TURN credentials (time-limited HMAC credentials issued by server on register/renew)
-        let turn_cred = self.credential_state.turn_credential().await;
-
-        // Assemble ICE server list; TURN servers use TurnCredential, STUN servers use static config
+        turn_credential: Option<&TurnCredential>,
+    ) -> RTCConfiguration {
         let ice_servers: Vec<RTCIceServer> = self
             .config
             .ice_servers
@@ -206,18 +108,16 @@ impl WebRtcNegotiator {
                     .any(|url| url.starts_with("turn:") || url.starts_with("turns:"));
 
                 if is_turn {
-                    match &turn_cred {
-                        Some(tc) => RTCIceServer {
+                    match turn_credential {
+                        Some(credential) => RTCIceServer {
                             urls: server.urls.clone(),
-                            username: tc.username.clone(),
-                            credential: tc.password.clone(),
+                            username: credential.username.clone(),
+                            credential: credential.password.clone(),
                         },
                         None => {
-                            // Credential not ready yet, skip this TURN server (missing credentials cause ICE failure,
-                            // keep URL so webrtc-rs error logs show the specific address)
                             tracing::warn!(
-                                "TurnCredential not ready, TURN server {} will fail authentication",
-                                server.urls.first().cloned().unwrap_or_default()
+                                server_url = %server.urls.first().cloned().unwrap_or_default(),
+                                "TURN credential is not ready; authentication may fail"
                             );
                             RTCIceServer {
                                 urls: server.urls.clone(),
@@ -238,72 +138,180 @@ impl WebRtcNegotiator {
 
         if ice_servers.is_empty() {
             tracing::info!("🌐 No ICE servers configured; proceeding without STUN/TURN servers");
+        } else {
+            tracing::info!(
+                ice_server_count = ice_servers.len(),
+                "🌐 ICE servers configured"
+            );
         }
-        tracing::info!("🌐 ICE servers configured: {:?}", ice_servers);
-        // Convert ICE transport policy
+
         let ice_transport_policy = match self.config.ice_transport_policy {
             IceTransportPolicy::All => RTCIceTransportPolicy::All,
             IceTransportPolicy::Relay => RTCIceTransportPolicy::Relay,
         };
 
-        // Create WebRTC configuration
-        let rtc_config = RTCConfiguration {
-            ice_servers,
-            ice_transport_policy,
-            ..Default::default()
+        RTCConfigurationBuilder::new()
+            .with_ice_servers(ice_servers)
+            .with_ice_transport_policy(ice_transport_policy)
+            .build()
+    }
+
+    /// Create RTCPeerConnection
+    ///
+    /// # Arguments
+    /// - `is_answerer`: true if this node is the answerer (passive side), false if offerer (default)
+    /// - `remote_fixed`: true if remote peer has fixed network configuration
+    ///   (informational only since the webrtc-rs 0.20 migration — NAT 1:1
+    ///   mappings are rejected at startup, so it no longer selects a mapping
+    ///   strategy)
+    ///
+    /// # Returns
+    /// newCreate's PeerConnection
+    #[cfg_attr(
+        feature = "opentelemetry",
+        tracing::instrument(level = "info", skip(self), fields(ice_servers = self.config.ice_servers.len(), is_answerer, remote_fixed))
+    )]
+    pub async fn create_peer_connection(
+        &self,
+        is_answerer: bool,
+        remote_fixed: bool,
+    ) -> NetworkResult<RTCPeerConnection> {
+        use rtc::rtp_transceiver::rtp_sender::{RTCRtpCodec, RTCRtpCodecParameters, RtpCodecKind};
+        use webrtc::peer_connection::{
+            MediaEngine, PeerConnection, PeerConnectionBuilder, Registry,
+            register_default_interceptors,
         };
 
+        // Create MediaEngine and register codecs
+        let mut media_engine = MediaEngine::default();
+
+        // Register VP8 video codec
+        media_engine.register_codec(
+            RTCRtpCodecParameters {
+                rtp_codec: RTCRtpCodec {
+                    mime_type: "video/VP8".to_owned(),
+                    clock_rate: 90000,
+                    channels: 0,
+                    sdp_fmtp_line: "".to_owned(),
+                    rtcp_feedback: vec![],
+                },
+                payload_type: 96,
+            },
+            RtpCodecKind::Video,
+        )?;
+
+        // Register H264 video codec
+        media_engine.register_codec(
+            RTCRtpCodecParameters {
+                rtp_codec: RTCRtpCodec {
+                    mime_type: "video/H264".to_owned(),
+                    clock_rate: 90000,
+                    channels: 0,
+                    sdp_fmtp_line:
+                        "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f"
+                            .to_owned(),
+                    rtcp_feedback: vec![],
+                },
+                payload_type: 102,
+            },
+            RtpCodecKind::Video,
+        )?;
+
+        // Register OPUS audio codec
+        media_engine.register_codec(
+            RTCRtpCodecParameters {
+                rtp_codec: RTCRtpCodec {
+                    mime_type: "audio/opus".to_owned(),
+                    clock_rate: 48000,
+                    channels: 2,
+                    sdp_fmtp_line: "minptime=10;useinbandfec=1".to_owned(),
+                    rtcp_feedback: vec![],
+                },
+                payload_type: 111,
+            },
+            RtpCodecKind::Audio,
+        )?;
+
+        let turn_credential = self.credential_state.turn_credential().await;
+        let rtc_config = self.build_rtc_configuration(turn_credential.as_ref());
+
         // Create SettingEngine with role-based configuration
-        let mut setting_engine = webrtc::api::setting_engine::SettingEngine::default();
+        let mut setting_engine = SettingEngine::default();
 
         // Inject VNet if configured (test-utils only)
         #[cfg(feature = "test-utils")]
-        if let Some(ref vnet) = self.vnet {
-            tracing::info!("🌐 Using VNet for RTCPeerConnection (test mode)");
-            setting_engine.set_vnet(Some(vnet.clone()));
+        match (&self.vnet, &self.packet_blocked) {
+            (Some(_), Some(_)) => {
+                tracing::info!("webrtc-rs 0.20 test packet filter enabled over its UDP socket")
+            }
+            (Some(_), None) => tracing::warn!(
+                "webrtc-rs 0.20 does not expose VNet socket injection; no packet filter was provided"
+            ),
+            _ => {}
         }
 
         // Apply ICE candidate acceptance wait times (for both Offerer and Answerer)
         self.apply_ice_wait_times(&mut setting_engine);
 
-        // Apply advanced parameters (UDP ports, NAT 1:1) only for Answerer
+        // Apply advanced parameters (UDP ports) only for Answerer
         if is_answerer {
-            tracing::info!("🎭 Applying advanced WebRTC parameters (Answerer mode)");
-            self.apply_answerer_config(&mut setting_engine, remote_fixed)?;
+            tracing::info!(
+                remote_fixed,
+                "🎭 Applying advanced WebRTC parameters (Answerer mode)"
+            );
+            self.apply_answerer_config();
         } else {
             tracing::info!("🎭 Using default WebRTC configuration (Offerer mode)");
         }
 
-        // Opt-in shared ICE UDP mux (`ice_udp_mux_port`): route all ICE UDP
-        // through one process-shared muxed socket instead of per-connection
-        // ephemeral sockets, so connection churn cannot exhaust the fd table.
-        // NOT the default: in webrtc-ice 0.14, muxed mode skips
-        // server-reflexive (srflx) candidate gathering entirely (host and
-        // TURN relay candidates only), so it is only suitable for nodes that
-        // are directly reachable or have TURN configured; NAT-ed nodes
-        // relying on STUN must keep the default ephemeral sockets. Under
-        // VNet (tests) the virtual transport is used instead, so the mux is
-        // skipped.
-        if let Some(mux_port) = self.config.advanced.ice_udp_mux_port {
-            #[cfg(feature = "test-utils")]
-            let use_shared_mux = self.vnet.is_none();
-            #[cfg(not(feature = "test-utils"))]
-            let use_shared_mux = true;
-            if use_shared_mux {
-                use webrtc::ice::udp_network::UDPNetwork;
-                setting_engine
-                    .set_udp_network(UDPNetwork::Muxed(self.shared_udp_mux(mux_port).await?));
-            }
-        }
-
-        // Create API with MediaEngine and SettingEngine
-        let api = APIBuilder::new()
+        // The default registry is a deeply nested generic interceptor chain. Keeping
+        // that type inside the async builder makes the PeerConnection construction
+        // future large enough to overflow small runtime/test thread stacks. Erase the
+        // chain before it crosses the async boundary.
+        let registry = register_default_interceptors(Registry::new(), &mut media_engine)?.boxed();
+        let events = RTCPeerConnection::events();
+        // Hold the fixed-port selection lock across select + the builder's bind
+        // so two concurrent answerer creations sharing this negotiator cannot
+        // both probe-select the same first free port (one would then hit
+        // AddrInUse). Offerer (ephemeral port) is uncontended and skipped.
+        let _port_guard = if is_answerer && self.config.advanced.udp_ports.is_some() {
+            Some(self.port_select_lock.lock().await)
+        } else {
+            None
+        };
+        let udp_addrs = self.select_udp_bind_addrs(is_answerer)?;
+        let peer_connection_builder = PeerConnectionBuilder::new()
+            .with_configuration(rtc_config)
             .with_media_engine(media_engine)
             .with_setting_engine(setting_engine)
-            .build();
-
-        // Create PeerConnection
-        let peer_connection = api.new_peer_connection(rtc_config).await?;
+            .with_interceptor_registry(registry)
+            .with_handler(events.clone())
+            // v0.20 drives every connection in one sans-I/O task. A stale
+            // TURN/ICE timeout loop must not starve actr signaling, heartbeat,
+            // or peer reaping on the ambient Tokio runtime.
+            .with_dedicated_reactor_thread(true)
+            .with_reactor_pool_size(WEBRTC_REACTOR_POOL_SIZE)
+            .with_udp_addrs(udp_addrs);
+        #[cfg(test)]
+        let peer_connection_builder = peer_connection_builder.with_runtime(
+            crate::wire::webrtc::test_runtime::reactor_probe_runtime(Arc::clone(
+                &self.reactor_spawn_probe,
+            )),
+        );
+        #[cfg(feature = "test-utils")]
+        let peer_connection_builder = match &self.packet_blocked {
+            Some(blocked) => peer_connection_builder.with_runtime(
+                crate::wire::webrtc::test_runtime::packet_filter_runtime(blocked.clone()),
+            ),
+            None => peer_connection_builder,
+        };
+        let peer_connection = peer_connection_builder.build().await?;
+        // The builder has bound the selected port by now; release the
+        // fixed-port lock before the callback wiring so concurrent answerer
+        // creations are not serialized past the bind.
+        drop(_port_guard);
+        let peer_connection =
+            RTCPeerConnection::new(Arc::new(peer_connection) as Arc<dyn PeerConnection>, events);
 
         peer_connection.on_ice_connection_state_change(Box::new(move |state| {
             tracing::info!("🔄 ICE Connection State Changed: {:?}", state);
@@ -321,12 +329,9 @@ impl WebRtcNegotiator {
     }
 
     /// Apply ICE candidate acceptance wait times (for both Offerer and Answerer)
-    fn apply_ice_wait_times(
-        &self,
-        setting_engine: &mut webrtc::api::setting_engine::SettingEngine,
-    ) {
+    fn apply_ice_wait_times(&self, setting_engine: &mut SettingEngine) {
+        use rtc::ice::network_type::NetworkType;
         use std::time::Duration;
-        use webrtc::ice::network_type::NetworkType;
 
         let advanced = &self.config.advanced;
 
@@ -368,88 +373,131 @@ impl WebRtcNegotiator {
         );
     }
 
-    /// Apply Answerer-specific configuration (UDP ports, NAT 1:1 mapping)
-    fn apply_answerer_config(
-        &self,
-        setting_engine: &mut webrtc::api::setting_engine::SettingEngine,
-        remote_fixed: bool,
-    ) -> NetworkResult<()> {
-        use webrtc::ice::udp_network::{EphemeralUDP, UDPNetwork};
-        use webrtc::ice_transport::ice_candidate_type::RTCIceCandidateType;
-
+    /// Log the Answerer-side fixed-port policy.
+    ///
+    /// No NAT 1:1 mapping is applied here: rtc 0.20 stores `nat_1to1_ips` on
+    /// the setting engine without ever reading it back, so `public_ips` is
+    /// rejected at startup instead (see `WebRtcAdvancedConfig::validate`)
+    /// rather than silently advertising internal addresses.
+    fn apply_answerer_config(&self) {
         let advanced = &self.config.advanced;
 
-        // Determine if local has fixed configuration
-        let local_fixed = advanced.udp_ports.is_some() && !advanced.public_ips.is_empty();
-
-        // Apply UDP port strategy. When the shared ICE UDP mux is enabled
-        // (ice_udp_mux_port), it takes precedence: create_peer_connection
-        // overrides the UDP network with the muxed socket for every role, and
-        // configuring an ephemeral port range here would be dead config.
         if let Some((min, max)) = advanced.udp_ports {
-            if advanced.ice_udp_mux_port.is_some() {
-                tracing::warn!(
-                    "🔧 UDP port range {}-{} ignored: ice_udp_mux_port is set and \
-                     the shared ICE UDP mux takes precedence",
-                    min,
-                    max
-                );
-            } else {
-                let ephemeral = EphemeralUDP::new(min, max).map_err(|e| {
-                    crate::transport::NetworkError::Other(anyhow::anyhow!(
-                        "Failed to create EphemeralUDP: {}",
-                        e
-                    ))
-                })?;
-                setting_engine.set_udp_network(UDPNetwork::Ephemeral(ephemeral));
-                tracing::info!("🔧 UDP port range: {}-{}", min, max);
-            }
+            tracing::info!(
+                "🔧 UDP port range requested: {}-{} (selected before builder bind)",
+                min,
+                max
+            );
         } else {
             tracing::info!("🔧 Using default random UDP ports");
         }
+    }
 
-        // Apply NAT 1:1 mapping based on local and remote configuration
-        if !advanced.public_ips.is_empty() {
-            match (local_fixed, remote_fixed) {
-                (true, true) => {
-                    // Both sides configured → Srflx only
-                    setting_engine
-                        .set_nat_1to1_ips(advanced.public_ips.clone(), RTCIceCandidateType::Srflx);
-                    tracing::info!(
-                        "🔧 NAT 1:1 IPs (Srflx only): {:?} [local_fixed={}, remote_fixed={}]",
-                        advanced.public_ips,
-                        local_fixed,
-                        remote_fixed
-                    );
-                }
-                (true, false) => {
-                    // Only local configured → Host only
-                    setting_engine
-                        .set_nat_1to1_ips(advanced.public_ips.clone(), RTCIceCandidateType::Host);
-                    tracing::info!(
-                        "🔧 NAT 1:1 IPs (Host only): {:?} [local_fixed={}, remote_fixed={}]",
-                        advanced.public_ips,
-                        local_fixed,
-                        remote_fixed
-                    );
-                }
-                (false, _) => {
-                    // Local not configured → Host + Srflx (default behavior)
-                    setting_engine
-                        .set_nat_1to1_ips(advanced.public_ips.clone(), RTCIceCandidateType::Host);
-                    setting_engine
-                        .set_nat_1to1_ips(advanced.public_ips.clone(), RTCIceCandidateType::Srflx);
-                    tracing::info!(
-                        "🔧 NAT 1:1 IPs (Host + Srflx): {:?} [local_fixed={}, remote_fixed={}]",
-                        advanced.public_ips,
-                        local_fixed,
-                        remote_fixed
-                    );
-                }
+    fn eligible_ipv4_bind_ips(
+        interfaces: impl IntoIterator<Item = (std::net::IpAddr, bool, bool)>,
+    ) -> Vec<std::net::Ipv4Addr> {
+        use std::collections::BTreeSet;
+        use std::net::IpAddr;
+
+        interfaces
+            .into_iter()
+            .filter_map(|(ip, is_oper_up, is_loopback)| match ip {
+                IpAddr::V4(ip) if is_oper_up && !is_loopback && !ip.is_unspecified() => Some(ip),
+                _ => None,
+            })
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
+    fn local_ipv4_bind_ips() -> Vec<std::net::Ipv4Addr> {
+        use std::net::{IpAddr, Ipv4Addr, UdpSocket};
+
+        let mut local_ips = match if_addrs::get_if_addrs() {
+            Ok(interfaces) => {
+                Self::eligible_ipv4_bind_ips(interfaces.into_iter().map(|interface| {
+                    (
+                        interface.ip(),
+                        interface.is_oper_up(),
+                        interface.is_loopback(),
+                    )
+                }))
             }
+            Err(error) => {
+                tracing::warn!(%error, "failed to enumerate local interfaces for ICE gathering");
+                Vec::new()
+            }
+        };
+
+        if local_ips.is_empty() {
+            // Keep local development usable when the host has no active
+            // non-loopback IPv4 interface. The route probe does not send any
+            // packets; it only lets the OS choose a concrete source address.
+            let fallback = UdpSocket::bind("0.0.0.0:0")
+                .ok()
+                .and_then(|socket| {
+                    socket.connect("8.8.8.8:80").ok()?;
+                    match socket.local_addr().ok()?.ip() {
+                        IpAddr::V4(ip) if !ip.is_unspecified() => Some(ip),
+                        _ => None,
+                    }
+                })
+                .unwrap_or(Ipv4Addr::LOCALHOST);
+            tracing::warn!(%fallback, "no active non-loopback IPv4 interface found; using ICE fallback address");
+            local_ips.push(fallback);
         }
 
-        Ok(())
+        tracing::info!(
+            ?local_ips,
+            "using concrete IPv4 interfaces for ICE gathering"
+        );
+        local_ips
+    }
+
+    fn select_udp_bind_addrs(&self, is_answerer: bool) -> NetworkResult<Vec<String>> {
+        use std::net::{SocketAddr, UdpSocket};
+
+        // rtc/webrtc 0.20 builds host candidates directly from each bound
+        // socket's local_addr(); it does not expand 0.0.0.0 into interface
+        // addresses. Bind every concrete active IPv4 interface so SDP never
+        // advertises an unusable 0.0.0.0 candidate and multi-homed/offline-LAN
+        // hosts remain reachable through every eligible NIC.
+        let local_ips = Self::local_ipv4_bind_ips();
+
+        if is_answerer && let Some((min, max)) = self.config.advanced.udp_ports {
+            'ports: for port in min..=max {
+                let mut probes = Vec::with_capacity(local_ips.len());
+                for local_ip in &local_ips {
+                    match UdpSocket::bind(SocketAddr::new((*local_ip).into(), port)) {
+                        Ok(socket) => probes.push(socket),
+                        Err(_) => continue 'ports,
+                    }
+                }
+                drop(probes);
+                return Ok(local_ips
+                    .into_iter()
+                    .map(|ip| SocketAddr::new(ip.into(), port).to_string())
+                    .collect());
+            }
+            // The port range is a firewall-pinhole deployment precondition:
+            // an ephemeral port the firewall does not open presents as
+            // "node healthy but unreachable". Fail connection creation so the
+            // operator sees the misconfiguration instead of a silently dead
+            // node. (A small AddrInUse window remains between this probe's
+            // socket drop and the builder's bind: `with_udp_addrs` takes addr
+            // strings, not bound sockets, so the probe cannot be handed over.
+            // The per-coordinator `port_select_lock` in `create_peer_connection`
+            // closes the Actr-internal race.)
+            return Err(crate::transport::NetworkError::Other(anyhow::anyhow!(
+                "no free UDP port in the configured firewall-pinhole range \
+                 {min}-{max}; refusing to fall back to an ephemeral port"
+            )));
+        }
+
+        Ok(local_ips
+            .into_iter()
+            .map(|ip| SocketAddr::new(ip.into(), 0).to_string())
+            .collect())
     }
 
     /// Create Offer (Trickle ICE mode)
@@ -490,14 +538,8 @@ impl WebRtcNegotiator {
         &self,
         peer_connection: &RTCPeerConnection,
     ) -> NetworkResult<String> {
-        use webrtc::peer_connection::offer_answer_options::RTCOfferOptions;
-
-        let offer = peer_connection
-            .create_offer(Some(RTCOfferOptions {
-                ice_restart: true,
-                ..Default::default()
-            }))
-            .await?;
+        peer_connection.restart_ice().await?;
+        let offer = peer_connection.create_offer(None).await?;
         let offer_sdp = offer.sdp.clone();
 
         peer_connection.set_local_description(offer).await?;
@@ -590,8 +632,6 @@ impl WebRtcNegotiator {
         peer_connection: &RTCPeerConnection,
         candidate: IceCandidate,
     ) -> NetworkResult<()> {
-        use webrtc::ice_transport::ice_candidate::RTCIceCandidateInit;
-
         let sdp_mline_index = candidate
             .sdp_mline_index
             .map(u16::try_from)
@@ -606,6 +646,7 @@ impl WebRtcNegotiator {
             sdp_mid: candidate.sdp_mid,
             sdp_mline_index,
             username_fragment: candidate.username_fragment,
+            url: None,
         };
 
         peer_connection.add_ice_candidate(ice_candidate).await?;

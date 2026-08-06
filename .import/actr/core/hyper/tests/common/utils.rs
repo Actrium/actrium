@@ -88,14 +88,13 @@ pub async fn create_peer_with_websocket(
     Ok((coordinator, signaling_client_arc))
 }
 
-/// Create a WebRTC peer with WebSocket signaling and VNet
+/// Create a WebRTC peer with WebSocket signaling and controllable UDP loss.
 ///
-/// Same as `create_peer_with_websocket` but injects a virtual network
-/// so that all ICE/UDP traffic flows through the VNet router.
-/// This enables simulating network disconnection at the transport level.
+/// webrtc-rs v0.20 no longer accepts the old VNet socket provider. The helper
+/// keeps the VNet test context for compatibility and installs a runtime packet
+/// gate over the real UDP socket to simulate transport-level disconnection.
 ///
-/// **Note:** `set_vnet` must be called before `start()`, so this function
-/// creates the coordinator as mutable, sets vnet, then wraps in `Arc` and starts.
+/// **Note:** the test context and packet gate must be set before `start()`.
 ///
 /// # Arguments
 /// - `id`: Actor ID for this peer
@@ -105,6 +104,7 @@ pub async fn create_peer_with_vnet(
     id: ActrId,
     server_url: &str,
     vnet: Arc<webrtc_util::vnet::net::Net>,
+    packet_blocked: Arc<std::sync::atomic::AtomicBool>,
 ) -> anyhow::Result<(Arc<WebRtcCoordinator>, Arc<dyn SignalingClient>)> {
     install_test_crypto_provider();
 
@@ -123,7 +123,7 @@ pub async fn create_peer_with_vnet(
 
     let signaling_client_arc = signaling_client as Arc<dyn SignalingClient>;
 
-    // Create coordinator as mutable to inject vnet before start
+    // Create coordinator as mutable to install test networking before start.
     let mut coordinator = WebRtcCoordinator::new(
         id,
         credential_state,
@@ -132,8 +132,9 @@ pub async fn create_peer_with_vnet(
         media_registry,
     );
 
-    // Inject VNet BEFORE start
+    // Attach the legacy context and install the v0.20 packet gate before start.
     coordinator.set_vnet(vnet);
+    coordinator.set_test_packet_blocked(packet_blocked);
 
     let coordinator = Arc::new(coordinator);
     let c = coordinator.clone();

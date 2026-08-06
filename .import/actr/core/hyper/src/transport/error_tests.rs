@@ -321,8 +321,8 @@ fn from_anyhow_into_network_error() {
 #[test]
 fn from_webrtc_closed_error_into_peer_connection_closed() {
     for err in [
-        webrtc::Error::ErrConnectionClosed,
-        webrtc::Error::ErrClosedPipe,
+        webrtc::error::Error::ErrConnectionClosed,
+        webrtc::error::Error::ErrClosedPipe,
     ] {
         let e: NetworkError = err.into();
         assert!(matches!(e, NetworkError::PeerConnectionClosed(_)));
@@ -333,8 +333,8 @@ fn from_webrtc_closed_error_into_peer_connection_closed() {
 #[test]
 fn from_webrtc_not_open_error_into_data_channel_not_open() {
     for err in [
-        webrtc::Error::ErrDataChannelNotOpen,
-        webrtc::Error::ErrSCTPNotEstablished,
+        webrtc::error::Error::ErrDataChannelNotOpen,
+        webrtc::error::Error::ErrSCTPNotEstablished,
     ] {
         let e: NetworkError = err.into();
         assert!(matches!(e, NetworkError::DataChannelNotOpen(_)));
@@ -344,7 +344,7 @@ fn from_webrtc_not_open_error_into_data_channel_not_open() {
 
 #[test]
 fn from_generic_webrtc_error_stays_webrtc_error() {
-    let e: NetworkError = webrtc::Error::ErrUnknownType.into();
+    let e: NetworkError = webrtc::error::Error::ErrUnknownType.into();
     assert!(matches!(e, NetworkError::WebRtcError(_)));
     assert!(!e.is_closed_like());
 }

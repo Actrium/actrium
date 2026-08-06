@@ -410,6 +410,12 @@ timer_inventory! {
         success: "all current candidates apply", interrupt: "session replacement",
         expiry: "retain/report candidate failure", reset: "new candidate batch", external: false
     },
+    WEBRTC_SIGNALING_WORKER_IDLE => {
+        id: "webrtc.coordinator.signaling_worker_idle", owner: "webrtc_coordinator", category: RetentionExpiry,
+        duration: "SIGNALING_PEER_WORKER_IDLE_TIMEOUT", arm: "a peer signaling FIFO becomes idle",
+        success: "a new signaling envelope arrives", interrupt: "coordinator shutdown",
+        expiry: "retire the idle peer worker", reset: "after each handled envelope", external: false
+    },
     WEBRTC_SEND_OVERALL => {
         id: "webrtc.coordinator.send_overall", owner: "webrtc_coordinator", category: FailureDeadline,
         duration: "OVERALL_TIMEOUT or caller send budget", arm: "coordinator send/create operation starts",
@@ -943,6 +949,10 @@ mod tests {
             (
                 "verify/cert_cache.rs",
                 "certificate cache freshness; deliberately tracks real elapsed time",
+            ),
+            (
+                "wire/webrtc/adapter.rs",
+                "webrtc v0.20 get_stats() requires a std::time::Instant report stamp; the stamp is consumed by the upstream stats collector and never compared against a lifecycle deadline",
             ),
         ];
 

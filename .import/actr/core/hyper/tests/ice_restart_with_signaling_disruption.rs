@@ -4,7 +4,8 @@
 /// to simulate signaling disruption and recovery scenarios, including full
 /// WebRTC peer connection establishment and ICE restart.
 use actr_hyper::test_support::{
-    TestSignalingServer, create_peer_with_websocket, install_test_crypto_provider, make_actor_id,
+    TestSignalingServer, create_peer_with_vnet, create_peer_with_websocket, create_vnet_pair,
+    install_test_crypto_provider, make_actor_id,
 };
 use actr_protocol::{actr_relay, signaling_envelope};
 use std::time::{Duration, Instant};
@@ -457,13 +458,24 @@ async fn test_readiness_timeout_after_restart_answer_triggers_rebuild() {
     let server = TestSignalingServer::start().await.unwrap();
     let id_offerer = make_actor_id(107);
     let id_answerer = make_actor_id(208);
+    let vnet = create_vnet_pair().await.unwrap();
 
-    let (offerer, _client1) = create_peer_with_websocket(id_offerer.clone(), &server.url())
-        .await
-        .unwrap();
-    let (answerer, _client2) = create_peer_with_websocket(id_answerer.clone(), &server.url())
-        .await
-        .unwrap();
+    let (offerer, _client1) = create_peer_with_vnet(
+        id_offerer.clone(),
+        &server.url(),
+        vnet.net_offerer.clone(),
+        vnet.packet_blocked_flag(),
+    )
+    .await
+    .unwrap();
+    let (answerer, _client2) = create_peer_with_vnet(
+        id_answerer.clone(),
+        &server.url(),
+        vnet.net_answerer.clone(),
+        vnet.packet_blocked_flag(),
+    )
+    .await
+    .unwrap();
 
     sleep(Duration::from_millis(500)).await;
     let ready_rx = offerer
@@ -493,11 +505,12 @@ async fn test_readiness_timeout_after_restart_answer_triggers_rebuild() {
     };
     let baseline_negotiations = role_negotiation_count().await;
 
-    // SDP still flows; the restarted generation never sees a single
-    // candidate, so both readiness waiters hit their terminal ICE timeout
-    // (10s). The blackout ends just before that so the rebuilt generation
-    // can trickle freely.
-    server.drop_next_ice_candidates_for(64, Duration::from_secs(10));
+    // SDP still flows over WebSocket, but the v0.20 packet gate blocks the
+    // reused inline candidates as well as newly trickled candidates. Both
+    // readiness waiters therefore hit their terminal ICE timeout (10s).
+    // Keep the gate closed until fresh role negotiation proves that teardown
+    // reached the autonomous rebuild path.
+    vnet.block_network();
 
     let targets = offerer
         .begin_network_recovery("test readiness-timeout rebuild")
@@ -524,8 +537,8 @@ async fn test_readiness_timeout_after_restart_answer_triggers_rebuild() {
     .await
     .expect("terminal readiness failure must trigger fresh role negotiation");
 
-    // With the blackout over, the rebuilt generation converges and both
-    // recovery guards clear.
+    // Let the rebuilt generation converge and clear both recovery guards.
+    vnet.unblock_network();
     timeout(Duration::from_secs(30), async {
         loop {
             let offerer_clear = !offerer.is_peer_recovering(&id_answerer).await;
