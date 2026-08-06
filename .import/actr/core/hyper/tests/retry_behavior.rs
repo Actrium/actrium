@@ -25,9 +25,9 @@ use actr_framework::Bytes;
 use actr_hyper::test_support::TestHarness;
 use actr_hyper::test_support::{
     expect_request_eventually_ok, wait_for_data_channel_close_chain, wait_for_data_channel_opened,
-    wait_for_peer_state,
+    wait_for_ice_restart_started,
 };
-use actr_hyper::transport::{ConnectionEvent, ConnectionState};
+use actr_hyper::transport::ConnectionEvent;
 use actr_hyper::wire::webrtc::{HookCallback, HookEvent};
 use actr_protocol::{ActrError, PayloadType};
 use std::sync::Arc;
@@ -195,14 +195,15 @@ async fn test_call_succeeds_after_wirepool_reconnect() {
         .expect("test requires VNet")
         .block_network();
 
-    // Wait for ICE to detect the failure.
-    let (_session_id, _state) = wait_for_peer_state(
+    // Either peer may detect the underlying ICE disconnect first. Wait for the
+    // local recovery boundary instead of requiring this side to publish a
+    // transient Disconnected/Failed state before the peer requests a restart.
+    let _restart_session = wait_for_ice_restart_started(
         &mut event_rx,
         &target_id,
-        &[ConnectionState::Disconnected, ConnectionState::Failed],
         // ICE failure detection can be delayed when the full workspace test
         // suite is competing for CPU. Keep this above the production ICE
-        // timeout so the test observes the transition instead of racing it.
+        // timeout so the test observes recovery instead of racing it.
         Duration::from_secs(20),
     )
     .await;
