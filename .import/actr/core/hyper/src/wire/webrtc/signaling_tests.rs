@@ -123,6 +123,7 @@ fn make_config() -> SignalingConfig {
         reconnect_config: ReconnectConfig::default(),
         auth_config: None,
         webrtc_role: None,
+        inbound_queue: InboundQueueConfig::default(),
     }
 }
 
@@ -2042,10 +2043,13 @@ async fn test_build_url_with_webrtc_role() {
 async fn test_reset_inbound_channel_creates_fresh_channel() {
     let client = WebSocketSignalingClient::new(make_config());
 
-    // Get old tx and send a message
+    // Enqueue a message into the current session's bounded queue
     {
-        let tx = client.inbound_tx.lock().await;
-        let _ = tx.send(SignalingEnvelope::default());
+        let egress = client.inbound_egress.lock().await;
+        egress
+            .send(SignalingEnvelope::default(), 16)
+            .await
+            .expect("enqueue should succeed while capacity is available");
     }
 
     // Reset channel
@@ -2216,4 +2220,139 @@ fn delayed_resume_wake_counts_as_one_ping_interval() {
 
     assert_eq!(silent_active_secs, PING_INTERVAL_SECS);
     assert!(silent_active_secs <= PONG_TIMEOUT_SECS);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// 12. Bounded inbound queue (issue #351)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Helper: build an `InboundQueueConfig` with explicit bounds for testing.
+fn inbound_config(
+    max_messages: usize,
+    max_bytes: usize,
+    backpressure_timeout_ms: u64,
+) -> InboundQueueConfig {
+    InboundQueueConfig {
+        max_messages,
+        max_bytes,
+        max_frame_bytes: DEFAULT_INBOUND_MAX_FRAME_BYTES,
+        backpressure_timeout: Duration::from_millis(backpressure_timeout_ms),
+    }
+}
+
+/// Sustained flood: a slow/stopped consumer cannot grow the queue past the
+/// configured message bound; the producer observes `Saturated` (fail-closed
+/// trigger) once the bound is held past the backpressure deadline.
+#[tokio::test]
+async fn test_inbound_egress_bounded_by_message_count() {
+    let stats = Arc::new(AtomicSignalingStats::default());
+    let (egress, _rx) = InboundEgress::new(inbound_config(2, 1 << 20, 50), stats.clone());
+
+    // Fill the message-count bound (consumer never drains).
+    egress.send(SignalingEnvelope::default(), 8).await.unwrap();
+    egress.send(SignalingEnvelope::default(), 8).await.unwrap();
+
+    // The next send cannot be admitted and must saturate (not block forever).
+    let result = egress.send(SignalingEnvelope::default(), 8).await;
+    assert_eq!(result, Err(InboundEnqueueError::Saturated));
+    assert_eq!(stats.inbound_saturated.load(Ordering::Relaxed), 1);
+    assert_eq!(stats.inbound_enqueued.load(Ordering::Relaxed), 2);
+}
+
+/// The byte budget caps the queue before the message-count bound does.
+#[tokio::test]
+async fn test_inbound_egress_bounded_by_byte_budget() {
+    let stats = Arc::new(AtomicSignalingStats::default());
+    // Generous message count, tiny byte budget (100 bytes).
+    let (egress, _rx) = InboundEgress::new(inbound_config(16, 100, 50), stats.clone());
+
+    // First frame reserves 60 of 100 bytes.
+    egress.send(SignalingEnvelope::default(), 60).await.unwrap();
+
+    // Second frame would need another 60 bytes (120 > 100): blocked by the byte
+    // budget even though only 1 of 16 message slots is used.
+    let result = egress.send(SignalingEnvelope::default(), 60).await;
+    assert_eq!(result, Err(InboundEnqueueError::Saturated));
+    assert_eq!(stats.inbound_saturated.load(Ordering::Relaxed), 1);
+}
+
+/// Recovery after saturation: once the consumer drains, producers can enqueue
+/// again (no permanent latch).
+#[tokio::test]
+async fn test_inbound_egress_recovers_after_drain() {
+    let stats = Arc::new(AtomicSignalingStats::default());
+    let (egress, mut rx) = InboundEgress::new(inbound_config(1, 1 << 20, 50), stats.clone());
+
+    egress.send(SignalingEnvelope::default(), 8).await.unwrap();
+    // Queue is now full (1/1); the next send saturates.
+    assert_eq!(
+        egress.send(SignalingEnvelope::default(), 8).await,
+        Err(InboundEnqueueError::Saturated)
+    );
+
+    // Consumer drains one message, freeing a slot and its byte budget.
+    let queued = rx.recv().await.expect("one message should be queued");
+    drop(queued);
+
+    // Producer recovers: the next enqueue succeeds.
+    egress.send(SignalingEnvelope::default(), 8).await.unwrap();
+    assert_eq!(stats.inbound_enqueued.load(Ordering::Relaxed), 2);
+}
+
+/// Dropping the receiver (session reset/disconnect) releases every queued byte
+/// reservation — no orphaned budget.
+#[tokio::test]
+async fn test_inbound_egress_releases_bytes_on_queue_drop() {
+    let stats = Arc::new(AtomicSignalingStats::default());
+    let (egress, rx) = InboundEgress::new(inbound_config(8, 1000, 50), stats.clone());
+
+    egress
+        .send(SignalingEnvelope::default(), 400)
+        .await
+        .unwrap();
+    egress
+        .send(SignalingEnvelope::default(), 400)
+        .await
+        .unwrap();
+    assert_eq!(egress.queued_bytes(), 800);
+
+    // Simulate a session reset: dropping the receiver drains and drops all
+    // queued envelopes, returning their byte permits.
+    drop(rx);
+    // Allow the channel teardown to settle (permits release synchronously on drop).
+    assert_eq!(egress.queued_bytes(), 0);
+    assert_eq!(egress.depth(), 0);
+}
+
+/// Observability: depth/bytes gauges track enqueues and drains.
+#[tokio::test]
+async fn test_inbound_egress_depth_and_byte_gauges() {
+    let stats = Arc::new(AtomicSignalingStats::default());
+    let (egress, mut rx) = InboundEgress::new(inbound_config(8, 1000, 50), stats.clone());
+
+    assert_eq!(egress.depth(), 0);
+    assert_eq!(egress.queued_bytes(), 0);
+
+    egress
+        .send(SignalingEnvelope::default(), 128)
+        .await
+        .unwrap();
+    assert_eq!(egress.depth(), 1);
+    assert_eq!(egress.queued_bytes(), 128);
+
+    let queued = rx.recv().await.unwrap();
+    drop(queued);
+    assert_eq!(egress.depth(), 0);
+    assert_eq!(egress.queued_bytes(), 0);
+}
+
+/// A frame whose byte cost exceeds the whole byte budget can never be admitted
+/// and saturates promptly (defense against a single oversized reservation).
+#[tokio::test]
+async fn test_inbound_egress_rejects_frame_larger_than_budget() {
+    let stats = Arc::new(AtomicSignalingStats::default());
+    let (egress, _rx) = InboundEgress::new(inbound_config(8, 64, 50), stats.clone());
+
+    let result = egress.send(SignalingEnvelope::default(), 4096).await;
+    assert_eq!(result, Err(InboundEnqueueError::Saturated));
 }

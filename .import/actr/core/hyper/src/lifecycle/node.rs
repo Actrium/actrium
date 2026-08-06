@@ -1659,6 +1659,7 @@ impl Inner {
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role,
+            inbound_queue: crate::wire::webrtc::InboundQueueConfig::default(),
         };
 
         let client = Arc::new(WebSocketSignalingClient::new(signaling_config));

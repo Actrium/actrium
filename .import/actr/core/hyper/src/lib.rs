@@ -222,8 +222,8 @@ pub use transport::{Dest, ExponentialBackoff, NetworkError, NetworkResult};
 // Layer 0: Wire layer
 #[cfg(not(target_arch = "wasm32"))]
 pub use wire::{
-    AuthConfig, AuthType, DisconnectReason, ReconnectConfig, SignalingClient, SignalingConfig,
-    SignalingEvent, SignalingStats, WebRtcConfig,
+    AuthConfig, AuthType, DisconnectReason, InboundQueueConfig, ReconnectConfig, SignalingClient,
+    SignalingConfig, SignalingEvent, SignalingStats, WebRtcConfig,
 };
 #[cfg(all(not(target_arch = "wasm32"), feature = "test-utils"))]
 pub use wire::{WebRtcCoordinator, WebSocketSignalingClient};
@@ -278,8 +278,8 @@ pub mod prelude {
     // ── Layer 0: Wire / WebRTC (native-only) ────────────────────────────────
     #[cfg(not(target_arch = "wasm32"))]
     pub use crate::wire::webrtc::{
-        AuthConfig, AuthType, DisconnectReason, ReconnectConfig, SignalingClient, SignalingConfig,
-        SignalingEvent, SignalingStats, WebRtcConfig,
+        AuthConfig, AuthType, DisconnectReason, InboundQueueConfig, ReconnectConfig,
+        SignalingClient, SignalingConfig, SignalingEvent, SignalingStats, WebRtcConfig,
     };
     #[cfg(feature = "test-utils")]
     pub use crate::wire::webrtc::{WebRtcCoordinator, WebSocketSignalingClient};

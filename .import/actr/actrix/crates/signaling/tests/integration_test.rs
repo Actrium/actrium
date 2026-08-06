@@ -326,3 +326,40 @@ async fn test_invalid_message_handling() {
         }
     }
 }
+
+/// An oversized signaling frame is rejected at the WebSocket transport
+/// boundary (`max_frame_size`/`max_message_size` on the server's
+/// `WebSocketUpgrade`) so the server never allocates/queues it (issue #351).
+/// The connection is torn down; the post-read check in `handle_websocket`
+/// remains as defense in depth.
+#[tokio::test]
+async fn test_oversized_inbound_frame_rejected_at_transport_boundary() {
+    let (ws_url, _handle) = create_test_server().await;
+    let (ws_stream, _) = connect_async(&ws_url).await.unwrap();
+    let (mut write, mut read) = ws_stream.split();
+
+    // Send an oversized ~512 KiB Binary frame (above the 256 KiB transport cap).
+    // The send itself may succeed (the client buffers the frame); the server
+    // rejects it at the transport boundary and tears down the connection.
+    let oversized = vec![0xABu8; 512 * 1024];
+    let _ = write
+        .send(TungsteniteMessage::Binary(oversized.into()))
+        .await;
+
+    // The server must reject the oversized frame and tear down the connection.
+    // Acceptable: a Close frame (ideally 1009 Message Too Big), a transport
+    // error (e.g. connection reset), or end-of-stream. A normal Binary
+    // response would mean the oversized frame was accepted — a regression.
+    let response = timeout(Duration::from_secs(5), read.next())
+        .await
+        .expect("server should react to the oversized frame within 5s");
+
+    match response {
+        Some(Ok(TungsteniteMessage::Close(_))) => {}
+        Some(Err(_)) | None => {}
+        Some(Ok(other)) => panic!(
+            "oversized frame should have been rejected at the transport boundary, \
+             but the connection stayed open and yielded {other:?}"
+        ),
+    }
+}

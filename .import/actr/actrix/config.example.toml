@@ -213,6 +213,19 @@ ws_path = "/signaling"
 # per_second = 10  # (optional, default: 10)
 # burst_size = 50  # (optional, default: 50)
 
+# Per-client egress queue bounds (optional, all have safe defaults; issue #351).
+# Bounds the messages/bytes queued to a single client, caps single inbound frame
+# size, and disconnects slow/non-reading clients after the enqueue/write deadline.
+# [services.signaling.server.egress]
+# max_messages = 256            # (optional, default: 256) data messages queued per client
+# max_bytes = 1048576           # (optional, default: 1 MiB) encoded bytes queued per client
+# max_control_messages = 32     # (optional, default: 32) Ping/Pong/Close queued per client
+# max_frame_bytes = 262144      # (optional, default: 256 KiB) max single inbound frame
+# enqueue_timeout_ms = 2000     # (optional, default: 2000) full-queue enqueue deadline
+# write_timeout_ms = 5000       # (optional, default: 5000) single WebSocket write deadline
+# target_rate_per_second = 200  # (optional, default: 200) per-target aggregate msg/s
+# target_bytes_per_second = 1048576  # (optional, default: 1 MiB/s) per-target aggregate bytes/s
+
 # Signaling dependencies (optional, auto-discovered if local services enabled)
 # [services.signaling.dependencies.ks]
 # endpoint = "http://remote-ks:8080"  # (optional, gRPC endpoint)

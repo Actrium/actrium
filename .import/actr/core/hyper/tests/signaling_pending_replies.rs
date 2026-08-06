@@ -2,7 +2,7 @@
 
 use actr_hyper::test_support::{dummy_credential, make_actor_id};
 use actr_hyper::wire::webrtc::{
-    ReconnectConfig, SignalingClient, SignalingConfig, WebSocketSignalingClient,
+    InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig, WebSocketSignalingClient,
 };
 use actr_protocol::{ActrType, RouteCandidatesRequest, route_candidates_request};
 use futures_util::StreamExt;
@@ -59,6 +59,7 @@ fn test_signaling_config(url: &str) -> SignalingConfig {
         },
         auth_config: None,
         webrtc_role: None,
+        inbound_queue: InboundQueueConfig::default(),
     }
 }
 

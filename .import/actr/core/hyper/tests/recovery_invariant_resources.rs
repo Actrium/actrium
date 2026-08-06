@@ -17,8 +17,8 @@ use actr_hyper::transport::{
     PeerTransport, WireBuilder, WireHandle,
 };
 use actr_hyper::wire::webrtc::{
-    HookCallback, HookEvent, ReconnectConfig, SignalingClient, SignalingConfig, SignalingEvent,
-    WebSocketSignalingClient,
+    HookCallback, HookEvent, InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig,
+    SignalingEvent, WebSocketSignalingClient,
 };
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
@@ -229,6 +229,7 @@ async fn inv12_blackbox_stale_signaling_generation_cannot_publish_connected_or_o
         },
         auth_config: None,
         webrtc_role: None,
+        inbound_queue: InboundQueueConfig::default(),
     }));
     let publish = Arc::new(Barrier::new(2));
     client.set_connection_publish_barrier_for_test(publish.clone());
