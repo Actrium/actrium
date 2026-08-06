@@ -451,6 +451,26 @@ message RoleAssignment {
 // waiting for its backoff timer to expire.
 message IceRestartRequest {
   optional string reason = 1; // e.g. "network_recovered", "network_type_changed"
+  // Stable across retransmissions of one recovery request. Optional so a
+  // rolling deployment can still accept requests from older runtimes.
+  optional string request_id = 2;
+  // Monotonically increasing retransmission attempt for request_id.
+  optional uint32 attempt = 3 [default = 1];
+}
+
+// Confirms whether the receiver can apply a correlated IceRestartRequest to
+// its current PeerConnection. ACCEPTED confirms ownership only; the Answerer
+// still waits for an ICE restart offer and retransmits if no offer is observed.
+message IceRestartRequestAck {
+  enum Outcome {
+    ACCEPTED = 0;
+    NO_ACTIVE_SESSION = 1;
+    WRONG_ROLE = 2;
+  }
+
+  required string request_id = 1;
+  optional uint32 attempt = 2 [default = 1];
+  optional Outcome outcome = 3 [default = ACCEPTED];
 }
 
 // =========================================================================
