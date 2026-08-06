@@ -465,7 +465,9 @@ async fn actorless_harness() -> (
 ) {
     use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
     use crate::outbound::{Gate, HostGate};
-    use crate::wire::webrtc::{ReconnectConfig, SignalingConfig, WebSocketSignalingClient};
+    use crate::wire::webrtc::{
+        InboundQueueConfig, ReconnectConfig, SignalingConfig, WebSocketSignalingClient,
+    };
 
     let host = Arc::new(HostTransport::new());
     let inproc = Gate::Host(Arc::new(HostGate::new(host)));
@@ -484,6 +486,7 @@ async fn actorless_harness() -> (
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
         })) as Arc<dyn SignalingClient>,
         AIdCredential::default(),
         None,

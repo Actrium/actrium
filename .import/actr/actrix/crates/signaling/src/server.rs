@@ -38,11 +38,15 @@ use actr_protocol::{
 };
 use futures_util::{SinkExt, StreamExt};
 use platform::aid::credential::validator::AIdCredentialValidator;
+use platform::config::signaling::EgressQueueConfig;
 use platform::realm::Realm as RealmEntity;
 use prost::Message as ProstMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
+use tokio::sync::{OwnedSemaphorePermit, RwLock, Semaphore};
+use tokio::time::timeout;
 use tracing::info_span;
 use uuid::Uuid;
 
@@ -65,6 +69,183 @@ fn type_key(actor_type: &ActrType) -> String {
     )
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Per-client egress queue bound (issue #351)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Signaling queue observability counters (no credentials or payloads).
+///
+/// These counters are incremented atomically on the hot path to expose queue
+/// depth/bytes, saturation events, slow-consumer disconnects, oversized-frame
+#[derive(Debug, Default)]
+pub struct SignalingQueueMetrics {
+    /// Total data messages successfully enqueued
+    pub egress_enqueued: AtomicU64,
+    /// Number of times enqueue exceeded its deadline (queue full)
+    pub egress_saturation_events: AtomicU64,
+    /// Connections actively disconnected by the server for slow consumption
+    pub slow_consumer_disconnects: AtomicU64,
+    /// Inbound frames rejected for exceeding the max frame size
+    pub oversized_frame_rejections: AtomicU64,
+    /// Messages dropped for exceeding the per-target aggregate rate/byte budget
+    pub target_budget_rejections: AtomicU64,
+    /// Control frames dropped because the control queue was full
+    pub control_dropped: AtomicU64,
+}
+
+impl SignalingQueueMetrics {
+    /// Current snapshot (for tests and metrics export)
+    pub fn snapshot(&self) -> SignalingQueueMetricsSnapshot {
+        SignalingQueueMetricsSnapshot {
+            egress_enqueued: self.egress_enqueued.load(Ordering::Relaxed),
+            egress_saturation_events: self.egress_saturation_events.load(Ordering::Relaxed),
+            slow_consumer_disconnects: self.slow_consumer_disconnects.load(Ordering::Relaxed),
+            oversized_frame_rejections: self.oversized_frame_rejections.load(Ordering::Relaxed),
+            target_budget_rejections: self.target_budget_rejections.load(Ordering::Relaxed),
+            control_dropped: self.control_dropped.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Instantaneous snapshot of [`SignalingQueueMetrics`]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SignalingQueueMetricsSnapshot {
+    pub egress_enqueued: u64,
+    pub egress_saturation_events: u64,
+    pub slow_consumer_disconnects: u64,
+    pub oversized_frame_rejections: u64,
+    pub target_budget_rejections: u64,
+    pub control_dropped: u64,
+}
+
+/// Why a data message could not be enqueued to a client egress queue
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EnqueueError {
+    /// The queue stayed full past the deadline (slow consumer); the caller should close and remove the client
+    Saturated,
+    /// The client queue is closed (the connection is being torn down)
+    Closed,
+}
+
+/// A queued data frame and its byte-budget permit.
+///
+/// The permit is returned to the byte budget when this value is dropped (on send
+/// completion, or on connection teardown/reset), so teardown never leaks a byte reservation.
+struct QueuedFrame {
+    msg: WsMessage,
+    byte_len: usize,
+    _permit: OwnedSemaphorePermit,
+}
+
+/// Per-client bounded egress handle (issue #351).
+///
+/// Data (Binary) and control (Ping/Pong/Close) messages use two independent bounded queues,
+/// and the write task drains the control queue first so control messages are not starved by data. The data queue is bounded by both
+/// message count and encoded byte count.
+#[derive(Debug, Clone)]
+pub struct ClientEgress {
+    /// Data (Binary) queue sender (bounded by message count)
+    data_tx: tokio::sync::mpsc::Sender<QueuedFrame>,
+    /// Control (Ping/Pong/Close) queue sender (bounded, small capacity)
+    control_tx: tokio::sync::mpsc::Sender<WsMessage>,
+    /// Data queue byte budget
+    byte_budget: Arc<Semaphore>,
+    /// The bound configuration applied to this client
+    config: EgressQueueConfig,
+    /// Shared observability counters
+    metrics: Arc<SignalingQueueMetrics>,
+}
+
+impl ClientEgress {
+    /// Build a bounded egress handle and its two consumers for a new connection
+    fn new(
+        config: EgressQueueConfig,
+        metrics: Arc<SignalingQueueMetrics>,
+    ) -> (
+        Self,
+        tokio::sync::mpsc::Receiver<QueuedFrame>,
+        tokio::sync::mpsc::Receiver<WsMessage>,
+    ) {
+        let (data_tx, data_rx) = tokio::sync::mpsc::channel(config.max_messages.max(1) as usize);
+        let (control_tx, control_rx) =
+            tokio::sync::mpsc::channel(config.max_control_messages.max(1) as usize);
+        let egress = Self {
+            data_tx,
+            control_tx,
+            byte_budget: Arc::new(Semaphore::new(config.max_bytes as usize)),
+            config,
+            metrics,
+        };
+        (egress, data_rx, control_rx)
+    }
+
+    /// Reserve byte budget and a message slot, then enqueue the data frame.
+    ///
+    /// Returns `Saturated` if capacity is not available within `enqueue_timeout` (the caller closes the slow-consumer
+    /// client); returns `Closed` if the channel is closed. The caller is never blocked while holding a lock.
+    async fn send_data(&self, msg: WsMessage, byte_len: usize) -> Result<(), EnqueueError> {
+        let enqueue_timeout = Duration::from_millis(self.config.enqueue_timeout_ms as u64);
+        let reserve = async {
+            // byte_len is bounded by max_frame_bytes (<= max_bytes), so it always fits in a u32 permit count
+            let permits = u32::try_from(byte_len).unwrap_or(u32::MAX);
+            let permit = self
+                .byte_budget
+                .clone()
+                .acquire_many_owned(permits)
+                .await
+                .map_err(|_| EnqueueError::Closed)?;
+            self.data_tx
+                .send(QueuedFrame {
+                    msg,
+                    byte_len,
+                    _permit: permit,
+                })
+                .await
+                .map_err(|_| EnqueueError::Closed)
+        };
+
+        match timeout(enqueue_timeout, reserve).await {
+            Ok(result) => {
+                if result.is_ok() {
+                    self.metrics.egress_enqueued.fetch_add(1, Ordering::Relaxed);
+                }
+                result
+            }
+            Err(_) => {
+                self.metrics
+                    .egress_saturation_events
+                    .fetch_add(1, Ordering::Relaxed);
+                Err(EnqueueError::Saturated)
+            }
+        }
+    }
+
+    /// Enqueue a control message (Ping/Pong/Close) without blocking.
+    ///
+    /// The control queue is independent and bounded; if full the message is dropped and counted (the control write task has a write deadline,
+    /// so a slow-consuming connection is eventually torn down by the write timeout).
+    fn try_send_control(
+        &self,
+        msg: WsMessage,
+    ) -> Result<(), tokio::sync::mpsc::error::TrySendError<WsMessage>> {
+        self.control_tx.try_send(msg).inspect_err(|_| {
+            self.metrics.control_dropped.fetch_add(1, Ordering::Relaxed);
+        })
+    }
+
+    /// Current number of queued data messages (observability gauge)
+    #[allow(dead_code)]
+    fn depth(&self) -> usize {
+        self.data_tx.max_capacity() - self.data_tx.capacity()
+    }
+
+    /// Current number of queued data bytes (observability gauge)
+    #[allow(dead_code)]
+    fn queued_bytes(&self) -> usize {
+        (self.config.max_bytes as usize).saturating_sub(self.byte_budget.available_permits())
+    }
+}
+
 /// Signaling server state
 #[derive(Debug)]
 pub struct SignalingServer {
@@ -80,6 +261,12 @@ pub struct SignalingServer {
     pub connection_rate_limiter: Option<Arc<crate::ratelimit::ConnectionRateLimiter>>,
     /// Message rate limiter
     pub message_rate_limiter: Option<Arc<crate::ratelimit::MessageRateLimiter>>,
+    /// Per-client egress queue bound configuration (issue #351)
+    pub egress_config: EgressQueueConfig,
+    /// Per-target aggregate rate/byte limiter (issue #351)
+    pub target_rate_limiter: Arc<crate::ratelimit::TargetRateLimiter>,
+    /// Signaling queue observability counters (issue #351)
+    pub queue_metrics: Arc<SignalingQueueMetrics>,
 }
 
 /// Client connection info
@@ -88,7 +275,8 @@ pub struct ClientConnection {
     pub id: String,
     pub actor_id: Option<ActrId>,
     pub credential: Option<AIdCredential>,
-    pub direct_sender: tokio::sync::mpsc::UnboundedSender<WsMessage>,
+    /// Bounded egress handle (data + control dual queues, issue #351)
+    pub egress: ClientEgress,
     pub client_ip: Option<std::net::IpAddr>,
     /// WebRTC role: "answer" or None (defaults to offer)
     pub webrtc_role: Option<String>,
@@ -102,7 +290,7 @@ enum CleanupMode {
 
 struct StaleClient {
     id: String,
-    direct_sender: tokio::sync::mpsc::UnboundedSender<WsMessage>,
+    egress: ClientEgress,
 }
 
 /// Signaling server handle - used to operate the server in async tasks
@@ -114,6 +302,12 @@ pub struct SignalingServerHandle {
     pub presence_manager: Arc<RwLock<PresenceManager>>,
     pub connection_rate_limiter: Option<Arc<crate::ratelimit::ConnectionRateLimiter>>,
     pub message_rate_limiter: Option<Arc<crate::ratelimit::MessageRateLimiter>>,
+    /// Per-client egress queue bound configuration (issue #351)
+    pub egress_config: EgressQueueConfig,
+    /// Per-target aggregate rate/byte limiter (issue #351)
+    pub target_rate_limiter: Arc<crate::ratelimit::TargetRateLimiter>,
+    /// Signaling queue observability counters (issue #351)
+    pub queue_metrics: Arc<SignalingQueueMetrics>,
 }
 impl SignalingServerHandle {
     /// Create a SignalingEnvelope
@@ -156,6 +350,15 @@ impl Default for SignalingServer {
 
 impl SignalingServer {
     pub fn new() -> Self {
+        Self::with_egress_config(EgressQueueConfig::default())
+    }
+
+    /// Create a server with the given egress queue bound configuration (issue #351)
+    pub fn with_egress_config(egress_config: EgressQueueConfig) -> Self {
+        let target_rate_limiter = Arc::new(crate::ratelimit::TargetRateLimiter::new(
+            egress_config.target_rate_per_second,
+            egress_config.target_bytes_per_second,
+        ));
         Self {
             clients: Arc::new(RwLock::new(HashMap::new())),
             actor_id_index: Arc::new(RwLock::new(HashMap::new())),
@@ -163,6 +366,9 @@ impl SignalingServer {
             presence_manager: Arc::new(RwLock::new(PresenceManager::new())),
             connection_rate_limiter: None, // Initialized in axum_router based on config
             message_rate_limiter: None,    // Initialized in axum_router based on config
+            egress_config,
+            target_rate_limiter,
+            queue_metrics: Arc::new(SignalingQueueMetrics::default()),
         }
     }
 }
@@ -185,11 +391,13 @@ pub async fn handle_websocket_connection(
     // Split read and write streams
     let (mut ws_sender, mut ws_receiver) = websocket.split();
 
-    // Create a dedicated send channel for peer-to-peer messages
-    let (direct_tx, mut direct_rx) = tokio::sync::mpsc::unbounded_channel();
-    let control_tx = direct_tx.clone();
+    // Create a bounded egress queue for this connection (data + control dual channels + byte budget, issue #351)
+    let (egress, mut data_rx, mut control_rx) =
+        ClientEgress::new(server.egress_config.clone(), server.queue_metrics.clone());
+    let write_timeout = Duration::from_millis(server.egress_config.write_timeout_ms as u64);
+    let control_tx = egress.clone();
 
-    // Register client (including dedicated sender)
+    // Register the client (including the bounded egress handle)
     let (actor_id, credential) = match url_identity {
         Some(identity) => (Some(identity.0), Some(identity.1)),
         None => (None, None),
@@ -218,7 +426,7 @@ pub async fn handle_websocket_connection(
                 id: client_id.clone(),
                 actor_id,
                 credential,
-                direct_sender: direct_tx,
+                egress,
                 client_ip,
                 webrtc_role: webrtc_role.clone(),
             },
@@ -314,11 +522,26 @@ pub async fn handle_websocket_connection(
     // Task for handling client messages
     let server_for_receive = server.clone();
     let client_id_for_receive = client_id.clone();
+    let max_frame_bytes = server.egress_config.max_frame_bytes as usize;
+    let metrics_for_receive = server.queue_metrics.clone();
 
     let receive_task = tokio::spawn(async move {
         while let Some(msg) = ws_receiver.next().await {
             match msg {
                 Ok(WsMessage::Binary(data)) => {
+                    // Reject oversized frames before protobuf decode/alloc (issue #351)
+                    if data.len() > max_frame_bytes {
+                        metrics_for_receive
+                            .oversized_frame_rejections
+                            .fetch_add(1, Ordering::Relaxed);
+                        platform::recording::warn!(
+                            "🚫 Rejecting oversized signaling frame: {} bytes (limit {}), from connection {}",
+                            data.len(),
+                            max_frame_bytes,
+                            client_id_for_receive
+                        );
+                        continue;
+                    }
                     if let Err(e) =
                         handle_client_envelope(&data, &client_id_for_receive, &server_for_receive)
                             .await
@@ -353,19 +576,68 @@ pub async fn handle_websocket_connection(
     });
 
     // Task for sending messages
+    //
+    // Drain the control queue first (biased select) so Close/Ping/Pong are not starved by data messages;
+    // every write has a write deadline, so slow/non-reading clients are torn down on timeout (issue #351).
     let mut send_task = tokio::spawn(async move {
         loop {
             tokio::select! {
-                // Handle peer-to-peer messages
-                msg = direct_rx.recv() => {
-                    match msg {
+                biased;
+                // Control messages first
+                ctrl = control_rx.recv() => {
+                    match ctrl {
                         Some(message) => {
                             let should_close = matches!(message, WsMessage::Close(_));
-                            if ws_sender.send(message).await.is_err() {
-                                break;
+                            match timeout(write_timeout, ws_sender.send(message)).await {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    platform::recording::warn!(
+                                        "WebSocket control frame write failed: {}",
+                                        e
+                                    );
+                                    break;
+                                }
+                                Err(_) => {
+                                    platform::recording::warn!(
+                                        "WebSocket control frame write timed out ({}ms); closing slow-consumer connection",
+                                        write_timeout.as_millis()
+                                    );
+                                    break;
+                                }
                             }
                             if should_close {
                                 break;
+                            }
+                        }
+                        None => break,
+                    }
+                }
+                // Data messages
+                data = data_rx.recv() => {
+                    match data {
+                        Some(queued) => {
+                            let QueuedFrame { msg, byte_len, _permit } = queued;
+                            // Hold the byte permit during the write and release it after (applies accurate backpressure to slow consumers)
+                            let send_result = timeout(write_timeout, ws_sender.send(msg)).await;
+                            drop(_permit);
+                            match send_result {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    platform::recording::warn!(
+                                        "WebSocket data frame write failed ({} bytes): {}",
+                                        byte_len,
+                                        e
+                                    );
+                                    break;
+                                }
+                                Err(_) => {
+                                    platform::recording::warn!(
+                                        "WebSocket data frame write timed out ({}ms, {} bytes); closing slow-consumer connection",
+                                        write_timeout.as_millis(),
+                                        byte_len
+                                    );
+                                    break;
+                                }
                             }
                         }
                         None => break,
@@ -423,7 +695,7 @@ fn remove_stale_actor_clients(
         .filter_map(|cid| {
             clients.remove(&cid).map(|client| StaleClient {
                 id: cid,
-                direct_sender: client.direct_sender,
+                egress: client.egress,
             })
         })
         .collect()
@@ -437,12 +709,12 @@ async fn close_stale_clients(stale_clients: Vec<StaleClient>, server: &Signaling
         };
 
         if stale_client
-            .direct_sender
-            .send(WsMessage::Close(Some(close_frame)))
+            .egress
+            .try_send_control(WsMessage::Close(Some(close_frame)))
             .is_err()
         {
             platform::recording::debug!(
-                "Stale WebSocket client {} send task already closed",
+                "Stale WebSocket client {} control queue full or closed",
                 stale_client.id
             );
         }
@@ -455,25 +727,40 @@ async fn close_stale_clients(stale_clients: Vec<StaleClient>, server: &Signaling
         if let Some(ref limiter) = server.message_rate_limiter {
             limiter.remove_connection(&stale_client.id).await;
         }
+        server
+            .target_rate_limiter
+            .remove_target(&stale_client.id)
+            .await;
     }
 }
 
 fn handle_websocket_control_message(
     message: WsMessage,
-    control_tx: &tokio::sync::mpsc::UnboundedSender<WsMessage>,
+    control_tx: &ClientEgress,
     client_id: &str,
 ) -> bool {
     match message {
         WsMessage::Ping(payload) => {
             platform::recording::debug!("Received WebSocket Ping, replying Pong: {}", client_id);
-            if control_tx.send(WsMessage::Pong(payload)).is_err() {
-                platform::recording::warn!(
-                    "WebSocket Pong send queue closed for client {}",
-                    client_id
-                );
-                return false;
+            // The control queue is bounded: drop the Pong when full (the peer retransmits the Ping, and the write deadline covers slow connections),
+            // and only terminate the receive loop when the channel is closed (send task exited).
+            match control_tx.try_send_control(WsMessage::Pong(payload)) {
+                Ok(()) => true,
+                Err(tokio::sync::mpsc::error::TrySendError::Full(_)) => {
+                    platform::recording::warn!(
+                        "WebSocket control queue full; dropping Pong for client {}",
+                        client_id
+                    );
+                    true
+                }
+                Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {
+                    platform::recording::warn!(
+                        "WebSocket Pong send queue closed for client {}",
+                        client_id
+                    );
+                    false
+                }
             }
-            true
         }
         WsMessage::Pong(_) => {
             platform::recording::debug!("Received WebSocket Pong: {}", client_id);
@@ -1181,19 +1468,22 @@ async fn handle_actr_relay(
         return Ok(());
     }
 
-    // Find target client and forward other relay messages
-    let clients_guard = server.clients.read().await;
-    let target_client_id = clients_guard.iter().find_map(|(id, client)| {
-        client.actor_id.as_ref().and_then(|actor_id| {
-            if actor_id.realm.realm_id == target.realm.realm_id
-                && actor_id.serial_number == target.serial_number
-            {
-                Some(id.clone())
-            } else {
-                None
-            }
+    // Find the target client and forward other relay messages (resolve client_id under a short read lock, then release before awaiting
+    // delivery -- the delivery path may take a write lock to clean up a slow-consumer connection, so holding the read lock would deadlock).
+    let target_client_id = {
+        let clients_guard = server.clients.read().await;
+        clients_guard.iter().find_map(|(id, client)| {
+            client.actor_id.as_ref().and_then(|actor_id| {
+                if actor_id.realm.realm_id == target.realm.realm_id
+                    && actor_id.serial_number == target.serial_number
+                {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
         })
-    });
+    };
 
     if let Some(target_client_id) = target_client_id {
         // Reconstruct envelope and forward
@@ -1292,21 +1582,24 @@ async fn send_role_assignment(
     let mut buf = Vec::new();
     envelope.encode(&mut buf)?;
 
-    let clients_guard = server.clients.read().await;
-    if let Some(client) = clients_guard.values().find(|client| {
-        client.actor_id.as_ref().is_some_and(|id| {
-            id.realm.realm_id == target_actor.realm.realm_id
-                && id.serial_number == target_actor.serial_number
+    // Resolve the target client_id (short read lock), then release the lock and deliver via the unified bounded egress path.
+    let target_client_id = {
+        let clients_guard = server.clients.read().await;
+        clients_guard.iter().find_map(|(id, client)| {
+            (client.actor_id.as_ref().is_some_and(|aid| {
+                aid.realm.realm_id == target_actor.realm.realm_id
+                    && aid.serial_number == target_actor.serial_number
+            }))
+            .then(|| id.clone())
         })
-    }) {
+    };
+
+    if let Some(target_client_id) = target_client_id {
         platform::recording::debug!(
-            "send_role_assignment: sending envelope to client {:?}",
-            client.actor_id
+            "send_role_assignment: sending envelope to client {}",
+            target_client_id
         );
-        client
-            .direct_sender
-            .send(WsMessage::Binary(buf.into()))
-            .map_err(|e| e.into())
+        enqueue_binary_to_client(&target_client_id, buf, server).await
     } else {
         platform::recording::warn!(
             "⚠️ send_role_assignment: target Actor {} not found",
@@ -1317,41 +1610,134 @@ async fn send_role_assignment(
 }
 
 /// Send SignalingEnvelope to client
+///
+/// Target-side delivery problems (target missing / queue saturated / queue closed) are handled internally (logged + counted +
+/// slow-consumer target closed) and are **not** propagated to the sender as Err, so a healthy sender is not disconnected
+/// because of a slow/vanished target (issue #351 acceptance criterion 4). Err is returned only on encode failure (an internal bug).
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = envelope.envelope_id)))]
 async fn send_envelope_to_client(
     client_id: &str,
     #[allow(unused_mut)] mut envelope: SignalingEnvelope,
     server: &SignalingServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let clients_guard = server.clients.read().await;
-
-    if let Some(client) = clients_guard.get(client_id) {
-        #[cfg(feature = "opentelemetry")]
-        {
-            use tracing_opentelemetry::OpenTelemetrySpanExt;
-            let context = tracing::Span::current().context();
-            inject_trace_context(&context, &mut envelope);
-        }
-
-        // Encode protobuf
-        let mut buf = Vec::new();
-        envelope.encode(&mut buf)?;
-
-        // Send Binary message
-        match client.direct_sender.send(WsMessage::Binary(buf.into())) {
-            Ok(_) => {
-                platform::recording::info!("✅ Successfully sent envelope to client {}", client_id);
-                Ok(())
-            }
-            Err(e) => {
-                platform::recording::error!("❌ Send failed: {}", e);
-                Err(format!("Send failed: {e}").into())
-            }
-        }
-    } else {
-        platform::recording::warn!("⚠️ Client {} not found", client_id);
-        Err(format!("Client {client_id} not found").into())
+    #[cfg(feature = "opentelemetry")]
+    {
+        use tracing_opentelemetry::OpenTelemetrySpanExt;
+        let context = tracing::Span::current().context();
+        inject_trace_context(&context, &mut envelope);
     }
+
+    // Encode protobuf
+    let mut buf = Vec::new();
+    envelope.encode(&mut buf)?;
+
+    enqueue_binary_to_client(client_id, buf, server).await
+}
+
+/// Deliver an encoded Binary frame to the target client's bounded egress queue (issue #351).
+///
+/// - Clone the egress handle under a short read lock, release it immediately, then await capacity (never block while holding the lock).
+/// - Apply the per-target aggregate rate/byte budget (across all senders).
+/// - If the queue stays full past the deadline, close and remove the slow-consumer client; a missing/closed target is only logged.
+///
+/// Target-side problems always return Ok (handled internally), so the sender is never implicated.
+async fn enqueue_binary_to_client(
+    client_id: &str,
+    buf: Vec<u8>,
+    server: &SignalingServerHandle,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let byte_len = buf.len();
+
+    // Defense: a single message larger than the whole per-client byte budget can never be enqueued (acquire would block
+    // until the timeout and wrongly kill a healthy client). Drop and count it directly, rather than disconnecting.
+    if byte_len > server.egress_config.max_bytes as usize {
+        server
+            .queue_metrics
+            .target_budget_rejections
+            .fetch_add(1, Ordering::Relaxed);
+        platform::recording::warn!(
+            "🚫 Dropping outbound message that exceeds the per-client byte budget: {} bytes (budget {}), target {}",
+            byte_len,
+            server.egress_config.max_bytes,
+            client_id
+        );
+        return Ok(());
+    }
+
+    // Clone the egress handle (short read lock), then release the lock before awaiting capacity
+    let egress = {
+        let clients_guard = server.clients.read().await;
+        clients_guard.get(client_id).map(|c| c.egress.clone())
+    };
+    let Some(egress) = egress else {
+        platform::recording::warn!("⚠️ Client {} not found", client_id);
+        return Ok(());
+    };
+
+    // Per-target aggregate rate/byte budget (across all senders, issue #351)
+    if let Err(e) = server
+        .target_rate_limiter
+        .check_target(client_id, byte_len as u32)
+        .await
+    {
+        server
+            .queue_metrics
+            .target_budget_rejections
+            .fetch_add(1, Ordering::Relaxed);
+        platform::recording::warn!(
+            "🚫 Target {} aggregate budget exceeded, dropping message: {}",
+            client_id,
+            e
+        );
+        return Ok(());
+    }
+
+    match egress
+        .send_data(WsMessage::Binary(buf.into()), byte_len)
+        .await
+    {
+        Ok(()) => {
+            platform::recording::debug!("✅ Enqueued {} bytes to client {}", byte_len, client_id);
+            Ok(())
+        }
+        Err(EnqueueError::Saturated) => {
+            // Slow consumer: close and remove the target connection (healthy clients unaffected)
+            close_slow_client(client_id, server, &egress).await;
+            Ok(())
+        }
+        Err(EnqueueError::Closed) => {
+            platform::recording::debug!(
+                "Client {} egress queue closed, dropping message",
+                client_id
+            );
+            Ok(())
+        }
+    }
+}
+
+/// Close and remove a slow-consumer client connection (issue #351).
+///
+/// Best-effort send a Close frame over the independent control queue, and remove the client from the routing table
+/// (`cleanup_client` is idempotent, so the connection task's later second cleanup is a no-op). The write task's write
+/// deadline completes the teardown as a fallback. Other healthy clients are unaffected.
+async fn close_slow_client(client_id: &str, server: &SignalingServerHandle, egress: &ClientEgress) {
+    server
+        .queue_metrics
+        .slow_consumer_disconnects
+        .fetch_add(1, Ordering::Relaxed);
+    platform::recording::warn!(
+        "🔌 Closing slow-consumer client {} (egress queue stayed full for {}ms)",
+        client_id,
+        server.egress_config.enqueue_timeout_ms
+    );
+
+    let close_frame = axum::extract::ws::CloseFrame {
+        code: axum::extract::ws::close_code::ERROR,
+        reason: "slow consumer: egress queue saturated".into(),
+    };
+    let _ = egress.try_send_control(WsMessage::Close(Some(close_frame)));
+
+    cleanup_client(client_id, server, CleanupMode::ConnectionClosed).await;
 }
 
 /// Clean up client connection
@@ -1447,6 +1833,9 @@ async fn cleanup_client(client_id: &str, server: &SignalingServerHandle, mode: C
         if let Some(ref limiter) = server.message_rate_limiter {
             limiter.remove_connection(client_id).await;
         }
+
+        // Remove the per-target aggregate limiter entry (issue #351)
+        server.target_rate_limiter.remove_target(client_id).await;
     }
 }
 
@@ -1997,6 +2386,26 @@ mod tests {
         create_test_client_with_id(&uuid::Uuid::new_v4().to_string(), actor_id, webrtc_role)
     }
 
+    /// Build a test egress handle that a background task continuously drains (simulating a healthy consumer).
+    fn create_test_egress() -> ClientEgress {
+        create_test_egress_with_config(EgressQueueConfig::default())
+    }
+
+    fn create_test_egress_with_config(config: EgressQueueConfig) -> ClientEgress {
+        let (egress, mut data_rx, mut control_rx) =
+            ClientEgress::new(config, Arc::new(SignalingQueueMetrics::default()));
+        if tokio::runtime::Handle::try_current().is_ok() {
+            // Async test: a background task drains continuously, simulating a healthy consumer.
+            tokio::spawn(async move { while data_rx.recv().await.is_some() {} });
+            tokio::spawn(async move { while control_rx.recv().await.is_some() {} });
+        } else {
+            // Sync test (no runtime): leak the receiver to keep the channel open (without actually consuming).
+            std::mem::forget(data_rx);
+            std::mem::forget(control_rx);
+        }
+        egress
+    }
+
     fn create_test_client_with_id(
         id: &str,
         actor_id: ActrId,
@@ -2006,14 +2415,20 @@ mod tests {
             id: id.to_string(),
             actor_id: Some(actor_id),
             credential: None,
-            direct_sender: tokio::sync::mpsc::unbounded_channel().0,
+            egress: create_test_egress(),
             client_ip: None,
             webrtc_role,
         }
     }
 
     fn create_test_server_handle() -> SignalingServerHandle {
-        let server = SignalingServer::new();
+        create_test_server_handle_with_config(EgressQueueConfig::default())
+    }
+
+    fn create_test_server_handle_with_config(
+        egress_config: EgressQueueConfig,
+    ) -> SignalingServerHandle {
+        let server = SignalingServer::with_egress_config(egress_config);
         SignalingServerHandle {
             clients: server.clients.clone(),
             actor_id_index: server.actor_id_index.clone(),
@@ -2021,6 +2436,9 @@ mod tests {
             presence_manager: server.presence_manager.clone(),
             connection_rate_limiter: server.connection_rate_limiter.clone(),
             message_rate_limiter: server.message_rate_limiter.clone(),
+            egress_config: server.egress_config.clone(),
+            target_rate_limiter: server.target_rate_limiter.clone(),
+            queue_metrics: server.queue_metrics.clone(),
         }
     }
 
@@ -2040,15 +2458,18 @@ mod tests {
 
     #[test]
     fn test_websocket_ping_enqueues_pong() {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (egress, _data_rx, mut control_rx) = ClientEgress::new(
+            EgressQueueConfig::default(),
+            Arc::new(SignalingQueueMetrics::default()),
+        );
 
         assert!(handle_websocket_control_message(
             WsMessage::Ping(Vec::from("probe").into()),
-            &tx,
+            &egress,
             "client",
         ));
 
-        match rx.try_recv().expect("pong should be queued") {
+        match control_rx.try_recv().expect("pong should be queued") {
             WsMessage::Pong(payload) => assert_eq!(payload.as_ref(), b"probe"),
             other => panic!("expected Pong, got {other:?}"),
         }
@@ -2058,7 +2479,10 @@ mod tests {
     async fn test_reconnect_closes_removed_stale_client() {
         let server = create_test_server_handle();
         let actor_id = create_test_actr_id(1);
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let (egress, _data_rx, mut control_rx) = ClientEgress::new(
+            EgressQueueConfig::default(),
+            Arc::new(SignalingQueueMetrics::default()),
+        );
 
         let mut clients = HashMap::new();
         clients.insert(
@@ -2067,7 +2491,7 @@ mod tests {
                 id: "old-client".to_string(),
                 actor_id: Some(actor_id.clone()),
                 credential: None,
-                direct_sender: tx,
+                egress,
                 client_ip: None,
                 webrtc_role: None,
             },
@@ -2082,7 +2506,7 @@ mod tests {
         close_stale_clients(stale_clients, &server).await;
 
         assert!(
-            matches!(rx.try_recv(), Ok(WsMessage::Close(_))),
+            matches!(control_rx.try_recv(), Ok(WsMessage::Close(_))),
             "stale client should receive a WebSocket Close frame"
         );
     }
@@ -2315,5 +2739,268 @@ mod tests {
                 "Test failed: {desc} (from={from_serial}, to={to_serial}, from_role={from_role:?}, to_role={to_role:?})"
             );
         }
+    }
+
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // Bounded egress queue (issue #351)
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    /// Configuration with a high egress bound + high aggregate budget (the queue bound is the only constraint, for saturation/disconnect tests).
+    fn bounded_egress_config() -> EgressQueueConfig {
+        EgressQueueConfig {
+            max_messages: 2,
+            max_bytes: 1 << 20,
+            max_control_messages: 4,
+            max_frame_bytes: 256 << 10,
+            enqueue_timeout_ms: 50,
+            write_timeout_ms: 100,
+            target_rate_per_second: 100_000,
+            target_bytes_per_second: 1 << 24,
+        }
+    }
+
+    /// Build an egress handle that is never drained (simulating a blocked/slow consumer); the receiver is returned for the test to hold.
+    fn create_blocked_egress(
+        config: EgressQueueConfig,
+        metrics: Arc<SignalingQueueMetrics>,
+    ) -> (
+        ClientEgress,
+        tokio::sync::mpsc::Receiver<QueuedFrame>,
+        tokio::sync::mpsc::Receiver<WsMessage>,
+    ) {
+        ClientEgress::new(config, metrics)
+    }
+
+    /// Build an egress handle that is continuously drained and counted (simulating a healthy consumer).
+    fn create_counting_egress(
+        config: EgressQueueConfig,
+        metrics: Arc<SignalingQueueMetrics>,
+    ) -> (ClientEgress, Arc<AtomicU64>) {
+        let (egress, mut data_rx, mut control_rx) = ClientEgress::new(config, metrics);
+        let received = Arc::new(AtomicU64::new(0));
+        let r = received.clone();
+        tokio::spawn(async move {
+            while data_rx.recv().await.is_some() {
+                r.fetch_add(1, Ordering::Relaxed);
+            }
+        });
+        tokio::spawn(async move { while control_rx.recv().await.is_some() {} });
+        (egress, received)
+    }
+
+    async fn insert_client(server: &SignalingServerHandle, client_id: &str, egress: ClientEgress) {
+        server.clients.write().await.insert(
+            client_id.to_string(),
+            ClientConnection {
+                id: client_id.to_string(),
+                actor_id: None,
+                credential: None,
+                egress,
+                client_ip: None,
+                webrtc_role: None,
+            },
+        );
+    }
+
+    /// Sustained flood: a blocked consumer cannot push the queue past the configured message-count bound; once over, enqueue reports saturation.
+    #[tokio::test]
+    async fn test_egress_bounded_by_message_count() {
+        let metrics = Arc::new(SignalingQueueMetrics::default());
+        let (egress, _data_rx, _control_rx) =
+            create_blocked_egress(bounded_egress_config(), metrics.clone());
+
+        egress
+            .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
+            .await
+            .unwrap();
+        egress
+            .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
+            .await
+            .unwrap();
+
+        // The third message exceeds max_messages=2; the blocked consumer does not recover within 50ms -> saturated
+        let result = egress
+            .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
+            .await;
+        assert_eq!(result, Err(EnqueueError::Saturated));
+        let snap = metrics.snapshot();
+        assert_eq!(snap.egress_saturation_events, 1);
+        assert_eq!(snap.egress_enqueued, 2);
+    }
+
+    /// The byte budget takes effect before the message-count bound.
+    #[tokio::test]
+    async fn test_egress_bounded_by_byte_budget() {
+        let metrics = Arc::new(SignalingQueueMetrics::default());
+        let mut config = bounded_egress_config();
+        config.max_messages = 16;
+        config.max_bytes = 100;
+        let (egress, _data_rx, _control_rx) = create_blocked_egress(config, metrics.clone());
+
+        egress
+            .send_data(WsMessage::Binary(vec![0u8; 60].into()), 60)
+            .await
+            .unwrap();
+        // A second 60-byte frame would bring the total to 120 > 100: blocked by the byte budget (even though only 1/16 slots are used)
+        let result = egress
+            .send_data(WsMessage::Binary(vec![0u8; 60].into()), 60)
+            .await;
+        assert_eq!(result, Err(EnqueueError::Saturated));
+    }
+
+    /// When the data queue is full, control messages (Pong) still enter the independent control queue (not starved by data).
+    #[tokio::test]
+    async fn test_control_messages_not_starved_by_full_data_queue() {
+        let metrics = Arc::new(SignalingQueueMetrics::default());
+        let (egress, _data_rx, mut control_rx) =
+            create_blocked_egress(bounded_egress_config(), metrics);
+
+        // Fill the data queue
+        egress
+            .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
+            .await
+            .unwrap();
+        egress
+            .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
+            .await
+            .unwrap();
+
+        // Even with the data queue full, the Pong for a Ping still enters the control queue
+        assert!(handle_websocket_control_message(
+            WsMessage::Ping(Vec::from("probe").into()),
+            &egress,
+            "client"
+        ));
+        match control_rx.try_recv() {
+            Ok(WsMessage::Pong(payload)) => assert_eq!(payload.as_ref(), b"probe"),
+            other => panic!("expected queued Pong despite full data queue, got {other:?}"),
+        }
+    }
+
+    /// Blocked socket: a slow-consumer client is closed after the enqueue timeout and removed from the routing table (acceptance criteria 3+4).
+    #[tokio::test]
+    async fn test_slow_consumer_disconnected_and_removed() {
+        let server = create_test_server_handle_with_config(bounded_egress_config());
+        let (egress, _data_rx, _control_rx) =
+            create_blocked_egress(server.egress_config.clone(), server.queue_metrics.clone());
+        insert_client(&server, "slow", egress).await;
+
+        // Fill the queue (2 messages); the third triggers saturation -> close_slow_client
+        for _ in 0..2 {
+            enqueue_binary_to_client("slow", vec![0u8; 8], &server)
+                .await
+                .unwrap();
+        }
+        enqueue_binary_to_client("slow", vec![0u8; 8], &server)
+            .await
+            .unwrap();
+
+        assert!(
+            server.clients.read().await.get("slow").is_none(),
+            "slow consumer should be removed from the routing map"
+        );
+        let snap = server.queue_metrics.snapshot();
+        assert_eq!(snap.slow_consumer_disconnects, 1);
+        assert!(snap.egress_saturation_events >= 1);
+    }
+
+    /// When a slow-consumer target is disconnected, healthy targets are unaffected (acceptance criterion 4).
+    #[tokio::test]
+    async fn test_healthy_client_unaffected_by_slow_peer() {
+        let server = create_test_server_handle_with_config(bounded_egress_config());
+
+        // Slow (blocked) target
+        let (slow_egress, _sd, _sc) =
+            create_blocked_egress(server.egress_config.clone(), server.queue_metrics.clone());
+        insert_client(&server, "slow", slow_egress).await;
+
+        // Healthy (continuously drained + counted) target
+        let (healthy_egress, healthy_received) =
+            create_counting_egress(server.egress_config.clone(), server.queue_metrics.clone());
+        insert_client(&server, "healthy", healthy_egress).await;
+
+        // Saturate the slow target so it is removed
+        for _ in 0..3 {
+            enqueue_binary_to_client("slow", vec![0u8; 8], &server)
+                .await
+                .unwrap();
+        }
+        assert!(server.clients.read().await.get("slow").is_none());
+
+        // The healthy target still receives messages and stays in the routing table
+        for _ in 0..5 {
+            enqueue_binary_to_client("healthy", vec![0u8; 8], &server)
+                .await
+                .unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(server.clients.read().await.get("healthy").is_some());
+        assert_eq!(healthy_received.load(Ordering::Relaxed), 5);
+    }
+
+    /// Multiple senders hitting the same target: the per-target aggregate budget rate-limits them (acceptance criterion 6).
+    #[tokio::test]
+    async fn test_multi_sender_aggregate_target_budget() {
+        // The queue bound is relaxed; the only constraint is the per-target aggregate rate of 3 msg/s
+        let mut config = bounded_egress_config();
+        config.max_messages = 1000;
+        config.target_rate_per_second = 3;
+        config.target_bytes_per_second = 1 << 24;
+        let server = create_test_server_handle_with_config(config.clone());
+
+        let (egress, received) = create_counting_egress(config, server.queue_metrics.clone());
+        insert_client(&server, "target", egress).await;
+
+        // Simulate multiple senders rapidly sending 10 messages (~8 bytes each) to the same target
+        for _ in 0..10 {
+            enqueue_binary_to_client("target", vec![0u8; 8], &server)
+                .await
+                .unwrap();
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let snap = server.queue_metrics.snapshot();
+        let got = received.load(Ordering::Relaxed);
+        // Aggregate budget 3/s (burst 3): most are rejected; the target receives only a few
+        assert!(
+            snap.target_budget_rejections >= 5,
+            "expected aggregate budget to reject most messages, got rejections={}",
+            snap.target_budget_rejections
+        );
+        assert!(
+            got <= 5,
+            "target should receive only a few messages, got {got}"
+        );
+        assert_eq!(got + snap.target_budget_rejections, 10);
+    }
+
+    /// Recovery after saturation: once the consumer drains, the producer can enqueue again (acceptance criterion 10).
+    #[tokio::test]
+    async fn test_egress_recovers_after_consumer_drains() {
+        let metrics = Arc::new(SignalingQueueMetrics::default());
+        let (egress, mut data_rx, _control_rx) =
+            create_blocked_egress(bounded_egress_config(), metrics);
+
+        egress
+            .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
+            .await
+            .unwrap();
+        egress
+            .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
+            .await
+            .unwrap();
+        assert_eq!(
+            egress
+                .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
+                .await,
+            Err(EnqueueError::Saturated)
+        );
+
+        // Consumer drains -> slots and byte budget recover
+        let _ = data_rx.recv().await;
+        egress
+            .send_data(WsMessage::Binary(vec![0u8; 8].into()), 8)
+            .await
+            .unwrap();
     }
 }

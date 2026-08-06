@@ -506,6 +506,12 @@ timer_inventory! {
         success: "matching pong", interrupt: "disconnect or generation replacement",
         expiry: "report path unreachable", reset: "new probe only", external: false
     },
+    SIGNALING_INBOUND_BACKPRESSURE => {
+        id: "signaling.inbound_backpressure", owner: "signaling_client", category: FailureDeadline,
+        duration: "InboundQueueConfig.backpressure_timeout", arm: "receiver enqueues unmatched/push envelope onto a full bounded inbound queue",
+        success: "queue capacity granted within the deadline", interrupt: "inbound channel reset or receiver abort",
+        expiry: "fail closed (drop connection and reconnect)", reset: "new enqueue only", external: false
+    },
     WEBSOCKET_ACCEPT_BACKOFF => {
         id: "websocket.accept_backoff", owner: "websocket_server", category: FailureBackoff,
         duration: "WEBSOCKET_ACCEPT_BACKOFF_DURATION (100ms)", arm: "listener accept returns an error",

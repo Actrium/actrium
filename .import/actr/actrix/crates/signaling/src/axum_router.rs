@@ -82,8 +82,14 @@ pub async fn create_signaling_router_with_config_and_counters(
         })?;
     platform::recording::info!("✅ AIdCredentialValidator (Ed25519) initialized");
 
-    // Create SignalingServer
-    let mut server = SignalingServer::new();
+    // Create SignalingServer (apply the egress queue bound from config, issue #351)
+    let egress_config = config
+        .services
+        .signaling
+        .as_ref()
+        .map(|sc| sc.server.egress.clone())
+        .unwrap_or_default();
+    let mut server = SignalingServer::with_egress_config(egress_config);
 
     // Initialize ServiceRegistry persistent cache (for restart recovery)
     let cache_ttl_secs = crate::service_registry_storage::DEFAULT_SERVICE_TTL_SECS;
@@ -314,9 +320,17 @@ async fn websocket_handler(
         ctr.record_request(true, 0.0).await;
     }
 
-    ws.on_upgrade(move |socket| {
-        handle_websocket(socket, state, client_ip, url_identity, webrtc_role)
-    })
+    // Cap frame/message sizes at the transport boundary so a client cannot
+    // force Axum to allocate a many-megabyte buffer before the post-read size
+    // check rejects it (issue #351). Axum defaults are 16 MiB frame / 64 MiB
+    // message; both are bounded to `max_frame_bytes` here. The post-read
+    // check in the `handle_websocket` receive loop remains as defense in depth.
+    let max_frame_bytes = state.server.egress_config.max_frame_bytes as usize;
+    ws.max_frame_size(max_frame_bytes)
+        .max_message_size(max_frame_bytes)
+        .on_upgrade(move |socket| {
+            handle_websocket(socket, state, client_ip, url_identity, webrtc_role)
+        })
 }
 
 /// WebSocket connection handler
@@ -347,6 +361,9 @@ async fn handle_websocket(
         presence_manager: state.server.presence_manager.clone(),
         connection_rate_limiter: state.server.connection_rate_limiter.clone(),
         message_rate_limiter: state.server.message_rate_limiter.clone(),
+        egress_config: state.server.egress_config.clone(),
+        target_rate_limiter: state.server.target_rate_limiter.clone(),
+        queue_metrics: state.server.queue_metrics.clone(),
     };
 
     // Call SignalingServer's WebSocket handler function

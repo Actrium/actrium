@@ -224,7 +224,8 @@ pub fn runtime_context_with_host_transport(
     use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
     use crate::outbound::{Gate, HostGate};
     use crate::wire::webrtc::{
-        ReconnectConfig, SignalingClient, SignalingConfig, WebSocketSignalingClient,
+        InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig,
+        WebSocketSignalingClient,
     };
 
     let inproc_gate = Gate::Host(Arc::new(HostGate::new(host_transport)));
@@ -237,6 +238,7 @@ pub fn runtime_context_with_host_transport(
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
         }));
 
     crate::context::RuntimeContext::new(

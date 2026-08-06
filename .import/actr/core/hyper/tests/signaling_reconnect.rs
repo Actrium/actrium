@@ -13,8 +13,8 @@
 
 use actr_hyper::test_support::TestSignalingServer;
 use actr_hyper::wire::webrtc::{
-    DisconnectReason, ReconnectConfig, SignalingClient, SignalingConfig, SignalingEvent,
-    WebSocketSignalingClient,
+    DisconnectReason, InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig,
+    SignalingEvent, WebSocketSignalingClient,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -46,6 +46,7 @@ fn make_config(server_url: &str) -> SignalingConfig {
         },
         auth_config: None,
         webrtc_role: None,
+        inbound_queue: InboundQueueConfig::default(),
     }
 }
 
@@ -231,6 +232,7 @@ async fn test_connect_to_unreachable_server_fails() {
         },
         auth_config: None,
         webrtc_role: None,
+        inbound_queue: InboundQueueConfig::default(),
     };
     let client = Arc::new(WebSocketSignalingClient::new(config));
     let mut events = client.subscribe_events();
@@ -653,6 +655,7 @@ async fn test_connect_with_retries_exhausts_attempts() {
         },
         auth_config: None,
         webrtc_role: None,
+        inbound_queue: InboundQueueConfig::default(),
     };
     let client = Arc::new(WebSocketSignalingClient::new(config));
 
@@ -710,6 +713,7 @@ async fn test_auto_reconnect_succeeds_after_server_restart() {
         },
         auth_config: None,
         webrtc_role: None,
+        inbound_queue: InboundQueueConfig::default(),
     };
     let client = Arc::new(WebSocketSignalingClient::new(config));
     let mut events = client.subscribe_events();
@@ -824,6 +828,7 @@ async fn test_multiple_disconnects_each_trigger_reconnect() {
         },
         auth_config: None,
         webrtc_role: None,
+        inbound_queue: InboundQueueConfig::default(),
     };
     let client = Arc::new(WebSocketSignalingClient::new(config));
 

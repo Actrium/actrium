@@ -33,7 +33,7 @@ use std::sync::{
 };
 use std::time::Duration;
 use tokio::net::TcpStream;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_with_config};
 use tokio_util::sync::CancellationToken;
@@ -91,6 +91,11 @@ pub struct SignalingConfig {
 
     /// WebRTC role preference: "answer" if this node has advanced config
     pub webrtc_role: Option<String>,
+
+    /// Bounded inbound envelope queue settings (issue #351).
+    ///
+    /// Defaults to a safe bounded configuration; see [`InboundQueueConfig`].
+    pub inbound_queue: InboundQueueConfig,
 }
 
 /// reconnection configuration
@@ -120,6 +125,52 @@ impl Default for ReconnectConfig {
             initial_delay: 1,
             max_delay: 60,
             backoff_multiplier: 2.0,
+        }
+    }
+}
+
+/// Default bound on queued unmatched/push envelopes (message count).
+pub const DEFAULT_INBOUND_MAX_MESSAGES: usize = 256;
+/// Default bound on queued unmatched/push envelope bytes (byte budget).
+pub const DEFAULT_INBOUND_MAX_BYTES: usize = 1 << 20; // 1 MiB
+/// Default maximum size of a single inbound signaling frame. Larger frames are
+/// rejected before protobuf decode/allocation.
+pub const DEFAULT_INBOUND_MAX_FRAME_BYTES: usize = 256 << 10; // 256 KiB
+/// Default deadline (milliseconds) the receiver waits for inbound queue
+/// capacity before failing closed and reconnecting.
+pub const DEFAULT_INBOUND_BACKPRESSURE_TIMEOUT_MS: u64 = 2_000;
+
+/// Bounded, byte-budgeted inbound envelope queue settings (issue #351).
+///
+/// The signaling client demultiplexes direct RPC replies by `reply_for`
+/// (never queued) and forwards unmatched/push envelopes (ActrRelay, presence)
+/// into a single bounded queue consumed by `receive_envelope`. These settings
+/// bound that queue by both message count and encoded bytes, cap the size of a
+/// single inbound frame, and bound how long the receiver applies backpressure
+/// before failing closed (closing the socket and reconnecting) rather than
+/// silently dropping signaling messages.
+#[derive(Debug, Clone, Copy)]
+pub struct InboundQueueConfig {
+    /// Maximum number of queued unmatched/push envelopes (message-count bound).
+    pub max_messages: usize,
+    /// Maximum total encoded bytes held in the inbound queue (byte budget).
+    pub max_bytes: usize,
+    /// Maximum size of a single inbound signaling frame in bytes. Frames larger
+    /// than this are rejected before protobuf decode/allocation.
+    pub max_frame_bytes: usize,
+    /// How long the receiver waits for inbound queue capacity before treating
+    /// the consumer as stalled and failing closed (reconnect). This applies
+    /// TCP/WebSocket backpressure instead of dropping messages.
+    pub backpressure_timeout: Duration,
+}
+
+impl Default for InboundQueueConfig {
+    fn default() -> Self {
+        Self {
+            max_messages: DEFAULT_INBOUND_MAX_MESSAGES,
+            max_bytes: DEFAULT_INBOUND_MAX_BYTES,
+            max_frame_bytes: DEFAULT_INBOUND_MAX_FRAME_BYTES,
+            backpressure_timeout: Duration::from_millis(DEFAULT_INBOUND_BACKPRESSURE_TIMEOUT_MS),
         }
     }
 }
@@ -367,6 +418,10 @@ pub enum DisconnectReason {
     Manual,
     /// Connection attempt failed with an error.
     ConnectionFailed(String),
+    /// The inbound signaling queue stayed saturated past its backpressure
+    /// deadline, so the client failed closed to force a reconnect rather than
+    /// silently drop signaling messages.
+    BackpressureSaturated,
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -504,6 +559,127 @@ fn reacquire_pacing_delay(
     )
 }
 
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Bounded inbound envelope queue (issue #351)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+/// Why an unmatched/push envelope could not be queued for the consumer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InboundEnqueueError {
+    /// The queue stayed full past the backpressure deadline; the caller must
+    /// fail closed (close the socket and reconnect) instead of dropping the
+    /// message.
+    Saturated,
+    /// The inbound channel was closed (reset/disconnect); the receiver should
+    /// stop reading.
+    Closed,
+}
+
+/// An unmatched/push envelope together with the byte-budget permit that
+/// reserved its queue capacity.
+///
+/// The permit is released (returning the reserved bytes to the budget) when
+/// this value is dropped — after the consumer dequeues and processes the
+/// envelope, or when the queue is drained/reset without delivery.
+struct QueuedInbound {
+    envelope: SignalingEnvelope,
+    _permit: tokio::sync::OwnedSemaphorePermit,
+}
+
+/// Bounded, byte-budgeted producer handle for the inbound unmatched/push queue.
+///
+/// A fresh queue is built per session (see [`WebSocketSignalingClient::reset_inbound_channel`])
+/// and cloned into the per-connection receiver task. Sending applies
+/// backpressure: when the queue is full it awaits capacity up to
+/// `backpressure_timeout`, then reports [`InboundEnqueueError::Saturated`] so the
+/// receiver can fail closed instead of silently dropping signaling messages.
+#[derive(Clone)]
+struct InboundEgress {
+    tx: mpsc::Sender<QueuedInbound>,
+    byte_budget: Arc<Semaphore>,
+    config: InboundQueueConfig,
+    stats: Arc<AtomicSignalingStats>,
+}
+
+impl InboundEgress {
+    /// Build a fresh bounded queue and its consuming receiver.
+    fn new(config: InboundQueueConfig, stats: Arc<AtomicSignalingStats>) -> (Self, InboundQueueRx) {
+        let (tx, rx) = mpsc::channel(config.max_messages.max(1));
+        let egress = Self {
+            tx,
+            byte_budget: Arc::new(Semaphore::new(config.max_bytes)),
+            config,
+            stats,
+        };
+        (egress, rx)
+    }
+
+    /// Reserve byte budget and a message slot, then enqueue the envelope.
+    ///
+    /// Returns `Saturated` if capacity is not granted within
+    /// `backpressure_timeout`; `Closed` if the channel went away.
+    async fn send(
+        &self,
+        envelope: SignalingEnvelope,
+        byte_len: usize,
+    ) -> Result<(), InboundEnqueueError> {
+        let reserve = async {
+            // `byte_len` is bounded by `max_frame_bytes` (checked before decode),
+            // which is <= `max_bytes`, so it always fits in a u32 permit count.
+            let permits = u32::try_from(byte_len).unwrap_or(u32::MAX);
+            let permit = self
+                .byte_budget
+                .clone()
+                .acquire_many_owned(permits)
+                .await
+                .map_err(|_| InboundEnqueueError::Closed)?;
+            self.tx
+                .send(QueuedInbound {
+                    envelope,
+                    _permit: permit,
+                })
+                .await
+                .map_err(|_| InboundEnqueueError::Closed)
+        };
+
+        match crate::timer::timeout(
+            crate::timer::ids::SIGNALING_INBOUND_BACKPRESSURE,
+            self.config.backpressure_timeout,
+            reserve,
+        )
+        .await
+        {
+            Ok(result) => {
+                if result.is_ok() {
+                    self.stats.inbound_enqueued.fetch_add(1, Ordering::Relaxed);
+                }
+                result
+            }
+            Err(_) => {
+                self.stats.inbound_saturated.fetch_add(1, Ordering::Relaxed);
+                Err(InboundEnqueueError::Saturated)
+            }
+        }
+    }
+
+    /// Current number of queued envelopes (observability gauge).
+    #[cfg(any(test, feature = "test-utils"))]
+    fn depth(&self) -> usize {
+        self.tx.max_capacity() - self.tx.capacity()
+    }
+
+    /// Current number of queued encoded bytes (observability gauge).
+    #[cfg(any(test, feature = "test-utils"))]
+    fn queued_bytes(&self) -> usize {
+        self.config
+            .max_bytes
+            .saturating_sub(self.byte_budget.available_permits())
+    }
+}
+
+/// Receiving half of the bounded inbound queue.
+type InboundQueueRx = mpsc::Receiver<QueuedInbound>;
+
 /// WebSocket signaling clientImplementation
 pub struct WebSocketSignalingClient {
     config: SignalingConfig,
@@ -529,9 +705,13 @@ pub struct WebSocketSignalingClient {
     pending_pongs: Arc<tokio::sync::Mutex<HashMap<Vec<u8>, oneshot::Sender<()>>>>,
     /// Monotonic probe payload counter.
     probe_counter: AtomicU64,
-    /// Inbound envelope channel for unmatched messages (ActrRelay / push)
-    inbound_rx: Arc<tokio::sync::Mutex<mpsc::UnboundedReceiver<SignalingEnvelope>>>,
-    inbound_tx: tokio::sync::Mutex<mpsc::UnboundedSender<SignalingEnvelope>>,
+    /// Inbound envelope queue for unmatched messages (ActrRelay / push).
+    ///
+    /// The receiving half is consumed by the single serialized
+    /// `receive_envelope` caller; the bounded producing half is cloned into the
+    /// per-connection receiver task and applies backpressure when full.
+    inbound_rx: Arc<tokio::sync::Mutex<InboundQueueRx>>,
+    inbound_egress: tokio::sync::Mutex<InboundEgress>,
     /// Background receive task handle to allow graceful shutdown
     receiver_task: Arc<tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// Background ping task to detect half-open connections
@@ -593,7 +773,8 @@ pub struct WebSocketSignalingClient {
 impl WebSocketSignalingClient {
     /// Create new WebSocket signaling client
     pub fn new(config: SignalingConfig) -> Self {
-        let (inbound_tx, inbound_rx) = mpsc::unbounded_channel();
+        let stats = Arc::new(AtomicSignalingStats::default());
+        let (inbound_egress, inbound_rx) = InboundEgress::new(config.inbound_queue, stats.clone());
         let (event_tx, _event_rx) = broadcast::channel(64);
         Self {
             config,
@@ -603,13 +784,13 @@ impl WebSocketSignalingClient {
             ws_stream: tokio::sync::Mutex::new(None),
             connected: Arc::new(AtomicBool::new(false)),
             connecting: Arc::new(AtomicBool::new(false)),
-            stats: Arc::new(AtomicSignalingStats::default()),
+            stats,
             envelope_counter: tokio::sync::Mutex::new(0),
             pending_replies: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             pending_pongs: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             probe_counter: AtomicU64::new(0),
             inbound_rx: Arc::new(tokio::sync::Mutex::new(inbound_rx)),
-            inbound_tx: tokio::sync::Mutex::new(inbound_tx),
+            inbound_egress: tokio::sync::Mutex::new(inbound_egress),
             receiver_task: Arc::new(tokio::sync::Mutex::new(None)),
             ping_task: tokio::sync::Mutex::new(None),
             event_tx,
@@ -1140,6 +1321,7 @@ impl WebSocketSignalingClient {
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
         };
 
         let client = Arc::new(Self::new(config));
@@ -1166,6 +1348,7 @@ impl WebSocketSignalingClient {
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
         };
 
         let client = Arc::new(Self::new(config));
@@ -1196,13 +1379,36 @@ impl WebSocketSignalingClient {
     }
 
     /// Reset inbound channel for a fresh session (useful after disconnects).
+    ///
+    /// Builds a brand-new bounded queue and byte budget and swaps both halves
+    /// in. Dropping the old receiver releases every still-queued envelope, whose
+    /// permits return their reserved bytes to the old (now dropped) budget, so a
+    /// reset never leaves orphaned queued messages or leaked byte reservations.
     async fn reset_inbound_channel(&self) {
         self.drop_pending_replies("inbound channel reset").await;
         self.drop_pending_pongs("inbound channel reset").await;
 
-        let (tx, rx) = mpsc::unbounded_channel();
-        *self.inbound_tx.lock().await = tx;
+        let (egress, rx) = InboundEgress::new(self.config.inbound_queue, self.stats.clone());
+        *self.inbound_egress.lock().await = egress;
         *self.inbound_rx.lock().await = rx;
+    }
+
+    /// Current number of unmatched/push envelopes queued for the consumer
+    /// (observability gauge, issue #351).
+    ///
+    /// Available wherever the concrete client type is nameable (tests and the
+    /// `test-utils` feature); production observability flows through the
+    /// counters in [`SignalingStats`].
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn inbound_queue_depth(&self) -> usize {
+        self.inbound_egress.lock().await.depth()
+    }
+
+    /// Current number of encoded bytes held in the inbound queue
+    /// (observability gauge, issue #351). See [`Self::inbound_queue_depth`].
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn inbound_queue_bytes(&self) -> usize {
+        self.inbound_egress.lock().await.queued_bytes()
     }
 
     async fn drop_pending_replies(&self, reason: &'static str) {
@@ -1405,7 +1611,17 @@ impl WebSocketSignalingClient {
             Self::redact_signaling_url_for_log(&url)
         );
         // After disconnection, data written to the buffer will continue to be sent once the network recovers
-        let config = WebSocketConfig::default().write_buffer_size(0);
+        // Cap frame/message sizes at the transport boundary so a peer cannot
+        // force tungstenite to allocate a many-megabyte buffer before the
+        // post-read size check rejects it (issue #351). Tungstenite defaults
+        // are 16 MiB frame / 64 MiB message; both are bounded to
+        // `max_frame_bytes` here. The post-read check in `start_receiver`
+        // remains as defense in depth.
+        let max_frame_bytes = self.config.inbound_queue.max_frame_bytes;
+        let config = WebSocketConfig::default()
+            .write_buffer_size(0)
+            .max_frame_size(Some(max_frame_bytes))
+            .max_message_size(Some(max_frame_bytes));
         // One attempt is bounded by its flight deadline and interrupted by
         // lifecycle generation invalidation. The retained Notify futures are
         // enabled before each state check, closing the check/subscribe race.
@@ -1698,7 +1914,8 @@ impl WebSocketSignalingClient {
 
         let mut stream = stream_guard.take().expect("stream exists");
         let pending = self.pending_replies.clone();
-        let inbound_tx = { self.inbound_tx.lock().await.clone() };
+        let inbound_egress = { self.inbound_egress.lock().await.clone() };
+        let max_frame_bytes = self.config.inbound_queue.max_frame_bytes;
         let stats = self.stats.clone();
         let connected = self.connected.clone();
         let event_tx = self.event_tx.clone();
@@ -1712,11 +1929,29 @@ impl WebSocketSignalingClient {
         let fact_sink = self.supervisor_fact_sink.get().cloned();
         let socket_generation = self.connection_generation.load(Ordering::Acquire);
         let handle = tokio::spawn(async move {
-            while let Some(msg) = stream.next().await {
+            // Why the receive loop terminated; published to subscribers so a
+            // backpressure fail-closed is distinguishable from a clean end.
+            let mut disconnect_reason = DisconnectReason::StreamEnded;
+            'recv_loop: while let Some(msg) = stream.next().await {
                 match msg {
                     Ok(tokio_tungstenite::tungstenite::Message::Binary(data)) => {
                         // Any inbound traffic counts as liveness
                         liveness_generation.fetch_add(1, Ordering::Release);
+
+                        // Reject oversized frames before protobuf
+                        // decode/allocation so a malicious or buggy peer cannot
+                        // force a large allocation (issue #351).
+                        if data.len() > max_frame_bytes {
+                            stats.inbound_oversized.fetch_add(1, Ordering::Relaxed);
+                            tracing::warn!(
+                                "Rejecting oversized signaling frame: {} bytes (max {})",
+                                data.len(),
+                                max_frame_bytes
+                            );
+                            continue;
+                        }
+
+                        let frame_len = data.len();
                         match SignalingEnvelope::decode(&data[..]) {
                             Ok(envelope) => {
                                 #[cfg(feature = "opentelemetry")]
@@ -1744,12 +1979,29 @@ impl WebSocketSignalingClient {
                                 tracing::debug!(
                                     "Unmatched or push message -> forward to inbound channel"
                                 );
-                                // Unmatched or push message -> forward to inbound channel
-                                if let Err(e) = inbound_tx.send(envelope) {
-                                    stats.errors.fetch_add(1, Ordering::Relaxed);
-                                    tracing::warn!(
-                                        "Failed to send envelope to inbound channel: {e:?}"
-                                    );
+                                // Unmatched or push message -> forward to the bounded
+                                // inbound queue. When the queue is full this applies
+                                // TCP/WebSocket backpressure by awaiting capacity, then
+                                // fails closed (reconnect) rather than dropping the
+                                // signaling message (issue #351).
+                                match inbound_egress.send(envelope, frame_len).await {
+                                    Ok(()) => {}
+                                    Err(InboundEnqueueError::Saturated) => {
+                                        stats
+                                            .inbound_backpressure_closes
+                                            .fetch_add(1, Ordering::Relaxed);
+                                        tracing::warn!(
+                                            "Inbound signaling queue saturated past backpressure deadline; failing closed to reconnect"
+                                        );
+                                        disconnect_reason = DisconnectReason::BackpressureSaturated;
+                                        break 'recv_loop;
+                                    }
+                                    Err(InboundEnqueueError::Closed) => {
+                                        tracing::debug!(
+                                            "Inbound channel closed; stopping receiver task"
+                                        );
+                                        break 'recv_loop;
+                                    }
                                 }
                             }
                             Err(e) => {
@@ -1775,7 +2027,7 @@ impl WebSocketSignalingClient {
                     Err(e) => {
                         stats.errors.fetch_add(1, Ordering::Relaxed);
                         tracing::error!("Signaling receive error: {e}");
-                        break;
+                        break 'recv_loop;
                     }
                 }
             }
@@ -1790,7 +2042,7 @@ impl WebSocketSignalingClient {
                 &stats,
                 &event_tx,
                 hook_callback,
-                DisconnectReason::StreamEnded,
+                disconnect_reason,
                 reconnect_enabled.then_some(&reconnect_notify),
             )
             .await;
@@ -2819,7 +3071,13 @@ impl SignalingClient for WebSocketSignalingClient {
     async fn receive_envelope(&self) -> NetworkResult<Option<SignalingEnvelope>> {
         let mut rx = self.inbound_rx.lock().await;
         match rx.recv().await {
-            Some(envelope) => Ok(Some(envelope)),
+            Some(queued) => {
+                // Destructuring drops the byte-budget permit here, returning the
+                // reserved bytes to the budget now that the envelope is handed
+                // to the consumer.
+                let QueuedInbound { envelope, .. } = queued;
+                Ok(Some(envelope))
+            }
             None => {
                 tracing::error!("Inbound channel closed");
                 Err(NetworkError::ConnectionError(
@@ -2907,6 +3165,18 @@ pub(crate) struct AtomicSignalingStats {
 
     /// Error attempts
     pub errors: AtomicU64,
+
+    /// Unmatched/push envelopes successfully queued for the consumer (issue #351).
+    pub inbound_enqueued: AtomicU64,
+
+    /// Inbound frames rejected for exceeding `max_frame_bytes` before decode (issue #351).
+    pub inbound_oversized: AtomicU64,
+
+    /// Times the inbound queue stayed full past the backpressure deadline (issue #351).
+    pub inbound_saturated: AtomicU64,
+
+    /// Connections torn down because inbound backpressure forced a fail-closed (issue #351).
+    pub inbound_backpressure_closes: AtomicU64,
 }
 
 impl Default for AtomicSignalingStats {
@@ -2919,6 +3189,10 @@ impl Default for AtomicSignalingStats {
             heartbeats_sent: AtomicU64::new(0),
             heartbeats_received: AtomicU64::new(0),
             errors: AtomicU64::new(0),
+            inbound_enqueued: AtomicU64::new(0),
+            inbound_oversized: AtomicU64::new(0),
+            inbound_saturated: AtomicU64::new(0),
+            inbound_backpressure_closes: AtomicU64::new(0),
         }
     }
 }
@@ -2946,6 +3220,18 @@ pub struct SignalingStats {
 
     /// Error attempts
     pub errors: u64,
+
+    /// Unmatched/push envelopes successfully queued for the consumer (issue #351).
+    pub inbound_enqueued: u64,
+
+    /// Inbound frames rejected for exceeding `max_frame_bytes` before decode (issue #351).
+    pub inbound_oversized: u64,
+
+    /// Times the inbound queue stayed full past the backpressure deadline (issue #351).
+    pub inbound_saturated: u64,
+
+    /// Connections torn down because inbound backpressure forced a fail-closed (issue #351).
+    pub inbound_backpressure_closes: u64,
 }
 
 impl AtomicSignalingStats {
@@ -2959,6 +3245,10 @@ impl AtomicSignalingStats {
             heartbeats_sent: self.heartbeats_sent.load(Ordering::Relaxed),
             heartbeats_received: self.heartbeats_received.load(Ordering::Relaxed),
             errors: self.errors.load(Ordering::Relaxed),
+            inbound_enqueued: self.inbound_enqueued.load(Ordering::Relaxed),
+            inbound_oversized: self.inbound_oversized.load(Ordering::Relaxed),
+            inbound_saturated: self.inbound_saturated.load(Ordering::Relaxed),
+            inbound_backpressure_closes: self.inbound_backpressure_closes.load(Ordering::Relaxed),
         }
     }
 }

@@ -207,6 +207,94 @@ impl MessageRateLimiter {
     }
 }
 
+/// Per-target aggregate rate/byte limiter (across all senders, issue #351)
+///
+/// The existing [`MessageRateLimiter`] rate-limits per *sender* connection; this limiter aggregates per *receiver* target
+/// to prevent multiple individually-compliant senders from overwhelming a single target together. Each target connection maintains a
+/// message token bucket (messages/sec) and a byte token bucket (bytes/sec).
+#[derive(Debug)]
+pub struct TargetRateLimiter {
+    /// Per-target aggregate message rate (messages/sec)
+    msg_per_second: u32,
+    /// Per-target aggregate byte budget (bytes/sec)
+    bytes_per_second: u32,
+    /// Per-target-connection (message, byte) limiters
+    limiters: Arc<RwLock<HashMap<String, TargetLimiters>>>,
+}
+
+#[derive(Debug)]
+struct TargetLimiters {
+    messages: DefaultDirectRateLimiter,
+    bytes: DefaultDirectRateLimiter,
+}
+
+impl TargetRateLimiter {
+    /// Create a new per-target aggregate limiter
+    pub fn new(msg_per_second: u32, bytes_per_second: u32) -> Self {
+        Self {
+            msg_per_second: msg_per_second.max(1),
+            bytes_per_second: bytes_per_second.max(1),
+            limiters: Arc::new(RwLock::new(HashMap::new())),
+        }
+    }
+
+    /// Check whether a message of `byte_len` bytes may be delivered to the target
+    ///
+    /// Returns Ok(()) if allowed (both buckets pass), otherwise Err (aggregate budget exceeded;
+    /// the caller should drop the message and count it, not block or queue indefinitely).
+    pub async fn check_target(&self, target_id: &str, byte_len: u32) -> Result<(), String> {
+        let mut limiters = self.limiters.write().await;
+        let entry = limiters.entry(target_id.to_string()).or_insert_with(|| {
+            let msg_quota =
+                Quota::per_second(NonZeroU32::new(self.msg_per_second).unwrap_or(NonZeroU32::MIN))
+                    .allow_burst(NonZeroU32::new(self.msg_per_second).unwrap_or(NonZeroU32::MIN));
+            let byte_quota = Quota::per_second(
+                NonZeroU32::new(self.bytes_per_second).unwrap_or(NonZeroU32::MIN),
+            )
+            .allow_burst(NonZeroU32::new(self.bytes_per_second).unwrap_or(NonZeroU32::MIN));
+            TargetLimiters {
+                messages: RateLimiter::direct(msg_quota),
+                bytes: RateLimiter::direct(byte_quota),
+            }
+        });
+
+        // Message-count check (1 token per message)
+        entry.messages.check().map_err(|_| {
+            format!(
+                "Target {target_id} exceeded aggregate message rate: {} msg/s",
+                self.msg_per_second
+            )
+        })?;
+
+        // Byte check (byte_len tokens)
+        let tokens = NonZeroU32::new(byte_len.max(1)).unwrap_or(NonZeroU32::MIN);
+        match entry.bytes.check_n(tokens) {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(_)) => Err(format!(
+                "Target {target_id} single message of {byte_len} bytes exceeds aggregate byte capacity ({} B/s)",
+                self.bytes_per_second
+            )),
+            Err(_) => Err(format!(
+                "Target {target_id} exceeded aggregate byte budget: {} B/s",
+                self.bytes_per_second
+            )),
+        }
+    }
+
+    /// Remove the target's limiter (called when the connection closes)
+    pub async fn remove_target(&self, target_id: &str) {
+        let mut limiters = self.limiters.write().await;
+        limiters.remove(target_id);
+        platform::recording::debug!("Removed target rate limiter for {}", target_id);
+    }
+
+    /// Get statistics (number of tracked targets)
+    pub async fn stats(&self) -> usize {
+        let limiters = self.limiters.read().await;
+        limiters.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

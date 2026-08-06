@@ -31,8 +31,8 @@ pub(crate) use peer_recovery::NetworkRecoveryStatus;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use signaling::WebSocketSignalingClient;
 pub use signaling::{
-    AuthConfig, AuthType, ConnectionState, DisconnectReason, ReconnectConfig, SignalingClient,
-    SignalingConfig, SignalingEvent, SignalingStats,
+    AuthConfig, AuthType, ConnectionState, DisconnectReason, InboundQueueConfig, ReconnectConfig,
+    SignalingClient, SignalingConfig, SignalingEvent, SignalingStats,
 };
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use signaling::{HookCallback, HookEvent};

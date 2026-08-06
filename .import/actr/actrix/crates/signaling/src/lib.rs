@@ -35,7 +35,11 @@ pub use axum_router::{
 // Re-export commonly used types
 pub use load_balancer::LoadBalancer;
 pub use presence::PresenceManager;
-pub use server::{ClientConnection, SignalingServer, SignalingServerHandle};
+pub use ratelimit::TargetRateLimiter;
+pub use server::{
+    ClientConnection, ClientEgress, SignalingQueueMetrics, SignalingQueueMetricsSnapshot,
+    SignalingServer, SignalingServerHandle,
+};
 pub use service_registry::{ServiceInfo, ServiceRegistry};
 
 // Export WebSocket handler

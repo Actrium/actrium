@@ -4,7 +4,7 @@ use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
 use crate::outbound::{Gate, HostGate};
 use crate::transport::HostTransport;
 use crate::wire::webrtc::{
-    ReconnectConfig, SignalingClient, SignalingConfig, WebSocketSignalingClient,
+    InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig, WebSocketSignalingClient,
 };
 use actr_framework::Context as _;
 use actr_protocol::{AIdCredential, ActrId, ActrType, Realm};
@@ -99,6 +99,7 @@ fn test_runtime_context() -> RuntimeContext {
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
         }));
 
     RuntimeContext::new(

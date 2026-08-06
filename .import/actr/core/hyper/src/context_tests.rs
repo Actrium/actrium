@@ -49,7 +49,9 @@ async fn select_gate_peer_errors_when_outproc_unset() {
     // helper, which sets Some). Peer dest must fail.
     use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
     use crate::outbound::{Gate, HostGate};
-    use crate::wire::webrtc::{ReconnectConfig, SignalingConfig, WebSocketSignalingClient};
+    use crate::wire::webrtc::{
+        InboundQueueConfig, ReconnectConfig, SignalingConfig, WebSocketSignalingClient,
+    };
     let host = Arc::new(HostTransport::new());
     let inproc = Gate::Host(Arc::new(HostGate::new(host)));
     let c = RuntimeContext::new(
@@ -67,6 +69,7 @@ async fn select_gate_peer_errors_when_outproc_unset() {
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
         })) as Arc<dyn SignalingClient>,
         AIdCredential::default(),
         None,
@@ -178,7 +181,9 @@ fn builder() -> BootstrapContextBuilder {
         Arc::new(DataChunkRegistry::new()),
         Arc::new(MediaFrameRegistry::new()),
         {
-            use crate::wire::webrtc::{ReconnectConfig, SignalingConfig, WebSocketSignalingClient};
+            use crate::wire::webrtc::{
+                InboundQueueConfig, ReconnectConfig, SignalingConfig, WebSocketSignalingClient,
+            };
             Arc::new(WebSocketSignalingClient::new(SignalingConfig {
                 server_url: url::Url::parse("ws://127.0.0.1:9").unwrap(),
                 connection_timeout: 1,
@@ -186,6 +191,7 @@ fn builder() -> BootstrapContextBuilder {
                 reconnect_config: ReconnectConfig::default(),
                 auth_config: None,
                 webrtc_role: None,
+                inbound_queue: InboundQueueConfig::default(),
             })) as Arc<dyn SignalingClient>
         },
         None,
@@ -232,7 +238,9 @@ use actr_config::lock::{LockFile, LockedDependency};
 fn ctx_with_lock(lock: Option<LockFile>) -> RuntimeContext {
     use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
     use crate::outbound::{Gate, HostGate};
-    use crate::wire::webrtc::{ReconnectConfig, SignalingConfig, WebSocketSignalingClient};
+    use crate::wire::webrtc::{
+        InboundQueueConfig, ReconnectConfig, SignalingConfig, WebSocketSignalingClient,
+    };
     let host = Arc::new(HostTransport::new());
     let inproc = Gate::Host(Arc::new(HostGate::new(host)));
     RuntimeContext::new(
@@ -250,6 +258,7 @@ fn ctx_with_lock(lock: Option<LockFile>) -> RuntimeContext {
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
         })) as Arc<dyn SignalingClient>,
         AIdCredential::default(),
         lock.map(Arc::new),

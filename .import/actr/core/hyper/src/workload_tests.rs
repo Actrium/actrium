@@ -4,7 +4,8 @@ use crate::lifecycle::hooks::{HookContextBuilder, WorkloadHookObserverRef, build
 use crate::outbound::{Gate, HostGate};
 use crate::transport::HostTransport;
 use crate::wire::webrtc::{
-    HookEvent, ReconnectConfig, SignalingClient, SignalingConfig, WebSocketSignalingClient,
+    HookEvent, InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig,
+    WebSocketSignalingClient,
 };
 use actr_framework::Context as FrameworkContext;
 use actr_framework::test_support::DummyContext;
@@ -42,6 +43,7 @@ fn test_runtime_context(serial: u64) -> RuntimeContext {
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
         }));
 
     RuntimeContext::new(

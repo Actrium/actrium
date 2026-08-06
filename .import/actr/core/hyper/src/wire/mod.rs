@@ -77,8 +77,8 @@ pub(crate) fn direction_for_routing(
 // connection / websocket) stay reachable via module paths rather than
 // duplicated re-exports here.
 pub use webrtc::{
-    AuthConfig, AuthType, DisconnectReason, ReconnectConfig, SignalingClient, SignalingConfig,
-    SignalingEvent, SignalingStats, WebRtcConfig,
+    AuthConfig, AuthType, DisconnectReason, InboundQueueConfig, ReconnectConfig, SignalingClient,
+    SignalingConfig, SignalingEvent, SignalingStats, WebRtcConfig,
 };
 #[cfg(feature = "test-utils")]
 pub use webrtc::{WebRtcCoordinator, WebSocketSignalingClient};

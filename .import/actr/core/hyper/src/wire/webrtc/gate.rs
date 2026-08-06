@@ -480,7 +480,8 @@ mod tests {
     use crate::inbound::MediaFrameRegistry;
     use crate::lifecycle::CredentialState;
     use crate::wire::webrtc::{
-        ReconnectConfig, SignalingConfig, WebRtcConfig, WebSocketSignalingClient,
+        InboundQueueConfig, ReconnectConfig, SignalingConfig, WebRtcConfig,
+        WebSocketSignalingClient,
     };
     use actr_protocol::{AIdCredential, ActrType, Realm};
     use actr_runtime_mailbox::{MailboxStats, MessageRecord, StorageResult};
@@ -595,6 +596,7 @@ mod tests {
             reconnect_config: ReconnectConfig::default(),
             auth_config: None,
             webrtc_role: None,
+            inbound_queue: InboundQueueConfig::default(),
         }));
         let credential = AIdCredential {
             key_id: 1,

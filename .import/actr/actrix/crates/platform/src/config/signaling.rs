@@ -27,6 +27,96 @@ pub struct SignalingServerConfig {
     /// Rate limiting configuration
     #[serde(default)]
     pub rate_limit: RateLimitConfig,
+
+    /// Per-client egress queue bound configuration (issue #351)
+    #[serde(default)]
+    pub egress: EgressQueueConfig,
+}
+
+/// Per-client outbound (egress) queue bound configuration (issue #351)
+///
+/// Bound the number of WebSocket messages and bytes the server queues for a single client, and apply enqueue/write deadlines for slow-consuming/non-reading
+/// clients; on timeout the connection is closed and removed (healthy clients are unaffected).
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct EgressQueueConfig {
+    /// Max number of data (Binary) messages queued per client (message-count bound)
+    #[serde(default = "default_egress_max_messages")]
+    pub max_messages: u32,
+
+    /// Max number of encoded bytes queued per client (byte budget)
+    #[serde(default = "default_egress_max_bytes")]
+    pub max_bytes: u32,
+
+    /// Max number of control messages (Ping/Pong/Close) queued per client
+    #[serde(default = "default_egress_max_control_messages")]
+    pub max_control_messages: u32,
+
+    /// Max size of a single inbound signaling frame (rejected before protobuf decode/alloc when exceeded)
+    #[serde(default = "default_egress_max_frame_bytes")]
+    pub max_frame_bytes: u32,
+
+    /// Deadline (ms) for enqueueing onto a full client queue; on timeout the client is treated as slow-consuming and disconnected
+    #[serde(default = "default_egress_enqueue_timeout_ms")]
+    pub enqueue_timeout_ms: u32,
+
+    /// Deadline (ms) for a single WebSocket write; on timeout the connection is closed
+    #[serde(default = "default_egress_write_timeout_ms")]
+    pub write_timeout_ms: u32,
+
+    /// Per-target aggregate message rate (messages/sec, across all senders)
+    #[serde(default = "default_target_rate_per_second")]
+    pub target_rate_per_second: u32,
+
+    /// Per-target aggregate byte budget (bytes/sec, across all senders)
+    #[serde(default = "default_target_bytes_per_second")]
+    pub target_bytes_per_second: u32,
+}
+
+fn default_egress_max_messages() -> u32 {
+    256
+}
+
+fn default_egress_max_bytes() -> u32 {
+    1 << 20 // 1 MiB
+}
+
+fn default_egress_max_control_messages() -> u32 {
+    32
+}
+
+fn default_egress_max_frame_bytes() -> u32 {
+    256 << 10 // 256 KiB
+}
+
+fn default_egress_enqueue_timeout_ms() -> u32 {
+    2_000
+}
+
+fn default_egress_write_timeout_ms() -> u32 {
+    5_000
+}
+
+fn default_target_rate_per_second() -> u32 {
+    200
+}
+
+fn default_target_bytes_per_second() -> u32 {
+    1 << 20 // 1 MiB/s
+}
+
+impl Default for EgressQueueConfig {
+    fn default() -> Self {
+        Self {
+            max_messages: default_egress_max_messages(),
+            max_bytes: default_egress_max_bytes(),
+            max_control_messages: default_egress_max_control_messages(),
+            max_frame_bytes: default_egress_max_frame_bytes(),
+            enqueue_timeout_ms: default_egress_enqueue_timeout_ms(),
+            write_timeout_ms: default_egress_write_timeout_ms(),
+            target_rate_per_second: default_target_rate_per_second(),
+            target_bytes_per_second: default_target_bytes_per_second(),
+        }
+    }
 }
 
 /// Rate limiting configuration
@@ -141,6 +231,7 @@ impl Default for SignalingServerConfig {
         Self {
             ws_path: "/signaling".to_string(),
             rate_limit: RateLimitConfig::default(),
+            egress: EgressQueueConfig::default(),
         }
     }
 }
