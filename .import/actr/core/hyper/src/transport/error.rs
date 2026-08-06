@@ -565,13 +565,14 @@ impl From<NetworkError> for ActrError {
 /// `WebRtcError` that `is_closed_like()` would miss. The closed set is kept
 /// minimal (connection-level errors only); channel-level closed errors are
 /// classified with state context by `classify_data_channel_send_error`.
-impl From<webrtc::Error> for NetworkError {
-    fn from(err: webrtc::Error) -> Self {
+impl From<webrtc::error::Error> for NetworkError {
+    fn from(err: webrtc::error::Error) -> Self {
         match &err {
-            webrtc::Error::ErrConnectionClosed | webrtc::Error::ErrClosedPipe => {
+            webrtc::error::Error::ErrConnectionClosed | webrtc::error::Error::ErrClosedPipe => {
                 NetworkError::PeerConnectionClosed(err.to_string())
             }
-            webrtc::Error::ErrDataChannelNotOpen | webrtc::Error::ErrSCTPNotEstablished => {
+            webrtc::error::Error::ErrDataChannelNotOpen
+            | webrtc::error::Error::ErrSCTPNotEstablished => {
                 NetworkError::DataChannelNotOpen(err.to_string())
             }
             _ => NetworkError::WebRtcError(err.to_string()),

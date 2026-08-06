@@ -507,8 +507,7 @@ fn init_subscriber(
                 .filter(|s| !s.is_empty())
                 .unwrap_or_else(|| {
                     "info,tokio_tungstenite=error,\
-                     webrtc_mdns::conn=warn,webrtc_ice::agent::agent_internal=warn,\
-                     webrtc_sctp=warn"
+                     rtc_mdns::conn=warn,rtc_ice=warn,rtc_sctp=warn"
                         .to_string()
                 }),
         )

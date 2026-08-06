@@ -1,8 +1,12 @@
 //! Virtual Network (VNet) test utilities
 //!
-//! Provides a controllable virtual network layer for integration tests,
-//! enabling simulation of network disconnection, reconnection, and partitions
-//! at the UDP transport level (below ICE).
+//! Provides the compatibility test context and shared packet gate used to
+//! simulate network disconnection and reconnection below ICE.
+//!
+//! webrtc-rs v0.20 owns the UDP sockets created by `PeerConnectionBuilder` and
+//! no longer accepts the legacy VNet socket provider. Tests retain the existing
+//! `VNetPair` API, while the shared `network_blocked` flag now also drives a
+//! runtime wrapper around those builder-owned sockets.
 //!
 //! ## Architecture
 //!
@@ -23,19 +27,17 @@
 //!              │ (VNet/Net) │        │ (VNet/Net)   │
 //!              └─────┬──────┘        └──────┬───────┘
 //!                    │                      │
-//!              SettingEngine           SettingEngine
-//!              set_vnet(net)           set_vnet(net)
-//!                    │                      │
-//!              RTCPeerConnection      RTCPeerConnection
+//!                 shared network_blocked flag
+//!                            │
+//!                 v0.20 packet-filter runtime
+//!                            │
+//!                 RTCPeerConnection UDP sockets
 //! ```
 //!
 //! ## Usage
 //!
 //! ```rust,ignore
 //! let vnet_pair = VNetPair::new().await?;
-//!
-//! // Use in RTCPeerConnection creation:
-//! // setting_engine.set_vnet(Some(vnet_pair.net_offerer.clone()));
 //!
 //! // Block network traffic (simulate disconnection)
 //! vnet_pair.block_network();
@@ -168,6 +170,11 @@ impl VNetPair {
     /// Check if the network is currently blocked.
     pub fn is_blocked(&self) -> bool {
         self.network_blocked.load(Ordering::SeqCst)
+    }
+
+    /// Shared packet gate for the webrtc-rs v0.20 test runtime.
+    pub fn packet_blocked_flag(&self) -> Arc<AtomicBool> {
+        self.network_blocked.clone()
     }
 }
 

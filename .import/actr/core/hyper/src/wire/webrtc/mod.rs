@@ -5,12 +5,15 @@
 //! - Connect build independent andManage
 //! - OutboundGate Implementation
 
+pub(crate) mod adapter;
 pub(crate) mod connection; // WebRtcConnection Implementation
 mod coordinator;
 pub(crate) mod gate;
 pub(crate) mod negotiator;
 pub(crate) mod peer_recovery;
 mod signaling;
+#[cfg(any(test, feature = "test-utils"))]
+mod test_runtime;
 pub(crate) mod trace;
 
 pub(crate) type WebRtcInboundMessage = (Vec<u8>, actr_framework::Bytes, actr_protocol::PayloadType);

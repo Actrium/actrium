@@ -23,8 +23,9 @@ use actr_hyper::wire::webrtc::{
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
 use bytes::Bytes;
+use rtc::data_channel::RTCDataChannelState;
+use rtc::peer_connection::state::RTCPeerConnectionState;
 use tokio::sync::{Barrier, Semaphore};
-use webrtc::peer_connection::peer_connection_state::RTCPeerConnectionState;
 
 fn resource_test_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -547,8 +548,7 @@ async fn inv17_blackbox_registration_after_teardown_is_refused_and_closes_the_ch
     assert!(
         matches!(
             channel.ready_state(),
-            webrtc::data_channel::data_channel_state::RTCDataChannelState::Closing
-                | webrtc::data_channel::data_channel_state::RTCDataChannelState::Closed
+            RTCDataChannelState::Closing | RTCDataChannelState::Closed
         ),
         "the refused channel must be closed by the gate, got {:?}",
         channel.ready_state()
@@ -596,8 +596,7 @@ async fn inv17_blackbox_registration_overlapping_teardown_cannot_repopulate_clea
     assert!(
         matches!(
             channel.ready_state(),
-            webrtc::data_channel::data_channel_state::RTCDataChannelState::Closing
-                | webrtc::data_channel::data_channel_state::RTCDataChannelState::Closed
+            RTCDataChannelState::Closing | RTCDataChannelState::Closed
         ),
         "the refused channel must be closed by the gate, got {:?}",
         channel.ready_state()

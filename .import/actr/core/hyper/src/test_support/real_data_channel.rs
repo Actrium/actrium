@@ -1,15 +1,11 @@
-use super::VNetPair;
 use crate::transport::{ConnectionEvent, DataChannelStateSignal, DataLane};
 use crate::wire::webrtc::WebRtcInboundMessage;
+use crate::wire::webrtc::adapter::{RTCDataChannel, RTCPeerConnection, new_test_peer_connection};
 use crate::wire::webrtc::connection::WebRtcConnection;
 use actr_protocol::PayloadType;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{broadcast, mpsc};
-use webrtc::api::APIBuilder;
-use webrtc::api::setting_engine::SettingEngine;
-use webrtc::peer_connection::RTCPeerConnection;
-use webrtc::peer_connection::configuration::RTCConfiguration;
 
 /// An unsignaled pair of real WebRTC peers with a production DataChannel lane.
 ///
@@ -25,37 +21,18 @@ pub struct RealDataChannelPair {
     state_signal: DataChannelStateSignal,
     _inbound: mpsc::Receiver<WebRtcInboundMessage>,
     events: broadcast::Receiver<ConnectionEvent>,
-    vnet: VNetPair,
 }
 
 impl RealDataChannelPair {
     pub async fn new() -> Self {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
-        let vnet = VNetPair::new()
-            .await
-            .expect("real DataChannel VNet should be created");
-
-        let mut offer_settings = SettingEngine::default();
-        offer_settings.set_vnet(Some(vnet.net_offerer.clone()));
-        let offer_api = APIBuilder::new()
-            .with_setting_engine(offer_settings)
-            .build();
-
-        let mut answer_settings = SettingEngine::default();
-        answer_settings.set_vnet(Some(vnet.net_answerer.clone()));
-        let answer_api = APIBuilder::new()
-            .with_setting_engine(answer_settings)
-            .build();
-
         let offer_pc = Arc::new(
-            offer_api
-                .new_peer_connection(RTCConfiguration::default())
+            new_test_peer_connection()
                 .await
                 .expect("offer peer connection should be created"),
         );
         let answer_pc = Arc::new(
-            answer_api
-                .new_peer_connection(RTCConfiguration::default())
+            new_test_peer_connection()
                 .await
                 .expect("answer peer connection should be created"),
         );
@@ -101,7 +78,6 @@ impl RealDataChannelPair {
             state_signal,
             _inbound: inbound,
             events,
-            vnet,
         }
     }
 
@@ -160,7 +136,7 @@ impl RealDataChannelPair {
         &self,
         payload_type: PayloadType,
     ) -> (
-        Arc<webrtc::data_channel::RTCDataChannel>,
+        Arc<RTCDataChannel>,
         crate::transport::NetworkResult<Arc<dyn DataLane>>,
     ) {
         let channel = self.mint_incoming_channel(payload_type).await;
@@ -172,10 +148,7 @@ impl RealDataChannelPair {
 
     /// Mint a fresh DataChannel on the ANSWER peer connection. See
     /// [`Self::offer_register_fresh_channel`] for why the answer side mints.
-    pub async fn mint_incoming_channel(
-        &self,
-        payload_type: PayloadType,
-    ) -> Arc<webrtc::data_channel::RTCDataChannel> {
+    pub async fn mint_incoming_channel(&self, payload_type: PayloadType) -> Arc<RTCDataChannel> {
         self.answer_pc
             .create_data_channel(payload_type.as_str_name(), None)
             .await
@@ -185,7 +158,7 @@ impl RealDataChannelPair {
     /// Register an incoming channel on the offering connection.
     pub async fn offer_register_channel(
         &self,
-        channel: Arc<webrtc::data_channel::RTCDataChannel>,
+        channel: Arc<RTCDataChannel>,
         payload_type: PayloadType,
     ) -> crate::transport::NetworkResult<Arc<dyn DataLane>> {
         let (tx, _rx) = mpsc::channel(8);
@@ -198,7 +171,7 @@ impl RealDataChannelPair {
     /// so a test can interleave other operations while it is in flight.
     pub fn spawn_offer_register(
         &self,
-        channel: Arc<webrtc::data_channel::RTCDataChannel>,
+        channel: Arc<RTCDataChannel>,
         payload_type: PayloadType,
     ) -> tokio::task::JoinHandle<crate::transport::NetworkResult<Arc<dyn DataLane>>> {
         let offer = self.offer.clone();
@@ -225,7 +198,7 @@ impl RealDataChannelPair {
     pub async fn offer_data_channel(
         &self,
         payload_type: PayloadType,
-    ) -> Option<Arc<webrtc::data_channel::RTCDataChannel>> {
+    ) -> Option<Arc<RTCDataChannel>> {
         self.offer.data_channels().await[payload_type as usize].clone()
     }
 
@@ -251,12 +224,6 @@ impl RealDataChannelPair {
         .expect("real peer-pair cleanup should remain bounded");
         offer_result.expect("offer cleanup should succeed");
         answer_result.expect("answer cleanup should succeed");
-        tokio::time::timeout(Duration::from_secs(5), async {
-            self.vnet.wan.lock().await.stop().await
-        })
-        .await
-        .expect("test VNet shutdown should remain bounded")
-        .expect("test VNet router should stop cleanly");
     }
 
     async fn wait_for_data_channel_event(&mut self, opened: bool) {
@@ -314,7 +281,8 @@ async fn signal_pair(offer: &RTCPeerConnection, answer: &RTCPeerConnection) {
         .expect("test offer should become local description");
     tokio::time::timeout(Duration::from_secs(10), offer_gathered.recv())
         .await
-        .expect("offer ICE gathering should complete");
+        .expect("offer ICE gathering should complete")
+        .expect("offer gathering notification should remain available");
     answer
         .set_remote_description(
             offer
@@ -336,7 +304,8 @@ async fn signal_pair(offer: &RTCPeerConnection, answer: &RTCPeerConnection) {
         .expect("test answer should become local description");
     tokio::time::timeout(Duration::from_secs(10), answer_gathered.recv())
         .await
-        .expect("answer ICE gathering should complete");
+        .expect("answer ICE gathering should complete")
+        .expect("answer gathering notification should remain available");
     offer
         .set_remote_description(
             answer

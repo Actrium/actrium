@@ -52,9 +52,7 @@ async fn inv17_data_channel_state_signal_observes_a_publish_that_landed_before_t
 
 #[test]
 fn test_stream_closed_send_error_wins_over_stale_open_state() {
-    let error = webrtc::Error::Data(webrtc::data::Error::Sctp(
-        webrtc::sctp::Error::ErrStreamClosed,
-    ));
+    let error = webrtc::error::Error::ErrStreamClosed;
 
     let classified =
         classify_data_channel_send_error(error, RTCDataChannelState::Open, "Send failed");
@@ -65,9 +63,7 @@ fn test_stream_closed_send_error_wins_over_stale_open_state() {
 
 #[test]
 fn test_non_established_send_error_wins_over_stale_open_state() {
-    let error = webrtc::Error::Data(webrtc::data::Error::Sctp(
-        webrtc::sctp::Error::ErrPayloadDataStateNotExist,
-    ));
+    let error = webrtc::error::Error::ErrPayloadDataStateNotExist;
 
     let classified =
         classify_data_channel_send_error(error, RTCDataChannelState::Open, "Send failed");
@@ -79,7 +75,7 @@ fn test_non_established_send_error_wins_over_stale_open_state() {
 #[test]
 fn test_unrelated_send_error_remains_data_channel_error_while_open() {
     let classified = classify_data_channel_send_error(
-        webrtc::Error::ErrUnknownType,
+        webrtc::error::Error::ErrUnknownType,
         RTCDataChannelState::Open,
         "Send failed",
     );
@@ -98,7 +94,8 @@ fn test_closed_peer_connection_error_wins_over_stale_state() {
         RTCPeerConnectionState::Connecting,
         RTCPeerConnectionState::Disconnected,
     ] {
-        let classified = classify_peer_connection_error(webrtc::Error::ErrConnectionClosed, state);
+        let classified =
+            classify_peer_connection_error(webrtc::error::Error::ErrConnectionClosed, state);
 
         assert!(matches!(classified, NetworkError::PeerConnectionClosed(_)));
         assert!(classified.is_closed_like());
@@ -108,7 +105,7 @@ fn test_closed_peer_connection_error_wins_over_stale_state() {
 #[test]
 fn test_closed_peer_state_wins_over_generic_error() {
     let classified = classify_peer_connection_error(
-        webrtc::Error::ErrUnknownType,
+        webrtc::error::Error::ErrUnknownType,
         RTCPeerConnectionState::Failed,
     );
 
@@ -118,8 +115,10 @@ fn test_closed_peer_state_wins_over_generic_error() {
 
 #[test]
 fn test_unrelated_peer_connection_error_remains_webrtc_error() {
-    let classified =
-        classify_peer_connection_error(webrtc::Error::ErrUnknownType, RTCPeerConnectionState::New);
+    let classified = classify_peer_connection_error(
+        webrtc::error::Error::ErrUnknownType,
+        RTCPeerConnectionState::New,
+    );
 
     assert!(matches!(classified, NetworkError::WebRtcError(_)));
     assert!(!classified.is_closed_like());

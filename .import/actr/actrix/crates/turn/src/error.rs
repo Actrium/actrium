@@ -112,7 +112,7 @@ pub enum TurnError {
 
     /// WebRTC library error
     #[error("WebRTC error: {0}")]
-    WebRtc(#[from] webrtc::Error),
+    WebRtc(#[from] webrtc::error::Error),
 
     /// Address parse error
     #[error("Address parse error: {0}")]

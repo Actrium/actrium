@@ -209,7 +209,7 @@ impl TestHarness {
             } else {
                 vnet.net_answerer.clone()
             };
-            create_peer_with_vnet(id.clone(), &server_url, net)
+            create_peer_with_vnet(id.clone(), &server_url, net, vnet.packet_blocked_flag())
                 .await
                 .expect("Failed to create peer with vnet")
         } else {

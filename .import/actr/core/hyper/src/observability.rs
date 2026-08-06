@@ -322,9 +322,9 @@ fn otel_targets_filter(cfg: &ObservabilityConfig) -> Targets {
         .with_target("tungstenite", tracing::Level::ERROR) // OFF equivalent
         .with_target("tokio_tungstenite", tracing::Level::ERROR) // OFF equivalent
         .with_target("wasmtime", tracing::Level::WARN)
-        .with_target("webrtc_mdns::conn", tracing::Level::WARN)
-        .with_target("webrtc_ice::agent::agent_internal", tracing::Level::WARN)
-        .with_target("webrtc_sctp", tracing::Level::WARN)
+        .with_target("rtc_mdns::conn", tracing::Level::WARN)
+        .with_target("rtc_ice", tracing::Level::WARN)
+        .with_target("rtc_sctp", tracing::Level::WARN)
 }
 
 #[cfg(test)]

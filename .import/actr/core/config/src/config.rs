@@ -285,29 +285,22 @@ pub struct WebRtcAdvancedConfig {
     pub udp_ports: UdpPorts,
     /// Fixed local UDP port for a process-shared ICE UDP mux (opt-in).
     ///
-    /// When set, every peer connection routes its ICE traffic through one
-    /// shared UDP socket bound to this port, so the process's UDP socket
-    /// count stays O(1) regardless of connection churn (otherwise ICE
-    /// gathering opens one socket per local interface per connection).
-    ///
-    /// Trade-off: in webrtc-ice 0.14, muxed mode skips server-reflexive
-    /// (srflx) candidate gathering entirely — only host (and TURN relay)
-    /// candidates are produced. This option is therefore intended for
-    /// multi-homed servers that are directly reachable (public IP / NAT 1:1)
-    /// or have a TURN relay configured. Nodes behind NAT that rely on STUN
-    /// for connectivity should leave it unset (the default), which uses
-    /// per-connection ephemeral UDP sockets.
-    ///
-    /// Lifecycle note: the mux socket is bound lazily on first use and held
-    /// for the lifetime of the WebRTC coordinator; it is never closed. ICE
-    /// restarts change the local ufrag and only the current ufrag is removed
-    /// from the mux on agent close, so stale ufrag entries can accumulate
-    /// across many restarts (bounded memory growth, no fd growth).
-    ///
-    /// Mutually exclusive with `udp_ports`: when both are set the shared mux
-    /// wins and `udp_ports` is ignored (a warning is logged at runtime).
+    /// **Unsupported since the webrtc-rs 0.20 migration: rejected at startup
+    /// by [`WebRtcAdvancedConfig::validate`].** webrtc-rs 0.20 does not expose
+    /// the shared ICE UDP mux, so honoring this option is impossible; a fixed
+    /// port is a deployment precondition (firewall pinholes are opened for
+    /// it), and silently binding an ephemeral port instead would present as
+    /// "node healthy but unreachable". Use `udp_ports` for a fixed port
+    /// range.
     pub ice_udp_mux_port: Option<u16>,
-    /// NAT 1:1 public IP mapping
+    /// NAT 1:1 public IP mapping.
+    ///
+    /// **Unsupported since the webrtc-rs 0.20 migration: rejected at startup
+    /// by [`WebRtcAdvancedConfig::validate`].** rtc 0.20 stores
+    /// `nat_1to1_ips` on the setting engine but never reads it back, so
+    /// configured mappings would silently keep advertising internal host
+    /// candidates in SDP while logs claim the mapping is in effect. Front
+    /// the node with TURN or run it on a public interface instead.
     pub public_ips: Vec<String>,
     /// ICE host candidate acceptance min wait (ms)
     pub ice_host_acceptance_min_wait: u64,
@@ -324,6 +317,35 @@ impl WebRtcAdvancedConfig {
     pub fn prefer_answerer(&self) -> bool {
         // If port range or public_ips are configured, prefer being Answerer
         self.udp_ports.is_some() || !self.public_ips.is_empty()
+    }
+
+    /// Reject options that the webrtc-rs 0.20 integration cannot honor.
+    ///
+    /// These options are deployment preconditions — operators open firewall
+    /// pinholes for them — so silently ignoring them would present as "node
+    /// healthy but unreachable". Startup must fail loudly instead. Checked
+    /// both at config-file parse time and before the WebRTC coordinator is
+    /// constructed from a programmatically built config.
+    pub fn validate(&self) -> Result<(), crate::error::ConfigError> {
+        if let Some(port) = self.ice_udp_mux_port {
+            return Err(crate::error::ConfigError::InvalidConfig(format!(
+                "ice_udp_mux_port = {port} is not supported with webrtc-rs 0.20: \
+                 the shared ICE UDP mux is not exposed upstream and every peer \
+                 connection would bind an ephemeral port instead. Remove the \
+                 option, or use udp_ports for a fixed port range"
+            )));
+        }
+        if !self.public_ips.is_empty() {
+            return Err(crate::error::ConfigError::InvalidConfig(format!(
+                "public_ips = {:?} is not supported with webrtc-rs 0.20: rtc \
+                 stores nat_1to1_ips but never applies it, so SDP would keep \
+                 advertising internal addresses while the mapping appears \
+                 configured. Remove the option; front the node with TURN or \
+                 run it on a public interface",
+                self.public_ips
+            )));
+        }
+        Ok(())
     }
 }
 
