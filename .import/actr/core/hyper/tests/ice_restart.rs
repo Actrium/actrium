@@ -73,26 +73,43 @@ async fn wait_for_restart_rejection(
     .expect("answerer must explicitly reject the correlated restart offer")
 }
 
-async fn wait_for_peer_removed(
-    coordinator: &actr_hyper::wire::webrtc::WebRtcCoordinator,
-    peer_id: &ActrId,
-) {
-    tokio::time::timeout(Duration::from_secs(4), async {
+async fn wait_for_peer_rebuilt(
+    harness: &TestHarness,
+    offerer_id: &ActrId,
+    answerer_id: &ActrId,
+    old_offerer_session: u64,
+    old_answerer_session: u64,
+) -> (u64, u64) {
+    tokio::time::timeout(Duration::from_secs(15), async {
         loop {
-            if coordinator.get_peer_session_id(peer_id).await.is_none() {
-                return;
+            let offerer_session = harness
+                .peer(901)
+                .coordinator
+                .get_peer_session_id(answerer_id)
+                .await;
+            let answerer_session = harness
+                .peer(902)
+                .coordinator
+                .get_peer_session_id(offerer_id)
+                .await;
+            if let (Some(offerer_session), Some(answerer_session)) =
+                (offerer_session, answerer_session)
+                && offerer_session != old_offerer_session
+                && answerer_session != old_answerer_session
+            {
+                return (offerer_session, answerer_session);
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
     })
     .await
-    .expect("stale offerer session should be removed after restart rejection");
+    .expect("restart rejection should autonomously establish a fresh peer session")
 }
 
 /// Regression for #436: the Answerer has forgotten its peer while the Offerer
 /// still owns the old PeerConnection and sends an ICE restart offer.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn test_unknown_answerer_session_rejects_restart_and_fresh_rpc_recovers() {
+async fn test_unknown_answerer_session_rejects_restart_and_rebuilds_autonomously() {
     install_test_crypto_provider();
 
     let mut harness = TestHarness::new().await;
@@ -153,38 +170,23 @@ async fn test_unknown_answerer_session_rejects_restart_and_fresh_rpc_recovers() 
         ice_restart_rejected::Reason::NoActiveSession as i32,
         "restart rejection must identify the missing active session"
     );
-    assert!(
-        harness
-            .peer(902)
-            .coordinator
-            .get_peer_session_id(&offerer_id)
-            .await
-            .is_none(),
-        "the stale restart offer must not bootstrap a new answerer PeerConnection"
-    );
-
-    wait_for_peer_removed(harness.peer(901).coordinator.as_ref(), &answerer_id).await;
     detached_answerer
         .close()
         .await
         .expect("detached answerer connection should close");
 
-    tokio::time::timeout(Duration::from_secs(4), async {
-        loop {
-            if harness.peer(901).transport_manager.dest_count().await == 0
-                && harness.peer(902).transport_manager.dest_count().await == 0
-            {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .expect("old transports should drain after the rejected restart");
+    let (new_offerer_session, new_answerer_session) = wait_for_peer_rebuilt(
+        &harness,
+        &offerer_id,
+        &answerer_id,
+        old_offerer_session,
+        old_answerer_session,
+    )
+    .await;
 
     let request = harness
         .peer(901)
-        .spawn_request(902, "issue_436_fresh_rpc", 15_000);
+        .spawn_request(902, "issue_508_autonomous_rebuild", 15_000);
     let response = tokio::time::timeout(Duration::from_secs(20), request)
         .await
         .expect("fresh RPC should not time out")
@@ -192,18 +194,6 @@ async fn test_unknown_answerer_session_rejects_restart_and_fresh_rpc_recovers() 
         .expect("fresh RPC should succeed after full renegotiation");
     assert_eq!(response.as_ref(), b"pong");
 
-    let new_offerer_session = harness
-        .peer(901)
-        .coordinator
-        .get_peer_session_id(&answerer_id)
-        .await
-        .expect("offerer should own the rebuilt session");
-    let new_answerer_session = harness
-        .peer(902)
-        .coordinator
-        .get_peer_session_id(&offerer_id)
-        .await
-        .expect("answerer should own the rebuilt session");
     assert_ne!(new_offerer_session, old_offerer_session);
     assert_ne!(new_answerer_session, old_answerer_session);
 

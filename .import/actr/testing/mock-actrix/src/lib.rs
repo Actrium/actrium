@@ -45,6 +45,7 @@ pub struct MockActrixServer {
     message_count: Arc<AtomicU32>,
     ice_restart_offer_count: Arc<AtomicU32>,
     ice_restart_request_count: Arc<AtomicU32>,
+    ice_restart_request_drop_count: Arc<AtomicU32>,
     pause_forwarding: Arc<AtomicBool>,
     ice_candidate_drop_count: Arc<AtomicU32>,
     connection_count: Arc<AtomicU32>,
@@ -84,6 +85,7 @@ impl MockActrixServer {
         let message_count = state.message_count.clone();
         let ice_restart_offer_count = state.ice_restart_offer_count.clone();
         let ice_restart_request_count = state.ice_restart_request_count.clone();
+        let ice_restart_request_drop_count = state.ice_restart_request_drop_count.clone();
         let pause_forwarding = state.pause_forwarding.clone();
         let ice_candidate_drop_count = state.ice_candidate_drop_count.clone();
         let connection_count = state.connection_count.clone();
@@ -123,6 +125,7 @@ impl MockActrixServer {
             message_count,
             ice_restart_offer_count,
             ice_restart_request_count,
+            ice_restart_request_drop_count,
             pause_forwarding,
             ice_candidate_drop_count,
             connection_count,
@@ -213,6 +216,17 @@ impl MockActrixServer {
 
     pub fn resume_forwarding(&self) {
         self.pause_forwarding.store(false, Ordering::Release);
+    }
+
+    /// Drop the next N Answerer ICE restart requests while keeping every other
+    /// signaling payload flowing.
+    pub fn drop_next_ice_restart_requests(&self, count: u32) {
+        tracing::warn!(
+            "🧪 Dropping the next {} ICE restart request relay message(s)",
+            count
+        );
+        self.ice_restart_request_drop_count
+            .store(count, Ordering::SeqCst);
     }
 
     /// Stop reading/writing frames for WebSocket connections that already
@@ -311,6 +325,8 @@ impl MockActrixServer {
         self.message_count.store(0, Ordering::Relaxed);
         self.ice_restart_offer_count.store(0, Ordering::SeqCst);
         self.ice_restart_request_count.store(0, Ordering::SeqCst);
+        self.ice_restart_request_drop_count
+            .store(0, Ordering::SeqCst);
         self.ice_candidate_drop_count.store(0, Ordering::SeqCst);
         self.state.offer_drop_count.store(0, Ordering::SeqCst);
         self.connection_count.store(0, Ordering::SeqCst);

@@ -34,8 +34,9 @@ use actr_framework::Bytes;
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
     AIdCredential, ActrId, ActrRelay, IceCandidate, IceRestartRejected, IceRestartRequest,
-    PayloadType, RoleAssignment, RoleNegotiation, SIGNALING_ENVELOPE_VERSION, SignalingEnvelope,
-    actr_relay, ice_restart_rejected, session_description::Type as SdpType, signaling_envelope,
+    IceRestartRequestAck, PayloadType, RoleAssignment, RoleNegotiation, SIGNALING_ENVELOPE_VERSION,
+    SignalingEnvelope, actr_relay, ice_restart_rejected, ice_restart_request_ack,
+    session_description::Type as SdpType, signaling_envelope,
 };
 use actr_protocol::{ActorResult, ActrError};
 use std::collections::{HashMap, VecDeque};
@@ -74,6 +75,8 @@ const ICE_GATHERING_TIMEOUT: Duration = Duration::from_secs(10);
 const ICE_CONNECTED_TIMEOUT: Duration = Duration::from_secs(10);
 const DATA_CHANNEL_AFTER_ICE_TIMEOUT: Duration = Duration::from_secs(2);
 const ROLE_NEGOTIATION_TIMEOUT: Duration = Duration::from_secs(5);
+const ANSWERER_RESTART_REQUEST_MAX_ATTEMPTS: u32 = 3;
+const ANSWERER_RESTART_OFFER_WAIT_TIMEOUT: Duration = Duration::from_secs(2);
 const PEER_CONNECTION_CLOSE_FALLBACK_TIMEOUT: Duration = Duration::from_millis(500);
 const REMOTE_CANDIDATE_FLUSH_TIMEOUT: Duration = Duration::from_secs(5);
 const CLOSE_ALL_HOOK_TIMEOUT: Duration = Duration::from_secs(1);
@@ -641,6 +644,78 @@ enum PublicRtcHookState {
     Recovering,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnswererRestartProgress {
+    Accepted(u32),
+    RejectedNoActiveSession,
+    RejectedWrongRole,
+    OfferObserved,
+}
+
+fn record_answerer_restart_progress(
+    current: &mut Option<AnswererRestartProgress>,
+    incoming: AnswererRestartProgress,
+) -> bool {
+    match (*current, incoming) {
+        // Signaling delivery can reorder the ACK behind the restart Offer. Once
+        // an actionable terminal state is observed, a later receipt-only ACK
+        // must not overwrite it in the watch channel.
+        (
+            Some(
+                AnswererRestartProgress::OfferObserved
+                | AnswererRestartProgress::RejectedNoActiveSession
+                | AnswererRestartProgress::RejectedWrongRole,
+            ),
+            _,
+        ) => false,
+        (
+            Some(AnswererRestartProgress::Accepted(current_attempt)),
+            AnswererRestartProgress::Accepted(incoming_attempt),
+        ) if incoming_attempt <= current_attempt => false,
+        (_, incoming) => {
+            *current = Some(incoming);
+            true
+        }
+    }
+}
+
+struct AnswererRestartRequestFlight {
+    request_id: String,
+    latest_attempt: u32,
+    progress_tx: watch::Sender<Option<AnswererRestartProgress>>,
+}
+
+struct ReceivedIceRestartRequest {
+    request_id: String,
+    highest_attempt: u32,
+}
+
+fn record_ice_restart_request_attempt(
+    received: &mut Option<ReceivedIceRestartRequest>,
+    request_id: Option<&str>,
+    attempt: u32,
+) -> bool {
+    let Some(request_id) = request_id else {
+        return true;
+    };
+
+    match received.as_mut() {
+        Some(previous) if previous.request_id == request_id => {
+            if attempt <= previous.highest_attempt {
+                return false;
+            }
+            previous.highest_attempt = attempt;
+        }
+        Some(_) | None => {
+            *received = Some(ReceivedIceRestartRequest {
+                request_id: request_id.to_string(),
+                highest_attempt: attempt,
+            });
+        }
+    }
+    true
+}
+
 /// Peer connection state
 struct PeerState {
     /// RTCPeerConnection (for receiving ICE candidates)
@@ -664,9 +739,25 @@ struct PeerState {
     /// Restart attempts counter (resets on success)
     ice_restart_attempts: u32,
 
+    /// Offerer-side readiness waiter for the in-flight restart, tracked so a
+    /// restart session has exactly one outstanding waiter instead of one
+    /// untracked task per restart Answer (#511). Since every attempt of a
+    /// restart shares the same PeerConnection/session, a single waiter measures
+    /// the restart session's readiness; a new attempt reuses it rather than
+    /// stacking another. Cleared when the waiter fires so teardown can abort it.
+    offerer_restart_ready_handle: Option<JoinHandle<()>>,
+
     /// In-flight Offerer restart or Answerer restart-notification task handle.
     /// Both variants share lifecycle cancellation and de-duplication.
     restart_task_handle: Option<JoinHandle<()>>,
+
+    /// Correlated Answerer request kept until a restart offer is observed or
+    /// bounded retransmission falls back to a fresh PeerConnection.
+    answerer_restart_request: Option<AnswererRestartRequestFlight>,
+
+    /// Last request generation accepted by the Offerer. Exact duplicates are
+    /// acknowledged again without interrupting the active SDP exchange.
+    received_ice_restart_request: Option<ReceivedIceRestartRequest>,
 
     /// Answerer-side task that waits for the restarted generation to become
     /// ready (ICE Connected + open DataChannel) and then broadcasts the
@@ -802,6 +893,10 @@ impl DetachedPeerForTest {
             handle.abort();
             let _ = handle.await;
         }
+        if let Some(handle) = state.offerer_restart_ready_handle.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
         for handle in state.receive_handles {
             handle.abort();
             let _ = handle.await;
@@ -813,16 +908,27 @@ impl DetachedPeerForTest {
 }
 
 enum IceRestartWaitOutcome {
-    Completed,
+    Recovered,
+    Abandoned,
     TimedOut,
     Woken,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum IceRestartRunOutcome {
-    Completed,
+    Recovered,
+    Abandoned,
     Exhausted,
     RejectedNoActiveSession,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AnswererRestartRequestOutcome {
+    OfferObserved,
+    RejectedNoActiveSession,
+    RejectedWrongRole,
+    Exhausted,
+    Abandoned,
 }
 
 type RecoveryStatusTarget = (ActrId, NetworkRecoveryStatus);
@@ -1953,13 +2059,20 @@ impl WebRtcCoordinator {
                     );
                 }
             }
-            // Mirror the restart task: the answerer readiness waiter is
-            // session-scoped too, so abort it on teardown rather than let it
-            // linger to its timeout and log a spurious not-ready warning.
-            if let Some(handle) = state.answerer_restart_ready_handle.take() {
-                handle.abort();
-                let _ = handle.await;
-            }
+        }
+        // The answerer readiness waiter is never the task that owns teardown,
+        // so always stop it even when the current restart task is rebuilding
+        // its own failed session with `abort_restart_task = false`.
+        if let Some(handle) = state.answerer_restart_ready_handle.take() {
+            handle.abort();
+            let _ = handle.await;
+        }
+        // Same for the offerer readiness waiter: it is detached (set to None)
+        // by its own terminal path before failing recovery, so a live handle
+        // here always belongs to a task that did not own this teardown.
+        if let Some(handle) = state.offerer_restart_ready_handle.take() {
+            handle.abort();
+            let _ = handle.await;
         }
 
         for handle in &state.receive_handles {
@@ -2780,7 +2893,8 @@ impl WebRtcCoordinator {
                 futures_util::future::join_all(expired.into_iter().map(|expired| {
                     let coordinator = Arc::clone(&coordinator);
                     async move {
-                        coordinator
+                        let failed_session_id = expired.status.session_id;
+                        let closed = coordinator
                             .close_claimed_peer_recovery(
                                 &expired.peer_id,
                                 expired.status,
@@ -2788,6 +2902,20 @@ impl WebRtcCoordinator {
                                 "peer recovery deadline expired",
                             )
                             .await;
+                        // The deadline is the terminal owner when an explicit
+                        // terminal path never claimed (lost callback), so it
+                        // must also drive the rebuild instead of leaving the
+                        // peer absent until business traffic reconnects.
+                        if closed {
+                            coordinator
+                                .rebuild_peer_connection_after_recovery_failure(
+                                    &expired.peer_id,
+                                    failed_session_id,
+                                    closed,
+                                    "peer recovery deadline expired",
+                                )
+                                .await;
+                        }
                     }
                 }))
                 .await;
@@ -2975,6 +3103,7 @@ impl WebRtcCoordinator {
             for (peer_id, state) in peers.iter_mut() {
                 let handle = state.restart_task_handle.take();
                 let ready_handle = state.answerer_restart_ready_handle.take();
+                let offerer_ready_handle = state.offerer_restart_ready_handle.take();
                 if state.ice_restart_inflight || handle.is_some() {
                     tracing::info!("🛑 Aborting pending ICE restart for {:?}", peer_id);
                     if let Some(handle) = handle {
@@ -2990,6 +3119,11 @@ impl WebRtcCoordinator {
                 if let Some(ready_handle) = ready_handle {
                     ready_handle.abort();
                     restart_handles.push((peer_id.clone(), ready_handle));
+                }
+                // The offerer readiness waiter shares the same lifecycle.
+                if let Some(offerer_ready_handle) = offerer_ready_handle {
+                    offerer_ready_handle.abort();
+                    restart_handles.push((peer_id.clone(), offerer_ready_handle));
                 }
                 state.ice_signaling.clear_pending_restart();
             }
@@ -4121,13 +4255,25 @@ impl WebRtcCoordinator {
                     }
                     Some(actr_relay::Payload::IceRestartRequest(req)) => {
                         tracing::info!(
-                            "📥 Received IceRestartRequest from serial={}, reason={:?}",
+                            "📥 Received IceRestartRequest from serial={}, request_id={:?}, attempt={:?}, reason={:?}",
                             source,
+                            req.request_id,
+                            req.attempt,
                             req.reason
                         );
-                        if let Err(e) = self.handle_ice_restart_request(&source, req.reason).await {
+                        if let Err(e) = self.handle_ice_restart_request(&source, req).await {
                             tracing::error!("❌ Failed to handle IceRestartRequest: {}", e);
                         }
+                    }
+                    Some(actr_relay::Payload::IceRestartRequestAck(ack)) => {
+                        tracing::info!(
+                            "📥 Received IceRestartRequestAck from serial={}, request_id={}, attempt={:?}, outcome={:?}",
+                            source,
+                            ack.request_id,
+                            ack.attempt,
+                            ack.outcome
+                        );
+                        self.handle_ice_restart_request_ack(&source, ack).await;
                     }
                     Some(actr_relay::Payload::IceRestartRejected(rejection)) => {
                         tracing::info!(
@@ -4235,6 +4381,10 @@ impl WebRtcCoordinator {
                 if let Some(ready_handle) = state.answerer_restart_ready_handle.take() {
                     ready_handle.abort();
                     restart_handles.push((peer_id.clone(), ready_handle));
+                }
+                if let Some(offerer_ready_handle) = state.offerer_restart_ready_handle.take() {
+                    offerer_ready_handle.abort();
+                    restart_handles.push((peer_id.clone(), offerer_ready_handle));
                 }
                 state.ice_restart_inflight = false;
                 state.ice_restart_attempts = 0;
@@ -4344,6 +4494,12 @@ impl WebRtcCoordinator {
                         if let Some(ready_handle) = state.answerer_restart_ready_handle.take() {
                             ready_handle.abort();
                             late_restart_handles.push((peer_id.clone(), ready_handle));
+                        }
+                        if let Some(offerer_ready_handle) =
+                            state.offerer_restart_ready_handle.take()
+                        {
+                            offerer_ready_handle.abort();
+                            late_restart_handles.push((peer_id.clone(), offerer_ready_handle));
                         }
                     }
 
@@ -5042,6 +5198,13 @@ impl WebRtcCoordinator {
             {
                 handle.abort();
             }
+            if let Some(state) = peers
+                .get_mut(target)
+                .filter(|state| state.session_id == expected_session_id)
+                && let Some(handle) = state.offerer_restart_ready_handle.take()
+            {
+                handle.abort();
+            }
         }
 
         let restart_signaling_gate = self.restart_signaling_gate_for(target).await;
@@ -5124,6 +5287,13 @@ impl WebRtcCoordinator {
                 .get_mut(target)
                 .filter(|state| state.session_id == expected_session_id)
                 && let Some(handle) = state.answerer_restart_ready_handle.take()
+            {
+                handle.abort();
+            }
+            if let Some(state) = peers
+                .get_mut(target)
+                .filter(|state| state.session_id == expected_session_id)
+                && let Some(handle) = state.offerer_restart_ready_handle.take()
             {
                 handle.abort();
             }
@@ -5236,6 +5406,13 @@ impl WebRtcCoordinator {
                 .get_mut(target)
                 .filter(|state| state.session_id == expected_session_id)
                 && let Some(handle) = state.answerer_restart_ready_handle.take()
+            {
+                handle.abort();
+            }
+            if let Some(state) = peers
+                .get_mut(target)
+                .filter(|state| state.session_id == expected_session_id)
+                && let Some(handle) = state.offerer_restart_ready_handle.take()
             {
                 handle.abort();
             }
@@ -5447,7 +5624,10 @@ impl WebRtcCoordinator {
             ice_signaling: PeerIceSignalingState::default(),
             ice_restart_inflight: false,
             ice_restart_attempts: 0,
+            offerer_restart_ready_handle: None,
             restart_task_handle: None,
+            answerer_restart_request: None,
+            received_ice_restart_request: None,
             answerer_restart_ready_handle: None,
             restart_wake: Arc::new(tokio::sync::Notify::new()),
             restart_retry_wake: Arc::new(tokio::sync::Notify::new()),
@@ -5847,7 +6027,10 @@ impl WebRtcCoordinator {
             ice_signaling: PeerIceSignalingState::default(),
             ice_restart_inflight: false,
             ice_restart_attempts: 0,
+            offerer_restart_ready_handle: None,
             restart_task_handle: None,
+            answerer_restart_request: None,
+            received_ice_restart_request: None,
             answerer_restart_ready_handle: None,
             restart_wake: Arc::new(tokio::sync::Notify::new()),
             restart_retry_wake: Arc::new(tokio::sync::Notify::new()),
@@ -6345,7 +6528,7 @@ impl WebRtcCoordinator {
         let event_broadcaster = self.event_broadcaster.clone();
         let coordinator_for_wait = Arc::clone(self);
 
-        tokio::spawn(async move {
+        let ready_handle = tokio::spawn(async move {
             let opened = coordinator_for_wait
                 .wait_for_connection_ready_event(
                     &from_id,
@@ -6398,7 +6581,20 @@ impl WebRtcCoordinator {
                     wait_session_id
                 );
                 if restart_inflight {
-                    coordinator_for_wait
+                    // Detach this waiter from the peer first: teardown aborts
+                    // `offerer_restart_ready_handle` unconditionally, and the
+                    // fail below runs that teardown — leaving the handle in
+                    // place would abort+await the currently-executing task
+                    // before it reached the rebuild.
+                    {
+                        let mut peers_guard = peers.write().await;
+                        if let Some(state) = peers_guard.get_mut(&from_id)
+                            && state.session_id == wait_session_id
+                        {
+                            state.offerer_restart_ready_handle = None;
+                        }
+                    }
+                    let cleaned = coordinator_for_wait
                         .fail_peer_recovery(
                             &from_id,
                             wait_session_id,
@@ -6407,13 +6603,49 @@ impl WebRtcCoordinator {
                         )
                         .await;
                     event_broadcaster.send(ConnectionEvent::IceRestartCompleted {
-                        peer_id: from_id,
+                        peer_id: from_id.clone(),
                         session_id: wait_session_id,
                         success: false,
                     });
+                    // The abort above kills the outer restart loop, which was
+                    // the only other fallback; this waiter must rebuild.
+                    if cleaned {
+                        coordinator_for_wait
+                            .rebuild_peer_connection_after_recovery_failure(
+                                &from_id,
+                                wait_session_id,
+                                cleaned,
+                                "restart answer readiness failed",
+                            )
+                            .await;
+                    }
                 }
             }
         });
+
+        // Track the restart readiness waiter so a restart session keeps exactly
+        // one outstanding waiter instead of one untracked task per restart
+        // Answer (#511). Every attempt of a restart shares one PeerConnection
+        // and session ID, so the single waiter measures the restart session's
+        // readiness; a retried attempt's Answer must not stack a second waiter
+        // that could independently fail the session. If one is already pending,
+        // the just-spawned duplicate is aborted before it can do anything.
+        if restart_inflight {
+            let mut peers_guard = self.peers.write().await;
+            match peers_guard.get_mut(from) {
+                Some(state) if state.session_id == wait_session_id => {
+                    match &state.offerer_restart_ready_handle {
+                        Some(pending) if !pending.is_finished() => {
+                            ready_handle.abort();
+                        }
+                        _ => {
+                            state.offerer_restart_ready_handle = Some(ready_handle);
+                        }
+                    }
+                }
+                _ => ready_handle.abort(),
+            }
+        }
 
         Ok(())
     }
@@ -7804,6 +8036,104 @@ impl WebRtcCoordinator {
         Ok(())
     }
 
+    /// Retire the exact failed recovery session, then immediately run normal
+    /// role negotiation to create a new PeerConnection. This path is
+    /// autonomous: it does not wait for a later business message to call
+    /// `ensure_connected`.
+    ///
+    /// Single-flight ownership: only the handler that actually retired the
+    /// failed session calls this — passing `session_already_retired = true`
+    /// from the `cleaned`/`closed` flag its own `fail_peer_recovery` /
+    /// `close_claimed_peer_recovery` call returned. A handler that lost the
+    /// claim (the session was already gone) must not call this, so at most one
+    /// terminal path negotiates fresh. The autonomous deadline handler is also
+    /// a rebuilder, so a lost callback that lets the deadline win the claim
+    /// still produces fresh negotiation instead of leaving the peer absent.
+    async fn rebuild_peer_connection_after_recovery_failure(
+        self: &Arc<Self>,
+        target: &ActrId,
+        failed_session_id: u64,
+        session_already_retired: bool,
+        reason: &str,
+    ) {
+        if !session_already_retired {
+            tracing::debug!(
+                "⏭️ Fresh negotiation skipped: this handler did not own the failed recovery session: serial={}, session_id={}, reason={}",
+                target,
+                failed_session_id,
+                reason
+            );
+            return;
+        }
+        tracing::info!(
+            "🧹 Rebuilding after recovery failure: serial={}, session_id={}, reason={}",
+            target,
+            failed_session_id,
+            reason
+        );
+        // A newer session may have taken the peer's place between the caller's
+        // teardown and here; only rebuild if the slot is still empty or still
+        // holds the failed session. The caller already retired the failed
+        // session, so an absent peer is the expected precondition, not a
+        // reason to stand down.
+        let session_replaced = {
+            let peers = self.peers.read().await;
+            peers
+                .get(target)
+                .is_some_and(|state| state.session_id != failed_session_id)
+        };
+        if session_replaced {
+            tracing::debug!(
+                "⏭️ Fresh negotiation skipped because recovery session was already replaced: serial={}, session_id={}",
+                target,
+                failed_session_id
+            );
+            return;
+        }
+
+        if self.peer_signaling.closing_all.load(Ordering::Acquire) {
+            return;
+        }
+
+        tracing::info!(
+            "🔄 Starting fresh role negotiation after ICE recovery failure: serial={}",
+            target
+        );
+        let ready_rx = match self.initiate_connection(target).await {
+            Ok(ready_rx) => ready_rx,
+            Err(err) => {
+                tracing::warn!(
+                    "⚠️ Fresh connection negotiation failed to start for serial={}: {}",
+                    target,
+                    err
+                );
+                return;
+            }
+        };
+
+        match crate::timer::timeout(
+            crate::timer::ids::WEBRTC_CONNECTION_READY,
+            INITIAL_CONNECTION_TIMEOUT,
+            ready_rx,
+        )
+        .await
+        {
+            Ok(Ok(())) => tracing::info!(
+                "✅ Fresh PeerConnection established after ICE recovery failure: serial={}",
+                target
+            ),
+            Ok(Err(_)) => tracing::warn!(
+                "⚠️ Fresh PeerConnection readiness channel closed for serial={}",
+                target
+            ),
+            Err(_) => tracing::warn!(
+                "⚠️ Fresh PeerConnection did not become ready within {:?}: serial={}",
+                INITIAL_CONNECTION_TIMEOUT,
+                target
+            ),
+        }
+    }
+
     /// Trigger ICE recovery for an existing connection.
     ///
     /// The Offerer creates the ICE restart offer. The Answerer never creates an
@@ -7874,14 +8204,8 @@ impl WebRtcCoordinator {
         tracing::info!("Restarting ICE for target: {}", target);
         if let Some(state) = peers.get_mut(target) {
             // 1. Check if restart is already in-flight using restart_task_handle
-            if let Some(ref handle) = state.restart_task_handle {
-                let is_finished = handle.is_finished();
-                tracing::warn!(
-                    "🔍 [DEBUG] restart_task_handle exists, is_finished={} for serial={}",
-                    is_finished,
-                    target
-                );
-                if !is_finished {
+            if let Some(handle) = state.restart_task_handle.as_ref() {
+                if !handle.is_finished() {
                     if state.is_offerer {
                         // Wake the Offerer's backoff sleep so the in-flight
                         // restart retries immediately. Notify is idempotent.
@@ -7898,19 +8222,23 @@ impl WebRtcCoordinator {
                     }
                     return Ok(());
                 }
-            } else {
-                tracing::warn!(
-                    "🔍 [DEBUG] restart_task_handle is None for serial={}",
+
+                // A finished task can be observed before its final state-cleanup
+                // lock is scheduled. Retire both markers here so a later recovery
+                // fact cannot keep waking a dead task forever.
+                state.restart_task_handle.take();
+                state.ice_restart_inflight = false;
+            }
+
+            if !state.is_offerer && state.answerer_restart_request.is_some() {
+                tracing::debug!(
+                    "⏭️ Answerer already observed a restart offer and is waiting for readiness: serial={}",
                     target
                 );
+                return Ok(());
             }
 
             // 2. Also check ice_restart_inflight flag as a backup
-            tracing::warn!(
-                "🔍 [DEBUG] ice_restart_inflight={} for serial={}",
-                state.ice_restart_inflight,
-                target
-            );
             if state.ice_restart_inflight {
                 state.restart_wake.notify_one();
                 tracing::warn!(
@@ -7930,47 +8258,68 @@ impl WebRtcCoordinator {
                     "📤 Not offerer for serial={}, sending IceRestartRequest to notify offerer",
                     target
                 );
+                let request_id = Self::new_envelope_id();
+                let (progress_tx, progress_rx) = watch::channel(None);
+                state.answerer_restart_request = Some(AnswererRestartRequestFlight {
+                    request_id: request_id.clone(),
+                    latest_attempt: 0,
+                    progress_tx,
+                });
                 let network_recovering_peers = Arc::clone(&self.network_recovering_peers);
                 let handle = tokio::spawn(async move {
-                    let send_result = if Self::wait_for_signaling_reconnect_for_answerer(
-                        &signaling_client,
+                    let outcome = Self::run_answerer_restart_request(
                         &target_clone,
+                        restart_session_id,
+                        &request_id,
+                        progress_rx,
+                        &commit_context,
+                        &network_recovering_peers,
+                        &local_id,
+                        &credential_state,
+                        cancellation_epoch,
+                        &signaling_client,
                     )
-                    .await
-                    {
-                        Self::send_ice_restart_request_if_current(
-                            &target_clone,
-                            restart_session_id,
-                            &commit_context,
-                            &network_recovering_peers,
-                            &local_id,
-                            &credential_state,
-                            cancellation_epoch,
-                            &signaling_client,
-                            "network_recovered",
-                        )
-                        .await
-                    } else {
-                        None
-                    };
+                    .await;
 
-                    match send_result {
-                        Some(Ok(())) => tracing::info!(
-                            "✅ IceRestartRequest sent to offerer serial={}, session_id={}",
+                    match outcome {
+                        AnswererRestartRequestOutcome::OfferObserved => tracing::info!(
+                            "✅ Answerer observed correlated ICE restart offer from serial={}, session_id={}",
                             target_clone,
                             restart_session_id
                         ),
-                        Some(Err(err)) => tracing::warn!(
-                            "⚠️ Failed to send IceRestartRequest to serial={}, session_id={}: {}",
-                            target_clone,
-                            restart_session_id,
-                            err
-                        ),
-                        None => tracing::debug!(
-                            "⏭️ Skipped deferred or stale IceRestartRequest to serial={}, session_id={}",
+                        AnswererRestartRequestOutcome::Abandoned => tracing::debug!(
+                            "⏭️ Answerer restart request abandoned after lifecycle change for serial={}, session_id={}",
                             target_clone,
                             restart_session_id
                         ),
+                        failure => {
+                            tracing::warn!(
+                                "⚠️ Answerer restart request ended with {:?} for serial={}, session_id={}; rebuilding PeerConnection",
+                                failure,
+                                target_clone,
+                                restart_session_id
+                            );
+                            if let Some(coord) = coordinator_weak.upgrade() {
+                                let cleaned = coord
+                                    .fail_peer_recovery(
+                                        &target_clone,
+                                        restart_session_id,
+                                        false,
+                                        "Answerer ICE restart request failed",
+                                    )
+                                    .await;
+                                if cleaned {
+                                    coord
+                                        .rebuild_peer_connection_after_recovery_failure(
+                                            &target_clone,
+                                            restart_session_id,
+                                            cleaned,
+                                            "Answerer ICE restart request failed",
+                                        )
+                                        .await;
+                                }
+                            }
+                        }
                     }
 
                     Self::prune_restart_signaling_gates(&commit_context.state.gates).await;
@@ -7980,6 +8329,14 @@ impl WebRtcCoordinator {
                         && state.session_id == restart_session_id
                     {
                         state.restart_task_handle = None;
+                        if outcome != AnswererRestartRequestOutcome::OfferObserved
+                            && state
+                                .answerer_restart_request
+                                .as_ref()
+                                .is_some_and(|flight| flight.request_id == request_id)
+                        {
+                            state.answerer_restart_request = None;
+                        }
                     }
                 });
                 state.restart_task_handle = Some(handle);
@@ -8043,9 +8400,16 @@ impl WebRtcCoordinator {
                 .await;
 
                 match restart_result {
-                    Ok(IceRestartRunOutcome::Completed) => {
+                    Ok(IceRestartRunOutcome::Recovered) => {
                         tracing::info!(
                             "✅ ICE restart completed for serial={}, session_id={}",
+                            target_clone,
+                            restart_session_id
+                        );
+                    }
+                    Ok(IceRestartRunOutcome::Abandoned) => {
+                        tracing::debug!(
+                            "⏭️ ICE restart abandoned after peer/session lifecycle changed for serial={}, session_id={}",
                             target_clone,
                             restart_session_id
                         );
@@ -8062,7 +8426,9 @@ impl WebRtcCoordinator {
                                 "rejected because the Answerer has no active session",
                                 "ICE restart rejected: no active remote session",
                             ),
-                            IceRestartRunOutcome::Completed => unreachable!(),
+                            IceRestartRunOutcome::Recovered | IceRestartRunOutcome::Abandoned => {
+                                unreachable!()
+                            }
                         };
                         tracing::warn!(
                             "⚠️ ICE restart {} for serial={}, session_id={}, cleaning up matched session",
@@ -8087,17 +8453,12 @@ impl WebRtcCoordinator {
                                     session_id: restart_session_id,
                                     success: false,
                                 });
-                            tracing::info!(
-                                "🧹 Cleaning up old connection after ICE restart failure for serial={}, session_id={}",
-                                target_clone,
-                                restart_session_id
-                            );
-                            if !cleaned {
+                            if cleaned {
                                 coord
-                                    .cleanup_connection_if_session(
+                                    .rebuild_peer_connection_after_recovery_failure(
                                         &target_clone,
                                         restart_session_id,
-                                        false,
+                                        cleaned,
                                         cleanup_reason,
                                     )
                                     .await;
@@ -8129,17 +8490,12 @@ impl WebRtcCoordinator {
                                     session_id: restart_session_id,
                                     success: false,
                                 });
-                            tracing::info!(
-                                "🧹 Cleaning up connection after ICE restart error for serial={}, session_id={}",
-                                target_clone,
-                                restart_session_id
-                            );
-                            if !cleaned {
+                            if cleaned {
                                 coord
-                                    .cleanup_connection_if_session(
+                                    .rebuild_peer_connection_after_recovery_failure(
                                         &target_clone,
                                         restart_session_id,
-                                        false,
+                                        cleaned,
                                         "ICE restart error",
                                     )
                                     .await;
@@ -8212,6 +8568,131 @@ impl WebRtcCoordinator {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn run_answerer_restart_request(
+        target: &ActrId,
+        restart_session_id: u64,
+        request_id: &str,
+        mut progress_rx: watch::Receiver<Option<AnswererRestartProgress>>,
+        commit_context: &PeerSignalingCommitContext,
+        network_recovering_peers: &Arc<PeerRecoveryRegistry>,
+        local_id: &ActrId,
+        credential_state: &CredentialState,
+        cancellation_epoch: u64,
+        signaling_client: &Arc<dyn SignalingClient>,
+    ) -> AnswererRestartRequestOutcome {
+        for attempt in 1..=ANSWERER_RESTART_REQUEST_MAX_ATTEMPTS {
+            if !Self::answerer_restart_request_is_current(
+                &commit_context.peers,
+                network_recovering_peers,
+                target,
+                restart_session_id,
+            )
+            .await
+            {
+                return AnswererRestartRequestOutcome::Abandoned;
+            }
+
+            if !Self::wait_for_signaling_reconnect_for_answerer(signaling_client, target).await {
+                continue;
+            }
+
+            match Self::send_ice_restart_request_if_current(
+                target,
+                restart_session_id,
+                request_id,
+                attempt,
+                commit_context,
+                network_recovering_peers,
+                local_id,
+                credential_state,
+                cancellation_epoch,
+                signaling_client,
+                "network_recovered",
+            )
+            .await
+            {
+                Some(Ok(())) => tracing::info!(
+                    "📤 Sent IceRestartRequest to serial={}, session_id={}, request_id={}, attempt={}",
+                    target,
+                    restart_session_id,
+                    request_id,
+                    attempt
+                ),
+                Some(Err(err)) => {
+                    tracing::warn!(
+                        "⚠️ Failed IceRestartRequest send to serial={}, request_id={}, attempt={}: {}",
+                        target,
+                        request_id,
+                        attempt,
+                        err
+                    );
+                    continue;
+                }
+                None => return AnswererRestartRequestOutcome::Abandoned,
+            }
+
+            let progress = crate::timer::timeout(
+                crate::timer::ids::WEBRTC_ICE_RESTART_WAIT,
+                ANSWERER_RESTART_OFFER_WAIT_TIMEOUT,
+                async {
+                    loop {
+                        let current = *progress_rx.borrow_and_update();
+                        match current {
+                            Some(AnswererRestartProgress::OfferObserved) => {
+                                return Some(AnswererRestartProgress::OfferObserved);
+                            }
+                            Some(AnswererRestartProgress::RejectedNoActiveSession) => {
+                                return Some(AnswererRestartProgress::RejectedNoActiveSession);
+                            }
+                            Some(AnswererRestartProgress::RejectedWrongRole) => {
+                                return Some(AnswererRestartProgress::RejectedWrongRole);
+                            }
+                            Some(AnswererRestartProgress::Accepted(accepted_attempt))
+                                if accepted_attempt >= attempt =>
+                            {
+                                tracing::debug!(
+                                    "✅ Offerer accepted IceRestartRequest: serial={}, request_id={}, attempt={}",
+                                    target,
+                                    request_id,
+                                    accepted_attempt
+                                );
+                            }
+                            Some(AnswererRestartProgress::Accepted(_)) | None => {}
+                        }
+
+                        if progress_rx.changed().await.is_err() {
+                            return None;
+                        }
+                    }
+                },
+            )
+            .await;
+
+            match progress {
+                Ok(Some(AnswererRestartProgress::OfferObserved)) => {
+                    return AnswererRestartRequestOutcome::OfferObserved;
+                }
+                Ok(Some(AnswererRestartProgress::RejectedNoActiveSession)) => {
+                    return AnswererRestartRequestOutcome::RejectedNoActiveSession;
+                }
+                Ok(Some(AnswererRestartProgress::RejectedWrongRole)) => {
+                    return AnswererRestartRequestOutcome::RejectedWrongRole;
+                }
+                Ok(Some(AnswererRestartProgress::Accepted(_))) => unreachable!(),
+                Ok(None) => return AnswererRestartRequestOutcome::Abandoned,
+                Err(_) => tracing::warn!(
+                    "⏱️ No ICE restart offer observed from serial={} for request_id={}, attempt={}; retransmitting",
+                    target,
+                    request_id,
+                    attempt
+                ),
+            }
+        }
+
+        AnswererRestartRequestOutcome::Exhausted
+    }
+
     /// Check whether a deferred Answerer request still targets the active session
     /// and remains needed: the peer is unavailable, or a matching network-recovery
     /// guard is proactively recovering a session that may still report `Connected`.
@@ -8245,6 +8726,8 @@ impl WebRtcCoordinator {
     async fn send_ice_restart_request_if_current(
         target: &ActrId,
         restart_session_id: u64,
+        request_id: &str,
+        attempt: u32,
         commit_context: &PeerSignalingCommitContext,
         network_recovering_peers: &Arc<PeerRecoveryRegistry>,
         local_id: &ActrId,
@@ -8265,6 +8748,8 @@ impl WebRtcCoordinator {
             target,
             actr_relay::Payload::IceRestartRequest(IceRestartRequest {
                 reason: Some(reason.to_string()),
+                request_id: Some(request_id.to_string()),
+                attempt: Some(attempt),
             }),
         );
 
@@ -8281,6 +8766,15 @@ impl WebRtcCoordinator {
         {
             return None;
         }
+        {
+            let mut peers = commit_context.peers.write().await;
+            let state = peers.get_mut(target)?;
+            let flight = state.answerer_restart_request.as_mut()?;
+            if state.session_id != restart_session_id || flight.request_id != request_id {
+                return None;
+            }
+            flight.latest_attempt = attempt;
+        }
         Some(
             Self::send_peer_signaling_envelope_while_guarded(
                 &commit_guard,
@@ -8293,67 +8787,192 @@ impl WebRtcCoordinator {
 
     /// Handle incoming IceRestartRequest from Answerer (Approach A).
     ///
-    /// Three scenarios:
-    /// 1. Restart already in-flight & task running → wake up backoff via `notify_one()`
-    /// 2. No restart in-flight & we are offerer → initiate new `restart_ice()`
-    /// 3. We are not the offerer → ignore (shouldn't happen in normal flow)
+    /// Correlated requests are acknowledged on every delivery. A duplicate of
+    /// the same attempt is side-effect free; a higher attempt may wake an
+    /// in-flight restart because it proves the prior offer was not observed.
     async fn handle_ice_restart_request(
         self: &Arc<Self>,
         from: &ActrId,
-        reason: Option<String>,
+        request: IceRestartRequest,
     ) -> ActorResult<()> {
-        let (is_offerer, has_inflight_restart) = {
-            let peers = self.peers.read().await;
-            match peers.get(from) {
-                Some(state) => {
-                    let has_inflight = state
-                        .restart_task_handle
-                        .as_ref()
-                        .map(|h| !h.is_finished())
-                        .unwrap_or(false);
-                    (state.is_offerer, has_inflight)
+        enum Disposition {
+            WrongRole {
+                session_id: u64,
+            },
+            Accepted {
+                session_id: u64,
+                action: RequestAction,
+            },
+        }
+
+        enum RequestAction {
+            None,
+            Wake(Arc<tokio::sync::Notify>),
+            Start,
+        }
+
+        let request_id = request.request_id.clone();
+        let attempt = request.attempt.unwrap_or(1).max(1);
+        let disposition = {
+            let mut peers = self.peers.write().await;
+            let Some(state) = peers.get_mut(from) else {
+                tracing::warn!("⚠️ IceRestartRequest from unknown peer serial={}", from);
+                drop(peers);
+                if let Some(request_id) = request_id.as_deref()
+                    && let Some(lifecycle_epoch) = self.capture_peer_lifecycle_epoch().await
+                {
+                    self.send_ice_restart_request_ack_if_peer_absent(
+                        from,
+                        request_id,
+                        attempt,
+                        lifecycle_epoch,
+                    )
+                    .await?;
                 }
-                None => {
-                    tracing::warn!("⚠️ IceRestartRequest from unknown peer serial={}", from);
-                    return Ok(());
+                return Ok(());
+            };
+
+            if !state.is_offerer {
+                Disposition::WrongRole {
+                    session_id: state.session_id,
+                }
+            } else {
+                let is_new_attempt = record_ice_restart_request_attempt(
+                    &mut state.received_ice_restart_request,
+                    request_id.as_deref(),
+                    attempt,
+                );
+
+                let running = state
+                    .restart_task_handle
+                    .as_ref()
+                    .is_some_and(|handle| !handle.is_finished());
+                let action = if !is_new_attempt {
+                    RequestAction::None
+                } else if running {
+                    RequestAction::Wake(state.restart_wake.clone())
+                } else {
+                    if state.restart_task_handle.is_some() {
+                        state.restart_task_handle.take();
+                        state.ice_restart_inflight = false;
+                    }
+                    RequestAction::Start
+                };
+                Disposition::Accepted {
+                    session_id: state.session_id,
+                    action,
                 }
             }
         };
 
-        if !is_offerer {
-            tracing::warn!(
-                "⚠️ Received IceRestartRequest but we are not offerer for serial={}",
-                from
-            );
-            return Ok(());
-        }
-
-        if has_inflight_restart {
-            // Restart task is running — it's either in backoff sleep or waiting for answer.
-            // Either way, notify_one() is safe and idempotent:
-            //   - If in backoff sleep: wakes up immediately, retries ICE restart
-            //   - If waiting for answer: notify stored, consumed after wait_for_completion timeout
-            //   - If creating/sending offer: notify stored, consumed at next backoff
-            tracing::info!(
-                "⚡ Waking up ICE restart backoff for serial={} (peer notification, reason={:?})",
-                from,
-                reason
-            );
-            let peers = self.peers.read().await;
-            if let Some(state) = peers.get(from) {
-                state.restart_wake.notify_one();
+        let (session_id, outcome) = match disposition {
+            Disposition::WrongRole { session_id } => {
+                tracing::warn!(
+                    "⚠️ Rejecting IceRestartRequest because local peer is not offerer: serial={}",
+                    from
+                );
+                (session_id, ice_restart_request_ack::Outcome::WrongRole)
             }
-        } else {
-            // No restart running — initiate one now
-            tracing::info!(
-                "♻️ Initiating ICE restart for serial={} upon peer request (reason={:?})",
-                from,
-                reason
-            );
-            self.restart_ice(from).await?;
+            Disposition::Accepted { session_id, action } => {
+                match action {
+                    RequestAction::None => tracing::debug!(
+                        "⏭️ Re-acknowledging duplicate IceRestartRequest without restarting SDP: serial={}, request_id={:?}, attempt={}",
+                        from,
+                        request_id,
+                        attempt
+                    ),
+                    RequestAction::Wake(restart_wake) => {
+                        tracing::info!(
+                            "⚡ Waking ICE restart after a newer Answerer request attempt: serial={}, request_id={:?}, attempt={}",
+                            from,
+                            request_id,
+                            attempt
+                        );
+                        restart_wake.notify_one();
+                    }
+                    RequestAction::Start => {
+                        tracing::info!(
+                            "♻️ Initiating ICE restart for serial={} upon peer request (reason={:?})",
+                            from,
+                            request.reason
+                        );
+                        self.restart_ice(from).await?;
+                    }
+                }
+                (session_id, ice_restart_request_ack::Outcome::Accepted)
+            }
+        };
+
+        if let Some(request_id) = request_id {
+            let sent = self
+                .commit_peer_signaling(
+                    from,
+                    session_id,
+                    None,
+                    actr_relay::Payload::IceRestartRequestAck(IceRestartRequestAck {
+                        request_id,
+                        attempt: Some(attempt),
+                        outcome: Some(outcome as i32),
+                    }),
+                )
+                .await?;
+            if !sent {
+                tracing::debug!(
+                    "⏭️ Skipped IceRestartRequestAck after peer session changed: serial={}, session_id={}",
+                    from,
+                    session_id
+                );
+            }
         }
 
         Ok(())
+    }
+
+    async fn handle_ice_restart_request_ack(&self, from: &ActrId, ack: IceRestartRequestAck) {
+        let attempt = ack.attempt.unwrap_or(1).max(1);
+        let progress = match ice_restart_request_ack::Outcome::try_from(ack.outcome.unwrap_or(0)) {
+            Ok(ice_restart_request_ack::Outcome::Accepted) => {
+                AnswererRestartProgress::Accepted(attempt)
+            }
+            Ok(ice_restart_request_ack::Outcome::NoActiveSession) => {
+                AnswererRestartProgress::RejectedNoActiveSession
+            }
+            Ok(ice_restart_request_ack::Outcome::WrongRole) => {
+                AnswererRestartProgress::RejectedWrongRole
+            }
+            Err(_) => {
+                tracing::warn!(
+                    "🚫 Ignoring IceRestartRequestAck with unknown outcome from serial={}: request_id={}, outcome={:?}",
+                    from,
+                    ack.request_id,
+                    ack.outcome
+                );
+                return;
+            }
+        };
+
+        let peers = self.peers.read().await;
+        let Some(state) = peers.get(from) else {
+            return;
+        };
+        let Some(flight) = state.answerer_restart_request.as_ref() else {
+            return;
+        };
+        if state.is_offerer
+            || flight.request_id != ack.request_id
+            || attempt != flight.latest_attempt
+        {
+            tracing::debug!(
+                "⏭️ Ignoring stale or role-invalid IceRestartRequestAck: serial={}, request_id={}, attempt={}",
+                from,
+                ack.request_id,
+                attempt
+            );
+            return;
+        }
+        flight
+            .progress_tx
+            .send_if_modified(|current| record_answerer_restart_progress(current, progress));
     }
 
     /// Handle an Answerer's explicit rejection of the current restart offer.
@@ -8451,7 +9070,7 @@ impl WebRtcCoordinator {
                     target,
                     restart_session_id
                 );
-                return Ok(IceRestartRunOutcome::Completed);
+                return Ok(IceRestartRunOutcome::Abandoned);
             }
 
             // ========== Guard 1: Check signaling state ==========
@@ -8561,7 +9180,7 @@ impl WebRtcCoordinator {
                             restart_session_id,
                             state.session_id
                         );
-                        return Ok(IceRestartRunOutcome::Completed);
+                        return Ok(IceRestartRunOutcome::Abandoned);
                     }
                     None => {
                         tracing::warn!(
@@ -8569,7 +9188,7 @@ impl WebRtcCoordinator {
                             target,
                             restart_session_id
                         );
-                        return Ok(IceRestartRunOutcome::Completed);
+                        return Ok(IceRestartRunOutcome::Abandoned);
                     }
                 }
             };
@@ -8617,7 +9236,7 @@ impl WebRtcCoordinator {
                             restart_session_id,
                             s.session_id
                         );
-                        return Ok(IceRestartRunOutcome::Completed);
+                        return Ok(IceRestartRunOutcome::Abandoned);
                     }
                     None => {
                         tracing::warn!(
@@ -8625,7 +9244,7 @@ impl WebRtcCoordinator {
                             target,
                             restart_session_id
                         );
-                        return Ok(IceRestartRunOutcome::Completed);
+                        return Ok(IceRestartRunOutcome::Abandoned);
                     }
                 };
 
@@ -8671,7 +9290,7 @@ impl WebRtcCoordinator {
                     target,
                     restart_session_id
                 );
-                return Ok(IceRestartRunOutcome::Completed);
+                return Ok(IceRestartRunOutcome::Abandoned);
             }
             let offer_sdp = negotiator
                 .create_ice_restart_offer(&peer_connection)
@@ -8687,7 +9306,7 @@ impl WebRtcCoordinator {
                     target,
                     restart_session_id
                 );
-                return Ok(IceRestartRunOutcome::Completed);
+                return Ok(IceRestartRunOutcome::Abandoned);
             }
 
             // Phase 3: re-acquire lock — verify peer/session is still current.
@@ -8702,7 +9321,7 @@ impl WebRtcCoordinator {
                             restart_session_id,
                             state.session_id
                         );
-                        return Ok(IceRestartRunOutcome::Completed);
+                        return Ok(IceRestartRunOutcome::Abandoned);
                     }
                     None => {
                         tracing::warn!(
@@ -8710,7 +9329,7 @@ impl WebRtcCoordinator {
                             target,
                             restart_session_id
                         );
-                        return Ok(IceRestartRunOutcome::Completed);
+                        return Ok(IceRestartRunOutcome::Abandoned);
                     }
                 }
             }
@@ -8738,7 +9357,7 @@ impl WebRtcCoordinator {
                     target,
                     restart_session_id
                 );
-                return Ok(IceRestartRunOutcome::Completed);
+                return Ok(IceRestartRunOutcome::Abandoned);
             };
 
             if !Self::record_pending_local_offer_for_peer(
@@ -8756,7 +9375,7 @@ impl WebRtcCoordinator {
                     target,
                     restart_session_id
                 );
-                return Ok(IceRestartRunOutcome::Completed);
+                return Ok(IceRestartRunOutcome::Abandoned);
             }
 
             if let Err(e) = Self::send_peer_signaling_envelope_while_guarded(
@@ -8792,9 +9411,9 @@ impl WebRtcCoordinator {
                             restart_session_id,
                             state.session_id
                         );
-                        return Ok(IceRestartRunOutcome::Completed);
+                        return Ok(IceRestartRunOutcome::Abandoned);
                     }
-                    None => return Ok(IceRestartRunOutcome::Completed),
+                    None => return Ok(IceRestartRunOutcome::Abandoned),
                 }
                 drop(peers_guard);
                 drop(commit_guard);
@@ -8873,8 +9492,11 @@ impl WebRtcCoordinator {
             .await;
 
             match wait_outcome {
-                IceRestartWaitOutcome::Completed => {
-                    return Ok(IceRestartRunOutcome::Completed);
+                IceRestartWaitOutcome::Recovered => {
+                    return Ok(IceRestartRunOutcome::Recovered);
+                }
+                IceRestartWaitOutcome::Abandoned => {
+                    return Ok(IceRestartRunOutcome::Abandoned);
                 }
                 IceRestartWaitOutcome::Woken => {
                     tracing::info!(
@@ -8911,9 +9533,9 @@ impl WebRtcCoordinator {
                                 restart_session_id,
                                 state.session_id
                             );
-                            return Ok(IceRestartRunOutcome::Completed);
+                            return Ok(IceRestartRunOutcome::Abandoned);
                         }
-                        None => return Ok(IceRestartRunOutcome::Completed),
+                        None => return Ok(IceRestartRunOutcome::Abandoned),
                     };
                     if rejected {
                         return Ok(IceRestartRunOutcome::RejectedNoActiveSession);
@@ -8968,9 +9590,9 @@ impl WebRtcCoordinator {
                             restart_session_id,
                             state.session_id
                         );
-                        return Ok(IceRestartRunOutcome::Completed);
+                        return Ok(IceRestartRunOutcome::Abandoned);
                     }
-                    None => return Ok(IceRestartRunOutcome::Completed),
+                    None => return Ok(IceRestartRunOutcome::Abandoned),
                 }
             };
             if rejected {
@@ -9039,18 +9661,18 @@ impl WebRtcCoordinator {
                 match peers_guard.get(target) {
                     Some(state) if state.session_id != restart_session_id => {
                         tracing::debug!(
-                            "⏭️ Treating ICE restart as complete because session changed: serial={}, task_session_id={}, active_session_id={}",
+                            "⏭️ Abandoning ICE restart because session changed: serial={}, task_session_id={}, active_session_id={}",
                             target,
                             restart_session_id,
                             state.session_id
                         );
-                        return IceRestartWaitOutcome::Completed;
+                        return IceRestartWaitOutcome::Abandoned;
                     }
                     Some(state) => {
                         !state.ice_restart_inflight
                             && matches!(state.current_state, RTCPeerConnectionState::Connected)
                     }
-                    None => return IceRestartWaitOutcome::Completed,
+                    None => return IceRestartWaitOutcome::Abandoned,
                 }
             };
             if is_done {
@@ -9060,7 +9682,7 @@ impl WebRtcCoordinator {
                         state.ice_restart_attempts = 0;
                     }
                 }
-                return IceRestartWaitOutcome::Completed;
+                return IceRestartWaitOutcome::Recovered;
             }
 
             tokio::select! {
@@ -9094,7 +9716,7 @@ impl WebRtcCoordinator {
                         Ok(_) => continue,
                         Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {}
                         Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                            return IceRestartWaitOutcome::Completed;
+                            return IceRestartWaitOutcome::Abandoned;
                         }
                     }
                 }
@@ -9237,6 +9859,54 @@ impl WebRtcCoordinator {
         result
     }
 
+    async fn send_ice_restart_request_ack_if_peer_absent(
+        &self,
+        target: &ActrId,
+        request_id: &str,
+        attempt: u32,
+        lifecycle_epoch: u64,
+    ) -> ActorResult<bool> {
+        let envelope = Self::build_actr_relay_envelope(
+            self.local_id_snapshot(),
+            self.credential_state.credential().await,
+            target,
+            actr_relay::Payload::IceRestartRequestAck(IceRestartRequestAck {
+                request_id: request_id.to_string(),
+                attempt: Some(attempt),
+                outcome: Some(ice_restart_request_ack::Outcome::NoActiveSession as i32),
+            }),
+        );
+        let commit_context = self.peer_signaling_commit_context();
+        let Some(commit_guard) = commit_context
+            .acquire_pre_session_commit(target, lifecycle_epoch)
+            .await
+        else {
+            return Ok(false);
+        };
+
+        if self.peers.read().await.contains_key(target) {
+            drop(commit_guard);
+            Self::prune_restart_signaling_gates(&self.peer_signaling.gates).await;
+            return Ok(false);
+        }
+
+        let result = Self::send_peer_signaling_envelope_while_guarded(
+            &commit_guard,
+            &self.signaling_client,
+            envelope,
+        )
+        .await
+        .map(|()| true)
+        .map_err(|err| {
+            ActrError::Unavailable(format!(
+                "Failed to reject ICE restart request for missing peer session: {err}"
+            ))
+        });
+        drop(commit_guard);
+        Self::prune_restart_signaling_gates(&self.peer_signaling.gates).await;
+        result
+    }
+
     /// Handle ICE restart Offer on an existing connection.
     /// Only the answerer should accept restart; offerer-side restarts are initiated locally.
     async fn handle_ice_restart_offer(
@@ -9258,7 +9928,7 @@ impl WebRtcCoordinator {
             .load(Ordering::Acquire);
 
         // Locate peer state and ensure we are not the offerer
-        let (peer_connection, is_offerer, session_id) = {
+        let (peer_connection, is_offerer, session_id, answerer_progress_tx) = {
             let peers = self.peers.read().await;
             let Some(state) = peers.get(from) else {
                 drop(peers);
@@ -9311,6 +9981,10 @@ impl WebRtcCoordinator {
                 state.peer_connection.clone(),
                 state.is_offerer,
                 state.session_id,
+                state
+                    .answerer_restart_request
+                    .as_ref()
+                    .map(|flight| flight.progress_tx.clone()),
             )
         };
 
@@ -9321,6 +9995,11 @@ impl WebRtcCoordinator {
             );
             return Ok(());
         }
+
+        // `answerer_progress_tx` is captured above but OfferObserved is only
+        // published after the restart offer is fully applied below; an early
+        // record would let the Answerer request task exit as observed and
+        // suppress subsequent restart_ice retries when a later step fails.
 
         // A restart offer cannot be applied to a closed PeerConnection, so
         // reject it exactly like the unknown-peer case: tear down the dead
@@ -9459,6 +10138,16 @@ impl WebRtcCoordinator {
         self.flush_pending_candidates(from, session_id, &peer_connection)
             .await?;
 
+        // The restart offer is now fully applied and signaled. Publish
+        // OfferObserved only here so a create_answer/signaling/flush error
+        // above leaves the Answerer request flight open for bounded retry
+        // instead of falsely reporting the offer as observed.
+        if let Some(progress_tx) = answerer_progress_tx {
+            progress_tx.send_if_modified(|current| {
+                record_answerer_restart_progress(current, AnswererRestartProgress::OfferObserved)
+            });
+        }
+
         tracing::info!(
             "✅ Completed ICE restart answer to serial={}, session_id={}; waiting for ICE Connected before marking sendable",
             from,
@@ -9510,6 +10199,14 @@ impl WebRtcCoordinator {
                             "answerer restart verified ready",
                         )
                         .await;
+                    {
+                        let mut peers = peers.write().await;
+                        if let Some(state) = peers.get_mut(&from_id)
+                            && state.session_id == session_id
+                        {
+                            state.answerer_restart_request = None;
+                        }
+                    }
                     event_broadcaster.send(ConnectionEvent::IceRestartCompleted {
                         peer_id: from_id.clone(),
                         session_id,
@@ -9521,11 +10218,25 @@ impl WebRtcCoordinator {
                         from_id,
                         session_id
                     );
-                    // This readiness waiter is itself stored on the peer.
-                    // Teardown must not abort the currently executing task;
-                    // removing the exact session is sufficient to make every
-                    // other session-scoped operation stop.
-                    coordinator_for_wait
+                    // This readiness waiter is itself stored on the peer in
+                    // `answerer_restart_ready_handle`, and teardown aborts that
+                    // handle unconditionally (even with `abort_restart_task =
+                    // false`). Detach self first so the teardown about to run
+                    // cannot abort+await the currently-executing task — that
+                    // self-abort would unwind the waiter before it reached the
+                    // rebuild. The waiter completes after rebuilding, so
+                    // leaving it untracked here is safe; a concurrent newer
+                    // restart answer is reconciled by the session guard in
+                    // rebuild and the single-flight ownership of the claim.
+                    {
+                        let mut peers_guard = peers.write().await;
+                        if let Some(state) = peers_guard.get_mut(&from_id)
+                            && state.session_id == session_id
+                        {
+                            state.answerer_restart_ready_handle = None;
+                        }
+                    }
+                    let cleaned = coordinator_for_wait
                         .fail_peer_recovery(
                             &from_id,
                             session_id,
@@ -9538,6 +10249,21 @@ impl WebRtcCoordinator {
                         session_id,
                         success: false,
                     });
+                    // The Answerer flight already completed when the offer was
+                    // observed, so nothing else retries; this waiter must
+                    // rebuild autonomously, but only if it owned the claim.
+                    // The autonomous deadline handler rebuilds when it owns
+                    // the claim instead, so standing down here is safe.
+                    if cleaned {
+                        coordinator_for_wait
+                            .rebuild_peer_connection_after_recovery_failure(
+                                &from_id,
+                                session_id,
+                                cleaned,
+                                "answerer restart readiness failed",
+                            )
+                            .await;
+                    }
                 }
             });
             // Track the readiness waiter so a newer restart answer supersedes

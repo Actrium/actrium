@@ -572,6 +572,17 @@ async fn handle_actr_relay(
         state
             .ice_restart_request_count
             .fetch_add(1, Ordering::SeqCst);
+
+        if state
+            .ice_restart_request_drop_count
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |count| {
+                if count > 0 { Some(count - 1) } else { None }
+            })
+            .is_ok()
+        {
+            tracing::warn!("🧪 Dropping test ICE restart request relay");
+            return;
+        }
     }
 
     if state.pause_forwarding.load(Ordering::Acquire) {

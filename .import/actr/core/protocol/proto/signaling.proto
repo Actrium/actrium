@@ -107,5 +107,7 @@ message ActrRelay {
     actr.IceRestartRequest ice_restart_request = 14;
     // Receiver cannot apply the correlated restart to an active session.
     webrtc.IceRestartRejected ice_restart_rejected = 15;
+    // Receiver confirms or rejects a correlated Answerer restart request.
+    actr.IceRestartRequestAck ice_restart_request_ack = 16;
   }
 }
