@@ -30,6 +30,43 @@ use actr_protocol::{ActrId, ActrType, Realm, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use tempfile::TempDir;
 
+/// Install a tracing subscriber so the caller→signaling→`admit_incoming`→
+/// scheduler→handler trail is visible if a dispatch hangs. nextest runs each
+/// test in its own process, so `try_init` is safe. The `EnvFilter` keeps the
+/// noisy transport layers (tungstenite/webrtc) at `warn` while exposing the
+/// dispatch path at `debug`; `RUST_LOG` overrides this when set. Without this
+/// the test has no subscriber at all, so every `tracing` event is dropped and
+/// a hang leaves nothing to diagnose (the failure mode behind issue #500).
+fn init_tracing() {
+    use tracing_subscriber::{filter::EnvFilter, fmt, prelude::*};
+    let directive = std::env::var("RUST_LOG").unwrap_or_else(|_| {
+        "warn,actr_hyper::lifecycle=debug,actr_hyper::wire::webrtc=debug,actr_hyper::dispatch=debug,actr_hyper::outbound=debug".to_string()
+    });
+    let filter = EnvFilter::try_new(&directive).unwrap_or_else(|_| EnvFilter::new("warn"));
+    let _ = tracing_subscriber::registry()
+        .with(
+            fmt::layer()
+                .with_file(true)
+                .with_line_number(true)
+                .with_test_writer(),
+        )
+        .with(filter)
+        .try_init();
+}
+
+/// Bound node teardown so a stuck shutdown cannot hang the whole test binary —
+/// the failure mode behind issue #500's 5h+ CI run. `ActrRef::shutdown` is
+/// non-blocking; the `wait_for_shutdown` is the part that can stall.
+async fn bounded_shutdown(node: &ActrRef, label: &str) {
+    node.shutdown();
+    if tokio::time::timeout(std::time::Duration::from_secs(15), node.wait_for_shutdown())
+        .await
+        .is_err()
+    {
+        panic!("{label} did not shut down within 15s");
+    }
+}
+
 const ROUTE: &str = "echo";
 
 #[derive(Clone, PartialEq, ProstMessage)]
@@ -75,6 +112,10 @@ impl MessageDispatcher for BarrierDispatcher {
         _ctx: &C,
     ) -> actr_protocol::ActorResult<Bytes> {
         workload.entered.fetch_add(1, Ordering::SeqCst);
+        tracing::debug!(
+            "barrier dispatch handler entered: route_key={}",
+            envelope.route_key
+        );
         // Blocks until the required number of parties are simultaneously here.
         workload.barrier.wait().await;
         Ok(envelope.payload.unwrap_or_default())
@@ -109,6 +150,10 @@ impl MessageDispatcher for GatedDispatcher {
         _ctx: &C,
     ) -> actr_protocol::ActorResult<Bytes> {
         workload.entered.fetch_add(1, Ordering::SeqCst);
+        tracing::debug!(
+            "gated dispatch handler entered: route_key={}",
+            envelope.route_key
+        );
         // Publish a release handle to the test and park until it fires. If the
         // test dropped the receiver (teardown), we simply complete.
         let (rel_tx, rel_rx) = tokio::sync::oneshot::channel::<()>();
@@ -343,6 +388,7 @@ async fn setup_serial(
 /// flight together, so both calls returning is the concurrency proof.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn distinct_keys_dispatch_concurrently_end_to_end() {
+    init_tracing();
     let mut server = TestSignalingServer::start().await.expect("server start");
     let dir_a = TempDir::new().unwrap();
     let dir_b = TempDir::new().unwrap();
@@ -411,11 +457,11 @@ async fn distinct_keys_dispatch_concurrently_end_to_end() {
         "both handlers must have entered"
     );
 
-    caller.shutdown();
-    caller.wait_for_shutdown().await;
-    echo.shutdown();
-    echo.wait_for_shutdown().await;
-    server.shutdown().await;
+    bounded_shutdown(&caller, "caller").await;
+    bounded_shutdown(&echo, "echo").await;
+    tokio::time::timeout(std::time::Duration::from_secs(15), server.shutdown())
+        .await
+        .expect("signaling server did not shut down within 15s");
 }
 
 /// Gate ON but NO key declared → both requests project to the global `Serial`
@@ -432,6 +478,7 @@ async fn distinct_keys_dispatch_concurrently_end_to_end() {
 /// for (and forbids) sleep-based coordination.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn undeclared_route_stays_serial_end_to_end() {
+    init_tracing();
     let mut server = TestSignalingServer::start().await.expect("server start");
     let dir_a = TempDir::new().unwrap();
     let dir_b = TempDir::new().unwrap();
@@ -479,11 +526,54 @@ async fn undeclared_route_stays_serial_end_to_end() {
         })
     };
 
-    // The first handler enters and parks on its release channel.
-    let rel1 = entry_rx
-        .recv()
-        .await
-        .expect("first handler must enter and publish its release handle");
+    // The first handler enters and parks on its release channel. This `recv`
+    // is the point that hung unbounded in CI (issue #500): if the first
+    // dispatch never reached the handler — e.g. a session race dropped the
+    // envelope before `admit_incoming`, or the scheduler never started the
+    // job — this would block forever and nextest had no per-test cap to kill
+    // it. Bound it so a stuck dispatch fails loudly with the in-flight calls'
+    // status instead of stalling the runner, and so the tracing trail is
+    // captured rather than lost to a 5h+ timeout.
+    let rel1 = match tokio::time::timeout(std::time::Duration::from_secs(30), entry_rx.recv()).await
+    {
+        Ok(Some(rel)) => rel,
+        Ok(None) => panic!(
+            "entry channel closed before the first handler published its release \
+             handle (entered_count={}); the echo node dispatch path exited \
+             without entering the handler — see tracing output for the \
+             '📨 Handling incoming' / scheduler / 'dispatch handler entered' trail",
+            entered.load(Ordering::SeqCst)
+        ),
+        Err(_) => {
+            // First handler never entered within 30s. Probe the in-flight
+            // calls' status (non-blocking `is_finished`, so the handles stay
+            // usable on the success path): a finished call means it already
+            // resolved — almost certainly with an error, since the handler
+            // never entered — pointing at a session/transport race; a pending
+            // call means the envelope produced no reply at all. The actual
+            // error (TimedOut / ConnectionNotReady / Unavailable) is in the
+            // tracing output emitted by the caller's `PeerGate`.
+            let entered_now = entered.load(Ordering::SeqCst);
+            let c1_status = if c1.is_finished() {
+                "finished"
+            } else {
+                "pending"
+            };
+            let c2_status = if c2.is_finished() {
+                "finished"
+            } else {
+                "pending"
+            };
+            panic!(
+                "first dispatch handler never entered within 30s \
+                 (entered_count={entered_now}); call status: c1={c1_status}, \
+                 c2={c2_status}. Inspect the tracing output for the '📨 Handling \
+                 incoming' → 'admitting inbound RPC to dispatch scheduler' → \
+                 'dispatch scheduler started job' → 'dispatch handler entered' \
+                 trail to locate where the request stalled."
+            );
+        }
+    };
 
     // While the first handler is held in flight, a serial runner must NOT have
     // started the second one. A concurrent dispatch would surface a second entry
@@ -539,9 +629,9 @@ async fn undeclared_route_stays_serial_end_to_end() {
         "both handlers must eventually have run"
     );
 
-    caller.shutdown();
-    caller.wait_for_shutdown().await;
-    echo.shutdown();
-    echo.wait_for_shutdown().await;
-    server.shutdown().await;
+    bounded_shutdown(&caller, "caller").await;
+    bounded_shutdown(&echo, "echo").await;
+    tokio::time::timeout(std::time::Duration::from_secs(15), server.shutdown())
+        .await
+        .expect("signaling server did not shut down within 15s");
 }

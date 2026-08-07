@@ -1645,6 +1645,11 @@ impl Inner {
             let executor = call_executor;
             let run: crate::dispatch::scheduler::DispatchFn = Box::new(move || {
                 Box::pin(async move {
+                    tracing::debug!(
+                        "dispatch scheduler started job: route_key={}, request_id={}",
+                        env.route_key,
+                        env.request_id
+                    );
                     workload
                         .dispatch_envelope(env, ctx_run, invocation, &executor)
                         .await
@@ -1652,6 +1657,13 @@ impl Inner {
             });
             // Submission (queue-slot acquisition + arrival-order enqueue) happens
             // now, before returning — this `.await` is the back-pressure point.
+            tracing::debug!(
+                "admitting inbound RPC to dispatch scheduler: route_key={}, \
+                 caller={:?}, conflict_key={:?}",
+                envelope.route_key,
+                caller_id,
+                key
+            );
             let rx = scheduler.submit(key, run).await;
             Box::pin(async move {
                 let result = rx.await.unwrap_or_else(|_| {
