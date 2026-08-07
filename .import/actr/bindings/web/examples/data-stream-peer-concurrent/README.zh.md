@@ -1,4 +1,7 @@
-# Data Stream Peer Concurrent - Web Example
+# Data Stream Peer Concurrent - Legacy / Unsafe Web Example
+
+> [!CAUTION]
+> 这是一个保留用于历史 Fast Path 调试的 legacy 示例，不是当前受支持的安全 Web workload 流程。它的自定义 Service Worker 会直接获取并执行松散的 wasm-bindgen JavaScript 和 `_bg.wasm`，不会验证 `.actr` 签名或内容 hash。`start.sh` 默认拒绝启动。当前流程请使用 [`../echo/start-mock.sh`](../echo/start-mock.sh)，直到本示例完成 signed `.actr` 迁移。
 
 这个示例把 [examples/rust/data-stream-peer-concurrent](../../../../examples/rust/data-stream-peer-concurrent/README.md) 的核心流程搬到了浏览器端：
 
@@ -31,11 +34,13 @@ data-stream-peer-concurrent/
 1. 安装：Node.js 18+、pnpm、Rust 1.95+、wasm-pack
 2. `start.sh` 会自动构建并启动本仓库的 `mock-actrix`，不需要外部 `actrix` checkout、STUN/TURN 服务或手工写 SQLite
 
-## 运行方式
+## Legacy 调试方式（不安全）
+
+不要在生产环境、共享环境或处理不可信输入时运行。只有在隔离的本地环境中确认接受未验证代码执行风险后，才能显式启用：
 
 ```bash
 cd bindings/web/examples/data-stream-peer-concurrent
-./start.sh
+ACTR_ALLOW_UNVERIFIED_LEGACY_WBG=1 ./start.sh
 ```
 
 默认使用 `8081`。如果本机已有旧的 `8081` 服务，请先关闭它再运行这个示例。
@@ -48,9 +53,11 @@ cd bindings/web/examples/data-stream-peer-concurrent
 4. 启动一个 Server Vite dev server 和两个 Client Vite dev server
 5. 运行 `test-auto.js` 做并发验证
 
-推荐优先使用 `./start.sh` 做验证。这个示例默认不启动 STUN/TURN，自动测试会通过 Puppeteer 使用独立浏览器上下文，并关闭 Chrome 的 WebRTC mDNS 本地地址隐藏，避免本机 DataChannel 建连受 `*.local` candidate 影响。
+这条 legacy 路径不作为当前 Web runtime 的验收依据。它默认不启动 STUN/TURN；显式启用后的自动测试会通过 Puppeteer 使用独立浏览器上下文，并关闭 Chrome 的 WebRTC mDNS 本地地址隐藏，避免本机 DataChannel 建连受 `*.local` candidate 影响。
 
-## 单独跑自动化测试
+## 单独跑 legacy 自动化测试
+
+下面的分步命令同样会执行未经 package 验证的松散 JS/WASM，只能用于隔离的历史调试：
 
 ```bash
 cd bindings/web/examples/data-stream-peer-concurrent

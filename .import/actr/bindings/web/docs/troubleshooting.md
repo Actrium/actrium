@@ -36,15 +36,18 @@ cd bindings/web
 bash scripts/sync-cli-assets.sh --build
 ```
 
-### `.wbg` guest bundle is missing
+### Packaged wasm-bindgen guest is missing
 
-The current Service Worker resolves the browser guest from a sibling `.wbg/` directory. For a package named `acme-demo-0.1.0-wasm32-wasip2.actr`, the browser path should include:
+The current Service Worker executes only artifacts extracted from the verified `.actr`. Inspect the package and confirm it contains:
 
 ```text
-acme-demo-0.1.0-wasm32-wasip2.actr
-acme-demo-0.1.0-wasm32-wasip2.wbg/guest.js
-acme-demo-0.1.0-wasm32-wasip2.wbg/guest_bg.wasm
+manifest.toml
+manifest.sig
+<manifest binary path>       # wasm-bindgen *_bg.wasm
+resources/glue.js            # signed wasm-bindgen JavaScript glue
 ```
+
+The manifest must hash the binary and list/hash `resources/glue.js` as a resource. A sibling `.wbg/` directory is not a runtime input.
 
 The echo script lays this out automatically:
 
@@ -79,10 +82,14 @@ Check:
 
 The current path should call `register_guest_workload` from `actor.sw.js`. If registration fails, confirm:
 
-- `guest.js` loads without a JavaScript exception
-- `guest_bg.wasm` is reachable next to `guest.js`
-- the `.actr` package URL and `.wbg/` sibling URL use the same package stem
+- package signature and manifest hashes verify
+- the package binary is the expected wasm-bindgen `*_bg.wasm`
+- `resources/glue.js` is present in the signed resource list and evaluates without a JavaScript exception
 - browser devtools show Service Worker logs, not only DOM page logs
+
+### Package verification reports no usable static trust anchor
+
+The browser verifier never skips package verification. Confirm the runtime configuration delivered to the Service Worker contains a static anchor with a non-empty `pubkey_b64`. Registry lookup is not implemented in the browser, and the browser cannot read `pubkey_file` itself; a host using that field must resolve it to `pubkey_b64` before worker initialization.
 
 ### Cannot connect to signaling
 
@@ -91,11 +98,6 @@ For local example runs, prefer the mock actrix scripts:
 ```bash
 cd bindings/web/examples/echo
 bash start-mock.sh
-```
-
-```bash
-cd bindings/web/examples/data-stream-peer-concurrent
-bash start.sh
 ```
 
 If connecting manually, verify:
@@ -134,7 +136,7 @@ Debug in this order:
 ## Debugging Strategy
 
 1. Start with `examples/echo/start-mock.sh`.
-2. Confirm `actor.sw.js`, `guest.js`, and `guest_bg.wasm` return HTTP 200.
+2. Confirm `actor.sw.js` and the signed `.actr` package return HTTP 200, then inspect Service Worker logs for package verification/extraction failures.
 3. Compare DOM-side console logs with Service Worker logs.
 4. Clear old Service Worker registrations and reload if the browser keeps stale assets.
-5. Move to `examples/data-stream-peer-concurrent/start.sh` only after the echo path works.
+5. Do not use the legacy data-stream example as a runtime check until it has migrated to signed `.actr` loading.

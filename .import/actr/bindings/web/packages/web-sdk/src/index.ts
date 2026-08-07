@@ -14,10 +14,22 @@ export * from './config';
 export * from './errors';
 export * from './types';
 export * from './actor-ref';
+// Package inspection only. The explicitly named APIs return unverified data;
+// historical short names remain deprecated for source compatibility.
 export * from './package-loader';
 
 // Unified API
 export { Actor, createActor } from './actor';
 export type { ActorConfig } from './actor';
-export { loadActrPackage, parseActrPackage } from './package-loader';
-export type { ActrManifest, LoadedActrPackage } from './package-loader';
+export {
+  loadUnverifiedActrPackage,
+  parseUnverifiedActrPackage,
+  loadActrPackage,
+  parseActrPackage,
+} from './package-loader';
+export type {
+  UnverifiedActrManifest,
+  UnverifiedLoadedActrPackage,
+  ActrManifest,
+  LoadedActrPackage,
+} from './package-loader';

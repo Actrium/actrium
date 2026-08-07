@@ -4,9 +4,185 @@
 
 use actr_config::{LockFile, LockedDependency, ProtoFileMeta, ServiceSpecMeta};
 use anyhow::Result;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use super::components::*;
+
+#[cfg(test)]
+fn build_lock_snapshot(dependencies: &[ResolvedDependency]) -> Result<LockFile> {
+    let mut lock_file = LockFile::new();
+
+    for dep in dependencies {
+        lock_file.add_dependency(locked_dependency_from_resolved(dep)?);
+    }
+
+    lock_file.validate_aliases()?;
+    Ok(lock_file)
+}
+
+fn locked_dependency_from_resolved(dep: &ResolvedDependency) -> Result<LockedDependency> {
+    let dependency_alias = dep.spec.alias.clone();
+    let protobufs = dep
+        .proto_files
+        .iter()
+        .map(|proto| {
+            let file_name = if proto.name.ends_with(".proto") {
+                proto.name.clone()
+            } else {
+                format!("{}.proto", proto.name)
+            };
+            ProtoFileMeta {
+                path: format!("{dependency_alias}/{file_name}"),
+                fingerprint: String::new(),
+            }
+        })
+        .collect();
+    let spec = ServiceSpecMeta {
+        name: dep.spec.name.clone(),
+        description: None,
+        fingerprint: dep.fingerprint.clone(),
+        protobufs,
+        published_at: None,
+        tags: Vec::new(),
+    };
+    let actr_type = dep.spec.actr_type.clone().ok_or_else(|| {
+        anyhow::anyhow!("Actr type is required for dependency: {dependency_alias}")
+    })?;
+    Ok(LockedDependency::new(
+        dependency_alias,
+        actr_type.to_string_repr(),
+        spec,
+    ))
+}
+
+fn locked_dependency_matches_spec(locked: &LockedDependency, spec: &DependencySpec) -> bool {
+    if locked.alias != spec.alias {
+        return false;
+    }
+    if let Some(actr_type) = &spec.actr_type
+        && locked.actr_type != actr_type.to_string_repr()
+    {
+        return false;
+    }
+    if let Some(fingerprint) = &spec.fingerprint
+        && (locked.name != spec.name || locked.fingerprint != *fingerprint)
+    {
+        return false;
+    }
+    true
+}
+
+#[cfg(test)]
+fn rebuild_lock_snapshot(
+    existing: Option<&LockFile>,
+    dependencies: &[ResolvedDependency],
+) -> Result<LockFile> {
+    if let Some(existing) = existing {
+        validate_existing_lock_version(existing)?;
+    }
+    // The old dependency array is deliberately ignored. The manifest and
+    // current discovery results are the complete source of the new snapshot.
+    build_lock_snapshot(dependencies)
+}
+
+fn validate_existing_lock_version(lock: &LockFile) -> Result<()> {
+    let version = lock.format_version();
+    if version != 1 && version != actr_config::lock::LOCK_FILE_VERSION {
+        anyhow::bail!(
+            "unsupported existing lock file version {version}; this CLI can migrate version 1 and writes version {}",
+            actr_config::lock::LOCK_FILE_VERSION
+        );
+    }
+    Ok(())
+}
+
+fn validate_discovered_fingerprint(
+    spec: &DependencySpec,
+    discovered_fingerprint: &str,
+) -> Result<()> {
+    if let Some(expected) = spec.fingerprint.as_deref()
+        && expected != discovered_fingerprint
+    {
+        return Err(anyhow::anyhow!(
+            "manifest dependency '{}' fingerprint mismatch: expected {}, discovered {}",
+            spec.alias,
+            expected,
+            discovered_fingerprint
+        ));
+    }
+    Ok(())
+}
+
+struct InstallFilesystemBackup {
+    project_root: PathBuf,
+    temporary: tempfile::TempDir,
+    had_lock: bool,
+    had_cache: bool,
+}
+
+impl InstallFilesystemBackup {
+    fn capture(project_root: &Path) -> Result<Self> {
+        let temporary = tempfile::Builder::new()
+            .prefix(".actr-install-backup-")
+            .tempdir_in(project_root)?;
+        let lock = project_root.join("manifest.lock.toml");
+        let had_lock = lock.is_file();
+        if had_lock {
+            std::fs::copy(&lock, temporary.path().join("manifest.lock.toml"))?;
+        }
+        let cache = project_root.join("protos").join("remote");
+        let had_cache = cache.is_dir();
+        if had_cache {
+            copy_directory_snapshot(&cache, &temporary.path().join("remote"))?;
+        }
+        Ok(Self {
+            project_root: project_root.to_path_buf(),
+            temporary,
+            had_lock,
+            had_cache,
+        })
+    }
+
+    fn restore(&self) -> Result<()> {
+        let lock = self.project_root.join("manifest.lock.toml");
+        if self.had_lock {
+            std::fs::copy(self.temporary.path().join("manifest.lock.toml"), &lock)?;
+        } else if lock.exists() {
+            std::fs::remove_file(&lock)?;
+        }
+
+        let cache = self.project_root.join("protos").join("remote");
+        if cache.exists() {
+            std::fs::remove_dir_all(&cache)?;
+        }
+        if self.had_cache {
+            copy_directory_snapshot(&self.temporary.path().join("remote"), &cache)?;
+        }
+        Ok(())
+    }
+}
+
+fn copy_directory_snapshot(source: &Path, destination: &Path) -> Result<()> {
+    std::fs::create_dir_all(destination)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let metadata = std::fs::symlink_metadata(entry.path())?;
+        if metadata.file_type().is_symlink() {
+            anyhow::bail!(
+                "refusing to snapshot symbolic link {}",
+                entry.path().display()
+            );
+        }
+        let target = destination.join(entry.file_name());
+        if metadata.is_dir() {
+            copy_directory_snapshot(&entry.path(), &target)?;
+        } else if metadata.is_file() {
+            std::fs::copy(entry.path(), target)?;
+        }
+    }
+    Ok(())
+}
 
 // ============================================================================
 // Pipeline result types
@@ -199,8 +375,8 @@ impl ValidationPipeline {
         })
     }
 
-    /// Validate a specific list of dependencies
-    /// Note: Multiple aliases pointing to the same service name will be deduplicated
+    /// Validate a specific list of dependencies.
+    /// Reuses availability checks that share the same canonical lookup key.
     pub async fn validate_dependencies(
         &self,
         specs: &[DependencySpec],
@@ -400,6 +576,9 @@ impl InstallPipeline {
 
     /// Check-first install flow
     pub async fn install_dependencies(&self, specs: &[DependencySpec]) -> Result<InstallResult> {
+        if specs.is_empty() {
+            return Ok(InstallResult::success());
+        }
         // Phase 1: Full validation (reuse ValidationPipeline)
         let validation_report = self
             .validation_pipeline
@@ -427,26 +606,85 @@ impl InstallPipeline {
             ));
         }
 
-        // Phase 2: Atomic install
+        // Phase 2: Atomic install. The config manager protects manifest.toml;
+        // this snapshot protects the lock and proto cache written by the same
+        // transaction.
+        let filesystem_backup =
+            InstallFilesystemBackup::capture(self.config_manager.get_project_root())?;
         let backup = self.config_manager.backup_config().await?;
 
         match self.execute_atomic_install(specs).await {
             Ok(result) => {
-                // Install succeeded, clean up backup
-                self.config_manager.remove_backup(backup).await?;
+                // The transaction is already committed. Backup cleanup is
+                // best-effort and must not turn a successful install into a
+                // reported failure with committed state.
+                if let Err(error) = self.config_manager.remove_backup(backup).await {
+                    tracing::warn!(%error, "failed to remove manifest backup after successful install");
+                }
                 Ok(result)
             }
             Err(e) => {
-                // Install failed, restore backup
-                self.config_manager.restore_backup(backup).await?;
-                Err(e)
+                let config_restore = self.config_manager.restore_backup(backup).await;
+                let filesystem_restore = filesystem_backup.restore();
+                match (config_restore, filesystem_restore) {
+                    (Ok(()), Ok(())) => Err(e),
+                    (config_result, filesystem_result) => Err(anyhow::anyhow!(
+                        "{e}; rollback failed (manifest: {}; lock/cache: {})",
+                        config_result
+                            .err()
+                            .map(|error| error.to_string())
+                            .unwrap_or_else(|| "ok".to_string()),
+                        filesystem_result
+                            .err()
+                            .map(|error| error.to_string())
+                            .unwrap_or_else(|| "ok".to_string())
+                    )),
+                }
+            }
+        }
+    }
+
+    /// Commit an empty v2 dependency snapshot and prune all remote proto
+    /// caches. Used when the manifest declares no dependencies.
+    pub async fn install_empty_dependency_snapshot(&self) -> Result<InstallResult> {
+        let project_root = self.config_manager.get_project_root();
+        let lock_path = project_root.join("manifest.lock.toml");
+        if lock_path.exists() {
+            let existing = LockFile::from_file(&lock_path)?;
+            validate_existing_lock_version(&existing)?;
+        }
+        let filesystem_backup = InstallFilesystemBackup::capture(project_root)?;
+        let operation = async {
+            let mut lock_file = LockFile::new();
+            lock_file.update_timestamp();
+            lock_file.save_to_file(&lock_path)?;
+            self.cache_manager
+                .retain_aliases(&std::collections::HashSet::new())
+                .await?;
+            Ok::<_, anyhow::Error>(())
+        }
+        .await;
+
+        match operation {
+            Ok(()) => Ok(InstallResult {
+                updated_lock_file: true,
+                ..InstallResult::success()
+            }),
+            Err(error) => {
+                if let Err(restore_error) = filesystem_backup.restore() {
+                    return Err(anyhow::anyhow!(
+                        "{error}; lock/cache rollback failed: {restore_error}"
+                    ));
+                }
+                Err(error)
             }
         }
     }
 
     /// Atomic install execution
-    /// Note: Multiple aliases pointing to the same service will be deduplicated -
-    /// only one entry per unique service name will be installed and recorded in lock file
+    /// A valid manifest must not assign multiple aliases to the same canonical
+    /// service lookup or `ActrType`, because v2 lock validation treats both
+    /// alias and canonical actor type as unique identities.
     async fn execute_atomic_install(&self, specs: &[DependencySpec]) -> Result<InstallResult> {
         use std::collections::HashSet;
 
@@ -455,14 +693,12 @@ impl InstallPipeline {
 
         for spec in specs {
             let lookup_key = ValidationPipeline::dependency_lookup_key(spec);
-            // Skip if we already installed this service (by name)
-            if installed_services.contains(&lookup_key) {
-                tracing::debug!(
-                    "Skipping duplicate service '{}' (alias: '{}')",
-                    lookup_key,
-                    spec.alias
-                );
-                continue;
+            if !installed_services.insert(lookup_key.clone()) {
+                return Err(anyhow::anyhow!(
+                    "dependency '{}' resolves the same service as another alias ({})",
+                    spec.alias,
+                    lookup_key
+                ));
             }
 
             // 1. Get service details (before updating config, ensure we have the full actr_type)
@@ -472,9 +708,16 @@ impl InstallPipeline {
                 .get_service_details(&lookup_key)
                 .await?;
 
+            // Validate a manifest-pinned fingerprint before replacing it with
+            // discovery metadata. Otherwise the subsequent manifest rewrite
+            // would hide a registry mismatch.
+            validate_discovered_fingerprint(spec, &service_details.info.fingerprint)?;
+
             // 2. Build resolved_spec using the canonical actr_type from discovery
             let mut resolved_spec = spec.clone();
             resolved_spec.actr_type = Some(service_details.info.actr_type.clone());
+            resolved_spec.name = service_details.info.dependency_service_name().to_string();
+            resolved_spec.fingerprint = Some(service_details.info.fingerprint.clone());
 
             // 3. Update config file (using resolved_spec with actr_type)
             self.config_manager
@@ -484,7 +727,7 @@ impl InstallPipeline {
 
             // 4. Cache proto files
             self.cache_manager
-                .cache_proto(&spec.name, &service_details.proto_files)
+                .cache_proto(&spec.alias, &service_details.proto_files)
                 .await?;
 
             result.cache_updates += 1;
@@ -497,12 +740,9 @@ impl InstallPipeline {
                 proto_files: service_details.proto_files,
             };
             result.installed_dependencies.push(resolved_dep);
-
-            // Mark this service as installed
-            installed_services.insert(lookup_key);
         }
 
-        // 4. Update lock file (lock file also deduplicates by name)
+        // 6. Update the lock file (deduplicated by alias and canonical ActrType).
         self.update_lock_file(&result.installed_dependencies)
             .await?;
         result.updated_lock_file = true;
@@ -511,65 +751,94 @@ impl InstallPipeline {
     }
 
     /// Update lock file with new format (no embedded proto content)
-    async fn update_lock_file(&self, dependencies: &[ResolvedDependency]) -> Result<()> {
+    async fn update_lock_file(&self, installed: &[ResolvedDependency]) -> Result<()> {
         let project_root = self.config_manager.get_project_root();
         let lock_file_path = project_root.join("manifest.lock.toml");
 
-        // Load existing lock file or create new one
-        let mut lock_file = if lock_file_path.exists() {
-            LockFile::from_file(&lock_file_path).unwrap_or_else(|_| LockFile::new())
-        } else {
-            LockFile::new()
-        };
-
-        // Update dependencies
-        for dep in dependencies {
-            let service_name = dep.spec.name.clone();
-
-            // Create protobuf entries with relative path (no content)
-            let protobufs: Vec<ProtoFileMeta> = dep
-                .proto_files
-                .iter()
-                .map(|pf| {
-                    let file_name = if pf.name.ends_with(".proto") {
-                        pf.name.clone()
-                    } else {
-                        format!("{}.proto", pf.name)
-                    };
-                    // Path relative to proto/remote/ (e.g., "service_name/file.proto")
-                    let path = format!("{}/{}", service_name, file_name);
-
-                    ProtoFileMeta {
-                        path,
-                        fingerprint: String::new(), // TODO: compute semantic fingerprint
-                    }
-                })
-                .collect();
-
-            // Create service spec metadata
-            let spec = ServiceSpecMeta {
-                name: dep.spec.name.clone(),
-                description: None,
-                fingerprint: dep.fingerprint.clone(),
-                protobufs,
-                published_at: None,
-                tags: Vec::new(),
-            };
-
-            // Create locked dependency
-            let actr_type = dep.spec.actr_type.clone().ok_or_else(|| {
-                anyhow::anyhow!("Actr type is required for dependency: {}", service_name)
-            })?;
-            let locked_dep = LockedDependency::new(actr_type.to_string_repr(), spec);
-            lock_file.add_dependency(locked_dep);
+        // A lock is a snapshot of the current manifest, not an append-only
+        // install history. Rebuild it on every install so removed aliases are
+        // pruned and v1 migration never has to infer identity from old fields.
+        let existing = lock_file_path
+            .exists()
+            .then(|| LockFile::from_file(&lock_file_path))
+            .transpose()?;
+        if let Some(existing) = existing.as_ref() {
+            validate_existing_lock_version(existing)?;
         }
+        let reusable = existing
+            .as_ref()
+            .filter(|lock| lock.validate_aliases().is_ok());
+        let manifest_path = project_root.join("manifest.toml");
+        let config = self.config_manager.load_config(&manifest_path).await?;
+        let specs = self
+            .validation_pipeline
+            .dependency_resolver()
+            .resolve_spec(&config)
+            .await?;
+        let installed_by_alias = installed
+            .iter()
+            .map(|dependency| (dependency.spec.alias.as_str(), dependency))
+            .collect::<std::collections::HashMap<_, _>>();
+        let mut lock_file = LockFile::new();
+        let mut aliases = std::collections::HashSet::with_capacity(specs.len());
+        for spec in specs {
+            aliases.insert(spec.alias.clone());
+            if let Some(dependency) = installed_by_alias.get(spec.alias.as_str()) {
+                lock_file.add_dependency(locked_dependency_from_resolved(dependency)?);
+                continue;
+            }
+            if let Some(locked) = reusable
+                .and_then(|lock| lock.get_dependency_by_alias(&spec.alias))
+                .filter(|locked| locked_dependency_matches_spec(locked, &spec))
+            {
+                lock_file.add_dependency(locked.clone());
+                continue;
+            }
+
+            let dependency = self.resolve_manifest_dependency(spec).await?;
+            self.cache_manager
+                .cache_proto(&dependency.spec.alias, &dependency.proto_files)
+                .await?;
+            lock_file.add_dependency(locked_dependency_from_resolved(&dependency)?);
+        }
+        lock_file.validate_aliases()?;
 
         // Update timestamp and save
         lock_file.update_timestamp();
         lock_file.save_to_file(&lock_file_path)?;
+        self.cache_manager.retain_aliases(&aliases).await?;
 
-        tracing::info!("Updated lock file: {} dependencies", dependencies.len());
+        tracing::info!(
+            "Updated lock file: {} dependencies",
+            lock_file.dependencies.len()
+        );
         Ok(())
+    }
+
+    /// Resolve every dependency declared by the current manifest.
+    ///
+    /// The manifest supplies the source-level alias and any pinned fingerprint;
+    /// discovery supplies the canonical `ActrType` and current service data.
+    async fn resolve_manifest_dependency(
+        &self,
+        spec: DependencySpec,
+    ) -> Result<ResolvedDependency> {
+        let lookup_key = ValidationPipeline::dependency_lookup_key(&spec);
+        let service_details = self
+            .validation_pipeline
+            .service_discovery()
+            .get_service_details(&lookup_key)
+            .await?;
+        validate_discovered_fingerprint(&spec, &service_details.info.fingerprint)?;
+        let mut resolved_spec = spec;
+        resolved_spec.actr_type = Some(service_details.info.actr_type.clone());
+        resolved_spec.name = service_details.info.dependency_service_name().to_string();
+        resolved_spec.fingerprint = Some(service_details.info.fingerprint.clone());
+        Ok(ResolvedDependency {
+            spec: resolved_spec,
+            fingerprint: service_details.info.fingerprint,
+            proto_files: service_details.proto_files,
+        })
     }
 }
 

@@ -8,6 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+use sha2::{Digest, Sha256};
 use tempfile::TempDir;
 
 fn actr_bin() -> PathBuf {
@@ -544,9 +545,16 @@ fn fingerprint_verify_passes_with_matching_lock_file() {
     // Write a lock file with matching fingerprints (no prefix to avoid
     // the service_semantic: prefix comparison).
     let lock = format!(
-        r#"[[dependency]]
+        r#"[metadata]
+version = 2
+generated_at = "2026-08-06T00:00:00Z"
+
+[[dependency]]
 name = "echo"
+alias = "echo"
+actr_type = "acme:EchoService:1.0.0"
 fingerprint = "{svc_fp}"
+cached_at = "2026-08-06T00:00:00Z"
 
 [[dependency.files]]
 path = "proto/echo.proto"
@@ -639,9 +647,16 @@ fn registry_fingerprint_reports_service_json_and_lock_mismatches() {
 
     fs::write(
         tmp.path().join("manifest.lock.toml"),
-        r#"[[dependency]]
+        r#"[metadata]
+version = 2
+generated_at = "2026-08-06T00:00:00Z"
+
+[[dependency]]
 name = "remote-echo"
+alias = "remote-echo"
+actr_type = "acme:EchoService:1.0.0"
 fingerprint = "service_semantic:stale"
+cached_at = "2026-08-06T00:00:00Z"
 
 [[dependency.files]]
 path = "proto/echo.proto"
@@ -1287,6 +1302,70 @@ fn pkg_sign_validates_manifest_and_signs_on_success() {
 }
 
 #[test]
+fn pkg_sign_authenticates_v2_dependency_lock() {
+    let tmp = TempDir::new().expect("tempdir");
+    let home = isolated_home(tmp.path());
+    let key_arg = gen_key(tmp.path(), &home);
+    fs::write(
+        tmp.path().join("manifest.toml"),
+        r#"edition = 1
+
+[package]
+name = "client"
+manufacturer = "acme"
+version = "0.1.0"
+
+[dependencies]
+echo = { actr_type = "acme:EchoService:1.0.0", service = "EchoService:service_semantic:echo" }
+"#,
+    )
+    .expect("write manifest");
+    fs::write(
+        tmp.path().join("manifest.lock.toml"),
+        r#"[metadata]
+version = 2
+generated_at = "2026-08-06T00:00:00Z"
+
+[[dependency]]
+name = "EchoService"
+alias = "echo"
+actr_type = "acme:EchoService:1.0.0"
+fingerprint = "service_semantic:echo"
+cached_at = "2026-08-06T00:00:00Z"
+
+[[dependency.files]]
+path = "echo/echo.proto"
+fingerprint = "semantic:echo"
+"#,
+    )
+    .expect("write lock");
+
+    let signed = run_actr(
+        &[
+            "pkg",
+            "sign",
+            "--manifest-path",
+            "manifest.toml",
+            "--key",
+            &key_arg,
+        ],
+        tmp.path(),
+        &home,
+    );
+
+    assert_success(&signed, "pkg sign dependency lock");
+    let signed_manifest = fs::read_to_string(tmp.path().join("manifest.toml")).unwrap();
+    let package_manifest = actr_pack::PackageManifest::from_toml(&signed_manifest)
+        .expect("signed package manifest should parse");
+    let lock_entry = package_manifest
+        .lock_file
+        .expect("signed package manifest should authenticate the lock file");
+    assert_eq!(lock_entry.path, "manifest.lock.toml");
+    let lock_bytes = fs::read(tmp.path().join("manifest.lock.toml")).unwrap();
+    assert_eq!(lock_entry.hash, hex::encode(Sha256::digest(lock_bytes)));
+}
+
+#[test]
 fn pkg_sign_without_key_reports_missing_configuration() {
     let tmp = TempDir::new().expect("tempdir");
     let home = isolated_home(tmp.path());
@@ -1341,7 +1420,11 @@ fn gen_validates_lock_file_input_and_language_compatibility() {
     );
 
     // Lock present but default input `protos` does not exist → error.
-    fs::write(tmp.path().join("manifest.lock.toml"), "").expect("write lock");
+    fs::write(
+        tmp.path().join("manifest.lock.toml"),
+        "[metadata]\nversion = 2\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
+    )
+    .expect("write lock");
     let bad_input = run_actr(&["gen"], tmp.path(), &home);
     assert_failure(&bad_input, "gen bad input");
     assert!(

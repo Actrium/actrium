@@ -436,8 +436,9 @@ use crate::test_support::runtime_context_with_host_transport;
 use crate::transport::HostTransport;
 use crate::workload::{HostOperation, HostOperationResult, LinkedWorkloadHandle, Workload};
 use actr_framework::guest::dynclib_abi::{
-    DestV1, HostCallRawV1, HostCallV1, HostDiscoverV1, HostRegisterStreamV1, HostSendDataChunkV1,
-    HostTellV1, HostUnregisterStreamV1, code as abi_code,
+    DestV1, HostCallRawV1, HostCallV1, HostDiscoverV1, HostRegisterStreamV1,
+    HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1,
+    code as abi_code,
 };
 use actr_protocol::{AIdCredential, ActrId, PayloadType};
 use std::sync::Arc;
@@ -573,6 +574,23 @@ async fn discover_without_realm_returns_unavailable() {
     assert!(matches!(
         expect_runtime_error(res),
         ActrError::Unavailable(_)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn missing_dependency_alias_preserves_structured_error() {
+    let (ctx, workload) = harness().await;
+    let result = host_operation_handler(
+        ctx,
+        weak_runner(&workload),
+        HostOperation::ResolveDependency(HostResolveDependencyV1 {
+            alias: "missing".into(),
+        }),
+    )
+    .await;
+    assert!(matches!(
+        expect_runtime_error(result),
+        ActrError::DependencyNotFound { service_name, .. } if service_name == "missing"
     ));
 }
 
@@ -1224,6 +1242,65 @@ fn dedup_test_config(dir: &tempfile::TempDir) -> actr_config::RuntimeConfig {
     }
 }
 
+#[tokio::test]
+async fn inner_shares_prebuilt_alias_map_with_all_runtime_contexts() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let workload = Workload::Linked(Arc::new(DummyLinkedHandle) as Arc<dyn LinkedWorkloadHandle>);
+    let aliases = HashMap::from([(
+        "sensor".to_string(),
+        actr_protocol::ActrType::from_string_repr("acme:Sensor:1.0.0").unwrap(),
+    )]);
+    let sensor_type = aliases["sensor"].clone();
+    let inner = Inner::build(
+        dedup_test_config(&dir),
+        workload,
+        None,
+        None,
+        Some(crate::LinkedDependencyMetadata {
+            aliases,
+            fingerprints: HashMap::from([(sensor_type.clone(), "service_semantic:sensor".into())]),
+        }),
+        100,
+        Duration::from_secs(60),
+        crate::config::DispatchConcurrency::default(),
+        None,
+        false,
+    )
+    .await
+    .expect("Inner::build must succeed with in-memory mailbox");
+
+    let actor_id = ActrId::default();
+    let credential = AIdCredential::default();
+    let request_ctx = inner.make_runtime_context(&actor_id, None, "request-id", &credential);
+    let bootstrap_ctx = inner
+        .bootstrap_ctx_builder()
+        .build_bootstrap(&actor_id, &credential);
+
+    assert!(Arc::ptr_eq(
+        &inner.alias_map,
+        &request_ctx.alias_map_for_test()
+    ));
+    assert_eq!(
+        inner
+            .dependency_fingerprints
+            .get(&sensor_type)
+            .map(String::as_str),
+        Some("service_semantic:sensor")
+    );
+    assert!(Arc::ptr_eq(
+        &inner.alias_map,
+        &bootstrap_ctx.alias_map_for_test()
+    ));
+    assert_eq!(
+        request_ctx
+            .alias_map()
+            .get("sensor")
+            .map(actr_protocol::ActrType::to_string_repr)
+            .as_deref(),
+        Some("acme:Sensor:1.0.0")
+    );
+}
+
 struct TellDedupHarness {
     inner: Arc<Inner>,
     entered_rx: tokio::sync::mpsc::UnboundedReceiver<()>,
@@ -1255,6 +1332,7 @@ async fn tell_dedup_harness(result: fn() -> ActorResult<FrameworkBytes>) -> Tell
     let mut inner = Inner::build(
         config,
         workload,
+        None,
         None,
         None,
         100,
@@ -1454,6 +1532,7 @@ async fn profile_test_inner() -> (Inner, tempfile::TempDir) {
     let inner = Inner::build(
         config,
         workload,
+        None,
         None,
         None,
         100,

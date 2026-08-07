@@ -18,19 +18,20 @@ rustup target add wasm32-unknown-unknown
 cargo install wasm-pack
 ```
 
-Some example packaging flows still build and sign `.actr` packages from `wasm32-wasip2` components before serving the wasm-bindgen browser guest. If you run those flows, also install the repository-level Component Model toolchain described in the root `AGENTS.md`.
+Native Component Model packaging still uses the repository-level `wasm32-wasip2` toolchain described in the root `AGENTS.md`. The browser package instead embeds the wasm-bindgen output described below.
 
 ## Runtime Artifacts
 
 The current browser runtime expects:
 
-- a signed `.actr` package
-- a sibling `<package-stem>.wbg/` directory
-- `<package-stem>.wbg/guest.js`
-- `<package-stem>.wbg/guest_bg.wasm`
+- a signed `.actr` package whose binary is the wasm-bindgen `*_bg.wasm`
+- signed JavaScript glue inside that package at `resources/glue.js`
 - `actor.sw.js`
+- at least one usable static trust anchor whose 32-byte Ed25519 public key reaches the Service Worker as `pubkey_b64`
 
-`actor.sw.js` loads the wasm-bindgen guest bundle and calls `register_guest_workload`. jco-transpiled bundles are not part of the current browser runtime path.
+`actor.sw.js` verifies the `.actr`, extracts its binary and `resources/glue.js`, instantiates that authenticated wasm-bindgen guest, and calls `register_guest_workload`. It does not fetch or execute a sibling `.wbg/` directory. jco-transpiled bundles are not part of the current browser runtime path.
+
+Package verification fails closed. Empty trust configuration, registry-only trust, or a browser-visible `pubkey_file` that has not been resolved to `pubkey_b64` aborts initialization; none of these cases skips verification.
 
 ## Run the Echo Example
 
@@ -41,18 +42,11 @@ cd examples/echo
 bash start-mock.sh
 ```
 
-The script builds the browser guest bundle, signs the `.actr` packages, starts the in-repo mock actrix service, serves the web client/server through `actr run --web`, and drives the browser smoke suite.
+The script builds the browser guest, packages its wasm and glue into signed `.actr` files, starts the in-repo mock actrix service, serves the web client/server through `actr run --web`, and drives the browser smoke suite.
 
-## Run the Browser-Hosted Peer Example
+## Legacy Data-Stream Example
 
-```bash
-cd bindings/web
-pnpm install
-cd examples/data-stream-peer-concurrent
-bash start.sh
-```
-
-This example includes browser-hosted service behavior and concurrent peer/client flows.
+`examples/data-stream-peer-concurrent` is not part of the current setup or release smoke flow. Its custom Service Workers still execute loose, unverified wasm-bindgen JavaScript and WASM, so `start.sh` refuses to launch by default. Use the signed-package echo example above until the data-stream example is migrated to the canonical `.actr` loader.
 
 ## Rebuild CLI-Embedded Web Runtime Assets
 

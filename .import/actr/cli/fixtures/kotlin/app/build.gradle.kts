@@ -54,13 +54,6 @@ val copyProtos =
             into("src/main/proto")
         }
 
-// Copy manifest.lock.toml to assets for runtime service resolution
-val copyLockFile =
-        tasks.register<Copy>("copyLockFile") {
-            from("${rootProject.projectDir}/manifest.lock.toml")
-            into("src/main/assets")
-        }
-
 // Copy Actr.toml to assets for runtime configuration
 val copyActrConfig =
         tasks.register<Copy>("copyActrConfig") {
@@ -73,9 +66,8 @@ afterEvaluate {
     tasks
             .matching { it.name.startsWith("generateProto") || it.name.startsWith("extractProto") }
             .configureEach { dependsOn(copyProtos) }
-    // Make compile tasks depend on copyLockFile and copyActrConfig
+    // Make compile tasks depend on copyActrConfig
     tasks.matching { it.name.startsWith("merge") && it.name.contains("Assets") }.configureEach {
-        dependsOn(copyLockFile)
         dependsOn(copyActrConfig)
     }
 }

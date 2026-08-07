@@ -133,7 +133,7 @@ class ActrNode private constructor(
          * val ref = node.start()
          * ```
          *
-         * @param configPath Path to the TOML configuration file
+         * @param configPath Path to the package runtime `actr.toml`
          * @param packagePath Path to the `.actr` package file
          * @param observers Optional host-side [RuntimeObservers] for transport readiness; when
          * non-null the node is built with the observer-aware constructor so the package guest
@@ -189,11 +189,13 @@ class ActrNode private constructor(
          * Example:
          * ```kotlin
          * val workload = dynamicWorkload(myLifecycle)
-         * val node = ActrNode.linked("config.toml", myType, workload)
+         * val node = ActrNode.linked("manifest.toml", myType, workload)
          * val ref = node.start()
          * ```
          *
-         * @param configPath Path to the TOML configuration file
+         * @param configPath Path to `manifest.toml` for dynamic dependency
+         * resolution (its sibling `actr.toml` supplies runtime settings), or
+         * directly to `actr.toml` for a dependency-free linked workload
          * @param actorType The actor's type identity
          * @param workload The composed workload (lifecycle + optional observers)
          * @return A new ActrNode instance that retains the workload
@@ -239,7 +241,7 @@ class ActrNode private constructor(
          * Validates that both URLs are file URLs before delegating to
          * [fromPackageFile] with the URL paths.
          *
-         * @param configURL File URL to the TOML configuration file
+         * @param configURL File URL to the package runtime `actr.toml`
          * @param packageURL File URL to the `.actr` package file
          * @param observers Optional host-side [RuntimeObservers] for transport readiness; passed through to the path-based overload
          * @return A new ActrNode instance
@@ -291,7 +293,8 @@ class ActrNode private constructor(
         /**
          * Create a linked node from a config file URL.
          *
-         * @param configURL File URL to the TOML configuration file
+         * @param configURL File URL to `manifest.toml`, or to `actr.toml` for
+         * a dependency-free linked workload
          * @param actorType The actor's type identity
          * @param workload The composed workload
          * @return A new ActrNode instance that retains the workload
@@ -564,6 +567,9 @@ class ActrRef internal constructor(
         count: UInt,
     ): List<ActrId> = inner.discover(targetType, count)
 
+    /** Resolve a dependency alias declared by the workload metadata. */
+    suspend fun resolveDependency(alias: String): ActrType = inner.resolveDependency(alias)
+
     /** Check if the actor is shutting down. */
     fun isShuttingDown(): Boolean = inner.isShuttingDown()
 
@@ -662,7 +668,7 @@ fun setLogCallback(callback: LogCallback?) {
  * val node = createActrNode("config.toml", "dist/app.actr")
  * ```
  *
- * @param configPath Path to the TOML configuration file
+ * @param configPath Path to the package runtime `actr.toml`
  * @param packagePath Path to the `.actr` package file
  * @param observers Optional host-side [RuntimeObservers] for transport readiness
  * @return A new ActrNode instance
@@ -736,7 +742,8 @@ suspend fun createActrNodeWithMonitoring(
 /**
  * Create an ActrNode backed by a linked dynamic workload (top-level function).
  *
- * @param configPath Path to the TOML configuration file
+ * @param configPath Path to `manifest.toml`, or to `actr.toml` for a
+ * dependency-free linked workload
  * @param actorType The actor's type identity
  * @param workload The composed workload
  * @return A new ActrNode instance that retains the workload

@@ -135,40 +135,6 @@ async fn ensure_session_ready_rejects_stale_generation() {
     assert!(c.ensure_session_ready().await.is_ok());
 }
 
-// ── matches_dependency_actr_type ────────────────────────────────────────
-
-#[test]
-fn matches_dependency_exact_type() {
-    let target = actr_type("acme", "Sensor", "1.0.0");
-    assert!(RuntimeContext::matches_dependency_actr_type(
-        "acme:Sensor:1.0.0",
-        &target
-    ));
-}
-
-#[test]
-fn matches_dependency_rejects_mismatch() {
-    let target = actr_type("acme", "Sensor", "1.0.0");
-    assert!(!RuntimeContext::matches_dependency_actr_type(
-        "acme:Sensor:2.0.0",
-        &target
-    ));
-    assert!(!RuntimeContext::matches_dependency_actr_type(
-        "other:Sensor:1.0.0",
-        &target
-    ));
-}
-
-#[test]
-fn matches_dependency_rejects_unparseable() {
-    let target = actr_type("acme", "Sensor", "1.0.0");
-    assert!(!RuntimeContext::matches_dependency_actr_type(
-        "not-a-valid-type",
-        &target
-    ));
-    assert!(!RuntimeContext::matches_dependency_actr_type("", &target));
-}
-
 // ── BootstrapContextBuilder ─────────────────────────────────────────────
 
 fn builder() -> BootstrapContextBuilder {
@@ -195,10 +161,24 @@ fn builder() -> BootstrapContextBuilder {
             })) as Arc<dyn SignalingClient>
         },
         None,
+        Arc::new(HashMap::new()),
+        Arc::new(HashMap::new()),
         Arc::new(RwLock::new(HashMap::new())),
         None,
         0,
     )
+}
+
+#[test]
+fn bootstrap_builder_reuses_prebuilt_alias_map() {
+    let b = builder();
+    let first = b.build_bootstrap(&ActrId::default(), &AIdCredential::default());
+    let second = b.build_bootstrap(&ActrId::default(), &AIdCredential::default());
+
+    assert!(Arc::ptr_eq(
+        &first.alias_map_for_test(),
+        &second.alias_map_for_test()
+    ));
 }
 
 #[test]
@@ -233,7 +213,7 @@ async fn build_bootstrap_falls_back_to_builder_generation() {
 
 // ── get_dependency_fingerprint ──────────────────────────────────────────
 
-use actr_config::lock::{LockFile, LockedDependency};
+use actr_config::lock::{LOCK_FILE_VERSION, LockFile, LockMetadata, LockedDependency};
 
 fn ctx_with_lock(lock: Option<LockFile>) -> RuntimeContext {
     use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
@@ -271,6 +251,7 @@ fn ctx_with_lock(lock: Option<LockFile>) -> RuntimeContext {
 fn dep(actr_type: &str, fingerprint: &str) -> LockedDependency {
     LockedDependency {
         name: actr_type.to_string(),
+        alias: actr_type.to_string(),
         actr_type: actr_type.to_string(),
         description: None,
         fingerprint: fingerprint.to_string(),
@@ -279,6 +260,36 @@ fn dep(actr_type: &str, fingerprint: &str) -> LockedDependency {
         cached_at: String::new(),
         files: vec![],
     }
+}
+
+#[test]
+fn lock_alias_map_requires_v2_and_never_uses_name_as_alias() {
+    let mut dependency = dep("acme:Sensor:1.0.0", "sha256:sensor");
+    dependency.name = "SensorService".to_string();
+    dependency.alias = "sensor".to_string();
+
+    let v1 = LockFile {
+        metadata: None,
+        dependencies: vec![dependency.clone()],
+    };
+    assert!(build_alias_map(&v1).is_empty());
+
+    let v2 = LockFile {
+        metadata: Some(LockMetadata {
+            version: LOCK_FILE_VERSION,
+            generated_at: String::new(),
+        }),
+        dependencies: vec![dependency],
+    };
+    let aliases = build_alias_map(&v2);
+    assert!(!aliases.contains_key("SensorService"));
+    assert_eq!(
+        aliases
+            .get("sensor")
+            .map(ActrType::to_string_repr)
+            .as_deref(),
+        Some("acme:Sensor:1.0.0")
+    );
 }
 
 #[tokio::test]
@@ -294,29 +305,16 @@ async fn get_dependency_fingerprint_returns_none_without_lock() {
 async fn get_dependency_fingerprint_exact_key_match() {
     // to_string_repr uses ':' separators.
     let lock = LockFile {
-        metadata: None,
+        metadata: Some(LockMetadata {
+            version: LOCK_FILE_VERSION,
+            generated_at: String::new(),
+        }),
         dependencies: vec![dep("acme:Sensor:1.0.0", "sha256:exact")],
     };
     let c = ctx_with_lock(Some(lock));
     assert_eq!(
         c.get_dependency_fingerprint(&actr_type("acme", "Sensor", "1.0.0")),
         Some("sha256:exact".to_string())
-    );
-}
-
-#[tokio::test]
-async fn get_dependency_fingerprint_falls_back_to_scan() {
-    // No exact key, but a dependency whose actr_type parses to the target.
-    let lock = LockFile {
-        metadata: None,
-        dependencies: vec![dep("acme:Sensor:1.0.0", "sha256:scan")],
-    };
-    let c = ctx_with_lock(Some(lock));
-    // Query with a target that won't match the exact key string but parses
-    // equal (same components) — exercises the scan fallback.
-    assert_eq!(
-        c.get_dependency_fingerprint(&actr_type("acme", "Sensor", "1.0.0")),
-        Some("sha256:scan".to_string())
     );
 }
 

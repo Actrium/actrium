@@ -469,13 +469,13 @@ impl InstallCommand {
 
         println!("  ├─ 🌐 Network connectivity test (Skipped) ✅");
 
-        // Create dependency spec with alias
-        // name = alias ensures update_dependency won't write a redundant "name" field
+        // Preserve the discovered service reference separately from the
+        // source-level alias.
         let resolved_spec = DependencySpec {
             alias: alias.to_string(),
             actr_type: Some(service_details.info.actr_type.clone()),
-            name: alias.to_string(),
-            fingerprint: fingerprint.map(|s| s.to_string()),
+            name: service_details.info.dependency_service_name().to_string(),
+            fingerprint: Some(service_details.info.fingerprint.clone()),
         };
 
         println!("  └─ ✅ Added to installation plan");
@@ -534,23 +534,18 @@ impl InstallCommand {
         if dependency_specs.is_empty() {
             println!("ℹ️ No dependencies configured, generating empty lock file");
 
-            // Generate empty lock file with metadata
             let install_pipeline = {
                 let mut container = context.container.lock().unwrap();
                 container.get_install_pipeline()?
             };
-            let project_root = install_pipeline.config_manager().get_project_root();
-            let lock_file_path = project_root.join("manifest.lock.toml");
-
-            let mut lock_file = LockFile::new();
-            lock_file.update_timestamp();
-            lock_file
-                .save_to_file(&lock_file_path)
-                .map_err(|e| ActrCliError::InstallFailed {
-                    reason: format!("Failed to save lock file: {}", e),
+            install_pipeline
+                .install_empty_dependency_snapshot()
+                .await
+                .map_err(|error| ActrCliError::InstallFailed {
+                    reason: error.to_string(),
                 })?;
 
-            println!("  └─ 🔒 Generated manifest.lock.toml");
+            println!("  └─ 🔒 Generated manifest.lock.toml and pruned dependency cache");
             self.install_npm_dependencies_if_needed()?;
             return Ok(CommandResult::Success(
                 "Generated empty lock file".to_string(),
@@ -913,8 +908,9 @@ impl InstallCommand {
 
         // For each dependency, check if the currently registered service is compatible
         for spec in dependency_specs {
-            // Find the locked dependency by name
-            let locked_dep = lock_file.dependencies.iter().find(|d| d.name == spec.name);
+            // The manifest alias is the lock-file identity. `name` is only
+            // service-reference/display metadata and may legitimately differ.
+            let locked_dep = lock_file.get_dependency_by_alias(&spec.alias);
 
             let locked_dep = match locked_dep {
                 Some(d) => d,

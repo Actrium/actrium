@@ -465,7 +465,7 @@ service ChatService {
 fn write_lock_toml(dir: &std::path::Path) {
     std::fs::write(
         dir.join("manifest.lock.toml"),
-        "[metadata]\nversion = 1\ngenerated_at = \"2026-01-01T00:00:00Z\"\n",
+        "[metadata]\nversion = 2\ngenerated_at = \"2026-01-01T00:00:00Z\"\n",
     )
     .unwrap();
 }

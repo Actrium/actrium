@@ -3,10 +3,9 @@
 #
 # Pipeline:
 #   - builds the unified guest crates with `wasm-pack` (`--features web
-#     --no-default-features`); output goes under the `<stem>.wbg/` sibling
-#     of the signed .actr, matching the convention `cli/src/commands/run.rs`
-#     expects (see `wbg_dir` resolution)
-#   - signs the resulting wasm into a `.actr` package
+#     --no-default-features`)
+#   - signs the wasm-bindgen binary and glue into one authenticated `.actr`
+#     package
 #   - boots the in-repo `actr-mock-actrix` (signaling WS + HTTP AIS + MFR)
 #   - starts `actr run --web` for server + client
 #   - drives the Puppeteer test suite (BasicFunction by default; pass
@@ -33,14 +32,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 ACTR_ROOT="$(cd "$PROJECT_ROOT/../.." && pwd)"
 
-# Unified guest crates (Option U γ-unified Phase 6c). Same source
-# directory feeds both the CM build (wasm32-wasip2, default features,
-# for signing the .actr) and the WBG build (wasm32-unknown-unknown,
-# `--features web --no-default-features`, for the SW-loaded core module).
+# Unified guest crates (Option U γ-unified Phase 6c). The browser package
+# is built for wasm32-unknown-unknown with `--features web
+# --no-default-features` and carries both wasm and glue in the signed archive.
 SERVER_GUEST_DIR="$SCRIPT_DIR/server-guest"
 CLIENT_GUEST_DIR="$SCRIPT_DIR/client-guest"
-SERVER_GUEST_TARGET_DIR="$ACTR_ROOT/target/bindings-web-examples-echo-server-guest"
-CLIENT_GUEST_TARGET_DIR="$ACTR_ROOT/target/bindings-web-examples-echo-client-guest"
 
 RELEASE_DIR="$SCRIPT_DIR/release"
 SERVER_ACTR_TOML="$SCRIPT_DIR/server-actr.toml"
@@ -147,44 +143,7 @@ echo "Building current protoc-gen-actrframework..."
 (cd "$ACTR_ROOT" && cargo build --manifest-path tools/protoc-gen/rust/Cargo.toml --bin protoc-gen-actrframework 2>&1 | tail -5)
 export PATH="$ACTR_ROOT/target/debug:$PATH"
 
-# Component Model toolchain — still needed to build the signed .actr whose
-# verification the WBG SW path still runs. Kept identical to start-mock.sh
-# so a broken wasm-component-ld surfaces the same way.
-if [ -x "${WASM_COMPONENT_LD:-$HOME/.cargo/bin/wasm-component-ld}" ]; then
-    WASM_COMPONENT_LD="${WASM_COMPONENT_LD:-$HOME/.cargo/bin/wasm-component-ld}"
-elif command -v wasm-component-ld > /dev/null 2>&1; then
-    WASM_COMPONENT_LD="$(command -v wasm-component-ld)"
-else
-    echo -e "${RED}wasm-component-ld not found${NC}"; exit 1
-fi
-
-# ---- Step 1a: build CM guests (default features, wasm32-wasip2) ----
-#
-# The .actr signing step later needs a valid Component binary to embed;
-# we build the default-feature output so `actr build --no-compile` can
-# pick it up. The same crate's `--features web` output (wasm32-unknown-
-# unknown) feeds the SW via wasm-pack in step 1b.
-
-echo ""
-echo -e "${BLUE}Step 1a: Building CM guests (default features) for .actr signing...${NC}"
-
-(
-    export RUSTFLAGS="-Clinker=$WASM_COMPONENT_LD"
-    cd "$SERVER_GUEST_DIR" && cargo build --target wasm32-wasip2 --release 2>&1 | tail -5
-)
-SERVER_GUEST_CM_WASM="$SERVER_GUEST_TARGET_DIR/wasm32-wasip2/release/echo_guest.wasm"
-[ -f "$SERVER_GUEST_CM_WASM" ] || { echo -e "${RED}server CM guest missing${NC}"; exit 1; }
-
-(
-    export RUSTFLAGS="-Clinker=$WASM_COMPONENT_LD"
-    cd "$CLIENT_GUEST_DIR" && cargo build --target wasm32-wasip2 --release 2>&1 | tail -5
-)
-CLIENT_GUEST_CM_WASM="$CLIENT_GUEST_TARGET_DIR/wasm32-wasip2/release/echo_client_guest_web.wasm"
-[ -f "$CLIENT_GUEST_CM_WASM" ] || { echo -e "${RED}client CM guest missing${NC}"; exit 1; }
-
-echo -e "${GREEN}CM guests built${NC}"
-
-# ---- Step 1b: build WBG guests via wasm-pack (same crates, --features web) ----
+# ---- Step 1: build WBG guests via wasm-pack (same crates, --features web) ----
 
 echo ""
 echo -e "${BLUE}Step 1b: Building WBG guests via wasm-pack (--features web)...${NC}"
@@ -219,7 +178,7 @@ CLIENT_WBG_WASM="$CLIENT_GUEST_DIR/pkg/echo_client_guest_web_bg.wasm"
 
 echo -e "${GREEN}WBG guests built${NC}"
 
-# ---- Step 2: sign .actr packages (Component binary inside) ----
+# ---- Step 2: sign authenticated browser .actr packages ----
 
 echo ""
 echo -e "${BLUE}Step 2: Building signed .actr packages...${NC}"
@@ -229,40 +188,21 @@ MFR_KEY_FILE="$RELEASE_DIR/dev-key.json"
 MFR_PUBKEY=$(python3 -c "import json; print(json.load(open('$MFR_KEY_FILE'))['public_key'])")
 echo "  MFR pubkey: ${MFR_PUBKEY:0:20}..."
 
-SERVER_ACTR_PACKAGE="$RELEASE_DIR/acme-EchoService-0.1.0-wasm32-wasip2.actr"
+SERVER_ACTR_PACKAGE="$RELEASE_DIR/acme-EchoService-0.1.0-wasm32-unknown-unknown.actr"
 (cd "$SERVER_GUEST_DIR" && "$ACTR_CMD" build \
     --no-compile \
-    --target "wasm32-wasip2" \
+    --target "wasm32-unknown-unknown" \
     --key "$MFR_KEY_FILE" \
     --output "$SERVER_ACTR_PACKAGE")
 
-CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-wasip2.actr"
+CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-unknown-unknown.actr"
 (cd "$CLIENT_GUEST_DIR" && "$ACTR_CMD" build \
     --no-compile \
-    --target "wasm32-wasip2" \
+    --target "wasm32-unknown-unknown" \
     --key "$MFR_KEY_FILE" \
     --output "$CLIENT_ACTR_PACKAGE")
 
 echo -e "${GREEN}.actr packages built${NC}"
-
-# ---- Step 2b: lay out `<stem>.wbg/` sibling bundles ----
-#
-# The WBG SW entry resolves `<packageUrl>.wbg/guest.js` by default. CLI
-# mounts `<package stem>.wbg/` under `/packages/<stem>.wbg/` when it
-# exists. We rename the wasm-pack output to the conventional `guest.js` /
-# `guest_bg.wasm` pair so the SW URL resolution is trivial.
-
-SERVER_WBG_DIR="$RELEASE_DIR/acme-EchoService-0.1.0-wasm32-wasip2.wbg"
-CLIENT_WBG_DIR="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-wasip2.wbg"
-rm -rf "$SERVER_WBG_DIR" "$CLIENT_WBG_DIR"
-mkdir -p "$SERVER_WBG_DIR" "$CLIENT_WBG_DIR"
-
-cp "$SERVER_WBG_JS"   "$SERVER_WBG_DIR/guest.js"
-cp "$SERVER_WBG_WASM" "$SERVER_WBG_DIR/guest_bg.wasm"
-cp "$CLIENT_WBG_JS"   "$CLIENT_WBG_DIR/guest.js"
-cp "$CLIENT_WBG_WASM" "$CLIENT_WBG_DIR/guest_bg.wasm"
-
-echo -e "${GREEN}WBG sibling bundles laid out under release/*.wbg/${NC}"
 
 # ---- Step 3: start mock-actrix ----
 

@@ -8,7 +8,7 @@ description = "An Actrium Android client"
 authors = []
 
 [dependencies]
-EchoService = {}
+EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
 
 [system.signaling]
 url = "{{SIGNALING_URL}}"

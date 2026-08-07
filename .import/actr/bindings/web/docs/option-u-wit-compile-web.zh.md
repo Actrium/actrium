@@ -20,12 +20,12 @@
 | **TD-003 γ HashMap** | ✓ | `guest_bridge.rs::DISPATCH_CTXS: HashMap<RequestId, Ctx>` |
 | **TD-004 α'** | ✓ | cred namespace 按 client_id；mock-actrix rebind WARN |
 | **TD-006 multi-client RPC** | ✓ | mock-actrix relay 精确投递 + sw-host stale peer cleanup + DOM/SW client lifecycle 修复（commit `301c58d6`） |
-| **Phase 7 data-stream 迁 WBG** | 跳过 | 复盘后发现 `data-stream-peer-concurrent` 实际就在 wbg-compatible 架构上（直接用 `actr_sw_host::register_workload(WasmWorkload::new(...))`），不依赖 CM。Phase 8 不被它阻塞 |
+| **Phase 7 data-stream 迁移** | 待完成 | `data-stream-peer-concurrent` 仍由自定义 Service Worker 直接执行松散、未验证的 wasm-bindgen JS/WASM；已降级为默认拒绝启动的 legacy 示例，迁入 signed `.actr` canonical loader 后才能恢复为当前示例 |
 | **Phase 8 CM 路径删除** | ✓ | 删除 `bindings/web/packages/web-sdk/src/actor.sw.js`（CM 旧版）+ `cli/assets/web-runtime/actor.sw.js`（同步副本）+ `bindings/web/scripts/transpile-component.sh`；将 `actor-wbg.sw.js` → `actor.sw.js`、`start-mock-wbg.sh` → `start-mock.sh`；`register_component_workload` → `register_guest_workload`；移除 `cli` 内 `ACTR_WEB_GUEST_MODE` env 选择器；保留 `host_*_async` 等 host imports（WBG 路径仍用） |
 
 **最终 MultiTab 结果**：**`SUITES='BasicFunction MultiTab' bash start-mock.sh` 12/12 全过**。`1-0 Basic Echo Connectivity` / `6-2 Concurrent Multi-Client` / `6-3 Close One Client` / `6-4 Refresh One Client` / `6-5 Multiple Server Instances` 全部包含在内。
 
-Option U 核心路径已跑通 —— jco / Component Model / JSPI 在浏览器主路径中全部绕开，echo 单 client + 多 client 都过。Phase 7 已复盘跳过，Phase 8 已完成；当前浏览器路径是 `.wbg/` 伴生产物 + 单一 `actor.sw.js` + `register_guest_workload`。
+Option U 核心路径已跑通 —— jco / Component Model / JSPI 在浏览器主路径中全部绕开，echo 单 client + 多 client 都过。Phase 7 已复盘跳过，Phase 8 已完成。当前浏览器路径把 wasm-bindgen `*_bg.wasm` 作为 `.actr` 的签名 binary、把 JS glue 作为签名资源 `resources/glue.js`；单一 `actor.sw.js` 从验证后的包中提取二者并调用 `register_guest_workload`。早期 `.wbg/` sibling 布局仅是历史快照。
 
 ---
 

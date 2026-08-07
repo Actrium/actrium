@@ -12,7 +12,6 @@ Template: echo
 {{PROJECT_NAME}}/
 ├── manifest.toml          # 包身份、导出和依赖
 ├── actr.toml              # 运行时和网络配置
-├── manifest.lock.toml     # actr deps install 生成的锁文件
 ├── project.yml            # XcodeGen 项目配置
 ├── {{PROJECT_NAME_PASCAL}}/                  # iOS 应用程序源代码
 │   ├── {{PROJECT_NAME_PASCAL}}.swift         # 应用程序入口
@@ -90,13 +89,13 @@ Template: echo
 
 根据您的部署环境需要修改这些设置。
 
-生成的 iOS 启动代码使用 `ActrNode.linked` 和静态链接的 `DynamicWorkload`，不会从应用资源中加载 `.actr` 包。`ActrService.swift` 会从 `manifest.toml` 解析本地 actor type 和远端依赖 target，并把这些 target 传入生成的 lifecycle/workload 接入逻辑。
+生成的 iOS 启动代码使用 `ActrNode.linked` 和静态链接的 `DynamicWorkload`，不会从应用资源中加载 `.actr` 包。运行时从 `manifest.toml` 读取本地身份和依赖 alias。
 
 ## 开发工作流程
 
 1. 如需要，修改 `protos/` 中的协议定义
 2. 使用 `actr discovery` 查看服务并将其添加到 `manifest.toml`
-3. 使用 `actr deps install` 下载 proto 文件并生成 `manifest.lock.toml`
+3. 使用 `actr deps install` 下载依赖 proto 文件
 4. 重新生成不可变代码：`actr gen -l swift`
 5. 在 `{{PROJECT_NAME_PASCAL}}/<ServiceName>HandlerImpl.swift` 中实现 RPC 方法
 6. 按需修改 `<ServiceName>LifecycleAdapter.swift` 中的生命周期钩子

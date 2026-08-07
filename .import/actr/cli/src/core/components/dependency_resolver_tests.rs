@@ -76,6 +76,28 @@ async fn resolve_dependencies_matches_by_name_actr_type_or_falls_back() {
 }
 
 #[tokio::test]
+async fn resolve_dependencies_matches_canonical_service_name_not_registry_key() {
+    let resolver = DefaultDependencyResolver::new();
+    let specs = vec![spec("echo", "EchoService", None, None)];
+    let details = vec![ServiceDetails {
+        info: service_info(
+            "acme:EchoService",
+            "service_semantic:echo",
+            "acme:EchoService:1.0.0",
+        ),
+        proto_files: vec![],
+        dependencies: vec![],
+    }];
+
+    let result = resolver
+        .resolve_dependencies(&specs, &details)
+        .await
+        .unwrap();
+
+    assert_eq!(result[0].fingerprint, "service_semantic:echo");
+}
+
+#[tokio::test]
 async fn resolve_dependencies_no_match_uses_empty_fingerprint() {
     let resolver = DefaultDependencyResolver::new();
     let specs = vec![spec("ghost", "ghost", None, None)];

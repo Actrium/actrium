@@ -112,6 +112,7 @@ async fn execute_build(args: &BuildCommand) -> Result<()> {
 
     let cli_config = crate::config::resolver::resolve_effective_cli_config()?;
     let key_path = resolve_key_path(args.key.as_deref(), cli_config.mfr.keychain.as_deref())?;
+    let resources = authenticated_wasm_bindgen_resources(&binary.path, &effective_target)?;
 
     let summary = build_package(PackageBuildInput {
         binary_path: binary.path.clone(),
@@ -119,11 +120,40 @@ async fn execute_build(args: &BuildCommand) -> Result<()> {
         key_path,
         output_path,
         target: effective_target,
-        resources: vec![],
+        resources,
     })?;
 
     print_build_summary(&summary);
     Ok(())
+}
+
+fn authenticated_wasm_bindgen_resources(
+    binary_path: &Path,
+    target: &str,
+) -> Result<Vec<(String, PathBuf)>> {
+    if target != "wasm32-unknown-unknown" {
+        return Ok(Vec::new());
+    }
+
+    let stem = binary_path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .and_then(|stem| stem.strip_suffix("_bg"))
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "wasm32-unknown-unknown packages require a wasm-bindgen binary named `*_bg.wasm`: {}",
+                binary_path.display()
+            )
+        })?;
+    let glue_path = binary_path.with_file_name(format!("{stem}.js"));
+    if !glue_path.is_file() {
+        anyhow::bail!(
+            "wasm-bindgen glue not found next to packaged binary: {}",
+            glue_path.display()
+        );
+    }
+
+    Ok(vec![("resources/glue.js".to_string(), glue_path)])
 }
 
 fn ensure_rust_codegen_ready(build: &BuildConfig) -> Result<()> {

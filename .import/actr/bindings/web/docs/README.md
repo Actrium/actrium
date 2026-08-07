@@ -1,20 +1,23 @@
 # Actor-RTC Web Documentation
 
-Actor-RTC Web currently uses the Option U / wasm-bindgen browser path. User workloads are loaded from a signed `.actr` package plus a sibling `.wbg/` bundle (`guest.js` and `guest_bg.wasm`). The browser Service Worker entry is `actor.sw.js`, which installs the guest dispatch function through `register_guest_workload`.
+Actor-RTC Web currently uses the Option U / wasm-bindgen browser path. The wasm-bindgen `*_bg.wasm` is the signed `.actr` package binary, and its JavaScript glue is the signed package resource `resources/glue.js`. The browser Service Worker entry `actor.sw.js` verifies the package, extracts both artifacts directly from it, and installs the guest dispatch function through `register_guest_workload`. No sibling `.wbg/` bundle is executed.
 
 Component Model and jco documents are retained as historical design context only.
 
 ## Current User Documentation
 
 - [Getting started](./getting-started.md): setup, current commands, example entry points, and React hooks.
-- [Troubleshooting](./troubleshooting.md): build, Service Worker, `.wbg/`, signaling, WebRTC, and storage checks.
+- [Troubleshooting](./troubleshooting.md): build, signed package contents, Service Worker, signaling, WebRTC, and storage checks.
 - [Error handling](./error-handling.md): how browser runtime errors should be categorized and reported.
 - [Requirements](./requirements.md): current goals, non-goals, usage modes, and platform constraints.
 
 ## Current Examples
 
 - [Echo example](../examples/echo/README.md): primary browser smoke path. Run with `bash examples/echo/start-mock.sh` from `bindings/web`.
-- [Data-stream peer concurrent example](../examples/data-stream-peer-concurrent/README.zh.md): browser-hosted service and peer scenario. Run with `bash examples/data-stream-peer-concurrent/start.sh` from `bindings/web`.
+
+## Legacy Examples
+
+- [Data-stream peer concurrent example](../examples/data-stream-peer-concurrent/README.zh.md): retained for historical Fast Path debugging. Its custom Service Workers execute loose, unverified wasm-bindgen assets, so its launcher refuses to run by default. It is not a current security or release smoke path.
 
 ## Current Build and Asset Commands
 

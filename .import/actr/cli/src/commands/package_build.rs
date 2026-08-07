@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use actr_config::ConfigParser;
+use actr_config::{ConfigParser, LockFile, ManifestConfig};
 use anyhow::{Context, Result};
 use base64::Engine;
 use ed25519_dalek::SigningKey;
@@ -23,6 +23,100 @@ pub struct PackageBuildSummary {
     pub binary_hash: String,
     pub package_size: usize,
     pub public_key: String,
+}
+
+#[derive(Debug)]
+struct ValidatedLock {
+    parsed: LockFile,
+    bytes: Vec<u8>,
+}
+
+pub(crate) fn binary_kind_for_target(target: &str) -> Option<actr_pack::BinaryKind> {
+    match target {
+        "wasm32-wasip2" => Some(actr_pack::BinaryKind::Component),
+        "wasm32-unknown-unknown" => Some(actr_pack::BinaryKind::CoreModule),
+        _ => None,
+    }
+}
+
+fn read_validated_lock(lock_path: &Path) -> Result<Option<ValidatedLock>> {
+    if !lock_path.exists() {
+        return Ok(None);
+    }
+
+    let bytes = std::fs::read(lock_path)
+        .with_context(|| format!("Failed to read {}", lock_path.display()))?;
+    let raw = std::str::from_utf8(&bytes)
+        .with_context(|| format!("{} is not valid UTF-8", lock_path.display()))?;
+    let parsed: LockFile = raw
+        .parse()
+        .with_context(|| format!("Failed to parse {}", lock_path.display()))?;
+    parsed.validate_aliases().with_context(|| {
+        format!(
+            "Invalid {}; run `actr deps install` before packaging",
+            lock_path.display()
+        )
+    })?;
+    Ok(Some(ValidatedLock { parsed, bytes }))
+}
+
+fn validate_packaged_dependencies(
+    config: &ManifestConfig,
+    lock: Option<&ValidatedLock>,
+) -> Result<()> {
+    if !config.dependencies.is_empty() && lock.is_none() {
+        anyhow::bail!(
+            "manifest declares remote dependencies but manifest.lock.toml is missing; run `actr deps install` before packaging"
+        );
+    }
+
+    let Some(lock) = lock else {
+        return Ok(());
+    };
+    if lock.parsed.dependencies.len() != config.dependencies.len() {
+        anyhow::bail!(
+            "manifest.lock.toml dependency set does not match manifest.toml; run `actr deps install` before packaging"
+        );
+    }
+    for dependency in &config.dependencies {
+        let locked = lock
+            .parsed
+            .get_dependency_by_alias(&dependency.alias)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "manifest dependency '{}' is missing from manifest.lock.toml; run `actr deps install` before packaging",
+                    dependency.alias
+                )
+            })?;
+        if let Some(expected_type) = &dependency.actr_type {
+            let expected = expected_type.to_string_repr();
+            if locked.actr_type != expected {
+                anyhow::bail!(
+                    "manifest dependency '{}' has ActrType {}, but manifest.lock.toml contains {}; run `actr deps install` before packaging",
+                    dependency.alias,
+                    expected,
+                    locked.actr_type
+                );
+            }
+        }
+        if let Some(expected_service) = &dependency.service {
+            if locked.name != expected_service.name
+                || locked.fingerprint != expected_service.fingerprint
+            {
+                anyhow::bail!(
+                    "manifest dependency '{}' service reference does not match manifest.lock.toml; run `actr deps install` before packaging",
+                    dependency.alias
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn validated_packaged_lock(config: &ManifestConfig) -> Result<Option<Vec<u8>>> {
+    let lock = read_validated_lock(&config.config_dir.join("manifest.lock.toml"))?;
+    validate_packaged_dependencies(config, lock.as_ref())?;
+    Ok(lock.map(|lock| lock.bytes))
 }
 
 pub fn resolve_key_path(custom: Option<&Path>, config_keychain: Option<&str>) -> Result<PathBuf> {
@@ -210,17 +304,7 @@ pub fn build_package(input: PackageBuildInput) -> Result<PackageBuildSummary> {
         })
         .collect::<Vec<_>>();
 
-    let lock_file = {
-        let lock_path = config.config_dir.join("manifest.lock.toml");
-        if lock_path.exists() {
-            Some(
-                std::fs::read(&lock_path)
-                    .with_context(|| format!("Failed to read {}", lock_path.display()))?,
-            )
-        } else {
-            None
-        }
-    };
+    let lock_file = validated_packaged_lock(&config)?;
 
     let manifest = actr_pack::PackageManifest {
         manufacturer: config.package.actr_type.manufacturer.clone(),
@@ -231,10 +315,7 @@ pub fn build_package(input: PackageBuildInput) -> Result<PackageBuildSummary> {
             target: input.target.clone(),
             hash: String::new(),
             size: None,
-            // Target `wasm32-wasip2` implies a Component binary in the
-            // Phase-1 toolchain; every other target leaves the kind
-            // unset so the resolver falls back to the legacy default.
-            kind: (input.target == "wasm32-wasip2").then_some(actr_pack::BinaryKind::Component),
+            kind: binary_kind_for_target(&input.target),
         },
         signature_algorithm: "ed25519".to_string(),
         signing_key_id: Some(actr_pack::compute_key_id(&verifying_key.to_bytes())),
@@ -265,12 +346,7 @@ pub fn build_package(input: PackageBuildInput) -> Result<PackageBuildSummary> {
 
     let binary_hash = hex::encode(Sha256::digest(&binary_bytes));
     let public_key = base64::engine::general_purpose::STANDARD.encode(verifying_key.to_bytes());
-    let actr_type = format!(
-        "{}:{}:{}",
-        config.package.actr_type.manufacturer,
-        config.package.actr_type.name,
-        config.package.actr_type.version
-    );
+    let actr_type = config.package.actr_type.to_string_repr();
 
     Ok(PackageBuildSummary {
         actr_type,
@@ -422,5 +498,88 @@ mod tests {
             Some(std::path::Component::Normal(_))
         ));
         assert!(components.next().is_none());
+    }
+
+    #[test]
+    fn package_binary_kind_distinguishes_native_components_and_browser_modules() {
+        assert_eq!(
+            binary_kind_for_target("wasm32-wasip2"),
+            Some(actr_pack::BinaryKind::Component)
+        );
+        assert_eq!(
+            binary_kind_for_target("wasm32-unknown-unknown"),
+            Some(actr_pack::BinaryKind::CoreModule)
+        );
+    }
+
+    #[test]
+    fn package_lock_validation_rejects_v1_and_accepts_empty_v2() {
+        let dir = TempDir::new().unwrap();
+        let lock_path = dir.path().join("manifest.lock.toml");
+        fs::write(
+            &lock_path,
+            "[metadata]\nversion = 1\ngenerated_at = \"2026-01-01T00:00:00Z\"\n",
+        )
+        .unwrap();
+        let error = read_validated_lock(&lock_path).unwrap_err().to_string();
+        assert!(error.contains("actr deps install"), "{error}");
+
+        fs::write(
+            &lock_path,
+            "[metadata]\nversion = 2\ngenerated_at = \"2026-01-01T00:00:00Z\"\n",
+        )
+        .unwrap();
+        assert!(read_validated_lock(&lock_path).unwrap().is_some());
+    }
+
+    #[test]
+    fn packaging_requires_lock_to_match_manifest_dependencies() {
+        let dir = TempDir::new().unwrap();
+        let manifest_path = dir.path().join("manifest.toml");
+        fs::write(
+            &manifest_path,
+            r#"edition = 1
+
+[package]
+name = "EchoClient"
+manufacturer = "acme"
+version = "1.0.0"
+
+[dependencies]
+echo = { actr_type = "acme:EchoService:1.0.0", service = "EchoService:service_semantic:echo" }
+"#,
+        )
+        .unwrap();
+        let config = ConfigParser::from_manifest_file(&manifest_path).unwrap();
+        let missing_error = validate_packaged_dependencies(&config, None)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            missing_error.contains("actr deps install"),
+            "{missing_error}"
+        );
+
+        let lock_path = dir.path().join("manifest.lock.toml");
+        fs::write(
+            &lock_path,
+            r#"[metadata]
+version = 2
+generated_at = "2026-08-06T00:00:00Z"
+
+[[dependency]]
+name = "EchoService"
+alias = "echo"
+actr_type = "acme:EchoService:1.0.0"
+fingerprint = "service_semantic:echo"
+cached_at = "2026-08-06T00:00:00Z"
+
+[[dependency.files]]
+path = "echo/echo.proto"
+fingerprint = "semantic:echo"
+"#,
+        )
+        .unwrap();
+        let lock = read_validated_lock(&lock_path).unwrap().unwrap();
+        validate_packaged_dependencies(&config, Some(&lock)).unwrap();
     }
 }

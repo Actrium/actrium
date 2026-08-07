@@ -1,7 +1,10 @@
 #!/bin/bash
-# Actor-RTC Web Data-Stream Peer Concurrent Example Launcher
-# Uses the in-repo mock-actrix so the example does not depend on an external
-# actrix checkout, sqlite schema, or pre-seeded manufacturer state.
+# LEGACY / UNSAFE Actor-RTC Web Data-Stream Peer Concurrent launcher.
+#
+# This example predates the canonical signed .actr workload path. Its custom
+# Service Workers fetch and execute loose wasm-bindgen JavaScript and WASM
+# files without package signature or content-hash verification. Keep it only
+# as historical fast-path test material until it is migrated.
 
 set -e  # Exit on error
 
@@ -30,6 +33,15 @@ log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 log_step()    { echo -e "${MAGENTA}[STEP]${NC} $1"; }
 
 command_exists() { command -v "$1" >/dev/null 2>&1; }
+
+if [ "${ACTR_ALLOW_UNVERIFIED_LEGACY_WBG:-}" != "1" ]; then
+    log_error "Refusing to start legacy data-stream example: it executes unsigned loose JS/WASM."
+    log_info "Use bindings/web/examples/echo/start-mock.sh for the current signed .actr path."
+    log_info "For isolated historical debugging only, explicitly set ACTR_ALLOW_UNVERIFIED_LEGACY_WBG=1."
+    exit 2
+fi
+
+log_warning "UNSAFE LEGACY MODE: loose wasm-bindgen JS/WASM will execute without package verification."
 
 # ── Cleanup ──
 

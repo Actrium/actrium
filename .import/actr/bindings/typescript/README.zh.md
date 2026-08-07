@@ -54,7 +54,8 @@ async function main() {
   );
 
   console.log(response.toString());
-  await actorRef.stop();
+  actorRef.shutdown();
+  await actorRef.waitForShutdown();
 }
 
 main().catch(console.error);
@@ -65,9 +66,10 @@ main().catch(console.error);
 - `ActrNode.fromConfig(configPath)`：从 `manifest.toml` 启动
   `ActrNode` 包装层。
 - `ActrRef.discover(targetType, count)`：发现远端 actor。
+- `ActrRef.resolveDependency(alias)`：在发现前解析 manifest 依赖别名。
 - `ActrRef.call(target, routeKey, payloadType, payload, timeoutMs)`：发起远端 RPC。
 - `ActrRef.tell(target, routeKey, payloadType, payload)`：发送单向远端消息。
-- `ActrRef.stop()`：关闭 actor 并等待完成。
+- `ActrRef.shutdown()` 与 `waitForShutdown()`：关闭 actor 并等待完成。
 
 ## 与 Rust Node Typestate 的关系
 
@@ -126,7 +128,8 @@ npm run codegen -- --config examples/echo-client/manifest.toml
 
 注意：
 
-- 生成器优先读取 `manifest.lock.toml`；请确保包含你想生成的依赖。
+- 生成远程依赖要求 v2 `manifest.lock.toml` 显式包含 alias；修改依赖后请运行
+  `actr deps install`。
 - proto 默认来源为 `examples/echo-client/protos/remote`。
 - 输出包括 protobuf 编解码、路由辅助，以及 `local.actor.ts`。
 

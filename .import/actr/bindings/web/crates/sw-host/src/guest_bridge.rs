@@ -13,7 +13,8 @@
 //!    inbound packet dispatcher, threading per-dispatch `RuntimeContext`
 //!    into [`DISPATCH_CTXS`] keyed by `request_id`.
 //! 2. **Host import implementations** — [`host_call_async`],
-//!    [`host_call_raw_async`], [`host_discover_async`], [`host_log_message`],
+//!    [`host_call_raw_async`], [`host_discover_async`],
+//!    [`host_resolve_dependency`], [`host_log_message`],
 //!    [`host_tell_async`] and the per-dispatch context getters expose the
 //!    Rust side of the WIT `actr:workload/host` interface as `#[wasm_bindgen]`
 //!    JS functions. The SW glue (`actor.sw.js`) installs `actrHost*` JS
@@ -27,6 +28,7 @@
 //! | `host.tell(target, route, payload)`             | [`host_tell_async`]       |
 //! | `host.call-raw(id, route, payload, timeout-ms)` | [`host_call_raw_async`]   |
 //! | `host.discover(type)`                           | [`host_discover_async`]   |
+//! | `host.resolve-dependency(alias)`                | [`host_resolve_dependency`] |
 //! | `host.log-message(level, message)`              | [`host_log_message`]      |
 //! | `host.get-self-id()`                | [`host_get_self_id`]             |
 //! | `host.get-caller-id()`              | [`host_get_caller_id`]           |
@@ -78,6 +80,7 @@ use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 
 use crate::context::RuntimeContext;
+use crate::dependency_aliases;
 use crate::web_context::WebContext;
 use crate::workload::{ServiceHandlerFn, WasmWorkload};
 
@@ -280,6 +283,26 @@ fn parse_actr_type(value: &JsValue) -> Result<ActrType, JsValue> {
     })
 }
 
+fn actr_type_to_js(actr_type: &ActrType) -> JsValue {
+    let value = js_sys::Object::new();
+    let _ = js_sys::Reflect::set(
+        &value,
+        &JsValue::from_str("manufacturer"),
+        &JsValue::from_str(&actr_type.manufacturer),
+    );
+    let _ = js_sys::Reflect::set(
+        &value,
+        &JsValue::from_str("name"),
+        &JsValue::from_str(&actr_type.name),
+    );
+    let _ = js_sys::Reflect::set(
+        &value,
+        &JsValue::from_str("version"),
+        &JsValue::from_str(&actr_type.version),
+    );
+    value.into()
+}
+
 /// Translate an internal `ActrError` into a JS `Error` suitable for the guest's
 /// `result<_, actr-error>` error arm. The JS glue in the SW wraps these
 /// with the matching variant tags; here we flatten to message text plus a
@@ -297,10 +320,7 @@ fn actr_error_to_js(error: ActrError) -> JsValue {
         ActrError::PermissionDenied(m) => ("permission-denied", m.clone()),
         ActrError::InvalidArgument(m) => ("invalid-argument", m.clone()),
         ActrError::UnknownRoute(r) => ("unknown-route", r.clone()),
-        ActrError::DependencyNotFound {
-            service_name,
-            message,
-        } => ("dependency-not-found", format!("{service_name}: {message}")),
+        ActrError::DependencyNotFound { message, .. } => ("dependency-not-found", message.clone()),
         ActrError::DecodeFailure(m) => ("decode-failure", m.clone()),
         ActrError::NotImplemented(m) => ("not-implemented", m.clone()),
         ActrError::Internal(m) => ("internal", m.clone()),
@@ -312,6 +332,18 @@ fn actr_error_to_js(error: ActrError) -> JsValue {
         &JsValue::from_str("actrErrorTag"),
         &JsValue::from_str(tag),
     );
+    let _ = js_sys::Reflect::set(
+        &err,
+        &JsValue::from_str("actrMessage"),
+        &JsValue::from_str(&message),
+    );
+    if let ActrError::DependencyNotFound { service_name, .. } = &error {
+        let _ = js_sys::Reflect::set(
+            &err,
+            &JsValue::from_str("actrServiceName"),
+            &JsValue::from_str(service_name),
+        );
+    }
     if tag == "connection-not-ready" {
         let value = retry_after_ms
             .map(|value| JsValue::from_f64(value as f64))
@@ -449,16 +481,40 @@ pub async fn host_discover_async(
     let target_type = parse_actr_type(&target_type)?;
 
     log::info!(
-        "[SW][GuestBridge] host.discover request_id={} target={}:{}:{}",
+        "[SW][GuestBridge] host.discover request_id={} target={}",
         request_id,
-        target_type.manufacturer,
-        target_type.name,
-        target_type.version
+        target_type.to_string_repr()
     );
 
     match ctx.discover(&target_type).await {
         Ok(id) => Ok(actr_id_to_js(&id)),
         Err(e) => Err(actr_error_to_js(e)),
+    }
+}
+
+/// Replace the workload-scoped dependency aliases from a verified package
+/// lock. Passing `None` clears aliases left by a previous workload.
+#[wasm_bindgen]
+pub fn install_dependency_lock(lock_toml: Option<String>) -> Result<(), JsError> {
+    dependency_aliases::install(lock_toml.as_deref()).map_err(|message| JsError::new(&message))
+}
+
+/// WIT `host.resolve-dependency(alias) -> result<actr-type, actr-error>`.
+#[wasm_bindgen]
+pub async fn host_resolve_dependency(
+    _request_id: String,
+    alias: String,
+) -> Result<JsValue, JsValue> {
+    match dependency_aliases::resolve(&alias) {
+        Ok(actr_type) => {
+            log::info!(
+                "[SW][GuestBridge] host.resolve-dependency alias={} target={}",
+                alias,
+                actr_type.to_string_repr()
+            );
+            Ok(actr_type_to_js(&actr_type))
+        }
+        Err(error) => Err(actr_error_to_js(error)),
     }
 }
 
@@ -535,8 +591,8 @@ pub fn host_get_request_id(request_id: String) -> Result<String, JsValue> {
 /// inbound side: `{ requestId: string, routeKey: string, payload: Uint8Array }`.
 ///
 /// The JS side is responsible for:
-/// 1. Instantiating the wasm-bindgen guest bundle (`<name>.wbg/guest.js` +
-///    `_bg.wasm`) emitted by `tools/wit-compile-web` for the generated
+/// 1. Instantiating the authenticated wasm-bindgen binary and JS glue
+///    extracted from the verified `.actr` package for the generated
 ///    `actr-web-abi` shim.
 /// 2. Installing the `actrHost*` JS globals that the guest imports — they
 ///    proxy onto the `host_*_async` / `host_*` wasm-bindgen exports from

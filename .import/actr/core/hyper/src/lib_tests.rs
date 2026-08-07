@@ -268,6 +268,45 @@ async fn with_actor_type_overrides_pending_runtime_metadata() {
     assert_eq!(actr_type.version, "1.0.0");
 }
 
+#[tokio::test]
+async fn linked_manifest_identity_rejects_actor_type_override() {
+    let dir = TempDir::new().unwrap();
+    let hyper = Hyper::new(dev_config(&dir)).await.unwrap();
+    let manifest_type = actr_protocol::ActrType {
+        manufacturer: "acme".into(),
+        name: "ManifestActor".into(),
+        version: "1.0.0".into(),
+    };
+    let manifest = actr_config::ManifestConfig {
+        package: actr_config::PackageInfo {
+            name: manifest_type.name.clone(),
+            actr_type: manifest_type.clone(),
+            description: None,
+            authors: vec![],
+            license: None,
+        },
+        exports: vec![],
+        dependencies: vec![],
+        acl: None,
+        tags: vec![],
+        scripts: std::collections::HashMap::new(),
+        binary: None,
+        build: None,
+        config_dir: dir.path().to_path_buf(),
+    };
+    let requested_type = actr_protocol::ActrType {
+        manufacturer: "other".into(),
+        name: "Override".into(),
+        version: "9.9.9".into(),
+    };
+
+    let node = Node::from_hyper(hyper, linked_runtime_config(&dir))
+        .with_linked_manifest(manifest)
+        .with_actor_type(requested_type);
+
+    assert_eq!(node.runtime_config().actr_type(), &manifest_type);
+}
+
 #[test]
 fn compatible_native_target_matches_current_host() {
     // Current host should always match itself.
@@ -662,4 +701,84 @@ fn detect_binary_kind_rejects_unsupported_target() {
     };
     let err = detect_binary_kind(&manifest).unwrap_err();
     assert!(matches!(err, HyperError::InvalidManifest(_)));
+}
+
+#[test]
+fn linked_dependency_metadata_loads_from_explicit_manifest_and_ignores_lock() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(
+        dir.path().join("manifest.toml"),
+        r#"[package]
+name = "LinkedClient"
+manufacturer = "acme"
+version = "1.0.0"
+
+[dependencies]
+echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_semantic:echo" }
+"#,
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("manifest.lock.toml"),
+        "[metadata]\nversion = 1\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
+    )
+    .unwrap();
+
+    let manifest =
+        actr_config::ConfigParser::from_manifest_file(dir.path().join("manifest.toml")).unwrap();
+    let metadata = resolve_linked_dependency_metadata(&manifest).unwrap();
+    assert_eq!(
+        metadata
+            .aliases
+            .get("echo")
+            .map(ActrType::to_string_repr)
+            .as_deref(),
+        Some("acme:EchoActor:1.0.0")
+    );
+    assert_eq!(
+        metadata.fingerprints.values().next().map(String::as_str),
+        Some("service_semantic:echo")
+    );
+
+    std::fs::write(
+        dir.path().join("manifest.toml"),
+        r#"[package]
+name = "LinkedClient"
+manufacturer = "acme"
+version = "1.0.0"
+
+[dependencies]
+echo = {}
+"#,
+    )
+    .unwrap();
+    let manifest =
+        actr_config::ConfigParser::from_manifest_file(dir.path().join("manifest.toml")).unwrap();
+    let error = resolve_linked_dependency_metadata(&manifest)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("must declare a complete actr_type"),
+        "{error}"
+    );
+
+    std::fs::write(
+        dir.path().join("manifest.toml"),
+        r#"[package]
+name = "LinkedClient"
+manufacturer = "acme"
+version = "1.0.0"
+
+[dependencies]
+echo = { actr_type = "acme:EchoActor:1.0.0" }
+echo_copy = { actr_type = "acme:EchoActor:1.0.0" }
+"#,
+    )
+    .unwrap();
+    let manifest =
+        actr_config::ConfigParser::from_manifest_file(dir.path().join("manifest.toml")).unwrap();
+    let error = resolve_linked_dependency_metadata(&manifest)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("more than one dependency alias"), "{error}");
 }

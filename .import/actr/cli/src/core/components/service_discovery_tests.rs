@@ -88,3 +88,36 @@ fn cli_discovery_requires_realm_secret() {
     let err = blank.required_realm_secret().unwrap_err();
     assert!(err.to_string().contains("network.realm_secret is required"));
 }
+
+#[test]
+fn lookup_name_accepts_registry_key_service_name_and_full_actor_type() {
+    let entry = discovery_response::TypeEntry {
+        actr_type: ActrType {
+            manufacturer: "acme".to_string(),
+            name: "EchoService".to_string(),
+            version: "1.0.0".to_string(),
+        },
+        name: "acme:EchoService".to_string(),
+        description: None,
+        service_fingerprint: "service_semantic:echo".to_string(),
+        published_at: None,
+        tags: vec![],
+    };
+
+    assert!(NetworkServiceDiscovery::matches_lookup_name(
+        &entry,
+        "acme:EchoService"
+    ));
+    assert!(NetworkServiceDiscovery::matches_lookup_name(
+        &entry,
+        "EchoService"
+    ));
+    assert!(NetworkServiceDiscovery::matches_lookup_name(
+        &entry,
+        "acme:EchoService:1.0.0"
+    ));
+    assert!(!NetworkServiceDiscovery::matches_lookup_name(
+        &entry,
+        "OtherService"
+    ));
+}

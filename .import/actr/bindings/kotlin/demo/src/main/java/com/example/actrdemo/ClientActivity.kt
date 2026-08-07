@@ -281,7 +281,7 @@ class ClientActivity : AppCompatActivity() {
                 val lifecycle = UnifiedLifecycleAdapter(workload)
                 val system =
                     linkedWithMonitoring(
-                        configPath = configPath,
+                        configPath = manifestPath,
                         actorType = actorType,
                         workload =
                             lifecycle.toDynamicWorkload(

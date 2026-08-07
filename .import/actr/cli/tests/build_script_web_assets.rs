@@ -4,6 +4,33 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[test]
+fn embedded_actor_service_worker_matches_web_sdk_source() {
+    let root = workspace_root();
+    let source = fs::read(root.join("bindings/web/packages/web-sdk/src/actor.sw.js"))
+        .expect("read canonical actor.sw.js");
+    let embedded = fs::read(root.join("cli/assets/web-runtime/actor.sw.js"))
+        .expect("read embedded actor.sw.js");
+    assert_eq!(
+        embedded, source,
+        "run bindings/web/scripts/sync-cli-assets.sh after editing actor.sw.js"
+    );
+}
+
+#[test]
+fn actor_service_worker_executes_only_authenticated_guest_artifacts() {
+    let source =
+        fs::read_to_string(workspace_root().join("bindings/web/packages/web-sdk/src/actor.sw.js"))
+            .expect("read canonical actor.sw.js");
+
+    assert!(source.contains("validateRuntimeConfig"));
+    assert!(source.contains("wasmInitPromise"));
+    assert!(source.contains("extracted.glue_js"));
+    assert!(source.contains("module_or_path: extracted.binary"));
+    assert!(source.contains("RUNTIME_CONFIG = null"));
+    assert!(!source.contains("packageUrl.replace(/\\.actr$/, '') + '.wbg/guest.js'"));
+}
+
+#[test]
 fn missing_generated_web_assets_copy_from_canonical_sources_without_mutating_cli_assets() {
     let temp = TempRepo::new("actr-cli-build-script");
     let repo_root = temp.path();

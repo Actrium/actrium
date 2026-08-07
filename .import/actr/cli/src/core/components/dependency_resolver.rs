@@ -56,6 +56,7 @@ impl DependencyResolver for DefaultDependencyResolver {
             // Find matching service details
             let matching_details = service_details.iter().find(|details| {
                 details.info.name == spec.name
+                    || details.info.dependency_service_name() == spec.name
                     || details.info.actr_type.to_string_repr() == spec.name
                     || spec
                         .actr_type

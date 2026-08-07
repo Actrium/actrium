@@ -98,6 +98,15 @@ public final class ActrRef: Sendable {
         }
     }
 
+    /// Resolve a dependency alias declared by the workload metadata.
+    public func resolveDependency(alias: String) async throws(ActrError) -> ActrType {
+        do {
+            return ActrType(bridge: try await inner.resolveDependency(alias: alias))
+        } catch {
+            throw ActrError(error: error)
+        }
+    }
+
     /// Shuts down the actor and waits for it to terminate.
     public func stop() async {
         inner.shutdown()

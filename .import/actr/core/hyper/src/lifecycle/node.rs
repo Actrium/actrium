@@ -7,7 +7,9 @@
 
 use crate::actr_ref::{ActrRef, ActrRefShared};
 use crate::ais_client::AisClient;
-use crate::context::{BootstrapContextBuilder, RuntimeContext};
+use crate::context::{
+    BootstrapContextBuilder, RuntimeContext, build_alias_map, build_dependency_fingerprints,
+};
 use crate::inbound::{DataChunkRegistry, MediaFrameRegistry};
 use crate::lifecycle::credential_manager::{
     CredentialManager, HardRebindHandles, RegistrationContext,
@@ -23,11 +25,12 @@ use crate::wire::webrtc::trace::{inject_span_context_to_rpc, set_parent_from_rpc
 use actr_framework::Bytes;
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
-    AIdCredential, ActorResult, ActrError, ActrId, ConnectionNotReadyInfo, Direction, PayloadType,
-    RegisterAuthMode, RegisterRequest, RpcEnvelope, TurnCredential, register_response,
+    AIdCredential, ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, Direction,
+    PayloadType, RegisterAuthMode, RegisterRequest, RpcEnvelope, TurnCredential, register_response,
 };
 use actr_runtime::check_acl_permission;
 use actr_runtime_mailbox::{DeadLetterQueue, Mailbox};
+use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Weak};
@@ -516,6 +519,11 @@ pub(crate) struct Inner {
     /// Wrapped in `Arc` so per-request `RuntimeContext` clones only bump a refcount
     /// instead of deep-cloning the dependency vector.
     pub(crate) actr_lock: Option<Arc<actr_config::lock::LockFile>>,
+    /// Runtime dependency aliases built once from the source appropriate to
+    /// this workload: authenticated lock for packages, dynamic manifest for
+    /// linked workloads.
+    pub(crate) alias_map: Arc<HashMap<String, ActrType>>,
+    pub(crate) dependency_fingerprints: Arc<HashMap<ActrType, String>>,
     /// Network event receiver (from NetworkEventHandle)
     pub(crate) network_event_rx:
         Option<tokio::sync::mpsc::Receiver<crate::lifecycle::network_event::NetworkEventRequest>>,
@@ -835,6 +843,11 @@ async fn host_operation_handler(
             }
         }
 
+        HostOperation::ResolveDependency(req) => match ctx.resolve_dependency(&req.alias).await {
+            Ok(actr_type) => HostOperationResult::Bytes(actr_type.encode_to_vec()),
+            Err(error) => HostOperationResult::Error(error),
+        },
+
         HostOperation::RegisterStream(req) => {
             let stream_id = req.stream_id;
             let callback_ctx = ctx.clone();
@@ -1017,6 +1030,10 @@ async fn stream_callback_host_operation_handler(
                 Err(e) => HostOperationResult::Error(e),
             }
         }
+        HostOperation::ResolveDependency(req) => match ctx.resolve_dependency(&req.alias).await {
+            Ok(actr_type) => HostOperationResult::Bytes(actr_type.encode_to_vec()),
+            Err(error) => HostOperationResult::Error(error),
+        },
         HostOperation::RegisterStream(_) => {
             tracing::error!("register_stream from inside a stream callback is not supported");
             HostOperationResult::AbiError(abi_code::UNSUPPORTED_OP)
@@ -1664,6 +1681,7 @@ impl Inner {
         workload: crate::workload::Workload,
         package_manifest: Option<actr_pack::PackageManifest>,
         packaged_lock: Option<actr_config::lock::LockFile>,
+        linked_dependencies: Option<crate::LinkedDependencyMetadata>,
         mailbox_backpressure_threshold: usize,
         credential_expiry_warning: Duration,
         dispatch_concurrency: crate::config::DispatchConcurrency,
@@ -1744,18 +1762,51 @@ impl Inner {
 
         tracing::info!("✅ Inproc infrastructure initialized (bidirectional Shell ↔ Guest)");
 
+        if packaged_lock.is_some() && package_manifest.is_none() {
+            return Err(ActrError::InvalidArgument(
+                "package dependency locks require an authenticated package manifest".to_string(),
+            ));
+        }
+        if packaged_lock.is_some() && linked_dependencies.is_some() {
+            return Err(ActrError::InvalidArgument(
+                "a runtime cannot combine package-lock and linked-manifest dependency aliases"
+                    .to_string(),
+            ));
+        }
+        let package_backed = package_manifest.is_some();
         let actr_lock = if let Some(lock) = packaged_lock {
+            lock.validate_aliases().map_err(|error| {
+                actr_protocol::ActrError::InvalidArgument(format!(
+                    "invalid packaged manifest.lock.toml: {error}"
+                ))
+            })?;
             tracing::info!(
                 "📋 Loaded packaged manifest.lock.toml with {} dependencies",
                 lock.dependencies.len()
             );
             Some(Arc::new(lock))
         } else {
-            tracing::warn!(
-                "⚠️ manifest.lock.toml not found in package. Continuing without dependency fingerprints."
-            );
+            if package_backed {
+                tracing::warn!(
+                    "⚠️ manifest.lock.toml not found in package. Continuing without dependency fingerprints."
+                );
+            }
             None
         };
+        let alias_map = Arc::new(match linked_dependencies.as_ref() {
+            Some(metadata) => metadata.aliases.clone(),
+            None => actr_lock
+                .as_deref()
+                .map(build_alias_map)
+                .unwrap_or_default(),
+        });
+        let dependency_fingerprints = Arc::new(match linked_dependencies {
+            Some(metadata) => metadata.fingerprints,
+            None => actr_lock
+                .as_deref()
+                .map(build_dependency_fingerprints)
+                .unwrap_or_default(),
+        });
 
         // ── Dispatch scheduling layer (B2 native / M5 wasm) ─────────────────
         // Strategy A (default-on, keyless zero-overhead): the gate now defaults
@@ -1835,6 +1886,8 @@ impl Inner {
             shutdown_token,
             mailbox_batch_admission: MailboxBatchAdmission::new(),
             actr_lock,
+            alias_map,
+            dependency_fingerprints,
             network_event_rx: None,
             network_event_debounce_config: None,
             network_event_internal: None,
@@ -1872,6 +1925,8 @@ impl Inner {
             self.media_frame_registry.clone(),
             self.signaling_client.clone(),
             self.actr_lock.clone(),
+            self.alias_map.clone(),
+            self.dependency_fingerprints.clone(),
             self.discovered_ws_addresses.clone(),
             self.session_state.clone(),
             self.session_state
@@ -1892,7 +1947,7 @@ impl Inner {
         request_id: &str,
         credential: &AIdCredential,
     ) -> RuntimeContext {
-        RuntimeContext::new(
+        RuntimeContext::new_with_alias_map(
             self_id.clone(),
             caller_id.cloned(),
             request_id.to_string(),
@@ -1903,6 +1958,8 @@ impl Inner {
             self.signaling_client.clone(),
             credential.clone(),
             self.actr_lock.clone(),
+            self.alias_map.clone(),
+            self.dependency_fingerprints.clone(),
             self.discovered_ws_addresses.clone(),
             self.session_state.clone(),
             self.session_state

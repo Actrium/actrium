@@ -369,6 +369,17 @@ CLIENT_GUEST_TARGET="$(rustc -vV | awk '/host:/ {print $2}')"
 CLIENT_GUEST_DIST_DIR="$CLIENT_GUEST_DIR/dist"
 mkdir -p "$CLIENT_GUEST_DIST_DIR"
 
+# Package from disposable config copies so the tracked example remains clean
+# when ECHO_ACTR_VERSION differs from its default. The v2 lock and manifest
+# must carry the same canonical ActrType.
+CLIENT_GUEST_BUILD_CONFIG_DIR="$CLIENT_GUEST_DIST_DIR/package-config"
+mkdir -p "$CLIENT_GUEST_BUILD_CONFIG_DIR"
+cp "$CLIENT_GUEST_DIR/manifest.toml" "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.toml"
+cp "$CLIENT_GUEST_DIR/manifest.lock.toml" "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.lock.toml"
+perl -0pi -e "s/actr_type = \"actrium:EchoService:[^\"]+\"/actr_type = \"actrium:EchoService:${ECHO_ACTR_VERSION}\"/g" \
+    "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.toml" \
+    "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.lock.toml"
+
 # Build the cdylib (runs in workspace root, so target is at workspace level)
 # Use workspace-level target dir from .cargo/config.toml (target-dir = "../../target/examples")
 WORKSPACE_TARGET_DIR="$ACTR_REPO_DIR/target/examples"
@@ -399,7 +410,7 @@ CLIENT_GUEST_PUBLIC_KEY="$CLIENT_GUEST_DIST_DIR/public-key.json"
 # Package the client-guest binary (uses manifest.toml = Actr.example.toml)
 cargo run --manifest-path "$ACTR_CLI_MANIFEST" --bin actr -- pkg build \
     --binary "$CLIENT_GUEST_BINARY" \
-    --config "$CLIENT_GUEST_DIR/manifest.toml" \
+    --config "$CLIENT_GUEST_BUILD_CONFIG_DIR/manifest.toml" \
     --key "$CLIENT_GUEST_DEV_KEY" \
     --target "$CLIENT_GUEST_TARGET" \
     --output "$CLIENT_GUEST_PACKAGE"

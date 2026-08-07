@@ -50,6 +50,7 @@ pub mod op {
     pub const HOST_REGISTER_STREAM: u32 = 5;
     pub const HOST_UNREGISTER_STREAM: u32 = 6;
     pub const HOST_SEND_DATA_CHUNK: u32 = 7;
+    pub const HOST_RESOLVE_DEPENDENCY: u32 = 8;
     pub const GUEST_HANDLE: u32 = 101;
     pub const GUEST_DATA_CHUNK: u32 = 102;
     pub const GUEST_LIFECYCLE: u32 = 103;
@@ -460,6 +461,13 @@ pub struct HostDiscoverV1 {
     pub target_type: ActrType,
 }
 
+/// Runtime guest->host dependency-alias lookup payload.
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct HostResolveDependencyV1 {
+    #[prost(string, tag = "1")]
+    pub alias: String,
+}
+
 /// Runtime guest->host DataChunk registration payload.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct HostRegisterStreamV1 {
@@ -525,6 +533,11 @@ impl AbiPayload for HostCallRawV1 {
 impl AbiPayload for HostDiscoverV1 {
     const ABI_VERSION: u32 = version::V1;
     const OP: u32 = op::HOST_DISCOVER;
+}
+
+impl AbiPayload for HostResolveDependencyV1 {
+    const ABI_VERSION: u32 = version::V1;
+    const OP: u32 = op::HOST_RESOLVE_DEPENDENCY;
 }
 
 impl AbiPayload for HostRegisterStreamV1 {
@@ -734,5 +747,21 @@ mod tests {
             round_trip(ActrError::Internal("bug".into())),
             ActrError::Internal(message) if message == "bug"
         ));
+    }
+
+    #[test]
+    fn dependency_alias_lookup_has_a_stable_host_operation() {
+        let request = HostResolveDependencyV1 {
+            alias: "echo".into(),
+        };
+        let frame = request.to_frame().expect("encode resolve-dependency");
+        assert_eq!(frame.abi_version, version::V1);
+        assert_eq!(frame.op, op::HOST_RESOLVE_DEPENDENCY);
+        assert_eq!(
+            HostResolveDependencyV1::decode_payload(&frame.payload)
+                .expect("decode resolve-dependency")
+                .alias,
+            "echo"
+        );
     }
 }

@@ -1,7 +1,8 @@
 //! Package Echo Client Guest — cdylib workload for the client host.
 //!
 //! Implements the transparent proxy for `echo.EchoService.Echo`:
-//! 1. Discover `actrium:EchoService:<version>` (cached after first success)
+//! 1. Resolve the `EchoService` dependency alias and discover it (cached after
+//!    first success)
 //! 2. Call `echo.EchoService.Echo` on the remote server
 //! 3. Return the reply to the host
 //! 4. On failure with a cached target, clear cache and retry once
@@ -11,19 +12,14 @@ pub mod echo {
 }
 
 use actr_framework::{Context, MessageDispatcher, Workload, entry};
-use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, RpcEnvelope, RpcRequest};
+use actr_protocol::{ActorResult, ActrError, ActrId, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use bytes::Bytes;
 use prost::Message as ProstMessage;
 
 use echo::{EchoRequest, EchoResponse};
 
-const ECHO_SERVICE_MANUFACTURER: &str = "actrium";
-const ECHO_SERVICE_NAME: &str = "EchoService";
-
-fn echo_actr_version() -> String {
-    std::env::var("ECHO_ACTR_VERSION").unwrap_or_else(|_| "0.2.1".to_string())
-}
+const ECHO_SERVICE_ALIAS: &str = "EchoService";
 
 impl RpcRequest for EchoRequest {
     type Response = EchoResponse;
@@ -138,11 +134,7 @@ async fn resolve_server<C: Context>(
 }
 
 async fn discover_server<C: Context>(ctx: &C) -> ActorResult<ActrId> {
-    let target_type = ActrType {
-        manufacturer: ECHO_SERVICE_MANUFACTURER.to_string(),
-        name: ECHO_SERVICE_NAME.to_string(),
-        version: echo_actr_version(),
-    };
+    let target_type = ctx.resolve_dependency(ECHO_SERVICE_ALIAS).await?;
     ctx.discover_route_candidate(&target_type).await
 }
 

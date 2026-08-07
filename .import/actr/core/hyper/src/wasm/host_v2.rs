@@ -19,8 +19,8 @@
 
 use actr_framework::guest::dynclib_abi as guest_abi;
 use actr_framework::guest::dynclib_abi::{
-    HostCallRawV1, HostCallV1, HostDiscoverV1, HostRegisterStreamV1, HostSendDataChunkV1,
-    HostTellV1, HostUnregisterStreamV1,
+    HostCallRawV1, HostCallV1, HostDiscoverV1, HostRegisterStreamV1, HostResolveDependencyV1,
+    HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1,
 };
 use actr_framework::{BackpressureEvent, CredentialEvent, PeerEvent, WebRtcPeerStatus};
 use actr_protocol::prost::Message as ProstMessage;
@@ -181,6 +181,24 @@ impl HostWithStore<HostState> for HostState {
                 )))),
             },
             Err(e) => Ok(Err(e)),
+        }
+    }
+
+    async fn resolve_dependency(
+        accessor: &Accessor<HostState, Self>,
+        ctx_token: u64,
+        alias: String,
+    ) -> wasmtime::Result<Result<WitActrType, WitActrError>> {
+        let host_abi = accessor.with(|mut accessor| accessor.get().invocation_host_abi(ctx_token));
+        let op = HostOperation::ResolveDependency(HostResolveDependencyV1 { alias });
+        match run_host_operation(host_abi, op).await? {
+            Ok(bytes) => match ActrType::decode(bytes.as_slice()) {
+                Ok(actr_type) => Ok(Ok(proto_actr_type_to_wit(&actr_type))),
+                Err(error) => Ok(Err(WitActrError::DecodeFailure(format!(
+                    "host resolve-dependency returned undecodable ActrType: {error}"
+                )))),
+            },
+            Err(error) => Ok(Err(error)),
         }
     }
 

@@ -726,9 +726,6 @@ targets:
       - path: actr.toml
         type: file
         buildPhase: resources
-      - path: manifest.lock.toml
-        type: file
-        buildPhase: resources
       - path: manifest.toml
         type: file
         buildPhase: resources
@@ -774,6 +771,9 @@ scaffold_swift_ts_workload_app() {
     rm -rf "$TMP_APP_DIR/SwiftTsWorkloadApp/Generated"
 
     cp "$SCRIPT_DIR/manifest.toml" "$TMP_APP_DIR/manifest.toml"
+    perl -i -pe \
+        "s{manufacturer = \"actrium\"}{manufacturer = \"${MANUFACTURER}\"}; s{actrium:}{${MANUFACTURER}:}g" \
+        "$TMP_APP_DIR/manifest.toml"
     write_swift_ts_workload_app_project_yml
     rm -f "$TMP_APP_DIR/protos/local/local.proto"
     write_probe_proto "$TMP_APP_DIR/protos/local/probe.proto"
@@ -1042,7 +1042,6 @@ install_and_launch_app() {
     # may return before the app exits when detached from the terminal, so do not
     # treat the wrapper process as the app lifetime.
     SIMCTL_CHILD_ACTR_SWIFTTSAPP_AUTO_STREAM_COUNT=3 \
-    SIMCTL_CHILD_ACTR_MANUFACTURER="${MANUFACTURER}" \
     SIMCTL_CHILD_ACTR_SWIFTTSAPP_TARGET_TYPE="${MANUFACTURER}:DuplexEchoService:1.0.0" \
     xcrun simctl launch \
         "${launch_args[@]}" \
@@ -1127,7 +1126,7 @@ setup_ios_simulator
 
 # Phase 4: Start DuplexEchoService before SwiftTsWorkloadApp dependency install.
 # `actr deps install` validates the remote dependency through discovery, so the
-# service must be registered before Swift codegen resolves manifest.lock.toml.
+# service must be registered before the dependency proto is downloaded.
 run_server_host
 check_service_ready
 

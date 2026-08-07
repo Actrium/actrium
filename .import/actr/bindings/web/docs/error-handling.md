@@ -11,20 +11,21 @@ Examples:
 - invalid signaling or AIS URL
 - missing realm, package, or actor identifiers
 - incorrect Service Worker path
-- missing `.actr` package or `.wbg/` sibling bundle
+- missing `.actr` package, package binary, or signed `resources/glue.js`
+- empty trust configuration, registry-only trust, or a `pubkey_file` not resolved to browser-usable `pubkey_b64`
 
-These should fail fast during initialization whenever possible.
+These should fail fast during initialization whenever possible. Trust failures are fail-closed: the browser must not execute package content when no usable static anchor is available.
 
 ### Guest Loading Errors
 
 Examples:
 
-- `actor.sw.js` cannot load `guest.js`
-- `guest_bg.wasm` is missing or served with the wrong URL
+- `actor.sw.js` cannot extract or evaluate packaged `resources/glue.js`
+- the package binary is missing or is not a usable wasm-bindgen `*_bg.wasm`
 - `register_guest_workload` is not exported or throws
-- signed package metadata does not match the served guest bundle
+- the package signature or binary/resource hashes do not match
 
-These are build or packaging errors. They should include the package URL, `.wbg/` URL, and original JavaScript or wasm-bindgen error.
+These are build or packaging errors. They should include the package URL, affected package entry, and original verification, JavaScript, or wasm-bindgen error.
 
 ### Connectivity Errors
 
@@ -71,7 +72,7 @@ These should be treated as correctness bugs or wire-compatibility problems, not 
 
 - Retry only when the owning layer has a clear policy for doing so.
 - Reconnect flows should be explicit and observable.
-- Package or `.wbg/` layout errors should not be retried silently.
+- Package layout, signature, or resource-hash errors should not be retried silently.
 - Persistent storage corruption or schema mismatch should trigger an intentional reset path rather than undefined behavior.
 
 ## Documentation Expectations

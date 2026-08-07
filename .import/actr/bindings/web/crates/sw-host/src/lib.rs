@@ -8,6 +8,7 @@
 
 pub mod actr_ref;
 pub mod context;
+mod dependency_aliases;
 pub mod error_handler;
 pub mod guest_bridge;
 pub mod inbound;
@@ -37,8 +38,8 @@ pub use error_handler::{
 };
 pub use guest_bridge::{
     host_call_async, host_call_raw_async, host_discover_async, host_get_caller_id,
-    host_get_request_id, host_get_self_id, host_log_message, host_tell_async,
-    register_guest_workload,
+    host_get_request_id, host_get_self_id, host_log_message, host_resolve_dependency,
+    host_tell_async, install_dependency_lock, register_guest_workload,
 };
 pub use inbound::{InboundPacketDispatcher, MailboxMessageHandler, MailboxProcessor};
 pub use lifecycle::SwLifecycleManager;

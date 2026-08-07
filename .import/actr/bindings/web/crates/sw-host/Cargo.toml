@@ -64,6 +64,7 @@ web-time = "1.1"
 # Serialization
 serde.workspace = true
 serde_json.workspace = true
+toml = "1.0.6"
 
 # Utilities
 log.workspace = true

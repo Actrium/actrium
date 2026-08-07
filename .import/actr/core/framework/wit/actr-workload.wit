@@ -239,6 +239,10 @@ interface host {
     // Discovery: find a candidate actor serving the requested type.
     discover: func(target-type: actr-type) -> result<actr-id, actr-error>;
 
+    // Resolve a dependency alias from the workload's authenticated package
+    // metadata before discovery.
+    resolve-dependency: func(alias: string) -> result<actr-type, actr-error>;
+
     register-stream: func(stream-id: string) -> result<_, actr-error>;
 
     unregister-stream: func(stream-id: string) -> result<_, actr-error>;

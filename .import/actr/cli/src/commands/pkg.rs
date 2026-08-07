@@ -20,8 +20,8 @@ use clap::{Args, Subcommand};
 use ed25519_dalek::SigningKey;
 
 use crate::commands::package_build::{
-    ensure_manufacturer_matches, load_signing_key_with_manufacturer, load_verifying_key,
-    load_verifying_key_from_dev_key, resolve_key_path,
+    binary_kind_for_target, ensure_manufacturer_matches, load_signing_key_with_manufacturer,
+    load_verifying_key, load_verifying_key_from_dev_key, resolve_key_path, validated_packaged_lock,
 };
 use crate::core::{Command, CommandContext, CommandResult, ComponentType};
 
@@ -227,8 +227,10 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
 // Output:
 //   1. Canonical manifest.toml — the exact bytes that were signed
 //   2. manifest.sig — 64 bytes raw Ed25519 signature
+//   3. A signed manifest.lock.toml hash when the source manifest has dependencies
 //
-// The signed content is byte-level identical to what `actr build` produces.
+// The output uses the same PackageManifest schema and lock validation as
+// `actr build`; an external packager must include the referenced sibling lock.
 
 async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Result<()> {
     use ed25519_dalek::Signer;
@@ -264,6 +266,9 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
     let manufacturer = get_str("manufacturer")?;
     let name = get_str("name")?;
     let version = get_str("version")?;
+    let parsed_config = actr_config::ConfigParser::from_manifest_file(config_path)
+        .with_context(|| "Invalid manifest.toml package configuration")?;
+    let lock_file = validated_packaged_lock(&parsed_config)?;
 
     // Reject cross-manufacturer signing before computing hashes or writing the
     // signature (issue #425).
@@ -328,15 +333,16 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
             target: args.target.clone(),
             hash: binary_hash,
             size: binary_size,
-            // Default to Component for wasm32-wasip2, leave unset otherwise
-            // so the legacy-default resolver can apply.
-            kind: (args.target == "wasm32-wasip2").then_some(actr_pack::BinaryKind::Component),
+            kind: binary_kind_for_target(&args.target),
         },
         signature_algorithm: "ed25519".to_string(),
         signing_key_id: Some(key_id.clone()),
         resources: vec![],
         proto_files: proto_entries,
-        lock_file: None,
+        lock_file: lock_file.as_ref().map(|bytes| actr_pack::LockFileEntry {
+            path: "manifest.lock.toml".to_string(),
+            hash: hex::encode(Sha256::digest(bytes)),
+        }),
         metadata: actr_pack::ManifestMetadata {
             description: pkg
                 .get("description")

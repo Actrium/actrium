@@ -698,7 +698,7 @@ public static func newFromLinkedWorkload(configPath: String, actorType: ActrType
             errorHandler: FfiConverterTypeActrError_lift
         )
 }
-    
+
     /**
      * Create a new runtime wrapper from config and a verified `.actr` package file.
      */
@@ -848,6 +848,11 @@ public protocol ActrRefWrapperProtocol: AnyObject, Sendable {
     func isShuttingDown()  -> Bool
     
     /**
+     * Resolve a dependency alias to its declared `ActrType`.
+     */
+    func resolveDependency(alias: String) async throws  -> ActrType
+
+    /**
      * Trigger shutdown.
      */
     func shutdown() 
@@ -929,7 +934,7 @@ open func actorId() -> ActrId  {
     )
 })
 }
-    
+
     /**
      * Call the local guest workload via RPC.
      */
@@ -981,6 +986,26 @@ open func isShuttingDown() -> Bool  {
 })
 }
     
+    /**
+     * Resolve a dependency alias to its declared `ActrType`.
+     */
+open func resolveDependency(alias: String)async throws  -> ActrType  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_actr_fn_method_actrrefwrapper_resolve_dependency(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(alias)
+                )
+            },
+            pollFunc: ffi_actr_rust_future_poll_rust_buffer,
+            completeFunc: ffi_actr_rust_future_complete_rust_buffer,
+            freeFunc: ffi_actr_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeActrType_lift,
+            errorHandler: FfiConverterTypeActrError_lift
+        )
+}
+
     /**
      * Trigger shutdown.
      */
@@ -1147,6 +1172,11 @@ public protocol ContextBridgeProtocol: AnyObject, Sendable {
      * Request ID associated with the current dispatch or lifecycle context.
      */
     func requestId()  -> String
+
+    /**
+     * Resolve a declared dependency alias to its canonical actor type.
+     */
+    func resolveDependency(alias: String) async throws  -> ActrType
 
     /**
      * Current actor ID associated with this context.
@@ -1414,6 +1444,26 @@ open func requestId() -> String  {
             self.uniffiCloneHandle(),$0
     )
 })
+}
+
+    /**
+     * Resolve a declared dependency alias to its canonical actor type.
+     */
+open func resolveDependency(alias: String)async throws  -> ActrType  {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_actr_fn_method_contextbridge_resolve_dependency(
+                    self.uniffiCloneHandle(),
+                    FfiConverterString.lower(alias)
+                )
+            },
+            pollFunc: ffi_actr_rust_future_poll_rust_buffer,
+            completeFunc: ffi_actr_rust_future_complete_rust_buffer,
+            freeFunc: ffi_actr_rust_future_free_rust_buffer,
+            liftFunc: FfiConverterTypeActrType_lift,
+            errorHandler: FfiConverterTypeActrError_lift
+        )
 }
 
     /**
@@ -6974,6 +7024,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actr_checksum_method_contextbridge_request_id() != 61345) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_actr_checksum_method_contextbridge_resolve_dependency() != 9905) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_actr_checksum_method_contextbridge_self_id() != 56416) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -7014,6 +7067,9 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actr_checksum_method_actrrefwrapper_is_shutting_down() != 50332) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency() != 37283) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actr_checksum_method_actrrefwrapper_shutdown() != 60173) {

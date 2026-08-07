@@ -309,6 +309,15 @@ impl Context for WebContext {
         flatten_js(outcome).map(|wit_id| actr_id_from_wit(&wit_id))
     }
 
+    async fn resolve_dependency(&self, alias: &str) -> ActorResult<ActrType> {
+        let outcome = actr_web_abi::guest::resolve_dependency_with_request_id(
+            self.request_id(),
+            alias.to_string(),
+        )
+        .await;
+        flatten_js(outcome).map(|actr_type| actr_type_from_wit(&actr_type))
+    }
+
     // ── DataChunk fast path (not supported on web) ─────────────────────
 
     async fn register_stream<F>(&self, _stream_id: String, _callback: F) -> ActorResult<()>

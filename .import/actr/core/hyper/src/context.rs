@@ -48,6 +48,12 @@ pub struct RuntimeContext {
     signaling_client: Arc<dyn SignalingClient>,
     credential: AIdCredential,
     actr_lock: Option<Arc<LockFile>>, // packaged manifest.lock.toml for fingerprint lookups
+    /// `alias -> ActrType` map built once from the runtime's dependency source.
+    /// Package workloads use their authenticated lock; linked workloads use
+    /// their dynamic manifest. Every context shares this map by `Arc`.
+    alias_map: Arc<HashMap<String, ActrType>>,
+    /// Strict service fingerprints keyed by complete dependency ActrType.
+    dependency_fingerprints: Arc<HashMap<ActrType, String>>,
     /// Shared map of discovered direct-connect WebSocket URLs, keyed by ActrId.
     /// Populated by `discover_route_candidate` from the signaling `ws_address_map`,
     /// then read by `DefaultWireBuilder` when establishing outbound connections.
@@ -77,6 +83,7 @@ impl RuntimeContext {
     /// - `credential`: credentials used when calling signaling interfaces
     /// - `actr_lock`: shared packaged `manifest.lock.toml` used for fingerprint lookup (wrapped in `Arc` so context clones stay cheap)
     /// - `discovered_ws_addresses`: shared map written by `discover_route_candidate` and read by `DefaultWireBuilder`
+    #[cfg(any(test, feature = "test-utils"))]
     #[allow(clippy::too_many_arguments)] // Internal API - all parameters are required
     pub(crate) fn new(
         self_id: ActrId,
@@ -93,6 +100,57 @@ impl RuntimeContext {
         session_state: Option<SessionState>,
         context_generation: u64,
     ) -> Self {
+        let alias_map = Arc::new(
+            actr_lock
+                .as_deref()
+                .map(build_alias_map)
+                .unwrap_or_default(),
+        );
+        let dependency_fingerprints = Arc::new(
+            actr_lock
+                .as_deref()
+                .map(build_dependency_fingerprints)
+                .unwrap_or_default(),
+        );
+        Self::new_with_alias_map(
+            self_id,
+            caller_id,
+            request_id,
+            inproc_gate,
+            outproc_gate,
+            data_chunk_registry,
+            media_frame_registry,
+            signaling_client,
+            credential,
+            actr_lock,
+            alias_map,
+            dependency_fingerprints,
+            discovered_ws_addresses,
+            session_state,
+            context_generation,
+        )
+    }
+
+    /// Create a context with the dependency map already materialized by the
+    /// owning node.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_alias_map(
+        self_id: ActrId,
+        caller_id: Option<ActrId>,
+        request_id: String,
+        inproc_gate: Gate,
+        outproc_gate: Option<Gate>,
+        data_chunk_registry: Arc<DataChunkRegistry>,
+        media_frame_registry: Arc<MediaFrameRegistry>,
+        signaling_client: Arc<dyn SignalingClient>,
+        credential: AIdCredential,
+        actr_lock: Option<Arc<LockFile>>,
+        alias_map: Arc<HashMap<String, ActrType>>,
+        dependency_fingerprints: Arc<HashMap<ActrType, String>>,
+        discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
+        session_state: Option<SessionState>,
+        context_generation: u64,
+    ) -> Self {
         Self {
             self_id,
             caller_id,
@@ -104,6 +162,8 @@ impl RuntimeContext {
             signaling_client,
             credential,
             actr_lock,
+            alias_map,
+            dependency_fingerprints,
             discovered_ws_addresses,
             session_state,
             context_generation,
@@ -113,6 +173,19 @@ impl RuntimeContext {
     #[cfg(test)]
     pub(crate) fn data_chunk_registry_for_test(&self) -> Arc<DataChunkRegistry> {
         self.data_chunk_registry.clone()
+    }
+
+    /// Read-only handle to the `alias -> ActrType` map, shared by every cloned
+    /// context. Exposed for tests and bootstrap paths that need to validate
+    /// aliases without going through the async trait method.
+    #[allow(dead_code)]
+    pub(crate) fn alias_map(&self) -> &HashMap<String, ActrType> {
+        &self.alias_map
+    }
+
+    #[cfg(test)]
+    pub(crate) fn alias_map_for_test(&self) -> Arc<HashMap<String, ActrType>> {
+        self.alias_map.clone()
     }
 
     /// Select the appropriate gate based on `Dest`.
@@ -299,31 +372,7 @@ impl RuntimeContext {
 
     /// Get dependency fingerprint from the packaged manifest.lock.toml
     fn get_dependency_fingerprint(&self, target_type: &ActrType) -> Option<String> {
-        let actr_lock = self.actr_lock.as_ref()?;
-
-        let key = target_type.to_string_repr();
-
-        // Try by full key
-        if let Some(dep) = actr_lock.get_dependency(&key) {
-            return Some(dep.fingerprint.clone());
-        }
-
-        // Fallback to scanning dependencies when the exact key is not present.
-        for dep in &actr_lock.dependencies {
-            if Self::matches_dependency_actr_type(&dep.actr_type, target_type) {
-                return Some(dep.fingerprint.clone());
-            }
-        }
-
-        None
-    }
-
-    fn matches_dependency_actr_type(raw: &str, target_type: &ActrType) -> bool {
-        let Ok(dep_type) = ActrType::from_string_repr(raw) else {
-            return false;
-        };
-
-        dep_type == *target_type
+        self.dependency_fingerprints.get(target_type).cloned()
     }
 
     /// Internal: Send discovery request to signaling server
@@ -335,7 +384,13 @@ impl RuntimeContext {
     ) -> ActorResult<InternalDiscoveryResult> {
         let criteria = route_candidates_request::NodeSelectionCriteria {
             candidate_count,
-            ranking_factors: Vec::new(),
+            ranking_factors: (!client_fingerprint.is_empty())
+                .then_some(
+                    route_candidates_request::node_selection_criteria::NodeRankingFactor::ExactMatchFirst
+                        as i32,
+                )
+                .into_iter()
+                .collect(),
             minimal_dependency_requirement: None,
             minimal_health_requirement: None,
         };
@@ -389,6 +444,51 @@ struct InternalDiscoveryResult {
     ws_address_map: Vec<actr_protocol::WsAddressEntry>,
 }
 
+/// Build the `alias -> ActrType` map from a packaged `manifest.lock.toml`.
+///
+/// Each `[[dependency]]` entry contributes its explicit v2 `alias`; `name` is
+/// metadata and is never used as an identity fallback.
+pub(crate) fn build_alias_map(lock: &LockFile) -> HashMap<String, ActrType> {
+    if lock.format_version() != actr_config::lock::LOCK_FILE_VERSION {
+        return HashMap::new();
+    }
+
+    let mut map = HashMap::with_capacity(lock.dependencies.len());
+    for dep in &lock.dependencies {
+        let alias = dep.alias.trim();
+        if alias.is_empty() {
+            continue;
+        }
+        match ActrType::from_string_repr(&dep.actr_type) {
+            Ok(actr_type) => {
+                map.insert(alias.to_string(), actr_type);
+            }
+            Err(_) => {
+                tracing::warn!(
+                    alias,
+                    actr_type = %dep.actr_type,
+                    "skipping lock dependency with unparseable actr_type during alias map build"
+                );
+            }
+        }
+    }
+    map
+}
+
+pub(crate) fn build_dependency_fingerprints(lock: &LockFile) -> HashMap<ActrType, String> {
+    if lock.format_version() != actr_config::lock::LOCK_FILE_VERSION {
+        return HashMap::new();
+    }
+    lock.dependencies
+        .iter()
+        .filter_map(|dependency| {
+            ActrType::from_string_repr(&dependency.actr_type)
+                .ok()
+                .map(|actr_type| (actr_type, dependency.fingerprint.clone()))
+        })
+        .collect()
+}
+
 /// Template used to materialize `RuntimeContext` instances for lifecycle
 /// bootstrap / observation paths (on_start / on_stop, signaling hooks, WebRTC
 /// hooks, ActrRef::app_context, ...).
@@ -413,6 +513,8 @@ pub(crate) struct BootstrapContextBuilder {
     media_frame_registry: Arc<MediaFrameRegistry>,
     signaling_client: Arc<dyn SignalingClient>,
     actr_lock: Option<Arc<LockFile>>,
+    alias_map: Arc<HashMap<String, ActrType>>,
+    dependency_fingerprints: Arc<HashMap<ActrType, String>>,
     /// Shared map populated by discover_route_candidate; forwarded into each
     /// RuntimeContext so discovery results are visible to DefaultWireBuilder.
     discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
@@ -436,6 +538,8 @@ impl BootstrapContextBuilder {
         media_frame_registry: Arc<MediaFrameRegistry>,
         signaling_client: Arc<dyn SignalingClient>,
         actr_lock: Option<Arc<LockFile>>,
+        alias_map: Arc<HashMap<String, ActrType>>,
+        dependency_fingerprints: Arc<HashMap<ActrType, String>>,
         discovered_ws_addresses: Arc<RwLock<HashMap<ActrId, String>>>,
         session_state: Option<SessionState>,
         generation: u64,
@@ -447,6 +551,8 @@ impl BootstrapContextBuilder {
             media_frame_registry,
             signaling_client,
             actr_lock,
+            alias_map,
+            dependency_fingerprints,
             discovered_ws_addresses,
             session_state,
             generation,
@@ -488,7 +594,7 @@ impl BootstrapContextBuilder {
             .and_then(SessionState::generation_sync)
             .unwrap_or(self.generation);
 
-        RuntimeContext::new(
+        RuntimeContext::new_with_alias_map(
             self_id.clone(),
             None,
             uuid::Uuid::new_v4().to_string(),
@@ -499,6 +605,8 @@ impl BootstrapContextBuilder {
             self.signaling_client.clone(),
             credential.clone(),
             self.actr_lock.clone(),
+            self.alias_map.clone(),
+            self.dependency_fingerprints.clone(),
             self.discovered_ws_addresses.clone(),
             self.session_state.clone(),
             generation,
@@ -764,6 +872,18 @@ impl Context for RuntimeContext {
                 "No route candidates for type {}/{}",
                 target_type.manufacturer, target_type.name
             ))
+        })
+    }
+
+    async fn resolve_dependency(&self, alias: &str) -> ActorResult<ActrType> {
+        if let Some(actr_type) = self.alias_map.get(alias) {
+            return Ok(actr_type.clone());
+        }
+        Err(ActrError::DependencyNotFound {
+            service_name: alias.to_string(),
+            message: format!(
+                "dependency alias `{alias}` is not declared in the workload dependency metadata"
+            ),
         })
     }
 

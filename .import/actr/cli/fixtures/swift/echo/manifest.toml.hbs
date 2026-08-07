@@ -12,7 +12,7 @@ tags = ["dev", "client"]
 
 [dependencies]
 {{#if IS_BOTH}}
-EchoService = {}
+EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
 {{else}}
 EchoService = { actr_type = "{{MANUFACTURER}}:EchoService:1.0.0" }
 {{/if}}

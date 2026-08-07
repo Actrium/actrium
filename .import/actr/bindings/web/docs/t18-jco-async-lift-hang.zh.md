@@ -333,7 +333,7 @@ crates/js-component-bindgen/src/intrinsics/p3/async_task.rs
 
 1. 历史上需要读本文档第 4 章（H_Y 判定）和第 7 章（选项）
 2. 历史上需要在 P / Q / R 之间选路线；当前已选择并完成 Option U
-3. 当前若要跑 e2e，请走现有 `actor.sw.js` + `.wbg/` 路径和 `sync-cli-assets.sh` / `cargo build -p actr-cli --bin actr` 流程
+3. 当前若要跑 e2e，请走 `actor.sw.js` + 自包含签名 `.actr` 路径：包内 binary 是 wasm-bindgen `*_bg.wasm`，`resources/glue.js` 是签名 JS glue；配合 `sync-cli-assets.sh` / `cargo build -p actr-cli --bin actr` 流程
 4. 如果要复盘旧诊断，`CAPTURE_SW_CONSOLE=1` 仍是理解 SW 日志的关键
 
 ---

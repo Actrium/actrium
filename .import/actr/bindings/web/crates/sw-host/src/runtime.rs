@@ -389,7 +389,8 @@ struct SwConfig {
     signaling_url: String,
     realm_id: u32,
     client_actr_type: String,
-    target_actr_type: String,
+    #[serde(default)]
+    target_actr_type: Option<String>,
     service_fingerprint: String,
     /// ACL: list of actr_types (e.g. "acme:echo-client-app") that are allowed
     /// to discover and communicate with this actor. Sent in RegisterRequest.
@@ -558,7 +559,7 @@ struct SwRuntime {
     reconnect_config: ReconnectConfig,
     realm_id: u32,
     client_actr_type: ActrType,
-    target_actr_type: ActrType,
+    target_actr_type: Option<ActrType>,
     service_fingerprint: String,
     acl: Option<Acl>,
     signaling: SignalingClient,
@@ -657,7 +658,12 @@ impl SwRuntime {
             reconnect_config: config.reconnect_config,
             realm_id: config.realm_id,
             client_actr_type,
-            target_actr_type: ActrType::from_string_repr(&config.target_actr_type)
+            target_actr_type: config
+                .target_actr_type
+                .as_deref()
+                .filter(|value| !value.trim().is_empty())
+                .map(ActrType::from_string_repr)
+                .transpose()
                 .map_err(|e| JsValue::from_str(&format!("Invalid target actr_type: {e}")))?,
             service_fingerprint: config.service_fingerprint,
             acl,
@@ -1385,7 +1391,12 @@ impl SwRuntime {
     /// outbound connection. Passive actors never call this path; they learn the
     /// remote peer identity from inbound signaling envelopes (`relay.source`).
     async fn discover_target(&mut self) -> Result<ActrId, JsValue> {
-        let target_type_key = self.target_actr_type.to_string_repr();
+        let target_type = self.target_actr_type.clone().ok_or_else(|| {
+            JsValue::from_str(
+                "No default target_actr_type is configured; resolve a dependency alias and discover that ActrType instead",
+            )
+        })?;
+        let target_type_key = target_type.to_string_repr();
         if let Some(target) = self.discovered_targets.get(&target_type_key).cloned() {
             return Ok(target);
         }
@@ -1398,10 +1409,7 @@ impl SwRuntime {
             .clone()
             .ok_or_else(|| JsValue::from_str("Missing credential"))?;
 
-        log::info!(
-            "[SW] route_candidates: request target_type={}",
-            self.target_actr_type
-        );
+        log::info!("[SW] route_candidates: request target_type={}", target_type);
         let criteria = route_candidates_request::NodeSelectionCriteria {
             candidate_count: 1,
             ranking_factors: vec![route_candidates_request::node_selection_criteria::NodeRankingFactor::MaximumPowerReserve as i32],
@@ -1409,7 +1417,7 @@ impl SwRuntime {
             minimal_health_requirement: None,
         };
         let request = RouteCandidatesRequest {
-            target_type: self.target_actr_type.clone(),
+            target_type,
             criteria: Some(criteria),
             client_location: None,
             client_fingerprint: self.service_fingerprint.clone(),
@@ -1512,7 +1520,10 @@ impl SwRuntime {
         );
         let criteria = route_candidates_request::NodeSelectionCriteria {
             candidate_count: 1,
-            ranking_factors: vec![route_candidates_request::node_selection_criteria::NodeRankingFactor::MaximumPowerReserve as i32],
+            ranking_factors: vec![
+                route_candidates_request::node_selection_criteria::NodeRankingFactor::ExactMatchFirst as i32,
+                route_candidates_request::node_selection_criteria::NodeRankingFactor::MaximumPowerReserve as i32,
+            ],
             minimal_dependency_requirement: None,
             minimal_health_requirement: None,
         };
@@ -1520,7 +1531,8 @@ impl SwRuntime {
             target_type: target_type.clone(),
             criteria: Some(criteria),
             client_location: None,
-            client_fingerprint: self.service_fingerprint.clone(),
+            client_fingerprint: crate::dependency_aliases::fingerprint_for(target_type)
+                .unwrap_or_default(),
         };
 
         let envelope = SignalingEnvelope {

@@ -61,9 +61,15 @@ public final class ActrService: ObservableObject {
             let lifecycle = {{SERVICE_NAME}}LifecycleAdapter({{#if REMOTE_TARGETS}}remoteTargets: remoteTargets{{/if}})
 {{/if}}
             let workload = Actr.dynamicWorkload(lifecycle: lifecycle)
+            let manifestURL = URL(fileURLWithPath: manifestPath)
             let configURL = URL(fileURLWithPath: configPath)
+            guard manifestURL.deletingLastPathComponent() == configURL.deletingLastPathComponent() else {
+                throw Actr.ActrError.Config(
+                    msg: "manifest.toml and actr.toml must be sibling files"
+                )
+            }
             let node = try await Actr.ActrNode.linked(
-                config: configURL,
+                config: manifestURL,
                 type: actorType,
                 workload: workload
             )

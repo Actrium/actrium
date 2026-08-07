@@ -7,6 +7,8 @@ public protocol ActrContext: Sendable {
     var callerId: ActrId? { get }
     var requestId: String { get }
 
+    func resolveDependency(alias: String) async throws(ActrError) -> ActrType
+
     func callRaw(
         target: ActrId,
         routeKey: String,
@@ -79,6 +81,10 @@ func decodeProtobufMessage<M: Message>(_ type: M.Type, from data: Data, context:
 }
 
 public extension ActrContext {
+    func resolveDependency(alias _: String) async throws(ActrError) -> ActrType {
+        throw ActrError.NotImplemented(msg: "resolveDependency is not implemented by this ActrContext")
+    }
+
     func registerStream(streamId _: String, callback _: any DataChunkCallback) async throws(ActrError) {
         throw ActrError.NotImplemented(msg: "registerStream is not implemented by this ActrContext")
     }
@@ -181,6 +187,14 @@ public final class Context: ActrContext, @unchecked Sendable {
 
     public var requestId: String {
         bridge.requestId()
+    }
+
+    public func resolveDependency(alias: String) async throws(ActrError) -> ActrType {
+        do {
+            return ActrType(bridge: try await bridge.resolveDependency(alias: alias))
+        } catch {
+            throw ActrError(error: error)
+        }
     }
 
     public func log(level: LogLevel, msg: String) {

@@ -43,6 +43,16 @@ export class ActrRef {
   }
 
   /**
+   * Resolve a dependency alias declared by this workload's manifest.
+   *
+   * Packaged workloads resolve from their authenticated lock; linked
+   * workloads resolve from the dynamic manifest loaded by fromConfig().
+   */
+  async resolveDependency(alias: string): Promise<ActrType> {
+    return await callNative(() => this.native.resolveDependency(alias));
+  }
+
+  /**
    * Call remote actor (RPC).
    *
    * @param target - Target actor ID

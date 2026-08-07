@@ -275,6 +275,9 @@ interface host {
     // Discovery: find a candidate actor serving the requested type.
     discover: async func(ctx-token: u64, target-type: actr-type) -> result<actr-id, actr-error>;
 
+    // Resolve a declared dependency alias to its canonical actor type.
+    resolve-dependency: async func(ctx-token: u64, alias: string) -> result<actr-type, actr-error>;
+
     register-stream: async func(ctx-token: u64, stream-id: string) -> result<_, actr-error>;
 
     unregister-stream: async func(ctx-token: u64, stream-id: string) -> result<_, actr-error>;

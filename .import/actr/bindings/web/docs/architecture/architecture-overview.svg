@@ -208,7 +208,7 @@
     <text x="0" y="20" class="small-text">• RPC via WebSocket: current latency requires benchmarks</text>
     <text x="0" y="35" class="small-text">• WebRTC send: SW MessagePort → DOM DataChannel</text>
     <text x="0" y="50" class="small-text">• Stream inbound: DOM FastPathForwarder → SW handler</text>
-    <text x="0" y="65" class="small-text">• Guest bridge: .actr + .wbg sibling bundle</text>
+    <text x="0" y="65" class="small-text">• Guest bridge: verified .actr binary + resources/glue.js</text>
     <text x="0" y="80" class="small-text">• Latency figures require current benchmark evidence</text>
   </g>
 

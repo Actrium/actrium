@@ -22,11 +22,6 @@ pub fn load(files: &mut HashMap<String, String>) -> Result<()> {
         "actr.toml",
     )?;
     ProjectTemplate::load_file(
-        &fixtures_root.join("swift/manifest.lock.toml.hbs"),
-        files,
-        "manifest.lock.toml",
-    )?;
-    ProjectTemplate::load_file(
         &fixtures_root.join("swift/gitignore.hbs"),
         files,
         ".gitignore",

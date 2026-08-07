@@ -7,7 +7,7 @@
 use actr_framework::WebRtcPeerStatus;
 use actr_framework::guest::dynclib_abi::{
     self as guest_abi, HostCallRawV1, HostCallV1, HostDiscoverV1, HostRegisterStreamV1,
-    HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1,
+    HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1,
 };
 #[cfg(feature = "dynclib-engine")]
 use actr_framework::guest::dynclib_abi::{AbiPayload, GuestHandleV1, GuestHookV1};
@@ -35,6 +35,7 @@ pub enum HostOperation {
     Call(HostCallV1),
     Tell(HostTellV1),
     Discover(HostDiscoverV1),
+    ResolveDependency(HostResolveDependencyV1),
     CallRaw(HostCallRawV1),
     RegisterStream(HostRegisterStreamV1),
     UnregisterStream(HostUnregisterStreamV1),
@@ -770,6 +771,10 @@ pub(crate) fn decode_host_operation(frame: guest_abi::AbiFrame) -> Result<HostOp
         guest_abi::op::HOST_DISCOVER => {
             let payload = <HostDiscoverV1 as AbiPayload>::decode_payload(&frame.payload)?;
             Ok(HostOperation::Discover(payload))
+        }
+        guest_abi::op::HOST_RESOLVE_DEPENDENCY => {
+            let payload = <HostResolveDependencyV1 as AbiPayload>::decode_payload(&frame.payload)?;
+            Ok(HostOperation::ResolveDependency(payload))
         }
         guest_abi::op::HOST_REGISTER_STREAM => {
             let payload = <HostRegisterStreamV1 as AbiPayload>::decode_payload(&frame.payload)?;

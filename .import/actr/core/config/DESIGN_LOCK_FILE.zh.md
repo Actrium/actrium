@@ -63,12 +63,13 @@ proto/remote/
 
 ```toml
 [metadata]
-version = 1
+version = 2
 generated_at = "2025-01-15T10:30:00Z"
 
 [[dependency]]
-name = "user-service"
-actr_type = "acme+user-service"
+name = "UserService"
+alias = "users"
+actr_type = "acme:UserActor:1.0.0"
 description = "User management service"
 fingerprint = "service_semantic:a1b2c3d4e5f6"
 published_at = 1705315800
@@ -84,50 +85,68 @@ cached_at = "2025-01-15T10:30:00Z"
   fingerprint = "semantic:abc789"
 ```
 
-## name vs alias 语义说明
+## alias、name 与 ActrType 语义说明
 
-Lock 文件中的 `name` 字段与 actr.toml 中的 `alias` 字段有明确的分工：
+v2 lock 显式保存 manifest 中的 alias，runtime 直接使用
+`alias -> ActrType` 映射。三个名称可以完全不同：
 
-### actr.toml (依赖配置)
+### manifest.toml（依赖配置）
 
 ```toml
 [dependencies]
-# alias 是用户在项目中引用该依赖的本地名称
-my-echo = { name = "echo-service-v1", actr_type = "acme+EchoService" }
-#        ↑
-#        alias (本地引用名，可自定义)
-
-shared-cache = { name = "redis-proxy", actr_type = "acme+CacheService" }
-#             ↑
-#             name (远程服务的唯一标识)
+echo = { service = "EchoService:service_semantic:abc123", actr_type = "acme:EchoActor:1.0.0" }
+# ↑ alias       ↑ 严格服务引用中的 service name       ↑ 完整 ActrType
 ```
 
 | 字段 | 位置 | 含义 | 作用 |
 |------|------|------|------|
-| `alias` | actr.toml | 本地引用名 | 代码中 `use crate::my_echo::*;` 导入生成的模块 |
-| `name` | actr.toml / manifest.lock.toml | 远程服务唯一标识 | 服务注册表中的服务名称，用于服务发现和指纹验证 |
-| `actr_type` | actr.toml / manifest.lock.toml | 服务类型标识 | 如 `"acme+EchoService"`，用于代码生成时的模块路径 |
+| `alias` | manifest.toml / manifest.lock.toml | 应用依赖名 | 生成 dispatcher 和 `Context::resolve_dependency` 的唯一查找键 |
+| `name` | 严格 service 引用 / manifest.lock.toml | 服务引用或显示元数据 | 可用于安装期发现与指纹校验，不是 runtime 依赖身份 |
+| `actr_type` | manifest.toml / manifest.lock.toml | Actor 类型身份 | 规范格式如 `"acme:EchoActor:1.0.0"`，用于 runtime 路由发现 |
+
+信令注册中心内部的 service key 属于服务端索引实现，不写入 lock，也不参与
+runtime 的 alias 解析。
+
+### Runtime 解析来源
+
+业务代码统一调用 `Context::resolve_dependency(alias)`，但 alias map 的可信来源随
+workload 形态不同：
+
+- `.actr` package：只读取包清单已认证、哈希已校验的 `manifest.lock.toml`，从而
+  保留依赖快照的可复现性和完整性。
+- iOS/Android linked workload：调用 linked 构造 API 时显式提供动态
+  `manifest.toml`，runtime 再读取该 manifest 同目录的 `actr.toml`；每个参与运行时
+  解析的依赖必须声明完整 `actr_type`，无需人为生成 lock，也不会猜测宿主文件系统中
+  的 manifest。
+
+两条路径最终都只暴露同一个 `alias -> ActrType` 映射。package 不会回退读取宿主
+文件系统中的 manifest，linked workload 也不会读取旁边的 lock。
 
 ### manifest.lock.toml (锁定的依赖)
 
-> 说明：manifest.lock.toml **推荐**用于锁定远程依赖和 fingerprint，但对纯本地部署不是硬性要求。
-> 缺少该文件时 runtime 仍然可以启动，只是无法使用基于 fingerprint 的精确依赖匹配，
-> 远程发现将退化为协商流程或在首次远程调用时提示依赖未锁定。
+> 说明：没有远程依赖的 workload 可以不带 manifest.lock.toml。只要生成的
+> dispatcher 使用了远程依赖 alias，就必须提供有效的 v2 lock；缺少该文件时
+> runtime 仍可启动，但首次解析该 alias 会返回 `DependencyNotFound`，不会退化为
+> name、Actor 类型名或注册中心 service key 查找。
 
 ```toml
 [[dependency]]
-# name 是远程服务的唯一标识，用于去重和服务发现
-name = "echo-service-v1"
-# actr_type 是服务类型，用于代码生成
-actr_type = "acme+EchoService"
+# name 只是服务引用/显示元数据
+name = "EchoService"
+# alias 是应用代码使用的依赖键
+alias = "echo"
+# actr_type 是 runtime 路由使用的完整 Actor 类型
+actr_type = "acme:EchoActor:1.0.0"
 fingerprint = "service_semantic:..."
 ```
 
 ### 去重规则
 
-- **多个 alias 指向同一 name**：只会在 lock 文件中生成一条记录
-- **Lock 文件按 name 去重**：同一服务只有一个条目
-- **安装时自动去重**：相同服务的多次安装请求会被合并
+- v2 中每个依赖必须有非空且唯一的 `alias`
+- 每个规范化后的完整 `ActrType` 也必须唯一
+- `name` 不参与 runtime 查找或 lock 身份判定
+- v1 不在 runtime 中回退到 `name`；运行 `actr deps install` 会从当前
+  manifest 与服务发现结果完整重建 v2 lock
 
 ## 核心数据结构
 
@@ -140,10 +159,13 @@ pub struct LockFile {
 
 /// A locked dependency entry
 pub struct LockedDependency {
-    /// Service name (identifier in lock file, matches actr.toml dependency name property)
+    /// Optional service-reference/display metadata; not dependency identity
     pub name: String,
 
-    /// Actor type (e.g., "acme+user-service")
+    /// Required source-level dependency key from manifest.toml
+    pub alias: String,
+
+    /// Canonical actor type (e.g., "acme:UserActor:1.0.0")
     pub actr_type: String,
 
     /// Service description
@@ -330,7 +352,8 @@ let spec_meta = ServiceSpecMeta {
 };
 
 let dep = LockedDependency::new(
-    "acme+user-service".to_string(),
+    "users".to_string(),
+    "acme:UserActor:1.0.0".to_string(),
     spec_meta,
 );
 
@@ -343,7 +366,7 @@ lock_file.save_to_file("manifest.lock.toml")?;
 let restored = LockFile::from_file("manifest.lock.toml")?;
 
 // 获取依赖
-if let Some(locked_dep) = lock_file.get_dependency("user-service") {
+if let Some(locked_dep) = lock_file.get_dependency_by_alias("users") {
     println!("Service: {}", locked_dep.name);
     println!("Type: {}", locked_dep.actr_type);
     println!("Fingerprint: {}", locked_dep.fingerprint);

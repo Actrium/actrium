@@ -4,7 +4,7 @@
 
 本文档记录 Actor-RTC Web 适配过程中的关键技术决策、背景、考虑因素和最终选择。
 
-> 当前实现校准：浏览器主路径已经固定为 Service Worker + Option U / wasm-bindgen guest bridge。旧文中关于 Web Worker 双模式、泛化 wasm-bindgen 类型生成、或未来 actr-cli Web 支持的描述应按当前源码修正：`actor.sw.js` 是唯一 SW 入口，`.actr` + `.wbg` sibling 由 CLI Web host 挂载，WIT → `tools/wit-compile-web` → `actr-web-abi` 是当前浏览器 ABI 生成路径。
+> 当前实现校准：浏览器主路径已经固定为 Service Worker + Option U / wasm-bindgen guest bridge。旧文中关于 Web Worker 双模式、泛化 wasm-bindgen 类型生成、`.actr` + `.wbg` sibling 或未来 actr-cli Web 支持的描述应按当前源码修正：`actor.sw.js` 是唯一 SW 入口；wasm-bindgen `*_bg.wasm` 是签名 package binary，JS glue 是签名资源 `resources/glue.js`；WIT → `tools/wit-compile-web` → `actr-web-abi` 是当前浏览器 ABI 生成路径。
 
 ---
 
@@ -245,8 +245,8 @@ const registration = await navigator.serviceWorker.register('/actor.sw.js');
 
 1. **Protobuf → TypeScript**: 使用 `protobuf.js` 生成消息类型
 2. **WIT → wasm-bindgen ABI**: 使用 `tools/wit-compile-web` 生成 `actr-web-abi`
-3. **guest bundle**: 使用 `wasm-pack --target no-modules` 生成 `.wbg/guest.js` 和 `.wbg/guest_bg.wasm`
-4. **CLI Web host**: `actr run --web` 挂载 `.actr` 与 `.wbg` sibling
+3. **guest package**: 使用 `wasm-pack --target no-modules` 生成 JS glue 和 `*_bg.wasm`，再分别写入签名 `.actr` 的 `resources/glue.js` 与 binary
+4. **CLI Web host**: `actr run --web` 只需提供自包含的签名 `.actr`
 
 ### 生成流程
 
@@ -257,7 +257,9 @@ echo.v1.d.ts (消息类型)
     ↓
 actr-web-abi guest/host glue
     ↓ wasm-pack --target no-modules
-.wbg guest bundle
+JS glue + *_bg.wasm
+    ↓ package/sign
+.actr (resources/glue.js + binary)
 ```
 
 ### 理由

@@ -21,8 +21,8 @@ use std::rc::Rc;
 use crate::{Context, Dest, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
 
 use super::context_helpers::{
-    actr_id_from_wit, actr_id_to_wit, actr_type_to_wit, data_chunk_from_wit, data_chunk_to_wit,
-    dest_to_wit, payload_type_to_wit,
+    actr_id_from_wit, actr_id_to_wit, actr_type_from_wit, actr_type_to_wit, data_chunk_from_wit,
+    data_chunk_to_wit, dest_to_wit, payload_type_to_wit,
 };
 use super::generated::actr::workload::host as wit_host;
 use super::generated::actr::workload::types as wit_types;
@@ -264,6 +264,13 @@ impl Context for WasmContext {
         wit_host::discover(self.ctx_token, actr_type_to_wit(target_type))
             .await
             .map(|id| actr_id_from_wit(&id))
+            .map_err(wit_actr_error_to_proto)
+    }
+
+    async fn resolve_dependency(&self, alias: &str) -> ActorResult<ActrType> {
+        wit_host::resolve_dependency(self.ctx_token, alias.to_string())
+            .await
+            .map(|actr_type| actr_type_from_wit(&actr_type))
             .map_err(wit_actr_error_to_proto)
     }
 

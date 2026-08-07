@@ -99,9 +99,6 @@ class MainActivity : AppCompatActivity() {
                 // Copy config file from assets to internal storage
                 val configPath = copyAssetToInternalStorage("manifest.toml")
                 Log.i(TAG, "Config path: $configPath")
-                // Also copy lock file - required by ActrNode
-                copyAssetToInternalStorage("manifest.lock.toml")
-
                 // Create ActrNode
                 val clientSystem = createActrNode(configPath)
 

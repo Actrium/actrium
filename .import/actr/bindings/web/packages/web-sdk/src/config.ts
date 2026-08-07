@@ -27,7 +27,8 @@ export interface SwRuntimeConfig {
   client_actr_type: string;
 
   /** Target actor type for peer discovery (manufacturer:name:version) */
-  target_actr_type: string;
+  /** Optional legacy default target. New workloads resolve dependency aliases at call time. */
+  target_actr_type?: string;
 
   /** Service fingerprint for exact matching (optional) */
   service_fingerprint: string;
@@ -41,8 +42,8 @@ export interface SwRuntimeConfig {
   package_url?: string;
 
   /** URL of the SW host WASM (wasm-pack output, e.g. "/packages/actr_sw_host_bg.wasm").
-   *  Loaded independently of the workload: Hyper (runtime) and workload (guest) are
-   *  always separate artifacts. The SW derives the JS glue URL from this (`_bg.wasm` → `.js`). */
+   *  Loaded independently of the workload; guest WASM and glue are authenticated
+   *  resources inside the signed `.actr` package. */
   runtime_wasm_url?: string;
 
   // ── Package verification (Web verify_package) ──
@@ -50,12 +51,13 @@ export interface SwRuntimeConfig {
   /** Trust anchors for verifying the .actr package signature. Array form
    *  mirrors the runtime `[[trust]]` config in `actr.toml`.
    *
-   *  The browser Service Worker currently honours only `kind = "static"`
-   *  anchors (using `pubkey_b64`); `kind = "registry"` anchors cause the SW
-   *  to skip verification with a warning, pending an async AIS lookup
-   *  implementation.
+   *  Verification is mandatory. The browser Service Worker currently honours
+   *  only a usable `kind = "static"` anchor with `pubkey_b64`. A registry-only
+   *  configuration, an empty array, or static entries without a resolved
+   *  `pubkey_b64` cause initialization to fail; verification is never skipped.
    *
-   *  When the array is empty or missing, verification is skipped. */
+   *  A host may resolve `pubkey_file` before sending this config to the worker,
+   *  but browser code cannot read that filesystem path itself. */
   trust?: TrustAnchor[];
 }
 
@@ -66,13 +68,14 @@ export type TrustAnchor =
       kind: 'static';
       /** Base64 (standard) of the 32-byte Ed25519 public key. */
       pubkey_b64?: string;
-      /** Path to a JSON file with a `public_key` field (resolved by the host
-       *  before the config reaches the SW). */
+      /** Path to a JSON file with a `public_key` field. This is not usable by
+       *  the browser directly; a host integration must resolve it to
+       *  `pubkey_b64` before initializing the Service Worker. */
       pubkey_file?: string;
     }
   | {
       /** Look up MFR public keys via AIS HTTP registry. Not yet implemented
-       *  in the browser SW. */
+       *  in the browser SW; a registry-only config fails closed. */
       kind: 'registry';
       endpoint: string;
     };

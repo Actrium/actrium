@@ -121,14 +121,6 @@ fi
 
 command -v wasm-pack >/dev/null 2>&1 || fail "wasm-pack not found"
 
-if [[ -x "${WASM_COMPONENT_LD:-$HOME/.cargo/bin/wasm-component-ld}" ]]; then
-    WASM_COMPONENT_LD="${WASM_COMPONENT_LD:-$HOME/.cargo/bin/wasm-component-ld}"
-elif command -v wasm-component-ld >/dev/null 2>&1; then
-    WASM_COMPONENT_LD="$(command -v wasm-component-ld)"
-else
-    fail "wasm-component-ld not found"
-fi
-
 MFR_KEY_FILE="$RELEASE_DIR/python-web-dev-key.json"
 log_step "Generating shared development signing key..."
 "$ACTR_CMD" pkg keygen --output "$MFR_KEY_FILE" --force >/dev/null
@@ -144,12 +136,6 @@ PY_ACTR_PACKAGE="$PY_WORKLOAD_DIR/dist/acme-EchoService-0.1.0-wasm32-wasip2.actr
 
 log_step "Building web client guest package..."
 (
-    export RUSTFLAGS="-Clinker=$WASM_COMPONENT_LD"
-    cd "$CLIENT_GUEST_DIR"
-    cargo build --target wasm32-wasip2 --release
-)
-
-(
     export RUSTFLAGS=""
     export CARGO_ENCODED_RUSTFLAGS=""
     cd "$CLIENT_GUEST_DIR"
@@ -157,21 +143,15 @@ log_step "Building web client guest package..."
         -- --no-default-features --features web
 )
 
-CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-wasip2.actr"
+CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-unknown-unknown.actr"
 (
     cd "$CLIENT_GUEST_DIR"
     "$ACTR_CMD" build \
         --no-compile \
-        --target wasm32-wasip2 \
+        --target wasm32-unknown-unknown \
         --key "$MFR_KEY_FILE" \
         --output "$CLIENT_ACTR_PACKAGE"
 )
-
-CLIENT_WBG_DIR="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-wasip2.wbg"
-rm -rf "$CLIENT_WBG_DIR"
-mkdir -p "$CLIENT_WBG_DIR"
-cp "$CLIENT_GUEST_DIR/pkg/echo_client_guest_web.js" "$CLIENT_WBG_DIR/guest.js"
-cp "$CLIENT_GUEST_DIR/pkg/echo_client_guest_web_bg.wasm" "$CLIENT_WBG_DIR/guest_bg.wasm"
 
 log_step "Starting mock-actrix..."
 MOCK_LOG="$LOG_DIR/mock-actrix.log"

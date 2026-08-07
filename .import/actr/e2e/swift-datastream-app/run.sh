@@ -1250,9 +1250,6 @@ targets:
       - path: actr.toml
         type: file
         buildPhase: resources
-      - path: manifest.lock.toml
-        type: file
-        buildPhase: resources
       - path: manifest.toml
         type: file
         buildPhase: resources
@@ -1640,7 +1637,7 @@ setup_ios_simulator
 
 # Phase 4: Start DuplexStreamService before DataStreamApp dependency install.
 # `actr deps install` validates the remote dependency through discovery, so the
-# service must be registered before Swift codegen resolves manifest.lock.toml.
+# service must be registered before the dependency proto is downloaded.
 run_server_host
 check_service_ready
 

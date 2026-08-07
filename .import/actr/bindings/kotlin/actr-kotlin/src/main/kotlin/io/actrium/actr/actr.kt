@@ -939,6 +939,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_request_id(
     ): Short
+    external fun uniffi_actr_checksum_method_contextbridge_resolve_dependency(
+    ): Short
     external fun uniffi_actr_checksum_method_contextbridge_self_id(
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_send_data_chunk(
@@ -966,6 +968,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_actr_checksum_method_actrrefwrapper_discover(
     ): Short
     external fun uniffi_actr_checksum_method_actrrefwrapper_is_shutting_down(
+    ): Short
+    external fun uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency(
     ): Short
     external fun uniffi_actr_checksum_method_actrrefwrapper_shutdown(
     ): Short
@@ -1082,6 +1086,8 @@ external fun uniffi_actr_fn_method_contextbridge_remove_media_track(`ptr`: Long,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_request_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
+external fun uniffi_actr_fn_method_contextbridge_resolve_dependency(`ptr`: Long,`alias`: RustBuffer.ByValue,
+): Long
 external fun uniffi_actr_fn_method_contextbridge_self_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_method_contextbridge_send_data_chunk(`ptr`: Long,`target`: RustBuffer.ByValue,`chunk`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,
@@ -1130,6 +1136,8 @@ external fun uniffi_actr_fn_method_actrrefwrapper_discover(`ptr`: Long,`targetTy
 ): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_is_shutting_down(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_actr_fn_method_actrrefwrapper_resolve_dependency(`ptr`: Long,`alias`: RustBuffer.ByValue,
+): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_actr_fn_method_actrrefwrapper_tell(`ptr`: Long,`routeKey`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,`messagePayload`: RustBuffer.ByValue,
@@ -1359,6 +1367,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_request_id() != 61345.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actr_checksum_method_contextbridge_resolve_dependency() != 9905.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actr_checksum_method_contextbridge_self_id() != 56416.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1399,6 +1410,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_is_shutting_down() != 50332.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency() != 37283.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_shutdown() != 60173.toShort()) {
@@ -2531,6 +2545,11 @@ public interface ActrRefWrapperInterface {
     fun `isShuttingDown`(): kotlin.Boolean
     
     /**
+     * Resolve a dependency alias to its declared `ActrType`.
+     */
+    suspend fun `resolveDependency`(`alias`: kotlin.String): ActrType
+
+    /**
      * Trigger shutdown.
      */
     fun `shutdown`()
@@ -2728,6 +2747,29 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     
 
     
+    /**
+     * Resolve a dependency alias to its declared `ActrType`.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `resolveDependency`(`alias`: kotlin.String) : ActrType {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_actrrefwrapper_resolve_dependency(
+                uniffiHandle,
+                FfiConverterString.lower(`alias`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        { FfiConverterTypeActrType.lift(it) },
+        ActrException.ErrorHandler,
+    )
+    }
+
+
+
     /**
      * Trigger shutdown.
      */override fun `shutdown`()
@@ -2990,6 +3032,11 @@ public interface ContextBridgeInterface {
      * Request ID associated with the current dispatch or lifecycle context.
      */
     fun `requestId`(): kotlin.String
+
+    /**
+     * Resolve a declared dependency alias to its canonical actor type.
+     */
+    suspend fun `resolveDependency`(`alias`: kotlin.String): ActrType
 
     /**
      * Current actor ID associated with this context.
@@ -3341,6 +3388,28 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         _status)
 }
     }
+    )
+    }
+
+
+    /**
+     * Resolve a declared dependency alias to its canonical actor type.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `resolveDependency`(`alias`: kotlin.String) : ActrType {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_contextbridge_resolve_dependency(
+                uniffiHandle,
+                FfiConverterString.lower(`alias`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        { FfiConverterTypeActrType.lift(it) },
+        ActrException.ErrorHandler,
     )
     }
 
@@ -8133,5 +8202,3 @@ public object FfiConverterSequenceTypeMetadataEntry: FfiConverterRustBuffer<List
     )
     }
     
-
-

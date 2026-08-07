@@ -17,7 +17,7 @@
 //! Verification is **mandatory**. There is no "skip verify" path: a
 //! misconfigured trust anchor errors out and the package never loads.
 
-use actr_pack::PackageManifest;
+use actr_pack::{BinaryKind, PackageManifest};
 use base64::Engine as _;
 use ed25519_dalek::VerifyingKey;
 use serde::Deserialize;
@@ -51,6 +51,7 @@ pub struct ExtractedPackage {
     manifest_json: String,
     binary: Vec<u8>,
     glue_js: Option<String>,
+    lock_file_toml: Option<String>,
 }
 
 #[wasm_bindgen]
@@ -68,12 +69,18 @@ impl ExtractedPackage {
         self.binary.clone()
     }
 
-    /// wasm-bindgen JS glue text extracted from `resources/*.js`, if any.
+    /// wasm-bindgen JS glue text extracted from `resources/glue.js`, if any.
     /// Returns `None` when the package carries no glue (guest-bridge mode or
     /// pure-Rust packages).
     #[wasm_bindgen(getter)]
     pub fn glue_js(&self) -> Option<String> {
         self.glue_js.clone()
+    }
+
+    /// Verified dependency lock contents, when the package declares one.
+    #[wasm_bindgen(getter)]
+    pub fn lock_file_toml(&self) -> Option<String> {
+        self.lock_file_toml.clone()
     }
 }
 
@@ -87,9 +94,9 @@ impl ExtractedPackage {
 /// # Parameters
 /// - `package_bytes` — the raw `.actr` ZIP bytes
 /// - `trust_anchors_json` — JSON array of `TrustAnchor` entries
-///   (shape matches `actr_config::TrustAnchor`). The SW honours the first
-///   usable `kind = "static"` entry; `kind = "registry"` entries cause a
-///   hard error until the SW learns to do async AIS lookups.
+///   (shape matches `actr_config::TrustAnchor`). The SW tries every usable
+///   `kind = "static"` entry; registry-only trust causes a hard error until
+///   the SW learns to do async AIS key lookup.
 ///
 /// # Errors
 /// Raises a `JsError` with a descriptive message on:
@@ -105,20 +112,47 @@ pub fn verify_and_extract_actr_package(
     let anchors: Vec<TrustAnchorCfg> = serde_json::from_str(trust_anchors_json)
         .map_err(|e| JsError::new(&format!("trust config is not valid JSON: {e}")))?;
 
-    let pubkey_b64 = resolve_static_pubkey(&anchors).ok_or_else(|| {
-        JsError::new(
-            "no usable static trust anchor in config: browser runtime \
-             requires a `kind=\"static\"` entry with `pubkey_b64` \
-             (registry anchors need async AIS lookup — not yet implemented \
-             in the browser; configure a static anchor or run via the \
-             native host)",
-        )
+    let static_keys = resolve_static_pubkeys(&anchors);
+    if static_keys.is_empty() {
+        return Err(JsError::new(
+            "no usable static trust anchor in config: browser runtime requires a `kind=\"static\"` entry with `pubkey_b64`; registry-only trust is not supported in the browser",
+        ));
+    }
+
+    let mut verification_errors = Vec::new();
+    let mut verified = None;
+    for pubkey_b64 in static_keys {
+        let vk = match parse_pubkey(&pubkey_b64) {
+            Ok(vk) => vk,
+            Err(error) => {
+                verification_errors.push(format!("{error:?}"));
+                continue;
+            }
+        };
+        match actr_pack::verify(package_bytes, &vk) {
+            Ok(package) => {
+                verified = Some(package);
+                break;
+            }
+            Err(error) => verification_errors.push(error.to_string()),
+        }
+    }
+    let verified = verified.ok_or_else(|| {
+        JsError::new(&format!(
+            "package verification failed for every static trust anchor: {}",
+            verification_errors.join("; ")
+        ))
     })?;
 
-    let vk = parse_pubkey(&pubkey_b64)?;
-
-    let verified = actr_pack::verify(package_bytes, &vk)
-        .map_err(|e| JsError::new(&format!("package verification failed: {e}")))?;
+    if verified.manifest.binary.target != "wasm32-unknown-unknown"
+        || verified.manifest.binary.resolved_kind() != BinaryKind::CoreModule
+    {
+        return Err(JsError::new(&format!(
+            "browser runtime requires a wasm32-unknown-unknown core-module package, got target `{}` with kind `{:?}`",
+            verified.manifest.binary.target,
+            verified.manifest.binary.resolved_kind()
+        )));
+    }
 
     let binary =
         actr_pack::load_binary_bounded(package_bytes, actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES)
@@ -131,26 +165,48 @@ pub fn verify_and_extract_actr_package(
     )
     .map_err(|e| JsError::new(&format!("extract glue.js: {e}")))?;
 
+    let lock_file_toml = match &verified.manifest.lock_file {
+        Some(lock_file) => {
+            let bytes = actr_pack::read_lock_file_bounded(
+                package_bytes,
+                &lock_file.path,
+                actr_pack::DEFAULT_MAX_VERIFIED_ENTRY_BYTES,
+            )
+            .map_err(|e| JsError::new(&format!("extract manifest.lock.toml: {e}")))?;
+            match bytes {
+                Some(bytes) => Some(String::from_utf8(bytes).map_err(|e| {
+                    JsError::new(&format!("manifest.lock.toml is not valid UTF-8: {e}"))
+                })?),
+                None => {
+                    return Err(JsError::new(&format!(
+                        "verified package is missing declared lock file `{}`",
+                        lock_file.path
+                    )));
+                }
+            }
+        }
+        None => None,
+    };
+
     Ok(ExtractedPackage {
         manifest_json: manifest_to_json(&verified.manifest)?,
         binary,
         glue_js,
+        lock_file_toml,
     })
 }
 
-fn resolve_static_pubkey(anchors: &[TrustAnchorCfg]) -> Option<String> {
-    for anchor in anchors {
-        if let TrustAnchorCfg::Static {
-            pubkey_b64: Some(b64),
-            ..
-        } = anchor
-        {
-            if !b64.is_empty() && b64 != "__MFR_PUBKEY_PLACEHOLDER__" {
-                return Some(b64.clone());
-            }
-        }
-    }
-    None
+fn resolve_static_pubkeys(anchors: &[TrustAnchorCfg]) -> Vec<String> {
+    anchors
+        .iter()
+        .filter_map(|anchor| match anchor {
+            TrustAnchorCfg::Static {
+                pubkey_b64: Some(b64),
+                ..
+            } if !b64.is_empty() && b64 != "__MFR_PUBKEY_PLACEHOLDER__" => Some(b64.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 fn parse_pubkey(b64: &str) -> Result<VerifyingKey, JsError> {

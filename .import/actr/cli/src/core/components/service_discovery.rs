@@ -368,7 +368,10 @@ impl NetworkServiceDiscovery {
     }
 
     fn matches_lookup_name(entry: &discovery_response::TypeEntry, name: &str) -> bool {
-        if entry.name == name || Self::format_actr_type(&entry.actr_type) == name {
+        if entry.name == name
+            || entry.actr_type.name == name
+            || Self::format_actr_type(&entry.actr_type) == name
+        {
             return true;
         }
 
@@ -439,13 +442,10 @@ impl ServiceDiscovery for NetworkServiceDiscovery {
         // Use actr_type.name (e.g., "EchoService") as the lookup key,
         // matching package ServiceSpec.name = package.name
         let spec_lookup_name = &entry.actr_type.name;
-        let proto_files = match self.get_service_proto(spec_lookup_name).await {
-            Ok(proto_files) => proto_files,
-            Err(e) => {
-                tracing::warn!("Failed to get ServiceSpec for {name}: {e}");
-                Vec::new()
-            }
-        };
+        let proto_files = self.get_service_proto(spec_lookup_name).await?;
+        if proto_files.is_empty() {
+            anyhow::bail!("ServiceSpec for {name} declares no proto files");
+        }
 
         Ok(ServiceDetails {
             info,

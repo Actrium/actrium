@@ -36,9 +36,6 @@ targets:
       - path: actr.toml
         type: file
         buildPhase: resources
-      - path: manifest.lock.toml
-        type: file
-        buildPhase: resources
       - path: manifest.toml
         type: file
         buildPhase: resources
