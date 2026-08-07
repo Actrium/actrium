@@ -40,6 +40,7 @@ export const hostCalls = {
   ctxTokens: [] as bigint[],
   operations: [] as string[],
   timeouts: [] as bigint[],
+  payloadTypes: [] as PayloadType[],
   registerStream: [] as string[],
   unregisterStream: [] as string[],
   sendDataChunk: [] as SendDataChunkCall[],
@@ -49,6 +50,7 @@ export function resetHostCalls(): void {
   hostCalls.ctxTokens.length = 0;
   hostCalls.operations.length = 0;
   hostCalls.timeouts.length = 0;
+  hostCalls.payloadTypes.length = 0;
   hostCalls.registerStream.length = 0;
   hostCalls.unregisterStream.length = 0;
   hostCalls.sendDataChunk.length = 0;
@@ -69,9 +71,11 @@ export async function call(
   _routeKey: string,
   payload: Uint8Array,
   timeoutMs: bigint,
+  payloadType: PayloadType,
 ): Promise<Uint8Array> {
   record(ctxToken, 'call');
   hostCalls.timeouts.push(timeoutMs);
+  hostCalls.payloadTypes.push(payloadType);
   return payload;
 }
 
@@ -80,8 +84,10 @@ export async function tell(
   _target: Dest,
   _routeKey: string,
   _payload: Uint8Array,
+  payloadType: PayloadType,
 ): Promise<void> {
   record(ctxToken, 'tell');
+  hostCalls.payloadTypes.push(payloadType);
 }
 
 export async function callRaw(
@@ -90,9 +96,11 @@ export async function callRaw(
   _routeKey: string,
   payload: Uint8Array,
   timeoutMs: bigint,
+  payloadType: PayloadType,
 ): Promise<Uint8Array> {
   record(ctxToken, 'callRaw');
   hostCalls.timeouts.push(timeoutMs);
+  hostCalls.payloadTypes.push(payloadType);
   return payload;
 }
 

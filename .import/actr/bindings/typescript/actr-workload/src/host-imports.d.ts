@@ -1,4 +1,4 @@
-declare module 'actr:workload/host@0.3.0' {
+declare module 'actr:workload/host@0.4.0' {
   // V2 host imports are real WIT `async func`. Every import takes a
   // `ctx-token: u64` first parameter (surfaced to JS as a `bigint`) that keys
   // the host's per-invocation table so it can recover the correct bridge even
@@ -16,6 +16,7 @@ declare module 'actr:workload/host@0.3.0' {
     routeKey: string,
     payload: Uint8Array,
     timeoutMs: bigint,
+    payloadType: PayloadType,
   ): Promise<Uint8Array>;
 
   export function tell(
@@ -23,6 +24,7 @@ declare module 'actr:workload/host@0.3.0' {
     target: Dest,
     routeKey: string,
     payload: Uint8Array,
+    payloadType: PayloadType,
   ): Promise<void>;
 
   export function callRaw(
@@ -31,6 +33,7 @@ declare module 'actr:workload/host@0.3.0' {
     routeKey: string,
     payload: Uint8Array,
     timeoutMs: bigint,
+    payloadType: PayloadType,
   ): Promise<Uint8Array>;
 
   export function discover(

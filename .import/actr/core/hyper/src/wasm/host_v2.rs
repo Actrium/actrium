@@ -1,4 +1,4 @@
-//! WasmWorkloadV2 — the `actr:workload@0.3.0` async-world execution path.
+//! WasmWorkloadV2 — the `actr:workload@0.4.0` async-world execution path.
 //!
 //! The sole actr:workload execution path (the 0.1.0 synchronous serial
 //! world is retired — a component exporting it is rejected at load by
@@ -110,6 +110,7 @@ impl HostWithStore<HostState> for HostState {
         route_key: String,
         payload: Vec<u8>,
         timeout_ms: i64,
+        payload_type: WitPayloadType,
     ) -> wasmtime::Result<Result<Vec<u8>, WitActrError>> {
         let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
         let op = HostOperation::Call(HostCallV1 {
@@ -117,6 +118,7 @@ impl HostWithStore<HostState> for HostState {
             dest: wit_dest_to_v1(&target),
             payload,
             timeout_ms,
+            payload_type: wit_payload_type_to_proto(payload_type) as i32,
         });
         run_host_operation(host_abi, op).await
     }
@@ -127,12 +129,14 @@ impl HostWithStore<HostState> for HostState {
         target: WitDest,
         route_key: String,
         payload: Vec<u8>,
+        payload_type: WitPayloadType,
     ) -> wasmtime::Result<Result<(), WitActrError>> {
         let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
         let op = HostOperation::Tell(HostTellV1 {
             route_key,
             dest: wit_dest_to_v1(&target),
             payload,
+            payload_type: wit_payload_type_to_proto(payload_type) as i32,
         });
         match run_host_operation(host_abi, op).await? {
             Ok(_) => Ok(Ok(())),
@@ -147,6 +151,7 @@ impl HostWithStore<HostState> for HostState {
         route_key: String,
         payload: Vec<u8>,
         timeout_ms: i64,
+        payload_type: WitPayloadType,
     ) -> wasmtime::Result<Result<Vec<u8>, WitActrError>> {
         let host_abi = accessor.with(|mut a| a.get().invocation_host_abi(ctx_token));
         let op = HostOperation::CallRaw(HostCallRawV1 {
@@ -154,6 +159,7 @@ impl HostWithStore<HostState> for HostState {
             target: wit_actr_id_to_proto(&target),
             payload,
             timeout_ms,
+            payload_type: wit_payload_type_to_proto(payload_type) as i32,
         });
         run_host_operation(host_abi, op).await
     }
@@ -256,9 +262,9 @@ impl HostWithStore<HostState> for HostState {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// WIT (0.3.0) ↔ actr_protocol / actr_framework translation
+// WIT (0.4.0) ↔ actr_protocol / actr_framework translation
 //
-// The 0.3.0 bindgen emits its own type namespace. These helpers translate
+// The 0.4.0 bindgen emits its own type namespace. These helpers translate
 // that namespace to the protocol/framework types and the native host-operation
 // payloads still shared with DynClib.
 // ─────────────────────────────────────────────────────────────────────────────
@@ -497,7 +503,7 @@ fn wit_payload_type_to_proto(payload_type: WitPayloadType) -> PayloadType {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Build a fresh async-world [`Store`] + component instance. Registers WASI
-/// p2 and the Accessor-based `actr:workload/host` (0.3.0) linker imports.
+/// p2 and the Accessor-based `actr:workload/host` (0.4.0) linker imports.
 async fn instantiate_parts_v2(
     engine: &Engine,
     component: &Component,
@@ -515,7 +521,7 @@ async fn instantiate_parts_v2(
     )
     .map_err(|e| {
         WasmError::LoadFailed(format!(
-            "failed to register actr:workload/host@0.3.0 linker imports: {e}"
+            "failed to register actr:workload/host@0.4.0 linker imports: {e}"
         ))
     })?;
 
@@ -556,7 +562,7 @@ async fn instantiate_parts_v2(
 // WasmWorkloadV2
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Single 0.3.0 async-world wasm actor instance.
+/// Single 0.4.0 async-world wasm actor instance.
 ///
 /// Owns the engine/component/store lifecycle (plus poison/rebuild); every
 /// guest entry runs inside a single-task `Store::run_concurrent` region. The

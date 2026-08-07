@@ -408,7 +408,7 @@ impl Drop for ActorHandle {
 ///
 /// `Serial` is the B1 contract: one command at a time, run-to-completion. It is
 /// mandatory for `DynClib` workloads and is the default. `Interleaved` is the
-/// B2 concurrency point for `Linked` workloads and 0.3.0 async-world WASM
+/// B2 concurrency point for `Linked` workloads and 0.4.0 async-world WASM
 /// guests, whose dispatch APIs can safely multiplex distinct-key invocations.
 /// Retired 0.1.0 sync-world WASM packages are rejected before a runner exists.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -446,7 +446,7 @@ pub(crate) fn spawn_runner(workload: Workload) -> ActorHandle {
 ///   sibling and queued commands fail rather than touching partially-mutated
 ///   actor state. A caught guest panic follows the same fail-closed path after
 ///   replying `Internal`.
-/// * `Workload::Wasm` — the sole supported 0.3.0 async world drives a **resident**
+/// * `Workload::Wasm` — the sole supported 0.4.0 async world drives a **resident**
 ///   `Store::run_concurrent` region ([`crate::wasm::WasmWorkloadV2::run_interleaved`]),
 ///   interleaving distinct-key dispatches at their host-import `.await` points
 ///   (M5). External per-dispatch deadlines supervise that region and discard

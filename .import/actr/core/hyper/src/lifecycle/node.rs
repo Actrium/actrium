@@ -722,6 +722,25 @@ impl CredentialState {
     }
 }
 
+/// Resolve the lane a guest declared for an outbound RPC. The ABI field
+/// defaults to 0 (`RpcReliable`) for pre-lane guests, which matches the
+/// lane legacy hosts hard-coded. An i32 that is not a known `PayloadType`
+/// (a guest built against a newer protocol) degrades to `RpcReliable`;
+/// known non-RPC lanes are rejected downstream by
+/// `ensure_rpc_payload_type`.
+fn guest_rpc_payload_type(raw: i32) -> actr_protocol::PayloadType {
+    match actr_protocol::PayloadType::try_from(raw) {
+        Ok(payload_type) => payload_type,
+        Err(_) => {
+            tracing::warn!(
+                payload_type = raw,
+                "unrecognised payload_type from guest; falling back to RpcReliable"
+            );
+            actr_protocol::PayloadType::RpcReliable
+        }
+    }
+}
+
 /// Host operation executor - routes guest outbound calls through RuntimeContext
 ///
 /// Called by the workload dispatch path in `handle_incoming`.
@@ -741,7 +760,7 @@ async fn host_operation_handler(
                 .call_raw(
                     &Dest::Peer(req.target),
                     req.route_key,
-                    PayloadType::RpcReliable,
+                    guest_rpc_payload_type(req.payload_type),
                     bytes::Bytes::from(req.payload),
                     req.timeout_ms,
                 )
@@ -767,7 +786,7 @@ async fn host_operation_handler(
                 .call_raw(
                     &dest,
                     req.route_key,
-                    PayloadType::RpcReliable,
+                    guest_rpc_payload_type(req.payload_type),
                     bytes::Bytes::from(req.payload),
                     req.timeout_ms,
                 )
@@ -793,7 +812,7 @@ async fn host_operation_handler(
                 .tell_raw(
                     &dest,
                     req.route_key,
-                    PayloadType::RpcReliable,
+                    guest_rpc_payload_type(req.payload_type),
                     bytes::Bytes::from(req.payload),
                 )
                 .await
@@ -945,7 +964,7 @@ async fn stream_callback_host_operation_handler(
                 .call_raw(
                     &Dest::Peer(req.target),
                     req.route_key,
-                    PayloadType::RpcReliable,
+                    guest_rpc_payload_type(req.payload_type),
                     bytes::Bytes::from(req.payload),
                     req.timeout_ms,
                 )
@@ -964,7 +983,7 @@ async fn stream_callback_host_operation_handler(
                 .call_raw(
                     &dest,
                     req.route_key,
-                    PayloadType::RpcReliable,
+                    guest_rpc_payload_type(req.payload_type),
                     bytes::Bytes::from(req.payload),
                     req.timeout_ms,
                 )
@@ -983,7 +1002,7 @@ async fn stream_callback_host_operation_handler(
                 .tell_raw(
                     &dest,
                     req.route_key,
-                    PayloadType::RpcReliable,
+                    guest_rpc_payload_type(req.payload_type),
                     bytes::Bytes::from(req.payload),
                 )
                 .await

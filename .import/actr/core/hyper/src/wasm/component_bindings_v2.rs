@@ -1,7 +1,7 @@
-//! Component Model bindings for the `actr:workload@0.3.0` async WIT world.
+//! Component Model bindings for the `actr:workload@0.4.0` async WIT world.
 //!
 //! These are the sole runtime bindings after retirement of the 0.1.0
-//! synchronous world. The 0.3.0 world declares every host import and workload
+//! synchronous world. The 0.4.0 world declares every host import and workload
 //! export as a real WIT `async func`, so wasmtime 46 emits the following
 //! binding shape:
 //!

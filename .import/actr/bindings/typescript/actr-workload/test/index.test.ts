@@ -129,6 +129,51 @@ describe('@actrium/actr-workload', () => {
       'logMessage',
     ]);
     expect(host.hostCalls.timeouts).toEqual([30_000n, 30_000n]);
+    // call/tell/callRaw default to the reliable lane when no payloadType is
+    // given; the sendDataChunk lane is asserted separately below.
+    expect(host.hostCalls.payloadTypes).toEqual([
+      { tag: 'rpc-reliable' },
+      { tag: 'rpc-reliable' },
+      { tag: 'rpc-reliable' },
+    ]);
+  });
+
+  it('forwards an explicit payloadType to the host import', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = testInvocationCtx(92n);
+    const payload = new Uint8Array([7]);
+
+    await runtime.withInvocationCtx(ctx, async () => {
+      await runtime.call(
+        'host',
+        'echo',
+        payload,
+        30_000,
+        undefined,
+        runtime.PayloadType.RpcSignal,
+      );
+      await runtime.tell(
+        'workload',
+        'notify',
+        payload,
+        undefined,
+        runtime.PayloadType.RpcSignal,
+      );
+      await runtime.callRaw(
+        testActorId(),
+        'raw',
+        payload,
+        30_000,
+        undefined,
+        runtime.PayloadType.RpcSignal,
+      );
+    });
+
+    expect(host.hostCalls.payloadTypes).toEqual([
+      { tag: 'rpc-signal' },
+      { tag: 'rpc-signal' },
+      { tag: 'rpc-signal' },
+    ]);
   });
 
   it('rejects host imports when no invocation context is active', async () => {

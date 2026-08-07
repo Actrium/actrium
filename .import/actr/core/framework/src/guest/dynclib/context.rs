@@ -186,6 +186,7 @@ impl Context for DynclibContext {
             dest: dest_to_v1(target),
             payload: request.encode_to_vec(),
             timeout_ms,
+            payload_type: R::payload_type() as i32,
         };
         let frame = payload.to_frame().map_err(abi_error_to_actr)?;
         let reply = self.invoke_frame(frame)?;
@@ -207,6 +208,7 @@ impl Context for DynclibContext {
             route_key: R::route_key().to_string(),
             dest: dest_to_v1(target),
             payload: message.encode_to_vec(),
+            payload_type: R::payload_type() as i32,
         };
         let frame = payload.to_frame().map_err(abi_error_to_actr)?;
         let reply = self.invoke_frame(frame)?;
@@ -298,6 +300,9 @@ impl Context for DynclibContext {
             target: target.clone(),
             payload: payload.to_vec(),
             timeout_ms,
+            // The Context::call_raw contract has no lane parameter; preserve
+            // the lane the host historically applied to raw calls.
+            payload_type: PayloadType::RpcReliable as i32,
         };
         let frame = request.to_frame().map_err(abi_error_to_actr)?;
         let reply = self.invoke_frame(frame)?;

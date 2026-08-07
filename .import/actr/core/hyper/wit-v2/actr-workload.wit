@@ -1,10 +1,14 @@
-// actr workload contract — Component Model WIT, timeout-aware async world
+// actr workload contract — Component Model WIT, lane-aware async world
 //
-// `actr:workload@0.3.0` extends the run_concurrent-ready 0.2.0 contract with
-// explicit per-call timeout arguments. The async design is a controlled fork
-// of the retired `actr:workload@0.1.0` contract that turns every host import
-// and every workload export into a real WIT `async func`. That single change
-// is what unlocks wasmtime 46's Component
+// `actr:workload@0.4.0` extends the timeout-aware 0.3.0 contract with an
+// explicit `payload-type` argument on the `call` / `tell` / `call-raw` host
+// imports, so a guest's typed RPC calls travel on the lane declared via
+// `(actr.payload_type)` in the protobuf schema instead of the host-chosen
+// default lane. 0.3.0 had itself extended the run_concurrent-ready 0.2.0
+// contract with explicit per-call timeout arguments. The async design is a
+// controlled fork of the retired `actr:workload@0.1.0` contract that turns
+// every host import and every workload export into a real WIT `async func`.
+// That single change is what unlocks wasmtime 46's Component
 // Model Concurrency: multiple `dispatch` calls may be IN FLIGHT on one
 // component instance, cooperatively interleaving at each host-import `.await`.
 //
@@ -41,7 +45,7 @@
 // stdlib-ish names during binding generation (e.g. `actr-error` rather
 // than bare `error`, which clashes with `wasi:io/error`).
 
-package actr:workload@0.3.0;
+package actr:workload@0.4.0;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared value types
@@ -237,23 +241,25 @@ interface types {
 interface host {
     use types.{actr-id, actr-type, actr-error, data-chunk, dest, payload-type};
 
-    // Typed-routed call: host forwards to the destination, returning the
-    // encoded response payload.
+    // Typed-routed call: host forwards to the destination on the requested
+    // payload-type lane, returning the encoded response payload.
     call: async func(
         ctx-token: u64,
         target: dest,
         route-key: string,
         payload: list<u8>,
         timeout-ms: s64,
+        payload-type: payload-type,
     ) -> result<list<u8>, actr-error>;
 
-    // Fire-and-forget: host forwards the message and returns without
-    // waiting for a response.
+    // Fire-and-forget: host forwards the message on the requested
+    // payload-type lane and returns without waiting for a response.
     tell: async func(
         ctx-token: u64,
         target: dest,
         route-key: string,
         payload: list<u8>,
+        payload-type: payload-type,
     ) -> result<_, actr-error>;
 
     // Raw RPC against a known actor identity (no Dest routing).
@@ -263,6 +269,7 @@ interface host {
         route-key: string,
         payload: list<u8>,
         timeout-ms: s64,
+        payload-type: payload-type,
     ) -> result<list<u8>, actr-error>;
 
     // Discovery: find a candidate actor serving the requested type.
