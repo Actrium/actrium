@@ -178,7 +178,12 @@ describe('asset guest — ④ host:asset.info + host:asset.blit into guest memor
   });
 
   it('the asset guest imports only host-provided functions (the seal)', () => {
-    const allowed = new Set(['keel_host_call', 'keel_send_batch', 'keel_log', 'keel_on_event']);
+    const allowed = new Set([
+      'keel_host_call',
+      'keel_send_batch',
+      'keel_log',
+      'keel_now_ms',
+    ]);
     const imports = WebAssembly.Module.imports(new WebAssembly.Module(ASSET_GUEST));
     for (const imp of imports) {
       expect(imp.module).toBe('env');

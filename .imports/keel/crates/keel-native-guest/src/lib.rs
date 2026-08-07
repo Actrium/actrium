@@ -46,6 +46,9 @@ extern "C" {
     // One-way diagnostics channel: hand the host a UTF-8 log line
     // (native-guest-host.ts wires it to its `onLog` sink).
     fn keel_log(msg_ptr: *const u8, msg_len: usize);
+    // Synchronous, relative monotonic clock. The host fixes its granularity at
+    // 1 ms and never exposes wall-clock time through this import.
+    fn keel_now_ms() -> f64;
 }
 
 /// ABI version this SDK speaks. The generated `keel_abi_version` export hands
@@ -60,6 +63,18 @@ pub const KEEL_ABI_VERSION: u32 = 1;
 /// window for "what went wrong" — the panic handler reports through it too.
 pub fn log(msg: &str) {
     unsafe { keel_log(msg.as_ptr(), msg.len()) }
+}
+
+/// Low-risk timing utilities available to every native guest without an async
+/// host:* round trip or a manifest capability declaration.
+pub mod time {
+    /// Relative monotonic milliseconds at 1 ms host-defined granularity.
+    ///
+    /// Use differences between samples for profiling. The value has no wall
+    /// clock or timezone meaning and never decreases during one host lifetime.
+    pub fn now_ms() -> f64 {
+        unsafe { super::keel_now_ms() }
+    }
 }
 
 // ---- Global allocator: talc (memory.grow-backed, growable, real free) ----
@@ -3002,11 +3017,20 @@ mod test_shims {
     extern "C" fn keel_send_batch(_batch_ptr: *const u8, _batch_len: usize) {}
     #[no_mangle]
     extern "C" fn keel_log(_msg_ptr: *const u8, _msg_len: usize) {}
+    #[no_mangle]
+    extern "C" fn keel_now_ms() -> f64 {
+        1234.0
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use alloc::string::String;
+
+    #[test]
+    fn time_now_ms_calls_the_sync_clock_import() {
+        assert_eq!(super::time::now_ms(), 1234.0);
+    }
 
     fn esc(raw: &str) -> String {
         let mut out = String::new();

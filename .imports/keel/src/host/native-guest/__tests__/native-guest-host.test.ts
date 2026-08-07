@@ -105,6 +105,8 @@ const EVENT_TRAP = readFileSync(join(import.meta.dir, 'fixtures/event-trap.wasm'
 // Adversarial guest whose keel_alloc always returns 0 (exhausted allocator).
 const ALLOC_ZERO = readFileSync(join(import.meta.dir, 'fixtures/alloc-zero.wasm'));
 const CANCEL_CALL = readFileSync(join(import.meta.dir, 'fixtures/cancel-call.wasm'));
+// Hand-written guest that samples the synchronous monotonic clock during init.
+const CLOCK_PROBE = readFileSync(join(import.meta.dir, 'fixtures/clock-probe.wasm'));
 
 // --- tiny seeded PRNG + JSON generator for fuzzing (reproducible, no deps) ---
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
@@ -251,7 +253,11 @@ describe('NativeGuestHost — cancellable host calls', () => {
 describe('NativeGuestHost — real Rust guest via the keel-native-guest SDK', () => {
   it('drives an async Rust guest (store::put("a","b").await) end to end', async () => {
     const { table, store } = storeDispatch();
-    const host = new NativeGuestHost({ dispatch: table });
+    const samples = [100.4, 103.8];
+    const host = new NativeGuestHost({
+      dispatch: table,
+      nowMs: () => samples.shift() ?? 0,
+    });
     await host.load(RUST_GUEST);
     await host.drain();
 
@@ -261,6 +267,8 @@ describe('NativeGuestHost — real Rust guest via the keel-native-guest SDK', ()
     const len = (host.exports.result_len as () => number)();
     expect(JSON.parse(new TextDecoder().decode(host.readBytes(ptr, len)))).toEqual({ version: 1 });
     expect(store.get('a')).toBe('b');
+    expect((host.exports.clock_first_ms as () => number)()).toBe(100);
+    expect((host.exports.clock_second_ms as () => number)()).toBe(103);
   });
 });
 
@@ -417,9 +425,11 @@ describe('NativeGuestHost — C guest via the C SDK (language-neutral ABI)', () 
       () => {},
       () => {}
     );
+    const clockSamples = [41.9, 47.2];
     const host = new NativeGuestHost({
       dispatch: {},
       onRenderBatch: (b) => receiver.applyBatch(b),
+      nowMs: () => clockSamples.shift() ?? 0,
     });
     await host.load(C_GUEST);
 
@@ -427,6 +437,8 @@ describe('NativeGuestHost — C guest via the C SDK (language-neutral ABI)', () 
     expect(tree?.type).toBe('View');
     expect(tree?.children[0].type).toBe('__TEXT__');
     expect(tree?.children[0].props.text).toBe('hello from c');
+    expect((host.exports.clock_first_ms as () => number)()).toBe(41);
+    expect((host.exports.clock_second_ms as () => number)()).toBe(47);
   });
 });
 
@@ -600,7 +612,13 @@ describe('NativeGuestHost — host->guest events (keel_on_event)', () => {
 });
 
 describe('NativeGuestHost — the seal is an import allowlist (automated)', () => {
-  const ALLOWED = new Set(['keel_host_call', 'keel_send_batch', 'keel_log', 'keel_on_event']);
+  const ALLOWED = new Set([
+    'keel_host_call',
+    'keel_host_cancel',
+    'keel_send_batch',
+    'keel_log',
+    'keel_now_ms',
+  ]);
   const guests: Array<[string, Uint8Array]> = [
     ['roundtrip', WASM],
     ['kv-guest', RUST_GUEST],
@@ -609,6 +627,7 @@ describe('NativeGuestHost — the seal is an import allowlist (automated)', () =
     ['event-guest', EVENT_GUEST],
     ['c-guest', C_GUEST],
     ['blur-demo-guest', BLUR_GUEST],
+    ['clock-probe', CLOCK_PROBE],
   ];
   for (const [name, bytes] of guests) {
     it(`${name}.wasm imports only host-provided functions (no fetch/socket/…)`, () => {
@@ -632,6 +651,35 @@ describe('NativeGuestHost — the seal is an import allowlist (automated)', () =
       threw = true;
     }
     expect(threw).toBe(true);
+  });
+});
+
+describe('NativeGuestHost — synchronous monotonic clock', () => {
+  it('gives native code useful sub-frame samples at a fixed 1 ms granularity', async () => {
+    const samples = [8.9, 10.2];
+    const host = new NativeGuestHost({ dispatch: {}, nowMs: () => samples.shift() ?? 0 });
+    await host.load(CLOCK_PROBE);
+    expect((host.exports.first as () => number)()).toBe(8);
+    expect((host.exports.second as () => number)()).toBe(10);
+    expect((host.exports.delta as () => number)()).toBe(2);
+  });
+
+  it('never exposes a backwards provider sample', async () => {
+    const samples = [20.8, 19.4];
+    const host = new NativeGuestHost({ dispatch: {}, nowMs: () => samples.shift() ?? 0 });
+    await host.load(CLOCK_PROBE);
+    expect((host.exports.first as () => number)()).toBe(20);
+    expect((host.exports.second as () => number)()).toBe(20);
+    expect((host.exports.delta as () => number)()).toBe(0);
+  });
+
+  it('turns non-finite provider samples into the last safe value', async () => {
+    const samples = [Number.NaN, Number.POSITIVE_INFINITY];
+    const host = new NativeGuestHost({ dispatch: {}, nowMs: () => samples.shift() ?? 0 });
+    await host.load(CLOCK_PROBE);
+    expect((host.exports.first as () => number)()).toBe(0);
+    expect((host.exports.second as () => number)()).toBe(0);
+    expect((host.exports.delta as () => number)()).toBe(0);
   });
 });
 

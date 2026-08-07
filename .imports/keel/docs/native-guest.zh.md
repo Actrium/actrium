@@ -26,7 +26,7 @@ keel 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 
 **② host:\* ABI（线性内存，语言中立）—— 地基核心**：字节按**指针+长度**在 guest 线性内存里传，host 持 guest 的 `Memory` **零拷贝读**。比 QuickJS 路线的序列化拷贝 + `number[]` 绕 TypedArray 疤**更简单更快**。完整 wire 见 §4。
 
-**③ 封口（回归 WASM 本质）**：`importObject` 完全由 host 控制。guest 只拿到 host:* + `keel_alloc`/`keel_log`，**无 fetch / socket / RTC**（WASM 无 ambient 网络，host 不导入就没有）；**未声明的 host 模块 fail-closed**（resolve `ok=0`）。封口由 **WASM import 模型结构性保证**——比「QuickJS 恰好没有 fetch」更标准可审。发布判档（声明的能力 + egress → green/lime）不变。
+**③ 封口（回归 WASM 本质）**：`importObject` 完全由 host 控制。guest 只拿到 host:* + `keel_alloc`/`keel_log`/`keel_now_ms`，**无 fetch / socket / RTC**（WASM 无 ambient 网络，host 不导入就没有）；**未声明的 host 模块 fail-closed**（resolve `ok=0`）。封口由 **WASM import 模型结构性保证**——比「QuickJS 恰好没有 fetch」更标准可审。发布判档（声明的能力 + egress → green/lime）不变。
 
 ## 3. 与现有 QuickJS 兼容——加法式，不动现有
 
@@ -52,6 +52,7 @@ keel 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 |---|---|---|
 | `env.keel_host_call` | `(mod_ptr,mod_len, method_ptr,method_len, in_ptr,in_len, cb_id)` | guest 发起一次 host:* 调用；**同步返回、不阻塞**；结果稍后经 `keel_resolve` 回来 |
 | `env.keel_log` | `(ptr,len)` | guest 日志 |
+| `env.keel_now_ms` | `() -> f64` | 同步单调相对时钟；固定 1 ms 粒度，不含墙上时间/时区，不走异步 host:* 回程 |
 
 **guest → host exports**
 | export | 签名 | 语义 |
@@ -80,13 +81,13 @@ keel 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 ## 5. Phase A 已落地 + 后续
 
 **Phase A · 装载 + ABI（本 PR，已跑绿）**
-- `src/host/native-guest/native-guest-host.ts` —— `NativeGuestHost`：`instantiate` + `importObject` 注入 `keel_host_call`/`keel_log`，桥接 `keel_host_call → createHostModuleDispatch → keel_resolve`，`drain()` 等待在途调用。
+- `src/host/native-guest/native-guest-host.ts` —— `NativeGuestHost`：`instantiate` + `importObject` 注入 `keel_host_call`/`keel_log`/`keel_now_ms`，桥接 `keel_host_call → createHostModuleDispatch → keel_resolve`，`drain()` 等待在途调用。
 - `src/host/native-guest/__tests__/fixtures/roundtrip.wat`（+ 编译产物 `.wasm`）—— 一个**手写最小原生 guest**，`keel_init` 发一次 `host:store.putText`，wire 级看清 ABI。
 - `src/host/native-guest/__tests__/native-guest-host.test.ts` —— 两个真测试：**① 端到端往返**（guest 经线性内存调 host:* → 真派发 → `keel_resolve` 回传 → 断言结果 `{version:1}` + KV 实存了 guest 的写）；**② 封口 fail-closed**（未声明模块 → `ok=0` + `not registered`）。
 
 **Phase B · Rust guest SDK（本 PR 已落地）**：`crates/keel-native-guest`（lib）—— 人体工学 SDK，开发者写 `store::put(k, v).await`，crate 处理 alloc / host_call / resolve / **future**（一个 no_std 单任务 executor：host 调用是个 future，首 poll 发 `keel_host_call` 挂起，host 之后 `keel_resolve` 唤醒再 poll 完成——即 guest 侧的 callback-resolve）；ABI 导出（`keel_alloc`/`keel_resolve`/`keel_init`）+ 全局 bump 分配器 + panic handler 由 `guest_main!` 宏在 guest cdylib 里生成。`crates/kv-guest` = 用它写的真 Rust guest，`crates/build.sh` 编成 `.wasm`（被 Phase A 的 `NativeGuestHost` 原样加载，测试驱动 `store::put("a","b").await` 端到端跑通）。
 
-> **封口自证**：编出的 `kv-guest.wasm` 的 import 列表**只有 `env.keel_host_call` 一个**——guest 能触达的全部就在这张表里，无 fetch / socket / 任何网络原语。import 模型即沙箱，肉眼可查。
+> **封口自证**：编出的 `kv-guest.wasm` 的 import 列表只有 `env.keel_host_call`、`env.keel_log` 与 `env.keel_now_ms`——guest 能触达的全部就在这张表里，无 fetch / socket / 任何网络原语。import 模型即沙箱，肉眼可查。
 
 **Phase B 后续（未做）**：CLI 增加 `.wasm` guest 构建目标（现只出 JS bundle）、补 `host:net` 等更多能力的 typed 包装、host:store 活桥 e2e。
 
@@ -204,7 +205,7 @@ guest 现在**可以**（不强制）导出 `keel_abi_version`，向宿主声明
 
 ### 10.2 封口（seal）不变——SIMD 是 opcode，不是 import
 
-host-import 白名单（`env.{keel_host_call, keel_send_batch, keel_log, keel_on_event}`，在 `native-guest-host.test.ts` 自动断言）对 SIMD **透明**：v128 是模块内的**指令**，不引入任何 import。实测：真发射了 v128 指令的 guest，import 集合与非 SIMD 基线逐字节一致。**唯一会破封口的是 atomics/threads**——共享内存会引入 `env.memory` import，与 SIMD 无关，切勿顺手一起开。
+host-import 白名单（`env.{keel_host_call, keel_send_batch, keel_log, keel_now_ms}`，在 `native-guest-host.test.ts` 自动断言）对 SIMD **透明**：v128 是模块内的**指令**，不引入任何 import。实测：真发射了 v128 指令的 guest，import 集合与非 SIMD 基线逐字节一致。**唯一会破封口的是 atomics/threads**——共享内存会引入 `env.memory` import，与 SIMD 无关，切勿顺手一起开。
 
 ### 10.3 逐字节正确性：标量与 SIMD 除法必须同法
 
