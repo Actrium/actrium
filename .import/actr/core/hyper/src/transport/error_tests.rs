@@ -504,3 +504,52 @@ fn transport_blips_never_carry_an_auth_verdict() {
         assert_eq!(e.auth_verdict(), None, "{e} must not carry a verdict");
     }
 }
+
+// ── is_tungstenite_closed: TCP-level passive closes count as closed ──────
+
+#[test]
+fn tungstenite_explicit_closed_variants_are_closed() {
+    use tokio_tungstenite::tungstenite::Error as WsError;
+
+    assert!(is_tungstenite_closed(&WsError::ConnectionClosed));
+    assert!(is_tungstenite_closed(&WsError::AlreadyClosed));
+}
+
+#[test]
+fn tungstenite_io_close_kinds_are_closed_like() {
+    use tokio_tungstenite::tungstenite::Error as WsError;
+
+    // Peer RST / broken pipe without a close frame must classify as closed so
+    // the send path evicts the stale wire instead of waiting for the timeout
+    // backstop.
+    for kind in [
+        std::io::ErrorKind::BrokenPipe,
+        std::io::ErrorKind::ConnectionReset,
+        std::io::ErrorKind::ConnectionAborted,
+        std::io::ErrorKind::NotConnected,
+    ] {
+        let err = WsError::Io(std::io::Error::new(kind, "passive close"));
+        assert!(is_tungstenite_closed(&err), "{kind:?} must be closed-like");
+
+        let net_err = NetworkError::from(err);
+        assert!(
+            matches!(net_err, NetworkError::WebSocketClosed(_)),
+            "{kind:?} must convert to WebSocketClosed, got {net_err}"
+        );
+        assert!(net_err.is_closed_like());
+    }
+}
+
+#[test]
+fn tungstenite_io_non_close_kinds_are_not_closed() {
+    use tokio_tungstenite::tungstenite::Error as WsError;
+
+    for kind in [
+        std::io::ErrorKind::Interrupted,
+        std::io::ErrorKind::WouldBlock,
+        std::io::ErrorKind::TimedOut,
+    ] {
+        let err = WsError::Io(std::io::Error::new(kind, "transient io"));
+        assert!(!is_tungstenite_closed(&err), "{kind:?} must not be closed");
+    }
+}

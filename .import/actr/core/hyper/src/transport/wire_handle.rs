@@ -15,9 +15,17 @@ use std::sync::Arc;
 ///
 /// Used for stale detection: if a close event arrives with a session_id that
 /// no longer matches the active wire, the event is stale and should be ignored.
+///
+/// WebSocket connections carry an identity too so the same compare-and-swap
+/// machinery (`mark_connection_closed_if_same`) applies to them — otherwise a
+/// passively-closed WebSocket stays in the ready set forever on the tell/stream
+/// paths. The `session_id` is a monotonically increasing generation minted by
+/// the wire builder, so a stale close event for a replaced wire never matches
+/// the fresh one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WireIdentity {
     WebRtc { peer_id: ActrId, session_id: u64 },
+    WebSocket { peer_id: ActrId, session_id: u64 },
 }
 
 /// WireHandle - Unified interface for Wire layer connections
@@ -58,8 +66,9 @@ pub trait WireHandle: Send + Sync + std::fmt::Debug {
     ///
     /// WebRTC connections return `WireIdentity::WebRtc { peer_id, session_id }`
     /// so that upper layers can detect whether a close event belongs to the
-    /// current active session or a stale one. WebSocket connections return None
-    /// since they lack a comparable session concept.
+    /// current active session or a stale one. WebSocket connections return
+    /// `WireIdentity::WebSocket { peer_id, session_id }` for the same reason.
+    /// Implementations without a comparable session concept return `None`.
     fn identity(&self) -> Option<WireIdentity> {
         None
     }

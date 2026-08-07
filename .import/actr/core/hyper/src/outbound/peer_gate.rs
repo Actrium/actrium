@@ -11,7 +11,7 @@ use super::ensure_stream_payload_type;
 use crate::lifecycle::SendProjection;
 use crate::transport::{
     ConnectionEvent, ConnectionState, Dest, DestTransportRef, NetworkResult, PayloadTypeExt,
-    PeerTransport, WireIdentity,
+    PeerTransport, SentTransportSlot, WireIdentity,
 };
 use crate::wire::webrtc::{NetworkRecoveryStatus, WebRtcCoordinator};
 use actr_framework::{Bytes, MediaSample};
@@ -589,6 +589,7 @@ impl PeerGate {
     ///
     /// Retry is applied only when `NetworkError::kind()` is `Transient`.
     /// Non-transient errors are returned immediately without retry.
+    #[cfg(any(test, feature = "test-utils"))]
     async fn send_with_retry(
         &self,
         dest: &Dest,
@@ -607,12 +608,21 @@ impl PeerGate {
         payload_type: PayloadType,
         data: &[u8],
         admission: SendAdmission,
+        record: Option<&SentTransportSlot>,
     ) -> ActorResult<DestTransportRef> {
         let policy = payload_type.retry_policy();
-        self.send_with_retry_policy_record_identity(dest, payload_type, data, policy, admission)
-            .await
+        self.send_with_retry_policy_record_identity(
+            dest,
+            payload_type,
+            data,
+            policy,
+            admission,
+            record,
+        )
+        .await
     }
 
+    #[cfg(any(test, feature = "test-utils"))]
     async fn send_with_retry_policy(
         &self,
         dest: &Dest,
@@ -621,9 +631,16 @@ impl PeerGate {
         policy: crate::transport::RetryPolicy,
         admission: SendAdmission,
     ) -> ActorResult<()> {
-        self.send_with_retry_policy_record_identity(dest, payload_type, data, policy, admission)
-            .await
-            .map(|_| ())
+        self.send_with_retry_policy_record_identity(
+            dest,
+            payload_type,
+            data,
+            policy,
+            admission,
+            None,
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn attempt_send(
@@ -632,16 +649,17 @@ impl PeerGate {
         payload_type: PayloadType,
         data: &[u8],
         admission: SendAdmission,
+        record: Option<&SentTransportSlot>,
     ) -> NetworkResult<Option<DestTransportRef>> {
         match admission {
             SendAdmission::Normal => self
                 .transport_manager
-                .send_with_identity(dest, payload_type, data)
+                .send_with_identity(dest, payload_type, data, record)
                 .await
                 .map(Some),
             SendAdmission::ExistingOnly => {
                 self.transport_manager
-                    .send_existing_with_identity(dest, payload_type, data)
+                    .send_existing_with_identity(dest, payload_type, data, record)
                     .await
             }
         }
@@ -653,9 +671,13 @@ impl PeerGate {
         payload_type: PayloadType,
         data: &[u8],
         admission: SendAdmission,
+        record: Option<&SentTransportSlot>,
     ) -> ActorResult<DestTransportRef> {
         let admission = self.tighten_with_current_projection(admission)?;
-        match self.attempt_send(dest, payload_type, data, admission).await {
+        match self
+            .attempt_send(dest, payload_type, data, admission, record)
+            .await
+        {
             Ok(Some(identity)) => Ok(identity),
             Ok(None) => Err(Self::send_projection_not_ready_error()),
             Err(error) => Err(error.into()),
@@ -669,13 +691,17 @@ impl PeerGate {
         data: &[u8],
         policy: crate::transport::RetryPolicy,
         mut admission: SendAdmission,
+        record: Option<&SentTransportSlot>,
     ) -> ActorResult<DestTransportRef> {
         let mut delay = policy.initial_delay;
         let mut attempt = 0u32;
 
         loop {
             admission = self.tighten_with_current_projection(admission)?;
-            match self.attempt_send(dest, payload_type, data, admission).await {
+            match self
+                .attempt_send(dest, payload_type, data, admission, record)
+                .await
+            {
                 Ok(Some(identity)) => return Ok(identity),
                 // `ExistingOnly` with no committed destination is an
                 // admission result, not a transient transport failure. Fail
@@ -720,6 +746,10 @@ impl PeerGate {
         sent_transport: Option<DestTransportRef>,
     ) {
         let Some(sent_transport) = sent_transport else {
+            // The deadline fired before a transport was selected (the send was
+            // still waiting on a Connecting flight). Closing here cancels that
+            // flight — fail-fast so the next send redials immediately instead
+            // of waiting out the flight's own creation deadline.
             tracing::warn!(
                 peer = ?target,
                 "Request timed out before a sent transport was recorded; closing transport"
@@ -766,10 +796,17 @@ impl PeerGate {
                     ),
                 }
             }
-            None => {
+            // Two cases share the instance-guarded close: the send resolved on
+            // a WebSocket wire (a WebSocket session id is minted per builder
+            // and is not comparable across DestTransport instances), or the
+            // send hung before its wire identity was recorded
+            // (`wire_identity: None` from the selection-time record). In both,
+            // only reclaim the transport if it is still the same instance that
+            // sent; a replacement rebuilt by an earlier reclaim is untouched.
+            Some(WireIdentity::WebSocket { .. }) | None => {
                 tracing::warn!(
                     peer = ?target,
-                    "Request timed out after send without wire identity; closing transport if instance still matches"
+                    "Request timed out after send; closing transport if instance still matches"
                 );
                 match transport_manager
                     .close_transport_if_current(&dest, &sent_transport)
@@ -864,11 +901,18 @@ impl PeerGate {
 
         let result =
             crate::timer::timeout(crate::timer::ids::PEER_REQUEST_DEADLINE, timeout, async {
-                // 5a. Send with per-PayloadType retry on transient failures
-                let sent_identity = self
-                    .send_with_retry_record_identity(&dest, payload_type, &data, admission)
-                    .await?;
-                *sent_transport_for_send.lock().await = Some(sent_identity);
+                // 5a. Send with per-PayloadType retry on transient failures.
+                // The selected transport is recorded into the slot before the
+                // wire send can hang, so a deadline expiring during the send
+                // phase still reclaims that exact instance.
+                self.send_with_retry_record_identity(
+                    &dest,
+                    payload_type,
+                    &data,
+                    admission,
+                    Some(&sent_transport_for_send),
+                )
+                .await?;
                 tracing::debug!("Sent request to {:?}", target);
 
                 // 5b. Wait for response
@@ -999,20 +1043,57 @@ impl PeerGate {
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
         let admission = self.preflight_send(target, &dest).await?;
-        let send = self.send_with_retry(&dest, payload_type, &data, admission);
-        if let Some(send_timeout) = send_timeout {
-            match crate::timer::timeout(
-                crate::timer::ids::PEER_REQUEST_DEADLINE,
-                send_timeout,
-                send,
+
+        // Capture the transport selected for the send so a tell-path timeout
+        // (e.g. a half-open WebSocket the send hangs on with no FIN) reclaims
+        // that exact instance, exactly as the request/response path does. The
+        // slot is written at selection time — before the wire send can hang —
+        // so on the timeout branch it is populated whenever the send had
+        // already picked a transport, and the reclaim goes through the
+        // instance-guarded close rather than an unguarded `close_transport`.
+        let sent_transport: SentTransportSlot = Arc::new(Mutex::new(None));
+        let sent_transport_for_send = Arc::clone(&sent_transport);
+        let send = async {
+            self.send_with_retry_record_identity(
+                &dest,
+                payload_type,
+                &data,
+                admission,
+                Some(&sent_transport_for_send),
             )
-            .await
-            {
-                Ok(result) => result,
-                Err(_) => Err(ActrError::TimedOut),
-            }
+            .await?;
+            Ok::<_, ActrError>(())
+        };
+
+        let result = if let Some(send_timeout) = send_timeout {
+            crate::timer::timeout(crate::timer::ids::PEER_REQUEST_DEADLINE, send_timeout, send)
+                .await
         } else {
-            send.await
+            Ok(send.await)
+        };
+
+        match result {
+            Ok(inner) => inner,
+            Err(_) => {
+                // Deadline expired: the send never resolved (typically a
+                // half-open wire with no FIN). Reclaim the selected transport
+                // so the next tell rebuilds a fresh one, mirroring the
+                // request/response timeout path at the call site.
+                let transport_manager = self.transport_manager.clone();
+                let stale_dest = dest.clone();
+                let stale_target = target.clone();
+                let sent_transport = sent_transport.lock().await.clone();
+                tokio::spawn(async move {
+                    Self::close_timed_out_request_transport(
+                        transport_manager,
+                        stale_dest,
+                        stale_target,
+                        sent_transport,
+                    )
+                    .await;
+                });
+                Err(ActrError::TimedOut)
+            }
         }
     }
 
@@ -1194,16 +1275,45 @@ impl PeerGate {
             false
         };
 
+        // Record the selected transport at selection time so a chunk-send
+        // deadline (half-open wire with no FIN) can reclaim that exact
+        // instance, mirroring the tell and request/response timeout paths.
+        let sent_transport: SentTransportSlot = Arc::new(Mutex::new(None));
         let result = match crate::timer::timeout(
             crate::timer::ids::PEER_REQUEST_DEADLINE,
             send_timeout,
-            self.send_once_with_admission(&dest, payload_type, &data, admission),
+            self.send_once_with_admission(
+                &dest,
+                payload_type,
+                &data,
+                admission,
+                Some(&sent_transport),
+            ),
         )
         .await
         {
             Ok(Ok(_identity)) => Ok(()),
             Ok(Err(e)) => Err(e),
-            Err(_) => Err(ActrError::TimedOut),
+            Err(_) => {
+                // Deadline expired: the single send attempt hung. Reclaim the
+                // recorded transport instance so the next chunk rebuilds a
+                // fresh one; the guarded close skips a transport that has
+                // already been replaced.
+                let transport_manager = self.transport_manager.clone();
+                let stale_dest = dest.clone();
+                let stale_target = target.clone();
+                let sent_transport = sent_transport.lock().await.clone();
+                tokio::spawn(async move {
+                    Self::close_timed_out_request_transport(
+                        transport_manager,
+                        stale_dest,
+                        stale_target,
+                        sent_transport,
+                    )
+                    .await;
+                });
+                Err(ActrError::TimedOut)
+            }
         };
 
         if result.is_err() {

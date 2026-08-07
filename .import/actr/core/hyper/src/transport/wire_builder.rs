@@ -9,7 +9,7 @@ use super::Dest; // Re-exported from actr-framework
 use super::error::{NetworkError, NetworkResult};
 use super::lane::DataLane;
 use super::peer_transport::WireBuilder;
-use super::wire_handle::WireHandle;
+use super::wire_handle::{WireHandle, WireIdentity};
 use super::wire_pool::ConnType;
 use crate::lifecycle::CredentialState;
 use crate::lifecycle::session_state::SessionState;
@@ -21,6 +21,7 @@ use actr_protocol::{ActrError, ActrId, Direction, PayloadType, RpcEnvelope};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
 
@@ -93,6 +94,14 @@ pub struct DefaultWireBuilder {
     /// Pending requests map (shared with PeerGate) for outbound WebSocket response routing.
     pending_requests: Option<PendingRequestsMap>,
 
+    /// Monotonic generation counter for outbound WebSocket wire identities.
+    ///
+    /// Each newly built `ClientWebSocketHandle` draws the next value so that a
+    /// stale close event for a replaced wire can never match the fresh wire's
+    /// `WireIdentity::WebSocket`. Strictly increasing within the builder, which
+    /// is sufficient for the compare-and-swap in `mark_connection_closed_if_same`.
+    ws_session_counter: Arc<AtomicU64>,
+
     /// Builder configuration.
     config: DefaultWireBuilderConfig,
 }
@@ -114,6 +123,7 @@ impl DefaultWireBuilder {
             discovered_ws_addresses: config.discovered_ws_addresses.clone(),
             credential_state: config.credential_state.clone(),
             pending_requests: config.pending_requests.clone(),
+            ws_session_counter: Arc::new(AtomicU64::new(0)),
             config,
         }
     }
@@ -149,13 +159,25 @@ impl DefaultWireBuilder {
 struct ClientWebSocketHandle {
     inner: WebSocketConnection,
     pending_requests: PendingRequestsMap,
+    /// Peer identity for `WireIdentity::WebSocket`.
+    peer_id: ActrId,
+    /// Monotonic generation distinguishing this wire session from any prior or
+    /// replacement wire to the same peer.
+    session_id: u64,
 }
 
 impl ClientWebSocketHandle {
-    fn new(inner: WebSocketConnection, pending_requests: PendingRequestsMap) -> Self {
+    fn new(
+        inner: WebSocketConnection,
+        pending_requests: PendingRequestsMap,
+        peer_id: ActrId,
+        session_id: u64,
+    ) -> Self {
         Self {
             inner,
             pending_requests,
+            peer_id,
+            session_id,
         }
     }
 
@@ -313,6 +335,13 @@ impl WireHandle for ClientWebSocketHandle {
     async fn get_lane(&self, payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
         self.inner.get_lane(payload_type).await
     }
+
+    fn identity(&self) -> Option<WireIdentity> {
+        Some(WireIdentity::WebSocket {
+            peer_id: self.peer_id.clone(),
+            session_id: self.session_id,
+        })
+    }
 }
 
 #[async_trait]
@@ -401,10 +430,21 @@ impl WireBuilder for DefaultWireBuilder {
                 // Wrap the connection so that, after `connect()`, response reader
                 // tasks are spawned to deliver server responses to `pending_requests`.
                 if let Some(ref pending) = self.pending_requests {
-                    connections.push(
-                        Arc::new(ClientWebSocketHandle::new(ws_conn, pending.clone()))
-                            as Arc<dyn WireHandle>,
-                    );
+                    // WebSocket wires are only created for `Dest::Peer`, so the
+                    // target id is always available here. The session id makes
+                    // the wire's identity unique so passive-close self-heal can
+                    // distinguish the current wire from a replaced one.
+                    let peer_id = dest
+                        .as_peer_id()
+                        .expect("ClientWebSocketHandle wire identity requires a peer destination")
+                        .clone();
+                    let session_id = self.ws_session_counter.fetch_add(1, Ordering::Relaxed);
+                    connections.push(Arc::new(ClientWebSocketHandle::new(
+                        ws_conn,
+                        pending.clone(),
+                        peer_id,
+                        session_id,
+                    )) as Arc<dyn WireHandle>);
                 } else {
                     connections.push(Arc::new(ws_conn) as Arc<dyn WireHandle>);
                 }

@@ -209,13 +209,17 @@ impl DestTransport {
                             let payload = bytes::Bytes::copy_from_slice(data);
                             let result = lane.send(payload.clone()).await;
 
-                            // If the WebRTC lane went stale after selection, drop
-                            // the cached lane and retry once before surfacing the error.
+                            // If the lane went stale after selection, drop the
+                            // cached lane and retry once before surfacing the
+                            // error. Transport-agnostic: a closed-like error
+                            // means the underlying wire (WebRTC *or* WebSocket)
+                            // is no longer sendable and should be self-healed.
                             if let Err(e) = &result {
-                                if conn_type == ConnType::WebRTC && e.is_closed_like() {
+                                if e.is_closed_like() {
                                     tracing::warn!(
-                                        "♻️ WebRTC lane closed-like error for {:?}, invalidating lane and retrying once: {}",
+                                        "♻️ lane closed-like error for {:?} ({:?}), invalidating lane and retrying once: {}",
                                         payload_type,
+                                        conn_type,
                                         e,
                                     );
                                     conn.invalidate_lane(payload_type).await;
@@ -227,9 +231,7 @@ impl DestTransport {
                                                 .map(|_| wire_identity);
                                         }
                                         Err(retry_err) => {
-                                            if conn_type == ConnType::WebRTC
-                                                && retry_err.is_closed_like()
-                                            {
+                                            if retry_err.is_closed_like() {
                                                 self.evict_closed_like_connection(
                                                     &conn,
                                                     conn_type,
@@ -248,8 +250,7 @@ impl DestTransport {
                             return result.map(|_| wire_identity);
                         }
                         Err(e) => {
-                            let is_closed_like =
-                                conn_type == ConnType::WebRTC && e.is_closed_like();
+                            let is_closed_like = e.is_closed_like();
 
                             if is_closed_like {
                                 self.evict_closed_like_connection(

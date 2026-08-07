@@ -583,13 +583,24 @@ impl From<webrtc::error::Error> for NetworkError {
 /// Whether a tungstenite WebSocket error indicates the connection is closed.
 ///
 /// Shared by `From<WsError>` and the WebSocket lane send path so the
-/// closed-variant set (`ConnectionClosed` / `AlreadyClosed`) is declared once.
+/// closed-variant set is declared once. Beyond the explicit closed variants
+/// (`ConnectionClosed` / `AlreadyClosed`), a TCP-level passive close (peer
+/// RST, broken pipe — no WebSocket close frame) surfaces as `Io`; including
+/// those kinds lets the send path evict the stale wire immediately instead of
+/// waiting for the timeout backstop.
 pub(crate) fn is_tungstenite_closed(err: &tokio_tungstenite::tungstenite::Error) -> bool {
-    matches!(
-        err,
-        tokio_tungstenite::tungstenite::Error::ConnectionClosed
-            | tokio_tungstenite::tungstenite::Error::AlreadyClosed
-    )
+    use tokio_tungstenite::tungstenite::Error as WsError;
+    match err {
+        WsError::ConnectionClosed | WsError::AlreadyClosed => true,
+        WsError::Io(io_err) => matches!(
+            io_err.kind(),
+            std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted
+                | std::io::ErrorKind::NotConnected
+        ),
+        _ => false,
+    }
 }
 
 /// Parse an HTTP `Retry-After` header value that carries a delta-seconds count.
