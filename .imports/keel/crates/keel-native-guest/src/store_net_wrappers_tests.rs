@@ -9,7 +9,7 @@
 //! plane — plus a back-compat check that a text-only store call is byte-identical
 //! to before.
 
-use crate::store_net_encode::limits::{MAX_ENVELOPE_BYTES, MAX_SEGMENTS, MAX_SEGMENT_BYTES};
+use crate::store_net_encode::limits::{MAX_SEGMENTS, MAX_SEGMENT_BYTES};
 use crate::store_net_encode::{decode_envelope, encode_envelope, MAGIC};
 use crate::test_shims::CALLS;
 // The host-call wiretap harness is shared with `module_verdict_tests`.
@@ -121,18 +121,39 @@ fn put_bytes_past_the_segment_cap_is_split_across_segments() {
 }
 
 #[test]
-fn put_bytes_beyond_the_envelope_cap_fails_closed_with_no_host_call() {
-    // The ceiling did not disappear, it moved: the aggregate envelope cap now
-    // binds instead of the per-segment cap. It must still fail BEFORE any host
-    // call, so nothing partial crosses the seam.
+fn put_bytes_round_trips_the_reported_five_megabyte_document() {
+    // application.ist#36: a real 1600x1200 two-layer document serialises to this
+    // exact size. The old 4 MiB aggregate cap still forced application-level
+    // chunking even after multi-segment values landed.
+    const DOCUMENT_BYTES: usize = 5_159_721;
+    let _guard = crate::wire_lock();
+    let value = vec![0x6du8; DOCUMENT_BYTES];
+    let tap = issue(crate::store::put_bytes("doc/1", &value));
+    let dec = decode_envelope(&tap.request).expect("real document must fit");
+    assert_eq!(dec.segments.len(), 5);
+    assert_eq!(
+        dec.segments.iter().map(|s| s.len()).sum::<usize>(),
+        DOCUMENT_BYTES
+    );
+    assert_eq!(
+        tap.resolve(1, b"{\"version\":1}").expect("put ok"),
+        b"{\"version\":1}"
+    );
+}
+
+#[test]
+fn put_bytes_beyond_the_sixteen_segment_budget_fails_closed_with_no_host_call() {
+    // The ceiling did not disappear: one logical value gets at most 16 bounded
+    // segments. It must still fail BEFORE any host call, so nothing partial
+    // crosses the seam.
     let _guard = crate::wire_lock();
     CALLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    let value = vec![0u8; MAX_ENVELOPE_BYTES + 1];
+    let value = vec![0u8; MAX_SEGMENT_BYTES * MAX_SEGMENTS + 1];
     let mut fut = Box::pin(crate::store::put_bytes("k", &value));
     match poll_once(fut.as_mut()) {
         Poll::Ready(Err(body)) => {
             // Fail-closed with a stable schema reason token, no partial write.
-            assert_eq!(body, b"{\"error\":\"envelope-too-big\"}");
+            assert_eq!(body, b"{\"error\":\"too-many-segments\"}");
         }
         Poll::Ready(Ok(_)) => panic!("over-cap value must not succeed"),
         Poll::Pending => panic!("over-cap value must fail before any host call"),
@@ -140,25 +161,6 @@ fn put_bytes_beyond_the_envelope_cap_fails_closed_with_no_host_call() {
     assert!(
         CALLS.lock().unwrap_or_else(|e| e.into_inner()).is_empty(),
         "no host call may be issued for an over-cap value"
-    );
-}
-
-#[test]
-fn put_bytes_needing_more_chunks_than_the_segment_budget_fails_closed() {
-    // The other fail-closed edge: the chunk count itself exceeds MAX_SEGMENTS.
-    // Reported as `too-many-segments`, and still before any host call.
-    let _guard = crate::wire_lock();
-    CALLS.lock().unwrap_or_else(|e| e.into_inner()).clear();
-    let value = vec![0u8; MAX_SEGMENT_BYTES * MAX_SEGMENTS + 1];
-    let mut fut = Box::pin(crate::store::put_bytes("k", &value));
-    match poll_once(fut.as_mut()) {
-        Poll::Ready(Err(body)) => assert_eq!(body, b"{\"error\":\"too-many-segments\"}"),
-        Poll::Ready(Ok(_)) => panic!("over-budget value must not succeed"),
-        Poll::Pending => panic!("over-budget value must fail before any host call"),
-    }
-    assert!(
-        CALLS.lock().unwrap_or_else(|e| e.into_inner()).is_empty(),
-        "no host call may be issued for an over-budget value"
     );
 }
 
