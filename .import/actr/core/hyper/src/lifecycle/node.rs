@@ -673,22 +673,6 @@ impl CredentialState {
         self.inner.read().await.turn_credential.clone()
     }
 
-    /// Publish refreshed credential material from an integration test.
-    ///
-    /// Production refreshes are owned by the membership lifecycle. Keeping
-    /// this test-only entry point on the same state transition lets transport
-    /// integration tests exercise the revision watcher without duplicating
-    /// its publication semantics.
-    #[cfg(feature = "test-utils")]
-    pub async fn update_for_test(
-        &self,
-        credential: AIdCredential,
-        expires_at: Option<prost_types::Timestamp>,
-        turn_credential: Option<TurnCredential>,
-    ) {
-        self.update(credential, expires_at, turn_credential).await;
-    }
-
     pub(crate) async fn turn_snapshot(&self) -> (Option<TurnCredential>, u64) {
         let guard = self.inner.read().await;
         (guard.turn_credential.clone(), guard.turn_revision)
@@ -727,6 +711,19 @@ impl CredentialState {
         if let Some(revision) = revision {
             self.turn_revision_tx.send_replace(revision);
         }
+    }
+
+    /// Test-only entry point mirroring `update`, so integration tests can
+    /// simulate the in-place credential write a soft renewal performs on the
+    /// shared `HardRebindHandles.credential_state`. See #423.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn update_for_test(
+        &self,
+        credential: AIdCredential,
+        expires_at: Option<prost_types::Timestamp>,
+        turn_credential: Option<TurnCredential>,
+    ) {
+        self.update(credential, expires_at, turn_credential).await;
     }
 }
 
@@ -2273,13 +2270,25 @@ impl Inner {
                 tracing::debug!("⏰ Credential expires at: {}s", expires_at.seconds);
             }
 
-            // Store ActrId and credential state
+            // Store ActrId and credential state.
+            //
+            // Reuse the SAME `CredentialState` instance installed on the
+            // signaling client above (`pre_connect_credential_state`) rather
+            // than constructing a second one. `CredentialState::clone()`
+            // shares the inner `Arc<RwLock<...>>`, so this single shared
+            // authority is what every reader — signaling reconnect URL
+            // construction, soft renewal, hard rebind, heartbeat — observes.
+            //
+            // This is the fix for #423: a second `CredentialState::new` here
+            // would create an independent `Arc`, leaving soft-renewal updates
+            // (which write to `HardRebindHandles.credential_state`) invisible to
+            // the signaling client. After a soft renewal, a signaling
+            // disconnect would then reconnect with the stale initial
+            // credential and loop on 401. Sharing one instance makes a
+            // successful soft renewal visible to the very next handshake.
+            // Do NOT reintroduce a second `CredentialState::new` on this path.
             self.actor_id = Some(actor_id.clone());
-            let credential_state = CredentialState::new(
-                credential.clone(),
-                credential_expires_at,
-                Some(register_ok.turn_credential.clone()),
-            );
+            let credential_state = pre_connect_credential_state.clone();
             self.credential_state = Some(credential_state.clone());
             session_state = SessionState::new(SessionSnapshot {
                 actor_id: actor_id.clone(),

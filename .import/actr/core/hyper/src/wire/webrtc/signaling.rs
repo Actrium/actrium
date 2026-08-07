@@ -1497,6 +1497,18 @@ impl WebSocketSignalingClient {
         url
     }
 
+    /// Test-only accessor for the handshake URL the next connect/reconnect
+    /// will use. Mirrors `build_url_with_identity` so tests can assert which
+    /// credential claims are carried without inspecting the wire.
+    ///
+    /// This exists to guard the fix for #423: after a soft renewal updates the
+    /// shared `CredentialState`, the very next handshake URL must carry the
+    /// renewed credential, never the stale initial one.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub async fn test_handshake_url(&self) -> Url {
+        self.build_url_with_identity().await
+    }
+
     fn redact_signaling_url_for_log(url: &Url) -> String {
         let mut redacted = url.clone();
         let pairs: Vec<(String, String)> = redacted

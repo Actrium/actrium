@@ -149,6 +149,7 @@ harness = false
 [dev-dependencies]
 tokio = { workspace = true }
 rand.workspace = true
+base64.workspace = true
 hmac.workspace = true
 sha1 = "0.10"
 mockito = "1.4"
