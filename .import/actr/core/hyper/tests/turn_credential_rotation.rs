@@ -237,10 +237,10 @@ async fn assert_rpc_eventually_succeeds(peer: &RelayPeer, target: &ActrId, base_
     .expect("relay RPC should recover after the TURN credential rotation");
 }
 
-async fn wait_for_turn_auth_entries(expected_minimum: usize) {
+async fn wait_for_turn_auth_entries(authenticator: &turn::Authenticator, expected_minimum: usize) {
     tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
-            if turn::Authenticator::cache_stats().0 >= expected_minimum {
+            if authenticator.cache_stats().0 >= expected_minimum {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(50)).await;
@@ -267,7 +267,6 @@ async fn wait_for_ice_restart(server: &TestSignalingServer) {
 async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_turn() {
     install_test_crypto_provider();
     init_logging();
-    turn::Authenticator::clear_cache();
 
     let turn_socket = Arc::new(
         UdpSocket::bind("127.0.0.1:0")
@@ -277,14 +276,15 @@ async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_tur
     let turn_address = turn_socket
         .local_addr()
         .expect("test TURN socket should report its address");
+    let turn_authenticator = Arc::new(
+        turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned())
+            .expect("Actrix TURN authenticator should initialize"),
+    );
     let turn_server = turn::create_turn_server(
         turn_socket,
         "127.0.0.1",
         TURN_REALM,
-        Arc::new(
-            turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned())
-                .expect("Actrix TURN authenticator should initialize"),
-        ),
+        turn_authenticator.clone(),
     )
     .await
     .expect("Actrix TURN service should start");
@@ -328,7 +328,7 @@ async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_tur
     );
 
     assert_rpc_succeeds(&offerer, &answerer.id, "turn_rotation_initial").await;
-    wait_for_turn_auth_entries(2).await;
+    wait_for_turn_auth_entries(turn_authenticator.as_ref(), 2).await;
 
     signaling_server.reset_counters();
     offerer
@@ -344,7 +344,7 @@ async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_tur
     // The new username must authenticate against Actrix during the in-place
     // TURN allocation refresh. It becomes the third unique authenticator cache
     // entry (offerer old, answerer old, offerer refreshed).
-    wait_for_turn_auth_entries(3).await;
+    wait_for_turn_auth_entries(turn_authenticator.as_ref(), 3).await;
 
     // The assertion under test: the existing relay path carries RPC traffic
     // again after configuration refresh plus ICE restart, without relying on
@@ -378,7 +378,6 @@ async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_tur
 async fn plain_ice_restart_reuses_relay_allocation_without_reallocating() {
     install_test_crypto_provider();
     init_logging();
-    turn::Authenticator::clear_cache();
 
     let (counting_auth, auth_calls) = CountingAuthenticator::new(TURN_SHARED_TEST_KEY);
 

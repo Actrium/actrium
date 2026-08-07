@@ -93,6 +93,11 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"core_dependency:{path}")
             continue
 
+        if path.startswith("actrix/"):
+            targets["rust_core"] = True
+            reasons.append(f"actrix_workspace:{path}")
+            continue
+
         if path.startswith("cli/assets/web-runtime/"):
             targets["rust_core"] = True
             targets["web_binding"] = True
