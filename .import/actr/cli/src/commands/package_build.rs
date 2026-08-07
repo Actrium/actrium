@@ -44,7 +44,14 @@ pub fn resolve_key_path(custom: Option<&Path>, config_keychain: Option<&str>) ->
     )
 }
 
-pub fn load_signing_key(key_path: &Path) -> Result<SigningKey> {
+/// Load an MFR signing key from a keychain JSON file, returning the key
+/// alongside the optional `manufacturer` binding recorded in the keychain.
+///
+/// A keychain that carries a `manufacturer` field is bound to that
+/// manufacturer; callers must verify it matches the package manufacturer
+/// before signing (see [`ensure_manufacturer_matches`]). Keychains without the
+/// field remain unbound for backward compatibility.
+pub fn load_signing_key_with_manufacturer(key_path: &Path) -> Result<(SigningKey, Option<String>)> {
     if !key_path.exists() {
         anyhow::bail!(
             "Key file not found: {}\nRun `actr pkg keygen` to generate a key first.",
@@ -54,6 +61,10 @@ pub fn load_signing_key(key_path: &Path) -> Result<SigningKey> {
 
     let content = std::fs::read_to_string(key_path)?;
     let json: serde_json::Value = serde_json::from_str(&content)?;
+    let manufacturer = json
+        .get("manufacturer")
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
     let private_b64 = json["private_key"]
         .as_str()
         .ok_or_else(|| anyhow::anyhow!("Key file missing private_key field"))?;
@@ -61,7 +72,37 @@ pub fn load_signing_key(key_path: &Path) -> Result<SigningKey> {
     let key_arr: [u8; 32] = private_bytes
         .try_into()
         .map_err(|_| anyhow::anyhow!("private_key must be exactly 32 bytes"))?;
-    Ok(SigningKey::from_bytes(&key_arr))
+    Ok((SigningKey::from_bytes(&key_arr), manufacturer))
+}
+
+/// Enforce that a keychain's bound manufacturer matches the package
+/// manufacturer. No-op when the keychain carries no `manufacturer` field
+/// (backward-compatible: legacy keychains remain usable and only log a warning
+/// advising that binding the keychain is recommended).
+pub fn ensure_manufacturer_matches(
+    keychain_manufacturer: Option<&str>,
+    package_manufacturer: &str,
+) -> Result<()> {
+    match keychain_manufacturer {
+        Some(kc_mfr) if kc_mfr == package_manufacturer => Ok(()),
+        Some(kc_mfr) => anyhow::bail!(
+            "Manufacturer mismatch: keychain is bound to '{}' but the package manufacturer is '{}'. \
+             Rebind the keychain with `actr pkg keygen --manufacturer {} --force` or use a matching keychain.",
+            kc_mfr,
+            package_manufacturer,
+            package_manufacturer,
+        ),
+        None => {
+            tracing::warn!(
+                "Keychain has no 'manufacturer' binding; the package manufacturer '{}' is not \
+                 verified against the signing key. Run `actr pkg keygen --manufacturer {}` to \
+                 bind the keychain and prevent cross-manufacturer signing.",
+                package_manufacturer,
+                package_manufacturer,
+            );
+            Ok(())
+        }
+    }
 }
 
 pub fn load_verifying_key(path: &Path) -> Result<ed25519_dalek::VerifyingKey> {
@@ -127,7 +168,7 @@ fn default_package_file_name(config_path: &Path, target: &str) -> Result<String>
 }
 
 pub fn build_package(input: PackageBuildInput) -> Result<PackageBuildSummary> {
-    let signing_key = load_signing_key(&input.key_path)?;
+    let (signing_key, keychain_manufacturer) = load_signing_key_with_manufacturer(&input.key_path)?;
     let verifying_key = signing_key.verifying_key();
 
     let config = ConfigParser::from_manifest_file(&input.config_path).with_context(|| {
@@ -136,6 +177,14 @@ pub fn build_package(input: PackageBuildInput) -> Result<PackageBuildSummary> {
             input.config_path.display()
         )
     })?;
+
+    // Reject cross-manufacturer signing before any packaging work: a keychain
+    // that declares a `manufacturer` binding may only sign packages for that
+    // same manufacturer (issue #425).
+    ensure_manufacturer_matches(
+        keychain_manufacturer.as_deref(),
+        &config.package.actr_type.manufacturer,
+    )?;
 
     let binary_bytes = std::fs::read(&input.binary_path)
         .with_context(|| format!("Failed to read binary: {}", input.binary_path.display()))?;
@@ -251,6 +300,8 @@ pub fn print_build_summary(summary: &PackageBuildSummary) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::engine::general_purpose::STANDARD as B64;
+    use ed25519_dalek::SigningKey;
     use std::fs;
     use tempfile::TempDir;
 
@@ -264,6 +315,84 @@ mod tests {
         )
         .unwrap();
         path
+    }
+
+    fn write_keychain(path: &Path, manufacturer: Option<&str>) -> SigningKey {
+        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let json = match manufacturer {
+            Some(mfr) => serde_json::json!({
+                "private_key": B64.encode(signing_key.to_bytes()),
+                "public_key": B64.encode(signing_key.verifying_key().to_bytes()),
+                "manufacturer": mfr,
+            }),
+            None => serde_json::json!({
+                "private_key": B64.encode(signing_key.to_bytes()),
+                "public_key": B64.encode(signing_key.verifying_key().to_bytes()),
+            }),
+        };
+        fs::write(path, json.to_string()).unwrap();
+        signing_key
+    }
+
+    #[test]
+    fn load_signing_key_with_manufacturer_reads_optional_binding() {
+        let dir = TempDir::new().unwrap();
+        let key_path = dir.path().join("k.json");
+
+        // Bound keychain → manufacturer is returned.
+        write_keychain(&key_path, Some("acme"));
+        let (_, mfr) = load_signing_key_with_manufacturer(&key_path).unwrap();
+        assert_eq!(mfr.as_deref(), Some("acme"));
+
+        // Unbound keychain → None (backward compatible).
+        write_keychain(&key_path, None);
+        let (_, mfr) = load_signing_key_with_manufacturer(&key_path).unwrap();
+        assert!(mfr.is_none());
+    }
+
+    #[test]
+    fn ensure_manufacturer_matches_passes_when_equal_or_unbound() {
+        // Bound + matching → ok.
+        assert!(ensure_manufacturer_matches(Some("acme"), "acme").is_ok());
+        // Unbound → ok (legacy keychain, warns only).
+        assert!(ensure_manufacturer_matches(None, "acme").is_ok());
+    }
+
+    #[test]
+    fn ensure_manufacturer_matches_rejects_cross_manufacturer() {
+        let err = ensure_manufacturer_matches(Some("acme"), "other").unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("Manufacturer mismatch"), "got: {msg}");
+        assert!(msg.contains("acme"), "got: {msg}");
+        assert!(msg.contains("other"), "got: {msg}");
+    }
+
+    #[test]
+    fn build_package_rejects_manufacturer_mismatch_before_packaging() {
+        let dir = TempDir::new().unwrap();
+        let manifest_path = write_manifest(&dir, "1.0.0");
+        let key_path = dir.path().join("bound-other.json");
+        // Keychain bound to "rival" but manifest says "acme".
+        write_keychain(&key_path, Some("rival"));
+
+        let err = match build_package(PackageBuildInput {
+            binary_path: dir.path().join("nonexistent.wasm"),
+            config_path: manifest_path,
+            key_path,
+            output_path: dir.path().join("dist/out.actr"),
+            target: "wasm32-wasip1".to_string(),
+            resources: vec![],
+        }) {
+            Ok(_) => panic!("expected a manufacturer mismatch error"),
+            Err(e) => e,
+        };
+        let msg = format!("{err}");
+        assert!(msg.contains("Manufacturer mismatch"), "got: {msg}");
+        // Must fail before touching the (non-existent) binary.
+        assert!(
+            !dir.path().join("dist").exists(),
+            "no packaging should occur"
+        );
     }
 
     #[test]

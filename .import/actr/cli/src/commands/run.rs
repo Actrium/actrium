@@ -47,8 +47,19 @@ impl actr_hyper::ManufacturerAuthProvider for KeychainManufacturerAuthProvider {
         target: &str,
         manifest_raw: &[u8],
     ) -> std::result::Result<actr_hyper::ManufacturerRegistrationAuth, actr_hyper::HyperError> {
-        let signing_key = crate::commands::package_build::load_signing_key(&self.key_path)
-            .map_err(|e| actr_hyper::HyperError::Runtime(format!("reload mfr signing key: {e}")))?;
+        let (signing_key, keychain_manufacturer) =
+            crate::commands::package_build::load_signing_key_with_manufacturer(&self.key_path)
+                .map_err(|e| {
+                    actr_hyper::HyperError::Runtime(format!("reload mfr signing key: {e}"))
+                })?;
+        // Reject cross-manufacturer registration signing (issue #425): a
+        // keychain bound to one manufacturer must not register a package that
+        // belongs to another.
+        crate::commands::package_build::ensure_manufacturer_matches(
+            keychain_manufacturer.as_deref(),
+            &actr_type.manufacturer,
+        )
+        .map_err(|e| actr_hyper::HyperError::Runtime(format!("manufacturer mismatch: {e}")))?;
         actr_hyper::ManufacturerRegistrationAuth::sign(
             &signing_key,
             realm_id,

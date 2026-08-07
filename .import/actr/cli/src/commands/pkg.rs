@@ -20,7 +20,8 @@ use clap::{Args, Subcommand};
 use ed25519_dalek::SigningKey;
 
 use crate::commands::package_build::{
-    load_signing_key, load_verifying_key, load_verifying_key_from_dev_key, resolve_key_path,
+    ensure_manufacturer_matches, load_signing_key_with_manufacturer, load_verifying_key,
+    load_verifying_key_from_dev_key, resolve_key_path,
 };
 use crate::core::{Command, CommandContext, CommandResult, ComponentType};
 
@@ -87,6 +88,10 @@ pub struct PkgKeygenArgs {
     /// Force overwrite existing key
     #[arg(long)]
     pub force: bool,
+    /// Bind this keychain to a manufacturer; signing/publishing packages for
+    /// any other manufacturer will then be rejected (issue #425).
+    #[arg(long, value_name = "NAME")]
+    pub manufacturer: Option<String>,
 }
 
 #[async_trait]
@@ -154,12 +159,18 @@ fn execute_keygen(args: &PkgKeygenArgs) -> Result<()> {
     let public_b64 = base64::engine::general_purpose::STANDARD.encode(verifying_key.to_bytes());
 
     let now = chrono::Utc::now().to_rfc3339();
-    let key_json = serde_json::json!({
+    let mut key_json = serde_json::json!({
         "private_key": private_b64,
         "public_key": public_b64,
         "created_at": now,
         "note": "Development signing key, for StaticTrust use only, not for production use"
     });
+    if let Some(ref manufacturer) = args.manufacturer {
+        if manufacturer.trim().is_empty() {
+            anyhow::bail!("--manufacturer cannot be empty");
+        }
+        key_json["manufacturer"] = serde_json::Value::String(manufacturer.clone());
+    }
 
     let json_str = serde_json::to_string_pretty(&key_json)?;
     std::fs::write(&key_path, &json_str)
@@ -225,7 +236,7 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
     use std::io::Write;
 
     let key_path = resolve_key_path(args.key.as_deref(), config_keychain)?;
-    let signing_key = load_signing_key(&key_path)?;
+    let (signing_key, keychain_manufacturer) = load_signing_key_with_manufacturer(&key_path)?;
     let verifying_key = signing_key.verifying_key();
     let key_id = actr_pack::compute_key_id(&verifying_key.to_bytes());
 
@@ -253,6 +264,10 @@ async fn execute_sign(args: &PkgSignArgs, config_keychain: Option<&str>) -> Resu
     let manufacturer = get_str("manufacturer")?;
     let name = get_str("name")?;
     let version = get_str("version")?;
+
+    // Reject cross-manufacturer signing before computing hashes or writing the
+    // signature (issue #425).
+    ensure_manufacturer_matches(keychain_manufacturer.as_deref(), &manufacturer)?;
 
     let (binary_hash, binary_size) = if let Some(binary_path) = &args.binary {
         let binary_data = std::fs::read(binary_path)
