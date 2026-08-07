@@ -35,7 +35,7 @@
 
 **设计（两条路，需拍板）**：
 - **Path A · CLI 调 cargo/clang**：CLI 直接编译原生 guest 源 → `.wasm`。集成度高但把 Rust/C 工具链耦进 CLI（重）。
-- **Path B · 打包预编译 `.wasm`（推荐先做）**：CLI 接受一个**已编好的 `.wasm`**，校验其 import ⊆ `{keel_host_call, keel_send_batch, keel_log, keel_on_event}`（复用封口不变量），写 `manifest.runtime="wasm"`。低风险、无工具链耦合。
+- **Path B · 打包预编译 `.wasm`（推荐先做）**：CLI 接受一个**已编好的 `.wasm`**，校验其 import ⊆ `{keel_host_call, keel_send_batch, keel_log, keel_now_ms}`（复用封口不变量），写 `manifest.runtime="wasm"`。低风险、无工具链耦合。
 
 **依赖/阻塞**：需 **下游平台仓侧先加 `manifest.runtime: "js" | "wasm"` 字段 + 分发/装载时按之分流**（平台侧改动，不在 keel 仓）。所以本项**卡在上游决策**。文件 `src/cli/{build,bin}.ts` 与其它项**不相交**，capacity 允许时 Path B 可随任意波并行。
 

@@ -21,6 +21,7 @@
  * ABI v0 (headless / foundation):
  *   host  -> guest imports:  env.keel_host_call(mod_ptr,mod_len, method_ptr,method_len, in_ptr,in_len, cb_id)
  *                            env.keel_log(ptr,len)
+ *                            env.keel_now_ms() -> f64 (monotonic, 1 ms granularity)
  *   guest -> host  exports:  memory, keel_alloc(size)->ptr, keel_resolve(cb,ok,ptr,len), keel_init()
  *   guest -> host  exports (optional): keel_abi_version() -> u32,
  *                            keel_wire_caps(flags) (WIP binary op-batch gate),
@@ -51,6 +52,18 @@ const MAX_BATCH_DROP_WARNINGS = 10;
 
 /** Same cap for host->guest event drops (a per-frame event source could flood too). */
 const MAX_EVENT_DROP_WARNINGS = 10;
+
+/** Native guests get useful profiling resolution without a high-resolution side-channel. */
+const CLOCK_GRANULARITY_MS = 1;
+
+/** Default clock is relative and monotonic; the Date fallback never exposes wall time. */
+function defaultRawNowMs(): () => number {
+  if (typeof globalThis.performance?.now === 'function') {
+    return () => globalThis.performance.now();
+  }
+  const origin = Date.now();
+  return () => Date.now() - origin;
+}
 
 /**
  * Guest ABI versions this host understands. A guest may declare its version via
@@ -89,6 +102,12 @@ export interface NativeGuestHostOptions {
    * charging time spent awaiting a host capability.
    */
   onGuestRunStateChange?: (running: boolean) => void;
+  /**
+   * Relative monotonic clock source for `env.keel_now_ms` (primarily for
+   * deterministic tests and platform ports). The host clamps it to 1 ms and
+   * never lets the guest observe a backwards or non-finite sample.
+   */
+  nowMs?: () => number;
 }
 
 /** Runtime-owned metadata passed after the schema-checked guest input. */
@@ -154,12 +173,14 @@ export class NativeGuestHost {
   private readonly onRenderBatch?: (batch: OperationBatch) => void;
   private readonly binaryOpBatch: boolean;
   private readonly onGuestRunStateChange?: (running: boolean) => void;
+  private readonly rawNowMs: () => number;
   private readonly inflight = new Set<Promise<void>>();
   private guestRunDepth = 0;
   private readonly callControllers = new Map<number, AbortController>();
   private abiVersion: number | null = null;
   private batchDropWarnings = 0;
   private eventDropWarnings = 0;
+  private lastNowMs = 0;
 
   constructor(options: NativeGuestHostOptions) {
     this.dispatch = options.dispatch;
@@ -167,6 +188,7 @@ export class NativeGuestHost {
     this.onRenderBatch = options.onRenderBatch;
     this.binaryOpBatch = options.binaryOpBatch ?? true;
     this.onGuestRunStateChange = options.onGuestRunStateChange;
+    this.rawNowMs = options.nowMs ?? defaultRawNowMs();
   }
 
   /**
@@ -193,6 +215,7 @@ export class NativeGuestHost {
           cb: number
         ) => this.onHostCall(mp >>> 0, ml >>> 0, xp >>> 0, xl >>> 0, ip >>> 0, il >>> 0, cb >>> 0),
         keel_log: (ptr: number, len: number) => this.onLog?.(this.readString(ptr >>> 0, len >>> 0)),
+        keel_now_ms: () => this.nowMs(),
         keel_send_batch: (ptr: number, len: number) => this.onSendBatch(ptr >>> 0, len >>> 0),
         keel_host_cancel: cancelHostCall,
       },
@@ -243,6 +266,15 @@ export class NativeGuestHost {
 
       (instance.exports.keel_init as (() => void) | undefined)?.();
     });
+  }
+
+  /** Return a finite, non-decreasing relative time at the ABI's fixed 1 ms granularity. */
+  private nowMs(): number {
+    const raw = this.rawNowMs();
+    if (!Number.isFinite(raw)) return this.lastNowMs;
+    const quantized = Math.floor(raw / CLOCK_GRANULARITY_MS) * CLOCK_GRANULARITY_MS;
+    this.lastNowMs = Math.max(0, this.lastNowMs, quantized);
+    return this.lastNowMs;
   }
 
   /** Resolve once every in-flight host call has run its keel_resolve. */
