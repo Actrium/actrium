@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// Database-related errors
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum DatabaseError {
     #[error("Connection failed: {message}")]
     ConnectionFailed { message: String },

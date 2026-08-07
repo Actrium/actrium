@@ -736,6 +736,9 @@ fn aid_error_to_response(err: AidError) -> (u32, String) {
         }
         AidError::InvalidSignature(_) => 500,
         AidError::DecodeFailure(_) => 500,
+        // `AidError` is `#[non_exhaustive]`: unmapped future variants are
+        // treated as generic server errors so the boundary never panics.
+        _ => 500,
     };
     (code, err.to_string())
 }

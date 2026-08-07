@@ -9,6 +9,7 @@ use super::model::{Realm, RealmStatus};
 /// `RealmUnavailable` maps to HTTP 403: the realm exists but is not usable.
 /// `StoreError` maps to HTTP 500: the database query itself failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RealmValidationError {
     /// Realm not found, disabled, expired, or in a non-Active status.
     RealmUnavailable { realm_id: u32, reason: String },

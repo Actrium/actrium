@@ -1093,6 +1093,10 @@ pub(crate) fn protocol_error_to_code(err: &ActrError) -> u32 {
         ActrError::DecodeFailure(_) => 10008,
         ActrError::NotImplemented(_) => 10009,
         ActrError::Internal(_) => 10010,
+        // `ActrError` is `#[non_exhaustive]`: unmapped future variants fall
+        // back to the generic Internal code so they round-trip as an
+        // identifiable error rather than panicking at this boundary.
+        _ => 10010,
     }
 }
 

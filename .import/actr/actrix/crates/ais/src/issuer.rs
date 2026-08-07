@@ -127,6 +127,11 @@ fn aid_error_to_code(err: &AidError) -> u32 {
             }
         }
         AidError::InvalidSignature(_) | AidError::DecodeFailure(_) => 500,
+        // `AidError` is `#[non_exhaustive]`: unmapped future variants are
+        // generic server errors. This catch-all is what now permits a future
+        // fix to express a new failure mode as a real `AidError` variant
+        // (see issue #442) instead of hiding it at this boundary.
+        _ => 500,
     }
 }
 

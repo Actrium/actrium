@@ -118,6 +118,7 @@ struct KeyRule {
 
 /// Errors from building a [`ConflictKeySpec`].
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
 pub enum ConflictKeyError {
     /// A `route_key` was registered more than once — a programming error.
     #[error("duplicate conflict-key registration for route_key `{0}`")]

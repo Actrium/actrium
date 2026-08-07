@@ -425,6 +425,7 @@ pub async fn rotate_renewal_token(
 
 /// Errors specific to renewal token management.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum RenewalError {
     /// Token not found or expired — maps to HTTP 401.
     TokenRejected,

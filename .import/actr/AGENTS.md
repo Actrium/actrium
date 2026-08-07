@@ -43,6 +43,26 @@ match exactly.
 - Use `#[cfg(test)] mod tests` patterns and meaningful test names (`test_actor_registration_flow`).
 - Execute targeted tests with `cargo test -p crate_name` when iterating on a specific component; finish with a workspace-wide `cargo test` before merging.
 
+## API Compatibility Policy
+
+Public error enums are the primary API surface that grows with fixes. To keep
+additive fixes from becoming source-breaking, observe:
+
+- Every new public error enum MUST be `#[non_exhaustive]` from birth.
+- Adding a variant to a `#[non_exhaustive]` enum is an additive (non-breaking)
+  change — ship it under `fix:`/`feat:` as appropriate.
+- Removing or renaming a variant is ALWAYS breaking — requires `feat!:`
+  (or a `BREAKING CHANGE` footer) and a MAJOR bump.
+- Enums that are genuinely closed domains (e.g. `ErrorKind` fault
+  classification, protocol wire enums with a fixed value set) MAY stay
+  exhaustive — but MUST carry a comment explaining why, so the next
+  contributor does not "fix" it.
+- Rationale: exhaustive public error enums force every additive fix that
+  introduces a new failure mode to either reuse a wrong variant or hide the
+  condition at a boundary. `#[non_exhaustive]` makes additive error growth a
+  routine PATCH instead of a source-breaking MAJOR. (See issue #442 for the
+  background.)
+
 ## Commit & Pull Request Guidelines
 - All commits and PR titles MUST follow [Conventional Commits](https://www.conventionalcommits.org/): `<type>[optional scope]: <description>`.
 - Valid types: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `test`, `ci`, `perf`, `build`, `revert`.

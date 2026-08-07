@@ -387,6 +387,10 @@ fn actr_error_to_wit(error: ActrError) -> WitActrError {
         ActrError::DecodeFailure(message) => WitActrError::DecodeFailure(message),
         ActrError::NotImplemented(message) => WitActrError::NotImplemented(message),
         ActrError::Internal(message) => WitActrError::Internal(message),
+        // `ActrError` is `#[non_exhaustive]`: unmapped future variants map
+        // to the generic Internal wire variant so they survive the WIT
+        // boundary rather than being lost.
+        other => WitActrError::Internal(format!("unmapped actr error: {other}")),
     }
 }
 

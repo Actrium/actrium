@@ -22,6 +22,7 @@ use crate::error::{HyperError, HyperResult};
 
 /// Structured errors returned by POST /ais/renew.
 #[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
 pub enum RenewError {
     #[error("invalid renewal request: {0}")]
     InvalidRequest(String),

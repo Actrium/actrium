@@ -125,6 +125,7 @@ pub struct ProtocolChange {
 
 /// Errors that can occur during compatibility analysis
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum CompatibilityError {
     #[error("Failed to parse proto file: {file_name}: {source}")]
     ProtoParseError {

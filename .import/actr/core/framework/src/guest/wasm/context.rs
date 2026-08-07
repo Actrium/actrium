@@ -74,6 +74,10 @@ pub(crate) fn proto_actr_error_to_wit(e: ActrError) -> wit_types::ActrError {
         ActrError::DecodeFailure(msg) => wit_types::ActrError::DecodeFailure(msg),
         ActrError::NotImplemented(msg) => wit_types::ActrError::NotImplemented(msg),
         ActrError::Internal(msg) => wit_types::ActrError::Internal(msg),
+        // `ActrError` is `#[non_exhaustive]`: unmapped future variants map
+        // to the generic Internal wire variant so they survive the WIT
+        // boundary rather than being lost.
+        other => wit_types::ActrError::Internal(format!("unmapped actr error: {other}")),
     }
 }
 

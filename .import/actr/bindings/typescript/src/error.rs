@@ -54,6 +54,10 @@ fn discriminate(
         ActrError::DecodeFailure(msg) => ("DecodeFailure", msg.clone(), None, None),
         ActrError::NotImplemented(msg) => ("NotImplemented", msg.clone(), None, None),
         ActrError::Internal(msg) => ("Internal", msg.clone(), None, None),
+        // `ActrError` is `#[non_exhaustive]`: unmapped future variants are
+        // surfaced under the generic Internal discriminator so the JS/TS
+        // boundary never panics.
+        other => ("Internal", other.to_string(), None, None),
     }
 }
 

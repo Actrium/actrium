@@ -66,6 +66,7 @@ impl fmt::Display for ConnectionNotReadyInfo {
 ///
 /// Flat enum — no nested error wrapping. Each variant is self-describing.
 #[derive(Error, Debug, Clone)]
+#[non_exhaustive]
 pub enum ActrError {
     // ── Transient ──────────────────────────────────────────────────────────
     /// Target temporarily unavailable: connection lost, overloaded, or reconnecting.
@@ -147,6 +148,13 @@ pub enum ActrError {
 /// Fault domain classification for any framework error.
 ///
 /// All error types implement [`Classify`] to expose their `ErrorKind`.
+///
+/// Deliberately exhaustive: the four fault domains form a closed value set
+/// that already covers every failure classification (retryable environmental
+/// blip, caller error, framework bug, data corruption). A new domain is a
+/// classification-system redesign, not an additive fix, so `#[non_exhaustive]`
+/// is intentionally NOT applied here — see the API Compatibility Policy in
+/// `AGENTS.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ErrorKind {
     /// Environmental fluctuation — retry with exponential backoff.

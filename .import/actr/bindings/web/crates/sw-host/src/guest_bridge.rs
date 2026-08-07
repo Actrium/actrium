@@ -324,6 +324,10 @@ fn actr_error_to_js(error: ActrError) -> JsValue {
         ActrError::DecodeFailure(m) => ("decode-failure", m.clone()),
         ActrError::NotImplemented(m) => ("not-implemented", m.clone()),
         ActrError::Internal(m) => ("internal", m.clone()),
+        // `ActrError` is `#[non_exhaustive]`: unmapped future variants are
+        // surfaced under the generic "internal" tag so the JS boundary
+        // never panics.
+        other => ("internal", other.to_string()),
     };
     let err = js_sys::Error::new(&format!("{tag}: {message}"));
     let _ = js_sys::Reflect::set(&err, &JsValue::from_str("name"), &JsValue::from_str(tag));

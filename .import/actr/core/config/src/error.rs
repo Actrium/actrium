@@ -5,6 +5,7 @@ use thiserror::Error;
 
 /// Errors that can occur during configuration parsing and processing
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ConfigError {
     #[error("Failed to read file: {0}")]
     IoError(#[from] std::io::Error),

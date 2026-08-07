@@ -12,6 +12,7 @@ use thiserror::Error;
 
 /// Actor-RTC URI parse error
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ActrUriError {
     #[error("Invalid URI scheme, expected 'actr' but got '{0}'")]
     InvalidScheme(String),

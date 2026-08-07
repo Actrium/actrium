@@ -16,6 +16,7 @@ use thiserror::Error;
 /// Kept deliberately small: only the outcomes that a signaling handshake or
 /// heartbeat can surface as an *authentication* decision.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum AuthVerdict {
     /// The credential was presented and rejected (handshake / heartbeat 401).
     ///
@@ -62,6 +63,7 @@ impl SignalingHandshakeFailure {
 
 /// Network layer error types
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum NetworkError {
     /// Connection error
     #[error("Connection error: {0}")]

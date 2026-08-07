@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// Serialization-related errors
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum SerializationError {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),

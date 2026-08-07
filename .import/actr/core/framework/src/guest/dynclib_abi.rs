@@ -219,6 +219,10 @@ impl From<ActrError> for ActrErrorV1 {
             ActrError::DecodeFailure(message) => ActrErrorKindV1::DecodeFailure(message),
             ActrError::NotImplemented(message) => ActrErrorKindV1::NotImplemented(message),
             ActrError::Internal(message) => ActrErrorKindV1::Internal(message),
+            // `ActrError` is `#[non_exhaustive]`: future variants are mapped to
+            // a generic internal error so they survive the V1 wire boundary
+            // rather than being lost or panicking at the FFI seam.
+            unknown => ActrErrorKindV1::Internal(format!("unmapped actr error: {unknown}")),
         };
         Self { kind: Some(kind) }
     }

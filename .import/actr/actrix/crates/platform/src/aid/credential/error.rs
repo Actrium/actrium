@@ -7,6 +7,7 @@ use thiserror::Error;
 
 /// AId Token error types
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum AidError {
     #[error("Invalid credential format")]
     InvalidFormat,

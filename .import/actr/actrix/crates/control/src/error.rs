@@ -5,6 +5,7 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, AdminError>;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum AdminError {
     #[error("gRPC transport error: {0}")]
     Transport(#[from] tonic::transport::Error),

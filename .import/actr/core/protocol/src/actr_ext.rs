@@ -25,6 +25,7 @@ pub const MAX_ACTR_VERSION_BYTES: usize = 64;
 /// Covers only syntactic/structural validity of `ActrId` and `ActrType` strings.
 /// Runtime and RPC errors belong to `ActrIdError` in the `error` module.
 #[derive(Error, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ActrIdError {
     #[error(
         "Invalid Actor ID format: '{0}'. Expected: <serial_hex>@<realm_id>/<manufacturer>:<name>:<version>"

@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// Storage-related errors
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum StorageError {
     #[error("File not found: {path}")]
     FileNotFound { path: String },

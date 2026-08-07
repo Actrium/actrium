@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// Network-related errors
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum NetworkError {
     #[error("Connection failed: {address}")]
     ConnectionFailed { address: String },
