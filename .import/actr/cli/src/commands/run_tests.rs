@@ -215,3 +215,75 @@ fn keychain_manufacturer_auth_provider_mints_fresh_proof_and_reloads_key() {
         "sign must re-read the keychain and fail when it is corrupt"
     );
 }
+
+/// A keychain that declares a `manufacturer` binding may only register a
+/// package for that same manufacturer. Cross-manufacturer registration signing
+/// must be rejected before the proof is minted (issue #425). Unbound
+/// keychains continue to register freely for backward compatibility.
+#[test]
+fn keychain_manufacturer_auth_provider_rejects_cross_manufacturer_binding() {
+    use super::KeychainManufacturerAuthProvider;
+    use actr_hyper::ManufacturerAuthProvider;
+    use actr_protocol::ActrType;
+    use base64::Engine as _;
+    use base64::engine::general_purpose::STANDARD as B64;
+    use ed25519_dalek::SigningKey;
+    use std::fs;
+    use std::path::Path;
+    use tempfile::TempDir;
+
+    let dir = TempDir::new().unwrap();
+    let key_path = dir.path().join("keychain.json");
+    let write_bound_key = |path: &Path, mfr: &str| {
+        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let json = serde_json::json!({
+            "private_key": B64.encode(signing_key.to_bytes()),
+            "public_key": B64.encode(signing_key.verifying_key().to_bytes()),
+            "manufacturer": mfr,
+        });
+        fs::write(path, json.to_string()).unwrap();
+    };
+    let write_unbound_key = |path: &Path| {
+        let signing_key = SigningKey::generate(&mut rand::rngs::OsRng);
+        let json = serde_json::json!({
+            "private_key": B64.encode(signing_key.to_bytes()),
+            "public_key": B64.encode(signing_key.verifying_key().to_bytes()),
+        });
+        fs::write(path, json.to_string()).unwrap();
+    };
+
+    let provider = KeychainManufacturerAuthProvider {
+        key_path: key_path.clone(),
+    };
+    let acme = ActrType {
+        manufacturer: "acme".into(),
+        name: "svc".into(),
+        version: "1.0.0".into(),
+    };
+    let rival = ActrType {
+        manufacturer: "rival".into(),
+        ..acme.clone()
+    };
+    let manifest = b"manifest-bytes";
+
+    // Bound to "acme" → registering an "acme" package succeeds.
+    write_bound_key(&key_path, "acme");
+    assert!(provider.sign(7, &acme, "wasm32-wasip1", manifest).is_ok());
+
+    // Bound to "acme" → registering a "rival" package is rejected.
+    let err = provider
+        .sign(7, &rival, "wasm32-wasip1", manifest)
+        .unwrap_err();
+    let msg = format!("{err}");
+    assert!(
+        msg.contains("manufacturer mismatch"),
+        "expected manufacturer mismatch, got: {msg}"
+    );
+
+    // Unbound keychain → registers any manufacturer (backward compatible).
+    write_unbound_key(&key_path);
+    assert!(
+        provider.sign(7, &rival, "wasm32-wasip1", manifest).is_ok(),
+        "unbound keychain should remain usable"
+    );
+}

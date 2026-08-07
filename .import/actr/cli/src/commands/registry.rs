@@ -166,6 +166,14 @@ async fn execute_publish(args: &RegistryPublishArgs) -> Result<()> {
     let kc_signing_key = ed25519_dalek::SigningKey::from_bytes(&kc_arr);
     let kc_key_id = actr_pack::compute_key_id(&kc_signing_key.verifying_key().to_bytes());
 
+    // Reject cross-manufacturer publishing (issue #425): a keychain that
+    // declares a `manufacturer` binding may only publish packages for that
+    // same manufacturer.
+    crate::commands::package_build::ensure_manufacturer_matches(
+        keychain.get("manufacturer").and_then(|v| v.as_str()),
+        &manifest.manufacturer,
+    )?;
+
     match manifest.signing_key_id {
         Some(ref manifest_key_id) if manifest_key_id == &kc_key_id => {}
         Some(ref manifest_key_id) => {

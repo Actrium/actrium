@@ -816,6 +816,149 @@ fn pkg_keygen_rejects_directory_output_path() {
 }
 
 #[test]
+fn pkg_keygen_with_manufacturer_writes_binding() {
+    let tmp = TempDir::new().expect("tempdir");
+    let home = isolated_home(tmp.path());
+    let key_path = tmp.path().join("keys/dev-key.json");
+    let key_arg = key_path.to_string_lossy().into_owned();
+
+    // --manufacturer binds the keychain to that manufacturer (issue #425).
+    let with_mfr = run_actr(
+        &[
+            "pkg",
+            "keygen",
+            "--output",
+            &key_arg,
+            "--manufacturer",
+            "acme",
+        ],
+        tmp.path(),
+        &home,
+    );
+    assert_success(&with_mfr, "pkg keygen with manufacturer");
+    let key_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&key_path).expect("read key"))
+            .expect("key should be JSON");
+    assert_eq!(key_json["manufacturer"].as_str(), Some("acme"));
+
+    // Without --manufacturer the field is omitted (backward compatible).
+    let unbound_path = tmp.path().join("keys/unbound.json");
+    let unbound_arg = unbound_path.to_string_lossy().into_owned();
+    let without_mfr = run_actr(
+        &["pkg", "keygen", "--output", &unbound_arg],
+        tmp.path(),
+        &home,
+    );
+    assert_success(&without_mfr, "pkg keygen without manufacturer");
+    let unbound_json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&unbound_path).expect("read key"))
+            .expect("unbound key should be JSON");
+    assert!(
+        unbound_json.get("manufacturer").is_none(),
+        "unbound keychain must not carry a manufacturer field"
+    );
+
+    // Empty manufacturer is rejected.
+    let empty_path = tmp.path().join("keys/empty.json");
+    let empty_arg = empty_path.to_string_lossy().into_owned();
+    let empty = run_actr(
+        &[
+            "pkg",
+            "keygen",
+            "--output",
+            &empty_arg,
+            "--manufacturer",
+            "  ",
+        ],
+        tmp.path(),
+        &home,
+    );
+    assert_failure(&empty, "pkg keygen empty manufacturer");
+    assert!(stderr(&empty).contains("--manufacturer cannot be empty"));
+}
+
+#[test]
+fn pkg_sign_rejects_cross_manufacturer_keychain_and_accepts_matching() {
+    let tmp = TempDir::new().expect("tempdir");
+    let home = isolated_home(tmp.path());
+    write_manifest_with_proto(tmp.path());
+
+    // Keychain bound to "rival" but manifest manufacturer is "acme".
+    let rival_key = tmp.path().join("keys/rival.json");
+    let rival_arg = rival_key.to_string_lossy().into_owned();
+    let gen_rival = run_actr(
+        &[
+            "pkg",
+            "keygen",
+            "--output",
+            &rival_arg,
+            "--manufacturer",
+            "rival",
+        ],
+        tmp.path(),
+        &home,
+    );
+    assert_success(&gen_rival, "gen rival key");
+
+    let mismatch = run_actr(
+        &[
+            "pkg",
+            "sign",
+            "--manifest-path",
+            "manifest.toml",
+            "--key",
+            &rival_arg,
+        ],
+        tmp.path(),
+        &home,
+    );
+    assert_failure(&mismatch, "pkg sign cross-manufacturer");
+    let err = stderr(&mismatch);
+    assert!(
+        err.contains("Manufacturer mismatch"),
+        "pkg sign mismatch stderr:\n{err}"
+    );
+    // The signature must not be written when the check fails.
+    assert!(!tmp.path().join("manifest.sig").exists());
+
+    // Matching binding → signs successfully.
+    let acme_key = tmp.path().join("keys/acme.json");
+    let acme_arg = acme_key.to_string_lossy().into_owned();
+    let gen_acme = run_actr(
+        &[
+            "pkg",
+            "keygen",
+            "--output",
+            &acme_arg,
+            "--manufacturer",
+            "acme",
+        ],
+        tmp.path(),
+        &home,
+    );
+    assert_success(&gen_acme, "gen acme key");
+
+    // Remove a stale signature from any prior run before re-signing.
+    let _ = fs::remove_file(tmp.path().join("manifest.sig"));
+
+    let signed = run_actr(
+        &[
+            "pkg",
+            "sign",
+            "--manifest-path",
+            "manifest.toml",
+            "--key",
+            &acme_arg,
+        ],
+        tmp.path(),
+        &home,
+    );
+    assert_success(&signed, "pkg sign matching manufacturer");
+    assert!(clean_stdout(&signed).contains("Manifest signed successfully"));
+    assert!(tmp.path().join("manifest.sig").exists());
+}
+
+#[test]
 fn version_prints_human_and_json_forms() {
     let tmp = TempDir::new().expect("tempdir");
     let home = isolated_home(tmp.path());
