@@ -115,7 +115,8 @@ worker 池近线性：8 worker ~9×、16 worker ~12×（16 核，超线程税使
 - **`native-compute-worker.ts`** —— 每个 worker 实例化一份私有 wasm，不运行 `keel_init`，
   不提供 host capability dispatch。导出 ABI 固定为
   `keel_compute_<name>(src_ptr, src_len, dst_ptr, dst_cap, ...i32_args) -> out_len`。导出必须同步、
-  不得分配/持有 host scratch 指针，也不得依赖主 guest 的可变状态。
+  不得分配/持有 host scratch 指针，也不得依赖主 guest 的可变状态。需要自行打包 worker 的
+  平台可从 `keel/host/native-compute-worker` 导入这个独立入口，并把生成的 URL 传给池。
 - 输入先复制再 transferable 移交，因此不会 detach 调用方的 `Uint8Array`；输出只复制导出
   返回的实际长度，并移交独立 `ArrayBuffer`。共享内存、atomics、COOP/COEP 均不需要。
 - 池只负责单个工作块的排队、并行、上限和中止。切片、halo、缝合及逐块重试由调用方负责。
