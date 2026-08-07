@@ -56,6 +56,15 @@ pub(crate) struct WebRtcNegotiator {
 }
 
 impl WebRtcNegotiator {
+    pub(crate) fn uses_turn(&self) -> bool {
+        self.config.ice_servers.iter().any(|server| {
+            server
+                .urls
+                .iter()
+                .any(|url| url.starts_with("turn:") || url.starts_with("turns:"))
+        })
+    }
+
     ///
     /// # Arguments
     /// - `config`: WebRTC configuration
@@ -156,6 +165,14 @@ impl WebRtcNegotiator {
             .build()
     }
 
+    pub(crate) async fn current_rtc_configuration(&self) -> (RTCConfiguration, u64) {
+        let (turn_credential, revision) = self.credential_state.turn_snapshot().await;
+        (
+            self.build_rtc_configuration(turn_credential.as_ref()),
+            revision,
+        )
+    }
+
     /// Create RTCPeerConnection
     ///
     /// # Arguments
@@ -232,8 +249,7 @@ impl WebRtcNegotiator {
             RtpCodecKind::Audio,
         )?;
 
-        let turn_credential = self.credential_state.turn_credential().await;
-        let rtc_config = self.build_rtc_configuration(turn_credential.as_ref());
+        let (rtc_config, turn_revision) = self.current_rtc_configuration().await;
 
         // Create SettingEngine with role-based configuration
         let mut setting_engine = SettingEngine::default();
@@ -310,8 +326,11 @@ impl WebRtcNegotiator {
         // fixed-port lock before the callback wiring so concurrent answerer
         // creations are not serialized past the bind.
         drop(_port_guard);
-        let peer_connection =
-            RTCPeerConnection::new(Arc::new(peer_connection) as Arc<dyn PeerConnection>, events);
+        let peer_connection = RTCPeerConnection::new(
+            Arc::new(peer_connection) as Arc<dyn PeerConnection>,
+            events,
+            turn_revision,
+        );
 
         peer_connection.on_ice_connection_state_change(Box::new(move |state| {
             tracing::info!("🔄 ICE Connection State Changed: {:?}", state);

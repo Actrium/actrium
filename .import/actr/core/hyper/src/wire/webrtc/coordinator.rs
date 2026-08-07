@@ -4193,7 +4193,99 @@ impl WebRtcCoordinator {
             signaling_loop,
         ]);
 
+        // Apply refreshed TURN credentials to already-active peer connections.
+        // Credential refresh itself remains owned by the membership lifecycle;
+        // this task only reacts to successfully published TURN material. Peers
+        // without TURN configuration do not need an otherwise-idle watcher.
+        if self.negotiator.uses_turn() {
+            background_tasks.push(self.spawn_turn_credential_rotation_task());
+        }
+
         Ok(())
+    }
+
+    fn spawn_turn_credential_rotation_task(self: &Arc<Self>) -> JoinHandle<()> {
+        let mut revision_rx = self.credential_state.subscribe_turn_revision();
+        let coordinator = Arc::downgrade(self);
+        tokio::spawn(async move {
+            while revision_rx.changed().await.is_ok() {
+                let revision = *revision_rx.borrow_and_update();
+                let Some(coordinator) = coordinator.upgrade() else {
+                    return;
+                };
+                coordinator.rotate_active_turn_credentials(revision).await;
+            }
+        })
+    }
+
+    async fn apply_turn_configuration_to_active_peers(&self) -> Vec<ActrId> {
+        if !self.negotiator.uses_turn() {
+            return Vec::new();
+        }
+
+        let (configuration, revision) = self.negotiator.current_rtc_configuration().await;
+        let peers: Vec<(ActrId, u64, Arc<RTCPeerConnection>)> = {
+            let peers = self.peers.read().await;
+            peers
+                .iter()
+                .filter(|(_, state)| state.peer_connection.turn_revision() < revision)
+                .map(|(peer_id, state)| {
+                    (
+                        peer_id.clone(),
+                        state.session_id,
+                        Arc::clone(&state.peer_connection),
+                    )
+                })
+                .collect()
+        };
+
+        let mut restart_targets = Vec::with_capacity(peers.len());
+        for (peer_id, session_id, peer_connection) in peers {
+            match peer_connection
+                .set_turn_configuration(configuration.clone(), revision)
+                .await
+            {
+                Ok(true) if self.is_active_session(&peer_id, session_id).await => {
+                    tracing::info!(
+                        peer_id = %peer_id.to_string_repr(),
+                        session_id,
+                        turn_revision = revision,
+                        "Applied refreshed TURN configuration to active peer"
+                    );
+                    restart_targets.push(peer_id);
+                }
+                Ok(_) => {}
+                Err(error) => tracing::warn!(
+                    peer_id = %peer_id.to_string_repr(),
+                    session_id,
+                    turn_revision = revision,
+                    %error,
+                    "Failed to apply refreshed TURN configuration"
+                ),
+            }
+        }
+        restart_targets
+    }
+
+    async fn rotate_active_turn_credentials(self: &Arc<Self>, announced_revision: u64) {
+        let restart_targets = self.apply_turn_configuration_to_active_peers().await;
+        tracing::info!(
+            announced_revision,
+            peer_count = restart_targets.len(),
+            "TURN credential rotation prepared active peers"
+        );
+
+        // Rotate sequentially to bound signaling and TURN Allocate pressure.
+        for peer_id in restart_targets {
+            if let Err(error) = self.restart_ice_for_turn_rotation(&peer_id).await {
+                tracing::warn!(
+                    peer_id = %peer_id.to_string_repr(),
+                    announced_revision,
+                    %error,
+                    "Failed to trigger ICE restart after TURN configuration update"
+                );
+            }
+        }
     }
 
     /// Abort and join every long-running task created by [`Self::start`].
@@ -8373,6 +8465,24 @@ impl WebRtcCoordinator {
     /// If an Offerer restart fails after all retries, it attempts to establish a
     /// new connection.
     pub async fn restart_ice(self: &Arc<Self>, target: &actr_protocol::ActrId) -> ActorResult<()> {
+        self.restart_ice_inner(target, false).await
+    }
+
+    /// Restart ICE after applying a new TURN credential. A connected Answerer
+    /// must notify the Offerer as well: unlike ordinary network recovery, the
+    /// restart is required even though the current path is still healthy.
+    async fn restart_ice_for_turn_rotation(
+        self: &Arc<Self>,
+        target: &actr_protocol::ActrId,
+    ) -> ActorResult<()> {
+        self.restart_ice_inner(target, true).await
+    }
+
+    async fn restart_ice_inner(
+        self: &Arc<Self>,
+        target: &actr_protocol::ActrId,
+        force_answerer_request: bool,
+    ) -> ActorResult<()> {
         if self.peer_signaling.closing_all.load(Ordering::Acquire) {
             tracing::debug!(
                 "⏭️ Skip ICE restart to serial={}: all peers are closing",
@@ -8507,6 +8617,12 @@ impl WebRtcCoordinator {
                         &credential_state,
                         cancellation_epoch,
                         &signaling_client,
+                        if force_answerer_request {
+                            "turn_credential_rotation"
+                        } else {
+                            "network_recovered"
+                        },
+                        force_answerer_request,
                     )
                     .await;
 
@@ -8809,6 +8925,8 @@ impl WebRtcCoordinator {
         credential_state: &CredentialState,
         cancellation_epoch: u64,
         signaling_client: &Arc<dyn SignalingClient>,
+        reason: &str,
+        allow_connected: bool,
     ) -> AnswererRestartRequestOutcome {
         for attempt in 1..=ANSWERER_RESTART_REQUEST_MAX_ATTEMPTS {
             if !Self::answerer_restart_request_is_current(
@@ -8816,6 +8934,7 @@ impl WebRtcCoordinator {
                 network_recovering_peers,
                 target,
                 restart_session_id,
+                allow_connected,
             )
             .await
             {
@@ -8837,7 +8956,8 @@ impl WebRtcCoordinator {
                 credential_state,
                 cancellation_epoch,
                 signaling_client,
-                "network_recovered",
+                reason,
+                allow_connected,
             )
             .await
             {
@@ -8930,6 +9050,7 @@ impl WebRtcCoordinator {
         network_recovering_peers: &Arc<PeerRecoveryRegistry>,
         target: &ActrId,
         expected_session_id: u64,
+        allow_connected: bool,
     ) -> bool {
         let unavailable = {
             let peers = peers.read().await;
@@ -8938,6 +9059,9 @@ impl WebRtcCoordinator {
             };
             if state.session_id != expected_session_id || state.is_offerer {
                 return false;
+            }
+            if allow_connected {
+                return true;
             }
             matches!(
                 state.current_state,
@@ -8964,6 +9088,7 @@ impl WebRtcCoordinator {
         cancellation_epoch: u64,
         signaling_client: &Arc<dyn SignalingClient>,
         reason: &str,
+        allow_connected: bool,
     ) -> Option<crate::transport::NetworkResult<()>> {
         tracing::info!(
             "📤 Sending IceRestartRequest to offerer serial={} (reason={})",
@@ -8990,6 +9115,7 @@ impl WebRtcCoordinator {
             network_recovering_peers,
             target,
             restart_session_id,
+            allow_connected,
         )
         .await
         {
