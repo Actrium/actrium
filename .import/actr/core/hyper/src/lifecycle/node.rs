@@ -32,7 +32,7 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::{Mutex, RwLock, watch};
 use tokio_util::sync::CancellationToken;
 #[cfg(feature = "opentelemetry")]
 use tracing::Instrument as _;
@@ -621,6 +621,7 @@ pub(crate) struct Inner {
 #[derive(Clone)]
 pub struct CredentialState {
     inner: Arc<RwLock<CredentialStateInner>>,
+    turn_revision_tx: watch::Sender<u64>,
 }
 
 #[derive(Clone)]
@@ -629,6 +630,7 @@ struct CredentialStateInner {
     expires_at: Option<prost_types::Timestamp>,
     /// HMAC time-limited TURN credential, updated together with credential on registration/renewal
     turn_credential: Option<TurnCredential>,
+    turn_revision: u64,
 }
 
 impl CredentialState {
@@ -638,12 +640,15 @@ impl CredentialState {
         expires_at: Option<prost_types::Timestamp>,
         turn_credential: Option<TurnCredential>,
     ) -> Self {
+        let (turn_revision_tx, _) = watch::channel(0);
         Self {
             inner: Arc::new(RwLock::new(CredentialStateInner {
                 credential,
                 expires_at,
                 turn_credential,
+                turn_revision: 0,
             })),
+            turn_revision_tx,
         }
     }
 
@@ -660,6 +665,31 @@ impl CredentialState {
         self.inner.read().await.turn_credential.clone()
     }
 
+    /// Publish refreshed credential material from an integration test.
+    ///
+    /// Production refreshes are owned by the membership lifecycle. Keeping
+    /// this test-only entry point on the same state transition lets transport
+    /// integration tests exercise the revision watcher without duplicating
+    /// its publication semantics.
+    #[cfg(feature = "test-utils")]
+    pub async fn update_for_test(
+        &self,
+        credential: AIdCredential,
+        expires_at: Option<prost_types::Timestamp>,
+        turn_credential: Option<TurnCredential>,
+    ) {
+        self.update(credential, expires_at, turn_credential).await;
+    }
+
+    pub(crate) async fn turn_snapshot(&self) -> (Option<TurnCredential>, u64) {
+        let guard = self.inner.read().await;
+        (guard.turn_credential.clone(), guard.turn_revision)
+    }
+
+    pub(crate) fn subscribe_turn_revision(&self) -> watch::Receiver<u64> {
+        self.turn_revision_tx.subscribe()
+    }
+
     /// Update credential and TURN credential
     ///
     /// Called on credential renewal; only overwrites the old TURN credential when the new one is not empty
@@ -672,8 +702,22 @@ impl CredentialState {
         let mut guard = self.inner.write().await;
         guard.credential = credential;
         guard.expires_at = expires_at;
-        if turn_credential.is_some() {
-            guard.turn_credential = turn_credential;
+        let turn_changed = turn_credential
+            .as_ref()
+            .is_some_and(|next| guard.turn_credential.as_ref() != Some(next));
+        if let Some(turn_credential) = turn_credential {
+            guard.turn_credential = Some(turn_credential);
+        }
+        let revision = turn_changed.then(|| {
+            guard.turn_revision = guard
+                .turn_revision
+                .checked_add(1)
+                .expect("TURN credential revision exhausted");
+            guard.turn_revision
+        });
+        drop(guard);
+        if let Some(revision) = revision {
+            self.turn_revision_tx.send_replace(revision);
         }
     }
 }

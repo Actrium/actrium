@@ -149,11 +149,17 @@ harness = false
 [dev-dependencies]
 tokio = { workspace = true }
 rand.workspace = true
+hmac.workspace = true
+sha1 = "0.10"
 mockito = "1.4"
 wat = "1"
 prost.workspace = true
 tempfile.workspace = true
 tokio-test = "0.4"
 actr-pack.workspace = true
+actr-config.workspace = true
 actr-hyper = { path = ".", features = ["test-utils"] }
 actr-framework = { workspace = true, features = ["test-utils"] }
+actrix-turn = { path = "../../actrix/crates/turn" }
+turn_crate = { workspace = true }
+tracing-log = "0.2"
