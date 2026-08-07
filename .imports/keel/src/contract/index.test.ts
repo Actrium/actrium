@@ -418,6 +418,28 @@ describe('createHostModuleDispatch', () => {
     expect(seen).toEqual([{ theme: 'dark' }]);
   });
 
+  test('subscription preserves an async handler completion after event validation', async () => {
+    let emit: ((event: unknown) => unknown) | undefined;
+    const dispatch = createHostModuleDispatch(buildContract(), {
+      'host:analytics': { track: async () => ({ ok: true }) },
+      'host:theme': {
+        onThemeChanged: (handler) => {
+          emit = handler as (event: unknown) => unknown;
+          return () => {};
+        },
+      },
+    });
+    let release!: () => void;
+    const handled = new Promise<void>((resolve) => { release = resolve; });
+
+    dispatch['host:theme']!.onThemeChanged!(() => handled);
+    const completion = emit?.({ theme: 'dark' });
+
+    expect(completion).toBe(handled);
+    release();
+    await completion;
+  });
+
   test('implementation errors propagate unchanged (not wrapped as boundary errors)', async () => {
     const dispatch = createHostModuleDispatch(buildContract(), {
       'host:analytics': {

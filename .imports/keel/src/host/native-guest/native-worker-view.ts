@@ -206,15 +206,46 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
 
   // Reason: named native events carry arbitrary contract-defined payloads.
   sendEvent(name: string, payload?: unknown): void {
-    if (!this.loaded || this.destroyed) return;
+    // Keep the shared EngineViewEngine fire-and-forget surface. Errors are
+    // already emitted through the engine's error listeners; consume the
+    // acknowledgement rejection so legacy callers do not create an unhandled
+    // promise.
+    void this.sendEventAndWait(name, payload).catch(() => {});
+  }
+
+  /**
+   * Queue a named event and resolve only after the worker has run its guest
+   * handler and drained any work it woke. This acknowledgement is what lets a
+   * bounded byte transport return receive credit without merely moving an
+   * unbounded queue from the socket into Worker.postMessage.
+   */
+  // Reason: named native events carry arbitrary contract-defined payloads.
+  sendEventAndWait(name: string, payload?: unknown): Promise<void> {
+    if (!this.loaded || this.destroyed) {
+      return Promise.reject(new Error('native guest is not available for event delivery'));
+    }
     const turnId = ++this.turnSeq;
-    this.turns.set(turnId, {
-      kind: 'event',
-      usedMs: 0,
-      runningSince: null,
-      timer: null,
+    let rejectDone!: (error: Error) => void;
+    const done = new Promise<void>((resolve, reject) => {
+      rejectDone = reject;
+      this.turns.set(turnId, {
+        kind: 'event',
+        usedMs: 0,
+        runningSince: null,
+        timer: null,
+        resolve,
+        reject,
+      });
     });
-    this.post({ type: 'event', turnId, name, payload });
+    try {
+      this.post({ type: 'event', turnId, name, payload });
+    } catch (error) {
+      this.turns.delete(turnId);
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.emitError(err);
+      rejectDone(err);
+    }
+    return done;
   }
 
   on(event: 'update', listener: Listener): () => void;
