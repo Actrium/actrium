@@ -19,6 +19,14 @@ export type { NativeGuestHostOptions } from './native-guest/native-guest-host';
 export { NativeGuestHost } from './native-guest/native-guest-host';
 export type { NativeGuestViewOptions } from './native-guest/native-guest-view';
 export { createNativeGuestEngine, NativeGuestView } from './native-guest/native-guest-view';
+export type {
+  NativeGuestWorkerKillInfo,
+  NativeGuestWorkerOptions,
+} from './native-guest/native-worker-view';
+export {
+  createNativeGuestWorkerEngine,
+  NativeGuestWorkerView,
+} from './native-guest/native-worker-view';
 // EngineView hook for custom EngineView implementations
 export type { LoadingState, UseEngineViewOptions, UseEngineViewResult } from './use-engine-view';
 export { useEngineView } from './use-engine-view';

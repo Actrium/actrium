@@ -83,6 +83,12 @@ export interface NativeGuestHostOptions {
    * while this is off is dropped with a warning (fail-closed).
    */
   binaryOpBatch?: boolean;
+  /**
+   * Reports the intervals in which host JavaScript is entering guest
+   * WebAssembly. A worker proxy uses this to charge guest CPU time without
+   * charging time spent awaiting a host capability.
+   */
+  onGuestRunStateChange?: (running: boolean) => void;
 }
 
 export class NativeGuestHost {
@@ -92,7 +98,9 @@ export class NativeGuestHost {
   private readonly onLog?: (message: string) => void;
   private readonly onRenderBatch?: (batch: OperationBatch) => void;
   private readonly binaryOpBatch: boolean;
+  private readonly onGuestRunStateChange?: (running: boolean) => void;
   private readonly inflight = new Set<Promise<void>>();
+  private guestRunDepth = 0;
   private abiVersion: number | null = null;
   private batchDropWarnings = 0;
   private eventDropWarnings = 0;
@@ -102,6 +110,7 @@ export class NativeGuestHost {
     this.onLog = options.onLog;
     this.onRenderBatch = options.onRenderBatch;
     this.binaryOpBatch = options.binaryOpBatch ?? true;
+    this.onGuestRunStateChange = options.onGuestRunStateChange;
   }
 
   /**
@@ -130,41 +139,45 @@ export class NativeGuestHost {
         keel_send_batch: (ptr: number, len: number) => this.onSendBatch(ptr >>> 0, len >>> 0),
       },
     };
-    const { instance } = await WebAssembly.instantiate(wasmBytes, importObject);
+    const { instance } = await this.runGuestAsync(() =>
+      WebAssembly.instantiate(wasmBytes, importObject)
+    );
     this.instance = instance;
     this.memory = instance.exports.memory as WebAssembly.Memory;
 
     // ABI version gate BEFORE keel_init: a guest that declares an unsupported
     // version must not run its entry (fail-closed). A guest that omits the
     // export is a pre-versioning guest and is tolerated.
-    const versionExport = instance.exports.keel_abi_version;
-    if (typeof versionExport === 'function') {
-      // May trap (guest code): let it propagate — a guest whose version probe
-      // traps must not run (same fail-closed posture as a failed instantiate).
-      const version = (versionExport as () => number)() >>> 0;
-      if (!SUPPORTED_GUEST_ABI_VERSIONS.has(version)) {
-        throw new Error(
-          `unsupported guest ABI version: ${version} (host supports: ${[...SUPPORTED_GUEST_ABI_VERSIONS].join(', ')})`
-        );
+    this.runGuest(() => {
+      const versionExport = instance.exports.keel_abi_version;
+      if (typeof versionExport === 'function') {
+        // May trap (guest code): let it propagate — a guest whose version probe
+        // traps must not run (same fail-closed posture as a failed instantiate).
+        const version = (versionExport as () => number)() >>> 0;
+        if (!SUPPORTED_GUEST_ABI_VERSIONS.has(version)) {
+          throw new Error(
+            `unsupported guest ABI version: ${version} (host supports: ${[...SUPPORTED_GUEST_ABI_VERSIONS].join(', ')})`
+          );
+        }
+        this.abiVersion = version;
+      } else {
+        this.abiVersion = null; // pre-versioning guest (ABI v0/v1 wire is identical): tolerated
       }
-      this.abiVersion = version;
-    } else {
-      this.abiVersion = null; // pre-versioning guest (ABI v0/v1 wire is identical): tolerated
-    }
 
-    // WIP binary op-batch: push the runtime half of the gate BEFORE keel_init,
-    // so the guest's very first render already goes out on the negotiated
-    // wire. Optional in both directions — a guest without the export (JSON-only
-    // build) is skipped, and with the option off the guest is never told, so
-    // old/new host x guest combinations all degrade to JSON.
-    if (this.binaryOpBatch) {
-      const wireCaps = instance.exports.keel_wire_caps;
-      if (typeof wireCaps === 'function') {
-        (wireCaps as (flags: number) => void)(WIRE_CAP_OP_BATCH_BINARY);
+      // WIP binary op-batch: push the runtime half of the gate BEFORE keel_init,
+      // so the guest's very first render already goes out on the negotiated
+      // wire. Optional in both directions — a guest without the export (JSON-only
+      // build) is skipped, and with the option off the guest is never told, so
+      // old/new host x guest combinations all degrade to JSON.
+      if (this.binaryOpBatch) {
+        const wireCaps = instance.exports.keel_wire_caps;
+        if (typeof wireCaps === 'function') {
+          (wireCaps as (flags: number) => void)(WIRE_CAP_OP_BATCH_BINARY);
+        }
       }
-    }
 
-    (instance.exports.keel_init as (() => void) | undefined)?.();
+      (instance.exports.keel_init as (() => void) | undefined)?.();
+    });
   }
 
   /** Resolve once every in-flight host call has run its keel_resolve. */
@@ -218,9 +231,11 @@ export class NativeGuestHost {
     }
 
     try {
-      const np = this.allocWrite(nameBytes);
-      const pp = this.allocWrite(payloadBytes);
-      onEvent(np, nameBytes.length, pp, payloadBytes.length);
+      this.runGuest(() => {
+        const np = this.allocWrite(nameBytes);
+        const pp = this.allocWrite(payloadBytes);
+        onEvent(np, nameBytes.length, pp, payloadBytes.length);
+      });
     } catch {
       // Delivery is guest-mediated (keel_alloc can hand back a bad pointer,
       // keel_on_event can trap). A hostile/broken guest must not make event
@@ -441,19 +456,57 @@ export class NativeGuestHost {
       // reply is the IDENTICAL JSON.stringify bytes as today — no behaviour
       // change for any existing (non-binary) capability. Contract-agnostic: the
       // hoist is driven by the runtime type (Uint8Array), not per-module config.
-      const envelope = encodeKbs1Result(result);
-      const bytes = envelope ?? new TextEncoder().encode(JSON.stringify(result));
-      const ptr = this.allocWrite(bytes);
-      (
-        this.instance.exports.keel_resolve as (
-          cb: number,
-          ok: number,
-          ptr: number,
-          len: number
-        ) => void
-      )(cb, ok, ptr, bytes.length);
+      this.runGuest(() => {
+        const envelope = encodeKbs1Result(result);
+        const bytes = envelope ?? new TextEncoder().encode(JSON.stringify(result));
+        const ptr = this.allocWrite(bytes);
+        (
+          this.instance.exports.keel_resolve as (
+            cb: number,
+            ok: number,
+            ptr: number,
+            len: number
+          ) => void
+        )(cb, ok, ptr, bytes.length);
+      });
     } catch {
       // guest-mediated write failed; abandon this cb.
+    }
+  }
+
+  /** Run one synchronous guest entry while reporting a balanced run interval. */
+  private runGuest<T>(run: () => T): T {
+    this.setGuestRunning(true);
+    try {
+      return run();
+    } finally {
+      this.setGuestRunning(false);
+    }
+  }
+
+  /** Account for instantiation too: a module start section can run arbitrary guest code. */
+  private async runGuestAsync<T>(run: () => Promise<T>): Promise<T> {
+    this.setGuestRunning(true);
+    try {
+      return await run();
+    } finally {
+      this.setGuestRunning(false);
+    }
+  }
+
+  private setGuestRunning(running: boolean): void {
+    if (running) {
+      this.guestRunDepth++;
+      if (this.guestRunDepth !== 1) return;
+    } else {
+      if (this.guestRunDepth === 0) return;
+      this.guestRunDepth--;
+      if (this.guestRunDepth !== 0) return;
+    }
+    try {
+      this.onGuestRunStateChange?.(running);
+    } catch {
+      // Observability must never become a guest capability or affect execution.
     }
   }
 }
