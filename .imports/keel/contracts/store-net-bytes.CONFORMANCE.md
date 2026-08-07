@@ -164,7 +164,7 @@ directions**.
 | maxSegments | `limits.maxSegments.value` = `16` | `limits::MAX_SEGMENTS = 16` | `too-many-segments` |
 | ↳ also bounds | the chunk count of one multi-segment value (§2a) | — | `too-many-segments` |
 | maxSegmentBytes | `limits.maxSegmentBytes.value` = `1048576` (1 MiB) — **one segment, not one value** (§2a) | `limits::MAX_SEGMENT_BYTES = 1048576` | `segment-too-big` |
-| maxEnvelopeBytes | `limits.maxEnvelopeBytes.value` = `4194304` (4 MiB) — the binding cap on one **value** (§2a) | `limits::MAX_ENVELOPE_BYTES = 4194304` | `envelope-too-big` |
+| maxEnvelopeBytes | `limits.maxEnvelopeBytes.value` = `17039360` (16.25 MiB) — 16 MiB of segment payload plus bounded control-plane headroom (§2a) | `limits::MAX_ENVELOPE_BYTES = 17039360` | `envelope-too-big` |
 | maxJsonBytes | `limits.maxJsonBytes.value` = `262144` (256 KiB) | `limits::MAX_JSON_BYTES = 262144` | `json-too-big` |
 
 The Rust constants are **generated** from the schema by
