@@ -414,6 +414,11 @@ pub struct HostCallV1 {
     pub payload: Vec<u8>,
     #[prost(int64, tag = "4")]
     pub timeout_ms: i64,
+    /// Lane declared via `(actr.payload_type)` on the protobuf method.
+    /// Wire-compatible with pre-lane guests: a missing field decodes to 0
+    /// (`RPC_RELIABLE`), which is the lane legacy hosts hard-coded.
+    #[prost(enumeration = "PayloadType", tag = "5")]
+    pub payload_type: i32,
 }
 
 /// Runtime guest->host tell payload.
@@ -425,6 +430,10 @@ pub struct HostTellV1 {
     pub dest: DestV1,
     #[prost(bytes = "vec", tag = "3")]
     pub payload: Vec<u8>,
+    /// Lane declared via `(actr.payload_type)` on the protobuf method;
+    /// missing decodes to `RPC_RELIABLE` (legacy behavior).
+    #[prost(enumeration = "PayloadType", tag = "4")]
+    pub payload_type: i32,
 }
 
 /// Runtime guest->host raw call payload.
@@ -438,6 +447,10 @@ pub struct HostCallRawV1 {
     pub payload: Vec<u8>,
     #[prost(int64, tag = "4")]
     pub timeout_ms: i64,
+    /// Lane for the raw call; missing decodes to `RPC_RELIABLE`
+    /// (legacy behavior).
+    #[prost(enumeration = "PayloadType", tag = "5")]
+    pub payload_type: i32,
 }
 
 /// Runtime guest->host discovery payload.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: Apache-2.0
 #
-# Build the Go echo workload for the async actr:workload@0.3.0 world.
+# Build the Go echo workload for the async actr:workload@0.4.0 world.
 
 set -euo pipefail
 
@@ -147,8 +147,8 @@ echo "[4/5] Embed V2 WIT and create the Component ..."
 echo "[5/5] Validate the V2 component ..."
 "${WASM_TOOLS}" validate "${OUT_WASM}"
 "${WASM_TOOLS}" component wit "${OUT_WASM}" | tee "${WIT_DUMP}"
-grep -q "actr:workload/types@0.3.0" "${WIT_DUMP}"
-grep -q "actr:workload/workload@0.3.0" "${WIT_DUMP}"
+grep -q "actr:workload/types@0.4.0" "${WIT_DUMP}"
+grep -q "actr:workload/workload@0.4.0" "${WIT_DUMP}"
 grep -q "dispatch: async func" "${WIT_DUMP}"
 grep -q "ctx: invocation-ctx" "${WIT_DUMP}"
 if grep -q "actr:workload/.*@0.1.0" "${WIT_DUMP}"; then

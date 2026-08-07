@@ -1612,3 +1612,61 @@ async fn plain_node_surface_keeps_headless_profile_ungated() {
         .await
         .expect("plain node reconciler should shut down cleanly");
 }
+
+#[test]
+fn guest_rpc_payload_type_maps_known_lanes_and_degrades_unknown() {
+    assert_eq!(guest_rpc_payload_type(0), PayloadType::RpcReliable);
+    assert_eq!(guest_rpc_payload_type(1), PayloadType::RpcSignal);
+    // A known non-RPC lane passes through untouched; ensure_rpc_payload_type
+    // rejects it downstream as InvalidArgument.
+    assert_eq!(guest_rpc_payload_type(2), PayloadType::StreamReliable);
+    // An i32 unknown to this host (guest built against a newer protocol)
+    // degrades to the lane pre-lane guests always got.
+    assert_eq!(guest_rpc_payload_type(99), PayloadType::RpcReliable);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn call_with_stream_lane_is_rejected_as_invalid_argument() {
+    let (ctx, wl) = harness().await;
+    let res = host_operation_handler(
+        ctx,
+        weak_runner(&wl),
+        // A guest that (incorrectly) declares a stream lane for a typed call
+        // must surface InvalidArgument from ensure_rpc_payload_type, not have
+        // the lane silently dropped onto the reliable lane.
+        HostOperation::Call(HostCallV1 {
+            dest: DestV1 {
+                kind: Some(actr_framework::guest::dynclib_abi::DestKind::Host(true)),
+            },
+            // A positive timeout is required to pass sender-side validation
+            // so the call reaches the lane guard under test.
+            timeout_ms: 30_000,
+            payload_type: PayloadType::StreamReliable as i32,
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert!(matches!(
+        expect_runtime_error(res),
+        ActrError::InvalidArgument(_)
+    ));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn call_with_signal_lane_passes_lane_validation() {
+    let (ctx, wl) = actorless_harness().await;
+    let res = host_operation_handler(
+        ctx,
+        weak_runner(&wl),
+        // RpcSignal is a valid RPC lane: lane validation passes and the call
+        // proceeds to gate selection, which fails here only because no remote
+        // actor gate is installed (same outcome as the reliable-lane case).
+        HostOperation::CallRaw(HostCallRawV1 {
+            timeout_ms: 30_000,
+            payload_type: PayloadType::RpcSignal as i32,
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert!(matches!(expect_runtime_error(res), ActrError::Internal(_)));
+}

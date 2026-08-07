@@ -883,7 +883,7 @@ impl Node<Init> {
     /// Declaring a key asserts that distinct-key invocations of that method may
     /// run concurrently — see [`crate::dispatch::ConflictKeySpec`] for the
     /// consumer-side concurrency contract. Execution concurrency is available
-    /// only to native `Linked` workloads and 0.3.0 async-world WASM guests.
+    /// only to native `Linked` workloads and 0.4.0 async-world WASM guests.
     /// The retired 0.1.0 sync-world is rejected at load. `DynClib` is the only
     /// supported packaged backend that stays serial regardless of the gate or
     /// budget: its key affects scheduler routing but provides no

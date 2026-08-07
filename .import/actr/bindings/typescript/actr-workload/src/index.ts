@@ -7,7 +7,7 @@ import {
   sendDataChunk as hostSendDataChunk,
   tell as hostTell,
   unregisterStream as hostUnregisterStream,
-} from 'actr:workload/host@0.3.0';
+} from 'actr:workload/host@0.4.0';
 
 export type PayloadBytes = Uint8Array | ArrayBuffer | ArrayLike<number>;
 
@@ -302,6 +302,7 @@ export async function call(
   payload: PayloadBytes,
   timeoutMs: bigint | number,
   ctx?: InvocationCtx,
+  payloadType: PayloadType = PayloadType.RpcReliable,
 ): Promise<Uint8Array> {
   return hostCall(
     resolveCtxToken(ctx),
@@ -309,6 +310,7 @@ export async function call(
     routeKey,
     toUint8Array(payload),
     BigInt(timeoutMs),
+    { tag: payloadType } satisfies WitPayloadType,
   );
 }
 
@@ -317,12 +319,14 @@ export async function tell(
   routeKey: string,
   payload: PayloadBytes,
   ctx?: InvocationCtx,
+  payloadType: PayloadType = PayloadType.RpcReliable,
 ): Promise<void> {
   await hostTell(
     resolveCtxToken(ctx),
     toWitDest(target),
     routeKey,
     toUint8Array(payload),
+    { tag: payloadType } satisfies WitPayloadType,
   );
 }
 
@@ -332,6 +336,7 @@ export async function callRaw(
   payload: PayloadBytes,
   timeoutMs: bigint | number,
   ctx?: InvocationCtx,
+  payloadType: PayloadType = PayloadType.RpcReliable,
 ): Promise<Uint8Array> {
   return hostCallRaw(
     resolveCtxToken(ctx),
@@ -339,6 +344,7 @@ export async function callRaw(
     routeKey,
     toUint8Array(payload),
     BigInt(timeoutMs),
+    { tag: payloadType } satisfies WitPayloadType,
   );
 }
 

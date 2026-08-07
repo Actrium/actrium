@@ -192,6 +192,7 @@ impl Context for WasmContext {
             R::route_key().to_string(),
             payload,
             timeout_ms,
+            payload_type_to_wit(R::payload_type()),
         )
         .await;
         match result {
@@ -208,6 +209,7 @@ impl Context for WasmContext {
             dest_to_wit(target),
             R::route_key().to_string(),
             payload,
+            payload_type_to_wit(R::payload_type()),
         )
         .await
         .map_err(wit_actr_error_to_proto)
@@ -278,6 +280,9 @@ impl Context for WasmContext {
             route_key.to_string(),
             payload.to_vec(),
             timeout_ms,
+            // The Context::call_raw contract has no lane parameter; preserve
+            // the lane the host historically applied to raw calls.
+            payload_type_to_wit(PayloadType::RpcReliable),
         )
         .await
         .map(Bytes::from)
