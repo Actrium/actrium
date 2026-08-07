@@ -65,6 +65,17 @@ describe('NativeGuestWorkerView — off-main-thread native guest', () => {
     expect(tree?.type).toBe('View');
     expect(tree?.children[0].type).toBe('__TEXT__');
     expect(tree?.children[0].props.text).toBe('hello from rust');
+    let settled = false;
+
+    // ui-guest has no named-event export, but the worker still owes an explicit
+    // turn completion. The promise must not settle at postMessage enqueue time.
+    const handled = engine.sendEventAndWait('noop', { value: 7 });
+    void handled.then(() => { settled = true; });
+    await Promise.resolve();
+
+    expect(settled).toBe(false);
+    await handled;
+    expect(settled).toBe(true);
   });
 
   it('round-trips bounded pointer reads and writes without mirroring the whole heap', async () => {

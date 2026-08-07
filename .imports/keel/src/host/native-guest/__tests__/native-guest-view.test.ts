@@ -48,7 +48,7 @@ describe('createNativeGuestEngine — native guest as an EngineViewEngine', () =
     expect(engine.isDestroyed).toBe(true);
   });
 
-  it('forwards events via sendEvent without throwing', async () => {
+  it('forwards events through fire-and-forget and acknowledged surfaces', async () => {
     const engine = createNativeGuestEngine({
       wasmBytes: UI_GUEST,
       contract: emptyContract,
@@ -60,6 +60,7 @@ describe('createNativeGuestEngine — native guest as an EngineViewEngine', () =
     await engine.loadBundle();
     // ui-guest has no keel_on_event handler; sendEvent must be a safe no-op.
     expect(() => engine.sendEvent('key', 'a')).not.toThrow();
+    await expect(engine.sendEventAndWait('key', 'b')).resolves.toBeUndefined();
   });
 
   it('exposes raw guest exports for diagnostics only after load', async () => {

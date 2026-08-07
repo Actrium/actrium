@@ -780,12 +780,12 @@ function wrapSubscriptionDispatch(
     }
 
     // Reason: the Guest handler and its events cross the runtime boundary as untrusted values.
-    const guestHandler = handler as (event: unknown) => void;
+    const guestHandler = handler as (event: unknown) => unknown;
     const parseEvent = schema?.parseEvent;
     // Reason: an event from the host implementation is untrusted until parseEvent / the binary backstop runs.
     const wrappedHandler =
       parseEvent || hasBinaryEvent
-        ? (event: unknown): void => {
+        ? (event: unknown): unknown => {
             // Boundary: parse every event before it reaches the Guest handler,
             // then run the declared-binary backstop on what parsing produced
             // (same order as rpc's output path: narrow first, assert after).
@@ -802,7 +802,11 @@ function wrapSubscriptionDispatch(
                 options
               );
             }
-            guestHandler(checked);
+            // Preserve the handler's completion value. Most subscriptions are
+            // synchronous and still return undefined, but transports that own
+            // bounded receive credit need to await an isolated guest actually
+            // processing the event before they admit more bytes.
+            return guestHandler(checked);
           }
         : guestHandler;
 

@@ -58,6 +58,8 @@ export interface NativeGuestEngine extends EngineViewEngine {
   /** Named host->guest event channel (keel_on_event). */
   // Reason: an event payload is any JSON-serializable value, forwarded as-is.
   sendEvent(name: string, payload?: unknown): void;
+  /** Resolve only after the guest has handled the named event and drained work it woke. */
+  sendEventAndWait(name: string, payload?: unknown): Promise<void>;
   destroy(): void;
 }
 
@@ -199,6 +201,15 @@ export class NativeGuestView implements NativeGuestEngine {
   // Reason: an event payload is any JSON-serializable value plus Uint8Array leaves, forwarded as-is.
   sendEvent(name: string, payload?: unknown): void {
     this.host.emitEvent(name, payload);
+  }
+
+  // Reason: named native events carry arbitrary contract-defined payloads.
+  async sendEventAndWait(name: string, payload?: unknown): Promise<void> {
+    if (!this.loaded || this.destroyed) {
+      throw new Error('native guest is not available for event delivery');
+    }
+    this.host.emitEvent(name, payload);
+    await this.host.drain();
   }
 
   on(event: 'update', listener: Listener): () => void;
