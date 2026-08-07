@@ -1,4 +1,4 @@
-import { ActrNode, PayloadType } from '@actrium/actr';
+import { ActrNode } from '@actrium/actr';
 {{#if IS_BOTH}}
 import { EchoRequest } from './generated/{{SERVICE_NAME}}/echo_client';
 {{else}}
@@ -6,7 +6,6 @@ import { EchoRequest } from './generated/echo-echo-server/echo_client';
 {{/if}}
 
 const RPC_TIMEOUT_MS = 15000;
-const RPC_PAYLOAD_TYPE: PayloadType = PayloadType.RpcReliable;
 
 async function main(): Promise<void> {
   const node = await ActrNode.fromConfig('./manifest.toml');
@@ -25,15 +24,12 @@ async function main(): Promise<void> {
     throw new Error('No EchoService target discovered');
   }
 
-  const req = EchoRequest.encode({ message: 'hello' });
-  const responseBytes = await actorRef.call(
+  const response = await actorRef.callRpc(
     target,
-    EchoRequest.routeKey,
-    RPC_PAYLOAD_TYPE,
-    req,
+    EchoRequest,
+    { message: 'hello' },
     RPC_TIMEOUT_MS,
   );
-  const response = EchoRequest.response.decode(responseBytes);
   console.log('Echo reply:', response.reply);
 
   await actorRef.stop();

@@ -472,6 +472,8 @@ fn test_remote_service_only() {
     let client_content = fs::read_to_string(gen_dir.join("echo-service/echo_client.ts")).unwrap();
     assert!(client_content.contains("export const EchoRequest = {"));
     assert!(client_content.contains("routeKey: \"echo.EchoService.Echo\""));
+    // Unannotated unary method keeps the RPC_RELIABLE fallback lane.
+    assert!(client_content.contains("payloadType: 0,"));
     assert!(client_content.contains("response: {"));
 
     let actr_service_content = fs::read_to_string(root.join("src/actr_service.ts")).unwrap();
@@ -519,6 +521,8 @@ fn test_local_and_remote_services() {
     let client_content = fs::read_to_string(gen_dir.join("echo-service/echo_client.ts")).unwrap();
     assert!(client_content.contains("export const EchoRequest = {"));
     assert!(client_content.contains("routeKey: \"echo.EchoService.Echo\""));
+    // Unannotated unary method keeps the RPC_RELIABLE fallback lane.
+    assert!(client_content.contains("payloadType: 0,"));
 
     let actr_service_content = fs::read_to_string(root.join("src/actr_service.ts")).unwrap();
     assert!(actr_service_content.contains("export default defineWorkload({"));

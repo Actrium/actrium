@@ -10,7 +10,10 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
 
-use actr_framework_protoc_codegen::{GeneratorRole, ModernGenerator, RemoteServiceInfo};
+use actr_framework_protoc_codegen::{
+    ExplicitPayloadTypeMap, GeneratorRole, ModernGenerator, RemoteServiceInfo,
+    build_explicit_payload_types,
+};
 use actr_protocol::{ActrType, PackageName, ServiceName};
 
 /// Proto source type enum — simplified design for compile-time routing
@@ -165,11 +168,16 @@ fn main() -> Result<()> {
         .read_to_end(&mut buf)
         .context("Failed to read from stdin")?;
 
+    // Recover explicit `(actr.payload_type)` method options from the raw
+    // bytes first: the prost decode below drops the extension as an unknown
+    // field, so this is the only chance to see it.
+    let explicit_payload_types = build_explicit_payload_types(&buf)?;
+
     let request = CodeGeneratorRequest::decode(Bytes::from(buf))
         .context("Failed to decode CodeGeneratorRequest")?;
 
     // Generate code
-    let response = generate_code(request)?;
+    let response = generate_code(request, &explicit_payload_types)?;
 
     // Write CodeGeneratorResponse to stdout
     let mut out_buf = Vec::new();
@@ -196,7 +204,10 @@ fn parse_parameters(param_str: &str) -> HashMap<String, String> {
     params
 }
 
-fn generate_code(request: CodeGeneratorRequest) -> Result<CodeGeneratorResponse> {
+fn generate_code(
+    request: CodeGeneratorRequest,
+    explicit_payload_types: &ExplicitPayloadTypeMap,
+) -> Result<CodeGeneratorResponse> {
     // Set supported features if available (FEATURE_PROTO3_OPTIONAL = 1)
     let mut response = CodeGeneratorResponse {
         supported_features: Some(1u64),
@@ -296,8 +307,14 @@ fn generate_code(request: CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                 ));
             }
             for service in &file.service {
-                let generated_file =
-                    generate_service_code(file, service, &type_owners, &params, &remote_services)?;
+                let generated_file = generate_service_code(
+                    file,
+                    service,
+                    &type_owners,
+                    &params,
+                    &remote_services,
+                    explicit_payload_types,
+                )?;
                 response.file.push(generated_file);
             }
         }
@@ -368,6 +385,7 @@ fn generate_service_code(
     type_owners: &HashMap<String, TypeOwner>,
     params: &HashMap<String, String>,
     remote_services: &[RemoteServiceInfo],
+    explicit_payload_types: &ExplicitPayloadTypeMap,
 ) -> Result<File> {
     let service_name = service.name();
     let package_name = file.package();
@@ -399,7 +417,13 @@ fn generate_service_code(
         .iter()
         .map(|(full_name, owner)| (full_name.clone(), owner.proto_package.clone()))
         .collect();
-    let generator = ModernGenerator::new(package_name, service_name, role, generator_type_owners);
+    let generator = ModernGenerator::new_with_payload_types(
+        package_name,
+        service_name,
+        role,
+        generator_type_owners,
+        explicit_payload_types.clone(),
+    );
 
     // Pass remote_services only for ServerSide generation
     let final_code = if role == GeneratorRole::ServerSide {
@@ -598,7 +622,7 @@ mod tests {
             ..Default::default()
         };
 
-        let response = generate_code(request).unwrap();
+        let response = generate_code(request, &Default::default()).unwrap();
         let local_actor = response
             .file
             .iter()
@@ -661,7 +685,7 @@ mod tests {
             ..Default::default()
         };
 
-        let response = generate_code(request).unwrap();
+        let response = generate_code(request, &Default::default()).unwrap();
         let metadata = response
             .file
             .iter()
@@ -738,7 +762,7 @@ mod tests {
             ..Default::default()
         };
 
-        let response = generate_code(request).unwrap();
+        let response = generate_code(request, &Default::default()).unwrap();
         let metadata = response
             .file
             .iter()
@@ -785,7 +809,7 @@ mod tests {
             ..Default::default()
         };
 
-        let err = generate_code(request).expect_err(
+        let err = generate_code(request, &Default::default()).expect_err(
             "unresolved qualified RPC type should not fall back to current metadata owner",
         );
         let message = err.to_string();
@@ -818,7 +842,7 @@ mod tests {
             ..Default::default()
         };
 
-        let err = generate_code(request).expect_err(
+        let err = generate_code(request, &Default::default()).expect_err(
             "unresolved unqualified RPC type should not fall back to current metadata owner",
         );
         let message = err.to_string();

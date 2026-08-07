@@ -152,6 +152,7 @@ dependencies = [
  "proc-macro2",
  "prost",
  "prost-types",
+ "protobuf",
  "quote",
  "serde",
  "serde_json",

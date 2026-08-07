@@ -128,6 +128,51 @@ export class ActrRef {
   }
 
   /**
+   * Type-safe RPC call consuming a generated request companion.
+   *
+   * The companion carries the route key and the `(actr.payload_type)` lane
+   * declared in proto (falling back to RpcReliable), so callers no longer
+   * restate them — and cannot accidentally pin the wrong lane.
+   *
+   * @param target - Target actor ID
+   * @param companion - Generated request companion (`{ routeKey, payloadType, encode, response }`)
+   * @param request - Request init object accepted by the companion's encode()
+   * @param timeoutMs - Timeout in ms, default 30000
+   * @returns Decoded response object
+   *
+   * @example
+   * ```typescript
+   * import { EchoRequest } from './generated/echo_client';
+   *
+   * const response = await actorRef.callRpc(
+   *   serverId,
+   *   EchoRequest,
+   *   { message: 'Hello' },
+   *   5000
+   * );
+   * console.log(response.reply);
+   * ```
+   */
+  async callRpc<Req, Res>(
+    target: ActrId,
+    companion: RpcCompanion<Req, Res>,
+    request: Req,
+    timeoutMs: number = 30000,
+  ): Promise<Res> {
+    const requestBuf = companion.encode(request);
+    const responseBuf = await this.call(
+      target,
+      companion.routeKey,
+      // Generated companions carry a runtime-neutral numeric lane; the Node
+      // runtime's PayloadType is the numeric const enum with the same values.
+      companion.payloadType as PayloadType,
+      requestBuf,
+      timeoutMs,
+    );
+    return companion.response.decode(responseBuf);
+  }
+
+  /**
    * Send one-way message (fire-and-forget).
    *
    * @param target - Target actor ID
@@ -203,3 +248,22 @@ export class ActrRef {
 type EncodableRequest = {
   encode(): Buffer;
 };
+
+/**
+ * Structural shape of a request companion emitted by
+ * protoc-gen-actrframework-typescript.
+ *
+ * `payloadType` is the runtime-neutral numeric value of the proto
+ * `(actr.payload_type)` option (0 = RPC_RELIABLE fallback). It deliberately
+ * does not import a runtime package. The Node binding adapts the numeric value
+ * to its `PayloadType` at the `ActrRef.callRpc` boundary. Workload/WIT lane
+ * propagation is handled separately.
+ */
+export interface RpcCompanion<Req, Res> {
+  readonly routeKey: string;
+  readonly payloadType: number;
+  encode(message: Req): Buffer;
+  response: {
+    decode(bytes: Uint8Array): Res;
+  };
+}

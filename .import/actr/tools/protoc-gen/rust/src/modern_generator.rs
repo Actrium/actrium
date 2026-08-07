@@ -13,7 +13,9 @@ use prost_types::MethodDescriptorProto;
 use quote::{format_ident, quote};
 use std::collections::HashMap;
 
-use crate::payload_type_extractor::extract_payload_type_or_default;
+use crate::payload_type_extractor::{
+    ExplicitPayloadTypeMap, MethodKey, extract_payload_type_or_default,
+};
 
 /// Remote service information for dispatcher generation
 #[derive(Debug, Clone)]
@@ -44,6 +46,10 @@ pub struct ModernGenerator {
     /// they resolve to their real owner instead of the current service's
     /// package.
     type_owner: HashMap<String, String>,
+    /// Explicitly declared `(actr.payload_type)` values recovered from the raw
+    /// request bytes (prost drops the extension as an unknown field). Methods
+    /// absent from the map fall back per `extract_payload_type_or_default`.
+    explicit_payload_types: ExplicitPayloadTypeMap,
 }
 
 impl ModernGenerator {
@@ -53,11 +59,29 @@ impl ModernGenerator {
         role: GeneratorRole,
         type_owner: HashMap<String, String>,
     ) -> Self {
+        Self::new_with_payload_types(
+            package_name,
+            service_name,
+            role,
+            type_owner,
+            ExplicitPayloadTypeMap::new(),
+        )
+    }
+
+    /// Create a generator with explicit protobuf `(actr.payload_type)` values.
+    pub fn new_with_payload_types(
+        package_name: &str,
+        service_name: &str,
+        role: GeneratorRole,
+        type_owner: HashMap<String, String>,
+        explicit_payload_types: ExplicitPayloadTypeMap,
+    ) -> Self {
         Self {
             package_name: package_name.to_string(),
             service_name: service_name.to_string(),
             role,
             type_owner,
+            explicit_payload_types,
         }
     }
 
@@ -200,8 +224,15 @@ use actr_protocol::{{ActrId, ActorResult, RpcRequest, RpcEnvelope, PayloadType}}
                 method.name()
             );
 
-            // Extract PayloadType
-            let payload_type = extract_payload_type_or_default(method);
+            // Explicit `(actr.payload_type)` values win over the fallback.
+            // The key is built from the same fields the extraction side
+            // used, decoupled from the emitted route_key format.
+            let key = MethodKey::new(&self.package_name, &self.service_name, method.name());
+            let payload_type = self
+                .explicit_payload_types
+                .get(&key)
+                .copied()
+                .unwrap_or_else(|| extract_payload_type_or_default(method));
 
             // Generate PayloadType enum path (cannot use quote! as it adds quotes)
             let payload_type_code = payload_type.as_rust_variant();

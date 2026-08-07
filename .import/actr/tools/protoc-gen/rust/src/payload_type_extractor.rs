@@ -1,18 +1,55 @@
 //! PayloadType option extractor
 //!
 //! Extracts `option (actr.payload_type)` from protobuf method descriptors.
+//!
+//! prost discards unknown fields when decoding `MethodOptions`, so the
+//! extension (field 50001) never reaches `MethodDescriptorProto.options`.
+//! The explicit values are therefore recovered by re-decoding the raw
+//! `CodeGeneratorRequest` bytes with rust-protobuf, which retains unknown
+//! fields — see [`build_explicit_payload_types`]. The prost-side
+//! [`extract_payload_type_or_default`] only provides the fallback for
+//! methods that do not set the option.
 
+use std::collections::HashMap;
+
+use anyhow::{Context as _, bail};
 use prost_types::MethodDescriptorProto;
+use protobuf::plugin::CodeGeneratorRequest as PbCodeGeneratorRequest;
+use protobuf::{Message as _, UnknownValueRef};
+
+/// Extension field number of `(actr.payload_type)` on `MethodOptions`.
+const PAYLOAD_TYPE_FIELD_NUMBER: u32 = 50001;
+
+/// Structured method identity used to correlate the extraction side (raw
+/// request bytes) with the generation side (prost descriptors). Both sides
+/// build the key from the same fields, decoupling it from the emitted
+/// `route_key` string format.
+#[derive(Hash, Eq, PartialEq, Clone, Debug)]
+pub struct MethodKey {
+    package: String,
+    service: String,
+    method: String,
+}
+
+impl MethodKey {
+    pub(crate) fn new(package: &str, service: &str, method: &str) -> Self {
+        Self {
+            package: package.to_string(),
+            service: service.to_string(),
+            method: method.to_string(),
+        }
+    }
+}
+
+/// Explicitly declared `(actr.payload_type)` values keyed by method.
+///
+/// Only methods that actually set the option appear here; everything else
+/// falls back per [`extract_payload_type_or_default`].
+pub type ExplicitPayloadTypeMap = HashMap<MethodKey, PayloadType>;
 
 /// PayloadType enum values matching proto definition.
-///
-/// The variants that `extract_payload_type_or_default` does not currently
-/// return are still modelled so that `as_rust_variant` can emit the correct
-/// `PayloadType::...` token into generated code when option-extraction is
-/// eventually wired up.
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub(crate) enum PayloadType {
+pub enum PayloadType {
     #[default]
     RpcReliable = 0,
     RpcSignal = 1,
@@ -22,9 +59,8 @@ pub(crate) enum PayloadType {
 }
 
 impl PayloadType {
-    /// Convert from i32 proto enum value
-    #[cfg(test)]
-    pub(crate) fn from_i32(value: i32) -> Option<Self> {
+    /// Convert from the proto enum value carried on the wire (varint).
+    pub fn from_u64(value: u64) -> Option<Self> {
         match value {
             0 => Some(PayloadType::RpcReliable),
             1 => Some(PayloadType::RpcSignal),
@@ -47,9 +83,14 @@ impl PayloadType {
     }
 }
 
-/// Extract PayloadType option from method descriptor
+/// Recover explicitly declared `(actr.payload_type)` values from the raw
+/// `CodeGeneratorRequest` bytes.
 ///
-/// # Proto Option Format
+/// prost does not retain unknown fields, so the same bytes protoc sent to
+/// the plugin are decoded a second time with rust-protobuf, and extension
+/// field 50001 is read from each method's `MethodOptions.unknown_fields`.
+///
+/// # Option Format
 ///
 /// ```protobuf
 /// extend google.protobuf.MethodOptions {
@@ -61,37 +102,53 @@ impl PayloadType {
 /// }
 /// ```
 ///
-/// # Fallback Strategy
+/// # Errors
 ///
-/// 1. Check method-level option `(actr.payload_type)`
-/// 2. If not set, return default: `PayloadType::RpcReliable`
-///
-/// # Returns
-///
-/// - `Some(PayloadType)`: Option was explicitly set
-/// - `None`: Option not set, should use default
-fn extract_payload_type(method: &MethodDescriptorProto) -> Option<PayloadType> {
-    // The extension field number we defined: 50001
-    const _PAYLOAD_TYPE_FIELD_NUMBER: i32 = 50001;
+/// A method that simply does not set the option is *not* an error — it is
+/// absent from the returned map and the caller applies the fallback. Every
+/// "the generator is broken" condition is an error, with the method named
+/// in the message: undecodable request bytes, the extension carried with a
+/// wrong wire type, or an enum value outside the `PayloadType` range.
+/// Silently degrading any of those to `RpcReliable` would disguise a
+/// codegen defect as a deliberate lane choice.
+pub fn build_explicit_payload_types(buf: &[u8]) -> anyhow::Result<ExplicitPayloadTypeMap> {
+    let request = PbCodeGeneratorRequest::parse_from_bytes(buf)
+        .context("failed to decode CodeGeneratorRequest for payload_type extraction")?;
 
-    let _options = method.options.as_ref()?;
+    let mut map = HashMap::new();
+    for file in &request.proto_file {
+        let package = file.package.clone().unwrap_or_default();
+        for service in &file.service {
+            let service_name = service.name.clone().unwrap_or_default();
+            for method in &service.method {
+                let method_name = method.name.clone().unwrap_or_default();
+                let key = MethodKey::new(&package, &service_name, &method_name);
 
-    // prost encodes extensions as UnknownFields
-    // We need to search through unknown fields for field number 50001
-    // However, prost_types::MethodOptions doesn't expose unknown fields directly
-    //
-    // Alternative approach: Use descriptor.proto's extension mechanism
-    // For now, we'll implement a basic parser
-
-    // Check if there's an extension field with our field number
-    // This is a simplified implementation - in production you'd want to use
-    // protobuf reflection or parse the raw bytes
-
-    // For now, return None to indicate "use default"
-    // TODO: Implement proper extension field parsing when prost provides the API
-    // or when we have access to FileDescriptorSet
-
-    None
+                let Some(options) = method.options.as_ref() else {
+                    continue;
+                };
+                match options.unknown_fields().get(PAYLOAD_TYPE_FIELD_NUMBER) {
+                    // Option not set: legal. The method is absent from the
+                    // map and the generation side applies the fallback.
+                    None => {}
+                    Some(UnknownValueRef::Varint(value)) => {
+                        let payload_type = PayloadType::from_u64(value).with_context(|| {
+                            format!(
+                                "unsupported payload_type value {value} for \
+                                 {package}.{service_name}.{method_name}"
+                            )
+                        })?;
+                        map.insert(key, payload_type);
+                    }
+                    Some(other) => bail!(
+                        "invalid payload_type wire value on \
+                         {package}.{service_name}.{method_name}: {other:?}"
+                    ),
+                }
+            }
+        }
+    }
+    Ok(map)
 }
 
 /// Check if method uses streaming
@@ -100,16 +157,16 @@ fn is_streaming(method: &MethodDescriptorProto) -> bool {
     method.client_streaming.unwrap_or(false) || method.server_streaming.unwrap_or(false)
 }
 
-/// Extract PayloadType with fallback to default
+/// Fallback PayloadType for methods that do not set `(actr.payload_type)`.
 ///
-/// This is the main API that code generators should use.
-/// It always returns a valid PayloadType (never None).
+/// Explicit option values never reach this function — prost drops the
+/// extension during decode — they are recovered by
+/// [`build_explicit_payload_types`] and consulted by the caller first.
 ///
 /// # Default Rules
 ///
 /// - Unary RPC (no stream) → `RPC_RELIABLE`
 /// - Streaming RPC (has stream keyword) → `STREAM_RELIABLE`
-/// - Explicit option → uses specified PayloadType
 ///
 /// # Example
 ///
@@ -119,35 +176,128 @@ fn is_streaming(method: &MethodDescriptorProto) -> bool {
 /// // Streaming RPC: PayloadType::StreamReliable
 /// ```
 pub(crate) fn extract_payload_type_or_default(method: &MethodDescriptorProto) -> PayloadType {
-    // 1. Check if explicitly set via option
-    if let Some(payload_type) = extract_payload_type(method) {
-        return payload_type;
-    }
-
-    // 2. Check if streaming - default to STREAM_RELIABLE
     if is_streaming(method) {
         return PayloadType::StreamReliable;
     }
 
-    // 3. Unary RPC - default to RPC_RELIABLE
     PayloadType::RpcReliable
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use protobuf::descriptor::{
+        FileDescriptorProto, MethodDescriptorProto as PbMethodDescriptorProto,
+        ServiceDescriptorProto,
+    };
+
+    /// Build a serialized CodeGeneratorRequest whose single method carries
+    /// field 50001 as a raw unknown varint (None = option unset).
+    fn request_bytes_with_payload_type(payload_type: Option<u64>) -> Vec<u8> {
+        let mut method = PbMethodDescriptorProto::new();
+        method.name = Some("Echo".to_string());
+        if let Some(value) = payload_type {
+            let mut options = protobuf::descriptor::MethodOptions::new();
+            options
+                .mut_unknown_fields()
+                .add_varint(PAYLOAD_TYPE_FIELD_NUMBER, value);
+            method.options = protobuf::MessageField::some(options);
+        }
+
+        let mut service = ServiceDescriptorProto::new();
+        service.name = Some("EchoService".to_string());
+        service.method.push(method);
+
+        let mut file = FileDescriptorProto::new();
+        file.name = Some("echo.proto".to_string());
+        file.package = Some("echo.v1".to_string());
+        file.service.push(service);
+
+        let mut request = PbCodeGeneratorRequest::new();
+        request.proto_file.push(file);
+        request.write_to_bytes().expect("serialize request")
+    }
 
     #[test]
-    fn test_payload_type_from_i32() {
-        assert_eq!(PayloadType::from_i32(0), Some(PayloadType::RpcReliable));
-        assert_eq!(PayloadType::from_i32(1), Some(PayloadType::RpcSignal));
-        assert_eq!(PayloadType::from_i32(2), Some(PayloadType::StreamReliable));
+    fn test_build_explicit_payload_types_reads_set_option() {
+        let bytes = request_bytes_with_payload_type(Some(1));
+        let map = build_explicit_payload_types(&bytes).expect("extract");
         assert_eq!(
-            PayloadType::from_i32(3),
+            map.get(&MethodKey::new("echo.v1", "EchoService", "Echo")),
+            Some(&PayloadType::RpcSignal)
+        );
+    }
+
+    #[test]
+    fn test_build_explicit_payload_types_omits_unset_option() {
+        let bytes = request_bytes_with_payload_type(None);
+        let map = build_explicit_payload_types(&bytes).expect("extract");
+        assert!(map.is_empty());
+    }
+
+    #[test]
+    fn test_build_explicit_payload_types_rejects_unknown_value() {
+        let bytes = request_bytes_with_payload_type(Some(99));
+        let err = build_explicit_payload_types(&bytes).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("unsupported payload_type value 99")
+                && msg.contains("echo.v1.EchoService.Echo"),
+            "error must name the value and method: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_build_explicit_payload_types_rejects_wrong_wire_type() {
+        let mut method = PbMethodDescriptorProto::new();
+        method.name = Some("Echo".to_string());
+        let mut options = protobuf::descriptor::MethodOptions::new();
+        options
+            .mut_unknown_fields()
+            .add_fixed32(PAYLOAD_TYPE_FIELD_NUMBER, 1);
+        method.options = protobuf::MessageField::some(options);
+
+        let mut service = ServiceDescriptorProto::new();
+        service.name = Some("EchoService".to_string());
+        service.method.push(method);
+
+        let mut file = FileDescriptorProto::new();
+        file.package = Some("echo.v1".to_string());
+        file.service.push(service);
+
+        let mut request = PbCodeGeneratorRequest::new();
+        request.proto_file.push(file);
+        let bytes = request.write_to_bytes().expect("serialize request");
+
+        let err = build_explicit_payload_types(&bytes).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("invalid payload_type wire value")
+                && msg.contains("echo.v1.EchoService.Echo"),
+            "error must name the wire-type problem and method: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_build_explicit_payload_types_rejects_garbage_bytes() {
+        let err = build_explicit_payload_types(&[0xff, 0xff, 0xff]).unwrap_err();
+        assert!(
+            format!("{err:#}").contains("failed to decode CodeGeneratorRequest"),
+            "error must describe the decode failure: {err:#}"
+        );
+    }
+
+    #[test]
+    fn test_payload_type_from_u64() {
+        assert_eq!(PayloadType::from_u64(0), Some(PayloadType::RpcReliable));
+        assert_eq!(PayloadType::from_u64(1), Some(PayloadType::RpcSignal));
+        assert_eq!(PayloadType::from_u64(2), Some(PayloadType::StreamReliable));
+        assert_eq!(
+            PayloadType::from_u64(3),
             Some(PayloadType::StreamLatencyFirst)
         );
-        assert_eq!(PayloadType::from_i32(4), Some(PayloadType::MediaRtp));
-        assert_eq!(PayloadType::from_i32(999), None);
+        assert_eq!(PayloadType::from_u64(4), Some(PayloadType::MediaRtp));
+        assert_eq!(PayloadType::from_u64(999), None);
     }
 
     #[test]
@@ -180,7 +330,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_unary_rpc_without_options() {
+    fn test_fallback_unary_rpc() {
         // Unary RPC: no streaming flags
         let method = MethodDescriptorProto {
             name: Some("TestMethod".to_string()),
@@ -191,7 +341,6 @@ mod tests {
             server_streaming: Some(false),
         };
 
-        assert_eq!(extract_payload_type(&method), None);
         assert_eq!(
             extract_payload_type_or_default(&method),
             PayloadType::RpcReliable
@@ -199,7 +348,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_client_streaming_without_options() {
+    fn test_fallback_client_streaming() {
         // Client streaming: stream Request
         let method = MethodDescriptorProto {
             name: Some("UploadFile".to_string()),
@@ -217,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_server_streaming_without_options() {
+    fn test_fallback_server_streaming() {
         // Server streaming: returns stream Response
         let method = MethodDescriptorProto {
             name: Some("DownloadFile".to_string()),
@@ -235,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_bidirectional_streaming_without_options() {
+    fn test_fallback_bidirectional_streaming() {
         // Bidirectional streaming: stream Request, returns stream Response
         let method = MethodDescriptorProto {
             name: Some("StreamChat".to_string()),
