@@ -36,6 +36,13 @@ class CiTargetsTest(unittest.TestCase):
         self.assertTrue(targets["rust_core"])
         self.assertIn(f"core_dependency:{path}", reasons)
 
+    def test_actrix_change_triggers_rust_checks(self) -> None:
+        path = "actrix/crates/turn/src/authenticator.rs"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertIn(f"actrix_workspace:{path}", reasons)
+
     def test_typescript_echo_workload_triggers_workload_checks(self) -> None:
         targets, reasons = ci_targets.detect_targets(
             ["examples/typescript/echo-workload/src/actr_service.ts"],
