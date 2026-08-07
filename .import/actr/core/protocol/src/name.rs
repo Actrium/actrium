@@ -45,6 +45,7 @@ pub struct MethodName(String);
 pub struct Name(String);
 
 #[derive(Debug, Error, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum NameError {
     #[error("Name is empty")]
     Empty,
@@ -130,6 +131,7 @@ impl Display for Name {
 // ----------------------------- PackageName -----------------------------
 
 #[derive(Debug, Error, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum PackageNameError {
     #[error("Package name is empty")]
     Empty,
@@ -254,6 +256,7 @@ impl Display for PackageName {
 // ----------------------------- ServiceName -----------------------------
 
 #[derive(Debug, Error, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum ServiceNameError {
     #[error("Service name is empty")]
     Empty,
@@ -336,6 +339,7 @@ impl Display for ServiceName {
 // ----------------------------- MethodName -----------------------------
 
 #[derive(Debug, Error, Eq, PartialEq)]
+#[non_exhaustive]
 pub enum MethodNameError {
     #[error("Method name is empty")]
     Empty,

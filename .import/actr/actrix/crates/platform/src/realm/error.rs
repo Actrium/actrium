@@ -5,6 +5,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RealmError {
     #[error("Database error: {0}")]
     DatabaseError(String),

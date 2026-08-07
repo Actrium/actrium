@@ -226,6 +226,12 @@ impl From<actr_protocol::ActrError> for ActrError {
             actr_protocol::ActrError::DecodeFailure(msg) => ActrError::DecodeFailure { msg },
             actr_protocol::ActrError::NotImplemented(msg) => ActrError::NotImplemented { msg },
             actr_protocol::ActrError::Internal(msg) => ActrError::Internal { msg },
+            // `actr_protocol::ActrError` is `#[non_exhaustive]`: unmapped
+            // future variants are surfaced as a generic Internal error so
+            // they survive the FFI boundary rather than being lost.
+            other => ActrError::Internal {
+                msg: format!("unmapped actr error: {other}"),
+            },
         }
     }
 }

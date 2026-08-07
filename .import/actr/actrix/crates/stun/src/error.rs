@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// STUN service error enumeration
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum StunError {
     // ========== Server errors ==========
     /// Server start failed

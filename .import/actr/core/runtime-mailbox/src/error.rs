@@ -4,6 +4,7 @@ use thiserror::Error;
 
 /// Storage layer error type
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum StorageError {
     /// Database connection error
     #[error("Database connection error: {0}")]

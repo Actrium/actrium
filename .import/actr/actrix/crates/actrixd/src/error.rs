@@ -8,6 +8,7 @@ use thiserror::Error;
 ///
 /// Aggregates error types from all sub-modules and dependency crates, providing type-safe error handling.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     // ========== Configuration errors ==========
     /// Configuration file related error

@@ -3,6 +3,7 @@ use thiserror::Error;
 pub type WasmResult<T> = Result<T, WasmError>;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum WasmError {
     #[error("WASM package verification failed: {0}")]
     VerificationFailed(#[from] crate::error::HyperError),

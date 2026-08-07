@@ -31,6 +31,7 @@ use thiserror::Error;
 
 /// Unified error type for platform operations
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum PlatformError {
     /// Storage operation failed
     #[error("storage error: {0}")]

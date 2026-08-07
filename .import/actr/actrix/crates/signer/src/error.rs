@@ -10,6 +10,7 @@ use thiserror::Error;
 
 /// Signer service error type
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum SignerError {
     /// Database error
     #[error("Database error: {0}")]

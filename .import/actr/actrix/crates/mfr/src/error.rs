@@ -6,6 +6,7 @@ use axum::{
 use serde_json::json;
 
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum MfrError {
     #[error("database error: {0}")]
     Database(#[from] sqlx::Error),

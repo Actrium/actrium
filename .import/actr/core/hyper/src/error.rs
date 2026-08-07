@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum HyperError {
     /// Signed manifest section not found in package
     #[error("package manifest section not found")]

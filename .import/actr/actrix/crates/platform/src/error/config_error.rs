@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// Configuration-related errors
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ConfigError {
     #[error("Invalid configuration format: {message}")]
     InvalidFormat { message: String },

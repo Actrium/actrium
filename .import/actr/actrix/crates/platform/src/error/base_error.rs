@@ -9,6 +9,7 @@ use thiserror::Error;
 
 /// Top-level error enum, aggregating all sub-crate error types
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum BaseError {
     // ========== Identity management errors ==========
     /// AId Token-related errors

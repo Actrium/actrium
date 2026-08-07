@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// TURN service error enumeration
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum TurnError {
     // ========== Server errors ==========
     /// Server start failed

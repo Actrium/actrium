@@ -6,6 +6,7 @@ use thiserror::Error;
 
 /// Validation-related errors
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ValidationError {
     #[error("Invalid input: {field}")]
     InvalidInput { field: String },

@@ -643,6 +643,7 @@ impl<const CHANNEL_MASK: u8> Record<CHANNEL_MASK> {
 
 /// Runtime recording validation/emit error.
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum RecordingError {
     #[error("recording channel mask cannot be empty")]
     EmptyChannelMask,

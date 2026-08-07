@@ -133,6 +133,7 @@ fn init_worker_id() -> u64 {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SNError {
     /// The provided value exceeds the 54-bit limit.
     ValueOverflow(u64),
