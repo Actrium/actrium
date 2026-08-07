@@ -15,6 +15,19 @@
 # visible rather than being silently absorbed.
 [profile.default]
 
+# Hard per-test time cap (issue #500 follow-up).
+#
+# A test that hangs on an unguarded await (e.g. a `recv().await` with no
+# timeout waiting on a delivery that never arrives) otherwise runs until the
+# job's wall-clock limit — observed as a 6h+ "SLOW" test that cancels the
+# whole run. The 60s period preserves the SLOW diagnostic lines already shown
+# in CI logs; `terminate-after = 5` hard-kills a test 5 × 60s = 5m in, so a
+# hung test fails bounded and fast instead of blocking the suite for hours.
+# 5m is well above every CI-run test's own internal budget (the largest
+# non-`#[ignore]` real-time budget is 60s; larger values elsewhere are
+# `start_paused` virtual-clock time or `#[ignore]`d stress tests).
+slow-timeout = { period = "60s", terminate-after = 5 }
+
 [[profile.default.overrides]]
 filter = 'kind(test)'
 retries = 2
