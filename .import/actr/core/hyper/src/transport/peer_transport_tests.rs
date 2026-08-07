@@ -356,7 +356,12 @@ async fn existing_only_send_does_not_start_a_physical_connection() {
     let manager = PeerTransport::new(ActrId::default(), factory.clone());
 
     let sent = manager
-        .send_existing_with_identity(&Dest::workload(), PayloadType::RpcReliable, b"payload")
+        .send_existing_with_identity(
+            &Dest::workload(),
+            PayloadType::RpcReliable,
+            b"payload",
+            None,
+        )
         .await
         .expect("absence is an admission result, not a transport error");
 
@@ -381,7 +386,7 @@ async fn existing_only_send_uses_a_committed_destination_without_rebuilding() {
     assert_eq!(factory.calls.load(Ordering::Acquire), 1);
 
     let sent = manager
-        .send_existing_with_identity(&dest, PayloadType::RpcReliable, b"payload")
+        .send_existing_with_identity(&dest, PayloadType::RpcReliable, b"payload", None)
         .await
         .expect("committed destination send should succeed");
 
@@ -411,7 +416,7 @@ async fn existing_only_send_materializes_an_inbound_physical_connection() {
     let dest = Dest::workload();
 
     let sent = manager
-        .send_existing_with_identity(&dest, PayloadType::RpcReliable, b"response")
+        .send_existing_with_identity(&dest, PayloadType::RpcReliable, b"response", None)
         .await
         .expect("an existing inbound connection should be reusable");
 
@@ -431,7 +436,7 @@ async fn existing_only_lookup_error_clears_its_materialization_flight() {
     let dest = Dest::workload();
 
     let error = match manager
-        .send_existing_with_identity(&dest, PayloadType::RpcReliable, b"response")
+        .send_existing_with_identity(&dest, PayloadType::RpcReliable, b"response", None)
         .await
     {
         Err(error) => error,
@@ -459,7 +464,7 @@ async fn close_supersedes_existing_only_materialization_before_commit() {
     let sender_dest = dest.clone();
     let sender = tokio::spawn(async move {
         sender_manager
-            .send_existing_with_identity(&sender_dest, PayloadType::RpcReliable, b"response")
+            .send_existing_with_identity(&sender_dest, PayloadType::RpcReliable, b"response", None)
             .await
     });
 
@@ -504,7 +509,7 @@ async fn existing_only_send_does_not_wait_for_an_inflight_destination() {
 
     let sent = timeout(
         Duration::from_secs(1),
-        manager.send_existing_with_identity(&dest, PayloadType::RpcReliable, b"payload"),
+        manager.send_existing_with_identity(&dest, PayloadType::RpcReliable, b"payload", None),
     )
     .await
     .expect("existing-only admission must not wait on the flight")
@@ -986,4 +991,147 @@ async fn close_webrtc_transport_if_session_skips_on_stale_session() {
         0,
         "WebSocket wire must NOT be closed for a stale session"
     );
+}
+
+// ── SentTransportSlot: selection-time recording for timeout reclaim ──
+
+/// Lane whose send never resolves — models a half-open wire (no FIN).
+#[derive(Debug)]
+struct HangingLane;
+
+#[async_trait]
+impl DataLane for HangingLane {
+    async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+        std::future::pending().await
+    }
+
+    fn lane_type(&self) -> &'static str {
+        "hanging"
+    }
+}
+
+#[derive(Debug)]
+struct HangingWire;
+
+#[async_trait]
+impl WireHandle for HangingWire {
+    fn connection_type(&self) -> ConnType {
+        ConnType::WebSocket
+    }
+
+    fn priority(&self) -> u8 {
+        0
+    }
+
+    async fn connect(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        true
+    }
+
+    async fn close(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+
+    async fn get_lane(&self, _payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        Ok(Arc::new(HangingLane))
+    }
+}
+
+struct HangingWireFactory;
+
+#[async_trait]
+impl WireBuilder for HangingWireFactory {
+    async fn create_connections(&self, _dest: &Dest) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+        Ok(vec![Arc::new(HangingWire)])
+    }
+}
+
+/// A wire send that never resolves must still leave the selected transport in
+/// the slot: that is what lets a tell/stream deadline reclaim the exact
+/// instance through the guarded close instead of an unguarded
+/// `close_transport`.
+#[tokio::test]
+async fn send_with_identity_records_transport_before_wire_send_resolves() {
+    let manager = Arc::new(PeerTransport::new(
+        ActrId::default(),
+        Arc::new(HangingWireFactory),
+    ));
+    let dest = Dest::host();
+    let slot: SentTransportSlot = Arc::new(Mutex::new(None));
+
+    let send_handle = tokio::spawn({
+        let manager = Arc::clone(&manager);
+        let dest = dest.clone();
+        let slot = Arc::clone(&slot);
+        async move {
+            let _ = manager
+                .send_with_identity(&dest, PayloadType::RpcReliable, b"tell", Some(&slot))
+                .await;
+        }
+    });
+
+    // The selection record must land while the wire send is still pending.
+    timeout(Duration::from_secs(5), async {
+        loop {
+            if slot.lock().await.is_some() {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("transport must be recorded at selection time, before the send resolves");
+
+    send_handle.abort();
+
+    let recorded = slot.lock().await.clone().expect("record present");
+    assert!(
+        recorded.wire_identity.is_none(),
+        "a send that never resolved records no wire identity"
+    );
+    let recorded_transport = recorded
+        .transport
+        .upgrade()
+        .expect("recorded transport still alive in the manager");
+    let mapped = manager
+        .get_or_create_transport(&dest)
+        .await
+        .expect("destination transport exists");
+    assert!(
+        Arc::ptr_eq(&mapped, &recorded_transport),
+        "the recorded instance is the one the manager still maps"
+    );
+}
+
+/// After a successful send the slot carries the wire identity, so the
+/// request/response reclaim keeps its session-guarded precision.
+#[tokio::test]
+async fn send_with_identity_records_wire_identity_after_send_resolves() {
+    let identity = WireIdentity::WebSocket {
+        peer_id: ActrId::default(),
+        session_id: 7,
+    };
+    let wire = Arc::new(CountingWire::new(
+        ConnType::WebSocket,
+        Some(identity.clone()),
+    ));
+    let factory = Arc::new(SingleWireFactory {
+        wire,
+        calls: AtomicUsize::new(0),
+    });
+    let manager = PeerTransport::new(ActrId::default(), factory);
+    let dest = Dest::host();
+    let slot: SentTransportSlot = Arc::new(Mutex::new(None));
+
+    let sent = manager
+        .send_with_identity(&dest, PayloadType::RpcReliable, b"tell", Some(&slot))
+        .await
+        .expect("send should succeed");
+
+    assert_eq!(sent.wire_identity, Some(identity));
+    let recorded = slot.lock().await.clone().expect("record present");
+    assert_eq!(recorded.wire_identity, sent.wire_identity);
 }

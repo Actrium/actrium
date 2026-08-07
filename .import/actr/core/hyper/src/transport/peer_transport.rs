@@ -20,7 +20,7 @@ use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::sync::{Arc, Weak};
 use std::time::Duration;
-use tokio::sync::{Notify, RwLock};
+use tokio::sync::{Mutex, Notify, RwLock};
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
@@ -215,9 +215,12 @@ impl Drop for CreatedDestTransportGuard {
 
 /// Reference to the DestTransport that accepted a send.
 ///
-/// `wire_identity` is available for WebRTC sessions. `transport` guards wires
-/// without their own session identity, such as WebSocket or fake test wires,
-/// so timeout cleanup cannot close a replacement DestTransport.
+/// `wire_identity` is `Some` once the send has resolved on a wire carrying a
+/// session identity (WebRTC or WebSocket). It stays `None` when the reference
+/// was recorded at transport-selection time and the send has not resolved, or
+/// when the wire has no session identity (fake test wires). `transport` is
+/// the instance guard used by timeout cleanup so it cannot close a
+/// replacement DestTransport.
 #[derive(Clone)]
 pub(crate) struct DestTransportRef {
     transport: Weak<DestTransport>,
@@ -232,6 +235,15 @@ impl DestTransportRef {
         }
     }
 }
+
+/// Shared slot recording the `DestTransport` selected for an in-flight send.
+///
+/// The send path writes the selected transport *before* the wire send can
+/// hang (with `wire_identity: None`), then overwrites it with the
+/// fully-identified reference once the send resolves. A timeout-reclaim path
+/// reading `Some` can therefore always use the instance-guarded close; `None`
+/// means the deadline fired before transport selection completed.
+pub(crate) type SentTransportSlot = Arc<Mutex<Option<DestTransportRef>>>;
 
 /// PeerTransport - Cross-process transport manager
 ///
@@ -556,7 +568,7 @@ impl PeerTransport {
         payload_type: PayloadType,
         data: &[u8],
     ) -> NetworkResult<()> {
-        self.send_with_identity(dest, payload_type, data)
+        self.send_with_identity(dest, payload_type, data, None)
             .await
             .map(|_| ())
     }
@@ -566,13 +578,25 @@ impl PeerTransport {
         dest: &Dest,
         payload_type: PayloadType,
         data: &[u8],
+        record: Option<&SentTransportSlot>,
     ) -> NetworkResult<DestTransportRef> {
         // Get or create DestTransport for this Dest
         let transport = self.get_or_create_transport(dest).await?;
 
+        // Record the selected transport before the wire send: if the send
+        // hangs (half-open wire with no FIN), the caller's deadline can still
+        // reclaim this exact instance through the instance-guarded close.
+        if let Some(slot) = record {
+            *slot.lock().await = Some(DestTransportRef::new(&transport, None));
+        }
+
         // Send through DestTransport
         let wire_identity = transport.send_with_identity(payload_type, data).await?;
-        Ok(DestTransportRef::new(&transport, wire_identity))
+        let sent = DestTransportRef::new(&transport, wire_identity);
+        if let Some(slot) = record {
+            *slot.lock().await = Some(sent.clone());
+        }
+        Ok(sent)
     }
 
     /// Send only through an existing physical connection.
@@ -588,13 +612,24 @@ impl PeerTransport {
         dest: &Dest,
         payload_type: PayloadType,
         data: &[u8],
+        record: Option<&SentTransportSlot>,
     ) -> NetworkResult<Option<DestTransportRef>> {
         let Some(transport) = self.get_or_materialize_existing_transport(dest).await? else {
             return Ok(None);
         };
 
+        // Same selection-time record as `send_with_identity`: a hung wire send
+        // must still leave a reclaimable instance reference behind.
+        if let Some(slot) = record {
+            *slot.lock().await = Some(DestTransportRef::new(&transport, None));
+        }
+
         let wire_identity = transport.send_with_identity(payload_type, data).await?;
-        Ok(Some(DestTransportRef::new(&transport, wire_identity)))
+        let sent = DestTransportRef::new(&transport, wire_identity);
+        if let Some(slot) = record {
+            *slot.lock().await = Some(sent.clone());
+        }
+        Ok(Some(sent))
     }
 
     /// Return a committed destination transport, or materialize one around a
