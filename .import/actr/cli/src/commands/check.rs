@@ -140,9 +140,12 @@ impl Command for CheckCommand {
 
             let lock_file = actr_config::LockFile::from_file(lock_path)
                 .map_err(|e| anyhow::anyhow!("Failed to read lock file: {}", e))?;
+            lock_file
+                .validate_aliases()
+                .map_err(|e| anyhow::anyhow!("Invalid manifest.lock.toml: {}", e))?;
 
             for spec in &specs_to_check {
-                if let Some(locked) = lock_file.get_dependency(&spec.name) {
+                if let Some(locked) = lock_file.get_dependency_by_alias(&spec.alias) {
                     // Check if versions/types match if necessary
                     if let Some(spec_fp) = &spec.fingerprint
                         && spec_fp != &locked.fingerprint

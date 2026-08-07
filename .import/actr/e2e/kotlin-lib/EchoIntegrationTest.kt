@@ -106,9 +106,8 @@ class EchoIntegrationTest {
     @Test
     fun testEchoRecoversAfterShortAndLongBackground(): Unit = runBlocking {
         Log.i(TAG, "=== Kotlin Echo integration test (linked mode + monitoring) ===")
-        val configPath = copyAsset("actr.toml")
+        copyAsset("actr.toml")
         val manifestPath = copyAsset("manifest.toml")
-        copyAsset("manifest.lock.toml")
         val shortBackgroundSeconds =
             backgroundDurationSeconds(
                 "shortBackgroundSeconds",
@@ -130,7 +129,7 @@ class EchoIntegrationTest {
         val lifecycle = __PACKAGE__.UnifiedLifecycleAdapter(workload)
 
         val node = linkedWithMonitoring(
-            configPath = configPath,
+            configPath = manifestPath,
             actorType = actorType,
             workload = lifecycle.toDynamicWorkload(),
             context = ctx(),

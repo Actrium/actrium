@@ -469,10 +469,6 @@ render_linked_client_config() {
     # manifest.toml is read by resolveActorType(); copy the (corrected) project manifest.
     cp "$app_dir/manifest.toml" "$assets_dir/manifest.toml"
 
-    # manifest.lock.toml is required by the runtime; copy the one deps-install produced.
-    if [ -f "$app_dir/manifest.lock.toml" ]; then
-        cp "$app_dir/manifest.lock.toml" "$assets_dir/manifest.lock.toml"
-    fi
     success "Linked client config written to $assets_dir"
 }
 

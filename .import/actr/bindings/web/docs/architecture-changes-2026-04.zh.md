@@ -2,6 +2,8 @@
 
 **评审分支**：`review/main-pending-2026-04` (HEAD = `67736e2d`，相对 `origin/main` 领先 169 commits)
 **生成日期**：2026-04-26
+
+> **历史快照校准（当前事实）**：本文记录 2026-04 review batch；其中 `.wbg` sibling/companion 是当时的过渡布局，现已废弃。当前 wasm-bindgen `*_bg.wasm` 是签名 `.actr` 的 binary，JS glue 是签名资源 `resources/glue.js`，`actor.sw.js` 验证 package 后直接提取二者，不再获取或执行 sibling。
 **关联文档**：
 - [Option U 总体设计](./option-u-wit-compile-web.zh.md)
 - [Option U Phase 6 γ-unified 详细设计](./option-u-phase6-gamma-unified.zh.md)
@@ -99,7 +101,7 @@
    断点：T18 jco async-lift dispatch promise 永挂
 ```
 
-#### After：Option U（当前唯一路径）
+#### After：Option U（图已按当前 package 布局校准；2026-04 的 `.wbg` sibling 已过时）
 
 ```
    WIT 契约
@@ -114,17 +116,16 @@
         │
         │ wasm-pack --target no-modules
         ▼
-   .actr 包                                          浏览器
-   ┌─────────────┐                              ┌──────────────┐
-   │ wasm32-     │   actr build (sign only)     │ Service Worker│
-   │ unknown-    │ ─────────────────────────────►│              │
-   │ unknown     │                              │ ┌──────────┐ │
-   └─────────────┘                              │ │ guest    │ │
-   ┌─────────────┐                              │ │ wasm     │ │
-   │ <stem>.wbg/ │   guest.js + guest_bg.wasm   │ │ (wbg)    │ │
-   │  guest.js   │ ─────────────────────────────►│ └────┬─────┘ │
-   │  guest_bg.wasm                              │      │       │
-   └─────────────┘                              │      │ actrHost│
+   签名 .actr 包                                     浏览器
+   ┌──────────────────────┐                    ┌──────────────┐
+   │ binary: *_bg.wasm    │                    │ Service Worker│
+   │ resources/glue.js    │ ──────────────────►│              │
+   │ manifest hashes + sig│  verify + extract  │ ┌──────────┐ │
+   └──────────────────────┘                    │ │ guest    │ │
+                                               │ │ wasm     │ │
+                                               │ │ (wbg ABI)│ │
+                                               │ └────┬─────┘ │
+                                               │      │ actrHost│
                                                 │      │ globals│
                                                 │ ┌────▼─────┐ │
                                                 │ │ sw-host  │ │
@@ -281,7 +282,7 @@ T18 诊断 (4 轮 spike)
    │ GET  /packages/actr_sw_host_bg.wasm          │ ─► sw-host wasm-pack 产物
    │ GET  /packages/actr_sw_host.js               │ ─► sw-host JS glue
    │ GET  /packages/<name>.actr                   │ ─► 签名后的 .actr 包
-   │ GET  /packages/<name>.wbg/*                  │ ─► wbg 伴生 (guest.js + guest_bg.wasm)
+   │ package 内 binary + resources/glue.js        │ ─► 验证后由 actor.sw.js 直接提取
    │ GET  /                                       │ ─► actr-host.html (内嵌 actr-dom)
    └──────────────────────────────────────────────┘
 
@@ -552,7 +553,7 @@ WIT 本身**结构稳定**（17 个方法 + 10 record + 3 variant）。**重要*
 | `actor.sw.js` 行为变 | 无需改 ── URL 不变，HTML script tag 不动 |
 | `actr run --web` 不再读 `ACTR_WEB_GUEST_MODE` | 删掉环境变量设置 |
 | 自定义 SW 调 `register_component_workload` | 改成 `register_guest_workload` |
-| 用 `<package>.jco/` 作 SW 旁车 | 改用 `<package>.wbg/`；产物由 `wasm-pack --target no-modules` 而不是 `jco transpile` 出 |
+| 用 `<package>.jco/` 或旧 `<package>.wbg/` 作 SW 旁车 | 用 `wasm-pack --target no-modules` 生成产物，再把 `*_bg.wasm` 与 JS glue 分别作为签名 package binary 和 `resources/glue.js` 打入 `.actr` |
 
 ### 8.2 给原生 host 消费者
 

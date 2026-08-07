@@ -215,6 +215,15 @@ impl ContextBridge {
         Ok(id.into())
     }
 
+    /// Resolve a declared dependency alias to its canonical actor type.
+    pub async fn resolve_dependency(
+        &self,
+        alias: String,
+    ) -> crate::error::ActrResult<crate::types::ActrType> {
+        let actr_type = self.inner.resolve_dependency(&alias).await?;
+        Ok(actr_type.into())
+    }
+
     /// Add a media track to the WebRTC connection with the target
     pub async fn add_media_track(
         &self,

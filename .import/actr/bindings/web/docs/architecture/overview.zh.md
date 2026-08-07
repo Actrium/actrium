@@ -3,7 +3,7 @@
 **版本**: 2025-11-11 (更新: 2026-01-08)
 **状态**: 当前实现总览（Option U / wasm-bindgen guest path）
 
-> 当前源码事实：浏览器 guest 只走 Option U。`actor.sw.js` 加载 sw-host WASM 和 `.wbg` guest bundle，DOM 侧只负责 WebRTC 与固定转发；Fast Path 不是 DOM 本地 registry/callback，而是 DOM WebRTC coordinator → `FastPathForwarder` → SW `handle_dom_fast_path` → SW runtime / stream handlers。
+> 当前源码事实：浏览器 guest 只走 Option U。`actor.sw.js` 加载 sw-host WASM，验证 `.actr`，并从包内提取 wasm-bindgen binary 与签名资源 `resources/glue.js`；不执行 sibling `.wbg`。DOM 侧只负责 WebRTC 与固定转发；Fast Path 不是 DOM 本地 registry/callback，而是 DOM WebRTC coordinator → `FastPathForwarder` → SW `handle_dom_fast_path` → SW runtime / stream handlers。
 
 ## 架构全览图
 

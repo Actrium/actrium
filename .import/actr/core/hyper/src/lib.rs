@@ -468,11 +468,58 @@ pub struct Node<S: NodeState = Attached> {
     /// Pending runtime configuration for `Node<Init>`; consumed by attach
     /// methods. `None` on `Attached` / `Registered`.
     pending_runtime_config: Option<actr_config::RuntimeConfig>,
+    /// Explicit dynamic manifest for a linked workload. Package attachment
+    /// never consults this field.
+    pending_linked_manifest: Option<actr_config::ManifestConfig>,
     /// Conflict-key projection spec declared on `Node<Init>` via
     /// [`Node::with_conflict_keys`], consumed by attach / link into the dispatch
     /// scheduler. `None` = no declarations = fully serial dispatch.
     pending_conflict_keys: Option<crate::dispatch::ConflictKeySpec>,
     _state: std::marker::PhantomData<S>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Default)]
+pub(crate) struct LinkedDependencyMetadata {
+    aliases: std::collections::HashMap<String, actr_protocol::ActrType>,
+    fingerprints: std::collections::HashMap<actr_protocol::ActrType, String>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn resolve_linked_dependency_metadata(
+    manifest: &actr_config::ManifestConfig,
+) -> HyperResult<LinkedDependencyMetadata> {
+    let mut aliases = std::collections::HashMap::with_capacity(manifest.dependencies.len());
+    let mut actr_types = std::collections::HashSet::with_capacity(manifest.dependencies.len());
+    let mut fingerprints = std::collections::HashMap::with_capacity(manifest.dependencies.len());
+    for dependency in &manifest.dependencies {
+        let alias = dependency.alias.trim();
+        if alias.is_empty() || alias != dependency.alias {
+            return Err(HyperError::Config(format!(
+                "linked manifest dependency alias `{}` must be non-empty and contain no surrounding whitespace",
+                dependency.alias
+            )));
+        }
+        let actr_type = dependency.actr_type.clone().ok_or_else(|| {
+            HyperError::Config(format!(
+                "linked manifest dependency `{alias}` must declare a complete actr_type for runtime alias resolution"
+            ))
+        })?;
+        let canonical_type = actr_type.to_string_repr();
+        if !actr_types.insert(canonical_type.clone()) {
+            return Err(HyperError::Config(format!(
+                "linked manifest ActrType `{canonical_type}` is assigned to more than one dependency alias"
+            )));
+        }
+        if let Some(service) = &dependency.service {
+            fingerprints.insert(actr_type.clone(), service.fingerprint.clone());
+        }
+        aliases.insert(alias.to_string(), actr_type);
+    }
+    Ok(LinkedDependencyMetadata {
+        aliases,
+        fingerprints,
+    })
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -800,6 +847,21 @@ impl Node {
         config::node_from_config_file_with_package(path.as_ref(), Some(package_info)).await
     }
 
+    /// Load runtime configuration together with the exact dynamic manifest
+    /// that supplies identity and dependency metadata for a linked workload.
+    pub async fn from_config_with_manifest(
+        path: impl AsRef<std::path::Path>,
+        manifest: actr_config::ManifestConfig,
+    ) -> HyperResult<Node<Init>> {
+        let mut node = config::node_from_config_file_with_package(
+            path.as_ref(),
+            Some(manifest.package.clone()),
+        )
+        .await?;
+        node.pending_linked_manifest = Some(manifest);
+        Ok(node)
+    }
+
     /// Escape-hatch constructor: wrap an already-built [`Hyper`] plus a
     /// pre-loaded [`actr_config::RuntimeConfig`] into a [`Node<Init>`].
     ///
@@ -812,6 +874,7 @@ impl Node {
             hyper: hyper.inner,
             attachment: None,
             pending_runtime_config: Some(runtime_config),
+            pending_linked_manifest: None,
             pending_conflict_keys: None,
             _state: std::marker::PhantomData,
         }
@@ -848,6 +911,16 @@ impl Node {
 
 #[cfg(not(target_arch = "wasm32"))]
 impl Node<Init> {
+    /// Attach an already parsed dynamic manifest before linking. The manifest
+    /// becomes authoritative for both actor identity and dependencies.
+    pub fn with_linked_manifest(mut self, manifest: actr_config::ManifestConfig) -> Self {
+        if let Some(runtime) = self.pending_runtime_config.as_mut() {
+            runtime.package = manifest.package.clone();
+        }
+        self.pending_linked_manifest = Some(manifest);
+        self
+    }
+
     /// Read-only view of the runtime configuration pending attachment.
     /// Useful for callers that need to configure observability /
     /// tracing subscribers from the config before driving `attach`.
@@ -863,6 +936,16 @@ impl Node<Init> {
     /// the runtime config has no package manifest. Linked/static hosts use this
     /// method to provide the concrete actor identity used for AIS registration.
     pub fn with_actor_type(mut self, actor_type: actr_protocol::ActrType) -> Self {
+        if let Some(manifest) = self.pending_linked_manifest.as_ref()
+            && manifest.package.actr_type != actor_type
+        {
+            tracing::warn!(
+                requested = %actor_type.to_string_repr(),
+                manifest = %manifest.package.actr_type.to_string_repr(),
+                "ignoring actor type override because the explicit linked manifest owns runtime identity"
+            );
+            return self;
+        }
         let runtime_config = self
             .pending_runtime_config
             .as_mut()
@@ -945,6 +1028,7 @@ impl Node<Init> {
             loaded.workload,
             Some(loaded.verified.manifest.clone()),
             packaged_lock,
+            None,
             mailbox_backpressure_threshold,
             credential_expiry_warning,
             dispatch_concurrency,
@@ -966,6 +1050,7 @@ impl Node<Init> {
                 package_bytes: package.bytes.clone(),
             }),
             pending_runtime_config: None,
+            pending_linked_manifest: None,
             pending_conflict_keys: None,
             _state: std::marker::PhantomData,
         })
@@ -984,6 +1069,12 @@ impl Node<Init> {
         self,
         handle: Arc<dyn workload::LinkedWorkloadHandle>,
     ) -> HyperResult<Node<Attached>> {
+        let dependency_metadata = self
+            .pending_linked_manifest
+            .as_ref()
+            .map(resolve_linked_dependency_metadata)
+            .transpose()?
+            .unwrap_or_default();
         let runtime_config = self
             .pending_runtime_config
             .expect("Node<Init> without pending runtime config");
@@ -999,6 +1090,7 @@ impl Node<Init> {
             crate::workload::Workload::Linked(handle.clone()),
             None,
             None,
+            Some(dependency_metadata),
             mailbox_backpressure_threshold,
             credential_expiry_warning,
             dispatch_concurrency,
@@ -1018,6 +1110,7 @@ impl Node<Init> {
                 package_bytes: bytes::Bytes::new(),
             }),
             pending_runtime_config: None,
+            pending_linked_manifest: None,
             pending_conflict_keys: None,
             _state: std::marker::PhantomData,
         })
@@ -1226,6 +1319,7 @@ impl Node<Attached> {
             hyper: self.hyper,
             attachment: self.attachment,
             pending_runtime_config: None,
+            pending_linked_manifest: None,
             pending_conflict_keys: None,
             _state: std::marker::PhantomData,
         })

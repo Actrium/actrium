@@ -11,10 +11,9 @@
  *   runtime_wasm_url  - URL of the SW runtime WASM (sw-host wasm-pack output)
  *   trust             - array of `TrustAnchor` entries
  *
- * Companion artefact convention:
- *   `<package_url>.wbg/guest.js` and `<package_url>.wbg/guest_bg.wasm` must
- *   be served alongside the .actr; the CLI mounts them when the companion
- *   directory exists.
+ * The signed package must contain a wasm-bindgen `*_bg.wasm` binary and its
+ * generated JS glue as an authenticated resource. No executable sibling
+ * artefacts are loaded outside the verified package.
  */
 
 /* global wasm_bindgen */
@@ -116,7 +115,60 @@ let SW_BROADCAST = null;
 /** @type {import('@actrium/actr-web').SwRuntimeConfig | null} */
 let RUNTIME_CONFIG = null;
 
+function canonicalRuntimeConfig(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalRuntimeConfig);
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, canonicalRuntimeConfig(value[key])])
+    );
+  }
+  return value;
+}
+
+function runtimeConfigsEqual(left, right) {
+  return (
+    JSON.stringify(canonicalRuntimeConfig(left)) ===
+    JSON.stringify(canonicalRuntimeConfig(right))
+  );
+}
+
+function validateRuntimeConfig(config) {
+  if (!config || typeof config !== 'object') {
+    throw new Error('[SW] runtimeConfig must be an object');
+  }
+  for (const field of ['client_actr_type', 'package_url', 'runtime_wasm_url']) {
+    if (typeof config[field] !== 'string' || config[field].trim() === '') {
+      throw new Error(`[SW] runtimeConfig.${field} must be a non-empty string`);
+    }
+  }
+  if (!Array.isArray(config.trust)) {
+    throw new Error('[SW] runtimeConfig.trust must be an array');
+  }
+  return config;
+}
+
+function verifiedPackageActrType(extracted) {
+  let manifest;
+  try {
+    manifest = JSON.parse(extracted.manifest_json);
+  } catch (error) {
+    throw new Error('[SW] Verified package manifest JSON is invalid: ' + String(error));
+  }
+  const fields = ['manufacturer', 'name', 'version'];
+  for (const field of fields) {
+    if (typeof manifest[field] !== 'string' || manifest[field].trim() === '') {
+      throw new Error(`[SW] Verified package manifest is missing ${field}`);
+    }
+  }
+  return `${manifest.manufacturer}:${manifest.name}:${manifest.version}`;
+}
+
 let wasmReady = false;
+let wasmInitPromise = null;
 let wsProbeDone = false;
 
 const clientPorts = new Map();
@@ -202,7 +254,7 @@ function actrIdKebabToCamel(id) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// Install the 8 `actrHost*` globals the wasm-bindgen guest imports.
+// Install the `actrHost*` globals the wasm-bindgen guest imports.
 //
 // The guest's `.wasm` imports these by bare global name (wasm-pack
 // `--target no-modules` resolves them from the enclosing global scope —
@@ -287,6 +339,17 @@ function installActrHostGlobals() {
     }
   };
 
+  self.actrHostResolveDependency = async function (requestId, alias) {
+    // Alias resolution is package-scoped, so lifecycle hooks may use their
+    // empty request id; no dispatch context lookup is required.
+    try {
+      const actrType = await wasm_bindgen.host_resolve_dependency(requestId, alias);
+      return { Ok: actrType };
+    } catch (e) {
+      return { Err: mapHostErrorToActr(e) };
+    }
+  };
+
   self.actrHostGetCallerId = async function (requestId) {
     try {
       const id = wasm_bindgen.host_get_caller_id(requestId);
@@ -342,18 +405,20 @@ function mapHostErrorToActr(e) {
   // actr-web-abi `ActrError` variant serde tags are kebab-case; we
   // return the matching `{ "kebab-tag": payload }` shape.
   const tag = (e && e.actrErrorTag) || 'internal';
-  const msg = (e && e.message) || String(e);
+  const msg = (e && e.actrMessage) || (e && e.message) || String(e);
   // `timed-out` is a unit variant; serde emits it as a bare string.
   if (tag === 'timed-out') return 'timed-out';
   if (tag === 'connection-not-ready') {
     const retryAfterMs = Number.isFinite(e && e.actrRetryAfterMs) ? e.actrRetryAfterMs : null;
     return { 'connection-not-ready': { 'retry-after-ms': retryAfterMs } };
   }
-  // `dependency-not-found` carries a record payload; we don't have the
-  // fields cleanly separated here, so fall back to `internal` to keep
-  // the result deserialisable.
   if (tag === 'dependency-not-found') {
-    return { internal: msg };
+    return {
+      'dependency-not-found': {
+        'service-name': (e && e.actrServiceName) || '',
+        message: msg,
+      },
+    };
   }
   return { [tag]: msg };
 }
@@ -378,6 +443,9 @@ async function loadWithGuestBridge(packageUrl, runtimeWasmUrl) {
 
   await wasm_bindgen({ module_or_path: runtimeWasmUrl });
   wasm_bindgen.init_global();
+  // A replacement package starts from an empty dependency snapshot. Failed
+  // verification or lock parsing must not retain aliases from an old package.
+  wasm_bindgen.install_dependency_lock(undefined);
   emitSwLog('info', 'guest_bridge_runtime_ready', null);
 
   // ── 2. Install actrHost* globals BEFORE guest instantiation ──
@@ -396,34 +464,31 @@ async function loadWithGuestBridge(packageUrl, runtimeWasmUrl) {
   const trustJson = JSON.stringify(
     RUNTIME_CONFIG && Array.isArray(RUNTIME_CONFIG.trust) ? RUNTIME_CONFIG.trust : []
   );
+  let extracted;
   try {
-    // Phase 4c: the `.actr` package for the WBG variant wraps the
-    // wasm-bindgen core wasm; we still call verify_and_extract to honour
-    // signing, but we intentionally ignore `extracted.binary` because the
-    // actual module we load is the companion `guest_bg.wasm` shipped in
-    // the `.wbg/` sibling directory (see §5 below). The core wasm inside
-    // the .actr is identical; we just need the JS glue from the sibling
-    // bundle to drive it with wasm-bindgen conventions.
-    wasm_bindgen.verify_and_extract_actr_package(new Uint8Array(buffer), trustJson);
+    extracted = wasm_bindgen.verify_and_extract_actr_package(
+      new Uint8Array(buffer),
+      trustJson
+    );
+    const verifiedActrType = verifiedPackageActrType(extracted);
+    if (!RUNTIME_CONFIG || RUNTIME_CONFIG.client_actr_type !== verifiedActrType) {
+      throw new Error(
+        `[SW] Verified package identity ${verifiedActrType} does not match configured runtime identity ` +
+          `${RUNTIME_CONFIG && RUNTIME_CONFIG.client_actr_type}`
+      );
+    }
+    wasm_bindgen.install_dependency_lock(extracted.lock_file_toml);
     emitSwLog('info', 'guest_bridge_verify_ok', null);
   } catch (verifyError) {
     emitSwLog('error', 'guest_bridge_verify_failed', String(verifyError));
     throw verifyError;
   }
 
-  // ── 4. Resolve wbg bundle URL ──
-  const wbgJsUrl =
-    (RUNTIME_CONFIG && RUNTIME_CONFIG.wbg_module_url) ||
-    packageUrl.replace(/\.actr$/, '') + '.wbg/guest.js';
-  emitSwLog('info', 'guest_bridge_guest_js_url', wbgJsUrl);
-
-  // ── 5. Fetch guest JS glue, rewrite top-level `let wasm_bindgen` to
-  // write to a dedicated global (avoid clobbering sw-host's).
-  const wbgResp = await fetch(wbgJsUrl, { cache: 'no-store' });
-  if (!wbgResp.ok) {
-    throw new Error('[SW] Failed to fetch WBG guest JS: ' + wbgResp.status);
+  // ── 4. Evaluate the authenticated wasm-bindgen glue from the package.
+  const wbgSrc = extracted.glue_js;
+  if (typeof wbgSrc !== 'string' || wbgSrc.length === 0) {
+    throw new Error('[SW] Verified web package does not contain resources/glue.js');
   }
-  const wbgSrc = await wbgResp.text();
   // wasm-pack `--target no-modules` emits `let wasm_bindgen = (function(exports) {...})({});`.
   // Rewrite to `self.actrGuestBindgen = ...` so the glue coexists with
   // sw-host (also keyed to `self.wasm_bindgen`).
@@ -438,10 +503,8 @@ async function loadWithGuestBridge(packageUrl, runtimeWasmUrl) {
     throw new Error('[SW] actrGuestBindgen init not installed after eval');
   }
 
-  // ── 6. Instantiate guest wasm ──
-  const wbgWasmUrl = wbgJsUrl.replace(/\.js$/, '_bg.wasm');
-  emitSwLog('info', 'guest_bridge_guest_wasm_url', wbgWasmUrl);
-  await self.actrGuestBindgen({ module_or_path: wbgWasmUrl });
+  // ── 5. Instantiate the authenticated package binary directly.
+  await self.actrGuestBindgen({ module_or_path: extracted.binary });
   emitSwLog('info', 'guest_bridge_guest_instantiated', Object.keys(self.actrGuestBindgen));
 
   // ── 7. Build dispatchFn that adapts sw-host envelope (camelCase) to
@@ -479,6 +542,21 @@ async function loadWithGuestBridge(packageUrl, runtimeWasmUrl) {
 
 async function ensureWasmReady() {
   if (wasmReady) return;
+  if (wasmInitPromise) return wasmInitPromise;
+
+  wasmInitPromise = initializeWasm();
+  try {
+    await wasmInitPromise;
+  } catch (error) {
+    // A failed first configuration must not permanently poison this worker.
+    // No workload has been registered successfully at this point.
+    RUNTIME_CONFIG = null;
+    wasmInitPromise = null;
+    throw error;
+  }
+}
+
+async function initializeWasm() {
 
   if (!RUNTIME_CONFIG) {
     throw new Error('[SW] Cannot load WASM: RUNTIME_CONFIG not yet received');
@@ -583,8 +661,36 @@ self.addEventListener('message', async (event) => {
   const clientId = event.data.clientId;
   if (!port || !clientId) return;
 
-  if (event.data.runtimeConfig && !RUNTIME_CONFIG) {
-    RUNTIME_CONFIG = event.data.runtimeConfig;
+  if (event.data.runtimeConfig) {
+    let candidateConfig;
+    try {
+      candidateConfig = validateRuntimeConfig(event.data.runtimeConfig);
+    } catch (error) {
+      try {
+        port.postMessage({
+          type: 'runtime_error',
+          error: error && error.message ? error.message : String(error),
+        });
+        port.close();
+      } catch (_) {
+        /* ignore */
+      }
+      return;
+    }
+    if (!RUNTIME_CONFIG) {
+      RUNTIME_CONFIG = candidateConfig;
+    } else if (!runtimeConfigsEqual(candidateConfig, RUNTIME_CONFIG)) {
+      const message =
+        '[SW] This Service Worker is already bound to a different runtime/package configuration';
+      emitSwLog('error', 'runtime_config_mismatch', { clientId, message });
+      try {
+        port.postMessage({ type: 'runtime_error', error: message });
+        port.close();
+      } catch (_) {
+        /* ignore */
+      }
+      return;
+    }
   }
 
   const browserId = event.source && event.source.id;
@@ -725,18 +831,26 @@ self.addEventListener('message', async (event) => {
 
   port.start();
 
-  ensureWasmReady().then(async () => {
-    try {
+  ensureWasmReady()
+    .then(async () => {
       if (!RUNTIME_CONFIG) {
-        console.error('[SW] RUNTIME_CONFIG not received from main thread');
-        return;
+        throw new Error('[SW] RUNTIME_CONFIG not received from main thread');
       }
       await wasm_bindgen.register_client(clientId, RUNTIME_CONFIG, port);
       console.log('[SW] Client registered (WBG):', clientId);
       emitSwLog('info', 'client_registered', { clientId, variant: 'wbg' });
-    } catch (error) {
+      port.postMessage({ type: 'runtime_ready' });
+    })
+    .catch((error) => {
       console.error('[SW] register_client failed:', error);
       emitSwLog('error', 'register_client_failed', { clientId, error: String(error) });
-    }
-  });
+      try {
+        port.postMessage({
+          type: 'runtime_error',
+          error: error && error.message ? error.message : String(error),
+        });
+      } catch (_) {
+        /* port may be closed */
+      }
+    });
 });

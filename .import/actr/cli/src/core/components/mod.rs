@@ -75,7 +75,11 @@ pub struct MethodDefinition {
 /// Service information
 #[derive(Debug, Clone)]
 pub struct ServiceInfo {
-    /// Service name (package name)
+    /// Registry discovery key/display name. Actrix currently emits its
+    /// internal `manufacturer:ActrTypeName` service key here.
+    ///
+    /// Do not persist this as a manifest service reference; use
+    /// [`Self::dependency_service_name`] instead.
     pub name: String,
     pub tags: Vec<String>,
     pub fingerprint: String,
@@ -83,6 +87,15 @@ pub struct ServiceInfo {
     pub published_at: Option<i64>,
     pub description: Option<String>,
     pub methods: Vec<MethodDefinition>,
+}
+
+impl ServiceInfo {
+    /// Canonical service name persisted in manifest and lock dependency
+    /// metadata. The service-spec lookup protocol is keyed by `ActrType.name`,
+    /// while `name` above is a registry index key.
+    pub fn dependency_service_name(&self) -> &str {
+        &self.actr_type.name
+    }
 }
 
 /// Service details
@@ -441,6 +454,10 @@ pub trait CacheManager: Send + Sync {
 
     /// Invalidate cache
     async fn invalidate_cache(&self, service_name: &str) -> Result<()>;
+
+    /// Remove cached dependency directories whose aliases are no longer in
+    /// the manifest snapshot.
+    async fn retain_aliases(&self, aliases: &std::collections::HashSet<String>) -> Result<()>;
 
     /// Clear cache
     async fn clear_cache(&self) -> Result<()>;

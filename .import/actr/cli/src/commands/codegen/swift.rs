@@ -249,20 +249,19 @@ impl LanguageGenerator for SwiftGenerator {
                     // If not found in Config, try to get from LockFile
                     if actr_type_str.is_none() {
                         if let Some(ref lock) = lock_file {
-                            // LockFile uses 'name' field to match (which is the dependency name/alias)
-                            if let Some(locked_dep) = lock.get_dependency(dep_alias) {
+                            if let Some(locked_dep) = lock.get_dependency_by_alias(dep_alias) {
                                 debug!(
-                                    "Found matching dependency in LockFile: name={}, actr_type={}",
-                                    locked_dep.name, locked_dep.actr_type
+                                    "Found matching dependency in LockFile: alias={}, actr_type={}",
+                                    locked_dep.alias, locked_dep.actr_type
                                 );
                                 actr_type_str = Some(locked_dep.actr_type.clone());
                             } else {
                                 debug!(
-                                    "No matching dependency found in LockFile for name: {} (available names: {:?})",
+                                    "No matching dependency found in LockFile for alias: {} (available aliases: {:?})",
                                     dep_alias,
                                     lock.dependencies
                                         .iter()
-                                        .map(|d| &d.name)
+                                        .map(|d| &d.alias)
                                         .collect::<Vec<_>>()
                                 );
                             }

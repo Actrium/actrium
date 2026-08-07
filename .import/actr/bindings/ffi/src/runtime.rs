@@ -6,7 +6,7 @@ use crate::types::{
     PayloadType, ReconnectReason,
 };
 use crate::workload::{DynamicWorkload, RuntimeObservers};
-use actr_framework::{Bytes, Dest};
+use actr_framework::{Bytes, Context as _, Dest};
 use actr_hyper::{ActrRef, NetworkEventHandle, Node, Registered, WorkloadPackage};
 use parking_lot::Mutex;
 use std::sync::Arc;
@@ -124,6 +124,10 @@ impl ActrNode {
     }
 
     /// Create a linked/static runtime from a foreign-language workload.
+    ///
+    /// Pass `manifest.toml` as `config_path` to load dependency aliases and
+    /// its sibling `actr.toml`. Passing `actr.toml` directly remains supported
+    /// for workloads with no dynamic manifest dependencies.
     #[uniffi::constructor(async_runtime = "tokio")]
     pub async fn new_from_linked_workload(
         config_path: String,
@@ -131,7 +135,7 @@ impl ActrNode {
         workload: Arc<DynamicWorkload>,
     ) -> ActrResult<Arc<Self>> {
         let actor_type: actr_protocol::ActrType = actor_type.into();
-        let init = load_linked_init(&config_path).await?;
+        let init = load_linked_init(&config_path, &actor_type).await?;
         let attached = init
             .with_actor_type(actor_type.clone())
             .link(workload.as_ref().clone())
@@ -495,6 +499,20 @@ impl ActrRefWrapper {
 
         Ok(())
     }
+
+    /// Resolve a dependency alias to its declared `ActrType`.
+    ///
+    /// App-side convenience wrapper around `app_context().resolve_dependency(alias)`.
+    /// Used by generated remote-route dispatch arms to resolve their declared
+    /// dependency alias before route discovery.
+    pub async fn resolve_dependency(&self, alias: String) -> ActrResult<crate::types::ActrType> {
+        let ctx = self.inner.app_context().await;
+        let actr_type = ctx
+            .resolve_dependency(&alias)
+            .await
+            .map_err(crate::error::ActrError::from)?;
+        Ok(actr_type.into())
+    }
 }
 
 #[cfg(test)]
@@ -504,8 +522,32 @@ impl ActrRefWrapper {
     }
 }
 
-async fn load_linked_init(config_path: &str) -> ActrResult<Node<actr_hyper::Init>> {
-    let init = Node::from_config_file(config_path).await.map_err(|e| {
+async fn load_linked_init(
+    config_path: &str,
+    actor_type: &actr_protocol::ActrType,
+) -> ActrResult<Node<actr_hyper::Init>> {
+    let path = std::path::Path::new(config_path);
+    let init = if path.file_name().is_some_and(|name| name == "manifest.toml") {
+        let manifest = actr_config::ConfigParser::from_manifest_file(path).map_err(|error| {
+            ActrError::Config {
+                msg: format!("Failed to load linked manifest `{config_path}`: {error}"),
+            }
+        })?;
+        if manifest.package.actr_type != *actor_type {
+            return Err(ActrError::Config {
+                msg: format!(
+                    "Linked manifest identity {} does not match requested actor type {}",
+                    manifest.package.actr_type.to_string_repr(),
+                    actor_type.to_string_repr()
+                ),
+            });
+        }
+        let runtime_path = manifest.config_dir.join("actr.toml");
+        Node::from_config_with_manifest(&runtime_path, manifest).await
+    } else {
+        Node::from_config_file(config_path).await
+    }
+    .map_err(|e| {
         error!("Failed to load runtime config: {}", e);
         ActrError::Config {
             msg: format!("Failed to load runtime config `{}`: {}", config_path, e),
@@ -610,6 +652,25 @@ mod tests {
         config_path
     }
 
+    fn write_test_manifest(dir: &std::path::Path) -> std::path::PathBuf {
+        let manifest_path = dir.join("manifest.toml");
+        std::fs::write(
+            &manifest_path,
+            r#"edition = 1
+
+[package]
+name = "LinkedProbe"
+manufacturer = "acme"
+version = "0.1.0"
+
+[dependencies]
+echo = { actr_type = "acme:EchoService:1.0.0" }
+"#,
+        )
+        .expect("write manifest.toml");
+        manifest_path
+    }
+
     async fn linked_node_for_test(config_path: &std::path::Path) -> ActrResult<Arc<ActrNode>> {
         let workload = DynamicWorkload::new(
             Box::new(TestLifecycleBridge::default()),
@@ -630,6 +691,68 @@ mod tests {
             workload,
         )
         .await
+    }
+
+    #[tokio::test]
+    async fn linked_manifest_constructor_enforces_manifest_identity() {
+        let mut server = MockActrixServer::start()
+            .await
+            .expect("mock actrix server should start");
+        let temp = tempdir().expect("temp dir");
+        write_test_config(temp.path(), &server);
+        let manifest_path = write_test_manifest(temp.path());
+        let manifest_type = actr_protocol::ActrType::from_string_repr("acme:LinkedProbe:0.1.0")
+            .expect("manifest actor type");
+
+        let init = load_linked_init(manifest_path.to_str().unwrap(), &manifest_type)
+            .await
+            .expect("load manifest-backed linked node");
+        assert_eq!(init.runtime_config().actr_type(), &manifest_type);
+
+        let workload = DynamicWorkload::new(
+            Box::new(TestLifecycleBridge::default()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let attached = init
+            .with_actor_type(manifest_type.clone())
+            .link(workload.as_ref().clone())
+            .await
+            .expect("link manifest-backed workload");
+        let node = register_linked_node(attached)
+            .await
+            .expect("register manifest-backed linked node");
+        let actr_ref = node
+            .start()
+            .await
+            .expect("start manifest-backed linked node");
+        let resolved = actr_ref
+            .resolve_dependency("echo".to_string())
+            .await
+            .expect("resolve dependency supplied by linked manifest");
+        assert_eq!(
+            resolved,
+            crate::types::ActrType {
+                manufacturer: "acme".to_string(),
+                name: "EchoService".to_string(),
+                version: "1.0.0".to_string(),
+            }
+        );
+
+        let wrong_type = actr_protocol::ActrType::from_string_repr("other:Override:9.9.9").unwrap();
+        let error = match load_linked_init(manifest_path.to_str().unwrap(), &wrong_type).await {
+            Ok(_) => panic!("mismatching linked identity should fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("does not match requested actor type")
+        );
+        server.shutdown().await;
     }
 
     #[tokio::test]

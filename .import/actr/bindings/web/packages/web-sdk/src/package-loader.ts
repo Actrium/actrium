@@ -1,22 +1,13 @@
 /**
- * Web Package Loader — Web equivalent of Rust Hyper's load_package_executor
+ * Unverified .actr package inspection helpers.
  *
- * In Rust Hyper, load_package_executor:
- *   1. Takes bytes of a .actr package (signed ZIP)
- *   2. Verifies the signature
- *   3. Extracts the WASM binary
- *   4. Loads it with wasmtime
- *   5. Returns an executor
+ * These helpers only parse the ZIP and manifest. They DO NOT verify
+ * manifest.sig, signing trust, or any manifest-declared content hash. Every
+ * returned field is attacker-controlled when the input package is untrusted.
+ * Never eval the returned JavaScript or instantiate the returned WASM.
  *
- * In the Web platform, the equivalent is:
- *   1. Fetch .actr package from a URL (or accept raw bytes)
- *   2. Parse the ZIP (STORE method, no compression)
- *   3. Extract manifest.toml manifest, WASM binary, JS glue, and actor.sw.js
- *   4. Return structured package contents for inspection or SW loading
- *
- * The actual WASM loading in the Service Worker happens via actor.sw.js
- * which has its own ZIP parser and loads directly from package_url.
- * This module provides main-thread inspection of .actr packages.
+ * Executable workload loading belongs to actor.sw.js, which delegates package
+ * verification to the Rust Web host before extracting binary or glue content.
  *
  * .actr ZIP structure (all entries STORE / no compression):
  *   manifest.toml             - package manifest (TOML)
@@ -29,7 +20,7 @@
 /**
  * Parsed manifest.toml manifest
  */
-export interface ActrManifest {
+export interface UnverifiedActrManifest {
   manufacturer: string;
   name: string;
   version: string;
@@ -53,18 +44,27 @@ export interface ActrManifest {
 /**
  * Result of parsing a .actr package
  */
-export interface LoadedActrPackage {
-  /** Parsed manifest from manifest.toml */
-  manifest: ActrManifest;
-  /** Raw WASM binary bytes */
+export interface UnverifiedLoadedActrPackage {
+  /** Unverified manifest text parsed from manifest.toml. */
+  manifest: UnverifiedActrManifest;
+  /** Unverified raw WASM bytes. Never instantiate these bytes. */
   wasmBytes: Uint8Array;
-  /** JS glue source text (resources/glue.js) */
+  /** Unverified JS source text. Never evaluate this text. */
   jsGlue: string | null;
-  /** actor.sw.js source text */
+  /** Unverified Service Worker source text. Never register or evaluate it. */
   actorSwJs: string | null;
-  /** All files in the ZIP: filename → bytes */
+  /** Unverified ZIP entries: filename → bytes. */
   files: Map<string, Uint8Array>;
 }
+
+/** @deprecated Use UnverifiedActrManifest; this parser does not verify packages. */
+export type ActrManifest = UnverifiedActrManifest;
+
+/**
+ * @deprecated Use UnverifiedLoadedActrPackage; none of its contents are
+ * authenticated and executable fields must not be executed.
+ */
+export type LoadedActrPackage = UnverifiedLoadedActrPackage;
 
 // ── ZIP parser (STORE-only) ──
 
@@ -107,8 +107,8 @@ function parseStoreZip(buffer: ArrayBuffer): Map<string, Uint8Array> {
  * Parse a minimal subset of TOML used in manifest.toml.
  * Handles top-level keys, [section] headers, [[array]] items.
  */
-function parseActrToml(text: string): ActrManifest {
-  const manifest: ActrManifest = {
+function parseActrToml(text: string): UnverifiedActrManifest {
+  const manifest: UnverifiedActrManifest = {
     manufacturer: '',
     name: '',
     version: '',
@@ -182,34 +182,35 @@ function parseActrToml(text: string): ActrManifest {
 // ── Public API ──
 
 /**
- * Fetch and parse a .actr package from a URL.
+ * Fetch and inspect a .actr package from a URL without verification.
  *
- * This is the main-thread equivalent of Hyper's load_package_executor.
- * Use this for package inspection, manifest reading, or pre-validation
- * before the Service Worker loads the package.
+ * This is suitable only for non-security-sensitive display and diagnostics.
+ * It does not perform pre-validation. Do not execute any returned content.
  *
  * @param url - URL of the .actr package
- * @returns Parsed package contents
+ * @returns Unverified package contents
  */
-export async function loadActrPackage(url: string): Promise<LoadedActrPackage> {
+export async function loadUnverifiedActrPackage(
+  url: string
+): Promise<UnverifiedLoadedActrPackage> {
   const resp = await fetch(url);
   if (!resp.ok) {
     throw new Error(`Failed to fetch .actr package: ${resp.status} ${resp.statusText} (${url})`);
   }
   const buffer = await resp.arrayBuffer();
-  return parseActrPackage(buffer);
+  return parseUnverifiedActrPackage(buffer);
 }
 
 /**
- * Parse raw .actr package bytes (ArrayBuffer).
+ * Inspect raw .actr package bytes without verification.
  *
- * Extracts all ZIP entries, parses manifest.toml manifest,
- * and returns structured access to WASM binary, JS glue, etc.
+ * The result has not passed signature or hash verification. It must never be
+ * used as an executable workload or as trusted package metadata.
  *
  * @param buffer - Raw .actr ZIP bytes
- * @returns Parsed package contents
+ * @returns Unverified package contents
  */
-export function parseActrPackage(buffer: ArrayBuffer): LoadedActrPackage {
+export function parseUnverifiedActrPackage(buffer: ArrayBuffer): UnverifiedLoadedActrPackage {
   const files = parseStoreZip(buffer);
 
   // Parse manifest
@@ -248,4 +249,20 @@ export function parseActrPackage(buffer: ArrayBuffer): LoadedActrPackage {
   }
 
   return { manifest, wasmBytes, jsGlue, actorSwJs, files };
+}
+
+/**
+ * @deprecated Use loadUnverifiedActrPackage. Despite its historical name,
+ * this function does not verify signatures or hashes. Never execute its output.
+ */
+export async function loadActrPackage(url: string): Promise<LoadedActrPackage> {
+  return loadUnverifiedActrPackage(url);
+}
+
+/**
+ * @deprecated Use parseUnverifiedActrPackage. Despite its historical name,
+ * this function does not verify signatures or hashes. Never execute its output.
+ */
+export function parseActrPackage(buffer: ArrayBuffer): LoadedActrPackage {
+  return parseUnverifiedActrPackage(buffer);
 }

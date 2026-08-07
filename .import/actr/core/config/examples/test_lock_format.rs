@@ -24,7 +24,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         tags: vec!["latest".to_string(), "stable".to_string()],
     };
 
-    let dep = LockedDependency::new("acme+user-service".to_string(), spec_meta);
+    let dep = LockedDependency::new(
+        "user-service".to_string(),
+        "acme:user-service:1.0.0".to_string(),
+        spec_meta,
+    );
 
     lock_file.add_dependency(dep);
 

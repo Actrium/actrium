@@ -121,6 +121,8 @@ fn test_project_template_generation() {
     assert!(temp_dir.path().join("project.yml").exists());
     // Verify manifest.toml exists
     assert!(temp_dir.path().join("manifest.toml").exists());
+    // Linked Swift workloads resolve dependencies from manifest.toml at runtime.
+    assert!(!temp_dir.path().join("manifest.lock.toml").exists());
     // Verify .gitignore exists
     assert!(temp_dir.path().join(".gitignore").exists());
     // Note: proto files are no longer created during init, they will be pulled via actr deps install

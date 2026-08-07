@@ -130,7 +130,6 @@ export function buildRuntimeConfig(): SwRuntimeConfig {
         signaling_url: c.signaling_url,
         realm_id: c.realm_id,
         client_actr_type: c.package.full_type,
-        target_actr_type: c.acl_allow_types[0] || '',
         service_fingerprint: '',
         acl_allow_types: c.acl_allow_types,
         package_url: c.package_url,

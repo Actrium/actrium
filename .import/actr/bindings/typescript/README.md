@@ -53,7 +53,8 @@ async function main() {
   );
 
   console.log(response.toString());
-  await actorRef.stop();
+  actorRef.shutdown();
+  await actorRef.waitForShutdown();
 }
 
 main().catch(console.error);
@@ -65,9 +66,10 @@ main().catch(console.error);
   `manifest.toml`
   and auto-loads `actr.toml` from the same directory.
 - `ActrRef.discover(targetType, count)` resolves remote actors.
+- `ActrRef.resolveDependency(alias)` resolves a manifest alias before discovery.
 - `ActrRef.call(target, routeKey, payloadType, payload, timeoutMs)` sends a remote RPC.
 - `ActrRef.tell(target, routeKey, payloadType, payload)` sends a one-way remote message.
-- `ActrRef.stop()` shuts down the actor and waits for completion.
+- `ActrRef.shutdown()` and `waitForShutdown()` stop the actor.
 
 ## Relationship to the Rust Node Typestate
 
@@ -145,8 +147,8 @@ npm run codegen -- --config examples/echo-client/manifest.toml
 
 Notes:
 
-- The generator reads `manifest.lock.toml` first; ensure it includes the
-  dependencies you want emitted.
+- Remote generation requires a v2 `manifest.lock.toml` with explicit aliases.
+  Run `actr deps install` after changing dependencies.
 - Proto sources default to `examples/echo-client/protos/remote`.
 - Outputs include protobuf codecs, route helpers, and `local.actor.ts`.
 

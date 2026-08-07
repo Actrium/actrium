@@ -86,11 +86,6 @@ impl ConfigManager for TomlConfigManager {
 
         let mut dep_table = InlineTable::new();
 
-        // Add name attribute if it differs from alias
-        if spec.name != spec.alias {
-            dep_table.insert("name", Value::from(spec.name.clone()));
-        }
-
         // Add actr_type attribute - preserve existing if new one is not provided
         if let Some(actr_type) = &spec.actr_type {
             let actr_type_repr = actr_type.to_string_repr();
@@ -108,14 +103,40 @@ impl ConfigManager for TomlConfigManager {
             }
         }
 
-        // Add fingerprint - preserve existing if new one is not provided
+        // Persist the strict service reference in the schema the manifest
+        // parser actually consumes: `ServiceName:fingerprint`.
         if let Some(fingerprint) = &spec.fingerprint {
-            dep_table.insert("fingerprint", Value::from(fingerprint.as_str()));
+            dep_table.insert(
+                "service",
+                Value::from(format!("{}:{}", spec.name, fingerprint)),
+            );
         } else if let Some(existing) = existing_dep {
-            // Preserve existing fingerprint if new spec doesn't have one
-            if let Some(existing_fp) = existing.get("fingerprint") {
-                dep_table.insert("fingerprint", existing_fp.clone());
+            if let Some(existing_service) = existing.get("service") {
+                dep_table.insert("service", existing_service.clone());
             }
+        }
+
+        // Updating a dependency must not discard an existing cross-realm
+        // override.
+        if let Some(existing) = existing_dep
+            && let Some(existing_realm) = existing.get("realm")
+        {
+            dep_table.insert("realm", existing_realm.clone());
+        }
+
+        // Drop fields written by older CLI versions but ignored by the v1
+        // manifest parser. Rewriting the inline table above canonicalizes the
+        // entry to `actr_type`, `service`, and optional `realm`.
+        if spec.fingerprint.is_none()
+            && let Some(existing) = existing_dep
+            && existing.get("service").is_none()
+            && let Some(fingerprint) = existing.get("fingerprint").and_then(Value::as_str)
+        {
+            let name = existing
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or(&spec.name);
+            dep_table.insert("service", Value::from(format!("{name}:{fingerprint}")));
         }
 
         doc["dependencies"][&spec.alias] = Item::Value(Value::InlineTable(dep_table));
@@ -147,6 +168,16 @@ impl ConfigManager for TomlConfigManager {
         for dependency in &config.dependencies {
             if dependency.alias.trim().is_empty() {
                 errors.push("dependency alias is required".to_string());
+            }
+            let mut components = std::path::Path::new(&dependency.alias).components();
+            if dependency.alias.contains(['/', '\\', '\0'])
+                || !matches!(components.next(), Some(std::path::Component::Normal(_)))
+                || components.next().is_some()
+            {
+                errors.push(format!(
+                    "dependency alias '{}' must be one safe path component",
+                    dependency.alias
+                ));
             }
             if let Some(actr_type) = &dependency.actr_type
                 && actr_type.name.trim().is_empty()

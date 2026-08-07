@@ -74,6 +74,11 @@ extern "C" {
         request_id: JsValue,
         stream_id: JsValue,
     ) -> Result<js_sys::Promise, JsValue>;
+    #[wasm_bindgen(catch, js_name = "actrHostResolveDependency")]
+    fn __actr_host_resolve_dependency(
+        request_id: JsValue,
+        alias: JsValue,
+    ) -> Result<js_sys::Promise, JsValue>;
     #[wasm_bindgen(catch, js_name = "actrHostSendDataChunk")]
     fn __actr_host_send_data_chunk(
         request_id: JsValue,
@@ -238,6 +243,24 @@ pub async fn register_stream_with_request_id(
     let __js_request_id = JsValue::from_str(request_id);
     let __js_arg0 = serde_wasm_bindgen::to_value(&stream_id).map_err(serde_err)?;
     let __js_promise = __actr_host_register_stream(__js_request_id, __js_arg0)?;
+    let __js_result = JsFuture::from(__js_promise).await?;
+    let __out = serde_wasm_bindgen::from_value(__js_result).map_err(serde_err)?;
+    Ok(__out)
+}
+
+/// Guest-side wrapper for WIT `host.resolve-dependency`.
+///
+/// The `request_id` first parameter threads per-dispatch context
+/// through to the SW host (Phase 6 γ-unified §3.4). Callers are
+/// expected to pass `Context::request_id()`; manual construction
+/// is discouraged.
+pub async fn resolve_dependency_with_request_id(
+    request_id: &str,
+    alias: String,
+) -> Result<Result<ActrType, ActrError>, JsValue> {
+    let __js_request_id = JsValue::from_str(request_id);
+    let __js_arg0 = serde_wasm_bindgen::to_value(&alias).map_err(serde_err)?;
+    let __js_promise = __actr_host_resolve_dependency(__js_request_id, __js_arg0)?;
     let __js_result = JsFuture::from(__js_promise).await?;
     let __out = serde_wasm_bindgen::from_value(__js_result).map_err(serde_err)?;
     Ok(__out)

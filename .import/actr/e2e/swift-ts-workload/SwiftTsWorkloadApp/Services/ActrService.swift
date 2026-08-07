@@ -97,11 +97,9 @@ final class ActrService: ObservableObject {
         setupFileLog()
 
         do {
-            let configURL = try materializeRuntimeConfig()
+            let manifestURL = try materializeRuntimeConfig()
 
-            // Read manufacturer from environment variable or default to "actrium"
-            let manufacturer = ProcessInfo.processInfo.environment["ACTR_MANUFACTURER"] ?? "actrium"
-            let actorType = ActrType(manufacturer: manufacturer, name: "SwiftTsWorkloadApp", version: "0.1.0")
+            let actorType = try resolveManifestPackageActrType(manifestPath: manifestURL.path)
 
             let handler = ProbeHandlerImpl(service: self)
             let workload = Actr.dynamicWorkload(
@@ -110,7 +108,7 @@ final class ActrService: ObservableObject {
 
             setLogCallback(callback: ActrLogHandler(service: self))
 
-            let node = try await Actr.ActrNode.linked(config: configURL, type: actorType, workload: workload)
+            let node = try await Actr.ActrNode.linked(config: manifestURL, type: actorType, workload: workload)
             let ref = try await node.start()
 
             actrNode = node
@@ -254,10 +252,13 @@ final class ActrService: ObservableObject {
         max(60_000, Int64(count) * 2_500 + 60_000)
     }
 
-    /// Reads actr.toml from the Bundle, appends hyper data_dir and trust config, writes to app support.
+    /// Materializes sibling manifest.toml and actr.toml files in app support.
     private func materializeRuntimeConfig() throws -> URL {
         guard let templateURL = Bundle.main.url(forResource: "actr", withExtension: "toml") else {
             throw ActrServiceError.missingConfigTemplate
+        }
+        guard let bundledManifestURL = Bundle.main.url(forResource: "manifest", withExtension: "toml") else {
+            throw ActrServiceError.missingManifest
         }
 
         let fileManager = FileManager.default
@@ -283,12 +284,15 @@ final class ActrService: ObservableObject {
 
         let configURL = appURL.appendingPathComponent("actr.toml")
         try config.write(to: configURL, atomically: true, encoding: .utf8)
-        return configURL
+        let manifestURL = appURL.appendingPathComponent("manifest.toml")
+        try Data(contentsOf: bundledManifestURL).write(to: manifestURL, options: .atomic)
+        return manifestURL
     }
 }
 
 private enum ActrServiceError: Error {
     case missingConfigTemplate
+    case missingManifest
 }
 
 // MARK: - E2E Result Emission

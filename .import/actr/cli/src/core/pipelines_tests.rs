@@ -27,6 +27,22 @@ fn dependency_lookup_key_prefers_actr_type_over_name() {
 }
 
 #[test]
+fn manifest_service_name_does_not_use_registry_index_key() {
+    let info = crate::core::ServiceInfo {
+        name: "acme:EchoService".into(),
+        tags: vec![],
+        fingerprint: "service_semantic:echo".into(),
+        actr_type: actr_protocol::ActrType::from_string_repr("acme:EchoService:1.0.0").unwrap(),
+        published_at: None,
+        description: None,
+        methods: vec![],
+    };
+
+    assert_eq!(info.dependency_service_name(), "EchoService");
+    assert_ne!(info.dependency_service_name(), info.name);
+}
+
+#[test]
 fn install_result_success_is_empty() {
     let result = InstallResult::success();
     assert!(result.installed_dependencies.is_empty());
@@ -47,6 +63,145 @@ fn install_result_summary_counts_deps_and_cache() {
     let s = result.summary();
     assert!(s.contains("Installed 0 dependencies"));
     assert!(s.contains("updated 5 cache entries"));
+}
+
+fn resolved_dependency(alias: &str, name: &str, actr_type: &str) -> ResolvedDependency {
+    ResolvedDependency {
+        spec: DependencySpec {
+            alias: alias.into(),
+            name: name.into(),
+            actr_type: Some(actr_protocol::ActrType::from_string_repr(actr_type).unwrap()),
+            fingerprint: Some(format!("service_semantic:{alias}")),
+        },
+        fingerprint: format!("service_semantic:{alias}"),
+        proto_files: vec![crate::core::ProtoFile {
+            name: "service.proto".into(),
+            path: std::path::PathBuf::from("unused/service.proto"),
+            content: "syntax = \"proto3\";".into(),
+            services: vec![],
+        }],
+    }
+}
+
+#[test]
+fn lock_snapshot_uses_alias_paths_and_contains_only_supplied_manifest_entries() {
+    let current = resolved_dependency("echo", "EchoService", "acme:EchoActor:1.0.0");
+    let lock = build_lock_snapshot(&[current]).unwrap();
+
+    assert_eq!(lock.dependencies.len(), 1);
+    assert_eq!(lock.dependencies[0].alias, "echo");
+    assert_eq!(lock.dependencies[0].name, "EchoService");
+    assert_eq!(lock.dependencies[0].files[0].path, "echo/service.proto");
+    assert!(lock.get_dependency_by_alias("removed-alias").is_none());
+}
+
+#[test]
+fn lock_snapshot_rejects_two_aliases_for_one_actor_type() {
+    let first = resolved_dependency("echo", "EchoService", "acme:EchoActor:1.0.0");
+    let second = resolved_dependency("echo-again", "OtherService", "acme:EchoActor:1.0.0");
+
+    let error = build_lock_snapshot(&[first, second])
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("actr_type `acme:EchoActor:1.0.0`"),
+        "{error}"
+    );
+}
+
+#[test]
+fn lock_rebuild_migrates_v1_and_prunes_dependencies_absent_from_manifest() {
+    let legacy: actr_config::LockFile = r#"
+[metadata]
+version = 1
+generated_at = "2026-01-01T00:00:00Z"
+
+[[dependency]]
+name = "removed-service"
+actr_type = "acme:Removed:1.0.0"
+fingerprint = "service_semantic:removed"
+cached_at = "2026-01-01T00:00:00Z"
+
+[[dependency.files]]
+path = "removed-service/removed.proto"
+fingerprint = "semantic:removed"
+"#
+    .parse()
+    .unwrap();
+    let current = resolved_dependency("echo", "EchoService", "acme:EchoActor:1.0.0");
+
+    let rebuilt = rebuild_lock_snapshot(Some(&legacy), &[current]).unwrap();
+
+    assert_eq!(
+        rebuilt.format_version(),
+        actr_config::lock::LOCK_FILE_VERSION
+    );
+    assert_eq!(rebuilt.dependencies.len(), 1);
+    assert_eq!(rebuilt.dependencies[0].alias, "echo");
+    assert!(rebuilt.get_dependency("removed-service").is_none());
+}
+
+#[test]
+fn future_lock_version_is_rejected_before_rebuild() {
+    let future: actr_config::LockFile = r#"
+[metadata]
+version = 3
+generated_at = "2026-01-01T00:00:00Z"
+"#
+    .parse()
+    .unwrap();
+
+    let error = validate_existing_lock_version(&future)
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("version 3"), "{error}");
+    assert!(rebuild_lock_snapshot(Some(&future), &[]).is_err());
+}
+
+#[test]
+fn filesystem_backup_restores_lock_and_proto_cache() {
+    let dir = tempfile::tempdir().unwrap();
+    let lock = dir.path().join("manifest.lock.toml");
+    let cache = dir.path().join("protos/remote/echo");
+    std::fs::create_dir_all(&cache).unwrap();
+    std::fs::write(&lock, "before-lock").unwrap();
+    std::fs::write(cache.join("echo.proto"), "before-proto").unwrap();
+
+    let backup = InstallFilesystemBackup::capture(dir.path()).unwrap();
+    std::fs::write(&lock, "after-lock").unwrap();
+    std::fs::remove_dir_all(dir.path().join("protos/remote")).unwrap();
+    backup.restore().unwrap();
+
+    assert_eq!(std::fs::read_to_string(lock).unwrap(), "before-lock");
+    assert_eq!(
+        std::fs::read_to_string(cache.join("echo.proto")).unwrap(),
+        "before-proto"
+    );
+}
+
+#[test]
+fn lock_snapshot_keeps_same_registry_name_isolated_by_alias() {
+    let first = resolved_dependency("primary", "shared-service", "acme:Primary:1.0.0");
+    let second = resolved_dependency("secondary", "shared-service", "acme:Secondary:1.0.0");
+
+    let lock = build_lock_snapshot(&[first, second]).unwrap();
+
+    assert_eq!(lock.dependencies[0].files[0].path, "primary/service.proto");
+    assert_eq!(
+        lock.dependencies[1].files[0].path,
+        "secondary/service.proto"
+    );
+}
+
+#[test]
+fn discovered_fingerprint_must_match_manifest_pin() {
+    let dependency = resolved_dependency("echo", "EchoService", "acme:EchoActor:1.0.0");
+    assert!(validate_discovered_fingerprint(&dependency.spec, "service_semantic:echo").is_ok());
+
+    let error = validate_discovered_fingerprint(&dependency.spec, "service_semantic:changed")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("fingerprint mismatch"), "{error}");
 }
 
 // ── mock trait implementations for pipeline testing ─────────────────
@@ -294,6 +449,46 @@ impl crate::core::CacheManager for MockCacheManager {
     async fn invalidate_cache(&self, _name: &str) -> anyhow::Result<()> {
         unreachable!()
     }
+    async fn retain_aliases(
+        &self,
+        _aliases: &std::collections::HashSet<String>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn clear_cache(&self) -> anyhow::Result<()> {
+        unreachable!()
+    }
+    async fn get_cache_stats(&self) -> anyhow::Result<crate::core::CacheStats> {
+        unreachable!()
+    }
+}
+
+struct FailingRetainCacheManager;
+
+#[async_trait]
+impl crate::core::CacheManager for FailingRetainCacheManager {
+    async fn get_cached_proto(
+        &self,
+        _name: &str,
+    ) -> anyhow::Result<Option<crate::core::CachedProto>> {
+        unreachable!()
+    }
+    async fn cache_proto(
+        &self,
+        _name: &str,
+        _protos: &[crate::core::ProtoFile],
+    ) -> anyhow::Result<()> {
+        unreachable!()
+    }
+    async fn invalidate_cache(&self, _name: &str) -> anyhow::Result<()> {
+        unreachable!()
+    }
+    async fn retain_aliases(
+        &self,
+        _aliases: &std::collections::HashSet<String>,
+    ) -> anyhow::Result<()> {
+        anyhow::bail!("injected retain failure")
+    }
     async fn clear_cache(&self) -> anyhow::Result<()> {
         unreachable!()
     }
@@ -304,6 +499,37 @@ impl crate::core::CacheManager for MockCacheManager {
 
 struct MockProtoProcessor {
     proto_is_valid: bool,
+}
+
+fn empty_snapshot_pipeline(
+    project_root: &Path,
+    cache: Arc<dyn crate::core::CacheManager>,
+) -> InstallPipeline {
+    let manifest_path = project_root.join("manifest.toml");
+    std::fs::write(
+        &manifest_path,
+        "edition = 1\n[package]\nname = \"Empty\"\nmanufacturer = \"acme\"\nversion = \"1.0.0\"\n",
+    )
+    .unwrap();
+    let config: Arc<dyn ConfigManager> =
+        Arc::new(crate::core::TomlConfigManager::new(&manifest_path));
+    let dependency_resolver: Arc<dyn DependencyResolver> = Arc::new(MockDepResolver);
+    let service_discovery: Arc<dyn ServiceDiscovery> = Arc::new(MockServiceDiscovery {
+        service_available: true,
+    });
+    let network: Arc<dyn NetworkValidator> = Arc::new(MockNetworkValidator { reachable: true });
+    let fingerprints: Arc<dyn FingerprintValidator> = Arc::new(MockFingerprintValidator);
+    let proto: Arc<dyn crate::core::ProtoProcessor> = Arc::new(MockProtoProcessor {
+        proto_is_valid: true,
+    });
+    let validation = ValidationPipeline::new(
+        config.clone(),
+        dependency_resolver,
+        service_discovery,
+        network,
+        fingerprints,
+    );
+    InstallPipeline::new(validation, config, cache, proto)
 }
 #[async_trait]
 impl crate::core::ProtoProcessor for MockProtoProcessor {
@@ -611,6 +837,71 @@ async fn install_dependencies_succeeds_with_empty_specs() {
     let ip = InstallPipeline::new(vp, config, cache, proto);
     let result = ip.install_dependencies(&[]).await.unwrap();
     assert!(result.installed_dependencies.is_empty());
+}
+
+#[tokio::test]
+async fn empty_snapshot_rejects_future_lock_without_modifying_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = "[metadata]\nversion = 3\ngenerated_at = \"2026-08-06T00:00:00Z\"\n";
+    let lock_path = dir.path().join("manifest.lock.toml");
+    std::fs::write(&lock_path, original).unwrap();
+    let pipeline = empty_snapshot_pipeline(dir.path(), Arc::new(MockCacheManager));
+
+    let error = pipeline
+        .install_empty_dependency_snapshot()
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("version 3"), "{error}");
+    assert_eq!(std::fs::read_to_string(lock_path).unwrap(), original);
+}
+
+#[tokio::test]
+async fn empty_snapshot_migrates_v1_and_prunes_all_cached_aliases() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join("manifest.lock.toml"),
+        "[metadata]\nversion = 1\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
+    )
+    .unwrap();
+    let cached = dir.path().join("protos/remote/echo/echo.proto");
+    std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+    std::fs::write(&cached, "syntax = \"proto3\";").unwrap();
+    let cache: Arc<dyn crate::core::CacheManager> = Arc::new(
+        crate::core::DefaultCacheManager::with_project_root(dir.path().to_path_buf()),
+    );
+    let pipeline = empty_snapshot_pipeline(dir.path(), cache);
+
+    let result = pipeline.install_empty_dependency_snapshot().await.unwrap();
+    let lock = actr_config::LockFile::from_file(dir.path().join("manifest.lock.toml")).unwrap();
+
+    assert!(result.updated_lock_file);
+    assert_eq!(lock.format_version(), actr_config::lock::LOCK_FILE_VERSION);
+    assert!(lock.dependencies.is_empty());
+    assert!(!cached.exists());
+}
+
+#[tokio::test]
+async fn empty_snapshot_restores_lock_and_cache_when_pruning_fails() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = "[metadata]\nversion = 2\ngenerated_at = \"2026-08-06T00:00:00Z\"\n";
+    let lock_path = dir.path().join("manifest.lock.toml");
+    std::fs::write(&lock_path, original).unwrap();
+    let cached = dir.path().join("protos/remote/echo/echo.proto");
+    std::fs::create_dir_all(cached.parent().unwrap()).unwrap();
+    std::fs::write(&cached, "before").unwrap();
+    let pipeline = empty_snapshot_pipeline(dir.path(), Arc::new(FailingRetainCacheManager));
+
+    let error = pipeline
+        .install_empty_dependency_snapshot()
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("injected retain failure"), "{error}");
+    assert_eq!(std::fs::read_to_string(lock_path).unwrap(), original);
+    assert_eq!(std::fs::read_to_string(cached).unwrap(), "before");
 }
 
 #[tokio::test]

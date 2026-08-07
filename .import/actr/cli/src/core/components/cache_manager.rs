@@ -3,15 +3,15 @@
 //! Proto files are cached to the project's `protos/remote/` folder (not ~/.actr/cache)
 //! following the documentation spec for dependency management.
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
-use std::path::PathBuf;
+use std::path::{Component, Path, PathBuf};
 
 use super::{CacheManager, CacheStats, CachedProto, Fingerprint, ProtoFile};
 
 /// Default cache manager (file-based, project-local)
 ///
-/// Caches proto files to `{project_root}/protos/remote/{service_name}/` directory
+/// Caches proto files to `{project_root}/protos/remote/{dependency_alias}/` directory
 /// following the documentation spec.
 pub struct DefaultCacheManager {
     /// Project root directory (where manifest.toml is located)
@@ -29,13 +29,39 @@ impl DefaultCacheManager {
         Self { project_root }
     }
 
-    /// Get the proto cache directory for a service
-    /// Returns: {project_root}/protos/remote/{service_name}/
-    fn get_service_proto_dir(&self, service_name: &str) -> PathBuf {
-        self.project_root
-            .join("protos")
-            .join("remote")
-            .join(service_name)
+    /// Get the proto cache directory for a source-level dependency alias.
+    /// Returns: {project_root}/protos/remote/{dependency_alias}/
+    fn validate_component<'a>(value: &'a str, label: &str) -> Result<&'a str> {
+        if value.is_empty() || value.contains(['/', '\\', '\0']) {
+            anyhow::bail!("{label} `{value}` is not a safe path component");
+        }
+        let mut components = Path::new(value).components();
+        if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+            anyhow::bail!("{label} `{value}` is not a safe path component");
+        }
+        Ok(value)
+    }
+
+    fn remote_root(&self) -> Result<PathBuf> {
+        let project_root = std::fs::canonicalize(&self.project_root).with_context(|| {
+            format!("canonicalize project root {}", self.project_root.display())
+        })?;
+        let remote_root = self.project_root.join("protos").join("remote");
+        std::fs::create_dir_all(&remote_root)?;
+        let canonical_remote = std::fs::canonicalize(&remote_root)?;
+        if !canonical_remote.starts_with(&project_root) {
+            anyhow::bail!(
+                "proto cache root {} escapes project root {}",
+                canonical_remote.display(),
+                project_root.display()
+            );
+        }
+        Ok(canonical_remote)
+    }
+
+    fn get_service_proto_dir(&self, dependency_alias: &str) -> Result<PathBuf> {
+        let alias = Self::validate_component(dependency_alias, "dependency alias")?;
+        Ok(self.remote_root()?.join(alias))
     }
 }
 
@@ -48,7 +74,7 @@ impl Default for DefaultCacheManager {
 #[async_trait]
 impl CacheManager for DefaultCacheManager {
     async fn get_cached_proto(&self, service_name: &str) -> Result<Option<CachedProto>> {
-        let cache_path = self.get_service_proto_dir(service_name);
+        let cache_path = self.get_service_proto_dir(service_name)?;
 
         if !cache_path.exists() {
             return Ok(None);
@@ -85,8 +111,24 @@ impl CacheManager for DefaultCacheManager {
     }
 
     async fn cache_proto(&self, service_name: &str, files: &[ProtoFile]) -> Result<()> {
-        let cache_path = self.get_service_proto_dir(service_name);
-        std::fs::create_dir_all(&cache_path)?;
+        if files.is_empty() {
+            anyhow::bail!("refusing to replace cache for `{service_name}` with an empty snapshot");
+        }
+        let cache_path = self.get_service_proto_dir(service_name)?;
+        if cache_path.exists()
+            && std::fs::symlink_metadata(&cache_path)?
+                .file_type()
+                .is_symlink()
+        {
+            anyhow::bail!(
+                "proto cache path is a symbolic link: {}",
+                cache_path.display()
+            );
+        }
+        let remote_root = self.remote_root()?;
+        let staging = tempfile::Builder::new()
+            .prefix(".actr-cache-")
+            .tempdir_in(&remote_root)?;
 
         for file in files {
             // Use the proto file name directly (e.g., echo.v1.proto)
@@ -95,13 +137,31 @@ impl CacheManager for DefaultCacheManager {
             } else {
                 format!("{}.proto", file.name)
             };
-            let file_path = cache_path.join(&file_name);
+            let file_name = Self::validate_component(&file_name, "proto file name")?;
+            let file_path = staging.path().join(file_name);
             std::fs::write(&file_path, &file.content)?;
             tracing::debug!(
                 "Cached proto file: {} -> {}",
                 file.name,
                 file_path.display()
             );
+        }
+
+        let staged_path = staging.keep();
+        let backup_path = remote_root.join(format!(".actr-cache-backup-{}", uuid::Uuid::new_v4()));
+        let had_existing = cache_path.exists();
+        if had_existing {
+            std::fs::rename(&cache_path, &backup_path)?;
+        }
+        if let Err(error) = std::fs::rename(&staged_path, &cache_path) {
+            if had_existing {
+                let _ = std::fs::rename(&backup_path, &cache_path);
+            }
+            let _ = std::fs::remove_dir_all(&staged_path);
+            return Err(error.into());
+        }
+        if had_existing {
+            std::fs::remove_dir_all(&backup_path)?;
         }
 
         tracing::info!(
@@ -113,9 +173,30 @@ impl CacheManager for DefaultCacheManager {
     }
 
     async fn invalidate_cache(&self, service_name: &str) -> Result<()> {
-        let cache_path = self.get_service_proto_dir(service_name);
+        let cache_path = self.get_service_proto_dir(service_name)?;
         if cache_path.exists() {
             std::fs::remove_dir_all(&cache_path)?;
+        }
+        Ok(())
+    }
+
+    async fn retain_aliases(&self, aliases: &std::collections::HashSet<String>) -> Result<()> {
+        for alias in aliases {
+            Self::validate_component(alias, "dependency alias")?;
+        }
+        let remote_root = self.remote_root()?;
+        for entry in std::fs::read_dir(&remote_root)? {
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().to_string();
+            if name.starts_with(".actr-cache-") || aliases.contains(&name) {
+                continue;
+            }
+            let metadata = std::fs::symlink_metadata(entry.path())?;
+            if metadata.file_type().is_symlink() || metadata.is_file() {
+                std::fs::remove_file(entry.path())?;
+            } else if metadata.is_dir() {
+                std::fs::remove_dir_all(entry.path())?;
+            }
         }
         Ok(())
     }

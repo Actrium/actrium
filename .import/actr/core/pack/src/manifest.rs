@@ -30,18 +30,14 @@ fn default_sig_algorithm() -> String {
 
 /// Shape of the binary carried by an .actr package.
 ///
-/// Phase 1 introduces the Component Model as the only supported wasm shape;
-/// older `core-module` packages were valid before the host rewrite in
-/// Phase 1 Commit 2 and fail to load against the new wasmtime
-/// `Component::from_binary` path. We keep the enum open to future variants
-/// (native cdylib, etc.) by encoding it as a lowercase kebab-case string
-/// rather than a closed numeric code.
+/// Native Hyper executes Component Model workloads, while the browser runtime
+/// executes wasm-bindgen core modules. The enum is encoded as a lowercase
+/// kebab-case string so package consumers can select the appropriate backend.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum BinaryKind {
-    /// Legacy core wasm module (`wasm_core_module`). No longer loadable —
-    /// retained in the enum so the verifier can produce a helpful
-    /// migration error rather than a generic "unknown kind".
+    /// Core wasm module. Used by browser `wasm32-unknown-unknown` packages;
+    /// native Hyper rejects it in favour of Component Model workloads.
     CoreModule,
     /// Component Model component (wasip2 canonical ABI).
     Component,

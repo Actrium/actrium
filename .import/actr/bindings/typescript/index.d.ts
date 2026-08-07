@@ -15,7 +15,7 @@
 // `error.message`; the `index.js` wrapper parses it and re-throws an
 // `ActrError` so consumers see stable, typed metadata.
 
-export type ActrErrorKind = 'Transient' | 'Client' | 'Internal' | 'Corrupt'
+export type ActrErrorKind = 'Transient' | 'Client' | 'Internal' | 'Corrupt';
 
 export type ActrErrorCode =
   | 'Unavailable'
@@ -30,73 +30,86 @@ export type ActrErrorCode =
   | 'NotImplemented'
   | 'Internal'
   | 'Config'
-  | 'HyperBootstrap'
+  | 'HyperBootstrap';
 
 export declare class ActrError extends Error {
-  readonly kind: ActrErrorKind
-  readonly code: ActrErrorCode
-  readonly service_name?: string
-  readonly retry_after_ms?: number | null
+  readonly kind: ActrErrorKind;
+  readonly code: ActrErrorCode;
+  readonly service_name?: string;
+  readonly retry_after_ms?: number | null;
   /** `true` iff `kind === 'Transient'` — retry with backoff. */
-  isRetryable(): boolean
+  isRetryable(): boolean;
   /** `true` iff `code === 'ConnectionNotReady'`. */
-  isConnectionNotReady(): boolean
+  isConnectionNotReady(): boolean;
   /** `true` iff `kind === 'Corrupt'` — route to Dead Letter Queue. */
-  requiresDlq(): boolean
+  requiresDlq(): boolean;
 }
 
 export declare class ActrNode {
   /** Create a client-only ActrNode directly from a config file path. */
-  static fromFile(configPath: string): Promise<ActrNode>
+  static fromFile(configPath: string): Promise<ActrNode>;
   /**
    * Start the node and return ActrRef.
    *
    * One-shot: consumes the internal Hyper handle. A second call resolves
    * with `Node already started`.
    */
-  start(): Promise<ActrRef>
+  start(): Promise<ActrRef>;
 }
 
 export declare class ActrRef {
   /** Get the actor ID. */
-  actorId(): ActrId
+  actorId(): ActrId;
   /** Discover actors of the given type. */
-  discover(targetType: ActrType, count: number): Promise<Array<ActrId>>
+  discover(targetType: ActrType, count: number): Promise<Array<ActrId>>;
+  /** Resolve a declared dependency alias to its canonical actor type. */
+  resolveDependency(alias: string): Promise<ActrType>;
   /** Call remote actor (RPC). */
-  call(target: ActrId, routeKey: string, payloadType: PayloadType, requestPayload: Buffer, timeoutMs: number): Promise<Buffer>
+  call(
+    target: ActrId,
+    routeKey: string,
+    payloadType: PayloadType,
+    requestPayload: Buffer,
+    timeoutMs: number,
+  ): Promise<Buffer>;
   /** Send one-way message (fire-and-forget). */
-  tell(target: ActrId, routeKey: string, payloadType: PayloadType, messagePayload: Buffer): Promise<void>
+  tell(
+    target: ActrId,
+    routeKey: string,
+    payloadType: PayloadType,
+    messagePayload: Buffer,
+  ): Promise<void>;
   /** Trigger shutdown. */
-  shutdown(): void
+  shutdown(): void;
   /** Wait for shutdown to complete. */
-  waitForShutdown(): Promise<void>
+  waitForShutdown(): Promise<void>;
   /** Check if shutdown is in progress. */
-  isShuttingDown(): boolean
+  isShuttingDown(): boolean;
 }
 
 export interface ActrId {
-  realm: Realm
-  serialNumber: number
-  type: ActrType
+  realm: Realm;
+  serialNumber: number;
+  type: ActrType;
 }
 
 export interface ActrType {
-  manufacturer: string
-  name: string
-  version: string
+  manufacturer: string;
+  name: string;
+  version: string;
 }
 
 export interface DataChunk {
-  streamId: string
-  sequence: number
-  payload: Buffer
-  metadata: Array<MetadataEntry>
-  timestampMs?: number
+  streamId: string;
+  sequence: number;
+  payload: Buffer;
+  metadata: Array<MetadataEntry>;
+  timestampMs?: number;
 }
 
 export interface MetadataEntry {
-  key: string
-  value: string
+  key: string;
+  value: string;
 }
 
 export declare const enum PayloadType {
@@ -104,20 +117,20 @@ export declare const enum PayloadType {
   RpcSignal = 1,
   StreamReliable = 2,
   StreamLatencyFirst = 3,
-  MediaRtp = 4
+  MediaRtp = 4,
 }
 
 export interface Realm {
-  realmId: number
+  realmId: number;
 }
 
 export interface RpcEnvelopeBridge {
-  routeKey: string
-  payload: Buffer
-  requestId: string
+  routeKey: string;
+  payload: Buffer;
+  requestId: string;
 }
 
 export interface StreamSignal {
-  chunk: DataChunk
-  sender: ActrId
+  chunk: DataChunk;
+  sender: ActrId;
 }

@@ -762,31 +762,10 @@ impl RunCommand {
             .map(|f| f.to_string_lossy().to_string())
             .unwrap_or_else(|| "package.actr".to_string());
 
-        // Option U / Phase 4: sibling `<stem>.wbg/` directory carrying the
-        // wasm-bindgen guest bundle (produced by `wasm-pack --target
-        // no-modules` from the unified guest crates, see Phase 6c). Mounted
-        // with the same `<package_url>.wbg/...` convention actor.sw.js
-        // expects.
-        let wbg_dir = package_path.as_ref().and_then(|pkg_path| {
-            let stem = pkg_path.file_stem().map(|s| s.to_os_string())?;
-            let mut wbg = pkg_path.with_file_name(stem);
-            wbg.as_mut_os_string().push(".wbg");
-            if wbg.is_dir() { Some(wbg) } else { None }
-        });
-        let wbg_route_prefix = if wbg_dir.is_some() {
-            let stem = package_path
-                .as_ref()
-                .and_then(|p| p.file_stem())
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| "package".to_string());
-            Some(format!("/packages/{}.wbg", stem))
-        } else {
-            None
-        };
-
         // Build runtime config JSON — auto-inject embedded asset URLs
-        let runtime_config_json =
-            self.build_web_runtime_config(&raw_config, &config_path, &package_filename)?;
+        let runtime_config_json = self
+            .build_web_runtime_config(&raw_config, &config_path, &package_filename)
+            .await?;
 
         let shared_state = Arc::new(WebServerState {
             runtime_config_json,
@@ -800,26 +779,14 @@ impl RunCommand {
         // 3. /packages/actr_sw_host_bg.wasm — embedded SW host WASM
         // 4. /packages/actr_sw_host.js — embedded SW host JS glue
         // 5. /packages/<name>.actr — the .actr package from [package].path
-        // 6. /packages/<name>.wbg/* — wasm-bindgen guest bundle sibling of
-        //    the .actr (produced at build time by `wasm-pack --target
-        //    no-modules`). Only mounted when the directory exists.
-        // 7. / — embedded host HTML (fallback: static_dir)
-        let mut app = Router::new()
+        // 6. / — embedded host HTML (fallback: static_dir)
+        let app = Router::new()
             .route("/actr-runtime-config.json", get(serve_runtime_config))
             .route("/actor.sw.js", get(serve_actor_sw_js))
             .route("/packages/actr_sw_host_bg.wasm", get(serve_runtime_wasm))
             .route("/packages/actr_sw_host.js", get(serve_runtime_js))
             .route("/packages/{filename}", get(serve_actr_package))
             .with_state(shared_state.clone());
-
-        if let (Some(wbg_dir), Some(prefix)) = (wbg_dir.as_ref(), wbg_route_prefix.as_ref()) {
-            info!(
-                "📦 Mounting wasm-bindgen guest bundle at {} -> {}",
-                prefix,
-                wbg_dir.display()
-            );
-            app = app.nest_service(prefix, ServeDir::new(wbg_dir));
-        }
 
         let app = app
             .fallback_service(if static_dir.exists() {
@@ -869,7 +836,7 @@ impl RunCommand {
         Ok(())
     }
 
-    fn build_web_runtime_config(
+    async fn build_web_runtime_config(
         &self,
         raw: &actr_config::RuntimeRawConfig,
         config_path: &Path,
@@ -962,20 +929,47 @@ impl RunCommand {
             .and_then(|w| w.runtime_wasm_url.clone())
             .unwrap_or_else(|| "/packages/actr_sw_host_bg.wasm".to_string());
 
-        // Serialise `[[trust]]` anchors to the web runtime in the same shape
-        // the Rust side uses (see `actr_config::TrustAnchor`). Browser-side
-        // code walks the array; today only `kind = "static"` is honoured for
-        // verification — a `kind = "registry"` anchor is surfaced but causes
-        // the SW to log a warning and skip verify until the web runtime learns
-        // to do async AIS key lookup.
-        let trust_json: Vec<serde_json::Value> = raw
-            .trust
-            .iter()
-            .map(serde_json::to_value)
-            .collect::<std::result::Result<_, _>>()
-            .map_err(|e| {
-                ActrCliError::command_error(format!("Failed to serialize [[trust]]: {}", e))
+        // Browser verification cannot read host files. Resolve every static
+        // `pubkey_file` here and send only inline base64 keys; the SW tries all
+        // static anchors with the same fallback semantics as native ChainTrust.
+        let mut trust_json = Vec::with_capacity(raw.trust.len());
+        if raw.trust.is_empty() {
+            let package_path = package_path.as_deref().ok_or_else(|| {
+                ActrCliError::command_error(
+                    "Web package verification requires [[trust]] or [package].path".to_string(),
+                )
             })?;
+            let key = self.load_public_key(package_path).await?;
+            use base64::Engine as _;
+            trust_json.push(serde_json::json!({
+                "kind": "static",
+                "pubkey_b64": base64::engine::general_purpose::STANDARD.encode(key),
+            }));
+        }
+        for anchor in &raw.trust {
+            match anchor {
+                actr_config::TrustAnchor::Static {
+                    pubkey_file,
+                    pubkey_b64,
+                } => {
+                    let resolved_file = pubkey_file
+                        .as_ref()
+                        .map(|path| resolve_against(config_dir, path));
+                    let key = self.load_static_pubkey(&resolved_file, pubkey_b64).await?;
+                    use base64::Engine as _;
+                    trust_json.push(serde_json::json!({
+                        "kind": "static",
+                        "pubkey_b64": base64::engine::general_purpose::STANDARD.encode(key),
+                    }));
+                }
+                actr_config::TrustAnchor::Registry { endpoint } => {
+                    trust_json.push(serde_json::json!({
+                        "kind": "registry",
+                        "endpoint": endpoint,
+                    }));
+                }
+            }
+        }
 
         let config_json = serde_json::json!({
             "signaling_url": signaling_url,

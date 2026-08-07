@@ -22,6 +22,16 @@ This project demonstrates a distributed system architecture that combines the cl
 - **Type safety**: Contract-driven development based on Protobuf
 - **ACL-aware discovery**: Secure discovery with access control list support
 
+### Dependency aliases
+
+Application code resolves remote dependencies through the same
+`resolve_dependency(alias)` API on every runtime. Packaged `.actr` workloads
+read the alias mapping from the authenticated v2 `manifest.lock.toml`, while
+linked iOS and Android workloads read it from their dynamic `manifest.toml`.
+The lock stores each dependency's alias and canonical
+`manufacturer:name:version` ActrType; v1 locks must be migrated by the CLI and
+are not accepted by the runtime.
+
 ---
 
 ## 📚 Documentation

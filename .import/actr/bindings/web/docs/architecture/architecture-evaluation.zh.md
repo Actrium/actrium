@@ -4,7 +4,7 @@
 **评估版本**: v0.1 (MVP 阶段)
 **评估者**: 架构审查
 
-> **历史评估说明**：本文主体保留 2026-01-08 的架构审查快照，不作为当前源码事实入口。当前浏览器路径已经切到 Option U / wasm-bindgen：`.actr` + `.wbg` sibling 由 `actor.sw.js` 加载；Fast Path 当前为 DOM `FastPathForwarder` → SW `handle_dom_fast_path` → runtime / stream handlers，不是 DOM 本地 Registry callback。下方性能数字如未标明实测，均应视为历史估算。
+> **历史评估说明**：本文主体保留 2026-01-08 的架构审查快照，不作为当前源码事实入口。当前浏览器路径已经切到 Option U / wasm-bindgen：`actor.sw.js` 验证自包含 `.actr`，从中提取 package binary 与 `resources/glue.js`，不再执行旧 `.wbg` sibling；Fast Path 当前为 DOM `FastPathForwarder` → SW `handle_dom_fast_path` → runtime / stream handlers，不是 DOM 本地 Registry callback。下方性能数字如未标明实测，均应视为历史估算。
 
 ---
 

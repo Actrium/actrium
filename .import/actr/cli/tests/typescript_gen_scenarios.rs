@@ -227,7 +227,7 @@ fn write_lock_file_empty(root: &Path) {
     fs::write(
         root.join("manifest.lock.toml"),
         r#"[metadata]
-version = 1
+version = 2
 generated_at = "2026-03-03T00:00:00Z"
 "#,
     )
@@ -238,11 +238,12 @@ fn write_lock_file_with_echo(root: &Path) {
     fs::write(
         root.join("manifest.lock.toml"),
         r#"[metadata]
-version = 1
+version = 2
 generated_at = "2026-03-03T00:00:00Z"
 
 [[dependency]]
 name = "echo-service"
+alias = "echo-service"
 actr_type = "acme:EchoService:1.0.0"
 fingerprint = "service_semantic:123"
 cached_at = "2026-03-03T00:00:00Z"
@@ -258,11 +259,12 @@ fn write_lock_file_with_echo_and_profile(root: &Path) {
     fs::write(
         root.join("manifest.lock.toml"),
         r#"[metadata]
-version = 1
+version = 2
 generated_at = "2026-03-03T00:00:00Z"
 
 [[dependency]]
 name = "echo-service"
+alias = "echo-service"
 actr_type = "acme:EchoService:1.0.0"
 fingerprint = "service_semantic:123"
 cached_at = "2026-03-03T00:00:00Z"
@@ -272,6 +274,7 @@ files = [
 
 [[dependency]]
 name = "profile-service"
+alias = "profile-service"
 actr_type = "acme:ProfileService:1.0.0"
 fingerprint = "service_semantic:789"
 cached_at = "2026-03-03T00:00:00Z"

@@ -92,8 +92,6 @@ class MainActivity : AppCompatActivity() {
             try {
                 // Copy config files from assets to internal storage
                 val configPath = copyAssetToInternalStorage("manifest.toml")
-                copyAssetToInternalStorage("manifest.lock.toml")
-
                 val packagePath = copyFirstPackageAssetToInternalStorage()
 
                 // Create ActrNode with config + package and start it

@@ -1,6 +1,6 @@
 //! Context trait - Execution context interface for actors
 
-use actr_protocol::{ActorResult, ActrId, ActrType, DataChunk, PayloadType};
+use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, DataChunk, PayloadType};
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 
@@ -211,6 +211,22 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     /// Returns a route candidate or an error if none are available. Concrete
     /// selection strategy is decided by the Context implementation.
     async fn discover_route_candidate(&self, target_type: &ActrType) -> ActorResult<ActrId>;
+
+    /// Resolve a dependency alias to its declared [`ActrType`].
+    ///
+    /// The runtime builds an `alias -> ActrType` map when the workload is
+    /// attached. Packaged workloads use the authenticated
+    /// `manifest.lock.toml`; linked iOS/Android workloads use their dynamic
+    /// `manifest.toml`. Generated dispatchers and business code use this
+    /// uniform API before calling [`Context::discover_route_candidate`].
+    ///
+    /// Returns [`ActrError::DependencyNotFound`] when the alias is absent.
+    async fn resolve_dependency(&self, alias: &str) -> ActorResult<ActrType> {
+        Err(ActrError::DependencyNotFound {
+            service_name: alias.to_string(),
+            message: format!("dependency alias `{alias}` is not resolvable on this context"),
+        })
+    }
 
     /// Send a raw RPC request (untyped bytes) and wait for response
     ///

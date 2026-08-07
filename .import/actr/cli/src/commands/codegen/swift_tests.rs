@@ -276,7 +276,11 @@ fn detects_standard_swift_template_layout() {
         "[package]\nname = \"echo-app\"\n",
     )
     .unwrap();
-    std::fs::write(project_root.join("manifest.lock.toml"), "").unwrap();
+    std::fs::write(
+        project_root.join("manifest.lock.toml"),
+        "[metadata]\nversion = 2\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
+    )
+    .unwrap();
     std::fs::create_dir_all(project_root.join("EchoApp")).unwrap();
 
     let layout = SwiftTemplateProjectLayout::detect(project_root, "echo-app")
@@ -306,7 +310,11 @@ fn converges_legacy_generated_files_into_generated_directory() {
         "[package]\nname = \"echo-app\"\n",
     )
     .unwrap();
-    std::fs::write(project_root.join("manifest.lock.toml"), "").unwrap();
+    std::fs::write(
+        project_root.join("manifest.lock.toml"),
+        "[metadata]\nversion = 2\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
+    )
+    .unwrap();
 
     let legacy_file = app_root.join("echo.pb.swift");
     let generated_file = generated_root.join("echo.pb.swift");
@@ -360,7 +368,11 @@ fn preserves_modified_legacy_generated_files() {
         "[package]\nname = \"echo-app\"\n",
     )
     .unwrap();
-    std::fs::write(project_root.join("manifest.lock.toml"), "").unwrap();
+    std::fs::write(
+        project_root.join("manifest.lock.toml"),
+        "[metadata]\nversion = 2\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
+    )
+    .unwrap();
 
     let legacy_file = app_root.join("echo.pb.swift");
     let generated_file = generated_root.join("echo.pb.swift");

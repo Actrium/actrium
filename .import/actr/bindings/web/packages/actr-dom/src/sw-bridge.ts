@@ -97,7 +97,9 @@ export type MessageFromSW =
   | { type: 'control_response'; payload: RpcResponsePayload }
   | { type: 'subscription_data'; payload: SubscriptionDataPayload }
   | { type: 'webrtc_event'; payload: WebRtcEventPayload }
-  | { type: 'update_turn_credential'; payload: { username: string; password: string } };
+  | { type: 'update_turn_credential'; payload: { username: string; password: string } }
+  | { type: 'runtime_ready' }
+  | { type: 'runtime_error'; error: string };
 
 export type MessageHandler = (message: MessageFromSW) => void;
 
@@ -110,11 +112,13 @@ export class ServiceWorkerBridge {
   private messageHandlers: Set<MessageHandler> = new Set();
   private readyPromise: Promise<void>;
   private resolveReady!: () => void;
+  private rejectReady!: (reason?: unknown) => void;
   private clientId: string;
 
   constructor() {
-    this.readyPromise = new Promise((resolve) => {
+    this.readyPromise = new Promise((resolve, reject) => {
       this.resolveReady = resolve;
+      this.rejectReady = reject;
     });
     // Generate a unique client ID for this browser tab
     this.clientId = `client_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
@@ -165,10 +169,27 @@ export class ServiceWorkerBridge {
       const channel = new MessageChannel();
       this.swPort = channel.port1;
 
-      //  SW
-      this.swPort.onmessage = (event) => {
-        this.handleMessageFromSW(event.data);
-      };
+      let readyTimeout: ReturnType<typeof setTimeout> | undefined;
+      const runtimeReady = new Promise<void>((resolve, reject) => {
+        readyTimeout = setTimeout(() => {
+          reject(new Error('Service Worker runtime initialization timed out'));
+        }, 30_000);
+
+        // Do not report the bridge as ready until the worker has loaded the
+        // verified package, initialized WASM, and registered this client.
+        this.swPort!.onmessage = (event) => {
+          const message = event.data as MessageFromSW;
+          if (message.type === 'runtime_ready') {
+            resolve();
+            return;
+          }
+          if (message.type === 'runtime_error') {
+            reject(new Error(message.error));
+            return;
+          }
+          this.handleMessageFromSW(message);
+        };
+      });
 
       //  Service Worker
       target.postMessage(
@@ -182,10 +203,23 @@ export class ServiceWorkerBridge {
       );
       target.postMessage({ type: 'PING' });
 
+      try {
+        await runtimeReady;
+      } catch (error) {
+        this.rejectReady(error);
+        this.close();
+        throw error;
+      } finally {
+        if (readyTimeout !== undefined) {
+          clearTimeout(readyTimeout);
+        }
+      }
       this.resolveReady();
       console.log('[SW Bridge] Initialized');
     } else {
-      throw new Error('Service Worker not supported');
+      const error = new Error('Service Worker not supported');
+      this.rejectReady(error);
+      throw error;
     }
   }
 

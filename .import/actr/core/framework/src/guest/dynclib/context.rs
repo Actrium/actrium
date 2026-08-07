@@ -2,8 +2,9 @@
 
 use crate::guest::dynclib_abi::{
     self as abi, AbiPayload, AbiReply, GuestDataChunkV1, HostCallRawV1, HostCallV1, HostDiscoverV1,
-    HostRegisterStreamV1, HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1,
-    InvocationContextV1, abi_error_to_actr, dest_to_v1, reply_to_actr_error,
+    HostRegisterStreamV1, HostResolveDependencyV1, HostSendDataChunkV1, HostTellV1,
+    HostUnregisterStreamV1, InvocationContextV1, abi_error_to_actr, dest_to_v1,
+    reply_to_actr_error,
 };
 use crate::guest::vtable::HostVTable;
 use crate::{Context, Dest, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
@@ -286,6 +287,19 @@ impl Context for DynclibContext {
 
         ActrId::decode(reply.payload.as_slice())
             .map_err(|e| ActrError::DecodeFailure(format!("discover result decode failed: {e}")))
+    }
+
+    async fn resolve_dependency(&self, alias: &str) -> ActorResult<ActrType> {
+        let payload = HostResolveDependencyV1 {
+            alias: alias.to_string(),
+        };
+        let reply = self.invoke_frame(payload.to_frame().map_err(abi_error_to_actr)?)?;
+        if reply.status != abi::code::SUCCESS {
+            return Err(reply_to_actr_error(reply));
+        }
+        ActrType::decode(reply.payload.as_slice()).map_err(|error| {
+            ActrError::DecodeFailure(format!("resolve_dependency result decode failed: {error}"))
+        })
     }
 
     async fn call_raw(

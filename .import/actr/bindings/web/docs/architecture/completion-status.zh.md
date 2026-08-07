@@ -6,8 +6,8 @@
 > **历史快照说明**：本文主体保留早期完成度评估，不作为当前事实入口。当前源码事实以 `bindings/web/packages/web-sdk/src/actor.sw.js`、`bindings/web/packages/actr-dom/src/fast-path-forwarder.ts`、`bindings/web/crates/sw-host/src/runtime.rs`、`cli/src/web_assets.rs`、`cli/src/commands/run.rs` 为准。
 >
 > 当前修正摘要：
-> - 浏览器 guest 路径已经是 Option U / wasm-bindgen 唯一路径；`actor.sw.js` 加载 `.actr` 以及同名 `.wbg/guest.js`、`.wbg/guest_bg.wasm`。
-> - `actr run --web` 已有嵌入式 host assets，并会在 sibling `.wbg` 目录存在时挂载 `/packages/<name>.wbg/*`；不要再把 CLI Web 平台支持描述为“未实现”。
+> - 浏览器 guest 路径已经是 Option U / wasm-bindgen 唯一路径；`actor.sw.js` 验证 `.actr`，并从包内加载 wasm-bindgen binary 与签名资源 `resources/glue.js`。
+> - `actr run --web` 已有嵌入式 host assets，并提供自包含的签名 `.actr`；当前执行链路不需要 sibling `.wbg` route。不要再把 CLI Web 平台支持描述为“未实现”。
 > - DOM Fast Path 不再是 DOM 本地 registry/callback；当前路径是 DOM `FastPathForwarder` → SW `handle_dom_fast_path` → SW runtime / stream handlers。
 > - 下方百分比矩阵是历史估算，只能用于理解当时判断，不能用于当前 roadmap 或验收。
 
@@ -248,7 +248,7 @@
 
 | 特性 | actr | actr-web | 完成度 |
 |------|------|----------|--------|
-| **actr-cli 工具** | ✅ | ✅ `actr run --web` 嵌入 web assets 并挂载 `.wbg` sibling | 当前已接入 |
+| **actr-cli 工具** | ✅ | ✅ `actr run --web` 嵌入 web assets 并提供自包含 `.actr` | 当前已接入 |
 | **protoc 插件** | ✅ `protoc-gen-actrframework` | ❌ | **0%** |
 | **MessageDispatcher 生成** | ✅ | ❌ | 0% |
 | **Service Actor 生成** | ✅ | ❌ | 0% |
@@ -261,7 +261,7 @@
 |------|------|----------|------|
 | **TS 类型生成** | N/A | ⚠️ 手动 protoc-gen-ts | **50%** |
 | **gRPC-Web 客户端** | N/A | ⚠️ 手动 protoc-gen-grpc-web | **60%** |
-| **actr-cli 集成** | N/A | ✅ `run --web` 路由 `.actr` + `.wbg` companion | 当前已接入 |
+| **actr-cli 集成** | N/A | ✅ `run --web` 路由自包含、已签名的 `.actr` | 当前已接入 |
 | **类型安全保证** | N/A | ⚠️ 部分 (protobuf) | **40%** |
 
 ---
@@ -328,7 +328,7 @@
 | **DataChunk** | ✅ | ⚠️ 框架 | **40%** | 🟡 中 |
 | **MediaTrack** | ✅ | ⚠️ 框架 | **35%** | 🟢 低 |
 | **Actor 生命周期** | ✅ | ❌ | **10%** | 🟡 中 |
-| **代码生成** | ✅ actr-cli | ✅ Option U WIT codegen + `.wbg` guest bundle | 当前已接入 | 🟡 中 |
+| **代码生成** | ✅ actr-cli | ✅ Option U WIT codegen + 自包含 `.actr` guest package | 当前已接入 | 🟡 中 |
 | **Service Worker** | N/A | ⚠️ 架构支持 | **20%** | 🟢 低 |
 
 ### Web 特有功能
@@ -367,7 +367,7 @@
 
 4. **代码生成工具**
    - 当前已有 `tools/wit-compile-web` → `actr-web-abi`
-   - 当前已有 CLI `.wbg` companion route
+   - 当前已有 CLI 自包含 `.actr` Web package route
    - 后续重点是补齐更多 guest/API 生成场景，而不是从零实现 Web 平台支持
 
 5. **WebRtcRecoveryManager 完善** (40% → 需要 80%)

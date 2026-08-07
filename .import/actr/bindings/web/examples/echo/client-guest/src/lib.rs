@@ -1,7 +1,8 @@
 //! Echo Client Guest WASM for Web — unified source (Option U γ-unified Phase 6c).
 //!
 //! Implements the transparent proxy for `echo.EchoService.Echo`:
-//! 1. Discover `acme:EchoService:0.1.0` (cached after first success)
+//! 1. Resolve the `EchoService` dependency alias and discover it (cached after
+//!    first success)
 //! 2. Call `echo.EchoService.Echo` on the remote server
 //! 3. Return the reply to the host
 //! 4. On failure with a cached target, clear cache and retry once
@@ -31,16 +32,14 @@ pub mod echo {
 use std::cell::RefCell;
 
 use actr_framework::{Context, Dest, MessageDispatcher, Workload, entry};
-use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, RpcEnvelope, RpcRequest};
+use actr_protocol::{ActorResult, ActrError, ActrId, RpcEnvelope, RpcRequest};
 use async_trait::async_trait;
 use bytes::Bytes;
 use prost::Message as ProstMessage;
 
 use echo::{EchoRequest, EchoResponse};
 
-const ECHO_SERVICE_MANUFACTURER: &str = "acme";
-const ECHO_SERVICE_NAME: &str = "EchoService";
-const ECHO_SERVICE_VERSION: &str = "0.1.0";
+const ECHO_SERVICE_ALIAS: &str = "EchoService";
 
 impl RpcRequest for EchoRequest {
     type Response = EchoResponse;
@@ -147,11 +146,7 @@ async fn resolve_server<C: Context>(
 }
 
 async fn discover_server<C: Context>(ctx: &C) -> ActorResult<ActrId> {
-    let target_type = ActrType {
-        manufacturer: ECHO_SERVICE_MANUFACTURER.to_string(),
-        name: ECHO_SERVICE_NAME.to_string(),
-        version: ECHO_SERVICE_VERSION.to_string(),
-    };
+    let target_type = ctx.resolve_dependency(ECHO_SERVICE_ALIAS).await?;
     ctx.discover_route_candidate(&target_type).await
 }
 

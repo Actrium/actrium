@@ -5,6 +5,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use clap::Args;
+use std::path::{Component, Path, PathBuf};
 
 use crate::core::{
     ActrCliError, Command, CommandContext, CommandResult, ComponentType, ConfigManager,
@@ -19,6 +20,58 @@ pub struct StandaloneDiscoverConfig {
     pub endpoint: url::Url,
     pub realm_id: u64,
     pub realm_secret: String,
+}
+
+fn validate_export_component<'a>(value: &'a str, label: &str) -> Result<&'a str> {
+    if value.is_empty() || value.contains(['/', '\\', '\0']) {
+        anyhow::bail!("{label} `{value}` is not a safe path component");
+    }
+    let mut components = Path::new(value).components();
+    if !matches!(components.next(), Some(Component::Normal(_))) || components.next().is_some() {
+        anyhow::bail!("{label} `{value}` is not a safe path component");
+    }
+    Ok(value)
+}
+
+fn prepare_export_directory(project_root: &Path, dependency_name: &str) -> Result<PathBuf> {
+    let dependency_name = validate_export_component(dependency_name, "dependency name")?;
+    let canonical_project = std::fs::canonicalize(project_root)?;
+    let remote_root = project_root.join("exports").join("remote");
+    std::fs::create_dir_all(&remote_root)?;
+    let canonical_remote = std::fs::canonicalize(&remote_root)?;
+    if !canonical_remote.starts_with(&canonical_project) {
+        anyhow::bail!(
+            "proto export root {} escapes project root {}",
+            canonical_remote.display(),
+            canonical_project.display()
+        );
+    }
+
+    let output_dir = canonical_remote.join(dependency_name);
+    std::fs::create_dir_all(&output_dir)?;
+    let canonical_output = std::fs::canonicalize(&output_dir)?;
+    if !canonical_output.starts_with(&canonical_remote) {
+        anyhow::bail!(
+            "proto export directory {} escapes export root {}",
+            canonical_output.display(),
+            canonical_remote.display()
+        );
+    }
+    Ok(canonical_output)
+}
+
+fn write_exported_proto(output_dir: &Path, name: &str, content: &str) -> Result<PathBuf> {
+    let name = validate_export_component(name, "proto file name")?;
+    let file_path = output_dir.join(name);
+    if std::fs::symlink_metadata(&file_path).is_ok_and(|metadata| metadata.file_type().is_symlink())
+    {
+        anyhow::bail!(
+            "refusing to overwrite symbolic link {}",
+            file_path.display()
+        );
+    }
+    std::fs::write(&file_path, content)?;
+    Ok(file_path)
 }
 
 /// Discovery command
@@ -577,23 +630,16 @@ impl DiscoveryCommand {
         service_discovery: &std::sync::Arc<dyn ServiceDiscovery>,
         config_manager: &std::sync::Arc<dyn ConfigManager>,
     ) -> Result<()> {
-        println!("📤 Exporting proto files for {}...", service.name);
+        let dependency_name = service.dependency_service_name();
+        println!("📤 Exporting proto files for {}...", dependency_name);
 
-        let proto_files = service_discovery.get_service_proto(&service.name).await?;
+        let proto_files = service_discovery.get_service_proto(dependency_name).await?;
 
-        let output_dir = config_manager
-            .get_project_root()
-            .join("exports")
-            .join("remote")
-            .join(&service.name);
-        std::fs::create_dir_all(&output_dir)?;
+        let output_dir =
+            prepare_export_directory(config_manager.get_project_root(), dependency_name)?;
 
         for proto in &proto_files {
-            let file_path = output_dir.join(&proto.name);
-            if let Some(parent) = file_path.parent() {
-                std::fs::create_dir_all(parent)?;
-            }
-            std::fs::write(&file_path, &proto.content)?;
+            let file_path = write_exported_proto(&output_dir, &proto.name, &proto.content)?;
             println!("✅ Exported: {}", file_path.display());
         }
 
@@ -626,11 +672,14 @@ impl DiscoveryCommand {
             )
         };
 
-        // Convert to dependency spec
+        // Convert the registry entry into manifest dependency metadata. The
+        // registry's `name` is its internal service key; it is not a valid
+        // manifest service reference or a useful source-level alias.
+        let dependency_name = service.dependency_service_name().to_string();
         let dependency_spec = DependencySpec {
-            alias: service.name.clone(),
+            alias: dependency_name.clone(),
             actr_type: Some(service.actr_type.clone()),
-            name: service.name.clone(),
+            name: dependency_name.clone(),
             fingerprint: Some(service.fingerprint.clone()),
         };
 
@@ -650,7 +699,7 @@ impl DiscoveryCommand {
                 .map(|s| s.name.as_str())
                 .or_else(|| dep.actr_type.as_ref().map(|t| t.name.as_str()))
                 .unwrap_or(dep.alias.as_str())
-                == service.name
+                == dependency_name.as_str()
         });
         let existing_by_alias = config
             .dependencies
@@ -664,7 +713,7 @@ impl DiscoveryCommand {
                 .map(|s| s.name.as_str())
                 .or_else(|| existing.actr_type.as_ref().map(|t| t.name.as_str()))
                 .unwrap_or(existing.alias.as_str())
-                != service.name
+                != dependency_name.as_str()
         {
             return Err(ActrCliError::Dependency {
                 message: format!(
@@ -685,7 +734,7 @@ impl DiscoveryCommand {
         if let Some(existing) = existing_by_name {
             println!(
                 "ℹ️  Dependency with name '{}' already exists (alias: '{}')",
-                service.name, existing.alias
+                dependency_name, existing.alias
             );
             if let (Some(existing_fp), Some(discovered_fp)) = (
                 existing.service.as_ref().map(|s| s.fingerprint.as_str()),
@@ -718,12 +767,12 @@ impl DiscoveryCommand {
         .await?;
 
         if should_update_config {
-            println!("📝 Adding {} to configuration file...", service.name);
+            println!("📝 Adding {} to configuration file...", dependency_name);
             let backup = config_manager.backup_config().await?;
             match config_manager.update_dependency(&dependency_spec).await {
                 Ok(_) => {
                     config_manager.remove_backup(backup).await?;
-                    println!("✅ Added {} to configuration file", service.name);
+                    println!("✅ Added {} to configuration file", dependency_name);
                 }
                 Err(e) => {
                     config_manager.restore_backup(backup).await?;
@@ -748,7 +797,7 @@ impl DiscoveryCommand {
         if should_install {
             // Reuse install flow
             println!();
-            println!("📦 Installing {}...", service.name);
+            println!("📦 Installing {}...", dependency_name);
 
             let install_pipeline = {
                 let mut container = context.container.lock().unwrap();

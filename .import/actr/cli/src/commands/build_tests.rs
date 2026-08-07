@@ -55,3 +55,41 @@ fn resolve_output_path_handles_absolute_relative_and_default() {
     let err = resolve_output_path(mf, "x86_64-linux", None).unwrap_err();
     assert!(format!("{err}").contains("manifest"));
 }
+
+#[test]
+fn web_package_authenticates_wasm_bindgen_glue() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let binary = dir.path().join("echo_guest_bg.wasm");
+    let glue = dir.path().join("echo_guest.js");
+    std::fs::write(&binary, b"wasm").unwrap();
+    std::fs::write(&glue, b"let wasm_bindgen = {};").unwrap();
+
+    let resources =
+        authenticated_wasm_bindgen_resources(&binary, "wasm32-unknown-unknown").unwrap();
+    assert_eq!(resources, vec![("resources/glue.js".to_string(), glue)]);
+}
+
+#[test]
+fn web_package_rejects_missing_or_misnamed_wasm_bindgen_artifacts() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let misnamed = dir.path().join("echo_guest.wasm");
+    std::fs::write(&misnamed, b"wasm").unwrap();
+    assert!(authenticated_wasm_bindgen_resources(&misnamed, "wasm32-unknown-unknown").is_err());
+
+    let binary = dir.path().join("echo_guest_bg.wasm");
+    std::fs::write(&binary, b"wasm").unwrap();
+    let error = authenticated_wasm_bindgen_resources(&binary, "wasm32-unknown-unknown")
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("glue not found"));
+}
+
+#[test]
+fn native_package_does_not_require_wasm_bindgen_resources() {
+    let resources = authenticated_wasm_bindgen_resources(
+        std::path::Path::new("component.wasm"),
+        "wasm32-wasip2",
+    )
+    .unwrap();
+    assert!(resources.is_empty());
+}

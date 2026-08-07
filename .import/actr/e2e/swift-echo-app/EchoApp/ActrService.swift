@@ -27,7 +27,7 @@ final class ActrService: ObservableObject {
         defer { isStarting = false }
 
         do {
-            let configURL = try materializeRuntimeConfig()
+            let manifestURL = try materializeRuntimeConfig()
             let echoServiceTarget = "actrium:EchoService:1.0.0"
             let actorType = ActrType(manufacturer: "actrium", name: "EchoApp", version: "0.1.0")
 
@@ -35,7 +35,7 @@ final class ActrService: ObservableObject {
                 lifecycle: LocalEchoServiceLifecycleAdapter(targetType: echoServiceTarget)
             )
             linkedWorkload = workload
-            let node = try await ActrNode.linked(config: configURL, type: actorType, workload: workload)
+            let node = try await ActrNode.linked(config: manifestURL, type: actorType, workload: workload)
 
             actorRef = try await node.start()
             actrNode = node
@@ -98,6 +98,9 @@ final class ActrService: ObservableObject {
         guard let templateURL = Bundle.main.url(forResource: "actr", withExtension: "toml") else {
             throw EchoAppError.missingConfigTemplate
         }
+        guard let bundledManifestURL = Bundle.main.url(forResource: "manifest", withExtension: "toml") else {
+            throw EchoAppError.missingManifest
+        }
 
         let fileManager = FileManager.default
         let supportURL = try fileManager.url(
@@ -122,13 +125,16 @@ final class ActrService: ObservableObject {
 
         let configURL = appURL.appendingPathComponent("actr.toml")
         try config.write(to: configURL, atomically: true, encoding: .utf8)
-        return configURL
+        let manifestURL = appURL.appendingPathComponent("manifest.toml")
+        try Data(contentsOf: bundledManifestURL).write(to: manifestURL, options: .atomic)
+        return manifestURL
     }
 
 }
 
 private enum EchoAppError: Error {
     case missingConfigTemplate
+    case missingManifest
     case actorUnavailable
     case remoteActorUnavailable
 }

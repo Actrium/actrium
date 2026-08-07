@@ -61,6 +61,8 @@ public final class ActrNode: Sendable {
     }
 
     /// Creates a linked/static node from config, explicit actor identity, and a Swift-provided workload.
+    /// Pass `manifest.toml` to enable dynamic dependency alias resolution; its
+    /// sibling `actr.toml` supplies runtime configuration.
     public static func linked(config configPath: String, type actorType: ActrType, workload: DynamicWorkload) async throws -> ActrNode {
         do {
             let wrapper = try await ActrBindings.ActrNode.newFromLinkedWorkload(

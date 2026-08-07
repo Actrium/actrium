@@ -76,8 +76,6 @@ class DataStreamIntegrationTest {
     fun testDataStreamTransfer(): Unit = runBlocking {
         Log.i(TAG, "=== Starting DataStream Integration Test ===")
         val clientConfigPath = copyAssetToInternalStorage("manifest.toml")
-        // manifest.lock.toml is required by the runtime now
-        copyAssetToInternalStorage("manifest.lock.toml")
         var clientRef: ActrRef? = null
 
         try {

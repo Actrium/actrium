@@ -9,7 +9,7 @@
 
 ## Overview
 
-Actor-RTC Web adapts the Actrium runtime to browser environments. The current browser path is Option U / wasm-bindgen: a signed `.actr` package is served with a sibling `.wbg/` guest bundle, and `actor.sw.js` loads that guest through `register_guest_workload`.
+Actor-RTC Web adapts the Actrium runtime to browser environments. The current browser path is Option U / wasm-bindgen: the wasm-bindgen `*_bg.wasm` is stored as the signed `.actr` package binary, its JavaScript glue is stored as the signed `resources/glue.js` resource, and `actor.sw.js` verifies and extracts both before calling `register_guest_workload`.
 
 Component Model and jco remain useful historical context, but they are not the current browser runtime consumption path.
 
@@ -33,7 +33,7 @@ The browser runtime is split into cooperating execution domains:
 
 - DOM-side application and bridge code for browser APIs, UI adjacency, WebRTC coordination, and user-facing events.
 - Service Worker-side runtime for shared worker execution, package loading, transport coordination, mailbox-backed processing, and guest dispatch.
-- wasm-bindgen guest workload bundle loaded from `<package-stem>.wbg/guest.js` and `<package-stem>.wbg/guest_bg.wasm`.
+- wasm-bindgen guest workload loaded entirely from the verified `.actr`: package binary plus `resources/glue.js`.
 
 ## Primary Usage Modes
 
@@ -43,7 +43,7 @@ The browser discovers and calls remote actors. This remains the simplest startin
 
 ### Browser-Hosted Workload Mode
 
-The browser can host actor workload behavior through the current wasm-bindgen guest path. The data-stream peer concurrent example exercises browser-hosted service behavior.
+The browser can host actor workload behavior through the current signed `.actr` wasm-bindgen guest path. The echo example exercises browser-hosted service behavior. The legacy data-stream peer concurrent example is excluded until it migrates away from loose, unverified assets.
 
 ### Runtime/Contributor Mode
 
@@ -67,7 +67,7 @@ Framework contributors may work directly with `crates/sw-host`, `packages/web-sd
 - Workspace dependency installation through `pnpm install`.
 - Current web runtime asset builds through `bash crates/sw-host/build.sh`.
 - CLI asset refresh through `bash scripts/sync-cli-assets.sh --build`.
-- Example smoke paths through `bash examples/echo/start-mock.sh` and `bash examples/data-stream-peer-concurrent/start.sh`.
+- Current example smoke path through `bash examples/echo/start-mock.sh`.
 - React integration through the currently exported hooks: `useActorClient`, `useServiceCall`, and `useSubscription`.
 - Documentation that clearly separates current setup steps from historical architecture notes.
 
@@ -77,7 +77,8 @@ Framework contributors may work directly with `crates/sw-host`, `packages/web-sd
 - IndexedDB behavior varies across browsers and browsing modes.
 - WebRTC setup depends on signaling, ICE infrastructure, and browser policy.
 - WASM size and startup time must remain practical for interactive apps.
-- `.actr` packages and `.wbg/` sibling bundles must be served from paths that `actor.sw.js` can resolve consistently.
+- `.actr` packages must contain the wasm-bindgen `*_bg.wasm` as their binary and signed JavaScript glue at `resources/glue.js`.
+- Browser package verification is mandatory. Missing usable static trust, registry-only trust, and unresolved `pubkey_file` configurations fail initialization instead of skipping verification.
 
 ## Quality Targets
 
@@ -89,7 +90,7 @@ Framework contributors may work directly with `crates/sw-host`, `packages/web-sd
 ## Delivery Priorities
 
 1. Keep the Option U / wasm-bindgen browser path stable and documented.
-2. Keep echo and data-stream peer examples runnable through current scripts.
+2. Keep the echo signed-package example runnable, and migrate legacy examples before restoring them to current smoke coverage.
 3. Keep CLI-embedded web assets synchronized with canonical web sources.
 4. Continue improving generated TypeScript and React integration without documenting unsupported public APIs.
 

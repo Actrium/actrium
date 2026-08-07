@@ -67,8 +67,8 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          # echo example builds CM-targeted guest workloads (wasm32-wasip2)
-          # plus the wasm-bindgen guest (wasm32-unknown-unknown).
+          # Browser guests use wasm32-unknown-unknown. The generated TypeScript
+          # browser E2E also builds its native service as a wasip2 component.
           targets: wasm32-wasip2,wasm32-unknown-unknown
 
       - name: Install protoc

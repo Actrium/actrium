@@ -43,7 +43,11 @@ dev = "echo dev"
 "#;
 
     fs::write(root.join("manifest.toml"), manifest_toml).unwrap();
-    fs::write(root.join("manifest.lock.toml"), "[metadata]\nversion = 1\n").unwrap();
+    fs::write(
+        root.join("manifest.lock.toml"),
+        "[metadata]\nversion = 2\ngenerated_at = \"2026-01-01T00:00:00Z\"\n",
+    )
+    .unwrap();
 }
 
 #[test]

@@ -407,6 +407,12 @@ pub fn default_mapping() -> Mapping {
                 op_const: "HOST_DISCOVER",
                 op_value: 4,
             },
+            FunctionMapping {
+                wit_key: "host.resolve-dependency",
+                rust_payload: "HostResolveDependencyV1",
+                op_const: "HOST_RESOLVE_DEPENDENCY",
+                op_value: 8,
+            },
             // `workload.dispatch` is carried by GuestHandleV1. The host
             // synthesises an `AbiFrame { op: GUEST_HANDLE, payload:
             // GuestHandleV1 }` frame; the guest unwraps it. Context

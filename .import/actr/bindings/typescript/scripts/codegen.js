@@ -51,19 +51,60 @@ function loadDependencies(lockPath, configPath) {
   if (fs.existsSync(lockPath)) {
     const lock = readToml(lockPath);
     const deps = Array.isArray(lock.dependency) ? lock.dependency : [];
-    return deps.map((dep) => ({
-      name: dep.name,
-      files: Array.isArray(dep.files) ? dep.files.map((file) => file.path) : [],
-    }));
+    const version =
+      lock.metadata && lock.metadata.version ? lock.metadata.version : 1;
+    if (version !== 2) {
+      throw new Error(
+        `Unsupported lock file version ${version}; expected 2. Run \`actr deps install\` to regenerate ${lockPath}`,
+      );
+    }
+    const aliases = new Set();
+    const actrTypes = new Set();
+    return deps.map((dep) => {
+      if (
+        typeof dep.alias !== 'string' ||
+        dep.alias.trim() !== dep.alias ||
+        !dep.alias
+      ) {
+        throw new Error(`Invalid v2 lock dependency alias in ${lockPath}`);
+      }
+      if (aliases.has(dep.alias)) {
+        throw new Error(
+          `Duplicate dependency alias ${dep.alias} in ${lockPath}`,
+        );
+      }
+      if (typeof dep.actr_type !== 'string' || !dep.actr_type) {
+        throw new Error(
+          `Dependency ${dep.alias} has no actr_type in ${lockPath}`,
+        );
+      }
+      if (actrTypes.has(dep.actr_type)) {
+        throw new Error(
+          `Duplicate dependency actr_type ${dep.actr_type} in ${lockPath}`,
+        );
+      }
+      if (!Array.isArray(dep.files) || dep.files.length === 0) {
+        throw new Error(
+          `Dependency ${dep.alias} declares no proto files in ${lockPath}`,
+        );
+      }
+      aliases.add(dep.alias);
+      actrTypes.add(dep.actr_type);
+      return {
+        name: dep.alias,
+        files: dep.files.map((file) => file.path),
+      };
+    });
   }
 
   if (fs.existsSync(configPath)) {
     const config = readToml(configPath);
     const deps = config.dependencies || {};
-    return Object.keys(deps).map((name) => ({
-      name,
-      files: [],
-    }));
+    if (Object.keys(deps).length > 0) {
+      throw new Error(
+        `manifest.lock.toml not found at ${lockPath}. Run \`actr deps install\` before code generation.`,
+      );
+    }
   }
 
   return [];

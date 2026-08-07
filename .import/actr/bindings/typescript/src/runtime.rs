@@ -53,7 +53,7 @@ impl ActrNode {
             .map_err(crate::error::config_error_to_napi)?;
         let runtime_path = manifest.config_dir.join("actr.toml");
 
-        let init = Node::from_config_with_package(&runtime_path, manifest.package.clone())
+        let init = Node::from_config_with_manifest(&runtime_path, manifest)
             .await
             .map_err(crate::error::hyper_error_to_napi)?;
         crate::logger::init_observability(init.runtime_config().observability.clone());
@@ -123,6 +123,17 @@ impl ActrRef {
             .map_err(crate::error::protocol_error_to_napi)?;
 
         Ok(ids.into_iter().map(|id| id.into()).collect())
+    }
+
+    /// Resolve a declared dependency alias to its canonical actor type.
+    #[napi]
+    pub async fn resolve_dependency(&self, alias: String) -> Result<ActrType> {
+        let ctx = self.inner.app_context().await;
+        let actr_type = ctx
+            .resolve_dependency(&alias)
+            .await
+            .map_err(crate::error::protocol_error_to_napi)?;
+        Ok(actr_type.into())
     }
 
     /// Call remote actor (RPC).

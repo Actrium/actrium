@@ -4,7 +4,7 @@
 **状态**: 已决策，已按 Option U / wasm-bindgen 路径更新
 **决策者**: 架构团队
 
-> 当前源码事实：浏览器 guest 不再使用 Component Model / jco / 手工 `wasm-bindgen --web` 示例路径。当前路径是 WIT → `tools/wit-compile-web` 生成 `bindings/web/crates/actr-web-abi/src/{types,guest,host}.rs` → guest crate 通过 `wasm-pack --target no-modules` 产出 `.wbg/guest.js` 和 `.wbg/guest_bg.wasm` → `.actr` 与 `.wbg` sibling 一起由 `actr run --web` 挂载 → `packages/web-sdk/src/actor.sw.js` 加载并桥接 guest。
+> 当前源码事实：浏览器 guest 不再使用 Component Model / jco / 手工 `wasm-bindgen --web` 示例路径。当前路径是 WIT → `tools/wit-compile-web` 生成 `bindings/web/crates/actr-web-abi/src/{types,guest,host}.rs` → guest crate 通过 `wasm-pack --target no-modules` 产出 JS glue 和 `*_bg.wasm` → `*_bg.wasm` 作为 `.actr` 的签名 binary、JS glue 作为签名资源 `resources/glue.js` → `packages/web-sdk/src/actor.sw.js` 验证包并直接提取、加载二者。旧 `.wbg` sibling 布局已废弃。
 
 ---
 
@@ -385,7 +385,7 @@ cargo run -p actr-wit-compile-web
 # 2. guest crate 使用 wasm-bindgen/wasm-pack 的 no-modules 输出
 wasm-pack build --target no-modules --release
 
-# 3. actr run --web 挂载 .actr 与同名 .wbg sibling
+# 3. 将 *_bg.wasm 与 JS glue 打入并签名为自包含 .actr
 actr run --web --package ./echo-client.actr
 ```
 
@@ -393,12 +393,11 @@ actr run --web --package ./echo-client.actr
 
 ```text
 echo-client.actr
-echo-client.wbg/
-├── guest.js
-└── guest_bg.wasm
+├── <manifest binary path>    # wasm-bindgen *_bg.wasm
+└── resources/glue.js         # signed JavaScript glue
 ```
 
-`actor.sw.js` 根据 `runtimeConfig.package_url` 推导默认 guest glue URL：`<package_url>` 去掉 `.actr` 后追加 `.wbg/guest.js`。也可以通过 `runtimeConfig.wbg_module_url` 显式覆盖。CLI 侧 `cli/src/commands/run.rs` 只在 sibling `.wbg` 目录存在时挂载 `/packages/<name>.wbg/*`。
+`actor.sw.js` 只使用 `runtimeConfig.package_url` 获取 `.actr`，完成签名和 manifest hash 校验后，从包中提取 binary 与 `resources/glue.js`。它不推导、获取或执行 sibling `.wbg` URL；CLI 侧也不再需要 companion route。
 
 ---
 
@@ -492,7 +491,7 @@ TinyGo → WASM          rustc → WASM          Emscripten → WASM
                 ↓
         tools/wit-compile-web / actr-web-abi
                 ↓
-        wasm-bindgen guest bundle (.wbg)
+        signed .actr (binary + resources/glue.js)
                 ↓
         Service Worker Runtime
 ```

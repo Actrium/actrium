@@ -1114,6 +1114,7 @@ mod tests {
         interface host {
             use types.{sample, actr-type};
             ping: func(arg: sample) -> result<u32, string>;
+            resolve-dependency: func(alias: string) -> result<actr-type, string>;
             wait: func(timeout-ms: s64);
             log-message: func(msg: string);
         }
@@ -1163,6 +1164,7 @@ mod tests {
         let model = load_inmem(MINI_WIT);
         let out = emit_guest(&model);
         assert!(out.contains("pub async fn ping_with_request_id"));
+        assert!(out.contains("pub async fn resolve_dependency_with_request_id"));
         assert!(out.contains("pub async fn log_message_with_request_id"));
         assert!(out.contains("JsFuture::from"));
     }

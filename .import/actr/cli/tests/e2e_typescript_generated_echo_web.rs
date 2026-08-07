@@ -15,7 +15,7 @@ use actr_cli::test_support::{LOCAL_E2E_REALM_ID, LoggedProcess, MockSignaling, a
 use tempfile::TempDir;
 
 const SERVICE_PACKAGE: &str = "acme-EchoService-0.1.0-wasm32-wasip2.actr";
-const CLIENT_PACKAGE: &str = "acme-echo-client-app-0.1.0-wasm32-wasip2.actr";
+const CLIENT_PACKAGE: &str = "acme-echo-client-app-0.1.0-wasm32-unknown-unknown.actr";
 
 fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -175,20 +175,6 @@ fn build_generated_typescript_service(release_dir: &Path, key_path: &Path) -> Pa
 
 fn build_web_client_package(release_dir: &Path, key_path: &Path) -> PathBuf {
     let client_guest = web_echo_dir().join("client-guest");
-    let component_ld = which("wasm-component-ld")
-        .unwrap_or_else(|| panic!("wasm-component-ld is required for this e2e"));
-
-    let rustflags = OsString::from(format!("-Clinker={}", component_ld.display()));
-    assert_success(
-        &run_with_env(
-            "cargo",
-            ["build", "--target", "wasm32-wasip2", "--release"],
-            &client_guest,
-            &[("RUSTFLAGS", rustflags)],
-        ),
-        "cargo build web client guest component",
-    );
-
     assert_success(
         &run_with_env(
             "wasm-pack",
@@ -230,22 +216,6 @@ fn build_web_client_package(release_dir: &Path, key_path: &Path) -> PathBuf {
         ),
         "actr build web client package",
     );
-
-    let wbg_dir = release_dir.join("acme-echo-client-app-0.1.0-wasm32-wasip2.wbg");
-    if wbg_dir.exists() {
-        fs::remove_dir_all(&wbg_dir).expect("failed to clear old WBG dir");
-    }
-    fs::create_dir_all(&wbg_dir).expect("failed to create WBG dir");
-    fs::copy(
-        client_guest.join("pkg/echo_client_guest_web.js"),
-        wbg_dir.join("guest.js"),
-    )
-    .expect("failed to copy WBG JS");
-    fs::copy(
-        client_guest.join("pkg/echo_client_guest_web_bg.wasm"),
-        wbg_dir.join("guest_bg.wasm"),
-    )
-    .expect("failed to copy WBG wasm");
 
     output
 }

@@ -92,15 +92,15 @@ async fn update_dependency_adds_new_entry_with_actr_type() {
         "actr_type written: {content}"
     );
     assert!(content.contains("fp1"), "fingerprint written: {content}");
-    // name differs from alias → name field emitted.
+    // Service name and fingerprint are persisted as one strict service ref.
     assert!(
-        content.contains("name = \"echo-service\""),
-        "name written: {content}"
+        content.contains("service = \"echo-service:fp1\""),
+        "service ref written: {content}"
     );
 }
 
 #[tokio::test]
-async fn update_dependency_preserves_existing_actr_type_and_fingerprint() {
+async fn update_dependency_preserves_actr_type_and_migrates_legacy_service_fields() {
     let dir = TempDir::new().unwrap();
     let body = r#"edition = 1
 [package]
@@ -126,9 +126,40 @@ echo = { actr_type = "acme:Echo:1.0.0", fingerprint = "keep-fp" }
         "actr_type preserved: {content}"
     );
     assert!(
-        content.contains("keep-fp"),
-        "fingerprint preserved: {content}"
+        content.contains("service = \"echo:keep-fp\""),
+        "legacy service fields migrated: {content}"
     );
+    assert!(
+        !content.contains("fingerprint ="),
+        "legacy field removed: {content}"
+    );
+}
+
+#[tokio::test]
+async fn update_dependency_prefers_existing_canonical_service_over_legacy_fields() {
+    let dir = TempDir::new().unwrap();
+    let body = r#"edition = 1
+[package]
+name = "svc"
+manufacturer = "acme"
+version = "0.1.0"
+
+[dependencies]
+echo = { actr_type = "acme:Echo:1.0.0", service = "EchoService:canonical", name = "legacy", fingerprint = "legacy-fp" }
+"#;
+    let (mgr, _) = manager_with(dir.path(), body);
+    let spec = DependencySpec {
+        alias: "echo".into(),
+        name: "echo".into(),
+        actr_type: None,
+        fingerprint: None,
+    };
+
+    mgr.update_dependency(&spec).await.unwrap();
+
+    let content = std::fs::read_to_string(dir.path().join("manifest.toml")).unwrap();
+    assert!(content.contains("service = \"EchoService:canonical\""));
+    assert!(!content.contains("legacy-fp"));
 }
 
 #[tokio::test]

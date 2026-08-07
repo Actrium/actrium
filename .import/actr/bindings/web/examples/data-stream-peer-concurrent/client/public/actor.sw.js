@@ -1,3 +1,8 @@
+/*
+ * LEGACY / UNSAFE: this historical example fetches and executes loose
+ * wasm-bindgen JS/WASM without signed .actr package verification. Do not use
+ * this Service Worker as a template for current workloads.
+ */
 /* global wasm_bindgen */
 
 (function () {

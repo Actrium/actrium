@@ -511,6 +511,11 @@ uint64_t uniffi_actr_fn_method_contextbridge_remove_media_track(uint64_t ptr, Ru
 RustBuffer uniffi_actr_fn_method_contextbridge_request_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_RESOLVE_DEPENDENCY
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_RESOLVE_DEPENDENCY
+uint64_t uniffi_actr_fn_method_contextbridge_resolve_dependency(uint64_t ptr, RustBuffer alias
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_SELF_ID
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_CONTEXTBRIDGE_SELF_ID
 RustBuffer uniffi_actr_fn_method_contextbridge_self_id(uint64_t ptr, RustCallStatus *_Nonnull out_status
@@ -629,6 +634,11 @@ uint64_t uniffi_actr_fn_method_actrrefwrapper_discover(uint64_t ptr, RustBuffer 
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_IS_SHUTTING_DOWN
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_IS_SHUTTING_DOWN
 int8_t uniffi_actr_fn_method_actrrefwrapper_is_shutting_down(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_RESOLVE_DEPENDENCY
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_RESOLVE_DEPENDENCY
+uint64_t uniffi_actr_fn_method_actrrefwrapper_resolve_dependency(uint64_t ptr, RustBuffer alias
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_SHUTDOWN
@@ -1142,6 +1152,12 @@ uint16_t uniffi_actr_checksum_method_contextbridge_request_id(void
 
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_RESOLVE_DEPENDENCY
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_RESOLVE_DEPENDENCY
+uint16_t uniffi_actr_checksum_method_contextbridge_resolve_dependency(void
+
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_SELF_ID
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_SELF_ID
 uint16_t uniffi_actr_checksum_method_contextbridge_self_id(void
@@ -1224,6 +1240,12 @@ uint16_t uniffi_actr_checksum_method_actrrefwrapper_discover(void
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_IS_SHUTTING_DOWN
 uint16_t uniffi_actr_checksum_method_actrrefwrapper_is_shutting_down(void
     
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_RESOLVE_DEPENDENCY
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_RESOLVE_DEPENDENCY
+uint16_t uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency(void
+
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_SHUTDOWN

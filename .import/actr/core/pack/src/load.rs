@@ -125,10 +125,9 @@ pub fn read_lock_file_bounded(
 
 /// Read a single manifest-declared JS glue file from an .actr package.
 ///
-/// Returns the first `.js` file under `resources/` that is NOT named
-/// `actor.sw.js` (which is the Service Worker runtime itself, not guest
-/// wasm-bindgen glue). Returns `Ok(None)` when the package has no eligible
-/// glue script.
+/// Returns the authenticated `resources/glue.js` resource. Returns `Ok(None)`
+/// when the manifest does not declare that conventional path and rejects an
+/// ambiguous manifest that declares it more than once.
 ///
 /// The resource path is selected from `manifest.resources`, never from raw ZIP
 /// names, so an unsigned entry appended to an otherwise valid package is
@@ -151,19 +150,20 @@ pub fn read_glue_js_bounded(
     manifest: &PackageManifest,
     max_bytes: usize,
 ) -> Result<Option<String>, PackError> {
-    let target = manifest
+    let mut targets = manifest
         .resources
         .iter()
         .map(|resource| resource.path.as_str())
-        .find(|name| {
-            name.starts_with("resources/")
-                && name.ends_with(".js")
-                && !name.ends_with("actor.sw.js")
-        });
+        .filter(|name| *name == "resources/glue.js");
 
-    let Some(name) = target else {
+    let Some(name) = targets.next() else {
         return Ok(None);
     };
+    if targets.next().is_some() {
+        return Err(PackError::InvalidPackage(
+            "manifest declares resources/glue.js more than once".to_string(),
+        ));
+    }
 
     let cursor = Cursor::new(actr_bytes);
     let mut archive = zip::ZipArchive::new(cursor)?;
@@ -352,6 +352,51 @@ mod tests {
         assert!(
             matches!(&error, PackError::InvalidPackage(message) if
                 message.contains(path) && message.contains("exceeds limit 1024")),
+            "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
+    fn read_glue_js_selects_only_conventional_resource_path() {
+        let glue_path = "resources/glue.js";
+        let manifest = manifest_with_resources(vec![
+            crate::manifest::ResourceEntry {
+                path: "resources/other.js".to_string(),
+                hash: "00".repeat(32),
+            },
+            crate::manifest::ResourceEntry {
+                path: glue_path.to_string(),
+                hash: "00".repeat(32),
+            },
+        ]);
+        let cursor = Cursor::new(Vec::new());
+        let mut zip = zip::ZipWriter::new(cursor);
+        let options = zip::write::SimpleFileOptions::default();
+        zip.start_file("resources/other.js", options).unwrap();
+        zip.write_all(b"throw new Error('wrong glue');").unwrap();
+        zip.start_file(glue_path, options).unwrap();
+        zip.write_all(b"export default async function init() {}")
+            .unwrap();
+        let package = zip.finish().unwrap().into_inner();
+
+        assert_eq!(
+            read_glue_js_bounded(&package, &manifest, 1024).unwrap(),
+            Some("export default async function init() {}".to_string())
+        );
+    }
+
+    #[test]
+    fn read_glue_js_rejects_duplicate_manifest_declarations() {
+        let resource = crate::manifest::ResourceEntry {
+            path: "resources/glue.js".to_string(),
+            hash: "00".repeat(32),
+        };
+        let manifest = manifest_with_resources(vec![resource.clone(), resource]);
+
+        let error = read_glue_js_bounded(&[], &manifest, 1024).unwrap_err();
+        assert!(
+            matches!(&error, PackError::InvalidPackage(message) if
+                message.contains("more than once")),
             "unexpected error: {error:?}"
         );
     }

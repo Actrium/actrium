@@ -433,7 +433,7 @@ async fn main() -> Result<()> {
             args.manifest_toml.display()
         )
     })?;
-    let init = Node::from_config_with_package(&args.runtime_toml, manifest.package.clone())
+    let init = Node::from_config_with_manifest(&args.runtime_toml, manifest)
         .await
         .with_context(|| {
             format!(
