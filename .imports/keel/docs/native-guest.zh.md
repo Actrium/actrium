@@ -124,7 +124,11 @@ keel 现状 = **QuickJS-WASM 跑 JS guest**（沙箱是一个 WASM 模块，里�
 >
 > **独立 review 又补修（沙箱边界硬化）**：`emitEvent`/`resolve` 补 try/catch（guest 坏 alloc/trap 不使 host 抛错、不 reject `drain()`）；SDK `events::dispatch` 迭代前**快照 handler**（Box→Rc，消除 handler 内改 `HANDLERS` 的 UAF）；`RESULTS` 加上限（防 drop 的 future 结果槽无界泄漏）；封口测试补**正向拒绝**用例。
 
-**已知限制（诚实）**：host 在**主线程同步**跑 guest，**自旋类 guest 仍能挂死 host**（trap 只治 panic/abort，不治正常死循环）——两种同族：①guest 自己 `loop {}`；②guest 每次事件/resolve 后再发一个 `host_call`，形成无限 microtask 链，`drain()` 在主线程永不返回。真正的中断需 Worker + `terminate`（对应 defer 的 worker-thread 线，QuickJS 已有 per-turn watchdog 可参照）。
+**Web Worker 隔离（已落地）**：Web host 可用 `createNativeGuestWorkerEngine` 把整个原生 guest（实例、线性内存、`keel_init`、event/resolve continuation）放进独立 Worker。主线程只保留真实的 `host:*` 实现与 Receiver；能力调用通过结构化消息往返。指针型能力不镜像整块 Wasm heap，而是通过有界的按需 memory RPC 只复制调用实际读取/写入的区间，所以 `canvas.present`、asset/file/media/audio/GPU 等路径需 `await readGuestMemory` / `await writeGuestMemory`。
+
+Worker proxy 对每个 load/event turn 累计 guest 实际运行时间：`keel_init`、event、`keel_resolve` 等同步执行段计入 watchdog，等待文件选择器、网络 broker 等 host capability 的时间不计入。同步 `loop {}` 会由主线程 `terminate()` 硬终止；无穷 host_call→resolve 链也不再占住 UI 主线程，并受累计预算约束。真实 Worker 测试覆盖了渲染、指针读写、host 等待不计费和死循环终止。
+
+**仍保留的直接模式**：`createNativeGuestEngine` 为非浏览器/测试/兼容场景继续提供同线程实现；选择它就仍须由集成方保证 guest 会返回。Worker 内的 `WebAssembly.Exports` 不能跨 structured clone，因此 worker engine 的 `exports` 只返回 `undefined`；诊断应改走命名事件或 host capability。打包器若不处理库内 `new URL(...)`，可通过 `createWorker` 注入内容哈希后的同源 Worker 入口。
 
 **仍缺（follow-up）**：更广的 fuzz（随机 op 流/畸形 props）、runaway-guest 的 Worker 化中断、接平台后 `host:store` 活桥 e2e。
 
