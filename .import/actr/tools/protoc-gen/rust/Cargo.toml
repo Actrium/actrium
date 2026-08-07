@@ -22,6 +22,10 @@ actr-protocol.workspace = true
 prost = "0.14"
 prost-types = "0.14"
 bytes = "1.10"
+# rust-protobuf is required alongside prost: prost drops unknown fields when
+# decoding `MethodOptions`, so the `(actr.payload_type)` extension (field
+# 50001) can only be recovered through rust-protobuf's unknown-fields API.
+protobuf = "3.7"
 
 # Code generation
 quote = "1.0"

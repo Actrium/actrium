@@ -1,5 +1,5 @@
 export { ActrNode } from './node';
-export { ActrRef } from './ref';
+export { ActrRef, type RpcCompanion } from './ref';
 export {
   ActrError,
   type ActrErrorCode,

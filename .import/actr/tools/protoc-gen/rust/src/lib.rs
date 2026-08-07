@@ -11,10 +11,14 @@
 //!
 //! The only external consumer of this library is the sibling binary
 //! `protoc-gen-actrframework`, which consumes the re-exported subset below.
-//! The `payload_type_extractor` module is an internal helper used by
-//! `modern_generator` and is kept crate-private.
+//! `payload_type_extractor` recovers the `(actr.payload_type)` method option
+//! from the raw request bytes (prost drops it as an unknown field) and is
+//! public so the binary can thread the extracted map into the generator.
 
 pub(crate) mod modern_generator;
-pub(crate) mod payload_type_extractor;
+pub mod payload_type_extractor;
 
 pub use modern_generator::{GeneratorRole, ModernGenerator, RemoteServiceInfo};
+pub use payload_type_extractor::{
+    ExplicitPayloadTypeMap, MethodKey, PayloadType, build_explicit_payload_types,
+};

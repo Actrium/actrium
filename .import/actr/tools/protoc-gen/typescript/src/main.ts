@@ -1,9 +1,11 @@
 import type {
+  DescExtension,
   DescFile,
   DescMessage,
   DescMethod,
   DescService,
 } from "@bufbuild/protobuf";
+import { getOption, hasOption } from "@bufbuild/protobuf";
 import {
   createEcmaScriptPlugin,
   runNodeJs,
@@ -58,6 +60,16 @@ type LocalServiceMetadata = {
 
 const VERSION = "0.6.1";
 
+// Extension field number of `(actr.payload_type)` on `MethodOptions`.
+const PAYLOAD_TYPE_EXTENSION_NUMBER = 50001;
+
+// Valid values of the `actr.PayloadType` enum (RPC_RELIABLE..MEDIA_RTP).
+const PAYLOAD_TYPE_MAX = 4;
+
+// Unary fallback when a method does not set `(actr.payload_type)`
+// (RPC_RELIABLE). Streaming methods are rejected before this is consulted.
+const PAYLOAD_TYPE_FALLBACK = 0;
+
 const plugin = createEcmaScriptPlugin<PluginParams>({
   name: "protoc-gen-actrframework-typescript",
   version: VERSION,
@@ -76,6 +88,7 @@ function generateTypeScript(schema: Schema<PluginParams>): void {
     schema.options.remoteFileMapping,
   );
   const requestOwners = new Map<string, string>();
+  const payloadTypeExtension = findPayloadTypeExtension(schema);
 
   for (const file of schema.files) {
     if (file.services.length === 0) {
@@ -93,7 +106,7 @@ function generateTypeScript(schema: Schema<PluginParams>): void {
     }
 
     validateUniqueRequestBindings(requestOwners, analyzedMethods);
-    generateClientFile(schema, file, analyzedMethods);
+    generateClientFile(schema, file, analyzedMethods, payloadTypeExtension);
 
     const explicitTargetType = parseActrType(
       schema.options.remoteFileMapping.get(normalizeProtoFileKey(file.name)) ??
@@ -131,6 +144,7 @@ function generateClientFile(
   schema: Schema<PluginParams>,
   file: DescFile,
   analyzedMethods: AnalyzedMethod[],
+  payloadTypeExtension: DescExtension | undefined,
 ): void {
   const generated = schema.generateFile(
     `${normalizeProtoFileKey(file.name)}_client.ts`,
@@ -160,6 +174,14 @@ function generateClientFile(
     generated.print(
       "  routeKey: ",
       generated.string(routeKeyForMethod(entry.method)),
+      ",",
+    );
+    // Runtime-neutral lane value: a plain number literal, not tied to any
+    // runtime's PayloadType representation. Each runtime adapts it at the
+    // call boundary (see ActrRef.callRpc in the Node binding).
+    generated.print(
+      "  payloadType: ",
+      String(payloadTypeForMethod(entry.method, payloadTypeExtension)),
       ",",
     );
     generated.print(
@@ -466,6 +488,46 @@ function requestCompanionNameForMethod(method: DescMethod): string {
 
 function routeKeyForMethod(method: DescMethod): string {
   return `${method.parent.typeName}.${method.name}`;
+}
+
+// Locate the `actr.payload_type` extension descriptor across all files in
+// the schema (present only when the service proto imports actr/options.proto).
+function findPayloadTypeExtension(
+  schema: Schema<PluginParams>,
+): DescExtension | undefined {
+  return schema.allFiles
+    .flatMap((file) => file.extensions)
+    .find(
+      (ext) =>
+        ext.typeName === "actr.payload_type" &&
+        ext.number === PAYLOAD_TYPE_EXTENSION_NUMBER &&
+        ext.extendee.typeName === "google.protobuf.MethodOptions",
+    );
+}
+
+// Explicit `(actr.payload_type)` wins over the unary fallback. Like the Rust
+// generator, a malformed option is a hard error naming the method — never a
+// silent fallback that would disguise a codegen defect as a lane choice.
+function payloadTypeForMethod(
+  method: DescMethod,
+  extension: DescExtension | undefined,
+): number {
+  if (extension === undefined || !hasOption(method, extension)) {
+    return PAYLOAD_TYPE_FALLBACK;
+  }
+  const value: unknown = getOption(method, extension);
+  if (
+    typeof value !== "number" ||
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > PAYLOAD_TYPE_MAX
+  ) {
+    throw new Error(
+      `${method.parent.typeName}.${method.name}: unsupported payload_type value ${String(value)}; ` +
+        `expected an integer in 0..${PAYLOAD_TYPE_MAX}.`,
+    );
+  }
+  return value;
 }
 
 function parseActrType(
