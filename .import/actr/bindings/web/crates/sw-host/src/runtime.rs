@@ -2584,7 +2584,7 @@ impl SwRuntime {
             );
             self.handle_rpc_response(envelope, &peer_id, channel_id, &payload.stream_id)
         } else {
-            // State path: route through `Dispatcher -> Mailbox -> MailboxProcessor -> ServiceHandler`.
+            // State path: route through `Dispatcher -> Mailbox -> MailboxProcessor -> Scheduler`.
             // By design, all inbound RPC requests must be persisted in the mailbox
             // and processed through serialized scheduling.
             log::info!(
