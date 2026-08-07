@@ -215,3 +215,18 @@ host-import 白名单（`env.{keel_host_call, keel_send_batch, keel_log, keel_on
 **实测提速（同内核、引擎相关）**：V8（node/浏览器/web host）约 **2.07×**，JSC（bun 测试运行时）约 **1.11×**——差异纯来自引擎的 wasm-SIMD 代码生成质量。web host 跑 V8，故 ~2× 是相关数字；bun 下看到的 ~1.1× 低估了真实收益。正确性与引擎无关。
 
 **scope**：具体滤镜（盒式模糊）属 app/demo 侧，框架只提供这条构建路径（+ 可选通用 helper），不做滤镜库。改任何 guest 后须 `crates/build.sh` 重建并提交其 fixture（CI 不重建）。
+
+### 10.5 通用 worker 计算导出
+
+需要并行吞吐的 native guest 可额外导出：
+
+`keel_compute_<name>(src_ptr, src_len, dst_ptr, dst_cap, ...i32_args) -> out_len`
+
+host 通过 `NativeGuestComputePool`（`keel/host/native-compute`）在多个独立 Worker 中实例化同一
+wasm，并以 transferable `ArrayBuffer` 搬运工作块。计算实例不运行 `keel_init`、没有 host
+capability dispatch，也不与主 guest 共享内存。计算导出必须是同步纯函数，不得分配或保留
+host 提供的 scratch 指针；返回长度若超出 `dst_cap` 会被拒绝。
+
+默认保护上限是 16 workers（自动值最多 8）、每个输入/输出 64 MiB、8 个 i32 参数、64 个
+等待加运行任务和 5 秒 wall timeout。池不理解算法：图像的切片、halo 和结果缝合仍由应用
+负责。完整设计和逐字节门禁见 [native-guest-threads.zh.md](native-guest-threads.zh.md)。

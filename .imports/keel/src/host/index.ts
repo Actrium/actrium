@@ -13,6 +13,11 @@ export { Engine } from './engine';
 
 // Pre-rename spellings of the five names below, kept as `@deprecated` aliases.
 export * from './native-guest/deprecated-aliases';
+export type {
+  NativeComputeRequest,
+  NativeGuestComputePoolOptions,
+} from './native-guest/native-compute-pool';
+export { NativeGuestComputePool } from './native-guest/native-compute-pool';
 export type { NativeGuestHostOptions } from './native-guest/native-guest-host';
 // Native (non-JS) WASM guest: the low-level host + an EngineViewEngine adapter so
 // the platform mounts a native guest through the same useEngineView pipeline.

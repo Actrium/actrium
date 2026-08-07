@@ -1,9 +1,9 @@
-# keel native guest 多线程计算 —— approach B 设计草稿（预研，未实现）
+# keel native guest 多线程计算 —— approach B（独立实例 worker 池）
 
-> 状态：**设计 + 已落地 host 侧切片**。approach B 的 host 侧 worker 池已实现并带逐字节
-> 门禁 + 提速 bench（见第 8 节），**未改 seal、未改 guest、未加任何 wire/contract**。对应
-> issue #57 验收的「线程」那半；SIMD 那半见 `docs/native-guest.zh.md` 第 10 节 +
-> `crates/blur-demo-guest`。
+> 状态：**通用 host 侧计算池已落地**。任意 native guest 可按固定 ABI 导出纯同步计算函数，
+> host 用互相独立的 worker/wasm 实例并行执行并以 transferable buffer 搬运输入输出。旧的 blur
+> 切片池仍作为瓦片/halo/缝合的算法示例。两条路径都**不改 seal、不用共享内存，也不增加
+> guest 的 host import**。应用平台如何把它声明成 `host:compute` 能力不属于 keel 的 contract。
 
 ## 0. 定位与边界
 
@@ -32,18 +32,20 @@
 
 ```
 主线程 (host)
-  │  切图：源 framebuffer → N 个瓦片(带 halo)
-  │  postMessage(tile.buffer, [tile.buffer])   // transferable，零拷贝
+  │  应用切图：源数据 → N 个工作块（卷积类算法自行附带 halo）
+  │  pool.run({ exportName, input, outputCapacity, args })
+  │  postMessage(input.buffer, [input.buffer])
   ▼
-worker[0..N)   每个 = 一个独立 NativeGuestHost + 一份 blur guest .wasm
-  │  guest.box_blur_simd(tilePtr, w, h, r)      // 各自线性内存内跑，互不可见
+worker[0..N)   每个 = 同一 guest .wasm 的独立实例 + 私有线性内存
+  │  guest.keel_compute_<name>(src_ptr, src_len, dst_ptr, dst_cap, ...args)
   ▼  postMessage(result.buffer, [result.buffer])
 主线程
-     缝合：各瓦片内部区域写回目标 framebuffer → host:canvas.present
+     应用接收结果并缝合/聚合
 ```
 
-现状对照：`NativeGuestHost`（`src/host/native-guest/native-guest-host.ts`）今天只实例化
-**一个** guest。approach B = 在 worker 里跑 N 个这样的实例 + 一层「瓦片工作 API」。
+计算 worker 不启动 `keel_init`，也不装配 `NativeGuestHost` 的能力派发；它只实例化模块、
+查找命名受限的纯计算导出并在 host 管理的 scratch 区同步调用。计算实例因此不能借这条路径
+调用 `host:*`，也不会与主 guest 共享状态。
 
 ## 3. 关键设计点
 
@@ -78,10 +80,9 @@ worker[0..N)   每个 = 一个独立 NativeGuestHost + 一份 blur guest .wasm
 
 ## 4. 复用现有基建
 
-web host 已有 off-main-thread 的 engine-in-worker 与派发/协议层：
-`src/host/web/worker/{worker-engine,worker-host,worker-dispatch,protocol,turn-gate}.ts`。
-approach B 的 worker 承载与消息协议应**扩展这套**，而非另起炉灶——池化与瓦片消息是
-在其上加的一层「compute 工作」协议。
+web host 已有 off-main-thread 的完整 guest 承载层，但纯计算池刻意不用它：完整承载层会启动
+guest 并开放能力派发，而计算池只允许一组命名受限、同步、无副作用的导出。两者复用的是
+浏览器 Worker/transferable 基建，不复用生命周期或 capability dispatch。
 
 ## 5. web-first；native 宿主的差异
 
@@ -89,13 +90,13 @@ approach B 的「Web Worker 池」是 **web 专属**。native 宿主（Apple/RN 
 Worker，等价物是「OS 线程各承载一个独立 VM 实例 + 线程间传 buffer」，属**宿主特定、更
 大**的工作，本预研不覆盖。故 B 先在 web host 落地。
 
-## 6. 不做 / 未决
+## 6. 边界 / 未决
 
-- 本预研**不落实现**、不改 seal、不加 host API。
-- 未决：瓦片工作 API 归属——挂在 `host:canvas` 下，还是新开一个 `host:compute` 模块？
-  （倾向后者：计算与画布展示是两件事。）
+- keel 提供的是 host 侧 `NativeGuestComputePool`，不是 guest 可直接调用的 `host:compute`
+  contract。应用平台若要开放后者，必须自行声明 capability、限制可调用导出并接入授权/撤销。
 - 未决：瓦片调度粒度（固定瓦片 vs 按核数自适应）、halo 冗余计算与移交开销的平衡点
-  （决定何时才值得转 approach A）。
+  由调用方按算法选择；通用池不假装理解图像边界。
+- native 宿主的 OS 线程实现、approach A（共享内存真 wasm 线程）仍未做。
 
 ## 7. 预期收益（来自 #57 的 spike 实测）
 
@@ -103,7 +104,27 @@ worker 池近线性：8 worker ~9×、16 worker ~12×（16 核，超线程税使
 与「算法（滑窗）+ SIMD」叠加：**1.2s 的 naive 模糊 → ~40ms（约 30×，16 worker）**，逼近
 实时。这也是「先 B」的依据——不动 seal、不改部署，就拿到主要收益。
 
-## 8. 已落地（approach B host 侧切片）
+## 8. 已落地
+
+### 8.1 通用 native compute pool
+
+- **`native-compute-pool.ts`** —— `NativeGuestComputePool`，也可从
+  `keel/host/native-compute` 导入。默认池大小 `min(hardwareConcurrency, 8)`、硬上限 16；每个
+  输入/输出默认上限 64 MiB、数字参数最多 8 个、等待加运行任务最多 64 个、单任务 wall
+  timeout 默认 5 秒。超时会终止并替换该 worker。
+- **`native-compute-worker.ts`** —— 每个 worker 实例化一份私有 wasm，不运行 `keel_init`，
+  不提供 host capability dispatch。导出 ABI 固定为
+  `keel_compute_<name>(src_ptr, src_len, dst_ptr, dst_cap, ...i32_args) -> out_len`。导出必须同步、
+  不得分配/持有 host scratch 指针，也不得依赖主 guest 的可变状态。
+- 输入先复制再 transferable 移交，因此不会 detach 调用方的 `Uint8Array`；输出只复制导出
+  返回的实际长度，并移交独立 `ArrayBuffer`。共享内存、atomics、COOP/COEP 均不需要。
+- 池只负责单个工作块的排队、并行、上限和中止。切片、halo、缝合及逐块重试由调用方负责。
+
+`__tests__/native-compute-pool.test.ts` 用实际 worker 同时跑三份
+`keel_compute_box_blur`，并与主实例 SIMD 结果逐字节比较；还覆盖输入上限、非法/缺失导出、
+队列上限和 wall timeout。
+
+### 8.2 blur 专用参考实现
 
 host 侧 worker 池已实现，全在 `src/host/native-guest/`，复用 `blur-demo-guest.wasm`，**未改
 seal / guest / 任何 wire·contract**：
@@ -127,7 +148,7 @@ seal / guest / 任何 wire·contract**：
 每次 blur 的主线程切条/拷贝/缝合串行段 + JSC worker 开销；V8 上更好（引擎 SIMD ~2× vs JSC
 ~1.1×）。
 
-**本切片未做（follow-up）**：更细瓦片 + 拷贝/计算重叠（削减主线程串行段、提升并行度）;
+**仍未做（follow-up）**：更细瓦片 + 拷贝/计算重叠（削减主线程串行段、提升并行度）;
 把源像素路径接到真实 `host:asset`/`present`（当前 demo 由调用方传入整块 `Uint8Array`）;
 contract 级的瓦片 bomb-wall（本切片是 host 侧运行时守卫，语义上更靠下游 present 强制那侧,
 若要上升为 wire cap 需 canvas-wire.json + build.rs codegen + 一致性/golden，属更大改动);

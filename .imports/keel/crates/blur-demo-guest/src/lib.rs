@@ -73,6 +73,32 @@ pub extern "C" fn box_blur_simd(src: *const u8, dst: *mut u8, w: u32, h: u32, r:
     unsafe { blur_simd(src, dst, w as usize, h as usize, r as usize) };
 }
 
+/// Generic compute-pool ABI wrapper. The host supplies both buffers and numeric
+/// parameters; this export validates their capacities before entering the same
+/// SIMD kernel used by the direct-host correctness tests.
+#[no_mangle]
+pub extern "C" fn keel_compute_box_blur(
+    src: *const u8,
+    src_len: u32,
+    dst: *mut u8,
+    dst_cap: u32,
+    w: u32,
+    h: u32,
+    r: u32,
+) -> u32 {
+    let Some(expected) = w
+        .checked_mul(h)
+        .and_then(|pixels| pixels.checked_mul(BYTES_PER_PIXEL as u32))
+    else {
+        return u32::MAX;
+    };
+    if src_len != expected || dst_cap < expected || w == 0 || h == 0 {
+        return u32::MAX;
+    }
+    box_blur_simd(src, dst, w, h, r);
+    expected
+}
+
 /// Clamp a (possibly negative) coordinate into `0..hi` for edge handling.
 #[inline]
 fn clamp_coord(v: isize, hi: usize) -> usize {
