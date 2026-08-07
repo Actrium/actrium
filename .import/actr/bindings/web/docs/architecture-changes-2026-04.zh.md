@@ -189,7 +189,6 @@ T18 诊断 (4 轮 spike)
    │  │   ├── adapter.rs     │   │  ├── types.rs        │
    │  │   ├── context.rs     │◄──┤  ├── guest.rs        │
    │  │   └── mod.rs         │   │  └── host.rs         │
-   │  ├── service_handler.rs │   │                      │
    │  └── workload.rs        │   │  Workload trait      │
    └────────┬────────────────┘   │  (#[doc(hidden)] pub)│
             │                    └──────────┬───────────┘
@@ -505,7 +504,6 @@ T18 诊断 (4 轮 spike)
 ```rust
 // core/framework
 pub mod web;                          // WebContext / WebWorkloadAdapter
-pub trait ServiceHandler;             // 6b 关联类型 trait
 pub use entry;                        // entry! macro 加 web target arm
 
 // bindings/web/crates/actr-web-abi
@@ -581,7 +579,7 @@ SUITES='BasicFunction MultiTab' ./start-mock.sh   # 全套 12/12
 
 ### 8.4 给 protoc-gen 用户
 
-`bindings/web/examples/codegen-test` 是 codegen 的 smoke target。本批次 `tools/protoc-gen/web/src/codegen.rs` 增了 `ServiceHandler` impl 自动 emit（commit `cd372f94`），无需改 `.proto` 即可获得新 trait 实现。
+`bindings/web/examples/codegen-test` 是 codegen 的 smoke target。本批次 `tools/protoc-gen/rust/src/modern_generator.rs` 曾增 `ServiceHandler` impl 自动 emit（commit `cd372f94`）；该 witness 后经核查全仓无消费方，已作为死代码删除（#292），生成物不再包含。
 
 ---
 

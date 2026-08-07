@@ -14,7 +14,7 @@
 | **4 Echo 接入 + e2e** | ✓ | `server/client-guest-wbg` + `actor.sw.js`（Phase 8 后 WBG 即唯一）+ `start-mock.sh`；**BasicFunction 6/6 PASS** |
 | **5 CI drift + 文档收尾** | ✓ | `.github/workflows/ci-web.yml` 接 `actr-wit-compile-web --check` + `sync-cli-assets.sh --check`；T18 doc 标"已绕开" |
 | **6a-I γ-unified 整合** | ✓ | 6 commits；BasicFunction 6/6 ✓；架构落地 |
-| **6b entry! 宏 + protoc 跨 target** | ✓ | 5 commits（ServiceHandler + WebWorkloadAdapter + 宏 + protoc-gen + smoke test crate） |
+| **6b entry! 宏 + protoc 跨 target** | ✓ | 5 commits（WebWorkloadAdapter + 宏 + protoc-gen + smoke test crate；彼时的 ServiceHandler witness 无消费方，已于 #292 删除） |
 | **6c echo 一份化** | ✓ | 3 commits 合入 main（`87b3401d` / `a4ec581b` / `cff7f71a`），`*-guest-wbg` 已删，`*-guest` 单 crate 跨 target |
 | **TD-002 sync-cli-assets** | ✓ | `bindings/web/scripts/sync-cli-assets.sh` + sw-host build.sh 末尾自动触发 |
 | **TD-003 γ HashMap** | ✓ | `guest_bridge.rs::DISPATCH_CTXS: HashMap<RequestId, Ctx>` |
