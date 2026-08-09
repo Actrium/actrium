@@ -6,6 +6,9 @@ import { NativeGuestHost } from '../native-guest-host';
 import type { ComputePoolToWorker, ComputeWorkerToPool } from '../native-compute-protocol';
 
 const BLUR_GUEST = readFileSync(join(import.meta.dir, 'fixtures/blur-demo-guest.wasm'));
+const RUNAWAY_START_GUEST = readFileSync(
+  join(import.meta.dir, 'fixtures/native-compute-runaway-start.wasm')
+);
 
 function source(width: number, height: number, seed: number): Uint8Array {
   const out = new Uint8Array(width * height * 4);
@@ -144,5 +147,86 @@ describe('generic native-guest compute pool', () => {
     ).rejects.toThrow('queue cap 1 exceeded');
     pool.destroy();
     await expect(first).rejects.toThrow('pool destroyed');
+  });
+
+  it('times out a runaway WebAssembly start section during worker initialization', async () => {
+    const pool = new NativeGuestComputePool(RUNAWAY_START_GUEST, {
+      workers: 1,
+      timeoutMs: 50,
+    });
+    try {
+      await expect(
+        pool.run({ exportName: 'keel_compute_probe', input: new Uint8Array() })
+      ).rejects.toThrow('initialization timed out after 50ms');
+    } finally {
+      pool.destroy();
+    }
+  }, 3_000);
+
+  it('snapshots a request before it waits in the queue', async () => {
+    let worker!: ManualWorker;
+    class ManualWorker {
+      onmessage: ((event: MessageEvent<ComputeWorkerToPool>) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+      runMessage: Extract<ComputePoolToWorker, { kind: 'run' }> | null = null;
+
+      postMessage(message: ComputePoolToWorker) {
+        if (message.kind !== 'run') return;
+        this.runMessage = message;
+        queueMicrotask(() =>
+          this.onmessage?.({
+            data: { kind: 'result', id: message.id, output: new ArrayBuffer(0) },
+          } as MessageEvent<ComputeWorkerToPool>)
+        );
+      }
+
+      ready() {
+        this.onmessage?.({
+          data: { kind: 'ready' },
+        } as MessageEvent<ComputeWorkerToPool>);
+      }
+
+      terminate() {}
+    }
+    const pool = new NativeGuestComputePool(BLUR_GUEST, {
+      workers: 1,
+      maxBytes: 4,
+      createWorker: () => (worker = new ManualWorker()) as unknown as Worker,
+    });
+    const request = {
+      exportName: 'keel_compute_probe',
+      input: Uint8Array.from([1, 2, 3, 4]),
+      outputCapacity: 4,
+      args: [7],
+    };
+    const result = pool.run(request);
+    request.input = new Uint8Array(8);
+    request.outputCapacity = 8;
+    request.args = [8, 9];
+    worker.ready();
+
+    await expect(result).resolves.toEqual(new Uint8Array());
+    expect(worker.runMessage?.input.byteLength).toBe(4);
+    expect(worker.runMessage?.outputCapacity).toBe(4);
+    expect(worker.runMessage?.args).toEqual([7]);
+    pool.destroy();
+  });
+
+  it('rejects invalid resource-limit configuration', () => {
+    expect(
+      () => new NativeGuestComputePool(BLUR_GUEST, { maxBytes: Number.NaN })
+    ).toThrow('maxBytes');
+    expect(
+      () => new NativeGuestComputePool(BLUR_GUEST, { maxArgs: -1 })
+    ).toThrow('maxArgs');
+    expect(
+      () => new NativeGuestComputePool(BLUR_GUEST, { maxQueue: 0 })
+    ).toThrow('maxQueue');
+    expect(
+      () =>
+        new NativeGuestComputePool(BLUR_GUEST, {
+          timeoutMs: Number.POSITIVE_INFINITY,
+        })
+    ).toThrow('timeoutMs');
   });
 });
