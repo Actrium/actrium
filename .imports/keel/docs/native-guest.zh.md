@@ -228,5 +228,7 @@ capability dispatch，也不与主 guest 共享内存。计算导出必须是同
 host 提供的 scratch 指针；返回长度若超出 `dst_cap` 会被拒绝。
 
 默认保护上限是 16 workers（自动值最多 8）、每个输入/输出 64 MiB、8 个 i32 参数、64 个
-等待加运行任务和 5 秒 wall timeout。池不理解算法：图像的切片、halo 和结果缝合仍由应用
-负责。完整设计和逐字节门禁见 [native-guest-threads.zh.md](native-guest-threads.zh.md)。
+等待加运行任务和 5 秒 wall timeout（同时覆盖 Wasm 初始化和单任务执行）。请求会在入队前
+完整快照，避免排队期间的调用方修改绕过上限。池不理解算法：图像的切片、halo 和结果缝合
+仍由应用负责。完整设计和逐字节门禁见
+[native-guest-threads.zh.md](native-guest-threads.zh.md)。

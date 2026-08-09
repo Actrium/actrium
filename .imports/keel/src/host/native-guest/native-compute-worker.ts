@@ -1,6 +1,8 @@
 /**
  * One worker-hosted, private-memory instance of a native guest's pure compute
- * exports. No guest entry point runs and no host capability dispatch exists.
+ * exports. keel_init is not invoked and no host capability dispatch exists.
+ * WebAssembly start sections still execute during instantiation; the pool
+ * bounds that initialization phase with the same wall timeout as a job.
  *
  * Compute ABI:
  *   keel_compute_<name>(src_ptr, src_len, dst_ptr, dst_cap, ...i32_args) -> out_len
