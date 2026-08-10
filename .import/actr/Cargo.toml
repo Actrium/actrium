@@ -168,9 +168,9 @@ opentelemetry-appender-tracing = "0.32.0"
 tracing-opentelemetry = "0.33.0"
 
 # === WebRTC (WebRTC) ===
-webrtc = { version = "0.20.0", default-features = false, features = ["runtime-tokio"] }
-rtc = "0.20.0"
-rtc-rtp = "0.20.0"
+webrtc = { version = "0.20.1", default-features = false, features = ["runtime-tokio"] }
+rtc = "0.20.1"
+rtc-rtp = "0.20.1"
 
 # === actrix server deps (imported) ===
 turn_crate = { package = "turn", version = "0.11.0" }
