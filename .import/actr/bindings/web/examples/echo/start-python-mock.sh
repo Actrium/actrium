@@ -131,7 +131,7 @@ log_step "Building generated Python EchoService package..."
     cd "$PY_WORKLOAD_DIR"
     ACTR_SIGNING_KEY="$MFR_KEY_FILE" PATH="$ACTR_ROOT/target/debug:$PATH" ./build.sh package
 )
-PY_ACTR_PACKAGE="$PY_WORKLOAD_DIR/dist/acme-EchoService-0.1.0-wasm32-wasip2.actr"
+PY_ACTR_PACKAGE="$PY_WORKLOAD_DIR/dist/acme-EchoService-0.2.0-wasm32-wasip2.actr"
 [[ -f "$PY_ACTR_PACKAGE" ]] || fail "missing Python package: $PY_ACTR_PACKAGE"
 
 log_step "Building web client guest package..."
@@ -244,7 +244,7 @@ turn_urls = ["turn:localhost:3478"]
 
 [[acl.rules]]
 permission = "allow"
-type = "acme:EchoService:0.1.0"
+type = "acme:EchoService:0.2.0"
 
 [web]
 port = 5173

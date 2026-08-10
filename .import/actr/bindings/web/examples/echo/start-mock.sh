@@ -188,7 +188,7 @@ MFR_KEY_FILE="$RELEASE_DIR/dev-key.json"
 MFR_PUBKEY=$(python3 -c "import json; print(json.load(open('$MFR_KEY_FILE'))['public_key'])")
 echo "  MFR pubkey: ${MFR_PUBKEY:0:20}..."
 
-SERVER_ACTR_PACKAGE="$RELEASE_DIR/acme-EchoService-0.1.0-wasm32-unknown-unknown.actr"
+SERVER_ACTR_PACKAGE="$RELEASE_DIR/acme-EchoService-0.2.0-wasm32-unknown-unknown.actr"
 (cd "$SERVER_GUEST_DIR" && "$ACTR_CMD" build \
     --no-compile \
     --target "wasm32-unknown-unknown" \
