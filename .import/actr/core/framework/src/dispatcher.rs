@@ -76,4 +76,17 @@ pub trait MessageDispatcher: crate::MaybeSendSync + 'static {
         envelope: RpcEnvelope,
         ctx: &C,
     ) -> ActorResult<Bytes>;
+
+    /// The `ReplyMode` declared for `route_key` via the proto
+    /// `actr.reply_mode` option (RFC-0323). Used by the runtime pump to decide
+    /// between the RETURN path (dispatch → bytes → reply) and the EXPLICIT
+    /// path (handler gets a `Reply<T>` handle; reply is deferred).
+    ///
+    /// The default returns `ReplyMode::Return`, so every existing dispatcher
+    /// — which does not override this — stays on the byte-identical RETURN
+    /// path. Generated dispatchers override this with a `match` over their
+    /// route keys.
+    fn reply_mode_for_route(_route_key: &str) -> actr_protocol::ReplyMode {
+        actr_protocol::ReplyMode::Return
+    }
 }

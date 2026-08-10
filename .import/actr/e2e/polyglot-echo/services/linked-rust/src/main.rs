@@ -21,9 +21,11 @@ use std::env;
 use std::path::PathBuf;
 
 use actr_config::ConfigParser;
-use actr_framework::{Context as RtContext, MessageDispatcher, Workload as RtWorkload};
+use actr_framework::{
+    Context as RtContext, MessageDispatcher, ReplyOutcome, Workload as RtWorkload,
+};
 use actr_hyper::Node;
-use actr_protocol::{ActorResult, ActrError, PayloadType, RpcEnvelope, RpcRequest};
+use actr_protocol::{ActorResult, ActrError, PayloadType, ReplyMode, RpcEnvelope, RpcRequest};
 use anyhow::{Context, Result, anyhow, bail};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -61,10 +63,23 @@ struct EchoDispatcher;
 impl MessageDispatcher for EchoDispatcher {
     type Workload = EchoWorkload;
 
+    /// Drive `echo.EchoService.Echo` through the RFC-0323 EXPLICIT path:
+    /// the pump provisions a `ReplyDeliver` on the ctx (because this route
+    /// declares `ReplyMode::Explicit`), and `dispatch` hands the encoded
+    /// response to it instead of returning the bytes inline. This exercises
+    /// the real ack-at-return / outstanding_replies / Deliver::deliver_async
+    /// machinery end-to-end. All other routes stay on the RETURN path.
+    fn reply_mode_for_route(route_key: &str) -> ReplyMode {
+        match route_key {
+            "echo.EchoService.Echo" => ReplyMode::Explicit,
+            _ => ReplyMode::Return,
+        }
+    }
+
     async fn dispatch<C: RtContext>(
         _workload: &Self::Workload,
         envelope: RpcEnvelope,
-        _ctx: &C,
+        ctx: &C,
     ) -> ActorResult<Bytes> {
         match envelope.route_key.as_str() {
             "echo.EchoService.Echo" => {
@@ -74,8 +89,32 @@ impl MessageDispatcher for EchoDispatcher {
                 let req = EchoRequest::decode(&**payload).map_err(|e| {
                     ActrError::DecodeFailure(format!("Failed to decode EchoRequest: {e}"))
                 })?;
+                let message = req.message.clone();
                 let resp = echo_service::handle_echo(req);
-                Ok(Bytes::from(resp.encode_to_vec()))
+                let resp_bytes = Bytes::from(resp.encode_to_vec());
+                // EXPLICIT: the pump set a ReplyDeliver on the ctx because
+                // this route declared ReplyMode::Explicit. Hand the reply to
+                // it — delivery (RESPONSE send + dedup completion + gauge
+                // release) runs in a spawned task. The RETURN fallback below
+                // is deliberately distinguishable: it replies with a
+                // `FALLBACK-RETURN:` prefix (not `Echo:`), so if the pump
+                // ever fails to provision a Deliver for an EXPLICIT route,
+                // run.sh's `Echo: <msg>` grep fails instead of silently
+                // passing as an indistinguishable RETURN echo.
+                if let Some(deliver) = ctx.reply_deliver() {
+                    deliver.deliver(ReplyOutcome {
+                        request_id: envelope.request_id.clone(),
+                        result: Ok(resp_bytes),
+                        emit_response: true,
+                    });
+                    Ok(Bytes::new())
+                } else {
+                    let fallback = EchoResponse {
+                        reply: format!("FALLBACK-RETURN: {message}"),
+                        ..resp
+                    };
+                    Ok(Bytes::from(fallback.encode_to_vec()))
+                }
             }
             route => Err(ActrError::UnknownRoute(route.to_string())),
         }

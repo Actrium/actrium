@@ -121,3 +121,82 @@ fn different_request_ids_are_independent() {
         DedupOutcome::Duplicate(_)
     ));
 }
+
+#[tokio::test]
+async fn explicit_inflight_sweep_evicts_aged_entry_and_notifies_waiter() {
+    // RFC-0323 §5/§7: an EXPLICIT InFlight marker that never completes
+    // (e.g. a Reply parked forever) must be swept — scoped to the
+    // `outstanding_replies` registry ids — and its parked duplicate waiter
+    // notified with TimedOut, not left hanging.
+    let mut d = DedupState::new();
+    assert!(matches!(d.check_or_mark("req-parked"), DedupOutcome::Fresh));
+
+    let mut waiter = match d.check_or_mark("req-parked") {
+        DedupOutcome::InFlight(w) => w,
+        other => panic!("expected InFlight waiter, got {other:?}"),
+    };
+
+    // Aged beyond INFLIGHT_TTL: the scoped sweep must evict + send TimedOut.
+    let future = std::time::Instant::now() + INFLIGHT_TTL + Duration::from_secs(1);
+    d.sweep_inflight_explicit(future, &["req-parked".to_string()]);
+
+    let _ = waiter.changed().await;
+    let result = waiter.borrow().clone().expect("waiter notified");
+    assert!(
+        matches!(result, Err(actr_protocol::ActrError::TimedOut)),
+        "expected Err(TimedOut) after sweep, got {result:?}"
+    );
+
+    // The InFlight marker is gone: a fresh check_or_mark now marks again.
+    assert!(matches!(d.check_or_mark("req-parked"), DedupOutcome::Fresh));
+}
+
+#[tokio::test]
+async fn explicit_inflight_sweep_does_not_evict_unaged_entry() {
+    // Below INFLIGHT_TTL the scoped sweep must leave the InFlight marker
+    // intact so a fast duplicate still waits for the real result.
+    let mut d = DedupState::new();
+    assert!(matches!(d.check_or_mark("req-live"), DedupOutcome::Fresh));
+
+    let now = std::time::Instant::now();
+    d.sweep_inflight_explicit(now, &["req-live".to_string()]);
+
+    assert!(matches!(
+        d.check_or_mark("req-live"),
+        DedupOutcome::InFlight(_)
+    ));
+}
+
+#[tokio::test]
+async fn return_inflight_is_not_evicted_by_explicit_sweep() {
+    // RFC-0323 §5: a RETURN handler may legitimately run longer than
+    // INFLIGHT_TTL. Its InFlight marker is NOT in the outstanding_replies
+    // registry, so the scoped sweep must leave it intact — otherwise a late
+    // retry would re-run the handler (cache flip / double side-effects).
+    let mut d = DedupState::new();
+    assert!(matches!(
+        d.check_or_mark("req-slow-return"),
+        DedupOutcome::Fresh
+    ));
+
+    // Pretend a duplicate parked on it.
+    let waiter = match d.check_or_mark("req-slow-return") {
+        DedupOutcome::InFlight(w) => w,
+        other => panic!("expected InFlight waiter, got {other:?}"),
+    };
+
+    // Aged beyond INFLIGHT_TTL, but the id is NOT EXPLICIT (absent from the
+    // explicit_ids set the sweep is scoped to). The entry must stay, and no
+    // TimedOut notification is sent to its parked duplicate waiter.
+    let future = std::time::Instant::now() + INFLIGHT_TTL + Duration::from_secs(1);
+    d.sweep_inflight_explicit(future, &["req-explicit-other".to_string()]);
+
+    assert!(
+        waiter.borrow().is_none(),
+        "RETURN in-flight waiter must not be notified by the EXPLICIT sweep"
+    );
+    assert!(matches!(
+        d.check_or_mark("req-slow-return"),
+        DedupOutcome::InFlight(_)
+    ));
+}

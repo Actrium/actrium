@@ -14,13 +14,13 @@ edition = "2024"
 rust-version = "1.95"
 
 [workspace.dependencies]
-actr-framework = { version = "0.4.0" }
-actr-protocol = { version = "0.4.0" }
-actr-runtime = { version = "0.4.0" }
-actr-hyper = { version = "0.4.0", features = ["opentelemetry"] }
-actr-config = { version = "0.4.0" }
-actr-platform-native = { version = "0.4.0" }
-actr-pack = { version = "0.4.0" }
+actr-framework = { version = "0.6.1" }
+actr-protocol = { version = "0.6.1" }
+actr-runtime = { version = "0.6.1" }
+actr-hyper = { version = "0.6.1", features = ["opentelemetry"] }
+actr-config = { version = "0.6.1" }
+actr-platform-native = { version = "0.6.1" }
+actr-pack = { version = "0.6.1" }
 tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"
 tracing = "0.1"

@@ -38,7 +38,7 @@
 
 use prost::Message as ProstMessage;
 
-use crate::generated::actr::PayloadType;
+use crate::generated::actr::{PayloadType, ReplyMode};
 
 /// Associates an RPC Request type with its Response type for type-safe RPC calls.
 ///
@@ -130,5 +130,31 @@ pub trait RpcRequest: ProstMessage + Default + Send + Sync + 'static {
     /// when making RPC calls.
     fn payload_type() -> PayloadType {
         PayloadType::RpcReliable
+    }
+
+    /// Returns the reply mode for this RPC method (RFC-0323).
+    ///
+    /// The reply mode determines how the callee delivers a response:
+    ///
+    /// ```protobuf
+    /// rpc Transcode(TranscodeRequest) returns (TranscodeResponse) {
+    ///     option (actr.reply_mode) = REPLY_MODE_EXPLICIT;
+    /// }
+    /// ```
+    ///
+    /// - `ReplyMode::Return` (default): the reply is the handler's return value.
+    ///   Dispatch completion and reply coincide — behavior is identical to
+    ///   pre-RFC-0323 codegen.
+    /// - `ReplyMode::Explicit`: the reply is sent through a movable `Reply<T>`
+    ///   handle, so the handler may return before the reply is produced.
+    ///
+    /// If not specified, defaults to `ReplyMode::Return`. The default keeps
+    /// RETURN methods byte-identical to today's generated code.
+    ///
+    /// Non-Rust-native targets (wasm, dynclib, and the polyglot generators)
+    /// do not yet support `ReplyMode::Explicit` and reject it at codegen time
+    /// rather than silently degrading (reject-don't-degrade).
+    fn reply_mode() -> ReplyMode {
+        ReplyMode::Return
     }
 }

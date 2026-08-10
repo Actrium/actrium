@@ -18,10 +18,14 @@
 
 pub(crate) mod dispatch_spec;
 pub(crate) mod modern_generator;
-pub(crate) mod payload_type_extractor;
+pub(crate) mod option_extractor;
+pub mod payload_type_extractor;
 pub(crate) mod unified_dispatch;
 
 pub use dispatch_spec::{DispatchRoute, DispatchSpec};
 pub use modern_generator::{GeneratorRole, ModernGenerator, RemoteServiceInfo};
-pub use payload_type_extractor::PayloadType;
+pub use option_extractor::extract_reply_modes;
+pub use payload_type_extractor::{
+    ExplicitPayloadTypeMap, MethodKey, PayloadType, build_explicit_payload_types,
+};
 pub use unified_dispatch::UnifiedDispatcherGenerator;

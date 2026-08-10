@@ -28,3 +28,21 @@ enum PayloadType {
 extend google.protobuf.MethodOptions {
     optional PayloadType payload_type = 50001;
 }
+
+// Reply mode: how the callee delivers a response for an RPC method.
+//
+// RETURN   (default): the reply is the handler's return value. Dispatch
+//                     completion and reply coincide — behavior is identical
+//                     to pre-RFC-0323 codegen.
+// EXPLICIT: the reply is sent through a movable `Reply<T>` handle, so the
+//           handler may return (releasing its dispatch slot / conflict key)
+//           before the reply is produced. See RFC-0323.
+enum ReplyMode {
+    REPLY_MODE_RETURN = 0;    // Reply through the handler return value (default)
+    REPLY_MODE_EXPLICIT = 1; // Reply explicitly through a Reply<T> handle
+}
+
+// Method-level option for reply mode selection (RFC-0323).
+extend google.protobuf.MethodOptions {
+    optional ReplyMode reply_mode = 50002;
+}

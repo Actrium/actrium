@@ -258,6 +258,13 @@ timer_inventory! {
         success: "backoff deadline", interrupt: "node shutdown", expiry: "retry dequeue",
         reset: "new dequeue failure", external: false
     },
+    INFLIGHT_TTL_SWEEP => {
+        id: "lifecycle.dedup.inflight_ttl_sweep", owner: "node.dedup", category: CompatibilityPolling,
+        duration: "fixed 5s", arm: "EXPLICIT Reply may be parked indefinitely (RFC-0323 §7)",
+        success: "sweep tick", interrupt: "node shutdown",
+        expiry: "evict aged InFlight + outstanding-reply entries", reset: "each sweep tick",
+        external: false
+    },
     PEER_SEND_BACKOFF => {
         id: "outbound.peer.send_backoff", owner: "peer_gate", category: FailureBackoff,
         duration: "payload retry policy", arm: "transient peer send fails",
@@ -943,6 +950,10 @@ mod tests {
             (
                 "lifecycle/dedup.rs",
                 "request-id dedup TTL; independent of connection or recovery state",
+            ),
+            (
+                "lifecycle/outstanding_replies.rs",
+                "EXPLICIT reply gauge + TTL sweep; independent of connection or recovery state",
             ),
             (
                 "lifecycle/recovery_policy/translate_bench.rs",
