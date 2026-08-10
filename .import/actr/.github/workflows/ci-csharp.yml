@@ -1,0 +1,54 @@
+name: CI (C#)
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: C# Wrapper + actr-cabi (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - uses: Swatinem/rust-cache@v2
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+      # Build actr-cabi as a Windows native lib (cdylib/staticlib) to verify the
+      # C ABI crate compiles on the Windows target. actr-cabi does not enable
+      # actr-hyper's opentelemetry feature, so this avoids the OTLP compile-time
+      # timeout that skipped the actrix Windows release build (#520).
+      - name: Build actr-cabi (Windows native)
+        run: cargo build --locked -p actr-cabi --target x86_64-pc-windows-msvc
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: Restore ActrSharp
+        working-directory: bindings/cabi/csharp/ActrSharp
+        run: dotnet restore
+      - name: Build ActrSharp
+        working-directory: bindings/cabi/csharp/ActrSharp
+        run: dotnet build --no-restore --configuration Release
+      - name: Restore WinUI E2E fixture
+        run: dotnet restore e2e/winui-echo-app/WinUiEchoApp/WinUiEchoApp.csproj --runtime win-x64
+      - name: Build WinUI E2E fixture
+        shell: pwsh
+        run: |
+          Copy-Item `
+            target/x86_64-pc-windows-msvc/debug/actr_cabi.dll `
+            e2e/winui-echo-app/WinUiEchoApp/actr_cabi.dll
+          dotnet build `
+            e2e/winui-echo-app/WinUiEchoApp/WinUiEchoApp.csproj `
+            --no-restore `
+            --configuration Debug `
+            --runtime win-x64

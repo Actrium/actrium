@@ -17,6 +17,7 @@ TARGETS = (
     "python_workload",
     "swift_binding",
     "kotlin_binding",
+    "csharp_binding",
     "web_binding",
     "c_go_workloads",
     "release_related",
@@ -98,6 +99,13 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"actrix_workspace:{path}")
             continue
 
+        if path.startswith("crates/actr-cabi/"):
+            targets["rust_core"] = True
+            targets["swift_binding"] = True
+            targets["csharp_binding"] = True
+            reasons.append(f"actr_cabi:{path}")
+            continue
+
         if path.startswith("cli/assets/web-runtime/"):
             targets["rust_core"] = True
             targets["web_binding"] = True
@@ -174,7 +182,9 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"typescript_stream_e2e:{path}")
             continue
 
-        if path.startswith(("bindings/swift/", "tools/protoc-gen/swift/")):
+        if path.startswith(
+            ("bindings/swift/", "bindings/cabi/swift/", "tools/protoc-gen/swift/")
+        ):
             targets["swift_binding"] = True
             reasons.append(f"swift:{path}")
             continue
@@ -182,6 +192,17 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
         if path.startswith(("bindings/kotlin/", "tools/protoc-gen/kotlin/")):
             targets["kotlin_binding"] = True
             reasons.append(f"kotlin:{path}")
+            continue
+
+        if path.startswith("bindings/cabi/csharp/"):
+            targets["csharp_binding"] = True
+            reasons.append(f"csharp:{path}")
+            continue
+
+        if path.startswith("e2e/winui-echo-app/"):
+            targets["rust_core"] = True
+            targets["csharp_binding"] = True
+            reasons.append(f"winui_e2e:{path}")
             continue
 
         if path.startswith("bindings/web/"):

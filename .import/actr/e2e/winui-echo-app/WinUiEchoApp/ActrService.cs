@@ -1,0 +1,101 @@
+using System.Diagnostics;
+using ActrSharp;
+
+namespace WinUiEchoApp;
+
+// Mirrors e2e/swift-echo-app/EchoApp/ActrService.swift's linked-runtime flow,
+// adapted to the actr-cabi C ABI typestate chain.
+//
+// Key difference from the Swift app: Swift implements the local EchoService
+// handler in-language (LocalEchoServiceHandlerImpl discovers + forwards to the
+// remote EchoService). The actr-cabi line cannot implement a workload in C#,
+// so the C# host drives only the node typestate chain and calls the LOCAL
+// linked Rust workload ("cabi.EchoApp"), which forwards to the remote
+// EchoService. See e2e/winui-echo-app/workload/src/lib.rs.
+internal sealed class ActrService
+{
+    private const string WorkloadName = "cabi.EchoApp";
+    private const string LocalRouteKey = "cabi.EchoApp.Echo";
+    private const string LocalPrefix = "winui-local:";   // mirrors Swift's "swift-local:"
+    private const long CallTimeoutMs = 30_000;
+    private const int ReadyRetryTotalSeconds = 20;
+    private const int ReadyRetryDelayMs = 250;
+
+    private ActrCabiNode? _node;
+    private bool _hasAutoSent;
+
+    public string Status { get; private set; } = "Starting ACTR node...";
+    public bool IsReady => _node != null;
+
+    public async Task StartIfNeededAsync(string configPath)
+    {
+        if (_node != null) return;
+        try
+        {
+            ActrCabiNode.InitRuntime();
+            var node = new ActrCabiNode();
+            await node.FromConfig(configPath);
+            await node.LinkWorkload(WorkloadName);
+            await node.Register(null);    // local mode: use the node's configured AIS endpoint
+            await node.Start();
+            _node = node;
+            Status = "Ready: actrium:EchoApp:0.1.0 (cabi.EchoApp workload)";
+        }
+        catch (Exception e)
+        {
+            Status = $"ACTR startup failed: {e.Message}";
+            throw;
+        }
+    }
+
+    public bool ShouldAutoSend() =>
+        Environment.GetEnvironmentVariable("ACTR_ECHOAPP_AUTO_SEND") == "1" && !_hasAutoSent;
+
+    public async Task<string> SendEchoAsync(string input)
+    {
+        if (_node is null) throw new InvalidOperationException("actor unavailable");
+
+        // Mirror Swift's local transform: the forwarded message is prefixed
+        // so the remote EchoService reply carries the local provenance.
+        var forwarded = $"{LocalPrefix}{input}";
+        var payload = EchoProto.EncodeEchoRequest(forwarded);
+        var resp = await _node.Call(LocalRouteKey, payload, CallTimeoutMs);
+        _hasAutoSent = true;
+        return EchoProto.DecodeEchoReply(resp);
+    }
+
+    // Retry on ConnectionNotReady, mirroring Swift's sendEchoWhenReady. The C
+    // ABI surfaces all call errors as a generic ActrCabiException (-50) whose
+    // message is the ActrError Display string; ConnectionNotReady renders as
+    // "connection not ready: ...", so match on the message prefix.
+    public async Task<string> SendEchoWhenReadyAsync(string input)
+    {
+        var sw = Stopwatch.StartNew();
+        while (true)
+        {
+            try
+            {
+                return await SendEchoAsync(input);
+            }
+            catch (ActrCabiException e) when (e.Message.Contains("connection not ready"))
+            {
+                if (sw.Elapsed.TotalSeconds >= ReadyRetryTotalSeconds) throw;
+                Console.Error.WriteLine(
+                    $"ACTR_E2E_RETRY:ConnectionNotReady retryAfterMs={ReadyRetryDelayMs}");
+                await Task.Delay(ReadyRetryDelayMs);
+            }
+        }
+    }
+
+    public async Task ShutdownAsync()
+    {
+        if (_node is null) return;
+        try { _node.Shutdown(); await _node.WaitShutdown(); }
+        catch { /* best-effort shutdown */ }
+        _node = null;
+    }
+
+    /// Emit the E2E result marker on stderr (parsed by run.sh).
+    internal static void EmitResult(string result) =>
+        Console.Error.WriteLine($"ACTR_E2E_RESULT:{result}");
+}
