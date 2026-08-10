@@ -32,6 +32,32 @@ pub fn find_workload(name: &str) -> Option<&'static WorkloadEntry> {
     inventory::iter::<WorkloadEntry>().find(|e| e.name == name)
 }
 
+// ── bundle identity ─────────────────────────────────────────────────────────
+
+/// A bundle ID declared by a workload cdylib via `export_bundle!`.
+///
+/// At most one bundle ID is expected per process: a single `actr_cabi`
+/// cdylib statically links one Rust workload (or a static combination of
+/// several). The host reads it to confirm which native provider was loaded.
+pub struct BundleEntry {
+    pub id: &'static str,
+}
+
+inventory::collect!(BundleEntry);
+
+/// Return the first registered bundle ID, or `None` if no workload cdylib
+/// declared one.
+pub fn bundle_id() -> Option<&'static str> {
+    inventory::iter::<BundleEntry>().next().map(|e| e.id)
+}
+
+/// Return the number of registered bundle IDs. Should be 0 or 1; a value
+/// greater than 1 signals multiple providers were linked, which violates the
+/// single-provider contract.
+pub fn bundle_count() -> usize {
+    inventory::iter::<BundleEntry>().count()
+}
+
 /// Register a Rust workload under a string name.
 ///
 /// The workload type must implement `actr_framework::Workload` + `Default`.
@@ -55,6 +81,25 @@ macro_rules! export_workload {
                     ::actr_hyper::Node::link(node, workload).await
                 }),
             }
+        }
+    };
+}
+
+/// Declare the bundle ID for this workload cdylib.
+///
+/// Call this exactly once per workload crate (alongside `export_workload!`).
+/// The host's native validation surfaces the ID so a mislinked `actr_cabi`
+/// can be identified before driving the typestate chain. Multiple workloads
+/// that are statically combined into one cdylib share a single bundle ID.
+///
+/// ```rust,ignore
+/// actr_cabi::export_bundle!("com.example.myworkload");
+/// ```
+#[macro_export]
+macro_rules! export_bundle {
+    ($id:expr) => {
+        $crate::inventory::submit! {
+            $crate::BundleEntry { id: $id }
         }
     };
 }

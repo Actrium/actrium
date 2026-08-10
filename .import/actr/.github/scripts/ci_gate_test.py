@@ -9,9 +9,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CI_GATE_WORKFLOW = ROOT / ".github/workflows/ci-gate.yml"
 CI_E2E_WORKFLOW = ROOT / ".github/workflows/ci-e2e.yml"
+CI_CSHARP_WORKFLOW = ROOT / ".github/workflows/ci-csharp.yml"
+CI_CSHARP_E2E_WORKFLOW = ROOT / ".github/workflows/ci-csharp-e2e.yml"
 CI_TYPESCRIPT_WORKFLOW = ROOT / ".github/workflows/ci-typescript.yml"
 RELEASE_TRAIN_WORKFLOW = ROOT / ".github/workflows/release-train.yml"
+RELEASE_TRAIN_VERIFY_WORKFLOW = ROOT / ".github/workflows/release-train-verify.yml"
 RELEASE_TRAIN_SCRIPT = ROOT / "scripts/release-train.sh"
+PUBLISH_ACTRSHARP_WORKFLOW = ROOT / ".github/workflows/publish-actrsharp.yml"
 GO_WORKLOAD_BUILD = ROOT / "examples/go/echo-workload/build.sh"
 CLI_TEST_SUPPORT = ROOT / "cli/src/test_support.rs"
 SWIFT_E2E_READINESS = ROOT / "e2e/swift-echo-app/lib/readiness.sh"
@@ -203,6 +207,68 @@ def test_release_train_verifies_ci_gate_triggered() -> None:
     assert "actions/workflows/ci-gate.yml/runs" in gate_job
     assert "head_sha=${RELEASE_SHA}" in gate_job
     assert "we do NOT block on" in gate_job
+
+
+def test_release_train_reuses_actrsharp_workflow() -> None:
+    workflow = RELEASE_TRAIN_WORKFLOW.read_text(encoding="utf-8")
+    publish_workflow = PUBLISH_ACTRSHARP_WORKFLOW.read_text(encoding="utf-8")
+    verify_workflow = RELEASE_TRAIN_VERIFY_WORKFLOW.read_text(encoding="utf-8")
+    publish_job = _job(workflow, "publish-actrsharp", "publish-cli")
+    report_job = _job(workflow, "collect-report", "notify-wechat")
+
+    assert "workflow_call:" in publish_workflow
+    assert "workflow_dispatch:" not in publish_workflow
+    assert '\n  push:\n' not in publish_workflow
+    for input_name in ("version", "source_ref", "release_sha", "publish"):
+        assert f"      {input_name}:\n" in publish_workflow
+
+    assert "- create-release" in publish_job
+    assert "packages: write" in publish_job
+    assert "uses: ./.github/workflows/publish-actrsharp.yml" in publish_job
+    assert "release_sha: ${{ needs.context.outputs.release_sha }}" in publish_job
+    assert "publish: ${{ !fromJSON(needs.context.outputs.dry_run) }}" in publish_job
+    assert "- publish-actrsharp" in report_job
+
+    assert "  verify-actrsharp:\n" in verify_workflow
+    assert "uses: ./.github/workflows/publish-actrsharp.yml" in verify_workflow
+    assert "publish: false" in verify_workflow
+    assert "publish-actrsharp.state.tsv" in publish_workflow
+    assert "local-name()='license'" in publish_workflow
+    assert 'GetAttribute("type") -ne "expression"' in publish_workflow
+    assert "<licenseExpression>" not in publish_workflow
+    release_script = RELEASE_TRAIN_SCRIPT.read_text(encoding="utf-8")
+    assert '"publish-actrsharp"' in release_script
+    assert release_script.count("bindings/cabi/csharp/ActrSharp/ActrSharp.csproj") >= 2
+
+
+def test_csharp_pr_gate_uses_light_fixture_and_nightly_keeps_full_matrix() -> None:
+    gate_workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
+    csharp_job = _job(gate_workflow, "csharp", "gate")
+    workflow = CI_CSHARP_WORKFLOW.read_text(encoding="utf-8")
+    nightly = CI_CSHARP_E2E_WORKFLOW.read_text(encoding="utf-8")
+    workload_manifest = (
+        ROOT / "e2e/winui-echo-app/workload/Cargo.toml"
+    ).read_text(encoding="utf-8")
+
+    assert "needs.determine.outputs.csharp_binding == 'true'" in csharp_job
+    assert "rust_core" not in csharp_job
+    assert "full_matrix:" in workflow
+    assert "default: false" in workflow
+    assert "cache-on-failure: true" in workflow
+    assert "workspaces: e2e/winui-echo-app/workload" in workflow
+    assert workflow.count("https://api.nuget.org/v3/index.json") == 3
+    assert workflow.count("<packageSourceMapping>") == 3
+    assert workflow.count('<package pattern="ActrSharp.*" />') == 3
+    assert workflow.count('<package pattern="*" />') == 3
+    assert '@("--profile", "ci")' in workflow
+    assert '@("--release")' in workflow
+    assert workflow.count("if: inputs.full_matrix") >= 3
+    assert 'cron: "0 19 * * *"' in nightly
+    assert "uses: ./.github/workflows/ci-csharp.yml" in nightly
+    assert "full_matrix: true" in nightly
+    assert '[profile.ci]' in workload_manifest
+    assert 'inherits = "dev"' in workload_manifest
+    assert "incremental = false" in workload_manifest
 
 
 def test_release_train_forwards_release_context() -> None:
@@ -751,6 +817,8 @@ if __name__ == "__main__":
     test_pr_gate_swift_uses_macos_only_xcframework()
     test_release_train_has_valid_publish_steps()
     test_release_train_verifies_ci_gate_triggered()
+    test_release_train_reuses_actrsharp_workflow()
+    test_csharp_pr_gate_uses_light_fixture_and_nightly_keeps_full_matrix()
     test_release_train_forwards_release_context()
     test_release_train_supports_generic_maintenance_branches()
     test_swift_echoapp_e2e_job_present()

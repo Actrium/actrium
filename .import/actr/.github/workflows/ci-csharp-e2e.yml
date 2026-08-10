@@ -1,0 +1,20 @@
+name: CI (C# Full Fixture)
+
+on:
+  schedule:
+    # Stagger this one hour after the main nightly E2E workflows start.
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: csharp-full-fixture-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  full-fixture:
+    uses: ./.github/workflows/ci-csharp.yml
+    with:
+      full_matrix: true

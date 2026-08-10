@@ -17,6 +17,14 @@ async-trait = "0.1"
 bytes = "1"
 
 # This crate is a standalone workspace so it does not inherit the e2e
-# workspace's stale 0.4.0 actr-* version requirements (the root workspace is
-# now 0.6.1). Path deps above resolve directly to the local source trees.
+# workspace's actr-* version requirements. Path deps above resolve directly
+# to the local source trees.
 [workspace]
+
+# PR CI only needs a loadable fixture to validate NuGet RID resolution and the
+# C ABI. Keep it low-optimization and non-incremental; nightly full-matrix runs
+# continue to use the standard release profile.
+[profile.ci]
+inherits = "dev"
+debug = 0
+incremental = false

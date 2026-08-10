@@ -98,6 +98,13 @@ pub(crate) fn box_init(node: Node<Init>) -> ActrNodeInitHandle {
     insert(HandleValue::Init(node))
 }
 
+pub(crate) fn take_init(handle: ActrNodeInitHandle) -> Option<Node<Init>> {
+    match take_matching(handle, |value| matches!(value, HandleValue::Init(_)))? {
+        HandleValue::Init(node) => Some(node),
+        _ => unreachable!("handle kind was checked while holding the registry lock"),
+    }
+}
+
 // ── Node<Attached> ──────────────────────────────────────────────────────────
 
 pub(crate) fn box_attached(node: Node<Attached>) -> ActrNodeAttachedHandle {

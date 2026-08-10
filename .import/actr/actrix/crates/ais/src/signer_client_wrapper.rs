@@ -5,6 +5,7 @@
 use platform::aid::AidError;
 use signer::{GrpcClient, GrpcClientConfig};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::RwLock;
 
 /// Signer client wrapper (for gRPC client)
@@ -48,11 +49,32 @@ impl SignerClientWrapper {
             let client = GrpcClient::new(&self.grpc_config).await?;
             *guard = Some(client);
         }
-        guard
+        let result = guard
             .as_mut()
             .expect("grpc client must exist after lazy init")
             .sign(key_id, message)
-            .await
+            .await;
+
+        match result {
+            Ok(signature) => Ok(signature),
+            Err(error) if is_retryable_transport_error(&error) => {
+                platform::recording::warn!(
+                    "Signer gRPC transport failed for key_id={}; rebuilding the client and retrying once",
+                    key_id
+                );
+                *guard = None;
+                tokio::time::sleep(Duration::from_millis(200)).await;
+
+                let client = GrpcClient::new(&self.grpc_config).await?;
+                *guard = Some(client);
+                guard
+                    .as_mut()
+                    .expect("grpc client must exist after reconnect")
+                    .sign(key_id, message)
+                    .await
+            }
+            Err(error) => Err(error),
+        }
     }
 
     /// Get the verifying public key for the specified key_id
@@ -87,6 +109,10 @@ impl SignerClientWrapper {
             .health_check()
             .await
     }
+}
+
+fn is_retryable_transport_error(error: &signer::SignerError) -> bool {
+    matches!(error, signer::SignerError::Internal(message) if message.contains("transport error"))
 }
 
 /// Create a Signer client wrapper from configuration

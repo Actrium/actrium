@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+
+    <!--
+      TEST-ONLY CI FIXTURE — NEVER PUBLISH.
+      Bundles the EchoWorkload actr_cabi.dll so ActrSharp CI can validate NuGet
+      RID asset resolution, native auto-copy, and managed consumption from a
+      clean out-of-repo console app. The PR gate includes win-x64; the scheduled
+      full-matrix workflow adds win-arm64. A real workload native package is
+      owned by the workload's own repository; this fixture only mirrors its shape.
+    -->
+    <PackageId>ActrSharp.Native.EchoWorkload</PackageId>
+    <ActrSharpVersion>0.7.0</ActrSharpVersion>
+    <Version>$(ActrSharpVersion)</Version>
+    <Description>TEST-ONLY CI fixture: bundles the EchoWorkload actr_cabi.dll for ActrSharp consumption validation. NOT for publishing — workload authors own their native packages.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>actr;test;fixture;not-for-publish</PackageTags>
+    <IsPackable>true</IsPackable>
+    <!-- Deliberately omits license/repository metadata: this package is never
+         published. ci-csharp.yml structurally guarantees no dotnet nuget push
+         path ever references it. -->
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Exact dependency on ActrSharp: a workload native package must pin the
+         ActrSharp version it was built against. CI overrides ActrSharpVersion
+         from the Cargo workspace version so fixture and ActrSharp stay in
+         sync without hand-editing this file on every release. -->
+    <PackageReference Include="ActrSharp" Version="[$(ActrSharpVersion)]" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Native assets: NuGet copies runtimes/<RID>/native/actr_cabi.dll into
+         the consumer's output directory at restore time (no manual copy). The
+         DLLs are built by CI from e2e/winui-echo-app/workload and dropped here
+         before packing; runtimes/ is gitignored. -->
+    <None Include="runtimes\**\*" Pack="true" PackagePath="runtimes" />
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The consumer/ template is a CI asset (copied into the out-of-repo
+         console app), not part of the fixture package. Exclude it from
+         compilation (its top-level statements require an executable output
+         type, CS8805) and from the nupkg. -->
+    <Compile Remove="consumer\**" />
+    <None Remove="consumer\**" />
+  </ItemGroup>
+
+</Project>

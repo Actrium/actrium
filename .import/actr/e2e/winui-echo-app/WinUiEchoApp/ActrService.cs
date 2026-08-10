@@ -15,6 +15,8 @@ namespace WinUiEchoApp;
 internal sealed class ActrService
 {
     private const string WorkloadName = "cabi.EchoApp";
+    private const string BundleId = "actr.e2e.echo-app";
+    private const string ActorType = "actrium:EchoApp:0.1.0";
     private const string LocalRouteKey = "cabi.EchoApp.Echo";
     private const string LocalPrefix = "winui-local:";   // mirrors Swift's "swift-local:"
     private const long CallTimeoutMs = 30_000;
@@ -32,17 +34,29 @@ internal sealed class ActrService
         if (_node != null) return;
         try
         {
+            RuntimeLog.Info("ACTR InitRuntime");
             ActrCabiNode.InitRuntime();
+            RuntimeLog.Info($"ACTR ValidateNative {WorkloadName}");
+            ActrNativeInfo native = ActrCabiNode.ValidateNative(WorkloadName, BundleId);
+            RuntimeLog.Info($"ACTR native validated {native}");
             var node = new ActrCabiNode();
+            RuntimeLog.Info("ACTR FromConfig");
             await node.FromConfig(configPath);
+            RuntimeLog.Info($"ACTR WithActorType {ActorType}");
+            node.WithActorType(ActorType);
+            RuntimeLog.Info($"ACTR LinkWorkload {WorkloadName}");
             await node.LinkWorkload(WorkloadName);
+            RuntimeLog.Info("ACTR Register");
             await node.Register(null);    // local mode: use the node's configured AIS endpoint
+            RuntimeLog.Info("ACTR Start");
             await node.Start();
             _node = node;
             Status = "Ready: actrium:EchoApp:0.1.0 (cabi.EchoApp workload)";
+            RuntimeLog.Info("ACTR node ready");
         }
         catch (Exception e)
         {
+            RuntimeLog.Error("ACTR startup failed", e);
             Status = $"ACTR startup failed: {e.Message}";
             throw;
         }
@@ -80,6 +94,7 @@ internal sealed class ActrService
             catch (ActrCabiException e) when (e.Message.Contains("connection not ready"))
             {
                 if (sw.Elapsed.TotalSeconds >= ReadyRetryTotalSeconds) throw;
+                RuntimeLog.Info("ACTR call waiting for connection");
                 Console.Error.WriteLine(
                     $"ACTR_E2E_RETRY:ConnectionNotReady retryAfterMs={ReadyRetryDelayMs}");
                 await Task.Delay(ReadyRetryDelayMs);
@@ -97,5 +112,11 @@ internal sealed class ActrService
 
     /// Emit the E2E result marker on stderr (parsed by run.sh).
     internal static void EmitResult(string result) =>
+        EmitResultCore(result);
+
+    private static void EmitResultCore(string result)
+    {
+        RuntimeLog.Info($"E2E result emitted; length={result.Length}");
         Console.Error.WriteLine($"ACTR_E2E_RESULT:{result}");
+    }
 }

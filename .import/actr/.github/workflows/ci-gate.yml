@@ -827,9 +827,7 @@ jobs:
   csharp:
     name: C#
     needs: determine
-    if: >-
-      needs.determine.outputs.csharp_binding == 'true' ||
-      needs.determine.outputs.rust_core == 'true'
+    if: needs.determine.outputs.csharp_binding == 'true'
     uses: ./.github/workflows/ci-csharp.yml
 
   gate:

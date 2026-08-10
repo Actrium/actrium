@@ -19,6 +19,8 @@ on:
       - "bindings/web/packages/**/package.json"
       - "bindings/typescript/Cargo.toml"
       - "bindings/typescript/package.json"
+      - "bindings/cabi/csharp/ActrSharp/ActrSharp.csproj"
+      - ".github/workflows/publish-actrsharp.yml"
   workflow_dispatch:
     inputs:
       target_branch:
@@ -766,6 +768,24 @@ jobs:
           path: release/reports/release-train-v${{ needs.context.outputs.version }}.publish-typescript.state.tsv
           if-no-files-found: warn
 
+  # ── Publish ActrSharp ─────────────────────────────────────────────────
+  publish-actrsharp:
+    name: Publish ActrSharp
+    needs:
+      - context
+      - create-tag
+      - create-release
+    permissions:
+      contents: write
+      packages: write
+    uses: ./.github/workflows/publish-actrsharp.yml
+    with:
+      version: ${{ needs.context.outputs.version }}
+      source_ref: ${{ fromJSON(needs.context.outputs.dry_run) && needs.context.outputs.release_sha || format('v{0}', needs.context.outputs.version) }}
+      release_sha: ${{ needs.context.outputs.release_sha }}
+      publish: ${{ !fromJSON(needs.context.outputs.dry_run) }}
+    secrets: inherit
+
   # ── Publish CLI Binaries ──────────────────────────────────────────────
   publish-cli:
     name: Publish actr CLI binaries
@@ -824,6 +844,7 @@ jobs:
       - build-typescript-native
       - publish-typescript-workload
       - publish-typescript
+      - publish-actrsharp
       - publish-cli
       - publish-actrix
       - publish-protoc-plugins

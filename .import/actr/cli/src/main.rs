@@ -6,8 +6,30 @@ use clap::Parser;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
+#[cfg(windows)]
+const WINDOWS_RUNTIME_STACK_SIZE: usize = 8 * 1024 * 1024;
+
+#[cfg(windows)]
+fn main() -> Result<()> {
+    // The PE default reserves only 1 MiB for the main thread. WebRTC signaling
+    // initialization can exceed that on Windows, so run the CLI runtime on a
+    // deliberately sized thread instead.
+    std::thread::Builder::new()
+        .name("actr-cli-runtime".to_owned())
+        .stack_size(WINDOWS_RUNTIME_STACK_SIZE)
+        .spawn(run)
+        .map_err(|error| anyhow::anyhow!("failed to start ACTR CLI runtime thread: {error}"))?
+        .join()
+        .map_err(|_| anyhow::anyhow!("ACTR CLI runtime thread panicked"))?
+}
+
+#[cfg(not(windows))]
+fn main() -> Result<()> {
+    run()
+}
+
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn run() -> Result<()> {
     let cli = Cli::parse();
 
     // Skip CLI-level tracing init in detached child mode — the runtime

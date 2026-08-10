@@ -247,8 +247,20 @@ test_validate_version_requires_pep440_when_python_is_enabled() {
   fi
 
   SKIP_PYTHON=true
-  VERSION="1.2.3-feature-x.7+build.01"
+  VERSION="1.2.3-feature-x.7"
   validate_version
+}
+
+test_validate_version_rejects_build_metadata() {
+  reset_release_train_state
+  PRE_RELEASE=true
+  SKIP_PYTHON=true
+  VERSION="1.2.3-feature-x.7+build.01"
+
+  if validate_version 2>/dev/null; then
+    printf 'release versions must reject SemVer build metadata\n' >&2
+    exit 1
+  fi
 }
 
 test_release_channel_supports_generic_maintenance_lines() {
@@ -982,6 +994,7 @@ test_report_stage_merges_state_files() {
   # Create per-stage state files.
   printf 'actr-protocol\tfoundation\tcrate\t1.2.3\tpublished\tpublished\t-\t-\n' >"$REPORT_DIR/release-train-v1.2.3.publish-rust.state.tsv"
   printf 'framework_codegen_python\tprotoc-gen\tpython\t1.2.3\tpublished\tpublished\t-\t-\n' >"$REPORT_DIR/release-train-v1.2.3.publish-python.state.tsv"
+  printf 'ActrSharp\tsdk\tnuget\t1.2.3\tsuccess\tpublished\t-\tabc123\n' >"$REPORT_DIR/release-train-v1.2.3.publish-actrsharp.state.tsv"
 
   # Create a context file.
   cat >"$REPORT_DIR/release-train-v1.2.3.context.json" <<EOF
@@ -1004,11 +1017,70 @@ EOF
 
   local line_count
   line_count=$(wc -l < "$STATE_FILE" | tr -d ' ')
-  if [[ "$line_count" -ne 2 ]]; then
-    printf 'merged state file must contain 2 rows, got %s\n' "$line_count" >&2
+  if [[ "$line_count" -ne 3 ]]; then
+    printf 'merged state file must contain 3 rows, got %s\n' "$line_count" >&2
     rm -rf "$temp_dir"
     exit 1
   fi
+
+  rm -rf "$temp_dir"
+}
+
+test_release_prepare_stages_workload_lockfile() {
+  local stage_function
+  stage_function=$(declare -f stage_release_version_files)
+
+  if ! grep -Fq 'e2e/winui-echo-app/workload/Cargo.lock' <<<"$stage_function"; then
+    printf 'release prepare must stage the generated WinUI workload lockfile\n' >&2
+    exit 1
+  fi
+}
+
+test_notify_wechat_includes_nuget_packages() {
+  reset_release_train_state
+
+  local temp_dir old_path
+  temp_dir=$(mktemp -d)
+  mkdir -p "$temp_dir/bin" "$temp_dir/release/reports"
+
+  cat >"$temp_dir/release/reports/release-train-v1.2.3.json" <<'EOF'
+{"overall_status":"success","components":[{"name":"ActrSharp","kind":"nuget","status":"success","registry_url":"https://github.com/orgs/Actrium/packages/nuget/package/ActrSharp"}]}
+EOF
+  cat >"$temp_dir/bin/curl" <<'EOF'
+#!/usr/bin/env bash
+while (($#)); do
+  if [[ "$1" == "-d" ]]; then
+    printf '%s' "$2" >"$CURL_PAYLOAD_FILE"
+    break
+  fi
+  shift
+done
+printf '{"errcode":0}'
+EOF
+  chmod +x "$temp_dir/bin/curl"
+
+  VERSION="1.2.3"
+  REPORT_DIR="$temp_dir/release/reports"
+  DRY_RUN=false
+  PRE_RELEASE=false
+  RELEASE_WEBHOOK_URL="https://example.invalid/wechat"
+  CURL_PAYLOAD_FILE="$temp_dir/payload.json"
+  export CURL_PAYLOAD_FILE
+  old_path="$PATH"
+  PATH="$temp_dir/bin:$PATH"
+
+  stage_notify_wechat
+  PATH="$old_path"
+
+  python3 - "$temp_dir/payload.json" <<'PY'
+import json
+import sys
+
+payload = json.load(open(sys.argv[1]))
+content = payload["markdown"]["content"]
+assert "**NuGet Packages**" in content
+assert "[ActrSharp](https://github.com/orgs/Actrium/packages/nuget/package/ActrSharp)" in content
+PY
 
   rm -rf "$temp_dir"
 }
@@ -1019,6 +1091,7 @@ test_update_versions_syncs_optional_dependencies() {
   local temp_dir
   temp_dir=$(mktemp -d)
   mkdir -p "$temp_dir/bindings/typescript"
+  mkdir -p "$temp_dir/bindings/cabi/csharp/ActrSharp"
 
   # Create a minimal package.json with optionalDependencies.
   cat >"$temp_dir/bindings/typescript/package.json" <<'EOF'
@@ -1032,6 +1105,9 @@ test_update_versions_syncs_optional_dependencies() {
   }
 }
 EOF
+
+  printf '<Project><PropertyGroup><Version>0.2.0</Version></PropertyGroup></Project>\n' \
+    >"$temp_dir/bindings/cabi/csharp/ActrSharp/ActrSharp.csproj"
 
   WORK_REPO_ROOT="$temp_dir"
   VERSION="0.3.0"
@@ -1132,6 +1208,11 @@ EOF
   local workload_ver
   workload_ver=$(python3 -c "import json; d=json.load(open('$temp_dir/bindings/typescript/actr-workload/package.json')); print(d['version'])")
   assert_eq "0.3.0" "$workload_ver" "actr-workload version"
+
+  local actrsharp_ver
+  actrsharp_ver=$(sed -n 's:.*<Version>\([^<]*\)</Version>.*:\1:p' \
+    "$temp_dir/bindings/cabi/csharp/ActrSharp/ActrSharp.csproj")
+  assert_eq "0.3.0" "$actrsharp_ver" "ActrSharp version"
 
   assert_eq \
     'struct Generator { static let version = "0.3.0" }' \
@@ -1808,6 +1889,7 @@ test_parse_stage_all_is_default
 test_parse_stage_rejects_unknown
 test_validate_version_requires_strict_semver
 test_validate_version_requires_pep440_when_python_is_enabled
+test_validate_version_rejects_build_metadata
 test_release_channel_supports_generic_maintenance_lines
 test_release_channel_rejects_mismatched_maintenance_version
 test_maintenance_policy_allows_only_next_patch_and_fix_history
@@ -1831,6 +1913,8 @@ test_release_train_workflow_publish_typescript_uses_script_stage
 test_release_train_workflow_downloads_only_typescript_native_artifacts
 test_release_prepare_workflow_skips_release_commits
 test_report_stage_merges_state_files
+test_release_prepare_stages_workload_lockfile
+test_notify_wechat_includes_nuget_packages
 test_update_versions_syncs_optional_dependencies
 test_publish_web_packages_skips_puppeteer_download
 test_cli_zigbuild_uses_zigbuild_arguments_without_build_subcommand

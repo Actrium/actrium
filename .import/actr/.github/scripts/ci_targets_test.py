@@ -41,7 +41,38 @@ class CiTargetsTest(unittest.TestCase):
         targets, reasons = ci_targets.detect_targets([path], full_run=False)
 
         self.assertTrue(targets["rust_core"])
+        self.assertFalse(targets["csharp_binding"])
         self.assertIn(f"actrix_workspace:{path}", reasons)
+
+    def test_csharp_runtime_dependencies_trigger_csharp_checks(self) -> None:
+        paths = (
+            "core/config/src/lib.rs",
+            "core/framework/src/lib.rs",
+            "core/hyper/src/lib.rs",
+            "core/pack/src/lib.rs",
+            "core/platform-traits/src/lib.rs",
+            "core/protocol/src/lib.rs",
+            "core/runtime/src/lib.rs",
+            "core/runtime-mailbox/src/lib.rs",
+            "core/service-compat/src/lib.rs",
+        )
+
+        for path in paths:
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["rust_core"])
+                self.assertTrue(targets["csharp_binding"])
+                self.assertIn(f"core_dependency:{path}", reasons)
+
+    def test_unrelated_core_change_does_not_trigger_csharp_checks(self) -> None:
+        for path in ("core/hlc/src/lib.rs", "core/platform-native/src/lib.rs"):
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["rust_core"])
+                self.assertFalse(targets["csharp_binding"])
+                self.assertIn(f"core_dependency:{path}", reasons)
 
     def test_actr_cabi_change_triggers_native_and_binding_checks(self) -> None:
         path = "crates/actr-cabi/src/lib.rs"
