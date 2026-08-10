@@ -77,18 +77,19 @@ impl PeerGate {
         }
     }
 
-    async fn send_rpc_signal_envelope(
+    async fn send_envelope_with_type(
         &self,
         target: &ActrId,
+        payload_type: PayloadType,
         envelope: RpcEnvelope,
     ) -> ActorResult<()> {
         // 1. Resolve the target destination.
         let dest = self.get_dest(target)?;
 
-        // 2. Serialize the envelope and send it with RpcSignal as a one-way payload type.
+        // 2. Serialize the envelope and send it on the caller-selected RPC lane.
         let payload = envelope.encode_to_vec();
         self.transport
-            .send(&dest, PayloadType::RpcSignal, &payload)
+            .send(&dest, payload_type, &payload)
             .await
             .map_err(|e| ActrError::Unavailable(format!("Send failed: {}", e)))?;
 
@@ -97,6 +98,17 @@ impl PeerGate {
 
     /// Send a request and wait for the response.
     pub async fn send_request(&self, target: &ActrId, envelope: RpcEnvelope) -> ActorResult<Bytes> {
+        self.send_request_with_type(target, PayloadType::RpcReliable, envelope)
+            .await
+    }
+
+    pub async fn send_request_with_type(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+    ) -> ActorResult<Bytes> {
+        crate::outbound::validate_rpc_payload_type(payload_type)?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Request);
 
         // Sender-side contract (#254): reject non-positive deadlines before
@@ -127,7 +139,7 @@ impl PeerGate {
         let payload = envelope.encode_to_vec();
         let operation = async {
             self.transport
-                .send(&dest, PayloadType::RpcReliable, &payload)
+                .send(&dest, payload_type, &payload)
                 .await
                 .map_err(|e| ActrError::Unavailable(format!("Send failed: {}", e)))?;
             rx.await
@@ -146,6 +158,17 @@ impl PeerGate {
 
     /// Send a one-way tell without waiting for a response.
     pub async fn send_message(&self, target: &ActrId, envelope: RpcEnvelope) -> ActorResult<()> {
+        self.send_message_with_type(target, PayloadType::RpcSignal, envelope)
+            .await
+    }
+
+    pub async fn send_message_with_type(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+    ) -> ActorResult<()> {
+        crate::outbound::validate_rpc_payload_type(payload_type)?;
         let envelope = Self::stamp_envelope_direction(envelope, Direction::Tell);
 
         log::debug!(
@@ -154,7 +177,8 @@ impl PeerGate {
             envelope.request_id
         );
 
-        self.send_rpc_signal_envelope(target, envelope).await
+        self.send_envelope_with_type(target, payload_type, envelope)
+            .await
     }
 
     /// Relay an envelope that already carries its routing direction.
@@ -162,6 +186,17 @@ impl PeerGate {
     /// Used by `System::init_message_handler` to forward HostGate-produced
     /// request envelopes to remote peers without downgrading them to Tell.
     pub async fn relay_envelope(&self, target: &ActrId, envelope: RpcEnvelope) -> ActorResult<()> {
+        self.relay_envelope_with_type(target, PayloadType::RpcSignal, envelope)
+            .await
+    }
+
+    pub async fn relay_envelope_with_type(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+    ) -> ActorResult<()> {
+        crate::outbound::validate_rpc_payload_type(payload_type)?;
         let direction = Self::relayable_direction(&envelope)?;
 
         log::debug!(
@@ -171,7 +206,8 @@ impl PeerGate {
             direction
         );
 
-        self.send_rpc_signal_envelope(target, envelope).await
+        self.send_envelope_with_type(target, payload_type, envelope)
+            .await
     }
 
     /// Send a DataChunk through the Fast Path.

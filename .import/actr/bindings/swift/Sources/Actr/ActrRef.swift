@@ -145,6 +145,20 @@ public final class ActrRef: Sendable {
         }
     }
 
+    /// Sends a type-safe one-way message using its generated route and lane.
+    public func tell<Req: RpcRequest>(_ message: Req) async throws(ActrError) {
+        do {
+            let payload = try encodeProtobufMessage(message, context: "\(Req.self) message")
+            try await inner.tell(
+                routeKey: Req.routeKey,
+                payloadType: Req.payloadType.bridge,
+                messagePayload: payload
+            )
+        } catch {
+            throw ActrError(error: error)
+        }
+    }
+
     /// Wait for shutdown to complete
     public func waitForShutdown() async {
         await inner.waitForShutdown()

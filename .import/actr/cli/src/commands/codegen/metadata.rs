@@ -3,10 +3,10 @@ use crate::commands::SupportedLanguage;
 use crate::commands::codegen::proto_model::{
     MethodModel, ProtoFileModel, ProtoModel, ServiceModel, TypeOwnerIndex,
 };
+use crate::commands::codegen::traits::GenContext;
 use crate::error::{ActrCliError, Result};
-#[cfg(test)]
-use actr_protocol::ActrType;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
 pub const ACTR_GEN_META_FILE: &str = "actr-gen-meta.json";
@@ -39,12 +39,34 @@ pub struct TypeRef {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ActrGenMetadata {
+    /// Schema version of the metadata file itself.
+    #[serde(default = "default_metadata_schema_version")]
+    pub schema_version: String,
     pub plugin_version: String,
     pub language: String,
+    /// SHA-256 of the canonical DispatchSpec this generation was driven by.
+    /// Scaffold assembly and CLI validation cross-check this against the
+    /// spec on disk to detect stale generated trees.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dispatch_spec_hash: Option<String>,
+    /// Relative paths (within the output dir) of every file the plugin
+    /// emitted this run. The CLI validates each exists.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generated_files: Vec<String>,
+    /// Route keys the plugin generated local dispatch for.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generated_local_routes: Vec<String>,
+    /// Route keys the plugin generated remote proxying for.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub generated_remote_routes: Vec<String>,
     #[serde(default)]
     pub local_services: Vec<LocalServiceMetadata>,
     #[serde(default)]
     pub remote_services: Vec<RemoteServiceMetadata>,
+}
+
+fn default_metadata_schema_version() -> String {
+    "v1".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +85,16 @@ pub struct RemoteServiceMetadata {
     pub name: String,
     pub package: String,
     pub proto_file: String,
+    /// Manifest dependency alias used by `DispatchSpec` remote routes to
+    /// resolve this service's `ActrType` at runtime via
+    /// `Context::resolve_dependency`. Replaces the former `actr_type`
+    /// field; `actr_type` is kept for backward-compat with pre-migration
+    /// plugins and is populated only by legacy emitters.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub dependency_alias: String,
+    /// Legacy field, retained so pre-migration plugins still parse. New
+    /// generators MUST emit `dependency_alias` instead and leave this empty.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub actr_type: String,
     pub client_type: String,
     pub methods: Vec<MethodMetadata>,
@@ -96,6 +128,7 @@ impl ActrGenMetadata {
             language: language_key(language).to_string(),
             local_services,
             remote_services,
+            ..Default::default()
         })
     }
 }
@@ -140,6 +173,111 @@ pub fn load_required_metadata(
         )));
     }
     Ok(metadata)
+}
+
+pub(crate) fn validate_metadata_for_context(
+    metadata: &ActrGenMetadata,
+    context: &GenContext,
+) -> Result<()> {
+    // Test-only and legacy callers may construct an empty context. Production
+    // generation always carries the canonical DispatchSpec hash.
+    if context.dispatch_spec_hash.is_empty() {
+        return Ok(());
+    }
+
+    if metadata.schema_version != "v1" {
+        return Err(ActrCliError::config_error(format!(
+            "ACTR plugin metadata schema mismatch: expected `v1`, found `{}`",
+            metadata.schema_version
+        )));
+    }
+    if metadata.dispatch_spec_hash.as_deref() != Some(context.dispatch_spec_hash.as_str()) {
+        return Err(ActrCliError::config_error(format!(
+            "ACTR plugin metadata dispatch spec hash mismatch: expected `{}`, found `{}`",
+            context.dispatch_spec_hash,
+            metadata
+                .dispatch_spec_hash
+                .as_deref()
+                .unwrap_or("<missing>")
+        )));
+    }
+
+    let expected_local: BTreeSet<&str> = context
+        .dispatch_spec
+        .routes
+        .iter()
+        .filter(|route| route.dependency_alias.is_none())
+        .map(|route| route.route_key.as_str())
+        .collect();
+    let expected_remote: BTreeSet<&str> = context
+        .dispatch_spec
+        .routes
+        .iter()
+        .filter(|route| route.dependency_alias.is_some())
+        .map(|route| route.route_key.as_str())
+        .collect();
+    let generated_local: BTreeSet<&str> = metadata
+        .generated_local_routes
+        .iter()
+        .map(String::as_str)
+        .collect();
+    let generated_remote: BTreeSet<&str> = metadata
+        .generated_remote_routes
+        .iter()
+        .map(String::as_str)
+        .collect();
+    if generated_local != expected_local
+        || metadata.generated_local_routes.len() != expected_local.len()
+        || generated_remote != expected_remote
+        || metadata.generated_remote_routes.len() != expected_remote.len()
+    {
+        return Err(ActrCliError::config_error(
+            "ACTR plugin metadata routes do not match the DispatchSpec used for generation"
+                .to_string(),
+        ));
+    }
+
+    if metadata.generated_files.is_empty() {
+        return Err(ActrCliError::config_error(
+            "ACTR plugin metadata did not list any generated files".to_string(),
+        ));
+    }
+    for relative in &metadata.generated_files {
+        let path = Path::new(relative);
+        let safe_relative = !path.as_os_str().is_empty()
+            && !path.is_absolute()
+            && path.components().all(|component| {
+                matches!(
+                    component,
+                    std::path::Component::Normal(_) | std::path::Component::CurDir
+                )
+            });
+        if !safe_relative {
+            return Err(ActrCliError::config_error(format!(
+                "ACTR plugin metadata contains unsafe generated file path `{relative}`"
+            )));
+        }
+        let mut generated_paths = vec![context.output.join(path)];
+        if metadata.language == "typescript" {
+            for prefix in ["local", "remote"] {
+                if let Ok(stripped) = path.strip_prefix(prefix) {
+                    generated_paths.push(context.output.join(stripped));
+                }
+            }
+        } else if metadata.language == "swift"
+            && let Some(file_name) = path.file_name()
+        {
+            generated_paths.push(context.output.join(file_name));
+        }
+        if !generated_paths.iter().any(|candidate| candidate.is_file()) {
+            return Err(ActrCliError::config_error(format!(
+                "ACTR plugin metadata claims generated file `{relative}`, but it is missing from {}",
+                context.output.display()
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 pub fn write_metadata(output_dir: &Path, metadata: &ActrGenMetadata) -> Result<PathBuf> {
@@ -206,14 +344,19 @@ fn build_remote_service_metadata(
         name: service.name.clone(),
         package: service.package.clone(),
         proto_file: service.relative_path.to_string_lossy().to_string(),
-        actr_type: service.actr_type.clone().unwrap_or_else(|| {
-            ActrType {
-                manufacturer: "acme".to_string(),
-                name: service.name.clone(),
-                version: "1.0.0".to_string(),
-            }
-            .to_string_repr()
-        }),
+        dependency_alias: service
+            .relative_path
+            .components()
+            .nth(1)
+            .and_then(|component| component.as_os_str().to_str())
+            .ok_or_else(|| {
+                ActrCliError::config_error(format!(
+                    "remote proto `{}` has no dependency alias path component",
+                    service.relative_path.display()
+                ))
+            })?
+            .to_string(),
+        actr_type: String::new(),
         client_type: format!("{}Client", service.name),
         methods: service
             .methods

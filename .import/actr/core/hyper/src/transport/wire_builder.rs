@@ -430,14 +430,14 @@ impl WireBuilder for DefaultWireBuilder {
                 // Wrap the connection so that, after `connect()`, response reader
                 // tasks are spawned to deliver server responses to `pending_requests`.
                 if let Some(ref pending) = self.pending_requests {
-                    // WebSocket wires are only created for `Dest::Peer`, so the
-                    // target id is always available here. The session id makes
-                    // the wire's identity unique so passive-close self-heal can
-                    // distinguish the current wire from a replaced one.
-                    let peer_id = dest
-                        .as_peer_id()
-                        .expect("ClientWebSocketHandle wire identity requires a peer destination")
-                        .clone();
+                    let peer_id = dest.as_peer_id().cloned().ok_or_else(|| {
+                        NetworkError::InvalidArgument(
+                            "ClientWebSocketHandle requires a peer destination".to_string(),
+                        )
+                    })?;
+                    // The session id makes the wire's identity unique so
+                    // passive-close self-heal can distinguish the current wire
+                    // from a replaced one.
                     let session_id = self.ws_session_counter.fetch_add(1, Ordering::Relaxed);
                     connections.push(Arc::new(ClientWebSocketHandle::new(
                         ws_conn,

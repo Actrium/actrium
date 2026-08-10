@@ -18,6 +18,9 @@ let package = Package(
             name: "framework-codegen-swift",
             dependencies: [
                 .product(name: "SwiftProtobufPluginLibrary", package: "swift-protobuf"),
+            ],
+            linkerSettings: [
+                .linkedFramework("CryptoKit"),
             ]
         ),
         .testTarget(

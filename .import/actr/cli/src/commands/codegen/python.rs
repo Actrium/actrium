@@ -2,7 +2,6 @@ use crate::commands::codegen::scaffold::ScaffoldCatalog;
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
 use crate::utils::{command_exists, to_pascal_case};
-use actr_config::LockFile;
 use async_trait::async_trait;
 use handlebars::Handlebars;
 use serde::Serialize;
@@ -48,6 +47,9 @@ struct ProtoMethod {
     input_import: String,
     output_import: String,
     route_key: String,
+    /// Unified-dispatch handler method name: `snake_case(service.method)`,
+    /// used by the ``ActrDispatchHandler`` protocol.
+    dispatch_method: String,
 }
 
 pub struct PythonGenerator;
@@ -59,15 +61,6 @@ impl LanguageGenerator for PythonGenerator {
         let mut generated_files = Vec::new();
 
         self.ensure_required_tools()?;
-
-        if context.proto_model.local_services.is_empty() {
-            return Err(ActrCliError::config_error(
-                "Python workload codegen requires at least one local protobuf service. \
-                 Client/proxy-only Python codegen is no longer supported because the \
-                 legacy Python runtime package was removed."
-                    .to_string(),
-            ));
-        }
 
         let plugin_path = ensure_python_plugin()?;
 
@@ -85,178 +78,13 @@ impl LanguageGenerator for PythonGenerator {
             context.input_path.as_path()
         };
 
-        // 1. Read manifest.lock.toml from current working directory
-        // The lock file should always be in the project root, not in the protos directory
-        let lock_file_path = PathBuf::from("manifest.lock.toml");
-
-        // Check if lock file exists - required for code generation
-        if !lock_file_path.exists() {
-            return Err(ActrCliError::config_error(format!(
-                "manifest.lock.toml not found at {}. Please run 'actr deps install' first.",
-                lock_file_path.display()
-            )));
-        }
-
-        // Read and parse lock file
-        let lock_file = LockFile::from_file(&lock_file_path).map_err(|e| {
-            ActrCliError::config_error(format!(
-                "Failed to read lock file at {}: {}",
-                lock_file_path.display(),
-                e
-            ))
-        })?;
-
-        info!("📖 Reading lock file: {}", lock_file_path.display());
-
-        // Build remote services mapping
-        let mut remote_services_map: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-
-        for dep in lock_file.dependencies {
-            for file in dep.files {
-                // Map proto file path to actr_type
-                // file.path is like "data-stream-peer-concurrent-server-python/data_stream_peer.proto"
-                remote_services_map.insert(file.path.clone(), dep.actr_type.clone());
-            }
-        }
-
-        info!(
-            "✅ Found {} remote service mappings",
-            remote_services_map.len()
+        // Unified-dispatch options: only the dispatch spec path and hash.
+        // The protoc plugin reads all local/remote routing from the spec.
+        let options = format!(
+            "dispatch_spec={},dispatch_spec_hash={}",
+            context.dispatch_spec_path.display(),
+            context.dispatch_spec_hash
         );
-
-        // 2. Separate local and remote files based on lock file
-        // Use a struct to keep path and actr_type paired together
-        #[derive(Debug)]
-        struct ProtoFileInfo {
-            path: String,
-            actr_type: Option<String>,
-        }
-
-        let mut remote_files = Vec::new();
-        let mut local_files = Vec::new();
-
-        for proto_file in &context.proto_files {
-            let relative_path = proto_file.strip_prefix(proto_root).unwrap_or(proto_file);
-
-            // Use Path components instead of string matching for reliable path checking
-            let components: Vec<_> = relative_path.components().collect();
-            let is_remote = components
-                .first()
-                .and_then(|c| c.as_os_str().to_str())
-                .map(|s| s == "remote")
-                .unwrap_or(false);
-
-            // Normalize path to use Unix-style separators (cross-platform compatible)
-            let path_str = relative_path
-                .components()
-                .filter_map(|c| c.as_os_str().to_str())
-                .collect::<Vec<_>>()
-                .join("/");
-
-            if is_remote {
-                // Extract path after "remote/" component
-                let remote_relative_path = relative_path
-                    .components()
-                    .skip(1) // Skip the "remote" component
-                    .filter_map(|c| c.as_os_str().to_str())
-                    .collect::<Vec<_>>()
-                    .join("/");
-
-                if remote_relative_path.is_empty() {
-                    warn!(
-                        "⚠️  Invalid remote path (no content after 'remote/'): {}",
-                        path_str
-                    );
-                    // Treat as local file if path is invalid
-                    local_files.push(ProtoFileInfo {
-                        path: path_str,
-                        actr_type: None,
-                    });
-                    continue;
-                }
-
-                debug!("🔍 Checking remote file: {}", remote_relative_path);
-
-                // Look up actr_type in the lock file mapping
-                let actr_type = remote_services_map.get(&remote_relative_path).cloned();
-
-                // Critical: Remote files MUST have actr_type mapping in lock file
-                if actr_type.is_none() {
-                    return Err(ActrCliError::config_error(format!(
-                        "Remote file '{}' not found in lock file.\n\
-                         Available remote files in lock:\n  {}\n\n\
-                         This usually means:\n\
-                         1. The dependency is not listed in manifest.toml\n\
-                         2. You need to run 'actr deps install' to update manifest.lock.toml\n\
-                         3. The proto file path in the dependency doesn't match",
-                        remote_relative_path,
-                        remote_services_map
-                            .keys()
-                            .map(|k| format!("- {}", k))
-                            .collect::<Vec<_>>()
-                            .join("\n  ")
-                    )));
-                }
-
-                info!(
-                    "✅ Matched remote file '{}' to actr_type '{}'",
-                    remote_relative_path,
-                    actr_type.as_ref().unwrap()
-                );
-
-                remote_files.push(ProtoFileInfo {
-                    path: path_str,
-                    actr_type,
-                });
-            } else {
-                local_files.push(ProtoFileInfo {
-                    path: path_str,
-                    actr_type: None,
-                });
-            }
-        }
-
-        // 3. Build the unified options string using key=value format for better reliability
-
-        // Build RemoteFileMapping in format: path1=actr_type1;path2=actr_type2
-        let remote_file_mappings: Vec<String> = remote_files
-            .iter()
-            .filter_map(|f| {
-                if let Some(actr_type) = &f.actr_type {
-                    Some(format!("{}={}", f.path, actr_type))
-                } else {
-                    // Log warning for files without actr_type
-                    warn!("⚠️  Remote file '{}' has no actr_type mapping", f.path);
-                    None
-                }
-            })
-            .collect();
-
-        let local_paths: Vec<String> = local_files.iter().map(|f| f.path.clone()).collect();
-
-        info!("🔍 Remote file mappings: {:?}", remote_file_mappings);
-        info!("🔍 Local files: {:?}", local_paths);
-
-        // Build options string
-        let mut options = String::new();
-
-        if !remote_file_mappings.is_empty() {
-            if !options.is_empty() {
-                options.push(',');
-            }
-            options.push_str(&format!(
-                "RemoteFileMapping={}",
-                remote_file_mappings.join(";")
-            ));
-        }
-
-        if !local_paths.is_empty() {
-            if !options.is_empty() {
-                options.push(',');
-            }
-            options.push_str(&format!("LocalFiles={}", local_paths.join(":")));
-        }
 
         info!("📝 Options: {}", options);
 
@@ -577,43 +405,49 @@ impl PythonGenerator {
             .local_services
             .iter()
             .cloned()
-            .map(|service| ProtoService {
-                name: service.name.clone(),
-                package: service.package.clone(),
-                proto_module: proto_module_from_path(&service.proto_file),
-                pb2_package: pb2_package_from_path(&service.proto_file),
-                generated_module: generated_workload_module(&service.package, &service.name),
-                methods: service
-                    .methods
-                    .into_iter()
-                    .map(|method| {
-                        let (input_alias, input_import) = pb2_alias_and_import(
-                            &method.input_ref.proto_package,
-                            &method.input_ref.proto_file,
-                        );
-                        let (output_alias, output_import) = pb2_alias_and_import(
-                            &method.output_ref.proto_package,
-                            &method.output_ref.proto_file,
-                        );
-                        ProtoMethod {
-                            name: method.name,
-                            snake_name: method.snake_name,
-                            input_type: python_proto_type_name(
-                                &method.input_ref,
-                                &method.input_type,
-                            ),
-                            output_type: python_proto_type_name(
-                                &method.output_ref,
-                                &method.output_type,
-                            ),
-                            input_alias,
-                            output_alias,
-                            input_import,
-                            output_import,
-                            route_key: method.route_key,
-                        }
-                    })
-                    .collect(),
+            .map(|service| {
+                let dispatch_service = to_snake_case(&service.name);
+                ProtoService {
+                    name: service.name.clone(),
+                    package: service.package.clone(),
+                    proto_module: proto_module_from_path(&service.proto_file),
+                    pb2_package: pb2_package_from_path(&service.proto_file),
+                    generated_module: generated_workload_module(&service.package, &service.name),
+                    methods: service
+                        .methods
+                        .into_iter()
+                        .map(|method| {
+                            let (input_alias, input_import) = pb2_alias_and_import(
+                                &method.input_ref.proto_package,
+                                &method.input_ref.proto_file,
+                            );
+                            let (output_alias, output_import) = pb2_alias_and_import(
+                                &method.output_ref.proto_package,
+                                &method.output_ref.proto_file,
+                            );
+                            let dispatch_method =
+                                format!("{}_{}", dispatch_service, method.snake_name);
+                            ProtoMethod {
+                                name: method.name,
+                                snake_name: method.snake_name,
+                                input_type: python_proto_type_name(
+                                    &method.input_ref,
+                                    &method.input_type,
+                                ),
+                                output_type: python_proto_type_name(
+                                    &method.output_ref,
+                                    &method.output_type,
+                                ),
+                                input_alias,
+                                output_alias,
+                                input_import,
+                                output_import,
+                                route_key: method.route_key,
+                                dispatch_method,
+                            }
+                        })
+                        .collect(),
+                }
             })
             .collect())
     }
@@ -631,10 +465,6 @@ impl PythonGenerator {
             service_name: String,
             #[serde(rename = "WORKLOAD_NAME")]
             workload_name: String,
-            #[serde(rename = "DISPATCHER_NAME")]
-            dispatcher_name: String,
-            #[serde(rename = "ACTOR_MODULE")]
-            actor_module: String,
             #[serde(rename = "PB2_IMPORTS")]
             pb2_imports: Vec<String>,
             #[serde(rename = "SERVICES")]
@@ -648,8 +478,6 @@ impl PythonGenerator {
                 "Python workload scaffold requires at least one local service".to_string(),
             )
         })?;
-
-        let actor_module = first_service.generated_module.clone();
 
         // Collect every distinct pb2 import line referenced by the services'
         // RPC methods, so imported types are imported from their real owner
@@ -666,16 +494,10 @@ impl PythonGenerator {
             }
         }
 
-        let dispatcher_name = services
-            .first()
-            .map(|s| format!("{}Dispatcher", s.name))
-            .unwrap_or_else(|| "Dispatcher".to_string());
-
+        let _ = first_service; // presence check only
         let context = ScaffoldContext {
             service_name: service_name.to_string(),
             workload_name: workload_name.to_string(),
-            dispatcher_name,
-            actor_module,
             pb2_imports,
             services: services.to_vec(),
             has_services: !services.is_empty(),
@@ -774,14 +596,7 @@ fn generated_workload_module(package: &str, service_name: &str) -> String {
 
 // Helper function to convert CamelCase to snake_case
 fn to_snake_case(name: &str) -> String {
-    let mut result = String::new();
-    for (i, ch) in name.chars().enumerate() {
-        if ch.is_uppercase() && i != 0 {
-            result.push('_');
-        }
-        result.push(ch.to_ascii_lowercase());
-    }
-    result
+    heck::AsSnakeCase(name).to_string()
 }
 
 fn ensure_python_plugin() -> Result<PathBuf> {

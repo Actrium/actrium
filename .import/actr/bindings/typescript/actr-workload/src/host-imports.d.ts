@@ -41,6 +41,11 @@ declare module 'actr:workload/host@0.4.0' {
     targetType: ActrType,
   ): Promise<ActrId>;
 
+  export function resolveDependency(
+    ctxToken: bigint,
+    alias: string,
+  ): Promise<ActrType>;
+
   export function registerStream(
     ctxToken: bigint,
     streamId: string,

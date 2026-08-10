@@ -19,6 +19,12 @@ pub struct ScaffoldService {
     pub workload_type: Option<String>,
     pub dispatcher_type: Option<String>,
     pub client_type: Option<String>,
+    /// Manifest dependency alias for remote services (resolved at runtime
+    /// via `Context::resolve_dependency`). `None` for local services or for
+    /// pre-migration plugins that still carry `actr_type`.
+    pub dependency_alias: Option<String>,
+    /// Legacy actr_type for pre-migration plugins. New generators emit
+    /// `dependency_alias` instead.
     pub actr_type: Option<String>,
     pub methods: Vec<ScaffoldMethod>,
 }
@@ -53,6 +59,7 @@ impl ScaffoldCatalog {
                     workload_type: Some(service.workload_type.clone()),
                     dispatcher_type: Some(service.dispatcher_type.clone()),
                     client_type: None,
+                    dependency_alias: None,
                     actr_type: None,
                     methods: service
                         .methods
@@ -80,7 +87,16 @@ impl ScaffoldCatalog {
                     workload_type: None,
                     dispatcher_type: None,
                     client_type: Some(service.client_type.clone()),
-                    actr_type: Some(service.actr_type.clone()),
+                    dependency_alias: if service.dependency_alias.is_empty() {
+                        None
+                    } else {
+                        Some(service.dependency_alias.clone())
+                    },
+                    actr_type: if service.actr_type.is_empty() {
+                        None
+                    } else {
+                        Some(service.actr_type.clone())
+                    },
                     methods: service
                         .methods
                         .iter()

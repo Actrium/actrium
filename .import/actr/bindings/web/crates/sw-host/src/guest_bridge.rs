@@ -506,13 +506,18 @@ pub fn install_dependency_lock(lock_toml: Option<String>) -> Result<(), JsError>
 /// WIT `host.resolve-dependency(alias) -> result<actr-type, actr-error>`.
 #[wasm_bindgen]
 pub async fn host_resolve_dependency(
-    _request_id: String,
+    request_id: String,
     alias: String,
 ) -> Result<JsValue, JsValue> {
+    // Keep resolver imports scoped to a live dispatch just like every other
+    // context operation; otherwise a stale guest can query the next workload's
+    // process-global dependency lock.
+    let _ctx = ctx_get(&request_id)?;
     match dependency_aliases::resolve(&alias) {
         Ok(actr_type) => {
             log::info!(
-                "[SW][GuestBridge] host.resolve-dependency alias={} target={}",
+                "[SW][GuestBridge] host.resolve-dependency request_id={} alias={} target={}",
+                request_id,
                 alias,
                 actr_type.to_string_repr()
             );

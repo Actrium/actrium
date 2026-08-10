@@ -89,7 +89,7 @@ Configuration is split by responsibility:
 
 Modify these settings as needed for your deployment environment.
 
-The generated iOS bootstrap uses `ActrNode.linked` with a statically linked `DynamicWorkload`. It does not load a `.actr` package from application resources. The runtime reads local identity and dependency aliases from `manifest.toml`.
+The generated iOS bootstrap uses `ActrNode.linked` with a statically linked `DynamicWorkload`. It does not load a `.actr` package from application resources. The runtime reads local identity and dependency aliases from `manifest.toml`; generated dispatchers resolve each remote alias through `ActrContext` when it is used.
 
 ## Development Workflow
 
@@ -106,7 +106,7 @@ The generated iOS bootstrap uses `ActrNode.linked` with a statically linked `Dyn
 - `{{PROJECT_NAME_PASCAL}}/Generated/` is owned by `actr gen -l swift`. Do not edit these files manually.
 - `<ServiceName>HandlerImpl.swift` is the user-owned RPC implementation.
 - `<ServiceName>LifecycleAdapter.swift` is the user-owned lifecycle customization.
-- `ActrService.swift` wires those components into `ActrNode.linked` and resolves remote targets from `manifest.toml`.
+- `ActrService.swift` wires those components into `ActrNode.linked`; generated dispatchers resolve aliases from the linked manifest at runtime.
 - `ContentView.swift` and other UI files are created by `actr init` and are not rewritten by `actr gen`.
 
 ## License

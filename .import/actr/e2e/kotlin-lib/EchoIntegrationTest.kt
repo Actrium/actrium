@@ -30,7 +30,7 @@ import java.io.File
  *
  * Protobuf is hand-encoded/decoded (tag 1 = `string`) so the test does not depend
  * on generated Echo* classes — only on the generated UnifiedWorkload /
- * UnifiedLifecycleAdapter / RemoteServiceRegistry (from `actr gen -l kotlin`).
+ * UnifiedLifecycleAdapter (from `actr gen -l kotlin`).
  *
  * Run via `./gradlew connectedDebugAndroidTest` against a booted emulator, with
  * an actrix + EchoService host reachable at 10.0.2.2 from the emulator.
@@ -123,9 +123,7 @@ class EchoIntegrationTest {
         val actorType = Manifest.from(File(manifestPath)).packageType()
         Log.i(TAG, "Actor type: ${actorType.manufacturer}:${actorType.name}:${actorType.version}")
 
-        val remoteTargets =
-            __PACKAGE__.generated.RemoteServiceRegistry.resolveRemoteTargets(manifestPath)
-        val workload = __PACKAGE__.UnifiedWorkload(remoteTargets = remoteTargets)
+        val workload = __PACKAGE__.UnifiedWorkload()
         val lifecycle = __PACKAGE__.UnifiedLifecycleAdapter(workload)
 
         val node = linkedWithMonitoring(

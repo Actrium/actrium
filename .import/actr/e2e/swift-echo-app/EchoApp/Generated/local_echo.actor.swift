@@ -5,66 +5,55 @@ import Foundation
 import SwiftProtobuf
 import Actr
 
-/// LocalEchoService service handler protocol - users need to implement this protocol
-public protocol LocalEchoServiceHandler: Sendable {
-/// RPC method: Send
-func send(
-    req: Echoapp_LocalEchoRequest,
-    ctx: any ActrContext
-) async throws(ActrError) -> Echoapp_LocalEchoResponse
-
-}
-
-extension Echoapp_LocalEchoRequest: RpcRequest {
+public struct EchoappLocalEchoServiceSendRpc {
+    public typealias Request = Echoapp_LocalEchoRequest
     public typealias Response = Echoapp_LocalEchoResponse
-
     public static var routeKey: String { "echoapp.LocalEchoService.Send" }
     public static var payloadType: PayloadType { .rpcReliable }
-}
-/// LocalEchoService workload wrapper - wraps the user's handler implementation
-public actor LocalEchoServiceWorkload<T: LocalEchoServiceHandler> {
-    public let handler: T
-    private let remoteTargets: [String: ActrType]
 
-    public init(handler: T, remoteTargets: [String: ActrType] = [:]) {
-        self.handler = handler
-        self.remoteTargets = remoteTargets
+    public static func encodeRequest(_ request: Echoapp_LocalEchoRequest) throws -> Data {
+        try request.serializedData()
+    }
+
+    public static func decodeResponse(_ data: Data) throws -> Echoapp_LocalEchoResponse {
+        try Echoapp_LocalEchoResponse(serializedBytes: data)
     }
 }
 
-extension LocalEchoServiceWorkload {
-    public func __dispatch(ctx: any ActrContext, envelope: RpcEnvelope) async throws(ActrError) -> Data {
-        switch envelope.routeKey {
-case "echoapp.LocalEchoService.Send":
-    let req: Echoapp_LocalEchoRequest
-    do {
-        req = try Echoapp_LocalEchoRequest(serializedBytes: envelope.payload)
-    } catch {
-        throw ActrError.DecodeFailure(msg: "Failed to decode Echoapp_LocalEchoRequest for route \(envelope.routeKey): \(error)")
-    }
-    let resp = try await handler.send(req: req, ctx: ctx)
-    do {
-        return try resp.serializedData()
-    } catch {
-        throw ActrError.DecodeFailure(msg: "Failed to encode Echoapp_LocalEchoResponse for route \(envelope.routeKey): \(error)")
-    }
-case "echo.EchoService.Echo":
-    let targetType = try remoteTargetType(for: envelope.routeKey)
-    let targetId = try await ctx.discover(targetType: targetType)
-    return try await ctx.call(
-        target: targetId,
-        routeKey: envelope.routeKey,
-        payload: envelope.payload
-    )
+public protocol LocalEchoServiceHandler: Sendable {
+    func send(
+        req: Echoapp_LocalEchoRequest,
+        ctx: any ActrContext
+    ) async throws(ActrError) -> Echoapp_LocalEchoResponse
+}
+
+public enum LocalEchoServiceDispatcher {
+    public static func dispatch(
+        handler: any LocalEchoServiceHandler,
+        ctx: any ActrContext,
+        routeKey: String,
+        payload: Data
+    ) async throws(ActrError) -> Data {
+        switch routeKey {
+        case "echoapp.LocalEchoService.Send":
+            let req: Echoapp_LocalEchoRequest
+            do {
+                req = try Echoapp_LocalEchoRequest(serializedBytes: payload)
+            } catch {
+                throw ActrError.DecodeFailure(
+                    msg: "Failed to decode Echoapp_LocalEchoRequest for route \(routeKey): \(error)"
+                )
+            }
+            let resp = try await handler.send(req: req, ctx: ctx)
+            do {
+                return try resp.serializedData()
+            } catch {
+                throw ActrError.DecodeFailure(
+                    msg: "Failed to encode Echoapp_LocalEchoResponse for route \(routeKey): \(error)"
+                )
+            }
         default:
-            throw ActrError.UnknownRoute(msg: "Unknown route: \(envelope.routeKey)")
+            throw ActrError.UnknownRoute(msg: "Unknown route: \(routeKey)")
         }
     }
-
-private func remoteTargetType(for routeKey: String) throws(ActrError) -> ActrType {
-    guard let targetType = remoteTargets[routeKey] else {
-        throw ActrError.UnknownRoute(msg: "No remote target configured for route: \(routeKey)")
-    }
-    return targetType
-}
 }

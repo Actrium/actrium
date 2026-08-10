@@ -102,7 +102,7 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
 ///   that transitively imports WASI interfaces);
 /// - a per-invocation table keyed by `ctx-token`, holding the
 ///   [`InvocationContext`] + [`HostAbiFn`] for every in-flight dispatch on
-///   the 0.3.0 async world — installed before `call_dispatch` and retired
+///   the 0.4.0 async world — installed before `call_dispatch` and retired
 ///   after, so the Accessor-based host imports recover the right per-call
 ///   state without a shared single slot that would cross-talk;
 /// - stream callback token tracking, so a callback registered during one
@@ -111,7 +111,7 @@ fn build_engine(limits: &WasmRuntimeLimits) -> WasmResult<Engine> {
 pub(crate) struct HostState {
     wasi: WasiCtx,
     table: ResourceTable,
-    /// Per-invocation table keyed by `ctx-token`, used by the V2 (0.3.0
+    /// Per-invocation table keyed by `ctx-token`, used by the V2 (0.4.0
     /// async world) Accessor-based host imports. Each in-flight invocation
     /// keys its own `HostAbiFn` / `InvocationContext` by its token, so the
     /// static Accessor import methods recover the correct one without a

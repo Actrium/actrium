@@ -5,6 +5,7 @@
  * generates:
  * - Handler interface for service implementations
  * - Dispatcher object for request routing
+ * - Unified `actr_dispatch.kt` with exact route-key matching sourced from DispatchSpec v1
  *
  * Usage as protoc plugin: protoc --plugin=protoc-gen-actrframework-kotlin=PATH \
  * ```
@@ -17,6 +18,8 @@ import com.google.protobuf.DescriptorProtos.DescriptorProto
 import com.google.protobuf.DescriptorProtos.FileDescriptorProto
 import com.google.protobuf.compiler.PluginProtos.CodeGeneratorRequest
 import com.google.protobuf.compiler.PluginProtos.CodeGeneratorResponse
+import org.json.JSONArray
+import org.json.JSONObject
 
 fun main(args: Array<String>) {
     // Support --version and --help arguments
@@ -60,7 +63,20 @@ fun generateCode(request: CodeGeneratorRequest): CodeGeneratorResponse {
 
     // Parse parameters
     val params = parseParameters(request.parameter)
-    val pluginParams = parsePluginParams(params)
+    val kotlinPackage = params["kotlin_package"] ?: "com.example.generated"
+
+    // Load DispatchSpec (phase 6 unified-dispatch model)
+    val dispatchSpecPath = params["dispatch_spec"]
+    val dispatchSpecHash = params["dispatch_spec_hash"] ?: ""
+    val dispatchSpec = if (dispatchSpecPath != null) {
+        val spec = DispatchSpec.fromPath(dispatchSpecPath)
+        spec.verifyHash(dispatchSpecHash)
+        spec
+    } else {
+        throw IllegalArgumentException(
+            "dispatch_spec parameter is required; pass --actr_opt=dispatch_spec=<path>"
+        )
+    }
 
     // Build fully-qualified message name -> declaring (package, proto file) map
     // from the full descriptor set so imported RPC message types resolve to
@@ -72,16 +88,11 @@ fun generateCode(request: CodeGeneratorRequest): CodeGeneratorResponse {
         }
     }
 
-    val localServices = mutableListOf<ServiceMetadata>()
-    val remoteServices = mutableListOf<ServiceMetadata>()
-
-    // Process each file to generate
+    // Track generated files, local routes, and remote routes for metadata.
+    val generatedFiles = mutableListOf<String>()
+    // Process each file to generate per-service handler/dispatcher/contract files.
     for (fileName in request.fileToGenerateList) {
         val fileDescriptor = request.protoFileList.find { it.name == fileName } ?: continue
-        val normalizedFileName = normalizeProtoPath(fileDescriptor.name)
-        val role = pluginParams.roleFor(normalizedFileName)
-
-        // Get proto file name (e.g., "file.proto" -> "file")
         val protoFileName = fileName.substringAfterLast("/")
 
         // Process each service in the file
@@ -98,280 +109,312 @@ fun generateCode(request: CodeGeneratorRequest): CodeGeneratorResponse {
 
             val generatedFile = generator.generate()
             responseBuilder.addFile(generatedFile)
+            generatedFiles.add(generatedFile.name)
 
-            val serviceMetadata =
-                    ServiceMetadata(
-                            name = service.name,
-                            packageName = fileDescriptor.`package`,
-                            protoFile = normalizedFileName,
-                            methods =
-                                    service.methodList.map { method ->
-                                        MethodMetadata(
-                                                name = method.name,
-                                                snakeName = method.name.toSnakeCase(),
-                                                routeKey =
-                                                        routeKey(
-                                                                fileDescriptor.`package`,
-                                                                service.name,
-                                                                method.name),
-                                                inputRef =
-                                                        buildTypeRef(
-                                                                method.inputType,
-                                                                "input",
-                                                                service.name,
-                                                                method.name,
-                                                                normalizedFileName,
-                                                                typeOwner,
-                                                                generator.kotlinTypeName(
-                                                                        method.inputType,
-                                                                        "input",
-                                                                        method.name)),
-                                                outputRef =
-                                                        buildTypeRef(
-                                                                method.outputType,
-                                                                "output",
-                                                                service.name,
-                                                                method.name,
-                                                                normalizedFileName,
-                                                                typeOwner,
-                                                                generator.kotlinTypeName(
-                                                                        method.outputType,
-                                                                        "output",
-                                                                        method.name)),
-                                        )
-                                    },
-                    )
-            if (role == FileRole.REMOTE) {
-                remoteServices.add(serviceMetadata)
-            } else {
-                localServices.add(serviceMetadata)
-            }
         }
     }
 
+    // Generate the unified `actr_dispatch.kt` with exact route-key matching.
+    val dispatchCode =
+            generateActrDispatch(
+                    dispatchSpec,
+                    kotlinPackage,
+                    typeOwner,
+            )
+    val dispatchFile =
+            CodeGeneratorResponse.File.newBuilder()
+                    .setName("actr_dispatch.kt")
+                    .setContent(dispatchCode)
+                    .build()
+    responseBuilder.addFile(dispatchFile)
+    generatedFiles.add("actr_dispatch.kt")
+
+    // Generate `actr-gen-meta.json` with the new unified-dispatch fields.
     responseBuilder.addFile(
             CodeGeneratorResponse.File.newBuilder()
                     .setName("actr-gen-meta.json")
-                    .setContent(buildMetadataJson(localServices, remoteServices, pluginParams))
+                    .setContent(
+                            buildMetadataJson(
+                                    dispatchSpec,
+                                    dispatchSpecHash,
+                                    generatedFiles,
+                                    typeOwner,
+                            ))
                     .build())
 
     return responseBuilder.build()
 }
 
-private enum class FileRole {
-    LOCAL,
-    REMOTE,
-}
-
-private data class PluginParams(
-        val localFiles: Set<String>,
-        val remoteFiles: Set<String>,
-        val remoteFileMapping: Map<String, String>,
-) {
-    fun roleFor(fileName: String): FileRole {
-        return when {
-            remoteFiles.contains(fileName) -> FileRole.REMOTE
-            localFiles.contains(fileName) -> FileRole.LOCAL
-            fileName.startsWith("remote/") -> FileRole.REMOTE
-            else -> FileRole.LOCAL
-        }
-    }
-}
-
-private data class TypeRefMetadata(
-        val protoType: String,
-        val typeName: String,
-        val protoPackage: String,
-        val protoFile: String,
-        val generatedType: String,
-)
-
-private data class MethodMetadata(
-        val name: String,
-        val snakeName: String,
-        val routeKey: String,
-        val inputRef: TypeRefMetadata,
-        val outputRef: TypeRefMetadata,
-)
-
-private data class ServiceMetadata(
-        val name: String,
-        val packageName: String,
-        val protoFile: String,
-        val methods: List<MethodMetadata>,
-)
-
-private fun parsePluginParams(params: Map<String, String>): PluginParams {
-    return PluginParams(
-            localFiles = parsePathSet(params["LocalFiles"]),
-            remoteFiles = parsePathSet(params["RemoteFiles"]),
-            remoteFileMapping =
-                    parseMapping(params["RemoteFileMapping"] ?: params["RemoteFileActrTypes"]))
-}
-
-private fun parsePathSet(value: String?): Set<String> {
-    if (value.isNullOrBlank()) return emptySet()
-    return value.split(":").map { normalizeProtoPath(it.trim()) }.filter { it.isNotEmpty() }.toSet()
-}
-
-private fun parseMapping(value: String?): Map<String, String> {
-    if (value.isNullOrBlank()) return emptyMap()
-    return value.split(";")
-            .mapNotNull { entry ->
-                val trimmed = entry.trim()
-                if (trimmed.isEmpty()) {
-                    null
-                } else {
-                    val parts = trimmed.split("=", limit = 2)
-                    require(parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) {
-                        "Invalid RemoteFileMapping entry: $trimmed"
-                    }
-                    normalizeProtoPath(parts[0]) to parts[1]
-                }
-            }
-            .toMap()
-}
-
-private fun buildTypeRef(
-        rawType: String,
-        kind: String,
-        serviceName: String,
-        methodName: String,
-        protoFileName: String,
+/** Generate the unified `actr_dispatch.kt` with exact route-key matching. */
+private fun generateActrDispatch(
+        spec: DispatchSpec,
+        kotlinPackage: String,
         typeOwner: Map<String, TypeOwner>,
-        generatedType: String,
-): TypeRefMetadata {
-    val cleaned = rawType.trimStart('.')
-    val owner =
-            typeOwner[cleaned]
-                    ?: throw IllegalArgumentException(
-                            "Cannot resolve $kind type `$cleaned` for $serviceName.$methodName in " +
-                                    "$protoFileName: RPC types must be declared in one of the parsed proto files")
-    return TypeRefMetadata(
-            protoType = cleaned,
-            typeName = owner.messagePath.joinToString("."),
-            protoPackage = owner.packageName,
-            protoFile = normalizeProtoPath(owner.protoFileName),
-            generatedType = generatedType,
-    )
-}
-
-private fun buildMetadataJson(
-        localServices: List<ServiceMetadata>,
-        remoteServices: List<ServiceMetadata>,
-        params: PluginParams,
 ): String {
+    val localRoutes = spec.localRoutes()
+    val remoteRoutes = spec.remoteRoutes()
+
+    // Build handler interface aggregating all local service handlers.
+    val localServiceNames = localRoutes.map { it.protoService }.distinct().sorted()
+    val hasLocal = localRoutes.isNotEmpty()
+
+    val handlerInterfaces =
+            if (hasLocal) {
+                localServiceNames.joinToString(", ") { "${extractServiceName(it)}Handler" }
+            } else {
+                ""
+            }
+
+    // Build imports for protobuf message types used in local route decode/encode.
+    val localImports = mutableSetOf<String>()
+    for (route in localRoutes) {
+        val inputOwner = typeOwner[route.inputType.trimStart('.')]
+        if (inputOwner != null) {
+            localImports.add(buildImport(inputOwner))
+        }
+        val outputOwner = typeOwner[route.outputType.trimStart('.')]
+        if (outputOwner != null) {
+            localImports.add(buildImport(outputOwner))
+        }
+    }
+
+    val importsStr = if (localImports.isNotEmpty()) {
+        localImports.filter { it.isNotEmpty() }.sorted().joinToString("\n") { "import $it.*" }
+    } else {
+        ""
+    }
+
+    // Build the `when` cases for exact route-key matching.
+    val cases = StringBuilder()
+    for (route in localRoutes) {
+        val inputType = resolveKotlinType(route.inputType, typeOwner)
+        val handlerMethod = route.method.toSnakeCase()
+
+        cases.appendLine("    ${kotlinStringLiteral(route.routeKey)} -> {")
+        cases.appendLine("        val request = $inputType.parseFrom(payload)")
+        cases.appendLine("        val response = handler.${handlerMethod}(request, ctx)")
+        cases.appendLine("        response.toByteArray()")
+        cases.appendLine("    }")
+    }
+    for (route in remoteRoutes) {
+        val alias = route.dependencyAlias ?: continue
+        cases.appendLine("    ${kotlinStringLiteral(route.routeKey)} -> {")
+        cases.appendLine("        val actrType = ctx.resolveDependency(${kotlinStringLiteral(alias)})")
+        cases.appendLine("        val target = ctx.discover(actrType)")
+        cases.appendLine("        ctx.callRaw(target, routeKey, payload, timeoutMs)")
+        cases.appendLine("    }")
+    }
+
+    val elseCase =
+            "    else -> throw io.actrium.actr.ActrException.UnknownRoute(\"Unknown route: \$routeKey\")"
+
+    val handlerInterface =
+            if (hasLocal) {
+                """
+                |/**
+                | * Unified handler interface aggregating all local service handlers.
+                | */
+                |interface ActrDispatchHandler : $handlerInterfaces {
+                |    // All methods are inherited from individual service handlers.
+                |}
+                """.trimMargin()
+            } else {
+                """
+                |/** Marker handler for a DispatchSpec without local routes. */
+                |interface ActrDispatchHandler
+                |
+                |object EmptyActrDispatchHandler : ActrDispatchHandler
+                """.trimMargin()
+            }
+
     return buildString {
-        append("{\n")
-        append("  \"plugin_version\": \"0.4.13\",\n")
-        append("  \"language\": \"kotlin\",\n")
-        append("  \"local_services\": ")
-        appendServiceArray(localServices, FileRole.LOCAL, params)
-        append(",\n")
-        append("  \"remote_services\": ")
-        appendServiceArray(remoteServices, FileRole.REMOTE, params)
-        append("\n")
-        append("}\n")
+        appendLine("/**")
+        appendLine(" * Auto-generated unified dispatcher - DO NOT EDIT.")
+        appendLine(" *")
+        appendLine(" * Generated by protoc-gen-actrframework-kotlin from DispatchSpec v1.")
+        appendLine(" * Exact route-key matching (no prefix matching).")
+        appendLine(" *")
+        appendLine(" * Local routes: ${localRoutes.size}")
+        appendLine(" * Remote routes: ${remoteRoutes.size}")
+        appendLine(" */")
+        appendLine("package $kotlinPackage")
+        appendLine()
+        appendLine("import io.actrium.actr.dsl.ActrContext")
+        if (importsStr.isNotEmpty()) {
+            appendLine(importsStr)
+        }
+        if (hasLocal) {
+            appendLine()
+            appendLine("// Import individual service handlers and dispatchers.")
+            for (name in localServiceNames) {
+                val svc = extractServiceName(name)
+                appendLine("import $kotlinPackage.${svc}Handler")
+            }
+        }
+        appendLine()
+        appendLine(handlerInterface)
+        appendLine()
+        appendLine("/**")
+        appendLine(" * Unified dispatcher with exact route-key matching.")
+        appendLine(" *")
+        appendLine(" * Local routes decode the payload, call the handler, and encode the response.")
+        appendLine(" * Remote routes resolve the dependency alias, discover the target, and call raw.")
+        appendLine(" */")
+        appendLine("suspend fun actrDispatch(")
+        appendLine("    ctx: ActrContext,")
+        appendLine("    handler: ActrDispatchHandler,")
+        appendLine("    routeKey: String,")
+        appendLine("    payload: ByteArray,")
+        appendLine("    timeoutMs: Long,")
+        appendLine("): ByteArray = when (routeKey) {")
+        append(cases)
+        appendLine(elseCase)
+        appendLine("}")
     }
 }
 
-private fun StringBuilder.appendServiceArray(
-        services: List<ServiceMetadata>,
-        role: FileRole,
-        params: PluginParams,
-) {
-    append("[")
-    if (services.isNotEmpty()) append("\n")
-    services.forEachIndexed { index, service ->
-        append("    {\n")
-        appendJsonField("name", service.name, indent = 6, trailing = true)
-        appendJsonField("package", service.packageName, indent = 6, trailing = true)
-        appendJsonField("proto_file", service.protoFile, indent = 6, trailing = true)
-        if (role == FileRole.LOCAL) {
-            appendJsonField("handler_interface", "${service.name}Handler", indent = 6, trailing = true)
-            appendJsonField("workload_type", "${service.name}Workload", indent = 6, trailing = true)
-            appendJsonField("dispatcher_type", "${service.name}Dispatcher", indent = 6, trailing = true)
+
+/** Build a Kotlin import path for a proto type owner. */
+private fun buildImport(owner: TypeOwner): String {
+    val packagePrefix = owner.javaPackage.ifEmpty { owner.packageName }
+    if (owner.javaMultipleFiles) {
+        return packagePrefix
+    }
+    val outer = owner.javaOuterClassName.ifEmpty {
+        owner.protoFileName.substringAfterLast("/").removeSuffix(".proto").toPascalCase()
+    }
+    return if (packagePrefix.isEmpty()) outer else "$packagePrefix.$outer"
+}
+
+/** Resolve a fully-qualified proto type to its generated JVM type name. */
+private fun resolveKotlinType(typeName: String, typeOwner: Map<String, TypeOwner>): String {
+    val cleaned = typeName.trimStart('.')
+    val owner = typeOwner[cleaned] ?: return cleaned
+    val packagePrefix = owner.javaPackage.ifEmpty { owner.packageName }
+    val messagePath =
+            if (owner.messagePath.isEmpty()) listOf(cleaned.split(".").last())
+            else owner.messagePath
+    val classPath =
+            if (owner.javaMultipleFiles) {
+                messagePath.joinToString(".")
+            } else {
+                val outer = owner.javaOuterClassName.ifEmpty {
+                    owner.protoFileName.substringAfterLast("/").removeSuffix(".proto").toPascalCase()
+                }
+                (listOf(outer) + messagePath).filter { it.isNotEmpty() }.joinToString(".")
+            }
+    return if (packagePrefix.isEmpty()) classPath else "$packagePrefix.$classPath"
+}
+
+/** Extract the service name from a fully-qualified proto_service like "echo.EchoService". */
+private fun extractServiceName(protoService: String): String {
+    return protoService.substringAfterLast(".")
+}
+
+/** Build the `actr-gen-meta.json` content with unified-dispatch fields. */
+private fun buildMetadataJson(
+        dispatchSpec: DispatchSpec,
+        dispatchSpecHash: String,
+        generatedFiles: List<String>,
+        typeOwner: Map<String, TypeOwner>,
+): String {
+    val localRoutes = dispatchSpec.localRoutes()
+    val remoteRoutes = dispatchSpec.remoteRoutes()
+    val metadata =
+            JSONObject()
+                    .put("schema_version", "v1")
+                    .put("plugin_version", "0.6.1")
+                    .put("language", "kotlin")
+                    .put("dispatch_spec_hash", dispatchSpecHash)
+                    .put(
+                            "generated_files",
+                            jsonArray((generatedFiles + "actr-gen-meta.json").distinct().sorted()),
+                    )
+                    .put(
+                            "generated_local_routes",
+                            jsonArray(localRoutes.map { it.routeKey }.sorted()),
+                    )
+                    .put(
+                            "generated_remote_routes",
+                            jsonArray(remoteRoutes.map { it.routeKey }.sorted()),
+                    )
+                    .put("local_services", serviceMetadata(localRoutes, typeOwner, false))
+                    .put("remote_services", serviceMetadata(remoteRoutes, typeOwner, true))
+    return metadata.toString(2) + "\n"
+}
+
+private fun serviceMetadata(
+        routes: List<DispatchRoute>,
+        typeOwner: Map<String, TypeOwner>,
+        remote: Boolean,
+): JSONArray {
+    val services = JSONArray()
+    for ((protoService, serviceRoutes) in routes.groupBy { it.protoService }.toSortedMap()) {
+        val separator = protoService.lastIndexOf('.')
+        val packageName = if (separator < 0) "" else protoService.substring(0, separator)
+        val serviceName = if (separator < 0) protoService else protoService.substring(separator + 1)
+        val service =
+                JSONObject()
+                        .put("name", serviceName)
+                        .put("package", packageName)
+                        .put("proto_file", serviceRoutes.first().protoFile)
+        if (remote) {
+            service
+                    .put("dependency_alias", serviceRoutes.first().dependencyAlias)
+                    .put("client_type", "${serviceName}Client")
         } else {
-            val actrType =
-                    params.remoteFileMapping[normalizeProtoPath(service.protoFile)]
-                            ?: throw IllegalArgumentException(
-                                    "No actr_type mapping found for remote file ${service.protoFile}")
-            appendJsonField("actr_type", actrType, indent = 6, trailing = true)
-            appendJsonField("client_type", "${service.name}Client", indent = 6, trailing = true)
+            service
+                    .put("handler_interface", "${serviceName}Handler")
+                    .put("workload_type", "${serviceName}Workload")
+                    .put("dispatcher_type", "${serviceName}Dispatcher")
         }
-        append("      \"methods\": ")
-        appendMethodArray(service.methods)
-        append("\n")
-        append("    }")
-        if (index != services.lastIndex) append(",")
-        append("\n")
-    }
-    append("  ]")
-}
-
-private fun StringBuilder.appendMethodArray(methods: List<MethodMetadata>) {
-    append("[")
-    if (methods.isNotEmpty()) append("\n")
-    methods.forEachIndexed { index, method ->
-        append("        {\n")
-        appendJsonField("name", method.name, indent = 10, trailing = true)
-        appendJsonField("snake_name", method.snakeName, indent = 10, trailing = true)
-        appendJsonField("route_key", method.routeKey, indent = 10, trailing = true)
-        append("          \"input_ref\": ")
-        appendTypeRef(method.inputRef)
-        append(",\n")
-        append("          \"output_ref\": ")
-        appendTypeRef(method.outputRef)
-        append("\n")
-        append("        }")
-        if (index != methods.lastIndex) append(",")
-        append("\n")
-    }
-    append("      ]")
-}
-
-private fun StringBuilder.appendTypeRef(ref: TypeRefMetadata) {
-    append("{")
-    append("\"proto_type\": ")
-    appendJsonString(ref.protoType)
-    append(", \"type_name\": ")
-    appendJsonString(ref.typeName)
-    append(", \"proto_package\": ")
-    appendJsonString(ref.protoPackage)
-    append(", \"proto_file\": ")
-    appendJsonString(ref.protoFile)
-    append(", \"generated_type\": ")
-    appendJsonString(ref.generatedType)
-    append("}")
-}
-
-private fun StringBuilder.appendJsonField(
-        key: String,
-        value: String,
-        indent: Int,
-        trailing: Boolean,
-) {
-    append(" ".repeat(indent))
-    appendJsonString(key)
-    append(": ")
-    appendJsonString(value)
-    if (trailing) append(",")
-    append("\n")
-}
-
-private fun StringBuilder.appendJsonString(value: String) {
-    append("\"")
-    for (char in value) {
-        when (char) {
-            '\\' -> append("\\\\")
-            '"' -> append("\\\"")
-            '\n' -> append("\\n")
-            '\r' -> append("\\r")
-            '\t' -> append("\\t")
-            else -> append(char)
+        val methods = JSONArray()
+        for (route in serviceRoutes.sortedBy { it.routeKey }) {
+            methods.put(
+                    JSONObject()
+                            .put("name", route.method)
+                            .put("snake_name", route.method.toSnakeCase())
+                            .put("route_key", route.routeKey)
+                            .put(
+                                    "input_ref",
+                                    metadataTypeRef(route.inputType, route.protoFile, typeOwner),
+                            )
+                            .put(
+                                    "output_ref",
+                                    metadataTypeRef(route.outputType, route.protoFile, typeOwner),
+                            )
+            )
         }
+        service.put("methods", methods)
+        services.put(service)
     }
-    append("\"")
+    return services
+}
+
+private fun metadataTypeRef(
+        rawType: String,
+        fallbackProtoFile: String,
+        typeOwner: Map<String, TypeOwner>,
+): JSONObject {
+    val protoType = rawType.trimStart('.')
+    val owner = typeOwner[protoType]
+    val typeName = owner?.messagePath?.joinToString(".") ?: protoType.substringAfterLast('.')
+    val packageName = owner?.packageName ?: protoType.substringBeforeLast('.', "")
+    val protoFile = normalizeProtoPath(owner?.protoFileName ?: fallbackProtoFile)
+    return JSONObject()
+            .put("proto_type", protoType)
+            .put("type_name", typeName)
+            .put("proto_package", packageName)
+            .put("proto_file", protoFile)
+            .put("generated_type", resolveKotlinType(rawType, typeOwner))
+}
+
+private fun jsonArray(values: List<String>): JSONArray {
+    val array = JSONArray()
+    for (value in values) {
+        array.put(value)
+    }
+    return array
 }
 
 private fun routeKey(packageName: String, serviceName: String, methodName: String): String {
@@ -385,6 +428,32 @@ private fun normalizeProtoPath(value: String): String {
         normalized = normalized.removePrefix("./")
     }
     return if (normalized.endsWith(".proto")) normalized else "$normalized.proto"
+}
+
+private fun kotlinStringLiteral(value: String): String {
+    val result = StringBuilder("\"")
+    for (char in value) {
+        when (char) {
+            '\b' -> result.append("\\b")
+            '\t' -> result.append("\\t")
+            '\n' -> result.append("\\n")
+            '\u000C' -> result.append("\\f")
+            '\r' -> result.append("\\r")
+            '"' -> result.append("\\\"")
+            '\\' -> result.append("\\\\")
+            '$' -> result.append('\\').append('$')
+            '\u2028', '\u2029' ->
+                result.append("\\u").append(char.code.toString(16).padStart(4, '0'))
+            else -> {
+                if (char.code < 0x20) {
+                    result.append("\\u").append(char.code.toString(16).padStart(4, '0'))
+                } else {
+                    result.append(char)
+                }
+            }
+        }
+    }
+    return result.append('"').toString()
 }
 
 private fun collectTypeOwners(

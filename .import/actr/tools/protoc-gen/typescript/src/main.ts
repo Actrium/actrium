@@ -1,25 +1,18 @@
-import type {
-  DescExtension,
-  DescFile,
-  DescMessage,
-  DescMethod,
-  DescService,
-} from "@bufbuild/protobuf";
-import { getOption, hasOption } from "@bufbuild/protobuf";
+import type { DescFile, DescMessage, DescMethod } from "@bufbuild/protobuf";
 import {
   createEcmaScriptPlugin,
   runNodeJs,
   type Schema,
 } from "@bufbuild/protoplugin";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 
 type PluginParams = {
-  localFiles: Set<string>;
-  remoteFiles: Set<string>;
-  remoteFileMapping: Map<string, string>;
+  dispatchSpecPath?: string;
+  dispatchSpecHash?: string;
 };
 
 type AnalyzedMethod = {
-  service: DescService;
   method: DescMethod;
   requestCompanionName: string;
 };
@@ -39,13 +32,21 @@ type MethodMetadata = {
   output_ref: TypeRef;
 };
 
-type RemoteServiceMetadata = {
-  name: string;
-  package: string;
+type DispatchRoute = {
+  route_key: string;
   proto_file: string;
-  actr_type: string;
-  client_type: string;
-  methods: MethodMetadata[];
+  proto_service: string;
+  method: string;
+  input_type: string;
+  output_type: string;
+  payload_type: string;
+  dependency_alias?: string;
+};
+
+type DispatchSpec = {
+  schema_version: string;
+  routes: DispatchRoute[];
+  spec_hash?: string;
 };
 
 type LocalServiceMetadata = {
@@ -58,17 +59,16 @@ type LocalServiceMetadata = {
   methods: MethodMetadata[];
 };
 
+type RemoteServiceMetadata = {
+  name: string;
+  package: string;
+  proto_file: string;
+  dependency_alias: string;
+  client_type: string;
+  methods: MethodMetadata[];
+};
+
 const VERSION = "0.6.1";
-
-// Extension field number of `(actr.payload_type)` on `MethodOptions`.
-const PAYLOAD_TYPE_EXTENSION_NUMBER = 50001;
-
-// Valid values of the `actr.PayloadType` enum (RPC_RELIABLE..MEDIA_RTP).
-const PAYLOAD_TYPE_MAX = 4;
-
-// Unary fallback when a method does not set `(actr.payload_type)`
-// (RPC_RELIABLE). Streaming methods are rejected before this is consulted.
-const PAYLOAD_TYPE_FALLBACK = 0;
 
 const plugin = createEcmaScriptPlugin<PluginParams>({
   name: "protoc-gen-actrframework-typescript",
@@ -82,48 +82,59 @@ const plugin = createEcmaScriptPlugin<PluginParams>({
 runNodeJs(plugin);
 
 function generateTypeScript(schema: Schema<PluginParams>): void {
-  const localServiceMetadata: LocalServiceMetadata[] = [];
-  const remoteServiceMetadata: RemoteServiceMetadata[] = [];
-  const fallbackTargetType = buildFallbackTargetType(
-    schema.options.remoteFileMapping,
-  );
-  const requestOwners = new Map<string, string>();
-  const payloadTypeExtension = findPayloadTypeExtension(schema);
-
-  for (const file of schema.files) {
-    if (file.services.length === 0) {
-      continue;
-    }
-
-    const role = inferRole(file, schema.options);
-    const analyzedMethods = analyzeFileMethods(file, role === "remote");
-
-    if (role === "local") {
-      localServiceMetadata.push(
-        ...buildLocalServiceMetadata(file, analyzedMethods),
-      );
-      continue;
-    }
-
-    validateUniqueRequestBindings(requestOwners, analyzedMethods);
-    generateClientFile(schema, file, analyzedMethods, payloadTypeExtension);
-
-    const explicitTargetType = parseActrType(
-      schema.options.remoteFileMapping.get(normalizeProtoFileKey(file.name)) ??
-        "",
-    );
-    const targetType = explicitTargetType ?? fallbackTargetType;
-    if (!targetType) {
-      throw new Error(
-        `No actr_type mapping found for remote file ${file.name}. ` +
-          "Use RemoteFileMapping=remote/path.proto=manufacturer:Service:version.",
-      );
-    }
-
-    remoteServiceMetadata.push(
-      ...buildRemoteServiceMetadata(file, analyzedMethods, targetType),
+  if (!schema.options.dispatchSpecPath) {
+    throw new Error(
+      "dispatch_spec=<path> is required; remote routing must come from DispatchSpec v1",
     );
   }
+  const specContent = readFileSync(schema.options.dispatchSpecPath, "utf-8");
+  const dispatchSpec = JSON.parse(specContent) as DispatchSpec;
+  validateDispatchRoutes(dispatchSpec);
+  if (dispatchSpec.schema_version !== "v1") {
+    throw new Error(
+      `Unexpected dispatch spec schema_version: ${dispatchSpec.schema_version}`,
+    );
+  }
+  validateDispatchSpecHash(dispatchSpec, schema.options.dispatchSpecHash);
+
+  const localServiceMetadata: LocalServiceMetadata[] = [];
+  const remoteServiceMetadata: RemoteServiceMetadata[] = [];
+
+  buildMetadataFromDispatchSpec(
+    dispatchSpec,
+    schema,
+    localServiceMetadata,
+    remoteServiceMetadata,
+  );
+
+  const generatedFiles = ["actr_dispatch.ts", "actr-gen-meta.json"];
+  const remoteRouteKeys = new Set(
+    dispatchSpec.routes
+      .filter((route) => route.dependency_alias !== undefined)
+      .map((route) => route.route_key),
+  );
+  for (const file of schema.files) {
+    const remoteMethods = analyzeFileMethods(file).filter((entry) =>
+      remoteRouteKeys.has(routeKeyForMethod(entry.method)),
+    );
+    if (remoteMethods.length === 0) {
+      continue;
+    }
+    const requestCompanionNames = new Set<string>();
+    for (const entry of remoteMethods) {
+      if (requestCompanionNames.has(entry.requestCompanionName)) {
+        throw new Error(
+          `${routeKeyForMethod(entry.method)}: request companion '${entry.requestCompanionName}' is duplicated within ${file.name}. ` +
+            "Each remote request type name must map to exactly one RPC in the generated file.",
+        );
+      }
+      requestCompanionNames.add(entry.requestCompanionName);
+    }
+    generateClientFile(schema, file, remoteMethods);
+    generatedFiles.push(`${normalizeProtoFileKey(file.name)}_client.ts`);
+  }
+
+  generateActrDispatch(schema, dispatchSpec);
 
   const metadataFile = schema.generateFile("actr-gen-meta.json");
   metadataFile.print(
@@ -131,6 +142,18 @@ function generateTypeScript(schema: Schema<PluginParams>): void {
       {
         plugin_version: VERSION,
         language: "typescript",
+        schema_version: dispatchSpec.schema_version,
+        dispatch_spec_hash:
+          dispatchSpec.spec_hash ?? schema.options.dispatchSpecHash ?? "",
+        generated_files: generatedFiles.sort(),
+        generated_local_routes: dispatchSpec.routes
+          .filter((route) => route.dependency_alias === undefined)
+          .map((route) => route.route_key)
+          .sort(),
+        generated_remote_routes: dispatchSpec.routes
+          .filter((route) => route.dependency_alias !== undefined)
+          .map((route) => route.route_key)
+          .sort(),
         local_services: localServiceMetadata,
         remote_services: remoteServiceMetadata,
       },
@@ -140,11 +163,219 @@ function generateTypeScript(schema: Schema<PluginParams>): void {
   );
 }
 
+function buildMetadataFromDispatchSpec(
+  spec: DispatchSpec,
+  schema: Schema<PluginParams>,
+  localServiceMetadata: LocalServiceMetadata[],
+  remoteServiceMetadata: RemoteServiceMetadata[],
+): void {
+  // Group routes by proto_service.
+  const servicesByProtoService = new Map<string, DispatchRoute[]>();
+  for (const route of spec.routes) {
+    const routes = servicesByProtoService.get(route.proto_service) ?? [];
+    routes.push(route);
+    servicesByProtoService.set(route.proto_service, routes);
+  }
+
+  for (const [protoService, routes] of servicesByProtoService) {
+    const aliases = new Set(routes.map((route) => route.dependency_alias));
+    if (aliases.size !== 1) {
+      throw new Error(
+        `DispatchSpec mixes dependency aliases for service '${protoService}'`,
+      );
+    }
+    const dependencyAlias = routes[0].dependency_alias;
+    const isRemote = dependencyAlias !== undefined;
+    if (isRemote && dependencyAlias.trim().length === 0) {
+      throw new Error(
+        `DispatchSpec remote service '${protoService}' has an empty dependency_alias`,
+      );
+    }
+    const lastDot = protoService.lastIndexOf(".");
+    const packageName = lastDot > 0 ? protoService.slice(0, lastDot) : "";
+    const serviceName =
+      lastDot > 0 ? protoService.slice(lastDot + 1) : protoService;
+
+    const methodsByRoute = new Map<string, DescMethod>();
+    for (const file of schema.files) {
+      for (const service of file.services) {
+        for (const method of service.methods) {
+          methodsByRoute.set(routeKeyForMethod(method), method);
+        }
+      }
+    }
+    const methods = routes.map((route) => {
+      const method = methodsByRoute.get(route.route_key);
+      if (!method) {
+        throw new Error(
+          `DispatchSpec route '${route.route_key}' is not present in the protoc request`,
+        );
+      }
+      return buildMethodMetadata(method);
+    });
+
+    if (isRemote) {
+      remoteServiceMetadata.push({
+        name: serviceName,
+        package: packageName,
+        proto_file: routes[0].proto_file,
+        dependency_alias: dependencyAlias!,
+        client_type: `${serviceName}Client`,
+        methods,
+      });
+    } else {
+      localServiceMetadata.push({
+        name: serviceName,
+        package: packageName,
+        proto_file: routes[0].proto_file,
+        handler_interface: `${serviceName}Handler`,
+        workload_type: `${serviceName}Workload`,
+        dispatcher_type: `${serviceName}Dispatcher`,
+        methods,
+      });
+    }
+  }
+}
+
+function generateActrDispatch(
+  schema: Schema<PluginParams>,
+  spec: DispatchSpec,
+): void {
+  const dispatchFile = schema.generateFile("actr_dispatch.ts");
+
+  const localRoutes = spec.routes.filter((r) => !r.dependency_alias);
+  const remoteRoutes = spec.routes.filter((r) => r.dependency_alias);
+  const methodsByRoute = new Map<string, DescMethod>();
+  for (const file of schema.files) {
+    for (const service of file.services) {
+      for (const method of service.methods) {
+        methodsByRoute.set(routeKeyForMethod(method), method);
+      }
+    }
+  }
+  const methodForRoute = (route: DispatchRoute): DescMethod => {
+    const method = methodsByRoute.get(route.route_key);
+    if (!method) {
+      throw new Error(
+        `DispatchSpec route '${route.route_key}' is not present in the protoc request`,
+      );
+    }
+    return method;
+  };
+  const fromBinary = dispatchFile.import("fromBinary", "@bufbuild/protobuf");
+  const toBinary = dispatchFile.import("toBinary", "@bufbuild/protobuf");
+  const actrContext = dispatchFile.import(
+    "ActrContext",
+    "@actrium/actr-workload",
+    true,
+  );
+
+  dispatchFile.print("// Auto-generated unified dispatcher (DispatchSpec v1)");
+  dispatchFile.print("// DO NOT EDIT this file manually");
+  dispatchFile.print("");
+
+  // Handler interface. It remains a marker for remote-only specs so every
+  // generated dispatcher has the same five-argument signature.
+  dispatchFile.print("export interface ActrDispatchHandler {");
+  for (const route of localRoutes) {
+    const methodName = dispatchHandlerMethodName(route);
+    const method = methodForRoute(route);
+    const inputType = dispatchFile.importShape(method.input);
+    const outputType = dispatchFile.importShape(method.output);
+    dispatchFile.print(
+      "  ",
+      methodName,
+      "(req: ",
+      inputType,
+      ", ctx: ",
+      actrContext,
+      "): ",
+      outputType,
+      " | Promise<",
+      outputType,
+      ">;",
+    );
+  }
+  dispatchFile.print("}");
+  dispatchFile.print("");
+
+  // actrDispatch function.
+  const hasLocal = localRoutes.length > 0;
+  dispatchFile.print("export async function actrDispatch(");
+  dispatchFile.print("  ctx: ", actrContext, ",");
+  dispatchFile.print("  handler: ActrDispatchHandler,");
+  dispatchFile.print("  routeKey: string,");
+  dispatchFile.print("  payload: Uint8Array,");
+  dispatchFile.print("  timeoutMs: number,");
+  dispatchFile.print("): Promise<Uint8Array> {");
+  if (!hasLocal) {
+    dispatchFile.print("  void handler;");
+  }
+  if (remoteRoutes.length === 0) {
+    dispatchFile.print("  void timeoutMs;");
+  }
+
+  if (spec.routes.length === 0) {
+    dispatchFile.print("  throw new Error(`UnknownRoute: ${routeKey}`);");
+    dispatchFile.print("}");
+    return;
+  }
+
+  dispatchFile.print("  switch (routeKey) {");
+  for (const route of localRoutes) {
+    const methodName = dispatchHandlerMethodName(route);
+    const method = methodForRoute(route);
+    const inputSchema = dispatchFile.importSchema(method.input);
+    const outputSchema = dispatchFile.importSchema(method.output);
+    dispatchFile.print("    case ", dispatchFile.string(route.route_key), ": {");
+    dispatchFile.print(
+      "      const req = ",
+      fromBinary,
+      "(",
+      inputSchema,
+      ", payload);",
+    );
+    dispatchFile.print(
+      `      const resp = await handler.${methodName}(req, ctx);`,
+    );
+    dispatchFile.print(
+      "      return ",
+      toBinary,
+      "(",
+      outputSchema,
+      ", resp);",
+    );
+    dispatchFile.print("    }");
+  }
+
+  if (remoteRoutes.length > 0) {
+    for (const route of remoteRoutes) {
+      dispatchFile.print("    case ", dispatchFile.string(route.route_key), ": {");
+      dispatchFile.print(
+        "      const actrType = await ctx.resolveDependency(",
+        dispatchFile.string(route.dependency_alias ?? ""),
+        ");",
+      );
+      dispatchFile.print("      const target = await ctx.discover(actrType);");
+      dispatchFile.print(
+        "      return ctx.callRaw(target, routeKey, payload, timeoutMs);",
+      );
+      dispatchFile.print("    }");
+    }
+    dispatchFile.print("    default:");
+    dispatchFile.print("      throw new Error(`UnknownRoute: ${routeKey}`);");
+  } else {
+    dispatchFile.print("    default:");
+    dispatchFile.print("      throw new Error(`UnknownRoute: ${routeKey}`);");
+  }
+  dispatchFile.print("  }");
+  dispatchFile.print("}");
+}
+
 function generateClientFile(
   schema: Schema<PluginParams>,
   file: DescFile,
   analyzedMethods: AnalyzedMethod[],
-  payloadTypeExtension: DescExtension | undefined,
 ): void {
   const generated = schema.generateFile(
     `${normalizeProtoFileKey(file.name)}_client.ts`,
@@ -174,14 +405,6 @@ function generateClientFile(
     generated.print(
       "  routeKey: ",
       generated.string(routeKeyForMethod(entry.method)),
-      ",",
-    );
-    // Runtime-neutral lane value: a plain number literal, not tied to any
-    // runtime's PayloadType representation. Each runtime adapts it at the
-    // call boundary (see ActrRef.callRpc in the Node binding).
-    generated.print(
-      "  payloadType: ",
-      String(payloadTypeForMethod(entry.method, payloadTypeExtension)),
       ",",
     );
     generated.print(
@@ -249,103 +472,189 @@ function generateClientFile(
   }
 }
 
-function buildFallbackTargetType(
-  remoteFileMapping: Map<string, string>,
-): { manufacturer: string; name: string; version: string } | null {
-  const mappingTypes = Array.from(remoteFileMapping.values())
-    .map(parseActrType)
-    .filter(
-      (
-        value,
-      ): value is { manufacturer: string; name: string; version: string } =>
-        value !== null,
+function validateDispatchSpecHash(
+  spec: DispatchSpec,
+  optionHash: string | undefined,
+): void {
+  const expectedHash = optionHash ?? spec.spec_hash;
+  if (!expectedHash) {
+    throw new Error("DispatchSpec is missing spec_hash");
+  }
+  if (optionHash && spec.spec_hash && optionHash !== spec.spec_hash) {
+    throw new Error(
+      `DispatchSpec hash mismatch: option ${optionHash} does not match file ${spec.spec_hash}`,
     );
-  return mappingTypes.length === 1 ? mappingTypes[0] : null;
+  }
+
+  const withoutHash = { ...spec } as Record<string, unknown>;
+  delete withoutHash.spec_hash;
+  const actualHash = createHash("sha256")
+    .update(JSON.stringify(canonicalizeJson(withoutHash)))
+    .digest("hex");
+  if (actualHash !== expectedHash) {
+    throw new Error(
+      `DispatchSpec hash mismatch: expected ${expectedHash}, got ${actualHash}`,
+    );
+  }
+}
+
+function validateDispatchRoutes(spec: DispatchSpec): void {
+  if (typeof spec !== "object" || spec === null || Array.isArray(spec)) {
+    throw new Error("DispatchSpec must be a JSON object");
+  }
+  const specRecord = spec as unknown as Record<string, unknown>;
+  const allowedSpecFields = new Set<string>([
+    "schema_version",
+    "routes",
+    "spec_hash",
+  ]);
+  const unknownSpecFields = Object.keys(specRecord).filter(
+    (field) => !allowedSpecFields.has(field),
+  );
+  if (unknownSpecFields.length > 0) {
+    throw new Error(
+      `DispatchSpec contains unknown field(s): ${unknownSpecFields.sort().join(", ")}`,
+    );
+  }
+  if (!Array.isArray(specRecord.routes)) {
+    throw new Error("DispatchSpec routes must be an array");
+  }
+  if (typeof specRecord.schema_version !== "string") {
+    throw new Error("DispatchSpec schema_version must be a string");
+  }
+  if (
+    specRecord.spec_hash !== undefined &&
+    typeof specRecord.spec_hash !== "string"
+  ) {
+    throw new Error("DispatchSpec spec_hash must be a string when present");
+  }
+
+  const routeKeys = new Set<string>();
+  const aliasesByService = new Map<string, Set<string | undefined>>();
+  const requiredRouteFields = [
+    "route_key",
+    "proto_file",
+    "proto_service",
+    "method",
+    "input_type",
+    "output_type",
+    "payload_type",
+  ] as const;
+  const allowedRouteFields = new Set<string>([
+    ...requiredRouteFields,
+    "dependency_alias",
+  ]);
+  for (const route of spec.routes) {
+    if (typeof route !== "object" || route === null || Array.isArray(route)) {
+      throw new Error("DispatchSpec routes must contain JSON objects");
+    }
+    const routeRecord = route as unknown as Record<string, unknown>;
+    const unknownRouteFields = Object.keys(routeRecord).filter(
+      (field) => !allowedRouteFields.has(field),
+    );
+    if (unknownRouteFields.length > 0) {
+      throw new Error(
+        `DispatchSpec route contains unknown field(s): ${unknownRouteFields.sort().join(", ")}`,
+      );
+    }
+    for (const field of requiredRouteFields) {
+      if (typeof routeRecord[field] !== "string" || routeRecord[field] === "") {
+        throw new Error(
+          `DispatchSpec route field '${field}' must be a non-empty string`,
+        );
+      }
+    }
+    if (
+      routeRecord.dependency_alias !== undefined &&
+      typeof routeRecord.dependency_alias !== "string"
+    ) {
+      throw new Error(
+        "DispatchSpec dependency_alias must be a string when present",
+      );
+    }
+    if (!route.route_key) {
+      throw new Error("DispatchSpec route_key must be non-empty");
+    }
+    if (routeKeys.has(route.route_key)) {
+      throw new Error(
+        `DispatchSpec contains duplicate route_key '${route.route_key}'`,
+      );
+    }
+    routeKeys.add(route.route_key);
+    if (
+      route.dependency_alias !== undefined &&
+      route.dependency_alias.trim().length === 0
+    ) {
+      throw new Error(
+        `DispatchSpec remote route '${route.route_key}' has an empty dependency_alias`,
+      );
+    }
+    const aliases = aliasesByService.get(route.proto_service) ?? new Set();
+    aliases.add(route.dependency_alias);
+    aliasesByService.set(route.proto_service, aliases);
+  }
+  for (const [service, aliases] of aliasesByService) {
+    if (aliases.size !== 1) {
+      throw new Error(
+        `DispatchSpec mixes local/remote routes or dependency aliases for service '${service}'`,
+      );
+    }
+  }
+}
+
+function canonicalizeJson(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeJson);
+  }
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+        .map(([key, child]) => [key, canonicalizeJson(child)]),
+    );
+  }
+  return value;
+}
+
+function dispatchHandlerMethodName(route: DispatchRoute): string {
+  const serviceName =
+    route.proto_service.split(".").pop() ?? route.proto_service;
+  return toLowerCamelCase(
+    `${toSnakeCase(serviceName)}_${toSnakeCase(route.method)}`,
+  );
 }
 
 function parseOptions(
   rawOptions: { key: string; value: string }[],
 ): PluginParams {
-  const localFiles = new Set<string>();
-  const remoteFiles = new Set<string>();
-  const remoteFileMapping = new Map<string, string>();
+  let dispatchSpecPath: string | undefined;
+  let dispatchSpecHash: string | undefined;
 
   for (const { key, value } of rawOptions) {
     switch (key) {
-      case "LocalFiles":
-        appendPathList(localFiles, value);
+      case "dispatch_spec":
+        dispatchSpecPath = value;
         break;
-      case "RemoteFiles":
-        appendPathList(remoteFiles, value);
+      case "dispatch_spec_hash":
+        dispatchSpecHash = value;
         break;
-      case "RemoteFileMapping":
-        appendRemoteMapping(remoteFileMapping, value);
+      case "target":
+      case "import_extension":
+        // Ignore — target=ts is the only supported mode.
         break;
       default:
         throw new Error(`Unknown option '${key}'.`);
     }
   }
 
-  for (const file of localFiles) {
-    if (remoteFiles.has(file)) {
-      throw new Error(
-        `${file}: appears in both LocalFiles and RemoteFiles; a file must belong to exactly one side.`,
-      );
-    }
-  }
-
   return {
-    localFiles,
-    remoteFiles,
-    remoteFileMapping,
+    dispatchSpecPath,
+    dispatchSpecHash,
   };
 }
 
-function appendPathList(target: Set<string>, rawValue: string): void {
-  for (const item of rawValue.split(":")) {
-    const normalized = normalizeProtoFileKey(item.trim());
-    if (normalized) {
-      target.add(normalized);
-    }
-  }
-}
-
-function appendRemoteMapping(
-  target: Map<string, string>,
-  rawValue: string,
-): void {
-  for (const item of rawValue.split(";")) {
-    const trimmed = item.trim();
-    if (!trimmed) {
-      continue;
-    }
-    const idx = trimmed.indexOf("=");
-    if (idx <= 0 || idx === trimmed.length - 1) {
-      throw new Error(`Invalid RemoteFileMapping entry: ${trimmed}`);
-    }
-    const file = normalizeProtoFileKey(trimmed.slice(0, idx));
-    const actrType = trimmed.slice(idx + 1);
-    target.set(file, actrType);
-  }
-}
-
-function inferRole(file: DescFile, params: PluginParams): "local" | "remote" {
-  const normalized = normalizeProtoFileKey(file.name);
-  if (params.remoteFiles.has(normalized)) {
-    return "remote";
-  }
-  if (params.localFiles.has(normalized)) {
-    return "local";
-  }
-  return file.services.length > 0 ? "local" : "remote";
-}
-
-function analyzeFileMethods(
-  file: DescFile,
-  requireUniqueRequestCompanions: boolean,
-): AnalyzedMethod[] {
+function analyzeFileMethods(file: DescFile): AnalyzedMethod[] {
   const analyzedMethods: AnalyzedMethod[] = [];
-  const companionNames = new Set<string>();
 
   for (const service of file.services) {
     for (const method of service.methods) {
@@ -356,21 +665,7 @@ function analyzeFileMethods(
       }
 
       const requestCompanionName = requestCompanionNameForMethod(method);
-      if (
-        requireUniqueRequestCompanions &&
-        companionNames.has(requestCompanionName)
-      ) {
-        throw new Error(
-          `${service.typeName}.${method.name}: request companion '${requestCompanionName}' is duplicated within ${file.name}. ` +
-            "Each request type name must map to exactly one RPC in the generated file.",
-        );
-      }
-      if (requireUniqueRequestCompanions) {
-        companionNames.add(requestCompanionName);
-      }
-
       analyzedMethods.push({
-        service,
         method,
         requestCompanionName,
       });
@@ -378,55 +673,6 @@ function analyzeFileMethods(
   }
 
   return analyzedMethods;
-}
-
-function buildLocalServiceMetadata(
-  file: DescFile,
-  analyzedMethods: AnalyzedMethod[],
-): LocalServiceMetadata[] {
-  return groupAnalyzedMethodsByService(analyzedMethods).map(
-    ([service, methods]) => ({
-      name: service.name,
-      package: packageNameForService(service),
-      proto_file: protoFilePath(file),
-      handler_interface: `${service.name}Handler`,
-      workload_type: `${service.name}Workload`,
-      dispatcher_type: `${service.name}Dispatcher`,
-      methods: methods.map((entry) => buildMethodMetadata(entry.method)),
-    }),
-  );
-}
-
-function buildRemoteServiceMetadata(
-  file: DescFile,
-  analyzedMethods: AnalyzedMethod[],
-  targetType: { manufacturer: string; name: string; version: string },
-): RemoteServiceMetadata[] {
-  return groupAnalyzedMethodsByService(analyzedMethods).map(
-    ([service, methods]) => ({
-      name: service.name,
-      package: packageNameForService(service),
-      proto_file: protoFilePath(file),
-      actr_type: `${targetType.manufacturer}:${targetType.name}:${targetType.version}`,
-      client_type: `${service.name}Client`,
-      methods: methods.map((entry) => buildMethodMetadata(entry.method)),
-    }),
-  );
-}
-
-function groupAnalyzedMethodsByService(
-  analyzedMethods: AnalyzedMethod[],
-): Array<[DescService, AnalyzedMethod[]]> {
-  const grouped = new Map<DescService, AnalyzedMethod[]>();
-  for (const entry of analyzedMethods) {
-    const existing = grouped.get(entry.service);
-    if (existing) {
-      existing.push(entry);
-    } else {
-      grouped.set(entry.service, [entry]);
-    }
-  }
-  return Array.from(grouped.entries());
 }
 
 function buildMethodMetadata(method: DescMethod): MethodMetadata {
@@ -456,32 +702,6 @@ function relativeTypeName(message: DescMessage): string {
     : message.typeName;
 }
 
-function packageNameForService(service: DescService): string {
-  const suffix = `.${service.name}`;
-  if (service.typeName.endsWith(suffix)) {
-    return service.typeName.slice(0, -suffix.length);
-  }
-  return "";
-}
-
-function validateUniqueRequestBindings(
-  requestOwners: Map<string, string>,
-  analyzedMethods: AnalyzedMethod[],
-): void {
-  for (const entry of analyzedMethods) {
-    const requestTypeName = entry.method.input.typeName;
-    const routeKey = routeKeyForMethod(entry.method);
-    const owner = requestOwners.get(requestTypeName);
-    if (owner && owner !== routeKey) {
-      throw new Error(
-        `${routeKey}: request type ${requestTypeName} is already bound to ${owner}. ` +
-          "TypeScript strong-associated generation requires each request type to map to exactly one RPC.",
-      );
-    }
-    requestOwners.set(requestTypeName, routeKey);
-  }
-}
-
 function requestCompanionNameForMethod(method: DescMethod): string {
   return method.input.name;
 }
@@ -490,62 +710,10 @@ function routeKeyForMethod(method: DescMethod): string {
   return `${method.parent.typeName}.${method.name}`;
 }
 
-// Locate the `actr.payload_type` extension descriptor across all files in
-// the schema (present only when the service proto imports actr/options.proto).
-function findPayloadTypeExtension(
-  schema: Schema<PluginParams>,
-): DescExtension | undefined {
-  return schema.allFiles
-    .flatMap((file) => file.extensions)
-    .find(
-      (ext) =>
-        ext.typeName === "actr.payload_type" &&
-        ext.number === PAYLOAD_TYPE_EXTENSION_NUMBER &&
-        ext.extendee.typeName === "google.protobuf.MethodOptions",
-    );
-}
-
-// Explicit `(actr.payload_type)` wins over the unary fallback. Like the Rust
-// generator, a malformed option is a hard error naming the method — never a
-// silent fallback that would disguise a codegen defect as a lane choice.
-function payloadTypeForMethod(
-  method: DescMethod,
-  extension: DescExtension | undefined,
-): number {
-  if (extension === undefined || !hasOption(method, extension)) {
-    return PAYLOAD_TYPE_FALLBACK;
-  }
-  const value: unknown = getOption(method, extension);
-  if (
-    typeof value !== "number" ||
-    !Number.isInteger(value) ||
-    value < 0 ||
-    value > PAYLOAD_TYPE_MAX
-  ) {
-    throw new Error(
-      `${method.parent.typeName}.${method.name}: unsupported payload_type value ${String(value)}; ` +
-        `expected an integer in 0..${PAYLOAD_TYPE_MAX}.`,
-    );
-  }
-  return value;
-}
-
-function parseActrType(
-  value: string,
-): { manufacturer: string; name: string; version: string } | null {
-  const parts = value.split(":");
-  if (parts.length !== 3) {
-    return null;
-  }
-  const [manufacturer, name, version] = parts;
-  if (!manufacturer || !name || !version) {
-    return null;
-  }
-  return {
-    manufacturer,
-    name,
-    version,
-  };
+function toLowerCamelCase(value: string): string {
+  return value
+    .replace(/(?:^|_)(.)/g, (_, c: string) => c.toUpperCase())
+    .replace(/^./, (c) => c.toLowerCase());
 }
 
 function normalizePath(value: string): string {

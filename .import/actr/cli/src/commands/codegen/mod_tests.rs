@@ -51,6 +51,7 @@ impl LanguageGenerator for SpyGenerator {
                     language: "rust".into(),
                     local_services: vec![],
                     remote_services: vec![],
+                    ..Default::default()
                 },
             )?;
         }
@@ -130,6 +131,9 @@ realm_id = 1001
         no_format,
         debug: false,
         skip_validation,
+        dispatch_spec: DispatchSpec::default(),
+        dispatch_spec_path: PathBuf::new(),
+        dispatch_spec_hash: String::new(),
     }
 }
 

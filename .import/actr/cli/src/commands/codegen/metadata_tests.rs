@@ -13,6 +13,7 @@ fn svc_model(name: &str, side: super::super::ProtoSide) -> ServiceModel {
             snake_name: "echo".into(),
             input_type: "EchoRequest".into(),
             output_type: "EchoResponse".into(),
+            payload_type: "rpcReliable".into(),
             route_key: "echo.EchoService.Echo".into(),
         }],
         actr_type: Some("acme:Echo:1.0.0".into()),
@@ -31,6 +32,22 @@ fn from_proto_model_populates_local_and_remote() {
     assert_eq!(meta.local_services[0].name, "EchoService");
     assert_eq!(meta.language, "rust");
     assert!(meta.remote_services.is_empty());
+}
+
+#[test]
+fn remote_metadata_keeps_alias_without_baking_in_actr_type() {
+    let mut remote = svc_model("EchoService", super::super::ProtoSide::Remote);
+    remote.relative_path = PathBuf::from("remote/echo/echo.proto");
+    remote.proto_file = remote.relative_path.clone();
+    let model = ProtoModel {
+        files: vec![],
+        local_services: vec![],
+        remote_services: vec![remote],
+    };
+
+    let meta = ActrGenMetadata::from_proto_model(SupportedLanguage::Rust, &model).unwrap();
+    assert_eq!(meta.remote_services[0].dependency_alias, "echo");
+    assert!(meta.remote_services[0].actr_type.is_empty());
 }
 
 #[test]
@@ -53,6 +70,7 @@ fn write_and_load_metadata_roundtrip() {
         language: "rust".into(),
         local_services: vec![],
         remote_services: vec![],
+        ..Default::default()
     };
     let path = write_metadata(dir.path(), &meta).unwrap();
     assert!(path.exists());
@@ -93,6 +111,11 @@ exports = []
 name = "DataStreamApp"
 manufacturer = "acme"
 version = "0.1.0"
+
+[dependencies]
+ask-service = { actr_type = "acme:AskService:1.0.0" }
+pkg-a = { actr_type = "acme:PackageA:1.0.0" }
+ask = { actr_type = "acme:NestedAsk:1.0.0" }
 
 [system.signaling]
 url = "ws://127.0.0.1:8080"
@@ -197,7 +220,7 @@ fn type_owner_index_resolves_unqualified_unique_non_current_type() {
     std::fs::create_dir_all(&remote_dir).unwrap();
     std::fs::write(
         local_dir.join("client.proto"),
-        "syntax = \"proto3\";\npackage client;\nimport \"remote/pkg-a/a.proto\";\nservice Client {\n  rpc Foo(SharedRequest) returns (SharedResponse);\n}\n",
+        "syntax = \"proto3\";\npackage client;\nimport \"remote/pkg-a/a.proto\";\nservice Client {\n  rpc Foo(a.SharedRequest) returns (a.SharedResponse);\n}\n",
     )
     .unwrap();
     std::fs::write(
@@ -217,45 +240,78 @@ fn type_owner_index_resolves_unqualified_unique_non_current_type() {
     assert_eq!(method.input_ref.proto_package, "a");
     assert_eq!(method.input_ref.proto_file, "remote/pkg-a/a.proto");
     assert_eq!(method.input_ref.type_name, "SharedRequest");
+    assert_eq!(method.input_ref.proto_type, "a.SharedRequest");
 }
 
 #[test]
 fn from_proto_model_errors_on_ambiguous_unqualified_type() {
     // An unqualified `SharedRequest` declared in TWO remote files is
     // ambiguous and must surface as a config error rather than silently
-    // picking one owner.
-    let tmp = TempDir::new().unwrap();
-    let proto_root = tmp.path().join("protos");
-    let local_dir = proto_root.join("local");
-    let remote_a = proto_root.join("remote/pkg-a");
-    let remote_b = proto_root.join("remote/pkg-b");
-    std::fs::create_dir_all(&local_dir).unwrap();
-    std::fs::create_dir_all(&remote_a).unwrap();
-    std::fs::create_dir_all(&remote_b).unwrap();
-    std::fs::write(
-        local_dir.join("client.proto"),
-        "syntax = \"proto3\";\npackage client;\nimport \"remote/pkg-a/a.proto\";\nimport \"remote/pkg-b/b.proto\";\nservice Client {\n  rpc Foo(SharedRequest) returns (SharedResponse);\n}\n",
-    )
-    .unwrap();
-    std::fs::write(
-        remote_a.join("a.proto"),
-        "syntax = \"proto3\";\npackage a;\nmessage SharedRequest {}\nmessage SharedResponse {}\n",
-    )
-    .unwrap();
-    std::fs::write(
-        remote_b.join("b.proto"),
-        "syntax = \"proto3\";\npackage b;\nmessage SharedRequest {}\nmessage SharedResponse {}\n",
-    )
-    .unwrap();
-
-    let config = minimal_manifest(tmp.path());
-    let local_proto = proto_root.join("local/client.proto");
-    let proto_files = vec![
-        local_proto,
-        remote_a.join("a.proto"),
-        remote_b.join("b.proto"),
+    // picking one owner. We construct the model directly because protoc
+    // rejects unqualified cross-package type references in proto3 — the
+    // TypeOwnerIndex ambiguity check is still exercised by the metadata
+    // builder when the model carries an unqualified input_type.
+    let files = vec![
+        ProtoFileModel {
+            proto_file: PathBuf::from("local/client.proto"),
+            relative_path: PathBuf::from("local/client.proto"),
+            package: "client".to_string(),
+            side: super::super::ProtoSide::Local,
+            declared_type_names: vec![],
+            services: vec![ServiceModel {
+                name: "Client".to_string(),
+                package: "client".to_string(),
+                proto_file: PathBuf::from("local/client.proto"),
+                relative_path: PathBuf::from("local/client.proto"),
+                side: super::super::ProtoSide::Local,
+                methods: vec![MethodModel {
+                    name: "Foo".to_string(),
+                    snake_name: "foo".to_string(),
+                    input_type: "SharedRequest".to_string(),
+                    output_type: "SharedResponse".to_string(),
+                    payload_type: "rpcReliable".to_string(),
+                    route_key: "client.Client.Foo".to_string(),
+                }],
+                actr_type: None,
+            }],
+        },
+        ProtoFileModel {
+            proto_file: PathBuf::from("remote/pkg-a/a.proto"),
+            relative_path: PathBuf::from("remote/pkg-a/a.proto"),
+            package: "a".to_string(),
+            side: super::super::ProtoSide::Remote,
+            declared_type_names: vec!["SharedRequest".to_string(), "SharedResponse".to_string()],
+            services: vec![],
+        },
+        ProtoFileModel {
+            proto_file: PathBuf::from("remote/pkg-b/b.proto"),
+            relative_path: PathBuf::from("remote/pkg-b/b.proto"),
+            package: "b".to_string(),
+            side: super::super::ProtoSide::Remote,
+            declared_type_names: vec!["SharedRequest".to_string(), "SharedResponse".to_string()],
+            services: vec![],
+        },
     ];
-    let proto_model = ProtoModel::parse(&proto_files, &proto_root, &config).unwrap();
+    let proto_model = ProtoModel {
+        files,
+        local_services: vec![ServiceModel {
+            name: "Client".to_string(),
+            package: "client".to_string(),
+            proto_file: PathBuf::from("local/client.proto"),
+            relative_path: PathBuf::from("local/client.proto"),
+            side: super::super::ProtoSide::Local,
+            methods: vec![MethodModel {
+                name: "Foo".to_string(),
+                snake_name: "foo".to_string(),
+                input_type: "SharedRequest".to_string(),
+                output_type: "SharedResponse".to_string(),
+                payload_type: "rpcReliable".to_string(),
+                route_key: "client.Client.Foo".to_string(),
+            }],
+            actr_type: None,
+        }],
+        remote_services: vec![],
+    };
 
     let result = ActrGenMetadata::from_proto_model(SupportedLanguage::Rust, &proto_model);
     let err = result.expect_err("ambiguous type should error");

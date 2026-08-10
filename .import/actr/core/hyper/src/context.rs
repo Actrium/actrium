@@ -175,10 +175,8 @@ impl RuntimeContext {
         self.data_chunk_registry.clone()
     }
 
-    /// Read-only handle to the `alias -> ActrType` map, shared by every cloned
-    /// context. Exposed for tests and bootstrap paths that need to validate
-    /// aliases without going through the async trait method.
-    #[allow(dead_code)]
+    /// Read-only test handle to the `alias -> ActrType` map.
+    #[cfg(test)]
     pub(crate) fn alias_map(&self) -> &HashMap<String, ActrType> {
         &self.alias_map
     }

@@ -96,7 +96,9 @@ export class {{service_name}}ActorRef extends ActorRef {
    * {{this.name}} method
    */
   async {{this.name}}(request: {{this.input_type}}): Promise<{{this.output_type}}> {
-    return this.call('{{../service_name}}', '{{this.name}}', request);
+    const encoded = {{this.input_type}}.encode(request).finish();
+    const responseData = await this.callRaw('{{../service_name}}:{{this.name}}', encoded);
+    return {{this.output_type}}.decode(responseData);
   }
   {{/each}}
 

@@ -3,8 +3,6 @@ use crate::commands::codegen::scaffold::{ScaffoldCatalog, ScaffoldService};
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
 use crate::utils::command_exists;
-use actr_config::LockFile;
-use actr_protocol::ActrType;
 use async_trait::async_trait;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -63,6 +61,7 @@ struct GeneratedClientApi {
     exported_consts: HashSet<String>,
 }
 
+#[allow(dead_code)] // fields retained for the legacy scaffold path; plugin emits dispatch
 #[derive(Debug, Clone)]
 struct BoundMethodInfo {
     generated_client_import: String,
@@ -112,9 +111,6 @@ struct LocalWorkloadMethod {
     output_pb_import: String,
 }
 
-type ServiceImportKey<'a> = (&'a str, &'a str);
-type ServiceImportGroups = (BTreeSet<String>, BTreeSet<String>, BTreeSet<String>);
-
 pub struct TypeScriptGenerator;
 
 #[async_trait]
@@ -139,21 +135,6 @@ impl LanguageGenerator for TypeScriptGenerator {
             context.input_path.clone()
         };
 
-        let mut local_files = Vec::new();
-        let mut remote_files = Vec::new();
-
-        for proto_file in &context.proto_files {
-            let rel = proto_file.strip_prefix(&proto_root).unwrap_or(proto_file);
-            let rel_norm = normalize_proto_path(rel);
-            if rel_norm.starts_with("remote/") {
-                remote_files.push(rel_norm);
-            } else {
-                local_files.push(rel_norm);
-            }
-        }
-
-        let remote_mapping = self.build_remote_mapping(context, &remote_files)?;
-
         let mut proto_inputs = Vec::new();
         for proto_file in &context.proto_files {
             let rel = proto_file.strip_prefix(&proto_root).unwrap_or(proto_file);
@@ -167,7 +148,7 @@ impl LanguageGenerator for TypeScriptGenerator {
                 "--plugin=protoc-gen-es={}",
                 es_plugin_path.display()
             ))
-            .arg("--es_opt=target=ts")
+            .arg("--es_opt=target=ts,import_extension=js")
             .arg(format!("--es_out={}", context.output.display()));
 
         for proto_input in &proto_inputs {
@@ -186,23 +167,16 @@ impl LanguageGenerator for TypeScriptGenerator {
             )));
         }
 
-        let mut options = Vec::new();
-        options.push("target=ts".to_string());
-        if !local_files.is_empty() {
-            options.push(format!("LocalFiles={}", local_files.join(":")));
-        }
-        if !remote_files.is_empty() {
-            options.push(format!("RemoteFiles={}", remote_files.join(":")));
-        }
-        if !remote_mapping.is_empty() {
-            let mut sorted_mapping: Vec<String> = remote_mapping
-                .iter()
-                .map(|(path, actr_type)| format!("{path}={actr_type}"))
-                .collect();
-            sorted_mapping.sort();
-            options.push(format!("RemoteFileMapping={}", sorted_mapping.join(";")));
-        }
-        let option_str = options.join(",");
+        let options = ["target=ts", "import_extension=js"];
+        // Unified dispatch: pass only dispatch_spec and dispatch_spec_hash.
+        // LocalFiles/RemoteFiles/RemoteFileMapping are no longer needed —
+        // the plugin sources local/remote routing from the DispatchSpec.
+        let option_str = format!(
+            "{},dispatch_spec={},dispatch_spec_hash={}",
+            options.join(","),
+            context.dispatch_spec_path.display(),
+            context.dispatch_spec_hash
+        );
 
         if !proto_inputs.is_empty() {
             let plugin_path = self.ensure_typescript_plugin()?;
@@ -773,12 +747,6 @@ impl TypeScriptGenerator {
             .iter()
             .filter(|method| !method.is_local)
             .collect::<Vec<_>>();
-        let local_service_count = local_methods
-            .iter()
-            .map(|method| method.service_name.as_str())
-            .collect::<BTreeSet<_>>()
-            .len();
-
         let mut output = String::new();
         output.push_str(UNIMPLEMENTED_MARKER);
         output.push('\n');
@@ -786,32 +754,14 @@ impl TypeScriptGenerator {
         output.push_str("\n\n");
         if !local_methods.is_empty() {
             output.push_str("import { create } from '@bufbuild/protobuf';\n");
-            output.push_str("import type { InvocationCtx } from '@actrium/actr-workload';\n");
         }
-        output.push_str("import { defineWorkload } from '@actrium/actr-workload';\n");
+        output.push_str("import { ActrContext, defineWorkload } from '@actrium/actr-workload';\n");
 
         if !local_methods.is_empty() {
-            let mut service_imports: BTreeMap<ServiceImportKey<'_>, ServiceImportGroups> =
-                BTreeMap::new();
             let mut proto_type_imports: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
             let mut proto_schema_imports: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
 
             for method in &local_methods {
-                let entry = service_imports
-                    .entry((
-                        method.generated_workload_import.as_str(),
-                        method.service_name.as_str(),
-                    ))
-                    .or_default();
-                entry.0.insert(method.handler_interface.clone());
-                entry.1.insert(method.dispatcher_type.clone());
-                if local_service_count > 1 {
-                    entry.2.insert(route_constant_name(
-                        &method.service_name,
-                        &method.method_name,
-                    ));
-                }
-
                 // Group proto type/schema imports by each method type's
                 // declaring proto module (owner-resolved), so imported types
                 // are imported from their real owner `_pb.js` instead of the
@@ -828,26 +778,6 @@ impl TypeScriptGenerator {
                     .entry(&method.output_pb_import)
                     .or_default()
                     .insert(format!("{}Schema", method.output_type_short));
-            }
-
-            for ((module_import, _service_name), (handler_types, dispatchers, route_constants)) in
-                service_imports
-            {
-                output.push_str("import type { ");
-                output.push_str(&handler_types.into_iter().collect::<Vec<_>>().join(", "));
-                output.push_str(" } from '");
-                output.push_str(module_import);
-                output.push_str("';\n");
-
-                let values = dispatchers
-                    .into_iter()
-                    .chain(route_constants)
-                    .collect::<Vec<_>>();
-                output.push_str("import { ");
-                output.push_str(&values.join(", "));
-                output.push_str(" } from '");
-                output.push_str(module_import);
-                output.push_str("';\n");
             }
 
             for (proto_import, types) in proto_type_imports {
@@ -868,46 +798,24 @@ impl TypeScriptGenerator {
         }
 
         if !local_methods.is_empty() {
-            let mut services: BTreeMap<&str, Vec<&&BoundMethodInfo>> = BTreeMap::new();
+            output.push_str("\nclass ActrHandler {\n");
             for method in &local_methods {
-                services
-                    .entry(method.service_name.as_str())
-                    .or_default()
-                    .push(method);
-            }
-
-            for (service_name, methods) in &services {
-                let first = methods[0];
-                output.push_str("\nclass ");
-                output.push_str(service_name);
-                output.push_str("HandlerImpl implements ");
-                output.push_str(&first.handler_interface);
-                output.push_str(" {\n");
-                for method in methods {
-                    output.push_str("  ");
-                    output.push_str(&method.handler_method_name);
-                    output.push_str("(_req: ");
-                    output.push_str(&method.input_type_short);
-                    output.push_str(", _ctx?: InvocationCtx): ");
-                    output.push_str(&method.output_type_short);
-                    output.push_str(" {\n");
-                    output.push_str("    return create(");
-                    output.push_str(&method.output_type_short);
-                    output.push_str("Schema, {});\n");
-                    output.push_str("  }\n\n");
-                }
-                output.push_str("}\n");
-                output.push_str("\nconst ");
-                output.push_str(&scaffold_dispatcher_variable_name(
-                    service_name,
-                    local_service_count,
+                output.push_str("  ");
+                output.push_str(&typescript_dispatch_handler_method_name(
+                    &method.service_name,
+                    &method.method_name,
                 ));
-                output.push_str(" = new ");
-                output.push_str(&first.dispatcher_type);
-                output.push_str("(new ");
-                output.push_str(service_name);
-                output.push_str("HandlerImpl());\n");
+                output.push_str("(_req: ");
+                output.push_str(&method.input_type_short);
+                output.push_str(", _ctx: ActrContext): ");
+                output.push_str(&method.output_type_short);
+                output.push_str(" {\n");
+                output.push_str("    return create(");
+                output.push_str(&method.output_type_short);
+                output.push_str("Schema, {});\n");
+                output.push_str("  }\n\n");
             }
+            output.push_str("}\n");
         }
 
         output.push_str("\nexport default defineWorkload({\n  async onStart(): Promise<void> {\n    console.log('ACTR TypeScript workload started');\n");
@@ -919,48 +827,21 @@ impl TypeScriptGenerator {
                 "    console.log('Remote call examples are listed below. Uncomment and adapt them when you are ready.');\n",
             );
         }
-        output.push_str("  },\n\n  async onStop(): Promise<void> {\n    console.log('ACTR TypeScript workload stopped');\n  },\n\n  async dispatch(envelope, ctx): Promise<Uint8Array> {\n");
-        let local_services = local_methods
-            .iter()
-            .map(|method| method.service_name.as_str())
-            .collect::<BTreeSet<_>>();
-        if local_services.len() == 1 {
-            let service_name = local_services.iter().next().expect("service exists");
-            output.push_str("    return ");
-            output.push_str(&scaffold_dispatcher_variable_name(
-                service_name,
-                local_services.len(),
-            ));
-            output.push_str(".dispatch(envelope, ctx);\n");
-        } else if !local_services.is_empty() {
-            output.push_str("    switch (envelope.method) {\n");
-            for service_name in &local_services {
-                for method in local_methods
-                    .iter()
-                    .filter(|method| method.service_name == **service_name)
-                {
-                    output.push_str("      case ");
-                    output.push_str(&route_constant_name(
-                        &method.service_name,
-                        &method.method_name,
-                    ));
-                    output.push_str(":\n");
-                }
-                output.push_str("        return ");
-                output.push_str(&scaffold_dispatcher_variable_name(
-                    service_name,
-                    local_services.len(),
-                ));
-                output.push_str(".dispatch(envelope, ctx);\n");
-            }
-            output.push_str("      default:\n");
-            output.push_str("        throw new Error(`Unknown route: ${envelope.method}`);\n");
-            output.push_str("    }\n");
+        output.push_str("  },\n\n  async dispatch(envelope, ctx): Promise<Uint8Array> {\n");
+        // Delegate to the generated unified dispatcher (actr_dispatch.ts).
+        // The unified dispatcher handles local routes (decode → handler →
+        // encode) and remote routes (resolveDependency → discover → callRaw)
+        // sourced from the DispatchSpec, avoiding any hardcoded timeout.
+        output.push_str(
+            "    const { actrDispatch } = await import('./generated/actr_dispatch.js');\n",
+        );
+        if local_methods.is_empty() {
+            output.push_str("    const handler = null as unknown as import('./generated/actr_dispatch.js').ActrDispatchHandler;\n");
         } else {
-            output.push_str(
-                "    throw new Error('No local RPC methods were inferred for this workload.');\n",
-            );
+            output.push_str("    const handler = new ActrHandler();\n");
         }
+        output.push_str("    const actrCtx = new ActrContext(ctx!);\n");
+        output.push_str("    return actrDispatch(actrCtx, handler, envelope.routeKey ?? envelope.method, envelope.payload ?? new Uint8Array(), envelope.timeoutMs);\n");
         output.push_str("  },\n});\n");
 
         if !remote_methods.is_empty() {
@@ -1440,66 +1321,6 @@ impl TypeScriptGenerator {
 
         Ok(plugin_path)
     }
-
-    fn build_remote_mapping(
-        &self,
-        context: &GenContext,
-        remote_files: &[String],
-    ) -> Result<HashMap<String, String>> {
-        if remote_files.is_empty() {
-            return Ok(HashMap::new());
-        }
-
-        let config_dir = context
-            .config_path
-            .parent()
-            .unwrap_or_else(|| Path::new("."));
-        let lock_path = config_dir.join("manifest.lock.toml");
-        if !lock_path.exists() {
-            return Err(ActrCliError::config_error(format!(
-                "manifest.lock.toml not found at {}. Please run `actr deps install` first.",
-                lock_path.display()
-            )));
-        }
-
-        let lock_file = LockFile::from_file(&lock_path).map_err(|e| {
-            ActrCliError::config_error(format!("Failed to parse {}: {e}", lock_path.display()))
-        })?;
-
-        let mut lock_mapping = HashMap::new();
-        for dep in lock_file.dependencies {
-            for file in dep.files {
-                lock_mapping.insert(file.path, dep.actr_type.clone());
-            }
-        }
-
-        let mut result = HashMap::new();
-        for remote_file in remote_files {
-            let lock_key = remote_file.trim_start_matches("remote/").to_string();
-            let actr_type = lock_mapping.get(&lock_key).ok_or_else(|| {
-                ActrCliError::config_error(format!(
-                    "Remote proto '{}' missing in manifest.lock.toml.\n\
-                     Please run `actr deps install` and retry.",
-                    lock_key
-                ))
-            })?;
-            result.insert(
-                remote_file.clone(),
-                normalize_actr_type_for_typescript_plugin(actr_type)?,
-            );
-        }
-
-        Ok(result)
-    }
-}
-
-fn normalize_actr_type_for_typescript_plugin(raw: &str) -> Result<String> {
-    let parsed = ActrType::from_string_repr(raw).map_err(|e| {
-        ActrCliError::config_error(format!(
-            "Invalid actr_type '{raw}' in manifest.lock.toml: {e}"
-        ))
-    })?;
-    Ok(parsed.to_string_repr())
 }
 
 fn generate_local_workload_content(module: &LocalWorkloadModule) -> String {
@@ -1866,16 +1687,12 @@ fn route_constant_name(service_name: &str, method_name: &str) -> String {
     )
 }
 
-fn dispatcher_variable_name(service_name: &str) -> String {
-    format!("{}Dispatcher", lower_camel_case(service_name))
-}
-
-fn scaffold_dispatcher_variable_name(service_name: &str, local_service_count: usize) -> String {
-    if local_service_count == 1 {
-        "dispatcher".to_string()
-    } else {
-        dispatcher_variable_name(service_name)
-    }
+fn typescript_dispatch_handler_method_name(service_name: &str, method_name: &str) -> String {
+    snake_to_camel_case(&format!(
+        "{}_{}",
+        to_snake_case(service_name),
+        to_snake_case(method_name)
+    ))
 }
 
 fn snake_to_camel_case(raw: &str) -> String {
@@ -1888,19 +1705,6 @@ fn snake_to_camel_case(raw: &str) -> String {
         output.push_str(&upper_camel_case(part));
     }
     output
-}
-
-fn lower_camel_case(raw: &str) -> String {
-    let upper = upper_camel_case(raw);
-    let mut chars = upper.chars();
-    let Some(first) = chars.next() else {
-        return String::new();
-    };
-    format!(
-        "{}{}",
-        first.to_ascii_lowercase(),
-        chars.collect::<String>()
-    )
 }
 
 fn upper_camel_case(raw: &str) -> String {
@@ -1917,26 +1721,7 @@ fn upper_camel_case(raw: &str) -> String {
 }
 
 fn to_snake_case(raw: &str) -> String {
-    let mut output = String::new();
-    let mut previous_was_separator = false;
-    let mut previous_was_lower_or_digit = false;
-
-    for ch in raw.chars() {
-        if ch.is_ascii_alphanumeric() {
-            if ch.is_ascii_uppercase() && previous_was_lower_or_digit && !output.ends_with('_') {
-                output.push('_');
-            }
-            output.push(ch.to_ascii_lowercase());
-            previous_was_separator = false;
-            previous_was_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
-        } else if !previous_was_separator && !output.is_empty() {
-            output.push('_');
-            previous_was_separator = true;
-            previous_was_lower_or_digit = false;
-        }
-    }
-
-    output.trim_matches('_').to_string()
+    heck::AsSnakeCase(raw).to_string()
 }
 
 fn to_screaming_snake(raw: &str) -> String {

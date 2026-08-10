@@ -86,33 +86,6 @@ suspend fun ActrRef.discoverCatching(
 ): Result<List<ActrId>> = runCatching { discover(typeString, count) }
 
 // ============================================================================
-// ActrContext Extensions — convenience wrappers with default parameters
-// ============================================================================
-
-/**
- * Convenience wrapper around [ActrContext.callRaw] with default parameters.
- *
- * Equivalent to:
- * ```kotlin
- * ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, 30000L)
- * ```
- *
- * @param target Target actor ID (obtained via [ActrContext.discover])
- * @param routeKey RPC route key (e.g., "echo.EchoService.Echo")
- * @param payload Serialized request payload
- * @param payloadType Transmission type (default: RPC_RELIABLE)
- * @param timeoutMs Timeout in milliseconds (default: 30000)
- * @return Response bytes
- */
-suspend fun ActrContext.call(
-    target: ActrId,
-    routeKey: String,
-    payload: ByteArray,
-    payloadType: PayloadType = PayloadType.RPC_RELIABLE,
-    timeoutMs: Long = 30000L,
-): ByteArray = callRaw(target, routeKey, payloadType, payload, timeoutMs)
-
-// ============================================================================
 // NetworkEventHandle Extensions - For functional error handling
 // ============================================================================
 

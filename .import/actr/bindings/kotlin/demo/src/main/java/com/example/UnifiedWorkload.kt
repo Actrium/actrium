@@ -1,15 +1,16 @@
 /**
  * Unified Workload for all services (linked mode)
  *
- * This Workload handles both local and remote service requests using the UnifiedDispatcher. Local
- * requests are routed to your UnifiedHandler implementation. Remote requests are forwarded to
- * discovered remote actors.
+ * This Workload handles all service requests using the generated `actrDispatch`
+ * function with exact route-key matching. Local requests are routed to your
+ * ActrDispatchHandler implementation. Remote requests are resolved via
+ * dependency alias, discovered, and called raw.
  */
 package com.example
 
 import android.util.Log
-import com.example.generated.UnifiedDispatcher
-import com.example.generated.UnifiedHandler
+import com.example.generated.ActrDispatchHandler
+import com.example.generated.actrDispatch
 import io.actrium.actr.dsl.ActrContext
 import io.actrium.actr.dsl.ErrorEvent
 import io.actrium.actr.dsl.RpcEnvelope
@@ -29,7 +30,7 @@ import io.actrium.actr.dsl.RpcEnvelope
  * ```
  */
 class UnifiedWorkload(
-    private val handler: UnifiedHandler,
+    private val handler: ActrDispatchHandler,
 ) {
     companion object {
         private const val TAG = "UnifiedWorkload"
@@ -37,10 +38,6 @@ class UnifiedWorkload(
 
     suspend fun onStart(ctx: ActrContext) {
         Log.i(TAG, "UnifiedWorkload.onStart")
-        // Discover all remote services
-        Log.i(TAG, "📡 Discovering remote services...")
-        UnifiedDispatcher.discoverRemoteServices(ctx)
-        Log.i(TAG, "✅ Remote services discovered")
     }
 
     suspend fun onReady(ctx: ActrContext) {
@@ -61,9 +58,8 @@ class UnifiedWorkload(
     /**
      * Dispatch RPC requests
      *
-     * Uses the UnifiedDispatcher to route requests to:
-     * - Local handler methods for local service routes
-     * - Remote actors for remote service routes
+     * Uses the generated `actrDispatch` function to route requests with
+     * exact route-key matching to local handlers or remote actors.
      */
     suspend fun dispatch(
         ctx: ActrContext,
@@ -74,6 +70,6 @@ class UnifiedWorkload(
         Log.i(TAG, "   request_id: ${envelope.requestId}")
         Log.i(TAG, "   payload size: ${envelope.payload.size} bytes")
 
-        return UnifiedDispatcher.dispatch(handler, ctx, envelope)
+        return actrDispatch(ctx, handler, envelope.routeKey, envelope.payload, 30_000L)
     }
 }

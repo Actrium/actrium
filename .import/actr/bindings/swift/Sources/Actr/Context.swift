@@ -168,6 +168,19 @@ public extension ActrContext {
             context: "\(Req.Response.self) response"
         )
     }
+
+    func tell<Req: RpcRequest>(
+        target: ActrId,
+        message: Req
+    ) async throws(ActrError) {
+        let payload = try encodeProtobufMessage(message, context: "\(Req.self) message")
+        try await tellRaw(
+            target: target,
+            routeKey: Req.routeKey,
+            payloadType: Req.payloadType,
+            payload: payload
+        )
+    }
 }
 
 public final class Context: ActrContext, @unchecked Sendable {

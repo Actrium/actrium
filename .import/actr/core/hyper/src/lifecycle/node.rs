@@ -701,10 +701,7 @@ impl CredentialState {
             guard.turn_credential = Some(turn_credential);
         }
         let revision = turn_changed.then(|| {
-            guard.turn_revision = guard
-                .turn_revision
-                .checked_add(1)
-                .expect("TURN credential revision exhausted");
+            guard.turn_revision = guard.turn_revision.wrapping_add(1);
             guard.turn_revision
         });
         drop(guard);

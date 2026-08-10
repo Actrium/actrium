@@ -14,7 +14,6 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
-import {{PACKAGE_NAME}}.generated.RemoteServiceRegistry
 
 /**
  * {{PROJECT_NAME_PASCAL}} DataStream Integration Test
@@ -83,11 +82,8 @@ class DataStreamIntegrationTest {
 
             // Create UnifiedWorkload with handler
             val handler = MyUnifiedHandler()
-            val remoteTargets =
-                RemoteServiceRegistry.resolveRemoteTargets(clientConfigPath)
             val clientWorkload = UnifiedWorkload(
                 handler = handler,
-                remoteTargets = remoteTargets,
             )
             val lifecycle = UnifiedLifecycleAdapter(clientWorkload)
 

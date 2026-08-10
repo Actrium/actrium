@@ -43,9 +43,10 @@
 
 use std::path::PathBuf;
 
-pub(crate) mod codegen;
+pub mod codegen;
 mod config;
 pub mod descriptor;
+pub mod dispatch_spec;
 mod error;
 mod generator;
 mod request;

@@ -157,15 +157,17 @@ fn generates_scaffold_with_local_and_remote_sections() {
         },
     ]);
 
-    assert!(scaffold.contains("import { defineWorkload } from '@actrium/actr-workload';"));
+    assert!(
+        scaffold.contains("import { ActrContext, defineWorkload } from '@actrium/actr-workload';")
+    );
     assert!(scaffold.contains("export default defineWorkload({"));
     assert!(
-        scaffold.contains("import { EchoServiceDispatcher } from './generated/echo_workload.js';")
+        scaffold.contains("const { actrDispatch } = await import('./generated/actr_dispatch.js');")
     );
-    assert!(scaffold.contains("class EchoServiceHandlerImpl implements EchoServiceHandler"));
-    assert!(scaffold.contains("import type { InvocationCtx }"));
-    assert!(scaffold.contains("_ctx?: InvocationCtx"));
-    assert!(scaffold.contains("return dispatcher.dispatch(envelope, ctx);"));
+    assert!(scaffold.contains("class ActrHandler {"));
+    assert!(scaffold.contains("const handler = new ActrHandler();"));
+    assert!(scaffold.contains("const actrCtx = new ActrContext(ctx!);"));
+    assert!(scaffold.contains("actrDispatch(actrCtx, handler, envelope.routeKey ?? envelope.method, envelope.payload ?? new Uint8Array(), envelope.timeoutMs)"));
     assert!(!scaffold.contains("Implement this workload with @actrium/actr-workload"));
     assert!(!scaffold.contains("// - EchoService.Echo (EchoRequest -> EchoResponse)"));
     assert!(scaffold.contains("Remote RPC quick-start examples"));
@@ -305,6 +307,14 @@ fn workload_import_path_only_strips_exact_source_marker() {
     assert_eq!(
         workload_pb_import_path("remote-control/foo.proto"),
         "./remote-control/foo_pb.js"
+    );
+}
+
+#[test]
+fn unified_handler_name_preserves_acronym_boundaries() {
+    assert_eq!(
+        typescript_dispatch_handler_method_name("HTTPService", "ParseURL"),
+        "httpServiceParseUrl"
     );
 }
 

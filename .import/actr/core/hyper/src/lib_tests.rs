@@ -740,6 +740,22 @@ echo = { actr_type = "acme:EchoActor:1.0.0", service = "EchoService:service_sema
         Some("service_semantic:echo")
     );
 
+    let mut duplicate_alias_manifest = manifest.clone();
+    let mut duplicate = duplicate_alias_manifest.dependencies[0].clone();
+    duplicate.actr_type = Some(ActrType {
+        manufacturer: "acme".into(),
+        name: "OtherEchoActor".into(),
+        version: "1.0.0".into(),
+    });
+    duplicate_alias_manifest.dependencies.push(duplicate);
+    let error = resolve_linked_dependency_metadata(&duplicate_alias_manifest)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        error.contains("alias `echo` is declared more than once"),
+        "{error}"
+    );
+
     std::fs::write(
         dir.path().join("manifest.toml"),
         r#"[package]

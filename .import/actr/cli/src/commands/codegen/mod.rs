@@ -1,3 +1,4 @@
+mod dispatch_spec;
 mod kotlin;
 mod metadata;
 mod proto_model;
@@ -10,6 +11,9 @@ mod typescript;
 
 pub use crate::commands::SupportedLanguage;
 use crate::error::Result;
+pub use dispatch_spec::{
+    DISPATCH_SPEC_FILE, DISPATCH_SPEC_SCHEMA_VERSION, DispatchRoute, DispatchSpec,
+};
 use kotlin::KotlinGenerator;
 pub use metadata::{
     ACTR_GEN_META_FILE, ActrGenMetadata, TypeRef, load_metadata, load_required_metadata,
@@ -59,6 +63,7 @@ async fn run_codegen_pipeline(
 ) -> Result<()> {
     let mut all_files = generator.generate_infrastructure(context).await?;
     let metadata = load_required_metadata(&context.output, language)?;
+    metadata::validate_metadata_for_context(&metadata, context)?;
     if !context.no_scaffold {
         let catalog = ScaffoldCatalog::from_metadata(&metadata);
         all_files.extend(generator.generate_scaffold(context, &catalog).await?);

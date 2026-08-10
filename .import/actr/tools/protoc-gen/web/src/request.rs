@@ -59,6 +59,14 @@ pub struct WebCodegenRequest {
     pub local_services: Vec<ServiceInfo>,
     pub remote_services: Vec<ServiceInfo>,
     pub files: Vec<FileInfo>,
+
+    // ── Dispatch spec (phase 7 unified dispatch) ──
+    /// Path to the DispatchSpec v1 JSON file.
+    #[serde(default)]
+    pub dispatch_spec_path: Option<PathBuf>,
+    /// Expected SHA-256 hash of the dispatch spec (canonical JCS, without spec_hash).
+    #[serde(default)]
+    pub dispatch_spec_hash: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

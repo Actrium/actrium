@@ -5,31 +5,15 @@ import Actr
 import Foundation
 
 {{#if HAS_SERVICES}}
-public final class {{SERVICE_NAME}}LifecycleAdapter<Handler: {{HANDLER_NAME}}>: Workload, @unchecked Sendable {
-    private let workload: {{WORKLOAD_NAME}}<Handler>
+public final class {{SERVICE_NAME}}LifecycleAdapter<Handler: ActrDispatchHandler>: Workload, @unchecked Sendable {
+    private let handler: Handler
 
-    public init(workload: {{WORKLOAD_NAME}}<Handler>) {
-        self.workload = workload
-    }
-
-    public convenience init(handler: Handler) {
-        self.init(workload: {{WORKLOAD_NAME}}(handler: handler))
-    }
-
-    public convenience init(handler: Handler, remoteTargets: [String: ActrType]) {
-        self.init(workload: {{WORKLOAD_NAME}}(handler: handler, remoteTargets: remoteTargets))
+    public init(handler: Handler) {
+        self.handler = handler
     }
 {{else}}
 public final class {{SERVICE_NAME}}LifecycleAdapter: Workload, @unchecked Sendable {
-    private let workload: {{WORKLOAD_NAME}}
-
-    public init(workload: {{WORKLOAD_NAME}}) {
-        self.workload = workload
-    }
-
-    public convenience init(remoteTargets: [String: ActrType] = [:]) {
-        self.init(workload: {{WORKLOAD_NAME}}(remoteTargets: remoteTargets))
-    }
+    public init() {}
 {{/if}}
 
     public func onStart(ctx: Context) async throws {
@@ -49,6 +33,22 @@ public final class {{SERVICE_NAME}}LifecycleAdapter: Workload, @unchecked Sendab
     }
 
     public func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
-        return try await workload.__dispatch(ctx: ctx, envelope: envelope)
+{{#if HAS_SERVICES}}
+        return try await actrDispatch(
+            ctx: ctx,
+            handler: handler,
+            routeKey: envelope.routeKey,
+            payload: envelope.payload,
+            timeoutMs: envelope.timeoutMs
+        )
+{{else}}
+        return try await actrDispatch(
+            ctx: ctx,
+            handler: EmptyActrDispatchHandler(),
+            routeKey: envelope.routeKey,
+            payload: envelope.payload,
+            timeoutMs: envelope.timeoutMs
+        )
+{{/if}}
     }
 }

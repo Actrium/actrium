@@ -6,7 +6,6 @@ fn sample_echo_service() -> ProtoService {
         name: "EchoService".to_string(),
         package: "echo".to_string(),
         swift_package_prefix: "Echo_".to_string(),
-        workload_name: "EchoServiceWorkload".to_string(),
         methods: vec![ProtoMethod {
             name: "Echo".to_string(),
             swift_name: "echo".to_string(),
@@ -23,10 +22,9 @@ fn generated_handler_impl_contains_rpc_method_stubs() {
         .generate_handler_impl_content(&sample_echo_service())
         .expect("render handler");
 
-    assert!(handler.contains("public final class EchoServiceHandlerImpl: EchoServiceHandler"));
-    assert!(handler.contains("private let targetType: ActrType?"));
-    assert!(handler.contains("public init(targetType: ActrType? = nil)"));
-    assert!(handler.contains("Use targetType with ctx.discover(targetType:)"));
+    assert!(handler.contains("public final class EchoServiceHandlerImpl: ActrDispatchHandler"));
+    assert!(handler.contains("public init() {}"));
+    assert!(!handler.contains("targetType"));
     assert!(handler.contains("public func echo("));
     assert!(handler.contains("req: Echo_EchoRequest"));
     assert!(handler.contains("ctx: any ActrContext"));
@@ -80,23 +78,8 @@ fn swift_type_name_preserves_nested_parent_scope() {
 #[test]
 fn generated_scaffold_uses_linked_runtime() {
     let generator = SwiftGenerator;
-    let service = sample_echo_service();
-    let remote_targets = vec![RemoteTarget {
-        alias: "echo-service".to_string(),
-        variable_name: "echoServiceTargetType".to_string(),
-        routes: vec![RemoteTargetRoute {
-            route_key: "echo.EchoService.Echo".to_string(),
-            variable_name: "echoServiceTargetType".to_string(),
-        }],
-    }];
     let scaffold = generator
-        .generate_scaffold_content(
-            "demo",
-            "EchoService",
-            "EchoServiceWorkload",
-            std::slice::from_ref(&service),
-            &remote_targets,
-        )
+        .generate_scaffold_content("EchoService", true)
         .expect("render scaffold");
 
     assert!(scaffold.contains("ACTR: mutable scaffold"));
@@ -112,39 +95,28 @@ fn generated_scaffold_uses_linked_runtime() {
     assert!(scaffold.contains("resolveManifestPackageActrType"));
     assert!(!scaffold.contains("import ActrBindings"));
     assert!(!scaffold.contains("ActrBindings.resolveManifest"));
-    assert!(scaffold.contains("resolveManifestDependency("));
-    assert!(scaffold.contains("dependencyAlias: \"echo-service\""));
-    assert!(scaffold.contains("let remoteTargets: [String: ActrType] = ["));
-    assert!(scaffold.contains("\"echo.EchoService.Echo\": echoServiceTargetType"));
-    assert!(scaffold.contains("EchoServiceHandlerImpl(targetType: targetType)"));
-    assert!(scaffold.contains("EchoServiceLifecycleAdapter("));
-    assert!(scaffold.contains("remoteTargets: remoteTargets"));
+    assert!(!scaffold.contains("resolveManifestDependency("));
+    assert!(!scaffold.contains("remoteTargets"));
+    assert!(!scaffold.contains("targetType"));
+    assert!(scaffold.contains("let handler = EchoServiceHandlerImpl()"));
+    assert!(scaffold.contains("EchoServiceLifecycleAdapter(handler: handler)"));
     assert!(scaffold.contains("dynamicWorkload(lifecycle: lifecycle)"));
     assert!(scaffold.contains("ActrNode.linked("));
     assert!(!scaffold.contains("ActrNode.from(packageConfig:"));
 }
 
 #[test]
-fn generated_scaffold_supports_empty_local_workload() {
+fn generated_scaffold_supports_no_local_services() {
     let generator = SwiftGenerator;
-    let remote_targets = vec![RemoteTarget {
-        alias: "echo-service".to_string(),
-        variable_name: "echoServiceTargetType".to_string(),
-        routes: vec![RemoteTargetRoute {
-            route_key: "echo.EchoService.Echo".to_string(),
-            variable_name: "echoServiceTargetType".to_string(),
-        }],
-    }];
     let scaffold = generator
-        .generate_scaffold_content("demo", "Client", "ClientWorkload", &[], &remote_targets)
+        .generate_scaffold_content("Client", false)
         .expect("render scaffold");
 
-    assert!(scaffold.contains("let remoteTargets: [String: ActrType] = ["));
-    assert!(scaffold.contains("\"echo.EchoService.Echo\": echoServiceTargetType"));
-    assert!(scaffold.contains("ClientLifecycleAdapter(remoteTargets: remoteTargets)"));
+    assert!(scaffold.contains("ClientLifecycleAdapter()"));
     assert!(scaffold.contains("dynamicWorkload(lifecycle: lifecycle)"));
     assert!(!scaffold.contains("HandlerImpl"));
-    assert!(!scaffold.contains("targetType ="));
+    assert!(!scaffold.contains("remoteTargets"));
+    assert!(!scaffold.contains("targetType"));
 }
 
 #[test]
@@ -165,26 +137,6 @@ fn swift_runtime_config_template_has_valid_defaults() {
 }
 
 #[test]
-fn remote_target_variable_names_are_swift_safe_and_unique() {
-    let mut used = std::collections::HashMap::new();
-    let names = ["foo-bar", "foo_bar", "foo.bar", "1service", "!!!"]
-        .into_iter()
-        .map(|alias| remote_target_variable_name(alias, &mut used))
-        .collect::<Vec<_>>();
-
-    assert_eq!(
-        names,
-        vec![
-            "fooBarTargetType",
-            "fooBar2TargetType",
-            "fooBar3TargetType",
-            "target1serviceTargetType",
-            "targetTargetType",
-        ]
-    );
-}
-
-#[test]
 fn echo_content_view_uses_generated_actr_service_api() {
     let content_view = include_str!(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -200,16 +152,17 @@ fn echo_content_view_uses_generated_actr_service_api() {
 fn generated_lifecycle_adapter_contains_workload_conformance() {
     let generator = SwiftGenerator;
     let adapter = generator
-        .generate_lifecycle_adapter_content("EchoService", "EchoServiceWorkload", true)
+        .generate_lifecycle_adapter_content("EchoService", true)
         .expect("render lifecycle adapter");
 
     assert!(adapter.contains("ACTR: mutable scaffold"));
     assert!(adapter.contains("import Foundation"));
     assert!(adapter.lines().any(|line| {
-            line == "public final class EchoServiceLifecycleAdapter<Handler: EchoServiceHandler>: Workload, @unchecked Sendable {"
+            line == "public final class EchoServiceLifecycleAdapter<Handler: ActrDispatchHandler>: Workload, @unchecked Sendable {"
         }));
     assert!(!adapter.contains("private final class EchoServiceLifecycleAdapter"));
-    assert!(adapter.contains("EchoServiceWorkload<Handler>"));
+    assert!(adapter.contains("private let handler: Handler"));
+    assert!(adapter.contains("public init(handler: Handler)"));
     assert!(!adapter.contains("EchoServiceHandlerImpl"));
     assert!(adapter.contains("public func onStart(ctx: Context) async throws"));
     assert!(adapter.contains("public func onReady(ctx: Context) async throws"));
@@ -221,25 +174,34 @@ fn generated_lifecycle_adapter_contains_workload_conformance() {
     assert!(!adapter.contains("ctx: ContextBridge"));
     assert!(!adapter.contains("event: ErrorEventBridge"));
     assert!(!adapter.contains("envelope: RpcEnvelopeBridge"));
-    assert!(adapter.contains("workload.__dispatch(ctx: ctx, envelope: envelope)"));
+    assert!(adapter.contains("actrDispatch("));
+    assert!(adapter.contains("handler: handler"));
+    assert!(adapter.contains("routeKey: envelope.routeKey"));
+    assert!(adapter.contains("payload: envelope.payload"));
+    assert!(adapter.contains("timeoutMs: envelope.timeoutMs"));
+    assert!(!adapter.contains("remoteTargets"));
+    assert!(!adapter.contains("__dispatch"));
 }
 
 #[test]
 fn generated_lifecycle_adapter_supports_empty_workload() {
     let generator = SwiftGenerator;
     let adapter = generator
-        .generate_lifecycle_adapter_content("Client", "ClientWorkload", false)
+        .generate_lifecycle_adapter_content("Client", false)
         .expect("render lifecycle adapter");
 
     assert!(
         adapter.lines().any(|line| line
             == "public final class ClientLifecycleAdapter: Workload, @unchecked Sendable {")
     );
-    assert!(adapter.contains("private let workload: ClientWorkload"));
-    assert!(adapter.contains("public init(workload: ClientWorkload)"));
-    assert!(adapter.contains("public convenience init(remoteTargets: [String: ActrType] = [:])"));
-    assert!(adapter.contains("ClientWorkload(remoteTargets: remoteTargets)"));
-    assert!(adapter.contains("workload.__dispatch(ctx: ctx, envelope: envelope)"));
+    assert!(adapter.contains("public init() {}"));
+    assert!(adapter.contains("actrDispatch("));
+    assert!(adapter.contains("routeKey: envelope.routeKey"));
+    assert!(adapter.contains("payload: envelope.payload"));
+    assert!(adapter.contains("handler: EmptyActrDispatchHandler()"));
+    assert!(adapter.contains("timeoutMs: envelope.timeoutMs"));
+    assert!(!adapter.contains("remoteTargets"));
+    assert!(!adapter.contains("__dispatch"));
     assert!(!adapter.contains("<Handler"));
     assert!(!adapter.contains("HandlerImpl"));
 }
@@ -267,18 +229,13 @@ fn xcodegen_root_finds_project_yml_ancestor() {
 }
 
 #[test]
-fn detects_standard_swift_template_layout() {
+fn detects_standard_swift_template_layout_without_lock_file() {
     let temp_dir = TempDir::new().unwrap();
     let project_root = temp_dir.path();
     std::fs::write(project_root.join("project.yml"), "actr-swift\n").unwrap();
     std::fs::write(
         project_root.join("manifest.toml"),
         "[package]\nname = \"echo-app\"\n",
-    )
-    .unwrap();
-    std::fs::write(
-        project_root.join("manifest.lock.toml"),
-        "[metadata]\nversion = 2\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
     )
     .unwrap();
     std::fs::create_dir_all(project_root.join("EchoApp")).unwrap();
@@ -310,12 +267,6 @@ fn converges_legacy_generated_files_into_generated_directory() {
         "[package]\nname = \"echo-app\"\n",
     )
     .unwrap();
-    std::fs::write(
-        project_root.join("manifest.lock.toml"),
-        "[metadata]\nversion = 2\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
-    )
-    .unwrap();
-
     let legacy_file = app_root.join("echo.pb.swift");
     let generated_file = generated_root.join("echo.pb.swift");
     let generated_content =
@@ -340,22 +291,6 @@ fn converges_legacy_generated_files_into_generated_directory() {
 }
 
 #[test]
-fn extracts_service_workload_name_from_service_specific_actor_file() {
-    let tmp = TempDir::new().unwrap();
-    let output_dir = tmp.path();
-    std::fs::write(
-        output_dir.join("local_echo.actor.swift"),
-        "public actor LocalEchoServiceWorkload<T: LocalEchoServiceHandler> {\n",
-    )
-    .unwrap();
-
-    let generator = SwiftGenerator;
-    let workload = generator.extract_workload_name_for_service(output_dir, "LocalEchoService");
-
-    assert_eq!(workload.as_deref(), Some("LocalEchoServiceWorkload"));
-}
-
-#[test]
 fn preserves_modified_legacy_generated_files() {
     let temp_dir = TempDir::new().unwrap();
     let project_root = temp_dir.path();
@@ -368,12 +303,6 @@ fn preserves_modified_legacy_generated_files() {
         "[package]\nname = \"echo-app\"\n",
     )
     .unwrap();
-    std::fs::write(
-        project_root.join("manifest.lock.toml"),
-        "[metadata]\nversion = 2\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
-    )
-    .unwrap();
-
     let legacy_file = app_root.join("echo.pb.swift");
     let generated_file = generated_root.join("echo.pb.swift");
     std::fs::write(

@@ -1,6 +1,6 @@
 use super::*;
 use crate::commands::codegen::{
-    GenContext, MethodModel, ProtoFileModel, ProtoModel, ProtoSide, ServiceModel,
+    DispatchSpec, GenContext, MethodModel, ProtoFileModel, ProtoModel, ProtoSide, ServiceModel,
 };
 
 fn remote_echo_service() -> ServiceInfo {
@@ -8,7 +8,6 @@ fn remote_echo_service() -> ServiceInfo {
         service_name: "EchoService".to_string(),
         proto_package: "echo".to_string(),
         is_local: false,
-        remote_target_type: Some("acme:EchoService:1.0.0".to_string()),
         methods: vec![MethodInfo {
             name: "Echo".to_string(),
             request_type: "EchoRequest".to_string(),
@@ -24,7 +23,6 @@ fn local_client_service() -> ServiceInfo {
         service_name: "ClientService".to_string(),
         proto_package: "client".to_string(),
         is_local: true,
-        remote_target_type: None,
         methods: vec![MethodInfo {
             name: "Send".to_string(),
             request_type: "SendRequest".to_string(),
@@ -36,39 +34,70 @@ fn local_client_service() -> ServiceInfo {
 }
 
 #[test]
-fn remote_service_registry_uses_manifest_dependency_aliases() {
+fn unified_infrastructure_is_empty_when_plugin_emits_dispatch() {
+    // The CLI no longer generates unified_actor.kt; the plugin emits
+    // actr_dispatch.kt directly from the DispatchSpec.
     let generator = KotlinGenerator;
-    let service = remote_echo_service();
-    let mut aliases = HashMap::new();
-    aliases.insert(
-        "acme:EchoService:1.0.0".to_string(),
-        "echo-service".to_string(),
-    );
+    let services = vec![local_client_service(), remote_echo_service()];
+
+    // Build a minimal GenContext to satisfy the signature.
+    let tmp = tempfile::TempDir::new().unwrap();
+    let config_path = tmp.path().join("manifest.toml");
+    std::fs::write(
+        &config_path,
+        r#"edition = 1
+exports = []
+
+[package]
+name = "Demo"
+manufacturer = "acme"
+version = "0.1.0"
+
+[system.signaling]
+url = "ws://127.0.0.1:8080"
+
+[system.ais_endpoint]
+url = "http://127.0.0.1:8080/ais"
+
+[system.deployment]
+realm_id = 1001
+"#,
+    )
+    .unwrap();
+    let config = actr_config::ConfigParser::from_manifest_file(&config_path).unwrap();
+    let context = GenContext {
+        proto_files: vec![],
+        proto_model: ProtoModel {
+            files: vec![],
+            local_services: vec![],
+            remote_services: vec![],
+        },
+        input_path: tmp.path().join("protos"),
+        output: tmp.path().join("generated"),
+        config_path,
+        config,
+        no_scaffold: false,
+        overwrite_user_code: false,
+        no_format: false,
+        debug: false,
+        skip_validation: false,
+        dispatch_spec: DispatchSpec::default(),
+        dispatch_spec_path: std::path::PathBuf::new(),
+        dispatch_spec_hash: String::new(),
+    };
 
     let content = generator
-        .generate_remote_service_registry(&[&service], &aliases)
-        .expect("render remote registry");
-
-    assert!(content.contains("val remoteRouteAliases: Map<String, String>"));
-    assert!(content.contains("\"echo.Echo\" to \"echo-service\""));
-    assert!(content.contains("resolveManifestDependency(manifestPath, alias)"));
-    assert!(content.contains(".toSet()"));
-    assert!(content.contains(".associateWith { alias ->"));
-    assert!(content.contains("targetsByAlias.getValue(alias)"));
-    assert!(
-        content.contains("getActorType(routeKey: String, remoteTargets: Map<String, ActrType>)")
-    );
-    assert!(!content.contains("ActrType(manufacturer"));
-    assert!(!content.contains("remoteRoutes: Map<String, ActrType>"));
+        .generate_unified_infrastructure(&services, "com.example.generated", &context)
+        .expect("render unified infrastructure");
+    assert!(content.is_empty());
 }
 
 #[test]
-fn unified_workload_requires_pre_resolved_remote_targets() {
+fn unified_workload_no_longer_references_prefix_matching_or_cache() {
     let services = vec![local_client_service(), remote_echo_service()];
     let content = generate_unified_workload_scaffold(&services, "com.example.generated");
 
     assert!(content.contains("class UnifiedWorkload("));
-    assert!(content.contains("private val remoteTargets: Map<String, ActrType>,"));
     assert!(content.contains("suspend fun onStart(ctx: ActrContext)"));
     assert!(content.contains("suspend fun onReady(ctx: ActrContext)"));
     assert!(content.contains("suspend fun onStop(ctx: ActrContext)"));
@@ -77,21 +106,20 @@ fn unified_workload_requires_pre_resolved_remote_targets() {
         content
             .contains("suspend fun dispatch(ctx: ActrContext, envelope: RpcEnvelope): ByteArray")
     );
-    assert!(content.contains("UnifiedDispatcher.discoverRemoteServices(ctx, remoteTargets)"));
-    assert!(content.contains("UnifiedDispatcher.dispatch(handler, ctx, remoteTargets, envelope)"));
 
-    assert!(!content.contains("WorkloadLifecycleBridge"));
-    assert!(content.contains("val lifecycle = UnifiedLifecycleAdapter(workload)"));
-    assert!(content.contains("val dynamicWorkload = lifecycle.toDynamicWorkload()"));
-    assert!(!content.contains("import io.actrium.actr.DynamicWorkload"));
-    assert!(!content.contains("fun toDynamicWorkload(): DynamicWorkload"));
-    assert!(!content.contains("private val realmId"));
-    assert!(!content.contains("ActrId("));
-    assert!(!content.contains("Realm("));
-    assert!(!content.contains("manifestPath: String?"));
-    assert!(!content.contains("remoteTargets: Map<String, ActrType> = emptyMap()"));
-    assert!(!content.contains("manifestPath?.let"));
-    assert!(!content.contains("\n\\\n"));
+    // The scaffold must NOT reference the old prefix-matching/caching patterns.
+    assert!(!content.contains("remoteTargets"));
+    assert!(!content.contains("RemoteServiceRegistry"));
+    assert!(!content.contains("discoverRemoteServices"));
+    assert!(!content.contains("UnifiedDispatcher.dispatch"));
+    assert!(!content.contains("30000"));
+    assert!(!content.contains("DEFAULT_RPC_TIMEOUT_MS"));
+    assert!(!content.contains("callRawWithTimeout"));
+    assert!(!content.contains("callWithTimeout"));
+    assert!(!content.contains("ActrType"));
+    assert!(content.contains(
+        "return actrDispatch(ctx, handler, envelope.routeKey, envelope.payload, envelope.timeoutMs)"
+    ));
 }
 
 #[test]
@@ -147,6 +175,7 @@ realm_id = 1001
                 snake_name: "foo".to_string(),
                 input_type: "ask.Outer.InnerRequest".to_string(),
                 output_type: "ask.Outer.InnerResponse".to_string(),
+                payload_type: "rpcReliable".to_string(),
                 route_key: "client.Client.Foo".to_string(),
             }],
             actr_type: None,
@@ -180,6 +209,9 @@ realm_id = 1001
         no_format: false,
         debug: false,
         skip_validation: false,
+        dispatch_spec: DispatchSpec::default(),
+        dispatch_spec_path: std::path::PathBuf::new(),
+        dispatch_spec_hash: String::new(),
     };
     std::fs::create_dir_all(&context.output).unwrap();
     std::fs::write(
@@ -311,6 +343,7 @@ realm_id = 1001
                 snake_name: "call".to_string(),
                 input_type: "client.WrongRequest".to_string(),
                 output_type: "client.WrongResponse".to_string(),
+                payload_type: "rpcReliable".to_string(),
                 route_key: "client.Client.Call".to_string(),
             }],
             actr_type: None,
@@ -332,6 +365,9 @@ realm_id = 1001
         no_format: false,
         debug: false,
         skip_validation: false,
+        dispatch_spec: DispatchSpec::default(),
+        dispatch_spec_path: std::path::PathBuf::new(),
+        dispatch_spec_hash: String::new(),
     };
 
     let catalog = ScaffoldCatalog::load(&context, SupportedLanguage::Kotlin).unwrap();
@@ -381,7 +417,9 @@ fn unified_lifecycle_adapter_wraps_unified_workload() {
 }
 
 #[test]
-fn kotlin_bootstrap_fixtures_inject_manifest_resolved_targets() {
+fn kotlin_bootstrap_fixtures_use_lifecycle_adapter() {
+    // Bootstrap fixtures use the unified dispatcher directly. Dependency
+    // aliases are resolved inside that dispatcher, never injected at startup.
     for fixture in [
         include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -396,12 +434,24 @@ fn kotlin_bootstrap_fixtures_inject_manifest_resolved_targets() {
             "/fixtures/kotlin/data-stream/DataStreamIntegrationTest.kt"
         )),
     ] {
-        assert!(fixture.contains("RemoteServiceRegistry.resolveRemoteTargets("));
-        assert!(fixture.contains("remoteTargets = remoteTargets"));
         assert!(fixture.contains("UnifiedLifecycleAdapter("));
         assert!(fixture.contains("toDynamicWorkload()"));
         assert!(!fixture.contains(concat!("attach", "(clientWorkload)")));
+        assert!(!fixture.contains("RemoteServiceRegistry"));
+        assert!(!fixture.contains("resolveRemoteTargets"));
+        assert!(!fixture.contains("remoteTargets"));
     }
+}
+
+#[test]
+fn kotlin_handler_fixture_resolves_dependency_alias_at_runtime() {
+    let fixture = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/fixtures/kotlin/data-stream/MyUnifiedHandler.kt"
+    ));
+
+    assert!(fixture.contains("ctx.resolveDependency(\"StreamEchoServer\")"));
+    assert!(!fixture.contains("ActrType("));
 }
 
 #[test]
@@ -414,7 +464,6 @@ fn unified_handler_scaffold_imports_and_resolves_imported_rpc_types() {
         service_name: "DataStreamAppService".to_string(),
         proto_package: "data_stream_app".to_string(),
         is_local: true,
-        remote_target_type: None,
         methods: vec![MethodInfo {
             name: "continue_prompt_result_streams".to_string(),
             request_type: "ContinuePromptResultStreamsRequest".to_string(),

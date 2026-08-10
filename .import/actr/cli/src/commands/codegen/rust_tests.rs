@@ -1,8 +1,8 @@
 use super::{ENTRY_PLACEHOLDER_MARKER, ENTRY_SCAFFOLD_MARKER, RustGenerator};
 use crate::commands::codegen::scaffold::{ScaffoldCatalog, ScaffoldMethod, ScaffoldService};
 use crate::commands::codegen::{
-    ActrGenMetadata, GenContext, LanguageGenerator, ProtoModel, SupportedLanguage, TypeRef,
-    write_metadata,
+    ActrGenMetadata, DispatchSpec, GenContext, LanguageGenerator, ProtoModel, SupportedLanguage,
+    TypeRef, write_metadata,
 };
 use crate::templates::{
     DEFAULT_MANUFACTURER, ProjectTemplate, ProjectTemplateName, TemplateContext,
@@ -20,6 +20,7 @@ fn scaffold_service() -> ScaffoldService {
         workload_type: Some("EmptyShellWorkload".to_string()),
         dispatcher_type: Some("EmptyShellDispatcher".to_string()),
         client_type: None,
+        dependency_alias: None,
         actr_type: None,
         methods: vec![ScaffoldMethod {
             name: "Ping".to_string(),
@@ -45,20 +46,11 @@ fn scaffold_service() -> ScaffoldService {
     }
 }
 
-#[test]
-fn modified_generated_handler_scaffold_is_preserved() {
-    let tmp = TempDir::new().unwrap();
-    let path = tmp.path().join("empty_shell.rs");
-    let generator = RustGenerator;
-    let scaffold = generator.generate_scaffold_content(&scaffold_service());
-    let modified = format!("{scaffold}\n// User customization.\n");
-    std::fs::write(&path, modified).unwrap();
-
-    assert!(
-        !generator
-            .should_overwrite_handler_scaffold(&path, &scaffold)
-            .unwrap()
-    );
+fn scaffold_catalog() -> ScaffoldCatalog {
+    ScaffoldCatalog {
+        local_services: vec![scaffold_service()],
+        remote_services: vec![],
+    }
 }
 
 #[test]
@@ -81,15 +73,15 @@ fn generated_entry_placeholder_is_overwritten_and_regeneration_is_idempotent() {
     assert!(placeholder.contains(ENTRY_PLACEHOLDER_MARKER));
 
     let generator = RustGenerator;
-    let scaffold = generator.generate_entry_scaffold_content(&scaffold_service());
+    let scaffold = generator.generate_entry_scaffold_content(&scaffold_catalog());
     std::fs::create_dir_all(&output).unwrap();
 
-    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_service(), &output, false))
+    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_catalog(), &output, false))
         .unwrap();
 
     assert_eq!(std::fs::read_to_string(&path).unwrap(), scaffold);
 
-    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_service(), &output, false))
+    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_catalog(), &output, false))
         .unwrap();
 
     assert_eq!(std::fs::read_to_string(path).unwrap(), scaffold);
@@ -119,8 +111,8 @@ fn legacy_generated_entry_placeholder_is_overwritten_with_full_scaffold() {
     std::fs::write(&path, placeholder).unwrap();
 
     let generator = RustGenerator;
-    let scaffold = generator.generate_entry_scaffold_content(&scaffold_service());
-    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_service(), &output, false))
+    let scaffold = generator.generate_entry_scaffold_content(&scaffold_catalog());
+    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_catalog(), &output, false))
         .unwrap();
 
     assert_eq!(std::fs::read_to_string(path).unwrap(), scaffold);
@@ -147,7 +139,7 @@ fn user_modified_entry_placeholder_is_preserved() {
     std::fs::write(&path, &user_content).unwrap();
 
     tokio_test::block_on(RustGenerator.generate_entry_scaffold(
-        &scaffold_service(),
+        &scaffold_catalog(),
         &output,
         false,
     ))
@@ -161,7 +153,7 @@ fn modified_generated_entry_scaffold_is_preserved() {
     let tmp = TempDir::new().unwrap();
     let path = tmp.path().join("lib.rs");
     let generator = RustGenerator;
-    let scaffold = generator.generate_entry_scaffold_content(&scaffold_service());
+    let scaffold = generator.generate_entry_scaffold_content(&scaffold_catalog());
     let modified = format!("{scaffold}\n// User customization.\n");
     std::fs::write(&path, modified).unwrap();
 
@@ -183,7 +175,7 @@ fn user_modified_entry_without_actr_marker_is_preserved() {
     let user_content = "pub mod generated;\n\npub fn user_customization() {}\n";
     std::fs::write(&path, user_content).unwrap();
 
-    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_service(), &output, false))
+    tokio_test::block_on(generator.generate_entry_scaffold(&scaffold_catalog(), &output, false))
         .unwrap();
 
     assert_eq!(std::fs::read_to_string(path).unwrap(), user_content);
@@ -242,6 +234,9 @@ realm_id = 1001
         no_format: false,
         debug: false,
         skip_validation: false,
+        dispatch_spec: DispatchSpec::default(),
+        dispatch_spec_path: PathBuf::new(),
+        dispatch_spec_hash: String::new(),
     };
     let metadata =
         ActrGenMetadata::from_proto_model(SupportedLanguage::Rust, &context.proto_model).unwrap();
@@ -250,10 +245,10 @@ realm_id = 1001
 
     tokio_test::block_on(RustGenerator.generate_scaffold(&context, &catalog)).unwrap();
 
-    let handler_path = src_dir.join("empty_shell.rs");
+    let handler_path = src_dir.join("actr_handler.rs");
     assert!(
         handler_path.exists(),
-        "handler file should be named from service metadata, not proto stem"
+        "unified handler file should be generated"
     );
     assert!(
         !src_dir.join("bridge_service.rs").exists(),
@@ -261,17 +256,17 @@ realm_id = 1001
     );
 
     let handler = std::fs::read_to_string(&handler_path).unwrap();
-    assert!(handler.contains("use crate::generated::bridge_actor::EmptyShellHandler;"));
-    assert!(handler.contains("pub struct EmptyShellImpl;"));
-    assert!(handler.contains("impl EmptyShellHandler for EmptyShellImpl"));
+    assert!(handler.contains("use crate::generated::actr_dispatch::ActrDispatchHandler;"));
+    assert!(handler.contains("pub struct ActrHandler;"));
+    assert!(handler.contains("impl ActrDispatchHandler for ActrHandler"));
 
     let lib = std::fs::read_to_string(src_dir.join("lib.rs")).unwrap();
     assert!(lib.contains("pub mod generated;"));
-    assert!(lib.contains("pub mod empty_shell;"));
-    assert!(lib.contains("use generated::bridge_actor::EmptyShellWorkload;"));
-    assert!(lib.contains("pub use crate::empty_shell::EmptyShellImpl;"));
+    assert!(lib.contains("pub mod actr_handler;"));
+    assert!(lib.contains("use generated::actr_dispatch::ActrWorkload;"));
+    assert!(lib.contains("pub use crate::actr_handler::ActrHandler;"));
     assert!(lib.contains("entry!("));
-    assert!(lib.contains("EmptyShellWorkload<EmptyShellImpl>"));
+    assert!(lib.contains("ActrWorkload<ActrHandler>"));
 
     std::fs::write(&handler_path, "pub struct UserImplemented;\n").unwrap();
     tokio_test::block_on(RustGenerator.generate_scaffold(&context, &catalog)).unwrap();
@@ -283,22 +278,13 @@ realm_id = 1001
 }
 
 #[test]
-fn build_remote_file_actr_types_uses_shared_proto_model() {
+fn unified_remote_scaffold_uses_unit_handler_without_actr_type() {
     let tmp = TempDir::new().unwrap();
     let proto_root = tmp.path().join("protos");
-    let local_dir = proto_root.join("local");
     let remote_dir = proto_root.join("remote/echo");
-    std::fs::create_dir_all(&local_dir).unwrap();
     std::fs::create_dir_all(&remote_dir).unwrap();
 
-    let local_proto = local_dir.join("local.proto");
     let remote_proto = remote_dir.join("echo.proto");
-
-    std::fs::write(
-        &local_proto,
-        "syntax = \"proto3\";\npackage demo;\nservice EmptyBridge {}\n",
-    )
-    .unwrap();
     std::fs::write(
         &remote_proto,
         "syntax = \"proto3\";\npackage demo;\nservice EchoService {}\n",
@@ -332,47 +318,31 @@ realm_id = 1001
     .unwrap();
 
     let config = ConfigParser::from_manifest_file(&config_path).unwrap();
-    let proto_files = vec![local_proto, remote_proto];
+    let proto_files = vec![remote_proto];
     let proto_model = ProtoModel::parse(&proto_files, &proto_root, &config).unwrap();
 
-    let context = GenContext {
-        proto_files,
-        proto_model,
-        input_path: proto_root,
-        output: tmp.path().join("src/generated"),
-        config_path,
-        config,
-        no_scaffold: false,
-        overwrite_user_code: false,
-        no_format: false,
-        debug: false,
-        skip_validation: false,
-    };
-
-    let mappings = RustGenerator
-        .build_remote_file_actr_types(&context)
-        .unwrap();
-    assert!(mappings.contains("echo.proto="));
-    assert!(mappings.contains("EchoService"));
+    let metadata =
+        ActrGenMetadata::from_proto_model(SupportedLanguage::Rust, &proto_model).unwrap();
+    let catalog = ScaffoldCatalog::from_metadata(&metadata);
+    let entry = RustGenerator.generate_entry_scaffold_content(&catalog);
+    assert!(entry.contains("ActrWorkload<()>"));
+    assert!(entry.contains("ActrWorkload::new(())"));
+    assert!(!entry.contains("ActrType"));
 }
 
 #[test]
 fn pure_helpers_produce_correct_output() {
     let svc = scaffold_service();
-    assert_eq!(super::handler_module_name(&svc), "empty_shell");
-    assert_eq!(super::handler_impl_type(&svc), "EmptyShellImpl");
     assert_eq!(
-        super::service_type_or_default(&svc, None, "Workload"),
-        "EmptyShellWorkload"
+        super::rust_scaffold_qualified_type(&svc.methods[0].input_ref, "Fallback"),
+        "crate::generated::demo_shell::PingRequest"
     );
-    assert!(!super::message_imports(&svc).is_empty());
-    assert!(!super::handler_method_impls(&svc).is_empty());
     // is_default_cargo_lib_rs returns false for non-default lib.rs.
     assert!(!super::is_default_cargo_lib_rs("custom content"));
 }
 
 #[test]
-fn message_imports_use_nested_parent_modules() {
+fn qualified_scaffold_types_use_nested_parent_modules() {
     let mut svc = scaffold_service();
     svc.methods[0].input_ref = TypeRef {
         proto_type: "ask.Outer.InnerRequest".to_string(),
@@ -389,13 +359,12 @@ fn message_imports_use_nested_parent_modules() {
         generated_type: None,
     };
 
-    let imports = super::message_imports(&svc);
-
-    assert!(
-        imports.contains("use crate::generated::ask::{outer::InnerRequest, outer::InnerResponse};")
-            || imports.contains(
-                "use crate::generated::ask::{outer::InnerResponse, outer::InnerRequest};"
-            ),
-        "expected nested parent modules in imports, got:\n{imports}"
+    assert_eq!(
+        super::rust_scaffold_qualified_type(&svc.methods[0].input_ref, "Fallback"),
+        "crate::generated::ask::outer::InnerRequest"
+    );
+    assert_eq!(
+        super::rust_scaffold_qualified_type(&svc.methods[0].output_ref, "Fallback"),
+        "crate::generated::ask::outer::InnerResponse"
     );
 }

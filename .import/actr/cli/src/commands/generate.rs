@@ -4,7 +4,9 @@
 //! `src/commands/codegen/{rust,swift,typescript,...}.rs`.
 
 use crate::commands::SupportedLanguage;
-use crate::commands::codegen::{GenContext, ProtoModel, execute_codegen};
+use crate::commands::codegen::{
+    DISPATCH_SPEC_FILE, DispatchSpec, GenContext, ProtoModel, execute_codegen,
+};
 use crate::core::{Command, CommandContext, CommandResult, ComponentType};
 use crate::error::{ActrCliError, Result};
 use crate::project_language::DetectedProjectLanguage;
@@ -88,7 +90,6 @@ impl Command for GenCommand {
 
 impl GenCommand {
     async fn execute_inner(&self) -> Result<()> {
-        self.check_lock_file()?;
         self.validate_project_language_compatibility()?;
 
         let output = self.determine_output_path()?;
@@ -103,6 +104,24 @@ impl GenCommand {
 
         let proto_files = self.preprocess()?;
         let proto_model = ProtoModel::parse(&proto_files, &self.input, &config)?;
+
+        // Build the canonical DispatchSpec v1 and write it to disk.
+        let dispatch_spec = DispatchSpec::build(&proto_model)?;
+        let dispatch_spec_hash = dispatch_spec.spec_hash.clone().unwrap_or_default();
+        let dispatch_spec_dir = output.join(".actr").join("codegen");
+        std::fs::create_dir_all(&dispatch_spec_dir).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to create dispatch spec directory: {e}"))
+        })?;
+        let dispatch_spec_path = dispatch_spec_dir.join(DISPATCH_SPEC_FILE);
+        std::fs::write(&dispatch_spec_path, dispatch_spec.to_json_string()).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to write dispatch spec: {e}"))
+        })?;
+        info!(
+            "📋 Dispatch spec written to: {} (hash: {})",
+            dispatch_spec_path.display(),
+            dispatch_spec_hash
+        );
+
         let context = GenContext {
             proto_files,
             proto_model,
@@ -115,6 +134,9 @@ impl GenCommand {
             no_format: self.no_format,
             debug: self.debug,
             skip_validation: self.skip_validation,
+            dispatch_spec,
+            dispatch_spec_path,
+            dispatch_spec_hash,
         };
         execute_codegen(self.language, &context).await?;
         Ok(())
@@ -161,25 +183,6 @@ impl GenCommand {
             SupportedLanguage::Kotlin => DetectedProjectLanguage::Kotlin,
             SupportedLanguage::TypeScript => DetectedProjectLanguage::TypeScript,
         }
-    }
-
-    fn check_lock_file(&self) -> Result<()> {
-        let config_dir = self
-            .config
-            .parent()
-            .unwrap_or_else(|| std::path::Path::new("."));
-        let lock_file_path = config_dir.join("manifest.lock.toml");
-
-        if !lock_file_path.exists() {
-            return Err(ActrCliError::config_error(
-                "manifest.lock.toml not found\n\n\
-                The lock file is required for code generation. Please run:\n\n\
-                \x20\x20\x20\x20actr deps install\n\n\
-                This will generate manifest.lock.toml based on your manifest.toml configuration.",
-            ));
-        }
-
-        Ok(())
     }
 
     fn determine_output_path(&self) -> Result<PathBuf> {

@@ -8,9 +8,10 @@
 //! - `public/actor.sw.js`            — Service Worker entry (config from DOM_PORT_INIT)
 //! - `build.sh`                      — Root build script
 
+use crate::GeneratedFile;
 use crate::request::{FileInfo, ServiceInfo, WebCodegenRequest, WebCodegenResponse};
 use heck::{ToKebabCase, ToLowerCamelCase, ToSnakeCase};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use tracing::info;
 
@@ -53,6 +54,19 @@ fn generate_inner(req: &WebCodegenRequest) -> Result<Vec<PathBuf>, String> {
     let index_content = gen_index(req)?;
     write_file(&index_path, &index_content)?;
     generated.push(index_path);
+
+    // 3a. Unified dispatch artifacts (if dispatch spec is provided)
+    if let Some(spec_path) = &req.dispatch_spec_path {
+        let spec = crate::dispatch_spec::DispatchSpec::load_and_validate(
+            spec_path,
+            req.dispatch_spec_hash.as_deref(),
+        )?;
+        let dispatch_files = generate_unified_dispatch(&spec, &req.output_dir);
+        for file in dispatch_files {
+            write_file(&file.path, &file.content)?;
+            generated.push(file.path);
+        }
+    }
 
     // 4. wasm/ scaffold
     let wasm_files = gen_wasm_scaffold(req)?;
@@ -844,49 +858,30 @@ fn gen_client_handler(service: &ServiceInfo, req: &WebCodegenRequest) -> String 
     let sn = &service.name;
     let mut out = String::new();
     out.push_str(&format!(
-        "//! {sn} local handler — forwards requests to remote service\n\n"
+        "//! {sn} local handler — dispatch delegated to actr_dispatch.ts\n\n"
     ));
-    out.push_str("use std::rc::Rc;\nuse std::sync::OnceLock;\n");
-    out.push_str("use actr_sw_host::RuntimeContext;\nuse actr_sw_host::WebContext;\n\n");
+    out.push_str("use std::rc::Rc;\n");
+    out.push_str("use actr_sw_host::RuntimeContext;\n\n");
 
-    let remote_target = req.dependencies.first().and_then(|d| d.actr_type.as_ref());
+    // In the unified-dispatch model, the forwarding to remote is handled by
+    // the generated `actr_dispatch.ts` via `ctx.callRaw(target, routeKey,
+    // payload, timeoutMs)`. The Rust WASM handler is a pass-through
+    // that returns the raw bytes to the SW runtime, which routes them to the
+    // TS `Workload.dispatch()` entry point.
+    let _ = req; // suppress unused warning — dispatch spec drives routing now
 
-    if let Some(target) = remote_target {
-        out.push_str("static TARGET_TYPE: OnceLock<actr_sw_host::actr_protocol::ActrType> = OnceLock::new();\n\n");
-        out.push_str("fn target_type() -> &'static actr_sw_host::actr_protocol::ActrType {\n");
-        out.push_str("    TARGET_TYPE.get_or_init(|| actr_sw_host::actr_protocol::ActrType {\n");
-        out.push_str(&format!(
-            "        manufacturer: \"{}\".to_string(),\n",
-            target.manufacturer
-        ));
-        out.push_str(&format!("        name: \"{}\".to_string(),\n", target.name));
-        out.push_str("        version: \"1.0.0\".to_string(),\n    })\n}\n\n");
-    }
-
-    let remote_route_key = req
-        .remote_services
-        .first()
-        .and_then(|s| s.methods.first())
-        .map(|m| m.route_key.as_str())
-        .unwrap_or("unknown.Unknown.Unknown");
-
-    out.push_str("pub async fn handle_request(method: &str, request_bytes: &[u8], ctx: Rc<RuntimeContext>) -> Result<Vec<u8>, String> {\n");
+    out.push_str("pub async fn handle_request(method: &str, request_bytes: &[u8], _ctx: Rc<RuntimeContext>) -> Result<Vec<u8>, String> {\n");
     out.push_str("    match method {\n");
     for m in &service.methods {
         out.push_str(&format!("        \"{}\" => {{\n", m.name));
         out.push_str(&format!(
-            "            log::info!(\"[{}] Forwarding to remote...\");\n",
+            "            log::info!(\"[{}] dispatch delegated to actr_dispatch.ts\");\n",
             sn
         ));
-        if remote_target.is_some() {
-            out.push_str("            let target = ctx.discover(target_type()).await.map_err(|e| format!(\"Discover failed: {}\", e))?;\n");
-            out.push_str(&format!(
-                "            let response = ctx.call_raw(&target, \"{remote_route_key}\", request_bytes, 30000).await.map_err(|e| format!(\"call_raw failed: {{}}\", e))?;\n"
-            ));
-            out.push_str("            Ok(response)\n");
-        } else {
-            out.push_str("            Err(\"No remote target configured\".to_string())\n");
-        }
+        out.push_str("            // Forwarding is handled by the TS unified dispatcher.\n");
+        out.push_str("            // Return the raw bytes so the SW runtime routes them\n");
+        out.push_str("            // through Workload.dispatch() → actrDispatch().\n");
+        out.push_str("            Ok(request_bytes.to_vec())\n");
         out.push_str("        }\n");
     }
     out.push_str("        _ => Err(format!(\"Unknown method: {}\", method)),\n");
@@ -1064,6 +1059,11 @@ fn to_snake_case(name: &str) -> String {
 
 fn to_camel_case(name: &str) -> String {
     name.to_lower_camel_case()
+}
+
+/// Format a string as a TypeScript/JSON string literal (quoted with escapes).
+fn typescript_string_literal(raw: &str) -> String {
+    format!("{raw:?}")
 }
 
 fn proto_type_to_rust(proto_type: &str) -> String {
@@ -1326,6 +1326,280 @@ self.addEventListener('message', (event) => {
 });
 "#;
 
+// ═══════════════════════════════════════════════════════════════════
+// Unified dispatch (phase 7 — DispatchSpec v1)
+// ═══════════════════════════════════════════════════════════════════
+
+/// Generate the unified dispatch artifacts from a DispatchSpec.
+///
+/// Emits:
+/// - `actr_dispatch.ts` — unified dispatcher with `actrDispatch()`
+/// - `actr-gen-meta.json` — codegen metadata
+pub fn generate_unified_dispatch(
+    spec: &crate::dispatch_spec::DispatchSpec,
+    output_dir: &Path,
+) -> Vec<GeneratedFile> {
+    let mut files = Vec::new();
+
+    // 1. actr_dispatch.ts
+    let dispatch_path = output_dir.join("actr_dispatch.ts");
+    let dispatch_content = gen_actr_dispatch(spec);
+    files.push(GeneratedFile::new(dispatch_path, dispatch_content));
+
+    // 2. actr-gen-meta.json
+    let meta_path = output_dir.join("actr-gen-meta.json");
+    let meta_content = gen_actr_gen_meta(spec);
+    files.push(GeneratedFile::new(meta_path, meta_content));
+
+    files
+}
+
+/// Generate the unified `actr_dispatch.ts` file.
+fn gen_actr_dispatch(spec: &crate::dispatch_spec::DispatchSpec) -> String {
+    let local_routes = spec.local_routes();
+    let remote_routes = spec.remote_routes();
+
+    // Group local routes by proto_service to build the handler interface and
+    // import the matching generated `*.types.ts` module as a namespace.
+    let mut handler_methods: Vec<(String, String, String, String, String)> = Vec::new();
+    // (method_name, namespace, input_type, output_type, route_key)
+    let mut type_modules = BTreeMap::new();
+    for route in &local_routes {
+        let service_name = route
+            .proto_service
+            .rsplit('.')
+            .next()
+            .unwrap_or(&route.proto_service);
+        let namespace = format!("{}Types", service_name);
+        type_modules.insert(
+            namespace.clone(),
+            format!("./{}.types", service_name.to_kebab_case()),
+        );
+        let method_name = to_camel_case(&format!("{}_{}", service_name, route.method));
+        handler_methods.push((
+            method_name,
+            namespace,
+            route
+                .input_type
+                .rsplit('.')
+                .next()
+                .unwrap_or(&route.input_type)
+                .to_string(),
+            route
+                .output_type
+                .rsplit('.')
+                .next()
+                .unwrap_or(&route.output_type)
+                .to_string(),
+            route.route_key.clone(),
+        ));
+    }
+
+    let mut out = String::new();
+    out.push_str("/**\n * Auto-generated unified dispatcher (DispatchSpec v1)\n");
+    out.push_str(" *\n * DO NOT EDIT this file manually\n */\n\n");
+
+    // Imports
+    out.push_str("import type { ActrContext } from '@actrium/actr-workload';\n");
+    for (namespace, module) in &type_modules {
+        out.push_str(&format!("import * as {namespace} from '{module}';\n"));
+    }
+
+    // If there are remote routes, we need resolveDependency/discover/callRaw
+    // from ActrContext — no additional imports needed since ActrContext
+    // already provides them.
+
+    // Handler interface remains a marker for remote-only specs so the
+    // generated dispatcher always has the same five-argument signature.
+    out.push_str("\n// ── ActrDispatchHandler ──\n\n");
+    out.push_str("export interface ActrDispatchHandler {\n");
+    for (method_name, namespace, input_type, output_type, _) in &handler_methods {
+        out.push_str(&format!(
+            "  {}(req: {}.{}, ctx: ActrContext): Promise<{}.{}>;\n",
+            method_name, namespace, input_type, namespace, output_type
+        ));
+    }
+    out.push_str("}\n");
+
+    // actrDispatch function
+    out.push_str("\n// ── Unified dispatcher ──\n\n");
+    out.push_str("export async function actrDispatch(\n");
+    out.push_str("  ctx: ActrContext,\n");
+    out.push_str("  handler: ActrDispatchHandler,\n");
+    out.push_str("  routeKey: string,\n");
+    out.push_str("  payload: Uint8Array,\n");
+    out.push_str("  timeoutMs: number,\n");
+    out.push_str("): Promise<Uint8Array> {\n");
+    if local_routes.is_empty() {
+        out.push_str("  void handler;\n");
+    }
+    if remote_routes.is_empty() {
+        out.push_str("  void timeoutMs;\n");
+    }
+
+    if spec.routes.is_empty() {
+        out.push_str("  throw new Error(`UnknownRoute: ${routeKey}`);\n");
+        out.push_str("}\n");
+        return out;
+    }
+
+    out.push_str("  switch (routeKey) {\n");
+
+    // Local routes: decode → handler method → encode
+    for (method_name, namespace, input_type, output_type, route_key) in &handler_methods {
+        out.push_str(&format!(
+            "    case {}: {{\n",
+            typescript_string_literal(route_key)
+        ));
+        out.push_str(&format!(
+            "      const req = {}.decode{}(payload);\n",
+            namespace, input_type
+        ));
+        out.push_str(&format!(
+            "      const resp = await handler.{}(req, ctx);\n",
+            method_name
+        ));
+        out.push_str(&format!(
+            "      return {}.encode{}(resp);\n",
+            namespace, output_type
+        ));
+        out.push_str("    }\n");
+    }
+
+    // Remote routes: resolve dependency → discover → callRaw
+    if !remote_routes.is_empty() {
+        // Group remote routes by dependency_alias for the default case
+        out.push_str("    default: {\n");
+        out.push_str("      // Remote routes: resolve alias → discover → callRaw\n");
+        out.push_str("      const alias = remoteAliasFor(routeKey);\n");
+        out.push_str("      if (alias) {\n");
+        out.push_str("        const actrType = await ctx.resolveDependency(alias);\n");
+        out.push_str("        const target = await ctx.discover(actrType);\n");
+        out.push_str("        return ctx.callRaw(target, routeKey, payload, timeoutMs);\n");
+        out.push_str("      }\n");
+        out.push_str("      throw new Error(`UnknownRoute: ${routeKey}`);\n");
+        out.push_str("    }\n");
+    } else {
+        out.push_str("    default:\n");
+        out.push_str("      throw new Error(`UnknownRoute: ${routeKey}`);\n");
+    }
+
+    out.push_str("  }\n");
+    out.push_str("}\n");
+
+    // Remote alias lookup helper
+    if !remote_routes.is_empty() {
+        out.push_str("\n// ── Remote route → dependency alias map ──\n\n");
+        out.push_str("const _remoteAliasMap: Record<string, string> = {\n");
+        for route in &remote_routes {
+            if let Some(ref alias) = route.dependency_alias {
+                out.push_str(&format!(
+                    "  {}: {},\n",
+                    typescript_string_literal(&route.route_key),
+                    typescript_string_literal(alias)
+                ));
+            }
+        }
+        out.push_str("};\n\n");
+        out.push_str("function remoteAliasFor(routeKey: string): string | undefined {\n");
+        out.push_str("  return _remoteAliasMap[routeKey];\n");
+        out.push_str("}\n");
+    }
+
+    out
+}
+
+/// Generate the `actr-gen-meta.json` metadata file.
+fn gen_actr_gen_meta(spec: &crate::dispatch_spec::DispatchSpec) -> String {
+    let mut by_service: BTreeMap<&str, Vec<&crate::dispatch_spec::DispatchRoute>> = BTreeMap::new();
+    for route in &spec.routes {
+        by_service
+            .entry(route.proto_service.as_str())
+            .or_default()
+            .push(route);
+    }
+
+    let method_metadata = |route: &crate::dispatch_spec::DispatchRoute| {
+        let type_ref = |proto_type: &str| {
+            let normalized = proto_type.trim_start_matches('.');
+            let (package, type_name) = normalized.rsplit_once('.').unwrap_or(("", normalized));
+            serde_json::json!({
+                "proto_type": normalized,
+                "type_name": type_name,
+                "proto_package": package,
+                "proto_file": route.proto_file,
+            })
+        };
+        serde_json::json!({
+            "name": route.method,
+            "snake_name": route.method.to_snake_case(),
+            "route_key": route.route_key,
+            "input_ref": type_ref(&route.input_type),
+            "output_ref": type_ref(&route.output_type),
+        })
+    };
+
+    let mut local_services = Vec::new();
+    let mut remote_services = Vec::new();
+    for (proto_service, routes) in by_service {
+        let (package, name) = proto_service
+            .rsplit_once('.')
+            .unwrap_or(("", proto_service));
+        let methods = routes
+            .iter()
+            .map(|route| method_metadata(route))
+            .collect::<Vec<_>>();
+        match routes[0].dependency_alias.as_deref() {
+            None => local_services.push(serde_json::json!({
+                "name": name,
+                "package": package,
+                "proto_file": routes[0].proto_file,
+                "handler_interface": format!("{name}Handler"),
+                "workload_type": format!("{name}Workload"),
+                "dispatcher_type": format!("{name}Dispatcher"),
+                "methods": methods,
+            })),
+            Some(alias) => remote_services.push(serde_json::json!({
+                "name": name,
+                "package": package,
+                "proto_file": routes[0].proto_file,
+                "dependency_alias": alias,
+                "client_type": format!("{name}Client"),
+                "methods": methods,
+            })),
+        }
+    }
+
+    let mut local_routes = spec
+        .local_routes()
+        .into_iter()
+        .map(|route| route.route_key.clone())
+        .collect::<Vec<_>>();
+    local_routes.sort();
+    let mut remote_routes = spec
+        .remote_routes()
+        .into_iter()
+        .map(|route| route.route_key.clone())
+        .collect::<Vec<_>>();
+    remote_routes.sort();
+
+    let metadata = serde_json::json!({
+        "schema_version": spec.schema_version,
+        "plugin_version": env!("CARGO_PKG_VERSION"),
+        "language": "web",
+        "dispatch_spec_hash": spec.spec_hash.as_deref().unwrap_or(""),
+        "generated_files": ["actr-gen-meta.json", "actr_dispatch.ts"],
+        "generated_local_routes": local_routes,
+        "generated_remote_routes": remote_routes,
+        "local_services": local_services,
+        "remote_services": remote_services,
+    });
+    format!(
+        "{}\n",
+        serde_json::to_string_pretty(&metadata).expect("serialize codegen metadata")
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1339,5 +1613,152 @@ mod tests {
         assert!(cargo_toml.contains(&expected_tag));
         assert!(!cargo_toml.contains("github.com/actor-rtc/actr"));
         assert!(!cargo_toml.contains("branch = \"web\""));
+    }
+
+    #[test]
+    fn unified_dispatch_local_only_emits_handler_and_no_remote() {
+        let spec = crate::dispatch_spec::DispatchSpec {
+            schema_version: "v1".to_string(),
+            routes: vec![crate::dispatch_spec::DispatchRoute {
+                route_key: "echo.EchoService.Echo".to_string(),
+                proto_file: "local/echo.proto".to_string(),
+                proto_service: "echo.EchoService".to_string(),
+                method: "Echo".to_string(),
+                input_type: "EchoRequest".to_string(),
+                output_type: "EchoResponse".to_string(),
+                payload_type: "rpcReliable".to_string(),
+                dependency_alias: None,
+            }],
+            spec_hash: Some("abc123".to_string()),
+        };
+        let content = gen_actr_dispatch(&spec);
+        assert!(content.contains("export interface ActrDispatchHandler"));
+        assert!(content.contains("echoServiceEcho"));
+        assert!(content.contains("EchoServiceTypes.decodeEchoRequest(payload)"));
+        assert!(content.contains("EchoServiceTypes.encodeEchoResponse(resp)"));
+        assert!(!content.contains("actr-dispatch-types"));
+        assert!(content.contains("case \"echo.EchoService.Echo\""));
+        assert!(!content.contains("ctx.resolveDependency"));
+        assert!(content.contains("UnknownRoute"));
+    }
+
+    #[test]
+    fn unified_dispatch_remote_only_emits_marker_handler() {
+        let spec = crate::dispatch_spec::DispatchSpec {
+            schema_version: "v1".to_string(),
+            routes: vec![crate::dispatch_spec::DispatchRoute {
+                route_key: "remote.Svc.Method".to_string(),
+                proto_file: "remote/alias/svc.proto".to_string(),
+                proto_service: "remote.Svc".to_string(),
+                method: "Method".to_string(),
+                input_type: "Request".to_string(),
+                output_type: "Response".to_string(),
+                payload_type: "rpcReliable".to_string(),
+                dependency_alias: Some("alias".to_string()),
+            }],
+            spec_hash: Some("def456".to_string()),
+        };
+        let content = gen_actr_dispatch(&spec);
+        assert!(content.contains("export interface ActrDispatchHandler"));
+        assert!(content.contains("handler: ActrDispatchHandler"));
+        assert!(content.contains("timeoutMs: number"));
+        assert!(content.contains("ctx.resolveDependency(alias)"));
+        assert!(content.contains("ctx.callRaw(target, routeKey, payload, timeoutMs)"));
+    }
+
+    #[test]
+    fn unified_dispatch_no_30000_or_timeout_constants() {
+        let spec = crate::dispatch_spec::DispatchSpec {
+            schema_version: "v1".to_string(),
+            routes: vec![
+                crate::dispatch_spec::DispatchRoute {
+                    route_key: "local.Svc.Method".to_string(),
+                    proto_file: "local/svc.proto".to_string(),
+                    proto_service: "local.Svc".to_string(),
+                    method: "Method".to_string(),
+                    input_type: "Request".to_string(),
+                    output_type: "Response".to_string(),
+                    payload_type: "rpcReliable".to_string(),
+                    dependency_alias: None,
+                },
+                crate::dispatch_spec::DispatchRoute {
+                    route_key: "remote.RemoteSvc.Method".to_string(),
+                    proto_file: "remote/alias/svc.proto".to_string(),
+                    proto_service: "remote.RemoteSvc".to_string(),
+                    method: "Method".to_string(),
+                    input_type: "Request".to_string(),
+                    output_type: "Response".to_string(),
+                    payload_type: "rpcReliable".to_string(),
+                    dependency_alias: Some("alias".to_string()),
+                },
+            ],
+            spec_hash: Some("hash".to_string()),
+        };
+        let content = gen_actr_dispatch(&spec);
+        assert!(!content.contains("30000"));
+        assert!(!content.contains("DEFAULT_RPC_TIMEOUT_MS"));
+        assert!(!content.contains("callRawWithTimeout"));
+        assert!(!content.contains("callWithTimeout"));
+    }
+
+    #[test]
+    fn unified_dispatch_empty_routes_throws_unknown_route() {
+        let spec = crate::dispatch_spec::DispatchSpec {
+            schema_version: "v1".to_string(),
+            routes: vec![],
+            spec_hash: None,
+        };
+        let content = gen_actr_dispatch(&spec);
+        assert!(content.contains("throw new Error(`UnknownRoute: ${routeKey}`)"));
+    }
+
+    #[test]
+    fn gen_meta_has_required_fields() {
+        let spec = crate::dispatch_spec::DispatchSpec {
+            schema_version: "v1".to_string(),
+            routes: vec![
+                crate::dispatch_spec::DispatchRoute {
+                    route_key: "local.Svc.Method".to_string(),
+                    proto_file: "local/svc.proto".to_string(),
+                    proto_service: "local.Svc".to_string(),
+                    method: "Method".to_string(),
+                    input_type: "Request".to_string(),
+                    output_type: "Response".to_string(),
+                    payload_type: "rpcReliable".to_string(),
+                    dependency_alias: None,
+                },
+                crate::dispatch_spec::DispatchRoute {
+                    route_key: "remote.RemoteSvc.Method".to_string(),
+                    proto_file: "remote/alias/svc.proto".to_string(),
+                    proto_service: "remote.RemoteSvc".to_string(),
+                    method: "Method".to_string(),
+                    input_type: "Request".to_string(),
+                    output_type: "Response".to_string(),
+                    payload_type: "rpcReliable".to_string(),
+                    dependency_alias: Some("alias".to_string()),
+                },
+            ],
+            spec_hash: Some("myhash".to_string()),
+        };
+        let content = gen_actr_gen_meta(&spec);
+        let metadata: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(metadata["schema_version"], "v1");
+        assert_eq!(metadata["language"], "web");
+        assert_eq!(metadata["plugin_version"], env!("CARGO_PKG_VERSION"));
+        assert_eq!(metadata["local_services"][0]["name"], "Svc");
+        assert_eq!(metadata["remote_services"][0]["name"], "RemoteSvc");
+        assert_eq!(metadata["remote_services"][0]["dependency_alias"], "alias");
+        assert_eq!(
+            metadata["remote_services"][0]["client_type"],
+            "RemoteSvcClient"
+        );
+        assert!(
+            metadata["generated_files"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|file| file == "actr-gen-meta.json")
+        );
+        assert!(metadata["remote_services"][0].get("actr_type").is_none());
     }
 }

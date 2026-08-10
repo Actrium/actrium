@@ -105,7 +105,7 @@ final class ActrService: ObservableObject {
 
             let handler = ProbeHandlerImpl(service: self)
             let workload = Actr.dynamicWorkload(
-                lifecycle: ProbeLifecycleAdapter(workload: ProbeServiceWorkload(handler: handler))
+                lifecycle: ProbeLifecycleAdapter(handler: handler)
             )
 
             setLogCallback(callback: ActrLogHandler(service: self))
@@ -165,7 +165,14 @@ final class ActrService: ObservableObject {
         req.targetType = targetType
 
         do {
-            let resp: Local_StartProbeResponse = try await self.actorRef!.call(req)
+            let requestData = try LocalProbeServiceStartProbeRpc.encodeRequest(req)
+            let responseData = try await self.actorRef!.call(
+                routeKey: LocalProbeServiceStartProbeRpc.routeKey,
+                payloadType: LocalProbeServiceStartProbeRpc.payloadType,
+                requestPayload: requestData,
+                timeoutMs: 30_000
+            )
+            let resp = try LocalProbeServiceStartProbeRpc.decodeResponse(responseData)
             appendBoundedLog("StartProbe response: started=\(resp.started) msg=\(resp.message)")
         } catch {
             appendBoundedLog("[FAIL] StartProbe RPC failed: \(error)")
@@ -198,10 +205,14 @@ final class ActrService: ObservableObject {
         req.targetType = targetType
 
         do {
-            let resp: Local_StartProbeResponse = try await self.actorRef!.call(
-                req,
+            let requestData = try LocalProbeServiceStartProbeRpc.encodeRequest(req)
+            let responseData = try await self.actorRef!.call(
+                routeKey: LocalProbeServiceStartProbeRpc.routeKey,
+                payloadType: LocalProbeServiceStartProbeRpc.payloadType,
+                requestPayload: requestData,
                 timeoutMs: streamEchoRequestTimeoutMs(for: count)
             )
+            let resp = try LocalProbeServiceStartProbeRpc.decodeResponse(responseData)
             appendBoundedLog("StreamEcho response: started=\(resp.started) msg=\(resp.message)")
         } catch {
             appendBoundedLog("[FAIL] StreamEcho RPC failed: \(error)")
@@ -310,7 +321,7 @@ private func emitE2EResult(_ result: String) {
 
 /// Implements ProbeServiceHandler.startProbe(req:ctx:).
 /// When this RPC fires, ctx is delivered — discover target then run all probes.
-private final class ProbeHandlerImpl: ProbeServiceHandler, @unchecked Sendable {
+private final class ProbeHandlerImpl: ActrDispatchHandler, @unchecked Sendable {
     private weak var service: ActrService?
 
     init(service: ActrService) {
@@ -413,10 +424,10 @@ private final class ProbeHandlerImpl: ProbeServiceHandler, @unchecked Sendable {
 // MARK: - Lifecycle Adapter
 
 private final class ProbeLifecycleAdapter: Workload, @unchecked Sendable {
-    private let workload: ProbeServiceWorkload<ProbeHandlerImpl>
+    private let handler: ProbeHandlerImpl
 
-    init(workload: ProbeServiceWorkload<ProbeHandlerImpl>) {
-        self.workload = workload
+    init(handler: ProbeHandlerImpl) {
+        self.handler = handler
     }
 
     func onStart(ctx: Context) async throws {}
@@ -428,7 +439,13 @@ private final class ProbeLifecycleAdapter: Workload, @unchecked Sendable {
     }
 
     func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
-        try await workload.__dispatch(ctx: ctx, envelope: envelope)
+        try await actrDispatch(
+            ctx: ctx,
+            handler: handler,
+            routeKey: envelope.routeKey,
+            payload: envelope.payload,
+            timeoutMs: 30_000
+        )
     }
 }
 

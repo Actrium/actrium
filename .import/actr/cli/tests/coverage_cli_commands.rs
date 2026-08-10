@@ -1405,26 +1405,14 @@ fn pkg_verify_reports_unreadable_package() {
 }
 
 #[test]
-fn gen_validates_lock_file_input_and_language_compatibility() {
+fn gen_validates_input_and_language_compatibility_without_a_lock() {
     let tmp = TempDir::new().expect("tempdir");
     let home = isolated_home(tmp.path());
     write_manifest_with_proto(tmp.path());
 
-    // No lock file → error before any proto discovery.
-    let no_lock = run_actr(&["gen"], tmp.path(), &home);
-    assert_failure(&no_lock, "gen no lock");
-    assert!(
-        stderr(&no_lock).contains("manifest.lock.toml not found"),
-        "gen no lock stderr:\n{}",
-        stderr(&no_lock)
-    );
-
-    // Lock present but default input `protos` does not exist → error.
-    fs::write(
-        tmp.path().join("manifest.lock.toml"),
-        "[metadata]\nversion = 2\ngenerated_at = \"2026-08-06T00:00:00Z\"\n",
-    )
-    .expect("write lock");
+    // Codegen reads dependency aliases from manifest.toml; no lock is needed.
+    // The default input `protos` does not exist, so validation reaches the
+    // input-path error instead of asking for an artificial lock file.
     let bad_input = run_actr(&["gen"], tmp.path(), &home);
     assert_failure(&bad_input, "gen bad input");
     assert!(

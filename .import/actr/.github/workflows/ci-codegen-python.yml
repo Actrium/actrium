@@ -59,11 +59,36 @@ jobs:
           }
           PROTO
 
+          python3 - "$tmp" <<'PY'
+          import hashlib, json, os, pathlib, sys
+          tmp = sys.argv[1]
+          spec = {
+              "schema_version": "v1",
+              "routes": [
+                  {
+                      "route_key": "echo.EchoService.Echo",
+                      "proto_file": "local/echo.proto",
+                      "proto_service": "echo.EchoService",
+                      "method": "Echo",
+                      "input_type": "echo.EchoRequest",
+                      "output_type": "echo.EchoResponse",
+                      "payload_type": "rpcReliable",
+                  }
+              ],
+          }
+          canonical = json.dumps(spec, sort_keys=True, separators=(",", ":"))
+          spec["spec_hash"] = hashlib.sha256(canonical.encode()).hexdigest()
+          pathlib.Path(os.path.join(tmp, "dispatch_spec.json")).write_text(
+              json.dumps(spec)
+          )
+          PY
+
+          spec_hash=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1]))["spec_hash"])' "$tmp/dispatch_spec.json")
           protoc \
             --proto_path="$tmp/protos" \
             --python_out="$tmp/generated" \
             --plugin="protoc-gen-actrframework-python=$(command -v protoc-gen-actrframework-python)" \
-            --actrframework-python_opt="LocalFiles=local/echo.proto" \
+            --actrframework-python_opt="dispatch_spec=$tmp/dispatch_spec.json,dispatch_spec_hash=$spec_hash" \
             --actrframework-python_out="$tmp/generated" \
             "$tmp/protos/local/echo.proto"
 
@@ -71,8 +96,10 @@ jobs:
           PYTHONPATH="$tmp" python - <<'PY'
           import generated.echo_workload
           import generated.local.echo_pb2
+          import generated.actr_dispatch
 
           assert hasattr(generated.echo_workload, "EchoServiceDispatcher")
+          assert hasattr(generated.actr_dispatch, "actr_dispatch")
           PY
 
           if grep -R -E "from actr import|import actr" "$tmp/generated"; then

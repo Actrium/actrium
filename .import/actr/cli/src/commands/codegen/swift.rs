@@ -4,11 +4,9 @@ use crate::commands::codegen::scaffold::ScaffoldCatalog;
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
 use crate::utils::{command_exists, to_pascal_case};
-use actr_config::LockFile;
 use async_trait::async_trait;
 use handlebars::Handlebars;
 use serde::Serialize;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use tracing::{debug, info, warn};
@@ -56,10 +54,7 @@ struct SwiftTemplateProjectLayout {
 impl SwiftTemplateProjectLayout {
     fn detect(project_root: &Path, package_name: &str) -> Option<Self> {
         let project_yml = project_root.join("project.yml");
-        if !project_yml.exists()
-            || !project_root.join("manifest.toml").exists()
-            || !project_root.join("manifest.lock.toml").exists()
-        {
+        if !project_yml.exists() || !project_root.join("manifest.toml").exists() {
             return None;
         }
 
@@ -174,147 +169,24 @@ impl LanguageGenerator for SwiftGenerator {
             context.input_path.as_path()
         };
 
-        // 1. Load manifest.lock.toml if available (it always has actr_type)
-        // Try to find manifest.lock.toml by searching up from proto_root
-        let lock_file_path = proto_root
-            .ancestors()
-            .find_map(|p| {
-                let lock_path = p.join("manifest.lock.toml");
-                if lock_path.exists() {
-                    Some(lock_path)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_else(|| proto_root.join("manifest.lock.toml"));
-        let lock_file = LockFile::from_file(&lock_file_path).ok();
-        if lock_file.is_some() {
-            debug!("Loaded manifest.lock.toml from: {:?}", lock_file_path);
-        } else {
-            debug!(
-                "manifest.lock.toml not found at: {:?} (will fallback to Config only)",
-                lock_file_path
-            );
-        }
-
-        // 2. Separate local and remote files, and build relative paths
-        // Also build a mapping from proto file paths to their actr_type
-        let mut remote_paths = Vec::new();
-        let mut local_paths = Vec::new();
-        let mut remote_file_to_actr_type: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
-
-        for proto_file in &context.proto_files {
-            let is_remote = proto_file.to_string_lossy().contains("/remote/");
-            let relative_path = proto_file.strip_prefix(proto_root).unwrap_or(proto_file);
-            let path_str = relative_path.to_string_lossy().to_string();
-
-            if is_remote {
-                remote_paths.push(path_str.clone());
-                // Try to find matching dependency by proto file path
-                // Proto file path format: <dependency-alias>/<filename>.proto
-                // or remote/<dependency-alias>/<filename>.proto
-                if let Some(dep_alias) = relative_path
-                    .parent()
-                    .and_then(|p| p.file_name())
-                    .and_then(|n| n.to_str())
-                {
-                    debug!(
-                        "Trying to match dependency alias: {} for proto file: {}",
-                        dep_alias, path_str
-                    );
-
-                    // First, try to get actr_type from Config
-                    let mut actr_type_str: Option<String> = None;
-
-                    if let Some(dep) = context.config.dependencies.iter().find(|d| {
-                        d.alias == dep_alias
-                            || d.alias == to_pascal_case(dep_alias)
-                            || to_pascal_case(&d.alias) == to_pascal_case(dep_alias)
-                    }) {
-                        debug!(
-                            "Found matching dependency in Config: alias={}, actr_type={:?}",
-                            dep.alias, dep.actr_type
-                        );
-                        if let Some(ref actr_type) = dep.actr_type {
-                            // Convert ActrType to canonical string representation.
-                            actr_type_str = Some(actr_type.to_string_repr());
-                            debug!(
-                                "Got actr_type from Config: {}",
-                                actr_type_str.as_ref().unwrap()
-                            );
-                        }
-                    }
-
-                    // If not found in Config, try to get from LockFile
-                    if actr_type_str.is_none() {
-                        if let Some(ref lock) = lock_file {
-                            if let Some(locked_dep) = lock.get_dependency_by_alias(dep_alias) {
-                                debug!(
-                                    "Found matching dependency in LockFile: alias={}, actr_type={}",
-                                    locked_dep.alias, locked_dep.actr_type
-                                );
-                                actr_type_str = Some(locked_dep.actr_type.clone());
-                            } else {
-                                debug!(
-                                    "No matching dependency found in LockFile for alias: {} (available aliases: {:?})",
-                                    dep_alias,
-                                    lock.dependencies
-                                        .iter()
-                                        .map(|d| &d.alias)
-                                        .collect::<Vec<_>>()
-                                );
-                            }
-                        } else {
-                            debug!(
-                                "LockFile not found or could not be loaded: {:?}",
-                                lock_file_path
-                            );
-                        }
-                    }
-
-                    // If we found an actr_type, add it to the mapping
-                    if let Some(actr_type) = actr_type_str {
-                        remote_file_to_actr_type.insert(path_str.clone(), actr_type.clone());
-                        debug!("Mapped proto file {} to actr_type {}", path_str, actr_type);
-                    } else {
-                        debug!(
-                            "Could not find actr_type for dependency alias: {}",
-                            dep_alias
-                        );
-                    }
-                } else {
-                    debug!("Could not extract dependency alias from path: {}", path_str);
-                }
-            } else {
-                local_paths.push(path_str);
-            }
-        }
-
-        // 2. Build the unified options string
+        // 1. Build the unified options string.
+        // Phase 7: the plugin sources all local/remote classification and
+        // dependency metadata from the DispatchSpec — no more
+        // RemoteFiles/RemoteFileActrTypes/LocalFiles parameters.
         let mut options = format!(
             "Visibility=Public,manufacturer={}",
             context.config.package.actr_type.manufacturer
         );
 
-        if !remote_paths.is_empty() {
-            options.push_str(&format!(",RemoteFiles={}", remote_paths.join(":")));
-            // Add RemoteFileActrTypes mapping: file1=actr_type1;file2=actr_type2
-            if !remote_file_to_actr_type.is_empty() {
-                let actr_type_mappings: Vec<String> = remote_file_to_actr_type
-                    .iter()
-                    .map(|(file, actr_type)| format!("{}={}", file, actr_type))
-                    .collect();
-                options.push_str(&format!(
-                    ",RemoteFileActrTypes={}",
-                    actr_type_mappings.join(";")
-                ));
-            }
-        }
-
-        if !local_paths.is_empty() {
-            options.push_str(&format!(",LocalFiles={}", local_paths.join(":")));
-        }
+        // Pass dispatch spec path and hash to the protoc plugin.
+        options.push_str(&format!(
+            ",dispatch_spec={}",
+            context.dispatch_spec_path.display()
+        ));
+        options.push_str(&format!(
+            ",dispatch_spec_hash={}",
+            context.dispatch_spec_hash
+        ));
 
         // Step 1: Generate basic Swift protobuf types for files that contain messages, enums or extensions
         let swift_proto_files: Vec<_> = context
@@ -414,7 +286,7 @@ impl LanguageGenerator for SwiftGenerator {
         let mut scaffold_files = Vec::new();
 
         // 1. Parse local services to get methods for handler implementation
-        let mut services = self.parse_local_services(catalog)?;
+        let services = self.parse_local_services(catalog)?;
 
         if services.len() > 1 {
             let service_names: Vec<&str> = services.iter().map(|s| s.name.as_str()).collect();
@@ -426,36 +298,14 @@ impl LanguageGenerator for SwiftGenerator {
             )));
         }
 
-        let remote_targets = self.remote_targets_for_scaffold(context, catalog)?;
-        let handler_service = if let Some(service) = services.first_mut() {
-            service.workload_name = self
-                .extract_workload_name_for_service(&context.output, &service.name)
-                .unwrap_or_else(|| {
-                    let fallback = format!("{}Workload", service.name);
-                    warn!(
-                        "Could not find workload name for service '{}' in generated *.actor.swift files, \
-                        falling back to '{}'. Run `actr gen` infrastructure step first.",
-                        service.name, fallback
-                    );
-                    fallback
-                });
-
-            Some(service.clone())
-        } else {
-            None
-        };
-        let (service_name, workload_name) = handler_service
+        let handler_service = services.first().cloned();
+        let service_name = handler_service
             .as_ref()
-            .map(|service| (service.name.clone(), service.workload_name.clone()))
-            .unwrap_or_else(|| self.empty_local_workload_scaffold_names(context));
+            .map(|service| service.name.clone())
+            .unwrap_or_else(|| self.empty_local_service_name(context));
 
-        let scaffold_content = self.generate_scaffold_content(
-            &context.config.package.actr_type.manufacturer,
-            &service_name,
-            &workload_name,
-            &services,
-            &remote_targets,
-        )?;
+        let scaffold_content =
+            self.generate_scaffold_content(&service_name, !services.is_empty())?;
 
         let layout = self.detect_template_project_layout(context);
         let user_file_path = layout
@@ -560,11 +410,8 @@ impl LanguageGenerator for SwiftGenerator {
         let adapter_file_name = format!("{service_name}LifecycleAdapter.swift");
         let adapter_file_path = scaffold_root.join(&adapter_file_name);
 
-        let adapter_content = self.generate_lifecycle_adapter_content(
-            &service_name,
-            &workload_name,
-            !services.is_empty(),
-        )?;
+        let adapter_content =
+            self.generate_lifecycle_adapter_content(&service_name, !services.is_empty())?;
 
         let write_adapter = if !adapter_file_path.exists() {
             true
@@ -1242,24 +1089,11 @@ fn lower_camel_identifier_from_alias(alias: &str) -> String {
     }
 }
 
-fn remote_target_variable_name(alias: &str, used_names: &mut HashMap<String, usize>) -> String {
-    let base_name = lower_camel_identifier_from_alias(alias);
-    let count = used_names.entry(base_name.clone()).or_insert(0);
-    *count += 1;
-
-    if *count == 1 {
-        format!("{base_name}TargetType")
-    } else {
-        format!("{base_name}{count}TargetType")
-    }
-}
-
 #[derive(Serialize, Clone)]
 struct ProtoService {
     name: String,
     package: String,
     swift_package_prefix: String,
-    workload_name: String,
     methods: Vec<ProtoMethod>,
 }
 
@@ -1269,19 +1103,6 @@ struct ProtoMethod {
     swift_name: String,
     input_type: String,
     output_type: String,
-}
-
-#[derive(Serialize, Clone)]
-struct RemoteTarget {
-    alias: String,
-    variable_name: String,
-    routes: Vec<RemoteTargetRoute>,
-}
-
-#[derive(Serialize, Clone)]
-struct RemoteTargetRoute {
-    route_key: String,
-    variable_name: String,
 }
 
 impl SwiftGenerator {
@@ -1308,75 +1129,14 @@ impl SwiftGenerator {
                     name: service.name,
                     package: service.package,
                     swift_package_prefix,
-                    workload_name: service
-                        .workload_type
-                        .unwrap_or_else(|| "Workload".to_string()),
                     methods,
                 }
             })
             .collect())
     }
 
-    fn extract_actor_name_from_line(&self, line: &str) -> Option<String> {
-        let trimmed = line.trim();
-        if !trimmed.starts_with("public actor ") || !trimmed.contains(" {") {
-            return None;
-        }
-
-        let rest = trimmed.trim_start_matches("public actor ").trim_start();
-        let actor_name: String = rest
-            .chars()
-            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
-            .collect();
-
-        if actor_name.is_empty() {
-            None
-        } else {
-            Some(actor_name)
-        }
-    }
-
-    /// Extract workload name for a specific service from generated `*.actor.swift` files.
-    fn extract_workload_name_for_service(
-        &self,
-        output_dir: &Path,
-        service_name: &str,
-    ) -> Option<String> {
-        let expected = format!("{}Workload", service_name);
-
-        for actor_path in self.generated_actor_files(output_dir) {
-            if let Ok(content) = std::fs::read_to_string(&actor_path) {
-                for line in content.lines() {
-                    if let Some(actor_name) = self.extract_actor_name_from_line(line) {
-                        if actor_name == expected
-                            || actor_name
-                                .strip_suffix("Workload")
-                                .is_some_and(|name| name == service_name)
-                        {
-                            return Some(actor_name);
-                        }
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    fn empty_local_workload_scaffold_names(&self, context: &GenContext) -> (String, String) {
-        let workload_name = self
-            .extract_first_workload_name_from_generated_file(&context.output)
-            .unwrap_or_else(|| self.empty_local_workload_name_from_model(context));
-        let service_name = workload_name
-            .strip_suffix("Workload")
-            .unwrap_or(&workload_name)
-            .to_string();
-
-        (service_name, workload_name)
-    }
-
-    fn empty_local_workload_name_from_model(&self, context: &GenContext) -> String {
-        let workload_stem = context
+    fn empty_local_service_name(&self, context: &GenContext) -> String {
+        context
             .proto_model
             .files
             .iter()
@@ -1390,43 +1150,7 @@ impl SwiftGenerator {
                 }
             })
             .next()
-            .unwrap_or_else(|| "Client".to_string());
-
-        format!("{workload_stem}Workload")
-    }
-
-    fn extract_first_workload_name_from_generated_file(&self, output_dir: &Path) -> Option<String> {
-        for actor_path in self.generated_actor_files(output_dir) {
-            if let Ok(content) = std::fs::read_to_string(&actor_path) {
-                for line in content.lines() {
-                    if let Some(actor_name) = self.extract_actor_name_from_line(line)
-                        && actor_name.ends_with("Workload")
-                    {
-                        return Some(actor_name);
-                    }
-                }
-            }
-        }
-
-        None
-    }
-
-    fn generated_actor_files(&self, output_dir: &Path) -> Vec<PathBuf> {
-        let mut paths: Vec<PathBuf> = WalkDir::new(output_dir)
-            .min_depth(1)
-            .into_iter()
-            .filter_map(|entry| entry.ok())
-            .map(|entry| entry.into_path())
-            .filter(|path| {
-                path.is_file()
-                    && path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|name| name.ends_with(".actor.swift"))
-            })
-            .collect();
-        paths.sort();
-        paths
+            .unwrap_or_else(|| "Client".to_string())
     }
 
     fn swift_type_name(&self, type_ref: &TypeRef) -> String {
@@ -1439,118 +1163,18 @@ impl SwiftGenerator {
         }
     }
 
-    fn remote_targets_for_scaffold(
-        &self,
-        context: &GenContext,
-        catalog: &ScaffoldCatalog,
-    ) -> Result<Vec<RemoteTarget>> {
-        let dependency_actr_types = context
-            .config
-            .dependencies
-            .iter()
-            .filter_map(|dependency| {
-                dependency
-                    .actr_type
-                    .as_ref()
-                    .map(|actr_type| actr_type.to_string_repr())
-            })
-            .collect::<Vec<_>>();
-
-        for service in &catalog.remote_services {
-            let Some(service_actr_type) = &service.actr_type else {
-                continue;
-            };
-            if !dependency_actr_types
-                .iter()
-                .any(|dependency_actr_type| dependency_actr_type == service_actr_type)
-            {
-                return Err(ActrCliError::config_error(format!(
-                    "Missing manifest dependency alias for remote service '{}' with actr_type '{}'",
-                    service.name, service_actr_type
-                )));
-            }
-        }
-
-        let mut targets = Vec::new();
-        let mut used_variable_names = HashMap::new();
-
-        for dependency in &context.config.dependencies {
-            let Some(dependency_actr_type) = &dependency.actr_type else {
-                continue;
-            };
-            let dependency_actr_type = dependency_actr_type.to_string_repr();
-            let variable_name =
-                remote_target_variable_name(&dependency.alias, &mut used_variable_names);
-            let routes: Vec<RemoteTargetRoute> = catalog
-                .remote_services
-                .iter()
-                .filter(|service| {
-                    service.actr_type.as_deref() == Some(dependency_actr_type.as_str())
-                })
-                .flat_map(|service| {
-                    service.methods.iter().map(|method| RemoteTargetRoute {
-                        route_key: method.route_key.clone(),
-                        variable_name: variable_name.clone(),
-                    })
-                })
-                .collect();
-
-            if !routes.is_empty() {
-                targets.push(RemoteTarget {
-                    alias: dependency.alias.clone(),
-                    variable_name,
-                    routes,
-                });
-            }
-        }
-
-        Ok(targets)
-    }
-
-    fn generate_scaffold_content(
-        &self,
-        manufacturer: &str,
-        service_name: &str,
-        workload_name: &str,
-        services: &[ProtoService],
-        remote_targets: &[RemoteTarget],
-    ) -> Result<String> {
+    fn generate_scaffold_content(&self, service_name: &str, has_services: bool) -> Result<String> {
         #[derive(Serialize)]
         struct SwiftScaffoldContext {
-            #[serde(rename = "MANUFACTURER")]
-            manufacturer: String,
             #[serde(rename = "SERVICE_NAME")]
             service_name: String,
-            #[serde(rename = "WORKLOAD_NAME")]
-            workload_name: String,
-            #[serde(rename = "SERVICES")]
-            services: Vec<ProtoService>,
             #[serde(rename = "HAS_SERVICES")]
             has_services: bool,
-            #[serde(rename = "REMOTE_TARGETS")]
-            remote_targets: Vec<RemoteTarget>,
-            #[serde(rename = "REMOTE_TARGET_ROUTES")]
-            remote_target_routes: Vec<RemoteTargetRoute>,
-            #[serde(rename = "FIRST_REMOTE_TARGET_VARIABLE")]
-            first_remote_target_variable: Option<String>,
         }
 
-        let remote_target_routes = remote_targets
-            .iter()
-            .flat_map(|target| target.routes.iter().cloned())
-            .collect::<Vec<_>>();
-
         let context = SwiftScaffoldContext {
-            manufacturer: manufacturer.to_string(),
             service_name: service_name.to_string(),
-            workload_name: workload_name.to_string(),
-            services: services.to_vec(),
-            has_services: !services.is_empty(),
-            remote_targets: remote_targets.to_vec(),
-            remote_target_routes,
-            first_remote_target_variable: remote_targets
-                .first()
-                .map(|target| target.variable_name.clone()),
+            has_services,
         };
 
         let mut handlebars = Handlebars::new();
@@ -1563,15 +1187,12 @@ impl SwiftGenerator {
         struct HandlerContext {
             #[serde(rename = "SERVICE_NAME")]
             service_name: String,
-            #[serde(rename = "HANDLER_NAME")]
-            handler_name: String,
             #[serde(rename = "METHODS")]
             methods: Vec<ProtoMethod>,
         }
 
         let context = HandlerContext {
             service_name: service.name.clone(),
-            handler_name: format!("{}Handler", service.name),
             methods: service.methods.clone(),
         };
 
@@ -1583,37 +1204,21 @@ impl SwiftGenerator {
     /// Render the `LifecycleAdapter.swift` scaffold — the `Workload` protocol
     /// conformance glue that every actr-swift project needs.
     ///
-    /// The handler type name follows `protoc-gen-actrframework-swift`'s
-    /// convention: `<ServiceName>Handler` (impl: `<ServiceName>HandlerImpl`).
-    /// It is derived from the workload name (`<ServiceName>Workload`) so the
-    /// generated adapter matches the generated actor's types.
     fn generate_lifecycle_adapter_content(
         &self,
         service_name: &str,
-        workload_name: &str,
         has_services: bool,
     ) -> Result<String> {
-        let handler_name = workload_name
-            .strip_suffix("Workload")
-            .map(|stem| format!("{stem}Handler"))
-            .unwrap_or_else(|| format!("{service_name}Handler"));
-
         #[derive(Serialize)]
         struct LifecycleAdapterContext {
             #[serde(rename = "SERVICE_NAME")]
             service_name: String,
-            #[serde(rename = "WORKLOAD_NAME")]
-            workload_name: String,
-            #[serde(rename = "HANDLER_NAME")]
-            handler_name: String,
             #[serde(rename = "HAS_SERVICES")]
             has_services: bool,
         }
 
         let context = LifecycleAdapterContext {
             service_name: service_name.to_string(),
-            workload_name: workload_name.to_string(),
-            handler_name,
             has_services,
         };
 

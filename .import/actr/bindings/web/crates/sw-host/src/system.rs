@@ -124,14 +124,14 @@ impl System {
     ///
     /// Installs the HostGate message handler and routes messages to the correct target:
     /// - Local actor -> TODO (Phase 2)
-    /// - Remote actor -> `Gate.relay_envelope()`
+    /// - Remote actor -> `Gate.relay_envelope_with_type()`
     pub fn init_message_handler(&self) {
         let local_actor_id = Rc::clone(&self.local_actor_id);
         let outgate = Rc::clone(&self.outgate);
         let host_gate_for_reject = Arc::clone(&self.host_gate);
 
         self.host_gate
-            .set_message_handler(move |target_id, envelope| {
+            .set_message_handler(move |target_id, payload_type, envelope| {
                 log::info!(
                     "[System] MessageHandler: routing request_id={} to target={:?}",
                     envelope.request_id,
@@ -166,10 +166,17 @@ impl System {
                     } else {
                         // Remote invocation: relay the HostGate-stamped
                         // envelope through the peer gate without changing
-                        // its Request/Tell direction.
+                        // its payload lane or Request/Tell direction.
                         match gate {
                             Some(ref g) => {
-                                if let Err(e) = g.relay_envelope(&target_id, envelope.clone()).await {
+                                if let Err(e) = g
+                                    .relay_envelope_with_type(
+                                        &target_id,
+                                        payload_type,
+                                        envelope.clone(),
+                                    )
+                                    .await
+                                {
                                     log::error!("[System] Gate relay_envelope failed: {:?}", e);
                                     // Reject the pending HostGate oneshot so
                                     // send_request() returns an error instead of

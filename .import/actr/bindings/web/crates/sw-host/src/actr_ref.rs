@@ -157,7 +157,7 @@ impl<W: Workload> ActrRef<W> {
         let response_bytes = self
             .shared
             .host_gate
-            .send_request(&self.shared.actor_id, envelope)
+            .send_request_with_type(&self.shared.actor_id, R::payload_type(), envelope)
             .await?;
 
         // Decode the response.
@@ -207,7 +207,7 @@ impl<W: Workload> ActrRef<W> {
         // Send the message without waiting for a response.
         self.shared
             .host_gate
-            .send_message(&self.shared.actor_id, envelope)
+            .send_message_with_type(&self.shared.actor_id, R::payload_type(), envelope)
             .await
     }
 

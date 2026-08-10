@@ -9,12 +9,89 @@ import com.google.protobuf.DescriptorProtos.ServiceDescriptorProto
 import com.google.protobuf.UnknownFieldSet
 import com.google.protobuf.compiler.PluginProtos.CodeGeneratorRequest
 import com.google.protobuf.compiler.PluginProtos.CodeGeneratorResponse
+import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 
+/** Helper: write a DispatchSpec JSON to a temp file and return the path. */
+private fun writeDispatchSpec(routes: List<String>): String {
+    val tmp = Files.createTempFile("dispatch-spec", ".json")
+    val json = buildString {
+        append("{\"schema_version\":\"v1\",\"routes\":[")
+        routes.forEachIndexed { i, r ->
+            if (i > 0) append(",")
+            append(r)
+        }
+        append("]}")
+    }
+    Files.writeString(tmp, json)
+    tmp.toFile().deleteOnExit()
+    return tmp.toAbsolutePath().toString()
+}
+
+private fun localRoute(
+        routeKey: String,
+        protoFile: String,
+        protoService: String,
+        method: String,
+        inputType: String,
+        outputType: String,
+): String =
+        """{"route_key":"$routeKey","proto_file":"$protoFile","proto_service":"$protoService","method":"$method","input_type":"$inputType","output_type":"$outputType","payload_type":"rpcReliable"}"""
+
+private fun remoteRoute(
+        routeKey: String,
+        protoFile: String,
+        protoService: String,
+        method: String,
+        inputType: String,
+        outputType: String,
+        dependencyAlias: String,
+): String =
+        """{"route_key":"$routeKey","proto_file":"$protoFile","proto_service":"$protoService","method":"$method","input_type":"$inputType","output_type":"$outputType","payload_type":"rpcReliable","dependency_alias":"$dependencyAlias"}"""
+
 class KotlinActorGeneratorTest {
+    @Test
+    fun dispatchSpecRejectsUnsupportedSchemaAndInvalidRoutes() {
+        assertFailsWith<IllegalArgumentException> {
+            DispatchSpec.fromJson("""{"schema_version":"v2","routes":[]}""")
+        }
+
+        val route =
+                remoteRoute(
+                        "echo.Echo.Call",
+                        "remote/echo/echo.proto",
+                        "echo.Echo",
+                        "Call",
+                        "echo.Request",
+                        "echo.Response",
+                        "echo",
+                )
+        assertFailsWith<IllegalArgumentException> {
+            DispatchSpec.fromJson(
+                    """{"schema_version":"v1","routes":[$route,$route]}"""
+            )
+        }
+
+        val emptyAliasRoute =
+                remoteRoute(
+                        "echo.Echo.Call",
+                        "remote/echo/echo.proto",
+                        "echo.Echo",
+                        "Call",
+                        "echo.Request",
+                        "echo.Response",
+                        " ",
+                )
+        assertFailsWith<IllegalArgumentException> {
+            DispatchSpec.fromJson(
+                    """{"schema_version":"v1","routes":[$emptyAliasRoute]}"""
+            )
+        }
+    }
+
     @Test
     fun generatedTypeReferencesAreQualifiedByOwnerOuterClass() {
         val methods =
@@ -194,9 +271,17 @@ class KotlinActorGeneratorTest {
 
     @Test
     fun generateCodeQualifiesImportedAskRpcTypesForDataStreamApp() {
+        val specPath = writeDispatchSpec(listOf(
+                localRoute("data_stream_app.DataStreamApp.ContinuePromptResultStreams",
+                        "data_stream_app.proto", "data_stream_app.DataStreamApp",
+                        "ContinuePromptResultStreams",
+                        "ask.ContinuePromptResultStreamsRequest",
+                        "ask.ContinuePromptResultStreamsResponse")
+        ))
         val request =
                 CodeGeneratorRequest.newBuilder()
                         .addFileToGenerate("data_stream_app.proto")
+                        .setParameter("dispatch_spec=$specPath")
                         .addProtoFile(
                                 FileDescriptorProto.newBuilder()
                                         .setName("ask.proto")
@@ -248,9 +333,15 @@ class KotlinActorGeneratorTest {
 
     @Test
     fun generateCodeHonorsJavaPackageOuterClassAndMultipleFiles() {
+        val specPath = writeDispatchSpec(listOf(
+                localRoute("local.LocalService.Call", "local.proto",
+                        "local.LocalService", "Call",
+                        "proto.user.v1.Request", "proto.response.v1.Response")
+        ))
         val request =
                 CodeGeneratorRequest.newBuilder()
                         .addFileToGenerate("local.proto")
+                        .setParameter("dispatch_spec=$specPath")
                         .addProtoFile(
                                 FileDescriptorProto.newBuilder()
                                         .setName("user_types.proto")
@@ -304,21 +395,22 @@ class KotlinActorGeneratorTest {
                 generated,
                 "val request = com.example.user.v1.UserTypesProto.Request.parseFrom(envelope.payload)",
         )
-        assertContains(
-                metadata,
-                "\"generated_type\": \"com.example.user.v1.UserTypesProto.Request\"",
-        )
-        assertContains(
-                metadata,
-                "\"generated_type\": \"com.example.response.v1.Response\"",
-        )
+        assertContains(metadata, "\"schema_version\": \"v1\"")
+        assertContains(metadata, "\"generated_local_routes\"")
+        assertContains(metadata, "local.LocalService.Call")
     }
 
     @Test
     fun generateCodeUsesOuterClassSuffixWhenDefaultOuterClassCollides() {
+        val specPath = writeDispatchSpec(listOf(
+                localRoute("local.LocalService.Call", "local.proto",
+                        "local.LocalService", "Call",
+                        "proto.request.v1.Request", "proto.request.v1.Request")
+        ))
         val request =
                 CodeGeneratorRequest.newBuilder()
                         .addFileToGenerate("local.proto")
+                        .setParameter("dispatch_spec=$specPath")
                         .addProtoFile(
                                 FileDescriptorProto.newBuilder()
                                         .setName("request.proto")
@@ -356,9 +448,15 @@ class KotlinActorGeneratorTest {
 
     @Test
     fun generateCodeErrorsOnUnresolvedUnqualifiedRpcType() {
+        val specPath = writeDispatchSpec(listOf(
+                localRoute("local.LocalService.Call", "local.proto",
+                        "local.LocalService", "Call",
+                        "MissingRequest", "MissingResponse")
+        ))
         val request =
                 CodeGeneratorRequest.newBuilder()
                         .addFileToGenerate("local.proto")
+                        .setParameter("dispatch_spec=$specPath")
                         .addProtoFile(
                                 FileDescriptorProto.newBuilder()
                                         .setName("local.proto")
@@ -383,11 +481,20 @@ class KotlinActorGeneratorTest {
 
     @Test
     fun generateCodeWritesMetadataWithDescriptorOwnerRefs() {
+        val specPath = writeDispatchSpec(listOf(
+                localRoute("local.LocalService.Call", "local.proto",
+                        "local.LocalService", "Call",
+                        "ask.Request", "ask.Response"),
+                remoteRoute("ask.AskService.Ask", "ask.proto",
+                        "ask.AskService", "Ask",
+                        "ask.Request", "ask.Response",
+                        "ask-service")
+        ))
         val request =
                 CodeGeneratorRequest.newBuilder()
                         .addFileToGenerate("ask.proto")
                         .addFileToGenerate("local.proto")
-                        .setParameter("LocalFiles=local.proto,RemoteFiles=ask.proto,RemoteFileMapping=ask.proto=acme:Ask:1.0.0")
+                        .setParameter("dispatch_spec=$specPath")
                         .addProtoFile(
                                 FileDescriptorProto.newBuilder()
                                         .setName("ask.proto")
@@ -429,20 +536,76 @@ class KotlinActorGeneratorTest {
         val metadata =
                 generateCode(request).fileList.single { it.name == "actr-gen-meta.json" }.content
 
+        assertContains(metadata, "\"schema_version\": \"v1\"")
+        assertContains(metadata, "\"plugin_version\": \"0.6.1\"")
         assertContains(metadata, "\"language\": \"kotlin\"")
         assertContains(metadata, "\"local_services\"")
-        assertContains(metadata, "\"remote_services\"")
-        assertContains(metadata, "\"actr_type\": \"acme:Ask:1.0.0\"")
-        assertContains(metadata, "\"input_ref\": {\"proto_type\": \"ask.Request\"")
-        assertContains(metadata, "\"proto_package\": \"ask\"")
-        assertContains(metadata, "\"proto_file\": \"ask.proto\"")
+        assertContains(metadata, "\"handler_interface\": \"LocalServiceHandler\"")
+        assertContains(metadata, "\"input_ref\"")
+        assertContains(metadata, "\"generated_type\"")
+        assertContains(metadata, "\"generated_local_routes\"")
+        assertContains(metadata, "local.LocalService.Call")
+        assertContains(metadata, "\"generated_remote_routes\"")
+        assertContains(metadata, "ask.AskService.Ask")
+        assertContains(metadata, "\"dependency_alias\": \"ask-service\"")
+        assertContains(metadata, "\"client_type\": \"AskServiceClient\"")
+        assertContains(metadata, "actr-gen-meta.json")
+    }
+
+    @Test
+    fun generatedRemoteDispatcherResolvesAliasAtRuntime() {
+        val specPath = writeDispatchSpec(listOf(
+                remoteRoute("ask.AskService.Ask", "ask.proto",
+                        "ask.AskService", "Ask",
+                        "ask.Request", "ask.Response",
+                        "ask-service")
+        ))
+        val request =
+                CodeGeneratorRequest.newBuilder()
+                        .addFileToGenerate("ask.proto")
+                        .setParameter("dispatch_spec=$specPath")
+                        .addProtoFile(
+                                FileDescriptorProto.newBuilder()
+                                        .setName("ask.proto")
+                                        .setPackage("ask")
+                                        .addMessageType(
+                                                DescriptorProto.newBuilder().setName("Request"))
+                                        .addMessageType(
+                                                DescriptorProto.newBuilder().setName("Response"))
+                                        .addService(
+                                                ServiceDescriptorProto.newBuilder()
+                                                        .setName("AskService")
+                                                        .addMethod(
+                                                                MethodDescriptorProto.newBuilder()
+                                                                        .setName("Ask")
+                                                                        .setInputType(".ask.Request")
+                                                                        .setOutputType(".ask.Response")
+                                                        )
+                                        )
+                        )
+                        .build()
+
+        val dispatcher =
+                generateCode(request).fileList.single { it.name == "actr_dispatch.kt" }.content
+
+        assertContains(dispatcher, "val actrType = ctx.resolveDependency(\"ask-service\")")
+        assertContains(dispatcher, "val target = ctx.discover(actrType)")
+        assertContains(dispatcher, "ctx.callRaw(target, routeKey, payload, timeoutMs)")
+        assertFalse(dispatcher.contains("remoteTargets"))
+        assertFalse(dispatcher.contains("ActrType("))
     }
 
     @Test
     fun generateCodeErrorsOnUnresolvedQualifiedRpcType() {
+        val specPath = writeDispatchSpec(listOf(
+                localRoute("local.LocalService.Call", "local.proto",
+                        "local.LocalService", "Call",
+                        "external.MissingRequest", "external.MissingResponse")
+        ))
         val request =
                 CodeGeneratorRequest.newBuilder()
                         .addFileToGenerate("local.proto")
+                        .setParameter("dispatch_spec=$specPath")
                         .addProtoFile(
                                 FileDescriptorProto.newBuilder()
                                         .setName("local.proto")
@@ -469,11 +632,16 @@ class KotlinActorGeneratorTest {
 
     @Test
     fun metadataUsesCanonicalMethodNamesAndProtoPaths() {
+        val specPath = writeDispatchSpec(listOf(
+                remoteRoute("ask.AskService.HTTPServer", "remote/ask.proto",
+                        "ask.AskService", "HTTPServer",
+                        "ask.Request", "ask.Response",
+                        "ask-server")
+        ))
         val request =
                 CodeGeneratorRequest.newBuilder()
                         .addFileToGenerate(".\\remote\\ask")
-                        .setParameter(
-                                "RemoteFiles=./remote/ask,RemoteFileMapping=./remote/ask=acme:Ask:1.0.0")
+                        .setParameter("dispatch_spec=$specPath")
                         .addProtoFile(
                                 FileDescriptorProto.newBuilder()
                                         .setName(".\\remote\\ask")
@@ -498,14 +666,15 @@ class KotlinActorGeneratorTest {
         val response = generateCode(request)
         val metadata = response.fileList.single { it.name == "actr-gen-meta.json" }.content
 
+        assertContains(metadata, "\"generated_remote_routes\"")
+        assertContains(metadata, "ask.AskService.HTTPServer")
         assertContains(metadata, "\"proto_file\": \"remote/ask.proto\"")
-        assertContains(metadata, "\"snake_name\": \"http_server\"")
         assertContains(actorContent(response), "suspend fun http_server(")
     }
 }
 
 private fun actorContent(response: CodeGeneratorResponse): String {
-    return response.fileList.single { it.name != "actr-gen-meta.json" }.content
+    return response.fileList.single { it.name != "actr-gen-meta.json" && it.name != "actr_dispatch.kt" }.content
 }
 
 private fun payloadTypeOption(value: Long): MethodOptions {
