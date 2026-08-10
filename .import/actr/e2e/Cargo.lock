@@ -4,7 +4,9 @@ version = 4
 
 [[package]]
 name = "actr-config"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb560b40a107469290bd92bc286c3a897603bf5b226cd7d3f32976bd9aa2cf41"
 dependencies = [
  "actr-protocol",
  "chrono",
@@ -17,7 +19,9 @@ dependencies = [
 
 [[package]]
 name = "actr-framework"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2ad64b4cfe76028ac85debc2f548462d9e1db253c0694eebcd7f66dca54cfcd1"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -25,6 +29,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "prost 0.14.4",
+ "tokio",
  "tracing",
  "uuid",
  "wit-bindgen 0.57.1",
@@ -32,7 +37,9 @@ dependencies = [
 
 [[package]]
 name = "actr-hyper"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e204c07e5f3e2542fdd2e3db8a26624e801aafec3d8fe086801d7fb17a41e270"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -87,7 +94,9 @@ dependencies = [
 
 [[package]]
 name = "actr-pack"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7a4130f7b65666df338d19f825d713cc31c7496a31158f586cdaf8e124dc35f4"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -102,7 +111,9 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-native"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4d188912b5f97552ce02f6ed04414d3433d9b37b6a0e1f614342b19df73a4d92"
 dependencies = [
  "actr-hyper",
  "actr-platform-traits",
@@ -117,7 +128,9 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-traits"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f18223230e1e1ea525e537c734f04cbeb43d42bc3ac219393cdafbef937d4971"
 dependencies = [
  "async-trait",
  "thiserror 2.0.18",
@@ -125,7 +138,9 @@ dependencies = [
 
 [[package]]
 name = "actr-protocol"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "33c828bceda018f41ca4aa850282f19cdffaff241744e0c0a7bbfcbb1efbc26d"
 dependencies = [
  "anyhow",
  "base64",
@@ -145,7 +160,9 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b10e9a8d64059f99989fce185f4cb4144174cc06a936a31dc3a372f8078e4fc7"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -157,7 +174,9 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime-mailbox"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1403cb6963f6bf53f55115e126cf7320c953cc3550bc33f6f88a7365f655c9b1"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -174,7 +193,9 @@ dependencies = [
 
 [[package]]
 name = "actr-service-compat"
-version = "0.4.10"
+version = "0.4.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1663f0984bde4e01ff1e55d333df72336aa1f113d8f0559a0c22d0e182fbd437"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -1554,6 +1575,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tower-service",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
@@ -2862,6 +2884,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "webpki-roots 1.0.9",
 ]
 
 [[package]]
@@ -3618,6 +3641,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "tungstenite",
+ "webpki-roots 0.26.11",
 ]
 
 [[package]]
@@ -4325,6 +4349,24 @@ checksum = "5a6580f308b1fad9207618087a65c04e7a10bc77e02c8e84e9b00dd4b12fa0bb"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "0.26.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
+dependencies = [
+ "webpki-roots 1.0.9",
+]
+
+[[package]]
+name = "webpki-roots"
+version = "1.0.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+dependencies = [
+ "rustls-pki-types",
 ]
 
 [[package]]
@@ -5222,4 +5264,44 @@ dependencies = [
 
 [[patch.unused]]
 name = "actr"
-version = "0.4.10"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-config"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-framework"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-hyper"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-pack"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-platform-native"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-platform-traits"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-protocol"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-runtime"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-runtime-mailbox"
+version = "0.6.1"
+
+[[patch.unused]]
+name = "actr-service-compat"
+version = "0.6.1"

@@ -1,0 +1,4 @@
+module ActrCabiLib {
+    header "actr-cabi.h"
+    export *
+}

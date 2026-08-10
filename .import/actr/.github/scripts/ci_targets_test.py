@@ -43,6 +43,30 @@ class CiTargetsTest(unittest.TestCase):
         self.assertTrue(targets["rust_core"])
         self.assertIn(f"actrix_workspace:{path}", reasons)
 
+    def test_actr_cabi_change_triggers_native_and_binding_checks(self) -> None:
+        path = "crates/actr-cabi/src/lib.rs"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertTrue(targets["swift_binding"])
+        self.assertTrue(targets["csharp_binding"])
+        self.assertIn(f"actr_cabi:{path}", reasons)
+
+    def test_cabi_swift_change_triggers_swift_checks(self) -> None:
+        path = "bindings/cabi/swift/Sources/ActrCabi/ActrCabi.swift"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["swift_binding"])
+        self.assertIn(f"swift:{path}", reasons)
+
+    def test_winui_e2e_change_triggers_rust_and_csharp_checks(self) -> None:
+        path = "e2e/winui-echo-app/WinUiEchoApp/ActrService.cs"
+        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+        self.assertTrue(targets["rust_core"])
+        self.assertTrue(targets["csharp_binding"])
+        self.assertIn(f"winui_e2e:{path}", reasons)
+
     def test_typescript_echo_workload_triggers_workload_checks(self) -> None:
         targets, reasons = ci_targets.detect_targets(
             ["examples/typescript/echo-workload/src/actr_service.ts"],

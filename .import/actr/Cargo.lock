@@ -15,6 +15,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "actr-cabi"
+version = "0.6.1"
+dependencies = [
+ "actr-config",
+ "actr-framework",
+ "actr-hyper",
+ "actr-mock-actrix",
+ "actr-protocol",
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "inventory",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "actr-cli"
 version = "0.6.1"
 dependencies = [

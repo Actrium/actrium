@@ -31,6 +31,7 @@ jobs:
       python_workload: ${{ steps.targets.outputs.python_workload }}
       swift_binding: ${{ steps.targets.outputs.swift_binding }}
       kotlin_binding: ${{ steps.targets.outputs.kotlin_binding }}
+      csharp_binding: ${{ steps.targets.outputs.csharp_binding }}
       web_binding: ${{ steps.targets.outputs.web_binding }}
       c_go_workloads: ${{ steps.targets.outputs.c_go_workloads }}
       release_related: ${{ steps.targets.outputs.release_related }}
@@ -126,15 +127,15 @@ jobs:
             ~/.cargo/bin/wasm-pack
             ~/.cargo/bin/wasm-component-ld
             ~/.cargo/bin/wasm-tools
-          key: cargo-tools-v1-${{ runner.os }}-wp0.13.1-wcld0.5.22-wt1.249.0
+          key: cargo-tools-v1-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
       - name: Install wasm-pack
         if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - name: Install wasm Component Model toolchain
         if: steps.cargo-tools.outputs.cache-hit != 'true'
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked
-          cargo install wasm-tools --version 1.253.0 --locked
+          cargo install wasm-component-ld --version 0.5.26 --locked --force
+          cargo install wasm-tools --version 1.253.0 --locked --force
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash bindings/web/scripts/sync-cli-assets.sh --build
@@ -279,15 +280,15 @@ jobs:
             ~/.cargo/bin/wasm-pack
             ~/.cargo/bin/wasm-component-ld
             ~/.cargo/bin/wasm-tools
-          key: cargo-tools-v1-${{ runner.os }}-wp0.13.1-wcld0.5.22-wt1.249.0
+          key: cargo-tools-v1-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
       - name: Install wasm-pack
         if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - name: Install wasm Component Model toolchain
         if: steps.cargo-tools.outputs.cache-hit != 'true'
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked
-          cargo install wasm-tools --version 1.253.0 --locked
+          cargo install wasm-component-ld --version 0.5.26 --locked --force
+          cargo install wasm-tools --version 1.253.0 --locked --force
       - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash bindings/web/scripts/sync-cli-assets.sh --build
@@ -518,13 +519,13 @@ jobs:
           path: |
             ~/.cargo/bin/wasm-tools
             ~/.cargo/bin/wasm-pack
-          key: cargo-tools-v1-${{ runner.os }}-wt1.249.0-wp0.13.1
+          key: cargo-tools-v1-${{ runner.os }}-wt1.253.0-wp0.15.0
       - name: Install wasm-tools
         if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-tools --version 1.253.0 --locked
+        run: cargo install wasm-tools --version 1.253.0 --locked --force
       - name: Install wasm-pack
         if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - name: Verify TypeScript workload WIT drift
         run: |
           cmp core/framework/wit-v2/actr-workload.wit bindings/typescript/actr-workload/src/wit-v2/actr-workload.wit
@@ -588,6 +589,16 @@ jobs:
         run: brew install swiftlint opus
       - name: Run SwiftLint
         run: swiftlint lint --strict
+      - name: Check actr-cabi header sync
+        run: >-
+          git diff --no-index --exit-code --
+          crates/actr-cabi/actr-cabi.h
+          bindings/cabi/swift/Sources/ActrCabi/include/actr-cabi.h
+      - name: Type-check actr-cabi Swift wrapper
+        run: >-
+          swiftc -typecheck -swift-version 6
+          -I bindings/cabi/swift/Sources/ActrCabi/include
+          bindings/cabi/swift/Sources/ActrCabi/ActrCabi.swift
       - name: Build local Swift XCFramework
         working-directory: bindings/swift
         env:
@@ -671,10 +682,10 @@ jobs:
         with:
           path: |
             ~/.cargo/bin/wasm-pack
-          key: cargo-tools-v1-${{ runner.os }}-wp0.13.1
+          key: cargo-tools-v1-${{ runner.os }}-wp0.15.0
       - name: Install wasm-pack
         if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked
+        run: cargo install wasm-pack --version 0.15.0 --locked --force
       - name: Check formatting
         working-directory: bindings/web
         run: cargo fmt --all -- --check
@@ -806,6 +817,14 @@ jobs:
       - name: Check English-only source
         run: python .github/scripts/check_cjk.py
 
+  csharp:
+    name: C#
+    needs: determine
+    if: >-
+      needs.determine.outputs.csharp_binding == 'true' ||
+      needs.determine.outputs.rust_core == 'true'
+    uses: ./.github/workflows/ci-csharp.yml
+
   gate:
     name: Gate
     runs-on: ubuntu-latest
@@ -820,6 +839,7 @@ jobs:
       - python_workload
       - swift
       - kotlin
+      - csharp
       - web
       - c_go_workloads
       - test
@@ -836,6 +856,7 @@ jobs:
       PYTHON_WORKLOAD_RESULT: ${{ needs.python_workload.result }}
       SWIFT_RESULT: ${{ needs.swift.result }}
       KOTLIN_RESULT: ${{ needs.kotlin.result }}
+      CSHARP_RESULT: ${{ needs.csharp.result }}
       WEB_RESULT: ${{ needs.web.result }}
       C_GO_WORKLOADS_RESULT: ${{ needs.c_go_workloads.result }}
       TEST_RESULT: ${{ needs.test.result }}
@@ -857,6 +878,7 @@ jobs:
               "python_workload": os.environ["PYTHON_WORKLOAD_RESULT"],
               "swift": os.environ["SWIFT_RESULT"],
               "kotlin": os.environ["KOTLIN_RESULT"],
+              "csharp": os.environ["CSHARP_RESULT"],
               "web": os.environ["WEB_RESULT"],
               "c_go_workloads": os.environ["C_GO_WORKLOADS_RESULT"],
               "test": os.environ["TEST_RESULT"],

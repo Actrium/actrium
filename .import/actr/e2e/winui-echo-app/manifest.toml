@@ -1,0 +1,16 @@
+# manifest.toml - EchoApp package declaration and dependencies
+#
+# EchoApp uses the linked runtime (actr-cabi) and is not built through
+# `actr build`. This file declares the package identity and the remote
+# EchoService dependency, mirroring e2e/swift-echo-app/manifest.toml.
+
+edition = 1
+
+[package]
+name = "EchoApp"
+manufacturer = "actrium"
+version = "0.1.0"
+description = "Actrium EchoApp — Windows linked runtime (actr-cabi)"
+
+[dependencies]
+echo = { actr_type = "actrium:EchoService:1.0.0" }

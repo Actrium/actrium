@@ -73,6 +73,8 @@ members = [
     "cli",
     # === Language Bindings (Rust FFI) ===
     "bindings/ffi",
+    # === C ABI Primitives ===
+    "crates/actr-cabi",
     # === Testing Utilities ===
     "testing/mock-actrix",
     "testing/error-fixture",

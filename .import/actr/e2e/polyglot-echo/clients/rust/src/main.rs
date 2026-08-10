@@ -157,7 +157,9 @@ fn parse_args() -> Result<DriverArgs> {
                     "echo" => Scenario::Echo,
                     "server-stream" => Scenario::ServerStream,
                     "bidi" => Scenario::Bidi,
-                    other => bail!("unknown --scenario value: {other} (expected echo|server-stream|bidi)"),
+                    other => bail!(
+                        "unknown --scenario value: {other} (expected echo|server-stream|bidi)"
+                    ),
                 };
             }
             other if !other.starts_with("--") && message.is_none() => {
@@ -204,7 +206,7 @@ async fn scenario_echo(
         message: message.to_string(),
     };
     let response: EchoResponse = actr_ref
-        .call_remote(target, request, 30_000)
+        .call_remote(target, request)
         .await
         .map_err(|e| anyhow!("Echo RPC failed: {e}"))?;
 
@@ -268,7 +270,6 @@ async fn scenario_server_stream(
                 chunk_count,
                 text: message.to_string(),
             },
-            30_000,
         )
         .await
         .map_err(|e| anyhow!("StartServerStream RPC failed: {e}"))?;
@@ -286,9 +287,7 @@ async fn scenario_server_stream(
                 // best-effort sync read — we're in error path
                 received.try_lock().map(|g| g.len()).unwrap_or(0)
             };
-            anyhow!(
-                "server-stream: timed out waiting for chunks; received {count}/{chunk_count}"
-            )
+            anyhow!("server-stream: timed out waiting for chunks; received {count}/{chunk_count}")
         })?;
 
     let chunks = received.lock().await;
@@ -358,7 +357,6 @@ async fn scenario_bidi(
                 server_rx_stream_id: server_rx_id.clone(),
                 expected_chunks: chunk_count,
             },
-            30_000,
         )
         .await
         .map_err(|e| anyhow!("SetupBidi RPC failed: {e}"))?;
@@ -433,7 +431,7 @@ async fn main() -> Result<()> {
             args.manifest_toml.display()
         )
     })?;
-    let init = Node::from_config_with_manifest(&args.runtime_toml, manifest)
+    let init = Node::from_config_with_package(&args.runtime_toml, manifest.package.clone())
         .await
         .with_context(|| {
             format!(
@@ -480,9 +478,7 @@ async fn main() -> Result<()> {
 
     match args.scenario {
         Scenario::Echo => scenario_echo(&actr_ref, target, &args.message).await?,
-        Scenario::ServerStream => {
-            scenario_server_stream(&actr_ref, target, &args.message).await?
-        }
+        Scenario::ServerStream => scenario_server_stream(&actr_ref, target, &args.message).await?,
         Scenario::Bidi => scenario_bidi(&actr_ref, target, &args.message).await?,
     }
 

@@ -1,0 +1,36 @@
+[package]
+name = "actr-cabi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+description = "C ABI primitive layer for cross-platform actr consumers (Swift/C#) with Rust workloads"
+
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+name = "actr_cabi"
+
+[dependencies]
+actr-protocol.workspace = true
+actr-framework.workspace = true
+actr-hyper.workspace = true
+actr-config.workspace = true
+tokio = { workspace = true }
+inventory = "0.3"
+bytes = { workspace = true }
+async-trait = { workspace = true }
+tracing = "0.1"
+futures-util = { workspace = true }
+
+[dev-dependencies]
+actr-framework = { workspace = true }
+actr-protocol = { workspace = true }
+actr-mock-actrix = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
