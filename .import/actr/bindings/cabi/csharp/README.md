@@ -9,10 +9,14 @@ implements a foreign callback.
 
 ## Layout
 
-- `ActrSharp.csproj` — .NET 8 library (`AllowUnsafeBlocks`, `LangVersion latest`)
+- `ActrSharp.csproj` — .NET 10 library (`AllowUnsafeBlocks`, `LangVersion latest`);
+  packable to the Actrium GitHub Packages NuGet feed (managed-only — no native
+  DLL; see `ActrSharp/README.md` and the
+  [developer guide](../../../docs/bindings/csharp-actrsharp.md)).
 - `ActrCabi.cs` — hand-written wrapper: `LibraryImport` of the C ABI, `SafeHandle`
   for opaque typestate handles, thread-safe `ContinuationMap`, static cdecl
-  trampolines, and an `ActrCabiNode` async class.
+  trampolines, an `ActrCabiNode` async class, and native introspection
+  (`ActrNativeInfo`, `ValidateNative`, `InitRuntime` ABI/actr version check).
 - `build-actr-cabi-dll.sh` — builds a Rust workload crate (cdylib) into
   `actr_cabi.{dll,dylib,so}` per target (+ `actr-cabi.h`). Mirrors the Swift
   `build-xcframework.sh`.
@@ -48,12 +52,16 @@ Windows release (#520).
 ```csharp
 using ActrSharp;
 
-ActrCabiNode.InitRuntime();
+ActrCabiNode.InitRuntime();                       // installs Tokio runtime + verifies ABI/actr version
+ActrNativeInfo info = ActrCabiNode.ValidateNative(
+    "cabi.Echo",
+    "actr.e2e.echo-app"); // confirms the expected workload bundle is linked
 var node = new ActrCabiNode();
-await node.FromConfig("actr.toml");        // Node<Init>
-await node.LinkWorkload("cabi.Echo");     // actr_workload_create → Node::link
-await node.Register();                     // Node::register (remote actrix AIS)
-await node.Start();                        // Node::start → ActrRef
+await node.FromConfig("actr.toml");               // Node<Init>
+node.WithActorType("actrium:Echo:1.0.0");         // sets the AIS actor identity
+await node.LinkWorkload("cabi.Echo");             // actr_workload_create → Node::link
+await node.Register();                            // Node::register (remote actrix AIS)
+await node.Start();                               // Node::start → ActrRef
 byte[] resp = await node.Call("cabi.Echo", payload, timeoutMs: 30_000);
 ```
 
@@ -78,14 +86,16 @@ Two parallel lines; `actr-cabi` does **not** replace UniFFI:
 |---|---|---|
 | Workload | C# (foreign DynamicWorkload) | Rust (`export_workload!`) |
 | UI drives | foreign callback vtable | typestate chain only |
-| Package | NuGet (TODO) | — |
+| Package | NuGet (Actrium GitHub Packages) | managed-only; native ships in workload packages |
 
 Developers choose: .NET-native workload (UniFFI, TODO) vs Rust core
 cross-platform (cabi, this crate).
 
 ## Status
 
-- ✅ `ActrCabi.cs` compiles (`dotnet build`, CI verified on Windows)
+- ✅ `ActrCabi.cs` compiles on .NET 10 (`dotnet build`, CI verified on Windows)
 - ✅ `actr-cabi` compiles on Windows (`cargo build --target x86_64-pc-windows-msvc`)
+- ✅ Native introspection: ABI version, actr version, bundle ID query + `ValidateNative`
+- ✅ `ActrSharp` published to Actrium GitHub Packages via the unified release train (tag `vX.Y.Z`)
 - ✅ Runtime verified on the Swift line (iOS sim: initRuntime→fromConfig→link→register→start→call, callback fire)
-- ⏳ WinUI app + e2e (mirror `swift-cabi-app` in askaway-e2e) — TODO
+- ✅ WinUI runner verified in an interactive Windows desktop session

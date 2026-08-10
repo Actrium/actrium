@@ -59,3 +59,8 @@ impl MessageDispatcher for EchoAppDispatcher {
 }
 
 actr_cabi::export_workload!(EchoAppWorkload, "cabi.EchoApp");
+
+// Declare the bundle ID so hosts can confirm which native provider was loaded
+// via ActrCabiNode.ValidateNative / actr_cabi_bundle_id before driving the
+// typestate chain. The CI fixture packages this cdylib as actr_cabi.dll.
+actr_cabi::export_bundle!("actr.e2e.echo-app");

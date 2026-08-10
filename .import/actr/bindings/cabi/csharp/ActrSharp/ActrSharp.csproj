@@ -1,12 +1,62 @@
 <Project Sdk="Microsoft.NET.Sdk">
+
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+
+    <!-- NuGet package identity. The version MUST match the actr Cargo
+         workspace version (Cargo.toml [workspace.package] version); the
+         publish workflow verifies this before pushing. Bump both together. -->
     <PackageId>ActrSharp</PackageId>
-    <Description>C# wrapper over the actr-cabi C ABI — Rust core + .NET UI (WinUI 3 / WPF).</Description>
+    <Version>0.7.0</Version>
+    <Authors>Actor-RTC Contributors</Authors>
+    <Company>Actrium</Company>
+    <Description>C# wrapper over the actr-cabi C ABI — Rust core + .NET UI (WinUI 3 / WPF / Console).</Description>
+    <PackageReleaseNotes>https://github.com/Actrium/actr/releases/tag/v$(Version)</PackageReleaseNotes>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <PackageTags>actr;webrtc;actor;rust;cabi;ffi;winui;wpf;dotnet</PackageTags>
+    <PackageProjectUrl>https://github.com/Actrium/actr</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Actrium/actr</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <!-- SourceRevisionId is populated by SourceLink at build time; empty in
+         local builds, which is acceptable (NuGet accepts an empty commit). -->
+    <RepositoryCommit>$(SourceRevisionId)</RepositoryCommit>
+
+    <!-- Deterministic + reproducible builds, SourceLink, portable PDBs. -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <DebugType>portable</DebugType>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- Keep InformationalVersion exactly at the package version so the
+         managed/native version check compares clean SemVer, not a
+         SourceRevisionId-suffixed string. -->
+    <InformationalVersion>$(Version)</InformationalVersion>
+    <!-- AssemblyVersion/FileVersion must be 4-part numeric; strip any
+         pre-release (-suffix) or SourceRevisionId (+commit) from $(Version)
+         so versions like 0.8.0-rc.1 still produce a valid 0.8.0.0. -->
+    <_VersionNumeric>$(Version)</_VersionNumeric>
+    <_VersionNumeric Condition="$(Version.Contains('+'))">$(Version.Split('+')[0])</_VersionNumeric>
+    <_VersionNumeric Condition="$(_VersionNumeric.Contains('-'))">$(_VersionNumeric.Split('-')[0])</_VersionNumeric>
+    <AssemblyVersion>$(_VersionNumeric).0</AssemblyVersion>
+    <FileVersion>$(_VersionNumeric).0</FileVersion>
+
+    <IsPackable>true</IsPackable>
+    <IncludeContentInPack>true</IncludeContentInPack>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
 </Project>

@@ -1,0 +1,8 @@
+# C# build artifacts
+bin/
+obj/
+artifacts/
+
+# CI-generated: written by ci-csharp.yml to point the fixture pack at the
+# local folder feed. Never committed.
+nuget.config

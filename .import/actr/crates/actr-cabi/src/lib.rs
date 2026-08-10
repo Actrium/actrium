@@ -12,10 +12,11 @@ mod registry;
 mod runtime;
 
 pub use inventory;
-pub use registry::{LinkFn, WorkloadEntry, find_workload};
+pub use registry::{BundleEntry, LinkFn, WorkloadEntry, bundle_count, bundle_id, find_workload};
 pub use runtime::{init_runtime, shutdown_runtime};
-// `export_workload!` is `#[macro_export]` → available at crate root as
-// `actr_cabi::export_workload!`, not under `registry::`.
+// `export_workload!` and `export_bundle!` are `#[macro_export]` → available at
+// crate root as `actr_cabi::export_workload!` / `actr_cabi::export_bundle!`,
+// not under `registry::`.
 
 use std::ffi::{c_char, c_void};
 use std::path::Path;
@@ -31,7 +32,7 @@ pub use crate::error::{
 use crate::error::{alloc_bytes, alloc_cstring, free_bytes, free_cstring};
 use crate::handle::{
     box_actr_ref, box_attached, box_init, box_registered, box_workload, clone_actr_ref,
-    drop_actr_ref, drop_handle, take_attached, take_link_inputs, take_registered,
+    drop_actr_ref, drop_handle, take_attached, take_init, take_link_inputs, take_registered,
 };
 use crate::observer::{CabiObserver, ObserverCallbacks};
 
@@ -295,6 +296,100 @@ pub unsafe extern "C" fn actr_shutdown_runtime() -> i32 {
     catch_unwind_i32(runtime::shutdown_runtime)
 }
 
+// ── native introspection ────────────────────────────────────────────────────
+//
+// Static, infallible queries a host calls before driving the typestate chain
+// to confirm the loaded `actr_cabi` matches the managed binding's expectations
+// (ABI version + actr version) and to surface which workload bundle was
+// linked. Unlike callback buffers, the returned pointers point into static
+// memory and must NOT be freed.
+
+/// The actr-cabi ABI version. Bumped only on incompatible changes to the C
+/// surface (callback signatures, handle semantics, memory ownership). Hosts
+/// compare this against their compiled-in expectation before any other call.
+pub const ABI_VERSION: u32 = 1;
+
+/// The actr workspace version this `actr_cabi` was built from
+/// (`CARGO_PKG_VERSION`). Hosts compare this against the managed package
+/// version to detect a stale or mismatched native library.
+pub const ACTR_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+/// Return the ABI version. Infallible — no allocation, no decode.
+///
+/// SAFETY: panic-free by construction (reads a `const`). Unlike the callback
+/// extern fns above, no `catch_unwind` is needed; if a future edit adds a
+/// panic-capable operation (tracing, allocation, formatting), wrap it.
+#[unsafe(no_mangle)]
+pub extern "C" fn actr_cabi_abi_version() -> u32 {
+    ABI_VERSION
+}
+
+/// Return a pointer to the static actr version string.
+///
+/// Writes the byte length to `out_len` when non-null. The returned pointer
+/// points into static memory and is valid for the process lifetime — the
+/// caller must NOT free it (unlike `alloc_cstring` callback buffers).
+///
+/// SAFETY: panic-free by construction (`&'static str` pointer + optional raw
+/// write to a caller-provided `usize`). See `actr_cabi_abi_version` for why
+/// no `catch_unwind` is used.
+///
+/// # Safety
+///
+/// `out_len` may be null; if non-null it must point to a writable `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_cabi_actr_version(out_len: *mut usize) -> *const c_char {
+    if !out_len.is_null() {
+        // SAFETY: the caller guarantees a non-null `out_len` is writable.
+        unsafe { *out_len = ACTR_VERSION.len() };
+    }
+    ACTR_VERSION.as_ptr().cast::<c_char>()
+}
+
+/// Return a pointer to the static bundle ID registered by the workload
+/// cdylib via `export_bundle!`, or null if none was registered. When null,
+/// `out_len` (if non-null) is set to 0 so the host never reads stale bytes.
+///
+/// The returned pointer is static and must NOT be freed.
+///
+/// SAFETY: panic-free by construction (`inventory::iter` walks a static
+/// `AtomicPtr` list — no allocation, no mutex). See `actr_cabi_abi_version`
+/// for why no `catch_unwind` is used.
+///
+/// # Safety
+///
+/// `out_len` may be null; if non-null it must point to a writable `usize`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_cabi_bundle_id(out_len: *mut usize) -> *const c_char {
+    match bundle_id() {
+        Some(id) => {
+            if !out_len.is_null() {
+                // SAFETY: the caller guarantees a non-null `out_len` is writable.
+                unsafe { *out_len = id.len() };
+            }
+            id.as_ptr().cast::<c_char>()
+        }
+        None => {
+            if !out_len.is_null() {
+                // SAFETY: the caller guarantees a non-null `out_len` is writable.
+                unsafe { *out_len = 0 };
+            }
+            std::ptr::null()
+        }
+    }
+}
+
+/// Return the number of distinct bundle IDs registered. Should be 0 or 1;
+/// a value greater than 1 means multiple workload cdylibs were linked into
+/// the process, violating the single-provider contract.
+///
+/// SAFETY: panic-free by construction (`inventory::iter().count()` on a
+/// static list). See `actr_cabi_abi_version` for why no `catch_unwind` is used.
+#[unsafe(no_mangle)]
+pub extern "C" fn actr_cabi_bundle_count() -> u32 {
+    bundle_count() as u32
+}
+
 // ── node: from_config ───────────────────────────────────────────────────────
 
 /// Create a `Node<Init>` from a TOML config file path. Async — result is
@@ -338,6 +433,45 @@ pub unsafe extern "C" fn actr_node_from_config(
                 emit_handle_error(code, "actr-cabi task failed", callback, ud as *mut c_void)
             },
         )
+    })
+}
+
+// ── node: with_actor_type (synchronous) ─────────────────────────────────────
+
+/// Override a linked node's actor identity before attaching a workload.
+///
+/// Returns a replacement `ActrNodeInitHandle`, or null when the input actor
+/// type is invalid or the supplied handle is stale or has the wrong state. The
+/// actor type must be `manufacturer:name:version` and satisfies the protocol
+/// identity validation rules.
+///
+/// # Safety
+///
+/// `init_handle` must be a valid `ActrNodeInitHandle` that has not been
+/// consumed. `actor_type_ptr` must point to `actor_type_len` valid UTF-8 bytes
+/// (or be null with `actor_type_len == 0`).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_node_with_actor_type(
+    init_handle: *mut c_void,
+    actor_type_ptr: *const c_char,
+    actor_type_len: usize,
+) -> *mut c_void {
+    catch_unwind_ptr(|| {
+        // SAFETY: the function's contract requires `actor_type_ptr` to be
+        // readable for `actor_type_len` bytes whenever it is non-null.
+        let actor_type_str = match unsafe { decode_str(actor_type_ptr, actor_type_len) } {
+            Ok(actor_type) => actor_type,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        let actor_type = match ActrType::from_string_repr(&actor_type_str) {
+            Ok(actor_type) => actor_type,
+            Err(_) => return std::ptr::null_mut(),
+        };
+        let node = match take_init(init_handle) {
+            Some(node) => node,
+            None => return std::ptr::null_mut(),
+        };
+        box_init(node.with_actor_type(actor_type))
     })
 }
 

@@ -83,6 +83,13 @@ readonly VALID_STAGES=(
   "notify-wechat"
 )
 
+# State files produced by reusable workflows are report inputs even though
+# they are not directly executable release-train.sh stages.
+readonly REPORT_STAGES=(
+  "${VALID_STAGES[@]}"
+  "publish-actrsharp"
+)
+
 readonly OPTIONAL_SKIPPED_COMPONENTS=(
 )
 readonly PACKAGE_SYNC_GITHUB_API="https://api.github.com"
@@ -186,7 +193,7 @@ generate_report() {
     # Merge per-stage state files into the main state file.
     : >"$STATE_FILE"
     local stage_state
-    for stage_name in "${VALID_STAGES[@]}"; do
+    for stage_name in "${REPORT_STAGES[@]}"; do
       stage_state="$REPORT_DIR/release-train-v${VERSION}.${stage_name}.state.tsv"
       if [[ -f "$stage_state" ]]; then
         cat "$stage_state" >>"$STATE_FILE"
@@ -449,6 +456,11 @@ parse_args() {
 }
 
 validate_version() {
+  if [[ "$VERSION" == *+* ]]; then
+    fail "Release versions must not contain SemVer build metadata because package registries normalize it inconsistently"
+    return 1
+  fi
+
   if [[ "$PRE_RELEASE" == true ]]; then
     if ! is_strict_semver "$VERSION" || [[ "${VERSION%%+*}" != *-* ]]; then
       fail "Pre-release version must follow strict SemVer X.Y.Z-<id> format"
@@ -1037,6 +1049,19 @@ for wp in web_packages:
             pkg["optionalDependencies"][dep_name] = version
     wp.write_text(json.dumps(pkg, indent=2) + "\n")
 
+csharp_project = repo / "bindings/cabi/csharp/ActrSharp/ActrSharp.csproj"
+csharp_updated, csharp_count = re.subn(
+    r'(<Version>)[^<]+(</Version>)',
+    rf'\g<1>{version}\g<2>',
+    csharp_project.read_text(),
+    count=1,
+)
+if csharp_count != 1:
+    raise RuntimeError(
+        f"expected one ActrSharp Version replacement in {csharp_project}, got {csharp_count}"
+    )
+csharp_project.write_text(csharp_updated)
+
 typescript_plugin_package = repo / "tools/protoc-gen/typescript/package.json"
 typescript_plugin_package_data = json.loads(typescript_plugin_package.read_text())
 typescript_plugin_package_data["version"] = version
@@ -1093,6 +1118,14 @@ for path, pattern, replacement, expected_count in embedded_versions:
         )
     path.write_text(updated)
 PY
+
+  local workload_manifest="$WORK_REPO_ROOT/e2e/winui-echo-app/workload/Cargo.toml"
+  if [[ -f "$workload_manifest" ]]; then
+    (
+      cd "$WORK_REPO_ROOT"
+      cargo generate-lockfile --manifest-path e2e/winui-echo-app/workload/Cargo.toml
+    )
+  fi
 }
 
 all_publishable_crates() {
@@ -1666,6 +1699,7 @@ stage_release_version_files() {
     bindings/typescript/Cargo.toml \
     bindings/typescript/package.json \
     bindings/typescript/actr-workload/package.json \
+    bindings/cabi/csharp/ActrSharp/ActrSharp.csproj \
     bindings/web/crates/actr-web-abi/Cargo.toml \
     bindings/web/crates/common/Cargo.toml \
     bindings/web/crates/sw-host/Cargo.toml \
@@ -1674,7 +1708,8 @@ stage_release_version_files() {
     bindings/web/crates/platform-web/Cargo.toml \
     bindings/web/crates/framework-web-entry-smoke/Cargo.toml \
     bindings/web/Cargo.lock \
-    bindings/typescript/Cargo.lock
+    bindings/typescript/Cargo.lock \
+    e2e/winui-echo-app/workload/Cargo.lock
 }
 
 commit_release_prepare() {
@@ -2097,7 +2132,7 @@ stage_report() {
 
   # List all stage state files found.
   local stage_name
-  for stage_name in "${VALID_STAGES[@]}"; do
+  for stage_name in "${REPORT_STAGES[@]}"; do
     local sf
     sf="$(stage_state_file "$stage_name")"
     if [[ -f "$sf" ]]; then
@@ -2184,6 +2219,7 @@ kind_order = [
     ("crate", "Rust Crates"),
     ("python", "Python"),
     ("npm", "npm Packages"),
+    ("nuget", "NuGet Packages"),
     ("package_sync", "Package Sync"),
     ("cli_binary", "CLI Binaries (GitHub Release)"),
 ]

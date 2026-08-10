@@ -12,6 +12,7 @@ on:
       - ".github/workflows/_actr-cli-release.yml"
       - ".github/workflows/_actrix-release.yml"
       - ".github/workflows/_protoc-plugins-release.yml"
+      - ".github/workflows/publish-actrsharp.yml"
       - "scripts/release-actr-cli.sh"
       - "scripts/release-train.sh"
       - "scripts/tests/release-asset-validation.sh"
@@ -30,6 +31,7 @@ on:
       - "bindings/typescript/package.json"
       - "bindings/swift/scripts/package-binary.sh"
       - "bindings/kotlin/actr-kotlin/build.gradle.kts"
+      - "bindings/cabi/csharp/ActrSharp/**"
   pull_request:
     branches:
       - main
@@ -42,6 +44,7 @@ on:
       - ".github/workflows/_actr-cli-release.yml"
       - ".github/workflows/_actrix-release.yml"
       - ".github/workflows/_protoc-plugins-release.yml"
+      - ".github/workflows/publish-actrsharp.yml"
       - "scripts/release-actr-cli.sh"
       - "scripts/release-train.sh"
       - "scripts/tests/release-asset-validation.sh"
@@ -60,6 +63,7 @@ on:
       - "bindings/typescript/package.json"
       - "bindings/swift/scripts/package-binary.sh"
       - "bindings/kotlin/actr-kotlin/build.gradle.kts"
+      - "bindings/cabi/csharp/ActrSharp/**"
 
 concurrency:
   group: release-train-basic-verify-${{ github.ref }}
@@ -70,6 +74,35 @@ permissions:
   id-token: write
 
 jobs:
+  resolve-actrsharp:
+    name: Resolve ActrSharp dry-run context
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.context.outputs.version }}
+      release_sha: ${{ steps.context.outputs.release_sha }}
+    steps:
+      - name: Checkout current ref
+        uses: actions/checkout@v5
+
+      - name: Resolve version and SHA
+        id: context
+        run: |
+          version=$(python3 -c "import tomllib;from pathlib import Path;d=tomllib.loads(Path('Cargo.toml').read_text());print(d['workspace']['package']['version'])")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "release_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  verify-actrsharp:
+    name: Verify ActrSharp release dry-run
+    needs: resolve-actrsharp
+    permissions:
+      contents: read
+    uses: ./.github/workflows/publish-actrsharp.yml
+    with:
+      version: ${{ needs.resolve-actrsharp.outputs.version }}
+      source_ref: ${{ needs.resolve-actrsharp.outputs.release_sha }}
+      release_sha: ${{ needs.resolve-actrsharp.outputs.release_sha }}
+      publish: false
+
   verify:
     name: Verify basic release train dry-run
     runs-on: ubuntu-latest

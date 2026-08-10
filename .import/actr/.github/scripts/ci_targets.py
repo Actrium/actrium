@@ -37,6 +37,18 @@ FULL_TRIGGER_PATTERNS = (
     "scripts/release-train.sh",
 )
 
+CSHARP_CORE_DEPENDENCY_PREFIXES = (
+    "core/config/",
+    "core/framework/",
+    "core/hyper/",
+    "core/pack/",
+    "core/platform-traits/",
+    "core/protocol/",
+    "core/runtime/",
+    "core/runtime-mailbox/",
+    "core/service-compat/",
+)
+
 
 def run_git_diff(base_sha: str, head_sha: str) -> list[str]:
     result = subprocess.run(
@@ -85,6 +97,8 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             targets["ts_binding"] = True
             targets["swift_binding"] = True
             targets["web_binding"] = True
+            if path.startswith(CSHARP_CORE_DEPENDENCY_PREFIXES):
+                targets["csharp_binding"] = True
             if path == "core/framework/wit-v2/actr-workload.wit":
                 targets["c_go_workloads"] = True
                 targets["python_workload"] = True

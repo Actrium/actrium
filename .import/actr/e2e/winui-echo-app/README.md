@@ -30,11 +30,10 @@ WinUI app (C#)  ──Call("cabi.EchoApp.Echo", EchoRequest bytes)──▶  Rus
   Swift's `swift-local:`), and decodes the `EchoResponse` reply. `EchoProto.cs`
   is a hand-rolled protobuf codec (no Google.Protobuf dependency).
 
-## Status — UNVERIFIED
+## Status — Windows runner
 
-The CI gate builds this fixture on Windows. Running the complete E2E flow
-requires a Windows host with the .NET 8 SDK, Windows SDK, and the Rust
-`x86_64-pc-windows-msvc` target:
+The complete flow requires a Windows desktop session with the .NET 8 SDK,
+Windows SDK, Rust `x86_64-pc-windows-msvc` target, `jq`, and `sqlite3`:
 
 ```bash
 rustup target add x86_64-pc-windows-msvc
@@ -42,6 +41,20 @@ bash e2e/winui-echo-app/run.sh
 ```
 
 Known risks / assumptions (see also the commit message):
+
+- **Interactive desktop session is required.** An OpenSSH shell runs in
+  Session 0, where an unpackaged WinUI 3 app fails inside
+  `Application.Start` before application code executes. `run.sh` starts the
+  app through an interactive Task Scheduler task for the logged-in user, then
+  waits for the logs written by that task. The nightly runner therefore needs
+  an active desktop user session.
+- **Native identity validation.** The app verifies the `cabi.EchoApp` workload
+  and its `actr.e2e.echo-app` bundle ID, then sets
+  `actrium:EchoApp:0.1.0` before linking. This prevents the default local
+  actor type from being rejected by the EchoService ACL.
+- **Startup diagnostics.** `RuntimeLog.cs` writes startup, window lifecycle,
+  and Actr typestate events to `ACTR_ECHOAPP_LOG_PATH`. On failure the E2E
+  runner includes the final runtime-log lines with stdout and stderr.
 
 - **build-actr-cabi-dll.sh target dir.** The script expects the cdylib under
   `${WORKSPACE_ROOT}/target/<target>/<profile>`. `run.sh` exports

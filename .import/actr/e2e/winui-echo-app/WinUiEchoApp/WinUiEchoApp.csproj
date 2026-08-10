@@ -12,6 +12,10 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <UseWinUI>true</UseWinUI>
+    <!-- Own the entry point so startup progress is logged before WinUI initializes. -->
+    <DefineConstants>$(DefineConstants);DISABLE_XAML_GENERATED_MAIN</DefineConstants>
+    <!-- The E2E runner supplies the native C ABI version to its managed reference. -->
+    <ActrSharpProjectProperties Condition="'$(ActrCabiVersion)' != ''">Version=$(ActrCabiVersion)</ActrSharpProjectProperties>
   </PropertyGroup>
 
   <ItemGroup>
@@ -19,7 +23,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\..\bindings\cabi\csharp\ActrSharp\ActrSharp.csproj"/>
+    <ProjectReference
+      Include="..\..\..\bindings\cabi\csharp\ActrSharp\ActrSharp.csproj"
+      AdditionalProperties="$(ActrSharpProjectProperties)" />
   </ItemGroup>
 
   <ItemGroup>
