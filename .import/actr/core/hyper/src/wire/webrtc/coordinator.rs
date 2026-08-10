@@ -7835,6 +7835,93 @@ impl WebRtcCoordinator {
         self.active_connection_or_retire(target_id).await
     }
 
+    /// Wait for an existing session to become business-sendable before the
+    /// outbound factory exposes it to `WirePool`.
+    ///
+    /// An inbound Offer publishes its Answerer `PeerState` before the
+    /// Offerer's DataChannels are registered. Returning that placeholder here
+    /// lets `WirePool` mark it Ready and makes `get_lane` create a second local
+    /// DataChannel on the Answerer. The remote Offerer does not own an actr
+    /// receive loop for that duplicate lane, so a request can be submitted
+    /// locally without ever reaching the remote RPC gate.
+    async fn active_sendable_connection_or_wait(
+        &self,
+        target_id: &ActrId,
+        cancel_token: Option<&CancellationToken>,
+    ) -> ActorResult<Option<WebRtcConnection>> {
+        loop {
+            let Some(connection) = self.active_connection_or_retire(target_id).await else {
+                return Ok(None);
+            };
+            let observed_session_id = connection.session_id();
+
+            if self
+                .is_peer_sendable_session(target_id, observed_session_id)
+                .await
+            {
+                return Ok(Some(connection));
+            }
+
+            tracing::info!(
+                peer_id = %target_id.to_string_repr(),
+                session_id = observed_session_id,
+                "Factory found an existing WebRTC session that is not sendable; waiting for readiness"
+            );
+
+            let ready_session_id = if let Some(token) = cancel_token {
+                tokio::select! {
+                    biased;
+                    _ = token.cancelled() => {
+                        return Err(ActrError::Internal(
+                            "Connection creation cancelled while waiting for an existing WebRTC session"
+                                .to_string(),
+                        ));
+                    }
+                    ready = self.wait_for_peer_sendable(
+                        target_id,
+                        INITIAL_CONNECTION_TIMEOUT,
+                    ) => ready,
+                }
+            } else {
+                self.wait_for_peer_sendable(target_id, INITIAL_CONNECTION_TIMEOUT)
+                    .await
+            };
+
+            let Some(ready_session_id) = ready_session_id else {
+                tracing::warn!(
+                    peer_id = %target_id.to_string_repr(),
+                    session_id = observed_session_id,
+                    "Existing WebRTC session did not become sendable before the factory deadline"
+                );
+                return Err(ActrError::TimedOut);
+            };
+
+            let ready_connection = {
+                let peers = self.peers.read().await;
+                peers.get(target_id).and_then(|state| {
+                    (state.session_id == ready_session_id).then(|| state.webrtc_conn.clone())
+                })
+            };
+
+            let Some(ready_connection) = ready_connection else {
+                // The event belonged to a session that was replaced before
+                // the factory could claim it. Re-read and wait on the current
+                // generation instead of handing out the stale connection.
+                continue;
+            };
+
+            if ready_connection.is_closing_or_closed()
+                || !self
+                    .is_peer_sendable_session(target_id, ready_session_id)
+                    .await
+            {
+                continue;
+            }
+
+            return Ok(Some(ready_connection));
+        }
+    }
+
     /// Inner implementation of create_connection without overall timeout
     async fn create_connection_inner(
         self: &Arc<Self>,
@@ -7857,8 +7944,13 @@ impl WebRtcCoordinator {
 
         tracing::debug!("🏭 [Factory] Creating WebRTC connection to {:?}", target_id);
 
-        // 2. Reuse only a session that has not entered terminal teardown.
-        if let Some(connection) = self.active_connection_or_retire(target_id).await {
+        // 2. Reuse only a business-sendable session. In particular, an
+        // Answerer placeholder is visible before its received DataChannels are
+        // registered and must not escape to WirePool during that interval.
+        if let Some(connection) = self
+            .active_sendable_connection_or_wait(target_id, cancel_token.as_ref())
+            .await?
+        {
             tracing::debug!(
                 "♻️ [Factory] Reusing existing WebRTC connection: {:?}",
                 target_id
