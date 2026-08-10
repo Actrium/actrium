@@ -16,7 +16,7 @@ export interface NativeWorkerDispatchOptions {
  */
 export class NativeWorkerDispatch {
   private readonly post: NativeWorkerDispatchOptions['post'];
-  private wasmBytes: ArrayBuffer | null = null;
+  private wasmSource: ArrayBuffer | WebAssembly.Module | null = null;
   private host: NativeGuestHost | null = null;
   private currentTurnId = 0;
   private callSeq = 0;
@@ -36,7 +36,7 @@ export class NativeWorkerDispatch {
     if (this.destroyed && message.type !== 'destroy') return;
     switch (message.type) {
       case 'init':
-        this.wasmBytes = message.wasmBytes;
+        this.wasmSource = 'wasmModule' in message ? message.wasmModule : message.wasmBytes;
         this.post({ type: 'ready' });
         return;
       case 'hostResult':
@@ -65,7 +65,7 @@ export class NativeWorkerDispatch {
     this.currentTurnId = message.turnId;
     try {
       if (message.type === 'load') {
-        if (!this.wasmBytes) throw new Error('native worker was not initialized');
+        if (!this.wasmSource) throw new Error('native worker was not initialized');
         if (this.host) throw new Error('native guest is already loaded');
         this.host = new NativeGuestHost({
           dispatch: this.createProxyDispatch(),
@@ -74,7 +74,7 @@ export class NativeWorkerDispatch {
           onGuestRunStateChange: (running) =>
             this.post({ type: 'guestState', turnId: message.turnId, running }),
         });
-        await this.host.load(this.wasmBytes);
+        await this.host.load(this.wasmSource);
         if (message.initialProps !== undefined) {
           this.host.emitEvent('props', message.initialProps);
         }

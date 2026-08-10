@@ -78,6 +78,21 @@ describe('NativeGuestWorkerView — off-main-thread native guest', () => {
     expect(settled).toBe(true);
   });
 
+  it('accepts an already-compiled module without turning it back into bytes', async () => {
+    engine = makeEngine({
+      wasmModule: await WebAssembly.compile(UI_GUEST),
+      contract: emptyContract,
+      hostModules: {},
+      watchdogTimeout: 20_000,
+    });
+    const receiver = engine.createReceiver();
+
+    await engine.loadBundle();
+
+    expect(engine.isLoaded).toBe(true);
+    expect(receiver.getComponentTree()?.children[0].props.text).toBe('hello from rust');
+  });
+
   it('round-trips bounded pointer reads and writes without mirroring the whole heap', async () => {
     type Input = { assetId: string; dstPtr: number; dstCap: number };
     type Output = { ok: boolean; written?: number; width?: number; height?: number };

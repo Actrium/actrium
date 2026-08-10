@@ -9,6 +9,7 @@ export interface NativeWorkerError {
 
 export type MainToNativeWorkerMessage =
   | { type: 'init'; wasmBytes: ArrayBuffer }
+  | { type: 'init'; wasmModule: WebAssembly.Module }
   | {
       type: 'load';
       turnId: number;

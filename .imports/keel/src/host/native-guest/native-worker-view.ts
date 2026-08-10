@@ -24,7 +24,10 @@ export interface NativeGuestWorkerKillInfo {
 }
 
 export interface NativeGuestWorkerOptions {
-  wasmBytes: BufferSource;
+  /** Decoded bytes for legacy loaders. Exactly one wasm source is required. */
+  wasmBytes?: BufferSource;
+  /** A browser-compiled module, which can be structured-cloned into the worker. */
+  wasmModule?: WebAssembly.Module;
   contract: KeelContractShape;
   hostModules: HostModuleImplementationMap;
   components: Record<string, ComponentType>;
@@ -93,6 +96,11 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
   private rejectReady!: (error: Error) => void;
 
   constructor(options: NativeGuestWorkerOptions) {
+    const hasWasmBytes = options.wasmBytes !== undefined;
+    const hasWasmModule = options.wasmModule !== undefined;
+    if (hasWasmBytes === hasWasmModule) {
+      throw new Error('native guest requires exactly one wasm source');
+    }
     this.dispatch = createHostModuleDispatch(options.contract, options.hostModules);
     this.onLog = options.onLog;
     this.watchdogTimeout = Math.max(1, options.watchdogTimeout ?? 5000);
@@ -114,8 +122,14 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
     this.worker.onerror = (event) =>
       this.failFatal(new Error(`[keel] native worker error: ${event.message || 'unknown'}`));
 
-    const wasmBytes = copyBufferSource(options.wasmBytes);
-    this.worker.postMessage({ type: 'init', wasmBytes }, [wasmBytes]);
+    if (options.wasmModule !== undefined) {
+      // WebAssembly.Module is structured-cloneable. Keeping it compiled avoids
+      // buffering and recompiling a module that the browser received as a stream.
+      this.worker.postMessage({ type: 'init', wasmModule: options.wasmModule });
+    } else {
+      const wasmBytes = copyBufferSource(options.wasmBytes!);
+      this.worker.postMessage({ type: 'init', wasmBytes }, [wasmBytes]);
+    }
   }
 
   get isLoaded(): boolean {
