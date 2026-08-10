@@ -10,7 +10,7 @@ from .constants import (
     ENV_WIT_PATH,
     REPO_WIT_PATH,
 )
-from .protocol import Workload
+from .context import ActrContext, RpcRequest, Workload
 
 
 def __getattr__(name: str) -> Any:
@@ -32,6 +32,8 @@ __all__ = [
     "DEFAULT_WORLD_MODULE",
     "ENV_WIT_PATH",
     "REPO_WIT_PATH",
+    "ActrContext",
+    "RpcRequest",
     "Workload",
     "componentize",
     "generate_bindings",

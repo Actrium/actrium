@@ -153,14 +153,13 @@ class ServerActivity : AppCompatActivity() {
 
         lifecycleScope.launch {
             try {
-                copyAssetToInternalStorage("actr.toml")
-                val manifestPath = copyAssetToInternalStorage("manifest.toml")
+                val runtimeConfigPath = copyAssetToInternalStorage("actr.toml")
                 val actorType =
                     ActrType(manufacturer = "actrium", name = "EchoService", version = "1.0.0")
                 val workload = dynamicWorkload(EchoServerWorkload())
                 val system =
                     linkedWithMonitoring(
-                        configPath = manifestPath,
+                        configPath = runtimeConfigPath,
                         actorType = actorType,
                         workload = workload,
                         context = this@ServerActivity,

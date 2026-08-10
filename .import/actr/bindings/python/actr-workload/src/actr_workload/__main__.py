@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
-from .constants import DEFAULT_WORLD, DEFAULT_WORLD_MODULE
 from .build import (
     componentize,
     generate_bindings,
 )
+from .constants import DEFAULT_WORLD, DEFAULT_WORLD_MODULE
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -34,7 +34,9 @@ def _build_parser() -> argparse.ArgumentParser:
     componentize_parser.add_argument("module_name")
     componentize_parser.add_argument("-o", "--output", required=True, type=Path)
     componentize_parser.add_argument("--project-dir", default=Path("."), type=Path)
-    componentize_parser.add_argument("--bindings-dir", default=Path("bindings"), type=Path)
+    componentize_parser.add_argument(
+        "--bindings-dir", default=Path("bindings"), type=Path
+    )
     componentize_parser.add_argument("--wit", type=Path)
     componentize_parser.add_argument("--world", default=DEFAULT_WORLD)
     componentize_parser.add_argument("--world-module", default=DEFAULT_WORLD_MODULE)

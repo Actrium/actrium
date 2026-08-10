@@ -80,7 +80,7 @@ describe('ActrRef.callRpc', () => {
     const ref = new ActrRef(native as never);
     const companion = makeCompanion('echo.lane.LaneService.PlainEcho', 0);
 
-    await ref.callRpc(target, companion, { message: 'ping' });
+    await ref.callRpc(target, companion, { message: 'ping' }, 30_000);
 
     expect(captured[0].payloadType).toBe(PayloadType.RpcReliable);
     expect(captured[0].timeoutMs).toBe(30000);

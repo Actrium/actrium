@@ -223,69 +223,6 @@ realm_id = 1
     .unwrap();
 }
 
-fn write_lock_file_empty(root: &Path) {
-    fs::write(
-        root.join("manifest.lock.toml"),
-        r#"[metadata]
-version = 2
-generated_at = "2026-03-03T00:00:00Z"
-"#,
-    )
-    .unwrap();
-}
-
-fn write_lock_file_with_echo(root: &Path) {
-    fs::write(
-        root.join("manifest.lock.toml"),
-        r#"[metadata]
-version = 2
-generated_at = "2026-03-03T00:00:00Z"
-
-[[dependency]]
-name = "echo-service"
-alias = "echo-service"
-actr_type = "acme:EchoService:1.0.0"
-fingerprint = "service_semantic:123"
-cached_at = "2026-03-03T00:00:00Z"
-files = [
-    { path = "echo-service/echo.proto", fingerprint = "semantic:456" }
-]
-"#,
-    )
-    .unwrap();
-}
-
-fn write_lock_file_with_echo_and_profile(root: &Path) {
-    fs::write(
-        root.join("manifest.lock.toml"),
-        r#"[metadata]
-version = 2
-generated_at = "2026-03-03T00:00:00Z"
-
-[[dependency]]
-name = "echo-service"
-alias = "echo-service"
-actr_type = "acme:EchoService:1.0.0"
-fingerprint = "service_semantic:123"
-cached_at = "2026-03-03T00:00:00Z"
-files = [
-    { path = "echo-service/echo.proto", fingerprint = "semantic:456" }
-]
-
-[[dependency]]
-name = "profile-service"
-alias = "profile-service"
-actr_type = "acme:ProfileService:1.0.0"
-fingerprint = "service_semantic:789"
-cached_at = "2026-03-03T00:00:00Z"
-files = [
-    { path = "profile-service/profile.proto", fingerprint = "semantic:999" }
-]
-"#,
-    )
-    .unwrap();
-}
-
 fn write_local_greeter_proto(root: &Path) {
     let proto_dir = root.join("protos");
     fs::create_dir_all(&proto_dir).unwrap();
@@ -365,7 +302,6 @@ fn test_local_service_only() {
 
     write_ts_project_files(root);
     write_actr_toml_local_only(root);
-    write_lock_file_empty(root);
     write_local_greeter_proto(root);
 
     let out = run_actr(&["gen", "-l", "typescript"], root);
@@ -416,23 +352,17 @@ fn test_local_service_only() {
 
     let actr_service_content = fs::read_to_string(root.join("src/actr_service.ts")).unwrap();
     assert!(
-        actr_service_content.contains("import { defineWorkload } from '@actrium/actr-workload';")
+        actr_service_content
+            .contains("import { ActrContext, defineWorkload } from '@actrium/actr-workload';")
     );
+    assert!(actr_service_content.contains("class ActrHandler {"));
     assert!(
         actr_service_content
-            .contains("import type { GreeterHandler } from './generated/greeter_workload.js';")
+            .contains("const { actrDispatch } = await import('./generated/actr_dispatch.js');")
     );
-    assert!(
-        actr_service_content
-            .contains("import { GreeterDispatcher } from './generated/greeter_workload.js';")
-    );
-    assert!(actr_service_content.contains("class GreeterHandlerImpl implements GreeterHandler"));
-    assert!(
-        actr_service_content
-            .contains("const dispatcher = new GreeterDispatcher(new GreeterHandlerImpl());")
-    );
+    assert!(actr_service_content.contains("const handler = new ActrHandler();"));
     assert!(actr_service_content.contains("export default defineWorkload({"));
-    assert!(actr_service_content.contains("return dispatcher.dispatch(envelope, ctx);"));
+    assert!(actr_service_content.contains("return actrDispatch(actrCtx, handler, envelope.routeKey ?? envelope.method, envelope.payload ?? new Uint8Array(), envelope.timeoutMs);"));
     assert!(!actr_service_content.contains("Local RPC methods:', 1"));
     assert!(actr_service_content.contains("Remote RPC methods:', 0"));
     assert!(!actr_service_content.contains("Received workload RPC:', envelope.method"));
@@ -450,7 +380,6 @@ fn test_remote_service_only() {
 
     write_ts_project_files(root);
     write_actr_toml_with_remote(root);
-    write_lock_file_with_echo(root);
     write_remote_echo_proto(root);
 
     let out = run_actr(&["gen", "-l", "typescript"], root);
@@ -475,14 +404,17 @@ fn test_remote_service_only() {
     let client_content = fs::read_to_string(gen_dir.join("echo-service/echo_client.ts")).unwrap();
     assert!(client_content.contains("export const EchoRequest = {"));
     assert!(client_content.contains("routeKey: \"echo.EchoService.Echo\""));
-    // Unannotated unary method keeps the RPC_RELIABLE fallback lane.
-    assert!(client_content.contains("payloadType: 0,"));
+    // payload_type now lives in the unified DispatchSpec (actr_dispatch.ts),
+    // not the per-message companion — no companion field to assert here.
     assert!(client_content.contains("response: {"));
 
     let actr_service_content = fs::read_to_string(root.join("src/actr_service.ts")).unwrap();
+    assert!(actr_service_content.contains("defineWorkload"));
     assert!(
-        actr_service_content.contains("import { defineWorkload } from '@actrium/actr-workload';")
+        actr_service_content
+            .contains("const { actrDispatch } = await import('./generated/actr_dispatch.js');")
     );
+    assert!(!actr_service_content.contains("class ActrHandler {"));
     assert!(actr_service_content.contains("Remote RPC methods:', 1"));
     assert!(actr_service_content.contains("Remote RPC quick-start examples"));
     assert!(actr_service_content.contains("EchoRequest.routeKey"));
@@ -498,7 +430,6 @@ fn test_local_and_remote_services() {
 
     write_ts_project_files(root);
     write_actr_toml_both(root);
-    write_lock_file_with_echo(root);
     write_local_greeter_proto(root);
     write_remote_echo_proto(root);
 
@@ -524,16 +455,18 @@ fn test_local_and_remote_services() {
     let client_content = fs::read_to_string(gen_dir.join("echo-service/echo_client.ts")).unwrap();
     assert!(client_content.contains("export const EchoRequest = {"));
     assert!(client_content.contains("routeKey: \"echo.EchoService.Echo\""));
-    // Unannotated unary method keeps the RPC_RELIABLE fallback lane.
-    assert!(client_content.contains("payloadType: 0,"));
+    // payload_type now lives in the unified DispatchSpec (actr_dispatch.ts),
+    // not the per-message companion — no companion field to assert here.
 
     let actr_service_content = fs::read_to_string(root.join("src/actr_service.ts")).unwrap();
     assert!(actr_service_content.contains("export default defineWorkload({"));
     assert!(
         actr_service_content
-            .contains("import { GreeterDispatcher } from './generated/greeter_workload.js';")
+            .contains("const { actrDispatch } = await import('./generated/actr_dispatch.js');")
     );
-    assert!(actr_service_content.contains("return dispatcher.dispatch(envelope, ctx);"));
+    assert!(actr_service_content.contains("class ActrHandler {"));
+    assert!(actr_service_content.contains("const handler = new ActrHandler();"));
+    assert!(actr_service_content.contains("return actrDispatch(actrCtx, handler, envelope.routeKey ?? envelope.method, envelope.payload ?? new Uint8Array(), envelope.timeoutMs);"));
     assert!(!actr_service_content.contains("Local RPC methods:', 1"));
     assert!(
         !actr_service_content.contains("// - Greeter.SayHello (HelloRequest -> HelloResponse)")
@@ -550,7 +483,6 @@ fn test_remote_clients_are_generated_without_local_dispatcher() {
 
     write_ts_project_files(root);
     write_actr_toml_both_with_two_remotes(root);
-    write_lock_file_with_echo_and_profile(root);
     write_local_greeter_proto(root);
     write_remote_echo_proto(root);
     write_remote_profile_proto(root);

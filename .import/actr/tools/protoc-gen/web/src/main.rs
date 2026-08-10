@@ -100,6 +100,37 @@ fn run_protoc_mode() -> anyhow::Result<()> {
         response.file.push(gen_file);
     }
 
+    // When a dispatch spec is provided, generate the unified dispatch artifacts.
+    if let Some(spec_path) = &params.dispatch_spec {
+        match actr_web_protoc_codegen::dispatch_spec::DispatchSpec::load_and_validate(
+            spec_path,
+            params.dispatch_spec_hash.as_deref(),
+        ) {
+            Ok(spec) => {
+                let dispatch_files = actr_web_protoc_codegen::codegen::generate_unified_dispatch(
+                    &spec,
+                    &params.output_dir,
+                );
+                for file in dispatch_files {
+                    let mut gen_file =
+                        prost_types::compiler::code_generator_response::File::default();
+                    let relative_path = file
+                        .path
+                        .strip_prefix(&params.output_dir)
+                        .unwrap_or(&file.path);
+                    gen_file.name = Some(relative_path.to_string_lossy().to_string());
+                    gen_file.content = Some(file.content);
+                    response.file.push(gen_file);
+                }
+            }
+            Err(e) => {
+                response.error = Some(format!(
+                    "[protoc-gen-actr-web] Failed to load dispatch spec: {e}"
+                ));
+            }
+        }
+    }
+
     let mut output = Vec::new();
     response.encode(&mut output)?;
     io::stdout().write_all(&output)?;
@@ -110,22 +141,32 @@ fn run_protoc_mode() -> anyhow::Result<()> {
 struct PluginParams {
     output_dir: PathBuf,
     react_hooks: bool,
+    dispatch_spec: Option<PathBuf>,
+    dispatch_spec_hash: Option<String>,
 }
 
 fn parse_parameters(params: &str) -> PluginParams {
     let mut output_dir = PathBuf::from(".");
     let mut react_hooks = false;
+    let mut dispatch_spec: Option<PathBuf> = None;
+    let mut dispatch_spec_hash: Option<String> = None;
 
     for param in params.split(',') {
         if let Some(value) = param.strip_prefix("output=") {
             output_dir = value.into();
         } else if param == "react_hooks" {
             react_hooks = true;
+        } else if let Some(value) = param.strip_prefix("dispatch_spec=") {
+            dispatch_spec = Some(PathBuf::from(value));
+        } else if let Some(value) = param.strip_prefix("dispatch_spec_hash=") {
+            dispatch_spec_hash = Some(value.to_string());
         }
     }
 
     PluginParams {
         output_dir,
         react_hooks,
+        dispatch_spec,
+        dispatch_spec_hash,
     }
 }

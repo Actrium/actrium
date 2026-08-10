@@ -125,20 +125,15 @@ EOF
     success "Client manifest.toml written (dep ${acl_type})"
 }
 
-# Place the remote EchoService proto locally + a minimal manifest.lock.toml placeholder.
-# Per actr-kt-migration §2.3/§4 this is sufficient for `actr gen` — no registry /
-# `actr deps install` needed.
-seed_client_protos_and_lock() {
-    section "📄 Seeding client protos + manifest.lock.toml"
-    mkdir -p "$TMP_APP_DIR/protos/remote/echo-echo-server"
+# Place the remote EchoService proto under its manifest dependency alias.
+# DispatchSpec reads this alias from the path and linked runtime resolution
+# reads the same alias from manifest.toml; no runtime lock is needed.
+seed_client_protos() {
+    section "📄 Seeding client protos"
+    mkdir -p "$TMP_APP_DIR/protos/remote/${SERVICE_ACTOR}"
     cp "$REPO_ROOT/e2e/package-runtime-echo/proto/echo.proto" \
-       "$TMP_APP_DIR/protos/remote/echo-echo-server/echo.proto"
-    cat >"$TMP_APP_DIR/manifest.lock.toml" <<EOF
-[metadata]
-version = 1
-generated_at = "2026-07-07T00:00:00+00:00"
-EOF
-    success "Remote echo.proto + placeholder manifest.lock.toml written"
+       "$TMP_APP_DIR/protos/remote/${SERVICE_ACTOR}/echo.proto"
+    success "Remote echo.proto written for dependency alias ${SERVICE_ACTOR}"
 }
 
 # Drop the correct linked-mode instrumentation test into the scaffolded app,
@@ -218,13 +213,13 @@ publish_app_package_identity "$APP_ACTOR" "$APP_VERSION"
 run_server_host "$SERVICE_PACKAGE" "${MANUFACTURER}:${APP_ACTOR}:${APP_VERSION}" "kotlin-echo-server"
 check_service_ready "$SERVICE_ACTOR"
 
-# Phase 4: scaffold the Kotlin client, wire local AAR, seed protos+lock, gen.
-# (No `actr deps install` — per actr-kt-migration §2.3/§4 a local proto + a
-# placeholder manifest.lock.toml are sufficient for `actr gen`.)
+# Phase 4: scaffold the Kotlin client, wire local AAR, seed protos, gen.
+# No `actr deps install` is needed: codegen and the linked runtime both source
+# the alias mapping from manifest.toml.
 scaffold_kotlin_app echo "$APP_ACTOR" "$TMP_APP_DIR" \
     "ws://10.0.2.2:${HTTP_PORT}/signaling/ws" "$MANUFACTURER"
 write_client_manifest
-seed_client_protos_and_lock
+seed_client_protos
 substitute_local_aar "$TMP_APP_DIR"
 run_kotlin_gen "$TMP_APP_DIR" "$APPLICATION_ID"
 

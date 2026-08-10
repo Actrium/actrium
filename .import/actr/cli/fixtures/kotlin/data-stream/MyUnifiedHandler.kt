@@ -14,7 +14,6 @@ import stream_server.StreamClientOuterClass.ClientStartStreamResponse
 import stream_server.StreamClientOuterClass.PrepareClientStreamRequest
 import stream_server.StreamClientOuterClass.PrepareClientStreamResponse
 import io.actrium.actr.ActrId
-import io.actrium.actr.ActrType
 import io.actrium.actr.DataChunk
 import io.actrium.actr.DataChunkCallback
 import io.actrium.actr.PayloadType
@@ -36,8 +35,6 @@ class MyUnifiedHandler : UnifiedHandler {
     companion object {
         private const val TAG = "MyUnifiedHandler"
     }
-
-    private val serverType = ActrType(manufacturer = "{{MANUFACTURER}}", name = "StreamEchoServer", version = "1.0.0")
 
     // ===== StreamClient methods =====
 
@@ -102,7 +99,8 @@ class MyUnifiedHandler : UnifiedHandler {
         Log.i(TAG, "start_stream: client_id=$clientId, stream_id=$streamId, message_count=$messageCount")
 
         try {
-            // Discover the server
+            // Resolve the manifest dependency alias, then discover the server.
+            val serverType = ctx.resolveDependency("StreamEchoServer")
             Log.i(TAG, "🌐 discovering server type: ${serverType.manufacturer}/${serverType.name}")
             val serverId = ctx.discover(serverType)
             Log.i(TAG, "🎯 discovered server: ${serverId.serialNumber}")

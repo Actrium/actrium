@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-import subprocess
 import shutil
+import subprocess
 import sys
+from collections.abc import Iterable, Sequence
 from pathlib import Path
-from typing import Iterable, Sequence
 
-from .constants import COMPONENTIZE_PY_VERSION, DEFAULT_WORLD, DEFAULT_WORLD_MODULE
+from .constants import DEFAULT_WORLD, DEFAULT_WORLD_MODULE
 from .paths import resolved_wit_path
 
 

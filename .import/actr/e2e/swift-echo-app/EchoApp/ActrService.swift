@@ -28,11 +28,11 @@ final class ActrService: ObservableObject {
 
         do {
             let manifestURL = try materializeRuntimeConfig()
-            let echoServiceTarget = "actrium:EchoService:1.0.0"
             let actorType = ActrType(manufacturer: "actrium", name: "EchoApp", version: "0.1.0")
 
+            let handler = LocalEchoServiceHandlerImpl()
             let workload = Actr.dynamicWorkload(
-                lifecycle: LocalEchoServiceLifecycleAdapter(targetType: echoServiceTarget)
+                lifecycle: LocalEchoServiceLifecycleAdapter(handler: handler)
             )
             linkedWorkload = workload
             let node = try await ActrNode.linked(config: manifestURL, type: actorType, workload: workload)
@@ -60,7 +60,14 @@ final class ActrService: ObservableObject {
 
         var localRequest = Echoapp_LocalEchoRequest()
         localRequest.message = input
-        let response: Echoapp_LocalEchoResponse = try await actorRef.call(localRequest)
+        let requestData = try EchoappLocalEchoServiceSendRpc.encodeRequest(localRequest)
+        let responseData = try await actorRef.call(
+            routeKey: EchoappLocalEchoServiceSendRpc.routeKey,
+            payloadType: EchoappLocalEchoServiceSendRpc.payloadType,
+            requestPayload: requestData,
+            timeoutMs: 30_000
+        )
+        let response = try EchoappLocalEchoServiceSendRpc.decodeResponse(responseData)
         autoMarkSent()
         return response.reply
     }
@@ -140,13 +147,10 @@ private enum EchoAppError: Error {
 }
 
 /// Safe: no mutable state. All fields are value types or immutable references.
-private final class LocalEchoServiceHandlerImpl: LocalEchoServiceHandler, @unchecked Sendable {
+private final class LocalEchoServiceHandlerImpl: ActrDispatchHandler, @unchecked Sendable {
     private let remoteEchoRoute = "echo.EchoService.Echo"
-    private let targetType: String
 
-    init(targetType: String) {
-        self.targetType = targetType
-    }
+    init() {}
 
     func send(
         req localRequest: Echoapp_LocalEchoRequest,
@@ -156,12 +160,7 @@ private final class LocalEchoServiceHandlerImpl: LocalEchoServiceHandler, @unche
 
         var remoteRequest = Echo_EchoRequest()
         remoteRequest.message = forwardedMessage
-        let targetType: ActrType
-        do {
-            targetType = try ActrType.fromStringRepr(self.targetType)
-        } catch {
-            throw ActrError.Config(msg: "Invalid target type: \(error)")
-        }
+        let targetType = try await ctx.resolveDependency(alias: "echo")
         let targetId = try await ctx.discover(targetType: targetType)
         let requestData: Data
         do {
@@ -172,7 +171,8 @@ private final class LocalEchoServiceHandlerImpl: LocalEchoServiceHandler, @unche
         let remotePayload = try await ctx.call(
             target: targetId,
             routeKey: remoteEchoRoute,
-            payload: requestData
+            payload: requestData,
+            timeoutMs: 30_000
         )
 
         let remoteResponse: Echo_EchoResponse
@@ -188,12 +188,12 @@ private final class LocalEchoServiceHandlerImpl: LocalEchoServiceHandler, @unche
     }
 }
 
-/// Safe: no mutable state. `workload` is a let-bound actor.
+/// Safe: no mutable state. `handler` is an immutable reference.
 private final class LocalEchoServiceLifecycleAdapter: Workload, @unchecked Sendable {
-    private let workload: LocalEchoServiceWorkload<LocalEchoServiceHandlerImpl>
+    private let handler: LocalEchoServiceHandlerImpl
 
-    init(targetType: String) {
-        self.workload = LocalEchoServiceWorkload(handler: LocalEchoServiceHandlerImpl(targetType: targetType))
+    init(handler: LocalEchoServiceHandlerImpl) {
+        self.handler = handler
     }
 
     func onStart(ctx: Context) async throws {}
@@ -207,6 +207,12 @@ private final class LocalEchoServiceLifecycleAdapter: Workload, @unchecked Senda
     }
 
     func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
-        return try await workload.__dispatch(ctx: ctx, envelope: envelope)
+        return try await actrDispatch(
+            ctx: ctx,
+            handler: handler,
+            routeKey: envelope.routeKey,
+            payload: envelope.payload,
+            timeoutMs: 30_000
+        )
     }
 }

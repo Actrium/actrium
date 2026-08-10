@@ -1,3 +1,4 @@
+use crate::commands::codegen::dispatch_spec::DispatchSpec;
 use crate::commands::codegen::proto_model::ProtoModel;
 use crate::commands::codegen::scaffold::ScaffoldCatalog;
 use crate::error::Result;
@@ -31,6 +32,9 @@ pub struct GenContext {
     pub no_format: bool,
     pub debug: bool,
     pub skip_validation: bool,
+    pub dispatch_spec: DispatchSpec,
+    pub dispatch_spec_path: PathBuf,
+    pub dispatch_spec_hash: String,
 }
 
 /// Interface for language-specific code generators

@@ -5,9 +5,17 @@ import Foundation
 import SwiftProtobuf
 import Actr
 
-extension Echo_EchoRequest: RpcRequest {
+public struct EchoEchoServiceEchoRpc {
+    public typealias Request = Echo_EchoRequest
     public typealias Response = Echo_EchoResponse
-
     public static var routeKey: String { "echo.EchoService.Echo" }
     public static var payloadType: PayloadType { .rpcReliable }
+
+    public static func encodeRequest(_ request: Echo_EchoRequest) throws -> Data {
+        try request.serializedData()
+    }
+
+    public static func decodeResponse(_ data: Data) throws -> Echo_EchoResponse {
+        try Echo_EchoResponse(serializedBytes: data)
+    }
 }

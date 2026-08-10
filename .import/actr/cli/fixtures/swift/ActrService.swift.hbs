@@ -33,32 +33,11 @@ public final class ActrService: ObservableObject {
             let actorType = try resolveManifestPackageActrType(
                 manifestPath: manifestPath
             )
-{{#if REMOTE_TARGETS}}
-{{#each REMOTE_TARGETS}}
-            let {{variable_name}} = try resolveManifestDependency(
-                manifestPath: manifestPath,
-                dependencyAlias: "{{alias}}"
-            )
-{{/each}}
-            let remoteTargets: [String: ActrType] = [
-{{#each REMOTE_TARGET_ROUTES}}
-                "{{route_key}}": {{variable_name}},
-{{/each}}
-            ]
-{{/if}}
 {{#if HAS_SERVICES}}
-{{#if REMOTE_TARGETS}}
-            let targetType = {{FIRST_REMOTE_TARGET_VARIABLE}}
-            let handler = {{SERVICE_NAME}}HandlerImpl(targetType: targetType)
-{{else}}
             let handler = {{SERVICE_NAME}}HandlerImpl()
-{{/if}}
-            let lifecycle = {{SERVICE_NAME}}LifecycleAdapter(
-                handler: handler{{#if REMOTE_TARGETS}},
-                remoteTargets: remoteTargets{{/if}}
-            )
+            let lifecycle = {{SERVICE_NAME}}LifecycleAdapter(handler: handler)
 {{else}}
-            let lifecycle = {{SERVICE_NAME}}LifecycleAdapter({{#if REMOTE_TARGETS}}remoteTargets: remoteTargets{{/if}})
+            let lifecycle = {{SERVICE_NAME}}LifecycleAdapter()
 {{/if}}
             let workload = Actr.dynamicWorkload(lifecycle: lifecycle)
             let manifestURL = URL(fileURLWithPath: manifestPath)

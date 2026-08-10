@@ -1,281 +1,445 @@
+import CryptoKit
 import Foundation
 import SwiftProtobuf
 import SwiftProtobufPluginLibrary
 
 @main
 struct ActrFrameworkGenerator {
-  static let version = "0.6.1"
+    static let version = "0.6.1"
 
-  struct RemoteServiceInfo {
-    let serviceName: String
-    let routeKeys: [String]
-    let fileName: String
-  }
+    // MARK: - DispatchSpec model
 
-  struct MethodMetadataInput {
-    let packageName: String
-    let serviceName: String
-    let methodName: String
-    let inputType: String
-    let outputType: String
-  }
+    struct DispatchRoute: Codable {
+        let route_key: String
+        let proto_file: String
+        let proto_service: String
+        let method: String
+        let input_type: String
+        let output_type: String
+        let payload_type: String
+        let dependency_alias: String?
 
-  struct MethodMetadata: Encodable {
-    let name: String
-    let snake_name: String
-    let route_key: String
-    let input_ref: TypeRef
-    let output_ref: TypeRef
-  }
-
-  struct TypeRef: Encodable {
-    let proto_type: String
-    let type_name: String
-    let proto_package: String
-    let proto_file: String
-  }
-
-  enum MetadataError: LocalizedError {
-    case unresolvedType(kind: String, typeName: String, serviceName: String, methodName: String)
-    case malformedPayloadTypeOption(serviceName: String, methodName: String, detail: String)
-    case unsupportedPayloadType(value: UInt64, serviceName: String, methodName: String)
-
-    var errorDescription: String? {
-      switch self {
-      case let .unresolvedType(kind, typeName, serviceName, methodName):
-        return
-          "Cannot resolve \(kind) type `\(typeName)` for \(serviceName).\(methodName): RPC types must be declared in one of the parsed proto files"
-      case let .malformedPayloadTypeOption(serviceName, methodName, detail):
-        return
-          "Cannot parse (actr.payload_type) option for \(serviceName).\(methodName): \(detail)"
-      case let .unsupportedPayloadType(value, serviceName, methodName):
-        return
-          "Unsupported (actr.payload_type) value \(value) for \(serviceName).\(methodName)"
-      }
-    }
-  }
-
-  enum RpcPayloadType: UInt64 {
-    case rpcReliable = 0
-    case rpcSignal = 1
-    case streamReliable = 2
-    case streamLatencyFirst = 3
-    case mediaRtp = 4
-
-    var swiftCase: String {
-      switch self {
-      case .rpcReliable:
-        return ".rpcReliable"
-      case .rpcSignal:
-        return ".rpcSignal"
-      case .streamReliable:
-        return ".streamReliable"
-      case .streamLatencyFirst:
-        return ".streamLatencyFirst"
-      case .mediaRtp:
-        return ".mediaRtp"
-      }
-    }
-  }
-
-  struct LocalServiceMetadata: Encodable {
-    let name: String
-    let package: String
-    let proto_file: String
-    let handler_interface: String
-    let workload_type: String
-    let dispatcher_type: String
-    let methods: [MethodMetadata]
-  }
-
-  struct RemoteServiceMetadata: Encodable {
-    let name: String
-    let package: String
-    let proto_file: String
-    let actr_type: String
-    let client_type: String
-    let methods: [MethodMetadata]
-  }
-
-  struct ActrGenMetadata: Encodable {
-    let plugin_version: String
-    let language: String
-    let local_services: [LocalServiceMetadata]
-    let remote_services: [RemoteServiceMetadata]
-  }
-
-  static func main() throws {
-    // Handle command line arguments
-    if CommandLine.arguments.contains("--version") || CommandLine.arguments.contains("-v") {
-      print(version)
-      return
+        var isRemote: Bool { dependency_alias != nil }
     }
 
-    // Read the request from stdin
-    let requestData = FileHandle.standardInput.readDataToEndOfFile()
-    let request = try Google_Protobuf_Compiler_CodeGeneratorRequest(serializedBytes: requestData)
-
-    // Parse parameters
-    let parameters = request.parameter.split(separator: ",").reduce(into: [String: String]()) {
-      dict, pair in
-      let parts = pair.split(separator: "=", maxSplits: 1)
-      if parts.count == 2 {
-        dict[String(parts[0])] = String(parts[1])
-      } else {
-        dict[String(parts[0])] = ""
-      }
+    struct DispatchSpecModel: Codable {
+        let schema_version: String
+        let routes: [DispatchRoute]
+        let spec_hash: String?
     }
-    let visibility = parameters["Visibility"] ?? "Internal"
-    let isPublic = visibility.lowercased() == "public"
-    let accessModifier = isPublic ? "public " : ""
-    let manufacturer = parameters["Manufacturer"] ?? "acme"
 
-    let localFileParam = parameters["LocalFile"].map(normalizeProtoPath)
-    let localFilesParam = Set(
-      (parameters["LocalFiles"] ?? "").split(separator: ":").map {
-        normalizeProtoPath(String($0))
-      })
-    let protoSourceParam = parameters["ProtoSource"]?.lowercased()
-    let globalProtoSource =
-      protoSourceParam ?? ((localFileParam != nil || !localFilesParam.isEmpty) ? "remote" : "local")
+    // MARK: - Metadata model
 
-    let remoteFilesParam = Set(
-      (parameters["RemoteFiles"] ?? "").split(separator: ":").map {
-        normalizeProtoPath(String($0))
-      })
+    struct MethodMetadata: Encodable {
+        let name: String
+        let snake_name: String
+        let route_key: String
+        let input_ref: TypeRef
+        let output_ref: TypeRef
+    }
 
-    // Parse RemoteFileActrTypes parameter: file1=actr_type1;file2=actr_type2
-    // The top-level protoc parameter string is comma-separated, so mappings
-    // inside one parameter use semicolons.
-    var remoteFileToActrType: [String: String] = [:]
-    if let remoteFileActrTypesParam = parameters["RemoteFileActrTypes"] {
-      for mapping in remoteFileActrTypesParam.split(separator: ";") {
-        let parts = mapping.split(separator: "=", maxSplits: 1)
-        if parts.count == 2 {
-          let file = normalizeProtoPath(String(parts[0]))
-          let actrType = String(parts[1])
-          remoteFileToActrType[file] = actrType
+    struct LocalServiceMetadata: Encodable {
+        let name: String
+        let package: String
+        let proto_file: String
+        let handler_interface: String
+        let workload_type: String
+        let dispatcher_type: String
+        let methods: [MethodMetadata]
+    }
+
+    struct RemoteServiceMetadata: Encodable {
+        let name: String
+        let package: String
+        let proto_file: String
+        let dependency_alias: String
+        let client_type: String
+        let methods: [MethodMetadata]
+    }
+
+    struct ActrGenMetadata: Encodable {
+        let schema_version: String
+        let plugin_version: String
+        let language: String
+        let dispatch_spec_hash: String
+        let generated_files: [String]
+        let generated_local_routes: [String]
+        let generated_remote_routes: [String]
+        let local_services: [LocalServiceMetadata]
+        let remote_services: [RemoteServiceMetadata]
+    }
+
+    // MARK: - Proto type resolution helpers
+
+    struct TypeRef: Encodable {
+        let proto_type: String
+        let type_name: String
+        let proto_package: String
+        let proto_file: String
+    }
+
+    enum PluginError: LocalizedError {
+        case missingDispatchSpec
+        case missingDispatchSpecHash
+        case cannotReadDispatchSpec(String)
+        case hashMismatch(expected: String, actual: String)
+        case invalidDispatchSpec(String)
+
+        var errorDescription: String? {
+            switch self {
+            case .missingDispatchSpec:
+                return "dispatch_spec parameter is required"
+            case .missingDispatchSpecHash:
+                return "dispatch_spec_hash parameter is required"
+            case let .cannotReadDispatchSpec(detail):
+                return "Cannot read dispatch spec: \(detail)"
+            case let .hashMismatch(expected, actual):
+                return "Dispatch spec hash mismatch: expected \(expected), got \(actual)"
+            case let .invalidDispatchSpec(detail):
+                return "Invalid dispatch spec: \(detail)"
+            }
         }
-      }
     }
 
-    var typeRefs: [String: TypeRef] = [:]
-    for fileDescriptor in request.protoFile {
-      for message in fileDescriptor.messageType {
-        Self.collectTypeRefs(
-          package: fileDescriptor.package,
-          protoFile: normalizeProtoPath(fileDescriptor.name),
-          message: message,
-          parentProtoName: nil,
-          into: &typeRefs)
-      }
-    }
+    // MARK: - Entry point
 
-    // First pass: Collect info about all files and identify all Remote services
-    var remoteServices: [RemoteServiceInfo] = []
-    var localServiceMetadata: [LocalServiceMetadata] = []
-    var remoteServiceMetadata: [RemoteServiceMetadata] = []
-    for fileDescriptor in request.protoFile {
-      let protoFile = normalizeProtoPath(fileDescriptor.name)
-      let isRemote: Bool
-      if remoteFilesParam.contains(protoFile) {
-        isRemote = true
-      } else if localFilesParam.contains(protoFile)
-        || localFileParam == protoFile
-      {
-        isRemote = false
-      } else {
-        isRemote = globalProtoSource == "remote"
-      }
-
-      for service in fileDescriptor.service {
-        let serviceName = service.name
-        let methods = try service.method.map {
-          try buildMethodMetadata(
-            MethodMetadataInput(
-              packageName: fileDescriptor.package,
-              serviceName: serviceName,
-              methodName: $0.name,
-              inputType: $0.inputType,
-              outputType: $0.outputType),
-            typeRefs: typeRefs)
+    static func main() throws {
+        if CommandLine.arguments.contains("--version") || CommandLine.arguments.contains("-v") {
+            print(version)
+            return
         }
 
-        if isRemote {
-          let routeKeys = methods.map { $0.route_key }
-          remoteServices.append(
-            RemoteServiceInfo(
-              serviceName: serviceName, routeKeys: routeKeys, fileName: protoFile))
+        let requestData = FileHandle.standardInput.readDataToEndOfFile()
+        let request = try Google_Protobuf_Compiler_CodeGeneratorRequest(serializedBytes: requestData)
 
-          let actrType =
-            remoteFileToActrType[protoFile]
-            ?? "\(manufacturer):\(serviceName):1.0.0"
-          remoteServiceMetadata.append(
-            RemoteServiceMetadata(
-              name: serviceName,
-              package: fileDescriptor.package,
-              proto_file: protoFile,
-              actr_type: actrType,
-              client_type: "\(serviceName)Client",
-              methods: methods))
-        } else {
-          localServiceMetadata.append(
-            LocalServiceMetadata(
-              name: serviceName,
-              package: fileDescriptor.package,
-              proto_file: protoFile,
-              handler_interface: "\(serviceName)Handler",
-              workload_type: "\(serviceName)Workload",
-              dispatcher_type: "\(serviceName)Dispatcher",
-              methods: methods))
+        let parameters = parseParameters(request.parameter)
+
+        // Read and validate the dispatch spec.
+        guard let specPath = parameters["dispatch_spec"] else {
+            throw PluginError.missingDispatchSpec
         }
-      }
+        guard let expectedHash = parameters["dispatch_spec_hash"] else {
+            throw PluginError.missingDispatchSpecHash
+        }
+        let spec = try loadDispatchSpec(at: specPath, expectedHash: expectedHash)
+
+        // Build proto-to-Swift type name map from the full descriptor set.
+        var typeToSwiftName: [String: String] = [:]
+        var typeRefs: [String: TypeRef] = [:]
+        for fileDescriptor in request.protoFile {
+            for message in fileDescriptor.messageType {
+                collectSwiftTypeNames(
+                    package: fileDescriptor.package,
+                    message: message,
+                    parentProtoName: nil,
+                    parentSwiftName: nil,
+                    into: &typeToSwiftName
+                )
+                collectTypeRefs(
+                    package: fileDescriptor.package,
+                    protoFile: normalizeProtoPath(fileDescriptor.name),
+                    message: message,
+                    parentProtoName: nil,
+                    into: &typeRefs
+                )
+            }
+        }
+
+        // Group routes by proto_file for per-file generation.
+        var routesByFile: [String: [DispatchRoute]] = [:]
+        for route in spec.routes {
+            let normalizedFile = normalizeProtoPath(route.proto_file)
+            routesByFile[normalizedFile, default: []].append(route)
+        }
+
+        // Collect all local and remote routes for the unified dispatcher.
+        let localRoutes = spec.routes.filter { !$0.isRemote }
+        let remoteRoutes = spec.routes.filter { $0.isRemote }
+        let localServiceNames = Set(localRoutes.map { $0.proto_service })
+
+        // Track generated file names for metadata.
+        var generatedFileNames: [String] = []
+
+        var response = Google_Protobuf_Compiler_CodeGeneratorResponse()
+
+        // Per-file generation.
+        for fileDescriptor in request.protoFile {
+            guard request.fileToGenerate.contains(fileDescriptor.name) else { continue }
+
+            let protoFile = normalizeProtoPath(fileDescriptor.name)
+            guard let fileRoutes = routesByFile[protoFile], !fileRoutes.isEmpty else {
+                // Skip files that have no dispatch routes.
+                continue
+            }
+
+            let hasLocal = fileRoutes.contains { !$0.isRemote }
+
+            var content = """
+            // DO NOT EDIT.
+            // Generated by protoc-gen-actrframework-swift
+
+            import Foundation
+            import SwiftProtobuf
+            import Actr
+
+            """
+
+            // Group routes by proto_service for handler protocol / dispatcher generation.
+            let routesByService = Dictionary(grouping: fileRoutes, by: { $0.proto_service })
+
+            for (serviceFq, serviceRoutes) in routesByService.sorted(by: { $0.key < $1.key }) {
+                let serviceName = serviceFq.split(separator: ".").last.map(String.init) ?? serviceFq
+                let isLocalService = serviceRoutes.allSatisfy { !$0.isRemote }
+
+                // 1. Per-RPC contract structs.
+                for route in serviceRoutes.sorted(by: { $0.route_key < $1.route_key }) {
+                    let inputSwift = resolveSwiftTypeName(route.input_type, typeToSwiftName: typeToSwiftName)
+                    let outputSwift = resolveSwiftTypeName(route.output_type, typeToSwiftName: typeToSwiftName)
+                    let structName = contractStructName(
+                        protoService: serviceFq, method: route.method
+                    )
+
+                    content += """
+
+                    public struct \(structName) {
+                        public typealias Request = \(inputSwift)
+                        public typealias Response = \(outputSwift)
+                        public static var routeKey: String { "\(route.route_key)" }
+                        public static var payloadType: PayloadType { \(payloadTypeSwift(route.payload_type)) }
+
+                        public static func encodeRequest(_ request: \(inputSwift)) throws -> Data {
+                            try request.serializedData()
+                        }
+
+                        public static func decodeResponse(_ data: Data) throws -> \(outputSwift) {
+                            try \(outputSwift)(serializedBytes: data)
+                        }
+                    }
+
+                    """
+                }
+
+                // 2. Handler protocol (local only).
+                if isLocalService {
+                    let handlerProtocol = "\(serviceName)Handler"
+                    content += """
+
+                    public protocol \(handlerProtocol): Sendable {
+                    """
+                    for route in serviceRoutes.sorted(by: { $0.route_key < $1.route_key }) {
+                        let methodName = lowerCamelCase(route.method)
+                        let inputSwift = resolveSwiftTypeName(route.input_type, typeToSwiftName: typeToSwiftName)
+                        let outputSwift = resolveSwiftTypeName(route.output_type, typeToSwiftName: typeToSwiftName)
+
+                        content += """
+
+                          func \(methodName)(
+                              req: \(inputSwift),
+                              ctx: any ActrContext
+                          ) async throws(ActrError) -> \(outputSwift)
+                        """
+                    }
+                    content += "\n}\n"
+
+                    // 3. ServiceDispatcher (local only).
+                    let dispatcherType = "\(serviceName)Dispatcher"
+                    content += """
+
+                    public enum \(dispatcherType) {
+                        public static func dispatch(
+                            handler: any \(handlerProtocol),
+                            ctx: any ActrContext,
+                            routeKey: String,
+                            payload: Data
+                        ) async throws(ActrError) -> Data {
+                            switch routeKey {
+                    """
+                    for route in serviceRoutes.sorted(by: { $0.route_key < $1.route_key }) {
+                        let methodName = lowerCamelCase(route.method)
+                        let inputSwift = resolveSwiftTypeName(route.input_type, typeToSwiftName: typeToSwiftName)
+                        let outputSwift = resolveSwiftTypeName(route.output_type, typeToSwiftName: typeToSwiftName)
+
+                        content += """
+
+                              case "\(route.route_key)":
+                                  let req: \(inputSwift)
+                                  do {
+                                      req = try \(inputSwift)(serializedBytes: payload)
+                                  } catch {
+                                      throw ActrError.DecodeFailure(msg: "Failed to decode \(inputSwift) for route \\(routeKey): \\(error)")
+                                  }
+                                  let resp = try await handler.\(methodName)(req: req, ctx: ctx)
+                                  do {
+                                      return try resp.serializedData()
+                                  } catch {
+                                      throw ActrError.DecodeFailure(msg: "Failed to encode \(outputSwift) for route \\(routeKey): \\(error)")
+                                  }
+                        """
+                    }
+                    content += """
+
+                            default:
+                                throw ActrError.UnknownRoute(msg: "Unknown route: \\(routeKey)")
+                            }
+                        }
+                    }
+
+                    """
+                }
+            }
+
+            let suffix = hasLocal ? ".actor.swift" : ".client.swift"
+            var generatedFile = Google_Protobuf_Compiler_CodeGeneratorResponse.File()
+            generatedFile.name = fileDescriptor.name.replacingOccurrences(of: ".proto", with: suffix)
+            generatedFile.content = content
+            response.file.append(generatedFile)
+            generatedFileNames.append(generatedFile.name)
+        }
+
+        // Generate unified dispatcher: actr_dispatch.swift
+        let dispatchContent = generateUnifiedDispatcher(
+            localRoutes: localRoutes,
+            remoteRoutes: remoteRoutes,
+            localServiceNames: localServiceNames,
+            typeToSwiftName: typeToSwiftName
+        )
+
+        var dispatchFile = Google_Protobuf_Compiler_CodeGeneratorResponse.File()
+        dispatchFile.name = "actr_dispatch.swift"
+        dispatchFile.content = dispatchContent
+        response.file.append(dispatchFile)
+        generatedFileNames.append("actr_dispatch.swift")
+
+        // Generate metadata.
+        generatedFileNames.append("actr-gen-meta.json")
+        let metadata = ActrGenMetadata(
+            schema_version: spec.schema_version,
+            plugin_version: version,
+            language: "swift",
+            dispatch_spec_hash: expectedHash,
+            generated_files: generatedFileNames,
+            generated_local_routes: localRoutes.map { $0.route_key }.sorted(),
+            generated_remote_routes: remoteRoutes.map { $0.route_key }.sorted(),
+            local_services: buildLocalServiceMetadata(localRoutes, typeRefs: typeRefs),
+            remote_services: buildRemoteServiceMetadata(remoteRoutes, typeRefs: typeRefs)
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        var metadataFile = Google_Protobuf_Compiler_CodeGeneratorResponse.File()
+        metadataFile.name = "actr-gen-meta.json"
+        metadataFile.content = String(bytes: try encoder.encode(metadata), encoding: .utf8) ?? "{}"
+        response.file.append(metadataFile)
+
+        try FileHandle.standardOutput.write(response.serializedData())
     }
 
-    var response = Google_Protobuf_Compiler_CodeGeneratorResponse()
+    // MARK: - Metadata generation
 
-    // Build a fully-qualified message name -> generated Swift type map from
-    // the full descriptor set. Imported RPC message types must resolve to their
-    // declaring package's Swift prefix (e.g. `ask.X` -> `Ask_X`) instead of the
-    // current service's package.
-    var typeToSwiftName: [String: String] = [:]
-    for fileDescriptor in request.protoFile {
-      for message in fileDescriptor.messageType {
-        Self.collectSwiftTypeNames(
-          package: fileDescriptor.package,
-          message: message,
-          parentProtoName: nil,
-          parentSwiftName: nil,
-          into: &typeToSwiftName)
-      }
+    static func buildLocalServiceMetadata(
+        _ routes: [DispatchRoute],
+        typeRefs: [String: TypeRef]
+    ) -> [LocalServiceMetadata] {
+        Dictionary(grouping: routes, by: { $0.proto_service })
+            .sorted { $0.key < $1.key }
+            .map { protoService, serviceRoutes in
+                let (packageName, serviceName) = splitProtoService(protoService)
+                return LocalServiceMetadata(
+                    name: serviceName,
+                    package: packageName,
+                    proto_file: serviceRoutes[0].proto_file,
+                    handler_interface: "\(serviceName)Handler",
+                    // Unified Swift generation dispatches through the global
+                    // actrDispatch function rather than a generated Workload type.
+                    workload_type: "",
+                    dispatcher_type: "\(serviceName)Dispatcher",
+                    methods: serviceRoutes
+                        .sorted { $0.route_key < $1.route_key }
+                        .map { methodMetadata($0, typeRefs: typeRefs) }
+                )
+            }
     }
 
-    // Second pass: Generate content for each file
-    for fileDescriptor in request.protoFile {
-      // Only generate code for files explicitly requested by protoc
-      if !request.fileToGenerate.contains(fileDescriptor.name) { continue }
+    static func buildRemoteServiceMetadata(
+        _ routes: [DispatchRoute],
+        typeRefs: [String: TypeRef]
+    ) -> [RemoteServiceMetadata] {
+        Dictionary(grouping: routes, by: { $0.proto_service })
+            .sorted { $0.key < $1.key }
+            .map { protoService, serviceRoutes in
+                let (packageName, serviceName) = splitProtoService(protoService)
+                return RemoteServiceMetadata(
+                    name: serviceName,
+                    package: packageName,
+                    proto_file: serviceRoutes[0].proto_file,
+                    dependency_alias: serviceRoutes[0].dependency_alias ?? "",
+                    client_type: "\(serviceName)Client",
+                    methods: serviceRoutes
+                        .sorted { $0.route_key < $1.route_key }
+                        .map { methodMetadata($0, typeRefs: typeRefs) }
+                )
+            }
+    }
 
-      let protoFile = normalizeProtoPath(fileDescriptor.name)
-      let isRemote: Bool
-      if remoteFilesParam.contains(protoFile) {
-        isRemote = true
-      } else if localFilesParam.contains(protoFile)
-        || localFileParam == protoFile
-      {
-        isRemote = false
-      } else {
-        isRemote = globalProtoSource == "remote"
-      }
+    static func methodMetadata(
+        _ route: DispatchRoute,
+        typeRefs: [String: TypeRef]
+    ) -> MethodMetadata {
+        MethodMetadata(
+            name: route.method,
+            snake_name: snakeCase(route.method),
+            route_key: route.route_key,
+            input_ref: metadataTypeRef(
+                route.input_type,
+                fallbackProtoFile: route.proto_file,
+                typeRefs: typeRefs
+            ),
+            output_ref: metadataTypeRef(
+                route.output_type,
+                fallbackProtoFile: route.proto_file,
+                typeRefs: typeRefs
+            )
+        )
+    }
 
-      // Skip generating files without services and not explicitly local
-      if fileDescriptor.service.isEmpty,
-        localFileParam != protoFile,
-        !localFilesParam.contains(protoFile)
-      {
-        continue
-      }
+    static func metadataTypeRef(
+        _ rawType: String,
+        fallbackProtoFile: String,
+        typeRefs: [String: TypeRef]
+    ) -> TypeRef {
+        let protoType = String(rawType.drop(while: { $0 == "." }))
+        if let typeRef = typeRefs[protoType] {
+            return typeRef
+        }
 
-      var content = """
+        let components = protoType.split(separator: ".").map(String.init)
+        return TypeRef(
+            proto_type: protoType,
+            type_name: components.last ?? protoType,
+            proto_package: components.dropLast().joined(separator: "."),
+            proto_file: fallbackProtoFile
+        )
+    }
+
+    static func splitProtoService(_ protoService: String) -> (String, String) {
+        guard let separator = protoService.lastIndex(of: ".") else {
+            return ("", protoService)
+        }
+        return (
+            String(protoService[..<separator]),
+            String(protoService[protoService.index(after: separator)...])
+        )
+    }
+
+    // MARK: - Unified dispatcher generation
+
+    static func generateUnifiedDispatcher(
+        localRoutes: [DispatchRoute],
+        remoteRoutes: [DispatchRoute],
+        localServiceNames: Set<String>,
+        typeToSwiftName: [String: String]
+    ) -> String {
+        var content = """
         // DO NOT EDIT.
         // Generated by protoc-gen-actrframework-swift
 
@@ -285,578 +449,470 @@ struct ActrFrameworkGenerator {
 
         """
 
-      // For Local mode with no services, generate a generic Workload from package name
-      if !isRemote, fileDescriptor.service.isEmpty {
-        let pkgName =
-          fileDescriptor.package.isEmpty
-          ? "Client" : fileDescriptor.package.split(separator: "_").map { $0.capitalized }.joined()
-        let workloadName = "\(pkgName)Workload"
+        // ActrDispatchHandler protocol — aggregates all local handler protocols.
+        let handlerProtocols = localServiceNames
+            .map { "\($0.split(separator: ".").last.map(String.init) ?? $0)Handler" }
+            .sorted()
+            .joined(separator: ", ")
 
-        content += """
-
-          /// \(pkgName) workload wrapper - automatically generated for empty local proto
-          \(accessModifier)actor \(workloadName) {
-              private let remoteTargets: [String: ActrType]
-
-              \(accessModifier)init(remoteTargets: [String: ActrType] = [:]) {
-                  self.remoteTargets = remoteTargets
-              }
-          }
-
-          extension \(workloadName) {
-              \(accessModifier)func __dispatch(ctx: any ActrContext, envelope: RpcEnvelope) async throws(ActrError) -> Data {
-                  switch envelope.routeKey {
-          """
-
-        // Remote service forwarding cases
-        // Group remote services by their actr_type
-        var servicesByActrType: [String: [RemoteServiceInfo]] = [:]
-        for remoteService in remoteServices {
-          let actrType =
-            remoteFileToActrType[remoteService.fileName]
-            ?? "\(manufacturer):\(remoteService.serviceName):1.0.0"
-          if servicesByActrType[actrType] == nil {
-            servicesByActrType[actrType] = []
-          }
-          servicesByActrType[actrType]?.append(remoteService)
-        }
-
-        // Generate forwarding cases for each actr_type
-        for (_, services) in servicesByActrType.sorted(by: { $0.key < $1.key }) {
-          var routeKeysForThisType: [String] = []
-          for service in services {
-            routeKeysForThisType.append(contentsOf: service.routeKeys)
-          }
-
-          if !routeKeysForThisType.isEmpty {
-            let routeKeysList = routeKeysForThisType.map { "\"\($0)\"" }.joined(
-              separator: ",\n                        ")
+        if !localServiceNames.isEmpty {
             content += """
 
-                      case \(routeKeysList):
-                          let targetType = try remoteTargetType(for: envelope.routeKey)
-                          let targetId = try await ctx.discover(targetType: targetType)
-                          return try await ctx.call(
-                              target: targetId,
-                              routeKey: envelope.routeKey,
-                              payload: envelope.payload
-                          )
-              """
-          }
-        }
+            public protocol ActrDispatchHandler: \(handlerProtocols), Sendable {}
 
-        content += """
-
-                  default:
-                      throw ActrError.UnknownRoute(msg: "Unknown route: \\(envelope.routeKey)")
-                  }
-              }
-
-              private func remoteTargetType(for routeKey: String) throws(ActrError) -> ActrType {
-                  guard let targetType = remoteTargets[routeKey] else {
-                      throw ActrError.UnknownRoute(msg: "No remote target configured for route: \\(routeKey)")
-                  }
-                  return targetType
-              }
-          }
-
-          """
-      } else {
-        for service in fileDescriptor.service {
-          let serviceName = service.name
-          let handlerProtocol = "\(serviceName)Handler"
-
-          // 1. Generate Handler Protocol (Local only)
-          if !isRemote {
+            """
+        } else {
             content += """
 
-              /// \(serviceName) service handler protocol - users need to implement this protocol
-              \(accessModifier)protocol \(handlerProtocol): Sendable {
-              """
+            public protocol ActrDispatchHandler: Sendable {}
 
-            for method in service.method {
-              let methodName = Self.lowerCamelCase(method.name)
-              let inputType = Self.swiftTypeName(
-                method.inputType, currentPackage: fileDescriptor.package,
-                typeToSwiftName: typeToSwiftName)
-              let outputType = Self.swiftTypeName(
-                method.outputType, currentPackage: fileDescriptor.package,
-                typeToSwiftName: typeToSwiftName)
-
-              content += """
-
-                /// RPC method: \(method.name)
-                func \(methodName)(
-                    req: \(inputType),
-                    ctx: any ActrContext
-                ) async throws(ActrError) -> \(outputType)
-
-                """
+            public struct EmptyActrDispatchHandler: ActrDispatchHandler {
+                public init() {}
             }
 
-            content += "\n}\n"
-          }
+            """
+        }
 
-          // 2. Generate RpcRequest extensions
-          for method in service.method {
-            let inputType = Self.swiftTypeName(
-              method.inputType, currentPackage: fileDescriptor.package,
-              typeToSwiftName: typeToSwiftName)
-            let outputType = Self.swiftTypeName(
-              method.outputType, currentPackage: fileDescriptor.package,
-              typeToSwiftName: typeToSwiftName)
-            let payloadType = try Self.payloadType(
-              for: method,
-              packageName: fileDescriptor.package,
-              serviceName: serviceName)
+        // actrDispatch function.
+        content += """
 
-            let routeKey: String
-            if fileDescriptor.package.isEmpty {
-              routeKey = "\(serviceName).\(method.name)"
+        public func actrDispatch(
+            ctx: any ActrContext,
+            handler: any ActrDispatchHandler,
+            routeKey: String,
+            payload: Data,
+            timeoutMs: Int64
+        ) async throws(ActrError) -> Data {
+            switch routeKey {
+        """
+
+        // Local routes: decode → invoke → encode.
+        for route in localRoutes.sorted(by: { $0.route_key < $1.route_key }) {
+            let methodName = lowerCamelCase(route.method)
+            let inputSwift = resolveSwiftTypeName(route.input_type, typeToSwiftName: typeToSwiftName)
+            let outputSwift = resolveSwiftTypeName(route.output_type, typeToSwiftName: typeToSwiftName)
+
+            content += """
+
+              case \(swiftStringLiteral(route.route_key)):
+                  let req: \(inputSwift)
+                  do {
+                      req = try \(inputSwift)(serializedBytes: payload)
+                  } catch {
+                      throw ActrError.DecodeFailure(msg: "Failed to decode \(inputSwift) for route \\(routeKey): \\(error)")
+                  }
+                  let resp = try await handler.\(methodName)(req: req, ctx: ctx)
+                  do {
+                      return try resp.serializedData()
+                  } catch {
+                      throw ActrError.DecodeFailure(msg: "Failed to encode \(outputSwift) for route \\(routeKey): \\(error)")
+                  }
+            """
+        }
+
+        // Remote routes: resolve dependency → discover → call.
+        for route in remoteRoutes.sorted(by: { $0.route_key < $1.route_key }) {
+            let alias = route.dependency_alias ?? ""
+
+            content += """
+
+              case \(swiftStringLiteral(route.route_key)):
+                  let actrType = try await ctx.resolveDependency(alias: \(swiftStringLiteral(alias)))
+                  let target = try await ctx.discover(targetType: actrType)
+                  return try await ctx.callRaw(
+                      target: target,
+                      routeKey: routeKey,
+                      payload: payload,
+                      timeoutMs: timeoutMs
+                  )
+            """
+        }
+
+        content += """
+
+            default:
+                throw ActrError.UnknownRoute(msg: "Unknown route: \\(routeKey)")
+            }
+        }
+        """
+
+        return content
+    }
+
+    // MARK: - DispatchSpec loading and hash validation
+
+    static func loadDispatchSpec(at path: String, expectedHash: String) throws -> DispatchSpecModel {
+        let url = URL(fileURLWithPath: path)
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
+            throw PluginError.cannotReadDispatchSpec(error.localizedDescription)
+        }
+
+        try validateDispatchSpecJSONShape(data: data)
+
+        let spec: DispatchSpecModel
+        do {
+            spec = try JSONDecoder().decode(DispatchSpecModel.self, from: data)
+        } catch {
+            throw PluginError.cannotReadDispatchSpec(error.localizedDescription)
+        }
+        try validateDispatchSpec(spec)
+
+        // Validate hash: recompute JCS+SHA-256 over the spec without spec_hash.
+        let actualHash = try computeDispatchSpecHash(data: data)
+        if let embeddedHash = spec.spec_hash, embeddedHash != actualHash {
+            throw PluginError.hashMismatch(expected: embeddedHash, actual: actualHash)
+        }
+        guard actualHash == expectedHash else {
+            throw PluginError.hashMismatch(expected: expectedHash, actual: actualHash)
+        }
+
+        return spec
+    }
+
+    /// Reject fields and value shapes outside DispatchSpec v1 before
+    /// `JSONDecoder` drops unknown keys from the typed model.
+    static func validateDispatchSpecJSONShape(data: Data) throws {
+        let json: Any
+        do {
+            json = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw PluginError.cannotReadDispatchSpec(error.localizedDescription)
+        }
+        guard let object = json as? [String: Any] else {
+            throw PluginError.invalidDispatchSpec("dispatch spec must be a JSON object")
+        }
+
+        let allowedSpecFields: Set<String> = ["schema_version", "routes", "spec_hash"]
+        let unknownSpecFields = Set(object.keys).subtracting(allowedSpecFields)
+        guard unknownSpecFields.isEmpty else {
+            throw PluginError.invalidDispatchSpec(
+                "unknown top-level field(s): \(unknownSpecFields.sorted().joined(separator: ", "))"
+            )
+        }
+        guard object["schema_version"] is String, let routes = object["routes"] as? [Any] else {
+            throw PluginError.invalidDispatchSpec(
+                "schema_version must be a string and routes must be an array"
+            )
+        }
+        if let hash = object["spec_hash"], !(hash is String), !(hash is NSNull) {
+            throw PluginError.invalidDispatchSpec("spec_hash must be a string when present")
+        }
+
+        let requiredRouteFields: Set<String> = [
+            "route_key", "proto_file", "proto_service", "method",
+            "input_type", "output_type", "payload_type",
+        ]
+        let allowedRouteFields = requiredRouteFields.union(["dependency_alias"])
+        for (index, value) in routes.enumerated() {
+            guard let route = value as? [String: Any] else {
+                throw PluginError.invalidDispatchSpec("route #\(index) must be a JSON object")
+            }
+            let routeFields = Set(route.keys)
+            let missing = requiredRouteFields.subtracting(routeFields)
+            let unknown = routeFields.subtracting(allowedRouteFields)
+            guard missing.isEmpty else {
+                throw PluginError.invalidDispatchSpec(
+                    "route #\(index) is missing field(s): \(missing.sorted().joined(separator: ", "))"
+                )
+            }
+            guard unknown.isEmpty else {
+                throw PluginError.invalidDispatchSpec(
+                    "route #\(index) contains unknown field(s): \(unknown.sorted().joined(separator: ", "))"
+                )
+            }
+            for field in requiredRouteFields {
+                guard let string = route[field] as? String, !string.isEmpty else {
+                    throw PluginError.invalidDispatchSpec(
+                        "route #\(index) field `\(field)` must be a non-empty string"
+                    )
+                }
+            }
+            if let alias = route["dependency_alias"], !(alias is String), !(alias is NSNull) {
+                throw PluginError.invalidDispatchSpec(
+                    "route #\(index) dependency_alias must be a string when present"
+                )
+            }
+        }
+    }
+
+    static func validateDispatchSpec(_ spec: DispatchSpecModel) throws {
+        guard spec.schema_version == "v1" else {
+            throw PluginError.invalidDispatchSpec(
+                "unsupported schema_version `\(spec.schema_version)`; expected `v1`"
+            )
+        }
+
+        var routeKeys = Set<String>()
+        var aliasesByService: [String: Set<String?>] = [:]
+        for route in spec.routes {
+            guard routeKeys.insert(route.route_key).inserted else {
+                throw PluginError.invalidDispatchSpec(
+                    "duplicate route_key `\(route.route_key)`"
+                )
+            }
+            if let alias = route.dependency_alias,
+               alias.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            {
+                throw PluginError.invalidDispatchSpec(
+                    "remote route `\(route.route_key)` has an empty dependency_alias"
+                )
+            }
+            aliasesByService[route.proto_service, default: []].insert(route.dependency_alias)
+        }
+        for (service, aliases) in aliasesByService where aliases.count != 1 {
+            throw PluginError.invalidDispatchSpec(
+                "service `\(service)` mixes local/remote routes or dependency aliases"
+            )
+        }
+    }
+
+    /// Recompute the canonical JSON hash (JCS + SHA-256) over the spec
+    /// **without** the `spec_hash` field.
+    static func computeDispatchSpecHash(data: Data) throws -> String {
+        // Decode as a generic JSON object so we can strip spec_hash.
+        let jsonObject: Any
+        do {
+            jsonObject = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw PluginError.cannotReadDispatchSpec(error.localizedDescription)
+        }
+
+        // Remove spec_hash from the top-level object.
+        if let dict = jsonObject as? [String: Any] {
+            var mutable = dict
+            mutable.removeValue(forKey: "spec_hash")
+            let canonical = try canonicalizeJSONObject(mutable)
+            let hash = SHA256.hash(data: canonical)
+            return hash.map { String(format: "%02x", $0) }.joined()
+        }
+
+        throw PluginError.cannotReadDispatchSpec("spec is not a JSON object")
+    }
+
+    /// Canonicalize a JSON object per JCS (RFC 8785): recursively sorted keys,
+    /// no whitespace, UTF-8.
+    static func canonicalizeJSONObject(_ value: Any) throws -> Data {
+        Data(try canonicalJSONString(value).utf8)
+    }
+
+    /// Encode the string-only DispatchSpec shape using RFC 8785 JSON
+    /// canonicalization. DispatchSpec v1 contains no numeric values.
+    static func canonicalJSONString(_ value: Any) throws -> String {
+        if let dict = value as? [String: Any] {
+            let fields = try dict.keys.sorted().map { key -> String in
+                guard let child = dict[key] else {
+                    throw PluginError.invalidDispatchSpec(
+                        "DispatchSpec object key disappeared during canonicalization"
+                    )
+                }
+                return "\(jcsStringLiteral(key)):\(try canonicalJSONString(child))"
+            }
+            return "{\(fields.joined(separator: ","))}"
+        }
+        if let arr = value as? [Any] {
+            let elements = try arr.map { try canonicalJSONString($0) }
+            return "[\(elements.joined(separator: ","))]"
+        }
+        if let string = value as? String {
+            return jcsStringLiteral(string)
+        }
+        if value is NSNull {
+            return "null"
+        }
+        throw PluginError.invalidDispatchSpec(
+            "DispatchSpec v1 canonicalization encountered a non-string primitive"
+        )
+    }
+
+    static func jcsStringLiteral(_ value: String) -> String {
+        var literal = "\""
+        for scalar in value.unicodeScalars {
+            switch scalar.value {
+            case 0x08: literal += "\\b"
+            case 0x09: literal += "\\t"
+            case 0x0A: literal += "\\n"
+            case 0x0C: literal += "\\f"
+            case 0x0D: literal += "\\r"
+            case 0x22: literal += "\\\""
+            case 0x5C: literal += "\\\\"
+            case 0x00 ... 0x1F:
+                literal += String(format: "\\u%04x", scalar.value)
+            default:
+                literal.append(contentsOf: String(scalar))
+            }
+        }
+        literal += "\""
+        return literal
+    }
+
+    // MARK: - Type name resolution
+
+    /// Resolve a fully-qualified proto type (e.g. `.echo.EchoRequest`) to its
+    /// generated Swift type name using the declaring package's prefix.
+    static func resolveSwiftTypeName(
+        _ rawType: String,
+        typeToSwiftName: [String: String]
+    ) -> String {
+        let trimmed = String(rawType.drop(while: { $0 == "." }))
+        if let swiftName = typeToSwiftName[trimmed] {
+            return swiftName
+        }
+        // Fallback: use the last component with no package prefix.
+        let typeName = trimmed.split(separator: ".").last.map(String.init) ?? trimmed
+        return typeName
+    }
+
+    static func collectSwiftTypeNames(
+        package: String,
+        message: Google_Protobuf_DescriptorProto,
+        parentProtoName: String?,
+        parentSwiftName: String?,
+        into typeToSwiftName: inout [String: String]
+    ) {
+        let protoName = parentProtoName.map { "\($0).\(message.name)" } ?? message.name
+        let fullProtoName = package.isEmpty ? protoName : "\(package).\(protoName)"
+        let swiftName =
+            parentSwiftName.map { "\($0).\(message.name)" }
+                ?? "\(swiftPackagePrefix(package))\(message.name)"
+        typeToSwiftName[fullProtoName] = swiftName
+
+        for nested in message.nestedType {
+            collectSwiftTypeNames(
+                package: package,
+                message: nested,
+                parentProtoName: protoName,
+                parentSwiftName: swiftName,
+                into: &typeToSwiftName
+            )
+        }
+    }
+
+    static func collectTypeRefs(
+        package: String,
+        protoFile: String,
+        message: Google_Protobuf_DescriptorProto,
+        parentProtoName: String?,
+        into typeRefs: inout [String: TypeRef]
+    ) {
+        let protoName = parentProtoName.map { "\($0).\(message.name)" } ?? message.name
+        let fullProtoName = package.isEmpty ? protoName : "\(package).\(protoName)"
+        typeRefs[fullProtoName] = TypeRef(
+            proto_type: fullProtoName,
+            type_name: protoName,
+            proto_package: package,
+            proto_file: protoFile
+        )
+
+        for nested in message.nestedType {
+            collectTypeRefs(
+                package: package,
+                protoFile: protoFile,
+                message: nested,
+                parentProtoName: protoName,
+                into: &typeRefs
+            )
+        }
+    }
+
+    // MARK: - Naming helpers
+
+    /// Contract struct name: `<Package><Service><Method>Rpc`.
+    /// Example: `echo.EchoService.Echo` → `EchoEchoServiceEchoRpc`.
+    static func contractStructName(protoService: String, method: String) -> String {
+        let parts = protoService.split(separator: ".")
+        let packagePart = parts.dropLast().map { pascalCase(String($0)) }.joined()
+        let servicePart = parts.last.map(String.init) ?? ""
+        return "\(packagePart)\(servicePart)\(pascalCase(method))Rpc"
+    }
+
+    static func pascalCase(_ value: String) -> String {
+        let parts = value.split(separator: "_")
+        return parts.map { part -> String in
+            guard let first = part.first else { return "" }
+            return String(first).uppercased() + String(part.dropFirst())
+        }.joined()
+    }
+
+    static func swiftPackagePrefix(_ packageName: String) -> String {
+        if packageName.isEmpty { return "" }
+        let components = packageName.split(separator: ".").map { component in
+            component.split(separator: "_").map { $0.capitalized }.joined()
+        }
+        return components.joined(separator: "_") + "_"
+    }
+
+    static func snakeCase(_ value: String) -> String {
+        let acronymBoundaries = value.replacingOccurrences(
+            of: #"(.)([A-Z][a-z]+)"#,
+            with: "$1_$2",
+            options: .regularExpression
+        )
+        return acronymBoundaries.replacingOccurrences(
+            of: #"([a-z0-9])([A-Z])"#,
+            with: "$1_$2",
+            options: .regularExpression
+        ).lowercased()
+    }
+
+    static func lowerCamelCase(_ value: String) -> String {
+        let parts = snakeCase(value).split(separator: "_")
+        guard let first = parts.first else { return "" }
+        return String(first) + parts.dropFirst().map { $0.capitalized }.joined()
+    }
+
+    static func normalizeProtoPath(_ value: String) -> String {
+        var path = value.replacingOccurrences(of: "\\", with: "/")
+        while path.hasPrefix("./") {
+            path.removeFirst(2)
+        }
+        return path.hasSuffix(".proto") ? path : "\(path).proto"
+    }
+
+    static func swiftStringLiteral(_ value: String) -> String {
+        var literal = "\""
+        for scalar in value.unicodeScalars {
+            switch scalar.value {
+            case 0x22: literal += "\\\""
+            case 0x5C: literal += "\\\\"
+            case 0x0A: literal += "\\n"
+            case 0x0D: literal += "\\r"
+            case 0x09: literal += "\\t"
+            case 0x00 ... 0x1F:
+                literal += String(format: "\\u{%X}", scalar.value)
+            case 0x2028, 0x2029:
+                literal += String(format: "\\u{%X}", scalar.value)
+            default:
+                literal.append(contentsOf: String(scalar))
+            }
+        }
+        literal += "\""
+        return literal
+    }
+
+    static func payloadTypeSwift(_ value: String) -> String {
+        switch value.lowercased() {
+        case "rpcreliable": return ".rpcReliable"
+        case "rpcsignal": return ".rpcSignal"
+        case "streamreliable": return ".streamReliable"
+        case "streamlatencyfirst": return ".streamLatencyFirst"
+        case "mediartp": return ".mediaRtp"
+        default: return ".rpcReliable"
+        }
+    }
+
+    // MARK: - Parameter parsing
+
+    static func parseParameters(_ parameter: String) -> [String: String] {
+        parameter.split(separator: ",").reduce(into: [String: String]()) { dict, pair in
+            let parts = pair.split(separator: "=", maxSplits: 1)
+            if parts.count == 2 {
+                dict[String(parts[0])] = String(parts[1])
             } else {
-              routeKey = "\(fileDescriptor.package).\(serviceName).\(method.name)"
+                dict[String(parts[0])] = ""
             }
-
-            content += """
-
-              extension \(inputType): RpcRequest {
-                  \(accessModifier)typealias Response = \(outputType)
-
-                  \(accessModifier)static var routeKey: String { "\(routeKey)" }
-                  \(accessModifier)static var payloadType: PayloadType { \(payloadType.swiftCase) }
-              }
-              """
-          }
-
-          // 3. Generate Workload actor (Local only)
-          if !isRemote {
-            let workloadName = "\(serviceName)Workload"
-            content += """
-
-              /// \(serviceName) workload wrapper - wraps the user's handler implementation
-              \(accessModifier)actor \(workloadName)<T: \(handlerProtocol)> {
-                  \(accessModifier)let handler: T
-                  private let remoteTargets: [String: ActrType]
-
-                  \(accessModifier)init(handler: T, remoteTargets: [String: ActrType] = [:]) {
-                      self.handler = handler
-                      self.remoteTargets = remoteTargets
-                  }
-              }
-
-              extension \(workloadName) {
-                  \(accessModifier)func __dispatch(ctx: any ActrContext, envelope: RpcEnvelope) async throws(ActrError) -> Data {
-                      switch envelope.routeKey {
-              """
-
-            // Local Methods
-            for method in service.method {
-              let methodName = Self.lowerCamelCase(method.name)
-              let inputType = Self.swiftTypeName(
-                method.inputType, currentPackage: fileDescriptor.package,
-                typeToSwiftName: typeToSwiftName)
-              let outputType = Self.swiftTypeName(
-                method.outputType, currentPackage: fileDescriptor.package,
-                typeToSwiftName: typeToSwiftName)
-
-              let routeKey: String
-              if fileDescriptor.package.isEmpty {
-                routeKey = "\(serviceName).\(method.name)"
-              } else {
-                routeKey = "\(fileDescriptor.package).\(serviceName).\(method.name)"
-              }
-
-              content += """
-
-                case "\(routeKey)":
-                    let req: \(inputType)
-                    do {
-                        req = try \(inputType)(serializedBytes: envelope.payload)
-                    } catch {
-                        throw ActrError.DecodeFailure(msg: "Failed to decode \(inputType) for route \\(envelope.routeKey): \\(error)")
-                    }
-                    let resp = try await handler.\(methodName)(req: req, ctx: ctx)
-                    do {
-                        return try resp.serializedData()
-                    } catch {
-                        throw ActrError.DecodeFailure(msg: "Failed to encode \(outputType) for route \\(envelope.routeKey): \\(error)")
-                    }
-                """
-            }
-
-            // Remote service forwarding cases
-            // Group remote services by their actr_type
-            var servicesByActrType: [String: [RemoteServiceInfo]] = [:]
-            for remoteService in remoteServices {
-              let actrType =
-                remoteFileToActrType[remoteService.fileName]
-                ?? "\(manufacturer):\(remoteService.serviceName):1.0.0"
-              if servicesByActrType[actrType] == nil {
-                servicesByActrType[actrType] = []
-              }
-              servicesByActrType[actrType]?.append(remoteService)
-            }
-
-            // Generate forwarding cases for each actr_type
-            for (_, services) in servicesByActrType.sorted(by: { $0.key < $1.key }) {
-              var routeKeysForThisType: [String] = []
-              for service in services {
-                routeKeysForThisType.append(contentsOf: service.routeKeys)
-              }
-
-              if !routeKeysForThisType.isEmpty {
-                let routeKeysList = routeKeysForThisType.map { "\"\($0)\"" }.joined(
-                  separator: ",\n                 ")
-                content += """
-
-                  case \(routeKeysList):
-                      let targetType = try remoteTargetType(for: envelope.routeKey)
-                      let targetId = try await ctx.discover(targetType: targetType)
-                      return try await ctx.call(
-                          target: targetId,
-                          routeKey: envelope.routeKey,
-                          payload: envelope.payload
-                      )
-                  """
-              }
-            }
-
-            content += """
-
-                      default:
-                          throw ActrError.UnknownRoute(msg: "Unknown route: \\(envelope.routeKey)")
-                      }
-                  }
-
-              private func remoteTargetType(for routeKey: String) throws(ActrError) -> ActrType {
-                  guard let targetType = remoteTargets[routeKey] else {
-                      throw ActrError.UnknownRoute(msg: "No remote target configured for route: \\(routeKey)")
-                  }
-                  return targetType
-              }
-              }
-
-              """
-          }
         }
-      }
-
-      var generatedFile = Google_Protobuf_Compiler_CodeGeneratorResponse.File()
-      let suffix = isRemote ? ".client.swift" : ".actor.swift"
-      generatedFile.name = fileDescriptor.name.replacingOccurrences(of: ".proto", with: suffix)
-      generatedFile.content = content
-      response.file.append(generatedFile)
     }
-
-    let metadata = ActrGenMetadata(
-      plugin_version: version,
-      language: "swift",
-      local_services: localServiceMetadata,
-      remote_services: remoteServiceMetadata)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    var metadataFile = Google_Protobuf_Compiler_CodeGeneratorResponse.File()
-    metadataFile.name = "actr-gen-meta.json"
-    metadataFile.content =
-      String(
-        data: try encoder.encode(metadata),
-        encoding: .utf8
-      ) ?? "{}"
-    response.file.append(metadataFile)
-
-    // Write the response back to stdout
-    try FileHandle.standardOutput.write(response.serializedData())
-  }
-
-  static func buildMethodMetadata(
-    _ input: MethodMetadataInput,
-    typeRefs: [String: TypeRef]
-  ) throws -> MethodMetadata {
-    let routeKey: String
-    if input.packageName.isEmpty {
-      routeKey = "\(input.serviceName).\(input.methodName)"
-    } else {
-      routeKey = "\(input.packageName).\(input.serviceName).\(input.methodName)"
-    }
-
-    return MethodMetadata(
-      name: input.methodName,
-      snake_name: snakeCase(input.methodName),
-      route_key: routeKey,
-      input_ref: try resolveTypeRef(
-        input.inputType,
-        kind: "input",
-        serviceName: input.serviceName,
-        methodName: input.methodName,
-        typeRefs: typeRefs),
-      output_ref: try resolveTypeRef(
-        input.outputType,
-        kind: "output",
-        serviceName: input.serviceName,
-        methodName: input.methodName,
-        typeRefs: typeRefs))
-  }
-
-  static func payloadType(
-    for method: Google_Protobuf_MethodDescriptorProto,
-    packageName _: String,
-    serviceName: String
-  ) throws -> RpcPayloadType {
-    if let rawValue = try extractPayloadTypeOption(
-      from: method.options.unknownFields.data,
-      serviceName: serviceName,
-      methodName: method.name)
-    {
-      guard let payloadType = RpcPayloadType(rawValue: rawValue) else {
-        throw MetadataError.unsupportedPayloadType(
-          value: rawValue,
-          serviceName: serviceName,
-          methodName: method.name)
-      }
-      return payloadType
-    }
-
-    if method.clientStreaming || method.serverStreaming {
-      return .streamReliable
-    }
-
-    return .rpcReliable
-  }
-
-  static func extractPayloadTypeOption(
-    from unknownFields: Data,
-    serviceName: String,
-    methodName: String
-  ) throws -> UInt64? {
-    let payloadTypeFieldNumber = 50_001
-    var index = unknownFields.startIndex
-
-    while index < unknownFields.endIndex {
-      let key = try readVarint(
-        from: unknownFields,
-        index: &index,
-        serviceName: serviceName,
-        methodName: methodName)
-      let fieldNumber = Int(key >> 3)
-      let wireType = Int(key & 0x7)
-
-      if fieldNumber == payloadTypeFieldNumber {
-        guard wireType == 0 else {
-          throw MetadataError.malformedPayloadTypeOption(
-            serviceName: serviceName,
-            methodName: methodName,
-            detail: "expected varint wire type, got \(wireType)")
-        }
-        return try readVarint(
-          from: unknownFields,
-          index: &index,
-          serviceName: serviceName,
-          methodName: methodName)
-      }
-
-      try skipUnknownField(
-        wireType: wireType,
-        in: unknownFields,
-        index: &index,
-        serviceName: serviceName,
-        methodName: methodName)
-    }
-
-    return nil
-  }
-
-  static func readVarint(
-    from data: Data,
-    index: inout Data.Index,
-    serviceName: String,
-    methodName: String
-  ) throws -> UInt64 {
-    var result: UInt64 = 0
-    var shift: UInt64 = 0
-
-    while index < data.endIndex, shift < 64 {
-      let byte = data[index]
-      index = data.index(after: index)
-      result |= UInt64(byte & 0x7f) << shift
-      if byte < 0x80 {
-        return result
-      }
-      shift += 7
-    }
-
-    throw MetadataError.malformedPayloadTypeOption(
-      serviceName: serviceName,
-      methodName: methodName,
-      detail: "unterminated varint")
-  }
-
-  static func skipUnknownField(
-    wireType: Int,
-    in data: Data,
-    index: inout Data.Index,
-    serviceName: String,
-    methodName: String
-  ) throws {
-    func advance(by count: Int) throws {
-      guard let next = data.index(index, offsetBy: count, limitedBy: data.endIndex) else {
-        throw MetadataError.malformedPayloadTypeOption(
-          serviceName: serviceName,
-          methodName: methodName,
-          detail: "truncated unknown field")
-      }
-      index = next
-    }
-
-    switch wireType {
-    case 0:
-      _ = try readVarint(
-        from: data,
-        index: &index,
-        serviceName: serviceName,
-        methodName: methodName)
-    case 1:
-      try advance(by: 8)
-    case 2:
-      let length = try readVarint(
-        from: data,
-        index: &index,
-        serviceName: serviceName,
-        methodName: methodName)
-      guard length <= UInt64(Int.max) else {
-        throw MetadataError.malformedPayloadTypeOption(
-          serviceName: serviceName,
-          methodName: methodName,
-          detail: "length-delimited field is too large")
-      }
-      try advance(by: Int(length))
-    case 5:
-      try advance(by: 4)
-    default:
-      throw MetadataError.malformedPayloadTypeOption(
-        serviceName: serviceName,
-        methodName: methodName,
-        detail: "unsupported wire type \(wireType)")
-    }
-  }
-
-  static func resolveTypeRef(
-    _ rawType: String,
-    kind: String,
-    serviceName: String,
-    methodName: String,
-    typeRefs: [String: TypeRef]
-  ) throws -> TypeRef {
-    let trimmed = String(rawType.drop(while: { $0 == "." }))
-    if let typeRef = typeRefs[trimmed] {
-      return typeRef
-    }
-    throw MetadataError.unresolvedType(
-      kind: kind,
-      typeName: trimmed,
-      serviceName: serviceName,
-      methodName: methodName)
-  }
-
-  /// Resolve a fully-qualified proto type (as carried by
-  /// `MethodDescriptorProto.inputType`/`outputType`, e.g.
-  /// `.ask.ContinuePromptResultStreamsRequest`) to its Swift type name, using
-  /// the declaring package's prefix when the type is imported from another
-  /// proto file. Falls back to `currentPackage` for types not found in the
-  /// descriptor set (well-known types, external imports).
-  static func swiftTypeName(
-    _ inputType: String,
-    currentPackage: String,
-    typeToSwiftName: [String: String]
-  ) -> String {
-    let trimmed = String(inputType.drop(while: { $0 == "." }))
-    if let swiftName = typeToSwiftName[trimmed] {
-      return swiftName
-    }
-    let prefix = swiftPackagePrefix(currentPackage)
-    let typeName = trimmed.split(separator: ".").last.map(String.init) ?? trimmed
-    return prefix + typeName
-  }
-
-  static func collectSwiftTypeNames(
-    package: String,
-    message: Google_Protobuf_DescriptorProto,
-    parentProtoName: String?,
-    parentSwiftName: String?,
-    into typeToSwiftName: inout [String: String]
-  ) {
-    let protoName = parentProtoName.map { "\($0).\(message.name)" } ?? message.name
-    let fullProtoName = package.isEmpty ? protoName : "\(package).\(protoName)"
-    let swiftName =
-      parentSwiftName.map { "\($0).\(message.name)" }
-      ?? "\(swiftPackagePrefix(package))\(message.name)"
-    typeToSwiftName[fullProtoName] = swiftName
-
-    for nested in message.nestedType {
-      collectSwiftTypeNames(
-        package: package,
-        message: nested,
-        parentProtoName: protoName,
-        parentSwiftName: swiftName,
-        into: &typeToSwiftName)
-    }
-  }
-
-  static func collectTypeRefs(
-    package: String,
-    protoFile: String,
-    message: Google_Protobuf_DescriptorProto,
-    parentProtoName: String?,
-    into typeRefs: inout [String: TypeRef]
-  ) {
-    let protoName = parentProtoName.map { "\($0).\(message.name)" } ?? message.name
-    let fullProtoName = package.isEmpty ? protoName : "\(package).\(protoName)"
-    typeRefs[fullProtoName] = TypeRef(
-      proto_type: fullProtoName,
-      type_name: protoName,
-      proto_package: package,
-      proto_file: normalizeProtoPath(protoFile))
-
-    for nested in message.nestedType {
-      collectTypeRefs(
-        package: package,
-        protoFile: protoFile,
-        message: nested,
-        parentProtoName: protoName,
-        into: &typeRefs)
-    }
-  }
-
-  static func swiftPackagePrefix(_ packageName: String) -> String {
-    if packageName.isEmpty { return "" }
-    let components = packageName.split(separator: ".").map { component in
-      component.split(separator: "_").map { $0.capitalized }.joined()
-    }
-    return components.joined(separator: "_") + "_"
-  }
-
-  static func snakeCase(_ value: String) -> String {
-    let acronymBoundaries = value.replacingOccurrences(
-      of: #"(.)([A-Z][a-z]+)"#,
-      with: "$1_$2",
-      options: .regularExpression)
-    return acronymBoundaries.replacingOccurrences(
-      of: #"([a-z0-9])([A-Z])"#,
-      with: "$1_$2",
-      options: .regularExpression
-    ).lowercased()
-  }
-
-  static func lowerCamelCase(_ value: String) -> String {
-    let parts = snakeCase(value).split(separator: "_")
-    guard let first = parts.first else { return "" }
-    return String(first) + parts.dropFirst().map { $0.capitalized }.joined()
-  }
-
-  static func normalizeProtoPath(_ value: String) -> String {
-    var path = value.replacingOccurrences(of: "\\", with: "/")
-    while path.hasPrefix("./") {
-      path.removeFirst(2)
-    }
-    return path.hasSuffix(".proto") ? path : "\(path).proto"
-  }
 }

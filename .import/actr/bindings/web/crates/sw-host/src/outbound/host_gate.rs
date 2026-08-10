@@ -38,13 +38,13 @@ pub struct HostGate {
     pending_requests: Arc<Mutex<HashMap<String, oneshot::Sender<Bytes>>>>,
 
     /// Message handling callback installed by System.
-    /// Receives `(target_id, envelope)` and routes it to the target actor.
+    /// Receives `(target_id, payload_type, envelope)` and routes it to the target actor.
     message_handler: Arc<Mutex<Option<MessageHandler>>>,
 }
 
 /// Message handling callback type.
 /// No `Send + Sync` is required in the single-threaded WASM/Service Worker environment.
-pub type MessageHandler = Box<dyn Fn(ActrId, RpcEnvelope)>;
+pub type MessageHandler = Box<dyn Fn(ActrId, PayloadType, RpcEnvelope)>;
 
 impl HostGate {
     /// Create a new HostGate.
@@ -65,7 +65,7 @@ impl HostGate {
     /// Called during System initialization to route messages to the appropriate actor.
     pub fn set_message_handler<F>(&self, handler: F)
     where
-        F: Fn(ActrId, RpcEnvelope) + 'static,
+        F: Fn(ActrId, PayloadType, RpcEnvelope) + 'static,
     {
         let mut guard = self.message_handler.lock();
         *guard = Some(Box::new(handler));
@@ -78,11 +78,18 @@ impl HostGate {
     /// 2. Register the pending request
     /// 3. Invoke `message_handler` to deliver the request
     /// 4. Wait for the response
-    pub async fn send_request(
+    pub async fn send_request(&self, target: &ActrId, envelope: RpcEnvelope) -> ActorResult<Bytes> {
+        self.send_request_with_type(target, PayloadType::RpcReliable, envelope)
+            .await
+    }
+
+    pub async fn send_request_with_type(
         &self,
         target: &ActrId,
+        payload_type: PayloadType,
         mut envelope: RpcEnvelope,
     ) -> ActorResult<Bytes> {
+        crate::outbound::validate_rpc_payload_type(payload_type)?;
         log::debug!(
             "HostGate::send_request to {:?}, request_id={}",
             target,
@@ -112,7 +119,7 @@ impl HostGate {
             let guard = self.message_handler.lock();
             match guard.as_ref() {
                 Some(handler) => {
-                    handler(target.clone(), envelope);
+                    handler(target.clone(), payload_type, envelope);
                 }
                 None => {
                     // Clean up the pending request.
@@ -145,11 +152,18 @@ impl HostGate {
     /// receiver runs the handler without replying. This method is for
     /// terminal tell traffic only; relayed request envelopes must go through
     /// `Gate::relay_envelope` so their explicit direction is preserved.
-    pub async fn send_message(
+    pub async fn send_message(&self, target: &ActrId, envelope: RpcEnvelope) -> ActorResult<()> {
+        self.send_message_with_type(target, PayloadType::RpcSignal, envelope)
+            .await
+    }
+
+    pub async fn send_message_with_type(
         &self,
         target: &ActrId,
+        payload_type: PayloadType,
         mut envelope: RpcEnvelope,
     ) -> ActorResult<()> {
+        crate::outbound::validate_rpc_payload_type(payload_type)?;
         log::debug!(
             "HostGate::send_message to {:?}, request_id={}",
             target,
@@ -162,7 +176,7 @@ impl HostGate {
         let guard = self.message_handler.lock();
         match guard.as_ref() {
             Some(handler) => {
-                handler(target.clone(), envelope);
+                handler(target.clone(), payload_type, envelope);
                 Ok(())
             }
             None => Err(ActrError::Unavailable(
@@ -285,13 +299,13 @@ mod tests {
     }
 
     #[test]
-    fn send_message_stamps_tell_direction() {
+    fn send_message_preserves_lane_and_stamps_tell_direction() {
         futures::executor::block_on(async {
             let gate = HostGate::new();
             let captured = Rc::new(RefCell::new(None));
             let captured_for_handler = captured.clone();
-            gate.set_message_handler(move |_target, envelope| {
-                *captured_for_handler.borrow_mut() = Some(envelope);
+            gate.set_message_handler(move |_target, payload_type, envelope| {
+                *captured_for_handler.borrow_mut() = Some((payload_type, envelope));
             });
 
             let mut envelope = RpcEnvelope {
@@ -302,14 +316,15 @@ mod tests {
             };
             envelope.payload = Some(Bytes::from_static(b"message"));
 
-            gate.send_message(&ActrId::default(), envelope)
+            gate.send_message_with_type(&ActrId::default(), PayloadType::RpcReliable, envelope)
                 .await
                 .unwrap();
 
-            let received = captured
+            let (payload_type, received) = captured
                 .borrow_mut()
                 .take()
                 .expect("message handler should receive envelope");
+            assert_eq!(payload_type, PayloadType::RpcReliable);
             // One-way traffic carries the explicit fire-and-forget label.
             assert_eq!(received.direction, Some(Direction::Tell as i32));
         });

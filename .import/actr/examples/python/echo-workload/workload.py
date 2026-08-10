@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import time
 
-from actr_workload import Workload as WorkloadProtocol
+from actr_workload import ActrContext, Workload as WorkloadProtocol
 
-from generated.echo_workload import EchoServiceDispatcher
+from generated.actr_dispatch import actr_dispatch
 from generated.local import echo_pb2 as pb2
 
 
 class EchoServiceHandler:
-    def echo(self, req: pb2.EchoRequest) -> pb2.EchoResponse:
+    async def echo_service_echo(
+        self, req: pb2.EchoRequest, ctx: ActrContext
+    ) -> pb2.EchoResponse:
         return pb2.EchoResponse(
             reply=f"echo from python: {req.message}",
             timestamp=int(time.time()),
@@ -19,11 +21,10 @@ class EchoServiceHandler:
 
 
 class Workload(WorkloadProtocol):
-    def __init__(self) -> None:
-        self._dispatcher = EchoServiceDispatcher(EchoServiceHandler())
-
     async def dispatch(self, envelope, ctx) -> bytes:
-        return self._dispatcher.dispatch(envelope)
+        return await actr_dispatch(
+            ctx, EchoServiceHandler(), envelope.route_key, envelope.payload, 30_000
+        )
 
     async def on_start(self, ctx) -> None:
         return None

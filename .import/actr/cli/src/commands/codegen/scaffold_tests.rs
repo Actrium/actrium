@@ -1,7 +1,8 @@
 use super::*;
-use crate::commands::codegen::ProtoModel;
 use crate::commands::codegen::write_metadata;
+use crate::commands::codegen::{DispatchSpec, ProtoModel};
 use actr_config::ConfigParser;
+use std::path::PathBuf;
 use tempfile::TempDir;
 
 #[test]
@@ -37,6 +38,7 @@ fn from_metadata_maps_local_and_remote_to_scaffold_services() {
             }],
         }],
         remote_services: vec![],
+        ..Default::default()
     };
     let catalog = ScaffoldCatalog::from_metadata(&metadata);
     assert_eq!(catalog.local_services.len(), 1);
@@ -96,6 +98,9 @@ realm_id = 1001
         no_format: true,
         debug: false,
         skip_validation: true,
+        dispatch_spec: DispatchSpec::default(),
+        dispatch_spec_path: PathBuf::new(),
+        dispatch_spec_hash: String::new(),
     }
 }
 
@@ -124,6 +129,7 @@ fn load_rejects_metadata_for_different_language() {
             language: "swift".into(),
             local_services: vec![],
             remote_services: vec![],
+            ..Default::default()
         },
     )
     .unwrap();

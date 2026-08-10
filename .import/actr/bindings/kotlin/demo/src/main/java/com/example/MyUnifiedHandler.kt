@@ -1,9 +1,8 @@
 package com.example
 
 import android.util.Log
-import com.example.generated.UnifiedHandler
+import com.example.generated.ActrDispatchHandler
 import io.actrium.actr.ActrId
-import io.actrium.actr.ActrType
 import io.actrium.actr.DataChunk
 import io.actrium.actr.DataChunkCallback
 import io.actrium.actr.PayloadType
@@ -12,20 +11,17 @@ import io.actrium.actr.dsl.withRetry
 import kotlinx.coroutines.delay
 
 /**
- * Implementation of UnifiedHandler (StreamClientHandler)
+ * Implementation of ActrDispatchHandler (StreamClientHandler)
  *
  * Implements the DuplexStreamService client protocol:
  * 1. Call StartDuplexStream RPC on the server
  * 2. Send DataChunk chunks to the server
  * 3. Optionally receive return stream from the server
  */
-class MyUnifiedHandler : UnifiedHandler {
+class MyUnifiedHandler : ActrDispatchHandler {
     companion object {
         private const val TAG = "MyUnifiedHandler"
     }
-
-    private val serverType =
-        ActrType(manufacturer = "actrium", name = "DuplexStreamService", version = "1.0.0")
 
     override suspend fun start_stream(
         request: local.StreamClientOuterClass.ClientStartStreamRequest,
@@ -41,6 +37,7 @@ class MyUnifiedHandler : UnifiedHandler {
         )
 
         try {
+            val serverType = ctx.resolveDependency("stream")
             Log.i(
                 TAG,
                 "🌐 discovering server type: ${serverType.manufacturer}/${serverType.name}",

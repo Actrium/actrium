@@ -1,6 +1,15 @@
 {
-  "plugin_version": "actr-cli",
+  "schema_version": "v1",
+  "plugin_version": "0.6.1",
   "language": "typescript",
+  "dispatch_spec_hash": "",
+  "generated_files": ["actr-gen-meta.json", "actr_dispatch.ts"],
+  "generated_local_routes": [
+    "echo.EchoService.Echo",
+    "echo.EchoService.PrepareStream",
+    "echo.EchoService.ReleaseStream"
+  ],
+  "generated_remote_routes": [],
   "local_services": [
     {
       "name": "EchoService",

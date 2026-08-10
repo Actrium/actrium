@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import os
+from collections.abc import Iterator
 from contextlib import contextmanager
 from importlib import resources
 from importlib.resources.abc import Traversable
-import os
 from pathlib import Path
-from typing import Iterator
 
 from .constants import DEFAULT_WIT_RESOURCE, ENV_WIT_PATH, REPO_WIT_PATH
 

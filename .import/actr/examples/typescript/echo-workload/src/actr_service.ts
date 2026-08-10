@@ -1,13 +1,10 @@
 import {
+  ActrContext,
   PayloadType,
   defineWorkload,
-  registerStream,
-  sendDataChunk,
   toUint8Array,
-  unregisterStream,
-} from '@actrium/actr-workload';
-import type { InvocationCtx } from '@actrium/actr-workload';
-import { create } from '@bufbuild/protobuf';
+} from "@actrium/actr-workload";
+import { create } from "@bufbuild/protobuf";
 
 import type {
   EchoRequest,
@@ -16,20 +13,22 @@ import type {
   StreamPrepareResponse,
   StreamReleaseRequest,
   StreamReleaseResponse,
-} from './generated/echo_pb.js';
+} from "./generated/echo_pb.js";
 import {
   EchoResponseSchema,
   StreamPrepareResponseSchema,
   StreamReleaseResponseSchema,
-} from './generated/echo_pb.js';
-import type { EchoServiceHandler } from './generated/echo_workload.js';
-import { EchoServiceDispatcher } from './generated/echo_workload.js';
+} from "./generated/echo_pb.js";
+import {
+  actrDispatch,
+  type ActrDispatchHandler,
+} from "./generated/actr_dispatch.js";
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
 
-class EchoServiceHandlerImpl implements EchoServiceHandler {
-  echo(request: EchoRequest): EchoResponse {
+class EchoServiceHandlerImpl implements ActrDispatchHandler {
+  echoServiceEcho(request: EchoRequest): EchoResponse {
     console.log(`Received Echo request: ${request.message}`);
 
     return create(EchoResponseSchema, {
@@ -38,35 +37,33 @@ class EchoServiceHandlerImpl implements EchoServiceHandler {
     });
   }
 
-  async prepareStream(
+  async echoServicePrepareStream(
     request: StreamPrepareRequest,
-    ctx?: InvocationCtx,
+    ctx: ActrContext,
   ): Promise<StreamPrepareResponse> {
     const inboundStreamId = request.inboundStreamId;
     const replyStreamId = request.replyStreamId;
     const replyMessage = request.replyMessage;
 
-    await registerStream(
+    await ctx.registerStream(
       inboundStreamId,
       async (chunk, sender, streamCtx) => {
         const incoming = textDecoder.decode(toUint8Array(chunk.payload));
 
-        await sendDataChunk(
+        await streamCtx.sendDataChunk(
           { peer: sender },
           {
             streamId: replyStreamId,
             sequence: BigInt(chunk.sequence) + 1n,
             payload: textEncoder.encode(`${replyMessage}: ${incoming}`),
-            metadata: [{ key: 'echo-runtime', value: 'typescript-wasm' }],
+            metadata: [{ key: "echo-runtime", value: "typescript-wasm" }],
             timestampMs: BigInt(Date.now()),
           },
           PayloadType.StreamReliable,
-          streamCtx,
         );
 
-        await unregisterStream(inboundStreamId, streamCtx);
+        await streamCtx.unregisterStream(inboundStreamId);
       },
-      ctx,
     );
 
     return create(StreamPrepareResponseSchema, {
@@ -74,29 +71,33 @@ class EchoServiceHandlerImpl implements EchoServiceHandler {
     });
   }
 
-  async releaseStream(
+  async echoServiceReleaseStream(
     request: StreamReleaseRequest,
-    ctx?: InvocationCtx,
+    ctx: ActrContext,
   ): Promise<StreamReleaseResponse> {
-    await unregisterStream(request.streamId, ctx);
+    await ctx.unregisterStream(request.streamId);
     return create(StreamReleaseResponseSchema, {
       status: `unregistered:${request.streamId}`,
     });
   }
 }
 
-const dispatcher = new EchoServiceDispatcher(new EchoServiceHandlerImpl());
-
 export default defineWorkload({
   async onStart(): Promise<void> {
-    console.log('Generated TypeScript EchoService workload started');
+    console.log("Generated TypeScript EchoService workload started");
   },
 
   async onStop(): Promise<void> {
-    console.log('Generated TypeScript EchoService workload stopped');
+    console.log("Generated TypeScript EchoService workload stopped");
   },
 
   async dispatch(envelope, ctx): Promise<Uint8Array> {
-    return dispatcher.dispatch(envelope, ctx);
+    return actrDispatch(
+      new ActrContext(ctx!),
+      new EchoServiceHandlerImpl(),
+      envelope.routeKey ?? envelope.method,
+      envelope.payload ?? new Uint8Array(),
+      30_000,
+    );
   },
 });

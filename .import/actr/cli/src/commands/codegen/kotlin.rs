@@ -3,9 +3,8 @@ use crate::commands::codegen::scaffold::{ScaffoldCatalog, ScaffoldService};
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
 use crate::utils::{command_exists, to_snake_case};
-use actr_config::LockFile;
 use async_trait::async_trait;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use tracing::{debug, info, warn};
@@ -16,6 +15,7 @@ const PROTOC_GEN_ACTR_FRAMEWORK_KOTLIN: &str = "protoc-gen-actrframework-kotlin"
 pub struct KotlinGenerator;
 
 /// Information about a proto service
+#[allow(dead_code)] // fields retained for the legacy unified-infra path; plugin emits dispatch
 #[derive(Debug, Clone)]
 struct ServiceInfo {
     /// Service name (e.g., "EchoService", "FileTransferService")
@@ -24,8 +24,6 @@ struct ServiceInfo {
     proto_package: String,
     /// Whether this is a local service (vs remote)
     is_local: bool,
-    /// Remote target actor type (only for remote services)
-    remote_target_type: Option<String>,
     /// List of RPC methods in this service
     methods: Vec<MethodInfo>,
 }
@@ -258,34 +256,11 @@ impl KotlinGenerator {
     /// Analyze proto file to determine if it's local or remote
     /// Convention: files under "local/" are local, files under "remote/" are remote
     ///
-    /// Now reads actr_type from manifest.lock.toml instead of inferring from directory names.
     /// Returns None if the proto file has no service definitions (skip it).
     #[allow(dead_code)]
-    fn analyze_proto_file(
-        &self,
-        proto_path: &PathBuf,
-        actr_type_map: &HashMap<String, String>,
-    ) -> Option<ServiceInfo> {
+    fn analyze_proto_file(&self, proto_path: &PathBuf) -> Option<ServiceInfo> {
         let path_str = proto_path.to_string_lossy();
         let is_local = path_str.contains("/local/");
-
-        // Get directory name for remote services to look up in lock file
-        let dir_name = proto_path
-            .parent()
-            .and_then(|p| p.file_name())
-            .and_then(|n| n.to_str())
-            .map(|s| s.to_string());
-
-        // Get actr_type from lock file mapping (for remote services)
-        let remote_target_type = if !is_local {
-            if let Some(ref dir) = dir_name {
-                actr_type_map.get(dir).cloned()
-            } else {
-                None
-            }
-        } else {
-            None
-        };
 
         // Read service name from proto file directly
         let proto_content = std::fs::read_to_string(proto_path).unwrap_or_default();
@@ -424,12 +399,11 @@ impl KotlinGenerator {
         let needs_outer_class_suffix = declared_names.contains(&outer_class_base_name);
 
         debug!(
-            "analyze_proto_file: {} -> service={}, package={}, is_local={}, remote_target_type={:?}, methods={}, outer_class_base={}, declared_names={:?}, needs_suffix={}",
+            "analyze_proto_file: {} -> service={}, package={}, is_local={}, methods={}, outer_class_base={}, declared_names={:?}, needs_suffix={}",
             proto_path.display(),
             service_name,
             proto_package,
             is_local,
-            remote_target_type,
             methods.len(),
             outer_class_base_name,
             declared_names,
@@ -440,54 +414,8 @@ impl KotlinGenerator {
             service_name,
             proto_package,
             is_local,
-            remote_target_type,
             methods,
         })
-    }
-
-    /// Load manifest.lock.toml and build a mapping from dependency name to canonical actr_type.
-    /// Returns a HashMap where key is the dependency name (e.g., "echo-real-server")
-    /// and value is the actr_type (e.g., "acme:EchoService")
-    #[allow(dead_code)]
-    fn load_actr_type_map(&self, context: &GenContext) -> Result<HashMap<String, String>> {
-        // Find project root by looking for manifest.lock.toml relative to input path
-        // The input path is typically "protos" or a similar directory
-        let project_root = context.input_path.parent().unwrap_or(&context.input_path);
-        let lock_file_path = project_root.join("manifest.lock.toml");
-
-        debug!(
-            "load_actr_type_map: looking for lock file at {:?}",
-            lock_file_path
-        );
-
-        if !lock_file_path.exists() {
-            return Err(ActrCliError::config_error(format!(
-                "manifest.lock.toml not found at {:?}.\n\
-                 Please run 'actr deps install' first to generate the lock file.",
-                lock_file_path
-            )));
-        }
-
-        let lock_file = LockFile::from_file(&lock_file_path).map_err(|e| {
-            ActrCliError::config_error(format!(
-                "Failed to parse manifest.lock.toml: {}\n\
-                 Please run 'actr deps install' to regenerate the lock file.",
-                e
-            ))
-        })?;
-
-        // Build the mapping: dependency name -> canonical actr_type
-        let mut map = HashMap::new();
-        for dep in &lock_file.dependencies {
-            debug!("load_actr_type_map: {} -> {}", dep.name, dep.actr_type);
-            map.insert(dep.name.clone(), dep.actr_type.clone());
-        }
-
-        info!(
-            "📦 Loaded {} dependencies from manifest.lock.toml",
-            map.len()
-        );
-        Ok(map)
     }
 
     /// Collect all service information from proto files
@@ -508,366 +436,21 @@ impl KotlinGenerator {
             .collect()
     }
 
-    /// Generate unified infrastructure code
+    /// Generate unified infrastructure code.
+    ///
+    /// The Kotlin protoc plugin now emits `actr_dispatch.kt` with exact
+    /// route-key matching sourced from the DispatchSpec. The CLI no longer
+    /// generates `unified_actor.kt` — the plugin's dispatcher supersedes it.
+    #[allow(dead_code)] // retained for the legacy unified-infra path
     fn generate_unified_infrastructure(
         &self,
-        services: &[ServiceInfo],
-        kotlin_package: &str,
-        context: &GenContext,
+        _services: &[ServiceInfo],
+        _kotlin_package: &str,
+        _context: &GenContext,
     ) -> Result<String> {
-        let local_services: Vec<_> = services.iter().filter(|s| s.is_local).collect();
-        let remote_services: Vec<_> = services.iter().filter(|s| !s.is_local).collect();
-        let manifest_resolver_import = if remote_services.is_empty() {
-            ""
-        } else {
-            "import io.actrium.actr.resolveManifestDependency\n"
-        };
-
-        let mut code = String::new();
-
-        // Header
-        code.push_str(&format!(
-            r#"/**
- * Auto-generated Unified Actor Code - DO NOT EDIT
- *
- * Generated by actr gen command
- *
- * This file contains:
- * - UnifiedHandler interface combining all local service handlers
- * - UnifiedDispatcher for routing requests to local handlers or remote services
- *
- * Local services: {local_count}
- * Remote services: {remote_count}
- */
-package {kotlin_package}
-
-import io.actrium.actr.ActrId
-import io.actrium.actr.ActrType
-import io.actrium.actr.PayloadType
-import io.actrium.actr.dsl.ActrContext
-import io.actrium.actr.dsl.RpcEnvelope
-{manifest_resolver_import}
-
-"#,
-            local_count = local_services.len(),
-            remote_count = remote_services.len(),
-            kotlin_package = kotlin_package,
-            manifest_resolver_import = manifest_resolver_import,
-        ));
-
-        // Import protobuf message types for all services.
-        // Protobuf Java Lite generates one outer class per proto file (PascalCase
-        // of the file stem, +`OuterClass` on name collisions); import every
-        // declaring file referenced by the services' RPC methods so imported
-        // types resolve to their real owner instead of the local service's
-        // package.
-        code.push_str("// Import protobuf message types\n");
-        let type_imports = kotlin_type_imports(services);
-        if !type_imports.is_empty() {
-            code.push_str(&type_imports);
-            code.push('\n');
-        }
-        code.push('\n');
-
-        // Import individual service handlers and dispatchers
-        for service in &local_services {
-            code.push_str(&format!(
-                "// Local service\nimport {}.{}Handler\nimport {}.{}Dispatcher\n",
-                kotlin_package, service.service_name, kotlin_package, service.service_name
-            ));
-        }
-        code.push('\n');
-
-        // Generate UnifiedHandler interface (only for local services)
-        if !local_services.is_empty() {
-            code.push_str(&self.generate_unified_handler(&local_services));
-            code.push('\n');
-        }
-
-        // Generate RemoteServiceRegistry for remote service discovery
-        if !remote_services.is_empty() {
-            let dependency_aliases = self.remote_dependency_aliases_by_type(context);
-            code.push_str(
-                &self.generate_remote_service_registry(&remote_services, &dependency_aliases)?,
-            );
-            code.push('\n');
-        }
-
-        // Generate UnifiedDispatcher
-        code.push_str(&self.generate_unified_dispatcher(&local_services, &remote_services));
-
-        Ok(code)
-    }
-
-    /// Generate UnifiedHandler interface
-    fn generate_unified_handler(&self, local_services: &[&ServiceInfo]) -> String {
-        let handler_extends: Vec<_> = local_services
-            .iter()
-            .map(|s| format!("{}Handler", s.service_name))
-            .collect();
-
-        format!(
-            r#"/**
- * Unified Handler interface combining all local service handlers
- *
- * Implement this interface to provide your business logic for all local services.
- */
-interface UnifiedHandler : {} {{
-    // All methods are inherited from individual service handlers
-}}
-"#,
-            handler_extends.join(", ")
-        )
-    }
-
-    /// Generate RemoteServiceRegistry for managing remote service discovery
-    fn remote_dependency_aliases_by_type(&self, context: &GenContext) -> HashMap<String, String> {
-        context
-            .config
-            .dependencies
-            .iter()
-            .filter_map(|dependency| {
-                dependency
-                    .actr_type
-                    .as_ref()
-                    .map(|actr_type| (actr_type.to_string_repr(), dependency.alias.clone()))
-            })
-            .collect()
-    }
-
-    fn generate_remote_service_registry(
-        &self,
-        remote_services: &[&ServiceInfo],
-        dependency_aliases_by_type: &HashMap<String, String>,
-    ) -> Result<String> {
-        let mut code = String::new();
-
-        code.push_str(
-            r#"/**
- * Remote Service Route prefixes and their manifest dependency aliases
- *
- * Used by UnifiedDispatcher to route requests to remote services.
- */
-object RemoteServiceRegistry {
-    /**
-     * Map of route key prefix to manifest dependency alias for remote services.
-     */
-    val remoteRouteAliases: Map<String, String> = mapOf(
-"#,
-        );
-
-        for service in remote_services {
-            let actor_type_raw = service.remote_target_type.as_ref().ok_or_else(|| {
-                ActrCliError::config_error(format!(
-                    "Missing actr_type for remote service '{}'",
-                    service.service_name
-                ))
-            })?;
-            let dependency_alias = dependency_aliases_by_type.get(actor_type_raw).ok_or_else(|| {
-                ActrCliError::config_error(format!(
-                    "Missing manifest dependency alias for remote service '{}' with actr_type '{}'",
-                    service.service_name, actor_type_raw
-                ))
-            })?;
-            // Extract service base name without "Service" suffix for route key
-            let service_base = service.service_name.replace("Service", "");
-            code.push_str(&format!(
-                "        \"{}.{}\" to \"{}\",\n",
-                service.proto_package, service_base, dependency_alias
-            ));
-        }
-
-        code.push_str(
-            r#"    )
-
-    /**
-     * Check if a route key belongs to a remote service
-     */
-    fun isRemoteRoute(routeKey: String): Boolean {
-        return remoteRouteAliases.keys.any { routeKey.startsWith(it) }
-    }
-
-    /**
-     * Resolve remote route targets from a runtime manifest.
-     */
-    fun resolveRemoteTargets(manifestPath: String): Map<String, ActrType> {
-        val targetsByAlias = remoteRouteAliases.values
-            .toSet()
-            .associateWith { alias ->
-                resolveManifestDependency(manifestPath, alias)
-            }
-        return remoteRouteAliases.mapValues { (_, alias) ->
-            targetsByAlias.getValue(alias)
-        }
-    }
-
-    /**
-     * Get the actor type for a remote route from runtime-resolved targets.
-     */
-    fun getActorType(routeKey: String, remoteTargets: Map<String, ActrType>): ActrType? {
-        val routePrefix = remoteRouteAliases.keys.find { routeKey.startsWith(it) }
-        return routePrefix?.let { remoteTargets[it] }
-    }
-}
-"#,
-        );
-
-        Ok(code)
-    }
-
-    /// Generate UnifiedDispatcher
-    fn generate_unified_dispatcher(
-        &self,
-        local_services: &[&ServiceInfo],
-        remote_services: &[&ServiceInfo],
-    ) -> String {
-        let mut local_dispatch_cases = String::new();
-        for service in local_services {
-            let service_base = service.service_name.replace("Service", "");
-            local_dispatch_cases.push_str(&format!(
-                r#"            // Local: {service_name}
-            routeKey.startsWith("{proto_package}.{service_base}") -> {{
-                {service_name}Dispatcher.dispatch(handler, ctx, envelope)
-            }}
-"#,
-                service_name = service.service_name,
-                proto_package = service.proto_package,
-                service_base = service_base,
-            ));
-        }
-
-        let has_remote = !remote_services.is_empty();
-        let has_local = !local_services.is_empty();
-
-        let handler_param = if has_local {
-            "handler: UnifiedHandler,\n        "
-        } else {
-            ""
-        };
-
-        let remote_dispatch = if has_remote {
-            r#"
-            // Check if this is a remote service call
-            RemoteServiceRegistry.isRemoteRoute(routeKey) -> {
-                // Get target actor type and discover it
-                val actrType = RemoteServiceRegistry.getActorType(routeKey, remoteTargets)
-                    ?: throw IllegalArgumentException("Unknown remote route: $routeKey")
-
-                val targetId = resolveRemoteActor(ctx, actrType)
-
-                try {
-                    ctx.callRaw(
-                        targetId,
-                        routeKey,
-                        PayloadType.RPC_RELIABLE,
-                        envelope.payload,
-                        30000L
-                    )
-                } catch (original: Exception) {
-                    invalidateRemoteActor(actrType)
-                    val freshTargetId = resolveRemoteActor(ctx, actrType)
-                    try {
-                        ctx.callRaw(
-                            freshTargetId,
-                            routeKey,
-                            PayloadType.RPC_RELIABLE,
-                            envelope.payload,
-                            30000L
-                        )
-                    } catch (retry: Exception) {
-                        throw IllegalStateException(
-                            "Remote route $routeKey failed after rediscovery: ${retry.message}",
-                            retry
-                        )
-                    }
-                }
-            }
-"#
-        } else {
-            ""
-        };
-
-        let discovered_actors_field = if has_remote {
-            r#"
-    // Cache for discovered remote actors
-    private val discoveredActors = mutableMapOf<ActrType, ActrId>()
-
-    private suspend fun resolveRemoteActor(ctx: ActrContext, actrType: ActrType): ActrId {
-        return discoveredActors[actrType] ?: ctx.discover(actrType).also { discoveredActors[actrType] = it }
-    }
-
-    private fun invalidateRemoteActor(actrType: ActrType) {
-        discoveredActors.remove(actrType)
-    }
-
-    /**
-     * Discover all remote services
-     *
-     * Call this in your Workload's onStart method to pre-discover remote actors.
-     */
-    suspend fun discoverRemoteServices(ctx: ActrContext, remoteTargets: Map<String, ActrType>) {
-        for ((_, actrType) in remoteTargets) {
-            if (!discoveredActors.containsKey(actrType)) {
-                val actorId = ctx.discover(actrType)
-                discoveredActors[actrType] = actorId
-            }
-        }
-    }
-
-    /**
-     * Clear discovered actors cache
-     */
-    fun clearDiscoveredActors() {
-        discoveredActors.clear()
-    }
-"#
-        } else {
-            ""
-        };
-        let remote_targets_param = if has_remote {
-            "remoteTargets: Map<String, ActrType>,\n        "
-        } else {
-            ""
-        };
-
-        format!(
-            r#"/**
- * Unified Dispatcher for routing requests
- *
- * Routes requests to:
- * - Local service handlers for local routes
- * - Remote actors via RPC for remote routes
- */
-object UnifiedDispatcher {{
-{discovered_actors_field}
-    /**
-     * Dispatch an RPC envelope to the appropriate handler or remote service
-     *
-     * @param handler The unified handler implementation (for local services)
-     * @param ctx The actor context for making remote calls
-     * @param envelope The RPC envelope containing the request
-     * @return The serialized response bytes
-     */
-    suspend fun dispatch(
-        {handler_param}ctx: ActrContext,
-        {remote_targets_param}
-        envelope: RpcEnvelope
-    ): ByteArray {{
-        val routeKey = envelope.routeKey
-
-        return when {{
-{local_dispatch_cases}{remote_dispatch}
-            else -> throw IllegalArgumentException("Unknown route key: $routeKey")
-        }}
-    }}
-}}
-"#,
-            discovered_actors_field = discovered_actors_field,
-            handler_param = handler_param,
-            remote_targets_param = remote_targets_param,
-            local_dispatch_cases = local_dispatch_cases,
-            remote_dispatch = remote_dispatch,
-        )
+        // Return empty — the plugin emits actr_dispatch.kt directly.
+        // The CLI no longer generates a separate unified_actor.kt.
+        Ok(String::new())
     }
 }
 
@@ -891,22 +474,16 @@ impl LanguageGenerator for KotlinGenerator {
         } else {
             context.input_path.clone()
         };
-        let (local_files, remote_files, remote_file_mapping) =
-            kotlin_plugin_file_options(context, &proto_root);
 
+        // Pass only dispatch_spec and kotlin_package to the plugin.
+        // The plugin sources all routing from the DispatchSpec (no
+        // LocalFiles/RemoteFiles/RemoteFileMapping).
         let mut options = vec![format!("kotlin_package={}", kotlin_package)];
-        if !local_files.is_empty() {
-            options.push(format!("LocalFiles={}", local_files.join(":")));
-        }
-        if !remote_files.is_empty() {
-            options.push(format!("RemoteFiles={}", remote_files.join(":")));
-        }
-        if !remote_file_mapping.is_empty() {
-            options.push(format!(
-                "RemoteFileMapping={}",
-                remote_file_mapping.join(";")
-            ));
-        }
+        options.push(format!(
+            "dispatch_spec={}",
+            context.dispatch_spec_path.display()
+        ));
+        options.push(format!("dispatch_spec_hash={}", context.dispatch_spec_hash));
 
         // Invoke the ACTR framework plugin once with the full descriptor graph.
         let mut cmd = StdCommand::new("protoc");
@@ -949,7 +526,13 @@ impl LanguageGenerator for KotlinGenerator {
             }
         }
 
-        // NOW collect service info (after per-service files are generated)
+        // Track the plugin-emitted unified dispatcher.
+        let dispatch_file = context.output.join("actr_dispatch.kt");
+        if dispatch_file.exists() {
+            generated_files.push(dispatch_file);
+        }
+
+        // Collect service info for scaffold generation.
         let catalog = ScaffoldCatalog::load(context, SupportedLanguage::Kotlin)?;
         let services = self.collect_services(&catalog)?;
         info!(
@@ -959,15 +542,8 @@ impl LanguageGenerator for KotlinGenerator {
             services.iter().filter(|s| !s.is_local).count()
         );
 
-        // Generate unified infrastructure file
-        let unified_code =
-            self.generate_unified_infrastructure(&services, &kotlin_package, context)?;
-        let unified_file = context.output.join("unified_actor.kt");
-        std::fs::write(&unified_file, &unified_code).map_err(|e| {
-            ActrCliError::config_error(format!("Failed to write unified_actor.kt: {e}"))
-        })?;
-        generated_files.push(unified_file);
-        info!("📄 Generated unified_actor.kt");
+        // The plugin emits actr_dispatch.kt directly; no CLI-side
+        // unified_actor.kt is generated anymore.
 
         info!(
             "✅ Generated {} Kotlin infrastructure files",
@@ -1141,7 +717,6 @@ fn kotlin_service_info(service: ScaffoldService, is_local: bool) -> Result<Servi
         service_name: service.name,
         proto_package: service.package,
         is_local,
-        remote_target_type: service.actr_type,
         methods,
     })
 }
@@ -1186,76 +761,43 @@ fn generate_unified_workload_scaffold(services: &[ServiceInfo], kotlin_package: 
         .unwrap_or(kotlin_package);
 
     let has_local = services.iter().any(|s| s.is_local);
-    let has_remote = services.iter().any(|s| !s.is_local);
 
     let handler_field = if has_local {
-        "private val handler: UnifiedHandler,"
+        "private val handler: ActrDispatchHandler,"
     } else {
-        ""
+        "private val handler: ActrDispatchHandler = EmptyActrDispatchHandler,"
     };
 
     let handler_import = if has_local {
-        format!("\nimport {}.UnifiedHandler", kotlin_package)
+        format!("\nimport {}.ActrDispatchHandler", kotlin_package)
     } else {
-        String::new()
+        format!(
+            "\nimport {}.ActrDispatchHandler\nimport {}.EmptyActrDispatchHandler",
+            kotlin_package, kotlin_package
+        )
     };
 
-    let discover_call = if has_remote {
-        r#"
-        // Discover all remote services
-        Log.i(TAG, "📡 Discovering remote services...")
-        UnifiedDispatcher.discoverRemoteServices(ctx, remoteTargets)
-        Log.i(TAG, "✅ Remote services discovered")"#
+    let usage_example = if has_local {
+        " * val handler = MyUnifiedHandler()\n * val workload = UnifiedWorkload(handler)\n"
+            .to_string()
     } else {
-        ""
+        " * val workload = UnifiedWorkload()\n".to_string()
     };
-
-    let remote_constructor_params = if has_remote {
-        "private val remoteTargets: Map<String, ActrType>,\n    "
-    } else {
-        ""
-    };
-
-    let usage_example = match (has_local, has_remote) {
-        (true, true) => format!(
-            r#" * val handler = MyUnifiedHandler()
- * val remoteTargets =
- *     {kotlin_package}.RemoteServiceRegistry.resolveRemoteTargets(manifestPath)
- * val workload = UnifiedWorkload(
- *     handler = handler,
- *     remoteTargets = remoteTargets,
- * )
-"#
-        ),
-        (false, true) => format!(
-            r#" * val remoteTargets =
- *     {kotlin_package}.RemoteServiceRegistry.resolveRemoteTargets(manifestPath)
- * val workload = UnifiedWorkload(remoteTargets = remoteTargets)
-"#
-        ),
-        (true, false) => {
-            " * val handler = MyUnifiedHandler()\n * val workload = UnifiedWorkload(handler)\n"
-                .to_string()
-        }
-        (false, false) => " * val workload = UnifiedWorkload()\n".to_string(),
-    };
-
-    let dispatch_handler = if has_local { "handler, " } else { "" };
-    let dispatch_remote_targets = if has_remote { "remoteTargets, " } else { "" };
 
     format!(
         r#"/**
  * Unified Workload for all services
  *
- * This Workload handles both local and remote service requests using the UnifiedDispatcher.
- * Local requests are routed to your UnifiedHandler implementation.
- * Remote requests are forwarded to discovered remote actors.
+ * This Workload handles all service requests using the generated
+ * `actrDispatch` function with exact route-key matching.
+ * Local requests are routed to your ActrDispatchHandler implementation.
+ * Remote requests are resolved via dependency alias, discovered, and
+ * called raw.
  */
 package {base_package}
 
 import android.util.Log
-import {kotlin_package}.UnifiedDispatcher{handler_import}
-import io.actrium.actr.ActrType
+import {kotlin_package}.actrDispatch{handler_import}
 import io.actrium.actr.dsl.ActrContext
 import io.actrium.actr.dsl.ErrorEvent
 import io.actrium.actr.dsl.RpcEnvelope
@@ -1275,7 +817,6 @@ import io.actrium.actr.dsl.RpcEnvelope
  */
 class UnifiedWorkload(
     {handler_field}
-    {remote_constructor_params}
 ) {{
 
     companion object {{
@@ -1283,7 +824,7 @@ class UnifiedWorkload(
     }}
 
     suspend fun onStart(ctx: ActrContext) {{
-        Log.i(TAG, "UnifiedWorkload.onStart"){discover_call}
+        Log.i(TAG, "UnifiedWorkload.onStart")
     }}
 
     suspend fun onReady(ctx: ActrContext) {{
@@ -1301,9 +842,8 @@ class UnifiedWorkload(
     /**
      * Dispatch RPC requests
      *
-     * Uses the UnifiedDispatcher to route requests to:
-     * - Local handler methods for local service routes
-     * - Remote actors for remote service routes
+     * Uses the generated `actrDispatch` function to route requests with
+     * exact route-key matching to local handlers or remote actors.
      */
     suspend fun dispatch(ctx: ActrContext, envelope: RpcEnvelope): ByteArray {{
         Log.i(TAG, "🔀 dispatch() called")
@@ -1311,7 +851,7 @@ class UnifiedWorkload(
         Log.i(TAG, "   request_id: ${{envelope.requestId}}")
         Log.i(TAG, "   payload size: ${{envelope.payload.size}} bytes")
 
-        return UnifiedDispatcher.dispatch({dispatch_handler}ctx, {dispatch_remote_targets}envelope)
+        return actrDispatch(ctx, handler, envelope.routeKey, envelope.payload, envelope.timeoutMs)
     }}
 }}
 "#,
@@ -1319,11 +859,7 @@ class UnifiedWorkload(
         kotlin_package = kotlin_package,
         handler_import = handler_import,
         handler_field = handler_field,
-        remote_constructor_params = remote_constructor_params,
         usage_example = usage_example,
-        discover_call = discover_call,
-        dispatch_handler = dispatch_handler,
-        dispatch_remote_targets = dispatch_remote_targets,
     )
 }
 
@@ -1470,17 +1006,17 @@ package {base_package}
 package {base_package}
 
 import android.util.Log
-import {kotlin_package}.UnifiedHandler
+import {kotlin_package}.ActrDispatchHandler
 import io.actrium.actr.dsl.ActrContext
 {imports}
 
 /**
- * Implementation of UnifiedHandler
+ * Implementation of ActrDispatchHandler
  *
  * This class handles all local service requests.
- * Remote service requests are automatically forwarded by the UnifiedDispatcher.
+ * Remote service requests are forwarded by the generated actrDispatch function.
  */
-class MyUnifiedHandler : UnifiedHandler {{
+class MyUnifiedHandler : ActrDispatchHandler {{
 
     companion object {{
         private const val TAG = "MyUnifiedHandler"
@@ -1495,41 +1031,7 @@ class MyUnifiedHandler : UnifiedHandler {{
     )
 }
 
-fn kotlin_plugin_file_options(
-    context: &GenContext,
-    proto_root: &Path,
-) -> (Vec<String>, Vec<String>, Vec<String>) {
-    let mut local_files = BTreeSet::new();
-    let mut remote_files = BTreeSet::new();
-
-    for proto_file in &context.proto_files {
-        let relative = proto_file.strip_prefix(proto_root).unwrap_or(proto_file);
-        let normalized = normalize_proto_path(relative);
-        if normalized.starts_with("remote/") {
-            remote_files.insert(normalized);
-        } else {
-            local_files.insert(normalized);
-        }
-    }
-
-    let mut remote_file_mapping = BTreeSet::new();
-    for service in &context.proto_model.remote_services {
-        if let Some(actr_type) = &service.actr_type {
-            remote_file_mapping.insert(format!(
-                "{}={}",
-                normalize_proto_path(&service.relative_path),
-                actr_type
-            ));
-        }
-    }
-
-    (
-        local_files.into_iter().collect(),
-        remote_files.into_iter().collect(),
-        remote_file_mapping.into_iter().collect(),
-    )
-}
-
+#[allow(dead_code)] // retained for the legacy unified-infra path
 fn normalize_proto_path(path: &Path) -> String {
     path.components()
         .filter_map(|component| component.as_os_str().to_str())

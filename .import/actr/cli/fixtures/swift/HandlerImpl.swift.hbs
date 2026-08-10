@@ -4,14 +4,8 @@
 import Actr
 import Foundation
 
-public final class {{SERVICE_NAME}}HandlerImpl: {{HANDLER_NAME}} {
-    // Use targetType with ctx.discover(targetType:) when forwarding local RPCs
-    // to a remote dependency declared in manifest.toml.
-    private let targetType: ActrType?
-
-    public init(targetType: ActrType? = nil) {
-        self.targetType = targetType
-    }
+public final class {{SERVICE_NAME}}HandlerImpl: ActrDispatchHandler {
+    public init() {}
 
 {{#each METHODS}}
     public func {{swift_name}}(

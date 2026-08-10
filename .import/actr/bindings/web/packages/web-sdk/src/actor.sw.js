@@ -295,11 +295,11 @@ function installActrHostGlobals() {
         u8,
         timeoutMs,
       );
-      return { ok: Array.from(reply) };
+      return { Ok: reply };
     } catch (e) {
       // Host rejects with Error carrying `actrErrorTag`; fold into the
       // guest-expected `Result::Err(ActrError)` shape.
-      return { err: mapHostErrorToActr(e) };
+      return { Err: mapHostErrorToActr(e) };
     }
   };
 
@@ -340,8 +340,8 @@ function installActrHostGlobals() {
   };
 
   self.actrHostResolveDependency = async function (requestId, alias) {
-    // Alias resolution is package-scoped, so lifecycle hooks may use their
-    // empty request id; no dispatch context lookup is required.
+    // Resolver access is scoped to a live invocation so stale guests cannot
+    // query the dependency lock installed for a later workload.
     try {
       const actrType = await wasm_bindgen.host_resolve_dependency(requestId, alias);
       return { Ok: actrType };

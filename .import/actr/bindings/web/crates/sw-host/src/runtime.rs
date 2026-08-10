@@ -2595,7 +2595,11 @@ impl SwRuntime {
 
             // Pass `stream_id` as `from` so `MailboxProcessor` knows the response target.
             let stream_id_bytes = payload.stream_id.as_bytes().to_vec();
-            let message = MessageFormat::new(PayloadType::RpcReliable, Bytes::from(payload.data));
+            let payload_type = match channel_id {
+                1 => PayloadType::RpcSignal,
+                _ => PayloadType::RpcReliable,
+            };
+            let message = MessageFormat::new(payload_type, Bytes::from(payload.data));
 
             CLIENTS.with(|cell| {
                 if let Some(ctx) = cell.borrow().get(&self.client_id) {

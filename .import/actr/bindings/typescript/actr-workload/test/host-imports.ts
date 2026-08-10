@@ -116,6 +116,18 @@ export async function discover(
   };
 }
 
+export async function resolveDependency(
+  ctxToken: bigint,
+  alias: string,
+): Promise<ActrType> {
+  record(ctxToken, 'resolveDependency');
+  return {
+    manufacturer: 'test',
+    name: alias,
+    version: '1.0.0',
+  };
+}
+
 export async function registerStream(
   ctxToken: bigint,
   streamId: string,

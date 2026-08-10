@@ -100,11 +100,9 @@ function loadDependencies(lockPath, configPath) {
   if (fs.existsSync(configPath)) {
     const config = readToml(configPath);
     const deps = config.dependencies || {};
-    if (Object.keys(deps).length > 0) {
-      throw new Error(
-        `manifest.lock.toml not found at ${lockPath}. Run \`actr deps install\` before code generation.`,
-      );
-    }
+    return Object.keys(deps)
+      .sort()
+      .map((alias) => ({ name: alias, files: [] }));
   }
 
   return [];

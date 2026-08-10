@@ -360,13 +360,13 @@ pub fn default_mapping() -> Mapping {
             // struct exists; the variant alignment is covered by
             // `variants` below.
             //
-            // Note: HostCallV1 / HostTellV1 / HostCallRawV1 / HostDiscoverV1
-            // correspond to the host interface functions, not to top-level
-            // WIT records — their field shape is asserted through
-            // `functions` below (presence + non-empty). We deliberately do
-            // NOT declare them as records here because WIT has no matching
-            // `record host-call-v1`: the parameters live directly on the
-            // function signature.
+            // Note: HostCallV1 / HostTellV1 / HostCallRawV1 / HostDiscoverV1 /
+            // HostResolveDependencyV1 correspond to the host interface
+            // functions, not to top-level WIT records — their field shape is
+            // asserted through `functions` below (presence + non-empty). We
+            // deliberately do NOT declare them as records here because WIT
+            // has no matching `record host-call-v1`: the parameters live
+            // directly on the function signature.
         ],
         variants: vec![VariantMapping {
             wit_name: "dest",

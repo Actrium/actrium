@@ -147,8 +147,9 @@ npm run codegen -- --config examples/echo-client/manifest.toml
 
 Notes:
 
-- Remote generation requires a v2 `manifest.lock.toml` with explicit aliases.
-  Run `actr deps install` after changing dependencies.
+- `manifest.lock.toml` is optional for codegen. When it is absent, dependency
+  aliases come from `manifest.toml` and proto files are discovered recursively
+  under the proto root. If a lock is present, it must use the v2 alias format.
 - Proto sources default to `examples/echo-client/protos/remote`.
 - Outputs include protobuf codecs, route helpers, and `local.actor.ts`.
 

@@ -37,7 +37,7 @@ private final class StaticWorkloadProbe: Workload, @unchecked Sendable {
 
         await recorder.append(DispatchRecord(routeKey: envelope.routeKey, payload: envelope.payload))
 
-        let payload = String(data: envelope.payload, encoding: .utf8) ?? ""
+        let payload = String(bytes: envelope.payload, encoding: .utf8) ?? ""
         return Data("swift-local:\(payload)".utf8)
     }
 

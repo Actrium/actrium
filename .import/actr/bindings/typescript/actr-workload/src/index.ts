@@ -4,6 +4,7 @@ import {
   discover as hostDiscover,
   logMessage as hostLogMessage,
   registerStream as hostRegisterStream,
+  resolveDependency as hostResolveDependency,
   sendDataChunk as hostSendDataChunk,
   tell as hostTell,
   unregisterStream as hostUnregisterStream,
@@ -146,6 +147,14 @@ export const PayloadType = {
 } as const;
 
 export type PayloadType = (typeof PayloadType)[keyof typeof PayloadType];
+
+/** Typed request metadata and codec implemented by generated RPC classes. */
+export interface RpcRequest<Response> {
+  readonly routeKey: string;
+  readonly payloadType: PayloadType;
+  encode(): Uint8Array;
+  decode(payload: Uint8Array): Response;
+}
 
 export type StreamCallback = (
   chunk: DataChunk,
@@ -304,12 +313,13 @@ export async function call(
   ctx?: InvocationCtx,
   payloadType: PayloadType = PayloadType.RpcReliable,
 ): Promise<Uint8Array> {
+  const timeout = validateTimeout(timeoutMs);
   return hostCall(
     resolveCtxToken(ctx),
     toWitDest(target),
     routeKey,
     toUint8Array(payload),
-    BigInt(timeoutMs),
+    timeout,
     { tag: payloadType } satisfies WitPayloadType,
   );
 }
@@ -338,12 +348,13 @@ export async function callRaw(
   ctx?: InvocationCtx,
   payloadType: PayloadType = PayloadType.RpcReliable,
 ): Promise<Uint8Array> {
+  const timeout = validateTimeout(timeoutMs);
   return hostCallRaw(
     resolveCtxToken(ctx),
     toWitActrId(target),
     routeKey,
     toUint8Array(payload),
-    BigInt(timeoutMs),
+    timeout,
     { tag: payloadType } satisfies WitPayloadType,
   );
 }
@@ -354,6 +365,13 @@ export async function discover(
 ): Promise<ActrId> {
   const id = await hostDiscover(resolveCtxToken(ctx), targetType);
   return fromWitActrId(id);
+}
+
+export async function resolveDependency(
+  alias: string,
+  ctx?: InvocationCtx,
+): Promise<ActrType> {
+  return hostResolveDependency(resolveCtxToken(ctx), alias);
 }
 
 export async function registerStream(
@@ -409,4 +427,100 @@ export async function __dispatchDataChunk(
     throw new Error(`No stream callback registered for ${chunk.streamId}`);
   }
   await callback(chunk, sender, ctx);
+}
+
+function validateTimeout(timeoutMs: bigint | number): bigint {
+  const timeout = BigInt(timeoutMs);
+  if (timeout <= 0n) {
+    throw new RangeError(`timeoutMs must be > 0, got ${timeoutMs}`);
+  }
+  return timeout;
+}
+
+/** Minimal per-invocation adapter used by generated unified dispatchers. */
+export class ActrContext {
+  constructor(private readonly ctx: InvocationCtx) {}
+
+  get selfId(): ActrId {
+    return this.ctx.selfId;
+  }
+
+  get callerId(): ActrId | undefined {
+    return this.ctx.callerId;
+  }
+
+  get requestId(): string {
+    return this.ctx.requestId;
+  }
+
+  async resolveDependency(alias: string): Promise<ActrType> {
+    return resolveDependency(alias, this.ctx);
+  }
+
+  async discover(targetType: ActrType): Promise<ActrId> {
+    return discover(targetType, this.ctx);
+  }
+
+  async call<Response>(
+    target: Dest,
+    request: RpcRequest<Response>,
+    timeoutMs: bigint | number,
+  ): Promise<Response> {
+    const response = await call(
+      target,
+      request.routeKey,
+      request.encode(),
+      timeoutMs,
+      this.ctx,
+      request.payloadType,
+    );
+    return request.decode(response);
+  }
+
+  async callRaw(
+    target: ActrId,
+    routeKey: string,
+    payload: Uint8Array,
+    timeoutMs: bigint | number,
+  ): Promise<Uint8Array> {
+    return callRaw(target, routeKey, payload, timeoutMs, this.ctx);
+  }
+
+  async tell(target: Dest, message: RpcRequest<unknown>): Promise<void> {
+    return tell(
+      target,
+      message.routeKey,
+      message.encode(),
+      this.ctx,
+      message.payloadType,
+    );
+  }
+
+  async registerStream(
+    streamId: string,
+    callback: (
+      chunk: DataChunk,
+      sender: ActrId,
+      ctx: ActrContext,
+    ) => Promise<void>,
+  ): Promise<void> {
+    return registerStream(
+      streamId,
+      async (chunk, sender, ctx) =>
+        callback(chunk, sender, new ActrContext(ctx)),
+      this.ctx,
+    );
+  }
+
+  async unregisterStream(streamId: string): Promise<void> {
+    return unregisterStream(streamId, this.ctx);
+  }
+
+  async sendDataChunk(
+    target: Dest,
+    chunk: DataChunk,
+    payloadType: PayloadType,
+  ): Promise<void> {
+    return sendDataChunk(target, chunk, payloadType, this.ctx);
+  }
 }

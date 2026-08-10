@@ -49,8 +49,21 @@ pub(crate) fn validate_rpc_timeout_ms(timeout_ms: i64) -> ActorResult<u32> {
     Ok(timeout_ms as u32)
 }
 
+pub(crate) fn validate_rpc_payload_type(payload_type: PayloadType) -> ActorResult<()> {
+    if matches!(
+        payload_type,
+        PayloadType::RpcReliable | PayloadType::RpcSignal
+    ) {
+        Ok(())
+    } else {
+        Err(ActrError::InvalidArgument(format!(
+            "RPC calls and tells require an RPC payload type, got {payload_type:?}"
+        )))
+    }
+}
+
 #[cfg(test)]
-mod timeout_tests {
+mod validation_tests {
     use super::*;
 
     #[test]
@@ -62,6 +75,20 @@ mod timeout_tests {
         );
         assert!(matches!(
             validate_rpc_timeout_ms(i64::from(i32::MAX) + 1),
+            Err(ActrError::InvalidArgument(_))
+        ));
+    }
+
+    #[test]
+    fn web_rpc_lane_validation_rejects_stream_and_media_types() {
+        assert!(validate_rpc_payload_type(PayloadType::RpcReliable).is_ok());
+        assert!(validate_rpc_payload_type(PayloadType::RpcSignal).is_ok());
+        assert!(matches!(
+            validate_rpc_payload_type(PayloadType::StreamReliable),
+            Err(ActrError::InvalidArgument(_))
+        ));
+        assert!(matches!(
+            validate_rpc_payload_type(PayloadType::MediaRtp),
             Err(ActrError::InvalidArgument(_))
         ));
     }
@@ -98,17 +125,51 @@ impl Gate {
 
     /// Send a request and wait for the response.
     pub async fn send_request(&self, target: &ActrId, envelope: RpcEnvelope) -> ActorResult<Bytes> {
+        self.send_request_with_type(target, PayloadType::RpcReliable, envelope)
+            .await
+    }
+
+    pub async fn send_request_with_type(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+    ) -> ActorResult<Bytes> {
+        validate_rpc_payload_type(payload_type)?;
         match self {
-            Gate::Host(gate) => gate.send_request(target, envelope).await,
-            Gate::Peer(gate) => gate.send_request(target, envelope).await,
+            Gate::Host(gate) => {
+                gate.send_request_with_type(target, payload_type, envelope)
+                    .await
+            }
+            Gate::Peer(gate) => {
+                gate.send_request_with_type(target, payload_type, envelope)
+                    .await
+            }
         }
     }
 
     /// Send a one-way tell without waiting for a response.
     pub async fn send_message(&self, target: &ActrId, envelope: RpcEnvelope) -> ActorResult<()> {
+        self.send_message_with_type(target, PayloadType::RpcSignal, envelope)
+            .await
+    }
+
+    pub async fn send_message_with_type(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+    ) -> ActorResult<()> {
+        validate_rpc_payload_type(payload_type)?;
         match self {
-            Gate::Host(gate) => gate.send_message(target, envelope).await,
-            Gate::Peer(gate) => gate.send_message(target, envelope).await,
+            Gate::Host(gate) => {
+                gate.send_message_with_type(target, payload_type, envelope)
+                    .await
+            }
+            Gate::Peer(gate) => {
+                gate.send_message_with_type(target, payload_type, envelope)
+                    .await
+            }
         }
     }
 
@@ -124,12 +185,26 @@ impl Gate {
     /// (`System::init_message_handler`) always runs against a Peer outgate, so
     /// the Host arm is a defensive guard against misuse, not a live path.
     pub async fn relay_envelope(&self, target: &ActrId, envelope: RpcEnvelope) -> ActorResult<()> {
+        self.relay_envelope_with_type(target, PayloadType::RpcSignal, envelope)
+            .await
+    }
+
+    pub async fn relay_envelope_with_type(
+        &self,
+        target: &ActrId,
+        payload_type: PayloadType,
+        envelope: RpcEnvelope,
+    ) -> ActorResult<()> {
+        validate_rpc_payload_type(payload_type)?;
         match self {
             Gate::Host(_) => Err(ActrError::InvalidArgument(
                 "relay_envelope requires a Peer gate; HostGate send_message is tell-only"
                     .to_string(),
             )),
-            Gate::Peer(gate) => gate.relay_envelope(target, envelope).await,
+            Gate::Peer(gate) => {
+                gate.relay_envelope_with_type(target, payload_type, envelope)
+                    .await
+            }
         }
     }
 

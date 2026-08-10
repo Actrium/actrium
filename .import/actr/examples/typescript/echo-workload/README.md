@@ -14,10 +14,9 @@ is required.
 - Handles `echo.EchoService.Echo`.
 - Exercises DataChunk authoring by handling `PrepareStream` / `ReleaseStream`
   and using `registerStream`, `sendDataChunk`, and `unregisterStream`.
-- Keeps generated dispatch glue in `src/generated/echo_workload.ts`.
+- Keeps the unified generated dispatcher in `src/generated/actr_dispatch.ts`.
 - Keeps user business logic in `src/actr_service.ts`, where the handler
-  implements `EchoServiceHandler` and delegates dispatch to
-  `EchoServiceDispatcher`.
+  implements `ActrDispatchHandler` and delegates dispatch to `actrDispatch`.
 
 ## Build
 

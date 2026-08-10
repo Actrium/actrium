@@ -89,7 +89,7 @@ Template: echo
 
 根据您的部署环境需要修改这些设置。
 
-生成的 iOS 启动代码使用 `ActrNode.linked` 和静态链接的 `DynamicWorkload`，不会从应用资源中加载 `.actr` 包。运行时从 `manifest.toml` 读取本地身份和依赖 alias。
+生成的 iOS 启动代码使用 `ActrNode.linked` 和静态链接的 `DynamicWorkload`，不会从应用资源中加载 `.actr` 包。运行时从 `manifest.toml` 读取本地身份和依赖 alias；生成的 dispatcher 在使用远端依赖时通过 `ActrContext` 解析 alias。
 
 ## 开发工作流程
 
@@ -106,7 +106,7 @@ Template: echo
 - `{{PROJECT_NAME_PASCAL}}/Generated/` 由 `actr gen -l swift` 负责生成，不要手工修改。
 - `<ServiceName>HandlerImpl.swift` 是用户维护的 RPC 实现。
 - `<ServiceName>LifecycleAdapter.swift` 是用户维护的生命周期定制。
-- `ActrService.swift` 负责将这些组件接入 `ActrNode.linked`，并从 `manifest.toml` 解析远端 target。
+- `ActrService.swift` 负责将这些组件接入 `ActrNode.linked`；生成的 dispatcher 在运行时从 linked manifest 解析 alias。
 - `ContentView.swift` 等 UI 文件由 `actr init` 创建，`actr gen` 不会重写。
 
 ## 许可证

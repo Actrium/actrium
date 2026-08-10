@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		008B4CB5ED449B1607069FAE /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5967BADDF5C90A79633B78B0 /* ContentView.swift */; };
 		06DE979B2B3B8B0F5BD66BB7 /* local_echo.actor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 039B9876E24683F49338746F /* local_echo.actor.swift */; };
+		12A73D984EBD4A2F8C10F001 /* actr_dispatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12A73D984EBD4A2F8C10F002 /* actr_dispatch.swift */; };
 		20E4461B28D6F1D7B23C4F59 /* ActrService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B104C0C498276F71E204841A /* ActrService.swift */; };
 		276935175E2216771B84E3AC /* actr.lock.toml in Resources */ = {isa = PBXBuildFile; fileRef = 8D516FA723C145B1354E2E60 /* actr.lock.toml */; };
 		38239C40871D1CDF486AC4E2 /* manifest.toml in Resources */ = {isa = PBXBuildFile; fileRef = ECACC975AD8F559C49999427 /* manifest.toml */; };
@@ -23,6 +24,7 @@
 
 /* Begin PBXFileReference section */
 		039B9876E24683F49338746F /* local_echo.actor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = local_echo.actor.swift; sourceTree = "<group>"; };
+		12A73D984EBD4A2F8C10F002 /* actr_dispatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = actr_dispatch.swift; sourceTree = "<group>"; };
 		136504857085460B67EA6952 /* swift */ = {isa = PBXFileReference; lastKnownFileType = folder; name = swift; path = ../../bindings/swift; sourceTree = SOURCE_ROOT; };
 		397CC9BA582965117290965D /* local_echo.pb.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = local_echo.pb.swift; sourceTree = "<group>"; };
 		3B355D26B7A704237F7ACEEF /* EchoApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = EchoApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -81,6 +83,7 @@
 		A7567AEBC0F090CF314DD287 /* Generated */ = {
 			isa = PBXGroup;
 			children = (
+				12A73D984EBD4A2F8C10F002 /* actr_dispatch.swift */,
 				8C6D62F0B36581720CC8C335 /* echo.client.swift */,
 				44423C0003E6EA5259A3CA6E /* echo.pb.swift */,
 				039B9876E24683F49338746F /* local_echo.actor.swift */,
@@ -181,6 +184,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				20E4461B28D6F1D7B23C4F59 /* ActrService.swift in Sources */,
+				12A73D984EBD4A2F8C10F001 /* actr_dispatch.swift in Sources */,
 				008B4CB5ED449B1607069FAE /* ContentView.swift in Sources */,
 				4D1218D21569E25EA912A9C1 /* EchoApp.swift in Sources */,
 				904E8B0C4FDAF56035816B19 /* echo.client.swift in Sources */,

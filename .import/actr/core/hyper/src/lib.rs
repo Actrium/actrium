@@ -500,6 +500,11 @@ fn resolve_linked_dependency_metadata(
                 dependency.alias
             )));
         }
+        if aliases.contains_key(alias) {
+            return Err(HyperError::Config(format!(
+                "linked manifest dependency alias `{alias}` is declared more than once"
+            )));
+        }
         let actr_type = dependency.actr_type.clone().ok_or_else(|| {
             HyperError::Config(format!(
                 "linked manifest dependency `{alias}` must declare a complete actr_type for runtime alias resolution"

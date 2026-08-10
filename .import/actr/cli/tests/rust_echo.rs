@@ -461,52 +461,55 @@ service ChatService {
 }
 "#;
 
-/// Helper: write a minimal manifest.lock.toml so `actr gen` doesn't abort.
-fn write_lock_toml(dir: &std::path::Path) {
-    std::fs::write(
-        dir.join("manifest.lock.toml"),
-        "[metadata]\nversion = 2\ngenerated_at = \"2026-01-01T00:00:00Z\"\n",
-    )
-    .unwrap();
-}
-
-/// Helper: write a remote proto under protos/remote/<dep-name>/<stem>.proto
-fn write_remote_proto(dir: &std::path::Path, dep_name: &str, stem: &str, content: &str) {
-    let proto_dir = dir.join("protos/remote").join(dep_name);
+/// Helper: write a remote proto under protos/remote/<dependency-alias>/<stem>.proto.
+fn write_remote_proto(dir: &std::path::Path, alias: &str, stem: &str, content: &str) {
+    let proto_dir = dir.join("protos/remote").join(alias);
     std::fs::create_dir_all(&proto_dir).unwrap();
     std::fs::write(proto_dir.join(format!("{stem}.proto")), content).unwrap();
 }
 
-/// Verify that `actr gen` generates local_actor.rs for the bridge service and skips local_service.rs.
+fn add_manifest_dependency(dir: &std::path::Path, alias: &str, actr_type: &str) {
+    let path = dir.join("manifest.toml");
+    let mut manifest = std::fs::read_to_string(&path).unwrap();
+    let dependency = format!("{alias} = {{ actr_type = \"{actr_type}\" }}\n");
+    let marker = "[dependencies]\n";
+    let insert_at = manifest.find(marker).expect("manifest dependencies table") + marker.len();
+    manifest.insert_str(insert_at, &dependency);
+    std::fs::write(path, manifest).unwrap();
+}
+
+/// Verify that `actr gen` emits a unified dispatcher for one remote service.
 #[test]
 fn rust_echo_app_gen_single_remote_service() {
     let tmp = TempDir::new().unwrap();
     let dir = init_rust_echo_app(tmp.path(), "single-svc-app");
 
-    write_lock_toml(&dir);
-    write_remote_proto(&dir, "echo-echo-server", "echo", ECHO_PROTO);
+    write_remote_proto(&dir, "EchoService", "echo", ECHO_PROTO);
 
     let out = run_actr(&["gen", "-l", "rust"], &dir);
     assert_actr_success(&out, "actr gen (single remote service)");
 
-    let local_actor = std::fs::read_to_string(dir.join("src/generated/local_actor.rs")).unwrap();
+    let dispatch = std::fs::read_to_string(dir.join("src/generated/actr_dispatch.rs")).unwrap();
 
     assert!(
-        local_actor.contains("pub trait SingleSvcAppClientAppHandler"),
-        "should generate bridge handler trait"
+        dispatch.contains("pub trait ActrDispatchHandler"),
+        "should generate the unified handler trait"
     );
     assert!(
-        local_actor.contains("pub struct SingleSvcAppClientAppWorkload"),
-        "should generate bridge workload"
+        dispatch.contains("pub struct ActrWorkload"),
+        "should generate the unified workload"
     );
     assert!(
-        local_actor.contains("\"echo.EchoService.Echo\""),
+        dispatch.contains("\"echo.EchoService.Echo\""),
         "should forward the Echo route key"
     );
     assert!(
-        local_actor.contains("manufacturer: \"acme\".to_string()")
-            && local_actor.contains("name: \"EchoService\".to_string()"),
-        "should use the mapped remote actr_type"
+        dispatch.contains("resolve_dependency(\"EchoService\")"),
+        "should resolve the manifest dependency alias at runtime"
+    );
+    assert!(
+        !dispatch.contains("ActrType {"),
+        "should not embed a remote ActrType"
     );
     assert!(
         !dir.join("src/local_service.rs").exists(),
@@ -514,42 +517,44 @@ fn rust_echo_app_gen_single_remote_service() {
     );
 }
 
-/// Verify that `actr gen` merges multiple remote services into local_actor.rs.
+/// Verify that `actr gen` merges multiple remote services into the unified dispatcher.
 #[test]
 fn rust_echo_app_gen_two_remote_services() {
     let tmp = TempDir::new().unwrap();
     let dir = init_rust_echo_app(tmp.path(), "two-svc-app");
 
-    write_lock_toml(&dir);
-    write_remote_proto(&dir, "echo-echo-server", "echo", ECHO_PROTO);
-    write_remote_proto(&dir, "chat-service", "chat", CHAT_PROTO);
+    add_manifest_dependency(&dir, "ChatService", "acme:ChatService:1.0.0");
+    write_remote_proto(&dir, "EchoService", "echo", ECHO_PROTO);
+    write_remote_proto(&dir, "ChatService", "chat", CHAT_PROTO);
 
     let out = run_actr(&["gen", "-l", "rust"], &dir);
     assert_actr_success(&out, "actr gen (two remote services)");
 
-    let local_actor = std::fs::read_to_string(dir.join("src/generated/local_actor.rs")).unwrap();
+    let dispatch = std::fs::read_to_string(dir.join("src/generated/actr_dispatch.rs")).unwrap();
 
     assert!(
-        local_actor.contains("\"echo.EchoService.Echo\""),
+        dispatch.contains("\"echo.EchoService.Echo\""),
         "should forward EchoService"
     );
     assert!(
-        local_actor.contains("\"chat.ChatService.SendMessage\""),
+        dispatch.contains("\"chat.ChatService.SendMessage\""),
         "should forward ChatService.SendMessage"
     );
     assert!(
-        local_actor.contains("\"chat.ChatService.JoinRoom\""),
+        dispatch.contains("\"chat.ChatService.JoinRoom\""),
         "should forward ChatService.JoinRoom"
     );
     assert!(
-        local_actor.contains("manufacturer: \"acme\".to_string()")
-            && local_actor.contains("name: \"EchoService\".to_string()"),
-        "should include EchoService actr_type"
+        dispatch.contains("resolve_dependency(\"EchoService\")"),
+        "should resolve EchoService by alias"
     );
     assert!(
-        local_actor.contains("manufacturer: \"acme\".to_string()")
-            && local_actor.contains("name: \"ChatService\".to_string()"),
-        "should include ChatService actr_type"
+        dispatch.contains("resolve_dependency(\"ChatService\")"),
+        "should resolve ChatService by alias"
+    );
+    assert!(
+        !dispatch.contains("ActrType {"),
+        "should not embed remote ActrTypes"
     );
     assert!(
         !dir.join("src/local_service.rs").exists(),

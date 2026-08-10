@@ -107,6 +107,7 @@ describe('@actrium/actr-workload', () => {
       await runtime.tell('workload', 'notify', payload);
       await runtime.callRaw(testActorId(), 'raw', payload, 30_000);
       await runtime.discover(targetType);
+      await runtime.resolveDependency('echo');
       await runtime.registerStream('als-stream', () => undefined);
       await runtime.unregisterStream('als-stream');
       await runtime.sendDataChunk(
@@ -117,12 +118,13 @@ describe('@actrium/actr-workload', () => {
       await runtime.logMessage('info', 'from active invocation');
     });
 
-    expect(host.hostCalls.ctxTokens).toEqual(Array(8).fill(91n));
+    expect(host.hostCalls.ctxTokens).toEqual(Array(9).fill(91n));
     expect(host.hostCalls.operations).toEqual([
       'call',
       'tell',
       'callRaw',
       'discover',
+      'resolveDependency',
       'registerStream',
       'unregisterStream',
       'sendDataChunk',
@@ -174,6 +176,25 @@ describe('@actrium/actr-workload', () => {
       { tag: 'rpc-signal' },
       { tag: 'rpc-signal' },
     ]);
+  });
+
+  it('binds typed context calls to their timeout and declared lane', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = new runtime.ActrContext(testInvocationCtx(93n));
+    const request = {
+      routeKey: 'echo',
+      payloadType: runtime.PayloadType.RpcSignal,
+      encode: () => new Uint8Array([9]),
+      decode: (payload: Uint8Array) => payload[0],
+    };
+
+    await expect(ctx.call('host', request, 1_234)).resolves.toBe(9);
+    await expect(
+      ctx.callRaw(testActorId(), 'raw', new Uint8Array(), 0),
+    ).rejects.toThrow('timeoutMs must be > 0');
+
+    expect(host.hostCalls.timeouts).toEqual([1_234n]);
+    expect(host.hostCalls.payloadTypes).toEqual([{ tag: 'rpc-signal' }]);
   });
 
   it('rejects host imports when no invocation context is active', async () => {

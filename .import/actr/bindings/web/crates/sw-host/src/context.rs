@@ -7,7 +7,8 @@ use std::rc::Rc;
 
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
-    ActorResult, ActrError, ActrId, ActrType, Direction, MetadataEntry, RpcEnvelope, RpcRequest,
+    ActorResult, ActrError, ActrId, ActrType, Direction, MetadataEntry, PayloadType, RpcEnvelope,
+    RpcRequest,
 };
 use bytes::Bytes;
 use futures::future::{Either, select};
@@ -67,51 +68,22 @@ impl RuntimeContext {
         self.bridge = Some(bridge);
         self
     }
-}
 
-#[async_trait::async_trait(?Send)]
-impl WebContext for RuntimeContext {
-    // ========== Basic Info ==========
-
-    fn self_id(&self) -> &ActrId {
-        &self.self_id
-    }
-
-    fn caller_id(&self) -> Option<&ActrId> {
-        self.caller_id.as_ref()
-    }
-
-    fn trace_id(&self) -> &str {
-        &self.traceparent
-    }
-
-    fn request_id(&self) -> &str {
-        &self.request_id
-    }
-
-    // ========== RPC Communication ==========
-
-    async fn call_raw(
+    async fn call_raw_with_type(
         &self,
         target: &ActrId,
         route_key: &str,
+        payload_type: PayloadType,
         payload: &[u8],
         timeout_ms: i64,
     ) -> ActorResult<Vec<u8>> {
-        // Sender-side contract (#254): a REQUEST must carry a positive
-        // deadline. Reject before registering a pending entry or sending.
+        crate::outbound::validate_rpc_payload_type(payload_type)?;
         let timeout_ms = crate::outbound::validate_rpc_timeout_ms(timeout_ms)?;
         let started_at = web_time::Instant::now();
-
         let request_id = js_sys::Math::random().to_string();
 
-        // Register the pending RPC through the bridge so `handle_fast_path`
-        // can treat it as a response instead of an inbound request.
         if let Some(bridge) = &self.bridge {
             bridge.register_pending_rpc(request_id.clone());
-            // Connection establishment consumes the same deadline budget as
-            // transport send and response waiting. In particular, WebRTC
-            // retries must not postpone the start of the caller's timeout.
             let connection = bridge.ensure_connection(target);
             let deadline = gloo_timers::future::TimeoutFuture::new(timeout_ms);
             futures::pin_mut!(connection, deadline);
@@ -156,14 +128,94 @@ impl WebContext for RuntimeContext {
             timeout_ms: remaining_timeout_ms,
         };
 
-        let response = self.gate.send_request(target, envelope).await;
+        let response = self
+            .gate
+            .send_request_with_type(target, payload_type, envelope)
+            .await;
         if response.is_err()
             && let Some(bridge) = &self.bridge
         {
             bridge.unregister_pending_rpc(&pending_request_id);
         }
-        let response_bytes = response?;
-        Ok(response_bytes.to_vec())
+        Ok(response?.to_vec())
+    }
+
+    async fn tell_raw_with_type(
+        &self,
+        target: &ActrId,
+        route_key: &str,
+        payload_type: PayloadType,
+        payload: Vec<u8>,
+    ) -> ActorResult<()> {
+        crate::outbound::validate_rpc_payload_type(payload_type)?;
+        if let Some(bridge) = &self.bridge
+            && let Err(error) = bridge.ensure_connection(target).await
+        {
+            log::warn!(
+                "[Context] ensure_connection skipped for {}: {}",
+                target,
+                error
+            );
+        }
+
+        let envelope = RpcEnvelope {
+            route_key: route_key.to_string(),
+            payload: Some(Bytes::from(payload)),
+            error: None,
+            direction: Some(Direction::Tell as i32),
+            traceparent: Some(self.traceparent.clone()),
+            tracestate: Some(self.tracestate.clone()),
+            request_id: js_sys::Math::random().to_string(),
+            metadata: vec![MetadataEntry {
+                key: "sender_actr_id".to_string(),
+                value: self.self_id.to_string_repr(),
+            }],
+            timeout_ms: 0,
+        };
+
+        self.gate
+            .send_message_with_type(target, payload_type, envelope)
+            .await
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl WebContext for RuntimeContext {
+    // ========== Basic Info ==========
+
+    fn self_id(&self) -> &ActrId {
+        &self.self_id
+    }
+
+    fn caller_id(&self) -> Option<&ActrId> {
+        self.caller_id.as_ref()
+    }
+
+    fn trace_id(&self) -> &str {
+        &self.traceparent
+    }
+
+    fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
+    // ========== RPC Communication ==========
+
+    async fn call_raw(
+        &self,
+        target: &ActrId,
+        route_key: &str,
+        payload: &[u8],
+        timeout_ms: i64,
+    ) -> ActorResult<Vec<u8>> {
+        self.call_raw_with_type(
+            target,
+            route_key,
+            PayloadType::RpcReliable,
+            payload,
+            timeout_ms,
+        )
+        .await
     }
 
     async fn discover(&self, target_type: &ActrType) -> ActorResult<ActrId> {
@@ -185,7 +237,13 @@ impl WebContext for RuntimeContext {
     ) -> ActorResult<R::Response> {
         let payload = request.encode_to_vec();
         let response_bytes = self
-            .call_raw(target, R::route_key(), &payload, timeout_ms)
+            .call_raw_with_type(
+                target,
+                R::route_key(),
+                R::payload_type(),
+                &payload,
+                timeout_ms,
+            )
             .await?;
 
         R::Response::decode(response_bytes.as_slice()).map_err(|e| {
@@ -202,7 +260,8 @@ impl WebContext for RuntimeContext {
         //    Passing the Vec by value lets tell_raw move it into Bytes with
         //    no extra copy (a &[u8] parameter would force a clone).
         let payload = message.encode_to_vec();
-        self.tell_raw(target, R::route_key(), payload).await
+        self.tell_raw_with_type(target, R::route_key(), R::payload_type(), payload)
+            .await
     }
 
     async fn tell_raw(
@@ -211,37 +270,8 @@ impl WebContext for RuntimeContext {
         route_key: &str,
         payload: Vec<u8>,
     ) -> ActorResult<()> {
-        if let Some(bridge) = &self.bridge {
-            if let Err(error) = bridge.ensure_connection(target).await {
-                log::warn!(
-                    "[Context] ensure_connection skipped for {}: {}",
-                    target,
-                    error
-                );
-            }
-        }
-
-        // Build an `RpcEnvelope` with fire-and-forget semantics: the
-        // explicit `Direction::Tell` label tells the receiver to run the
-        // handler without replying. timeout_ms stays 0 as documented filler
-        // — it is no longer a tell marker.
-        let envelope = RpcEnvelope {
-            route_key: route_key.to_string(),
-            payload: Some(Bytes::from(payload)),
-            error: None,
-            direction: Some(Direction::Tell as i32),
-            traceparent: Some(self.traceparent.clone()),
-            tracestate: Some(self.tracestate.clone()),
-            request_id: js_sys::Math::random().to_string(), // Simplified ID generation.
-            metadata: vec![MetadataEntry {
-                key: "sender_actr_id".to_string(),
-                value: self.self_id.to_string_repr(),
-            }],
-            timeout_ms: 0,
-        };
-
-        // Send through the gate without registering a pending entry.
-        self.gate.send_message(target, envelope).await
+        self.tell_raw_with_type(target, route_key, PayloadType::RpcSignal, payload)
+            .await
     }
 
     // ========== Stream Registration ==========

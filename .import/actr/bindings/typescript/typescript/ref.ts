@@ -147,7 +147,7 @@ export class ActrRef {
    * @param target - Target actor ID
    * @param companion - Generated request companion (`{ routeKey, payloadType, encode, response }`)
    * @param request - Request init object accepted by the companion's encode()
-   * @param timeoutMs - Timeout in ms, default 30000
+   * @param timeoutMs - Timeout in milliseconds
    * @returns Decoded response object
    *
    * @example
@@ -167,7 +167,7 @@ export class ActrRef {
     target: ActrId,
     companion: RpcCompanion<Req, Res>,
     request: Req,
-    timeoutMs: number = 30000,
+    timeoutMs: number,
   ): Promise<Res> {
     const requestBuf = companion.encode(request);
     const responseBuf = await this.call(

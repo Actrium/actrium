@@ -128,8 +128,9 @@ npm run codegen -- --config examples/echo-client/manifest.toml
 
 注意：
 
-- 生成远程依赖要求 v2 `manifest.lock.toml` 显式包含 alias；修改依赖后请运行
-  `actr deps install`。
+- codegen 不强制要求 `manifest.lock.toml`。缺少 lock 时会从 `manifest.toml`
+  读取依赖 alias，并递归扫描 proto 根目录；若存在 lock，则必须使用包含 alias
+  的 v2 格式。
 - proto 默认来源为 `examples/echo-client/protos/remote`。
 - 输出包括 protobuf 编解码、路由辅助，以及 `local.actor.ts`。
 

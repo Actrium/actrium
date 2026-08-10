@@ -1,145 +1,7 @@
-use std::collections::HashMap;
-
 use crate::commands::codegen::{
-    ActrGenMetadata, GenContext, MethodModel, ProtoFileModel, ProtoModel, ProtoSide,
+    ActrGenMetadata, DispatchSpec, GenContext, MethodModel, ProtoFileModel, ProtoModel, ProtoSide,
     ScaffoldCatalog, ServiceModel, SupportedLanguage, write_metadata,
 };
-
-#[test]
-fn test_remote_path_extraction() {
-    // Test the logic for extracting remote path after "/remote/"
-    let test_cases = vec![
-        (
-            "protos/remote/server/service.proto",
-            Some("server/service.proto"),
-        ),
-        // "remote/test.proto" will NOT match because split produces ["", "test.proto"]
-        // which is only 2 parts, but the first part is empty, not what we want
-        ("protos/remote/test.proto", Some("test.proto")),
-        ("protos/local.proto", None),
-        ("no_remote_here.proto", None),
-    ];
-
-    for (input, expected) in test_cases {
-        let parts: Vec<&str> = input.split("/remote/").collect();
-        let result = if parts.len() == 2 && !parts[0].is_empty() {
-            Some(parts[1])
-        } else {
-            None
-        };
-
-        assert_eq!(
-            result, expected,
-            "Failed for input: {}, expected: {:?}, got: {:?}",
-            input, expected, result
-        );
-    }
-}
-
-#[test]
-fn test_remote_services_map_construction() {
-    // Create a simple mock lock file structure
-    let mut remote_services_map: HashMap<String, String> = HashMap::new();
-
-    // Simulate adding entries from lock file
-    remote_services_map.insert(
-        "server/service.proto".to_string(),
-        "acme:TestServer".to_string(),
-    );
-    remote_services_map.insert(
-        "api/v1/api.proto".to_string(),
-        "custom:ApiService".to_string(),
-    );
-
-    // Verify the mapping
-    assert_eq!(remote_services_map.len(), 2);
-    assert_eq!(
-        remote_services_map.get("server/service.proto"),
-        Some(&"acme:TestServer".to_string())
-    );
-    assert_eq!(
-        remote_services_map.get("api/v1/api.proto"),
-        Some(&"custom:ApiService".to_string())
-    );
-}
-
-#[test]
-fn test_options_string_building() {
-    let remote_file_mappings = [
-        "remote/s1.proto=testco:S1".to_string(),
-        "remote/s2.proto=other:S2".to_string(),
-    ];
-    let local_paths = ["local.proto".to_string()];
-
-    let mut options = String::new();
-
-    if !remote_file_mappings.is_empty() {
-        options.push_str(&format!(
-            "RemoteFileMapping={}",
-            remote_file_mappings.join(";")
-        ));
-    }
-
-    if !local_paths.is_empty() {
-        if !options.is_empty() {
-            options.push(',');
-        }
-        options.push_str(&format!("LocalFiles={}", local_paths.join(":")));
-    }
-
-    assert!(
-        options.contains("RemoteFileMapping=remote/s1.proto=testco:S1;remote/s2.proto=other:S2")
-    );
-    assert!(options.contains("LocalFiles=local.proto"));
-}
-
-#[test]
-fn test_actr_type_extraction_logic() {
-    let remote_services_map: HashMap<String, String> = [
-        (
-            "service1/api.proto".to_string(),
-            "mfg1:Service1".to_string(),
-        ),
-        (
-            "service2/api.proto".to_string(),
-            "mfg2:Service2".to_string(),
-        ),
-    ]
-    .iter()
-    .cloned()
-    .collect();
-
-    // Test matched path
-    let path1 = "service1/api.proto";
-    assert_eq!(
-        remote_services_map.get(path1),
-        Some(&"mfg1:Service1".to_string())
-    );
-
-    // Test unmatched path (should return None)
-    let path2 = "unknown/api.proto";
-    assert_eq!(remote_services_map.get(path2), None);
-
-    // Test that we can handle None gracefully with empty string
-    let actr_type = remote_services_map.get(path2).cloned().unwrap_or_default();
-    assert_eq!(actr_type, "");
-}
-
-#[test]
-fn test_empty_lock_file_scenario() {
-    // When lock file doesn't exist or has no dependencies
-    let remote_services_map: HashMap<String, String> = HashMap::new();
-
-    // Should handle gracefully
-    assert_eq!(remote_services_map.len(), 0);
-    assert_eq!(remote_services_map.get("any/path.proto"), None);
-
-    // Simulating the warning path
-    let _path_str = "remote/service/api.proto";
-    let is_in_map = remote_services_map.contains_key("service/api.proto");
-    assert!(!is_in_map);
-    // In actual code, this triggers warn! and pushes empty string
-}
 
 #[test]
 fn pb2_alias_and_import_resolves_imported_type_owner() {
@@ -184,7 +46,7 @@ fn pb2_alias_and_import_distinguishes_same_package_owner_files() {
 }
 
 #[test]
-fn generated_scaffold_uses_imported_rpc_owner_pb2_alias() {
+fn generated_scaffold_uses_unified_dispatch_and_imported_pb2_alias() {
     let tmp = tempfile::TempDir::new().unwrap();
     let config_path = tmp.path().join("manifest.toml");
     std::fs::write(
@@ -226,6 +88,7 @@ realm_id = 1001
                 snake_name: "continue_prompt_result_streams".to_string(),
                 input_type: "ask.ContinuePromptResultStreamsRequest".to_string(),
                 output_type: "ask.ContinuePromptResultStreamsResponse".to_string(),
+                payload_type: "rpcReliable".to_string(),
                 route_key: "data_stream_app.DataStreamAppService.ContinuePromptResultStreams"
                     .to_string(),
             }],
@@ -259,6 +122,9 @@ realm_id = 1001
         no_format: false,
         debug: false,
         skip_validation: false,
+        dispatch_spec: DispatchSpec::default(),
+        dispatch_spec_path: std::path::PathBuf::new(),
+        dispatch_spec_hash: String::new(),
     };
     let metadata =
         ActrGenMetadata::from_proto_model(SupportedLanguage::Python, &context.proto_model).unwrap();
@@ -273,19 +139,32 @@ realm_id = 1001
         .generate_scaffold_content(&context, "ActrService", "Workload", &services)
         .expect("render scaffold");
 
+    // Unified dispatch import instead of per-service dispatcher.
+    assert!(scaffold.contains("from generated.actr_dispatch import actr_dispatch"));
+    assert!(
+        scaffold.contains("from actr_workload import ActrContext, Workload as WorkloadProtocol")
+    );
+
+    // Handler method uses dispatch_method naming (async + ctx).
     assert!(scaffold.contains(
-        "from generated.remote.ask_service import ask_pb2 as remote_ask_service_ask_pb2"
-    ));
-    assert!(scaffold.contains(
-        "def continue_prompt_result_streams(self, req: remote_ask_service_ask_pb2.ContinuePromptResultStreamsRequest) -> remote_ask_service_ask_pb2.ContinuePromptResultStreamsResponse:"
+        "async def data_stream_app_service_continue_prompt_result_streams(self, req: remote_ask_service_ask_pb2.ContinuePromptResultStreamsRequest, ctx: ActrContext) -> remote_ask_service_ask_pb2.ContinuePromptResultStreamsResponse:"
     ));
     assert!(
         scaffold
             .contains("return remote_ask_service_ask_pb2.ContinuePromptResultStreamsResponse()")
     );
+
+    // Imported types must NOT resolve to the local service's package.
     assert!(!scaffold.contains("local_data_stream_app_pb2.ContinuePromptResultStreamsRequest"));
     assert!(!scaffold.contains("data_stream_app_pb2.ContinuePromptResultStreamsRequest"));
+
+    // Dispatch calls actr_dispatch, not a per-service dispatcher.
     assert!(scaffold.contains("async def dispatch(self, envelope, ctx) -> bytes:"));
+    assert!(scaffold.contains(
+        "await actr_dispatch(ctx, ActrServiceHandler(), envelope.route_key, envelope.payload, envelope.timeout_ms)"
+    ));
+
+    // Lifecycle methods preserved.
     assert!(scaffold.contains("async def on_error(self, event, ctx) -> None:"));
     assert!(scaffold.contains("async def on_data_chunk(self, chunk, sender, ctx) -> None:"));
     assert!(!scaffold.contains("\n    def dispatch(self, envelope)"));
@@ -334,6 +213,7 @@ realm_id = 1001
                 snake_name: "foo".to_string(),
                 input_type: "ask.Outer.InnerRequest".to_string(),
                 output_type: "ask.Outer.InnerResponse".to_string(),
+                payload_type: "rpcReliable".to_string(),
                 route_key: "client.Client.Foo".to_string(),
             }],
             actr_type: None,
@@ -367,6 +247,9 @@ realm_id = 1001
         no_format: false,
         debug: false,
         skip_validation: false,
+        dispatch_spec: DispatchSpec::default(),
+        dispatch_spec_path: std::path::PathBuf::new(),
+        dispatch_spec_hash: String::new(),
     };
     let metadata =
         ActrGenMetadata::from_proto_model(SupportedLanguage::Python, &context.proto_model).unwrap();
@@ -380,4 +263,6 @@ realm_id = 1001
 
     assert_eq!(method.input_type, "Outer.InnerRequest");
     assert_eq!(method.output_type, "Outer.InnerResponse");
+    // dispatch_method = snake_case(service.name) + "_" + snake_case(method.name)
+    assert_eq!(method.dispatch_method, "client_foo");
 }

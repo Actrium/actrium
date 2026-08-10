@@ -13,6 +13,7 @@ repositories { mavenCentral() }
 dependencies {
     implementation("com.google.protobuf:protobuf-java:3.25.1")
     implementation("com.squareup:kotlinpoet:1.16.0")
+    implementation("org.json:json:20240303")
     testImplementation(kotlin("test"))
 }
 
