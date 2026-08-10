@@ -1,4 +1,4 @@
-use anyhow::{Context as _, Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use bytes::Bytes;
 use heck::ToSnakeCase;
 use prost::Message;
@@ -11,7 +11,8 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::{self, Read, Write};
 
 use actr_framework_protoc_codegen::{
-    DispatchSpec, GeneratorRole, ModernGenerator, RemoteServiceInfo, UnifiedDispatcherGenerator,
+    DispatchSpec, ExplicitPayloadTypeMap, GeneratorRole, ModernGenerator, RemoteServiceInfo,
+    UnifiedDispatcherGenerator, build_explicit_payload_types, extract_reply_modes,
 };
 use actr_protocol::{PackageName, ServiceName};
 
@@ -117,11 +118,21 @@ fn main() -> Result<()> {
         .read_to_end(&mut buf)
         .context("Failed to read from stdin")?;
 
+    // Recover explicit `(actr.payload_type)` method options from the raw
+    // bytes first: the prost decode below drops the extension as an unknown
+    // field, so this is the only chance to see it.
+    let explicit_payload_types = build_explicit_payload_types(&buf)?;
+
+    // Recover `actr.reply_mode` per route_key from the raw bytes too, for the
+    // same reason (prost drops the extension). See `option_extractor` + RFC-0323.
+    let reply_modes = extract_reply_modes(&buf)
+        .context("Failed to extract actr.reply_mode options via prost-reflect")?;
+
     let request = CodeGeneratorRequest::decode(Bytes::from(buf))
         .context("Failed to decode CodeGeneratorRequest")?;
 
     // Generate code
-    let response = generate_code(request)?;
+    let response = generate_code(request, &reply_modes, &explicit_payload_types)?;
 
     // Write CodeGeneratorResponse to stdout
     let mut out_buf = Vec::new();
@@ -148,7 +159,11 @@ fn parse_parameters(param_str: &str) -> HashMap<String, String> {
     params
 }
 
-fn generate_code(request: CodeGeneratorRequest) -> Result<CodeGeneratorResponse> {
+fn generate_code(
+    request: CodeGeneratorRequest,
+    reply_modes: &HashMap<String, actr_protocol::ReplyMode>,
+    explicit_payload_types: &ExplicitPayloadTypeMap,
+) -> Result<CodeGeneratorResponse> {
     // Set supported features if available (FEATURE_PROTO3_OPTIONAL = 1)
     let mut response = CodeGeneratorResponse {
         supported_features: Some(1u64),
@@ -237,6 +252,8 @@ fn generate_code(request: CodeGeneratorRequest) -> Result<CodeGeneratorResponse>
                     &spec,
                     &methods_by_route,
                     &mut metadata,
+                    reply_modes,
+                    explicit_payload_types,
                 )?;
                 let name = generated_file.name.clone().unwrap_or_default();
                 if !name.is_empty() {
@@ -353,6 +370,7 @@ fn insert_type_owner(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn generate_service_code(
     file: &FileDescriptorProto,
     service: &ServiceDescriptorProto,
@@ -360,6 +378,8 @@ fn generate_service_code(
     spec: &DispatchSpec,
     _methods_by_route: &HashMap<String, prost_types::MethodDescriptorProto>,
     metadata: &mut ActrGenMetadata,
+    reply_modes: &HashMap<String, actr_protocol::ReplyMode>,
+    explicit_payload_types: &ExplicitPayloadTypeMap,
 ) -> Result<File> {
     let service_name = service.name();
     let package_name = file.package();
@@ -422,7 +442,14 @@ fn generate_service_code(
         .iter()
         .map(|(full_name, owner)| (full_name.clone(), owner.proto_package.clone()))
         .collect();
-    let generator = ModernGenerator::new(package_name, service_name, role, generator_type_owners);
+    let generator = ModernGenerator::new_with_payload_types(
+        package_name,
+        service_name,
+        role,
+        generator_type_owners,
+        reply_modes.clone(),
+        explicit_payload_types.clone(),
+    );
 
     // Pass an empty `remote_services` slice — the per-service Dispatcher no
     // longer embeds remote forwarding arms with `ActrType` strings. Remote
@@ -818,6 +845,8 @@ mod tests {
             &spec,
             &methods_by_route,
             &mut metadata,
+            &HashMap::new(),
+            &ExplicitPayloadTypeMap::default(),
         )
         .unwrap();
 

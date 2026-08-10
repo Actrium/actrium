@@ -1,8 +1,5 @@
 fn main() {
-    let protos = [
-        "../../proto/echo.proto",
-        "../../proto/echo_stream.proto",
-    ];
+    let protos = ["../../proto/echo.proto", "../../proto/echo_stream.proto"];
     for proto in &protos {
         println!("cargo:rerun-if-changed={proto}");
     }

@@ -187,6 +187,16 @@ pub(crate) trait LinkedWorkloadHandle: Send + Sync + 'static {
             "linked workload handle has no dispatcher bound".to_string(),
         ))
     }
+
+    /// The `ReplyMode` declared for `route_key` via the proto
+    /// `actr.reply_mode` option (RFC-0323). The pump queries this before
+    /// dispatch to decide between the RETURN path (dispatch → bytes → reply)
+    /// and the EXPLICIT path (handler gets a `Reply<T>` handle; reply is
+    /// deferred). The default returns `Return`; [`WorkloadAdapter`] overrides
+    /// this to call `<W::Dispatcher as MessageDispatcher>::reply_mode_for_route`.
+    fn reply_mode_for_route(&self, _route_key: &str) -> actr_protocol::ReplyMode {
+        actr_protocol::ReplyMode::Return
+    }
 }
 
 /// Generic bridge from a user-defined [`actr_framework::Workload`] (with
@@ -301,6 +311,10 @@ impl<W: FrameworkWorkload> LinkedWorkloadHandle for WorkloadAdapter<W> {
         ctx: Arc<RuntimeContext>,
     ) -> ActorResult<Bytes> {
         self.dispatch_with_ctx(envelope, ctx.as_ref()).await
+    }
+
+    fn reply_mode_for_route(&self, route_key: &str) -> actr_protocol::ReplyMode {
+        <W::Dispatcher as actr_framework::MessageDispatcher>::reply_mode_for_route(route_key)
     }
 }
 

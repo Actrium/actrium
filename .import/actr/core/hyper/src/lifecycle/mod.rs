@@ -12,9 +12,11 @@ mod machine_docs;
 pub(crate) mod membership;
 mod network_event;
 pub(crate) mod node;
+pub(crate) mod outstanding_replies;
 mod recovery_execution;
 mod recovery_policy;
 mod recovery_supervisor;
+pub(crate) mod reply_deliver;
 pub(crate) mod session_state;
 
 #[cfg(test)]

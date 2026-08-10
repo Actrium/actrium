@@ -1383,7 +1383,12 @@ async fn duplicate_inflight_tell_is_dropped_immediately() {
     // Task A: original tell, blocks inside the handler on the release gate.
     let inner_a = h.inner.clone();
     let env_a = envelope.clone();
-    let original = tokio::spawn(async move { inner_a.handle_incoming(env_a, None).await });
+    let original = tokio::spawn(async move {
+        match inner_a.handle_incoming(env_a, None, None).await {
+            IncomingOutcome::Replied(r) => r,
+            IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
+        }
+    });
 
     // Deterministic: wait until the handler has actually been entered.
     tokio::time::timeout(Duration::from_secs(5), h.entered_rx.recv())
@@ -1394,10 +1399,12 @@ async fn duplicate_inflight_tell_is_dropped_immediately() {
     // Duplicate while in flight: must resolve without waiting for the
     // original (the release gate is still closed, so any wait would hang
     // until this test's own 5 s guard fires).
-    let duplicate = tokio::time::timeout(
-        Duration::from_secs(5),
-        h.inner.handle_incoming(envelope.clone(), None),
-    )
+    let duplicate = tokio::time::timeout(Duration::from_secs(5), async {
+        match h.inner.handle_incoming(envelope.clone(), None, None).await {
+            IncomingOutcome::Replied(r) => r,
+            IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
+        }
+    })
     .await
     .expect("duplicate in-flight tell must return immediately, not wait for the original")
     .expect("duplicate tell drop must resolve Ok");
@@ -1423,7 +1430,10 @@ async fn duplicate_inflight_tell_is_dropped_immediately() {
     // Post-completion duplicate: served from the dedup cache, which stores
     // EMPTY bytes for a successful tell (the response is never sent, so the
     // unsent payload is not retained for the DEDUP_TTL).
-    let cached = h.inner.handle_incoming(envelope, None).await.unwrap();
+    let cached = match h.inner.handle_incoming(envelope, None, None).await {
+        IncomingOutcome::Replied(r) => r.unwrap(),
+        IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
+    };
     assert!(
         cached.is_empty(),
         "completed tell must cache empty bytes, not the unsent response"
@@ -1446,7 +1456,12 @@ async fn tell_handler_error_completes_dedup_entry() {
 
     let inner_a = h.inner.clone();
     let env_a = envelope.clone();
-    let original = tokio::spawn(async move { inner_a.handle_incoming(env_a, None).await });
+    let original = tokio::spawn(async move {
+        match inner_a.handle_incoming(env_a, None, None).await {
+            IncomingOutcome::Replied(r) => r,
+            IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
+        }
+    });
 
     tokio::time::timeout(Duration::from_secs(5), h.entered_rx.recv())
         .await
@@ -1459,7 +1474,10 @@ async fn tell_handler_error_completes_dedup_entry() {
 
     // Retry with the same request_id: served from the dedup cache (the
     // recorded error), handler not re-entered.
-    let retried = h.inner.handle_incoming(envelope, None).await;
+    let retried = match h.inner.handle_incoming(envelope, None, None).await {
+        IncomingOutcome::Replied(r) => r,
+        IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
+    };
     assert!(
         matches!(retried, Err(ActrError::Internal(_))),
         "retried tell must observe the cached handler error, got {retried:?}"
@@ -1483,7 +1501,12 @@ async fn request_with_zero_timeout_is_still_dispatched() {
 
     let inner_a = h.inner.clone();
     let env_a = envelope.clone();
-    let call = tokio::spawn(async move { inner_a.handle_incoming(env_a, None).await });
+    let call = tokio::spawn(async move {
+        match inner_a.handle_incoming(env_a, None, None).await {
+            IncomingOutcome::Replied(r) => r,
+            IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
+        }
+    });
 
     tokio::time::timeout(Duration::from_secs(5), h.entered_rx.recv())
         .await
@@ -1498,6 +1521,336 @@ async fn request_with_zero_timeout_is_still_dispatched() {
         "a zero-timeout REQUEST must still be answered"
     );
     assert_eq!(h.runs.load(Ordering::SeqCst), 1);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// RFC-0323 EXPLICIT dispatch e2e (ack-at-return + counter balance)
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+use actr_framework::Context as _;
+
+/// A `LinkedWorkloadHandle` whose route declares `ReplyMode::Explicit` and
+/// whose `dispatch` captures the `ReplyDeliver` set on the ctx (instead of
+/// building a `Reply<T>` and sending) — lets a test drive the real
+/// `admit_incoming` → `ReplyDeliver::deliver_async` path without proto
+/// codegen.
+struct ExplicitCaptureHandle {
+    captured: Arc<std::sync::Mutex<Option<Arc<dyn actr_framework::Deliver>>>>,
+}
+
+#[async_trait::async_trait]
+impl LinkedWorkloadHandle for ExplicitCaptureHandle {
+    fn reply_mode_for_route(&self, _route_key: &str) -> actr_protocol::ReplyMode {
+        actr_protocol::ReplyMode::Explicit
+    }
+    async fn dispatch(
+        &self,
+        _envelope: RpcEnvelope,
+        ctx: Arc<crate::context::RuntimeContext>,
+    ) -> ActorResult<FrameworkBytes> {
+        if let Some(d) = ctx.reply_deliver() {
+            *self.captured.lock().unwrap() = Some(d);
+        }
+        // EXPLICIT: the dispatch return value is ignored — the reply is
+        // deferred to the captured Deliver.
+        Ok(FrameworkBytes::new())
+    }
+}
+
+async fn explicit_capture_harness() -> (
+    Arc<Inner>,
+    Arc<std::sync::Mutex<Option<Arc<dyn actr_framework::Deliver>>>>,
+    tempfile::TempDir,
+) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let captured: Arc<std::sync::Mutex<Option<Arc<dyn actr_framework::Deliver>>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let handle = ExplicitCaptureHandle {
+        captured: captured.clone(),
+    };
+    let workload = Workload::Linked(Arc::new(handle) as Arc<dyn LinkedWorkloadHandle>);
+    let config = dedup_test_config(&dir);
+    let actor_id = ActrId {
+        realm: config.realm,
+        serial_number: 1,
+        r#type: config.package.actr_type.clone(),
+    };
+    let mut inner = Inner::build(
+        config,
+        workload,
+        None,
+        None,
+        None,
+        100,
+        Duration::from_secs(60),
+        crate::config::DispatchConcurrency::default(),
+        None,
+        false,
+    )
+    .await
+    .expect("Inner::build must succeed");
+    inner.actor_id = Some(actor_id);
+    inner.credential_state = Some(CredentialState::new(AIdCredential::default(), None, None));
+    (Arc::new(inner), captured, dir)
+}
+
+fn explicit_envelope(request_id: &str) -> RpcEnvelope {
+    RpcEnvelope {
+        request_id: request_id.to_string(),
+        route_key: "pkg.Svc.ExplicitMethod".to_string(),
+        payload: Some(FrameworkBytes::from_static(b"explicit-payload")),
+        error: None,
+        direction: Some(Direction::Request as i32),
+        traceparent: None,
+        tracestate: None,
+        metadata: vec![],
+        timeout_ms: 1000,
+    }
+}
+
+/// RFC-0323 §4/§5: an EXPLICIT dispatch completes `Deferred` (ack-at-return),
+/// the `outstanding_replies` gauge rises to 1, and firing the captured
+/// `Deliver` releases it back to 0.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_deferred_balances_outstanding_counter_on_deliver() {
+    let (inner, captured, _dir) = explicit_capture_harness().await;
+    let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Mailbox {
+        caller: Err("test-caller".to_string()),
+        msg_id: uuid::Uuid::new_v4(),
+        span: tracing::Span::none(),
+    };
+    let outcome = inner
+        .handle_incoming(explicit_envelope("explicit-bal"), None, Some(reply_sink))
+        .await;
+    assert!(matches!(outcome, IncomingOutcome::Deferred));
+    assert_eq!(
+        inner.outstanding_replies.len(),
+        1,
+        "gauge must rise while the EXPLICIT reply is pending"
+    );
+
+    let deliver = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("ReplyDeliver must be set on ctx for EXPLICIT dispatch");
+    deliver.deliver(actr_framework::ReplyOutcome {
+        request_id: "explicit-bal".to_string(),
+        result: Ok(FrameworkBytes::from_static(b"explicit-reply")),
+        emit_response: true,
+    });
+
+    // deliver() spawns deliver_async; let it run.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while inner.outstanding_replies.len() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("gauge must return to 0 after the Deliver fires");
+
+    assert_eq!(inner.outstanding_replies.len(), 0);
+}
+
+/// RFC-0323 §5: an EXPLICIT dispatch that returns `Err` is NOT surfaced as
+/// `Replied(Err)` inline — the pump routes the error through the same
+/// first-write-wins `Deliver` as a spawned `Reply::send`, so the outcome is
+/// `Deferred` (ack-at-return) and the gauge is released by `deliver_async`
+/// (not inline). This is the fix for the §5 double-reply race: the Err and a
+/// late `Reply::send` now share one `deliver` CAS gate instead of the pump
+/// writing `Done(Err)` inline while a late send overwrites it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_handler_err_routes_through_deliver_and_defers() {
+    // Handle that does NOT read ctx.reply_deliver() (so no Reply is
+    // constructed) and returns Err: simulates a decode/early failure.
+    struct ErrNoReplyHandle;
+    #[async_trait::async_trait]
+    impl LinkedWorkloadHandle for ErrNoReplyHandle {
+        fn reply_mode_for_route(&self, _route_key: &str) -> actr_protocol::ReplyMode {
+            actr_protocol::ReplyMode::Explicit
+        }
+        async fn dispatch(
+            &self,
+            _envelope: RpcEnvelope,
+            _ctx: Arc<crate::context::RuntimeContext>,
+        ) -> ActorResult<FrameworkBytes> {
+            Err(actr_protocol::ActrError::Internal(
+                "early failure".to_string(),
+            ))
+        }
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let config = dedup_test_config(&dir);
+    let actor_id = ActrId {
+        realm: config.realm,
+        serial_number: 1,
+        r#type: config.package.actr_type.clone(),
+    };
+    let workload = Workload::Linked(Arc::new(ErrNoReplyHandle) as Arc<dyn LinkedWorkloadHandle>);
+    let mut inner = Inner::build(
+        config,
+        workload,
+        None,
+        None,
+        None,
+        100,
+        Duration::from_secs(60),
+        crate::config::DispatchConcurrency::default(),
+        None,
+        false,
+    )
+    .await
+    .expect("Inner::build must succeed");
+    inner.actor_id = Some(actor_id);
+    inner.credential_state = Some(CredentialState::new(AIdCredential::default(), None, None));
+    let inner = Arc::new(inner);
+
+    let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Mailbox {
+        caller: Err("test-caller".to_string()),
+        msg_id: uuid::Uuid::new_v4(),
+        span: tracing::Span::none(),
+    };
+    let outcome = inner
+        .handle_incoming(explicit_envelope("explicit-err"), None, Some(reply_sink))
+        .await;
+    assert!(
+        matches!(outcome, IncomingOutcome::Deferred),
+        "EXPLICIT Err must route through the Deliver → Deferred (not Replied(Err)), got {outcome:?}"
+    );
+
+    // The pump fired deliver(Err) inside wrap_outcome; deliver_async runs in a
+    // spawned task and releases the gauge. It is NOT inline.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while inner.outstanding_replies.len() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("gauge must return to 0 after deliver_async fires the Err");
+    assert_eq!(inner.outstanding_replies.len(), 0);
+}
+
+/// RFC-0323 §5 first-write-wins: an EXPLICIT handler that captures the
+/// `Reply`-backed `Deliver` and returns `Err` must have its pump-fired
+/// `deliver(Err)` win the CAS. A later `reply.send(Ok)` (simulated by firing
+/// the captured Deliver with Ok) degrades to a no-op: no second wire send, no
+/// `Done(Err)`→`Done(Ok)` cache flip. Pre-fix this overwrote the dedup entry
+/// and emitted a second RESPONSE.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn explicit_handler_err_wins_against_late_send_first_write_wins() {
+    // Handle captures the Deliver (as a spawned `Reply::send` would receive
+    // it) AND returns Err — the §5 race setup.
+    struct ErrCaptureHandle {
+        captured: Arc<std::sync::Mutex<Option<Arc<dyn actr_framework::Deliver>>>>,
+    }
+    #[async_trait::async_trait]
+    impl LinkedWorkloadHandle for ErrCaptureHandle {
+        fn reply_mode_for_route(&self, _route_key: &str) -> actr_protocol::ReplyMode {
+            actr_protocol::ReplyMode::Explicit
+        }
+        async fn dispatch(
+            &self,
+            _envelope: RpcEnvelope,
+            ctx: Arc<crate::context::RuntimeContext>,
+        ) -> ActorResult<FrameworkBytes> {
+            if let Some(d) = ctx.reply_deliver() {
+                *self.captured.lock().unwrap() = Some(d);
+            }
+            Err(actr_protocol::ActrError::Internal(
+                "handler failure".to_string(),
+            ))
+        }
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let captured: Arc<std::sync::Mutex<Option<Arc<dyn actr_framework::Deliver>>>> =
+        Arc::new(std::sync::Mutex::new(None));
+    let handle = ErrCaptureHandle {
+        captured: captured.clone(),
+    };
+    let config = dedup_test_config(&dir);
+    let actor_id = ActrId {
+        realm: config.realm,
+        serial_number: 1,
+        r#type: config.package.actr_type.clone(),
+    };
+    let workload = Workload::Linked(Arc::new(handle) as Arc<dyn LinkedWorkloadHandle>);
+    let mut inner = Inner::build(
+        config,
+        workload,
+        None,
+        None,
+        None,
+        100,
+        Duration::from_secs(60),
+        crate::config::DispatchConcurrency::default(),
+        None,
+        false,
+    )
+    .await
+    .expect("Inner::build must succeed");
+    inner.actor_id = Some(actor_id);
+    inner.credential_state = Some(CredentialState::new(AIdCredential::default(), None, None));
+    let inner = Arc::new(inner);
+
+    let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Mailbox {
+        caller: Err("test-caller".to_string()),
+        msg_id: uuid::Uuid::new_v4(),
+        span: tracing::Span::none(),
+    };
+    let outcome = inner
+        .handle_incoming(explicit_envelope("explicit-race"), None, Some(reply_sink))
+        .await;
+    assert!(
+        matches!(outcome, IncomingOutcome::Deferred),
+        "EXPLICIT Err must route through Deliver → Deferred, got {outcome:?}"
+    );
+
+    // The pump already fired deliver(Err) inside wrap_outcome; let
+    // deliver_async complete dedup + release the gauge.
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while inner.outstanding_replies.len() != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("gauge must return to 0 after the pump's deliver(Err)");
+
+    // A late spawned `reply.send(Ok)` fires the captured Deliver. The pump
+    // already won the `delivered` CAS, so this MUST degrade to a no-op — no
+    // second deliver_async, no dedup overwrite, no gauge bump.
+    let late_deliver = captured
+        .lock()
+        .unwrap()
+        .clone()
+        .expect("Deliver must be captured for the late-send race");
+    late_deliver.deliver(actr_framework::ReplyOutcome {
+        request_id: "explicit-race".to_string(),
+        result: Ok(FrameworkBytes::from_static(b"late-ok")),
+        emit_response: true,
+    });
+    // Give any (spurious) spawned task a chance to run; there must be none.
+    tokio::time::sleep(Duration::from_millis(150)).await;
+
+    // dedup Done must be the pump's Err — the late Ok must NOT have flipped it.
+    let dedup_outcome = inner
+        .dedup_state
+        .lock()
+        .await
+        .check_or_mark("explicit-race");
+    match dedup_outcome {
+        crate::lifecycle::dedup::DedupOutcome::Duplicate(Err(
+            actr_protocol::ActrError::Internal(_),
+        )) => {}
+        other => panic!(
+            "expected Duplicate(Err(Internal)) — pump's Err must win first-write; got {other:?}"
+        ),
+    }
+    assert_eq!(
+        inner.outstanding_replies.len(),
+        0,
+        "late no-op deliver must not bump the gauge"
+    );
 }
 
 struct ImmediateNetworkProcessor;

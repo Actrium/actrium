@@ -22,7 +22,7 @@ use crate::transport::HostTransport;
 use crate::wire::webrtc::SignalingClient;
 #[cfg(feature = "opentelemetry")]
 use crate::wire::webrtc::trace::{inject_span_context_to_rpc, set_parent_from_rpc_envelope};
-use actr_framework::Bytes;
+use actr_framework::{Bytes, Deliver};
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
     AIdCredential, ActorResult, ActrError, ActrId, ActrType, ConnectionNotReadyInfo, Direction,
@@ -40,11 +40,26 @@ use tokio_util::sync::CancellationToken;
 #[cfg(feature = "opentelemetry")]
 use tracing::Instrument as _;
 
+/// The outcome of an inbound RPC's dispatch continuation (RFC-0323).
+///
+/// - `Replied(result)` — the RETURN path: dispatch produced result bytes;
+///   the receive loop sends the reply + ACKs + the continuation already
+///   completed dedup via `finish`. Byte-identical to the pre-RFC path.
+/// - `Deferred` — the EXPLICIT path: the handler received a `Reply<T>`
+///   handle and the reply + dedup completion + ACK are deferred to whenever
+///   `reply.send()` fires (via the `Deliver` impl). The receive loop does
+///   nothing inline.
+#[derive(Debug)]
+pub(crate) enum IncomingOutcome {
+    Replied(ActorResult<Bytes>),
+    Deferred,
+}
+
 /// The remainder of an inbound RPC after synchronous admission has run.
 ///
 /// See [`Inner::admit_incoming`]. `'static + Send` so an entry loop may push it
 /// into a `FuturesUnordered` and keep dequeuing.
-pub(crate) type IncomingContinuation = Pin<Box<dyn Future<Output = ActorResult<Bytes>> + Send>>;
+pub(crate) type IncomingContinuation = Pin<Box<dyn Future<Output = IncomingOutcome> + Send>>;
 
 pub(crate) type MailboxTail = Pin<Box<dyn Future<Output = ()> + Send>>;
 type MailboxDepthCallback = Arc<dyn Fn(usize) + Send + Sync + 'static>;
@@ -118,7 +133,7 @@ pub(crate) type NodeStartFuture =
 
 /// Wrap an already-known result as an immediately-ready continuation.
 fn ready_continuation(result: ActorResult<Bytes>) -> IncomingContinuation {
-    Box::pin(async move { result })
+    Box::pin(async move { IncomingOutcome::Replied(result) })
 }
 
 /// Send the reply for one in-proc (Shell → Guest) request back over the
@@ -129,7 +144,7 @@ fn ready_continuation(result: ActorResult<Bytes>) -> IncomingContinuation {
 /// `FuturesUnordered`) run bit-for-bit identical logic. A `tell`
 /// (`expects_response == false`) runs for side effects only and sends nothing.
 #[allow(clippy::too_many_arguments)]
-async fn inproc_send_reply(
+pub(crate) async fn inproc_send_reply(
     response_tx: Arc<HostTransport>,
     route_key: String,
     request_id: String,
@@ -282,82 +297,70 @@ async fn send_envelope_to_caller(
 /// overlap a later message's dispatch (gate-on only, a documented behaviour
 /// change bounded by the dedup TTL).
 #[allow(clippy::too_many_arguments)]
-async fn mailbox_reply_and_ack(
+/// Send the RESPONSE envelope for an inbound mailbox call (Ok or Err path).
+/// Does NOT ACK the durable mailbox message — the caller (RETURN receive
+/// loop or EXPLICIT `ReplyDeliver`) is responsible for acking separately so
+/// that EXPLICIT can ACK at dispatch-completion (RFC-0323 §4: ack-at-return)
+/// rather than at reply time.
+pub(crate) async fn mailbox_send_reply(
     ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
     webrtc_gate: Option<Arc<crate::wire::webrtc::gate::WebRtcGate>>,
-    mailbox: Arc<dyn Mailbox>,
     caller: Result<ActrId, String>,
     request_id: String,
     route_key: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
     expects_response: bool,
-    msg_id: uuid::Uuid,
     result: ActorResult<Bytes>,
     span: tracing::Span,
 ) {
     let _ = &span; // consumed only under the opentelemetry feature
     match result {
-        Ok(response_bytes) => {
-            match caller {
-                Ok(caller) if expects_response => {
-                    // Construct response RpcEnvelope (reuse request_id!)
-                    #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
-                    let mut response_envelope = Inner::build_response_envelope(
-                        request_id.clone(),
-                        route_key,
-                        Some(response_bytes),
-                        None,
-                        traceparent,
-                        tracestate,
-                    );
-                    #[cfg(feature = "opentelemetry")]
-                    inject_span_context_to_rpc(&span, &mut response_envelope);
+        Ok(response_bytes) => match caller {
+            Ok(caller) if expects_response => {
+                #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
+                let mut response_envelope = Inner::build_response_envelope(
+                    request_id.clone(),
+                    route_key,
+                    Some(response_bytes),
+                    None,
+                    traceparent,
+                    tracestate,
+                );
+                #[cfg(feature = "opentelemetry")]
+                inject_span_context_to_rpc(&span, &mut response_envelope);
 
-                    #[cfg(feature = "opentelemetry")]
-                    let send_fut = send_envelope_to_caller(
-                        &ws_gate,
-                        &webrtc_gate,
-                        &caller,
-                        response_envelope,
-                        &request_id,
-                    )
-                    .instrument(span);
-                    #[cfg(not(feature = "opentelemetry"))]
-                    let send_fut = send_envelope_to_caller(
-                        &ws_gate,
-                        &webrtc_gate,
-                        &caller,
-                        response_envelope,
-                        &request_id,
-                    );
-                    send_fut.await;
-                }
-                // `tell` handled successfully: side effects ran, no reply is sent.
-                Ok(_) => {}
-                Err(e) => {
-                    tracing::error!(
-                        severity = 8,
-                        error_category = "protobuf_decode",
-                        request_id = %request_id,
-                        "❌ Failed to decode caller_id: {}",
-                        e
-                    );
-                }
+                #[cfg(feature = "opentelemetry")]
+                let send_fut = send_envelope_to_caller(
+                    &ws_gate,
+                    &webrtc_gate,
+                    &caller,
+                    response_envelope,
+                    &request_id,
+                )
+                .instrument(span);
+                #[cfg(not(feature = "opentelemetry"))]
+                let send_fut = send_envelope_to_caller(
+                    &ws_gate,
+                    &webrtc_gate,
+                    &caller,
+                    response_envelope,
+                    &request_id,
+                );
+                send_fut.await;
             }
-
-            // ACK message
-            if let Err(e) = mailbox.ack(msg_id).await {
+            // `tell` handled successfully: side effects ran, no reply is sent.
+            Ok(_) => {}
+            Err(e) => {
                 tracing::error!(
-                    severity = 9,
-                    error_category = "mailbox_error",
+                    severity = 8,
+                    error_category = "protobuf_decode",
                     request_id = %request_id,
-                    message_id = %msg_id,
-                    "❌ Mailbox ACK failed: {:?}",
+                    "❌ Failed to decode caller_id: {}",
                     e
                 );
             }
-        }
+        },
         Err(e) => {
             tracing::error!(
                 severity = 6,
@@ -397,11 +400,58 @@ async fn mailbox_reply_and_ack(
                 )
                 .await;
             }
-
-            // ACK to avoid infinite retries
-            let _ = mailbox.ack(msg_id).await;
         }
     }
+}
+
+/// ACK a durable mailbox message. Split out from `mailbox_send_reply` so the
+/// EXPLICIT pump can ACK at dispatch-completion (RFC-0323 §4) independently of
+/// when the reply is actually sent.
+pub(crate) async fn mailbox_ack(mailbox: Arc<dyn Mailbox>, msg_id: uuid::Uuid, request_id: &str) {
+    if let Err(e) = mailbox.ack(msg_id).await {
+        tracing::error!(
+            severity = 9,
+            error_category = "mailbox_error",
+            request_id = %request_id,
+            message_id = %msg_id,
+            "❌ Mailbox ACK failed: {:?}",
+            e
+        );
+    }
+}
+
+/// RETURN-mode mailbox tail: send the reply, then ACK. For EXPLICIT the ACK
+/// moves to dispatch-completion (`mailbox_ack` called from the continuation)
+/// and `ReplyDeliver` calls `mailbox_send_reply` only.
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn mailbox_reply_and_ack(
+    ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
+    webrtc_gate: Option<Arc<crate::wire::webrtc::gate::WebRtcGate>>,
+    mailbox: Arc<dyn Mailbox>,
+    caller: Result<ActrId, String>,
+    request_id: String,
+    route_key: String,
+    traceparent: Option<String>,
+    tracestate: Option<String>,
+    expects_response: bool,
+    msg_id: uuid::Uuid,
+    result: ActorResult<Bytes>,
+    span: tracing::Span,
+) {
+    mailbox_send_reply(
+        ws_gate,
+        webrtc_gate,
+        caller,
+        request_id.clone(),
+        route_key,
+        traceparent,
+        tracestate,
+        expects_response,
+        result,
+        span,
+    )
+    .await;
+    mailbox_ack(mailbox, msg_id, &request_id).await;
 }
 
 /// Force-closes stream callbacks when the node's owning state is released.
@@ -550,6 +600,15 @@ pub(crate) struct Inner {
     /// Request deduplication state (15 s TTL response cache, prevents double-processing on retry)
     pub(crate) dedup_state: Arc<Mutex<DedupState>>,
 
+    /// Outstanding EXPLICIT replies awaiting a later `Reply::send`/`Drop`
+    /// (RFC-0323 §5/§7). Backs the `outstanding_replies` gauge, the
+    /// `max_pending_replies` backpressure guard, and the leak-safety TTL sweep.
+    pub(crate) outstanding_replies: Arc<crate::lifecycle::outstanding_replies::OutstandingReplies>,
+
+    /// Cap on outstanding EXPLICIT replies before the pump pauses dequeue
+    /// (RFC-0323 §7 backpressure). Default 1024 (RFC recommends a lenient cap).
+    pub(crate) max_pending_replies: usize,
+
     /// Verified package manifest for package-backed nodes.
     #[allow(dead_code)]
     pub(crate) package_manifest: Option<actr_pack::PackageManifest>,
@@ -583,6 +642,16 @@ pub(crate) struct Inner {
     /// lock); transport and other observation hooks reach linked workloads
     /// through `hook_observer` without touching this handle.
     pub(crate) workload_dispatch: Arc<crate::executor::ActorHandle>,
+
+    /// Clone of the linked workload handle, retained so the pump can query
+    /// `reply_mode_for_route` before dispatch (RFC-0323). `None` for
+    /// WASM/DynClib-backed nodes — the host cannot call the guest's static
+    /// `reply_mode_for_route`, so EXPLICIT dispatch is host-side unsupported
+    /// there (the generated arm fails with `Internal` via `reply_deliver()`
+    /// returning `None`). For `Linked` nodes this is `Some`, and
+    /// `admit_incoming` reads it to decide between the RETURN and EXPLICIT
+    /// pump paths.
+    pub(crate) linked_handle: Option<Arc<dyn crate::workload::LinkedWorkloadHandle>>,
 
     /// In-memory conflict-key dispatch scheduler (B2). `None` = the scheduler is
     /// not engaged (gate off, **or** — under strategy A default-on — a keyless
@@ -1431,13 +1500,16 @@ impl Inner {
         &self,
         envelope: RpcEnvelope,
         caller_id: Option<&ActrId>,
-    ) -> ActorResult<Bytes> {
-        // Thin wrapper preserving the original signature: run synchronous
+        reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
+    ) -> IncomingOutcome {
+        // Thin wrapper preserving the original flow: run synchronous
         // admission, then await the continuation to completion inline. This is
         // bit-for-bit the pre-B2 path (ACL → dedup → ctx → dispatch → dedup
         // complete), used directly by the mailbox lane and by the in-proc lane
         // when the dispatch gate is off.
-        self.admit_incoming(envelope, caller_id).await.await
+        self.admit_incoming(envelope, caller_id, reply_sink)
+            .await
+            .await
     }
 
     /// Synchronous admission of an inbound RPC, returning the continuation that
@@ -1455,10 +1527,34 @@ impl Inner {
     /// The three pre-dispatch fast paths (ACL deny, dedup in-flight wait, dedup
     /// cache hit) return an already-resolved continuation — they never mark a
     /// dedup completion, exactly as before.
+    ///
+    /// ## RFC-0323 (EXPLICIT) continuation contract
+    ///
+    /// For `ReplyMode::Explicit`, the continuation's outcome is decided by the
+    /// shared `delivered` flag set by `ReplyDeliver::deliver`:
+    ///
+    /// - **`Ok`, or `Err` after the `Reply<T>` was constructed and `Drop` fired
+    ///   the Deliver** → `IncomingOutcome::Deferred`. The durable mailbox
+    ///   message is **ACKed at dispatch-completion (handler return)** here,
+    ///   *before* the reply is produced (§4 ack-at-return). The reply half
+    ///   (RESPONSE envelope + dedup completion) runs later from
+    ///   `ReplyDeliver::deliver_async`, which also releases the
+    ///   `outstanding_replies` gauge slot.
+    /// - **`Err` before the `Reply<T>` was constructed** (e.g. decode failure)
+    ///   → `IncomingOutcome::Replied(Err)`. The Deliver never fired, so the
+    ///   continuation completes dedup, releases the gauge slot, and sends the
+    ///   error reply inline (the receive loop ACKs alongside). This is the
+    ///   only EXPLICIT path that ACKs at reply time, matching `Return`.
+    ///
+    /// **Deadlock rule (§5):** a `Return` handler must not synchronously call
+    /// back into itself (it would block on its own still-held dispatch slot);
+    /// such recursion requires `Explicit` so the handler can move the `Reply`
+    /// aside and release the slot first.
     pub(crate) async fn admit_incoming(
         &self,
         envelope: RpcEnvelope,
         caller_id: Option<&ActrId>,
+        reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
     ) -> IncomingContinuation {
         // Log received message
         if let Some(caller) = caller_id {
@@ -1553,7 +1649,9 @@ impl Inner {
                 );
                 let timeout = Self::duplicate_wait_timeout(envelope.timeout_ms);
                 return Box::pin(async move {
-                    Self::wait_for_inflight_duplicate(waiter, timeout).await
+                    IncomingOutcome::Replied(
+                        Self::wait_for_inflight_duplicate(waiter, timeout).await,
+                    )
                 });
             }
             DedupOutcome::Duplicate(cached) => {
@@ -1576,12 +1674,90 @@ impl Inner {
                 )));
             }
         };
-        let ctx = self.make_runtime_context(
+        let mut ctx = self.make_runtime_context(
             actor_id,
             caller_id, // caller_id from transport layer (MessageRecord.from)
             &envelope.request_id,
             &credential_state.credential().await,
         );
+
+        // RFC-0323: query the route's ReplyMode. For `Linked` nodes the linked
+        // handle carries the generated `reply_mode_for_route` match; for
+        // WASM/DynClib the host cannot reach the guest's dispatcher, so
+        // `linked_handle` is `None` and every route is treated as `Return`
+        // (EXPLICIT in a packaged guest fails at the dispatch arm when
+        // `ctx.reply_deliver()` returns `None`).
+        let reply_mode = self
+            .linked_handle
+            .as_ref()
+            .map(|h| h.reply_mode_for_route(&envelope.route_key))
+            .unwrap_or(actr_protocol::ReplyMode::Return);
+        let expects_response = Inner::dispatch_expects_response(envelope.direction).unwrap_or(true);
+
+        // For EXPLICIT routes, build the `ReplyDeliver`, stash it on the
+        // context (the generated dispatch arm reads it via `ctx.reply_deliver()`),
+        // and keep a pump-side clone so the continuation can route handler-Err
+        // outcomes through the same first-write-wins `deliver` (RFC-0323 §5).
+        //
+        // RFC-0323 §4 (ack-at-return): for the mailbox path, the durable
+        // message is ACKed at dispatch-completion (handler return), NOT at
+        // reply time — so the pump can keep admitting while the reply is still
+        // pending. The ack handle is captured here and fired from the
+        // continuation's `Deferred` branch; `ReplyDeliver::deliver_async`
+        // sends only the reply (no ack).
+        let mailbox_ack_handle: Option<(Arc<dyn Mailbox>, uuid::Uuid)> = match &reply_sink {
+            Some(crate::lifecycle::reply_deliver::ReplySink::Mailbox { msg_id, .. }) => {
+                Some((self.mailbox.clone(), *msg_id))
+            }
+            _ => None,
+        };
+        let explicit_deliver: Option<crate::lifecycle::reply_deliver::ReplyDeliver> =
+            if reply_mode == actr_protocol::ReplyMode::Explicit {
+                match reply_sink {
+                    Some(sink) => {
+                        // RFC-0323 §5/§7: register the outstanding reply for the
+                        // gauge + backpressure + leak-safety sweep. `complete`
+                        // is called from `ReplyDeliver::deliver_async`.
+                        self.outstanding_replies
+                            .register(&envelope.request_id)
+                            .await;
+                        // RFC-0323: plumb the caller deadline (arrival +
+                        // `envelope.timeout_ms`) onto the context so the
+                        // generated EXPLICIT arm builds `Reply<T>` with a
+                        // real deadline instead of `None`. `timeout_ms == 0`
+                        // means "no timeout" → `None` (a TELL or an
+                        // unbounded call). The wall-clock read lives in the
+                        // exempt dedup module — this deadline is a
+                        // caller-side bound, not a tokio-await deadline.
+                        let reply_deadline =
+                            crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms);
+                        let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
+                            self.websocket_gate.clone(),
+                            self.webrtc_gate.clone(),
+                            self.dedup_state.clone(),
+                            self.outstanding_replies.clone(),
+                            envelope.request_id.clone(),
+                            envelope.route_key.clone(),
+                            envelope.traceparent.clone(),
+                            envelope.tracestate.clone(),
+                            sink,
+                        );
+                        // Pump-side clone: lets `wrap_outcome` route a
+                        // handler-Err through the same first-write-wins
+                        // `deliver` as a spawned `Reply::send` / `Drop`.
+                        let pump_deliver = deliver.clone();
+                        ctx.set_explicit_reply(
+                            std::sync::Arc::new(deliver),
+                            expects_response,
+                            reply_deadline,
+                        );
+                        Some(pump_deliver)
+                    }
+                    None => None,
+                }
+            } else {
+                None
+            };
 
         // 2. Dispatch
         let dispatch_ctx = crate::workload::InvocationContext {
@@ -1598,6 +1774,12 @@ impl Inner {
         let dedup_state = self.dedup_state.clone();
         let request_id = envelope.request_id.clone();
         let route_key = envelope.route_key.clone();
+        // `request_id_err` / `expects_response_err` feed the EXPLICIT-Err
+        // `ReplyOutcome` the pump hands to `deliver` inside `wrap_outcome`.
+        // `finish` moves the originals into its own capture, so the wrapper
+        // needs its own copies to avoid a use-after-move.
+        let request_id_err = envelope.request_id.clone();
+        let expects_response_err = expects_response;
         let finish = move |result: ActorResult<Bytes>| async move {
             match &result {
                 Ok(_) => tracing::debug!(
@@ -1624,6 +1806,39 @@ impl Inner {
             };
             dedup_state.lock().await.complete(&request_id, cached);
             result
+        };
+
+        // EXPLICIT continuation: dispatch, then route the outcome through the
+        // first-write-wins `deliver` (handler-Err) / defer to the Reply<T>
+        // (Ok), ACKing the durable mailbox at dispatch-completion (RFC-0323
+        // §4). RETURN continuation: dispatch → finish → Replied. Shared by
+        // both gate-on and gate-off branches.
+        let wrap_outcome = move |result: ActorResult<Bytes>| async move {
+            if let Some(deliver) = &explicit_deliver {
+                // EXPLICIT. For Ok the Reply<T> owns the success reply
+                // (send/Drop fires `deliver`); the pump does NOT deliver.
+                // For Err the pump routes the error through `deliver` so a
+                // spawned `Reply::send` / Drop that already won the CAS
+                // makes this a no-op, and otherwise the Deliver sends the
+                // error RESPONSE + completes dedup + releases the gauge —
+                // no double reply, no Done(Err)→Done(Ok) cache flip.
+                if let Err(e) = &result {
+                    deliver.deliver(actr_framework::ReplyOutcome {
+                        request_id: request_id_err.clone(),
+                        result: Err(e.clone()),
+                        emit_response: expects_response_err,
+                    });
+                }
+                // RFC-0323 §4: ACK the durable mailbox message at
+                // dispatch-completion (handler return), before the reply
+                // follows from the Deliver.
+                if let Some((mb, mid)) = &mailbox_ack_handle {
+                    crate::lifecycle::node::mailbox_ack(mb.clone(), *mid, &request_id_err).await;
+                }
+                IncomingOutcome::Deferred
+            } else {
+                IncomingOutcome::Replied(finish(result).await)
+            }
         };
 
         // Route through the conflict-key scheduler when the gate is on; otherwise
@@ -1668,7 +1883,7 @@ impl Inner {
                         "dispatch scheduler terminated".to_string(),
                     ))
                 });
-                finish(result).await
+                wrap_outcome(result).await
             })
         } else {
             let workload = self.workload_dispatch.clone();
@@ -1676,7 +1891,7 @@ impl Inner {
                 let result = workload
                     .dispatch_envelope(envelope, ctx, dispatch_ctx, &call_executor)
                     .await;
-                finish(result).await
+                wrap_outcome(result).await
             })
         }
     }
@@ -1841,6 +2056,18 @@ impl Inner {
         let scheduler_on = scheduler_engaged(gate_on, !conflict_keys.is_empty());
         let is_linked = matches!(workload, crate::workload::Workload::Linked(_));
 
+        // Retain a clone of the linked handle so the pump can query
+        // `reply_mode_for_route` before dispatch (RFC-0323). Only the `Linked`
+        // variant carries a host-callable dispatcher; WASM/DynClib guests keep
+        // their dispatcher inside the guest and the host cannot reach it.
+        let linked_handle = match &workload {
+            crate::workload::Workload::Linked(handle) => Some(handle.clone()),
+            #[cfg(feature = "wasm-engine")]
+            crate::workload::Workload::Wasm(_) => None,
+            #[cfg(feature = "dynclib-engine")]
+            crate::workload::Workload::DynClib(_) => None,
+        };
+
         let runner_mode = if scheduler_on {
             crate::executor::RunnerMode::Interleaved
         } else {
@@ -1904,6 +2131,10 @@ impl Inner {
             send_projection_rx: None,
             supervisor_fact_sink: None,
             dedup_state: Arc::new(Mutex::new(DedupState::new())),
+            outstanding_replies: Arc::new(
+                crate::lifecycle::outstanding_replies::OutstandingReplies::new(),
+            ),
+            max_pending_replies: 1024,
             package_manifest,
             preregistered_credential: None,
             preregistered_registration_context: None,
@@ -1911,6 +2142,7 @@ impl Inner {
                 std::collections::HashMap::new(),
             )),
             workload_dispatch: Arc::new(workload_dispatch),
+            linked_handle,
             dispatch_scheduler,
             conflict_keys,
             hook_observer: None,
@@ -3021,10 +3253,14 @@ impl Inner {
                     })?;
                 let response_tx = workload_to_shell.clone();
                 let shutdown = shutdown_token.clone();
+                let outstanding_replies = node_ref.outstanding_replies.clone();
+                let max_pending_replies = node_ref.max_pending_replies;
+                let hook_cb = node_hook_callback.clone();
 
                 let inproc_handle = tokio::spawn(async move {
                     use futures_util::StreamExt as _;
                     use futures_util::stream::FuturesUnordered;
+                    use std::sync::atomic::{AtomicBool, Ordering};
 
                     // Concurrency gate: only when the dispatch scheduler is on do
                     // we overlap messages. No scheduler (a keyless actor, or the
@@ -3035,10 +3271,47 @@ impl Inner {
                     // stops us dequeuing, which back-pressures the lane. The
                     // scheduler's own queue (`M`) is the finer bound underneath.
                     const INPROC_INFLIGHT_CAP: usize = 256;
+                    // RFC-0323 §7: rising-edge flag for the `max_pending_replies`
+                    // backpressure signal (outstanding EXPLICIT replies).
+                    let pending_saturated = AtomicBool::new(false);
                     let mut inflight: FuturesUnordered<Pin<Box<dyn Future<Output = ()> + Send>>> =
                         FuturesUnordered::new();
 
                     loop {
+                        // RFC-0323 §7 rising-edge backpressure signal. Fires
+                        // the framework `on_mailbox_backpressure` hook on the
+                        // rising edge (falling back to a log line when no hook
+                        // is installed), mirroring the §4.9 mailbox-depth
+                        // watchdog.
+                        {
+                            let pending = outstanding_replies.len();
+                            if pending >= max_pending_replies {
+                                if !pending_saturated.swap(true, Ordering::AcqRel) {
+                                    if let Some(cb) = hook_cb.as_ref() {
+                                        let cb = cb.clone();
+                                        tokio::spawn(async move {
+                                            cb(crate::wire::webrtc::HookEvent::MailboxBackpressure {
+                                                queue_len: pending,
+                                                threshold: max_pending_replies,
+                                            })
+                                            .await;
+                                        });
+                                    } else {
+                                        tracing::warn!(
+                                            outstanding_replies = pending,
+                                            max_pending_replies,
+                                            "explicit-reply backpressure: inproc dequeue paused",
+                                        );
+                                    }
+                                }
+                            } else if pending_saturated.swap(false, Ordering::AcqRel) {
+                                tracing::info!(
+                                    outstanding_replies = pending,
+                                    max_pending_replies,
+                                    "explicit-reply backpressure cleared",
+                                );
+                            }
+                        }
                         tokio::select! {
                             biased;
                             _ = shutdown.cancelled() => {
@@ -3050,9 +3323,11 @@ impl Inner {
                             Some(()) = inflight.next(), if !inflight.is_empty() => {}
                             // Accept a new request only while under the in-flight
                             // cap (back-pressure). With the gate off `inflight` is
-                            // always empty so the guard is always true.
+                            // always empty so the guard is always true. RFC-0323
+                            // §7: also gate on outstanding EXPLICIT replies.
                             envelope_result = request_rx_lane.recv_envelope(),
-                                if inflight.len() < INPROC_INFLIGHT_CAP => {
+                                if inflight.len() < INPROC_INFLIGHT_CAP
+                                    && outstanding_replies.len() < max_pending_replies => {
                                 match envelope_result {
                                     Ok(envelope) => {
                                         let request_id = envelope.request_id.clone();
@@ -3099,27 +3374,43 @@ impl Inner {
                                             // order + back-pressure; the continuation
                                             // (dispatch result → reply) overlaps with
                                             // later messages. Shell calls have no caller_id.
-                                            let cont = node.admit_incoming(envelope, None).await;
+                                            let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Inproc {
+                                                response_tx: response_tx.clone(),
+                                                span: span.clone(),
+                                            };
+                                            let cont = node.admit_incoming(envelope, None, Some(reply_sink)).await;
                                             let response_tx = response_tx.clone();
                                             inflight.push(Box::pin(async move {
-                                                let result = cont.await;
-                                                inproc_send_reply(
-                                                    response_tx, route_key, request_id,
-                                                    traceparent, tracestate, expects_response,
-                                                    result, span,
-                                                ).await;
+                                                match cont.await {
+                                                    IncomingOutcome::Replied(result) => {
+                                                        inproc_send_reply(
+                                                            response_tx, route_key, request_id,
+                                                            traceparent, tracestate, expects_response,
+                                                            result, span,
+                                                        ).await;
+                                                    }
+                                                    IncomingOutcome::Deferred => {}
+                                                }
                                             }));
                                         } else {
                                             // Gate off: run to completion inline.
-                                            let handle_incoming_fut = node.handle_incoming(envelope, None);
+                                            let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Inproc {
+                                                response_tx: response_tx.clone(),
+                                                span: span.clone(),
+                                            };
+                                            let handle_incoming_fut = node.handle_incoming(envelope, None, Some(reply_sink));
                                             #[cfg(feature = "opentelemetry")]
                                             let handle_incoming_fut = handle_incoming_fut.instrument(span.clone());
-                                            let result = handle_incoming_fut.await;
-                                            inproc_send_reply(
-                                                response_tx.clone(), route_key, request_id,
-                                                traceparent, tracestate, expects_response,
-                                                result, span,
-                                            ).await;
+                                            match handle_incoming_fut.await {
+                                                IncomingOutcome::Replied(result) => {
+                                                    inproc_send_reply(
+                                                        response_tx.clone(), route_key, request_id,
+                                                        traceparent, tracestate, expects_response,
+                                                        result, span,
+                                                    ).await;
+                                                }
+                                                IncomingOutcome::Deferred => {}
+                                            }
                                         }
                                     }
                                     Err(e) => {
@@ -3355,6 +3646,64 @@ impl Inner {
         }
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // 4.10. In-flight TTL sweep (RFC-0323 §5/§7)
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        //
+        // A periodic background sweep that does NOT rely on `check_or_mark`
+        // traffic being driven: an EXPLICIT `Reply` parked in a waiter map
+        // forever would otherwise pin its InFlight dedup marker (every retry
+        // for that `request_id` hangs) and the `outstanding_replies` gauge
+        // forever (backpressure never lifts). Every `INFLIGHT_TTL` this evicts
+        // aged InFlight entries (notifying duplicate waiters with
+        // `ActrError::TimedOut`) and aged outstanding-reply registry entries
+        // (decrementing the gauge).
+        {
+            let dedup_state = node_ref.dedup_state.clone();
+            let outstanding_replies = node_ref.outstanding_replies.clone();
+            let shutdown = shutdown_token.clone();
+            let sweep_handle = tokio::spawn(async move {
+                use crate::lifecycle::dedup::INFLIGHT_TTL;
+                let mut ticker = crate::timer::interval(
+                    crate::timer::ids::INFLIGHT_TTL_SWEEP,
+                    Duration::from_secs(5),
+                );
+                ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                loop {
+                    tokio::select! {
+                        _ = shutdown.cancelled() => {
+                            tracing::debug!("in-flight TTL sweep shutting down");
+                            break;
+                        }
+                        _ = ticker.tick() => {
+                            // Couple the two sweeps on the same tick so a
+                            // leaked EXPLICIT reply is freed on both sides
+                            // together. Only EXPLICIT-originated InFlight
+                            // entries (exactly the ids in the
+                            // outstanding_replies registry) are swept from
+                            // dedup — RETURN InFlight entries are retained
+                            // until `complete` (RFC-0323 §5: retain RETURN).
+                            // The clock reads stay inside the exempt
+                            // dedup/outstanding_replies modules.
+                            let leaked =
+                                outstanding_replies.leaked_ids_now(INFLIGHT_TTL).await;
+                            {
+                                let mut d = dedup_state.lock().await;
+                                d.evict_done_expired_now();
+                                if !leaked.is_empty() {
+                                    d.sweep_inflight_explicit_now(&leaked);
+                                }
+                            }
+                            for id in &leaked {
+                                outstanding_replies.complete(id).await;
+                            }
+                        }
+                    }
+                }
+            });
+            task_handles.push(sweep_handle);
+        }
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         // 5. Start Mailbox processing loop (State Path)
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         tracing::info!("🔄 Starting Mailbox processing loop (State Path)");
@@ -3365,10 +3714,14 @@ impl Inner {
             let ws_gate = node_ref.websocket_gate.clone();
             let shutdown = shutdown_token.clone();
             let mailbox_enqueue_wake = mailbox_enqueue_wake.clone();
+            let outstanding_replies = node_ref.outstanding_replies.clone();
+            let max_pending_replies = node_ref.max_pending_replies;
+            let hook_cb = node_hook_callback.clone();
 
             let mailbox_handle = tokio::spawn(async move {
                 use futures_util::StreamExt as _;
                 use futures_util::stream::FuturesUnordered;
+                use std::sync::atomic::{AtomicBool, Ordering};
 
                 // Concurrency gate: only overlap messages when the dispatch
                 // scheduler is on. No scheduler (a keyless actor, or the gate
@@ -3376,9 +3729,50 @@ impl Inner {
                 // loop.
                 let scheduler_on = node.dispatch_scheduler.is_some();
                 const MAILBOX_INFLIGHT_CAP: usize = 256;
+                // RFC-0323 §7: rising-edge flag for the `max_pending_replies`
+                // backpressure signal. Distinct from the mailbox-queue-depth
+                // watchdog (§4.9) — this guards in-memory outstanding EXPLICIT
+                // replies, not durable mailbox depth.
+                let pending_saturated = AtomicBool::new(false);
                 let mut inflight: FuturesUnordered<MailboxTail> = FuturesUnordered::new();
 
                 loop {
+                    // RFC-0323 §7: rising-edge backpressure signal for
+                    // outstanding EXPLICIT replies. Distinct from the
+                    // mailbox-queue-depth watchdog in §4.9 — this guards
+                    // in-memory pending replies, not durable mailbox depth.
+                    // Fires the framework `on_mailbox_backpressure` hook on
+                    // the rising edge (falling back to a log line when no
+                    // hook is installed), mirroring the §4.9 watchdog.
+                    {
+                        let pending = outstanding_replies.len();
+                        if pending >= max_pending_replies {
+                            if !pending_saturated.swap(true, Ordering::AcqRel) {
+                                if let Some(cb) = hook_cb.as_ref() {
+                                    let cb = cb.clone();
+                                    tokio::spawn(async move {
+                                        cb(crate::wire::webrtc::HookEvent::MailboxBackpressure {
+                                            queue_len: pending,
+                                            threshold: max_pending_replies,
+                                        })
+                                        .await;
+                                    });
+                                } else {
+                                    tracing::warn!(
+                                        outstanding_replies = pending,
+                                        max_pending_replies,
+                                        "explicit-reply backpressure: dequeue paused",
+                                    );
+                                }
+                            }
+                        } else if pending_saturated.swap(false, Ordering::AcqRel) {
+                            tracing::info!(
+                                outstanding_replies = pending,
+                                max_pending_replies,
+                                "explicit-reply backpressure cleared",
+                            );
+                        }
+                    }
                     tokio::select! {
                         biased;
                         // Listen for shutdown signal
@@ -3394,13 +3788,18 @@ impl Inner {
                         // that batch has reached scheduler / runner admission.
                         // Pause while the continuation set is full so
                         // back-pressure reaches the durable mailbox.
+                        // RFC-0323 §7: also pause while outstanding EXPLICIT
+                        // replies are at the `max_pending_replies` cap — a
+                        // stalled `Reply::send` must not let the pump keep
+                        // admitting work it cannot eventually reply to.
                         batch = async {
                             let mut enqueued =
                                 Box::pin(mailbox_enqueue_wake.clone().notified_owned());
                             enqueued.as_mut().enable();
                             let admission = node.mailbox_batch_admission.enter().await?;
                             Some((admission, mailbox.dequeue().await, enqueued))
-                        }, if inflight.len() < MAILBOX_INFLIGHT_CAP => {
+                        }, if inflight.len() < MAILBOX_INFLIGHT_CAP
+                            && outstanding_replies.len() < max_pending_replies => {
                             let Some((batch_admission, result, enqueued)) = batch else {
                                 tracing::info!("📭 Mailbox batch admission closed");
                                 break;
@@ -3508,39 +3907,57 @@ impl Inner {
                                                     // + back-pressure; the reply+ack continuation
                                                     // overlaps with later messages. Per-message
                                                     // reply→ack order is unchanged inside the tail.
-                                                    let cont = node
-                                                        .admit_incoming(envelope.clone(), caller_id_ref)
-                                                        .await;
                                                     let caller_owned =
-                                                        caller_id_result.map_err(|e| e.to_string());
-                                                    inflight.push(Box::pin(async move {
-                                                        let result = cont.await;
-                                                        mailbox_reply_and_ack(
-                                                            ws_gate, webrtc_gate, mailbox_c,
-                                                            caller_owned, request_id, route_key,
-                                                            traceparent, tracestate, expects_response,
-                                                            msg_id, result, span,
-                                                        )
+                                                        caller_id_result.clone().map_err(|e| e.to_string());
+                                                    let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Mailbox {
+                                                        caller: caller_owned.clone(),
+                                                        msg_id,
+                                                        span: span.clone(),
+                                                    };
+                                                    let cont = node
+                                                        .admit_incoming(envelope.clone(), caller_id_ref, Some(reply_sink))
                                                         .await;
+                                                    inflight.push(Box::pin(async move {
+                                                        match cont.await {
+                                                            IncomingOutcome::Replied(result) => {
+                                                                mailbox_reply_and_ack(
+                                                                    ws_gate, webrtc_gate, mailbox_c,
+                                                                    caller_owned, request_id, route_key,
+                                                                    traceparent, tracestate, expects_response,
+                                                                    msg_id, result, span,
+                                                                )
+                                                                .await;
+                                                            }
+                                                            IncomingOutcome::Deferred => {}
+                                                        }
                                                     }));
                                                 } else {
                                                     // Gate off: run to completion inline —
                                                     // bit-for-bit the pre-B2 mailbox path.
+                                                    let caller_owned =
+                                                        caller_id_result.clone().map_err(|e| e.to_string());
+                                                    let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Mailbox {
+                                                        caller: caller_owned.clone(),
+                                                        msg_id,
+                                                        span: span.clone(),
+                                                    };
                                                     let handle_incoming_fut =
-                                                        node.handle_incoming(envelope.clone(), caller_id_ref);
+                                                        node.handle_incoming(envelope.clone(), caller_id_ref, Some(reply_sink));
                                                     #[cfg(feature = "opentelemetry")]
                                                     let handle_incoming_fut =
                                                         handle_incoming_fut.instrument(span.clone());
-                                                    let result = handle_incoming_fut.await;
-                                                    let caller_owned =
-                                                        caller_id_result.map_err(|e| e.to_string());
-                                                    mailbox_reply_and_ack(
-                                                        ws_gate, webrtc_gate, mailbox_c,
-                                                        caller_owned, request_id, route_key,
-                                                        traceparent, tracestate, expects_response,
-                                                        msg_id, result, span,
-                                                    )
-                                                    .await;
+                                                    match handle_incoming_fut.await {
+                                                        IncomingOutcome::Replied(result) => {
+                                                            mailbox_reply_and_ack(
+                                                                ws_gate, webrtc_gate, mailbox_c,
+                                                                caller_owned, request_id, route_key,
+                                                                traceparent, tracestate, expects_response,
+                                                                msg_id, result, span,
+                                                            )
+                                                            .await;
+                                                        }
+                                                        IncomingOutcome::Deferred => {}
+                                                    }
                                                 }
                                             }
                                             Err(e) => {

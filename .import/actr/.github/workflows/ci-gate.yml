@@ -584,7 +584,14 @@ jobs:
           key: uniffi-bindgen-0.31.1-${{ runner.os }}-${{ runner.arch }}
       - name: Install UniFFI bindgen
         if: steps.cache-uniffi.outputs.cache-hit != 'true'
-        run: cargo install --locked uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+        run: |
+          # Swatinem/rust-cache may already restore ~/.cargo/bin/uniffi-bindgen
+          # from a prior run with a different key; skip the install when the
+          # binary is present so the unguarded `cargo install` doesn't abort
+          # with "binary already exists in destination".
+          if ! command -v uniffi-bindgen >/dev/null 2>&1; then
+            cargo install --locked uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+          fi
       - name: Install Swift tools and libraries
         run: brew install swiftlint opus
       - name: Run SwiftLint

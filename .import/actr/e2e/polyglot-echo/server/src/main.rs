@@ -120,9 +120,10 @@ async fn handle_start_server_stream<C: RtContext>(
     req: StartServerStreamRequest,
     ctx: &C,
 ) -> ActorResult<StartServerStreamResponse> {
-    let caller_id = ctx.caller_id().cloned().ok_or_else(|| {
-        ActrError::Internal("StartServerStream: caller_id is None".to_string())
-    })?;
+    let caller_id = ctx
+        .caller_id()
+        .cloned()
+        .ok_or_else(|| ActrError::Internal("StartServerStream: caller_id is None".to_string()))?;
 
     info!(
         caller = ?caller_id,
@@ -170,9 +171,10 @@ async fn handle_setup_bidi<C: RtContext>(
     req: SetupBidiRequest,
     ctx: &C,
 ) -> ActorResult<SetupBidiResponse> {
-    let caller_id = ctx.caller_id().cloned().ok_or_else(|| {
-        ActrError::Internal("SetupBidi: caller_id is None".to_string())
-    })?;
+    let caller_id = ctx
+        .caller_id()
+        .cloned()
+        .ok_or_else(|| ActrError::Internal("SetupBidi: caller_id is None".to_string()))?;
 
     info!(
         caller = ?caller_id,
@@ -255,14 +257,11 @@ async fn main() -> Result<()> {
         "polyglot-echo stream server starting",
     );
 
-    let manifest = ConfigParser::from_manifest_file(&manifest_toml).with_context(|| {
-        format!("failed to load manifest {}", manifest_toml.display())
-    })?;
+    let manifest = ConfigParser::from_manifest_file(&manifest_toml)
+        .with_context(|| format!("failed to load manifest {}", manifest_toml.display()))?;
     let init = Node::from_config_file(&runtime_toml)
         .await
-        .with_context(|| {
-            format!("failed to load runtime config {}", runtime_toml.display())
-        })?
+        .with_context(|| format!("failed to load runtime config {}", runtime_toml.display()))?
         .with_actor_type(manifest.package.actr_type.clone());
     let ais_endpoint = init.runtime_config().ais_endpoint.to_string();
 

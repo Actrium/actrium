@@ -65,6 +65,27 @@ pub struct RuntimeContext {
     /// Generation captured at context creation time. After a hard rebind,
     /// outbound sends from old-generation contexts return `ConnectionNotReady`.
     pub(crate) context_generation: u64,
+
+    /// Reply-delivery handle for `ReplyMode::Explicit` methods (RFC-0323).
+    ///
+    /// `None` for RETURN routes (the vast majority) and for contexts that do
+    /// not host EXPLICIT dispatch. Set per-request by `admit_incoming` when
+    /// `reply_mode_for_route` returns `Explicit`. The generated EXPLICIT
+    /// dispatch arm reads this via [`Context::reply_deliver`]; if `None` it
+    /// fails the dispatch with `Internal` (reject-don't-degrade).
+    reply_deliver: Option<Arc<dyn actr_framework::Deliver>>,
+
+    /// Whether the caller is waiting for a RESPONSE (`call`) or not (`tell`).
+    /// Set per-request from the inbound envelope direction. Used by the
+    /// EXPLICIT dispatch arm to build the `Reply<T>` with the right
+    /// `emit_response` flag.
+    expects_response: bool,
+
+    /// Caller deadline for an EXPLICIT reply (RFC-0323): arrival time plus
+    /// `envelope.timeout_ms`. `None` for a TELL or a route with no timeout.
+    /// Set per-request by `admit_incoming` alongside `reply_deliver`; read
+    /// by the generated EXPLICIT dispatch arm via [`Context::reply_deadline`].
+    reply_deadline: Option<actr_framework::ReplyDeadline>,
 }
 
 impl RuntimeContext {
@@ -167,7 +188,25 @@ impl RuntimeContext {
             discovered_ws_addresses,
             session_state,
             context_generation,
+            reply_deliver: None,
+            expects_response: true,
+            reply_deadline: None,
         }
+    }
+
+    /// Set the reply-delivery handle, `expects_response` flag, and caller
+    /// deadline for an `ReplyMode::Explicit` route (RFC-0323). Called by
+    /// `admit_incoming` before the dispatch continuation runs so the
+    /// generated EXPLICIT arm can read them off the context.
+    pub(crate) fn set_explicit_reply(
+        &mut self,
+        deliver: Arc<dyn actr_framework::Deliver>,
+        expects_response: bool,
+        reply_deadline: Option<actr_framework::ReplyDeadline>,
+    ) {
+        self.reply_deliver = Some(deliver);
+        self.expects_response = expects_response;
+        self.reply_deadline = reply_deadline;
     }
 
     #[cfg(test)]
@@ -626,6 +665,18 @@ impl Context for RuntimeContext {
 
     fn request_id(&self) -> &str {
         &self.request_id
+    }
+
+    fn expects_response(&self) -> bool {
+        self.expects_response
+    }
+
+    fn reply_deliver(&self) -> Option<Arc<dyn actr_framework::Deliver>> {
+        self.reply_deliver.clone()
+    }
+
+    fn reply_deadline(&self) -> Option<actr_framework::ReplyDeadline> {
+        self.reply_deadline
     }
 
     // ========== Communication Methods ==========

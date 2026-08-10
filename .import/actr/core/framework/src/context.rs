@@ -93,6 +93,42 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     /// A new request_id is generated for each RPC call, used to match requests and responses.
     fn request_id(&self) -> &str;
 
+    /// Whether the caller is waiting for a response (`call`) or not (`tell`).
+    ///
+    /// Set per-request by the runtime from the inbound envelope. Used by
+    /// generated `ReplyMode::Explicit` dispatch arms to build the `Reply<T>`
+    /// handle with the right `emit_response` flag: a `tell` into an EXPLICIT
+    /// method completes dedup with empty bytes and emits no RESPONSE envelope.
+    /// The default is `true` (a `call`); contexts that never host EXPLICIT
+    /// handlers never have this queried.
+    fn expects_response(&self) -> bool {
+        true
+    }
+
+    /// Reply-delivery handle for `ReplyMode::Explicit` methods (RFC-0323).
+    ///
+    /// `None` on contexts that do not host EXPLICIT dispatch (the default):
+    /// tests, dummy contexts, and runtimes without the pump wired. A
+    /// generated EXPLICIT dispatch arm calls this and, if `None`, fails the
+    /// dispatch with an `Internal` error rather than silently dropping the
+    /// reply (reject-don't-degrade). The hyper `RuntimeContext` overrides this
+    /// with the per-request `Deliver` that wires `reply.send` → RESPONSE
+    /// envelope + dedup completion + mailbox ACK.
+    fn reply_deliver(&self) -> Option<std::sync::Arc<dyn crate::Deliver>> {
+        None
+    }
+
+    /// Caller deadline for an EXPLICIT reply (RFC-0323): arrival time plus
+    /// `envelope.timeout_ms`. `None` for a TELL or a route with no timeout.
+    /// The generated EXPLICIT dispatch arm reads this so `Reply::deadline()`
+    /// reflects the real caller timeout rather than unconditionally `None`.
+    /// Sending after the deadline is still valid — the caller discards the
+    /// orphan RESPONSE. The default `None` suits contexts that never host
+    /// EXPLICIT dispatch.
+    fn reply_deadline(&self) -> Option<crate::ReplyDeadline> {
+        None
+    }
+
     // ========== Communication Methods ==========
 
     /// Send a type-safe RPC request and wait for response
