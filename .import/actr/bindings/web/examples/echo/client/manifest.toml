@@ -15,7 +15,7 @@ license = "Apache-2.0"
 tags = ["dev", "client"]
 
 [dependencies]
-EchoService = { actr_type = "acme:EchoService:0.1.0" }
+EchoService = { actr_type = "acme:EchoService:0.2.0" }
 
 # Web platform specific configuration (for reference / tooling)
 [platform.web]

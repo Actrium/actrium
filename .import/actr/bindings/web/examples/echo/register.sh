@@ -56,7 +56,7 @@ MFR_KEY_FILE="$RELEASE_DIR/dev-key.json"
 MFR_NAME="acme"
 
 # Browser packages contain the authenticated wasm-bindgen binary and glue.
-SERVER_ACTR_PACKAGE="$RELEASE_DIR/acme-EchoService-0.1.0-wasm32-unknown-unknown.actr"
+SERVER_ACTR_PACKAGE="$RELEASE_DIR/acme-EchoService-0.2.0-wasm32-unknown-unknown.actr"
 CLIENT_ACTR_PACKAGE="$RELEASE_DIR/acme-echo-client-app-0.1.0-wasm32-unknown-unknown.actr"
 
 # Config files
