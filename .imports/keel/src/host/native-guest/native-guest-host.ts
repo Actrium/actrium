@@ -123,7 +123,7 @@ export class NativeGuestHost {
   }
 
   /** Instantiate the guest `.wasm`, wire host imports, and run its entry. */
-  async load(wasmBytes: BufferSource): Promise<void> {
+  async load(wasmSource: BufferSource | WebAssembly.Module): Promise<void> {
     const importObject: WebAssembly.Imports = {
       env: {
         keel_host_call: (
@@ -139,9 +139,16 @@ export class NativeGuestHost {
         keel_send_batch: (ptr: number, len: number) => this.onSendBatch(ptr >>> 0, len >>> 0),
       },
     };
-    const { instance } = await this.runGuestAsync(() =>
-      WebAssembly.instantiate(wasmBytes, importObject)
+    const loaded = await this.runGuestAsync<
+      WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource
+    >(() =>
+      wasmSource instanceof WebAssembly.Module
+        ? WebAssembly.instantiate(wasmSource, importObject)
+        : WebAssembly.instantiate(wasmSource, importObject)
     );
+    // The bytes overload returns { module, instance }; the already-compiled
+    // module overload returns the instance directly.
+    const instance = loaded instanceof WebAssembly.Instance ? loaded : loaded.instance;
     this.instance = instance;
     this.memory = instance.exports.memory as WebAssembly.Memory;
 
