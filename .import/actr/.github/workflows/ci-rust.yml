@@ -66,6 +66,22 @@ jobs:
       - name: WIT <-> DynClib ABI drift check
         run: cargo run -p wit-lint --release
 
+  payload-logging:
+    name: OTel payload-logging guard
+    runs-on: ubuntu-latest-m
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check no payload is formatted in core/hyper tracing macros
+        # OpenTelemetryTracingBridge exports every tracing log event that
+        # passes the filter as an OTLP log record to vector → VictoriaLogs
+        # (unauthenticated query port). Flagging payload-bearing variables
+        # (envelope/payload/message/data/body) in tracing macros prevents
+        # user-data leakage at debug/trace filter levels. See issue #484.
+        run: bash .github/workflows/scripts/check-payload-logging.sh
+
   build:
     name: Build
     runs-on: ubuntu-latest-m
