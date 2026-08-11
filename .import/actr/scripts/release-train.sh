@@ -1123,7 +1123,7 @@ PY
   if [[ -f "$workload_manifest" ]]; then
     (
       cd "$WORK_REPO_ROOT"
-      cargo generate-lockfile --manifest-path e2e/winui-echo-app/workload/Cargo.toml
+      cargo update --manifest-path e2e/winui-echo-app/workload/Cargo.toml
     )
   fi
 }
