@@ -828,6 +828,22 @@ struct PeerState {
     receive_handles: Vec<JoinHandle<()>>,
 }
 
+enum PeerInsertError {
+    LifecycleChanged(PeerState),
+    Occupied {
+        rejected: PeerState,
+        active_session_id: u64,
+    },
+}
+
+impl PeerInsertError {
+    fn into_rejected(self) -> PeerState {
+        match self {
+            Self::LifecycleChanged(rejected) | Self::Occupied { rejected, .. } => rejected,
+        }
+    }
+}
+
 impl PeerState {
     fn update_connection_state(&mut self, state: RTCPeerConnectionState) {
         if self.current_state == state {
@@ -5802,7 +5818,7 @@ impl WebRtcCoordinator {
         peer_id: ActrId,
         state: PeerState,
         expected_epoch: u64,
-    ) -> Result<(), PeerState> {
+    ) -> Result<(), PeerInsertError> {
         #[cfg(any(test, feature = "test-utils"))]
         self.hit_peer_publish_barrier_for_test(&peer_id).await;
 
@@ -5814,7 +5830,7 @@ impl WebRtcCoordinator {
                 .load(Ordering::Acquire)
                 != expected_epoch
         {
-            return Err(state);
+            return Err(PeerInsertError::LifecycleChanged(state));
         }
 
         let restart_signaling_gate = self.restart_signaling_gate_for(&peer_id).await;
@@ -5823,8 +5839,11 @@ impl WebRtcCoordinator {
         // setup race. Replacement paths must first remove the exact observed
         // session under this same peer gate.
         let mut peers = self.peers.write().await;
-        if peers.contains_key(&peer_id) {
-            return Err(state);
+        if let Some(active) = peers.get(&peer_id) {
+            return Err(PeerInsertError::Occupied {
+                rejected: state,
+                active_session_id: active.session_id,
+            });
         }
         peers.insert(peer_id, state);
         drop(peers);
@@ -5937,18 +5956,49 @@ impl WebRtcCoordinator {
             session_id: webrtc_conn.session_id(),
             receive_handles: Vec::new(),
         };
-        if let Err(peer_state) = self
+        if let Err(error) = self
             .insert_peer_if_lifecycle_current(target.clone(), peer_state, peer_lifecycle_epoch)
             .await
         {
-            self.teardown_removed_peer_state(
-                target,
-                peer_state,
-                false,
-                None,
-                "peer lifecycle changed during offerer setup",
-            )
-            .await;
+            let active_session_id = match &error {
+                PeerInsertError::LifecycleChanged(_) => None,
+                PeerInsertError::Occupied {
+                    active_session_id, ..
+                } => Some(*active_session_id),
+            };
+            let peer_state = error.into_rejected();
+            let rejected_session_id = peer_state.session_id;
+            let teardown_reason = if active_session_id.is_some() {
+                "concurrent peer session won offerer setup"
+            } else {
+                "peer lifecycle changed during offerer setup"
+            };
+            self.teardown_removed_peer_state(target, peer_state, false, None, teardown_reason)
+                .await;
+
+            if let Some(active_session_id) = active_session_id {
+                tracing::info!(
+                    peer_id = %target.to_string_repr(),
+                    rejected_session_id,
+                    active_session_id,
+                    "Offerer setup lost a concurrent peer publication; waiting for the active session"
+                );
+                if let Some(connection) = self
+                    .active_sendable_connection_or_wait(target, None)
+                    .await?
+                {
+                    tracing::info!(
+                        peer_id = %target.to_string_repr(),
+                        rejected_session_id,
+                        active_session_id = connection.session_id(),
+                        "Reusing the active WebRTC session after a concurrent setup race"
+                    );
+                    let (ready_tx, ready_rx) = oneshot::channel();
+                    let _ = ready_tx.send(());
+                    return Ok((ready_rx, connection));
+                }
+            }
+
             return Err(ActrError::Unavailable(format!(
                 "WebRTC peer lifecycle changed during connection setup: {target}"
             )));
@@ -6338,10 +6388,11 @@ impl WebRtcCoordinator {
             session_id: webrtc_conn.session_id(),
             receive_handles: Vec::new(),
         };
-        if let Err(peer_state) = self
+        if let Err(error) = self
             .insert_peer_if_lifecycle_current(from.clone(), peer_state, peer_lifecycle_epoch)
             .await
         {
+            let peer_state = error.into_rejected();
             self.teardown_removed_peer_state(
                 from,
                 peer_state,
