@@ -12,12 +12,15 @@
 //! - [`storage`] — Key-value store backed by IndexedDB
 //! - [`platform`] — Composite [`PlatformProvider`] wiring crypto + storage
 //! - [`mailbox`] — Message queue backed by IndexedDB
+//! - [`clock`] — [`MonotonicClock`] backed by `performance.now()` (RFC-0419 §2)
 
+pub mod clock;
 pub mod crypto;
 pub mod mailbox;
 pub mod platform;
 pub mod storage;
 
+pub use clock::{WebInstant, WebMonotonicClock};
 pub use crypto::WebCryptoProvider;
 pub use mailbox::IndexedDbMailbox;
 pub use platform::WebPlatformProvider;

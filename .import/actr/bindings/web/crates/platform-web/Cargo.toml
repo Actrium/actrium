@@ -22,6 +22,7 @@ web-sys = { workspace = true, features = [
     "CryptoKey",
     "Window",
     "WorkerGlobalScope",
+    "Performance",
     "Storage",
 ] }
 serde-wasm-bindgen = { workspace = true }
@@ -45,3 +46,8 @@ chrono = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+gloo-timers.workspace = true
+actr-platform-traits = { workspace = true, features = ["test-utils"] }
