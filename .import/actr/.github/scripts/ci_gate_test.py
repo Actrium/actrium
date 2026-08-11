@@ -83,6 +83,23 @@ def test_pr_gate_excludes_heavy_root_e2e_jobs() -> None:
     assert "web_browser_e2e" not in workflow
 
 
+def test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile() -> None:
+    workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
+    e2e_job = _job(workflow, "e2e_rust", "audit")
+
+    assert "needs.determine.outputs.e2e_rust == 'true'" in e2e_job
+    normalized = " ".join(e2e_job.split())
+    assert "cargo metadata" in normalized
+    assert "--manifest-path e2e/Cargo.toml" in normalized
+    assert "--format-version 1" in normalized
+    assert "--locked" in normalized
+    assert "arduino/setup-protoc@v3" in e2e_job
+    assert "libopus-dev" in e2e_job
+    assert "cargo check" in e2e_job
+    assert "--workspace" in normalized
+    assert "package-runtime-echo/run.sh" not in e2e_job
+
+
 def test_native_workload_gate_builds_c_and_go_with_pinned_tools() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     native_job = _job(workflow, "c_go_workloads", "gate")
@@ -809,6 +826,7 @@ if __name__ == "__main__":
     test_rust_test_gate_restores_cache_before_installing_tools()
     test_msrv_gate_builds_full_workspace_on_pinned_toolchain()
     test_pr_gate_excludes_heavy_root_e2e_jobs()
+    test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile()
     test_native_workload_gate_builds_c_and_go_with_pinned_tools()
     test_blocked_typescript_component_e2e_jobs_share_disable_gate()
     test_typescript_componentize_only_allows_known_upstream_failure()

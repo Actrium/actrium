@@ -83,6 +83,9 @@ interface types {
         request-id: string,
         route-key: string,
         payload: list<u8>,
+        // Request deadline in milliseconds. Responses and tell messages use
+        // zero, matching actr_protocol::RpcEnvelope::timeout_ms semantics.
+        timeout-ms: s64,
     }
 
     record metadata-entry {

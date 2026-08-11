@@ -7,6 +7,21 @@ import ci_targets
 
 
 class CiTargetsTest(unittest.TestCase):
+    def test_e2e_rust_sources_and_manifests_trigger_compile_check(self) -> None:
+        paths = (
+            "e2e/Cargo.toml",
+            "e2e/Cargo.lock",
+            "e2e/polyglot-echo/clients/rust/Cargo.toml",
+            "e2e/polyglot-echo/clients/rust/src/main.rs",
+        )
+
+        for path in paths:
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
+
+                self.assertTrue(targets["e2e_rust"])
+                self.assertIn(f"e2e_rust:{path}", reasons)
+
     def test_c_and_go_echo_workloads_trigger_component_builds(self) -> None:
         paths = (
             "examples/c/echo-workload/src/main.c",
@@ -26,6 +41,7 @@ class CiTargetsTest(unittest.TestCase):
 
         self.assertTrue(targets["c_go_workloads"])
         self.assertTrue(targets["rust_core"])
+        self.assertTrue(targets["e2e_rust"])
         self.assertIn(f"core_dependency:{path}", reasons)
 
     def test_native_workload_smoke_change_rebuilds_components(self) -> None:
@@ -91,12 +107,17 @@ class CiTargetsTest(unittest.TestCase):
         self.assertIn(f"swift:{path}", reasons)
 
     def test_winui_e2e_change_triggers_rust_and_csharp_checks(self) -> None:
-        path = "e2e/winui-echo-app/WinUiEchoApp/ActrService.cs"
-        targets, reasons = ci_targets.detect_targets([path], full_run=False)
+        for path in (
+            "e2e/winui-echo-app/WinUiEchoApp/ActrService.cs",
+            "e2e/winui-echo-app/workload/src/lib.rs",
+            "e2e/winui-echo-app/workload/Cargo.toml",
+        ):
+            with self.subTest(path=path):
+                targets, reasons = ci_targets.detect_targets([path], full_run=False)
 
-        self.assertTrue(targets["rust_core"])
-        self.assertTrue(targets["csharp_binding"])
-        self.assertIn(f"winui_e2e:{path}", reasons)
+                self.assertTrue(targets["rust_core"])
+                self.assertTrue(targets["csharp_binding"])
+                self.assertIn(f"winui_e2e:{path}", reasons)
 
     def test_typescript_echo_workload_triggers_workload_checks(self) -> None:
         targets, reasons = ci_targets.detect_targets(

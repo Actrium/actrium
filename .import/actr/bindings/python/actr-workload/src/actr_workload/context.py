@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import functools
 import importlib
+import os
 from collections.abc import Awaitable, Callable
 from typing import Any, ClassVar, Protocol, TypeVar
 
@@ -21,9 +22,22 @@ class RpcRequest(Protocol[ResponseT]):
     def decode_response(self, data: bytes) -> ResponseT: ...
 
 
+def _world_module() -> str:
+    """Return the componentize-py world module selected for this workload.
+
+    ``DEFAULT_WORLD_MODULE`` is the normal package name.  The environment
+    override is used by the build helper when callers choose a custom
+    ``world_module``; componentize-py imports the workload in a subprocess so
+    this is the only configuration that needs to cross that boundary.
+    """
+
+    return os.environ.get("ACTR_WORKLOAD_WORLD_MODULE", DEFAULT_WORLD_MODULE)
+
+
 def _bindings() -> tuple[Any, Any]:
-    host = importlib.import_module(f"{DEFAULT_WORLD_MODULE}.imports.host")
-    types = importlib.import_module(f"{DEFAULT_WORLD_MODULE}.imports.types")
+    world_module = _world_module()
+    host = importlib.import_module(f"{world_module}.imports.host")
+    types = importlib.import_module(f"{world_module}.imports.types")
     return host, types
 
 
@@ -69,6 +83,7 @@ class ActrContext:
         route_key: str,
         payload: bytes,
         timeout_ms: int,
+        payload_type: str = "rpcReliable",
     ) -> bytes:
         _validate_timeout(timeout_ms)
         host, types = _bindings()
@@ -79,7 +94,7 @@ class ActrContext:
                 route_key,
                 payload,
                 timeout_ms,
-                _payload_type_to_wit("rpcReliable", types),
+                _payload_type_to_wit(payload_type, types),
             )
         )
 
@@ -170,7 +185,34 @@ def _bind_context(
     return wrapped
 
 
-class Workload:
+def _generated_workload_base() -> type[Any]:
+    """Load componentize-py's runtime export base when it is available.
+
+    ``componentize-py bindings`` writes typing stubs and the componentizer
+    generates a second, runtime-connected copy in a temporary mount.  Only
+    the latter contains the private ``_async_start_*`` methods used by the
+    async component ABI.  Importing the base lazily keeps the authoring
+    package usable before bindings have been generated, while componentized
+    workloads still inherit the generated shims.
+    """
+
+    try:
+        exports = importlib.import_module(f"{_world_module()}.exports")
+        base = getattr(exports, "Workload")
+    except (ImportError, AttributeError) as error:
+        if "ACTR_WORKLOAD_WORLD_MODULE" in os.environ:
+            raise RuntimeError(
+                "componentize-py runtime exports are unavailable; regenerate bindings "
+                f"for world module `{_world_module()}`"
+            ) from error
+        return object
+
+    if not isinstance(base, type):
+        return object
+    return base
+
+
+class Workload(_generated_workload_base()):
     """Base class converting raw WIT invocation contexts to ActrContext."""
 
     _CONTEXT_METHODS: ClassVar[set[str]] = {

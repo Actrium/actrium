@@ -552,7 +552,7 @@ The low-level API is in `io.actrium.actr` and consists of UniFFI-generated bindi
 | `Realm` | `realmId: UInt` |
 | `DataChunk` | `streamId: String`, `sequence: ULong`, `payload: ByteArray`, `metadata: List<MetadataEntry>`, `timestampMs: Long?` |
 | `MetadataEntry` | `key: String`, `value: String` |
-| `RpcEnvelopeBridge` | `routeKey: String`, `payload: ByteArray`, `requestId: String` |
+| `RpcEnvelopeBridge` | `routeKey: String`, `payload: ByteArray`, `requestId: String`, `timeoutMs: Long` |
 | `NetworkSnapshot` | `sequence: ULong`, `availability: NetworkAvailability`, `transport: NetworkTransportFlags`, `isExpensive: Boolean`, `isConstrained: Boolean` |
 | `NetworkTransportFlags` | `wifi: Boolean`, `cellular: Boolean`, `ethernet: Boolean`, `vpn: Boolean`, `other: Boolean` |
 | `NetworkEventResult` | `event: NetworkEvent`, `success: Boolean`, `error: String?`, `durationMs: ULong` |

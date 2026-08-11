@@ -10,7 +10,7 @@
 package com.example.generated
 
 import io.actrium.actr.dsl.ActrContext
-import io.actrium.actr.dsl.callRaw
+import io.actrium.actr.PayloadType
 
 import echo.Echo.*
 import local.DataStreamPeer.*
@@ -47,12 +47,12 @@ suspend fun actrDispatch(
     "echo.EchoService.Echo" -> {
         val actrType = ctx.resolveDependency("echo")
         val target = ctx.discover(actrType)
-        ctx.callRaw(target, routeKey, payload, timeoutMs)
+        ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)
     }
     "data_stream_peer.DuplexStreamService.StartStream" -> {
         val actrType = ctx.resolveDependency("stream")
         val target = ctx.discover(actrType)
-        ctx.callRaw(target, routeKey, payload, timeoutMs)
+        ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)
     }
     else -> throw io.actrium.actr.ActrException.UnknownRoute("Unknown route: $routeKey")
 }

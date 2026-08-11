@@ -510,14 +510,15 @@ async function loadWithGuestBridge(packageUrl, runtimeWasmUrl) {
   // ── 7. Build dispatchFn that adapts sw-host envelope (camelCase) to
   // the actr-web-abi guest (kebab-case + Vec<u8>).
   const dispatchFn = async (envelope) => {
-    // sw-host builds `{ requestId, routeKey, payload: Uint8Array }`.
-    // actr-web-abi `RpcEnvelope` uses `request-id`, `route-key`, `payload`.
+    // sw-host builds `{ requestId, routeKey, payload: Uint8Array, timeoutMs: bigint }`.
+    // actr-web-abi `RpcEnvelope` uses kebab-case field names.
     const kebabEnv = {
       'request-id': envelope.requestId,
       'route-key': envelope.routeKey,
       // serde-wasm-bindgen reads Vec<u8> from Uint8Array fine, but
       // also accepts plain arrays. Uint8Array is the natural form.
       payload: envelope.payload,
+      'timeout-ms': envelope.timeoutMs,
     };
     const result = await self.actrGuestBindgen.dispatch(kebabEnv);
     // actr-web-abi `dispatch` returns `Result<Vec<u8>, ActrError>` —

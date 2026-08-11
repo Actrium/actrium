@@ -3245,7 +3245,7 @@ public func FfiConverterTypeRealm_lower(_ value: Realm) -> RustBuffer {
 /**
  * RPC Envelope exposed to FFI
  *
- * Contains the route key, payload, and request ID for an RPC message.
+ * Contains the route key, payload, request ID, and request deadline for an RPC message.
  */
 public struct RpcEnvelopeBridge: Equatable, Hashable {
     /**
@@ -3260,6 +3260,10 @@ public struct RpcEnvelopeBridge: Equatable, Hashable {
      * Request ID for correlation
      */
     public var requestId: String
+    /**
+     * Request deadline in milliseconds. Responses and tells carry zero.
+     */
+    public var timeoutMs: Int64
 
     // Default memberwise initializers are never public by default, so we
     // declare one manually.
@@ -3272,10 +3276,14 @@ public struct RpcEnvelopeBridge: Equatable, Hashable {
          */payload: Data,
         /**
          * Request ID for correlation
-         */requestId: String) {
+         */requestId: String,
+        /**
+         * Request deadline in milliseconds. Responses and tells carry zero.
+         */timeoutMs: Int64) {
         self.routeKey = routeKey
         self.payload = payload
         self.requestId = requestId
+        self.timeoutMs = timeoutMs
     }
 
 
@@ -3296,7 +3304,8 @@ public struct FfiConverterTypeRpcEnvelopeBridge: FfiConverterRustBuffer {
             try RpcEnvelopeBridge(
                 routeKey: FfiConverterString.read(from: &buf),
                 payload: FfiConverterData.read(from: &buf),
-                requestId: FfiConverterString.read(from: &buf)
+                requestId: FfiConverterString.read(from: &buf),
+                timeoutMs: FfiConverterInt64.read(from: &buf)
         )
     }
 
@@ -3304,6 +3313,7 @@ public struct FfiConverterTypeRpcEnvelopeBridge: FfiConverterRustBuffer {
         FfiConverterString.write(value.routeKey, into: &buf)
         FfiConverterData.write(value.payload, into: &buf)
         FfiConverterString.write(value.requestId, into: &buf)
+        FfiConverterInt64.write(value.timeoutMs, into: &buf)
     }
 }
 

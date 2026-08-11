@@ -126,7 +126,7 @@ service RemoteService {
         method: "Call",
         input_type: "remote.Request",
         output_type: "remote.Response",
-        payload_type: "rpcReliable",
+        payload_type: "rpcSignal",
         dependency_alias: "remote-service",
       },
     ],
@@ -149,7 +149,10 @@ service RemoteService {
   const dispatcher = readFileSync(join(output, "actr_dispatch.ts"), "utf8");
   assert.match(dispatcher, /resolveDependency\("remote-service"\)/);
   assert.match(dispatcher, /discover\(actrType\)/);
-  assert.match(dispatcher, /callRaw\(target, routeKey, payload, timeoutMs\)/);
+  assert.match(
+    dispatcher,
+    /callRaw\(target, routeKey, payload, timeoutMs, PayloadType\.RpcSignal\)/,
+  );
   assert.doesNotMatch(dispatcher, /remoteTargets|manufacturer|ActrType\s*\{/);
 });
 

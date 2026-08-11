@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -21,8 +22,14 @@ def _componentize_py_executable() -> str:
     return shutil.which("componentize-py") or "componentize-py"
 
 
-def _run_componentize_py(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(command, check=True, text=True)
+def _run_componentize_py(
+    command: Sequence[str], *, world_module: str | None = None
+) -> subprocess.CompletedProcess[str]:
+    env = None
+    if world_module is not None:
+        env = os.environ.copy()
+        env["ACTR_WORKLOAD_WORLD_MODULE"] = world_module
+    return subprocess.run(command, check=True, text=True, env=env)
 
 
 def generate_bindings(
@@ -77,4 +84,4 @@ def componentize(
         for python_path in python_paths:
             command.extend(["-p", _path_arg(python_path)])
         command.extend(["-o", _path_arg(output)])
-        return _run_componentize_py(command)
+        return _run_componentize_py(command, world_module=world_module)

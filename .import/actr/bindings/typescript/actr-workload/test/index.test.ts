@@ -193,8 +193,19 @@ describe('@actrium/actr-workload', () => {
       ctx.callRaw(testActorId(), 'raw', new Uint8Array(), 0),
     ).rejects.toThrow('timeoutMs must be > 0');
 
-    expect(host.hostCalls.timeouts).toEqual([1_234n]);
-    expect(host.hostCalls.payloadTypes).toEqual([{ tag: 'rpc-signal' }]);
+    await ctx.callRaw(
+      testActorId(),
+      'raw-signal',
+      new Uint8Array(),
+      1_234,
+      runtime.PayloadType.RpcSignal,
+    );
+
+    expect(host.hostCalls.timeouts).toEqual([1_234n, 1_234n]);
+    expect(host.hostCalls.payloadTypes).toEqual([
+      { tag: 'rpc-signal' },
+      { tag: 'rpc-signal' },
+    ]);
   });
 
   it('rejects host imports when no invocation context is active', async () => {

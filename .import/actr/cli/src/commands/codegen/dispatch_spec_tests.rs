@@ -140,6 +140,63 @@ fn dispatch_spec_remote_routes_carry_dependency_alias() {
 }
 
 #[test]
+fn dispatch_spec_remote_routes_preserve_declared_payload_type() {
+    let model = ProtoModel {
+        files: vec![],
+        local_services: vec![],
+        remote_services: vec![ServiceModel {
+            name: "SignalService".to_string(),
+            package: "signal".to_string(),
+            proto_file: PathBuf::from("remote/signal-service/signal.proto"),
+            relative_path: PathBuf::from("remote/signal-service/signal.proto"),
+            side: ProtoSide::Remote,
+            methods: vec![MethodModel {
+                name: "Notify".to_string(),
+                snake_name: "notify".to_string(),
+                input_type: "Request".to_string(),
+                output_type: "Response".to_string(),
+                payload_type: "rpcSignal".to_string(),
+                route_key: "signal.SignalService.Notify".to_string(),
+            }],
+            actr_type: Some("acme:SignalService:1.0.0".to_string()),
+        }],
+    };
+
+    let spec = DispatchSpec::build(&model).expect("non-default remote payload type is supported");
+    assert_eq!(spec.routes[0].payload_type, "rpcSignal");
+}
+
+#[test]
+fn dispatch_spec_rejects_non_rpc_payload_type_for_remote_route() {
+    let model = ProtoModel {
+        files: vec![],
+        local_services: vec![],
+        remote_services: vec![ServiceModel {
+            name: "StreamService".to_string(),
+            package: "stream".to_string(),
+            proto_file: PathBuf::from("remote/stream-service/stream.proto"),
+            relative_path: PathBuf::from("remote/stream-service/stream.proto"),
+            side: ProtoSide::Remote,
+            methods: vec![MethodModel {
+                name: "Send".to_string(),
+                snake_name: "send".to_string(),
+                input_type: "Request".to_string(),
+                output_type: "Response".to_string(),
+                payload_type: "dataStream".to_string(),
+                route_key: "stream.StreamService.Send".to_string(),
+            }],
+            actr_type: Some("acme:StreamService:1.0.0".to_string()),
+        }],
+    };
+
+    let error = DispatchSpec::build(&model)
+        .expect_err("remote callRaw routes must reject non-RPC payload types")
+        .to_string();
+    assert!(error.contains("dataStream"), "unexpected error: {error}");
+    assert!(error.contains("rpcSignal"), "unexpected error: {error}");
+}
+
+#[test]
 fn proto_model_rejects_remote_alias_missing_from_manifest() {
     let tmp = TempDir::new().unwrap();
     let proto_root = tmp.path().join("protos");

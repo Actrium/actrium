@@ -11,6 +11,7 @@ from fnmatch import fnmatch
 
 TARGETS = (
     "rust_core",
+    "e2e_rust",
     "ts_binding",
     "ts_workload",
     "python_codegen",
@@ -92,8 +93,23 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             reasons.append(f"generated_typescript_web_e2e_source:{path}")
             continue
 
+        # Keep this before the generic e2e Rust-workspace rule below. The
+        # WinUI workload is a standalone Cargo workspace and also exercises
+        # the C# binding, so e2e_rust alone does not cover it.
+        if path.startswith("e2e/winui-echo-app/"):
+            targets["rust_core"] = True
+            targets["csharp_binding"] = True
+            reasons.append(f"winui_e2e:{path}")
+            continue
+
+        if path.startswith("e2e/") and path.endswith((".rs", "Cargo.toml", "Cargo.lock")):
+            targets["e2e_rust"] = True
+            reasons.append(f"e2e_rust:{path}")
+            continue
+
         if path.startswith("core/"):
             targets["rust_core"] = True
+            targets["e2e_rust"] = True
             targets["ts_binding"] = True
             targets["swift_binding"] = True
             targets["web_binding"] = True
@@ -211,12 +227,6 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
         if path.startswith("bindings/cabi/csharp/"):
             targets["csharp_binding"] = True
             reasons.append(f"csharp:{path}")
-            continue
-
-        if path.startswith("e2e/winui-echo-app/"):
-            targets["rust_core"] = True
-            targets["csharp_binding"] = True
-            reasons.append(f"winui_e2e:{path}")
             continue
 
         if path.startswith("bindings/web/"):

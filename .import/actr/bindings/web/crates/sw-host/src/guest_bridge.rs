@@ -597,7 +597,8 @@ pub fn host_get_request_id(request_id: String) -> Result<String, JsValue> {
 /// ```
 ///
 /// where `RpcEnvelopeJs` is the camelCase record built by sw-host on the
-/// inbound side: `{ requestId: string, routeKey: string, payload: Uint8Array }`.
+/// inbound side:
+/// `{ requestId: string, routeKey: string, payload: Uint8Array, timeoutMs: bigint }`.
 ///
 /// The JS side is responsible for:
 /// 1. Instantiating the authenticated wasm-bindgen binary and JS glue
@@ -620,7 +621,7 @@ pub fn host_get_request_id(request_id: String) -> Result<String, JsValue> {
 #[wasm_bindgen]
 pub fn register_guest_workload(dispatch_fn: js_sys::Function) {
     let handler: ServiceHandlerFn = Rc::new(
-        move |route_key: &str, body: &[u8], ctx: Rc<RuntimeContext>| {
+        move |route_key: &str, body: &[u8], timeout_ms: i64, ctx: Rc<RuntimeContext>| {
             let dispatch_fn = dispatch_fn.clone();
             let route_key = route_key.to_string();
             let body = body.to_vec();
@@ -651,6 +652,11 @@ pub fn register_guest_workload(dispatch_fn: js_sys::Function) {
                     &envelope_js,
                     &JsValue::from_str("payload"),
                     &js_sys::Uint8Array::from(&body[..]).into(),
+                );
+                let _ = js_sys::Reflect::set(
+                    &envelope_js,
+                    &JsValue::from_str("timeoutMs"),
+                    &js_sys::BigInt::from(timeout_ms).into(),
                 );
 
                 // Register the context for this request_id, and ensure it is

@@ -118,6 +118,8 @@ pub struct RpcEnvelope {
     #[serde(rename = "route-key")]
     pub route_key: String,
     pub payload: Vec<u8>,
+    #[serde(rename = "timeout-ms")]
+    pub timeout_ms: i64,
 }
 
 /// Lowered from WIT `record timestamp`.

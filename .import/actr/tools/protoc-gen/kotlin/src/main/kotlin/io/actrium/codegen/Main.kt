@@ -198,10 +198,12 @@ private fun generateActrDispatch(
     }
     for (route in remoteRoutes) {
         val alias = route.dependencyAlias ?: continue
+        val payloadType = payloadTypeKotlin(route.payloadType)
         cases.appendLine("    ${kotlinStringLiteral(route.routeKey)} -> {")
+        cases.appendLine("        require(timeoutMs > 0) { \"timeoutMs must be > 0, got \$timeoutMs\" }")
         cases.appendLine("        val actrType = ctx.resolveDependency(${kotlinStringLiteral(alias)})")
         cases.appendLine("        val target = ctx.discover(actrType)")
-        cases.appendLine("        ctx.callRaw(target, routeKey, payload, timeoutMs)")
+        cases.appendLine("        ctx.callRaw(target, routeKey, $payloadType, payload, timeoutMs)")
         cases.appendLine("    }")
     }
 
@@ -240,6 +242,9 @@ private fun generateActrDispatch(
         appendLine("package $kotlinPackage")
         appendLine()
         appendLine("import io.actrium.actr.dsl.ActrContext")
+        if (remoteRoutes.isNotEmpty()) {
+            appendLine("import io.actrium.actr.PayloadType")
+        }
         if (importsStr.isNotEmpty()) {
             appendLine(importsStr)
         }
@@ -272,6 +277,19 @@ private fun generateActrDispatch(
         appendLine("}")
     }
 }
+
+/** Map the DispatchSpec wire value to the public Kotlin payload enum. */
+private fun payloadTypeKotlin(value: String): String =
+        when (value.lowercase()) {
+            "rpcreliable" -> "PayloadType.RPC_RELIABLE"
+            "rpcsignal" -> "PayloadType.RPC_SIGNAL"
+            "streamreliable" -> "PayloadType.STREAM_RELIABLE"
+            "streamlatencyfirst" -> "PayloadType.STREAM_LATENCY_FIRST"
+            "mediartp" -> "PayloadType.MEDIA_RTP"
+            else ->
+                    throw IllegalArgumentException(
+                            "Unsupported payload_type `$value` in DispatchSpec route")
+        }
 
 
 /** Build a Kotlin import path for a proto type owner. */

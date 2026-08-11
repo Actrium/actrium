@@ -14,29 +14,16 @@ edition = "2024"
 rust-version = "1.95"
 
 [workspace.dependencies]
-actr-framework = { version = "0.6.1" }
-actr-protocol = { version = "0.6.1" }
-actr-runtime = { version = "0.6.1" }
-actr-hyper = { version = "0.6.1", features = ["opentelemetry"] }
-actr-config = { version = "0.6.1" }
-actr-platform-native = { version = "0.6.1" }
-actr-pack = { version = "0.6.1" }
+actr-framework = { path = "../core/framework" }
+actr-protocol = { path = "../core/protocol" }
+actr-runtime = { path = "../core/runtime" }
+actr-hyper = { path = "../core/hyper", features = ["opentelemetry"] }
+actr-config = { path = "../core/config" }
+actr-platform-native = { path = "../core/platform-native" }
+actr-pack = { path = "../core/pack" }
 tokio = { version = "1.0", features = ["full"] }
 anyhow = "1.0"
 tracing = "0.1"
 prost = "0.14"
 bytes = "1.11"
 async-trait = "0.1"
-
-[patch.crates-io]
-actr = { path = "../" }
-actr-framework = { path = "../core/framework" }
-actr-protocol = { path = "../core/protocol" }
-actr-runtime = { path = "../core/runtime" }
-actr-runtime-mailbox = { path = "../core/runtime-mailbox" }
-actr-hyper = { path = "../core/hyper" }
-actr-config = { path = "../core/config" }
-actr-platform-traits = { path = "../core/platform-traits" }
-actr-platform-native = { path = "../core/platform-native" }
-actr-pack = { path = "../core/pack" }
-actr-service-compat = { path = "../core/service-compat" }

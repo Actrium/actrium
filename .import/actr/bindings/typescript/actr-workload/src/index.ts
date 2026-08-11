@@ -12,7 +12,7 @@ import {
 
 export type PayloadBytes = Uint8Array | ArrayBuffer | ArrayLike<number>;
 
-// V2 `rpc-envelope` is `{request-id, route-key, payload}`. `method` is kept as
+// V2 `rpc-envelope` is `{request-id, route-key, payload, timeout-ms}`. `method` is kept as
 // a friendly alias for `route-key` so existing generated dispatchers that route
 // on `envelope.method` keep working; `route-key` and `request-id` expose the
 // raw V2 fields. The V1 `contentType` / `correlationId` / `deadlineMs` fields do
@@ -22,6 +22,8 @@ export interface RpcEnvelope {
   routeKey: string;
   requestId: string;
   payload?: Uint8Array;
+  /** Request timeout in milliseconds; responses and tells carry zero. */
+  timeoutMs: number;
 }
 
 export interface Realm {
@@ -482,8 +484,9 @@ export class ActrContext {
     routeKey: string,
     payload: Uint8Array,
     timeoutMs: bigint | number,
+    payloadType: PayloadType = PayloadType.RpcReliable,
   ): Promise<Uint8Array> {
-    return callRaw(target, routeKey, payload, timeoutMs, this.ctx);
+    return callRaw(target, routeKey, payload, timeoutMs, this.ctx, payloadType);
   }
 
   async tell(target: Dest, message: RpcRequest<unknown>): Promise<void> {

@@ -1401,6 +1401,9 @@ fn gen_actr_dispatch(spec: &crate::dispatch_spec::DispatchSpec) -> String {
 
     // Imports
     out.push_str("import type { ActrContext } from '@actrium/actr-workload';\n");
+    if !remote_routes.is_empty() {
+        out.push_str("import { PayloadType } from '@actrium/actr-workload';\n");
+    }
     for (namespace, module) in &type_modules {
         out.push_str(&format!("import * as {namespace} from '{module}';\n"));
     }
@@ -1475,7 +1478,7 @@ fn gen_actr_dispatch(spec: &crate::dispatch_spec::DispatchSpec) -> String {
         out.push_str("      if (alias) {\n");
         out.push_str("        const actrType = await ctx.resolveDependency(alias);\n");
         out.push_str("        const target = await ctx.discover(actrType);\n");
-        out.push_str("        return ctx.callRaw(target, routeKey, payload, timeoutMs);\n");
+        out.push_str("        return ctx.callRaw(target, routeKey, payload, timeoutMs, remotePayloadTypeFor(routeKey));\n");
         out.push_str("      }\n");
         out.push_str("      throw new Error(`UnknownRoute: ${routeKey}`);\n");
         out.push_str("    }\n");
@@ -1504,9 +1507,36 @@ fn gen_actr_dispatch(spec: &crate::dispatch_spec::DispatchSpec) -> String {
         out.push_str("function remoteAliasFor(routeKey: string): string | undefined {\n");
         out.push_str("  return _remoteAliasMap[routeKey];\n");
         out.push_str("}\n");
+        out.push_str("\nconst _remotePayloadTypeMap: Record<string, PayloadType> = {\n");
+        for route in &remote_routes {
+            out.push_str(&format!(
+                "  {}: PayloadType.{},\n",
+                typescript_string_literal(&route.route_key),
+                payload_type_variant(&route.payload_type)
+            ));
+        }
+        out.push_str("};\n\n");
+        out.push_str("function remotePayloadTypeFor(routeKey: string): PayloadType {\n");
+        out.push_str("  const payloadType = _remotePayloadTypeMap[routeKey];\n");
+        out.push_str(
+            "  if (payloadType === undefined) throw new Error(`UnknownRoute: ${routeKey}`);\n",
+        );
+        out.push_str("  return payloadType;\n");
+        out.push_str("}\n");
     }
 
     out
+}
+
+fn payload_type_variant(value: &str) -> &'static str {
+    match value.to_ascii_lowercase().as_str() {
+        "rpcreliable" => "RpcReliable",
+        "rpcsignal" => "RpcSignal",
+        "streamreliable" => "StreamReliable",
+        "streamlatencyfirst" => "StreamLatencyFirst",
+        "mediartp" => "MediaRtp",
+        _ => panic!("Unsupported payload_type '{value}' in DispatchSpec route"),
+    }
 }
 
 /// Generate the `actr-gen-meta.json` metadata file.
@@ -1653,7 +1683,7 @@ mod tests {
                 method: "Method".to_string(),
                 input_type: "Request".to_string(),
                 output_type: "Response".to_string(),
-                payload_type: "rpcReliable".to_string(),
+                payload_type: "rpcSignal".to_string(),
                 dependency_alias: Some("alias".to_string()),
             }],
             spec_hash: Some("def456".to_string()),
@@ -1663,7 +1693,11 @@ mod tests {
         assert!(content.contains("handler: ActrDispatchHandler"));
         assert!(content.contains("timeoutMs: number"));
         assert!(content.contains("ctx.resolveDependency(alias)"));
-        assert!(content.contains("ctx.callRaw(target, routeKey, payload, timeoutMs)"));
+        assert!(content.contains(
+            "ctx.callRaw(target, routeKey, payload, timeoutMs, remotePayloadTypeFor(routeKey))"
+        ));
+        assert!(content.contains("import { PayloadType } from '@actrium/actr-workload';"));
+        assert!(content.contains("PayloadType.RpcSignal"));
     }
 
     #[test]

@@ -5471,7 +5471,7 @@ public object FfiConverterTypeRealm: FfiConverterRustBuffer<Realm> {
 /**
  * RPC Envelope exposed to FFI
  *
- * Contains the route key, payload, and request ID for an RPC message.
+ * Contains the route key, payload, request ID, and request deadline for an RPC message.
  */
 data class RpcEnvelopeBridge (
     /**
@@ -5488,6 +5488,11 @@ data class RpcEnvelopeBridge (
      * Request ID for correlation
      */
     var `requestId`: kotlin.String
+    ,
+    /**
+     * Request deadline in milliseconds. Responses and tells carry zero.
+     */
+    var `timeoutMs`: kotlin.Long
     
 ){
     
@@ -5507,19 +5512,22 @@ public object FfiConverterTypeRpcEnvelopeBridge: FfiConverterRustBuffer<RpcEnvel
             FfiConverterString.read(buf),
             FfiConverterByteArray.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
         )
     }
 
     override fun allocationSize(value: RpcEnvelopeBridge) = (
             FfiConverterString.allocationSize(value.`routeKey`) +
             FfiConverterByteArray.allocationSize(value.`payload`) +
-            FfiConverterString.allocationSize(value.`requestId`)
+            FfiConverterString.allocationSize(value.`requestId`) +
+            FfiConverterLong.allocationSize(value.`timeoutMs`)
     )
 
     override fun write(value: RpcEnvelopeBridge, buf: ByteBuffer) {
             FfiConverterString.write(value.`routeKey`, buf)
             FfiConverterByteArray.write(value.`payload`, buf)
             FfiConverterString.write(value.`requestId`, buf)
+            FfiConverterLong.write(value.`timeoutMs`, buf)
     }
 }
 
