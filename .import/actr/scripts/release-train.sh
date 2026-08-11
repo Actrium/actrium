@@ -1734,7 +1734,7 @@ ensure_versions_prepared() {
   WORK_REPO_ROOT="$check_path"
   update_versions
 
-  diff_files=$(git -C "$check_path" diff --name-only)
+  diff_files=$(git -C "$check_path" diff --name-only -- . ':(exclude)**/Cargo.lock')
 
   git -C "$ORIGINAL_REPO_ROOT" worktree remove --force "$check_path" >/dev/null
   WORK_REPO_ROOT="$previous_work_repo_root"
