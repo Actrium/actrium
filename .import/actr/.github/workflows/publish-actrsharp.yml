@@ -4,9 +4,9 @@ name: Publish ActrSharp
 # GitHub Packages feed, and uploads its snupkg to the matching GitHub Release.
 # The native actr_cabi library remains owned by workload packages.
 #
-# This workflow is reusable-only: the release train is the sole publishing
-# entry point. Its caller controls token permissions and whether remote writes
-# are enabled through the publish input.
+# This workflow is reusable-only. The staged release train handles new releases,
+# while release-actrsharp.yml can recover an existing tag. Callers control token
+# permissions and whether remote writes are enabled through the publish input.
 
 on:
   workflow_call:
@@ -46,9 +46,13 @@ jobs:
           if ($env:VERSION_INPUT -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$') {
             throw "ActrSharp version '$env:VERSION_INPUT' is not valid SemVer."
           }
+          $tagRef = "refs/tags/v$env:VERSION_INPUT"
+          $tagRefspec = "{0}:{0}" -f $tagRef
           "ACTR_VERSION=$env:VERSION_INPUT" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "ACTR_TAG_REFSPEC=$tagRefspec" | Out-File -FilePath $env:GITHUB_ENV -Append
           "ACTR_RELEASE_MODE=workflow_failed" | Out-File -FilePath $env:GITHUB_ENV -Append
           Write-Host "ActrSharp version: $env:VERSION_INPUT"
+          Write-Host "ActrSharp tag refspec: $tagRefspec"
 
       - name: Checkout release source
         uses: actions/checkout@v5
@@ -98,7 +102,7 @@ jobs:
             throw "GitHub Release v$env:ACTR_VERSION does not exist."
           }
           Write-Host $release
-          git fetch origin "refs/tags/v$env:ACTR_VERSION:refs/tags/v$env:ACTR_VERSION"
+          git fetch origin $env:ACTR_TAG_REFSPEC
           if ($LASTEXITCODE -ne 0) { throw "Unable to fetch v$env:ACTR_VERSION." }
           $tagSha = git rev-parse "v$env:ACTR_VERSION^{commit}"
           if ($LASTEXITCODE -ne 0) { throw "Unable to resolve v$env:ACTR_VERSION." }
