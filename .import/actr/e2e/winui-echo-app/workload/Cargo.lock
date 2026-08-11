@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actr-cabi"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -20,7 +20,7 @@ dependencies = [
 
 [[package]]
 name = "actr-config"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "actr-protocol",
  "chrono",
@@ -34,7 +34,7 @@ dependencies = [
 
 [[package]]
 name = "actr-framework"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -49,7 +49,7 @@ dependencies = [
 
 [[package]]
 name = "actr-hyper"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "actr-config",
  "actr-framework",
@@ -102,7 +102,7 @@ dependencies = [
 
 [[package]]
 name = "actr-pack"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "actr-protocol",
  "base64",
@@ -118,7 +118,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-traits"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "async-trait",
  "hex",
@@ -127,7 +127,7 @@ dependencies = [
 
 [[package]]
 name = "actr-protocol"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "anyhow",
  "base64",
@@ -147,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "actr-framework",
  "actr-protocol",
@@ -159,7 +159,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime-mailbox"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -176,7 +176,7 @@ dependencies = [
 
 [[package]]
 name = "actr-service-compat"
-version = "0.8.0"
+version = "0.8.1"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -2704,9 +2704,9 @@ dependencies = [
 
 [[package]]
 name = "rcgen"
-version = "0.14.8"
+version = "0.14.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "57f6d249aad744e274e682777a50283a225a32705394ee6d5fcc01efa25e4055"
+checksum = "091e7a8e7d86e6feb87a27ce8e2cba29d49eff9507afeebefab7eeb2ca667fb4"
 dependencies = [
  "pem",
  "ring",
