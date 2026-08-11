@@ -428,6 +428,7 @@ fn rpc_envelope_to_wit(envelope: &RpcEnvelope) -> WitRpcEnvelope {
             .as_ref()
             .map(|b| b.to_vec())
             .unwrap_or_default(),
+        timeout_ms: envelope.timeout_ms,
     }
 }
 

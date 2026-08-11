@@ -166,7 +166,26 @@ class GeneratorTests(unittest.TestCase):
         )
         self.assertIn("target = await ctx.discover(actr_type)", content)
         self.assertIn(
-            "return await ctx.call_raw(target, route_key, payload, timeout_ms)",
+            'return await ctx.call_raw(target, route_key, payload, timeout_ms, "rpcReliable")',
+            content,
+        )
+
+    def test_remote_dispatch_preserves_rpc_signal_payload_type(self) -> None:
+        remote_route = {
+            "route_key": "ask.AskService.Prompt",
+            "proto_file": "remote/ask/ask.proto",
+            "proto_service": "ask.AskService",
+            "method": "Prompt",
+            "input_type": "ask.PromptRequest",
+            "output_type": "ask.PromptResponse",
+            "payload_type": "rpcSignal",
+            "dependency_alias": "ask-service",
+        }
+
+        content = generate_unified_dispatch([], [remote_route], {})
+
+        self.assertIn(
+            'ctx.call_raw(target, route_key, payload, timeout_ms, "rpcSignal")',
             content,
         )
 

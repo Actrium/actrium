@@ -299,6 +299,30 @@ pub trait Context: Clone + MaybeSendSync + 'static {
         timeout_ms: i64,
     ) -> ActorResult<bytes::Bytes>;
 
+    /// Send a raw RPC request on an explicitly selected RPC payload lane.
+    ///
+    /// This additive entry point lets generated dynamic dispatch preserve a
+    /// route's declared `RpcReliable` or `RpcSignal` lane without changing the
+    /// established [`Context::call_raw`] signature. Implementations that have
+    /// not opted into explicit lane selection remain compatible: reliable
+    /// calls delegate to `call_raw`, while other lanes fail instead of being
+    /// silently downgraded.
+    async fn call_raw_with_payload_type(
+        &self,
+        target: &ActrId,
+        route_key: &str,
+        payload_type: PayloadType,
+        payload: bytes::Bytes,
+        timeout_ms: i64,
+    ) -> ActorResult<bytes::Bytes> {
+        if payload_type != PayloadType::RpcReliable {
+            return Err(ActrError::InvalidArgument(format!(
+                "this Context implementation does not support raw RPC lane {payload_type:?}"
+            )));
+        }
+        self.call_raw(target, route_key, payload, timeout_ms).await
+    }
+
     // ========== Fast Path: MediaTrack Methods (WebRTC Native) ==========
 
     /// Register a WebRTC native media track callback

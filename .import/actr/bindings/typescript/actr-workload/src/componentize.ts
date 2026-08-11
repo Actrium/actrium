@@ -24,6 +24,9 @@ function toPublicEnvelope(): string {
     routeKey: envelope?.routeKey ?? '',
     requestId: envelope?.requestId ?? '',
     payload: envelope?.payload,
+    // WIT s64 values are bigint in some jco runtimes; expose the stable
+    // JavaScript number shape used by generated dispatchers.
+    timeoutMs: Number(envelope?.timeoutMs ?? 0),
   }`;
 }
 

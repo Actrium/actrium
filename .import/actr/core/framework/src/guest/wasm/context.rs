@@ -285,15 +285,31 @@ impl Context for WasmContext {
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
+        self.call_raw_with_payload_type(
+            target,
+            route_key,
+            PayloadType::RpcReliable,
+            payload,
+            timeout_ms,
+        )
+        .await
+    }
+
+    async fn call_raw_with_payload_type(
+        &self,
+        target: &ActrId,
+        route_key: &str,
+        payload_type: PayloadType,
+        payload: Bytes,
+        timeout_ms: i64,
+    ) -> ActorResult<Bytes> {
         wit_host::call_raw(
             self.ctx_token,
             actr_id_to_wit(target),
             route_key.to_string(),
             payload.to_vec(),
             timeout_ms,
-            // The Context::call_raw contract has no lane parameter; preserve
-            // the lane the host historically applied to raw calls.
-            payload_type_to_wit(PayloadType::RpcReliable),
+            payload_type_to_wit(payload_type),
         )
         .await
         .map(Bytes::from)

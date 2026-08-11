@@ -186,6 +186,8 @@ pub struct RpcEnvelopeBridge {
     pub payload: Buffer,
     #[napi(js_name = "requestId")]
     pub request_id: String,
+    #[napi(js_name = "timeoutMs")]
+    pub timeout_ms: i64,
 }
 
 impl From<actr_protocol::RpcEnvelope> for RpcEnvelopeBridge {
@@ -197,6 +199,7 @@ impl From<actr_protocol::RpcEnvelope> for RpcEnvelopeBridge {
                 .map(|p| p.to_vec().into())
                 .unwrap_or_else(|| Buffer::from(vec![])),
             request_id: envelope.request_id,
+            timeout_ms: envelope.timeout_ms,
         }
     }
 }

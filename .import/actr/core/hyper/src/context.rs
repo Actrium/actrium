@@ -954,6 +954,25 @@ impl Context for RuntimeContext {
         .await
     }
 
+    async fn call_raw_with_payload_type(
+        &self,
+        target: &ActrId,
+        route_key: &str,
+        payload_type: PayloadType,
+        payload: Bytes,
+        timeout_ms: i64,
+    ) -> ActorResult<Bytes> {
+        RuntimeContext::call_raw(
+            self,
+            &Dest::Peer(target.clone()),
+            route_key.to_string(),
+            payload_type,
+            payload,
+            timeout_ms,
+        )
+        .await
+    }
+
     // ========== Fast Path: MediaTrack Methods ==========
 
     async fn register_media_track<F>(&self, track_id: String, callback: F) -> ActorResult<()>

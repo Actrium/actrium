@@ -32,7 +32,7 @@ use std::sync::Arc;
 
 /// RPC Envelope exposed to FFI
 ///
-/// Contains the route key, payload, and request ID for an RPC message.
+/// Contains the route key, payload, request ID, and request deadline for an RPC message.
 #[derive(uniffi::Record, Clone)]
 pub struct RpcEnvelopeBridge {
     /// Route key for the RPC method (e.g., "echo.EchoService.Echo")
@@ -41,6 +41,8 @@ pub struct RpcEnvelopeBridge {
     pub payload: Vec<u8>,
     /// Request ID for correlation
     pub request_id: String,
+    /// Request deadline in milliseconds. Responses and tells carry zero.
+    pub timeout_ms: i64,
 }
 
 impl From<RpcEnvelope> for RpcEnvelopeBridge {
@@ -49,6 +51,7 @@ impl From<RpcEnvelope> for RpcEnvelopeBridge {
             route_key: envelope.route_key,
             payload: envelope.payload.map(|p| p.to_vec()).unwrap_or_default(),
             request_id: envelope.request_id,
+            timeout_ms: envelope.timeout_ms,
         }
     }
 }
@@ -925,6 +928,7 @@ mod tests {
             assert_eq!(dispatches[0].route_key, "echoapp.LocalEchoService.Send");
             assert_eq!(dispatches[0].payload, b"hello");
             assert!(!dispatches[0].request_id.is_empty());
+            assert_eq!(dispatches[0].timeout_ms, 30_000);
         }
 
         actr_ref.shutdown();

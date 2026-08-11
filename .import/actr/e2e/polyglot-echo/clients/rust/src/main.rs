@@ -37,6 +37,9 @@ use crate::echo::{
 };
 
 const STREAM_CHUNK_COUNT: u32 = 5;
+// Keep control RPCs below run.sh's default 30-second client watchdog and
+// align with the TypeScript driver's 15-second RPC timeout.
+const RPC_TIMEOUT_MS: i64 = 15_000;
 
 impl RpcRequest for EchoRequest {
     type Response = EchoResponse;
@@ -206,7 +209,7 @@ async fn scenario_echo(
         message: message.to_string(),
     };
     let response: EchoResponse = actr_ref
-        .call_remote(target, request)
+        .call_remote(target, request, RPC_TIMEOUT_MS)
         .await
         .map_err(|e| anyhow!("Echo RPC failed: {e}"))?;
 
@@ -270,6 +273,7 @@ async fn scenario_server_stream(
                 chunk_count,
                 text: message.to_string(),
             },
+            RPC_TIMEOUT_MS,
         )
         .await
         .map_err(|e| anyhow!("StartServerStream RPC failed: {e}"))?;
@@ -279,7 +283,7 @@ async fn scenario_server_stream(
     }
 
     // Wait for all chunks with a timeout.
-    let timeout = Duration::from_secs(15);
+    let timeout = Duration::from_millis(RPC_TIMEOUT_MS as u64);
     tokio::time::timeout(timeout, done_tx.notified())
         .await
         .map_err(|_| {
@@ -357,6 +361,7 @@ async fn scenario_bidi(
                 server_rx_stream_id: server_rx_id.clone(),
                 expected_chunks: chunk_count,
             },
+            RPC_TIMEOUT_MS,
         )
         .await
         .map_err(|e| anyhow!("SetupBidi RPC failed: {e}"))?;
@@ -383,7 +388,7 @@ async fn scenario_bidi(
     }
 
     // Wait for all echoed chunks.
-    let timeout = Duration::from_secs(15);
+    let timeout = Duration::from_millis(RPC_TIMEOUT_MS as u64);
     tokio::time::timeout(timeout, done_tx.notified())
         .await
         .map_err(|_| {

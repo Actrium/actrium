@@ -19,7 +19,7 @@ use crate::context::RuntimeContext;
 
 /// Handler function signature for dispatching RPC requests.
 ///
-/// Given `(route_key, request_bytes, context)`, returns a future that resolves
+/// Given `(route_key, request_bytes, timeout_ms, context)`, returns a future that resolves
 /// to the response bytes or an error string.
 ///
 /// The handler dispatches based on `route_key` prefix to local or remote handlers.
@@ -28,11 +28,13 @@ use crate::context::RuntimeContext;
 /// # Parameters
 /// - `route_key`: Full route key (e.g., `"echo.EchoService.Echo"`)
 /// - `request_bytes`: Serialized protobuf request payload
+/// - `timeout_ms`: Caller-provided RPC deadline in milliseconds (`0` for tells)
 /// - `ctx`: WebContext providing communication capabilities (call_raw, discover, etc.)
 pub type ServiceHandlerFn = Rc<
     dyn Fn(
         &str,
         &[u8],
+        i64,
         Rc<RuntimeContext>,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, String>>>>,
 >;
@@ -48,7 +50,7 @@ pub type ServiceHandlerFn = Rc<
 /// use std::rc::Rc;
 /// use actr_sw_host::{WasmWorkload, register_workload};
 ///
-/// let workload = WasmWorkload::new(Rc::new(|route_key, bytes, ctx| {
+/// let workload = WasmWorkload::new(Rc::new(|route_key, bytes, timeout_ms, ctx| {
 ///     Box::pin(async move {
 ///         match route_key {
 ///             "echo.EchoService.Echo" => handle_echo(bytes, ctx).await,
@@ -74,9 +76,10 @@ impl WasmWorkload {
         &self,
         route_key: &str,
         request_bytes: &[u8],
+        timeout_ms: i64,
         ctx: Rc<RuntimeContext>,
     ) -> Result<Vec<u8>, String> {
-        (self.handler)(route_key, request_bytes, ctx).await
+        (self.handler)(route_key, request_bytes, timeout_ms, ctx).await
     }
 
     /// Get a reference to the underlying handler function.

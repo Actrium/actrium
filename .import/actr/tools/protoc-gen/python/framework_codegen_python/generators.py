@@ -498,12 +498,13 @@ def generate_actr_dispatch_function(
     for route in remote_routes:
         route_key = python_string_literal(route["route_key"])
         alias = python_string_literal(route["dependency_alias"])
+        payload_type = python_string_literal(route["payload_type"])
         lines.extend(
             [
                 f"    if route_key == {route_key}:",
                 f"        actr_type = await ctx.resolve_dependency({alias})",
                 "        target = await ctx.discover(actr_type)",
-                "        return await ctx.call_raw(target, route_key, payload, timeout_ms)",
+                f"        return await ctx.call_raw(target, route_key, payload, timeout_ms, {payload_type})",
             ]
         )
 

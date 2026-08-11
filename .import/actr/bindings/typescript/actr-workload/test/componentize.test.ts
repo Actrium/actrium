@@ -13,6 +13,7 @@ describe('componentize shim', () => {
     expect(source).toMatch(
       /activeWorkload\(\)\.dispatch\([\s\S]*?requestId:[\s\S]*?}, ctx\)/,
     );
+    expect(source).toContain('timeoutMs: Number(envelope?.timeoutMs ?? 0)');
   });
 
   it('forwards structured error events unchanged', () => {

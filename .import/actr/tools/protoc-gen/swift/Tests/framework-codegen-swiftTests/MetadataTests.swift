@@ -70,14 +70,13 @@ final class MetadataTests: XCTestCase {
       "AskAskServiceContinuePromptRpc")
   }
 
-  func testPayloadTypeSwiftMapsKnownValues() {
-    XCTAssertEqual(ActrFrameworkGenerator.payloadTypeSwift("rpcReliable"), ".rpcReliable")
-    XCTAssertEqual(ActrFrameworkGenerator.payloadTypeSwift("rpcSignal"), ".rpcSignal")
-    XCTAssertEqual(ActrFrameworkGenerator.payloadTypeSwift("streamReliable"), ".streamReliable")
-    XCTAssertEqual(ActrFrameworkGenerator.payloadTypeSwift("streamLatencyFirst"), ".streamLatencyFirst")
-    XCTAssertEqual(ActrFrameworkGenerator.payloadTypeSwift("mediaRtp"), ".mediaRtp")
-    // Unknown falls back to .rpcReliable.
-    XCTAssertEqual(ActrFrameworkGenerator.payloadTypeSwift("unknown"), ".rpcReliable")
+  func testPayloadTypeSwiftMapsKnownValues() throws {
+    XCTAssertEqual(try ActrFrameworkGenerator.payloadTypeSwift("rpcReliable"), ".rpcReliable")
+    XCTAssertEqual(try ActrFrameworkGenerator.payloadTypeSwift("rpcSignal"), ".rpcSignal")
+    XCTAssertEqual(try ActrFrameworkGenerator.payloadTypeSwift("streamReliable"), ".streamReliable")
+    XCTAssertEqual(try ActrFrameworkGenerator.payloadTypeSwift("streamLatencyFirst"), ".streamLatencyFirst")
+    XCTAssertEqual(try ActrFrameworkGenerator.payloadTypeSwift("mediaRtp"), ".mediaRtp")
+    XCTAssertThrowsError(try ActrFrameworkGenerator.payloadTypeSwift("unknown"))
   }
 
   func testNormalizeProtoPathHandlesBackslashesAndMissingSuffix() {
@@ -151,7 +150,7 @@ final class MetadataTests: XCTestCase {
     XCTAssertEqual(params["flag"], "")
   }
 
-  func testRemoteDispatcherResolvesDependencyAliasAtRuntime() {
+  func testRemoteDispatcherResolvesDependencyAliasAtRuntime() throws {
     let route = ActrFrameworkGenerator.DispatchRoute(
       route_key: "echo.EchoService.Echo",
       proto_file: "remote/echo/echo.proto",
@@ -159,11 +158,11 @@ final class MetadataTests: XCTestCase {
       method: "Echo",
       input_type: "echo.EchoRequest",
       output_type: "echo.EchoResponse",
-      payload_type: "rpcReliable",
+      payload_type: "rpcSignal",
       dependency_alias: "echo"
     )
 
-    let source = ActrFrameworkGenerator.generateUnifiedDispatcher(
+    let source = try ActrFrameworkGenerator.generateUnifiedDispatcher(
       localRoutes: [],
       remoteRoutes: [route],
       localServiceNames: [],
@@ -173,12 +172,13 @@ final class MetadataTests: XCTestCase {
     XCTAssertTrue(source.contains("ctx.resolveDependency(alias: \"echo\")"))
     XCTAssertTrue(source.contains("ctx.discover(targetType: actrType)"))
     XCTAssertTrue(source.contains("ctx.callRaw("))
+    XCTAssertTrue(source.contains("payloadType: .rpcSignal"))
     XCTAssertTrue(source.contains("timeoutMs: timeoutMs"))
     XCTAssertFalse(source.contains("remoteTargets"))
     XCTAssertTrue(source.contains("handler: any ActrDispatchHandler"))
   }
 
-  func testLocalDispatcherRequiresUnifiedHandler() {
+  func testLocalDispatcherRequiresUnifiedHandler() throws {
     let route = ActrFrameworkGenerator.DispatchRoute(
       route_key: "echo.EchoService.Echo",
       proto_file: "local/echo.proto",
@@ -190,7 +190,7 @@ final class MetadataTests: XCTestCase {
       dependency_alias: nil
     )
 
-    let source = ActrFrameworkGenerator.generateUnifiedDispatcher(
+    let source = try ActrFrameworkGenerator.generateUnifiedDispatcher(
       localRoutes: [route],
       remoteRoutes: [],
       localServiceNames: ["echo.EchoService"],

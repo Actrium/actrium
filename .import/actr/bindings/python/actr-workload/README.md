@@ -83,6 +83,14 @@ class Workload(WorkloadProtocol):
         return bytes(envelope.payload)
 ```
 
+`Workload` automatically uses the runtime-generated
+`actr_workload_bindings.exports.Workload` base when componentize-py imports
+the workload.  That base supplies the private `_async_start_*` shims required
+by async WIT exports.  The authoring package falls back to a plain base when
+bindings are not present, so source modules remain importable before a build.
+Lifecycle and dispatch methods are still wrapped so their raw invocation
+context arrives as `ActrContext`.
+
 The package intentionally does not implement runtime hosting. Host
 execution belongs to the actr runtime; this package only supports Python
 workload authoring and build-time componentization.

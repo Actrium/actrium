@@ -49,8 +49,9 @@ private fun remoteRoute(
         inputType: String,
         outputType: String,
         dependencyAlias: String,
+        payloadType: String = "rpcReliable",
 ): String =
-        """{"route_key":"$routeKey","proto_file":"$protoFile","proto_service":"$protoService","method":"$method","input_type":"$inputType","output_type":"$outputType","payload_type":"rpcReliable","dependency_alias":"$dependencyAlias"}"""
+        """{"route_key":"$routeKey","proto_file":"$protoFile","proto_service":"$protoService","method":"$method","input_type":"$inputType","output_type":"$outputType","payload_type":"$payloadType","dependency_alias":"$dependencyAlias"}"""
 
 class KotlinActorGeneratorTest {
     @Test
@@ -488,7 +489,7 @@ class KotlinActorGeneratorTest {
                 remoteRoute("ask.AskService.Ask", "ask.proto",
                         "ask.AskService", "Ask",
                         "ask.Request", "ask.Response",
-                        "ask-service")
+                        "ask-service", "rpcSignal")
         ))
         val request =
                 CodeGeneratorRequest.newBuilder()
@@ -590,7 +591,9 @@ class KotlinActorGeneratorTest {
 
         assertContains(dispatcher, "val actrType = ctx.resolveDependency(\"ask-service\")")
         assertContains(dispatcher, "val target = ctx.discover(actrType)")
-        assertContains(dispatcher, "ctx.callRaw(target, routeKey, payload, timeoutMs)")
+        assertContains(dispatcher, "import io.actrium.actr.PayloadType")
+        assertContains(dispatcher, "require(timeoutMs > 0) { \"timeoutMs must be > 0, got \$timeoutMs\" }")
+        assertContains(dispatcher, "ctx.callRaw(target, routeKey, PayloadType.RPC_SIGNAL, payload, timeoutMs)")
         assertFalse(dispatcher.contains("remoteTargets"))
         assertFalse(dispatcher.contains("ActrType("))
     }

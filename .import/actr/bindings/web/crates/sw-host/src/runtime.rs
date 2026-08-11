@@ -3161,7 +3161,7 @@ thread_local! {
 /// ```ignore
 /// use actr_sw_host::{WasmWorkload, register_workload};
 ///
-/// let workload = WasmWorkload::new(Rc::new(|route_key, bytes, ctx| {
+/// let workload = WasmWorkload::new(Rc::new(|route_key, bytes, timeout_ms, ctx| {
 ///     Box::pin(async move {
 ///         match route_key {
 ///             "echo.EchoService.Echo" => handle_echo(bytes, ctx).await,
@@ -3376,7 +3376,14 @@ pub async fn register_client(
                 );
 
                 // Execute the actor business logic via workload dispatch.
-                let result = workload.dispatch(&route_key, &request_bytes, handler_ctx).await;
+                let result = workload
+                    .dispatch(
+                        &route_key,
+                        &request_bytes,
+                        envelope.timeout_ms,
+                        handler_ctx,
+                    )
+                    .await;
 
                 // `tell()` is fire-and-forget, so no response is built or sent.
                 if is_tell {
@@ -3763,7 +3770,7 @@ pub async fn handle_dom_control(client_id: String, payload: JsValue) -> Result<(
         let runtime_for_response = Rc::clone(runtime);
         wasm_bindgen_futures::spawn_local(async move {
             let result = workload
-                .dispatch(&route_key, &payload_bytes, handler_ctx)
+                .dispatch(&route_key, &payload_bytes, timeout_ms as i64, handler_ctx)
                 .await;
 
             // Send response back to DOM as control_response

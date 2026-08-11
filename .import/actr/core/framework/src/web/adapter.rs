@@ -232,6 +232,7 @@ fn envelope_from_wit(envelope: wit::RpcEnvelope) -> RpcEnvelope {
         } else {
             Some(Bytes::from(envelope.payload))
         },
+        timeout_ms: envelope.timeout_ms,
         direction: Some(Direction::Request as i32),
         ..Default::default()
     }

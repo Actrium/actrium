@@ -128,6 +128,7 @@ export interface RpcEnvelopeBridge {
   routeKey: string;
   payload: Buffer;
   requestId: string;
+  timeoutMs: number;
 }
 
 export interface StreamSignal {

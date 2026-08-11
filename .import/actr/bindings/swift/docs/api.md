@@ -281,13 +281,15 @@ public struct MetadataEntry: Equatable, Hashable {
 
 #### `RpcEnvelopeBridge`
 
-Envelope passed to workloads when dispatching inbound RPC messages.
+Envelope passed to workloads when dispatching inbound RPC messages. `timeoutMs`
+is the request deadline in milliseconds; responses and tells carry zero.
 
 ```swift
 public struct RpcEnvelopeBridge: Sendable {
     public let routeKey: String
     public let payload: Data
     public let requestId: String
+    public let timeoutMs: Int64
 }
 ```
 

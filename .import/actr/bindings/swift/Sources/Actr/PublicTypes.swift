@@ -461,18 +461,21 @@ public struct RpcEnvelope: Equatable, Hashable, Sendable {
     public var routeKey: String
     public var payload: Data
     public var requestId: String
+    public var timeoutMs: Int64
 
-    public init(routeKey: String, payload: Data, requestId: String) {
+    public init(routeKey: String, payload: Data, requestId: String, timeoutMs: Int64 = 0) {
         self.routeKey = routeKey
         self.payload = payload
         self.requestId = requestId
+        self.timeoutMs = timeoutMs
     }
 
     init(bridge: ActrBindings.RpcEnvelopeBridge) {
         self.init(
             routeKey: bridge.routeKey,
             payload: bridge.payload,
-            requestId: bridge.requestId
+            requestId: bridge.requestId,
+            timeoutMs: bridge.timeoutMs
         )
     }
 
@@ -480,7 +483,8 @@ public struct RpcEnvelope: Equatable, Hashable, Sendable {
         ActrBindings.RpcEnvelopeBridge(
             routeKey: routeKey,
             payload: payload,
-            requestId: requestId
+            requestId: requestId,
+            timeoutMs: timeoutMs
         )
     }
 }

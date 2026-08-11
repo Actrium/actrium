@@ -78,9 +78,12 @@ impl DispatchSpec {
                         "remote proto `{proto_file}` must be located under remote/<dependency-alias>/"
                     )));
                 }
-                if service.side == ProtoSide::Remote && method.payload_type != "rpcReliable" {
+                if service.side == ProtoSide::Remote
+                    && !matches!(method.payload_type.as_str(), "rpcReliable" | "rpcSignal")
+                {
                     return Err(ActrCliError::config_error(format!(
-                        "remote route `{}` uses unsupported payload type `{}`; unified raw dispatch currently supports only rpcReliable",
+                        "remote route `{}` uses payload type `{}`, but callRaw only supports \
+                         `rpcReliable` and `rpcSignal`",
                         method.route_key, method.payload_type
                     )));
                 }

@@ -309,14 +309,30 @@ impl Context for DynclibContext {
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
+        self.call_raw_with_payload_type(
+            target,
+            route_key,
+            PayloadType::RpcReliable,
+            payload,
+            timeout_ms,
+        )
+        .await
+    }
+
+    async fn call_raw_with_payload_type(
+        &self,
+        target: &ActrId,
+        route_key: &str,
+        payload_type: PayloadType,
+        payload: Bytes,
+        timeout_ms: i64,
+    ) -> ActorResult<Bytes> {
         let request = HostCallRawV1 {
             route_key: route_key.to_string(),
             target: target.clone(),
             payload: payload.to_vec(),
             timeout_ms,
-            // The Context::call_raw contract has no lane parameter; preserve
-            // the lane the host historically applied to raw calls.
-            payload_type: PayloadType::RpcReliable as i32,
+            payload_type: payload_type as i32,
         };
         let frame = request.to_frame().map_err(abi_error_to_actr)?;
         let reply = self.invoke_frame(frame)?;

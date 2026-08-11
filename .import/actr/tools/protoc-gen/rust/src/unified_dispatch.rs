@@ -7,8 +7,8 @@
 //!   `ActrDispatchHandler` method, and encodes the response.
 //! - **Remote route**: resolves the dependency alias via
 //!   `Context::resolve_dependency`, discovers a route candidate, and calls
-//!   `Context::call_raw` with the caller-supplied `timeout_ms` (the raw
-//!   lane is fixed to `RpcReliable`).
+//!   `Context::call_raw_with_payload_type` with the caller-supplied
+//!   `timeout_ms` and the route's declared RPC lane.
 //! - **Unknown route**: returns `ActrError::UnknownRoute`.
 //!
 //! The `ActrDispatchHandler` trait aggregates every local service method
@@ -41,6 +41,7 @@ struct LocalRouteInfo {
 struct RemoteRouteInfo {
     route_key: String,
     dependency_alias: String,
+    payload_type: &'static str,
 }
 
 /// Type-owner map: fully-qualified proto type name -> declaring proto package.
@@ -144,6 +145,7 @@ impl<'a> UnifiedDispatcherGenerator<'a> {
             routes.push(RemoteRouteInfo {
                 route_key: route.route_key.clone(),
                 dependency_alias: alias.to_string(),
+                payload_type: rust_rpc_payload_type_variant(&route.payload_type)?,
             });
         }
         routes.sort_by(|a, b| a.route_key.cmp(&b.route_key));
@@ -284,13 +286,15 @@ pub trait ActrDispatchHandler: actr_framework::MaybeSendSync + 'static {}"#
         for route in remote_routes {
             let route_key = &route.route_key;
             let alias = &route.dependency_alias;
+            let payload_type = route.payload_type;
             let arm = format!(
                 r#"{route_key:?} => {{
                     let actr_type = ctx.resolve_dependency({alias:?}).await?;
                     let target = ctx.discover_route_candidate(&actr_type).await?;
-                    ctx.call_raw(
+                    ctx.call_raw_with_payload_type(
                         &target,
                         route_key,
+                        PayloadType::{payload_type},
                         Bytes::copy_from_slice(payload),
                         timeout_ms,
                     ).await
@@ -306,7 +310,7 @@ pub trait ActrDispatchHandler: actr_framework::MaybeSendSync + 'static {}"#
 ///
 /// Routes `route_key` / `payload` to either a local `ActrDispatchHandler`
 /// method (decode → invoke → encode) or a remote dependency (resolve alias
-/// → discover → raw forwarding on the reliable lane). Unknown routes
+/// → discover → raw forwarding on the route's declared RPC lane). Unknown routes
 /// return `ActrError::UnknownRoute`.
 ///
 /// `timeout_ms` is supplied by the Rust workload adapter because the current
@@ -425,6 +429,16 @@ impl<H: ActrDispatchHandler> Workload for ActrWorkload<H> {{
         } else {
             String::new()
         }
+    }
+}
+
+fn rust_rpc_payload_type_variant(value: &str) -> Result<&'static str> {
+    match value.to_ascii_lowercase().as_str() {
+        "rpcreliable" => Ok("RpcReliable"),
+        "rpcsignal" => Ok("RpcSignal"),
+        _ => Err(anyhow!(
+            "unsupported remote RPC payload_type `{value}` in DispatchSpec"
+        )),
     }
 }
 
@@ -550,8 +564,8 @@ mod tests {
     }
 
     #[test]
-    fn remote_route_uses_resolve_dependency_and_call_raw() {
-        let spec = make_spec(vec![make_route(
+    fn remote_route_preserves_payload_type_in_raw_call() {
+        let mut route = make_route(
             "other.OtherService.Ping",
             "remote/other/other.proto",
             "other.OtherService",
@@ -559,7 +573,9 @@ mod tests {
             "other.PingRequest",
             "other.PingResponse",
             Some("other"),
-        )]);
+        );
+        route.payload_type = "rpcSignal".to_string();
+        let spec = make_spec(vec![route]);
         let owners = HashMap::new();
         let method = MethodDescriptorProto {
             name: Some("Ping".to_string()),
@@ -573,13 +589,42 @@ mod tests {
         let code = dispatcher_gen.generate(&methods).unwrap();
         assert!(code.contains("resolve_dependency"));
         assert!(code.contains("discover_route_candidate"));
-        assert!(code.contains("call_raw"));
+        assert!(code.contains("call_raw_with_payload_type"));
+        assert!(code.contains("PayloadType::RpcSignal"));
         assert!(code.contains("\"other.OtherService.Ping\""));
         assert!(code.contains("\"other\""));
         assert!(!code.contains("call_raw_with_timeout"));
         assert!(!code.contains("30_000"));
         assert!(!code.contains("30000"));
         assert!(!code.contains("DEFAULT_RPC_TIMEOUT_MS"));
+    }
+
+    #[test]
+    fn remote_route_rejects_non_rpc_payload_type() {
+        let mut route = make_route(
+            "other.OtherService.Ping",
+            "remote/other/other.proto",
+            "other.OtherService",
+            "Ping",
+            "other.PingRequest",
+            "other.PingResponse",
+            Some("other"),
+        );
+        route.payload_type = "streamReliable".to_string();
+        let spec = make_spec(vec![route]);
+        let method = MethodDescriptorProto {
+            name: Some("Ping".to_string()),
+            input_type: Some(".other.PingRequest".to_string()),
+            output_type: Some(".other.PingResponse".to_string()),
+            ..Default::default()
+        };
+        let methods = HashMap::from([("other.OtherService.Ping".to_string(), &method)]);
+
+        let error = UnifiedDispatcherGenerator::new(&spec, &HashMap::new())
+            .generate(&methods)
+            .unwrap_err();
+
+        assert!(error.to_string().contains("streamReliable"));
     }
 
     #[test]
