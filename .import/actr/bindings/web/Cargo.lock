@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "actr-dom-bridge"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "actr-protocol",
  "actr-web-common",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[package]]
 name = "actr-framework"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -45,7 +45,7 @@ dependencies = [
 
 [[package]]
 name = "actr-mailbox-web"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "async-trait",
  "futures",
@@ -65,7 +65,7 @@ dependencies = [
 
 [[package]]
 name = "actr-pack"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "actr-protocol",
  "base64",
@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-traits"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "async-trait",
  "hex",
@@ -90,7 +90,7 @@ dependencies = [
 
 [[package]]
 name = "actr-platform-web"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "actr-platform-traits",
  "actr-protocol",
@@ -115,7 +115,7 @@ dependencies = [
 
 [[package]]
 name = "actr-protocol"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "anyhow",
  "base64",
@@ -135,7 +135,7 @@ dependencies = [
 
 [[package]]
 name = "actr-runtime-mailbox"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "actr-protocol",
  "anyhow",
@@ -151,7 +151,7 @@ dependencies = [
 
 [[package]]
 name = "actr-sw-host"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "actr-framework",
  "actr-mailbox-web",
@@ -193,7 +193,7 @@ dependencies = [
 
 [[package]]
 name = "actr-web-abi"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "async-trait",
  "js-sys",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "actr-web-common"
-version = "0.8.1"
+version = "0.8.2"
 dependencies = [
  "actr-protocol",
  "bytes",
