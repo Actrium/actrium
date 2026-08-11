@@ -1810,6 +1810,49 @@ test_protoc_plugin_release_workflow_is_reusable() {
   done
 }
 
+test_actrsharp_release_workflow_supports_manual_recovery() {
+  local reusable=.github/workflows/publish-actrsharp.yml
+  local manual=.github/workflows/release-actrsharp.yml
+  local verify=.github/workflows/release-train-verify.yml
+  [[ -f "$reusable" ]] || { printf 'reusable ActrSharp release workflow is missing\n' >&2; exit 1; }
+  [[ -f "$manual" ]] || { printf 'manual ActrSharp release workflow is missing\n' >&2; exit 1; }
+
+  grep -q '^  workflow_call:' "$reusable" || {
+    printf 'reusable ActrSharp workflow must declare workflow_call\n' >&2
+    exit 1
+  }
+  grep -q '^  workflow_dispatch:' "$manual" || {
+    printf 'manual ActrSharp workflow must declare workflow_dispatch\n' >&2
+    exit 1
+  }
+  grep -q 'uses: ./\.github/workflows/publish-actrsharp.yml' "$manual" || {
+    printf 'manual ActrSharp workflow must call the reusable workflow\n' >&2
+    exit 1
+  }
+  grep -Fq 'ref: refs/tags/${{ inputs.tag }}' "$manual" || {
+    printf 'manual ActrSharp workflow must resolve the exact release tag\n' >&2
+    exit 1
+  }
+  grep -Fq 'release_sha: ${{ needs.resolve-release.outputs.release_sha }}' "$manual" || {
+    printf 'manual ActrSharp workflow must publish the resolved tag SHA\n' >&2
+    exit 1
+  }
+  grep -Fq 'publish: ${{ !inputs.dry_run }}' "$manual" || {
+    printf 'manual ActrSharp workflow must default to an explicit dry-run choice\n' >&2
+    exit 1
+  }
+  grep -Fq '$tagRefspec = "{0}:{0}" -f $tagRef' "$reusable" || {
+    printf 'ActrSharp tag refspec must delimit the PowerShell environment variable\n' >&2
+    exit 1
+  }
+  grep -Fq 'git fetch origin $env:ACTR_TAG_REFSPEC' "$reusable" || {
+    printf 'ActrSharp tag fetch must use the validated refspec\n' >&2
+    exit 1
+  }
+  assert_eq "2" "$(grep -Fc '.github/workflows/release-actrsharp.yml' "$verify")" \
+    "manual ActrSharp workflow verify trigger count"
+}
+
 test_release_train_publishes_release_assets_in_parallel() {
   local workflow=.github/workflows/release-train.yml
   grep -q '^  publish-cli:' "$workflow" || {
@@ -1923,6 +1966,7 @@ test_cli_sha256_uses_sha256sum_without_shasum
 test_cli_release_upload_asset_deletes_existing_asset_before_retry
 test_cli_validation_tag_requires_strict_semver
 test_protoc_plugin_release_workflow_is_reusable
+test_actrsharp_release_workflow_supports_manual_recovery
 test_release_train_publishes_release_assets_in_parallel
 test_actrix_release_stages_binaries_with_bash
 test_publish_web_workflow_has_timeout

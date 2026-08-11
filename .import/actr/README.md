@@ -136,6 +136,9 @@ server crates with one shared stable version.
   no `NPM_TOKEN` secret is needed.
 - Reports are generated under `release/reports/` and uploaded as workflow
   artifacts.
+- To validate or recover ActrSharp publishing for an existing stable tag,
+  manually run `.github/workflows/release-actrsharp.yml`. It defaults to a
+  dry-run and publishes only the missing NuGet package or symbol asset.
 
 The release train publishes all components in a single run:
   1. Foundation crates → protoc-gen crates → Python (optional) → SDK → CLI →
