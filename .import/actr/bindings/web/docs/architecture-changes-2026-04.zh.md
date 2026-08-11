@@ -376,7 +376,7 @@ T18 诊断 (4 轮 spike)
 - 锁定稳定的 SDK 表面，方便后续内部实现重写不破坏外部
 - 降低 IDE 自动补全噪声
 
-具体扫描清单见 `core/hyper/API_CLEANUP_PROGRESS.zh.md`。
+收敛策略：把内部实现细节（结构体字段、内部 trait、辅助函数）降级为 `pub(crate)`，仅保留 `Node` / `Hyper` / `WorkloadPackage` / `Context` / `RpcRequest` 等核心稳定类型对外暴露。
 
 ---
 
@@ -517,7 +517,6 @@ pub mod types;  pub mod guest;  pub mod host;  // 自 WIT 生成
 
 ```rust
 // core/hyper 大量 pub → pub(crate)
-// 详细清单见 core/hyper/API_CLEANUP_PROGRESS.zh.md
 // 对外仍提供：Node / Hyper / WorkloadPackage / Context / RpcRequest 等核心类型
 
 // bindings/web/crates/sw-host
@@ -695,18 +694,17 @@ d1fad7f5  docs(examples/ts): clarify jco componentize vs transpile
    - 重点是 `core/hyper/src/lib.rs` + `core/hyper/src/lifecycle/node.rs`
 
 4. **API 收敛批量**
-   - 不必逐 commit 看；查 `core/hyper/API_CLEANUP_PROGRESS.zh.md` 知道整理思路
+   - 不必逐 commit 看；整理思路见上节「API 公共面收敛」（§3.5）
 
 5. **Phase 8 删除清单 + 后续清理**
    - commit `855bb658` + `cae0d55b` + `15fa2aa1` + `67736e2d` 一组
    - 验证：`grep -rn "jco\|Component Model" bindings/web/ --include='*.rs'` 不应命中浏览器路径，只命中 wasmtime native 路径
 
-如果时间紧，最关键的 3 个文件读：
+如果时间紧，最关键的 2 个文件读：
 
 ```
 bindings/web/docs/option-u-wit-compile-web.zh.md   # 整体设计
 bindings/web/docs/td-006-multi-client-rpc-analysis.zh.md   # 最难的 bug
-core/hyper/API_CLEANUP_PROGRESS.zh.md   # 公开面收敛思路
 ```
 
 ---
