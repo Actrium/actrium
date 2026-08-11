@@ -102,6 +102,13 @@ jobs:
       ACTR_REQUIRE_WASM_FIXTURE: "1"
     steps:
       - uses: actions/checkout@v5
+      - name: OTel payload-logging guard
+        # Anti-regression guard for issue #484: the OTel tracing bridge exports
+        # every tracing event that passes the filter to vector → VictoriaLogs
+        # (unauthenticated query port). This step must run in the PR-gating
+        # path, not only in the manual-dispatch ci-rust.yml job, otherwise it
+        # provides zero regression prevention for merges.
+        run: bash .github/workflows/scripts/check-payload-logging.sh
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:

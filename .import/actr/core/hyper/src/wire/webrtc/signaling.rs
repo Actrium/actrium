@@ -1974,7 +1974,13 @@ impl WebSocketSignalingClient {
                                 };
 
                                 stats.messages_received.fetch_add(1, Ordering::Relaxed);
-                                tracing::debug!("Received message: {:?}", envelope);
+                                // Log only non-payload identifiers; never format the envelope
+                                // (which carries message content) — see issue #484.
+                                tracing::debug!(
+                                    envelope_id = %envelope.envelope_id,
+                                    reply_for = ?envelope.reply_for,
+                                    "Received signaling envelope"
+                                );
                                 if let Some(reply_for) = envelope.reply_for.clone() {
                                     if let Some(sender) = pending.lock().await.remove(&reply_for) {
                                         #[cfg(feature = "opentelemetry")]
@@ -2034,7 +2040,18 @@ impl WebSocketSignalingClient {
                         liveness_generation.fetch_add(1, Ordering::Release);
                     }
                     Ok(other) => {
-                        tracing::warn!("Received non-binary frame, ignoring: {other:?}");
+                        // Log only the frame variant, not its content — a `Text`
+                        // frame's payload is user data and must not be exported
+                        // via OTLP even at `info`/default filter (issue #484).
+                        let kind = match &other {
+                            tokio_tungstenite::tungstenite::Message::Text(_) => "Text",
+                            tokio_tungstenite::tungstenite::Message::Close(_) => "Close",
+                            tokio_tungstenite::tungstenite::Message::Frame(_) => "Frame",
+                            tokio_tungstenite::tungstenite::Message::Ping(_) => "Ping",
+                            tokio_tungstenite::tungstenite::Message::Pong(_) => "Pong",
+                            tokio_tungstenite::tungstenite::Message::Binary(_) => "Binary",
+                        };
+                        tracing::warn!("Received non-binary frame ({kind}), ignoring");
                     }
                     Err(e) => {
                         stats.errors.fetch_add(1, Ordering::Relaxed);

@@ -946,7 +946,6 @@ impl WebRtcConnection {
         data_channel.on_message(Box::new(move |msg: RTCDataChannelMessage| {
             // zero-copy: directly using msg.data (Bytes)
             let data = msg.data.freeze();
-            tracing::debug!("🔄 WebRTC DataChannel message received1111: {:?}", data);
             let tx = tx_clone.clone();
             Box::pin(async move {
                 if let Err(e) = tx.send(data).await {

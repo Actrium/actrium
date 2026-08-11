@@ -268,12 +268,16 @@ impl HostWithStore<HostState> for HostState {
         message: String,
     ) -> wasmtime::Result<()> {
         match level.as_str() {
-            "error" => tracing::error!(target: "wasm-guest", "{message}"),
-            "warn" => tracing::warn!(target: "wasm-guest", "{message}"),
-            "info" => tracing::info!(target: "wasm-guest", "{message}"),
-            "debug" => tracing::debug!(target: "wasm-guest", "{message}"),
-            "trace" => tracing::trace!(target: "wasm-guest", "{message}"),
-            other => tracing::info!(target: "wasm-guest", level = %other, "{message}"),
+            // `message` is guest-authored (the WASM guest calls the host `log`
+            // import with a string it chose); relaying it is a separate
+            // guest-trust question, not host payload leakage — see issue #484
+            // follow-up. Suppressed via the allow-payload-logging marker.
+            "error" => tracing::error!(target: "wasm-guest", "{message}"), // allow-payload-logging
+            "warn" => tracing::warn!(target: "wasm-guest", "{message}"),   // allow-payload-logging
+            "info" => tracing::info!(target: "wasm-guest", "{message}"),   // allow-payload-logging
+            "debug" => tracing::debug!(target: "wasm-guest", "{message}"), // allow-payload-logging
+            "trace" => tracing::trace!(target: "wasm-guest", "{message}"), // allow-payload-logging
+            other => tracing::info!(target: "wasm-guest", level = %other, "{message}"), // allow-payload-logging
         }
         Ok(())
     }
