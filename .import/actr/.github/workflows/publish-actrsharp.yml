@@ -260,26 +260,41 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
           $seen = $false
-          for ($i = 0; $i -lt 12; $i++) {
-            $response = gh api "/orgs/Actrium/packages/nuget/ActrSharp/versions" `
-              --paginate --jq '.[].name' 2>$null
-            if ($LASTEXITCODE -eq 0) {
-              if (@($response) -contains $env:ACTR_VERSION) {
+          $linked = $false
+          $package = $null
+          # GitHub Packages infers the package->repository link asynchronously
+          # after a version is pushed, so the link may be empty for a few minutes
+          # right after publish (v0.8.1/v0.8.2 failed here: push succeeded but
+          # repository.full_name was still null at the one-shot check). Poll for
+          # both version visibility and a populated link before validating.
+          for ($i = 0; $i -lt 30; $i++) {
+            if (-not $seen) {
+              $response = gh api "/orgs/Actrium/packages/nuget/ActrSharp/versions" `
+                --paginate --jq '.[].name' 2>$null
+              if ($LASTEXITCODE -eq 0 -and @($response) -contains $env:ACTR_VERSION) {
                 $seen = $true
-                break
               }
             }
+            if (-not $linked) {
+              $pkgJson = gh api "/orgs/Actrium/packages/nuget/ActrSharp" 2>$null
+              if ($LASTEXITCODE -eq 0) {
+                $package = $pkgJson | ConvertFrom-Json
+                if ($package.repository.full_name -eq "Actrium/actr") {
+                  $linked = $true
+                }
+              }
+            }
+            if ($seen -and $linked) { break }
             Start-Sleep -Seconds 10
           }
           if (-not $seen) {
             throw "ActrSharp $env:ACTR_VERSION is not visible in GitHub Packages after polling."
           }
-
-          $package = gh api "/orgs/Actrium/packages/nuget/ActrSharp" | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Unable to read ActrSharp package metadata." }
-          if ($package.repository.full_name -ne "Actrium/actr") {
-            throw "ActrSharp is not linked to Actrium/actr (got: $($package.repository.full_name))."
+          if (-not $linked) {
+            $last = if ($package) { $package.repository.full_name } else { "<no metadata>" }
+            throw "ActrSharp is not linked to Actrium/actr after polling (last saw: '$last')."
           }
+
           if ($package.visibility -ne "internal") {
             Write-Host "ActrSharp visibility is '$($package.visibility)'; setting it to internal."
             gh api --method PATCH "/orgs/Actrium/packages/nuget/ActrSharp" -f visibility=internal | Out-Null
