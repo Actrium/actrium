@@ -72,6 +72,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "host-api-v01-guest"
+version = "0.0.0"
+dependencies = [
+ "keel-native-guest",
+]
+
+[[package]]
 name = "keel-native-guest"
 version = "0.0.0"
 dependencies = [

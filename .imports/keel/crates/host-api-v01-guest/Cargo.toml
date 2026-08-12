@@ -1,0 +1,13 @@
+[package]
+name = "host-api-v01-guest"
+version.workspace = true
+edition.workspace = true
+description = "Native Host API v0.1 end-to-end fixture using the typed Rust bindings."
+license.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+keel-native-guest = { path = "../keel-native-guest" }
