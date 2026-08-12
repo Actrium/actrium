@@ -10,7 +10,13 @@ import { NativeGuestHost } from '../native-guest-host';
 // A tiny host module defined IN the test, mirroring the platform's host:store
 // contract (putText/getText shapes from host-store.ts): keel knows nothing
 // about specific capabilities, so this proves the native-guest ABI generically.
-function storeDispatch(options: { throwOnPut?: boolean; structuredErrorOnPut?: boolean } = {}) {
+function storeDispatch(
+  options: {
+    throwOnPut?: boolean;
+    structuredErrorOnPut?: boolean;
+    invalidStructuredErrorOnPut?: boolean;
+  } = {}
+) {
   const store = new Map<string, string>();
   const contract = defineKeelContract({
     version: '1',
@@ -47,6 +53,14 @@ function storeDispatch(options: { throwOnPut?: boolean; structuredErrorOnPut?: b
             name: 'HostError',
             method: 'store.putText',
             code: 'quota-exceeded',
+            retryable: false,
+          });
+        }
+        if (options.invalidStructuredErrorOnPut) {
+          throw Object.assign(new Error('credential must not cross the ABI'), {
+            name: 'HostError',
+            method: 'store.get',
+            code: 'Denied',
             retryable: false,
           });
         }
@@ -180,6 +194,18 @@ describe('NativeGuestHost — native (non-JS) guest host:* ABI', () => {
       code: 'quota-exceeded',
       retryable: false,
     });
+  });
+
+  it('redacts a malformed or cross-method structured error', async () => {
+    const { table } = storeDispatch({ invalidStructuredErrorOnPut: true });
+    const host = new NativeGuestHost({ dispatch: table });
+    await host.load(WASM);
+    await host.drain();
+
+    const { ok, result } = readResolve(host);
+    expect(ok).toBe(0);
+    expect(result).toEqual({ error: 'host call failed' });
+    expect(JSON.stringify(result)).not.toContain('credential');
   });
 });
 
