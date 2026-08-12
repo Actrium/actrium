@@ -11,6 +11,50 @@ export interface NativeWorkerError {
   retryable?: boolean;
 }
 
+const HOST_ERROR_CODE = /^[a-z][a-z0-9-]{0,62}$/;
+const PUBLIC_HOST_ERROR_MESSAGE = 'Host API call failed';
+
+interface StructuredHostErrorFields {
+  method: string;
+  code: string;
+  retryable: boolean;
+}
+
+const structuredHostErrorFields = (
+  value: unknown,
+  expectedMethod?: string
+): StructuredHostErrorFields | null => {
+  if (typeof value !== 'object' || value === null) return null;
+  try {
+    const candidate = value as { method?: unknown; code?: unknown; retryable?: unknown };
+    const method = candidate.method;
+    const code = candidate.code;
+    const retryable = candidate.retryable;
+    if (
+      typeof method !== 'string' ||
+      (expectedMethod !== undefined && method !== expectedMethod) ||
+      typeof code !== 'string' ||
+      !HOST_ERROR_CODE.test(code) ||
+      typeof retryable !== 'boolean'
+    ) {
+      return null;
+    }
+    return { method, code, retryable };
+  } catch {
+    // An arbitrary thrown object may expose throwing accessors.
+    return null;
+  }
+};
+
+const ordinaryWorkerError = (value: unknown): NativeWorkerError => {
+  try {
+    const error = value instanceof Error ? value : new Error(String(value));
+    return { name: error.name, message: error.message, stack: error.stack };
+  } catch {
+    return { name: 'Error', message: 'Unknown worker error' };
+  }
+};
+
 export type MainToNativeWorkerMessage =
   | { type: 'init'; wasmBytes: ArrayBuffer }
   | { type: 'init'; wasmModule: WebAssembly.Module }
@@ -67,38 +111,55 @@ export type NativeWorkerToMainMessage =
 
 // Reason: JavaScript permits throwing arbitrary values across every async boundary.
 export function serializeNativeWorkerError(value: unknown): NativeWorkerError {
-  const error = value instanceof Error ? value : new Error(String(value));
-  const candidate = value as { method?: unknown; code?: unknown; retryable?: unknown } | null;
-  const structured =
-    candidate &&
-    typeof candidate.method === 'string' &&
-    typeof candidate.code === 'string' &&
-    /^[a-z][a-z0-9-]{0,63}$/.test(candidate.code) &&
-    typeof candidate.retryable === 'boolean'
-      ? {
-          method: candidate.method,
-          code: candidate.code,
-          retryable: candidate.retryable,
-        }
-      : {};
-  return { name: error.name, message: error.message, stack: error.stack, ...structured };
+  const structured = structuredHostErrorFields(value);
+  if (structured) {
+    // HostError's three public fields are the whole cross-seam payload. Error
+    // messages, causes and stacks may contain provider URLs, tokens or paths.
+    return { name: 'HostError', message: PUBLIC_HOST_ERROR_MESSAGE, ...structured };
+  }
+  return ordinaryWorkerError(value);
+}
+
+/** Serialize an exception from a guest-initiated host call, never diagnostics. */
+export function serializeNativeHostCallError(
+  value: unknown,
+  expectedMethod: string
+): NativeWorkerError {
+  const structured = structuredHostErrorFields(value, expectedMethod);
+  return structured
+    ? { name: 'HostError', message: PUBLIC_HOST_ERROR_MESSAGE, ...structured }
+    : { name: 'Error', message: PUBLIC_HOST_ERROR_MESSAGE };
 }
 
 export function deserializeNativeWorkerError(value: NativeWorkerError): Error {
-  const error = new Error(value.message);
-  error.name = value.name;
-  if (value.stack) error.stack = value.stack;
-  if (
-    typeof value.method === 'string' &&
-    typeof value.code === 'string' &&
-    /^[a-z][a-z0-9-]{0,63}$/.test(value.code) &&
-    typeof value.retryable === 'boolean'
-  ) {
-    Object.assign(error, {
-      method: value.method,
-      code: value.code,
-      retryable: value.retryable,
-    });
+  if (typeof value !== 'object' || value === null) return new Error('Malformed worker error');
+  try {
+    const keys = Object.keys(value).sort().join(',');
+    const structured = structuredHostErrorFields(value);
+    if (keys === 'code,message,method,name,retryable' && structured && value.name === 'HostError') {
+      const error = new Error(PUBLIC_HOST_ERROR_MESSAGE);
+      error.name = 'HostError';
+      Object.assign(error, {
+        method: structured.method,
+        code: structured.code,
+        retryable: structured.retryable,
+      });
+      return error;
+    }
+
+    if (
+      (keys !== 'message,name' && keys !== 'message,name,stack') ||
+      typeof value.name !== 'string' ||
+      typeof value.message !== 'string' ||
+      (value.stack !== undefined && typeof value.stack !== 'string')
+    ) {
+      return new Error('Malformed worker error');
+    }
+    const error = new Error(value.message);
+    error.name = value.name;
+    if (value.stack) error.stack = value.stack;
+    return error;
+  } catch {
+    return new Error('Malformed worker error');
   }
-  return error;
 }

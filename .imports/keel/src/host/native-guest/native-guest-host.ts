@@ -105,20 +105,41 @@ export interface NativeHostCallContext {
  */
 function structuredHostError(error: unknown, expectedMethod: string): object | null {
   if (typeof error !== 'object' || error === null) return null;
-  const candidate = error as { method?: unknown; code?: unknown; retryable?: unknown };
-  if (
-    candidate.method !== expectedMethod ||
-    typeof candidate.code !== 'string' ||
-    !/^[a-z][a-z0-9-]{0,63}$/.test(candidate.code) ||
-    typeof candidate.retryable !== 'boolean'
-  ) {
+  try {
+    const candidate = error as { method?: unknown; code?: unknown; retryable?: unknown };
+    const method = candidate.method;
+    const code = candidate.code;
+    const retryable = candidate.retryable;
+    if (
+      method !== expectedMethod ||
+      typeof code !== 'string' ||
+      !/^[a-z][a-z0-9-]{0,62}$/.test(code) ||
+      typeof retryable !== 'boolean'
+    ) {
+      return null;
+    }
+    return { method, code, retryable };
+  } catch {
+    // A thrown object is untrusted and may expose throwing accessors.
     return null;
   }
-  return {
-    method: candidate.method,
-    code: candidate.code,
-    retryable: candidate.retryable,
-  };
+}
+
+function legacyHostError(error: unknown): { error: string } {
+  try {
+    return { error: error instanceof Error ? error.message : String(error) };
+  } catch {
+    return { error: 'host call failed' };
+  }
+}
+
+function resemblesStructuredHostError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  try {
+    return 'method' in error || 'code' in error || 'retryable' in error;
+  } catch {
+    return true;
+  }
 }
 
 export class NativeGuestHost {
@@ -494,9 +515,10 @@ export class NativeGuestHost {
         this.resolve(
           cb,
           0,
-          structuredHostError(err, canonicalMethod) ?? {
-            error: err instanceof Error ? err.message : String(err),
-          }
+          structuredHostError(err, canonicalMethod) ??
+            (resemblesStructuredHostError(err)
+              ? { error: 'host call failed' }
+              : legacyHostError(err))
         );
       }
     })();

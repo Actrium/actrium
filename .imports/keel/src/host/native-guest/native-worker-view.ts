@@ -8,7 +8,10 @@ import type {
   MainToNativeWorkerMessage,
   NativeWorkerToMainMessage,
 } from './native-worker-protocol';
-import { deserializeNativeWorkerError, serializeNativeWorkerError } from './native-worker-protocol';
+import {
+  deserializeNativeWorkerError,
+  serializeNativeHostCallError,
+} from './native-worker-protocol';
 
 interface NativeWorkerLike {
   onmessage: ((event: MessageEvent<NativeWorkerToMainMessage>) => void) | null;
@@ -361,7 +364,10 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
           type: 'hostResult',
           callId: message.callId,
           ok: false,
-          error: serializeNativeWorkerError(error),
+          error: serializeNativeHostCallError(
+            error,
+            `${message.moduleId.startsWith('host:') ? message.moduleId.slice(5) : message.moduleId}.${message.method}`
+          ),
         });
       } catch (postError) {
         this.failFatal(postError instanceof Error ? postError : new Error(String(postError)));

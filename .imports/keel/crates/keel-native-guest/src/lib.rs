@@ -372,6 +372,8 @@ pub struct HostCall {
     method: &'static str,
     input: Vec<u8>,
     cancelled_before_send: bool,
+    cancellation_requested: bool,
+    completed: bool,
 }
 
 impl Future for HostCall {
@@ -379,6 +381,7 @@ impl Future for HostCall {
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
         if this.cancelled_before_send {
+            this.completed = true;
             return Poll::Ready((
                 0,
                 Vec::from(
@@ -403,8 +406,23 @@ impl Future for HostCall {
             return Poll::Pending;
         }
         match rt::take_result(this.cb) {
-            Some(result) => Poll::Ready(result),
+            Some(result) => {
+                this.completed = true;
+                Poll::Ready(result)
+            }
             None => Poll::Pending,
+        }
+    }
+}
+
+impl Drop for HostCall {
+    fn drop(&mut self) {
+        // Dropping a pending future releases any Rust borrow carried by a
+        // higher-level ByteSink call. Tell the host synchronously that it must
+        // stop the matching operation; unknown/already-settled ids are no-ops.
+        if self.sent && !self.completed && !self.cancellation_requested {
+            self.cancellation_requested = true;
+            unsafe { keel_host_cancel(self.cb) };
         }
     }
 }
@@ -421,6 +439,10 @@ impl HostCall {
     /// sent it invokes the additive `keel_host_cancel` ABI; completion still
     /// arrives through the ordinary callback with the method's HostError.
     pub fn cancel(&mut self) {
+        if self.cancellation_requested {
+            return;
+        }
+        self.cancellation_requested = true;
         if self.sent {
             unsafe { keel_host_cancel(self.cb) };
         } else {
@@ -493,6 +515,8 @@ pub fn host_call(module: &'static str, method: &'static str, input: Vec<u8>) -> 
         method,
         input,
         cancelled_before_send: false,
+        cancellation_requested: false,
+        completed: false,
     }
 }
 
@@ -2737,6 +2761,7 @@ pub mod events {
 /// `0.1` is an exact, closed logical contract, not an alias for whichever
 /// host:* methods happen to exist in a runtime build.
 pub mod host_api_v01;
+mod host_api_v01_types;
 
 /// KBS1 binary-value ENVELOPE codec (`contracts/store-net-bytes.json`) — the R2
 /// first-class-bytes wire. ADDITIVE INFRA: compiled into the shipped guest
@@ -2940,6 +2965,7 @@ mod test_shims {
     /// futures serialize on `conformance::wire_lock` (the SDK's rt statics
     /// assume a single thread), then drain this.
     pub(crate) static CALLS: Mutex<Vec<RecordedCall>> = Mutex::new(Vec::new());
+    pub(crate) static CANCELS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
     #[no_mangle]
     extern "C" fn keel_host_call(
@@ -2966,7 +2992,12 @@ mod test_shims {
             .push((module, method, input, cb_id));
     }
     #[no_mangle]
-    extern "C" fn keel_host_cancel(_cb_id: u32) {}
+    extern "C" fn keel_host_cancel(cb_id: u32) {
+        CANCELS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(cb_id);
+    }
     #[no_mangle]
     extern "C" fn keel_send_batch(_batch_ptr: *const u8, _batch_len: usize) {}
     #[no_mangle]
