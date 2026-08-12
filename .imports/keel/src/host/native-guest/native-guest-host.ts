@@ -91,6 +91,36 @@ export interface NativeGuestHostOptions {
   onGuestRunStateChange?: (running: boolean) => void;
 }
 
+/** Runtime-owned metadata passed after the schema-checked guest input. */
+export interface NativeHostCallContext {
+  /** Aborted by env.keel_host_cancel(callbackId). */
+  signal: AbortSignal;
+}
+
+/**
+ * Preserve the public v0.1 HostError shape across the native ABI without
+ * trusting an arbitrary thrown object. A module may only report an error for
+ * the method currently being dispatched, and error codes stay deliberately
+ * small and machine-readable. Everything else uses the legacy opaque fallback.
+ */
+function structuredHostError(error: unknown, expectedMethod: string): object | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const candidate = error as { method?: unknown; code?: unknown; retryable?: unknown };
+  if (
+    candidate.method !== expectedMethod ||
+    typeof candidate.code !== 'string' ||
+    !/^[a-z][a-z0-9-]{0,63}$/.test(candidate.code) ||
+    typeof candidate.retryable !== 'boolean'
+  ) {
+    return null;
+  }
+  return {
+    method: candidate.method,
+    code: candidate.code,
+    retryable: candidate.retryable,
+  };
+}
+
 export class NativeGuestHost {
   private instance!: WebAssembly.Instance;
   private memory!: WebAssembly.Memory;
@@ -101,6 +131,7 @@ export class NativeGuestHost {
   private readonly onGuestRunStateChange?: (running: boolean) => void;
   private readonly inflight = new Set<Promise<void>>();
   private guestRunDepth = 0;
+  private readonly callControllers = new Map<number, AbortController>();
   private abiVersion: number | null = null;
   private batchDropWarnings = 0;
   private eventDropWarnings = 0;
@@ -124,6 +155,7 @@ export class NativeGuestHost {
 
   /** Instantiate the guest `.wasm`, wire host imports, and run its entry. */
   async load(wasmSource: BufferSource | WebAssembly.Module): Promise<void> {
+    const cancelHostCall = (cb: number) => this.onCancelHostCall(cb >>> 0);
     const importObject: WebAssembly.Imports = {
       env: {
         keel_host_call: (
@@ -137,6 +169,7 @@ export class NativeGuestHost {
         ) => this.onHostCall(mp >>> 0, ml >>> 0, xp >>> 0, xl >>> 0, ip >>> 0, il >>> 0, cb >>> 0),
         keel_log: (ptr: number, len: number) => this.onLog?.(this.readString(ptr >>> 0, len >>> 0)),
         keel_send_batch: (ptr: number, len: number) => this.onSendBatch(ptr >>> 0, len >>> 0),
+        keel_host_cancel: cancelHostCall,
       },
     };
     const loaded = await this.runGuestAsync<
@@ -376,6 +409,13 @@ export class NativeGuestHost {
   }
 
   // --- ABI bridge: guest keel_host_call -> host dispatch -> guest keel_resolve ---
+  private onCancelHostCall(cb: number): void {
+    // Unknown/already-settled ids are intentionally idempotent. A guest may race
+    // cancellation with completion, and cancellation must never affect another
+    // callback merely because its id is absent.
+    this.callControllers.get(cb)?.abort();
+  }
+
   private onHostCall(
     mp: number,
     ml: number,
@@ -385,10 +425,17 @@ export class NativeGuestHost {
     il: number,
     cb: number
   ): void {
+    // A callback id names exactly one live call. Reuse would make a later cancel
+    // ambiguous and could resolve the same guest future twice, so reject it before
+    // dispatch. Resolution remains deferred by the task's first await below.
+    const duplicate = this.callControllers.has(cb);
+    const controller = new AbortController();
+    if (!duplicate) this.callControllers.set(cb, controller);
     // Everything guest-controlled (pointers, bytes, JSON) is read inside the try
     // so a hostile or malformed call fails closed (resolve ok=0) instead of
     // crashing the host.
     const task = (async () => {
+      let canonicalMethod = '';
       try {
         // MEMORY-SAFETY CRITICAL (cross-crate invariant): the host must never
         // resolve synchronously inside a guest-initiated call. keel_resolve
@@ -399,8 +446,10 @@ export class NativeGuestHost {
         // the guest has parked (it is suspended until then, so its buffer is
         // stable and no future is mid-poll). Do not remove this await.
         await Promise.resolve();
+        if (duplicate) throw new Error(`duplicate host callback id: ${cb}`);
         const moduleId = this.readString(mp, ml);
         const method = this.readString(xp, xl);
+        canonicalMethod = `${moduleId.startsWith('host:') ? moduleId.slice(5) : moduleId}.${method}`;
         // Payload framing fork (canvas-wire.DESIGN.md §1.4 + store-net-bytes
         // §B.2). Each binary wire has a DISTINCT 4-byte magic, all sharing byte 0
         // (0x4B 'K'), so the fork compares the FULL u32 — never byte 0 alone:
@@ -437,14 +486,27 @@ export class NativeGuestHost {
         if (typeof handler !== 'function') {
           throw new Error(`host module not registered: ${moduleId}.${method}`);
         }
-        const result = await handler(input);
+        const result = await handler(input, {
+          signal: controller.signal,
+        } satisfies NativeHostCallContext);
         this.resolve(cb, 1, result === undefined ? null : result);
       } catch (err) {
-        this.resolve(cb, 0, { error: err instanceof Error ? err.message : String(err) });
+        this.resolve(
+          cb,
+          0,
+          structuredHostError(err, canonicalMethod) ?? {
+            error: err instanceof Error ? err.message : String(err),
+          }
+        );
       }
     })();
     this.inflight.add(task);
-    void task.finally(() => this.inflight.delete(task));
+    void task.finally(() => {
+      this.inflight.delete(task);
+      if (!duplicate && this.callControllers.get(cb) === controller) {
+        this.callControllers.delete(cb);
+      }
+    });
   }
 
   /** Write a JSON result into guest memory (via keel_alloc) and hand it back. */

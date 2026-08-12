@@ -134,6 +134,36 @@ describe('keel/contract', () => {
     ]);
   });
 
+  test('rpc schemas preserve runtime-owned invocation context after parsing guest input', async () => {
+    const contract = defineKeelContract({
+      version: '1',
+      hostModules: {
+        'host:test': {
+          wait: rpc<{ value: number }, number>({
+            schema: {
+              parseInput: (value) => ({ value: Number((value as { value?: unknown }).value) }),
+              parseOutput: Number,
+            },
+          }),
+        },
+      },
+      guestExports: {},
+    });
+    const signal = new AbortController().signal;
+    let received: unknown;
+    const dispatch = createHostModuleDispatch(contract, {
+      'host:test': {
+        wait: (input: { value: number }, context: unknown) => {
+          received = context;
+          return input.value;
+        },
+      },
+    });
+
+    expect(dispatch['host:test']!.wait!({ value: '7' }, { signal })).toBe(7);
+    expect(received).toEqual({ signal });
+  });
+
   test('validates host module implementations', async () => {
     const contract = defineKeelContract({
       version: '1.0.0',

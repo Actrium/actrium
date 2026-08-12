@@ -39,6 +39,8 @@ extern "C" {
         in_len: usize,
         cb_id: u32,
     );
+    /// Cancel one in-flight callback. Unknown/already-settled ids are no-ops.
+    fn keel_host_cancel(cb_id: u32);
     // One-way render channel: hand the host an operation batch (UTF-8 JSON).
     fn keel_send_batch(batch_ptr: *const u8, batch_len: usize);
     // One-way diagnostics channel: hand the host a UTF-8 log line
@@ -369,12 +371,22 @@ pub struct HostCall {
     module: &'static str,
     method: &'static str,
     input: Vec<u8>,
+    cancelled_before_send: bool,
 }
 
 impl Future for HostCall {
     type Output = (u32, Vec<u8>);
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+        if this.cancelled_before_send {
+            return Poll::Ready((
+                0,
+                Vec::from(
+                    &b"{\"method\":\"runtime.cancel\",\"code\":\"cancelled\",\"retryable\":false}"
+                        [..],
+                ),
+            ));
+        }
         if !this.sent {
             this.sent = true;
             unsafe {
@@ -398,6 +410,28 @@ impl Future for HostCall {
 }
 
 impl HostCall {
+    /// Whether the call has crossed the ABI boundary already.
+    pub fn was_sent(&self) -> bool {
+        self.sent
+    }
+
+    /// Request cancellation of this call.
+    ///
+    /// Before the first poll this guarantees that no host call is issued. Once
+    /// sent it invokes the additive `keel_host_cancel` ABI; completion still
+    /// arrives through the ordinary callback with the method's HostError.
+    pub fn cancel(&mut self) {
+        if self.sent {
+            unsafe { keel_host_cancel(self.cb) };
+        } else {
+            self.cancelled_before_send = true;
+        }
+    }
+
+    /// The callback id, useful for a higher-level cancellation token registry.
+    pub fn callback_id(&self) -> u32 {
+        self.cb
+    }
     /// Poll this pending host call WITHOUT awaiting it, so the single root task
     /// can keep presenting while the call is in flight instead of freezing on it.
     ///
@@ -458,6 +492,7 @@ pub fn host_call(module: &'static str, method: &'static str, input: Vec<u8>) -> 
         module,
         method,
         input,
+        cancelled_before_send: false,
     }
 }
 
@@ -2696,6 +2731,13 @@ pub mod events {
     }
 }
 
+/// Versioned application.ist Host API v0.1 binding.
+///
+/// This is deliberately separate from the legacy convenience modules above:
+/// `0.1` is an exact, closed logical contract, not an alias for whichever
+/// host:* methods happen to exist in a runtime build.
+pub mod host_api_v01;
+
 /// KBS1 binary-value ENVELOPE codec (`contracts/store-net-bytes.json`) — the R2
 /// first-class-bytes wire. ADDITIVE INFRA: compiled into the shipped guest
 /// (unlike the `binary-protocol` encoders), but it changes NO existing
@@ -2923,6 +2965,8 @@ mod test_shims {
             .unwrap_or_else(|e| e.into_inner())
             .push((module, method, input, cb_id));
     }
+    #[no_mangle]
+    extern "C" fn keel_host_cancel(_cb_id: u32) {}
     #[no_mangle]
     extern "C" fn keel_send_batch(_batch_ptr: *const u8, _batch_len: usize) {}
     #[no_mangle]

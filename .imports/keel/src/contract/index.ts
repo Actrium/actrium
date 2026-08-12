@@ -659,7 +659,12 @@ function wrapRpcDispatch(
         'input',
         options
       );
-      callArgs = [parsed];
+      // Preserve runtime-owned invocation context after the guest-controlled
+      // first argument. Native hosts use the second argument for an AbortSignal;
+      // dropping it here made cancellation disappear precisely on capabilities
+      // that had the strongest boundary schemas. Only args[0] is guest input and
+      // therefore only args[0] is parsed.
+      callArgs = [parsed, ...args.slice(1)];
     }
 
     // Boundary backstop: a declared-binary input field must be a real Uint8Array
