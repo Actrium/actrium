@@ -852,13 +852,19 @@ pub mod playback {
             },
         )
     }
-    pub fn stop(output: Handle<AudioOutput>, mode: StopMode) -> V01Call<'static, ()> {
+    /// Transition an output to draining or stop it immediately.
+    ///
+    /// The handle is borrowed because the v0.1 state machine permits a second
+    /// `Immediate` stop to upgrade an output that is already draining. Writes
+    /// are rejected by the host after the first drain transition, but the
+    /// close right remains usable until the terminal event.
+    pub fn stop(output: &Handle<AudioOutput>, mode: StopMode) -> V01Call<'static, ()> {
         call(
             "host:playback",
             "stop",
             METHODS[20],
             obj(vec![
-                ("output", handle(&output)),
+                ("output", handle(output)),
                 ("mode", encode_wire(mode)),
             ]),
             decode_void,
@@ -1382,7 +1388,8 @@ mod tests {
         record(asset::load_font("font"));
         record(playback::open(PlaybackOptions::default()));
         record(playback::write(&audio(), &[]));
-        record(playback::stop(audio(), StopMode::Immediate));
+        let drainable_audio = audio();
+        record(playback::stop(&drainable_audio, StopMode::Immediate));
         record(input::focus("main"));
         let state = || ImeState {
             text: String::new(),
@@ -1799,7 +1806,12 @@ mod tests {
             playback::write(&audio(), &[0; 8]),
             br#"{"acceptedFrames":1,"queuedFrames":1}"#
         );
-        ok!(playback::stop(audio(), StopMode::Immediate), b"null");
+        let drainable_audio = audio();
+        ok!(playback::stop(&drainable_audio, StopMode::Drain), b"null");
+        ok!(
+            playback::stop(&drainable_audio, StopMode::Immediate),
+            b"null"
+        );
         ok!(input::focus("main"), br#"{"focused":true}"#);
         ok!(
             ime::open_session("main", state()),
