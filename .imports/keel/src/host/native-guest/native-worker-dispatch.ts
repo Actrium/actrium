@@ -127,8 +127,10 @@ export class NativeWorkerDispatch {
   private callHost(
     moduleId: string,
     method: string,
+    // Reason: capability payloads are opaque until the main-thread contract validates them.
     input: unknown,
     signal?: AbortSignal
+    // Reason: a contract-validated capability result may have any method-specific wire shape.
   ): Promise<unknown> {
     if (!this.currentTurnId) return Promise.reject(new Error('host call outside a guest turn'));
     const callId = ++this.callSeq;

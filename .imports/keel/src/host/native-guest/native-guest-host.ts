@@ -103,9 +103,11 @@ export interface NativeHostCallContext {
  * the method currently being dispatched, and error codes stay deliberately
  * small and machine-readable. Everything else uses the legacy opaque fallback.
  */
+// Reason: a guest-initiated host module may throw any JavaScript value at this ABI boundary.
 function structuredHostError(error: unknown, expectedMethod: string): object | null {
   if (typeof error !== 'object' || error === null) return null;
   try {
+    // Reason: each field of an arbitrary thrown value remains untrusted until checked below.
     const candidate = error as { method?: unknown; code?: unknown; retryable?: unknown };
     const method = candidate.method;
     const code = candidate.code;
@@ -125,6 +127,7 @@ function structuredHostError(error: unknown, expectedMethod: string): object | n
   }
 }
 
+// Reason: legacy host modules may throw arbitrary JavaScript values rather than Error objects.
 function legacyHostError(error: unknown): { error: string } {
   try {
     return { error: error instanceof Error ? error.message : String(error) };
@@ -133,6 +136,7 @@ function legacyHostError(error: unknown): { error: string } {
   }
 }
 
+// Reason: this guard classifies an arbitrary thrown value before any field is read.
 function resemblesStructuredHostError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
   try {
