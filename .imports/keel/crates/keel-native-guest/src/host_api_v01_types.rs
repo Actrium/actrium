@@ -6,11 +6,13 @@
 
 use crate::host_api_v01::{
     AudioOutput, CameraStream, Font, Handle, HandleKind, ImeSession, MicrophoneStream,
+    ResourceMetadata,
 };
 use crate::store_net_encode::Value;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use unicode_normalization::UnicodeNormalization;
 
 pub(crate) trait WireDecode: Sized {
     fn decode(value: Value) -> Option<Self>;
@@ -775,13 +777,20 @@ pub struct CanvasInfo {
 impl WireDecode for CanvasInfo {
     fn decode(v: Value) -> Option<Self> {
         let mut r = Record::closed(v, &["width", "height", "dpr", "mode", "safeArea"], &[])?;
-        Some(Self {
+        let out = Self {
             width: u32v(r.take("width")?)?,
             height: u32v(r.take("height")?)?,
             dpr: finite(r.take("dpr")?)?,
             mode: CanvasMode::decode(r.take("mode")?)?,
             safe_area: Insets::decode(r.take("safeArea")?)?,
-        })
+        };
+        let horizontal = out.safe_area.left.checked_add(out.safe_area.right)?;
+        let vertical = out.safe_area.top.checked_add(out.safe_area.bottom)?;
+        (horizontal <= out.width
+            && vertical <= out.height
+            && (0.5..=8.0).contains(&out.dpr)
+            && out.dpr * 8.0 == ((out.dpr * 8.0) as u32) as f64)
+            .then_some(out)
     }
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -834,11 +843,21 @@ impl WireDecode for PlaybackStream {
         if c != 1 && c != 2 {
             return None;
         }
-        Some(Self {
-            output: Handle::from_value(&r.take("output")?)?,
-            sample_rate: u32v(r.take("sampleRate")?)?,
+        let output = Handle::from_value(&r.take("output")?)?;
+        let sample_rate = u32v(r.take("sampleRate")?)?;
+        let max_queued_frames = u32v(r.take("maxQueuedFrames")?)?;
+        if !(8_000..=192_000).contains(&sample_rate) || max_queued_frames == 0 {
+            return None;
+        }
+        output.set_metadata(ResourceMetadata::AudioOutput {
             channels: c,
-            max_queued_frames: u32v(r.take("maxQueuedFrames")?)?,
+            max_queued_frames,
+        });
+        Some(Self {
+            output,
+            sample_rate,
+            channels: c,
+            max_queued_frames,
         })
     }
 }
@@ -893,8 +912,9 @@ impl WireDecode for CameraSession {
             ],
             &[],
         )?;
-        Some(Self {
-            camera: Handle::from_value(&r.take("camera")?)?,
+        let camera = Handle::from_value(&r.take("camera")?)?;
+        let out = Self {
+            camera,
             facing: Facing::decode(r.take("facing")?)?,
             width: u32v(r.take("width")?)?,
             height: u32v(r.take("height")?)?,
@@ -902,7 +922,26 @@ impl WireDecode for CameraSession {
             format: PixelFormat::decode(r.take("format")?)?,
             frame_bytes: u32v(r.take("frameBytes")?)?,
             nominal_frame_rate: u32v(r.take("nominalFrameRate")?)?,
-        })
+        };
+        let row_bytes = out.width.checked_mul(4)?;
+        let expected_frame_bytes = out.stride.checked_mul(out.height)?;
+        if out.width == 0
+            || out.height == 0
+            || out.stride < row_bytes
+            || out.frame_bytes == 0
+            || out.frame_bytes != expected_frame_bytes
+            || out.nominal_frame_rate == 0
+        {
+            return None;
+        }
+        out.camera.set_metadata(ResourceMetadata::Camera {
+            width: out.width,
+            height: out.height,
+            stride: out.stride,
+            frame_bytes: out.frame_bytes,
+            sequences: Default::default(),
+        });
+        Some(out)
     }
 }
 #[derive(Debug, PartialEq)]
@@ -930,12 +969,24 @@ impl WireDecode for MicrophoneSession {
         if c != 1 && c != 2 {
             return None;
         }
+        let microphone = Handle::from_value(&r.take("microphone")?)?;
+        let sample_rate = u32v(r.take("sampleRate")?)?;
+        let max_frames_per_read = u32v(r.take("maxFramesPerRead")?)?;
+        if !(8_000..=192_000).contains(&sample_rate) || max_frames_per_read == 0 {
+            return None;
+        }
+        microphone.set_metadata(ResourceMetadata::Microphone {
+            sample_rate,
+            channels: c,
+            max_frames_per_read,
+            last: None,
+        });
         Some(Self {
-            microphone: Handle::from_value(&r.take("microphone")?)?,
-            sample_rate: u32v(r.take("sampleRate")?)?,
+            microphone,
+            sample_rate,
             channels: c,
             format: AudioFormat::decode(r.take("format")?)?,
-            max_frames_per_read: u32v(r.take("maxFramesPerRead")?)?,
+            max_frames_per_read,
         })
     }
 }
@@ -955,14 +1006,22 @@ impl WireDecode for VideoFrameResult {
             &["written", "width", "height", "stride", "format", "sequence"],
             &[],
         )?;
-        Some(Self {
+        let out = Self {
             written: u32v(r.take("written")?)?,
             width: u32v(r.take("width")?)?,
             height: u32v(r.take("height")?)?,
             stride: u32v(r.take("stride")?)?,
             format: PixelFormat::decode(r.take("format")?)?,
             sequence: u64d(r.take("sequence")?)?,
-        })
+        };
+        let row_bytes = out.width.checked_mul(4)?;
+        let expected = out.stride.checked_mul(out.height)?;
+        (out.width > 0
+            && out.height > 0
+            && out.stride >= row_bytes
+            && out.written > 0
+            && out.written == expected)
+            .then_some(out)
     }
 }
 impl SinkOutput for VideoFrameResult {
@@ -999,7 +1058,7 @@ impl WireDecode for AudioReadResult {
         if c != 1 && c != 2 {
             return None;
         }
-        Some(Self {
+        let out = Self {
             written: u32v(r.take("written")?)?,
             sample_rate: u32v(r.take("sampleRate")?)?,
             channels: c,
@@ -1007,7 +1066,16 @@ impl WireDecode for AudioReadResult {
             frames: u32v(r.take("frames")?)?,
             sequence: u64d(r.take("sequence")?)?,
             dropped_frames: u32v(r.take("droppedFrames")?)?,
-        })
+        };
+        let expected = out
+            .frames
+            .checked_mul(out.channels as u32)?
+            .checked_mul(4)?;
+        (out.frames > 0
+            && out.written > 0
+            && out.written == expected
+            && (8_000..=192_000).contains(&out.sample_rate))
+        .then_some(out)
     }
 }
 impl SinkOutput for AudioReadResult {
@@ -1081,8 +1149,17 @@ pub struct StoreListItem {
 impl WireDecode for StoreListItem {
     fn decode(v: Value) -> Option<Self> {
         let mut r = Record::closed(v, &["key", "version", "size"], &[])?;
+        let key = string(r.take("key")?)?;
+        if key.is_empty()
+            || key
+                .chars()
+                .any(|character| character <= '\u{1f}' || character == '\u{7f}')
+            || !key.nfc().eq(key.chars())
+        {
+            return None;
+        }
         Some(Self {
-            key: string(r.take("key")?)?,
+            key,
             version: u64d(r.take("version")?)?,
             size: u64d(r.take("size")?)?,
         })
@@ -1096,10 +1173,21 @@ pub struct StoreListPage {
 impl WireDecode for StoreListPage {
     fn decode(v: Value) -> Option<Self> {
         let mut r = Record::closed(v, &["items"], &["cursor"])?;
-        Some(Self {
-            items: array(r.take("items")?)?,
-            cursor: optional(r.optional("cursor"), string)?,
-        })
+        let items: Vec<StoreListItem> = array(r.take("items")?)?;
+        if items.windows(2).any(|pair| pair[0].key >= pair[1].key) {
+            return None;
+        }
+        let cursor = optional(r.optional("cursor"), string)?;
+        if cursor.as_ref().is_some_and(|value| {
+            value.is_empty()
+                || value.len() > 256
+                || !value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+        }) {
+            return None;
+        }
+        Some(Self { items, cursor })
     }
 }
 #[derive(Debug, Clone, PartialEq)]
@@ -1132,10 +1220,16 @@ pub struct Locale {
 impl WireDecode for Locale {
     fn decode(v: Value) -> Option<Self> {
         let mut r = Record::closed(v, &["language"], &["script"])?;
-        Some(Self {
-            language: string(r.take("language")?)?,
-            script: optional(r.optional("script"), string)?,
-        })
+        let language = string(r.take("language")?)?;
+        let script = optional(r.optional("script"), string)?;
+        let valid_language = (2..=8).contains(&language.len())
+            && language.bytes().all(|byte| byte.is_ascii_lowercase());
+        let valid_script = script.as_ref().is_none_or(|value| {
+            value.len() == 4
+                && value.as_bytes()[0].is_ascii_uppercase()
+                && value.as_bytes()[1..].iter().all(u8::is_ascii_lowercase)
+        });
+        (valid_language && valid_script).then_some(Self { language, script })
     }
 }
 #[derive(Debug, Clone, PartialEq)]

@@ -9,9 +9,12 @@
 pub use crate::host_api_v01_types::*;
 use crate::store_net_encode::{decode_reply, encode_value, Encoded, Value};
 use crate::{host_call, HostCall};
+use alloc::boxed::Box;
+use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 use core::future::Future;
 use core::marker::PhantomData;
 use core::pin::Pin;
@@ -94,31 +97,45 @@ pub struct HostError {
 }
 
 impl HostError {
-    fn internal(method: &str) -> Self {
+    fn fixed(method: &str, code: &str, retryable: bool) -> Self {
         Self {
             method: method.to_string(),
-            code: "internal".to_string(),
-            retryable: false,
+            code: code.to_string(),
+            retryable,
         }
+    }
+
+    fn protocol(method: &str) -> Self {
+        Self::fixed(method, "protocol-error", false)
+    }
+
+    fn transport(method: &str) -> Self {
+        Self::fixed(method, "transport-error", true)
     }
 
     fn cancelled(method: &str) -> Self {
-        Self {
-            method: method.to_string(),
-            code: "cancelled".to_string(),
-            retryable: false,
-        }
+        Self::fixed(method, "cancelled", false)
     }
 
     fn from_wire(method: &str, bytes: &[u8]) -> Self {
-        let Ok(Value::Obj(fields)) = decode_reply(bytes) else {
-            return Self::internal(method);
+        let value = match decode_reply(bytes) {
+            Ok(value) => value,
+            Err(_) => return Self::transport(method),
         };
+        let Value::Obj(fields) = value else {
+            return Self::transport(method);
+        };
+        if !fields
+            .iter()
+            .any(|(key, _)| matches!(key.as_str(), "method" | "code" | "retryable"))
+        {
+            return Self::transport(method);
+        }
         // HostError is a closed wire record.  Rejecting unknown and duplicate
         // fields is security-relevant: otherwise a producer and consumer can
         // disagree about which duplicate value was authenticated.
         if fields.len() != 3 {
-            return Self::internal(method);
+            return Self::protocol(method);
         }
         let mut wire_method = None;
         let mut code = None;
@@ -128,12 +145,12 @@ impl HostError {
                 ("method", Value::Str(value)) if wire_method.is_none() => wire_method = Some(value),
                 ("code", Value::Str(value)) if code.is_none() => code = Some(value),
                 ("retryable", Value::Bool(value)) if retryable.is_none() => retryable = Some(value),
-                _ => return Self::internal(method),
+                _ => return Self::protocol(method),
             }
         }
         match (wire_method, code, retryable) {
             (Some(wire_method), Some(code), Some(retryable))
-                if wire_method == method && valid_error_code(&code) =>
+                if wire_method == method && valid_method_error_code(method, &code) =>
             {
                 Self {
                     method: wire_method,
@@ -141,29 +158,230 @@ impl HostError {
                     retryable,
                 }
             }
-            _ => Self::internal(method),
+            _ => Self::protocol(method),
         }
     }
 }
 
-/// Keep the native decoder aligned with the public v0.1 lexical contract and
-/// the TypeScript host boundary: one lower-case ASCII letter followed by at
-/// most 62 lower-case letters, digits or hyphens.
-fn valid_error_code(code: &str) -> bool {
-    let bytes = code.as_bytes();
-    matches!(bytes.first(), Some(b'a'..=b'z'))
-        && bytes.len() <= 63
-        && bytes[1..]
+const COMMON_ERROR_CODES: &[&str] = &[
+    "invalid-argument",
+    "platform-unavailable",
+    "internal",
+    "protocol-error",
+    "transport-error",
+];
+
+/// Method-specific codes copied from the generated v0.1 catalog. The array is
+/// deliberately position-locked to `METHODS`; tests exercise every row so a
+/// catalog edit cannot silently widen a different method.
+const METHOD_ERROR_CODES: [&[&str]; 27] = [
+    &["denied", "limit-exceeded"],
+    &[
+        "denied",
+        "not-found",
+        "invalid-operation",
+        "resource-denied",
+        "limit-exceeded",
+    ],
+    &[
+        "denied",
+        "not-found",
+        "invalid-frame",
+        "stale-frame",
+        "limit-exceeded",
+    ],
+    &[
+        "denied",
+        "not-found",
+        "stale-handle",
+        "resource-denied",
+        "invalid-text",
+        "limit-exceeded",
+    ],
+    &["denied", "not-found", "invalid-offset", "limit-exceeded"],
+    &[
+        "denied",
+        "not-found",
+        "invalid-format",
+        "unsupported-format",
+        "limit-exceeded",
+    ],
+    &[
+        "denied",
+        "activation-required",
+        "device-unavailable",
+        "limit-exceeded",
+    ],
+    &["denied", "not-found", "not-visible", "limit-exceeded"],
+    &[
+        "denied",
+        "not-focused",
+        "invalid-range",
+        "session-exists",
+        "limit-exceeded",
+    ],
+    &[
+        "denied",
+        "activation-required",
+        "device-unavailable",
+        "cancelled",
+        "limit-exceeded",
+    ],
+    &[
+        "denied",
+        "activation-required",
+        "device-unavailable",
+        "cancelled",
+        "limit-exceeded",
+    ],
+    &["denied", "invalid-key", "sink-too-small", "limit-exceeded"],
+    &[
+        "denied",
+        "invalid-key",
+        "conflict",
+        "quota-exceeded",
+        "version-exhausted",
+        "limit-exceeded",
+    ],
+    &["denied", "invalid-key", "conflict", "limit-exceeded"],
+    &[
+        "denied",
+        "invalid-key",
+        "invalid-cursor",
+        "cursor-expired",
+        "limit-exceeded",
+    ],
+    &["denied", "invalid-key", "limit-exceeded"],
+    &[
+        "denied",
+        "activation-required",
+        "cancelled",
+        "invalid-data",
+        "sink-too-small",
+        "limit-exceeded",
+    ],
+    &[
+        "denied",
+        "activation-required",
+        "cancelled",
+        "invalid-data",
+        "limit-exceeded",
+    ],
+    &["denied", "unavailable", "limit-exceeded"],
+    &[
+        "stale-handle",
+        "resource-denied",
+        "invalid-format",
+        "busy",
+        "device-unavailable",
+        "limit-exceeded",
+    ],
+    &["stale-handle", "resource-denied"],
+    &[
+        "stale-handle",
+        "resource-denied",
+        "stale-state",
+        "invalid-range",
+        "limit-exceeded",
+    ],
+    &[
+        "stale-handle",
+        "resource-denied",
+        "stale-state",
+        "invalid-geometry",
+        "limit-exceeded",
+    ],
+    &["stale-handle", "resource-denied"],
+    &[
+        "stale-handle",
+        "resource-denied",
+        "invalid-sequence",
+        "sink-too-small",
+        "device-unavailable",
+        "busy",
+        "cancelled",
+        "limit-exceeded",
+    ],
+    &[
+        "stale-handle",
+        "resource-denied",
+        "sink-too-small",
+        "device-unavailable",
+        "busy",
+        "cancelled",
+        "limit-exceeded",
+    ],
+    &["stale-handle", "resource-denied"],
+];
+
+/// FNV-1a/64 lock generated from the normative v0.1 catalog by walking
+/// `METHODS`, then each method name, the five common codes and that method's
+/// specific codes. Strings are NUL-delimited and rows end in 0xff.
+pub const ERROR_CATALOG_LOCK_FNV1A64: u64 = 0xa604_0679_426b_789c;
+
+#[cfg(test)]
+fn error_catalog_fingerprint() -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325u64;
+    for (index, method) in METHODS.iter().enumerate() {
+        for value in core::iter::once(method)
+            .chain(COMMON_ERROR_CODES.iter())
+            .chain(METHOD_ERROR_CODES[index].iter())
+        {
+            for byte in value.as_bytes().iter().chain(core::iter::once(&0)) {
+                hash ^= *byte as u64;
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+        }
+        hash ^= 0xff;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn valid_method_error_code(method: &str, code: &str) -> bool {
+    COMMON_ERROR_CODES.contains(&code)
+        || METHODS
             .iter()
-            .all(|byte| matches!(byte, b'a'..=b'z' | b'0'..=b'9' | b'-'))
+            .position(|candidate| *candidate == method)
+            .is_some_and(|index| METHOD_ERROR_CODES[index].contains(&code))
 }
 
 /// Opaque, typed session handle. Construct only from a schema-checked host reply.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct Handle<K: HandleKind> {
     id: u32,
+    metadata: RefCell<ResourceMetadata>,
     _kind: PhantomData<K>,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ResourceMetadata {
+    None,
+    AudioOutput {
+        channels: u8,
+        max_queued_frames: u32,
+    },
+    Camera {
+        width: u32,
+        height: u32,
+        stride: u32,
+        frame_bytes: u32,
+        sequences: BTreeSet<u64>,
+    },
+    Microphone {
+        sample_rate: u32,
+        channels: u8,
+        max_frames_per_read: u32,
+        last: Option<(u64, u32)>,
+    },
+}
+
+impl<K: HandleKind> PartialEq for Handle<K> {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+impl<K: HandleKind> Eq for Handle<K> {}
 
 pub trait HandleKind {
     const WIRE_KIND: &'static str;
@@ -225,6 +443,7 @@ impl<K: HandleKind> Handle<K> {
         match (id, kind) {
             (Some(id), Some(kind)) if kind == K::WIRE_KIND => Some(Self {
                 id,
+                metadata: RefCell::new(ResourceMetadata::None),
                 _kind: PhantomData,
             }),
             _ => None,
@@ -233,6 +452,10 @@ impl<K: HandleKind> Handle<K> {
 
     pub(crate) fn wire_value(&self) -> Value {
         handle(self)
+    }
+
+    pub(crate) fn set_metadata(&self, metadata: ResourceMetadata) {
+        *self.metadata.borrow_mut() = metadata;
     }
 }
 
@@ -246,14 +469,21 @@ pub struct ByteSink<'a> {
     bytes: &'a mut [u8],
 }
 
+/// A guest-local ByteSink construction failure. It is not a host call and
+/// therefore must not synthesize a `HostError.method` outside the v0.1 catalog.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ByteSinkError {
+    Empty,
+    CapacityExceeded,
+}
+
 impl<'a> ByteSink<'a> {
-    pub fn new(bytes: &'a mut [u8]) -> Result<Self, HostError> {
-        if bytes.len() > u32::MAX as usize || bytes.is_empty() {
-            return Err(HostError {
-                method: "runtime.bytesink".to_string(),
-                code: "limit-exceeded".to_string(),
-                retryable: false,
-            });
+    pub fn new(bytes: &'a mut [u8]) -> Result<Self, ByteSinkError> {
+        if bytes.is_empty() {
+            return Err(ByteSinkError::Empty);
+        }
+        if bytes.len() > u32::MAX as usize {
+            return Err(ByteSinkError::CapacityExceeded);
         }
         Ok(Self { bytes })
     }
@@ -264,10 +494,14 @@ impl<'a> ByteSink<'a> {
     }
 }
 
+type SuccessDecoder<'a, T> = Box<dyn Fn(Value) -> Option<T> + 'a>;
+type SuccessCommit<'a, T> = Box<dyn Fn(&T) + 'a>;
+
 pub struct V01Call<'a, T> {
     inner: HostCall,
     method: &'static str,
-    decode: fn(Value) -> Option<T>,
+    decode: SuccessDecoder<'a, T>,
+    commit: Option<SuccessCommit<'a, T>>,
     sink: Option<&'a mut [u8]>,
     sink_written: Option<fn(&T) -> Option<usize>>,
     cancellation_requested: bool,
@@ -329,6 +563,9 @@ impl<T> Future for V01Call<'_, T> {
                             }
                             _ => return None,
                         }
+                    }
+                    if let Some(commit) = &this.commit {
+                        commit(&output);
                     }
                     Some(output)
                 });
@@ -411,7 +648,7 @@ fn call<'a, T>(
     method: &'static str,
     logical: &'static str,
     input: Value,
-    decode: fn(Value) -> Option<T>,
+    decode: impl Fn(Value) -> Option<T> + 'a,
 ) -> V01Call<'a, T> {
     let (bytes, preflight_error) = match encode(input) {
         Ok(bytes) => (bytes, None),
@@ -423,7 +660,8 @@ fn call<'a, T>(
     V01Call {
         inner: host_call(module, method, bytes),
         method: logical,
-        decode,
+        decode: Box::new(decode),
+        commit: None,
         sink: None,
         sink_written: None,
         cancellation_requested: false,
@@ -437,7 +675,7 @@ fn call_sink<'a, T: SinkOutput>(
     logical: &'static str,
     input: Value,
     sink: &'a mut [u8],
-    decode: fn(Value) -> Option<T>,
+    decode: impl Fn(Value) -> Option<T> + 'a,
 ) -> V01Call<'a, T> {
     let mut call = call(module, method, logical, input, decode);
     call.sink = Some(sink);
@@ -450,7 +688,7 @@ fn cancellable_sink<'a, T: SinkOutput>(
     logical: &'static str,
     input: Value,
     sink: &'a mut [u8],
-    decode: fn(Value) -> Option<T>,
+    decode: impl Fn(Value) -> Option<T> + 'a,
 ) -> CancellableV01Call<'a, T> {
     CancellableV01Call(call_sink(module, method, logical, input, sink, decode))
 }
@@ -459,7 +697,7 @@ fn cancellable<'a, T>(
     method: &'static str,
     logical: &'static str,
     input: Value,
-    decode: fn(Value) -> Option<T>,
+    decode: impl Fn(Value) -> Option<T> + 'a,
 ) -> CancellableV01Call<'a, T> {
     CancellableV01Call(call(module, method, logical, input, decode))
 }
@@ -533,6 +771,7 @@ pub mod asset {
         offset: u64,
     ) -> V01Call<'a, AssetReadResult> {
         let (output, sink) = output.into_wire();
+        let capacity = sink.len();
         call_sink(
             "host:asset",
             "read",
@@ -543,7 +782,15 @@ pub mod asset {
                 ("offset", u64_value(offset)),
             ]),
             sink,
-            decode_wire::<AssetReadResult>,
+            move |value| {
+                let result = AssetReadResult::decode(value)?;
+                let end = offset.checked_add(result.written as u64)?;
+                (result.written as usize <= capacity
+                    && offset <= result.total_size
+                    && end <= result.total_size
+                    && result.eof == (end == result.total_size))
+                    .then_some(result)
+            },
         )
     }
     pub fn load_font(asset_id: &str) -> V01Call<'static, Handle<Font>> {
@@ -560,18 +807,33 @@ pub mod asset {
 pub mod playback {
     use super::*;
     pub fn open(options: PlaybackOptions) -> V01Call<'static, PlaybackStream> {
+        let expected_channels = options.channels.unwrap_or(2);
         call(
             "host:playback",
             "open",
             METHODS[6],
             obj(vec![("options", encode_wire(options))]),
-            decode_wire::<PlaybackStream>,
+            move |value| {
+                let result = PlaybackStream::decode(value)?;
+                (result.channels == expected_channels).then_some(result)
+            },
         )
     }
     pub fn write(
         output: &Handle<AudioOutput>,
         samples: &[u8],
     ) -> V01Call<'static, PlaybackWriteResult> {
+        let metadata = output.metadata.borrow().clone();
+        let (input_frames, max_queued_frames) = match metadata {
+            ResourceMetadata::AudioOutput {
+                channels,
+                max_queued_frames,
+            } if channels > 0 && samples.len().is_multiple_of(channels as usize * 4) => (
+                (samples.len() / (channels as usize * 4)) as u32,
+                max_queued_frames,
+            ),
+            _ => (0, 0),
+        };
         call(
             "host:playback",
             "write",
@@ -580,7 +842,14 @@ pub mod playback {
                 ("output", handle(output)),
                 ("samples", Value::Bytes(samples.to_vec())),
             ]),
-            decode_wire::<PlaybackWriteResult>,
+            move |value| {
+                let result = PlaybackWriteResult::decode(value)?;
+                (input_frames > 0
+                    && result.accepted_frames <= input_frames
+                    && result.queued_frames >= result.accepted_frames
+                    && result.queued_frames <= max_queued_frames)
+                    .then_some(result)
+            },
         )
     }
     pub fn stop(output: Handle<AudioOutput>, mode: StopMode) -> V01Call<'static, ()> {
@@ -672,32 +941,63 @@ pub mod capture {
     pub fn request_camera(
         constraints: CameraConstraints,
     ) -> CancellableV01Call<'static, Option<CameraSession>> {
+        let expected = constraints.clone();
         cancellable(
             "host:capture",
             "requestCamera",
             METHODS[9],
             obj(vec![("constraints", encode_wire(constraints))]),
-            decode_optional::<CameraSession>,
+            move |value| {
+                let session = decode_optional::<CameraSession>(value)?;
+                session
+                    .as_ref()
+                    .is_none_or(|result| {
+                        expected.facing.is_none_or(|facing| result.facing == facing)
+                            && expected
+                                .max_width
+                                .is_none_or(|maximum| result.width <= maximum)
+                            && expected
+                                .max_height
+                                .is_none_or(|maximum| result.height <= maximum)
+                            && expected
+                                .max_frame_rate
+                                .is_none_or(|maximum| result.nominal_frame_rate <= maximum)
+                    })
+                    .then_some(session)
+            },
         )
     }
     pub fn request_mic(
         constraints: MicrophoneConstraints,
     ) -> CancellableV01Call<'static, Option<MicrophoneSession>> {
+        let expected = constraints.clone();
         cancellable(
             "host:capture",
             "requestMic",
             METHODS[10],
             obj(vec![("constraints", encode_wire(constraints))]),
-            decode_optional::<MicrophoneSession>,
+            move |value| {
+                let session = decode_optional::<MicrophoneSession>(value)?;
+                session
+                    .as_ref()
+                    .is_none_or(|result| {
+                        expected
+                            .max_channels
+                            .is_none_or(|maximum| result.channels <= maximum)
+                    })
+                    .then_some(session)
+            },
         )
     }
     pub fn frame<'a>(
-        camera: &Handle<CameraStream>,
+        camera: &'a Handle<CameraStream>,
         output: ByteSink<'a>,
         after_sequence: Option<u64>,
     ) -> CancellableV01Call<'a, VideoFrameResult> {
         let (output, sink) = output.into_wire();
-        cancellable_sink(
+        let capacity = sink.len();
+        let camera_for_decode = camera;
+        let mut call = cancellable_sink(
             "host:capture",
             "frame",
             METHODS[24],
@@ -710,22 +1010,82 @@ pub mod capture {
                 ),
             ]),
             sink,
-            decode_wire::<VideoFrameResult>,
-        )
+            move |value| {
+                let result = VideoFrameResult::decode(value)?;
+                let metadata = camera_for_decode.metadata.borrow();
+                let ResourceMetadata::Camera {
+                    width,
+                    height,
+                    stride,
+                    frame_bytes,
+                    sequences,
+                } = &*metadata
+                else {
+                    return None;
+                };
+                (result.width == *width
+                    && result.height == *height
+                    && result.stride == *stride
+                    && result.written == *frame_bytes
+                    && result.written as usize <= capacity
+                    && after_sequence
+                        .is_none_or(|after| sequences.contains(&after) && result.sequence > after))
+                .then_some(result)
+            },
+        );
+        call.0.commit = Some(Box::new(move |result| {
+            if let ResourceMetadata::Camera { sequences, .. } = &mut *camera.metadata.borrow_mut() {
+                sequences.insert(result.sequence);
+            }
+        }));
+        call
     }
     pub fn read_audio<'a>(
-        microphone: &Handle<MicrophoneStream>,
+        microphone: &'a Handle<MicrophoneStream>,
         output: ByteSink<'a>,
     ) -> CancellableV01Call<'a, AudioReadResult> {
         let (output, sink) = output.into_wire();
-        cancellable_sink(
+        let capacity = sink.len();
+        let microphone_for_decode = microphone;
+        let mut call = cancellable_sink(
             "host:capture",
             "readAudio",
             METHODS[25],
             obj(vec![("microphone", handle(microphone)), ("output", output)]),
             sink,
-            decode_wire::<AudioReadResult>,
-        )
+            move |value| {
+                let result = AudioReadResult::decode(value)?;
+                let metadata = microphone_for_decode.metadata.borrow();
+                let ResourceMetadata::Microphone {
+                    sample_rate,
+                    channels,
+                    max_frames_per_read,
+                    last,
+                } = &*metadata
+                else {
+                    return None;
+                };
+                (result.sample_rate == *sample_rate
+                    && result.channels == *channels
+                    && result.frames <= *max_frames_per_read
+                    && result.written as usize <= capacity
+                    && last.is_none_or(|(sequence, frames)| {
+                        sequence
+                            .checked_add(frames as u64)
+                            .and_then(|value| value.checked_add(result.dropped_frames as u64))
+                            == Some(result.sequence)
+                    }))
+                .then_some(result)
+            },
+        );
+        call.0.commit = Some(Box::new(move |result| {
+            if let ResourceMetadata::Microphone { last, .. } =
+                &mut *microphone.metadata.borrow_mut()
+            {
+                *last = Some((result.sequence, result.frames));
+            }
+        }));
+        call
     }
     pub fn stop(handle_value: CaptureHandle<'_>) -> V01Call<'static, ()> {
         let value = match handle_value {
@@ -785,6 +1145,7 @@ pub mod store {
         )
     }
     pub fn list(prefix: Option<&str>, cursor: Option<&str>) -> V01Call<'static, StoreListPage> {
+        let expected_prefix = prefix.unwrap_or("").to_string();
         call(
             "host:store",
             "list",
@@ -793,7 +1154,13 @@ pub mod store {
                 ("prefix", prefix.map(string).unwrap_or(Value::Null)),
                 ("cursor", cursor.map(string).unwrap_or(Value::Null)),
             ]),
-            decode_wire::<StoreListPage>,
+            move |value| {
+                let page = StoreListPage::decode(value)?;
+                page.items
+                    .iter()
+                    .all(|item| item.key.starts_with(&expected_prefix))
+                    .then_some(page)
+            },
         )
     }
     pub fn delete_prefix(prefix: &str) -> V01Call<'static, DeleteCount> {
@@ -944,6 +1311,7 @@ mod tests {
             EVENTS.len()
         );
         assert_eq!(catalog_fingerprint(), CATALOG_LOCK_FNV1A64);
+        assert_eq!(error_catalog_fingerprint(), ERROR_CATALOG_LOCK_FNV1A64);
     }
 
     #[test]
@@ -1117,9 +1485,16 @@ mod tests {
 
     #[test]
     fn host_error_fails_closed_on_malformed_or_cross_method_reply() {
+        let undecodable = HostError::from_wire("store.get", b"not-json");
+        assert_eq!(undecodable.code, "transport-error");
+        assert!(undecodable.retryable);
         assert_eq!(
-            HostError::from_wire("store.get", b"not-json").code,
-            "internal"
+            HostError::from_wire("store.get", b"null").code,
+            "transport-error"
+        );
+        assert_eq!(
+            HostError::from_wire("store.get", br#"{"error":"opaque"}"#).code,
+            "transport-error"
         );
         assert_eq!(
             HostError::from_wire(
@@ -1127,7 +1502,7 @@ mod tests {
                 br#"{"method":"store.put","code":"denied","retryable":false}"#
             )
             .code,
-            "internal"
+            "protocol-error"
         );
         assert_eq!(
             HostError::from_wire(
@@ -1137,22 +1512,6 @@ mod tests {
             .code,
             "denied"
         );
-        let longest_code = "a".repeat(63);
-        let longest_wire =
-            alloc::format!(r#"{{"method":"store.get","code":"{longest_code}","retryable":false}}"#);
-        assert_eq!(
-            HostError::from_wire("store.get", longest_wire.as_bytes()).code,
-            longest_code
-        );
-        let oversized_code = "a".repeat(64);
-        let oversized_wire = alloc::format!(
-            r#"{{"method":"store.get","code":"{oversized_code}","retryable":false}}"#
-        );
-        assert_eq!(
-            HostError::from_wire("store.get", oversized_wire.as_bytes()).code,
-            "internal"
-        );
-
         for malformed in [
             br#"{"method":"store.get","code":"denied","retryable":false,"debug":"secret"}"#
                 .as_slice(),
@@ -1166,8 +1525,32 @@ mod tests {
         ] {
             assert_eq!(
                 HostError::from_wire("store.get", malformed).code,
-                "internal"
+                "protocol-error"
             );
+        }
+    }
+
+    #[test]
+    fn every_method_enforces_its_generated_closed_error_set() {
+        for (index, method) in METHODS.iter().enumerate() {
+            for code in COMMON_ERROR_CODES
+                .iter()
+                .chain(METHOD_ERROR_CODES[index].iter())
+            {
+                let wire =
+                    alloc::format!(r#"{{"method":"{method}","code":"{code}","retryable":false}}"#);
+                assert_eq!(HostError::from_wire(method, wire.as_bytes()).code, *code);
+            }
+            let foreign = METHOD_ERROR_CODES
+                .iter()
+                .flat_map(|codes| codes.iter())
+                .find(|code| !METHOD_ERROR_CODES[index].contains(code))
+                .unwrap();
+            let wire =
+                alloc::format!(r#"{{"method":"{method}","code":"{foreign}","retryable":true}}"#);
+            let error = HostError::from_wire(method, wire.as_bytes());
+            assert_eq!(error.code, "protocol-error", "{method} accepted {foreign}");
+            assert!(!error.retryable);
         }
     }
 
@@ -1299,11 +1682,16 @@ mod tests {
             };
         }
         let audio = || {
-            Handle::<AudioOutput>::from_value(&obj(vec![
+            let handle = Handle::<AudioOutput>::from_value(&obj(vec![
                 ("id", num(1)),
                 ("kind", string("audio-output")),
             ]))
-            .unwrap()
+            .unwrap();
+            handle.set_metadata(ResourceMetadata::AudioOutput {
+                channels: 2,
+                max_queued_frames: 1024,
+            });
+            handle
         };
         let ime = || {
             Handle::<ImeSession>::from_value(&obj(vec![
@@ -1313,18 +1701,33 @@ mod tests {
             .unwrap()
         };
         let camera = || {
-            Handle::<CameraStream>::from_value(&obj(vec![
+            let handle = Handle::<CameraStream>::from_value(&obj(vec![
                 ("id", num(3)),
                 ("kind", string("camera-stream")),
             ]))
-            .unwrap()
+            .unwrap();
+            handle.set_metadata(ResourceMetadata::Camera {
+                width: 1,
+                height: 1,
+                stride: 4,
+                frame_bytes: 4,
+                sequences: BTreeSet::new(),
+            });
+            handle
         };
         let microphone = || {
-            Handle::<MicrophoneStream>::from_value(&obj(vec![
+            let handle = Handle::<MicrophoneStream>::from_value(&obj(vec![
                 ("id", num(4)),
                 ("kind", string("microphone-stream")),
             ]))
-            .unwrap()
+            .unwrap();
+            handle.set_metadata(ResourceMetadata::Microphone {
+                sample_rate: 48_000,
+                channels: 1,
+                max_frames_per_read: 1024,
+                last: None,
+            });
+            handle
         };
         let state = || ImeState {
             text: String::new(),
@@ -1459,6 +1862,224 @@ mod tests {
         ok!(clipboard::read_text(fake_sink()), b"null");
         ok!(clipboard::write_text("text"), b"null");
         ok!(env::snapshot(), br#"{"colorScheme":"light","locale":{"language":"en"},"timeZoneOffsetMinutes":0,"accessibility":{"reducedMotion":false,"increasedContrast":false}}"#);
+    }
+
+    #[test]
+    fn hostile_canvas_playback_store_and_locale_successes_are_protocol_errors() {
+        let _guard = crate::wire_lock();
+        crate::test_shims::CALLS.lock().unwrap().clear();
+
+        for reply in [
+            br#"{"width":10,"height":10,"dpr":1.1,"mode":"draw","safeArea":{"top":0,"right":0,"bottom":0,"left":0}}"#.as_slice(),
+            br#"{"width":10,"height":10,"dpr":1,"mode":"draw","safeArea":{"top":0,"right":6,"bottom":0,"left":5}}"#.as_slice(),
+        ] {
+            assert_eq!(
+                finish(canvas::get_info("main"), 1, reply).unwrap_err().code,
+                "protocol-error"
+            );
+        }
+
+        for reply in [
+            br#"{"output":{"id":1,"kind":"audio-output"},"sampleRate":7999,"channels":2,"maxQueuedFrames":8}"#.as_slice(),
+            br#"{"output":{"id":1,"kind":"audio-output"},"sampleRate":48000,"channels":1,"maxQueuedFrames":8}"#.as_slice(),
+            br#"{"output":{"id":1,"kind":"audio-output"},"sampleRate":48000,"channels":2,"maxQueuedFrames":0}"#.as_slice(),
+        ] {
+            assert_eq!(
+                finish(playback::open(PlaybackOptions::default()), 1, reply)
+                    .unwrap_err()
+                    .code,
+                "protocol-error"
+            );
+        }
+
+        let output = PlaybackStream::decode(
+            decode_reply(br#"{"output":{"id":1,"kind":"audio-output"},"sampleRate":48000,"channels":2,"maxQueuedFrames":8}"#)
+                .unwrap(),
+        )
+        .unwrap()
+        .output;
+        for reply in [
+            br#"{"acceptedFrames":2,"queuedFrames":2}"#.as_slice(),
+            br#"{"acceptedFrames":1,"queuedFrames":0}"#.as_slice(),
+            br#"{"acceptedFrames":1,"queuedFrames":9}"#.as_slice(),
+        ] {
+            assert_eq!(
+                finish(playback::write(&output, &[0; 8]), 1, reply)
+                    .unwrap_err()
+                    .code,
+                "protocol-error"
+            );
+        }
+
+        for reply in [
+            br#"{"items":[{"key":"prefix/b","version":"1","size":"0"},{"key":"prefix/a","version":"2","size":"0"}]}"#.as_slice(),
+            br#"{"items":[{"key":"other/a","version":"1","size":"0"}]}"#.as_slice(),
+            br#"{"items":[{"key":"prefix/e\u0301","version":"1","size":"0"}]}"#.as_slice(),
+            br#"{"items":[],"cursor":"bad+cursor"}"#.as_slice(),
+        ] {
+            assert_eq!(
+                finish(store::list(Some("prefix/"), None), 1, reply)
+                    .unwrap_err()
+                    .code,
+                "protocol-error"
+            );
+        }
+
+        for reply in [
+            br#"{"colorScheme":"light","locale":{"language":"EN"},"timeZoneOffsetMinutes":0,"accessibility":{"reducedMotion":false,"increasedContrast":false}}"#.as_slice(),
+            br#"{"colorScheme":"light","locale":{"language":"en","script":"latin"},"timeZoneOffsetMinutes":0,"accessibility":{"reducedMotion":false,"increasedContrast":false}}"#.as_slice(),
+        ] {
+            assert_eq!(
+                finish(env::snapshot(), 1, reply).unwrap_err().code,
+                "protocol-error"
+            );
+        }
+    }
+
+    #[test]
+    fn hostile_capture_successes_do_not_commit_bytes_or_sequence_state() {
+        let _guard = crate::wire_lock();
+        crate::test_shims::CALLS.lock().unwrap().clear();
+
+        let constraints = CameraConstraints {
+            facing: Some(Facing::User),
+            max_width: Some(2),
+            max_height: Some(2),
+            max_frame_rate: Some(30),
+        };
+        for reply in [
+            br#"{"camera":{"id":3,"kind":"camera-stream"},"facing":"environment","width":2,"height":2,"stride":8,"format":"rgba8","frameBytes":16,"nominalFrameRate":30}"#.as_slice(),
+            br#"{"camera":{"id":3,"kind":"camera-stream"},"facing":"user","width":3,"height":2,"stride":12,"format":"rgba8","frameBytes":24,"nominalFrameRate":30}"#.as_slice(),
+            br#"{"camera":{"id":3,"kind":"camera-stream"},"facing":"user","width":2,"height":2,"stride":7,"format":"rgba8","frameBytes":14,"nominalFrameRate":30}"#.as_slice(),
+            br#"{"camera":{"id":3,"kind":"camera-stream"},"facing":"user","width":2,"height":2,"stride":8,"format":"rgba8","frameBytes":15,"nominalFrameRate":30}"#.as_slice(),
+        ] {
+            assert_eq!(
+                finish(capture::request_camera(constraints.clone()), 1, reply)
+                    .unwrap_err()
+                    .code,
+                "protocol-error"
+            );
+        }
+
+        let camera = finish(
+            capture::request_camera(constraints),
+            1,
+            br#"{"camera":{"id":3,"kind":"camera-stream"},"facing":"user","width":2,"height":2,"stride":8,"format":"rgba8","frameBytes":16,"nominalFrameRate":30}"#,
+        )
+        .unwrap()
+        .unwrap();
+        let mut first = [9u8; 16];
+        assert!(finish_value(
+            capture::frame(&camera.camera, ByteSink::new(&mut first).unwrap(), None),
+            obj(vec![
+                ("written", num(16)),
+                ("width", num(2)),
+                ("height", num(2)),
+                ("stride", num(8)),
+                ("format", string("rgba8")),
+                ("sequence", string("0")),
+                ("bytes", Value::Bytes(vec![1; 16])),
+            ])
+        )
+        .is_ok());
+        assert_eq!(first, [1; 16]);
+        let mut untouched = [9u8; 16];
+        assert_eq!(
+            finish_value(
+                capture::frame(
+                    &camera.camera,
+                    ByteSink::new(&mut untouched).unwrap(),
+                    Some(0),
+                ),
+                obj(vec![
+                    ("written", num(16)),
+                    ("width", num(2)),
+                    ("height", num(2)),
+                    ("stride", num(8)),
+                    ("format", string("rgba8")),
+                    ("sequence", string("0")),
+                    ("bytes", Value::Bytes(vec![2; 16])),
+                ])
+            )
+            .unwrap_err()
+            .code,
+            "protocol-error"
+        );
+        assert_eq!(untouched, [9; 16]);
+
+        for reply in [
+            br#"{"microphone":{"id":4,"kind":"microphone-stream"},"sampleRate":7999,"channels":1,"format":"f32le","maxFramesPerRead":4}"#.as_slice(),
+            br#"{"microphone":{"id":4,"kind":"microphone-stream"},"sampleRate":48000,"channels":2,"format":"f32le","maxFramesPerRead":4}"#.as_slice(),
+            br#"{"microphone":{"id":4,"kind":"microphone-stream"},"sampleRate":48000,"channels":1,"format":"f32le","maxFramesPerRead":0}"#.as_slice(),
+        ] {
+            assert_eq!(
+                finish(
+                    capture::request_mic(MicrophoneConstraints {
+                        preferred_sample_rate: None,
+                        max_channels: Some(1),
+                    }),
+                    1,
+                    reply,
+                )
+                .unwrap_err()
+                .code,
+                "protocol-error"
+            );
+        }
+
+        let microphone = finish(
+            capture::request_mic(MicrophoneConstraints {
+                preferred_sample_rate: None,
+                max_channels: Some(1),
+            }),
+            1,
+            br#"{"microphone":{"id":4,"kind":"microphone-stream"},"sampleRate":48000,"channels":1,"format":"f32le","maxFramesPerRead":4}"#,
+        )
+        .unwrap()
+        .unwrap();
+        let mut audio = [9u8; 4];
+        assert!(finish_value(
+            capture::read_audio(&microphone.microphone, ByteSink::new(&mut audio).unwrap()),
+            obj(vec![
+                ("written", num(4)),
+                ("sampleRate", num(48_000)),
+                ("channels", num(1)),
+                ("format", string("f32le")),
+                ("frames", num(1)),
+                ("sequence", string("0")),
+                ("droppedFrames", num(0)),
+                ("bytes", Value::Bytes(vec![1; 4])),
+            ])
+        )
+        .is_ok());
+        let mut audio_untouched = [9u8; 4];
+        assert_eq!(
+            finish_value(
+                capture::read_audio(
+                    &microphone.microphone,
+                    ByteSink::new(&mut audio_untouched).unwrap(),
+                ),
+                obj(vec![
+                    ("written", num(4)),
+                    ("sampleRate", num(48_000)),
+                    ("channels", num(1)),
+                    ("format", string("f32le")),
+                    ("frames", num(1)),
+                    ("sequence", string("2")),
+                    ("droppedFrames", num(0)),
+                    ("bytes", Value::Bytes(vec![2; 4])),
+                ])
+            )
+            .unwrap_err()
+            .code,
+            "protocol-error"
+        );
+        assert_eq!(audio_untouched, [9; 4]);
+    }
+
+    #[test]
+    fn byte_sink_construction_uses_a_local_error_type() {
+        assert!(matches!(ByteSink::new(&mut []), Err(ByteSinkError::Empty)));
     }
 
     #[test]
