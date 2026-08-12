@@ -21,11 +21,13 @@ interface StructuredHostErrorFields {
 }
 
 const structuredHostErrorFields = (
+  // Reason: worker and host code may throw any JavaScript value across this message boundary.
   value: unknown,
   expectedMethod?: string
 ): StructuredHostErrorFields | null => {
   if (typeof value !== 'object' || value === null) return null;
   try {
+    // Reason: every property of an arbitrary thrown value is untrusted until validated below.
     const candidate = value as { method?: unknown; code?: unknown; retryable?: unknown };
     const method = candidate.method;
     const code = candidate.code;
@@ -46,6 +48,7 @@ const structuredHostErrorFields = (
   }
 };
 
+// Reason: ordinary worker failures may also be arbitrary JavaScript thrown values.
 const ordinaryWorkerError = (value: unknown): NativeWorkerError => {
   try {
     const error = value instanceof Error ? value : new Error(String(value));
@@ -122,6 +125,7 @@ export function serializeNativeWorkerError(value: unknown): NativeWorkerError {
 
 /** Serialize an exception from a guest-initiated host call, never diagnostics. */
 export function serializeNativeHostCallError(
+  // Reason: capability implementations may throw arbitrary values at the worker seam.
   value: unknown,
   expectedMethod: string
 ): NativeWorkerError {
