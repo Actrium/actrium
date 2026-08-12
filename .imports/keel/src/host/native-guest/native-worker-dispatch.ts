@@ -4,7 +4,7 @@ import type {
   MainToNativeWorkerMessage,
   NativeWorkerToMainMessage,
 } from './native-worker-protocol';
-import { serializeNativeWorkerError } from './native-worker-protocol';
+import { deserializeNativeWorkerError, serializeNativeWorkerError } from './native-worker-protocol';
 
 export interface NativeWorkerDispatchOptions {
   post(message: NativeWorkerToMainMessage, transfer?: Transferable[]): void;
@@ -25,7 +25,7 @@ export class NativeWorkerDispatch {
   private readonly pendingHostCalls = new Map<
     number,
     // Reason: capability inputs and results are contract-defined values decoded at the boundary.
-    { resolve(value: unknown): void; reject(error: Error): void }
+    { resolve(value: unknown): void; reject(error: Error): void; dispose(): void }
   >();
 
   constructor(options: NativeWorkerDispatchOptions) {
@@ -113,7 +113,8 @@ export class NativeWorkerDispatch {
               get: (_module, method) => {
                 if (typeof method !== 'string') return undefined;
                 // Reason: the main-thread contract validates this capability input.
-                return (input: unknown) => this.callHost(moduleId, method, input);
+                return (input: unknown, context?: { signal?: AbortSignal }) =>
+                  this.callHost(moduleId, method, input, context?.signal);
               },
             }
           );
@@ -123,11 +124,27 @@ export class NativeWorkerDispatch {
   }
 
   // Reason: capability inputs and results are opaque until the main-thread contract validates them.
-  private callHost(moduleId: string, method: string, input: unknown): Promise<unknown> {
+  private callHost(
+    moduleId: string,
+    method: string,
+    input: unknown,
+    signal?: AbortSignal
+  ): Promise<unknown> {
     if (!this.currentTurnId) return Promise.reject(new Error('host call outside a guest turn'));
     const callId = ++this.callSeq;
     return new Promise((resolve, reject) => {
-      this.pendingHostCalls.set(callId, { resolve, reject });
+      let cancellationSent = false;
+      const cancel = () => {
+        if (cancellationSent) return;
+        cancellationSent = true;
+        this.post({ type: 'hostCancel', callId });
+      };
+      signal?.addEventListener('abort', cancel, { once: true });
+      this.pendingHostCalls.set(callId, {
+        resolve,
+        reject,
+        dispose: () => signal?.removeEventListener('abort', cancel),
+      });
       this.post({
         type: 'hostCall',
         turnId: this.currentTurnId,
@@ -136,6 +153,7 @@ export class NativeWorkerDispatch {
         method,
         input,
       });
+      if (signal?.aborted) cancel();
     });
   }
 
@@ -145,10 +163,11 @@ export class NativeWorkerDispatch {
     const pending = this.pendingHostCalls.get(message.callId);
     if (!pending) return;
     this.pendingHostCalls.delete(message.callId);
+    pending.dispose();
     if (message.ok) pending.resolve(message.result);
     else
       pending.reject(
-        message.error ? new Error(message.error.message) : new Error('host call failed')
+        message.error ? deserializeNativeWorkerError(message.error) : new Error('host call failed')
       );
   }
 
@@ -186,6 +205,7 @@ export class NativeWorkerDispatch {
   private destroy(): void {
     this.destroyed = true;
     for (const pending of this.pendingHostCalls.values()) {
+      pending.dispose();
       pending.reject(new Error('native worker destroyed'));
     }
     this.pendingHostCalls.clear();

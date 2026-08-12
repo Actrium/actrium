@@ -5,6 +5,10 @@ export interface NativeWorkerError {
   name: string;
   message: string;
   stack?: string;
+  /** Strict Host API v0.1 fields; omitted for ordinary implementation errors. */
+  method?: string;
+  code?: string;
+  retryable?: boolean;
 }
 
 export type MainToNativeWorkerMessage =
@@ -44,6 +48,7 @@ export type NativeWorkerToMainMessage =
       // Reason: capability input is decoded in the worker and validated on the main thread.
       input: unknown;
     }
+  | { type: 'hostCancel'; callId: number }
   | {
       type: 'memoryReadResult';
       requestId: number;
@@ -63,12 +68,37 @@ export type NativeWorkerToMainMessage =
 // Reason: JavaScript permits throwing arbitrary values across every async boundary.
 export function serializeNativeWorkerError(value: unknown): NativeWorkerError {
   const error = value instanceof Error ? value : new Error(String(value));
-  return { name: error.name, message: error.message, stack: error.stack };
+  const candidate = value as { method?: unknown; code?: unknown; retryable?: unknown } | null;
+  const structured =
+    candidate &&
+    typeof candidate.method === 'string' &&
+    typeof candidate.code === 'string' &&
+    /^[a-z][a-z0-9-]{0,63}$/.test(candidate.code) &&
+    typeof candidate.retryable === 'boolean'
+      ? {
+          method: candidate.method,
+          code: candidate.code,
+          retryable: candidate.retryable,
+        }
+      : {};
+  return { name: error.name, message: error.message, stack: error.stack, ...structured };
 }
 
 export function deserializeNativeWorkerError(value: NativeWorkerError): Error {
   const error = new Error(value.message);
   error.name = value.name;
   if (value.stack) error.stack = value.stack;
+  if (
+    typeof value.method === 'string' &&
+    typeof value.code === 'string' &&
+    /^[a-z][a-z0-9-]{0,63}$/.test(value.code) &&
+    typeof value.retryable === 'boolean'
+  ) {
+    Object.assign(error, {
+      method: value.method,
+      code: value.code,
+      retryable: value.retryable,
+    });
+  }
   return error;
 }
