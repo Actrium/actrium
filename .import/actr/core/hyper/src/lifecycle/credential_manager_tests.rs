@@ -4,7 +4,7 @@ use actr_protocol::{
     RenewCredentialResponse, TurnCredential, register_response, renew_credential_response,
 };
 use prost::bytes::Bytes;
-use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomicOrdering};
 
 fn actor(serial: u64) -> ActrId {
     ActrId {
@@ -61,6 +61,17 @@ fn register_ok(serial: u64, key_id: u32) -> register_response::RegisterOk {
             nanos: 0,
         }),
     }
+}
+
+/// A `RegisterOk` whose `renewal_token` / `renewal_token_expires_at` are
+/// `None` — what an AIS built before the renewal-token feature returns. Used
+/// to prove a version-skewed hard rebind still commits the access credential
+/// instead of discarding it (issue #397).
+fn register_ok_without_token(serial: u64, key_id: u32) -> register_response::RegisterOk {
+    let mut ok = register_ok(serial, key_id);
+    ok.renewal_token = None;
+    ok.renewal_token_expires_at = None;
+    ok
 }
 
 /// P1 (finding 1): with the membership controller flag OFF (default), an expired
@@ -807,4 +818,254 @@ async fn credential_expiry_overflow_skips_callback_instead_of_panicking() {
         0,
         "an invalid remote expiry must not reach the observer callback"
     );
+}
+
+/// Issue #397: an AIS that predates the renewal-token feature returns a
+/// successful `/register` whose `renewal_token` / `renewal_token_expires_at`
+/// are `None`. The legacy hard rebind must still commit the access credential
+/// (the field that actually keeps the node reachable) instead of discarding
+/// the whole re-registration over an optional field — otherwise the node
+/// keeps its expiring old credential and silently drops off once its TTL
+/// lapses.
+#[tokio::test]
+async fn legacy_hard_rebind_commits_when_ais_omits_renewal_token() {
+    let mut server = mockito::Server::new_async().await;
+    let response = RegisterResponse {
+        result: Some(register_response::Result::Success(
+            register_ok_without_token(2, 9),
+        )),
+    };
+    let mock = server
+        .mock("POST", "/register")
+        .with_status(200)
+        .with_header("content-type", "application/x-protobuf")
+        .with_body(response.encode_to_vec())
+        .expect(1)
+        .create_async()
+        .await;
+
+    let session = SessionState::new(SessionSnapshot {
+        actor_id: actor(1),
+        credential: credential(1),
+        credential_expires_at: prost_types::Timestamp {
+            seconds: 10,
+            nanos: 0,
+        },
+        turn_credential: TurnCredential {
+            username: "10:actor-1".to_string(),
+            password: "old".to_string(),
+            expires_at: 10,
+        },
+        renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
+        renewal_token_expires_at: prost_types::Timestamp {
+            seconds: 1,
+            nanos: 0,
+        },
+        generation: 1,
+    });
+
+    run_renewal_once(
+        session.clone(),
+        server.url(),
+        None,
+        RegistrationContext::Linked {
+            request: RegisterRequest {
+                actr_type: actor(1).r#type,
+                realm: Realm { realm_id: 7 },
+                ..Default::default()
+            },
+            realm_secret: None,
+        },
+        None,
+        None,
+    )
+    .await
+    .expect("hard rebind should commit even when AIS omits renewal_token");
+
+    mock.assert_async().await;
+    let snapshot = session.snapshot().await;
+    // The freshly-issued credential IS committed.
+    assert_eq!(snapshot.actor_id, actor(2));
+    assert_eq!(snapshot.credential.key_id, 9);
+    assert_eq!(snapshot.generation, 2);
+    assert_eq!(
+        session.phase().await,
+        SessionPhase::Active,
+        "committed rebind must leave the session Active"
+    );
+    // Token degrades to empty — soft renewal unavailable, next cycle hard-rebinds again.
+    assert!(
+        snapshot.renewal_token.is_empty(),
+        "missing renewal_token must be committed as empty, not abort the rebind"
+    );
+}
+
+/// Issue #397 symmetric path: the membership-controller `/reissue` rebind must
+/// also commit a token-less success instead of returning `Deferred` and
+/// discarding the reissued credential.
+#[tokio::test]
+async fn credential_only_hard_reissue_commits_when_ais_omits_renewal_token() {
+    let mut server = mockito::Server::new_async().await;
+    let response = RegisterResponse {
+        result: Some(register_response::Result::Success(
+            register_ok_without_token(1, 9),
+        )),
+    };
+    let mock = server
+        .mock("POST", "/reissue")
+        .with_status(200)
+        .with_header("content-type", "application/x-protobuf")
+        .with_body(response.encode_to_vec())
+        .expect(1)
+        .create_async()
+        .await;
+
+    // Expired renewal token -> run_reacquire_once takes the hard-rebind branch.
+    let session = SessionState::new(SessionSnapshot {
+        actor_id: actor(1),
+        credential: credential(1),
+        credential_expires_at: prost_types::Timestamp {
+            seconds: 10,
+            nanos: 0,
+        },
+        turn_credential: TurnCredential {
+            username: "10:actor-1".to_string(),
+            password: "old".to_string(),
+            expires_at: 10,
+        },
+        renewal_token: Bytes::from_static(b"expired-renewal-token-32bytes"),
+        renewal_token_expires_at: prost_types::Timestamp {
+            seconds: 1,
+            nanos: 0,
+        },
+        generation: 1,
+    });
+    let session_handle = session.clone();
+
+    let outcome = run_reacquire_once(
+        session,
+        server.url(),
+        None,
+        RegistrationContext::Linked {
+            request: RegisterRequest {
+                actr_type: actor(1).r#type,
+                realm: Realm { realm_id: 7 },
+                ..Default::default()
+            },
+            realm_secret: None,
+        },
+        None,
+        None,
+    )
+    .await;
+
+    mock.assert_async().await;
+    assert!(
+        matches!(outcome, ReacquireOutcome::Renewed(_)),
+        "token-less reissue must commit (Renewed), not defer: {outcome:?}"
+    );
+    assert_eq!(
+        session_handle.snapshot().await.credential.key_id,
+        9,
+        "reissued credential must be committed"
+    );
+    assert_ne!(
+        session_handle.phase().await,
+        SessionPhase::RealmUnavailable,
+        "missing optional token must not look like a terminal realm denial"
+    );
+}
+
+// ---- Fix 2: non-transient failure classification & escalation -------------
+
+#[test]
+fn classify_renewal_error_categorizes_missing_field_as_non_transient() {
+    // Missing optional field / contract violations are non-transient: no retry
+    // can make an old AIS start returning renewal_token.
+    assert_eq!(
+        classify_renewal_error("hard rebind response missing renewal token"),
+        FailureClass::NonTransient
+    );
+    assert_eq!(
+        classify_renewal_error("hard rebind response missing renewal token expiry"),
+        FailureClass::NonTransient
+    );
+    assert_eq!(
+        classify_renewal_error("hard rebind response missing credential expiry"),
+        FailureClass::NonTransient
+    );
+    assert_eq!(
+        classify_renewal_error("renew response missing result"),
+        FailureClass::NonTransient
+    );
+    // Transport / rate-limit / store errors are transient.
+    assert_eq!(
+        classify_renewal_error("retryable renew error: connection reset"),
+        FailureClass::Transient
+    );
+    assert_eq!(
+        classify_renewal_error("renewal rate limited"),
+        FailureClass::Transient
+    );
+    assert_eq!(
+        classify_renewal_error(
+            "hard rebind register failed before commit: 503 service unavailable"
+        ),
+        FailureClass::Transient
+    );
+}
+
+#[test]
+fn record_failure_escalates_after_threshold() {
+    let counter = AtomicU32::new(0);
+    let err = "hard rebind response missing renewal token";
+
+    // Below the threshold: still Warn, counter climbing.
+    for _ in 0..(NON_TRANSIENT_FAILURE_ESCALATION_THRESHOLD - 1) {
+        assert_eq!(record_failure(&counter, err), EscalationLevel::Warn);
+    }
+    assert_eq!(
+        counter.load(AtomicOrdering::SeqCst),
+        NON_TRANSIENT_FAILURE_ESCALATION_THRESHOLD - 1
+    );
+
+    // Nth non-transient failure escalates and resets the counter.
+    assert_eq!(record_failure(&counter, err), EscalationLevel::Escalate);
+    assert_eq!(
+        counter.load(AtomicOrdering::SeqCst),
+        0,
+        "counter resets after escalating so the loud ERROR repeats per cycle, not per tick"
+    );
+
+    // Next failure starts a fresh count (Warn), proving the reset.
+    assert_eq!(record_failure(&counter, err), EscalationLevel::Warn);
+    assert_eq!(counter.load(AtomicOrdering::SeqCst), 1);
+}
+
+#[test]
+fn record_failure_transient_resets_counter() {
+    let counter = AtomicU32::new(0);
+    let non_transient = "hard rebind response missing renewal token";
+    let transient = "renewal rate limited";
+
+    // Prime the counter one short of the threshold.
+    for _ in 0..(NON_TRANSIENT_FAILURE_ESCALATION_THRESHOLD - 1) {
+        record_failure(&counter, non_transient);
+    }
+    assert_eq!(
+        counter.load(AtomicOrdering::SeqCst),
+        NON_TRANSIENT_FAILURE_ESCALATION_THRESHOLD - 1
+    );
+
+    // A single transient blip must not be able to masquerade as a stuck
+    // condition: it resets the counter and returns Warn.
+    assert_eq!(record_failure(&counter, transient), EscalationLevel::Warn);
+    assert_eq!(counter.load(AtomicOrdering::SeqCst), 0);
+
+    // The next non-transient failure starts from 0, not from the primed value.
+    assert_eq!(
+        record_failure(&counter, non_transient),
+        EscalationLevel::Warn
+    );
+    assert_eq!(counter.load(AtomicOrdering::SeqCst), 1);
 }
