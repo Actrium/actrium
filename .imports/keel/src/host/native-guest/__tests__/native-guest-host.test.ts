@@ -10,7 +10,7 @@ import { NativeGuestHost } from '../native-guest-host';
 // A tiny host module defined IN the test, mirroring the platform's host:store
 // contract (putText/getText shapes from host-store.ts): keel knows nothing
 // about specific capabilities, so this proves the native-guest ABI generically.
-function storeDispatch(options: { throwOnPut?: boolean } = {}) {
+function storeDispatch(options: { throwOnPut?: boolean; structuredErrorOnPut?: boolean } = {}) {
   const store = new Map<string, string>();
   const contract = defineKeelContract({
     version: '1',
@@ -42,6 +42,14 @@ function storeDispatch(options: { throwOnPut?: boolean } = {}) {
   const impl = implementHostModules(contract, {
     'host:store': {
       putText: async (i: { key: string; text: string }) => {
+        if (options.structuredErrorOnPut) {
+          throw Object.assign(new Error('must not cross the ABI'), {
+            name: 'HostError',
+            method: 'store.putText',
+            code: 'quota-exceeded',
+            retryable: false,
+          });
+        }
         if (options.throwOnPut) throw new Error('put exploded');
         store.set(i.key, i.text);
         return { version: store.size };
@@ -82,6 +90,7 @@ const BLUR_GUEST = readFileSync(join(import.meta.dir, 'fixtures/blur-demo-guest.
 const EVENT_TRAP = readFileSync(join(import.meta.dir, 'fixtures/event-trap.wasm'));
 // Adversarial guest whose keel_alloc always returns 0 (exhausted allocator).
 const ALLOC_ZERO = readFileSync(join(import.meta.dir, 'fixtures/alloc-zero.wasm'));
+const CANCEL_CALL = readFileSync(join(import.meta.dir, 'fixtures/cancel-call.wasm'));
 
 // --- tiny seeded PRNG + JSON generator for fuzzing (reproducible, no deps) ---
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
@@ -156,6 +165,60 @@ describe('NativeGuestHost — native (non-JS) guest host:* ABI', () => {
     const { ok, result } = readResolve(host);
     expect(ok).toBe(0);
     expect(String(result.error)).toContain('not registered');
+  });
+
+  it('preserves the strict HostError fields without leaking an internal message', async () => {
+    const { table } = storeDispatch({ structuredErrorOnPut: true });
+    const host = new NativeGuestHost({ dispatch: table });
+    await host.load(WASM);
+    await host.drain();
+
+    const { ok, result } = readResolve(host);
+    expect(ok).toBe(0);
+    expect(result).toEqual({
+      method: 'store.putText',
+      code: 'quota-exceeded',
+      retryable: false,
+    });
+  });
+});
+
+describe('NativeGuestHost — cancellable host calls', () => {
+  it('routes keel_host_cancel only to the matching in-flight callback', async () => {
+    const contract = defineKeelContract({
+      version: '1',
+      hostModules: {
+        'host:test': {
+          wait: rpc<{ value: number }, { ok: true }>({
+            schema: {
+              parseInput: (value) => ({ value: Number((value as { value?: unknown }).value) }),
+            },
+          }),
+        },
+      },
+      guestExports: {},
+    });
+    let sawAbort = false;
+    const table = createHostModuleDispatch(contract, {
+      'host:test': {
+        wait: (_input: unknown, context: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            const abort = () => {
+              sawAbort = true;
+              reject(new Error('cancelled'));
+            };
+            if (context.signal.aborted) abort();
+            else context.signal.addEventListener('abort', abort, { once: true });
+          }),
+      },
+    });
+    const host = new NativeGuestHost({ dispatch: table });
+    await host.load(CANCEL_CALL);
+    await host.drain();
+
+    expect(sawAbort).toBe(true);
+    expect((host.exports.resolved as () => number)()).toBe(1);
+    expect((host.exports.resolved_ok as () => number)()).toBe(0);
   });
 });
 
