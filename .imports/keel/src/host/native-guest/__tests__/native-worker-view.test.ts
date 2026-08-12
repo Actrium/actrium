@@ -14,6 +14,7 @@ import {
 const UI_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-guest.wasm'));
 const ASSET_GUEST = readFileSync(join(import.meta.dir, 'fixtures/asset-guest.wasm'));
 const RUNAWAY_GUEST = readFileSync(join(import.meta.dir, 'fixtures/runaway.wasm'));
+const CANCEL_CALL = readFileSync(join(import.meta.dir, 'fixtures/cancel-call.wasm'));
 
 const emptyContract = defineKeelContract({
   version: '1',
@@ -173,6 +174,46 @@ describe('NativeGuestWorkerView — off-main-thread native guest', () => {
 
     expect(killed).toBe(false);
     expect(engine.isLoaded).toBe(true);
+  });
+
+  it('routes native cancellation through the worker to the matching host call', async () => {
+    const contract = defineKeelContract({
+      version: '1',
+      hostModules: {
+        'host:test': {
+          wait: rpc<{ value: number }, { ok: true }>({
+            schema: {
+              parseInput: (value) => ({ value: Number((value as { value?: unknown }).value) }),
+            },
+          }),
+        },
+      },
+      guestExports: {},
+    });
+    let sawAbort = false;
+    const hostModules = implementHostModules(contract, {
+      'host:test': {
+        wait: (_input: unknown, context: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            const abort = () => {
+              sawAbort = true;
+              reject(new Error('cancelled'));
+            };
+            if (context.signal.aborted) abort();
+            else context.signal.addEventListener('abort', abort, { once: true });
+          }),
+      },
+    });
+    engine = makeEngine({
+      wasmBytes: CANCEL_CALL,
+      contract,
+      hostModules,
+      watchdogTimeout: 20_000,
+    });
+
+    await engine.loadBundle();
+
+    expect(sawAbort).toBe(true);
   });
 
   it('hard-kills a synchronous native guest loop while the main thread stays live', async () => {

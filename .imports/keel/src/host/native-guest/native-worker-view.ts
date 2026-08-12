@@ -86,6 +86,7 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
   private turnSeq = 0;
   private memorySeq = 0;
   private activeHostCalls = 0;
+  private readonly activeHostCallControllers = new Map<number, AbortController>();
   private readonly turns = new Map<number, TurnState>();
   private readonly memoryRequests = new Map<number, MemoryRequest>();
   private readonly updateListeners = new Set<Listener>();
@@ -321,6 +322,9 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
       case 'hostCall':
         void this.handleHostCall(message);
         return;
+      case 'hostCancel':
+        this.activeHostCallControllers.get(message.callId)?.abort();
+        return;
       case 'memoryReadResult':
       case 'memoryWriteResult':
         this.finishMemoryRequest(message);
@@ -341,13 +345,15 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
   private async handleHostCall(
     message: Extract<NativeWorkerToMainMessage, { type: 'hostCall' }>
   ): Promise<void> {
+    const controller = new AbortController();
+    this.activeHostCallControllers.set(message.callId, controller);
     this.activeHostCalls++;
     try {
       const handler = this.dispatch[message.moduleId]?.[message.method];
       if (typeof handler !== 'function') {
         throw new Error(`host module not registered: ${message.moduleId}.${message.method}`);
       }
-      const result = await handler(message.input);
+      const result = await handler(message.input, { signal: controller.signal });
       this.post({ type: 'hostResult', callId: message.callId, ok: true, result });
     } catch (error) {
       try {
@@ -361,6 +367,7 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
         this.failFatal(postError instanceof Error ? postError : new Error(String(postError)));
       }
     } finally {
+      this.activeHostCallControllers.delete(message.callId);
       this.activeHostCalls--;
     }
   }
@@ -440,6 +447,8 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
   }
 
   private rejectOutstanding(error: Error): void {
+    for (const controller of this.activeHostCallControllers.values()) controller.abort();
+    this.activeHostCallControllers.clear();
     for (const turn of this.turns.values()) {
       if (turn.timer) clearTimeout(turn.timer);
       turn.reject?.(error);
