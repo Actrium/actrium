@@ -20,7 +20,7 @@
 //! 6. Temporary errors: exponential backoff with jitter.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use actr_protocol::prost::Message as _;
@@ -110,6 +110,11 @@ pub(crate) struct CredentialManager {
 
     /// Single-flight guard: only one renewal attempt at a time.
     renewing: Arc<AtomicBool>,
+    /// Consecutive non-transient renewal failures. After
+    /// [`NON_TRANSIENT_FAILURE_ESCALATION_THRESHOLD`] the failure is escalated
+    /// to `ERROR` so a supervisor/alert can react instead of looping silently
+    /// (issue #397 hardening). Reset on any success or transient failure.
+    non_transient_failures: Arc<AtomicU32>,
     /// Pending renewal join handle for cancellation during shutdown.
     inflight: Arc<Mutex<Option<tokio::task::JoinHandle<()>>>>,
     /// Runtime handles that must be updated after hard rebind commits.
@@ -140,6 +145,7 @@ impl CredentialManager {
             ais_endpoint: ais_endpoint.into(),
             realm_secret,
             renewing: Arc::new(AtomicBool::new(false)),
+            non_transient_failures: Arc::new(AtomicU32::new(0)),
             inflight: Arc::new(Mutex::new(None)),
             hard_rebind_handles: Arc::new(Mutex::new(None)),
             hook_callback: Arc::new(Mutex::new(None)),
@@ -227,6 +233,7 @@ impl CredentialManager {
         let renewing = self.renewing.clone();
         let hard_rebind_handles = self.hard_rebind_handles.clone();
         let hook_callback = self.hook_callback.clone();
+        let non_transient_failures = self.non_transient_failures.clone();
 
         // Spawn the actual work so the caller isn't blocked.
         let handle = tokio::spawn(async move {
@@ -241,8 +248,23 @@ impl CredentialManager {
                 hook_callback,
             )
             .await;
-            if let Err(err) = result {
-                tracing::warn!(error = %err, "CredentialManager: renewal attempt ended");
+            match result {
+                Ok(()) => non_transient_failures.store(0, Ordering::Release),
+                Err(err) => match record_failure(&non_transient_failures, &err) {
+                    EscalationLevel::Warn => {
+                        tracing::warn!(error = %err, "CredentialManager: renewal attempt ended");
+                    }
+                    EscalationLevel::Escalate => {
+                        tracing::error!(
+                            error = %err,
+                            error_category = "credential_renewal_non_transient",
+                            severity = 9,
+                            "CredentialManager: renewal has failed non-transiently \
+                             repeatedly; node may be unable to soft-renew — \
+                             supervisor/alert intervention recommended"
+                        );
+                    }
+                },
             }
             renewing.store(false, Ordering::Release);
         });
@@ -453,12 +475,31 @@ async fn run_hard_rebind(
     let credential_expires_at = ok
         .credential_expires_at
         .ok_or_else(|| "hard rebind response missing credential expiry".to_string())?;
-    let renewal_token = ok
-        .renewal_token
-        .ok_or_else(|| "hard rebind response missing renewal token".to_string())?;
+    // `renewal_token` / `renewal_token_expires_at` are `optional` in the proto
+    // (actr.proto:217-219): an AIS that predates the renewal-token feature
+    // legitimately omits them. The access credential + expiry above are what
+    // keep the node reachable, so commit them regardless. A missing token only
+    // means "soft renewal unavailable" — the node stays in the empty-token state
+    // it was already in and will hard-rebind again next cycle. Failing the
+    // entire rebind over an optional field would discard a successful
+    // re-registration and let the old credential expire into a silent outage
+    // (issue #397). `credential_expires_at` stays mandatory: without an expiry
+    // the credential cannot be tracked, so that case is genuinely unsalvageable.
+    let renewal_token_missing = ok.renewal_token.is_none();
+    let renewal_token = ok.renewal_token.unwrap_or_default();
     let renewal_token_expires_at = ok
         .renewal_token_expires_at
-        .ok_or_else(|| "hard rebind response missing renewal token expiry".to_string())?;
+        .unwrap_or(prost_types::Timestamp {
+            seconds: 0,
+            nanos: 0,
+        });
+    if renewal_token_missing {
+        tracing::warn!(
+            actor_id = %ok.actr_id.to_string_repr(),
+            "hard rebind: AIS omitted renewal_token; committing access credential \
+             but soft renewal unavailable — node will hard-rebind each cycle"
+        );
+    }
 
     let new_snapshot = SessionSnapshot {
         // Fresh `/register` allocates a new serial — adopt the identity AIS just
@@ -924,19 +965,30 @@ async fn run_credential_only_hard_rebind(
             );
         }
     };
+    // `renewal_token` / `renewal_token_expires_at` are `optional` in the proto
+    // (actr.proto:217-219). A missing token must not discard a credential that
+    // AIS just reissued for this identity — commit it and return `Renewed` so
+    // the controller publishes the credential and keeps the node reachable.
+    // The node stays in the empty-token state and will hard-rebind again next
+    // cycle (issue #397 symmetric to the legacy `/register` path).
     let renewal_token = match ok.renewal_token.clone() {
         Some(v) => v,
         None => {
-            return ReacquireOutcome::Deferred("hard rebind response missing renewal token".into());
+            tracing::warn!(
+                actor_id = %old_snapshot.actor_id.to_string_repr(),
+                "credential-only hard rebind: AIS omitted renewal_token; \
+                 committing access credential but soft renewal unavailable — \
+                 node will hard-rebind each cycle"
+            );
+            bytes::Bytes::new()
         }
     };
     let renewal_token_expires_at = match ok.renewal_token_expires_at {
         Some(v) => v,
-        None => {
-            return ReacquireOutcome::Deferred(
-                "hard rebind response missing renewal token expiry".into(),
-            );
-        }
+        None => prost_types::Timestamp {
+            seconds: 0,
+            nanos: 0,
+        },
     };
 
     let new_snapshot = SessionSnapshot {
@@ -1060,6 +1112,73 @@ async fn fire_credential_renewed(
             return;
         };
         callback(HookEvent::CredentialRenewed { new_expiry }).await;
+    }
+}
+
+// ---- Non-transient failure classification & escalation --------------------
+
+/// Consecutive non-transient failures after which a renewal error is escalated
+/// to `ERROR` instead of `WARN`. Picked to ride out one or two transient
+/// blips on neighbouring heartbeat ticks while still surfacing a stuck
+/// condition well inside a credential TTL.
+const NON_TRANSIENT_FAILURE_ESCALATION_THRESHOLD: u32 = 3;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FailureClass {
+    /// Likely to resolve on retry (5xx, rate-limit, retryable transport).
+    Transient,
+    /// Cannot resolve by retrying (missing optional field, version skew,
+    /// permanent 4xx contract violation). Retrying forever is pointless and,
+    /// before Fix 1, silently burned down into an outage (issue #397).
+    NonTransient,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EscalationLevel {
+    Warn,
+    Escalate,
+}
+
+/// Classify a `run_renewal_once` error string into transient / non-transient.
+///
+/// The string is the same one `trigger_renewal` already logged, so matching on
+/// substrings keeps the classifier in lockstep with the error sites without a
+/// wider refactor that threads typed errors out of `run_renewal_once`.
+fn classify_renewal_error(err: &str) -> FailureClass {
+    if err.contains("missing renewal token")
+        || err.contains("missing renewal token expiry")
+        || err.contains("missing credential expiry")
+        || err.contains("missing result")
+    {
+        FailureClass::NonTransient
+    } else {
+        FailureClass::Transient
+    }
+}
+
+/// Update the consecutive-failure counter and decide whether to escalate.
+///
+/// `NonTransient` increments the counter; once it reaches the threshold the
+/// counter resets to 0 (so the loud `ERROR` repeats once per cycle, not every
+/// tick) and `Escalate` is returned. `Transient` resets the counter to 0 and
+/// returns `Warn` — a single transient blip must not be able to masquerade as
+/// a stuck condition. Pure over the counter so it is unit-testable without a
+/// runtime.
+fn record_failure(counter: &AtomicU32, err: &str) -> EscalationLevel {
+    match classify_renewal_error(err) {
+        FailureClass::NonTransient => {
+            let prev = counter.fetch_add(1, Ordering::AcqRel);
+            if prev + 1 >= NON_TRANSIENT_FAILURE_ESCALATION_THRESHOLD {
+                counter.store(0, Ordering::Release);
+                EscalationLevel::Escalate
+            } else {
+                EscalationLevel::Warn
+            }
+        }
+        FailureClass::Transient => {
+            counter.store(0, Ordering::Release);
+            EscalationLevel::Warn
+        }
     }
 }
 
