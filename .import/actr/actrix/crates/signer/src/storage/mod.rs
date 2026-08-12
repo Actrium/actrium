@@ -45,7 +45,7 @@ pub enum KeyStorage {
 
     /// PostgreSQL storage backend
     #[cfg(feature = "backend-postgres")]
-    Postgres(PostgresBackend),
+    Postgres(Box<PostgresBackend>),
 }
 
 impl KeyStorage {
@@ -86,8 +86,8 @@ impl KeyStorage {
                     .postgres
                     .as_ref()
                     .ok_or_else(|| SignerError::Config("Missing PostgreSQL config".into()))?;
-                let backend = PostgresBackend::new(cfg, config.key_ttl_seconds).await?;
-                Ok(Self::Postgres(backend))
+                let backend = PostgresBackend::new(cfg, config.key_ttl_seconds, encryptor).await?;
+                Ok(Self::Postgres(Box::new(backend)))
             }
 
             #[cfg(not(feature = "backend-postgres"))]

@@ -184,7 +184,9 @@ pub async fn create_signer_state<N: NonceStorage + Send + Sync + 'static>(
     // Create key encryptor
     let encryptor = match service_config.get_kek_source() {
         Some(kek_source) => {
-            crate::recording::info!("KEK configured, enabling private key encryption");
+            crate::recording::info!(
+                "KEK source configured; activating private key encryption in storage backend"
+            );
             KeyEncryptor::from_kek_source(&kek_source)?
         }
         None => {
