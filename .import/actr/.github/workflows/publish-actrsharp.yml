@@ -96,12 +96,23 @@ jobs:
           EXPECTED_RELEASE_SHA: ${{ inputs.release_sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
-          $release = gh release view "v$env:ACTR_VERSION" --repo Actrium/actr `
-            --json tagName,name,url
-          if ($LASTEXITCODE -ne 0) {
-            throw "GitHub Release v$env:ACTR_VERSION does not exist."
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tag = "v$env:ACTR_VERSION"
+          $release = $null
+          for ($i = 0; $i -lt 30; $i++) {
+            $releaseJson = gh release view $tag --repo Actrium/actr `
+              --json tagName,name,url 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $release = $releaseJson | ConvertFrom-Json
+              break
+            }
+            $global:LASTEXITCODE = 0
+            Start-Sleep -Seconds 10
           }
-          Write-Host $release
+          if (-not $release) {
+            throw "GitHub Release $tag is not visible after polling."
+          }
+          Write-Host ($release | ConvertTo-Json -Compress)
           git fetch origin $env:ACTR_TAG_REFSPEC
           if ($LASTEXITCODE -ne 0) { throw "Unable to fetch v$env:ACTR_VERSION." }
           $tagSha = git rev-parse "v$env:ACTR_VERSION^{commit}"
@@ -199,11 +210,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $PSNativeCommandUseErrorActionPreference = $false
           $tag = "v$env:ACTR_VERSION"
           $assetName = "ActrSharp.$env:ACTR_VERSION.snupkg"
           $localAsset = "artifacts/$assetName"
-          $release = gh release view $tag --repo Actrium/actr --json assets | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0) { throw "Unable to read GitHub Release $tag assets." }
+          $release = $null
+          for ($i = 0; $i -lt 30; $i++) {
+            $releaseJson = gh release view $tag --repo Actrium/actr --json assets 2>$null
+            if ($LASTEXITCODE -eq 0) {
+              $release = $releaseJson | ConvertFrom-Json
+              break
+            }
+            $global:LASTEXITCODE = 0
+            Start-Sleep -Seconds 10
+          }
+          if (-not $release) { throw "Unable to read GitHub Release $tag assets after polling." }
           $existing = @($release.assets | Where-Object { $_.name -eq $assetName })
           if ($existing.Count -eq 0) {
             "exists=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
