@@ -1119,6 +1119,14 @@ for path, pattern, replacement, expected_count in embedded_versions:
     path.write_text(updated)
 PY
 
+  local e2e_manifest="$WORK_REPO_ROOT/e2e/Cargo.toml"
+  if [[ -f "$e2e_manifest" ]]; then
+    (
+      cd "$WORK_REPO_ROOT"
+      cargo update --manifest-path e2e/Cargo.toml
+    )
+  fi
+
   local workload_manifest="$WORK_REPO_ROOT/e2e/winui-echo-app/workload/Cargo.toml"
   if [[ -f "$workload_manifest" ]]; then
     (
@@ -1709,6 +1717,7 @@ stage_release_version_files() {
     bindings/web/crates/framework-web-entry-smoke/Cargo.toml \
     bindings/web/Cargo.lock \
     bindings/typescript/Cargo.lock \
+    e2e/Cargo.lock \
     e2e/winui-echo-app/workload/Cargo.lock
 }
 
