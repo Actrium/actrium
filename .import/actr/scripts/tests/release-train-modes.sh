@@ -1849,6 +1849,14 @@ test_actrsharp_release_workflow_supports_manual_recovery() {
     printf 'ActrSharp tag fetch must use the validated refspec\n' >&2
     exit 1
   }
+  if [[ "$(grep -Fc 'for ($i = 0; $i -lt 30; $i++)' "$reusable")" -lt 3 ]]; then
+    printf 'ActrSharp publishing must poll for GitHub Release visibility\n' >&2
+    exit 1
+  fi
+  grep -Fq 'Unable to read GitHub Release $tag assets after polling.' "$reusable" || {
+    printf 'ActrSharp symbol inspection must fail after bounded Release polling\n' >&2
+    exit 1
+  }
   assert_eq "2" "$(grep -Fc '.github/workflows/release-actrsharp.yml' "$verify")" \
     "manual ActrSharp workflow verify trigger count"
 }
