@@ -198,24 +198,46 @@ impl SessionState {
     ///
     /// Replaces the entire snapshot with a new one, bumps the generation,
     /// and returns the *old* snapshot so callers can detach old handles.
+    #[cfg(test)]
     pub(crate) async fn commit_hard_rebind(
         &self,
         new_snapshot: SessionSnapshot,
     ) -> SessionSnapshot {
-        let (old, fact_sink, new_generation) = {
-            let mut guard = self.inner.write().await;
-            let old = guard.snapshot.clone();
-            guard.snapshot = new_snapshot;
-            guard.current_generation = guard.snapshot.generation;
-            (old, guard.fact_sink.clone(), guard.current_generation)
-        };
-        // The new session generation is now authoritatively committed; report it
-        // to the supervisor so recovery mode returns to `Active` and the new
-        // session's restoration obligation is derived.
-        if let Some(sink) = fact_sink {
-            sink.session_activated(new_generation);
-        }
+        let new_generation = new_snapshot.generation;
+        let old = self.commit_hard_rebind_unpublished(new_snapshot).await;
+        self.publish_session_activated(new_generation).await;
         old
+    }
+
+    /// Commit the session snapshot without publishing its activation fact.
+    ///
+    /// Credential recovery uses this form while it updates every dependent
+    /// runtime handle. Publishing before those projections are installed can
+    /// let the supervisor open a socket with mixed old/new identity material.
+    pub(crate) async fn commit_hard_rebind_unpublished(
+        &self,
+        new_snapshot: SessionSnapshot,
+    ) -> SessionSnapshot {
+        let mut guard = self.inner.write().await;
+        let old = guard.snapshot.clone();
+        guard.snapshot = new_snapshot;
+        guard.current_generation = guard.snapshot.generation;
+        old
+    }
+
+    /// Publish an already-committed generation after all runtime projections
+    /// carry the same identity and credential snapshot.
+    pub(crate) async fn publish_session_activated(&self, generation: u64) {
+        let fact_sink = {
+            let guard = self.inner.read().await;
+            if guard.current_generation != generation {
+                return;
+            }
+            guard.fact_sink.clone()
+        };
+        if let Some(sink) = fact_sink {
+            sink.session_activated(generation);
+        }
     }
 
     /// Transition back to `Active` after signaling reconnect succeeds.

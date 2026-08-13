@@ -66,6 +66,7 @@
 //! - FFI path: Uses NetworkEventHandle + channel (implemented)
 //! - Actor path: Direct proto message to mailbox (TODO, future enhancement)
 
+use actr_protocol::Classify as _;
 use std::collections::HashMap;
 use std::sync::{
     Arc,
@@ -87,6 +88,7 @@ use super::recovery_policy::translate as tp;
 use super::recovery_supervisor::{
     RecoverySupervisor, StartedEffect, TimerOp, event_to_input, network_action_of,
 };
+use super::session_state::{SessionPhase, SessionState};
 
 const NETWORK_EVENT_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
 const SIGNALING_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
@@ -243,6 +245,8 @@ pub enum NetworkRecoveryError {
     Timeout { stage: String },
     #[error("resource exhausted: {resource}")]
     ResourceExhausted { resource: String },
+    #[error("remote overloaded; retry no earlier than {retry_after:?}")]
+    Overloaded { retry_after: Duration },
     #[error("transport impaired: {}", scopes.join(", "))]
     TransportImpaired { scopes: Vec<String> },
     #[error("authentication rejected: {kind}")]
@@ -262,6 +266,15 @@ impl NetworkRecoveryError {
 
     fn from_network_error(stage: &str, error: NetworkError) -> Self {
         let detail = format!("{stage}: {error}");
+        if error.auth_verdict().is_some() {
+            return Self::AuthRejected { kind: detail };
+        }
+        if let Some(retry_after) = error.retry_after() {
+            return Self::Overloaded { retry_after };
+        }
+        if matches!(&error, NetworkError::Other(_)) && error.is_retryable() {
+            return Self::PathUnreachable { stage: detail };
+        }
         match error {
             NetworkError::TimeoutError(_) => Self::Timeout { stage: detail },
             NetworkError::ResourceExhaustedError(_) => Self::ResourceExhausted { resource: detail },
@@ -309,6 +322,7 @@ impl NetworkRecoveryError {
             Self::PathUnreachable { stage } => EffectDiagnosis::PathUnreachable { stage },
             Self::Timeout { stage } => EffectDiagnosis::Timeout { stage },
             Self::ResourceExhausted { resource } => EffectDiagnosis::ResourceExhausted { resource },
+            Self::Overloaded { retry_after } => EffectDiagnosis::Overloaded { retry_after },
             Self::TransportImpaired { scopes } => EffectDiagnosis::TransportImpaired { scopes },
             Self::AuthRejected { kind } => EffectDiagnosis::AuthRejected { kind },
             Self::ConfigRejected { detail } => EffectDiagnosis::ConfigRejected { detail },
@@ -461,22 +475,9 @@ pub trait NetworkEventProcessor: Send + Sync {
     fn prepare_network_event(&self, _event: &NetworkEvent) {}
 
     /// Invalidate commit rights for every in-flight signaling connection
-    /// attempt and keep automatic reconnect paused. The supervisor shell calls
-    /// this synchronously before cancelling a superseded recovery effect.
+    /// attempt. The supervisor shell calls this synchronously before cancelling
+    /// a superseded recovery effect.
     fn invalidate_signaling_connection_attempts(&self) {}
-
-    /// Invalidate in-flight automatic reconnect and keep new attempts paused.
-    ///
-    /// Executed by the shell when policy translation emits
-    /// `SignalingDirective::SuppressAutoReconnect`. The default is a no-op for
-    /// custom processors that own no signaling socket.
-    fn suppress_auto_reconnect(&self) {}
-
-    /// Re-enable future automatic reconnects without starting one immediately.
-    ///
-    /// Executed by the shell when policy translation emits
-    /// `SignalingDirective::ResumeAutoReconnect`. The default is a no-op.
-    fn resume_auto_reconnect(&self) {}
 
     /// Enter a lifecycle barrier as soon as a queued event is observed by the
     /// reconciler. The default is no barrier for custom processors.
@@ -577,6 +578,18 @@ pub trait NetworkEventProcessor: Send + Sync {
             .map_err(|detail| NetworkRecoveryError::from_opaque("custom recovery effect", detail))
     }
 
+    /// Execute an effect under the supervisor action that owns its commit
+    /// rights. Custom processors can ignore the identity; the built-in
+    /// signaling client uses it to tag the committed socket generation.
+    #[doc(hidden)]
+    async fn process_network_recovery_effect_for_action(
+        &self,
+        action: NetworkRecoveryAction,
+        _action_id: u64,
+    ) -> Result<(), NetworkRecoveryError> {
+        self.process_network_recovery_effect(action).await
+    }
+
     /// Run a bounded teardown effect (cleanup or confirmed offline disconnect).
     ///
     /// Implementations must synchronously invalidate the scoped generations,
@@ -668,6 +681,7 @@ pub struct DefaultNetworkEventProcessor {
     debounce_config: DebounceConfig,
     debounce_state: Option<Arc<DebounceState>>,
     recovery_state: Arc<SignalingRecoveryState>,
+    session_state: Option<SessionState>,
 }
 
 impl DefaultNetworkEventProcessor {
@@ -724,7 +738,13 @@ impl DefaultNetworkEventProcessor {
             debounce_config,
             debounce_state,
             recovery_state: Arc::new(SignalingRecoveryState::new()),
+            session_state: None,
         }
+    }
+
+    pub(crate) fn with_session_state(mut self, session_state: SessionState) -> Self {
+        self.session_state = Some(session_state);
+        self
     }
 
     fn lifecycle_barrier(&self) -> Option<NetworkEventBarrier> {
@@ -800,18 +820,24 @@ impl DefaultNetworkEventProcessor {
     async fn ensure_signaling_healthy_once_typed(
         &self,
         reason: &str,
+        action_id: Option<u64>,
     ) -> Result<(), NetworkRecoveryError> {
         let _guard = self.recovery_state.connect_lock.lock().await;
 
         if !self.signaling_client.is_connected() {
-            tracing::info!(
-                reason = reason,
-                "Network recovery event resetting signaling reconnect backoff before connect"
-            );
-            self.signaling_client
-                .schedule_auto_reconnect_reset_backoff();
             tracing::info!(reason = reason, "🔄 Connecting signaling");
-            self.signaling_client.connect_once().await.map_err(|e| {
+            let connect_result = match action_id {
+                Some(action_id) => {
+                    self.signaling_client
+                        .connect_once_for_recovery(action_id)
+                        .await
+                }
+                // Only the deprecated direct-call/batch adapter reaches this
+                // branch. It still performs one explicit attempt, while
+                // reconciled effects always carry a supervisor action id.
+                None => self.signaling_client.connect().await,
+            };
+            connect_result.map_err(|e| {
                 let error = NetworkRecoveryError::from_network_error("WebSocket connect failed", e);
                 tracing::error!("❌ {}", error);
                 error
@@ -855,24 +881,25 @@ impl DefaultNetworkEventProcessor {
                     );
                 }
 
-                tracing::info!(
-                    reason = reason,
-                    "Network recovery event resetting signaling reconnect backoff before rebuild"
-                );
-                self.signaling_client
-                    .schedule_auto_reconnect_reset_backoff();
                 tracing::info!(reason = reason, "🔄 Rebuilding signaling: connecting");
-                self.signaling_client
-                    .connect_once()
-                    .await
-                    .map_err(|connect_err| {
-                        let error = NetworkRecoveryError::from_network_error(
-                            "WebSocket rebuild failed",
-                            connect_err,
-                        );
-                        tracing::error!("❌ {}", error);
-                        error
-                    })?;
+                let connect_result = match action_id {
+                    Some(action_id) => {
+                        self.signaling_client
+                            .connect_once_for_recovery(action_id)
+                            .await
+                    }
+                    // See the matching initial-connect branch above: only
+                    // deprecated direct/batch callers have no action id.
+                    None => self.signaling_client.connect().await,
+                };
+                connect_result.map_err(|connect_err| {
+                    let error = NetworkRecoveryError::from_network_error(
+                        "WebSocket rebuild failed",
+                        connect_err,
+                    );
+                    tracing::error!("❌ {}", error);
+                    error
+                })?;
 
                 *self.recovery_state.last_successful_connect.lock().await = Some(Instant::now());
                 tracing::info!(reason = reason, "✅ Signaling rebuilt");
@@ -884,6 +911,7 @@ impl DefaultNetworkEventProcessor {
     async fn restore_signaling_and_webrtc_typed(
         &self,
         reason: &str,
+        action_id: Option<u64>,
     ) -> Result<(), NetworkRecoveryError> {
         let _cleanup_guard = self.lifecycle_barrier();
         let recovery_targets = if let Some(coordinator) = self.webrtc_coordinator.clone() {
@@ -892,7 +920,14 @@ impl DefaultNetworkEventProcessor {
             Vec::new()
         };
 
-        self.ensure_signaling_healthy_once_typed(reason).await?;
+        self.ensure_signaling_healthy_once_typed(reason, action_id)
+            .await?;
+
+        if let Some(session) = &self.session_state
+            && session.phase().await == SessionPhase::Rebinding
+        {
+            session.set_active().await;
+        }
 
         let coordinator = self.webrtc_coordinator.clone();
 
@@ -908,31 +943,20 @@ impl DefaultNetworkEventProcessor {
         Ok(())
     }
 
-    fn schedule_auto_reconnect_after_recovery_failure(&self, reason: &str, err: &str) {
-        tracing::warn!(
-            reason = reason,
-            error = %err,
-            "Network recovery failed; ensuring signaling auto-reconnect remains scheduled"
-        );
-        self.signaling_client.schedule_auto_reconnect();
-    }
-
     async fn restore_signaling_and_webrtc_from_network_event_typed(
         &self,
         reason: &str,
+        action_id: Option<u64>,
     ) -> Result<(), NetworkRecoveryError> {
-        let result = self.restore_signaling_and_webrtc_typed(reason).await;
-        if let Err(err) = &result {
-            self.schedule_auto_reconnect_after_recovery_failure(reason, &err.to_string());
-        }
-        result
+        self.restore_signaling_and_webrtc_typed(reason, action_id)
+            .await
     }
 
     async fn restore_signaling_and_webrtc_from_network_event(
         &self,
         reason: &str,
     ) -> Result<(), String> {
-        self.restore_signaling_and_webrtc_from_network_event_typed(reason)
+        self.restore_signaling_and_webrtc_from_network_event_typed(reason, None)
             .await
             .map_err(|error| error.to_string())
     }
@@ -992,7 +1016,7 @@ impl DefaultNetworkEventProcessor {
                         disconnect_err
                     );
                 }
-                self.restore_signaling_and_webrtc_from_network_event_typed(reason)
+                self.restore_signaling_and_webrtc_from_network_event_typed(reason, None)
                     .await
             }
         }
@@ -1040,15 +1064,18 @@ impl DefaultNetworkEventProcessor {
 
         tracing::info!("📱 Processing: Network available");
 
-        self.restore_signaling_and_webrtc_from_network_event_typed("NetworkAvailable")
+        self.restore_signaling_and_webrtc_from_network_event_typed("NetworkAvailable", None)
             .await
     }
 
-    async fn force_reconnect_typed(&self) -> Result<(), NetworkRecoveryError> {
+    async fn force_reconnect_typed(
+        &self,
+        action_id: Option<u64>,
+    ) -> Result<(), NetworkRecoveryError> {
         self.cleanup_connections()
             .await
             .map_err(|error| NetworkRecoveryError::from_opaque("ForceReconnect cleanup", error))?;
-        self.restore_signaling_and_webrtc_from_network_event_typed("ForceReconnect")
+        self.restore_signaling_and_webrtc_from_network_event_typed("ForceReconnect", action_id)
             .await
     }
 
@@ -1225,24 +1252,59 @@ impl DefaultNetworkEventProcessor {
             }
         }
     }
+
+    async fn execute_recovery_effect(
+        &self,
+        action: NetworkRecoveryAction,
+        supervisor_action_id: Option<u64>,
+    ) -> Result<(), NetworkRecoveryError> {
+        if action == NetworkRecoveryAction::Noop {
+            return Ok(());
+        }
+
+        let action_id = supervisor_action_id
+            .unwrap_or_else(|| NEXT_NETWORK_RECOVERY_ACTION_ID.fetch_add(1, Ordering::Relaxed));
+        tracing::info!(
+            action_id,
+            action = ?action,
+            "network_event.execution.action.start"
+        );
+        let result = match action {
+            NetworkRecoveryAction::Noop => Ok(()),
+            NetworkRecoveryAction::Offline => self
+                .process_offline()
+                .await
+                .map_err(|error| NetworkRecoveryError::from_opaque("Offline", error)),
+            NetworkRecoveryAction::Probe => self.probe_signaling_liveness_typed().await,
+            NetworkRecoveryAction::Restore => {
+                self.restore_signaling_and_webrtc_from_network_event_typed(
+                    "SupervisorRestore",
+                    supervisor_action_id,
+                )
+                .await
+            }
+            NetworkRecoveryAction::CleanupOnly => self
+                .cleanup_connections()
+                .await
+                .map_err(|error| NetworkRecoveryError::from_opaque("CleanupOnly", error)),
+            NetworkRecoveryAction::ForceReconnect => {
+                self.force_reconnect_typed(supervisor_action_id).await
+            }
+        };
+        tracing::info!(
+            action_id,
+            action = ?action,
+            success = result.is_ok(),
+            "network_event.execution.action.completed"
+        );
+        result
+    }
 }
 
 #[async_trait::async_trait]
 impl NetworkEventProcessor for DefaultNetworkEventProcessor {
     fn invalidate_signaling_connection_attempts(&self) {
         self.signaling_client.invalidate_generation();
-    }
-
-    fn suppress_auto_reconnect(&self) {
-        // Executed when policy translation emits `SuppressAutoReconnect`
-        // (entering the background, or a long-background foreground rebuild).
-        self.signaling_client.suppress_auto_reconnect();
-    }
-
-    fn resume_auto_reconnect(&self) {
-        // Executed when policy translation emits `ResumeAutoReconnect` (a short
-        // background stay that only probes the still-healthy socket).
-        self.signaling_client.resume_auto_reconnect();
     }
 
     fn begin_network_event_barrier(&self, event: &NetworkEvent) -> Option<NetworkEventBarrier> {
@@ -1334,7 +1396,7 @@ impl NetworkEventProcessor for DefaultNetworkEventProcessor {
     }
 
     async fn force_reconnect(&self) -> Result<(), String> {
-        self.force_reconnect_typed()
+        self.force_reconnect_typed(None)
             .await
             .map_err(|error| error.to_string())
     }
@@ -1362,10 +1424,6 @@ impl NetworkEventProcessor for DefaultNetworkEventProcessor {
         &self,
         action: NetworkRecoveryAction,
     ) -> Result<(), NetworkRecoveryError> {
-        if action == NetworkRecoveryAction::Noop {
-            return Ok(());
-        }
-
         // The single-flight execution machine (`view.execution`) is owned by the
         // supervisor, which is its only writer. The effect task performs I/O and
         // reports a typed outcome; it holds no policy state of its own. Driving a
@@ -1374,43 +1432,15 @@ impl NetworkEventProcessor for DefaultNetworkEventProcessor {
         // future's `complete` never runs — permanently wedging every later
         // recovery action (RFC-0400 "MUST NOT let a cancellation poison
         // single-flight ownership", invariant 8).
-        let action_id = NEXT_NETWORK_RECOVERY_ACTION_ID.fetch_add(1, Ordering::Relaxed);
-        tracing::info!(
-            action_id,
-            action = ?action,
-            "network_event.execution.action.start"
-        );
-        let result = match action {
-            NetworkRecoveryAction::Noop => Ok(()),
-            NetworkRecoveryAction::Offline => self
-                .process_offline()
-                .await
-                .map_err(|error| NetworkRecoveryError::from_opaque("Offline", error)),
-            // The Probe effect only observes; on failure it reports the typed
-            // `TransportImpaired` outcome and `translate()` derives the Restore
-            // successor (RFC-0400: effects report, policy decides).
-            NetworkRecoveryAction::Probe => self.probe_signaling_liveness_typed().await,
-            // Supervisor-selected work has already passed structural duplicate
-            // suppression and single-flight admission. Running it through the
-            // legacy direct-call debounce can silently acknowledge required
-            // Restore work without executing it.
-            NetworkRecoveryAction::Restore => {
-                self.restore_signaling_and_webrtc_from_network_event_typed("SupervisorRestore")
-                    .await
-            }
-            NetworkRecoveryAction::CleanupOnly => self
-                .cleanup_connections()
-                .await
-                .map_err(|error| NetworkRecoveryError::from_opaque("CleanupOnly", error)),
-            NetworkRecoveryAction::ForceReconnect => self.force_reconnect_typed().await,
-        };
-        tracing::info!(
-            action_id,
-            action = ?action,
-            success = result.is_ok(),
-            "network_event.execution.action.completed"
-        );
-        result
+        self.execute_recovery_effect(action, None).await
+    }
+
+    async fn process_network_recovery_effect_for_action(
+        &self,
+        action: NetworkRecoveryAction,
+        action_id: u64,
+    ) -> Result<(), NetworkRecoveryError> {
+        self.execute_recovery_effect(action, Some(action_id)).await
     }
 }
 
@@ -1621,6 +1651,17 @@ pub enum SignalingFactLostCause {
     RemoteReset,
 }
 
+/// Why a resource owner observed that signaling connectivity is required.
+///
+/// This is diagnostic only: the supervisor coalesces equivalent requests and
+/// never lets one bypass a backoff deadline, lifecycle gate, or terminal park.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignalingRecoveryRequestCause {
+    HeartbeatObservedDisconnected,
+    InitialConnectDeferred,
+    CredentialRebound,
+}
+
 impl SupervisorFactSink {
     pub(crate) fn new(tx: mpsc::UnboundedSender<tp::Input>) -> Self {
         Self { tx }
@@ -1655,6 +1696,50 @@ impl SupervisorFactSink {
         self.emit(tp::Input::SignalingGenerationLost { generation, cause });
     }
 
+    /// Record demand for a signaling connection without directly driving the
+    /// socket. Repeated demand is coalesced by the recovery reducer.
+    pub fn signaling_connection_required(&self, cause: SignalingRecoveryRequestCause) {
+        let cause = match cause {
+            SignalingRecoveryRequestCause::HeartbeatObservedDisconnected => {
+                tp::SignalingConnectionRequiredCause::HeartbeatObservedDisconnected
+            }
+            SignalingRecoveryRequestCause::InitialConnectDeferred => {
+                tp::SignalingConnectionRequiredCause::InitialConnectDeferred
+            }
+            SignalingRecoveryRequestCause::CredentialRebound => {
+                tp::SignalingConnectionRequiredCause::CredentialRebound
+            }
+        };
+        self.emit(tp::Input::SignalingConnectionRequired { cause });
+    }
+
+    /// Configure the supervisor-owned retry window and backoff compatibility
+    /// policy before signaling resource facts begin arriving.
+    #[doc(hidden)]
+    pub(crate) fn signaling_recovery_configured(
+        &self,
+        max_attempts: u32,
+        initial_delay: Duration,
+        max_delay: Duration,
+        backoff_multiplier: f64,
+    ) {
+        // The internal reducer input derives `Eq`; retain the public floating
+        // point value losslessly as bits rather than making the ordered fact
+        // model approximate it.
+        self.emit(tp::Input::SignalingRecoveryConfigChanged {
+            max_attempts,
+            initial_delay,
+            max_delay,
+            backoff_multiplier_bits: backoff_multiplier.to_bits(),
+        });
+    }
+
+    /// Record that the membership authority published newer credential
+    /// material. Revision validation makes duplicate publications inert.
+    pub fn signaling_credential_published(&self, revision: u64) {
+        self.emit(tp::Input::SignalingCredentialPublished { revision });
+    }
+
     /// Record that a new session generation was authoritatively committed.
     pub fn session_activated(&self, session_generation: u64) {
         self.emit(tp::Input::SessionActivated { session_generation });
@@ -1679,6 +1764,13 @@ impl SupervisorInternalChannel {
     /// the newly derived projection before any corresponding effect is started.
     pub(crate) fn subscribe_send_projection(&self) -> watch::Receiver<tp::SendProjection> {
         self.send_projection_tx.subscribe()
+    }
+
+    /// Select the constructor-time lifecycle profile before the reconciler is
+    /// started. The node creates this channel eagerly so headless runtimes and
+    /// mobile runtimes share the same always-on supervisor wiring.
+    pub(crate) fn set_profile(&mut self, profile: tp::LifecycleProfile) {
+        self.profile = profile;
     }
 }
 
@@ -2101,6 +2193,7 @@ fn handle_supervisor_input(
         revision = supervisor.view().policy_revision,
         send_policy = ?send_projection,
         pending_action = ?supervisor.composite_action(),
+        signaling_reconnect_state = ?supervisor.signaling_reconnect_state(),
         "network_event.supervisor.reconciled"
     );
 
@@ -2115,22 +2208,14 @@ fn handle_supervisor_input(
         }
     }
 
-    // Lower policy-derived signaling directives (auto-reconnect control) to the
-    // processor before requesting effect cancellation. A preemption fence must
+    // Lower the policy-derived signaling resource fence to the processor
+    // before requesting effect cancellation. A preemption fence must
     // revoke the old effect's commit rights before cooperative cancellation.
     for signal in &outcome.signals {
         match signal {
             tp::SignalingDirective::InvalidateConnectionAttempts => {
                 tracing::debug!("network_event.signaling.invalidate_connection_attempts");
                 processor.invalidate_signaling_connection_attempts();
-            }
-            tp::SignalingDirective::SuppressAutoReconnect => {
-                tracing::debug!("network_event.signaling.suppress_auto_reconnect");
-                processor.suppress_auto_reconnect();
-            }
-            tp::SignalingDirective::ResumeAutoReconnect => {
-                tracing::debug!("network_event.signaling.resume_auto_reconnect");
-                processor.resume_auto_reconnect();
             }
         }
     }
@@ -2179,6 +2264,7 @@ fn handle_supervisor_input(
                 action_id = started.action_id,
                 kind = ?started.kind,
                 policy_revision = started.captured_revision,
+                signaling_reconnect_state = ?supervisor.signaling_reconnect_state(),
                 "network_event.effect.started"
             );
             spawn_effect(
@@ -2233,7 +2319,10 @@ fn spawn_effect(
                 None => tokio::select! {
                     biased;
                     _ = token.cancelled() => EffectOutcome::Cancelled,
-                    res = processor.process_network_recovery_effect(net_action) => match res {
+                    res = processor.process_network_recovery_effect_for_action(
+                        net_action,
+                        action_id,
+                    ) => match res {
                         Ok(()) => EffectOutcome::Succeeded,
                         Err(error) => EffectOutcome::Failed {
                             diagnosis: error.into_diagnosis(),

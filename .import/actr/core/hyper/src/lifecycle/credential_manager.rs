@@ -36,6 +36,7 @@ use crate::wire::webrtc::gate::WebRtcGate;
 use crate::wire::webrtc::{HookCallback, HookEvent, SignalingClient, WebRtcCoordinator};
 
 use super::membership::PublishedCredential;
+use super::network_event::SignalingRecoveryRequestCause;
 use super::node::CredentialState;
 use super::session_state::{SessionPhase, SessionSnapshot, SessionState};
 
@@ -196,9 +197,9 @@ impl CredentialManager {
     /// controller.
     ///
     /// Mints a fresh credential (soft renew, then hard `/reissue` fallback) and
-    /// updates identity/handles, but NEVER drives the socket — the signaling
-    /// client is the sole reconnect driver. The coordinator publishes the
-    /// returned credential and wakes the socket itself.
+    /// updates identity/handles, but NEVER drives the socket. The membership
+    /// controller publishes the returned credential revision as a material
+    /// supervisor fact; the supervisor owns the recovery action and backoff.
     ///
     /// Runtime hard rebind is credential-only against the stable on-disk node
     /// AID. AIS authenticates the saved registration context but reissues for
@@ -514,7 +515,9 @@ async fn run_hard_rebind(
     };
 
     session.enter_rebinding().await;
-    let _old = session.commit_hard_rebind(new_snapshot.clone()).await;
+    let _old = session
+        .commit_hard_rebind_unpublished(new_snapshot.clone())
+        .await;
 
     if let Some(handles) = hard_rebind_handles {
         let _cleanup_guard = handles
@@ -574,21 +577,26 @@ async fn run_hard_rebind(
             gate.set_local_id(new_snapshot.actor_id.clone()).await;
         }
 
+        session
+            .publish_session_activated(new_snapshot.generation)
+            .await;
+
         // The credential is committed and the runtime handles carry the new
         // material — deliver the documented CredentialRenewed notification
-        // now. The socket reconnect below is best-effort and must not gate it.
+        // now. Supervisor-owned socket recovery must not gate it.
         fire_credential_renewed(hook_callback.as_ref(), &new_snapshot.credential_expires_at).await;
 
-        match handles.signaling_client.connect_once().await {
-            Ok(()) => session.set_active().await,
-            Err(err) => {
-                handles.signaling_client.schedule_auto_reconnect();
-                return Err(format!(
-                    "hard rebind committed but signaling reconnect failed: {err}"
-                ));
-            }
-        }
+        // The credential/session transaction is committed. Recovery is a
+        // separate supervisor-owned obligation: this path must not perform an
+        // inline connect or create a second retry policy. The recovery effect
+        // transitions the session back to Active after signaling succeeds.
+        handles
+            .signaling_client
+            .request_signaling_recovery(SignalingRecoveryRequestCause::CredentialRebound);
     } else {
+        session
+            .publish_session_activated(new_snapshot.generation)
+            .await;
         session.set_active().await;
         fire_credential_renewed(hook_callback.as_ref(), &new_snapshot.credential_expires_at).await;
     }
@@ -859,9 +867,9 @@ async fn run_soft_renew(
 /// explicitly supplied existing AID, commits the new
 /// snapshot, re-ids the runtime handles (gate / coordinator / transport) and
 /// updates `credential_state`. It deliberately DOES NOT drive the socket — no
-/// `disconnect()`, no `connect_once()`, no `schedule_auto_reconnect()`. The
-/// signaling client is the sole reconnect driver; the coordinator publishes the
-/// returned credential and wakes it.
+/// `disconnect()`, no direct signaling connect, and no client-local retry
+/// scheduling. The recovery supervisor is the sole reconnect driver; the
+/// coordinator publishes the returned credential revision as material input.
 async fn run_credential_only_hard_rebind(
     session: SessionState,
     ais_endpoint: String,
@@ -1002,8 +1010,11 @@ async fn run_credential_only_hard_rebind(
     };
 
     session.enter_rebinding().await;
-    let _old = session.commit_hard_rebind(new_snapshot.clone()).await;
+    let _old = session
+        .commit_hard_rebind_unpublished(new_snapshot.clone())
+        .await;
 
+    let has_runtime_handles = hard_rebind_handles.is_some();
     if let Some(handles) = hard_rebind_handles {
         handles
             .credential_state
@@ -1031,8 +1042,12 @@ async fn run_credential_only_hard_rebind(
         }
     }
 
-    // Back to Active — the socket driver will reconnect on the wake edge.
-    session.set_active().await;
+    session
+        .publish_session_activated(new_snapshot.generation)
+        .await;
+    if !has_runtime_handles {
+        session.set_active().await;
+    }
 
     // Hard reissue commits and publishes new credential material exactly like
     // a soft renew does — workloads get the same documented CredentialRenewed

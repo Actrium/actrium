@@ -13,14 +13,11 @@ use tokio::sync::{Notify, Semaphore, broadcast, mpsc, watch};
 
 struct ForceReconnectFakeSignalingClient {
     connected: AtomicBool,
-    connect_once_should_fail: bool,
+    connect_should_fail: bool,
     disconnect_calls: AtomicUsize,
-    connect_once_calls: AtomicUsize,
+    connect_calls: AtomicUsize,
     auto_reconnect_suppressed: AtomicBool,
     invalidate_generation_calls: AtomicUsize,
-    suppress_auto_reconnect_calls: AtomicUsize,
-    schedule_auto_reconnect_calls: AtomicUsize,
-    schedule_auto_reconnect_reset_backoff_calls: AtomicUsize,
     event_tx: broadcast::Sender<SignalingEvent>,
     /// When set, `disconnect` blocks after signaling `disconnect_entered` and
     /// until `disconnect_release` is notified, so a test can cancel an effect
@@ -31,18 +28,15 @@ struct ForceReconnectFakeSignalingClient {
 }
 
 impl ForceReconnectFakeSignalingClient {
-    fn new(connect_once_should_fail: bool) -> Self {
+    fn new(connect_should_fail: bool) -> Self {
         let (event_tx, _rx) = broadcast::channel(8);
         Self {
             connected: AtomicBool::new(false),
-            connect_once_should_fail,
+            connect_should_fail,
             disconnect_calls: AtomicUsize::new(0),
-            connect_once_calls: AtomicUsize::new(0),
+            connect_calls: AtomicUsize::new(0),
             auto_reconnect_suppressed: AtomicBool::new(false),
             invalidate_generation_calls: AtomicUsize::new(0),
-            suppress_auto_reconnect_calls: AtomicUsize::new(0),
-            schedule_auto_reconnect_calls: AtomicUsize::new(0),
-            schedule_auto_reconnect_reset_backoff_calls: AtomicUsize::new(0),
             event_tx,
             block_disconnect: AtomicBool::new(false),
             disconnect_entered: Arc::new(tokio::sync::Notify::new()),
@@ -54,26 +48,15 @@ impl ForceReconnectFakeSignalingClient {
 #[async_trait::async_trait]
 impl SignalingClient for ForceReconnectFakeSignalingClient {
     async fn connect(&self) -> NetworkResult<()> {
-        Ok(())
-    }
-
-    async fn connect_once(&self) -> NetworkResult<()> {
-        self.connect_once_calls.fetch_add(1, AtomicOrdering::SeqCst);
-        if self.connect_once_should_fail {
+        self.connect_calls.fetch_add(1, AtomicOrdering::SeqCst);
+        if self.connect_should_fail {
             return Err(NetworkError::ConnectionError(
-                "forced connect_once failure".to_string(),
+                "forced connect failure".to_string(),
             ));
         }
 
         self.connected.store(true, AtomicOrdering::SeqCst);
         Ok(())
-    }
-
-    fn suppress_auto_reconnect(&self) {
-        self.auto_reconnect_suppressed
-            .store(true, AtomicOrdering::SeqCst);
-        self.suppress_auto_reconnect_calls
-            .fetch_add(1, AtomicOrdering::SeqCst);
     }
 
     fn invalidate_generation(&self) {
@@ -83,26 +66,14 @@ impl SignalingClient for ForceReconnectFakeSignalingClient {
             .fetch_add(1, AtomicOrdering::SeqCst);
     }
 
-    fn schedule_auto_reconnect(&self) {
-        self.auto_reconnect_suppressed
-            .store(false, AtomicOrdering::SeqCst);
-        self.schedule_auto_reconnect_calls
-            .fetch_add(1, AtomicOrdering::SeqCst);
-    }
-
-    fn schedule_auto_reconnect_reset_backoff(&self) {
-        self.schedule_auto_reconnect_reset_backoff_calls
-            .fetch_add(1, AtomicOrdering::SeqCst);
-        self.schedule_auto_reconnect();
-    }
-
     async fn disconnect(&self) -> NetworkResult<()> {
         if self.block_disconnect.load(AtomicOrdering::SeqCst) {
             self.disconnect_entered.notify_one();
             self.disconnect_release.notified().await;
         }
         self.disconnect_calls.fetch_add(1, AtomicOrdering::SeqCst);
-        self.suppress_auto_reconnect();
+        self.auto_reconnect_suppressed
+            .store(true, AtomicOrdering::SeqCst);
         self.connected.store(false, AtomicOrdering::SeqCst);
         Ok(())
     }
@@ -279,14 +250,6 @@ async fn newer_monitor_incarnation_fences_old_lifecycle_and_snapshot_facts() {
         .handle_app_lifecycle_changed(AppLifecycleState::Background)
         .await
         .expect("a stale lifecycle callback should be acknowledged as discarded");
-    assert_eq!(
-        signaling
-            .suppress_auto_reconnect_calls
-            .load(AtomicOrdering::SeqCst),
-        0,
-        "a retired monitor must not overwrite the current foreground phase"
-    );
-
     old_monitor
         .handle_network_path_changed(snapshot(1, NetworkAvailability::Unavailable))
         .await
@@ -301,13 +264,6 @@ async fn newer_monitor_incarnation_fences_old_lifecycle_and_snapshot_facts() {
         .handle_app_lifecycle_changed(AppLifecycleState::Background)
         .await
         .expect("the current monitor should still be accepted");
-    assert_eq!(
-        signaling
-            .suppress_auto_reconnect_calls
-            .load(AtomicOrdering::SeqCst),
-        1
-    );
-
     shutdown.cancel();
     tokio::time::timeout(Duration::from_secs(1), reconciler)
         .await
@@ -473,6 +429,27 @@ fn recovery_effect_errors_preserve_typed_network_diagnoses() {
             ),
             EffectDiagnosis::InvariantViolation {
                 detail: "decode: Deserialization error: invalid frame".to_string(),
+            },
+        ),
+        (
+            NetworkRecoveryError::from_network_error(
+                "connect",
+                NetworkError::signaling_server_not_ready("signaling returned 503", None),
+            ),
+            EffectDiagnosis::PathUnreachable {
+                stage: "connect: Other error: signaling returned 503".to_string(),
+            },
+        ),
+        (
+            NetworkRecoveryError::from_network_error(
+                "connect",
+                NetworkError::signaling_server_not_ready(
+                    "signaling returned 503",
+                    Some(Duration::from_secs(7)),
+                ),
+            ),
+            EffectDiagnosis::Overloaded {
+                retry_after: Duration::from_secs(7),
             },
         ),
     ];
@@ -687,14 +664,7 @@ async fn dequeue_barrier_is_held_until_send_projection_is_published() {
 }
 
 #[test]
-fn signaling_directive_hooks_control_auto_reconnect() {
-    // Auto-reconnect suppression/resumption is now derived by policy translation
-    // as a `SignalingDirective` and executed by the reconciler through these
-    // processor hooks (background entry and long-background rebuilds emit
-    // `SuppressAutoReconnect`; a short-background probe emits
-    // `ResumeAutoReconnect`). This test covers the processor's lowering of those
-    // directives onto the signaling client; `translate_tests` covers the
-    // derivation itself.
+fn signaling_directive_only_fences_superseded_connection_attempts() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
     let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
 
@@ -704,36 +674,13 @@ fn signaling_directive_hooks_control_auto_reconnect() {
             .invalidate_generation_calls
             .load(AtomicOrdering::SeqCst),
         1,
-        "InvalidateConnectionAttempts must fence explicit and automatic attempts"
+        "InvalidateConnectionAttempts must fence the superseded attempt"
     );
     assert!(
         signaling
             .auto_reconnect_suppressed
             .load(AtomicOrdering::SeqCst),
-        "the generation fence must leave automatic reconnect paused"
-    );
-
-    processor.suppress_auto_reconnect();
-    assert_eq!(
-        signaling
-            .suppress_auto_reconnect_calls
-            .load(AtomicOrdering::SeqCst),
-        1,
-        "SuppressAutoReconnect must pause reconnect attempts without disconnecting a healthy socket"
-    );
-    assert!(
-        signaling
-            .auto_reconnect_suppressed
-            .load(AtomicOrdering::SeqCst),
-        "SuppressAutoReconnect must leave automatic reconnect paused"
-    );
-
-    processor.resume_auto_reconnect();
-    assert!(
-        !signaling
-            .auto_reconnect_suppressed
-            .load(AtomicOrdering::SeqCst),
-        "ResumeAutoReconnect must re-enable future automatic reconnects"
+        "the fake records that the generation fence was applied"
     );
 }
 
@@ -897,42 +844,18 @@ async fn cancelled_recovery_action_does_not_poison_later_actions() {
 }
 
 #[tokio::test]
-async fn force_reconnect_reenables_auto_reconnect_after_early_suppression() {
+async fn force_reconnect_does_not_delegate_retry_ownership_to_socket() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
     let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
-
-    // A long-background foreground rebuild suppresses stale auto-reconnect via
-    // the `SuppressAutoReconnect` directive the reconciler lowers here.
-    processor.suppress_auto_reconnect();
-    assert!(
-        signaling
-            .auto_reconnect_suppressed
-            .load(AtomicOrdering::SeqCst),
-        "long foreground preparation should pause automatic reconnect"
-    );
 
     processor
         .force_reconnect()
         .await
         .expect("ForceReconnect should restore signaling");
-
-    assert!(
-        !signaling
-            .auto_reconnect_suppressed
-            .load(AtomicOrdering::SeqCst),
-        "successful ForceReconnect should re-enable future automatic reconnects"
-    );
-    assert_eq!(
-        signaling
-            .schedule_auto_reconnect_reset_backoff_calls
-            .load(AtomicOrdering::SeqCst),
-        1,
-        "ForceReconnect should re-arm automatic reconnect before its explicit restore"
-    );
 }
 
 #[tokio::test]
-async fn force_reconnect_failure_schedules_auto_reconnect() {
+async fn force_reconnect_failure_reports_without_scheduling_local_retry() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(true));
     let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
 
@@ -945,28 +868,14 @@ async fn force_reconnect_failure_schedules_auto_reconnect() {
         "ForceReconnect cleanup should disconnect signaling once"
     );
     assert_eq!(
-        signaling.connect_once_calls.load(AtomicOrdering::SeqCst),
+        signaling.connect_calls.load(AtomicOrdering::SeqCst),
         1,
         "ForceReconnect restore should make one quick connect attempt"
-    );
-    assert_eq!(
-        signaling
-            .schedule_auto_reconnect_calls
-            .load(AtomicOrdering::SeqCst),
-        2,
-        "ForceReconnect should wake auto-reconnect before restore and keep it scheduled after failure"
-    );
-    assert_eq!(
-        signaling
-            .schedule_auto_reconnect_reset_backoff_calls
-            .load(AtomicOrdering::SeqCst),
-        1,
-        "ForceReconnect should reset reconnect backoff before the quick restore attempt"
     );
 }
 
 #[tokio::test]
-async fn restore_failure_schedules_auto_reconnect_reset_backoff() {
+async fn restore_failure_reports_without_resetting_socket_backoff() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(true));
     let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
 
@@ -976,21 +885,14 @@ async fn restore_failure_schedules_auto_reconnect_reset_backoff() {
 
     assert!(result.is_err());
     assert_eq!(
-        signaling.connect_once_calls.load(AtomicOrdering::SeqCst),
+        signaling.connect_calls.load(AtomicOrdering::SeqCst),
         1,
         "Restore should make one quick connect attempt"
-    );
-    assert_eq!(
-        signaling
-            .schedule_auto_reconnect_reset_backoff_calls
-            .load(AtomicOrdering::SeqCst),
-        1,
-        "failed Restore should reset reconnect backoff"
     );
 }
 
 #[tokio::test]
-async fn restore_schedules_reset_backoff_before_quick_connect() {
+async fn restore_executes_one_quick_connect_without_socket_backoff() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
     let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
 
@@ -1000,16 +902,9 @@ async fn restore_schedules_reset_backoff_before_quick_connect() {
         .expect("Restore should connect successfully");
 
     assert_eq!(
-        signaling.connect_once_calls.load(AtomicOrdering::SeqCst),
+        signaling.connect_calls.load(AtomicOrdering::SeqCst),
         1,
         "Restore should make one quick connect attempt"
-    );
-    assert_eq!(
-        signaling
-            .schedule_auto_reconnect_reset_backoff_calls
-            .load(AtomicOrdering::SeqCst),
-        1,
-        "Restore should reset reconnect backoff before the quick connect attempt"
     );
 }
 

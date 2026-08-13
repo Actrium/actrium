@@ -158,42 +158,27 @@ fn background_transitions_and_advances() {
 }
 
 #[test]
-fn background_emits_suppress_auto_reconnect_directive() {
-    // Entering the background derives SuppressAutoReconnect through translation
-    // rather than pre-translation event sniffing.
-    let mut view = View::initial();
-    view.app_phase = AppPhaseState::Foreground;
-    let d = tr(&view, Input::AppEnteredBackground);
-    assert!(
-        d.signals
-            .contains(&SignalingDirective::SuppressAutoReconnect)
-    );
-}
-
-#[test]
-fn short_foreground_emits_resume_and_long_foreground_emits_suppress() {
+fn foreground_paths_do_not_delegate_retry_ownership_to_signaling() {
     let mut view = View::initial();
     view.app_phase = AppPhaseState::Background;
     view.background_entered_at = Some(Duration::ZERO);
 
-    // Short background -> probe path re-enables automatic reconnect.
+    // Short background -> supervisor-owned probe.
     let d = tr(&view, foreground_after(Duration::from_secs(1)));
     assert!(has(
         &d,
         MachineInput::RecoveryIntent(RecoveryIntentInput::RequestProbe)
     ));
-    assert!(d.signals.contains(&SignalingDirective::ResumeAutoReconnect));
+    assert!(d.signals.is_empty());
 
-    // Long background -> reconnect path keeps stale automatic reconnect suppressed.
+    // Long background -> supervisor-owned reconnect. Neither path toggles a
+    // second signaling-local retry state machine.
     let d = tr(&view, foreground_after(Duration::from_secs(120)));
     assert!(has(
         &d,
         MachineInput::RecoveryIntent(RecoveryIntentInput::RequestReconnect)
     ));
-    assert!(
-        d.signals
-            .contains(&SignalingDirective::SuppressAutoReconnect)
-    );
+    assert!(d.signals.is_empty());
 }
 
 #[test]
@@ -212,7 +197,7 @@ fn short_foreground_coalesces_probe_while_restore_is_running() {
         &d,
         MachineInput::RecoveryIntent(RecoveryIntentInput::RequestProbe)
     ));
-    assert!(d.signals.contains(&SignalingDirective::ResumeAutoReconnect));
+    assert!(d.signals.is_empty());
     assert!(d.cancels.is_empty());
 }
 
@@ -254,10 +239,7 @@ fn foreground_uses_platform_background_duration_when_delivery_was_delayed() {
         &d,
         MachineInput::RecoveryIntent(RecoveryIntentInput::RequestReconnect)
     ));
-    assert!(
-        d.signals
-            .contains(&SignalingDirective::SuppressAutoReconnect)
-    );
+    assert!(d.signals.is_empty());
 }
 
 #[test]
@@ -280,11 +262,7 @@ fn foreground_missing_observation_is_long_despite_small_internal_delta() {
         &d,
         MachineInput::RecoveryIntent(RecoveryIntentInput::RequestProbe)
     ));
-    assert!(
-        d.signals
-            .contains(&SignalingDirective::SuppressAutoReconnect)
-    );
-    assert!(!d.signals.contains(&SignalingDirective::ResumeAutoReconnect));
+    assert!(d.signals.is_empty());
 }
 
 #[test]
@@ -315,12 +293,12 @@ fn foreground_missing_observation_reports_contract_violation_status() {
 }
 
 #[test]
-fn foreground_between_legacy_and_configured_thresholds_probes_and_resumes() {
+fn foreground_between_legacy_and_configured_thresholds_probes() {
     // Pins the single 60 s `background_reconnect_after` boundary: a stay in
     // the 30..60 s band is a short background. The legacy pre-translate hook
     // suppressed automatic reconnect at 30 s while intent selection already
     // used 60 s; the translation layer resolves that contradiction in favor
-    // of the configured 60 s default, so 45 s must probe and resume.
+    // of the configured 60 s default, so 45 s must probe.
     let mut view = View::initial();
     view.app_phase = AppPhaseState::Background;
     view.background_entered_at = Some(Duration::ZERO);
@@ -330,11 +308,7 @@ fn foreground_between_legacy_and_configured_thresholds_probes_and_resumes() {
         &d,
         MachineInput::RecoveryIntent(RecoveryIntentInput::RequestProbe)
     ));
-    assert!(d.signals.contains(&SignalingDirective::ResumeAutoReconnect));
-    assert!(
-        !d.signals
-            .contains(&SignalingDirective::SuppressAutoReconnect)
-    );
+    assert!(d.signals.is_empty());
 }
 
 #[test]
@@ -358,14 +332,7 @@ fn foreground_reconnect_boundary_is_exact_at_sixty_seconds() {
             ),
             "unexpected recovery intent at {elapsed_ms} ms"
         );
-        assert!(
-            d.signals.contains(if is_long_background {
-                &SignalingDirective::SuppressAutoReconnect
-            } else {
-                &SignalingDirective::ResumeAutoReconnect
-            }),
-            "unexpected signaling directive at {elapsed_ms} ms"
-        );
+        assert!(d.signals.is_empty());
     }
 }
 
@@ -1397,6 +1364,109 @@ fn signaling_committed_external_newer_is_material() {
 }
 
 #[test]
+fn signaling_connection_required_creates_one_restore_obligation() {
+    let view = View::initial();
+    let input = Input::SignalingConnectionRequired {
+        cause: SignalingConnectionRequiredCause::HeartbeatObservedDisconnected,
+    };
+    let d = tr(&view, input.clone());
+    assert_eq!(d.revision, RevisionDirective::Advances);
+    assert!(has(
+        &d,
+        MachineInput::RecoveryIntent(RecoveryIntentInput::RequestRestore)
+    ));
+
+    let mut pending = view;
+    pending.recovery_intent = RecoveryIntentState::RestorePending;
+    pending.recovery_record = Some(PendingRecord::recovery(1, RecoveryStrength::Restore));
+    assert_eq!(
+        tr(&pending, input),
+        Decision::none(),
+        "repeated heartbeat demand must not reset work identity or backoff"
+    );
+}
+
+#[test]
+fn signaling_connection_required_cannot_bypass_backoff_or_lifecycle_gate() {
+    let input = Input::SignalingConnectionRequired {
+        cause: SignalingConnectionRequiredCause::HeartbeatObservedDisconnected,
+    };
+    let mut backing_off = View::initial();
+    backing_off.recovery_intent = RecoveryIntentState::RestorePending;
+    let mut record = PendingRecord::recovery(3, RecoveryStrength::Restore);
+    record.gate = RetryGateState::BackingOff;
+    record.retry_id = 7;
+    record.attempt = 2;
+    backing_off.recovery_record = Some(record);
+    assert_eq!(tr(&backing_off, input.clone()), Decision::none());
+
+    let mut background = View::initial();
+    background.profile = LifecycleProfile::Gated;
+    background.app_phase = AppPhaseState::Background;
+    let d = tr(&background, input);
+    assert_eq!(d.revision, RevisionDirective::Advances);
+    assert!(has(
+        &d,
+        MachineInput::RecoveryIntent(RecoveryIntentInput::RequestRestore)
+    ));
+    // The obligation is retained, but the composite table refuses to execute
+    // it until foreground eligibility is restored.
+    background.recovery_intent = RecoveryIntentState::RestorePending;
+    background.recovery_record = Some(PendingRecord::recovery(1, RecoveryStrength::Restore));
+    assert_eq!(composite_action(&background), None);
+}
+
+#[test]
+fn signaling_connection_required_escalates_probe_but_coalesces_restore() {
+    let input = Input::SignalingConnectionRequired {
+        cause: SignalingConnectionRequiredCause::HeartbeatObservedDisconnected,
+    };
+    let mut probing = running_recovery_view(EffectKind::Probe, RecoveryStrength::Probe);
+    let d = tr(&probing, input.clone());
+    assert!(has(
+        &d,
+        MachineInput::RecoveryIntent(RecoveryIntentInput::RequestRestore)
+    ));
+    assert!(d.cancels.contains(&CancelReason::PreemptedByStronger));
+    assert!(
+        d.signals
+            .contains(&SignalingDirective::InvalidateConnectionAttempts)
+    );
+
+    probing.execution = ExecutionState::Idle;
+    probing.effect = None;
+    probing.recovery_intent = RecoveryIntentState::RestorePending;
+    probing.recovery_record = Some(PendingRecord::recovery(9, RecoveryStrength::Restore));
+    assert_eq!(tr(&probing, input), Decision::none());
+}
+
+#[test]
+fn credential_publication_is_revisioned_and_wakes_parked_recovery() {
+    let mut view = View::initial();
+    view.committed_credential_revision = Some(4);
+    view.recovery_intent = RecoveryIntentState::RestorePending;
+    let mut record = PendingRecord::recovery(2, RecoveryStrength::Restore);
+    record.gate = RetryGateState::Parked;
+    record.release_mask = ReleaseMask::single(ParkCause::AuthRejected);
+    view.recovery_record = Some(record);
+
+    assert_eq!(
+        tr(&view, Input::SignalingCredentialPublished { revision: 4 }),
+        Decision::none()
+    );
+
+    let d = tr(&view, Input::SignalingCredentialPublished { revision: 5 });
+    assert_eq!(d.revision, RevisionDirective::Advances);
+    assert!(d.gate_triggers.contains(&GateTrigger::ClearMask {
+        domain: RetryDomain::Recovery,
+        trigger: TriggerClass::CredentialPublished,
+    }));
+    assert!(d.gate_triggers.contains(&GateTrigger::Wake {
+        domain: RetryDomain::Recovery,
+    }));
+}
+
+#[test]
 fn signaling_lost_derives_restore_when_active_and_no_cleanup() {
     let mut view = View::initial();
     view.live_signaling_generation = Some(6);
@@ -2358,6 +2428,148 @@ fn composite_backing_off_recovery_is_not_ready() {
     rec.gate = RetryGateState::BackingOff;
     view.recovery_record = Some(rec);
     assert_eq!(composite_action(&view), None);
+}
+
+#[test]
+fn signaling_reconnect_state_is_a_typed_projection_of_supervisor_state() {
+    let mut view = View::initial();
+    assert_eq!(
+        signaling_reconnect_state(&view),
+        SignalingReconnectState::Idle
+    );
+
+    view.recovery_intent = RecoveryIntentState::RestorePending;
+    view.recovery_record = Some(PendingRecord::recovery(7, RecoveryStrength::Restore));
+    assert_eq!(
+        signaling_reconnect_state(&view),
+        SignalingReconnectState::Ready {
+            work_revision: 7,
+            strength: RecoveryStrength::Restore,
+            attempt: 0,
+        }
+    );
+
+    view.profile = LifecycleProfile::Gated;
+    view.app_phase = AppPhaseState::Background;
+    assert_eq!(
+        signaling_reconnect_state(&view),
+        SignalingReconnectState::Gated {
+            work_revision: 7,
+            strength: RecoveryStrength::Restore,
+            causes: SignalingGateCauses::from_view(&view),
+        }
+    );
+
+    view.profile = LifecycleProfile::Ungated;
+    view.execution = ExecutionState::Restoring;
+    view.effect = Some(recovery_effect(11, EffectKind::Restore, 7));
+    assert_eq!(
+        signaling_reconnect_state(&view),
+        SignalingReconnectState::Running {
+            work_revision: 7,
+            action_id: 11,
+            strength: RecoveryStrength::Restore,
+            attempt: 0,
+        }
+    );
+
+    view.execution = ExecutionState::Idle;
+    view.effect = None;
+    let record = view
+        .recovery_record
+        .as_mut()
+        .expect("recovery record should exist");
+    record.gate = RetryGateState::BackingOff;
+    record.attempt = 2;
+    record.retry_id = 13;
+    record.retry_deadline = Some(Duration::from_secs(42));
+    assert_eq!(
+        signaling_reconnect_state(&view),
+        SignalingReconnectState::BackingOff {
+            work_revision: 7,
+            strength: RecoveryStrength::Restore,
+            attempt: 2,
+            retry_id: 13,
+            deadline: Duration::from_secs(42),
+            delay_kind: RetryDelayKind::Backoff,
+        }
+    );
+
+    let record = view
+        .recovery_record
+        .as_mut()
+        .expect("recovery record should exist");
+    record.gate = RetryGateState::Parked;
+    assert_eq!(
+        signaling_reconnect_state(&view),
+        SignalingReconnectState::Parked {
+            work_revision: 7,
+            strength: RecoveryStrength::Restore,
+            causes: ReleaseMask::default(),
+        }
+    );
+}
+
+#[test]
+fn peer_only_recovery_is_idle_for_signaling_and_absorbs_a_signaling_demand() {
+    let mut view = View::initial();
+    view.recovery_intent = RecoveryIntentState::RestorePending;
+    let mut record =
+        PendingRecord::recovery_with_impacts(7, RecoveryStrength::Restore, RecoveryImpacts::PEERS);
+    record.gate = RetryGateState::BackingOff;
+    record.retry_id = 13;
+    record.attempt = 2;
+    record.retry_deadline = Some(Duration::from_secs(42));
+    view.recovery_record = Some(record);
+
+    assert_eq!(
+        signaling_reconnect_state(&view),
+        SignalingReconnectState::Idle,
+        "peer-only recovery must not be reported as signaling reconnect work"
+    );
+
+    let decision = tr(
+        &view,
+        Input::SignalingConnectionRequired {
+            cause: SignalingConnectionRequiredCause::HeartbeatObservedDisconnected,
+        },
+    );
+    assert_eq!(decision.revision, RevisionDirective::Unchanged);
+    assert!(decision.machine_inputs.is_empty());
+    assert_eq!(
+        decision.required_recovery_impacts,
+        Some(RecoveryImpacts::SIGNALING),
+        "the existing peer work absorbs signaling coverage without a second action or deadline"
+    );
+}
+
+#[test]
+fn gated_signaling_loss_merges_coverage_without_bypassing_the_gate() {
+    let mut view = View::initial();
+    view.recovery_mode = RecoveryModeState::LoggedOut;
+    view.recovery_intent = RecoveryIntentState::RestorePending;
+    view.recovery_record = Some(PendingRecord::recovery_with_impacts(
+        7,
+        RecoveryStrength::Restore,
+        RecoveryImpacts::PEERS,
+    ));
+    view.live_signaling_generation = Some(22);
+
+    let decision = tr(
+        &view,
+        Input::SignalingGenerationLost {
+            generation: 22,
+            cause: SignalingLostCause::RemoteReset,
+        },
+    );
+
+    assert_eq!(decision.revision, RevisionDirective::Advances);
+    assert!(decision.machine_inputs.is_empty());
+    assert_eq!(
+        decision.required_recovery_impacts,
+        Some(RecoveryImpacts::SIGNALING),
+        "the loss records signaling coverage but cannot start work while logged out"
+    );
 }
 
 #[test]

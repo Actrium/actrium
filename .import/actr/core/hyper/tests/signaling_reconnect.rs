@@ -452,12 +452,12 @@ async fn test_server_shutdown_detected_by_client() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Test 8: reconnect manager retries after server shutdown
+// Test 8: socket loss does not create a local retry loop
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/// Verify reconnect manager automatically initiates reconnection attempts after server shutdown.
+/// Verify the socket driver reports loss but does not own retry scheduling.
 #[tokio::test]
-async fn test_auto_reconnect_manager_triggers_retries() {
+async fn test_socket_loss_does_not_start_local_reconnect_loop() {
     init_tracing();
 
     let mut server = TestSignalingServer::start()
@@ -475,9 +475,6 @@ async fn test_auto_reconnect_manager_triggers_retries() {
         backoff_multiplier: 2.0,
     };
     let client = Arc::new(WebSocketSignalingClient::new(config));
-
-    // Start reconnect manager
-    client.start_reconnect_manager();
 
     // Connect
     tracing::info!("🔗 Initial connection...");
@@ -503,8 +500,8 @@ async fn test_auto_reconnect_manager_triggers_retries() {
     );
     tracing::info!("📡 Client detected disconnection");
 
-    // Wait some time for reconnect manager to make a few attempts
-    tracing::info!("⏳ Allowing reconnect manager to attempt retries...");
+    // No supervisor is attached in this socket-level test, so no new attempt
+    // is allowed to appear on its own.
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     // Verify client is still disconnected (old port is unavailable)
@@ -516,7 +513,7 @@ async fn test_auto_reconnect_manager_triggers_retries() {
     // Cleanup
     client.disconnect().await.ok();
 
-    tracing::info!("✅ test_auto_reconnect_manager_triggers_retries passed!");
+    tracing::info!("✅ test_socket_loss_does_not_start_local_reconnect_loop passed!");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -634,12 +631,13 @@ async fn test_reconnect_restarts_background_tasks() {
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Test 12: connect_with_retries retry logic
+// Test 12: signaling connect is one supervisor attempt
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/// Verify connect() with retries enabled eventually returns error for unreachable server (not infinite retries).
+/// Verify connect() does not hide a retry loop even when legacy reconnect
+/// configuration is enabled.
 #[tokio::test]
-async fn test_connect_with_retries_exhausts_attempts() {
+async fn test_connect_is_one_attempt_when_endpoint_is_unreachable() {
     init_tracing();
 
     let config = SignalingConfig {
@@ -659,28 +657,17 @@ async fn test_connect_with_retries_exhausts_attempts() {
     };
     let client = Arc::new(WebSocketSignalingClient::new(config));
 
-    tracing::info!("🔗 Connecting to unreachable server with retries...");
-    let start = std::time::Instant::now();
-    let result = client.connect().await;
-    let elapsed = start.elapsed();
+    let result = tokio::time::timeout(Duration::from_secs(2), client.connect())
+        .await
+        .expect("one signaling attempt should return within its outer test bound");
 
     assert!(
         result.is_err(),
-        "should return error after all retries exhausted"
+        "the unavailable endpoint should fail the one attempt"
     );
     assert!(
         !client.is_connected(),
         "should be disconnected after retries exhausted"
-    );
-    assert!(
-        elapsed >= Duration::from_secs(1),
-        "should have backoff delay, actual elapsed: {:?}",
-        elapsed
-    );
-
-    tracing::info!(
-        "✅ test_connect_with_retries_exhausts_attempts passed! (elapsed: {:?})",
-        elapsed
     );
 }
 
@@ -688,9 +675,9 @@ async fn test_connect_with_retries_exhausts_attempts() {
 // Test 13: reconnect manager auto-reconnects after server restart
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/// Verify reconnect manager auto-reconnects after server shutdown and restart on the same port.
+/// Verify a supervisor-owned one-shot reconnect succeeds after server restart.
 #[tokio::test]
-async fn test_auto_reconnect_succeeds_after_server_restart() {
+async fn test_one_shot_reconnect_succeeds_after_server_restart() {
     init_tracing();
 
     // ── Step 1: start server, connect client ──
@@ -717,9 +704,6 @@ async fn test_auto_reconnect_succeeds_after_server_restart() {
     };
     let client = Arc::new(WebSocketSignalingClient::new(config));
     let mut events = client.subscribe_events();
-
-    // Start reconnect manager
-    client.start_reconnect_manager();
 
     tracing::info!("Initial connection...");
     client
@@ -753,14 +737,18 @@ async fn test_auto_reconnect_succeeds_after_server_restart() {
         .await
         .expect("server restart should succeed");
 
-    // ── Step 4: wait for reconnect manager to auto-reconnect ──
-    tracing::info!("⏳ Waiting for auto-reconnect to succeed...");
+    // ── Step 4: execute the one attempt selected by the supervisor ──
+    client
+        .connect()
+        .await
+        .expect("supervisor-owned reconnect attempt should succeed");
+    tracing::info!("⏳ Waiting for reconnect commit event...");
     let reconnect_deadline = Duration::from_secs(15);
     let reconnected = tokio::time::timeout(reconnect_deadline, async {
         loop {
             match events.recv().await {
                 Ok(SignalingEvent::Connected) => {
-                    tracing::info!("🎉 Auto-reconnect succeeded: received Connected event");
+                    tracing::info!("🎉 One-shot reconnect committed: received Connected event");
                     return true;
                 }
                 Ok(other) => {
@@ -778,7 +766,7 @@ async fn test_auto_reconnect_succeeds_after_server_restart() {
 
     assert!(
         reconnected.is_ok(),
-        "reconnect manager failed to auto-reconnect within {:?}",
+        "one-shot reconnect did not publish Connected within {:?}",
         reconnect_deadline
     );
     assert!(
@@ -795,17 +783,17 @@ async fn test_auto_reconnect_succeeds_after_server_restart() {
     );
 
     client.disconnect().await.ok();
-    tracing::info!("✅ test_auto_reconnect_succeeds_after_server_restart passed!");
+    tracing::info!("✅ test_one_shot_reconnect_succeeds_after_server_restart passed!");
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// Test 14: multiple disconnections each trigger reconnect via manager
+// Test 14: multiple supervisor-owned reconnect attempts
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-/// Verify reconnect manager correctly detects and reconnects in multiple
+/// Verify one-shot reconnect execution remains reusable across multiple
 /// server restart scenarios (disconnect -> reconnect -> disconnect again -> reconnect again).
 #[tokio::test]
-async fn test_multiple_disconnects_each_trigger_reconnect() {
+async fn test_multiple_disconnects_accept_one_shot_reconnects() {
     init_tracing();
 
     const CYCLES: u32 = 3;
@@ -831,9 +819,6 @@ async fn test_multiple_disconnects_each_trigger_reconnect() {
         inbound_queue: InboundQueueConfig::default(),
     };
     let client = Arc::new(WebSocketSignalingClient::new(config));
-
-    // Start reconnect manager
-    client.start_reconnect_manager();
 
     // Initial connection
     tracing::info!("🔗 Initial connection...");
@@ -875,9 +860,13 @@ async fn test_multiple_disconnects_each_trigger_reconnect() {
             .await
             .expect("server restart should succeed");
 
-        // Wait for reconnect manager to auto-reconnect
+        // Execute exactly one reconnect attempt, as selected by the supervisor.
         let reconnect_timeout = Duration::from_secs(15);
         let mut events_rx = client.subscribe_events();
+        client
+            .connect()
+            .await
+            .expect("supervisor-owned reconnect attempt should succeed");
         let reconnected = tokio::time::timeout(reconnect_timeout, async {
             loop {
                 match events_rx.recv().await {
@@ -900,7 +889,7 @@ async fn test_multiple_disconnects_each_trigger_reconnect() {
             "[Cycle {}] should be connected after reconnect",
             cycle
         );
-        tracing::info!("✅ [Cycle {}] Auto-reconnect succeeded", cycle);
+        tracing::info!("✅ [Cycle {}] One-shot reconnect succeeded", cycle);
 
         server = new_server;
     }
@@ -917,5 +906,5 @@ async fn test_multiple_disconnects_each_trigger_reconnect() {
     );
 
     client.disconnect().await.ok();
-    tracing::info!("✅ test_multiple_disconnects_each_trigger_reconnect passed!");
+    tracing::info!("✅ test_multiple_disconnects_accept_one_shot_reconnects passed!");
 }

@@ -4,10 +4,10 @@
 //! to the signaling server and handling responses.
 
 use crate::ais_client::AisClient;
-use crate::lifecycle::CredentialState;
 use crate::lifecycle::credential_manager::{CredentialManager, credential_expiry_to_system_time};
 use crate::lifecycle::membership::MembershipHandle;
 use crate::lifecycle::session_state::SessionPhase;
+use crate::lifecycle::{CredentialState, SignalingRecoveryRequestCause};
 use crate::transport::{AuthVerdict, NetworkError};
 use crate::wire::webrtc::gate::WebRtcGate;
 use crate::wire::webrtc::{HookCallback, HookEvent, SignalingClient, WebRtcCoordinator};
@@ -389,49 +389,26 @@ pub async fn heartbeat_task(
                 }
 
                 if !client.is_connected() {
-                    if membership.is_some() {
-                        // Terminal realm denial: the membership contract is
-                        // "no automatic re-probe". Waking the reconnect
-                        // manager here would restart the handshake, collect
-                        // another Denied verdict and loop against the realm
-                        // on every heartbeat tick.
-                        if let Some(manager) = credential_manager.as_ref()
-                            && manager.phase().await == SessionPhase::RealmUnavailable
-                        {
-                            tracing::debug!(
-                                "💓 Heartbeat: realm denied membership (terminal); suppressing auto-reconnect wake"
-                            );
-                            continue;
-                        }
-                        // The signaling reconnect manager is the sole socket
-                        // driver when membership recovery is enabled. Heartbeat
-                        // only wakes it and waits for the next connected tick.
-                        client.schedule_auto_reconnect();
+                    // Terminal realm denial has no automatic release trigger.
+                    // Do not even emit duplicate demand while the credential
+                    // authority is terminally unavailable.
+                    if membership.is_some()
+                        && let Some(manager) = credential_manager.as_ref()
+                        && manager.phase().await == SessionPhase::RealmUnavailable
+                    {
+                        tracing::debug!(
+                            "💓 Heartbeat: realm denied membership (terminal); suppressing recovery demand"
+                        );
                         continue;
                     }
-                    match client.connect_once().await {
-                        Ok(()) => {
-                            tracing::info!("✅ Signaling reconnected before heartbeat");
-                        }
-                        Err(e) => {
-                            consecutive_failures += 1;
-                            if should_log_heartbeat_failure(consecutive_failures) {
-                                tracing::warn!(
-                                    consecutive_failures,
-                                    "⚠️ Failed to reconnect signaling before heartbeat: {}",
-                                    e
-                                );
-                            } else {
-                                tracing::debug!(
-                                    consecutive_failures,
-                                    "Suppressed repeated signaling reconnect failure before heartbeat: {}",
-                                    e
-                                );
-                            }
-                            client.schedule_auto_reconnect();
-                            continue;
-                        }
-                    }
+
+                    // Heartbeat is a fact producer, never a socket driver. The
+                    // supervisor coalesces repeated ticks without resetting an
+                    // existing attempt or backoff deadline.
+                    client.request_signaling_recovery(
+                        SignalingRecoveryRequestCause::HeartbeatObservedDisconnected,
+                    );
+                    continue;
                 }
 
                 if let Some(new_actor_id) = send_heartbeat_and_handle_response(
@@ -530,23 +507,10 @@ async fn re_register_task(
             client.set_actor_id(new_actor_id.clone()).await;
             client.set_credential_state(credential_state.clone()).await;
 
-            // Step 5: Reconnect signaling WebSocket (URL will carry new credential)
-            tracing::info!("🔗 Reconnecting signaling client with new credential");
-            match client.connect_once().await {
-                Ok(()) => {
-                    tracing::info!(
-                        "✅ Re-registration successful and signaling reconnected (ActrId: {})",
-                        new_actor_id,
-                    );
-                }
-                Err(e) => {
-                    tracing::error!(
-                        "❌ AIS re-registration succeeded but signaling reconnect is pending: {}",
-                        e
-                    );
-                    client.schedule_auto_reconnect();
-                }
-            }
+            // Step 5: publish recovery demand. The supervisor owns the one-shot
+            // connect action and every retry deadline.
+            tracing::info!("🔗 Requesting signaling recovery with new credential");
+            client.request_signaling_recovery(SignalingRecoveryRequestCause::CredentialRebound);
 
             tracing::debug!("TurnCredential updated, TURN authentication ready");
 

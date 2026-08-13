@@ -250,7 +250,7 @@ pub(crate) struct AcceptOutcome {
     pub cancel_effect: bool,
     /// Structured status-stream records produced by translation.
     pub status: Vec<tp::StatusRecord>,
-    /// Signaling-layer directives the shell executes (auto-reconnect control).
+    /// Signaling resource fences the shell executes.
     pub signals: Vec<tp::SignalingDirective>,
     /// The supervisor has ended unconditionally; the shell must stop its loop.
     pub terminate: bool,
@@ -342,6 +342,11 @@ impl RecoverySupervisor {
         tp::composite_action(&self.view)
     }
 
+    /// Typed projection of the one supervisor-owned signaling recovery task.
+    pub(crate) fn signaling_reconnect_state(&self) -> tp::SignalingReconnectState {
+        tp::signaling_reconnect_state(&self.view)
+    }
+
     /// The bootstrap-deadline arm op for a `Gated` supervisor, if any. The shell
     /// arms it once at start; the first authoritative phase cancels it.
     pub(crate) fn bootstrap_arm(&self, now: PolicyInstant) -> Option<TimerOp> {
@@ -359,6 +364,20 @@ impl RecoverySupervisor {
     /// Accept one input: translate it, apply the decision through checked
     /// transitions, maintain extended context, and return the shell's work.
     pub(crate) fn accept(&mut self, input: tp::Input, now: PolicyInstant) -> AcceptOutcome {
+        if let tp::Input::SignalingRecoveryConfigChanged {
+            max_attempts,
+            initial_delay,
+            max_delay,
+            backoff_multiplier_bits,
+        } = &input
+        {
+            self.config.configure_signaling_retry_window(
+                *max_attempts,
+                *initial_delay,
+                *max_delay,
+                f64::from_bits(*backoff_multiplier_bits),
+            );
+        }
         let decision = tp::translate(&self.view, &input, now, &self.config, &mut *self.entropy);
         self.pending_ops.clear();
 
@@ -368,8 +387,22 @@ impl RecoverySupervisor {
         }
         let rev = self.view.policy_revision;
 
+        if let Some(impacts) = decision.required_recovery_impacts {
+            self.merge_recovery_impacts(impacts);
+        }
         for mi in &decision.machine_inputs {
-            self.apply_machine_input(*mi, advanced, rev, now);
+            self.apply_machine_input(
+                *mi,
+                advanced,
+                rev,
+                now,
+                decision
+                    .required_recovery_impacts
+                    .unwrap_or(tp::RecoveryImpacts::ALL),
+            );
+        }
+        if let Some(schedule) = decision.retry_schedule {
+            self.apply_retry_schedule(schedule);
         }
         for gt in &decision.gate_triggers {
             self.apply_gate_trigger(*gt, rev);
@@ -479,6 +512,9 @@ impl RecoverySupervisor {
             tp::Input::SessionActivated { session_generation } if advanced => {
                 self.view.committed_session_generation = Some(*session_generation);
             }
+            tp::Input::SignalingCredentialPublished { revision } if advanced => {
+                self.view.committed_credential_revision = Some(*revision);
+            }
             tp::Input::SignalingGenerationCommitted { generation, .. } if advanced => {
                 self.view.live_signaling_generation = Some(*generation);
                 // A commit fact can already be queued when a teardown fence is
@@ -525,12 +561,15 @@ impl RecoverySupervisor {
         advanced: bool,
         rev: u64,
         now: PolicyInstant,
+        recovery_impacts: tp::RecoveryImpacts,
     ) {
         match mi {
             tp::MachineInput::RecoveryMode(i) => self.apply_recovery_mode(i),
             tp::MachineInput::AppPhase(i) => self.apply_app_phase(i, now),
             tp::MachineInput::NetworkPath(i) => self.apply_network_path(i),
-            tp::MachineInput::RecoveryIntent(i) => self.apply_recovery_intent(i, advanced, rev),
+            tp::MachineInput::RecoveryIntent(i) => {
+                self.apply_recovery_intent(i, advanced, rev, recovery_impacts)
+            }
             tp::MachineInput::CleanupWork(i) => self.apply_cleanup_work(i, rev),
             tp::MachineInput::OfflineWork(i) => self.apply_offline_work(i),
             tp::MachineInput::RetryGate { domain, input } => {
@@ -627,7 +666,19 @@ impl RecoverySupervisor {
         }
     }
 
-    fn apply_recovery_intent(&mut self, i: tp::RecoveryIntentInput, advanced: bool, rev: u64) {
+    fn merge_recovery_impacts(&mut self, impacts: tp::RecoveryImpacts) {
+        if let Some(record) = self.view.recovery_record.as_mut() {
+            record.required_impacts = record.required_impacts.union(impacts);
+        }
+    }
+
+    fn apply_recovery_intent(
+        &mut self,
+        i: tp::RecoveryIntentInput,
+        advanced: bool,
+        rev: u64,
+        required_impacts: tp::RecoveryImpacts,
+    ) {
         let new = self.recovery_intent_next(i);
         let Some(new) = new else { return };
         self.view.recovery_intent = new;
@@ -648,13 +699,24 @@ impl RecoverySupervisor {
                         rec.gate = tp::RetryGateState::Ready;
                         rec.attempt = 0;
                         rec.retry_id = 0;
+                        rec.retry_deadline = None;
+                        rec.retry_delay_kind = tp::RetryDelayKind::Backoff;
                         rec.release_mask = Default::default();
                         rec.strength = Some(strength);
+                        rec.required_impacts = rec.required_impacts.union(required_impacts);
                     }
                     // A fresh externally-requested or derived obligation.
                     _ => {
-                        self.view.recovery_record =
-                            Some(tp::PendingRecord::recovery(rev, strength));
+                        let inherited_impacts = self
+                            .view
+                            .recovery_record
+                            .as_ref()
+                            .map_or(tp::RecoveryImpacts::NONE, |record| record.required_impacts);
+                        self.view.recovery_record = Some(tp::PendingRecord::recovery_with_impacts(
+                            rev,
+                            strength,
+                            inherited_impacts.union(required_impacts),
+                        ));
                     }
                 }
                 self.pending_ops.push(TimerOp::Cancel {
@@ -834,13 +896,24 @@ impl RecoverySupervisor {
             tp::RetryGateInput::RetryableFailure => {
                 rec.attempt = rec.attempt.saturating_add(1);
                 rec.retry_id = new_retry_id;
+                rec.retry_delay_kind = tp::RetryDelayKind::Backoff;
             }
             tp::RetryGateInput::RetryDeadlineExpired => {
                 rec.work_revision = rev;
+                rec.retry_deadline = None;
+                if rec.retry_delay_kind == tp::RetryDelayKind::Cooldown {
+                    // A cooldown ends one compatibility retry window. The
+                    // obligation itself remains Ready and starts its next
+                    // window from attempt zero.
+                    rec.attempt = 0;
+                }
+                rec.retry_delay_kind = tp::RetryDelayKind::Backoff;
             }
             tp::RetryGateInput::NewMaterialTrigger => {
                 rec.attempt = 0;
                 rec.work_revision = rev;
+                rec.retry_deadline = None;
+                rec.retry_delay_kind = tp::RetryDelayKind::Backoff;
                 self.pending_ops.push(TimerOp::Cancel {
                     key: tp::TimerId::FailureBackoff(domain),
                 });
@@ -849,10 +922,21 @@ impl RecoverySupervisor {
                 // The release mask is recorded by the accompanying park directive.
             }
             tp::RetryGateInput::ExplicitPause => {
+                rec.retry_deadline = None;
+                rec.retry_delay_kind = tp::RetryDelayKind::Backoff;
                 self.pending_ops.push(TimerOp::Cancel {
                     key: tp::TimerId::FailureBackoff(domain),
                 });
             }
+        }
+    }
+
+    fn apply_retry_schedule(&mut self, schedule: tp::RetrySchedule) {
+        let Some(record) = self.record_mut(schedule.domain) else {
+            return;
+        };
+        if record.gate == tp::RetryGateState::BackingOff {
+            record.retry_delay_kind = schedule.kind;
         }
     }
 
@@ -871,6 +955,7 @@ impl RecoverySupervisor {
                     rec.gate = next;
                     rec.attempt = 0;
                     rec.work_revision = rev;
+                    rec.retry_delay_kind = tp::RetryDelayKind::Backoff;
                     self.pending_ops.push(TimerOp::Cancel {
                         key: tp::TimerId::FailureBackoff(domain),
                     });
@@ -891,6 +976,7 @@ impl RecoverySupervisor {
                     rec.gate = next;
                     rec.attempt = 0;
                     rec.work_revision = rev;
+                    rec.retry_delay_kind = tp::RetryDelayKind::Backoff;
                 }
             }
         }
@@ -1022,6 +1108,9 @@ impl RecoverySupervisor {
                     });
                 }
                 tp::TimerId::FailureBackoff(domain) => {
+                    if let Some(record) = self.record_mut(*domain) {
+                        record.retry_deadline = Some(*deadline);
+                    }
                     let (work_revision, retry_id) = self
                         .view
                         .record(*domain)
@@ -1055,7 +1144,12 @@ impl RecoverySupervisor {
                     tp::TimerId::TeardownOverall(tp::TeardownDomain::OfflineDisconnect) => {
                         self.view.offline_teardown = None
                     }
-                    tp::TimerId::FailureBackoff(_) | tp::TimerId::BootstrapPhase => {}
+                    tp::TimerId::FailureBackoff(domain) => {
+                        if let Some(record) = self.record_mut(*domain) {
+                            record.retry_deadline = None;
+                        }
+                    }
+                    tp::TimerId::BootstrapPhase => {}
                 }
                 self.pending_ops.push(TimerOp::Cancel { key: *id });
             }

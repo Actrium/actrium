@@ -36,8 +36,8 @@ pub use network_event::{
     NetworkAvailability, NetworkEvent, NetworkEventHandle, NetworkEventProcessor,
     NetworkEventRequest, NetworkEventResult, NetworkRecoveryAction, NetworkRecoveryError,
     NetworkSnapshot, NetworkTransportFlags, ObservedOutcome, ReconnectReason,
-    SignalingFactLostCause, SignalingFactOrigin, SupervisorFactSink, SupervisorStatus,
-    TeardownReport, process_network_event_batch, run_network_event_reconciler,
+    SignalingFactLostCause, SignalingFactOrigin, SignalingRecoveryRequestCause, SupervisorFactSink,
+    SupervisorStatus, TeardownReport, process_network_event_batch, run_network_event_reconciler,
     run_network_event_reconciler_with_status, select_network_recovery_action,
 };
 #[cfg(feature = "test-utils")]

@@ -802,7 +802,7 @@ async fn test_cleanup_then_restore_does_not_restart_fresh_initial_session() {
     harness
         .peer(100)
         .signaling_client
-        .connect_once()
+        .connect()
         .await
         .expect("source signaling should reconnect after cleanup");
 
@@ -1531,7 +1531,7 @@ async fn test_signaling_restore_wakes_existing_restart_without_duplicate_offer()
     tracing::info!("Step 3: Reconnect signaling and issue repeated recovery resumes");
     offerer
         .signaling_client
-        .connect_once()
+        .connect()
         .await
         .expect("test should reconnect offerer signaling");
     for _ in 0..5 {
@@ -2172,7 +2172,7 @@ async fn test_signaling_reconnect_overlapping_cleanup_does_not_revive_old_transp
 
     let reconnect_task = {
         let signaling = harness.peer(100).signaling_client.clone();
-        tokio::spawn(async move { signaling.connect_once().await })
+        tokio::spawn(async move { signaling.connect().await })
     };
 
     tokio::time::sleep(Duration::from_millis(25)).await;
@@ -2664,7 +2664,7 @@ async fn regression_log_timeline_foreground_cleanup_fails_fast_before_new_send()
                 .map_err(|err| err.to_string())?;
         }
         cleanup_signaling
-            .connect_once()
+            .connect()
             .await
             .map_err(|err| err.to_string())?;
 

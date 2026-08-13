@@ -42,7 +42,7 @@ pub(crate) enum MembershipResolution {
     Published,
     /// A prior request already advanced beyond the reported revision.
     Superseded,
-    /// AIS was temporarily unavailable. The socket may apply its normal
+    /// AIS was temporarily unavailable. The supervisor applies its normal
     /// reconnect backoff; a later auth rejection is a new on-demand trigger.
     Deferred,
     /// The realm denied membership. No automatic re-probe is scheduled.
@@ -139,8 +139,9 @@ pub struct MembershipController {
     engine: CredentialManager,
     credential_tx: watch::Sender<Arc<PublishedCredential>>,
     report_rx: mpsc::Receiver<MembershipReport>,
-    /// Publish happens-before this socket wake.
-    wake_socket: Arc<dyn Fn() + Send + Sync>,
+    /// Publish happens-before this supervisor fact, carrying the exact
+    /// credential revision that became visible to socket consumers.
+    wake_socket: Arc<dyn Fn(u64) + Send + Sync>,
     shutdown: CancellationToken,
 }
 
@@ -148,7 +149,7 @@ impl MembershipController {
     pub fn new(
         engine: CredentialManager,
         seed: PublishedCredential,
-        wake_socket: Arc<dyn Fn() + Send + Sync>,
+        wake_socket: Arc<dyn Fn(u64) + Send + Sync>,
         shutdown: CancellationToken,
     ) -> (Self, MembershipHandle) {
         let (credential_tx, credential_rx) = watch::channel(Arc::new(seed));
@@ -172,9 +173,9 @@ impl MembershipController {
         self.credential_tx.borrow().revision
     }
 
-    /// Stamp the next publication revision, publish the material, then wake the
-    /// sole socket driver. The credential manager's session generation is not
-    /// used as the publication clock.
+    /// Stamp the next publication revision, publish the material, then submit
+    /// the material fact to the sole recovery-policy owner. The credential
+    /// manager's session generation is not used as the publication clock.
     fn publish_then_wake(&self, mut published: PublishedCredential) {
         published.revision = self
             .current_revision()
@@ -182,8 +183,8 @@ impl MembershipController {
             .expect("credential publication revision exhausted");
         let revision = published.revision;
         self.credential_tx.send_replace(Arc::new(published));
-        (self.wake_socket)();
-        tracing::info!(revision, "membership: published credential and woke socket");
+        (self.wake_socket)(revision);
+        tracing::info!(revision, "membership: published credential recovery fact");
     }
 
     pub async fn run(mut self) {
