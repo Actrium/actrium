@@ -25,38 +25,30 @@ use tokio::sync::broadcast;
 struct FakeSignalingClient {
     connected: AtomicBool,
     connections: AtomicU64,
-    connect_once_calls: AtomicU64,
+    connect_calls: AtomicU64,
     disconnections: AtomicU64,
     probe_calls: AtomicU64,
     probe_success: AtomicBool,
-    auto_reconnect_suppressed: AtomicBool,
-    suppress_auto_reconnect_calls: AtomicU64,
-    resume_auto_reconnect_calls: AtomicU64,
     event_tx: broadcast::Sender<SignalingEvent>,
     connect_delay: Duration,
-    connect_once_delay: Duration,
 }
 
 impl FakeSignalingClient {
     fn new() -> Self {
-        Self::new_with_delays(Duration::ZERO, Duration::ZERO)
+        Self::new_with_connect_delay(Duration::ZERO)
     }
 
-    fn new_with_delays(connect_delay: Duration, connect_once_delay: Duration) -> Self {
+    fn new_with_connect_delay(connect_delay: Duration) -> Self {
         let (event_tx, _event_rx) = broadcast::channel(64);
         Self {
             connected: AtomicBool::new(false),
             connections: AtomicU64::new(0),
-            connect_once_calls: AtomicU64::new(0),
+            connect_calls: AtomicU64::new(0),
             disconnections: AtomicU64::new(0),
             probe_calls: AtomicU64::new(0),
             probe_success: AtomicBool::new(true),
-            auto_reconnect_suppressed: AtomicBool::new(false),
-            suppress_auto_reconnect_calls: AtomicU64::new(0),
-            resume_auto_reconnect_calls: AtomicU64::new(0),
             event_tx,
             connect_delay,
-            connect_once_delay,
         }
     }
 
@@ -68,8 +60,8 @@ impl FakeSignalingClient {
         }
     }
 
-    fn connect_once_calls(&self) -> u64 {
-        self.connect_once_calls.load(Ordering::SeqCst)
+    fn connect_calls(&self) -> u64 {
+        self.connect_calls.load(Ordering::SeqCst)
     }
 
     fn probe_calls(&self) -> u64 {
@@ -78,18 +70,6 @@ impl FakeSignalingClient {
 
     fn set_probe_success(&self, success: bool) {
         self.probe_success.store(success, Ordering::SeqCst);
-    }
-
-    fn auto_reconnect_suppressed(&self) -> bool {
-        self.auto_reconnect_suppressed.load(Ordering::SeqCst)
-    }
-
-    fn suppress_auto_reconnect_calls(&self) -> u64 {
-        self.suppress_auto_reconnect_calls.load(Ordering::SeqCst)
-    }
-
-    fn resume_auto_reconnect_calls(&self) -> u64 {
-        self.resume_auto_reconnect_calls.load(Ordering::SeqCst)
     }
 
     fn publish_connected(&self) {
@@ -102,33 +82,12 @@ impl FakeSignalingClient {
 #[async_trait::async_trait]
 impl SignalingClient for FakeSignalingClient {
     async fn connect(&self) -> NetworkResult<()> {
+        self.connect_calls.fetch_add(1, Ordering::SeqCst);
         if !self.connect_delay.is_zero() {
             tokio::time::sleep(self.connect_delay).await;
         }
         self.publish_connected();
         Ok(())
-    }
-
-    async fn connect_once(&self) -> NetworkResult<()> {
-        self.connect_once_calls.fetch_add(1, Ordering::SeqCst);
-        if !self.connect_once_delay.is_zero() {
-            tokio::time::sleep(self.connect_once_delay).await;
-        }
-        self.publish_connected();
-        Ok(())
-    }
-
-    fn suppress_auto_reconnect(&self) {
-        self.suppress_auto_reconnect_calls
-            .fetch_add(1, Ordering::SeqCst);
-        self.auto_reconnect_suppressed.store(true, Ordering::SeqCst);
-    }
-
-    fn resume_auto_reconnect(&self) {
-        self.resume_auto_reconnect_calls
-            .fetch_add(1, Ordering::SeqCst);
-        self.auto_reconnect_suppressed
-            .store(false, Ordering::SeqCst);
     }
 
     async fn disconnect(&self) -> NetworkResult<()> {
@@ -622,7 +581,7 @@ fn test_l0_documented_event_action_matrix() {
 #[tokio::test]
 async fn test_l0_duplicate_path_storms_execute_one_settled_action() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
@@ -695,7 +654,7 @@ async fn test_l0_duplicate_path_storms_execute_one_settled_action() {
 #[tokio::test]
 async fn test_network_available_probes_when_already_connected() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
@@ -720,7 +679,7 @@ async fn test_network_available_probes_when_already_connected() {
         "Available should not disconnect when signaling probe succeeds"
     );
     assert_eq!(client.probe_calls(), 1);
-    assert_eq!(client.connect_once_calls(), 0);
+    assert_eq!(client.connect_calls(), 0);
 
     processor
         .process_network_available()
@@ -758,7 +717,7 @@ async fn test_network_available_probes_when_already_connected() {
 #[tokio::test]
 async fn test_supervisor_restore_bypasses_legacy_available_debounce() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
@@ -797,7 +756,7 @@ async fn test_supervisor_restore_bypasses_legacy_available_debounce() {
 #[tokio::test]
 async fn test_network_available_rebuilds_when_signaling_probe_fails() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     client.set_probe_success(false);
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
@@ -823,14 +782,14 @@ async fn test_network_available_rebuilds_when_signaling_probe_fails() {
         stats.connections, 2,
         "failed probe should reconnect signaling once"
     );
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
     assert!(client.is_connected());
 }
 
 #[tokio::test]
 async fn test_short_foreground_failed_probe_disconnects_before_restore() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     client.set_probe_success(false);
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
@@ -850,7 +809,7 @@ async fn test_short_foreground_failed_probe_disconnects_before_restore() {
         1,
         "failed short-foreground probe should not be probed a second time during restore"
     );
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
     let stats = client.get_stats();
     assert_eq!(
         stats.disconnections, 1,
@@ -861,9 +820,9 @@ async fn test_short_foreground_failed_probe_disconnects_before_restore() {
 }
 
 #[tokio::test]
-async fn test_short_foreground_reenables_auto_reconnect_without_starting_an_extra_connect() {
+async fn test_short_foreground_probes_without_starting_an_extra_connect() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
 
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
@@ -879,9 +838,6 @@ async fn test_short_foreground_reenables_auto_reconnect_without_starting_an_extr
         .handle_app_lifecycle_changed(AppLifecycleState::Background)
         .await
         .expect("background event should complete");
-    assert!(client.auto_reconnect_suppressed());
-    assert_eq!(client.suppress_auto_reconnect_calls(), 1);
-
     handle
         .handle_app_lifecycle_changed(AppLifecycleState::Foreground {
             background_duration_ms: 1_000,
@@ -889,10 +845,8 @@ async fn test_short_foreground_reenables_auto_reconnect_without_starting_an_extr
         .await
         .expect("short foreground event should complete");
 
-    assert!(!client.auto_reconnect_suppressed());
-    assert_eq!(client.resume_auto_reconnect_calls(), 1);
     assert_eq!(
-        client.connect_once_calls(),
+        client.connect_calls(),
         0,
         "healthy signaling must not reconnect just to clear suppression"
     );
@@ -907,7 +861,7 @@ async fn test_default_recovery_uses_snapshot_state_instead_of_timed_debounce() {
     assert_eq!(DebounceConfig::default().window, Duration::ZERO);
 
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let handle = NetworkEventHandle::new_with_result_timeout(event_tx, Duration::from_secs(2));
@@ -957,7 +911,7 @@ async fn test_network_available_connects_without_probe_when_disconnected() {
 
     let stats = client.get_stats();
     assert_eq!(client.probe_calls(), 0);
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
     assert_eq!(stats.connections, 1);
     assert_eq!(stats.disconnections, 0);
     assert!(client.is_connected());
@@ -966,7 +920,7 @@ async fn test_network_available_connects_without_probe_when_disconnected() {
 #[tokio::test]
 async fn test_debounce_does_not_cross_event_types() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
@@ -1007,7 +961,7 @@ async fn test_direct_available_then_type_changed_probes_each_event_type() {
         .ok();
 
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
@@ -1064,7 +1018,7 @@ async fn test_direct_available_then_type_changed_probes_each_event_type() {
 #[tokio::test]
 async fn test_type_changed_works_without_prior_available() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
@@ -1090,13 +1044,13 @@ async fn test_type_changed_works_without_prior_available() {
         "TypeChanged should not disconnect signaling when probe succeeds"
     );
     assert_eq!(client.probe_calls(), 1);
-    assert_eq!(client.connect_once_calls(), 0);
+    assert_eq!(client.connect_calls(), 0);
 }
 
 #[tokio::test]
 async fn test_batch_available_type_changed_probes_signaling_once() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
@@ -1126,7 +1080,7 @@ async fn test_batch_available_type_changed_probes_signaling_once() {
         "Available + TypeChanged should not disconnect when probe succeeds"
     );
     assert_eq!(
-        client.connect_once_calls(),
+        client.connect_calls(),
         0,
         "batched restore should not reconnect when signaling probe succeeds"
     );
@@ -1140,7 +1094,7 @@ async fn test_batch_available_type_changed_probes_signaling_once() {
 #[tokio::test]
 async fn test_batch_restore_rebuilds_once_when_signaling_probe_fails() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     client.set_probe_success(false);
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
@@ -1168,7 +1122,7 @@ async fn test_batch_restore_rebuilds_once_when_signaling_probe_fails() {
         stats.connections, 2,
         "batched restore should reconnect once after failed probe"
     );
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
 }
 
 #[tokio::test]
@@ -1200,7 +1154,7 @@ async fn test_batch_lost_available_type_changed_prefers_restore() {
 
     let stats = client.get_stats();
     assert_eq!(stats.connections, 1);
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
     assert_eq!(
         client.probe_calls(),
         0,
@@ -1285,15 +1239,14 @@ async fn test_cleanup_batches_disconnect_without_reconnect() {
 
     for case in cases {
         let client = if case.delayed_connect {
-            let client = Arc::new(FakeSignalingClient::new_with_delays(
+            let client = Arc::new(FakeSignalingClient::new_with_connect_delay(
                 Duration::from_secs(5),
-                Duration::ZERO,
             ));
             client.publish_connected();
             client
         } else {
             let client = Arc::new(FakeSignalingClient::new());
-            client.connect().await.expect("initial connect");
+            client.publish_connected();
             client
         };
 
@@ -1340,9 +1293,9 @@ async fn test_cleanup_batches_disconnect_without_reconnect() {
         );
         assert!(!client.is_connected(), "{} should not reconnect", case.name);
         assert_eq!(
-            client.connect_once_calls(),
+            client.connect_calls(),
             0,
-            "{} should not connect_once",
+            "{} should not connect",
             case.name
         );
         assert_eq!(client.probe_calls(), 0, "{} should not probe", case.name);
@@ -1364,7 +1317,7 @@ async fn test_cleanup_batches_disconnect_without_reconnect() {
 #[tokio::test(start_paused = true)]
 async fn test_network_event_handle_rolls_back_offline_before_grace_expires() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
@@ -1471,7 +1424,7 @@ async fn test_network_event_handle_rolls_back_offline_before_grace_expires() {
 #[tokio::test(start_paused = true)]
 async fn test_offline_candidate_drained_after_non_offline_head_owns_grace() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let mut events = client.subscribe_events();
     let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
@@ -1544,7 +1497,7 @@ async fn test_offline_candidate_drained_after_non_offline_head_owns_grace() {
 #[tokio::test(start_paused = true)]
 async fn test_new_offline_candidate_after_fast_rollback_restarts_grace() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let mut events = client.subscribe_events();
     let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
@@ -1609,7 +1562,7 @@ async fn test_new_offline_candidate_after_fast_rollback_restarts_grace() {
 #[tokio::test(start_paused = true)]
 async fn test_reconnect_intent_survives_across_reconciler_receive_cycles() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let mut events = client.subscribe_events();
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
@@ -1662,7 +1615,7 @@ async fn test_reconnect_intent_survives_across_reconciler_receive_cycles() {
     assert!(deferred.success);
     assert!(!client.is_connected());
     assert_eq!(
-        client.connect_once_calls(),
+        client.connect_calls(),
         0,
         "a committed offline path must gate reconnect execution"
     );
@@ -1684,7 +1637,7 @@ async fn test_reconnect_intent_survives_across_reconciler_receive_cycles() {
     .await;
     assert!(client.is_connected());
     assert_eq!(
-        client.connect_once_calls(),
+        client.connect_calls(),
         1,
         "the reconnect intent must survive into a later receive cycle"
     );
@@ -1712,7 +1665,7 @@ async fn test_reconnect_intent_survives_across_reconciler_receive_cycles() {
 #[tokio::test]
 async fn test_background_preserves_healthy_session_and_admits_reconnect_under_ungated() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let mut events = client.subscribe_events();
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
@@ -1763,7 +1716,7 @@ async fn test_background_preserves_healthy_session_and_admits_reconnect_under_un
     })
     .await;
     assert!(client.is_connected());
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
     assert_eq!(client.get_stats().disconnections, 1);
 
     shutdown.cancel();
@@ -1773,7 +1726,7 @@ async fn test_background_preserves_healthy_session_and_admits_reconnect_under_un
 #[tokio::test]
 async fn test_material_path_updates_bypass_legacy_debounce() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
@@ -1853,7 +1806,7 @@ async fn test_material_path_updates_bypass_legacy_debounce() {
             cycle
         );
         assert_eq!(
-            client.connect_once_calls(),
+            client.connect_calls(),
             0,
             "foreground cycle {} should not reconnect healthy signaling",
             cycle
@@ -1916,7 +1869,7 @@ async fn test_l1_pre_start_queued_event_drains_when_reconciler_starts() {
         NetworkEvent::NetworkPathChanged { .. }
     ));
     assert!(client.is_connected());
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
 
     shutdown.cancel();
     reconciler.await.expect("reconciler task should not panic");
@@ -1998,7 +1951,7 @@ async fn test_l1_reconciler_shutdown_during_offline_grace_is_bounded() {
 #[tokio::test]
 async fn test_l1_command_apis_complete_through_network_event_handle() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
         None,
@@ -2041,7 +1994,7 @@ async fn test_l1_command_apis_complete_through_network_event_handle() {
         }
     ));
     assert!(client.is_connected());
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
 
     shutdown.cancel();
     reconciler.await.expect("reconciler task should not panic");
@@ -2050,7 +2003,7 @@ async fn test_l1_command_apis_complete_through_network_event_handle() {
 #[tokio::test]
 async fn test_l1_cleanup_is_a_batch_barrier_for_later_recovery_facts() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let (cleanup_tx, cleanup_rx) = tokio::sync::oneshot::channel();
@@ -2098,7 +2051,7 @@ async fn test_l1_cleanup_is_a_batch_barrier_for_later_recovery_facts() {
         client.is_connected(),
         "the post-cleanup online fact must execute in its own decision cycle"
     );
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
 
     shutdown.cancel();
     reconciler.await.expect("reconciler should stop cleanly");
@@ -2107,7 +2060,7 @@ async fn test_l1_cleanup_is_a_batch_barrier_for_later_recovery_facts() {
 #[tokio::test(start_paused = true)]
 async fn test_l1_explicit_cleanup_bypasses_offline_grace() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let processor = Arc::new(DefaultNetworkEventProcessor::new(client, None));
 
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
@@ -2350,7 +2303,7 @@ async fn test_network_event_handle_preserves_per_request_result_correlation() {
 #[tokio::test]
 async fn test_l1_cloned_handles_mixed_concurrent_calls_complete_without_crossed_results() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
         None,
@@ -2442,7 +2395,7 @@ async fn test_l1_cloned_handles_mixed_concurrent_calls_complete_without_crossed_
 #[tokio::test]
 async fn supervisor_probe_effect_reports_typed_outcome_without_inline_restore() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     client.set_probe_success(false);
     let processor = DefaultNetworkEventProcessor::new(client.clone(), None);
 
@@ -2462,7 +2415,7 @@ async fn supervisor_probe_effect_reports_typed_outcome_without_inline_restore() 
         "the effect must not disconnect: translate() derives the successor"
     );
     assert_eq!(
-        client.connect_once_calls(),
+        client.connect_calls(),
         0,
         "the effect must not rebuild inline"
     );
@@ -2471,7 +2424,7 @@ async fn supervisor_probe_effect_reports_typed_outcome_without_inline_restore() 
 #[tokio::test]
 async fn legacy_probe_action_retains_self_healing_restore() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     client.set_probe_success(false);
     let processor = DefaultNetworkEventProcessor::new(client.clone(), None);
 
@@ -2483,14 +2436,14 @@ async fn legacy_probe_action_retains_self_healing_restore() {
     assert_eq!(client.probe_calls(), 1);
     let stats = client.get_stats();
     assert_eq!(stats.disconnections, 1);
-    assert_eq!(client.connect_once_calls(), 1);
+    assert_eq!(client.connect_calls(), 1);
     assert!(client.is_connected());
 }
 
 #[tokio::test]
 async fn route_change_with_live_signaling_probes_then_escalates_to_restore() {
     let client = Arc::new(FakeSignalingClient::new());
-    client.connect().await.expect("initial connect");
+    client.publish_connected();
     let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
     let processor: Arc<dyn NetworkEventProcessor> = processor;
     let (handle, sink, shutdown, reconciler, mut status_rx) =
@@ -2562,7 +2515,7 @@ async fn route_change_with_live_signaling_probes_then_escalates_to_restore() {
         1,
         "the restore effect (not the probe) disconnects the half-open socket once"
     );
-    assert_eq!(client.connect_once_calls(), 1, "exactly one rebuild");
+    assert_eq!(client.connect_calls(), 1, "exactly one rebuild");
 
     shutdown.cancel();
     reconciler.await.expect("reconciler should stop cleanly");

@@ -250,7 +250,7 @@ async fn inv12_blackbox_stale_signaling_generation_cannot_publish_connected_or_o
 
     let connecting = {
         let client = client.clone();
-        tokio::spawn(async move { client.connect_once().await })
+        tokio::spawn(async move { client.connect().await })
     };
     rendezvous(&publish, "signaling pre-publication boundary").await;
     client.invalidate_generation();

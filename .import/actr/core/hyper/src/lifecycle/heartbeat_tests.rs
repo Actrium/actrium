@@ -5,7 +5,7 @@ use crate::lifecycle::membership::{
     MembershipController, PublishedCredential, spawn_membership_controller,
 };
 use crate::lifecycle::session_state::SessionPhase;
-use crate::lifecycle::{SessionSnapshot, SessionState};
+use crate::lifecycle::{SessionSnapshot, SessionState, SignalingRecoveryRequestCause};
 use crate::transport::{NetworkError, NetworkResult};
 use crate::wire::webrtc::{DisconnectReason, SignalingEvent, SignalingStats, WebRtcConfig};
 use actr_protocol::prost::Message as _;
@@ -98,10 +98,6 @@ impl ExpiredHeartbeatSignalingClient {
 #[async_trait::async_trait]
 impl SignalingClient for ExpiredHeartbeatSignalingClient {
     async fn connect(&self) -> NetworkResult<()> {
-        Ok(())
-    }
-
-    async fn connect_once(&self) -> NetworkResult<()> {
         Ok(())
     }
 
@@ -199,10 +195,6 @@ struct WarningHeartbeatSignalingClient;
 #[async_trait::async_trait]
 impl SignalingClient for WarningHeartbeatSignalingClient {
     async fn connect(&self) -> NetworkResult<()> {
-        Ok(())
-    }
-
-    async fn connect_once(&self) -> NetworkResult<()> {
         Ok(())
     }
 
@@ -316,10 +308,6 @@ impl SignalingClient for ReconnectBeforeHeartbeatClient {
         Ok(())
     }
 
-    async fn connect_once(&self) -> NetworkResult<()> {
-        self.connect().await
-    }
-
     async fn disconnect(&self) -> NetworkResult<()> {
         self.connected.store(false, Ordering::SeqCst);
         Ok(())
@@ -402,7 +390,7 @@ impl SignalingClient for ReconnectBeforeHeartbeatClient {
         rx
     }
 
-    fn schedule_auto_reconnect(&self) {
+    fn request_signaling_recovery(&self, _cause: SignalingRecoveryRequestCause) {
         self.reconnect_wakes.fetch_add(1, Ordering::SeqCst);
     }
 
@@ -414,7 +402,7 @@ impl SignalingClient for ReconnectBeforeHeartbeatClient {
 }
 
 #[tokio::test]
-async fn heartbeat_tick_reconnects_before_sending_when_signaling_is_disconnected() {
+async fn heartbeat_tick_requests_recovery_without_driving_disconnected_socket() {
     let actor_id = test_actor_id(1);
     let credential_state = CredentialState::new(test_credential(), None, None);
     let client = Arc::new(ReconnectBeforeHeartbeatClient::new_disconnected());
@@ -440,19 +428,20 @@ async fn heartbeat_tick_reconnects_before_sending_when_signaling_is_disconnected
         None,
     ));
 
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while client.heartbeat_calls.load(Ordering::SeqCst) == 0 {
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while client.reconnect_wakes.load(Ordering::SeqCst) == 0 {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .expect("heartbeat should be sent after reconnect preflight");
+    .expect("heartbeat should request supervisor recovery");
 
     shutdown.cancel();
     task.await.expect("heartbeat task should stop cleanly");
 
-    assert_eq!(client.connect_calls.load(Ordering::SeqCst), 1);
-    assert!(client.heartbeat_calls.load(Ordering::SeqCst) >= 1);
+    assert_eq!(client.connect_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(client.heartbeat_calls.load(Ordering::SeqCst), 0);
+    assert!(client.reconnect_wakes.load(Ordering::SeqCst) >= 1);
 }
 
 #[tokio::test]
@@ -497,7 +486,7 @@ async fn membership_heartbeat_never_drives_disconnected_socket() {
             actor_id: actor_id.clone(),
             revision: 1,
         },
-        Arc::new(|| {}),
+        Arc::new(|_| {}),
         shutdown.clone(),
     );
     let client = Arc::new(ReconnectBeforeHeartbeatClient::new_disconnected());
@@ -561,7 +550,7 @@ async fn run_membership_heartbeat_ticks(
             actor_id: actor_id.clone(),
             revision: 1,
         },
-        Arc::new(|| {}),
+        Arc::new(|_| {}),
         shutdown.clone(),
     );
     let client = Arc::new(ReconnectBeforeHeartbeatClient::new_disconnected());
@@ -919,10 +908,6 @@ impl SignalingClient for FakeSignalingClient {
         Ok(())
     }
 
-    async fn connect_once(&self) -> NetworkResult<()> {
-        Ok(())
-    }
-
     async fn disconnect(&self) -> NetworkResult<()> {
         Ok(())
     }
@@ -1075,9 +1060,6 @@ impl SignalingClient for RealmDeniedHeartbeatClient {
     async fn connect(&self) -> NetworkResult<()> {
         Ok(())
     }
-    async fn connect_once(&self) -> NetworkResult<()> {
-        Ok(())
-    }
     async fn disconnect(&self) -> NetworkResult<()> {
         Ok(())
     }
@@ -1193,7 +1175,7 @@ async fn connected_heartbeat_403_reports_terminal_realm_denied() {
     };
     let shutdown = CancellationToken::new();
     let (controller, handle) =
-        MembershipController::new(engine.clone(), seed, Arc::new(|| {}), shutdown.clone());
+        MembershipController::new(engine.clone(), seed, Arc::new(|_| {}), shutdown.clone());
     let controller_task = spawn_membership_controller(controller);
 
     let client = Arc::new(RealmDeniedHeartbeatClient);
@@ -1263,10 +1245,6 @@ impl StalledHeartbeatClient {
 #[async_trait::async_trait]
 impl SignalingClient for StalledHeartbeatClient {
     async fn connect(&self) -> NetworkResult<()> {
-        Ok(())
-    }
-
-    async fn connect_once(&self) -> NetworkResult<()> {
         Ok(())
     }
 

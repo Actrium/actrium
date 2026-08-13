@@ -685,6 +685,66 @@ async fn node_remains_running_during_signaling_pause_and_resume_smoke() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn headless_node_reconnects_after_signaling_endpoint_restart() {
+    let mut server = TestSignalingServer::start().await.expect("server start");
+    let signaling_port = server.port();
+    let dir = TempDir::new().unwrap();
+
+    let hyper = Hyper::new(HyperConfig::new(
+        dir.path(),
+        Arc::new(StaticTrust::dev_only()),
+    ))
+    .await
+    .unwrap();
+
+    let ais = format!("http://127.0.0.1:{signaling_port}/ais");
+    let actr = Node::from_hyper(hyper, runtime_config(&dir, &server, "HeadlessReconnect"))
+        .link(EchoWorkload)
+        .await
+        .unwrap()
+        .register(&ais)
+        .await
+        .unwrap()
+        .start()
+        .await
+        .unwrap();
+
+    assert_eq!(
+        server.get_connection_count(),
+        1,
+        "node startup should establish the initial signaling socket"
+    );
+    server.shutdown().await;
+
+    let restart_deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(2);
+    server = loop {
+        match TestSignalingServer::start_on_port(signaling_port).await {
+            Ok(server) => break server,
+            Err(error) => {
+                assert!(
+                    tokio::time::Instant::now() < restart_deadline,
+                    "signaling endpoint did not release its original port: {error}"
+                );
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            }
+        }
+    };
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while server.get_connection_count() == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "headless node did not reconnect through its always-on supervisor"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+
+    assert!(!actr.is_shutting_down());
+    actr.shutdown();
+    actr.wait_for_shutdown().await;
+    server.shutdown().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn node_handles_signaling_blackhole_io_without_panic_smoke() {
     // Blackhole WebSocket I/O (drop packets without closing) to exercise the
     // heartbeat-timeout disruption path as a bounded smoke test.

@@ -307,6 +307,18 @@ impl NetworkError {
         }))
     }
 
+    #[cfg(test)]
+    pub(crate) fn signaling_server_not_ready(
+        message: impl Into<String>,
+        retry_after: Option<Duration>,
+    ) -> Self {
+        NetworkError::Other(anyhow::Error::new(SignalingHandshakeFailure {
+            kind: SignalingHandshakeKind::ServerNotReady,
+            message: message.into(),
+            retry_after,
+        }))
+    }
+
     /// Get error category
     pub fn category(&self) -> &'static str {
         if let Some(failure) = self.signaling_handshake_failure() {

@@ -111,7 +111,7 @@ fn controller(
     actor_id: &ActrId,
     session: SessionState,
     endpoint: String,
-    wake: Arc<dyn Fn() + Send + Sync>,
+    wake: Arc<dyn Fn(u64) + Send + Sync>,
     shutdown: CancellationToken,
 ) -> (MembershipController, MembershipHandle) {
     let revision = session.generation_sync().unwrap();
@@ -147,7 +147,7 @@ async fn soft_renew_advances_publication_revision_without_bumping_session_genera
         &actor_id,
         session.clone(),
         server.url(),
-        Arc::new(|| {}),
+        Arc::new(|_| {}),
         shutdown.clone(),
     );
     let task = spawn_membership_controller(controller);
@@ -188,7 +188,7 @@ async fn concurrent_same_revision_reports_do_one_reissue() {
         &actor_id,
         session(&actor_id, 1, false),
         server.url(),
-        Arc::new(|| {}),
+        Arc::new(|_| {}),
         shutdown.clone(),
     );
     let task = spawn_membership_controller(controller);
@@ -229,7 +229,7 @@ async fn transient_failures_resolve_and_later_external_trigger_recovers() {
         &actor_id,
         session(&actor_id, 1, false),
         server.url(),
-        Arc::new(|| {}),
+        Arc::new(|_| {}),
         shutdown.clone(),
     );
     let task = spawn_membership_controller(controller);
@@ -286,7 +286,7 @@ async fn controller_has_no_background_refresh_or_denied_reprobe() {
         &actor_id,
         session(&actor_id, 1, true),
         server.url(),
-        Arc::new(|| {}),
+        Arc::new(|_| {}),
         shutdown.clone(),
     );
     let task = spawn_membership_controller(controller);
@@ -326,9 +326,10 @@ async fn publish_is_visible_before_socket_wake() {
     ));
     let observed_for_wake = observed.clone();
     let receiver_for_wake = receiver_slot.clone();
-    let wake: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+    let wake: Arc<dyn Fn(u64) + Send + Sync> = Arc::new(move |revision| {
         if let Some(receiver) = receiver_for_wake.lock().unwrap().as_ref() {
-            observed_for_wake.store(receiver.borrow().revision, Ordering::SeqCst);
+            assert_eq!(receiver.borrow().revision, revision);
+            observed_for_wake.store(revision, Ordering::SeqCst);
         }
     });
 

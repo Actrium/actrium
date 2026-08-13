@@ -93,10 +93,7 @@ async fn pending_route_candidates_waiter_uses_short_response_timeout() {
     let client = Arc::new(WebSocketSignalingClient::new(test_signaling_config(
         &server_url,
     )));
-    client
-        .connect_once()
-        .await
-        .expect("connect signaling client");
+    client.connect().await.expect("connect signaling client");
 
     let started = Instant::now();
     let request_task = {
@@ -153,10 +150,7 @@ async fn pending_route_candidates_waiter_fails_promptly_on_disconnect() {
     let client = Arc::new(WebSocketSignalingClient::new(test_signaling_config(
         &server_url,
     )));
-    client
-        .connect_once()
-        .await
-        .expect("connect signaling client");
+    client.connect().await.expect("connect signaling client");
 
     let request_task = {
         let client = client.clone();

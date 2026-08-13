@@ -1358,25 +1358,6 @@ impl Inner {
         self.package_manifest.as_ref()
     }
 
-    /// Network event processing loop (background task)
-    ///
-    /// # Responsibilities
-    /// - Receive network events from Channel
-    /// - Delegate to NetworkEventProcessor for handling
-    /// - Record processing time and send results
-    async fn network_event_loop(
-        event_rx: tokio::sync::mpsc::Receiver<crate::lifecycle::network_event::NetworkEventRequest>,
-        event_processor: Arc<dyn crate::lifecycle::network_event::NetworkEventProcessor>,
-        shutdown_token: CancellationToken,
-    ) {
-        crate::lifecycle::network_event::run_network_event_reconciler(
-            event_rx,
-            event_processor,
-            shutdown_token,
-        )
-        .await;
-    }
-
     /// Whether the inbound envelope is an explicit fire-and-forget tell.
     ///
     /// This is the ONLY tell marker: receivers never infer tell-ness from
@@ -1969,7 +1950,15 @@ impl Inner {
         };
 
         let client = Arc::new(WebSocketSignalingClient::new(signaling_config));
-        client.start_reconnect_manager();
+        // The recovery supervisor is present for every node, including
+        // headless runtimes that never create a public NetworkEventHandle.
+        // Resource facts may queue before `start()` spawns the reconciler.
+        let (supervisor_fact_sink, network_event_internal) =
+            crate::lifecycle::network_event::supervisor_internal_channel_with_profile(
+                LifecycleProfile::Ungated,
+            );
+        let send_projection_rx = network_event_internal.subscribe_send_projection();
+        client.set_supervisor_fact_sink(supervisor_fact_sink.clone());
         let signaling_client: Arc<dyn crate::wire::webrtc::SignalingClient> = client;
 
         // Initialize inproc infrastructure (Shell ↔ Guest)
@@ -2127,9 +2116,9 @@ impl Inner {
             dependency_fingerprints,
             network_event_rx: None,
             network_event_debounce_config: None,
-            network_event_internal: None,
-            send_projection_rx: None,
-            supervisor_fact_sink: None,
+            network_event_internal: Some(network_event_internal),
+            send_projection_rx: Some(send_projection_rx),
+            supervisor_fact_sink: Some(supervisor_fact_sink),
             dedup_state: Arc::new(Mutex::new(DedupState::new())),
             outstanding_replies: Arc::new(
                 crate::lifecycle::outstanding_replies::OutstandingReplies::new(),
@@ -2254,20 +2243,13 @@ impl Inner {
             None
         };
 
-        // Create the supervisor's internal input channel and a fact sink over
-        // it, so the signaling client and session state can report normalized
-        // facts into the same policy-ordered queue as timers and completions.
-        let (fact_sink, internal_channel) =
-            crate::lifecycle::network_event::supervisor_internal_channel_with_profile(profile);
-        let send_projection_rx = internal_channel.subscribe_send_projection();
-        self.signaling_client
-            .set_supervisor_fact_sink(fact_sink.clone());
+        self.network_event_internal
+            .as_mut()
+            .expect("recovery supervisor channel must exist before start")
+            .set_profile(profile);
 
         self.network_event_rx = Some(event_rx);
         self.network_event_debounce_config = debounce_config;
-        self.network_event_internal = Some(internal_channel);
-        self.send_projection_rx = Some(send_projection_rx);
-        self.supervisor_fact_sink = Some(fact_sink.clone());
 
         tracing::info!(
             debounce_ms,
@@ -2276,7 +2258,12 @@ impl Inner {
             "network_event.node.handle_created"
         );
 
-        crate::lifecycle::NetworkEventHandle::new_with_fact_sink(event_tx, fact_sink)
+        crate::lifecycle::NetworkEventHandle::new_with_fact_sink(
+            event_tx,
+            self.supervisor_fact_sink
+                .clone()
+                .expect("recovery supervisor fact sink must exist before start"),
+        )
     }
 
     /// Attach a credential already issued by AIS so that `start()` can skip
@@ -2448,32 +2435,33 @@ impl Inner {
         }
 
         tracing::info!("📡 Connecting to signaling server (with credential)");
-        // A typed auth verdict on the INITIAL handshake (401 credential
-        // rejection or 403 realm denial) must reach the same membership-recovery
-        // path as the connected case. Before the controller is installed the
-        // explicit connect loop cannot report it, so when the controller is
-        // enabled we capture the verdict here and hand it to the controller once
-        // it is spawned (below) instead of failing startup on a credential the
-        // recovery engine could refresh. With the controller disabled, behavior
-        // is unchanged: any connect failure aborts start.
+        // The initial handshake is one attempt, not an internal retry loop.
+        // Failure leaves a supervisor-owned recovery obligation queued while
+        // the remaining resource owners are wired. Typed auth verdicts are
+        // first handed to MembershipController once it exists.
         let mut deferred_initial_verdict: Option<crate::transport::AuthVerdict> = None;
         match self.signaling_client.connect().await {
             Ok(()) => tracing::info!("✅ Connected to signaling server"),
-            Err(e) => match e.auth_verdict() {
-                Some(verdict) if self.membership_controller_enabled => {
+            Err(e) => {
+                if let Some(verdict) = e.auth_verdict()
+                    && self.membership_controller_enabled
+                {
                     tracing::warn!(
                         ?verdict,
                         error = %e,
                         "📡 Initial signaling handshake returned a typed auth verdict; deferring to membership recovery instead of failing startup"
                     );
                     deferred_initial_verdict = Some(verdict);
+                } else {
+                    tracing::warn!(
+                        error = %e,
+                        "📡 Initial signaling attempt failed; deferring retries to RecoverySupervisor"
+                    );
+                    self.signaling_client.request_signaling_recovery(
+                        crate::lifecycle::SignalingRecoveryRequestCause::InitialConnectDeferred,
+                    );
                 }
-                _ => {
-                    return Err(ActrError::Unavailable(format!(
-                        "Signaling connect failed: {e}"
-                    )));
-                }
-            },
+            }
         }
 
         // Collect background task handles so they can be managed by ActrRefShared later.
@@ -2812,13 +2800,15 @@ impl Inner {
                     "🪪 Membership controller enabled; seeding credential watch"
                 );
 
-                // The wake edge: after the controller publishes a fresh
-                // credential it calls this to reset the socket's backoff
-                // generation and wake the reconnect loop. Publish
-                // happens-before this wake by construction.
-                let signaling_for_wake = self.signaling_client.clone();
-                let wake_socket: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
-                    signaling_for_wake.schedule_auto_reconnect_reset_backoff();
+                // Publish happens-before the identity-bearing supervisor fact.
+                // The credential owner never drives or wakes a client-local
+                // reconnect loop.
+                let fact_sink = self
+                    .supervisor_fact_sink
+                    .clone()
+                    .expect("membership requires the always-on recovery supervisor");
+                let wake_socket: Arc<dyn Fn(u64) + Send + Sync> = Arc::new(move |revision| {
+                    fact_sink.signaling_credential_published(revision);
                 });
 
                 let (controller, handle) = MembershipController::new(
@@ -2878,7 +2868,18 @@ impl Inner {
                     stale_revision,
                     "📡 Reporting deferred initial-handshake auth verdict to membership controller for recovery"
                 );
-                handle.report(verdict, stale_revision).await;
+                use crate::lifecycle::membership::MembershipResolution;
+                match handle.resolve(verdict, stale_revision).await {
+                    MembershipResolution::Published | MembershipResolution::Superseded => {
+                        // Credential publication emitted its own material fact.
+                    }
+                    MembershipResolution::Deferred => {
+                        self.signaling_client.request_signaling_recovery(
+                            crate::lifecycle::SignalingRecoveryRequestCause::InitialConnectDeferred,
+                        );
+                    }
+                    MembershipResolution::Denied | MembershipResolution::Shutdown => {}
+                }
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3030,8 +3031,16 @@ impl Inner {
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // 1.8.5. Spawn network event processing loop
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-            if let Some(event_rx) = self.network_event_rx.take() {
+            {
                 use crate::lifecycle::network_event::DefaultNetworkEventProcessor;
+
+                // A closed external receiver is intentional for headless
+                // deployments: internal signaling/session facts, timers and
+                // completions continue to drive the always-on supervisor.
+                let event_rx = self.network_event_rx.take().unwrap_or_else(|| {
+                    let (_event_tx, event_rx) = tokio::sync::mpsc::channel(1);
+                    event_rx
+                });
 
                 // Create DefaultNetworkEventProcessor
                 // If debounce config exists, use new_with_debounce
@@ -3043,14 +3052,18 @@ impl Inner {
                                 self.webrtc_coordinator.clone(),
                                 config,
                                 self.peer_transport.clone(),
-                            ),
+                            )
+                            .with_session_state(session_state.clone()),
                         )
                     } else {
-                        Arc::new(DefaultNetworkEventProcessor::new_with_peer_transport(
-                            self.signaling_client.clone(),
-                            self.webrtc_coordinator.clone(),
-                            self.peer_transport.clone(),
-                        ))
+                        Arc::new(
+                            DefaultNetworkEventProcessor::new_with_peer_transport(
+                                self.signaling_client.clone(),
+                                self.webrtc_coordinator.clone(),
+                                self.peer_transport.clone(),
+                            )
+                            .with_session_state(session_state.clone()),
+                        )
                     };
 
                 let shutdown = self.shutdown_token.clone();
@@ -3058,27 +3071,21 @@ impl Inner {
                 // over its sender was already wired into the signaling client and
                 // session state, so signaling and session facts share the
                 // supervisor's policy-ordered input queue.
-                let internal_channel = self.network_event_internal.take();
+                let internal_channel = self
+                    .network_event_internal
+                    .take()
+                    .expect("always-on recovery supervisor channel missing at start");
                 let network_event_handle = tokio::spawn(async move {
-                    match internal_channel {
-                        Some(channel) => {
-                            crate::lifecycle::network_event::run_network_event_reconciler_with_channel(
-                                event_rx,
-                                channel,
-                                event_processor,
-                                shutdown,
-                            )
-                            .await;
-                        }
-                        None => {
-                            Self::network_event_loop(event_rx, event_processor, shutdown).await;
-                        }
-                    }
+                    crate::lifecycle::network_event::run_network_event_reconciler_with_channel(
+                        event_rx,
+                        internal_channel,
+                        event_processor,
+                        shutdown,
+                    )
+                    .await;
                 });
                 task_handles.push(network_event_handle);
                 tracing::info!("network_event.node.loop_started");
-            } else {
-                tracing::debug!("network_event.node.loop_not_started_no_handle");
             }
 
             {

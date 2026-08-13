@@ -6,7 +6,8 @@
 use super::trace;
 use crate::lifecycle::membership::{MembershipHandle, MembershipResolution};
 use crate::lifecycle::{
-    CredentialState, SignalingFactLostCause, SignalingFactOrigin, SupervisorFactSink,
+    CredentialState, SignalingFactLostCause, SignalingFactOrigin, SignalingRecoveryRequestCause,
+    SupervisorFactSink,
 };
 use crate::transport::{NetworkError, NetworkResult};
 #[cfg(feature = "opentelemetry")]
@@ -36,7 +37,6 @@ use tokio::net::TcpStream;
 use tokio::sync::{Semaphore, broadcast, mpsc, oneshot};
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream, connect_async_with_config};
-use tokio_util::sync::CancellationToken;
 #[cfg(feature = "opentelemetry")]
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use url::Url;
@@ -101,19 +101,24 @@ pub struct SignalingConfig {
 /// reconnection configuration
 #[derive(Debug, Clone)]
 pub struct ReconnectConfig {
-    /// whether start usage automatic reconnection
+    /// Whether compatibility callers may publish automatic reconnect demand.
+    /// The client never starts a reconnect loop itself; the supervisor decides
+    /// whether that demand may turn into a connection action.
     pub enabled: bool,
 
-    /// maximum reconnection attempts
+    /// Maximum attempts in one supervisor-owned retry window. When the window
+    /// is exhausted, recovery remains pending through a cooldown and begins a
+    /// fresh window afterward.
     pub max_attempts: u32,
 
-    /// initial reconnection delay (seconds)
+    /// Initial supervisor-owned reconnection backoff delay (seconds).
     pub initial_delay: u64,
 
-    /// maximum reconnection delay (seconds)
+    /// Maximum supervisor-owned backoff delay and the basis for the cooldown
+    /// duration (seconds).
     pub max_delay: u64,
 
-    /// Backoff multiplier factor
+    /// Supervisor-owned backoff multiplier factor.
     pub backoff_multiplier: f64,
 }
 
@@ -212,41 +217,19 @@ pub trait SignalingClient: Send + Sync {
     /// Connecttosignaling server
     async fn connect(&self) -> NetworkResult<()>;
 
-    /// Perform a single explicit connection attempt.
+    /// Perform one supervisor-owned recovery attempt.
     ///
-    /// Network recovery events use this path so a failed restore attempt can
-    /// return quickly instead of sleeping inside the normal reconnect backoff.
-    async fn connect_once(&self) -> NetworkResult<()> {
+    /// Implementations may report an authentication verdict to their
+    /// credential authority, but must not sleep or start another socket
+    /// attempt. The supervisor owns every subsequent retry deadline.
+    async fn connect_once_for_recovery(&self, _action_id: u64) -> NetworkResult<()> {
         self.connect().await
     }
 
-    /// Invalidate in-flight automatic reconnect attempts and keep new attempts
-    /// paused until a recovery path explicitly schedules them again.
-    ///
-    /// This method must remain synchronous and non-blocking because lifecycle
-    /// reconciliation calls it before asynchronous action selection.
-    fn suppress_auto_reconnect(&self) {}
-
-    /// Allow future automatic reconnects without starting one immediately.
-    ///
-    /// Foreground lifecycle recovery uses this after a short background stay:
-    /// a healthy socket only needs automatic recovery re-enabled, not a second
-    /// concurrent probe or connection attempt.
-    fn resume_auto_reconnect(&self) {
-        self.schedule_auto_reconnect();
-    }
-
-    /// Re-enable and wake the automatic reconnect manager after an explicit
-    /// lifecycle recovery attempt failed.
-    fn schedule_auto_reconnect(&self) {}
-
-    /// Re-enable automatic reconnect and restart its backoff sequence.
-    ///
-    /// Network restoration signals should use this path because they represent
-    /// a fresh external condition, not just another passive connection failure.
-    fn schedule_auto_reconnect_reset_backoff(&self) {
-        self.schedule_auto_reconnect();
-    }
+    /// Report that signaling connectivity is required. This method is
+    /// synchronous so heartbeat and resource-loss paths can emit a fact while
+    /// holding no async recovery ownership.
+    fn request_signaling_recovery(&self, _cause: SignalingRecoveryRequestCause) {}
 
     /// DisconnectConnect
     async fn disconnect(&self) -> NetworkResult<()>;
@@ -355,6 +338,18 @@ pub trait SignalingClient: Send + Sync {
     ///
     /// Default is a no-op for clients that do not drive lifecycle recovery.
     fn set_supervisor_fact_sink(&self, _sink: SupervisorFactSink) {}
+
+    /// Return the generation of the currently connected signaling socket in a
+    /// test harness.
+    ///
+    /// Production recovery must consume the normalized facts published through
+    /// [`Self::set_supervisor_fact_sink`] instead of polling this value. The
+    /// probe exists only for integration harnesses that need to assert the
+    /// exact generation carried by a manually injected resource fact.
+    #[cfg(any(test, feature = "test-utils"))]
+    fn live_generation_for_test(&self) -> Option<u64> {
+        None
+    }
 
     /// Test-only probe that exercises the concrete client's production fact
     /// emission path through the sink installed above.
@@ -492,7 +487,50 @@ pub type HookCallback =
 #[derive(Debug, Clone, Copy)]
 enum ConnectIntent {
     Explicit { generation: u64 },
-    AutoReconnect { generation: u64 },
+    Recovery { generation: u64, action_id: u64 },
+}
+
+impl ConnectIntent {
+    fn generation(self) -> u64 {
+        match self {
+            Self::Explicit { generation } | Self::Recovery { generation, .. } => generation,
+        }
+    }
+
+    fn fact_origin(self) -> SignalingFactOrigin {
+        match self {
+            Self::Recovery { action_id, .. } => SignalingFactOrigin::CurrentEffect { action_id },
+            Self::Explicit { .. } => SignalingFactOrigin::External,
+        }
+    }
+
+    fn action_id(self) -> Option<u64> {
+        match self {
+            Self::Recovery { action_id, .. } => Some(action_id),
+            Self::Explicit { .. } => None,
+        }
+    }
+}
+
+/// Authoritative signaling socket-resource state. The boolean fields retained
+/// by the client are read-optimized projections of this state, not independent
+/// lifecycle machines.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SignalingSocketState {
+    Disconnected {
+        last_generation: Option<u64>,
+    },
+    Connecting {
+        expected_generation: u64,
+        action_id: Option<u64>,
+    },
+    Connected {
+        generation: u64,
+        action_id: Option<u64>,
+    },
+    Disconnecting {
+        generation: u64,
+    },
 }
 
 /// Cancellation-safe ownership of the signaling single-flight slot.
@@ -505,6 +543,9 @@ struct ConnectionAttemptGuard<'a> {
     connecting: &'a AtomicBool,
     completion: &'a tokio::sync::Notify,
     deadline: &'a Mutex<Option<tokio::time::Instant>>,
+    commit_gate: &'a Mutex<()>,
+    socket_state: &'a Mutex<SignalingSocketState>,
+    intent: ConnectIntent,
 }
 
 impl Drop for ConnectionAttemptGuard<'_> {
@@ -513,6 +554,32 @@ impl Drop for ConnectionAttemptGuard<'_> {
             .deadline
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+        {
+            // Clear the typed resource state before releasing the single-flight
+            // flag. Otherwise a same-generation explicit follower could become
+            // leader and publish a new `Connecting` state that this old guard
+            // would then mistake for its own.
+            let _commit_guard = self
+                .commit_gate
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut state = self
+                .socket_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if matches!(
+                *state,
+                SignalingSocketState::Connecting {
+                    expected_generation,
+                    action_id,
+                } if expected_generation == self.intent.generation()
+                    && action_id == self.intent.action_id()
+            ) {
+                *state = SignalingSocketState::Disconnected {
+                    last_generation: Some(self.intent.generation()),
+                };
+            }
+        }
         self.connecting.store(false, Ordering::Release);
         self.completion.notify_waiters();
     }
@@ -522,41 +589,18 @@ impl Drop for ConnectionAttemptGuard<'_> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AuthVerdictAction {
     /// A newer credential was published after the auth verdict was reported;
-    /// the caller should reconnect immediately with it.
+    /// its revision fact will wake the supervisor-owned recovery record.
     Reacquired,
-    /// AIS was temporarily unavailable. Do not park; let the existing socket
-    /// backoff retry and produce a fresh on-demand report if auth still fails.
+    /// AIS was temporarily unavailable. Return a retryable result so the
+    /// supervisor can arm its identity-bearing backoff.
     RetrySameCredential,
-    /// The realm denied membership. Stop this reconnect cycle; recovery needs
-    /// a new external trigger.
+    /// The realm denied membership. Recovery needs a new external trigger.
     Denied,
-    /// The credential owner shut down while we were parked; stop the cycle.
+    /// The credential owner shut down while the action was waiting.
     ShutdownWhileParked,
     /// The error was not an auth verdict (or no controller is wired); the caller
-    /// should apply the normal backoff path.
+    /// reports the original typed error to the supervisor.
     NotAVerdict,
-}
-
-/// Pacing decision for reconnecting with a re-acquired credential.
-///
-/// The first `Reacquired` round in a reconnect cycle retries immediately —
-/// that is the normal "credential expired, renewed, reconnect" path. Every
-/// consecutive round after it means signaling rejected a credential that AIS
-/// just minted, so the caller must sleep the returned delay before restarting
-/// the cycle; otherwise renew/reconnect spins at network latency.
-fn reacquire_pacing_delay(
-    reacquired_rounds: u32,
-    pacing: &mut impl Iterator<Item = std::time::Duration>,
-    max_delay_secs: u64,
-) -> Option<std::time::Duration> {
-    if reacquired_rounds <= 1 {
-        return None;
-    }
-    Some(
-        pacing
-            .next()
-            .unwrap_or(std::time::Duration::from_secs(max_delay_secs)),
-    )
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -695,6 +739,9 @@ pub struct WebSocketSignalingClient {
     connected: Arc<AtomicBool>,
     /// Connection in progress flag (prevents concurrent connect attempts)
     connecting: Arc<AtomicBool>,
+    /// Typed socket lifecycle protected by the same synchronous facade as
+    /// generation validation and socket publication.
+    socket_state: Arc<Mutex<SignalingSocketState>>,
     /// statistics info
     stats: Arc<AtomicSignalingStats>,
     /// Envelope count number device
@@ -724,38 +771,29 @@ pub struct WebSocketSignalingClient {
     /// of comparing `std::time::Instant` values, whose suspend behavior is not
     /// portable (Windows counts sleep).
     liveness_generation: Arc<AtomicU64>,
-    /// Flag to track if reconnect manager has been started
-    reconnector_started: Arc<AtomicBool>,
-    /// Notify channel to wake up the reconnect manager
-    reconnect_notify: Arc<tokio::sync::Notify>,
-    /// Event-driven lifetime signal for the reconnect manager.
-    reconnect_manager_shutdown: CancellationToken,
-    /// Explicit disconnects from lifecycle/cleanup suppress stale auto-reconnect cycles.
-    auto_reconnect_suppressed: AtomicBool,
     /// Incremented by lifecycle disconnects to invalidate every in-flight
     /// connection attempt, whether explicit or automatic.
     connection_generation: AtomicU64,
     /// Serializes the generation linearization point with connection state
     /// publication. No `.await` is allowed while this gate is held.
-    connection_commit_gate: Mutex<()>,
+    connection_commit_gate: Arc<Mutex<()>>,
     /// Wakes connection waiters when lifecycle invalidates their generation.
     ///
-    /// This is deliberately separate from `reconnect_notify`: connection
-    /// cancellation must not consume a permit intended for the reconnect
-    /// manager.
+    /// Connection invalidation and attempt completion have separate channels,
+    /// so cancellation cannot consume a completion notification.
     connection_generation_notify: tokio::sync::Notify,
     /// Wakes tasks waiting for the current single-flight connection attempt.
     connection_attempt_notify: tokio::sync::Notify,
     /// Absolute deadline owned by the active single-flight connection attempt.
     /// Followers observe this exact value instead of inventing a shorter wait.
     connection_attempt_deadline: Mutex<Option<tokio::time::Instant>>,
-    /// Incremented by external recovery events that should restart reconnect backoff.
-    reconnect_backoff_reset_generation: AtomicU64,
     /// Hook callback for ordered lifecycle notification (set once, lock-free read)
     hook_callback: OnceLock<HookCallback>,
     /// Supervisor fact sink for normalized signaling generation facts (set once,
-    /// lock-free read). Absent for clients not wired to lifecycle recovery.
-    supervisor_fact_sink: OnceLock<SupervisorFactSink>,
+    /// lock-free read). The cell is shared with the background receiver and
+    /// liveness tasks so late lifecycle wiring is visible to an already-open
+    /// socket as well as to sockets opened afterwards.
+    supervisor_fact_sink: Arc<OnceLock<SupervisorFactSink>>,
     /// Deterministic two-phase barrier for the generation/publication race.
     #[cfg(any(test, feature = "test-utils"))]
     connection_publish_barrier: OnceLock<Arc<tokio::sync::Barrier>>,
@@ -764,9 +802,9 @@ pub struct WebSocketSignalingClient {
     /// - `build_url_with_identity` reads the credential from the `watch`
     ///   receiver instead of the stored `credential_state`, so the handshake URL
     ///   always carries the latest published credential.
-    /// - The reconnect loop submits a tracked on-demand recovery request. It
-    ///   reconnects after a successful publication and resumes normal socket
-    ///   backoff after a transient AIS failure.
+    /// - A supervisor recovery effect submits a tracked on-demand credential
+    ///   request. Publication emits a material fact; transient AIS failure is
+    ///   returned for supervisor-owned backoff.
     membership: OnceLock<MembershipHandle>,
 }
 
@@ -784,6 +822,9 @@ impl WebSocketSignalingClient {
             ws_stream: tokio::sync::Mutex::new(None),
             connected: Arc::new(AtomicBool::new(false)),
             connecting: Arc::new(AtomicBool::new(false)),
+            socket_state: Arc::new(Mutex::new(SignalingSocketState::Disconnected {
+                last_generation: None,
+            })),
             stats,
             envelope_counter: tokio::sync::Mutex::new(0),
             pending_replies: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
@@ -795,18 +836,13 @@ impl WebSocketSignalingClient {
             ping_task: tokio::sync::Mutex::new(None),
             event_tx,
             liveness_generation: Arc::new(AtomicU64::new(0)),
-            reconnector_started: Arc::new(AtomicBool::new(false)),
-            reconnect_notify: Arc::new(tokio::sync::Notify::new()),
-            reconnect_manager_shutdown: CancellationToken::new(),
-            auto_reconnect_suppressed: AtomicBool::new(false),
             connection_generation: AtomicU64::new(0),
-            connection_commit_gate: Mutex::new(()),
+            connection_commit_gate: Arc::new(Mutex::new(())),
             connection_generation_notify: tokio::sync::Notify::new(),
             connection_attempt_notify: tokio::sync::Notify::new(),
             connection_attempt_deadline: Mutex::new(None),
-            reconnect_backoff_reset_generation: AtomicU64::new(0),
             hook_callback: OnceLock::new(),
-            supervisor_fact_sink: OnceLock::new(),
+            supervisor_fact_sink: Arc::new(OnceLock::new()),
             #[cfg(any(test, feature = "test-utils"))]
             connection_publish_barrier: OnceLock::new(),
             membership: OnceLock::new(),
@@ -854,10 +890,6 @@ impl WebSocketSignalingClient {
         let _ = self.membership.set(handle);
     }
 
-    /// Start the reconnect manager if enabled in config and not already started.
-    ///
-    /// The manager waits on a `Notify` and runs an exponential-backoff retry loop
-    /// each time it is woken up.
     /// Invoke the hook callback and await its completion.
     /// No-op if no callback has been set yet.
     async fn invoke_hook(&self, event: HookEvent) {
@@ -872,7 +904,6 @@ impl WebSocketSignalingClient {
         event_tx: &broadcast::Sender<SignalingEvent>,
         hook_callback: Option<HookCallback>,
         reason: DisconnectReason,
-        reconnect_notify: Option<&Arc<tokio::sync::Notify>>,
     ) -> bool {
         if !was_connected {
             return false;
@@ -886,10 +917,6 @@ impl WebSocketSignalingClient {
 
         let _ = event_tx.send(SignalingEvent::Disconnected { reason });
 
-        if let Some(notify) = reconnect_notify {
-            notify.notify_one();
-        }
-
         true
     }
 
@@ -897,13 +924,26 @@ impl WebSocketSignalingClient {
     ///
     /// The envelope outcome is indeterminate once the send has failed or timed
     /// out, so callers must not retry it in place. Stop the old socket tasks,
-    /// publish one disconnected transition, and wake the reconnect manager so
-    /// a later negotiation can use a fresh signaling session.
+    /// publish one disconnected transition, and let the supervisor derive the
+    /// one recovery obligation for that generation.
     async fn handle_envelope_send_failure(&self, reason: DisconnectReason) {
         self.stats.errors.fetch_add(1, Ordering::Relaxed);
 
         let generation = self.connection_generation.load(Ordering::Acquire);
-        let was_connected = self.connected.swap(false, Ordering::AcqRel);
+        let was_connected = {
+            let _commit_guard = self.lock_connection_commit();
+            let was_connected = self.connected.swap(false, Ordering::AcqRel);
+            if was_connected {
+                *self
+                    .socket_state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    SignalingSocketState::Disconnected {
+                        last_generation: Some(generation),
+                    };
+            }
+            was_connected
+        };
         if !was_connected {
             return;
         }
@@ -935,10 +975,6 @@ impl WebSocketSignalingClient {
 
         self.stats.disconnections.fetch_add(1, Ordering::Relaxed);
         let _ = self.event_tx.send(SignalingEvent::Disconnected { reason });
-        if self.config.reconnect_config.enabled {
-            self.reconnect_notify.notify_one();
-        }
-
         // send_envelope() may be called while a peer signaling commit gate is
         // held. Run the externally supplied hook after this method returns so
         // a re-entrant cleanup from the hook cannot wait on that same gate.
@@ -949,65 +985,19 @@ impl WebSocketSignalingClient {
         }
     }
 
-    pub fn start_reconnect_manager(self: &Arc<Self>) {
-        if !self.config.reconnect_config.enabled {
-            return;
-        }
-        if self
-            .reconnector_started
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return; // already started
-        }
-
-        tracing::info!("🔄 Starting reconnect manager for signaling client");
-
-        let client = Arc::downgrade(self);
-        let notify = self.reconnect_notify.clone();
-        let shutdown = self.reconnect_manager_shutdown.clone();
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    _ = notify.notified() => {}
-                    _ = shutdown.cancelled() => {
-                        tracing::debug!("Stopping signaling reconnect manager after owner drop");
-                        break;
-                    }
-                };
-
-                let Some(client) = client.upgrade() else {
-                    break;
-                };
-
-                if !client.config.reconnect_config.enabled {
-                    break;
-                }
-
-                if Arc::strong_count(&client) <= 1 {
-                    break;
-                }
-
-                // Run reconnect cycle with exponential backoff
-                client.run_reconnect_cycle().await;
-            }
-        });
-    }
-
     /// Handle a reconnect error against the membership authority.
     ///
     /// If the error carries a typed [`crate::transport::AuthVerdict`] and the
-    /// membership controller is wired, submit one on-demand request. A successful
-    /// publication reconnects immediately; a transient AIS failure returns to
-    /// the socket's normal backoff instead of parking forever.
+    /// membership controller is wired, submit one on-demand request. A
+    /// successful publication emits a revisioned material fact; all retry
+    /// pacing remains in the supervisor.
     async fn handle_auth_verdict(&self, err: &NetworkError) -> AuthVerdictAction {
         let Some(verdict) = err.auth_verdict() else {
             return AuthVerdictAction::NotAVerdict;
         };
         let Some(handle) = self.membership.get() else {
-            // No controller wired (flag off): treat as a normal failure so the
-            // legacy backoff path applies.
+            // No controller wired (flag off): preserve the original typed error
+            // for supervisor classification.
             return AuthVerdictAction::NotAVerdict;
         };
 
@@ -1040,271 +1030,6 @@ impl WebSocketSignalingClient {
         }
     }
 
-    /// Execute one full reconnect cycle with exponential backoff + jitter.
-    async fn run_reconnect_cycle(self: &Arc<Self>) {
-        use actr_framework::ExponentialBackoff;
-
-        let cfg = &self.config.reconnect_config;
-        let generation = self.connection_generation.load(Ordering::Acquire);
-
-        if Arc::strong_count(self) <= 1 {
-            tracing::debug!("Stopping signaling auto-reconnect cycle after owner drop");
-            return;
-        }
-
-        if self.auto_reconnect_cancelled(generation) {
-            tracing::debug!("Skipping signaling auto-reconnect cycle after explicit disconnect");
-            return;
-        }
-
-        if self.connected.load(Ordering::Acquire) {
-            tracing::debug!("🔎 Probing connected signaling before reconnect cycle");
-            match self
-                .probe_alive(Duration::from_secs(PONG_TIMEOUT_SECS))
-                .await
-            {
-                Ok(()) => {
-                    tracing::debug!("Signaling probe succeeded, skipping reconnect cycle");
-                    return;
-                }
-                Err(e) => {
-                    tracing::warn!("Signaling probe failed before reconnect: {e}");
-                    if let Err(disconnect_err) = self.disconnect_internal(false).await {
-                        tracing::warn!(
-                            "⚠️ Disconnect cleanup failed after failed probe (non-fatal): {disconnect_err}"
-                        );
-                    }
-                }
-            }
-        }
-
-        // Pacing for re-acquired credentials. A renewed credential normally
-        // reconnects immediately, but when signaling keeps rejecting freshly
-        // published credentials (stale validator key cache, misconfiguration)
-        // every rejection triggers another AIS renewal and another immediate
-        // handshake — a tight loop at network latency that burns the AIS and
-        // connection rate budget. This backoff lives OUTSIDE the 'cycle loop
-        // so it survives the per-cycle backoff reconstruction and paces every
-        // consecutive renew/reconnect round after the first.
-        let mut reacquired_rounds: u32 = 0;
-        let mut reacquire_pacing = ExponentialBackoff::builder()
-            .initial_delay(std::time::Duration::from_secs(cfg.initial_delay.max(1)))
-            .max_delay(std::time::Duration::from_secs(cfg.max_delay.max(1)))
-            .multiplier(cfg.backoff_multiplier)
-            .with_jitter()
-            .build();
-
-        'cycle: loop {
-            let backoff_reset_generation = self
-                .reconnect_backoff_reset_generation
-                .load(Ordering::Acquire);
-            let backoff = ExponentialBackoff::builder()
-                .initial_delay(std::time::Duration::from_secs(cfg.initial_delay.max(1)))
-                .max_delay(std::time::Duration::from_secs(cfg.max_delay.max(1)))
-                .max_retries(cfg.max_attempts)
-                .multiplier(cfg.backoff_multiplier)
-                .with_jitter()
-                .build();
-
-            let mut attempt: u32 = 0;
-
-            for delay in backoff {
-                if Arc::strong_count(self) <= 1 {
-                    tracing::debug!("Stopping signaling auto-reconnect cycle after owner drop");
-                    return;
-                }
-
-                if self.auto_reconnect_cancelled(generation) {
-                    tracing::debug!(
-                        "Stopping signaling auto-reconnect cycle after explicit disconnect"
-                    );
-                    return;
-                }
-
-                if self.connected.load(Ordering::Acquire) {
-                    tracing::debug!("Already connected, aborting reconnect cycle");
-                    return;
-                }
-
-                attempt += 1;
-                let _ = self.event_tx.send(SignalingEvent::ConnectStart { attempt });
-
-                match self.connect_once_for_auto_reconnect(generation).await {
-                    Ok(()) => {
-                        tracing::info!("✅ Signaling reconnect succeeded on attempt {attempt}");
-                        return;
-                    }
-                    Err(e) => {
-                        if self.auto_reconnect_cancelled(generation) {
-                            tracing::debug!(
-                                "Stopping signaling auto-reconnect cycle after explicit disconnect"
-                            );
-                            return;
-                        }
-
-                        // Membership authority: an auth VERDICT (401/403) means
-                        // the credential itself is dead — retrying the same
-                        // credential is pointless. Report it to the credential
-                        // owner and wait for that one on-demand recovery
-                        // attempt. If it publishes a newer credential revision,
-                        // continue the cycle and reconnect with it. A deferred
-                        // attempt returns to the normal socket backoff so a
-                        // later server verdict can trigger another attempt.
-                        //
-                        // A transient error (None) and `ServerNotReady` (503)
-                        // fall through to the existing backoff path and retry
-                        // the SAME credential (honoring Retry-After for 503).
-                        match self.handle_auth_verdict(&e).await {
-                            AuthVerdictAction::Reacquired => {
-                                reacquired_rounds = reacquired_rounds.saturating_add(1);
-                                let Some(pacing_delay) = reacquire_pacing_delay(
-                                    reacquired_rounds,
-                                    &mut reacquire_pacing,
-                                    cfg.max_delay.max(1),
-                                ) else {
-                                    tracing::info!(
-                                        "🔑 Reconnecting with re-acquired credential after auth verdict"
-                                    );
-                                    continue 'cycle;
-                                };
-
-                                // The credential publication wake stores a
-                                // notify permit, so this delay deliberately
-                                // does NOT select on `reconnect_notify` — it
-                                // would resolve immediately and defeat the
-                                // pacing. Cancellation is re-checked below.
-                                tracing::warn!(
-                                    reacquired_rounds,
-                                    delay_secs = pacing_delay.as_secs(),
-                                    "⚠️ Signaling rejected a freshly renewed credential again; \
-                                     pacing the next renew/reconnect round to protect the AIS \
-                                     and connection rate budget"
-                                );
-                                crate::timer::sleep(
-                                    crate::timer::ids::SIGNALING_RECONNECT_BACKOFF,
-                                    pacing_delay,
-                                )
-                                .await;
-                                if Arc::strong_count(self) <= 1 {
-                                    tracing::debug!(
-                                        "Stopping signaling auto-reconnect cycle after owner drop"
-                                    );
-                                    return;
-                                }
-                                if self.auto_reconnect_cancelled(generation) {
-                                    tracing::debug!(
-                                        "Stopping signaling auto-reconnect cycle after explicit disconnect"
-                                    );
-                                    return;
-                                }
-                                continue 'cycle;
-                            }
-                            AuthVerdictAction::RetrySameCredential => {
-                                tracing::debug!(
-                                    "Credential recovery deferred; continuing socket backoff"
-                                );
-                            }
-                            AuthVerdictAction::Denied => {
-                                tracing::error!(
-                                    "Stopping signaling reconnect cycle after realm denial"
-                                );
-                                return;
-                            }
-                            AuthVerdictAction::ShutdownWhileParked => {
-                                tracing::debug!(
-                                    "Stopping signaling auto-reconnect cycle: shutdown while parked on credential"
-                                );
-                                return;
-                            }
-                            AuthVerdictAction::NotAVerdict => { /* fall through */ }
-                        }
-
-                        if attempt >= cfg.max_attempts {
-                            tracing::warn!(
-                                "❌ Final reconnect attempt {attempt} failed: {e}; retry sequence exhausted"
-                            );
-                            break;
-                        }
-
-                        let retry_after = e.retry_after();
-                        let effective_delay = retry_after.unwrap_or(delay);
-                        tracing::warn!(
-                            "❌ Reconnect attempt {attempt} failed: {e}, retrying in {effective_delay:?}"
-                        );
-                        tokio::select! {
-                            _ = crate::timer::sleep(
-                                crate::timer::ids::SIGNALING_RECONNECT_BACKOFF,
-                                effective_delay,
-                            ) => {}
-                            _ = self.reconnect_notify.notified() => {
-                                tracing::debug!("Explicit reconnect request interrupted reconnect backoff");
-                            }
-                        }
-                        if self
-                            .reconnect_backoff_reset_generation
-                            .load(Ordering::Acquire)
-                            != backoff_reset_generation
-                        {
-                            tracing::debug!(
-                                "Restarting signaling reconnect backoff after external recovery event"
-                            );
-                            continue 'cycle;
-                        }
-                        if Arc::strong_count(self) <= 1 {
-                            tracing::debug!(
-                                "Stopping signaling auto-reconnect cycle after owner drop"
-                            );
-                            return;
-                        }
-                        if self.auto_reconnect_cancelled(generation) {
-                            tracing::debug!(
-                                "Stopping signaling auto-reconnect cycle after explicit disconnect"
-                            );
-                            return;
-                        }
-                    }
-                }
-            }
-
-            // All retries exhausted — enter cooldown, then allow future wakeups
-            tracing::error!("Reconnect failed after {attempt} attempts, entering cooldown");
-            let cooldown = std::time::Duration::from_secs(cfg.max_delay.max(1) * 2);
-            tokio::select! {
-                _ = crate::timer::sleep(
-                    crate::timer::ids::SIGNALING_RECONNECT_COOLDOWN,
-                    cooldown,
-                ) => {}
-                _ = self.reconnect_notify.notified() => {
-                    tracing::debug!("Explicit reconnect request interrupted reconnect cooldown");
-                }
-            }
-            if self
-                .reconnect_backoff_reset_generation
-                .load(Ordering::Acquire)
-                != backoff_reset_generation
-            {
-                tracing::debug!(
-                    "Restarting signaling reconnect backoff after external recovery event"
-                );
-                continue 'cycle;
-            }
-            if self.auto_reconnect_cancelled(generation) {
-                tracing::debug!(
-                    "Signaling auto-reconnect cooldown ended after explicit disconnect suppression"
-                );
-            }
-            // Membership recovery is driven by fresh socket auth verdicts. Keep
-            // the socket cycle alive across bounded retry windows so a later AIS
-            // recovery produces another on-demand report instead of leaving the
-            // node permanently parked. The legacy path retains its existing
-            // notify-driven behavior.
-            if self.membership.get().is_some() {
-                continue 'cycle;
-            }
-            return;
-        }
-    }
-
     /// Test-only convenience constructor: create, connect, and return a client.
     ///
     /// The returned client has no `actor_id` / `credential_state` bound, so the
@@ -1325,7 +1050,6 @@ impl WebSocketSignalingClient {
         };
 
         let client = Arc::new(Self::new(config));
-        client.start_reconnect_manager();
         client.connect().await?;
         Ok(client)
     }
@@ -1354,7 +1078,6 @@ impl WebSocketSignalingClient {
         let client = Arc::new(Self::new(config));
         client.set_actor_id(actor_id).await;
         client.set_credential_state(credential_state).await;
-        client.start_reconnect_manager();
         client.connect().await?;
         Ok(client)
     }
@@ -1534,44 +1257,27 @@ impl WebSocketSignalingClient {
         redacted.to_string()
     }
 
-    fn auto_reconnect_cancelled(&self, generation: u64) -> bool {
-        self.auto_reconnect_suppressed.load(Ordering::Acquire)
-            || self.connection_generation.load(Ordering::Acquire) != generation
-    }
-
     fn connection_generation_changed(&self, generation: u64) -> bool {
         self.connection_generation.load(Ordering::Acquire) != generation
     }
 
     fn connect_intent_cancelled(&self, intent: ConnectIntent) -> bool {
         match intent {
-            ConnectIntent::Explicit { generation } => {
+            ConnectIntent::Explicit { generation } | ConnectIntent::Recovery { generation, .. } => {
                 self.connection_generation_changed(generation)
-            }
-            ConnectIntent::AutoReconnect { generation } => {
-                self.auto_reconnect_cancelled(generation)
             }
         }
     }
 
-    fn suppress_auto_reconnect_internal(&self) {
-        self.auto_reconnect_suppressed
-            .store(true, Ordering::Release);
-        self.reconnect_notify.notify_waiters();
-    }
-
-    fn invalidate_connection_attempts_and_suppress_auto_reconnect(&self) {
+    fn invalidate_connection_attempts(&self) {
         {
             // The same gate covers the final generation check and socket
             // publication. Whichever side acquires it first defines whether the
             // candidate connection committed before or after invalidation.
             let _commit_guard = self.lock_connection_commit();
             self.connection_generation.fetch_add(1, Ordering::AcqRel);
-            self.auto_reconnect_suppressed
-                .store(true, Ordering::Release);
         }
         self.connection_generation_notify.notify_waiters();
-        self.reconnect_notify.notify_waiters();
     }
 
     /// Establish a single signaling WebSocket connection attempt, honoring connection_timeout.
@@ -1582,27 +1288,6 @@ impl WebSocketSignalingClient {
             tokio::time::Instant::now()
                 + std::time::Duration::from_secs(self.config.connection_timeout)
         })
-    }
-
-    async fn establish_connection_once(
-        &self,
-        generation: u64,
-        deadline: Option<tokio::time::Instant>,
-    ) -> NetworkResult<()> {
-        self.establish_connection_once_with_intent(ConnectIntent::Explicit { generation }, deadline)
-            .await
-    }
-
-    async fn establish_connection_once_for_auto_reconnect(
-        &self,
-        generation: u64,
-        deadline: Option<tokio::time::Instant>,
-    ) -> NetworkResult<()> {
-        self.establish_connection_once_with_intent(
-            ConnectIntent::AutoReconnect { generation },
-            deadline,
-        )
-        .await
     }
 
     async fn establish_connection_once_with_intent(
@@ -1660,11 +1345,8 @@ impl WebSocketSignalingClient {
 
         let connect_result = loop {
             let generation_changed = self.connection_generation_notify.notified();
-            let reconnect_changed = self.reconnect_notify.notified();
             tokio::pin!(generation_changed);
-            tokio::pin!(reconnect_changed);
             generation_changed.as_mut().enable();
-            reconnect_changed.as_mut().enable();
 
             if self.connect_intent_cancelled(intent) {
                 return Err(NetworkError::ConnectionError(
@@ -1675,13 +1357,6 @@ impl WebSocketSignalingClient {
             tokio::select! {
                 biased;
                 _ = &mut generation_changed => {
-                    if self.connect_intent_cancelled(intent) {
-                        return Err(NetworkError::ConnectionError(
-                            "Signaling connect was cancelled by lifecycle invalidation".to_string(),
-                        ));
-                    }
-                }
-                _ = &mut reconnect_changed => {
                     if self.connect_intent_cancelled(intent) {
                         return Err(NetworkError::ConnectionError(
                             "Signaling connect was cancelled by lifecycle invalidation".to_string(),
@@ -1712,10 +1387,7 @@ impl WebSocketSignalingClient {
         // locks, so there is no inverse lock ordering.
         let mut sink_guard = self.ws_sink.lock().await;
         let mut stream_guard = self.ws_stream.lock().await;
-        let generation = match intent {
-            ConnectIntent::Explicit { generation }
-            | ConnectIntent::AutoReconnect { generation } => generation,
-        };
+        let generation = intent.generation();
         let mut candidate_sink = Some(sink);
         let mut candidate_stream = Some(stream);
         let committed = {
@@ -1726,13 +1398,17 @@ impl WebSocketSignalingClient {
                 *sink_guard = candidate_sink.take();
                 *stream_guard = candidate_stream.take();
                 self.connected.store(true, Ordering::Release);
-                if matches!(intent, ConnectIntent::Explicit { .. }) {
-                    self.auto_reconnect_suppressed
-                        .store(false, Ordering::Release);
-                }
+                *self
+                    .socket_state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    SignalingSocketState::Connected {
+                        generation,
+                        action_id: intent.action_id(),
+                    };
                 self.liveness_generation.fetch_add(1, Ordering::Release);
                 self.stats.connections.fetch_add(1, Ordering::Relaxed);
-                self.emit_signaling_committed(generation, SignalingFactOrigin::External);
+                self.emit_signaling_committed(generation, intent.fact_origin());
                 true
             }
         };
@@ -1776,95 +1452,6 @@ impl WebSocketSignalingClient {
         Err(NetworkError::ConnectionError(
             "Signaling connection was cancelled by explicit disconnect".to_string(),
         ))
-    }
-
-    /// Connect to signaling server with retry and exponential backoff based on reconnect_config.
-    async fn connect_with_retries(&self, generation: u64) -> NetworkResult<()> {
-        use actr_framework::ExponentialBackoff;
-
-        let cfg = &self.config.reconnect_config;
-
-        // If reconnect is disabled, just attempt once.
-        if !cfg.enabled {
-            return self.connect_once_for_explicit(generation).await;
-        }
-
-        let mut last_err = None;
-
-        'cycle: loop {
-            let backoff_reset_generation = self
-                .reconnect_backoff_reset_generation
-                .load(Ordering::Acquire);
-            let backoff = ExponentialBackoff::builder()
-                .initial_delay(std::time::Duration::from_secs(cfg.initial_delay.max(1)))
-                .max_delay(std::time::Duration::from_secs(cfg.max_delay.max(1)))
-                .max_retries(cfg.max_attempts)
-                .with_jitter()
-                .build();
-
-            // First attempt immediately (delay = 0), subsequent delays from backoff
-            for (attempt, delay) in std::iter::once(std::time::Duration::ZERO)
-                .chain(backoff)
-                .enumerate()
-            {
-                if self.connection_generation_changed(generation) {
-                    return Err(NetworkError::ConnectionError(
-                        "Signaling connect retry cycle was cancelled by explicit disconnect"
-                            .to_string(),
-                    ));
-                }
-
-                let attempt = attempt as u32 + 1;
-                self.invoke_hook(HookEvent::SignalingConnectStart { attempt })
-                    .await;
-                if delay > std::time::Duration::ZERO {
-                    tracing::info!("Retry signaling connect after {delay:?} (attempt {attempt})");
-                    tokio::select! {
-                        _ = crate::timer::sleep(
-                            crate::timer::ids::SIGNALING_RECONNECT_BACKOFF,
-                            delay,
-                        ) => {}
-                        _ = self.reconnect_notify.notified() => {
-                            tracing::debug!("Explicit reconnect request interrupted signaling connect backoff");
-                        }
-                    }
-                    if self
-                        .reconnect_backoff_reset_generation
-                        .load(Ordering::Acquire)
-                        != backoff_reset_generation
-                    {
-                        tracing::debug!(
-                            "Restarting explicit signaling connect backoff after external recovery event"
-                        );
-                        continue 'cycle;
-                    }
-                }
-
-                match self.connect_once_for_explicit(generation).await {
-                    Ok(()) => return Ok(()),
-                    Err(e) => {
-                        tracing::warn!("Signaling connect attempt {attempt} failed: {e:?}");
-                        last_err = Some(e);
-                        if self
-                            .reconnect_backoff_reset_generation
-                            .load(Ordering::Acquire)
-                            != backoff_reset_generation
-                        {
-                            tracing::debug!(
-                                "Restarting explicit signaling connect backoff after external recovery event"
-                            );
-                            continue 'cycle;
-                        }
-                    }
-                }
-            }
-
-            let total = cfg.max_attempts + 1; // backoff max_retries + first attempt
-            tracing::error!("Signaling connect failed after {total} attempts, giving up");
-            return Err(last_err.unwrap_or_else(|| {
-                NetworkError::ConnectionError("All connection attempts failed".to_string())
-            }));
-        }
     }
 
     /// Send envelope and wait for response with timeout and error handling.
@@ -1930,15 +1517,15 @@ impl WebSocketSignalingClient {
         let max_frame_bytes = self.config.inbound_queue.max_frame_bytes;
         let stats = self.stats.clone();
         let connected = self.connected.clone();
+        let socket_state = self.socket_state.clone();
+        let connection_commit_gate = self.connection_commit_gate.clone();
         let event_tx = self.event_tx.clone();
         let liveness_generation = self.liveness_generation.clone();
         let pending_pongs = self.pending_pongs.clone();
-        let reconnect_notify = self.reconnect_notify.clone();
-        let reconnect_enabled = self.config.reconnect_config.enabled;
         let hook_callback = self.hook_callback.get().cloned();
-        // Snapshot the fact sink and the generation this socket was established
-        // under, so a spontaneous stream end can report the lost generation.
-        let fact_sink = self.supervisor_fact_sink.get().cloned();
+        // Keep the shared fact-sink cell so a supervisor installed after the
+        // socket handshake still receives a spontaneous stream-end fact.
+        let fact_sink = Arc::clone(&self.supervisor_fact_sink);
         let socket_generation = self.connection_generation.load(Ordering::Acquire);
         let handle = tokio::spawn(async move {
             // Why the receive loop terminated; published to subscribers so a
@@ -2063,21 +1650,34 @@ impl WebSocketSignalingClient {
 
             tracing::warn!("Stream terminated");
             // If explicit disconnect already marked the client disconnected,
-            // do not start an automatic reconnect cycle for the intentional
-            // close. The disconnect path publishes its own Manual event.
-            let was_connected = connected.swap(false, Ordering::AcqRel);
+            // do not publish a second loss fact for the intentional close. The
+            // disconnect path publishes its own Manual event and supervisor fact.
+            let was_connected = {
+                let _commit_guard = connection_commit_gate
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let was_connected = connected.swap(false, Ordering::AcqRel);
+                if was_connected {
+                    *socket_state
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        SignalingSocketState::Disconnected {
+                            last_generation: Some(socket_generation),
+                        };
+                }
+                was_connected
+            };
             Self::publish_disconnected_transition(
                 was_connected,
                 &stats,
                 &event_tx,
                 hook_callback,
                 disconnect_reason,
-                reconnect_enabled.then_some(&reconnect_notify),
             )
             .await;
             // A spontaneous stream end lost the live generation with no lifecycle
             // command; report it so the supervisor can derive recovery.
-            if was_connected && let Some(sink) = &fact_sink {
+            if was_connected && let Some(sink) = fact_sink.get() {
                 sink.signaling_generation_lost(
                     socket_generation,
                     SignalingFactLostCause::RemoteReset,
@@ -2103,14 +1703,17 @@ impl WebSocketSignalingClient {
 
         let sink = self.ws_sink.clone();
         let connected = self.connected.clone();
+        let socket_state = self.socket_state.clone();
+        let connection_commit_gate = self.connection_commit_gate.clone();
         let stats = self.stats.clone();
         let event_tx = self.event_tx.clone();
         let liveness_generation = self.liveness_generation.clone();
         let receiver_task_clone = Arc::clone(&self.receiver_task);
-        let reconnect_notify = self.reconnect_notify.clone();
-        let reconnect_enabled = self.config.reconnect_config.enabled;
         let hook_callback = self.hook_callback.get().cloned();
-        let fact_sink = self.supervisor_fact_sink.get().cloned();
+        // Resolve the sink when a liveness failure is observed rather than
+        // snapshotting it at task creation. Test and embedding harnesses may
+        // finish lifecycle wiring after the initial signaling handshake.
+        let fact_sink = Arc::clone(&self.supervisor_fact_sink);
         let socket_generation = self.connection_generation.load(Ordering::Acquire);
 
         let handle = tokio::spawn(async move {
@@ -2157,17 +1760,30 @@ impl WebSocketSignalingClient {
                 }
 
                 if let Some(reason) = disconnect_reason {
-                    let was_connected = connected.swap(false, Ordering::AcqRel);
+                    let was_connected = {
+                        let _commit_guard = connection_commit_gate
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        let was_connected = connected.swap(false, Ordering::AcqRel);
+                        if was_connected {
+                            *socket_state
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                                SignalingSocketState::Disconnected {
+                                    last_generation: Some(socket_generation),
+                                };
+                        }
+                        was_connected
+                    };
                     Self::publish_disconnected_transition(
                         was_connected,
                         &stats,
                         &event_tx,
                         hook_callback.clone(),
                         reason,
-                        reconnect_enabled.then_some(&reconnect_notify),
                     )
                     .await;
-                    if was_connected && let Some(sink) = &fact_sink {
+                    if was_connected && let Some(sink) = fact_sink.get() {
                         sink.signaling_generation_lost(
                             socket_generation,
                             SignalingFactLostCause::RemoteReset,
@@ -2191,17 +1807,30 @@ impl WebSocketSignalingClient {
                     if let Some(handle) = receiver_task_clone.lock().await.take() {
                         handle.abort();
                     }
-                    let was_connected = connected.swap(false, Ordering::AcqRel);
+                    let was_connected = {
+                        let _commit_guard = connection_commit_gate
+                            .lock()
+                            .unwrap_or_else(|poisoned| poisoned.into_inner());
+                        let was_connected = connected.swap(false, Ordering::AcqRel);
+                        if was_connected {
+                            *socket_state
+                                .lock()
+                                .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                                SignalingSocketState::Disconnected {
+                                    last_generation: Some(socket_generation),
+                                };
+                        }
+                        was_connected
+                    };
                     Self::publish_disconnected_transition(
                         was_connected,
                         &stats,
                         &event_tx,
                         hook_callback.clone(),
                         DisconnectReason::PongTimeout,
-                        reconnect_enabled.then_some(&reconnect_notify),
                     )
                     .await;
-                    if was_connected && let Some(sink) = &fact_sink {
+                    if was_connected && let Some(sink) = fact_sink.get() {
                         sink.signaling_generation_lost(
                             socket_generation,
                             SignalingFactLostCause::RemoteReset,
@@ -2215,19 +1844,43 @@ impl WebSocketSignalingClient {
         *existing = Some(handle);
     }
 
-    async fn disconnect_internal(&self, suppress_auto_reconnect: bool) -> NetworkResult<()> {
+    async fn disconnect_internal(&self, invalidate_attempts: bool) -> NetworkResult<()> {
         let teardown_deadline = tokio::time::Instant::now()
             + std::time::Duration::from_secs(DISCONNECT_LOCK_TIMEOUT_SECS);
         // Capture the live generation before invalidation bumps it, so the
         // `SignalingGenerationLost` fact reports the generation that was live.
         let generation_before = self.connection_generation.load(Ordering::Acquire);
-        if suppress_auto_reconnect {
-            self.invalidate_connection_attempts_and_suppress_auto_reconnect();
+        if invalidate_attempts {
+            self.invalidate_connection_attempts();
+        }
+
+        {
+            let _commit_guard = self.lock_connection_commit();
+            if self.connected.load(Ordering::Acquire) {
+                *self
+                    .socket_state
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                    SignalingSocketState::Disconnecting {
+                        generation: generation_before,
+                    };
+            }
         }
 
         self.drop_pending_replies("signaling disconnect").await;
         self.drop_pending_pongs("signaling disconnect").await;
-        let was_connected = self.connected.swap(false, Ordering::AcqRel);
+        let was_connected = {
+            let _commit_guard = self.lock_connection_commit();
+            let was_connected = self.connected.swap(false, Ordering::AcqRel);
+            *self
+                .socket_state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                SignalingSocketState::Disconnected {
+                    last_generation: was_connected.then_some(generation_before),
+                };
+            was_connected
+        };
 
         // Stop background tasks before taking the WebSocket sink/stream locks.
         // A ping or receiver task can be inside a socket operation while holding
@@ -2334,7 +1987,6 @@ impl WebSocketSignalingClient {
             &self.event_tx,
             self.hook_callback.get().cloned(),
             DisconnectReason::Manual,
-            None,
         )
         .await;
 
@@ -2347,106 +1999,13 @@ impl WebSocketSignalingClient {
         Ok(())
     }
 
-    async fn connect_once_for_auto_reconnect(&self, generation: u64) -> NetworkResult<()> {
-        if self.auto_reconnect_cancelled(generation) {
-            return Err(NetworkError::ConnectionError(
-                "Signaling auto-reconnect was cancelled".to_string(),
-            ));
-        }
-
-        if self.connected.load(Ordering::Acquire) {
-            tracing::debug!("Already connected, skipping auto-reconnect connect_once()");
-            return Ok(());
-        }
-
-        match self
-            .connecting
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-        {
-            Ok(_) => {}
-            Err(_) => {
-                if self.connected.load(Ordering::Acquire) {
-                    tracing::debug!("Already connected, skipping auto-reconnect connect_once()");
-                    return Ok(());
-                }
-
-                tracing::debug!(
-                    "Another connection attempt in progress, waiting for state change..."
-                );
-                let result = self.wait_for_connection_result(generation).await;
-                if self.auto_reconnect_cancelled(generation) {
-                    return Err(NetworkError::ConnectionError(
-                        "Signaling auto-reconnect was cancelled".to_string(),
-                    ));
-                }
-                return result;
-            }
-        }
-        let attempt_deadline = self.connection_attempt_deadline();
-        *self
-            .connection_attempt_deadline
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = attempt_deadline;
-        let attempt_guard = ConnectionAttemptGuard {
-            connecting: &self.connecting,
-            completion: &self.connection_attempt_notify,
-            deadline: &self.connection_attempt_deadline,
-        };
-
-        if self.auto_reconnect_cancelled(generation) {
-            return Err(NetworkError::ConnectionError(
-                "Signaling auto-reconnect was cancelled".to_string(),
-            ));
-        }
-
-        if self.connected.load(Ordering::Acquire) {
-            tracing::debug!("Connection completed by another task while acquiring lock");
-            return Ok(());
-        }
-
-        tracing::debug!(
-            generation,
-            "Acquired connection lock, establishing one auto-reconnect signaling attempt..."
-        );
-
-        let result = self
-            .establish_connection_once_for_auto_reconnect(generation, attempt_deadline)
-            .await;
-
-        match result {
-            Ok(()) => {
-                if self.auto_reconnect_cancelled(generation) {
-                    let cleanup_result = self.disconnect_internal(false).await;
-                    cleanup_result?;
-                    return Err(NetworkError::ConnectionError(
-                        "Signaling auto-reconnect was cancelled".to_string(),
-                    ));
-                }
-                self.start_receiver().await;
-                self.start_ping_task().await;
-                if self.auto_reconnect_cancelled(generation) {
-                    let cleanup_result = self.disconnect_internal(false).await;
-                    cleanup_result?;
-                    return Err(NetworkError::ConnectionError(
-                        "Signaling auto-reconnect was cancelled".to_string(),
-                    ));
-                }
-                drop(attempt_guard);
-                Ok(())
-            }
-            Err(e) => {
-                if !self.auto_reconnect_cancelled(generation) {
-                    let _ = self.event_tx.send(SignalingEvent::Disconnected {
-                        reason: DisconnectReason::ConnectionFailed(e.to_string()),
-                    });
-                    tracing::error!("Connection attempt failed: {e}");
-                }
-                Err(e)
-            }
-        }
+    async fn connect_once_for_explicit(&self, generation: u64) -> NetworkResult<()> {
+        self.connect_once_with_intent(ConnectIntent::Explicit { generation })
+            .await
     }
 
-    async fn connect_once_for_explicit(&self, generation: u64) -> NetworkResult<()> {
+    async fn connect_once_with_intent(&self, intent: ConnectIntent) -> NetworkResult<()> {
+        let generation = intent.generation();
         loop {
             if self.connection_generation_changed(generation) {
                 return Err(NetworkError::ConnectionError(
@@ -2455,7 +2014,7 @@ impl WebSocketSignalingClient {
             }
 
             if self.connected.load(Ordering::Acquire) {
-                tracing::debug!("Already connected, skipping connect_once()");
+                tracing::debug!("Already connected, skipping signaling connect attempt");
                 return Ok(());
             }
 
@@ -2463,10 +2022,21 @@ impl WebSocketSignalingClient {
                 .connecting
                 .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
             {
-                Ok(_) => break,
+                Ok(_) => {
+                    let _commit_guard = self.lock_connection_commit();
+                    *self
+                        .socket_state
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        SignalingSocketState::Connecting {
+                            expected_generation: generation,
+                            action_id: intent.action_id(),
+                        };
+                    break;
+                }
                 Err(_) => {
                     if self.connected.load(Ordering::Acquire) {
-                        tracing::debug!("Already connected, skipping connect_once()");
+                        tracing::debug!("Already connected, skipping signaling connect attempt");
                         return Ok(());
                     }
 
@@ -2481,7 +2051,7 @@ impl WebSocketSignalingClient {
                                 && !self.connecting.load(Ordering::Acquire) =>
                         {
                             tracing::debug!(
-                                "Concurrent signaling connection failed; explicit connect_once will retry immediately: {e}"
+                                "Concurrent signaling connection failed; explicit connect will retry immediately: {e}"
                             );
                             continue;
                         }
@@ -2499,6 +2069,9 @@ impl WebSocketSignalingClient {
             connecting: &self.connecting,
             completion: &self.connection_attempt_notify,
             deadline: &self.connection_attempt_deadline,
+            commit_gate: &self.connection_commit_gate,
+            socket_state: &self.socket_state,
+            intent,
         };
 
         if self.connection_generation_changed(generation) {
@@ -2512,13 +2085,16 @@ impl WebSocketSignalingClient {
             return Ok(());
         }
 
+        self.invoke_hook(HookEvent::SignalingConnectStart { attempt: 1 })
+            .await;
+
         tracing::debug!(
             generation,
             "Acquired connection lock, establishing one explicit signaling attempt..."
         );
 
         let result = self
-            .establish_connection_once(generation, attempt_deadline)
+            .establish_connection_once_with_intent(intent, attempt_deadline)
             .await;
 
         match result {
@@ -2651,12 +2227,6 @@ impl WebSocketSignalingClient {
     }
 }
 
-impl Drop for WebSocketSignalingClient {
-    fn drop(&mut self) {
-        self.reconnect_manager_shutdown.cancel();
-    }
-}
-
 #[async_trait]
 impl SignalingClient for WebSocketSignalingClient {
     async fn connect(&self) -> NetworkResult<()> {
@@ -2666,45 +2236,37 @@ impl SignalingClient for WebSocketSignalingClient {
         }
 
         let generation = self.connection_generation.load(Ordering::Acquire);
-        self.connect_with_retries(generation).await
-    }
-
-    async fn connect_once(&self) -> NetworkResult<()> {
-        let generation = self.connection_generation.load(Ordering::Acquire);
         self.connect_once_for_explicit(generation).await
     }
 
-    fn suppress_auto_reconnect(&self) {
-        self.suppress_auto_reconnect_internal();
-    }
-
-    fn resume_auto_reconnect(&self) {
-        self.auto_reconnect_suppressed
-            .store(false, Ordering::Release);
-    }
-
-    fn schedule_auto_reconnect(&self) {
-        if !self.config.reconnect_config.enabled {
-            tracing::debug!("Skipping signaling auto-reconnect schedule; config disabled");
-            return;
+    async fn connect_once_for_recovery(&self, action_id: u64) -> NetworkResult<()> {
+        let generation = self.connection_generation.load(Ordering::Acquire);
+        match self
+            .connect_once_with_intent(ConnectIntent::Recovery {
+                generation,
+                action_id,
+            })
+            .await
+        {
+            Ok(()) => Ok(()),
+            Err(error) => match self.handle_auth_verdict(&error).await {
+                AuthVerdictAction::Reacquired => Err(NetworkError::ConnectionError(
+                    "signaling credential changed during recovery".to_string(),
+                )),
+                AuthVerdictAction::RetrySameCredential => Err(NetworkError::ConnectionError(
+                    "credential recovery deferred; retry signaling later".to_string(),
+                )),
+                AuthVerdictAction::Denied
+                | AuthVerdictAction::ShutdownWhileParked
+                | AuthVerdictAction::NotAVerdict => Err(error),
+            },
         }
-
-        self.auto_reconnect_suppressed
-            .store(false, Ordering::Release);
-        self.reconnect_notify.notify_one();
     }
 
-    fn schedule_auto_reconnect_reset_backoff(&self) {
-        if !self.config.reconnect_config.enabled {
-            tracing::debug!("Skipping signaling auto-reconnect schedule; config disabled");
-            return;
+    fn request_signaling_recovery(&self, cause: SignalingRecoveryRequestCause) {
+        if let Some(sink) = self.supervisor_fact_sink.get() {
+            sink.signaling_connection_required(cause);
         }
-
-        self.auto_reconnect_suppressed
-            .store(false, Ordering::Release);
-        self.reconnect_backoff_reset_generation
-            .fetch_add(1, Ordering::AcqRel);
-        self.reconnect_notify.notify_one();
     }
 
     async fn disconnect(&self) -> NetworkResult<()> {
@@ -2759,14 +2321,27 @@ impl SignalingClient for WebSocketSignalingClient {
 
         if let Err(e) = send_result {
             self.pending_pongs.lock().await.remove(&payload);
-            let was_connected = self.connected.swap(false, Ordering::AcqRel);
+            let generation = self.connection_generation.load(Ordering::Acquire);
+            let was_connected = {
+                let _commit_guard = self.lock_connection_commit();
+                let was_connected = self.connected.swap(false, Ordering::AcqRel);
+                if was_connected {
+                    *self
+                        .socket_state
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+                        SignalingSocketState::Disconnected {
+                            last_generation: Some(generation),
+                        };
+                }
+                was_connected
+            };
             Self::publish_disconnected_transition(
                 was_connected,
                 &self.stats,
                 &self.event_tx,
                 self.hook_callback.get().cloned(),
                 DisconnectReason::PingSendFailed,
-                None,
             )
             .await;
             return Err(e);
@@ -3146,7 +2721,61 @@ impl SignalingClient for WebSocketSignalingClient {
     }
 
     fn set_supervisor_fact_sink(&self, sink: SupervisorFactSink) {
-        let _ = self.supervisor_fact_sink.set(sink);
+        // A production node installs its sink before its first handshake, but
+        // embedders and VNet harnesses may finish lifecycle wiring after a
+        // socket is already live. Seed that sink from the same commit-fenced
+        // resource state that emitted the original transition; otherwise a
+        // later `SignalingGenerationLost` fact is correctly rejected as stale
+        // because the supervisor never learned the generation was live.
+        // Holding this gate keeps a new connection commit from publishing a
+        // resource fact between the configuration transfer and the seed. The
+        // configuration itself is sent before making the sink visible, so the
+        // supervisor never executes a loss with its default retry policy just
+        // because lifecycle wiring raced an already-running socket.
+        let _commit_guard = self.lock_connection_commit();
+        if self.supervisor_fact_sink.get().is_some() {
+            return;
+        }
+
+        // Preserve the public reconnect knobs after moving retry ownership to
+        // the supervisor. `enabled` remains the compatibility-shim gate for
+        // callers that explicitly request automatic recovery; the window and
+        // curve values below are now interpreted by the one policy owner.
+        let reconnect = &self.config.reconnect_config;
+        sink.signaling_recovery_configured(
+            reconnect.max_attempts,
+            Duration::from_secs(reconnect.initial_delay),
+            Duration::from_secs(reconnect.max_delay),
+            reconnect.backoff_multiplier,
+        );
+        if self.supervisor_fact_sink.set(sink.clone()).is_err() {
+            return;
+        }
+
+        let live_generation = match *self
+            .socket_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        {
+            SignalingSocketState::Connected { generation, .. } => Some(generation),
+            _ => None,
+        };
+        if let Some(generation) = live_generation {
+            sink.signaling_generation_committed(generation, SignalingFactOrigin::External);
+        }
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    fn live_generation_for_test(&self) -> Option<u64> {
+        let _commit_guard = self.lock_connection_commit();
+        match *self
+            .socket_state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+        {
+            SignalingSocketState::Connected { generation, .. } => Some(generation),
+            _ => None,
+        }
     }
 
     #[cfg(test)]
@@ -3155,13 +2784,14 @@ impl SignalingClient for WebSocketSignalingClient {
     }
 
     fn invalidate_generation(&self) {
-        // Bump the connection generation and suppress new automatic attempts so
-        // no in-flight connect can still commit. The teardown-crossing
+        // Bump the connection generation so no in-flight connect can still
+        // commit. The teardown-crossing
         // `SignalingGenerationLost` is delivered by the disconnect that follows
         // (and, decisively, by the supervisor dropping the teardown-scoped
         // generation on teardown completion), so this synchronous close only
-        // invalidates commit rights and new-work admission.
-        self.invalidate_connection_attempts_and_suppress_auto_reconnect();
+        // invalidates commit rights; the supervisor remains the sole owner of
+        // new-work admission.
+        self.invalidate_connection_attempts();
     }
 
     async fn install_membership(&self, handle: MembershipHandle) {

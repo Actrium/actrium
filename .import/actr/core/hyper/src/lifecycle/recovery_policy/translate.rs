@@ -231,6 +231,56 @@ impl RecoveryStrength {
     }
 }
 
+/// A resource family covered by one shared recovery obligation.
+///
+/// The supervisor deliberately retains one retry gate for the combined work
+/// until #426 establishes whether peer recovery needs an independently paced
+/// domain.  Keeping the coverage set on the record prevents a peer-only
+/// handoff from masquerading as signaling reconnect work (or from creating a
+/// second signaling obligation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum RecoveryImpact {
+    Signaling,
+    Peers,
+}
+
+/// Compact, copyable set of [`RecoveryImpact`] values required by a recovery
+/// record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct RecoveryImpacts(u8);
+
+impl RecoveryImpacts {
+    const SIGNALING_BIT: u8 = 1 << 0;
+    const PEERS_BIT: u8 = 1 << 1;
+
+    pub(crate) const NONE: Self = Self(0);
+    pub(crate) const SIGNALING: Self = Self(Self::SIGNALING_BIT);
+    pub(crate) const PEERS: Self = Self(Self::PEERS_BIT);
+    pub(crate) const ALL: Self = Self(Self::SIGNALING_BIT | Self::PEERS_BIT);
+
+    pub(crate) fn contains(self, impact: RecoveryImpact) -> bool {
+        let bit = match impact {
+            RecoveryImpact::Signaling => Self::SIGNALING_BIT,
+            RecoveryImpact::Peers => Self::PEERS_BIT,
+        };
+        self.0 & bit != 0
+    }
+
+    pub(crate) fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+}
+
+/// Which portion of the supervisor-owned retry window is currently armed.
+/// Both variants use the one existing `FailureBackoff(Recovery)` timer; this
+/// is deliberately metadata on the pending obligation, not a second timer or
+/// mutable reconnect loop in the signaling client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RetryDelayKind {
+    Backoff,
+    Cooldown,
+}
+
 /// The closed reason enumeration for a cleanup command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum CleanupReason {
@@ -290,6 +340,18 @@ pub(crate) enum SignalingLostCause {
     RemoteReset,
 }
 
+/// Why a resource owner observed that signaling connectivity is required.
+///
+/// The reason is diagnostic only. Translation deliberately coalesces all
+/// requests while equivalent recovery work is already pending, running,
+/// backing off, gated, or parked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum SignalingConnectionRequiredCause {
+    HeartbeatObservedDisconnected,
+    InitialConnectDeferred,
+    CredentialRebound,
+}
+
 // ---------------------------------------------------------------------------
 // Extended state carried by the view
 // ---------------------------------------------------------------------------
@@ -305,22 +367,44 @@ pub(crate) struct PendingRecord {
     pub attempt: u32,
     /// The identity of the one armed backoff deadline, when backing off.
     pub retry_id: u64,
+    /// The absolute deadline of the currently armed retry/cooldown timer.
+    /// Present exactly while `gate == BackingOff` for records created through
+    /// the supervisor shell.
+    pub retry_deadline: Option<PolicyInstant>,
+    /// Whether the armed recovery deadline is an ordinary exponential retry or
+    /// the compatibility cooldown between exhausted retry windows.
+    pub retry_delay_kind: RetryDelayKind,
     /// Present exactly while the gate is `Parked`; never empty then.
     pub release_mask: ReleaseMask,
     /// For the recovery domain, which intent strength is pending.
     pub strength: Option<RecoveryStrength>,
+    /// The resource families this shared recovery obligation must cover.
+    /// Teardown records use [`RecoveryImpacts::NONE`].
+    pub required_impacts: RecoveryImpacts,
 }
 
 impl PendingRecord {
     /// A fresh `Ready` recovery record for the given strength.
     pub(crate) fn recovery(work_revision: Revision, strength: RecoveryStrength) -> Self {
+        Self::recovery_with_impacts(work_revision, strength, RecoveryImpacts::ALL)
+    }
+
+    /// A fresh `Ready` recovery record with explicit resource coverage.
+    pub(crate) fn recovery_with_impacts(
+        work_revision: Revision,
+        strength: RecoveryStrength,
+        required_impacts: RecoveryImpacts,
+    ) -> Self {
         Self {
             work_revision,
             gate: RetryGateState::Ready,
             attempt: 0,
             retry_id: 0,
+            retry_deadline: None,
+            retry_delay_kind: RetryDelayKind::Backoff,
             release_mask: ReleaseMask::default(),
             strength: Some(strength),
+            required_impacts,
         }
     }
 
@@ -331,8 +415,11 @@ impl PendingRecord {
             gate: RetryGateState::Ready,
             attempt: 0,
             retry_id: 0,
+            retry_deadline: None,
+            retry_delay_kind: RetryDelayKind::Backoff,
             release_mask: ReleaseMask::default(),
             strength: None,
+            required_impacts: RecoveryImpacts::NONE,
         }
     }
 }
@@ -454,6 +541,9 @@ pub(crate) struct View {
     /// anchor and must not be used to classify a stay as short.
     pub background_entered_at: Option<PolicyInstant>,
     pub committed_session_generation: Option<Generation>,
+    /// Latest credential publication accepted from the membership authority.
+    /// This clock is independent of session and signaling generations.
+    pub committed_credential_revision: Option<u64>,
     pub live_signaling_generation: Option<Generation>,
     /// Generations circled by a pending or running teardown scope; a generation
     /// here does not count as live for restore derivation.
@@ -484,6 +574,7 @@ impl View {
             offline_teardown: None,
             background_entered_at: None,
             committed_session_generation: None,
+            committed_credential_revision: None,
             live_signaling_generation: None,
             teardown_scopes: TeardownScopes::default(),
             shutdown_deadline: None,
@@ -586,6 +677,21 @@ pub(crate) enum Input {
         generation: Generation,
         cause: SignalingLostCause,
     },
+    SignalingConnectionRequired {
+        cause: SignalingConnectionRequiredCause,
+    },
+    /// Compatibility configuration supplied once by the concrete signaling
+    /// client when it attaches to the supervisor. The public multiplier is
+    /// encoded as bits so this ordered input remains `Eq`.
+    SignalingRecoveryConfigChanged {
+        max_attempts: u32,
+        initial_delay: Duration,
+        max_delay: Duration,
+        backoff_multiplier_bits: u64,
+    },
+    SignalingCredentialPublished {
+        revision: u64,
+    },
     EffectCompleted {
         action_id: u64,
         kind: EffectKind,
@@ -634,22 +740,16 @@ pub(crate) enum CancelReason {
 
 /// A signaling-layer directive the shell executes after applying a decision.
 ///
-/// Automatic-reconnect suppression and resumption are policy decisions, so they
-/// are derived here by the one pure translation function rather than sniffed
-/// from the raw event ahead of translation. The shell lowers each directive to
-/// the signaling client through the `NetworkEventProcessor` hooks.
+/// The supervisor already owns execution eligibility. Only a synchronous
+/// resource fence crosses into the socket executor; no pause/resume policy is
+/// duplicated there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum SignalingDirective {
     /// Invalidate every in-flight signaling connection attempt, including an
     /// explicit attempt owned by a superseded recovery effect, and keep new
-    /// automatic attempts paused. The shell must lower this fence before it
-    /// requests cancellation of the superseded effect.
+    /// attempts. The shell must lower this fence before it requests
+    /// cancellation of the superseded effect.
     InvalidateConnectionAttempts,
-    /// Invalidate in-flight automatic reconnect attempts and keep new attempts
-    /// paused until a recovery path explicitly schedules them again.
-    SuppressAutoReconnect,
-    /// Re-enable future automatic reconnects without starting one immediately.
-    ResumeAutoReconnect,
 }
 
 /// A category from the audited timer inventory.
@@ -681,6 +781,15 @@ pub(crate) enum TimerDirective {
     Cancel {
         id: TimerId,
     },
+}
+
+/// Metadata the shell applies to the record before lowering a retry timer.
+/// The pure reducer selects it together with the one `FailureBackoff` timer
+/// arm, preserving a single owner and a single identity-bearing deadline.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RetrySchedule {
+    pub domain: RetryDomain,
+    pub kind: RetryDelayKind,
 }
 
 /// Record the release mask that a `TerminalFailure`/`ExplicitPause` records on
@@ -736,8 +845,15 @@ pub(crate) struct Decision {
     pub timers: Vec<TimerDirective>,
     /// Structured status-stream records.
     pub status: Vec<StatusRecord>,
-    /// Signaling-layer directives the shell executes (auto-reconnect control).
+    /// Signaling resource fences the shell executes.
     pub signals: Vec<SignalingDirective>,
+    /// Resource coverage to merge into the shared recovery record. `None`
+    /// leaves coverage unchanged; a value is applied even for a structural
+    /// duplicate so a peer-only handoff can absorb signaling without creating
+    /// a second work item.
+    pub required_recovery_impacts: Option<RecoveryImpacts>,
+    /// The retry-window phase associated with this decision's timer arm.
+    pub retry_schedule: Option<RetrySchedule>,
     /// The supervisor has ended unconditionally (its shutdown overall deadline
     /// aborted all remaining work); the shell must stop its reconcile loop.
     pub terminate: bool,
@@ -754,6 +870,8 @@ impl Decision {
             timers: Vec::new(),
             status: Vec::new(),
             signals: Vec::new(),
+            required_recovery_impacts: None,
+            retry_schedule: None,
             terminate: false,
         }
     }
@@ -766,6 +884,20 @@ impl Decision {
 
     fn machine(&mut self, input: MachineInput) -> &mut Self {
         self.machine_inputs.push(input);
+        self
+    }
+
+    fn require_recovery_impacts(&mut self, impacts: RecoveryImpacts) -> &mut Self {
+        self.required_recovery_impacts = Some(
+            self.required_recovery_impacts
+                .unwrap_or(RecoveryImpacts::NONE)
+                .union(impacts),
+        );
+        self
+    }
+
+    fn schedule_retry(&mut self, domain: RetryDomain, kind: RetryDelayKind) -> &mut Self {
+        self.retry_schedule = Some(RetrySchedule { domain, kind });
         self
     }
 }
@@ -794,6 +926,16 @@ impl BackoffTable {
     }
 }
 
+/// Compatibility retry-window policy migrated from the public signaling
+/// configuration. Exhausting a window never removes the recovery record: the
+/// one supervisor timer enters `Cooldown`, then returns the same obligation to
+/// `Ready` for the next window.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SignalingRetryWindow {
+    pub max_attempts: u32,
+    pub cooldown: Duration,
+}
+
 /// Product policy constants used by translation; measured by telemetry rather
 /// than part of the state model.
 pub(crate) const RECOVERY_TEARDOWN_DEADLINE: Duration = Duration::from_secs(10);
@@ -809,6 +951,10 @@ pub(crate) struct PolicyConfig {
     pub escalate_after_probe: u32,
     pub escalate_after_restore: u32,
     pub backoff: BackoffTable,
+    /// `None` keeps the RFC defaults for supervisors without a concrete
+    /// signaling client. A wired client supplies this once through its fact
+    /// sink, preserving its public reconnect configuration at the supervisor.
+    pub signaling_retry_window: Option<SignalingRetryWindow>,
 }
 
 impl PolicyConfig {
@@ -818,12 +964,14 @@ impl PolicyConfig {
             base_delay: Duration::from_millis(500),
             max_delay: Duration::from_secs(30),
             exponent_cap: 6,
+            multiplier: 2.0,
             jitter_fraction: 0.2,
         };
         let teardown = BackoffParams {
             base_delay: Duration::from_millis(100),
             max_delay: Duration::from_secs(2),
             exponent_cap: 4,
+            multiplier: 2.0,
             jitter_fraction: 0.2,
         };
         Self {
@@ -841,7 +989,48 @@ impl PolicyConfig {
                 reconnect: curve,
                 teardown,
             },
+            signaling_retry_window: None,
         }
+    }
+
+    /// Install the compatibility semantics of `ReconnectConfig` in the
+    /// supervisor that now owns retry policy. Values are normalized once at
+    /// the boundary so malformed public configuration cannot create a busy
+    /// loop, an inverted cap, or non-finite duration arithmetic.
+    pub(crate) fn configure_signaling_retry_window(
+        &mut self,
+        max_attempts: u32,
+        initial_delay: Duration,
+        max_delay: Duration,
+        backoff_multiplier: f64,
+    ) {
+        let initial_delay = initial_delay.max(Duration::from_secs(1));
+        let max_delay = max_delay.max(initial_delay);
+        let multiplier = if backoff_multiplier.is_finite() && backoff_multiplier >= 1.0 {
+            backoff_multiplier
+        } else {
+            2.0
+        };
+        let curve = BackoffParams {
+            base_delay: initial_delay,
+            max_delay,
+            // The max-delay cap does the semantic bounding. This defensive
+            // ceiling only prevents a hostile attempt count from reaching an
+            // unbounded floating-point exponent.
+            exponent_cap: u32::MAX,
+            multiplier,
+            jitter_fraction: 0.2,
+        };
+        self.backoff.probe = curve;
+        self.backoff.restore = curve;
+        self.backoff.reconnect = curve;
+        self.signaling_retry_window = Some(SignalingRetryWindow {
+            // A zero-window would park recovery forever without a socket
+            // attempt. Preserve the no-lost-obligation invariant by treating
+            // it as one attempt per window.
+            max_attempts: max_attempts.max(1),
+            cooldown: max_delay.saturating_mul(2),
+        });
     }
 }
 
@@ -911,6 +1100,14 @@ pub(crate) fn translate(
         }
         Input::SignalingGenerationLost { generation, cause } => {
             translate_signaling_lost(view, *generation, *cause)
+        }
+        Input::SignalingConnectionRequired { .. } => translate_signaling_connection_required(view),
+        // The supervisor shell installs this compatibility policy before
+        // translation. It is intentionally not a lifecycle fact and therefore
+        // must not allocate a work revision or wake a pending deadline.
+        Input::SignalingRecoveryConfigChanged { .. } => Decision::none(),
+        Input::SignalingCredentialPublished { revision } => {
+            translate_signaling_credential_published(view, *revision)
         }
         Input::EffectCompleted {
             action_id,
@@ -982,7 +1179,6 @@ fn translate_foreground(
                         RecoveryIntentInput::RequestProbe,
                     ));
                 }
-                d.signals.push(SignalingDirective::ResumeAutoReconnect);
             } else {
                 // Long background: force a reconnect and keep any stale automatic
                 // attempt suppressed until that fresh connect path re-enables it.
@@ -993,8 +1189,6 @@ fn translate_foreground(
                 if d.cancels.contains(&CancelReason::PreemptedByStronger) {
                     d.signals
                         .push(SignalingDirective::InvalidateConnectionAttempts);
-                } else {
-                    d.signals.push(SignalingDirective::SuppressAutoReconnect);
                 }
             }
             // Wakes records backing off after a phase-ineligible failure; parks
@@ -1024,9 +1218,6 @@ fn translate_background(view: &View) -> Decision {
     // Row 1: enter background; the shell stamps background_entered_at = now.
     let mut d = Decision::advancing();
     d.machine(MachineInput::AppPhase(AppPhaseInput::EnterBackground));
-    // Entering the background pauses stale automatic reconnect without
-    // disconnecting a healthy socket (derived here, not sniffed pre-translation).
-    d.signals.push(SignalingDirective::SuppressAutoReconnect);
     d
 }
 
@@ -1565,6 +1756,7 @@ fn translate_signaling_lost(
         && view.execution != ExecutionState::Cleaning
     {
         let mut d = Decision::advancing();
+        d.require_recovery_impacts(RecoveryImpacts::SIGNALING);
         d.machine(MachineInput::RecoveryIntent(
             RecoveryIntentInput::RequestRestore,
         ));
@@ -1574,7 +1766,107 @@ fn translate_signaling_lost(
         return d;
     }
     // Row 3: live but absorbed by cleanup or gated by mode -> record not live.
-    Decision::advancing()
+    // Do not start or replace work behind that gate, but preserve signaling
+    // coverage if a peer-scoped handoff already owns the shared obligation.
+    let mut d = Decision::advancing();
+    if view.recovery_record.is_some() {
+        d.require_recovery_impacts(RecoveryImpacts::SIGNALING);
+    }
+    d
+}
+
+fn translate_signaling_connection_required(view: &View) -> Decision {
+    // A healthy generation already satisfies the request. A request also has
+    // no authority to bypass logout, shutdown, cleanup, a backoff deadline, an
+    // app/network gate, or a terminal park.
+    if view.live_signaling_outside_teardown() {
+        return Decision::none();
+    }
+
+    // A gated request may not start an action, but an existing peer-only
+    // record must still remember that signaling is a prerequisite once the
+    // gate opens. This merge intentionally leaves revision/retry identity
+    // untouched.
+    if view.recovery_mode != RecoveryModeState::Active
+        || view.cleanup_work != CleanupWorkState::Idle
+        || view.execution == ExecutionState::Cleaning
+    {
+        let mut d = Decision::none();
+        if view.recovery_record.is_some() {
+            d.require_recovery_impacts(RecoveryImpacts::SIGNALING);
+        }
+        return d;
+    }
+
+    // A disconnected socket is stronger news than a pending/running Probe but
+    // is equivalent to an existing Restore/Reconnect obligation. Escalate only
+    // the weaker case; duplicates preserve work_revision, attempt, retry_id and
+    // the already-armed deadline.
+    if view
+        .current_recovery_strength()
+        .is_some_and(|strength| strength >= RecoveryStrength::Restore)
+    {
+        if view
+            .recovery_record
+            .as_ref()
+            .is_some_and(|record| record.required_impacts.contains(RecoveryImpact::Signaling))
+        {
+            return Decision::none();
+        }
+
+        let mut d = Decision::none();
+        d.require_recovery_impacts(RecoveryImpacts::SIGNALING);
+        return d;
+    }
+
+    let mut d = Decision::advancing();
+    d.require_recovery_impacts(RecoveryImpacts::SIGNALING);
+    d.machine(MachineInput::RecoveryIntent(
+        RecoveryIntentInput::RequestRestore,
+    ));
+    preempt_weaker_recovery(view, RecoveryStrength::Restore, &mut d);
+    if d.cancels.contains(&CancelReason::PreemptedByStronger) {
+        d.signals
+            .push(SignalingDirective::InvalidateConnectionAttempts);
+    }
+    d
+}
+
+fn translate_signaling_credential_published(view: &View, revision: u64) -> Decision {
+    if view
+        .committed_credential_revision
+        .is_some_and(|current| revision <= current)
+    {
+        return Decision::none();
+    }
+
+    let mut d = Decision::advancing();
+
+    // A new credential is material to an absent signaling resource. Re-issue
+    // the current strength (or Restore when idle) so work_revision advances:
+    // an in-flight completion using the rejected credential then becomes stale
+    // regardless of whether the publication fact or its completion is dequeued
+    // first.
+    if view.recovery_mode == RecoveryModeState::Active
+        && view.cleanup_work == CleanupWorkState::Idle
+        && !view.live_signaling_outside_teardown()
+    {
+        d.require_recovery_impacts(RecoveryImpacts::SIGNALING);
+        let request = view
+            .current_recovery_strength()
+            .unwrap_or(RecoveryStrength::Restore)
+            .request_input();
+        d.machine(MachineInput::RecoveryIntent(request));
+    }
+
+    d.gate_triggers.push(GateTrigger::ClearMask {
+        domain: RetryDomain::Recovery,
+        trigger: TriggerClass::CredentialPublished,
+    });
+    d.gate_triggers.push(GateTrigger::Wake {
+        domain: RetryDomain::Recovery,
+    });
+    d
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1763,14 +2055,37 @@ fn apply_failure(
                 domain,
                 input: RetryGateInput::RetryableFailure,
             });
-            let retry_after = diagnosis.retry_after().unwrap_or(Duration::ZERO);
-            let deadline = arm_backoff(
-                now,
-                this_attempt,
-                config.backoff.for_kind(kind),
-                retry_after,
-                entropy,
-            );
+            let signaling_window =
+                match (domain, view.record(domain), config.signaling_retry_window) {
+                    (RetryDomain::Recovery, Some(record), Some(window))
+                        if record.required_impacts.contains(RecoveryImpact::Signaling) =>
+                    {
+                        Some(window)
+                    }
+                    _ => None,
+                };
+            let retry_kind =
+                if signaling_window.is_some_and(|window| this_attempt >= window.max_attempts) {
+                    RetryDelayKind::Cooldown
+                } else {
+                    RetryDelayKind::Backoff
+                };
+            d.schedule_retry(domain, retry_kind);
+            let deadline = match retry_kind {
+                RetryDelayKind::Backoff => {
+                    let retry_after = diagnosis.retry_after().unwrap_or(Duration::ZERO);
+                    arm_backoff(
+                        now,
+                        this_attempt,
+                        config.backoff.for_kind(kind),
+                        retry_after,
+                        entropy,
+                    )
+                }
+                RetryDelayKind::Cooldown => now.saturating_add(
+                    signaling_window.map_or(Duration::ZERO, |window| window.cooldown),
+                ),
+            };
             d.timers.push(TimerDirective::Arm {
                 id: TimerId::FailureBackoff(domain),
                 category: TimerCategory::FailureBackoff,
@@ -1908,6 +2223,171 @@ pub(crate) enum Action {
     Reconnect,
     Restore,
     Probe,
+}
+
+/// Read-only projection of the supervisor-owned signaling recovery task.
+///
+/// This is intentionally derived from `RecoveryIntent`, `RetryGate`, and the
+/// single execution slot instead of being stored by the signaling client. It
+/// gives logs and invariants one typed vocabulary without introducing another
+/// mutable reconnect state machine.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct SignalingGateCauses(u8);
+
+impl SignalingGateCauses {
+    const RECOVERY_MODE: u8 = 1 << 0;
+    const APP_PHASE: u8 = 1 << 1;
+    const NETWORK_PATH: u8 = 1 << 2;
+    const CLEANUP: u8 = 1 << 3;
+    const EXECUTION: u8 = 1 << 4;
+
+    fn from_view(view: &View) -> Self {
+        let mut causes = 0;
+        if view.recovery_mode != RecoveryModeState::Active {
+            causes |= Self::RECOVERY_MODE;
+        }
+        if !view.phase_eligible() {
+            causes |= Self::APP_PHASE;
+        }
+        if matches!(
+            view.network_path,
+            NetworkPathState::OfflineCandidate | NetworkPathState::Offline
+        ) {
+            causes |= Self::NETWORK_PATH;
+        }
+        if view.cleanup_work != CleanupWorkState::Idle {
+            causes |= Self::CLEANUP;
+        }
+        if view.execution != ExecutionState::Idle {
+            causes |= Self::EXECUTION;
+        }
+        Self(causes)
+    }
+}
+
+impl std::fmt::Debug for SignalingGateCauses {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut causes = f.debug_set();
+        if self.0 & Self::RECOVERY_MODE != 0 {
+            causes.entry(&"recovery_mode");
+        }
+        if self.0 & Self::APP_PHASE != 0 {
+            causes.entry(&"app_phase");
+        }
+        if self.0 & Self::NETWORK_PATH != 0 {
+            causes.entry(&"network_path");
+        }
+        if self.0 & Self::CLEANUP != 0 {
+            causes.entry(&"cleanup");
+        }
+        if self.0 & Self::EXECUTION != 0 {
+            causes.entry(&"execution");
+        }
+        causes.finish()
+    }
+}
+
+/// Read-only projection of the one supervisor-owned signaling reconnect task.
+///
+/// The projection remains derived state: it never becomes another mutable
+/// reconnect machine inside the socket client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum SignalingReconnectState {
+    Idle,
+    Ready {
+        work_revision: Revision,
+        strength: RecoveryStrength,
+        attempt: u32,
+    },
+    Running {
+        work_revision: Revision,
+        action_id: u64,
+        strength: RecoveryStrength,
+        attempt: u32,
+    },
+    BackingOff {
+        work_revision: Revision,
+        strength: RecoveryStrength,
+        attempt: u32,
+        retry_id: u64,
+        deadline: PolicyInstant,
+        delay_kind: RetryDelayKind,
+    },
+    Gated {
+        work_revision: Revision,
+        strength: RecoveryStrength,
+        causes: SignalingGateCauses,
+    },
+    Parked {
+        work_revision: Revision,
+        strength: RecoveryStrength,
+        causes: ReleaseMask,
+    },
+}
+
+/// Project the authoritative reconnect-task state from the supervisor view.
+pub(crate) fn signaling_reconnect_state(view: &View) -> SignalingReconnectState {
+    let Some(record) = view.recovery_record.as_ref() else {
+        return SignalingReconnectState::Idle;
+    };
+    if !record.required_impacts.contains(RecoveryImpact::Signaling) {
+        return SignalingReconnectState::Idle;
+    }
+    let strength = record
+        .strength
+        .or_else(|| view.current_recovery_strength())
+        .expect("recovery record must carry recovery strength");
+
+    if view.execution.is_recovery()
+        && let Some(effect) = view.effect.as_ref()
+    {
+        return SignalingReconnectState::Running {
+            work_revision: record.work_revision,
+            action_id: effect.action_id,
+            strength,
+            attempt: record.attempt,
+        };
+    }
+
+    match record.gate {
+        RetryGateState::BackingOff => SignalingReconnectState::BackingOff {
+            work_revision: record.work_revision,
+            strength,
+            attempt: record.attempt,
+            retry_id: record.retry_id,
+            // The shell records this before it arms the timer. `None` is only
+            // possible for a hand-built malformed test view; preserve a total
+            // projection rather than panicking in diagnostics.
+            deadline: record.retry_deadline.unwrap_or_default(),
+            delay_kind: record.retry_delay_kind,
+        },
+        RetryGateState::Parked => SignalingReconnectState::Parked {
+            work_revision: record.work_revision,
+            strength,
+            causes: record.release_mask.clone(),
+        },
+        RetryGateState::Ready
+            if view.recovery_mode != RecoveryModeState::Active
+                || !view.phase_eligible()
+                || matches!(
+                    view.network_path,
+                    NetworkPathState::OfflineCandidate | NetworkPathState::Offline
+                )
+                || view.cleanup_work != CleanupWorkState::Idle
+                || view.execution != ExecutionState::Idle =>
+        {
+            SignalingReconnectState::Gated {
+                work_revision: record.work_revision,
+                strength,
+                causes: SignalingGateCauses::from_view(view),
+            }
+        }
+        RetryGateState::Ready => SignalingReconnectState::Ready {
+            work_revision: record.work_revision,
+            strength,
+            attempt: record.attempt,
+        },
+    }
 }
 
 fn gate_ready(record: &Option<PendingRecord>) -> bool {

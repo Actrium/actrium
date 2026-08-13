@@ -8,10 +8,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
+use actr_hyper::SignalingClient;
 use actr_hyper::lifecycle::{
     AppLifecycleState, CleanupReason, DefaultNetworkEventProcessor, NetworkAvailability,
     NetworkEventProcessor, NetworkRecoveryAction, NetworkSnapshot, NetworkTransportFlags,
-    SignalingFactLostCause, SignalingFactOrigin, TeardownReport,
+    SignalingFactLostCause, TeardownReport,
 };
 use actr_hyper::test_support::{
     TestHarness, TestSignalingServer, spawn_gated_network_event_supervisor,
@@ -94,14 +95,6 @@ impl RecordingProcessor {
 
 #[async_trait::async_trait]
 impl NetworkEventProcessor for RecordingProcessor {
-    fn suppress_auto_reconnect(&self) {
-        self.inner.suppress_auto_reconnect();
-    }
-
-    fn resume_auto_reconnect(&self) {
-        self.inner.resume_auto_reconnect();
-    }
-
     async fn process_network_available(&self) -> Result<(), String> {
         self.inner.process_network_available().await
     }
@@ -152,14 +145,6 @@ impl NetworkEventProcessor for RecordingProcessor {
 
 #[async_trait::async_trait]
 impl NetworkEventProcessor for BlockingRecoveryProcessor {
-    fn suppress_auto_reconnect(&self) {
-        self.inner.suppress_auto_reconnect();
-    }
-
-    fn resume_auto_reconnect(&self) {
-        self.inner.resume_auto_reconnect();
-    }
-
     async fn process_network_available(&self) -> Result<(), String> {
         self.inner.process_network_available().await
     }
@@ -402,12 +387,18 @@ async fn expect_stream(
 }
 
 async fn prime_live_generation(
+    signaling_client: &dyn SignalingClient,
     handle: &actr_hyper::lifecycle::NetworkEventHandle,
-    sink: &actr_hyper::lifecycle::SupervisorFactSink,
-) {
-    sink.signaling_generation_committed(1, SignalingFactOrigin::External);
+) -> u64 {
+    // Installing a sink after the fixture's initial handshake seeds it from
+    // the concrete socket state. Keep the generation for later manually
+    // injected loss facts rather than fabricating `1`: the initial socket is
+    // generation `0`, and a fabricated commit makes its real loss stale.
+    let generation = signaling_client
+        .live_generation_for_test()
+        .expect("VNet fixture should have a live signaling generation");
     // Internal inputs are selected before public events. Acceptance of this
-    // duplicate foreground observation therefore proves the queued generation
+    // duplicate foreground observation therefore proves the queued sink-seed
     // fact has already reached policy state.
     let accepted = handle
         .handle_app_lifecycle_changed(AppLifecycleState::Foreground {
@@ -416,6 +407,7 @@ async fn prime_live_generation(
         .await
         .expect("priming foreground observation should be accepted");
     assert!(accepted.success);
+    generation
 }
 
 async fn wait_for_actions(processor: &RecordingProcessor, expected: &[NetworkRecoveryAction]) {
@@ -473,8 +465,9 @@ async fn start_blocked_restore(
     handle: &actr_hyper::lifecycle::NetworkEventHandle,
     sink: &actr_hyper::lifecycle::SupervisorFactSink,
     processor: &BlockingRecoveryProcessor,
+    generation: u64,
 ) {
-    sink.signaling_generation_lost(1, SignalingFactLostCause::RemoteReset);
+    sink.signaling_generation_lost(generation, SignalingFactLostCause::RemoteReset);
     let accepted = handle
         .handle_network_path_changed(snapshot(1, NetworkAvailability::Available, true))
         .await
@@ -506,9 +499,10 @@ async fn short_foreground_preserves_inflight_restore_and_recovers_vnet_bidirecti
         .peer(100)
         .signaling_client
         .set_supervisor_fact_sink(sink.clone());
-    prime_live_generation(&handle, &sink).await;
+    let generation =
+        prime_live_generation(harness.peer(100).signaling_client.as_ref(), &handle).await;
 
-    start_blocked_restore(&handle, &sink, &processor).await;
+    start_blocked_restore(&handle, &sink, &processor, generation).await;
     let background = handle
         .handle_app_lifecycle_changed(AppLifecycleState::Background)
         .await
@@ -570,9 +564,10 @@ async fn long_foreground_preempts_inflight_restore_and_rebuilds_vnet_bidirection
         .peer(100)
         .signaling_client
         .set_supervisor_fact_sink(sink.clone());
-    prime_live_generation(&handle, &sink).await;
+    let generation =
+        prime_live_generation(harness.peer(100).signaling_client.as_ref(), &handle).await;
 
-    start_blocked_restore(&handle, &sink, &processor).await;
+    start_blocked_restore(&handle, &sink, &processor, generation).await;
     let background = handle
         .handle_app_lifecycle_changed(AppLifecycleState::Background)
         .await
@@ -643,7 +638,7 @@ async fn vnet_offline_rollback_before_grace_keeps_session_and_sends_no_sdp() {
         .peer(100)
         .signaling_client
         .set_supervisor_fact_sink(sink.clone());
-    prime_live_generation(&handle, &sink).await;
+    prime_live_generation(harness.peer(100).signaling_client.as_ref(), &handle).await;
     harness.reset_counters();
 
     harness.simulate_disconnect();
@@ -716,7 +711,7 @@ async fn vnet_committed_offline_restores_once_and_recovers_bidirectionally() {
         .peer(100)
         .signaling_client
         .set_supervisor_fact_sink(sink.clone());
-    prime_live_generation(&handle, &sink).await;
+    prime_live_generation(harness.peer(100).signaling_client.as_ref(), &handle).await;
 
     harness.simulate_disconnect();
     handle
@@ -784,14 +779,15 @@ async fn accepted_event_while_webrtc_not_ready_fails_fast_without_pending_leak()
         .peer(100)
         .signaling_client
         .set_supervisor_fact_sink(sink.clone());
-    prime_live_generation(&handle, &sink).await;
+    let generation =
+        prime_live_generation(harness.peer(100).signaling_client.as_ref(), &handle).await;
 
     harness
         .vnet
         .as_ref()
         .expect("test requires VNet")
         .block_network();
-    sink.signaling_generation_lost(1, SignalingFactLostCause::RemoteReset);
+    sink.signaling_generation_lost(generation, SignalingFactLostCause::RemoteReset);
     let accepted = handle
         .handle_network_path_changed(snapshot(1, NetworkAvailability::Available, true))
         .await
@@ -839,14 +835,15 @@ async fn cleanup_request_and_recovery_overlap_cannot_revive_stale_session() {
         .peer(100)
         .signaling_client
         .set_supervisor_fact_sink(sink.clone());
-    prime_live_generation(&handle, &sink).await;
+    let generation =
+        prime_live_generation(harness.peer(100).signaling_client.as_ref(), &handle).await;
 
     harness
         .vnet
         .as_ref()
         .expect("test requires VNet")
         .block_network();
-    sink.signaling_generation_lost(1, SignalingFactLostCause::RemoteReset);
+    sink.signaling_generation_lost(generation, SignalingFactLostCause::RemoteReset);
     handle
         .handle_network_path_changed(snapshot(1, NetworkAvailability::Available, true))
         .await
@@ -916,32 +913,54 @@ async fn cleanup_request_and_recovery_overlap_cannot_revive_stale_session() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn failed_real_signaling_restore_retries_after_same_endpoint_returns() {
     let (mut harness, _rpc_tasks) = setup_bidirectional_vnet().await;
-    let processor = harness.peer(100).network_processor();
-    let processor_for_task: Arc<dyn NetworkEventProcessor> = processor;
-    let (handle, sink, shutdown, reconciler) = spawn_network_event_supervisor(processor_for_task);
+    let processor_100: Arc<dyn NetworkEventProcessor> = harness.peer(100).network_processor();
+    let (handle_100, sink_100, shutdown_100, reconciler_100) =
+        spawn_network_event_supervisor(processor_100);
     harness
         .peer(100)
         .signaling_client
-        .set_supervisor_fact_sink(sink.clone());
-    prime_live_generation(&handle, &sink).await;
+        .set_supervisor_fact_sink(sink_100.clone());
+    let generation_100 =
+        prime_live_generation(harness.peer(100).signaling_client.as_ref(), &handle_100).await;
+
+    // Every production node owns an always-on supervisor. Model both peers so
+    // restarting the shared endpoint does not rely on the removed
+    // signaling-client-local reconnect loop for the second peer.
+    let processor_200: Arc<dyn NetworkEventProcessor> = harness.peer(200).network_processor();
+    let (handle_200, sink_200, shutdown_200, reconciler_200) =
+        spawn_network_event_supervisor(processor_200);
+    harness
+        .peer(200)
+        .signaling_client
+        .set_supervisor_fact_sink(sink_200.clone());
+    let generation_200 =
+        prime_live_generation(harness.peer(200).signaling_client.as_ref(), &handle_200).await;
 
     let signaling_port = harness.server.port();
     harness.server.shutdown().await;
     let disconnected_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while harness.peer(100).signaling_client.is_connected() {
+    while harness.peer(100).signaling_client.is_connected()
+        || harness.peer(200).signaling_client.is_connected()
+    {
         assert!(
             tokio::time::Instant::now() < disconnected_deadline,
-            "signaling client did not observe the real server shutdown"
+            "signaling clients did not observe the real server shutdown"
         );
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 
-    sink.signaling_generation_lost(1, SignalingFactLostCause::RemoteReset);
-    let accepted = handle
+    sink_100.signaling_generation_lost(generation_100, SignalingFactLostCause::RemoteReset);
+    sink_200.signaling_generation_lost(generation_200, SignalingFactLostCause::RemoteReset);
+    let accepted_100 = handle_100
         .handle_network_path_changed(snapshot(1, NetworkAvailability::Available, true))
         .await
-        .expect("online recovery should be accepted while signaling is down");
-    assert!(accepted.success);
+        .expect("peer 100 online recovery should be accepted while signaling is down");
+    let accepted_200 = handle_200
+        .handle_network_path_changed(snapshot(1, NetworkAvailability::Available, true))
+        .await
+        .expect("peer 200 online recovery should be accepted while signaling is down");
+    assert!(accepted_100.success);
+    assert!(accepted_200.success);
 
     tokio::time::sleep(Duration::from_millis(750)).await;
     assert!(
@@ -958,8 +977,14 @@ async fn failed_real_signaling_restore_retries_after_same_endpoint_returns() {
     assert_eq!(harness.peer(100).pending_count().await, 0);
     assert_eq!(harness.peer(200).pending_count().await, 0);
 
-    shutdown.cancel();
-    reconciler.await.expect("reconciler should stop cleanly");
+    shutdown_100.cancel();
+    shutdown_200.cancel();
+    reconciler_100
+        .await
+        .expect("peer 100 reconciler should stop cleanly");
+    reconciler_200
+        .await
+        .expect("peer 200 reconciler should stop cleanly");
     harness.shutdown().await;
 }
 
@@ -998,7 +1023,7 @@ async fn recovered_vnet_delivers_reliable_streams_bidirectionally() {
         .peer(100)
         .signaling_client
         .set_supervisor_fact_sink(sink.clone());
-    prime_live_generation(&handle, &sink).await;
+    prime_live_generation(harness.peer(100).signaling_client.as_ref(), &handle).await;
 
     harness.simulate_disconnect();
     handle
@@ -1050,6 +1075,28 @@ async fn recovered_vnet_delivers_reliable_streams_bidirectionally() {
 #[tokio::test]
 async fn exhausted_real_ice_restart_falls_back_to_new_session_bidirectionally() {
     let (harness, _rpc_tasks) = setup_bidirectional_vnet().await;
+    // The signaling client no longer owns an independent reconnect loop. Keep
+    // both test peers wired to the same supervisor boundary as production so
+    // a liveness timeout during the virtual-clock ICE exhaustion cannot leave
+    // the signaling socket disconnected after the VNet is restored.
+    let processor_100: Arc<dyn NetworkEventProcessor> = harness.peer(100).network_processor();
+    let (handle_100, sink_100, shutdown_100, reconciler_100) =
+        spawn_network_event_supervisor(processor_100);
+    harness
+        .peer(100)
+        .signaling_client
+        .set_supervisor_fact_sink(sink_100.clone());
+    prime_live_generation(harness.peer(100).signaling_client.as_ref(), &handle_100).await;
+
+    let processor_200: Arc<dyn NetworkEventProcessor> = harness.peer(200).network_processor();
+    let (handle_200, sink_200, shutdown_200, reconciler_200) =
+        spawn_network_event_supervisor(processor_200);
+    harness
+        .peer(200)
+        .signaling_client
+        .set_supervisor_fact_sink(sink_200.clone());
+    prime_live_generation(harness.peer(200).signaling_client.as_ref(), &handle_200).await;
+
     let target = harness.peer(200).id.clone();
     let initial_session = harness
         .peer(100)
@@ -1116,5 +1163,13 @@ async fn exhausted_real_ice_restart_falls_back_to_new_session_bidirectionally() 
     assert_eq!(harness.peer(100).pending_count().await, 0);
     assert_eq!(harness.peer(200).pending_count().await, 0);
 
+    shutdown_100.cancel();
+    shutdown_200.cancel();
+    reconciler_100
+        .await
+        .expect("peer 100 reconciler should stop cleanly");
+    reconciler_200
+        .await
+        .expect("peer 200 reconciler should stop cleanly");
     harness.shutdown().await;
 }

@@ -59,7 +59,12 @@ fn default_and_debug_preserve_the_ungated_terminal_view() {
 fn invalid_or_recordless_machine_inputs_are_fail_closed() {
     let mut supervisor = ungated();
 
-    supervisor.apply_recovery_intent(tp::RecoveryIntentInput::CompleteProbe, true, 1);
+    supervisor.apply_recovery_intent(
+        tp::RecoveryIntentInput::CompleteProbe,
+        true,
+        1,
+        tp::RecoveryImpacts::ALL,
+    );
     supervisor.apply_cleanup_work(tp::CleanupWorkInput::CompleteCleanup, 1);
     supervisor.apply_offline_work(tp::OfflineWorkInput::CompleteDisconnect);
     supervisor.apply_execution(tp::ExecutionInput::Succeeded);
@@ -1135,6 +1140,196 @@ fn inv9_weaker_effect_completion_cannot_acknowledge_stronger_intent() {
 }
 
 // -- retry gating (invariant 10) --------------------------------------------
+
+#[test]
+fn peer_only_recovery_absorbs_signaling_coverage_without_replacing_backoff() {
+    let mut supervisor = ungated();
+    let mut record = tp::PendingRecord::recovery_with_impacts(
+        17,
+        tp::RecoveryStrength::Restore,
+        tp::RecoveryImpacts::PEERS,
+    );
+    record.gate = tp::RetryGateState::BackingOff;
+    record.attempt = 3;
+    record.retry_id = 29;
+    record.retry_deadline = Some(ms(900));
+    supervisor.view.recovery_intent = tp::RecoveryIntentState::RestorePending;
+    supervisor.view.recovery_record = Some(record);
+
+    let outcome = supervisor.accept(
+        tp::Input::SignalingConnectionRequired {
+            cause: tp::SignalingConnectionRequiredCause::HeartbeatObservedDisconnected,
+        },
+        ms(100),
+    );
+    let record = supervisor
+        .view()
+        .recovery_record
+        .as_ref()
+        .expect("the shared recovery obligation must remain");
+
+    assert!(!outcome.advanced);
+    assert!(record.required_impacts.contains(tp::RecoveryImpact::Peers));
+    assert!(
+        record
+            .required_impacts
+            .contains(tp::RecoveryImpact::Signaling)
+    );
+    assert_eq!(record.work_revision, 17);
+    assert_eq!(record.gate, tp::RetryGateState::BackingOff);
+    assert_eq!(record.attempt, 3);
+    assert_eq!(record.retry_id, 29);
+    assert_eq!(record.retry_deadline, Some(ms(900)));
+    assert!(outcome.timer_ops.is_empty());
+}
+
+#[test]
+fn signaling_retry_window_cools_down_without_losing_work_and_material_news_wakes_it() {
+    let mut s = ungated();
+    let configured = s.accept(
+        tp::Input::SignalingRecoveryConfigChanged {
+            max_attempts: 2,
+            initial_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(3),
+            backoff_multiplier_bits: 1.0_f64.to_bits(),
+        },
+        Duration::ZERO,
+    );
+    assert!(!configured.advanced, "config is not lifecycle work");
+    assert_eq!(
+        s.config.signaling_retry_window,
+        Some(tp::SignalingRetryWindow {
+            max_attempts: 2,
+            cooldown: Duration::from_secs(6),
+        })
+    );
+    assert_eq!(s.config.backoff.restore.base_delay, Duration::from_secs(1));
+    assert_eq!(s.config.backoff.restore.max_delay, Duration::from_secs(3));
+    assert_eq!(s.config.backoff.restore.multiplier, 1.0);
+
+    s.accept(
+        tp::Input::SignalingConnectionRequired {
+            cause: tp::SignalingConnectionRequiredCause::HeartbeatObservedDisconnected,
+        },
+        Duration::ZERO,
+    );
+    let first = s
+        .maybe_start_effect(Duration::ZERO)
+        .expect("signaling demand should start a restore");
+    assert_eq!(first.kind, EffectKind::Restore);
+    s.accept(
+        tp::Input::EffectCompleted {
+            action_id: first.action_id,
+            kind: first.kind,
+            policy_revision: first.captured_revision,
+            outcome: EffectOutcome::Failed {
+                diagnosis: EffectDiagnosis::PathUnreachable {
+                    stage: "signaling".into(),
+                },
+            },
+        },
+        Duration::ZERO,
+    );
+    let first_backoff = s.view().recovery_record.clone().expect("work retained");
+    assert_eq!(first_backoff.attempt, 1);
+    assert_eq!(first_backoff.retry_delay_kind, tp::RetryDelayKind::Backoff);
+    let first_deadline = first_backoff.retry_deadline.expect("backoff is armed");
+
+    s.accept(
+        tp::Input::RetryDeadlineExpired {
+            domain: tp::RetryDomain::Recovery,
+            work_revision: first_backoff.work_revision,
+            retry_id: first_backoff.retry_id,
+        },
+        first_deadline,
+    );
+    let second = s
+        .maybe_start_effect(first_deadline)
+        .expect("retry deadline should re-arm the same obligation");
+    s.accept(
+        tp::Input::EffectCompleted {
+            action_id: second.action_id,
+            kind: second.kind,
+            policy_revision: second.captured_revision,
+            outcome: EffectOutcome::Failed {
+                diagnosis: EffectDiagnosis::PathUnreachable {
+                    stage: "signaling".into(),
+                },
+            },
+        },
+        first_deadline,
+    );
+    let cooldown = s.view().recovery_record.clone().expect("work retained");
+    assert_eq!(cooldown.gate, tp::RetryGateState::BackingOff);
+    assert_eq!(cooldown.attempt, 2);
+    assert_eq!(cooldown.retry_delay_kind, tp::RetryDelayKind::Cooldown);
+    assert_eq!(
+        cooldown.retry_deadline,
+        Some(first_deadline + Duration::from_secs(6)),
+        "the exhausted window must remain a pending obligation behind one supervisor cooldown"
+    );
+
+    let duplicate = s.accept(
+        tp::Input::SignalingConnectionRequired {
+            cause: tp::SignalingConnectionRequiredCause::HeartbeatObservedDisconnected,
+        },
+        first_deadline + Duration::from_secs(1),
+    );
+    assert!(
+        !duplicate.advanced,
+        "duplicate demand cannot bypass cooldown"
+    );
+    assert_eq!(
+        s.view().recovery_record.as_ref().unwrap().retry_deadline,
+        cooldown.retry_deadline
+    );
+
+    s.accept(
+        tp::Input::SignalingCredentialPublished { revision: 1 },
+        first_deadline + Duration::from_secs(1),
+    );
+    let woken = s.view().recovery_record.as_ref().expect("work remains");
+    assert_eq!(woken.gate, tp::RetryGateState::Ready);
+    assert_eq!(woken.attempt, 0);
+    assert_eq!(woken.retry_deadline, None);
+    assert_eq!(woken.retry_delay_kind, tp::RetryDelayKind::Backoff);
+}
+
+#[test]
+fn signaling_cooldown_deadline_starts_the_next_attempt_window() {
+    let mut s = ungated();
+    let mut record = tp::PendingRecord::recovery_with_impacts(
+        9,
+        tp::RecoveryStrength::Reconnect,
+        tp::RecoveryImpacts::SIGNALING,
+    );
+    record.gate = tp::RetryGateState::BackingOff;
+    record.attempt = 4;
+    record.retry_id = 12;
+    record.retry_deadline = Some(ms(500));
+    record.retry_delay_kind = tp::RetryDelayKind::Cooldown;
+    s.view.recovery_intent = tp::RecoveryIntentState::ReconnectPending;
+    s.view.recovery_record = Some(record);
+
+    let outcome = s.accept(
+        tp::Input::RetryDeadlineExpired {
+            domain: tp::RetryDomain::Recovery,
+            work_revision: 9,
+            retry_id: 12,
+        },
+        ms(500),
+    );
+    let record = s
+        .view()
+        .recovery_record
+        .as_ref()
+        .expect("obligation remains");
+    assert!(outcome.advanced);
+    assert_eq!(record.gate, tp::RetryGateState::Ready);
+    assert_eq!(record.attempt, 0);
+    assert_eq!(record.retry_deadline, None);
+    assert_eq!(record.retry_delay_kind, tp::RetryDelayKind::Backoff);
+}
 
 #[test]
 fn inv10_availability_failure_backs_off_and_only_matching_deadline_rearms() {

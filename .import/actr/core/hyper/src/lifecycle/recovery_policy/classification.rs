@@ -31,6 +31,8 @@ pub(crate) enum ParkCause {
 pub(crate) enum TriggerClass {
     /// A newly committed session generation.
     SessionActivated,
+    /// A newly published signaling credential revision.
+    CredentialPublished,
     /// A configuration change in scope.
     ConfigurationChanged,
     /// An explicit recovery command (`RecoveryRequested`).
@@ -49,6 +51,7 @@ impl ParkCause {
         match self {
             Self::AuthRejected => &[
                 TriggerClass::SessionActivated,
+                TriggerClass::CredentialPublished,
                 TriggerClass::ExplicitCommand,
             ],
             Self::ConfigRejected => &[
@@ -339,8 +342,12 @@ pub(crate) struct BackoffParams {
     pub base_delay: Duration,
     /// The delay ceiling; sustained kinds retry here indefinitely.
     pub max_delay: Duration,
-    /// The exponent ceiling; `2^exponent` saturates at `2^exponent_cap`.
+    /// The exponent ceiling. It bounds work for hostile or malformed attempt
+    /// counts even when the curve itself would already be capped by
+    /// `max_delay`.
     pub exponent_cap: u32,
+    /// Multiplicative growth factor between consecutive attempts.
+    pub multiplier: f64,
     /// The jitter span: the sampled factor lies in `[1 - jitter_fraction, 1]`.
     pub jitter_fraction: f64,
 }
@@ -348,8 +355,8 @@ pub(crate) struct BackoffParams {
 /// Compute one absolute retry deadline from the backoff curve.
 ///
 /// ```text
-/// exponent = min(attempt - 1, exponent_cap)          saturating
-/// delay    = min(base_delay * 2^exponent, max_delay)
+/// exponent = min(attempt - 1, exponent_cap)                    saturating
+/// delay    = min(base_delay * multiplier^exponent, max_delay)
 /// jitter   = 1 - jitter_fraction * u,  u in [0, 1)   -> (1 - jitter_fraction, 1]
 /// deadline = now + max(delay * jitter, retry_after)
 /// ```
@@ -364,9 +371,22 @@ pub(crate) fn arm_backoff(
     entropy: &mut dyn EntropySource,
 ) -> PolicyInstant {
     let exponent = attempt.saturating_sub(1).min(params.exponent_cap);
-    let factor = 1u32.checked_shl(exponent).unwrap_or(u32::MAX);
-    let scaled = params.base_delay.saturating_mul(factor);
-    let delay = scaled.min(params.max_delay);
+    // `ReconnectConfig.backoff_multiplier` is public input. The supervisor
+    // normalizes it before installing a policy, but keep this arithmetic total
+    // for hand-built test configs too: an invalid factor falls back to a
+    // non-growing curve rather than panicking or producing a NaN duration.
+    let multiplier = params.multiplier;
+    let factor = if multiplier.is_finite() && multiplier > 1.0 {
+        multiplier.powi(exponent.min(i32::MAX as u32) as i32)
+    } else {
+        1.0
+    };
+    let scaled_secs = params.base_delay.as_secs_f64() * factor;
+    let delay = if !scaled_secs.is_finite() || scaled_secs >= params.max_delay.as_secs_f64() {
+        params.max_delay
+    } else {
+        Duration::from_secs_f64(scaled_secs).min(params.max_delay)
+    };
 
     let unit = entropy.next_unit().clamp(0.0, 1.0);
     let jitter = 1.0 - params.jitter_fraction.clamp(0.0, 1.0) * unit;
@@ -803,6 +823,7 @@ mod tests {
             base_delay: Duration::from_millis(100),
             max_delay: Duration::from_secs(10),
             exponent_cap: 6,
+            multiplier: 2.0,
             jitter_fraction: 0.2,
         }
     }
@@ -841,6 +862,7 @@ mod tests {
             base_delay: Duration::from_secs(5),
             max_delay: Duration::from_secs(8),
             exponent_cap: 6,
+            multiplier: 2.0,
             jitter_fraction: 0.2,
         };
         assert_eq!(

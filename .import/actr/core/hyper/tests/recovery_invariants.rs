@@ -97,12 +97,13 @@ struct FakeSignalingClient {
     probe_calls: AtomicU64,
     probe_success: AtomicBool,
     connect_should_fail: AtomicBool,
-    connect_once_calls: AtomicU64,
+    recovery_connect_calls: AtomicU64,
     /// Every attempt at reaching signaling — probe, `connect`, or
-    /// `connect_once` — regardless of which one the processor happens to pick
-    /// once the client has fallen disconnected. This is the right observable
-    /// for "did recovery retry", since a failed reconnect makes later cycles
-    /// skip straight past `probe_alive` (which only runs while connected).
+    /// `connect_once_for_recovery` — regardless of which one the processor
+    /// happens to pick once the client has fallen disconnected. This is the
+    /// right observable for "did recovery retry", since a failed reconnect
+    /// makes later cycles skip straight past `probe_alive` (which only runs
+    /// while connected).
     recovery_attempts: AtomicU64,
     event_tx: broadcast::Sender<SignalingEvent>,
 }
@@ -117,7 +118,7 @@ impl FakeSignalingClient {
             probe_calls: AtomicU64::new(0),
             probe_success: AtomicBool::new(true),
             connect_should_fail: AtomicBool::new(false),
-            connect_once_calls: AtomicU64::new(0),
+            recovery_connect_calls: AtomicU64::new(0),
             recovery_attempts: AtomicU64::new(0),
             event_tx,
         }
@@ -145,9 +146,10 @@ impl FakeSignalingClient {
         self.probe_success.store(success, Ordering::SeqCst);
     }
 
-    /// After this, `connect`/`connect_once` also fail, so a failed probe
-    /// cannot be papered over by a same-cycle reconnect: the whole recovery
-    /// effect genuinely fails and reaches the classification table.
+    /// After this, explicit and supervisor-owned connect attempts also fail,
+    /// so a failed probe cannot be papered over by a same-cycle reconnect:
+    /// the whole recovery effect genuinely fails and reaches the
+    /// classification table.
     fn set_connect_should_fail(&self, fail: bool) {
         self.connect_should_fail.store(fail, Ordering::SeqCst);
     }
@@ -172,8 +174,8 @@ impl SignalingClient for FakeSignalingClient {
         Ok(())
     }
 
-    async fn connect_once(&self) -> NetworkResult<()> {
-        self.connect_once_calls.fetch_add(1, Ordering::SeqCst);
+    async fn connect_once_for_recovery(&self, _action_id: u64) -> NetworkResult<()> {
+        self.recovery_connect_calls.fetch_add(1, Ordering::SeqCst);
         self.recovery_attempts.fetch_add(1, Ordering::SeqCst);
         if self.connect_should_fail.load(Ordering::SeqCst) {
             return Err(NetworkError::ConnectionError(
@@ -559,7 +561,7 @@ async fn inv6_duplicate_foreground_creates_no_recovery_work() {
     }
 
     assert_eq!(
-        client.connect_once_calls.load(Ordering::SeqCst),
+        client.recovery_connect_calls.load(Ordering::SeqCst),
         0,
         "cold and duplicate foreground observations must not create recovery work"
     );

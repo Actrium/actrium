@@ -453,18 +453,6 @@ timer_inventory! {
         success: "role result channel", interrupt: "peer/session replacement",
         expiry: "fail negotiation", reset: "new negotiation generation", external: false
     },
-    SIGNALING_RECONNECT_BACKOFF => {
-        id: "signaling.reconnect_backoff", owner: "signaling_client", category: FailureBackoff,
-        duration: "ReconnectConfig backoff", arm: "signaling connect fails",
-        success: "backoff deadline", interrupt: "explicit reconnect notification or shutdown",
-        expiry: "retry current signaling generation", reset: "successful commit or explicit request", external: false
-    },
-    SIGNALING_RECONNECT_COOLDOWN => {
-        id: "signaling.reconnect_cooldown", owner: "signaling_client", category: FailureBackoff,
-        duration: "2 * configured maximum delay", arm: "reconnect retry sequence exhausts",
-        success: "cooldown deadline", interrupt: "explicit reconnect notification or shutdown",
-        expiry: "start another retry sequence", reset: "successful commit", external: false
-    },
     SIGNALING_CONNECT => {
         id: "signaling.connect", owner: "signaling_client", category: FailureDeadline,
         duration: "configured connect timeout", arm: "WebSocket connect starts",
