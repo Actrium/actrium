@@ -7,7 +7,7 @@ use crate::guest::dynclib_abi::{
     reply_to_actr_error,
 };
 use crate::guest::vtable::HostVTable;
-use crate::{Context, Dest, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
+use crate::{Context, Dest, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
 use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, DataChunk, PayloadType};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -174,6 +174,34 @@ impl Context for DynclibContext {
 
     fn request_id(&self) -> &str {
         &self.request_id
+    }
+
+    /// Override the default `Context::log` to route the record across the FFI
+    /// boundary into the host's tracing global via the vtable `log` trampoline.
+    ///
+    /// A cdylib statically bundles its own `tracing` crate with an isolated
+    /// (null) global dispatcher, so the default impl — which calls
+    /// `tracing::info!(target: "actr_framework::workload", ...)` — has its
+    /// events dropped at the callsite and they never reach the host's
+    /// subscriber. Forwarding through the host vtable lands them in the host
+    /// process's tracing global, which the host-installed subscriber covers
+    /// (stderr fmt layer + OTLP exporter), restoring stderr and OTLP
+    /// visibility for workload logs. Mirrors the web target's FFI log bridge
+    /// at `crate::web::context::Context::log`.
+    fn log(&self, level: LogLevel, msg: &str) {
+        let level_byte: u8 = match level {
+            LogLevel::Trace => 0,
+            LogLevel::Debug => 1,
+            LogLevel::Info => 2,
+            LogLevel::Warn => 3,
+            LogLevel::Error => 4,
+        };
+        // Safety: `HostVTable::log` accepts a raw pointer + length to a UTF-8
+        // buffer; `msg` is a valid `&str` for the call's duration and the host
+        // trampoline only reads `msg_len` bytes (no retention beyond the call).
+        unsafe {
+            (self.vt().log)(self.bridge_token, level_byte, msg.as_ptr(), msg.len());
+        }
     }
 
     async fn call<R: actr_protocol::RpcRequest>(

@@ -290,12 +290,49 @@ unsafe extern "C" fn vtable_free_host_buf(ptr: *mut u8, len: usize) {
     unsafe { std::alloc::dealloc(ptr, layout) };
 }
 
+// ── VTable::log ──────────────────────────────────────────────────────────────
+//
+// A cdylib statically bundles its own `tracing` crate (separate global
+// dispatcher), so workload `ctx.log` records emitted via the default
+// `Context::log` impl never reach the host's subscriber and are silently
+// dropped at the callsite. This trampoline funnels them across the FFI
+// boundary into the host's tracing global — which the host-installed
+// subscriber covers (stderr fmt layer + OTLP exporter) — mirroring the web
+// target's `log_message_with_request_id` host bridge.
+//
+// `level` discriminant order matches `LogLevel` (0..=4 = trace..=error).
+// `token` is the bridge token for context correlation but is not required
+// to emit, so it is accepted and ignored here.
+
+unsafe extern "C" fn vtable_log(token: u64, level: u8, msg: *const u8, msg_len: usize) {
+    let _ = token;
+    let text: &str = if msg.is_null() || msg_len == 0 {
+        ""
+    } else {
+        // Safety: caller (guest) guarantees `msg` is valid for `msg_len` bytes
+        // and that the slice is valid UTF-8 (it originated from a Rust `&str`).
+        match std::str::from_utf8(unsafe { std::slice::from_raw_parts(msg, msg_len) }) {
+            Ok(s) => s,
+            Err(_) => "<invalid utf-8 in workload log>",
+        }
+    };
+    const TARGET: &str = "actr_framework::workload";
+    match level {
+        0 => tracing::trace!(target: TARGET, "{text}"),
+        1 => tracing::debug!(target: TARGET, "{text}"),
+        2 => tracing::info!(target: TARGET, "{text}"),
+        3 => tracing::warn!(target: TARGET, "{text}"),
+        _ => tracing::error!(target: TARGET, "{text}"),
+    }
+}
+
 /// Static VTable instance with all trampolines wired up.
 static HOST_VTABLE: HostVTable = HostVTable {
     retain_context: vtable_retain_context,
     release_context: vtable_release_context,
     invoke: vtable_invoke,
     free_host_buf: vtable_free_host_buf,
+    log: vtable_log,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
