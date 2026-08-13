@@ -1036,6 +1036,21 @@ test_release_prepare_stages_workload_lockfile() {
   fi
 }
 
+test_release_prepare_refreshes_and_stages_e2e_lockfile() {
+  local update_function stage_function
+  update_function=$(declare -f update_versions)
+  stage_function=$(declare -f stage_release_version_files)
+
+  if ! grep -Fq 'cargo update --manifest-path e2e/Cargo.toml' <<<"$update_function"; then
+    printf 'release prepare must refresh the e2e workspace lockfile\n' >&2
+    exit 1
+  fi
+  if ! grep -Fq 'e2e/Cargo.lock' <<<"$stage_function"; then
+    printf 'release prepare must stage the generated e2e workspace lockfile\n' >&2
+    exit 1
+  fi
+}
+
 test_notify_wechat_includes_nuget_packages() {
   reset_release_train_state
 
@@ -1966,6 +1981,7 @@ test_release_prepare_workflow_skips_release_commits
 test_report_stage_merges_state_files
 test_release_prepare_stages_workload_lockfile
 test_notify_wechat_includes_nuget_packages
+test_release_prepare_refreshes_and_stages_e2e_lockfile
 test_update_versions_syncs_optional_dependencies
 test_publish_web_packages_skips_puppeteer_download
 test_cli_zigbuild_uses_zigbuild_arguments_without_build_subcommand
