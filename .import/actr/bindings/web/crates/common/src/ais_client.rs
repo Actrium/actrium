@@ -14,13 +14,24 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::error::{WebError, WebResult};
 
+const CONTROL_ATTEMPT_RETRY_DEADLINE_MS: f64 = 95_000.0;
+const CONTROL_ATTEMPT_BASE_RETRY_DELAY_MS: u32 = 100;
+const CONTROL_ATTEMPT_MAX_RETRY_DELAY_MS: u32 = 2_000;
+
 /// Structured errors returned by POST /ais/renew in Web runtimes.
 #[derive(Debug, Clone, thiserror::Error)]
+#[non_exhaustive]
 pub enum RenewError {
     #[error("invalid renew request: {0}")]
     InvalidRequest(String),
     #[error("renewal token rejected")]
     TokenRejected,
+    #[error("renewal attempt result expired; start a new attempt")]
+    AttemptExpired,
+    #[error("renewal attempt id conflicts with a different request")]
+    AttemptConflict,
+    #[error("renewal attempt is still in progress")]
+    AttemptInProgress,
     #[error("realm unavailable")]
     RealmUnavailable,
     #[error("renewal rate limited")]
@@ -80,10 +91,7 @@ impl WebAisClient {
     ) -> Result<RenewCredentialResponse, RenewError> {
         let url = format!("{}/renew", self.endpoint);
         let body = req.encode_to_vec();
-        let buf = self
-            .post_protobuf_for_renew(&url, body)
-            .await
-            .map_err(|e| RenewError::Retryable(e.to_string()))?;
+        let buf = self.post_protobuf_for_renew(&url, body).await?;
 
         let decoded = RenewCredentialResponse::decode(buf.as_slice()).map_err(|e| {
             log::error!("failed to decode AIS RenewCredentialResponse: {}", e);
@@ -137,24 +145,54 @@ impl WebAisClient {
         url: &str,
         body: Vec<u8>,
     ) -> Result<Vec<u8>, RenewError> {
-        let (status, status_text, retry_after_secs, buf) = self
-            .post_protobuf_raw(url, body)
-            .await
-            .map_err(|e| RenewError::Retryable(e.to_string()))?;
+        let deadline_ms = js_sys::Date::now() + CONTROL_ATTEMPT_RETRY_DEADLINE_MS;
+        let mut completed = None;
+        let mut last_error = None;
+        let mut retry_count = 0u32;
+        loop {
+            match self.post_protobuf_raw(url, body.clone()).await {
+                Ok(result) => {
+                    let retryable = result.0 == 425;
+                    if retryable {
+                        let delay_ms = result
+                            .2
+                            .unwrap_or(1)
+                            .saturating_mul(1_000)
+                            .min(u64::from(u32::MAX)) as u32;
+                        if wait_for_control_retry(deadline_ms, delay_ms).await {
+                            retry_count = retry_count.saturating_add(1);
+                            continue;
+                        }
+                    }
+                    completed = Some(result);
+                    break;
+                }
+                Err(error) => {
+                    last_error = Some(error.to_string());
+                    if wait_for_control_retry(deadline_ms, control_attempt_backoff_ms(retry_count))
+                        .await
+                    {
+                        retry_count = retry_count.saturating_add(1);
+                        continue;
+                    }
+                    break;
+                }
+            }
+        }
+        let (status, status_text, retry_after_secs, buf) = completed.ok_or_else(|| {
+            RenewError::Retryable(
+                last_error.unwrap_or_else(|| "request failed without response".to_string()),
+            )
+        })?;
         if (200..300).contains(&status) {
             return Ok(buf);
         }
 
-        Err(match status {
-            400 => RenewError::InvalidRequest(status_text),
-            401 => RenewError::TokenRejected,
-            403 => RenewError::RealmUnavailable,
-            429 => RenewError::RateLimited { retry_after_secs },
-            500 | 502 | 503 | 504 => RenewError::Retryable(format!("{status} {status_text}")),
-            _ => RenewError::Protocol(format!(
-                "unexpected renew HTTP status {status} {status_text}"
-            )),
-        })
+        Err(classify_renew_http_status(
+            status,
+            status_text,
+            retry_after_secs,
+        ))
     }
 
     async fn post_protobuf_raw(
@@ -272,15 +310,104 @@ impl WebAisClient {
     }
 }
 
+async fn wait_for_control_retry(deadline_ms: f64, requested_delay_ms: u32) -> bool {
+    let remaining_ms = deadline_ms - js_sys::Date::now();
+    if remaining_ms <= 0.0 {
+        return false;
+    }
+    let delay_ms = requested_delay_ms.min(remaining_ms.ceil().min(f64::from(u32::MAX)) as u32);
+    gloo_timers::future::TimeoutFuture::new(delay_ms).await;
+    true
+}
+
+fn control_attempt_backoff_ms(retry_count: u32) -> u32 {
+    CONTROL_ATTEMPT_BASE_RETRY_DELAY_MS
+        .saturating_mul(1u32 << retry_count.min(4))
+        .min(CONTROL_ATTEMPT_MAX_RETRY_DELAY_MS)
+}
+
+fn classify_renew_http_status(
+    status: u16,
+    status_text: String,
+    retry_after_secs: Option<u64>,
+) -> RenewError {
+    match status {
+        400 => RenewError::InvalidRequest(status_text),
+        401 => RenewError::TokenRejected,
+        403 => RenewError::RealmUnavailable,
+        409 => RenewError::AttemptConflict,
+        410 => RenewError::AttemptExpired,
+        425 => RenewError::AttemptInProgress,
+        429 => RenewError::RateLimited { retry_after_secs },
+        500 | 502 | 503 | 504 => RenewError::Retryable(format!("{status} {status_text}")),
+        _ => RenewError::Protocol(format!(
+            "unexpected renew HTTP status {status} {status_text}"
+        )),
+    }
+}
+
 fn classify_renew_error(code: u32, message: String) -> RenewError {
     match code {
         400 => RenewError::InvalidRequest(message),
         401 => RenewError::TokenRejected,
         403 => RenewError::RealmUnavailable,
+        409 => RenewError::AttemptConflict,
+        410 => RenewError::AttemptExpired,
+        425 => RenewError::AttemptInProgress,
         429 => RenewError::RateLimited {
             retry_after_secs: None,
         },
         500 | 502 | 503 | 504 => RenewError::Retryable(message),
         _ => RenewError::Protocol(message),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn structured_http_statuses_remain_distinguishable() {
+        assert!(matches!(
+            classify_renew_http_status(400, "bad".into(), None),
+            RenewError::InvalidRequest(_)
+        ));
+        assert!(matches!(
+            classify_renew_http_status(401, "unauthorized".into(), None),
+            RenewError::TokenRejected
+        ));
+        assert!(matches!(
+            classify_renew_http_status(403, "denied".into(), None),
+            RenewError::RealmUnavailable
+        ));
+        assert!(matches!(
+            classify_renew_http_status(409, "conflict".into(), None),
+            RenewError::AttemptConflict
+        ));
+        assert!(matches!(
+            classify_renew_http_status(410, "gone".into(), None),
+            RenewError::AttemptExpired
+        ));
+        assert!(matches!(
+            classify_renew_http_status(425, "early".into(), Some(90)),
+            RenewError::AttemptInProgress
+        ));
+        assert!(matches!(
+            classify_renew_http_status(429, "limited".into(), Some(17)),
+            RenewError::RateLimited {
+                retry_after_secs: Some(17)
+            }
+        ));
+        assert!(matches!(
+            classify_renew_http_status(503, "down".into(), None),
+            RenewError::Retryable(_)
+        ));
+    }
+
+    #[test]
+    fn control_attempt_backoff_is_bounded() {
+        assert_eq!(control_attempt_backoff_ms(0), 100);
+        assert_eq!(control_attempt_backoff_ms(4), 1_600);
+        assert_eq!(control_attempt_backoff_ms(20), 1_600);
     }
 }

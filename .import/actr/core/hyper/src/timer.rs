@@ -138,6 +138,12 @@ timer_inventory! {
         success: "backoff deadline", interrupt: "renewal task cancellation",
         expiry: "return retryable result", reset: "new renewal sequence", external: false
     },
+    AIS_CONTROL_ATTEMPT_RETRY => {
+        id: "ais.control_attempt.retry", owner: "ais_client", category: FailureBackoff,
+        duration: "server Retry-After or bounded exponential backoff, capped by CONTROL_ATTEMPT_RETRY_DEADLINE", arm: "an idempotent AIS request has an ambiguous transport result or an in-progress response",
+        success: "retry delay expires", interrupt: "request cancellation",
+        expiry: "resend the exact protobuf request body", reset: "each retry until the absolute attempt deadline", external: false
+    },
     HEARTBEAT_POWER_RESERVE => {
         id: "lifecycle.heartbeat.power_reserve", owner: "heartbeat", category: FailureDeadline,
         duration: "POWER_RESERVE_FETCH_TIMEOUT", arm: "heartbeat samples power reserve",

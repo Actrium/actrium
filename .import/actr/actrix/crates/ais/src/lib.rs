@@ -85,6 +85,7 @@
 #![deny(clippy::disallowed_macros)]
 
 pub mod handlers;
+mod idempotency;
 pub mod issuer;
 pub mod ratelimit;
 pub mod renewal;

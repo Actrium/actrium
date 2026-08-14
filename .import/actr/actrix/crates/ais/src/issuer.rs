@@ -164,6 +164,52 @@ struct VerifiedPossession {
     binding_expires_at: i64,
 }
 
+/// Manufacturer nonce verified during request preparation and consumed only
+/// when the surrounding control-plane transaction commits.
+pub(crate) struct ManufacturerNonceBinding {
+    pub(crate) manufacturer: String,
+    pub(crate) key_id: String,
+    pub(crate) nonce: Vec<u8>,
+    pub(crate) created_at: i64,
+    pub(crate) expires_at: i64,
+}
+
+/// Registration work prepared without mutating SQLite. The HTTP handler
+/// commits this state together with ACL and pending-registration metadata.
+pub(crate) struct PreparedRegistration {
+    pub(crate) register_ok: register_response::RegisterOk,
+    token_hash: Vec<u8>,
+    token_expires_at: i64,
+    manufacturer_nonce: Option<ManufacturerNonceBinding>,
+}
+
+/// Reissue work prepared without mutating SQLite. The control-attempt journal
+/// commits these values, the nonce consumption, and the encrypted response in
+/// one transaction.
+pub(crate) struct PreparedReissue {
+    pub(crate) register_ok: register_response::RegisterOk,
+    pub(crate) successor_token: Vec<u8>,
+    pub(crate) successor_hash: Vec<u8>,
+    pub(crate) candidate_expires_at: i64,
+    pub(crate) proof_hash: Vec<u8>,
+    pub(crate) binding_expires_at: i64,
+    pub(crate) manufacturer_nonce: Option<ManufacturerNonceBinding>,
+}
+
+/// Result of preparing a reissue request for an atomic control-attempt commit.
+pub(crate) enum ReissuePreparation {
+    Success(PreparedReissue),
+    /// Stable client/authentication rejection. The optional verified nonce is
+    /// consumed atomically with the cached rejection.
+    Rejected {
+        response: RegisterResponse,
+        manufacturer_nonce: Option<ManufacturerNonceBinding>,
+    },
+    /// Infrastructure failure. The attempt lease is released so the exact body
+    /// can be retried instead of caching a transient failure.
+    Retryable(RegisterResponse),
+}
+
 impl ReissueFailure {
     /// Map to the `(code, message)` pair carried in `RegisterResponse`.
     fn to_response(&self) -> (u32, String) {
@@ -174,6 +220,23 @@ impl ReissueFailure {
                 "actor identity possession not proven".to_string(),
             ),
         }
+    }
+}
+
+fn reissue_error_response(failure: ReissueFailure) -> RegisterResponse {
+    let (code, message) = failure.to_response();
+    RegisterResponse {
+        result: Some(register_response::Result::Error(ErrorResponse {
+            code,
+            message,
+        })),
+    }
+}
+
+fn response_error_code(response: &RegisterResponse) -> Option<u32> {
+    match response.result.as_ref() {
+        Some(register_response::Result::Error(error)) => Some(error.code),
+        _ => None,
     }
 }
 
@@ -644,80 +707,129 @@ impl AIdIssuer {
         }
     }
 
-    /// Re-authenticate a registration context and issue fresh credentials for
-    /// an existing actor identity.
-    ///
-    /// This is deliberately separate from registration: callers must provide an
-    /// `ActrId` whose realm and type exactly match the authenticated registration
-    /// request, and no new serial number is allocated.
-    ///
-    /// `renewal_proof` is the caller's possession proof for exactly this
-    /// `actor_id`: the raw renewal token most recently issued to that actor.
-    /// Registration authentication alone only proves the caller may run this
-    /// package/type in this realm — it must never be enough to mint
-    /// credentials for an arbitrary serial number.
-    /// Failures are mapped into the `Error` variant of [`RegisterResponse`] here
-    /// so the handler has a single non-fallible path; this never returns `Err`.
-    pub async fn reissue_credential_with_realm_secret_check(
+    /// Prepare a new identity and signed credentials without changing durable
+    /// registration state.
+    pub(crate) async fn prepare_registration_with_realm_secret_check(
+        &self,
+        request: &RegisterRequest,
+        realm_secret_check: Option<RealmSecretCheck>,
+    ) -> Result<PreparedRegistration, AidError> {
+        self.prepare_registration_inner(request, realm_secret_check.as_ref())
+            .await
+    }
+
+    /// Commit the durable portion of a prepared registration into a
+    /// caller-owned transaction.
+    pub(crate) async fn commit_prepared_registration(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        prepared: &PreparedRegistration,
+    ) -> Result<(), AidError> {
+        if let Some(binding) = prepared.manufacturer_nonce.as_ref() {
+            Self::consume_manufacturer_auth_nonce_in_transaction(tx, binding).await?;
+        }
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO ais_renewal_token
+                (actor_id, token_hash, expires_at, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+        )
+        .bind(prepared.register_ok.actr_id.to_string_repr())
+        .bind(&prepared.token_hash)
+        .bind(prepared.token_expires_at)
+        .bind(crate::renewal::now_secs())
+        .execute(&mut **tx)
+        .await
+        .map_err(|error| {
+            AidError::GenerationFailed(format!("Failed to persist renewal token: {error}"))
+        })?;
+
+        Ok(())
+    }
+
+    /// Prepare a stable-identity credential reissue without changing durable
+    /// identity state. Used by the HTTP handler's idempotency transaction.
+    pub(crate) async fn prepare_reissue_credential_with_realm_secret_check(
         &self,
         actor_id: &ActrId,
         request: &RegisterRequest,
         renewal_proof: Option<&[u8]>,
         realm_secret_check: Option<RealmSecretCheck>,
-    ) -> RegisterResponse {
-        match self
-            .reissue_credential_inner(
-                actor_id,
-                request,
-                renewal_proof,
-                realm_secret_check.as_ref(),
-            )
+    ) -> ReissuePreparation {
+        if actor_id.realm != request.realm || actor_id.r#type != request.actr_type {
+            return ReissuePreparation::Rejected {
+                response: reissue_error_response(AidError::InvalidFormat.into()),
+                manufacturer_nonce: None,
+            };
+        }
+
+        let manufacturer_nonce = match self
+            .verify_registration_identity(request, realm_secret_check.as_ref())
             .await
         {
-            Ok(register_ok) => RegisterResponse {
-                result: Some(register_response::Result::Success(register_ok)),
-            },
+            Ok(binding) => binding,
             Err(err) => {
-                let (code, message) = err.to_response();
-                RegisterResponse {
-                    result: Some(register_response::Result::Error(ErrorResponse {
-                        code,
-                        message,
-                    })),
-                }
+                let failure = ReissueFailure::from(err);
+                let response = reissue_error_response(failure);
+                return if response_error_code(&response).is_some_and(|code| code >= 500) {
+                    ReissuePreparation::Retryable(response)
+                } else {
+                    ReissuePreparation::Rejected {
+                        response,
+                        manufacturer_nonce: None,
+                    }
+                };
             }
+        };
+
+        let proof = match self.verify_actor_possession(actor_id, renewal_proof).await {
+            Ok(proof) => proof,
+            Err(failure) => {
+                let response = reissue_error_response(failure);
+                return if response_error_code(&response).is_some_and(|code| code >= 500) {
+                    ReissuePreparation::Retryable(response)
+                } else {
+                    ReissuePreparation::Rejected {
+                        response,
+                        manufacturer_nonce,
+                    }
+                };
+            }
+        };
+
+        let register_ok = match self.issue_credential_for_actor(actor_id).await {
+            Ok(register_ok) => register_ok,
+            Err(err) => {
+                return ReissuePreparation::Retryable(reissue_error_response(err.into()));
+            }
+        };
+
+        if self.config.renewal_token_secret.is_empty() {
+            return ReissuePreparation::Retryable(reissue_error_response(
+                AidError::GenerationFailed("renewal_token_secret is required".to_string()).into(),
+            ));
         }
-    }
 
-    async fn reissue_credential_inner(
-        &self,
-        actor_id: &ActrId,
-        request: &RegisterRequest,
-        renewal_proof: Option<&[u8]>,
-        realm_secret_check: Option<&RealmSecretCheck>,
-    ) -> Result<register_response::RegisterOk, ReissueFailure> {
-        if actor_id.realm != request.realm || actor_id.r#type != request.actr_type {
-            platform::recording::warn!(
-                "Credential reissue identity mismatch: actor={}, requested_type={}, requested_realm={}",
-                actor_id.to_string_repr(),
-                request.actr_type.to_string_repr(),
-                request.realm.realm_id
-            );
-            return Err(AidError::InvalidFormat.into());
-        }
+        let successor_token = crate::renewal::derive_successor_token(
+            &self.config.renewal_token_secret,
+            &proof.token,
+            actor_id,
+            proof.binding_expires_at,
+        );
+        let successor_hash = crate::renewal::hash_token(&successor_token);
+        let anchor = proof.binding_expires_at.max(crate::renewal::now_secs());
+        let candidate_expires_at =
+            crate::renewal::successor_expires_at(anchor, self.config.renewal_token_ttl_secs);
 
-        self.verify_registration_identity(request, realm_secret_check)
-            .await?;
-        let proof = self
-            .verify_actor_possession(actor_id, renewal_proof)
-            .await?;
-
-        let mut register_ok = self.issue_credential_for_actor(actor_id).await?;
-        let (renewal_token, renewal_token_expires_at) =
-            self.issue_reissue_renewal_token(actor_id, &proof).await?;
-        register_ok.renewal_token = Some(renewal_token);
-        register_ok.renewal_token_expires_at = Some(renewal_token_expires_at);
-        Ok(register_ok)
+        ReissuePreparation::Success(PreparedReissue {
+            register_ok,
+            successor_token,
+            successor_hash,
+            candidate_expires_at,
+            proof_hash: crate::renewal::hash_token(&proof.token),
+            binding_expires_at: proof.binding_expires_at,
+            manufacturer_nonce,
+        })
     }
 
     /// Verify that the reissue caller actually owns `actor_id`.
@@ -784,10 +896,34 @@ impl AIdIssuer {
         request: &RegisterRequest,
         realm_secret_check: Option<&RealmSecretCheck>,
     ) -> Result<register_response::RegisterOk, AidError> {
+        let prepared = self
+            .prepare_registration_inner(request, realm_secret_check)
+            .await?;
+        let pool = platform::storage::db::get_database().get_pool();
+        let mut tx = pool.begin().await.map_err(|error| {
+            AidError::GenerationFailed(format!("Failed to begin registration: {error}"))
+        })?;
+        self.commit_prepared_registration(&mut tx, &prepared)
+            .await?;
+        tx.commit().await.map_err(|error| {
+            AidError::GenerationFailed(format!("Failed to commit registration: {error}"))
+        })?;
+
+        let _ = crate::renewal::gc_expired_tokens().await;
+        Ok(prepared.register_ok)
+    }
+
+    /// Prepare signing and token material without committing identity state.
+    async fn prepare_registration_inner(
+        &self,
+        request: &RegisterRequest,
+        realm_secret_check: Option<&RealmSecretCheck>,
+    ) -> Result<PreparedRegistration, AidError> {
         // Ensure a usable key is available
         self.ensure_key_loaded().await?;
 
-        self.verify_registration_identity(request, realm_secret_check)
+        let manufacturer_nonce = self
+            .verify_registration_identity(request, realm_secret_check)
             .await?;
 
         // Generate ActrId
@@ -838,10 +974,15 @@ impl AIdIssuer {
         // Generate a time-limited TURN credential compatible with coturn --use-auth-secret.
         let turn_credential = self.generate_turn_credential(&actr_id.to_string_repr(), expr_time);
 
-        let (renewal_token, renewal_token_expires_at) =
-            self.issue_fresh_renewal_token(&actr_id).await?;
-
-        Ok(register_response::RegisterOk {
+        if self.config.renewal_token_secret.is_empty() {
+            return Err(AidError::GenerationFailed(
+                "renewal_token_secret is required".to_string(),
+            ));
+        }
+        let renewal_token = self.generate_renewal_token();
+        let token_expires_at = self.calculate_renewal_expiry_time();
+        let token_hash = crate::renewal::hash_token(&renewal_token);
+        let register_ok = register_response::RegisterOk {
             actr_id,
             credential,
             turn_credential,
@@ -849,8 +990,18 @@ impl AIdIssuer {
             signaling_heartbeat_interval_secs: self.config.signaling_heartbeat_interval_secs,
             signing_pubkey: Bytes::from(verifying_key.as_bytes().to_vec()),
             signing_key_id: key_id,
-            renewal_token: Some(renewal_token),
-            renewal_token_expires_at: Some(renewal_token_expires_at),
+            renewal_token: Some(Bytes::from(renewal_token)),
+            renewal_token_expires_at: Some(Timestamp {
+                seconds: token_expires_at,
+                nanos: 0,
+            }),
+        };
+
+        Ok(PreparedRegistration {
+            register_ok,
+            token_hash,
+            token_expires_at,
+            manufacturer_nonce,
         })
     }
 
@@ -859,7 +1010,7 @@ impl AIdIssuer {
         &self,
         request: &RegisterRequest,
         realm_secret_check: Option<&RealmSecretCheck>,
-    ) -> Result<(), AidError> {
+    ) -> Result<Option<ManufacturerNonceBinding>, AidError> {
         let auth_mode = match request.auth_mode {
             Some(value) if value == actr_protocol::RegisterAuthMode::Linked as i32 => {
                 actr_protocol::RegisterAuthMode::Linked
@@ -878,7 +1029,8 @@ impl AIdIssuer {
                 self.verify_mfr_identity(request).await
             }
             actr_protocol::RegisterAuthMode::Linked => {
-                self.verify_linked_identity(request, realm_secret_check)
+                self.verify_linked_identity(request, realm_secret_check)?;
+                Ok(None)
             }
         }
     }
@@ -919,7 +1071,10 @@ impl AIdIssuer {
     /// are terminal and cannot fall through.
     /// Path 2: only a never-published tuple may use manifest and request signatures.
     /// Otherwise reject
-    async fn verify_mfr_identity(&self, request: &RegisterRequest) -> Result<(), AidError> {
+    async fn verify_mfr_identity(
+        &self,
+        request: &RegisterRequest,
+    ) -> Result<Option<ManufacturerNonceBinding>, AidError> {
         let actr_type = &request.actr_type;
         if actr_type.version.is_empty() {
             return Err(AidError::InvalidFormat);
@@ -1017,7 +1172,7 @@ impl AIdIssuer {
                 target_ref,
                 signing_key_id
             );
-            return Ok(());
+            return Ok(None);
         }
 
         // Path 2: not in table -> verify package signature + manufacturer authorization
@@ -1222,20 +1377,19 @@ impl AIdIssuer {
             return Err(AidError::ManufacturerNotVerified);
         }
 
-        Self::consume_manufacturer_auth_nonce(
-            &pool,
-            mfr_name,
-            &signing_key_id,
-            manufacturer_auth_nonce.as_ref(),
-            now,
-        )
-        .await?;
-
         platform::recording::debug!(
             "MFR manifest and manufacturer signature verification passed, type_str={}",
             type_str
         );
-        Ok(())
+        let created_at = i64::try_from(now)
+            .map_err(|_| AidError::InvalidTimestamp("current time exceeds i64".to_string()))?;
+        Ok(Some(ManufacturerNonceBinding {
+            manufacturer: mfr_name.clone(),
+            key_id: signing_key_id,
+            nonce: manufacturer_auth_nonce.to_vec(),
+            created_at,
+            expires_at: created_at.saturating_add(MANUFACTURER_NONCE_TTL_SECS as i64),
+        }))
     }
 
     fn map_mfr_verification_error(error: actrix_mfr::MfrError) -> AidError {
@@ -1289,49 +1443,42 @@ impl AIdIssuer {
         Ok(())
     }
 
-    async fn consume_manufacturer_auth_nonce(
-        pool: &sqlx::SqlitePool,
-        manufacturer: &str,
-        signing_key_id: &str,
-        manufacturer_auth_nonce: &[u8],
-        now: u64,
+    async fn consume_manufacturer_auth_nonce_in_transaction(
+        tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+        binding: &ManufacturerNonceBinding,
     ) -> Result<(), AidError> {
-        let now_i64 = i64::try_from(now)
-            .map_err(|_| AidError::InvalidTimestamp("current time exceeds i64".to_string()))?;
-        let expires_at = now_i64.saturating_add(MANUFACTURER_NONCE_TTL_SECS as i64);
-
-        sqlx::query("DELETE FROM ais_manufacturer_auth_nonce WHERE expires_at < ?")
-            .bind(now_i64)
-            .execute(pool)
+        let now = crate::renewal::now_secs();
+        if binding.expires_at <= now {
+            return Err(AidError::ManufacturerNotVerified);
+        }
+        sqlx::query("DELETE FROM ais_manufacturer_auth_nonce WHERE expires_at < ?1")
+            .bind(now)
+            .execute(&mut **tx)
             .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("manufacturer nonce cleanup failed: {e}"))
+            .map_err(|error| {
+                AidError::GenerationFailed(format!("manufacturer nonce cleanup failed: {error}"))
             })?;
 
         let result = sqlx::query(
-            "INSERT INTO ais_manufacturer_auth_nonce (manufacturer, key_id, nonce, created_at, expires_at)
-             VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO ais_manufacturer_auth_nonce
+                (manufacturer, key_id, nonce, created_at, expires_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
         )
-        .bind(manufacturer)
-        .bind(signing_key_id)
-        .bind(manufacturer_auth_nonce)
-        .bind(now_i64)
-        .bind(expires_at)
-        .execute(pool)
+        .bind(&binding.manufacturer)
+        .bind(&binding.key_id)
+        .bind(&binding.nonce)
+        .bind(binding.created_at)
+        .bind(binding.expires_at)
+        .execute(&mut **tx)
         .await;
 
         match result {
             Ok(_) => Ok(()),
-            Err(sqlx::Error::Database(err)) if err.is_unique_violation() => {
-                platform::recording::warn!(
-                    "manufacturer_auth_nonce replay detected: manufacturer={}, key_id={}",
-                    manufacturer,
-                    signing_key_id
-                );
+            Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
                 Err(AidError::ManufacturerNotVerified)
             }
-            Err(err) => Err(AidError::GenerationFailed(format!(
-                "manufacturer nonce consume failed: {err}"
+            Err(error) => Err(AidError::GenerationFailed(format!(
+                "manufacturer nonce consume failed: {error}"
             ))),
         }
     }
@@ -1372,122 +1519,6 @@ impl AIdIssuer {
         use rand::RngCore;
         rand::thread_rng().fill_bytes(&mut token);
         token
-    }
-
-    async fn issue_fresh_renewal_token(
-        &self,
-        actor_id: &ActrId,
-    ) -> Result<(Bytes, Timestamp), AidError> {
-        if self.config.renewal_token_secret.is_empty() {
-            return Err(AidError::GenerationFailed(
-                "renewal_token_secret is required".to_string(),
-            ));
-        }
-
-        let token = self.generate_renewal_token();
-        let expires_at = self.calculate_renewal_expiry_time();
-        let token_hash = crate::renewal::hash_token(&token);
-        crate::renewal::insert_renewal_token(actor_id, &token_hash, expires_at)
-            .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("Failed to persist renewal token: {e}"))
-            })?;
-
-        let _ = crate::renewal::gc_expired_tokens().await;
-        crate::renewal::trim_oldest_tokens_for_actor(actor_id)
-            .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("Failed to trim renewal tokens: {e}"))
-            })?;
-
-        Ok((
-            Bytes::from(token),
-            Timestamp {
-                seconds: expires_at,
-                nanos: 0,
-            },
-        ))
-    }
-
-    /// Issue the renewal token that accompanies a credential reissue.
-    ///
-    /// Unlike [`Self::issue_fresh_renewal_token`], the successor is derived
-    /// deterministically from the presented possession proof rather than drawn
-    /// from the CSPRNG. That is what makes `/ais/reissue` safe to retry: a
-    /// client whose response was lost replays the same proof and re-derives the
-    /// same successor, so the binding it is still holding is never displaced by
-    /// a competing token. A fast replay reuses the still-live row unchanged; a
-    /// replay after that one-day successor expired (while the original proof is
-    /// still inside the reissue grace) refreshes the row's expiry rather than
-    /// failing — so identity recovery survives any number of lost responses.
-    async fn issue_reissue_renewal_token(
-        &self,
-        actor_id: &ActrId,
-        proof: &VerifiedPossession,
-    ) -> Result<(Bytes, Timestamp), AidError> {
-        if self.config.renewal_token_secret.is_empty() {
-            return Err(AidError::GenerationFailed(
-                "renewal_token_secret is required".to_string(),
-            ));
-        }
-
-        let token = crate::renewal::derive_successor_token(
-            &self.config.renewal_token_secret,
-            &proof.token,
-            actor_id,
-            proof.binding_expires_at,
-        );
-        let token_hash = crate::renewal::hash_token(&token);
-
-        // Reissue accepts proofs that already expired (anything inside the
-        // binding grace window), so anchoring the successor on the proof's
-        // expiry alone could mint an already-dead token. Take whichever of the
-        // proof expiry and now is later; only the first attempt's value is
-        // ever persisted.
-        let anchor = proof.binding_expires_at.max(crate::renewal::now_secs());
-        let expires_at =
-            crate::renewal::successor_expires_at(anchor, self.config.renewal_token_ttl_secs);
-
-        // Upsert rather than `INSERT OR IGNORE`: if the first response was lost
-        // and this one-day successor already expired while the original proof is
-        // still inside the reissue grace, the deterministic row is refreshed to
-        // a live expiry. `INSERT OR IGNORE` would keep the dead row and the
-        // unexpired read-back below would return `None`, producing a spurious
-        // 500 that permanently blocks identity recovery. A still-live row is
-        // left untouched so a fast replay still observes the first expiry.
-        crate::renewal::upsert_reissue_successor_token(actor_id, &token_hash, expires_at)
-            .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("Failed to persist renewal token: {e}"))
-            })?;
-
-        // Read the expiry back instead of returning the value just computed:
-        // on a fast replay the row was left untouched, and the caller must
-        // observe the expiry AIS actually recorded for it.
-        let stored = crate::renewal::find_unexpired_token(actor_id, &token_hash)
-            .await
-            .map_err(|e| {
-                AidError::GenerationFailed(format!("Failed to read back renewal token: {e}"))
-            })?
-            .ok_or_else(|| {
-                AidError::GenerationFailed(
-                    "renewal token missing immediately after insert".to_string(),
-                )
-            })?;
-
-        // Deliberately no trim here. The proof must stay resolvable for as
-        // long as the grace window allows, otherwise a later retry of this
-        // same attempt would be rejected — the exact failure this endpoint
-        // exists to prevent. Growth stays bounded because a replay inserts
-        // nothing, and `gc_expired_tokens` reclaims rows past the grace.
-
-        Ok((
-            Bytes::from(token),
-            Timestamp {
-                seconds: stored.expires_at,
-                nanos: 0,
-            },
-        ))
     }
 
     /// Re-issue credentials for an existing ActrId (used by /ais/renew)

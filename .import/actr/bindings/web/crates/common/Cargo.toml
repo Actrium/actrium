@@ -29,6 +29,7 @@ bytes = "1.5"
 wasm-bindgen.workspace = true
 wasm-bindgen-futures.workspace = true
 js-sys = "0.3"
+gloo-timers.workspace = true
 web-sys = { workspace = true, features = [
     "Request",
     "RequestInit",

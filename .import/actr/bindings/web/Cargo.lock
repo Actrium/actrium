@@ -211,6 +211,7 @@ version = "0.8.4"
 dependencies = [
  "actr-protocol",
  "bytes",
+ "gloo-timers",
  "js-sys",
  "log",
  "serde",
