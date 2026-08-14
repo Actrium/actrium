@@ -69,7 +69,7 @@ impl LocalFileServiceHandler for MyFileService {
         };
 
         let start_resp: StartTransferResponse = ctx
-            .call(&receiver_id, start_req)
+            .call(&Dest::Peer(receiver_id.clone()), start_req, 30_000)
             .await?;
         if !start_resp.ready {
             return Ok(SendFileResponse { success: false });
@@ -116,7 +116,7 @@ impl LocalFileServiceHandler for MyFileService {
         };
 
         let end_resp: EndTransferResponse =
-            ctx.call(&receiver_id, end_req)
+            ctx.call(&Dest::Peer(receiver_id.clone()), end_req, 30_000)
                 .await?;
 
         info!("✅ EndTransfer RPC succeeded!");

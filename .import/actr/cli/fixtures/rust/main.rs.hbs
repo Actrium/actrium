@@ -4,7 +4,7 @@ mod generated;
 
 use anyhow::{Context, Result, anyhow};
 use base64::Engine;
-use generated::echo::{EchoRequest, EchoEchoServiceEchoRpc};
+use generated::echo::EchoRequest;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -63,10 +63,8 @@ async fn main() -> Result<()> {
 
     let response = actr_ref
         .call(
-            EchoEchoServiceEchoRpc {
-                request: EchoRequest {
-                    message: "hello".to_string(),
-                },
+            EchoRequest {
+                message: "hello".to_string(),
             },
             30_000,
         )

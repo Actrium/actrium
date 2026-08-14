@@ -52,13 +52,13 @@ impl Context for DummyContext {
         &self.request_id
     }
 
-    async fn call_with_timeout<R: RpcRequest>(
+    async fn call<R: RpcRequest>(
         &self,
         _target: &Dest,
         _request: R,
         _timeout_ms: i64,
     ) -> ActorResult<R::Response> {
-        Err(Self::not_implemented("DummyContext::call_with_timeout"))
+        Err(Self::not_implemented("DummyContext::call"))
     }
 
     async fn tell<R: RpcRequest>(&self, _target: &Dest, _message: R) -> ActorResult<()> {
@@ -93,14 +93,14 @@ impl Context for DummyContext {
         ))
     }
 
-    async fn call_raw_with_timeout(
+    async fn call_raw(
         &self,
         _target: &ActrId,
         _route_key: &str,
         _payload: bytes::Bytes,
         _timeout_ms: i64,
     ) -> ActorResult<bytes::Bytes> {
-        Err(Self::not_implemented("DummyContext::call_raw_with_timeout"))
+        Err(Self::not_implemented("DummyContext::call_raw"))
     }
 
     async fn register_media_track<F>(&self, _track_id: String, _callback: F) -> ActorResult<()>

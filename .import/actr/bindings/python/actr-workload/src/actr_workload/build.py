@@ -32,17 +32,6 @@ def _run_componentize_py(
     return subprocess.run(command, check=True, text=True, env=env)
 
 
-def _normalize_bindings_module(out_dir: str | Path, world_module: str) -> None:
-    out_path = Path(out_dir)
-    generated = out_path / "actr_workload"
-    desired = out_path / world_module
-    if generated == desired or not generated.exists():
-        return
-    if desired.exists():
-        raise FileExistsError(f"generated bindings module already exists: {desired}")
-    generated.rename(desired)
-
-
 def generate_bindings(
     out_dir: str | Path,
     *,
@@ -62,9 +51,7 @@ def generate_bindings(
             "bindings",
             _path_arg(out_dir),
         ]
-        result = _run_componentize_py(command)
-        _normalize_bindings_module(out_dir, world_module)
-        return result
+        return _run_componentize_py(command)
 
 
 def componentize(
@@ -78,7 +65,6 @@ def componentize(
     world_module: str = DEFAULT_WORLD_MODULE,
     python_paths: Iterable[str | Path] = (),
 ) -> subprocess.CompletedProcess[str]:
-    _normalize_bindings_module(bindings_dir, world_module)
     with resolved_wit_path(wit) as wit_path:
         command = [
             _componentize_py_executable(),

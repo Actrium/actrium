@@ -55,14 +55,8 @@ interface RpcRequest<Req, Resp> {
     fun deserializeResponse(bytes: ByteArray): Resp
 }
 
-// ============================================================================
-// ActrRef — Typed RPC convenience (aligned with four-method contract)
-// ============================================================================
-
 /**
  * Perform a type-safe RPC call using an [RpcRequest] contract.
- *
- * Delegates to [callWithTimeout] with [DEFAULT_RPC_TIMEOUT_MS].
  *
  * Example:
  * ```kotlin
@@ -71,31 +65,14 @@ interface RpcRequest<Req, Resp> {
  *
  * @param rpc The RPC contract defining route, serialization, and deserialization
  * @param request The request message
+ * @param timeoutMs Timeout in milliseconds (default: 30000)
  * @return The deserialized response
  */
 suspend fun <Req, Resp> ActrRef.call(
     rpc: RpcRequest<Req, Resp>,
     request: Req,
-): Resp = callWithTimeout(rpc, request, DEFAULT_RPC_TIMEOUT_MS)
-
-/**
- * Perform a type-safe RPC call with explicit timeout using an [RpcRequest] contract.
- *
- * Sources `routeKey`, `payloadType`, and serialization from the [RpcRequest]
- * contract. The response is deserialized via [RpcRequest.deserializeResponse].
- *
- * @param rpc The RPC contract
- * @param request The request message
- * @param timeoutMs Timeout in milliseconds (must be > 0)
- * @return The deserialized response
- * @throws IllegalArgumentException if `timeoutMs <= 0`
- */
-suspend fun <Req, Resp> ActrRef.callWithTimeout(
-    rpc: RpcRequest<Req, Resp>,
-    request: Req,
-    timeoutMs: Long,
+    timeoutMs: Long = 30000L,
 ): Resp {
-    require(timeoutMs > 0) { "timeoutMs must be > 0, got $timeoutMs" }
     val responseBytes = call(rpc.routeKey, rpc.payloadType, rpc.serializeRequest(request), timeoutMs)
     return rpc.deserializeResponse(responseBytes)
 }
@@ -104,8 +81,7 @@ suspend fun <Req, Resp> ActrRef.callWithTimeout(
  * Perform an inline type-safe RPC call with lambda-based serialization.
  *
  * This overload is useful when you don't want to define a separate [RpcRequest]
- * object — just pass the serialization lambdas inline. Defaults to
- * [PayloadType.RPC_RELIABLE] and [DEFAULT_RPC_TIMEOUT_MS].
+ * object — just pass the serialization lambdas inline.
  *
  * Example:
  * ```kotlin
@@ -120,7 +96,7 @@ suspend fun <Req, Resp> ActrRef.callWithTimeout(
  * @param routeKey RPC route key
  * @param request The request message
  * @param payloadType Transmission type (default: RPC_RELIABLE)
- * @param timeoutMs Timeout in milliseconds (default: [DEFAULT_RPC_TIMEOUT_MS])
+ * @param timeoutMs Timeout in milliseconds (default: 30000)
  * @param serialize Function to serialize the request to bytes
  * @param deserialize Function to deserialize the response from bytes
  * @return The deserialized response
@@ -129,7 +105,7 @@ suspend inline fun <Req, Resp> ActrRef.call(
     routeKey: String,
     request: Req,
     payloadType: PayloadType = PayloadType.RPC_RELIABLE,
-    timeoutMs: Long = DEFAULT_RPC_TIMEOUT_MS,
+    timeoutMs: Long = 30000L,
     crossinline serialize: (Req) -> ByteArray,
     crossinline deserialize: (ByteArray) -> Resp,
 ): Resp {

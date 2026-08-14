@@ -81,22 +81,10 @@ pub struct EchoResponse {
     pub payload: Vec<u8>,
 }
 
-/// Contract struct for the echo test route.
-pub struct EchoRpc {
-    pub request: EchoRequest,
-}
-
-impl RpcRequest for EchoRpc {
+impl RpcRequest for EchoRequest {
     type Response = EchoResponse;
-    fn route_key(&self) -> &'static str {
+    fn route_key() -> &'static str {
         ROUTE
-    }
-    fn encode_request(&self) -> Bytes {
-        use prost::Message as _;
-        self.request.encode_to_vec().into()
-    }
-    fn decode_response(data: &[u8]) -> Result<EchoResponse, prost::DecodeError> {
-        prost::Message::decode(data)
     }
 }
 
@@ -427,12 +415,10 @@ async fn distinct_keys_dispatch_concurrently_end_to_end() {
         let target = target.clone();
         tokio::spawn(async move {
             caller
-                .call_remote::<EchoRpc>(
+                .call_remote::<EchoRequest>(
                     target,
-                    EchoRpc {
-                        request: EchoRequest {
-                            payload: b"room-A".to_vec(),
-                        },
+                    EchoRequest {
+                        payload: b"room-A".to_vec(),
                     },
                     30_000,
                 )
@@ -444,12 +430,10 @@ async fn distinct_keys_dispatch_concurrently_end_to_end() {
         let target = target.clone();
         tokio::spawn(async move {
             caller
-                .call_remote::<EchoRpc>(
+                .call_remote::<EchoRequest>(
                     target,
-                    EchoRpc {
-                        request: EchoRequest {
-                            payload: b"room-B".to_vec(),
-                        },
+                    EchoRequest {
+                        payload: b"room-B".to_vec(),
                     },
                     30_000,
                 )
@@ -516,12 +500,10 @@ async fn undeclared_route_stays_serial_end_to_end() {
         let target = target.clone();
         tokio::spawn(async move {
             caller
-                .call_remote::<EchoRpc>(
+                .call_remote::<EchoRequest>(
                     target,
-                    EchoRpc {
-                        request: EchoRequest {
-                            payload: b"room-A".to_vec(),
-                        },
+                    EchoRequest {
+                        payload: b"room-A".to_vec(),
                     },
                     30_000,
                 )
@@ -533,12 +515,10 @@ async fn undeclared_route_stays_serial_end_to_end() {
         let target = target.clone();
         tokio::spawn(async move {
             caller
-                .call_remote::<EchoRpc>(
+                .call_remote::<EchoRequest>(
                     target,
-                    EchoRpc {
-                        request: EchoRequest {
-                            payload: b"room-B".to_vec(),
-                        },
+                    EchoRequest {
+                        payload: b"room-B".to_vec(),
                     },
                     30_000,
                 )

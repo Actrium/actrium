@@ -7,7 +7,6 @@ import io.actrium.actr.DataChunk
 import io.actrium.actr.DataChunkCallback
 import io.actrium.actr.PayloadType
 import io.actrium.actr.dsl.ActrContext
-import io.actrium.actr.dsl.callRawWithTimeout
 import io.actrium.actr.dsl.withRetry
 import kotlinx.coroutines.delay
 
@@ -60,9 +59,10 @@ class MyUnifiedHandler : ActrDispatchHandler {
 
             val startRespPayload =
                 withRetry(maxAttempts = 5) {
-                    ctx.callRawWithTimeout(
+                    ctx.callRaw(
                         serverId,
                         "local.DuplexStreamService.StartDuplexStream",
+                        PayloadType.RPC_RELIABLE,
                         startReq.toByteArray(),
                         30000L,
                     )
@@ -131,9 +131,10 @@ class MyUnifiedHandler : ActrDispatchHandler {
                         .setServiceToClientStreamId(serverStreamId)
                         .build()
                 val finishRespPayload =
-                    ctx.callRawWithTimeout(
+                    ctx.callRaw(
                         serverId,
                         "local.DuplexStreamService.FinishDuplexStream",
+                        PayloadType.RPC_RELIABLE,
                         finishReq.toByteArray(),
                         30000L,
                     )

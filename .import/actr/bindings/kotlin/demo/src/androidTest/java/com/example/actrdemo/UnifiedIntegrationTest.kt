@@ -16,6 +16,7 @@ import android.content.Context
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import io.actrium.actr.PayloadType
 import io.actrium.actr.dsl.ActrRef
 import io.actrium.actr.dsl.awaitShutdown
 import io.actrium.actr.dsl.createActrNode
@@ -140,8 +141,9 @@ class UnifiedIntegrationTest {
                 val echoRequestPayload = encodeEchoRequest(testMessage)
 
                 val echoResponsePayload =
-                    clientRef.callRawWithTimeout(
+                    clientRef.call(
                         "echo.EchoService.Echo",
+                        PayloadType.RPC_RELIABLE,
                         echoRequestPayload,
                         30000L,
                     )
@@ -166,8 +168,9 @@ class UnifiedIntegrationTest {
                         .build()
 
                 val startStreamResponsePayload =
-                    clientRef.callRawWithTimeout(
+                    clientRef.call(
                         "data_stream_peer.StreamClient.StartStream",
+                        PayloadType.RPC_RELIABLE,
                         startStreamRequest.toByteArray(),
                         30000L,
                     )

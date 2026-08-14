@@ -108,7 +108,7 @@ impl Context for MockCtx {
         "mock"
     }
 
-    async fn call_with_timeout<R: actr_protocol::RpcRequest>(
+    async fn call<R: actr_protocol::RpcRequest>(
         &self,
         _target: &actr_framework::Dest,
         _req: R,
@@ -154,7 +154,7 @@ impl Context for MockCtx {
         Err(ActrError::NotImplemented("mock".to_string()))
     }
 
-    async fn call_raw_with_timeout(
+    async fn call_raw(
         &self,
         _target: &ActrId,
         _route_key: &str,

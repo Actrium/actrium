@@ -504,7 +504,7 @@ def generate_actr_dispatch_function(
                 f"    if route_key == {route_key}:",
                 f"        actr_type = await ctx.resolve_dependency({alias})",
                 "        target = await ctx.discover(actr_type)",
-                f"        return await ctx.call_raw_with_payload_type(target, route_key, payload, timeout_ms, {payload_type})",
+                f"        return await ctx.call_raw(target, route_key, payload, timeout_ms, {payload_type})",
             ]
         )
 

@@ -41,32 +41,16 @@ public final class ActrRef: Sendable {
         ActrId(bridge: inner.actorId())
     }
 
-    /// Performs a type-safe RPC call using an RpcRequest message with
-    /// default timeout (`defaultRpcTimeoutMs`). Delegates to `callWithTimeout`.
-    ///
-    /// - Parameter message: The request message conforming to `RpcRequest`
-    /// - Returns: The response message
-    public func call<Req: RpcRequest>(
-        _ message: Req
-    ) async throws(ActrError) -> Req.Response {
-        try await callWithTimeout(message, timeoutMs: defaultRpcTimeoutMs)
-    }
-
-    /// Performs a type-safe RPC call using an RpcRequest message with an
-    /// explicit timeout. The payload lane comes from `Req.payloadType`.
+    /// Performs a type-safe RPC call using an RpcRequest message.
     ///
     /// - Parameters:
     ///   - message: The request message conforming to `RpcRequest`
-    ///   - timeoutMs: Timeout in milliseconds (must be > 0)
+    ///   - timeoutMs: Timeout in milliseconds (default: 30000)
     /// - Returns: The response message
-    /// - Throws: `ActrError.InvalidArgument` if `timeoutMs <= 0`
-    public func callWithTimeout<Req: RpcRequest>(
+    public func call<Req: RpcRequest>(
         _ message: Req,
-        timeoutMs: Int64
+        timeoutMs: Int64 = 30000
     ) async throws(ActrError) -> Req.Response {
-        guard timeoutMs > 0 else {
-            throw ActrError.InvalidArgument(msg: "timeoutMs must be > 0, got \(timeoutMs)")
-        }
         do {
             let requestData = try encodeProtobufMessage(message, context: "\(Req.self) request")
             let responseData = try await inner.call(
@@ -81,37 +65,7 @@ public final class ActrRef: Sendable {
         }
     }
 
-    /// Raw RPC on the reliable lane with default timeout
-    /// (`defaultRpcTimeoutMs`). Delegates to `callRawWithTimeout`.
-    /// Always sends on `PayloadType.rpcReliable`.
-    public func callRaw(
-        routeKey: String,
-        payload: Data
-    ) async throws -> Data {
-        try await callRawWithTimeout(routeKey: routeKey, payload: payload, timeoutMs: defaultRpcTimeoutMs)
-    }
-
-    /// Raw RPC on the reliable lane with explicit timeout.
-    /// Always sends on `PayloadType.rpcReliable`.
-    ///
-    /// - Throws: `ActrError.InvalidArgument` if `timeoutMs <= 0`
-    public func callRawWithTimeout(
-        routeKey: String,
-        payload: Data,
-        timeoutMs: Int64
-    ) async throws -> Data {
-        guard timeoutMs > 0 else {
-            throw ActrError.InvalidArgument(msg: "timeoutMs must be > 0, got \(timeoutMs)")
-        }
-        return try await call(
-            routeKey: routeKey,
-            payloadType: .rpcReliable,
-            requestPayload: payload,
-            timeoutMs: timeoutMs
-        )
-    }
-
-    /// Performs a raw local RPC call with explicit payload lane.
+    /// Performs a raw local RPC call.
     public func call(
         routeKey: String,
         payloadType: PayloadType,

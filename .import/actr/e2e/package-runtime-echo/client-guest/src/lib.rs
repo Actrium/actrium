@@ -22,28 +22,15 @@ fn echo_service_version() -> String {
     std::env::var("ECHO_ACTR_VERSION").unwrap_or_else(|_| "1.0.0".to_string())
 }
 
-pub struct EchoEchoServiceEchoRpc {
-    pub request: EchoRequest,
-}
-
-impl RpcRequest for EchoEchoServiceEchoRpc {
+impl RpcRequest for EchoRequest {
     type Response = EchoResponse;
 
-    fn route_key(&self) -> &'static str {
+    fn route_key() -> &'static str {
         "echo.EchoService.Echo"
     }
 
-    fn payload_type(&self) -> actr_protocol::PayloadType {
+    fn payload_type() -> actr_protocol::PayloadType {
         actr_protocol::PayloadType::RpcReliable
-    }
-
-    fn encode_request(&self) -> Bytes {
-        use prost::Message as _;
-        self.request.encode_to_vec().into()
-    }
-
-    fn decode_response(data: &[u8]) -> Result<EchoResponse, prost::DecodeError> {
-        prost::Message::decode(data)
     }
 }
 
@@ -97,9 +84,9 @@ async fn proxy_echo<C: Context>(
     };
 
     match ctx
-        .call_with_timeout(
+        .call(
             &actr_framework::Dest::Peer(server_id.clone()),
-            EchoEchoServiceEchoRpc { request: echo_req },
+            echo_req,
             30_000,
         )
         .await
@@ -112,11 +99,7 @@ async fn proxy_echo<C: Context>(
             let retry_req = EchoRequest {
                 message: req.message.clone(),
             };
-            ctx.call_with_timeout(
-                &actr_framework::Dest::Peer(fresh_id),
-                EchoEchoServiceEchoRpc { request: retry_req },
-                30_000,
-            )
+            ctx.call(&actr_framework::Dest::Peer(fresh_id), retry_req, 30_000)
                 .await
                 .map_err(|retry_err| {
                     ActrError::Internal(format!(

@@ -106,7 +106,7 @@ impl ContextBridge {
         let inner = self.inner.clone();
         let resp = run_on_tokio_runtime("remote call", async move {
             inner
-                .call_raw_dest(
+                .call_raw(
                     &Dest::Peer(target_id),
                     route_key,
                     proto_payload_type,

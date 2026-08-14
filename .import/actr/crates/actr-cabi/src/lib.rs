@@ -770,7 +770,7 @@ pub unsafe extern "C" fn actr_ref_call(
             async move {
                 let ctx = actr_ref.app_context().await;
                 match ctx
-                    .call_raw_dest(
+                    .call_raw(
                         &Dest::Workload,
                         route_key,
                         PayloadType::RpcReliable,
@@ -780,7 +780,7 @@ pub unsafe extern "C" fn actr_ref_call(
                     .await
                 {
                     Ok(resp) => {
-                        let (ptr, len) = alloc_bytes(&resp[..]);
+                        let (ptr, len) = alloc_bytes(&resp);
                         if !resp.is_empty() && ptr.is_null() {
                             emit_call_error(
                                 GENERIC_ERROR,
