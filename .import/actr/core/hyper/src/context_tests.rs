@@ -1,7 +1,6 @@
 use super::*;
 use crate::test_support::runtime_context_with_host_transport;
 use crate::transport::HostTransport;
-use bytes::Bytes;
 
 fn ctx() -> RuntimeContext {
     runtime_context_with_host_transport(ActrId::default(), Arc::new(HostTransport::new()))
@@ -27,25 +26,11 @@ struct TimeoutResponse {
     payload: Vec<u8>,
 }
 
-/// Contract struct for the timeout test route.
-struct TimeoutRpc {
-    request: TimeoutRequest,
-}
-
-impl RpcRequest for TimeoutRpc {
+impl RpcRequest for TimeoutRequest {
     type Response = TimeoutResponse;
 
-    fn route_key(&self) -> &'static str {
+    fn route_key() -> &'static str {
         "test.Timeout.Call"
-    }
-
-    fn encode_request(&self) -> Bytes {
-        use prost::Message as _;
-        self.request.encode_to_vec().into()
-    }
-
-    fn decode_response(data: &[u8]) -> Result<TimeoutResponse, prost::DecodeError> {
-        prost::Message::decode(data)
     }
 }
 
@@ -354,13 +339,7 @@ async fn typed_call_rejects_non_positive_timeout() {
 
     for timeout_ms in [0, -1] {
         let err = c
-            .call_dest(
-                &Dest::Workload,
-                TimeoutRpc {
-                    request: TimeoutRequest::default(),
-                },
-                timeout_ms,
-            )
+            .call(&Dest::Workload, TimeoutRequest::default(), timeout_ms)
             .await
             .unwrap_err();
         assert!(
@@ -374,13 +353,7 @@ async fn typed_call_rejects_non_positive_timeout() {
 async fn typed_call_honors_caller_timeout() {
     let c = ctx();
     let err = c
-        .call_dest(
-            &Dest::Workload,
-            TimeoutRpc {
-                request: TimeoutRequest::default(),
-            },
-            5,
-        )
+        .call(&Dest::Workload, TimeoutRequest::default(), 5)
         .await
         .unwrap_err();
 
@@ -394,7 +367,7 @@ async fn typed_call_honors_caller_timeout() {
 async fn call_raw_rejects_zero_timeout() {
     let c = ctx();
     let err = c
-        .call_raw_dest(
+        .call_raw(
             &Dest::Workload,
             "pkg.Service.Method".to_string(),
             PayloadType::RpcReliable,
@@ -415,7 +388,7 @@ async fn call_raw_rejects_negative_timeout() {
     // effectively infinite Duration.
     let c = ctx();
     let err = c
-        .call_raw_dest(
+        .call_raw(
             &Dest::Workload,
             "pkg.Service.Method".to_string(),
             PayloadType::RpcReliable,
@@ -434,7 +407,7 @@ async fn call_raw_rejects_negative_timeout() {
 async fn call_raw_rejects_stream_payload_type() {
     let c = ctx();
     let err = c
-        .call_raw_dest(
+        .call_raw(
             &Dest::Workload,
             "pkg.Service.Method".to_string(),
             PayloadType::StreamReliable,
@@ -453,7 +426,7 @@ async fn call_raw_rejects_stream_payload_type() {
 async fn call_raw_rejects_media_payload_type() {
     let c = ctx();
     let err = c
-        .call_raw_dest(
+        .call_raw(
             &Dest::Workload,
             "pkg.Service.Method".to_string(),
             PayloadType::MediaRtp,

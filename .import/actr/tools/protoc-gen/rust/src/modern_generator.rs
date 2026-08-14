@@ -7,7 +7,7 @@
 
 use actr_protocol::{ActrType, ReplyMode};
 use anyhow::{Result, anyhow};
-use heck::{ToSnakeCase, ToUpperCamelCase};
+use heck::ToSnakeCase;
 use proc_macro2::TokenStream;
 use prost_types::MethodDescriptorProto;
 use quote::{format_ident, quote};
@@ -263,19 +263,6 @@ use actr_protocol::{{ActrId, ActorResult, RpcRequest, RpcEnvelope, PayloadType{p
             let input_type_path = self.message_type_path(method.input_type())?;
             let output_type_path = self.message_type_path(method.output_type())?;
 
-            // Contract struct name: {Package}{Service}{Method}Rpc
-            let package_pascal = self
-                .package_name
-                .split('.')
-                .map(|p| p.to_upper_camel_case())
-                .collect::<String>();
-            let contract_name = format!(
-                "{}{}{}Rpc",
-                package_pascal,
-                self.service_name,
-                method.name().to_upper_camel_case()
-            );
-
             // Generate route key
             let route_key = format!(
                 "{}.{}.{}",
@@ -311,39 +298,22 @@ use actr_protocol::{{ActrId, ActorResult, RpcRequest, RpcEnvelope, PayloadType{p
 
             // Manually construct code string to avoid quote! adding quotes
             let impl_code = format!(
-                r#"/// RPC contract struct for {route_key}
-///
-/// Holds the protobuf request message and provides encoding/decoding
-/// for type-safe RPC calls.
-pub struct {contract_name} {{
-    pub request: {input_type_path},
-}}
-
-/// RpcRequest trait implementation - associates Request and Response types
+                r#"/// RpcRequest trait implementation - associates Request and Response types
 ///
 /// This enables type-safe RPC calls with automatic response type inference:
 /// ```rust,ignore
-/// let response: {output_type_path} = ctx.call(&target, request).await?;
+/// let response: {output_type_path} = ctx.call(&target, request, 30_000).await?;
 /// ```
-impl RpcRequest for {contract_name} {{
+impl RpcRequest for {input_type_path} {{
     type Response = {output_type_path};
 
-    fn route_key(&self) -> &'static str {{
+    fn route_key() -> &'static str {{
         "{route_key}"
     }}
 
-    fn payload_type(&self) -> PayloadType {{
+    fn payload_type() -> PayloadType {{
         {payload_type_code}
     }}{reply_mode_arm}
-
-    fn encode_request(&self) -> Bytes {{
-        use prost::Message as _;
-        self.request.encode_to_vec().into()
-    }}
-
-    fn decode_response(data: &[u8]) -> Result<{output_type_path}, prost::DecodeError> {{
-        prost::Message::decode(data)
-    }}
 }}"#
             );
 
@@ -558,7 +528,7 @@ impl RpcRequest for {contract_name} {{
                         version: "1.0.0".to_string(),
                     };
                     let target_id = ctx.discover_route_candidate(&target_type).await?;
-                    ctx.call_raw_with_timeout(
+                    ctx.call_raw(
                         &target_id,
                         envelope.route_key.as_str(),
                         envelope.payload.clone().unwrap_or_default(),
@@ -688,17 +658,6 @@ impl RpcRequest for {contract_name} {{
             let method_ident = format_ident!("{}", method_name);
             let input_type = self.message_type_tokens(method.input_type())?;
             let output_type = self.message_type_tokens(method.output_type())?;
-            let package_pascal = self
-                .package_name
-                .split('.')
-                .map(|part| part.to_upper_camel_case())
-                .collect::<String>();
-            let contract_ident = format_ident!(
-                "{}{}{}Rpc",
-                package_pascal,
-                self.service_name,
-                method.name().to_upper_camel_case()
-            );
 
             client_methods.push(quote! {
                 /// Call remote method: #method_name
@@ -708,10 +667,7 @@ impl RpcRequest for {contract_name} {{
                     req: #input_type,
                     timeout_ms: i64,
                 ) -> ActorResult<#output_type> {
-                    let request = #contract_ident { request: req };
-                    self.ctx
-                        .call_with_timeout(&Dest::from(target), request, timeout_ms)
-                        .await
+                    self.ctx.call(&Dest::from(target), req, timeout_ms).await
                 }
             });
         }
@@ -968,28 +924,6 @@ mod tests {
             result.contains("RpcReliable"),
             "Should contain 'RpcReliable'"
         );
-        // Verify contract struct is generated
-        assert!(
-            result.contains("pub struct TestV1TestServiceEchoRpc"),
-            "Should contain contract struct name"
-        );
-        assert!(
-            result.contains("pub request:"),
-            "Should contain request field in contract struct"
-        );
-        // Verify instance methods
-        assert!(
-            result.contains("fn route_key(&self)"),
-            "Should contain instance route_key method"
-        );
-        assert!(
-            result.contains("fn encode_request(&self)"),
-            "Should contain encode_request method"
-        );
-        assert!(
-            result.contains("fn decode_response"),
-            "Should contain decode_response method"
-        );
     }
 
     #[test]
@@ -1036,10 +970,10 @@ mod tests {
 
         let code = result.unwrap();
         // Client code should also contain RpcRequest impl
-        assert!(code.contains("impl RpcRequest for TestV1TestServiceEchoRpc"));
-        assert!(code.contains("fn payload_type(&self) -> PayloadType"));
+        assert!(code.contains("impl RpcRequest for super::test_v1::EchoRequest"));
+        assert!(code.contains("fn payload_type() -> PayloadType"));
         assert!(code.contains("timeout_ms : i64"));
-        assert!(code.contains("call_with_timeout"));
+        assert!(code.contains("self . ctx . call (& Dest :: from (target) , req , timeout_ms)"));
         assert!(code.contains("use actr_framework::{Context, Dest, MessageDispatcher, Workload}"));
         assert!(code.contains(
             "use actr_protocol::{ActrId, ActorResult, RpcRequest, RpcEnvelope, PayloadType}"
@@ -1073,7 +1007,7 @@ mod tests {
         // Verify Dispatcher was generated
         assert!(code.contains("pub struct TestServiceDispatcher"));
         // Verify payload_type was generated
-        assert!(code.contains("fn payload_type(&self) -> PayloadType"));
+        assert!(code.contains("fn payload_type() -> PayloadType"));
     }
 
     #[test]
@@ -1223,12 +1157,8 @@ mod tests {
             "generated code should not glob-import owner modules:\n{code}"
         );
         assert!(
-            code.contains("impl RpcRequest for LocalLocalServiceCallRpc"),
-            "RpcRequest impl should be on contract struct:\n{code}"
-        );
-        assert!(
-            code.contains("pub request: super::ask::Request"),
-            "contract struct should qualify the request owner:\n{code}"
+            code.contains("impl RpcRequest for super::ask::Request"),
+            "RpcRequest impl should qualify the request owner:\n{code}"
         );
         assert!(
             code.contains("type Response = super::reply::Response;"),
@@ -1279,12 +1209,8 @@ mod tests {
         let code = generator.generate(&methods).unwrap();
 
         assert!(
-            code.contains("impl RpcRequest for LocalLocalServiceCallRpc"),
-            "RpcRequest impl should be on contract struct with nested owner:\n{code}"
-        );
-        assert!(
-            code.contains("pub request: super::remote::outer::InnerRequest"),
-            "contract struct field should include nested parent module:\n{code}"
+            code.contains("impl RpcRequest for super::remote::outer::InnerRequest"),
+            "RpcRequest impl should include nested parent module:\n{code}"
         );
         assert!(
             code.contains("type Response = super::remote::outer::InnerResponse;"),

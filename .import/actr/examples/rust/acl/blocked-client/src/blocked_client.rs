@@ -61,7 +61,7 @@ impl actr_framework::MessageDispatcher for BlockedClientDispatcher {
 
         info!("[BlockedClient] Forwarding greeting to server...");
         
-        let response: GreetResponse = ctx.call(&server_id, request).await?;
+        let response: GreetResponse = ctx.call(&Dest::Peer(server_id), request, 30_000).await?;
 
         info!("[BlockedClient] Got response: {}", response.message);
 

@@ -53,7 +53,7 @@ impl MessageDispatcher for EchoAppDispatcher {
             .map_err(|e| ActrError::Unavailable(format!("invalid EchoService target type: {e}")))?;
         let target_id = ctx.discover_route_candidate(&target_type).await?;
         let payload = env.payload.unwrap_or_default();
-        ctx.call_raw_with_timeout(&target_id, ECHO_ROUTE_KEY, payload, ECHO_CALL_TIMEOUT_MS)
+        ctx.call_raw(&target_id, ECHO_ROUTE_KEY, payload, ECHO_CALL_TIMEOUT_MS)
             .await
     }
 }

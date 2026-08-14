@@ -110,7 +110,7 @@
 //!         tracing::info!("trace_id: {}", ctx.trace_id());
 //!
 //!         // Type-safe RPC call
-//!         let response = ctx.call(&target, another_request).await?;
+//!         let response = ctx.call(&target, another_request, 30_000).await?;
 //!
 //!         Ok(EchoResponse {
 //!             reply: format!("Echo: {}", req.message),
@@ -144,10 +144,7 @@ pub mod web;
 pub mod test_support;
 
 // Public re-exports
-pub use context::{
-    Context, DEFAULT_RPC_TIMEOUT_MS, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample,
-    MediaType,
-};
+pub use context::{Context, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample, MediaType};
 pub use dest::Dest;
 pub use dispatcher::MessageDispatcher;
 pub use reply::{Deliver, Reply, ReplyDeadline, ReplyOutcome};

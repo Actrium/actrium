@@ -32,7 +32,9 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{ActorResult, ActrError, ActrId, Direction, RpcEnvelope};
+use bytes::Bytes;
 
 use crate::outbound::HostGate;
 use crate::trace::inject_span_context_to_rpc;
@@ -130,14 +132,14 @@ impl<W: Workload> ActrRef<W> {
     /// ```
     pub async fn call<R>(&self, request: R, timeout_ms: i64) -> ActorResult<R::Response>
     where
-        R: actr_protocol::RpcRequest,
+        R: actr_protocol::RpcRequest + ProstMessage,
     {
         // Encode the request.
-        let payload = request.encode_request();
+        let payload: Bytes = request.encode_to_vec().into();
 
         // Create the envelope.
         let mut envelope = RpcEnvelope {
-            route_key: request.route_key().to_string(),
+            route_key: R::route_key().to_string(),
             payload: Some(payload),
             error: None,
             direction: Some(Direction::Request as i32),
@@ -155,11 +157,11 @@ impl<W: Workload> ActrRef<W> {
         let response_bytes = self
             .shared
             .host_gate
-            .send_request_with_type(&self.shared.actor_id, request.payload_type(), envelope)
+            .send_request_with_type(&self.shared.actor_id, R::payload_type(), envelope)
             .await?;
 
         // Decode the response.
-        R::decode_response(&response_bytes)
+        R::Response::decode(&*response_bytes)
             .map_err(|e| ActrError::DecodeFailure(format!("Failed to decode response: {e}")))
     }
 
@@ -179,16 +181,16 @@ impl<W: Workload> ActrRef<W> {
     /// ```
     pub async fn tell<R>(&self, message: R) -> ActorResult<()>
     where
-        R: actr_protocol::RpcRequest,
+        R: actr_protocol::RpcRequest + ProstMessage,
     {
         // Encode the message.
-        let payload = message.encode_request();
+        let payload: Bytes = message.encode_to_vec().into();
 
         // Create envelope with initial traceparent and tracestate set to None.
         // One-way messages carry the explicit Direction::Tell label; the zero
         // timeout is documented filler, not a tell marker.
         let mut envelope = RpcEnvelope {
-            route_key: message.route_key().to_string(),
+            route_key: R::route_key().to_string(),
             payload: Some(payload),
             error: None,
             direction: Some(Direction::Tell as i32),
@@ -205,7 +207,7 @@ impl<W: Workload> ActrRef<W> {
         // Send the message without waiting for a response.
         self.shared
             .host_gate
-            .send_message_with_type(&self.shared.actor_id, message.payload_type(), envelope)
+            .send_message_with_type(&self.shared.actor_id, R::payload_type(), envelope)
             .await
     }
 
