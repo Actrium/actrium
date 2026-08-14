@@ -16,6 +16,9 @@ pub const NULL_POINTER: i32 = -10;
 pub const INVALID_UTF8: i32 = -11;
 pub const WORKLOAD_NOT_FOUND: i32 = -20;
 pub const HANDLE_INVALID: i32 = -21;
+/// `actr_host_respond_reverse_rpc` was called with a request_id that is
+/// unknown, already answered, or past its timeout.
+pub const REQUEST_ID_UNKNOWN: i32 = -22;
 pub const PANIC: i32 = -99;
 
 // ── Validated callback-buffer allocations ──────────────────────────────────

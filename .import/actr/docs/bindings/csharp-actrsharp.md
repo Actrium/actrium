@@ -81,6 +81,85 @@ ActrCabiNode.ShutdownRuntime();
 
 ---
 
+## Host stream sink & reverse RPC
+
+Streaming responses and host-answered reverse RPC need data that arrives
+*after* the one-shot `Call` completes. Two process-global registrations plus
+a per-node subscribe cover both directions:
+
+```csharp
+// 1) Receive forwarded stream chunks (call once, before ListenStream).
+ActrCabiNode.RegisterStreamSink(chunk =>
+{
+    // chunk.StreamId / chunk.Payload (copied byte[]) / chunk.Sequence
+    // chunk.TimestampMs (long? — null when the producer set none)
+    // chunk.SenderId (sending actor's string repr)
+    // chunk.Metadata (copied key/value entries)
+    SendStreamEventToRn(chunk); // your RN bridge / UI dispatch
+});
+
+// 2) Subscribe this started node to a stream id (e.g. result_stream_id
+//    from an earlier RPC reply).
+await node.ListenStream(streamId);
+// ... later:
+await node.UnlistenStream(streamId);
+
+// 3) Host-answered reverse RPC (e.g. AskUserQuestion).
+ActrCabiNode.RegisterReverseRpcHandler(async request =>
+{
+    var answer = await AskUserInUiAsync(request.Route, request.Payload);
+    return answer; // returned bytes resolve the Rust caller's ask_host
+});
+```
+
+Semantics and sharp edges:
+
+- **Opt-in, exact-id streams only**: `ListenStream("id")` registers the
+  runtime callback for exactly `id`. This bridge does not forward ordinary
+  `Call`, `Tell`, or unrelated data-stream routes, and an id that was never
+  listened is never delivered to ActrSharp.
+- **Ordering and bounded overflow**: accepted chunks are dispatched to your
+  handler serially in arrival order on a dedicated consumer task, never on an
+  actr Tokio worker. The managed queue is bounded at
+  `ActrCabiNode.StreamQueueCapacity` (currently 256). When full, ActrSharp
+  drops the newest copied chunk and increments
+  `ActrCabiNode.DroppedStreamChunkCount`. Therefore this host bridge is
+  best-effort after the native callback: a reliable native stream does **not**
+  become an end-to-end managed delivery acknowledgement. Keep handlers fast,
+  observe the counter, or use an application-level acknowledgement/retry
+  protocol when every chunk matters.
+- **Registration is process-global**: the native sink replaces any previous
+  one; passing `null` unregisters. Native clear/replace waits for a currently
+  executing native callback before returning. On clear, ActrSharp invalidates
+  queued managed dispatch; on replacement, queued chunks from the old
+  registration are not delivered to the new handler. A managed handler that
+  is already running (or races the clear) is allowed to finish. Chunks
+  arriving with no handler registered are dropped (not buffered).
+- **Listener lifecycle**: `UnlistenStream(id)` removes that exact runtime
+  listener. The runtime may finish callbacks for chunks it accepted before
+  removal; it never forwards a newly received chunk from an unregistered id.
+- **Reverse RPC deadlines**: `ask_host` (the Rust-side call your workload's
+  dispatcher makes) carries its own timeout — answer within it or the Rust
+  caller resolves with `TimedOut`. Cancelling the Rust caller removes its
+  pending request immediately. A handler that throws or cannot copy its
+  callback buffers answers with a *generic error* instead.
+  `ActrCabiException.CodeRequestIdUnknown` (`-22`) means a respond referenced
+  an unknown, already-answered, cancelled, or timed-out request id.
+- **Fidelity and delegate lifetime**: `StreamId`, payload, sequence,
+  timestamp annotation, sender id, and every `DataChunk.metadata` key/value
+  entry are copied before the native callback returns. ActrSharp roots its
+  native trampolines statically and holds your active handler reference — you
+  do not need to keep delegates alive to prevent GC collection.
+
+Workload authors: the Rust side is `actr_cabi::ask_host(route, payload,
+timeout_ms)` — call it only from a dispatcher route that explicitly delegates
+to the host. It is not automatic forwarding for ordinary RPC/tell routes.
+`actr_stream_listen` is the supported opt-in stream path; workloads that call
+`actr_cabi::forward_chunk_to_host(&chunk, &sender)` themselves take ownership
+of the same best-effort sink contract.
+
+---
+
 ## Authentication reference
 
 | Consumer | Identity | Notes |
@@ -149,6 +228,7 @@ the loaded `actr_cabi` reports the same actr version; a mismatch throws an
 | **ABI version mismatch** (`-30`) | `actr_cabi` ABI is incompatible with ActrSharp | The native library and ActrSharp are from incompatible generations; align them. |
 | **Actr version mismatch** (`-31`) | `actr_cabi` built from a different actr version than ActrSharp | Use a workload package built against the matching actr version. |
 | **Bundle conflict** (`-33`) | Two workload cdylibs linked into one process | Only one `actr_cabi` provider per process; statically combine workloads into one cdylib. |
+| **Reverse-RPC unknown request** (`-22`) | `actr_host_respond_reverse_rpc` got an unknown, already-answered, or timed-out request id | Expected for late/duplicate answers; the Rust caller already resolved — no action needed. |
 | **Workload not found** (`-20`) | The workload name is not registered in the loaded bundle | Check the `export_workload!` name; ensure the cdylib was linked with `/WHOLEARCHIVE` (Windows) so inventory survives dead-stripping. |
 
 ### DLL / architecture

@@ -271,8 +271,10 @@ jobs:
 
       # Out-of-repo consumer: a fresh net10.0 console app that references ONLY
       # the fixture package (transitively ActrSharp). Validates NuGet RID asset
-      # resolution, native DLL auto-copy, and the full InitRuntime →
-      # ValidateNative → version/bundle read path against a real bundled workload.
+      # resolution, native DLL auto-copy, the InitRuntime → ValidateNative path,
+      # and a real Rust → C ABI → ActrSharp host-stream + explicit ask_host
+      # round trip against the bundled workload. This runs only on win-x64;
+      # the ARM64 job below remains a cross-build and signal-only native load.
       # Program.cs is copied from a committed template; nuget.config is generated
       # from a line array (PowerShell here-strings can't sit inside a YAML
       # literal block — the closing "@ must be at column 0).
