@@ -30,6 +30,7 @@ ed25519-dalek = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
 sha1 = "0.10"
+aes-gcm = "0.10"
 
 ## Database
 sqlx = { workspace = true, default-features = false, features = ["runtime-tokio-rustls", "sqlite"] }

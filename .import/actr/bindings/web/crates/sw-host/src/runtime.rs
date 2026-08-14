@@ -930,6 +930,9 @@ impl SwRuntime {
             "turn_credential",
             "renewal_token",
             "renewal_token_expires_at",
+            "renewal_attempt_id",
+            "renewal_attempt_actor_id",
+            "renewal_attempt_token_hash",
         ] {
             let _ = kv.delete(key).await;
         }
@@ -988,10 +991,57 @@ impl SwRuntime {
         let actor_id = ActrId::from_string_repr(&id_str)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse actor_id: {e}")))?;
 
+        // Persist the exact attempt identity across outer Service Worker
+        // recovery rounds (and worker restarts). It is replaced only when the
+        // actor/token binding changes or AIS returns a definitive result.
+        let token_hash = Sha256::digest(&token).to_vec();
+        let stored_attempt_id = kv
+            .get("renewal_attempt_id")
+            .await
+            .map_err(|e| JsValue::from_str(&format!("Failed to read renewal attempt: {e}")))?;
+        let stored_attempt_actor = kv.get("renewal_attempt_actor_id").await.map_err(|e| {
+            JsValue::from_str(&format!("Failed to read renewal attempt actor: {e}"))
+        })?;
+        let stored_attempt_token_hash =
+            kv.get("renewal_attempt_token_hash").await.map_err(|e| {
+                JsValue::from_str(&format!("Failed to read renewal attempt token: {e}"))
+            })?;
+        let attempt_id = match (
+            stored_attempt_id,
+            stored_attempt_actor,
+            stored_attempt_token_hash,
+        ) {
+            (Some(attempt), Some(actor), Some(hash))
+                if attempt.len() == 16 && actor == id_str.as_bytes() && hash == token_hash =>
+            {
+                Bytes::from(attempt)
+            }
+            _ => {
+                let attempt = Bytes::copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+                kv.set("renewal_attempt_id", attempt.as_ref())
+                    .await
+                    .map_err(|e| {
+                        JsValue::from_str(&format!("Failed to persist renewal attempt: {e}"))
+                    })?;
+                kv.set("renewal_attempt_actor_id", id_str.as_bytes())
+                    .await
+                    .map_err(|e| {
+                        JsValue::from_str(&format!("Failed to persist renewal attempt actor: {e}"))
+                    })?;
+                kv.set("renewal_attempt_token_hash", &token_hash)
+                    .await
+                    .map_err(|e| {
+                        JsValue::from_str(&format!("Failed to persist renewal attempt token: {e}"))
+                    })?;
+                attempt
+            }
+        };
+
         let response = match ais
             .renew_credential(RenewCredentialRequest {
                 actr_id: actor_id.clone(),
                 renewal_token: token.into(),
+                attempt_id,
             })
             .await
         {
@@ -1000,6 +1050,20 @@ impl SwRuntime {
                 log::warn!("[SW] AIS renew rejected persisted identity; clearing local identity");
                 Self::clear_persisted_identity_static(platform, cred_kv_ns).await?;
                 return Ok(None);
+            }
+            Err(
+                RenewError::AttemptExpired | RenewError::AttemptConflict | RenewError::Protocol(_),
+            ) => {
+                for key in [
+                    "renewal_attempt_id",
+                    "renewal_attempt_actor_id",
+                    "renewal_attempt_token_hash",
+                ] {
+                    let _ = kv.delete(key).await;
+                }
+                return Err(JsValue::from_str(
+                    "AIS renewal attempt must be restarted with a new attempt ID",
+                ));
             }
             Err(e) => return Err(JsValue::from_str(&format!("AIS renewal failed: {e}"))),
         };
@@ -1040,6 +1104,13 @@ impl SwRuntime {
                 expires_at.seconds as u64,
             )
             .await?;
+        }
+        for key in [
+            "renewal_attempt_id",
+            "renewal_attempt_actor_id",
+            "renewal_attempt_token_hash",
+        ] {
+            let _ = kv.delete(key).await;
         }
 
         Ok(Some((actor_id, credential, turn_credential)))

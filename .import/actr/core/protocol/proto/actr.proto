@@ -232,6 +232,10 @@ message RegisterResponse {
 message RenewCredentialRequest {
   required ActrId actr_id = 1;
   required bytes renewal_token = 2;
+  // Client-generated UUID (16 raw bytes) identifying this logical write.
+  // Retries MUST reuse both this value and the exact request body. A new
+  // credential-renewal operation MUST generate a new value.
+  required bytes attempt_id = 3;
 }
 
 message RenewCredentialResponse {
@@ -254,6 +258,10 @@ message ReissueCredentialRequest {
   // the reissue when no binding matches, so a workload cannot mint
   // credentials for another same-realm/type actor or an arbitrary serial.
   optional bytes renewal_proof = 3;
+  // Client-generated UUID (16 raw bytes) identifying this logical write.
+  // Retries MUST reuse both this value and the exact request body, including
+  // the manufacturer proof nested in registration.
+  required bytes attempt_id = 4;
 }
 
 // ============================================================================

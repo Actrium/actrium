@@ -72,6 +72,7 @@ wasm-logger.workspace = true
 console_error_panic_hook.workspace = true
 thiserror.workspace = true
 getrandom.workspace = true
+uuid.workspace = true
 
 # Data structures
 bytes = "1.5"
@@ -86,4 +87,3 @@ tracing-opentelemetry.workspace = true
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
-uuid.workspace = true

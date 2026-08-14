@@ -24,6 +24,22 @@ fn with_realm_secret_is_chainable_idempotent_builder() {
     assert_eq!(c2.realm_secret.as_deref(), Some("def"));
 }
 
+#[test]
+fn control_attempt_ids_are_raw_unique_uuids() {
+    let first = new_control_attempt_id();
+    let second = new_control_attempt_id();
+    assert_eq!(first.len(), 16);
+    assert_eq!(second.len(), 16);
+    assert_ne!(first, second);
+}
+
+#[test]
+fn control_attempt_retry_backoff_is_bounded() {
+    assert_eq!(control_attempt_backoff(0), Duration::from_millis(100));
+    assert_eq!(control_attempt_backoff(4), Duration::from_millis(1600));
+    assert_eq!(control_attempt_backoff(40), Duration::from_millis(1600));
+}
+
 // ── parse_retry_after ───────────────────────────────────────────────────
 
 #[test]
@@ -68,6 +84,18 @@ fn classify_status_client_errors() {
     assert!(matches!(
         classify_renew_status(403, None),
         RenewError::RealmUnavailable
+    ));
+    assert!(matches!(
+        classify_renew_status(409, None),
+        RenewError::AttemptConflict
+    ));
+    assert!(matches!(
+        classify_renew_status(410, None),
+        RenewError::AttemptExpired
+    ));
+    assert!(matches!(
+        classify_renew_status(425, None),
+        RenewError::AttemptInProgress
     ));
 }
 

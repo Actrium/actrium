@@ -1,7 +1,8 @@
 use super::*;
 use actr_protocol::{
     AIdCredential, ActrId, ActrType, IdentityClaims, Realm, RegisterRequest, RegisterResponse,
-    RenewCredentialResponse, TurnCredential, register_response, renew_credential_response,
+    ReissueCredentialRequest, RenewCredentialResponse, TurnCredential, register_response,
+    renew_credential_response,
 };
 use prost::bytes::Bytes;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering as AtomicOrdering};
@@ -24,6 +25,10 @@ fn credential(key_id: u32) -> AIdCredential {
         claims: Bytes::new(),
         signature: Bytes::from(vec![0; 64]),
     }
+}
+
+fn pending_control_attempts() -> Arc<Mutex<PendingControlAttempts>> {
+    Arc::new(Mutex::new(PendingControlAttempts::default()))
 }
 
 fn credential_for_actor(actor_id: &ActrId, key_id: u32, expires_at: u64) -> AIdCredential {
@@ -137,6 +142,7 @@ async fn expired_renewal_token_re_registers_fresh_identity() {
         },
         None,
         None,
+        pending_control_attempts(),
     )
     .await
     .expect("legacy hard rebind should commit a fresh registration");
@@ -243,6 +249,7 @@ async fn soft_renewal_fires_credential_renewed_hook() {
         },
         None,
         Some(hook_callback),
+        pending_control_attempts(),
     )
     .await
     .expect("soft renewal should succeed");
@@ -319,6 +326,7 @@ async fn credential_only_hard_reissue_fires_credential_renewed_hook() {
         },
         None,
         Some(hook_callback),
+        pending_control_attempts(),
     )
     .await;
 
@@ -395,6 +403,7 @@ async fn reissue_possession_failure_defers_instead_of_denying() {
         },
         None,
         None,
+        pending_control_attempts(),
     )
     .await;
 
@@ -467,6 +476,7 @@ async fn reissue_realm_denied_is_terminal() {
         },
         None,
         None,
+        pending_control_attempts(),
     )
     .await;
 
@@ -551,6 +561,7 @@ async fn legacy_hard_rebind_fires_credential_renewed_hook() {
         },
         None,
         Some(hook_callback),
+        pending_control_attempts(),
     )
     .await
     .expect("hard rebind should commit new snapshot");
@@ -677,6 +688,7 @@ async fn package_hard_rebind_re_signs_manufacturer_proof() {
         },
         None,
         None,
+        pending_control_attempts(),
     )
     .await
     .expect("hard rebind should commit new snapshot");
@@ -878,6 +890,7 @@ async fn legacy_hard_rebind_commits_when_ais_omits_renewal_token() {
         },
         None,
         None,
+        pending_control_attempts(),
     )
     .await
     .expect("hard rebind should commit even when AIS omits renewal_token");
@@ -956,6 +969,7 @@ async fn credential_only_hard_reissue_commits_when_ais_omits_renewal_token() {
         },
         None,
         None,
+        pending_control_attempts(),
     )
     .await;
 
@@ -1068,4 +1082,56 @@ fn record_failure_transient_resets_counter() {
         EscalationLevel::Warn
     );
     assert_eq!(counter.load(AtomicOrdering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn renewal_attempt_body_survives_outer_recovery_rounds() {
+    let pending = Arc::new(Mutex::new(PendingControlAttempts::default()));
+    let mut snapshot = SessionSnapshot {
+        actor_id: actor(41),
+        credential: credential(1),
+        credential_expires_at: prost_types::Timestamp::default(),
+        turn_credential: TurnCredential::default(),
+        renewal_token: Bytes::from_static(b"same-renewal-token"),
+        renewal_token_expires_at: prost_types::Timestamp::default(),
+        generation: 1,
+    };
+
+    let first = pending_renew_request(&pending, &snapshot).await;
+    let retry = pending_renew_request(&pending, &snapshot).await;
+    assert_eq!(retry, first, "outer retry must reuse the exact body");
+
+    clear_pending_renew(&pending, &first).await;
+    let definitive_retry = pending_renew_request(&pending, &snapshot).await;
+    assert_ne!(definitive_retry.attempt_id, first.attempt_id);
+
+    snapshot.renewal_token = Bytes::from_static(b"rotated-renewal-token");
+    let rotated = pending_renew_request(&pending, &snapshot).await;
+    assert_ne!(rotated.attempt_id, definitive_retry.attempt_id);
+}
+
+#[tokio::test]
+async fn reissue_attempt_body_survives_outer_recovery_rounds() {
+    let pending = Arc::new(Mutex::new(PendingControlAttempts::default()));
+    let snapshot = SessionSnapshot {
+        actor_id: actor(42),
+        credential: credential(1),
+        credential_expires_at: prost_types::Timestamp::default(),
+        turn_credential: TurnCredential::default(),
+        renewal_token: Bytes::from_static(b"reissue-possession-proof"),
+        renewal_token_expires_at: prost_types::Timestamp::default(),
+        generation: 1,
+    };
+    let request = ReissueCredentialRequest {
+        actr_id: snapshot.actor_id.clone(),
+        registration: RegisterRequest::default(),
+        renewal_proof: Some(snapshot.renewal_token.clone()),
+        attempt_id: new_control_attempt_id(),
+    };
+
+    store_pending_reissue(&pending, &request).await;
+    let retry = pending_reissue_request(&pending, &snapshot)
+        .await
+        .expect("matching outer retry should be retained");
+    assert_eq!(retry, request, "outer retry must reuse the exact body");
 }

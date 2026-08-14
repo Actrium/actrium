@@ -124,6 +124,20 @@ impl Database {
             .execute(&self.pool)
             .await; // intentionally ignore error (column may already exist)
 
+        // New registrations carry an explicit retention horizon. Existing rows
+        // remain NULL and are preserved until a successful renew/reissue writes
+        // a horizon for that actor.
+        let _ = sqlx::query("ALTER TABLE pending_registration ADD COLUMN expires_at INTEGER")
+            .execute(&self.pool)
+            .await; // intentionally ignore error (column may already exist)
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_pending_registration_expiry
+             ON pending_registration(expires_at)",
+        )
+        .execute(&self.pool)
+        .await?;
+
         // MFR (Manufacturer Registry) tables
         // name = GitHub user/org login (lowercased), serves as manufacturer identity
         sqlx::query(
@@ -336,6 +350,37 @@ impl Database {
         sqlx::query(
             "CREATE INDEX IF NOT EXISTS idx_ais_renewal_token_expires
              ON ais_renewal_token(expires_at)",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        // Durable idempotency journal for AIS identity-state writes. Response
+        // bodies contain bearer credentials and are therefore encrypted by AIS
+        // before being stored in response_ciphertext.
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS ais_control_attempt (
+                operation           TEXT    NOT NULL,
+                attempt_id          BLOB    NOT NULL,
+                actor_id            TEXT    NOT NULL,
+                request_hash        BLOB    NOT NULL,
+                state               INTEGER NOT NULL,
+                lease_id            BLOB,
+                lease_expires_at    INTEGER,
+                response_status     INTEGER,
+                response_ciphertext BLOB,
+                response_expires_at INTEGER,
+                tombstone_expires_at INTEGER NOT NULL,
+                created_at          INTEGER NOT NULL,
+                updated_at          INTEGER NOT NULL,
+                PRIMARY KEY(operation, attempt_id)
+            )",
+        )
+        .execute(&self.pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_ais_control_attempt_expiry
+             ON ais_control_attempt(state, tombstone_expires_at)",
         )
         .execute(&self.pool)
         .await?;

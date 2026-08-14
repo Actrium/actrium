@@ -30,7 +30,7 @@ use actr_protocol::{
 };
 use tokio::sync::Mutex;
 
-use crate::ais_client::{AisClient, RenewError};
+use crate::ais_client::{AisClient, ReissueError, RenewError, new_control_attempt_id};
 use crate::transport::PeerTransport;
 use crate::wire::webrtc::gate::WebRtcGate;
 use crate::wire::webrtc::{HookCallback, HookEvent, SignalingClient, WebRtcCoordinator};
@@ -122,6 +122,14 @@ pub(crate) struct CredentialManager {
     hard_rebind_handles: Arc<Mutex<Option<HardRebindHandles>>>,
     /// Lifecycle callback notified after soft renewal commits.
     hook_callback: Arc<Mutex<Option<HookCallback>>>,
+    /// Exact idempotent request bodies retained across outer recovery rounds.
+    pending_control_attempts: Arc<Mutex<PendingControlAttempts>>,
+}
+
+#[derive(Default)]
+struct PendingControlAttempts {
+    renew: Option<RenewCredentialRequest>,
+    reissue: Option<ReissueCredentialRequest>,
 }
 
 #[derive(Clone)]
@@ -150,6 +158,7 @@ impl CredentialManager {
             inflight: Arc::new(Mutex::new(None)),
             hard_rebind_handles: Arc::new(Mutex::new(None)),
             hook_callback: Arc::new(Mutex::new(None)),
+            pending_control_attempts: Arc::new(Mutex::new(PendingControlAttempts::default())),
         }
     }
 
@@ -214,6 +223,7 @@ impl CredentialManager {
             self.registration_ctx.clone(),
             handles,
             hook_callback,
+            self.pending_control_attempts.clone(),
         )
         .await
     }
@@ -235,6 +245,7 @@ impl CredentialManager {
         let hard_rebind_handles = self.hard_rebind_handles.clone();
         let hook_callback = self.hook_callback.clone();
         let non_transient_failures = self.non_transient_failures.clone();
+        let pending_control_attempts = self.pending_control_attempts.clone();
 
         // Spawn the actual work so the caller isn't blocked.
         let handle = tokio::spawn(async move {
@@ -247,6 +258,7 @@ impl CredentialManager {
                 registration_ctx,
                 handles,
                 hook_callback,
+                pending_control_attempts,
             )
             .await;
             match result {
@@ -289,6 +301,97 @@ impl CredentialManager {
     }
 }
 
+async fn pending_renew_request(
+    pending: &Arc<Mutex<PendingControlAttempts>>,
+    snapshot: &SessionSnapshot,
+) -> RenewCredentialRequest {
+    let mut guard = pending.lock().await;
+    if let Some(request) = guard.renew.as_ref()
+        && request.actr_id == snapshot.actor_id
+        && request.renewal_token == snapshot.renewal_token
+    {
+        return request.clone();
+    }
+
+    let request = RenewCredentialRequest {
+        actr_id: snapshot.actor_id.clone(),
+        renewal_token: snapshot.renewal_token.clone(),
+        attempt_id: new_control_attempt_id(),
+    };
+    guard.renew = Some(request.clone());
+    request
+}
+
+async fn clear_pending_renew(
+    pending: &Arc<Mutex<PendingControlAttempts>>,
+    completed: &RenewCredentialRequest,
+) {
+    let mut guard = pending.lock().await;
+    if guard
+        .renew
+        .as_ref()
+        .is_some_and(|request| request.attempt_id == completed.attempt_id)
+    {
+        guard.renew = None;
+    }
+}
+
+async fn pending_reissue_request(
+    pending: &Arc<Mutex<PendingControlAttempts>>,
+    snapshot: &SessionSnapshot,
+) -> Option<ReissueCredentialRequest> {
+    let mut guard = pending.lock().await;
+    let proof = reissue_possession_proof(snapshot);
+    if let Some(request) = guard.reissue.as_ref()
+        && request.actr_id == snapshot.actor_id
+        && request.renewal_proof == proof
+    {
+        return Some(request.clone());
+    }
+    guard.reissue = None;
+    None
+}
+
+async fn store_pending_reissue(
+    pending: &Arc<Mutex<PendingControlAttempts>>,
+    request: &ReissueCredentialRequest,
+) {
+    pending.lock().await.reissue = Some(request.clone());
+}
+
+async fn clear_pending_reissue(
+    pending: &Arc<Mutex<PendingControlAttempts>>,
+    completed: &ReissueCredentialRequest,
+) {
+    let mut guard = pending.lock().await;
+    if guard
+        .reissue
+        .as_ref()
+        .is_some_and(|request| request.attempt_id == completed.attempt_id)
+    {
+        guard.reissue = None;
+    }
+}
+
+fn reissue_client_for_context(
+    endpoint: &str,
+    registration_ctx: &RegistrationContext,
+    realm_secret: Option<&str>,
+) -> AisClient {
+    let mut ais = AisClient::new(endpoint);
+    if let RegistrationContext::Linked {
+        realm_secret: Some(secret),
+        ..
+    } = registration_ctx
+    {
+        ais = ais.with_realm_secret(secret);
+    }
+    if let Some(secret) = realm_secret {
+        ais = ais.with_realm_secret(secret);
+    }
+    ais
+}
+
 async fn run_renewal_once(
     session: SessionState,
     ais_endpoint: String,
@@ -296,6 +399,7 @@ async fn run_renewal_once(
     registration_ctx: RegistrationContext,
     hard_rebind_handles: Option<HardRebindHandles>,
     hook_callback: Option<HookCallback>,
+    pending_control_attempts: Arc<Mutex<PendingControlAttempts>>,
 ) -> Result<(), String> {
     let snapshot = session.snapshot().await;
 
@@ -328,18 +432,20 @@ async fn run_renewal_once(
         ais = ais.with_realm_secret(secret);
     }
 
-    let request = RenewCredentialRequest {
-        actr_id: snapshot.actor_id.clone(),
-        renewal_token: snapshot.renewal_token.clone(),
-    };
+    let request = pending_renew_request(&pending_control_attempts, &snapshot).await;
 
-    let response = match ais.renew_credential(request).await {
-        Ok(response) => response,
+    let response = match ais.renew_credential(request.clone()).await {
+        Ok(response) => {
+            clear_pending_renew(&pending_control_attempts, &request).await;
+            response
+        }
         Err(RenewError::RealmUnavailable) => {
+            clear_pending_renew(&pending_control_attempts, &request).await;
             session.set_realm_unavailable().await;
             return Err("realm unavailable during renewal".to_string());
         }
         Err(RenewError::TokenRejected) => {
+            clear_pending_renew(&pending_control_attempts, &request).await;
             return run_hard_rebind(
                 session,
                 ais_endpoint,
@@ -361,7 +467,18 @@ async fn run_renewal_once(
             crate::timer::sleep(crate::timer::ids::CREDENTIAL_RETRY_BACKOFF, backoff.next()).await;
             return Err(format!("retryable renew error: {err}"));
         }
-        Err(err) => return Err(err.to_string()),
+        Err(RenewError::AttemptInProgress) => {
+            return Err("renewal attempt remains retryable".to_string());
+        }
+        Err(
+            err @ (RenewError::InvalidRequest(_)
+            | RenewError::AttemptExpired
+            | RenewError::AttemptConflict
+            | RenewError::Protocol(_)),
+        ) => {
+            clear_pending_renew(&pending_control_attempts, &request).await;
+            return Err(err.to_string());
+        }
     };
 
     let ok = match response.result {
@@ -692,6 +809,7 @@ async fn run_reacquire_once(
     registration_ctx: RegistrationContext,
     hard_rebind_handles: Option<HardRebindHandles>,
     hook_callback: Option<HookCallback>,
+    pending_control_attempts: Arc<Mutex<PendingControlAttempts>>,
 ) -> ReacquireOutcome {
     let snapshot = session.snapshot().await;
 
@@ -706,6 +824,7 @@ async fn run_reacquire_once(
             hard_rebind_handles.as_ref(),
             hook_callback.as_ref(),
             &snapshot,
+            &pending_control_attempts,
         )
         .await
         {
@@ -724,6 +843,7 @@ async fn run_reacquire_once(
         registration_ctx,
         hard_rebind_handles,
         hook_callback,
+        pending_control_attempts,
     )
     .await
 }
@@ -747,31 +867,47 @@ async fn run_soft_renew(
     hard_rebind_handles: Option<&HardRebindHandles>,
     hook_callback: Option<&HookCallback>,
     snapshot: &SessionSnapshot,
+    pending_control_attempts: &Arc<Mutex<PendingControlAttempts>>,
 ) -> SoftRenewOutcome {
     let mut ais = AisClient::new(ais_endpoint);
     if let Some(secret) = realm_secret {
         ais = ais.with_realm_secret(secret);
     }
 
-    let request = RenewCredentialRequest {
-        actr_id: snapshot.actor_id.clone(),
-        renewal_token: snapshot.renewal_token.clone(),
-    };
+    let request = pending_renew_request(pending_control_attempts, snapshot).await;
 
-    let response = match ais.renew_credential(request).await {
-        Ok(response) => response,
+    let response = match ais.renew_credential(request.clone()).await {
+        Ok(response) => {
+            clear_pending_renew(pending_control_attempts, &request).await;
+            response
+        }
         Err(RenewError::RealmUnavailable) => {
+            clear_pending_renew(pending_control_attempts, &request).await;
             session.set_realm_unavailable().await;
             return SoftRenewOutcome::Denied;
         }
-        Err(RenewError::TokenRejected) => return SoftRenewOutcome::FallThroughToHardRebind,
+        Err(RenewError::TokenRejected) => {
+            clear_pending_renew(pending_control_attempts, &request).await;
+            return SoftRenewOutcome::FallThroughToHardRebind;
+        }
         Err(RenewError::RateLimited { .. }) => {
             return SoftRenewOutcome::Deferred("renewal rate limited".to_string());
         }
         Err(RenewError::Retryable(err)) => {
             return SoftRenewOutcome::Deferred(format!("retryable renew error: {err}"));
         }
-        Err(err) => return SoftRenewOutcome::Deferred(err.to_string()),
+        Err(RenewError::AttemptInProgress) => {
+            return SoftRenewOutcome::Deferred("renewal attempt remains in progress".to_string());
+        }
+        Err(
+            err @ (RenewError::InvalidRequest(_)
+            | RenewError::AttemptExpired
+            | RenewError::AttemptConflict
+            | RenewError::Protocol(_)),
+        ) => {
+            clear_pending_renew(pending_control_attempts, &request).await;
+            return SoftRenewOutcome::Deferred(err.to_string());
+        }
     };
 
     let ok = match response.result {
@@ -877,6 +1013,7 @@ async fn run_credential_only_hard_rebind(
     registration_ctx: RegistrationContext,
     hard_rebind_handles: Option<HardRebindHandles>,
     hook_callback: Option<HookCallback>,
+    pending_control_attempts: Arc<Mutex<PendingControlAttempts>>,
 ) -> ReacquireOutcome {
     let old_snapshot = session.snapshot().await;
     tracing::warn!(
@@ -885,23 +1022,49 @@ async fn run_credential_only_hard_rebind(
         "membership: starting credential-only hard rebind"
     );
 
-    let ais = AisClient::new(&ais_endpoint);
-    let (ais, registration) =
-        match build_reissue_registration(ais, registration_ctx, realm_secret).await {
-            Ok(pair) => pair,
-            Err(reason) => return ReacquireOutcome::Deferred(reason),
-        };
-
-    let response = match ais
-        .reissue_credential(ReissueCredentialRequest {
+    let (ais, request) = if let Some(request) =
+        pending_reissue_request(&pending_control_attempts, &old_snapshot).await
+    {
+        (
+            reissue_client_for_context(&ais_endpoint, &registration_ctx, realm_secret.as_deref()),
+            request,
+        )
+    } else {
+        let ais = AisClient::new(&ais_endpoint);
+        let (ais, registration) =
+            match build_reissue_registration(ais, registration_ctx.clone(), realm_secret.clone())
+                .await
+            {
+                Ok(pair) => pair,
+                Err(reason) => return ReacquireOutcome::Deferred(reason),
+            };
+        let request = ReissueCredentialRequest {
             actr_id: old_snapshot.actor_id.clone(),
             registration,
             renewal_proof: reissue_possession_proof(&old_snapshot),
-        })
-        .await
-    {
-        Ok(response) => response,
-        Err(err) => {
+            attempt_id: new_control_attempt_id(),
+        };
+        store_pending_reissue(&pending_control_attempts, &request).await;
+        (ais, request)
+    };
+
+    let response = match ais.reissue_credential_classified(request.clone()).await {
+        Ok(response) => {
+            clear_pending_reissue(&pending_control_attempts, &request).await;
+            response
+        }
+        Err(
+            ReissueError::AttemptExpired
+            | ReissueError::AttemptConflict
+            | ReissueError::Rejected(_)
+            | ReissueError::Protocol(_),
+        ) => {
+            clear_pending_reissue(&pending_control_attempts, &request).await;
+            return ReacquireOutcome::Deferred(
+                "hard rebind reissue attempt was definitively rejected".to_string(),
+            );
+        }
+        Err(err @ (ReissueError::AttemptInProgress | ReissueError::Retryable(_))) => {
             return ReacquireOutcome::Deferred(format!("hard rebind reissue failed: {err}"));
         }
     };

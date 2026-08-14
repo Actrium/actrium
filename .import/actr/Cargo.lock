@@ -547,6 +547,7 @@ dependencies = [
  "actrix-mfr",
  "actrix-platform",
  "actrix-signer",
+ "aes-gcm",
  "anyhow",
  "axum",
  "base64",

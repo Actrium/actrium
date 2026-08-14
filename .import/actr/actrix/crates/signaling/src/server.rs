@@ -446,7 +446,8 @@ pub async fn handle_websocket_connection(
                 let pool = db.get_pool();
                 let row: Option<(Option<Vec<u8>>, Option<String>)> = sqlx::query_as(
                     "SELECT service_spec_blob, ws_address FROM pending_registration \
-                     WHERE serial_number = ? AND realm_id = ?",
+                     WHERE serial_number = ?1 AND realm_id = ?2 \
+                       AND (expires_at IS NULL OR expires_at > unixepoch())",
                 )
                 .bind(actor_id_for_registry.serial_number as i64)
                 .bind(actor_id_for_registry.realm.realm_id as i64)

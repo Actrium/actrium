@@ -246,6 +246,7 @@ async fn mock_renew_allows_consecutive_soft_renewals() {
     let first_req = RenewCredentialRequest {
         actr_id: ok.actr_id.clone(),
         renewal_token: first_token,
+        attempt_id: bytes::Bytes::copy_from_slice(uuid::Uuid::new_v4().as_bytes()),
     };
     let first_resp = http
         .post(&renew_url)
@@ -269,6 +270,7 @@ async fn mock_renew_allows_consecutive_soft_renewals() {
             .renewal_token
             .clone()
             .expect("renew should return next renewal token"),
+        attempt_id: bytes::Bytes::copy_from_slice(uuid::Uuid::new_v4().as_bytes()),
     };
     let second_resp = http
         .post(&renew_url)
