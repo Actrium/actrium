@@ -310,6 +310,7 @@ impl NetworkRecoveryError {
             | NetworkError::ConnectionNotFound(_)
             | NetworkError::ConnectionClosed(_)
             | NetworkError::PeerConnectionClosed(_)
+            | NetworkError::SecureChannelNotReady(_)
             | NetworkError::ChannelClosed(_)
             | NetworkError::SendError(_)
             | NetworkError::ChannelNotFound(_)

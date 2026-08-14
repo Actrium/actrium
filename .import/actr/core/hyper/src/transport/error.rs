@@ -161,6 +161,14 @@ pub enum NetworkError {
     #[error("WebSocket closed: {0}")]
     WebSocketClosed(String),
 
+    /// Secure channel exists but is not currently sendable (e.g. `Handshaking`
+    /// or `Rekeying`), or the lane's secure epoch rotated and a fresh lane must
+    /// be acquired. Deliberately NOT closed-like: callers must wait for secure
+    /// readiness and re-acquire a lane, NOT evict the wire — a rekey must not
+    /// tear down the transport. See RFC-0563.
+    #[error("Secure channel not ready: {0}")]
+    SecureChannelNotReady(String),
+
     /// Connection not found error
     #[error("Connection not found: {0}")]
     ConnectionNotFound(String),
@@ -245,6 +253,10 @@ impl Classify for NetworkError {
             | NetworkError::WebRtcError(_)
             | NetworkError::NatTraversalError(_)
             | NetworkError::IceError(_) => ErrorKind::Transient,
+
+            // Transient: secure session alive but not sendable (handshake /
+            // rekey in flight); resolves once the session re-verifies.
+            NetworkError::SecureChannelNotReady(_) => ErrorKind::Transient,
 
             // Transient: timeout (framework-internal; caller-set deadlines should be Client)
             NetworkError::TimeoutError(_) => ErrorKind::Transient,
@@ -368,6 +380,7 @@ impl NetworkError {
             NetworkError::JsonError(_) => "json",
             NetworkError::BroadcastError(_) => "broadcast",
             NetworkError::CredentialExpired(_) => "credential_expired",
+            NetworkError::SecureChannelNotReady(_) => "secure_channel_not_ready",
             NetworkError::Other(_) => "other",
         }
     }
@@ -399,6 +412,8 @@ impl NetworkError {
             | NetworkError::DtlsError(_) => 6,
 
             NetworkError::TimeoutError(_) | NetworkError::ResourceExhaustedError(_) => 5,
+
+            NetworkError::SecureChannelNotReady(_) => 5,
 
             NetworkError::ServiceDiscoveryError(_)
             | NetworkError::DataChannelError(_)
@@ -451,7 +466,9 @@ impl NetworkError {
             | NetworkError::DataChannelNotOpen(_)
             | NetworkError::WebSocketClosed(_) => true,
 
-            // Not a stale-transport signal.
+            // Not a stale-transport signal. `SecureChannelNotReady` in
+            // particular is excluded: it means wait-for-readiness + lane
+            // re-acquisition (e.g. mid-rekey), NOT wire eviction.
             NetworkError::ConnectionError(_)
             | NetworkError::SignalingError(_)
             | NetworkError::WebRtcError(_)
@@ -484,6 +501,7 @@ impl NetworkError {
             | NetworkError::IoError(_)
             | NetworkError::UrlParseError(_)
             | NetworkError::JsonError(_)
+            | NetworkError::SecureChannelNotReady(_)
             | NetworkError::Other(_) => false,
         }
     }

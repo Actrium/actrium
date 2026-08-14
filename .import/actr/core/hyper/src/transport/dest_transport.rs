@@ -231,6 +231,16 @@ impl DestTransport {
                                                 .map(|_| wire_identity);
                                         }
                                         Err(retry_err) => {
+                                            if matches!(
+                                                retry_err,
+                                                NetworkError::SecureChannelNotReady(_)
+                                            ) {
+                                                // Secure epoch rotated again mid-retry:
+                                                // wait for readiness and re-acquire a
+                                                // lane — the wire itself is healthy.
+                                                conn.invalidate_lane(payload_type).await;
+                                                continue 'send;
+                                            }
                                             if retry_err.is_closed_like() {
                                                 self.evict_closed_like_connection(
                                                     &conn,
@@ -245,11 +255,37 @@ impl DestTransport {
                                         }
                                     }
                                 }
+                                if matches!(e, NetworkError::SecureChannelNotReady(_)) {
+                                    // Secure session alive but not sendable
+                                    // (e.g. rekey in flight), or the lane's
+                                    // epoch rotated: invalidate the lane and
+                                    // wait for the pool's readiness broadcast —
+                                    // do NOT evict or close the wire.
+                                    tracing::info!(
+                                        "🔐 secure channel not ready for {:?} ({}), waiting for readiness",
+                                        conn_type,
+                                        e,
+                                    );
+                                    conn.invalidate_lane(payload_type).await;
+                                    continue 'send;
+                                }
                             }
 
                             return result.map(|_| wire_identity);
                         }
                         Err(e) => {
+                            if matches!(e, NetworkError::SecureChannelNotReady(_)) {
+                                // Same as the send path above: wait for secure
+                                // readiness instead of evicting the wire.
+                                tracing::info!(
+                                    "🔐 secure channel not ready for {:?} ({}), waiting for readiness",
+                                    conn_type,
+                                    e,
+                                );
+                                conn.invalidate_lane(payload_type).await;
+                                continue 'send;
+                            }
+
                             let is_closed_like = e.is_closed_like();
 
                             if is_closed_like {
@@ -324,6 +360,18 @@ impl DestTransport {
             }
             None => false,
         };
+
+        // The wire returned a closed-like error, so it is dead: drive its
+        // secure state to terminal (and free its transport resources) so the
+        // pool's state-listener task exits instead of parking forever on the
+        // retired wire's epoch. Spawned so the send path is not blocked by a
+        // potentially-slow graceful drain. `close()` is idempotent on both
+        // transports, so callers that already closed are unaffected.
+        let conn_for_close = Arc::clone(conn);
+        tokio::spawn(async move {
+            let _ = conn_for_close.close().await;
+        });
+
         tracing::warn!(
             "♻️ DestTransport stale self-heal: payload_type={:?}, conn_type={:?}, expected_identity={:?}, changed={}",
             payload_type,

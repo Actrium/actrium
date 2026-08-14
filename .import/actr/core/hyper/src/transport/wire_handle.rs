@@ -6,6 +6,7 @@
 
 use super::error::NetworkResult;
 use super::lane::DataLane;
+use super::secure_channel::SecureChannelState;
 use super::wire_pool::ConnType;
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
@@ -43,7 +44,12 @@ pub trait WireHandle: Send + Sync + std::fmt::Debug {
     #[allow(dead_code)]
     fn priority(&self) -> u8;
 
-    /// Establish connection
+    /// Establish connection.
+    ///
+    /// Contract (RFC-0563): returns only when the wire's
+    /// `secure_channel_state()` is sendable. In phase 2 that means
+    /// `LegacyBypass` (transport ready, no crypto); phase 3 will drive
+    /// `New → Handshaking → Verified` here once the real handshake lands.
     async fn connect(&self) -> NetworkResult<()>;
 
     /// Check if connected
@@ -72,6 +78,46 @@ pub trait WireHandle: Send + Sync + std::fmt::Debug {
     fn identity(&self) -> Option<WireIdentity> {
         None
     }
+
+    /// Secure-channel state. Default `LegacyBypass` — an honest "transport
+    /// ready, no crypto" label — so unwrapped wires (tests, web bindings,
+    /// future transports) are sendable **without** claiming cryptographic
+    /// verification. Physical `WireHandle` impls that own a [`SecureCell`]
+    /// override this with their real state. See RFC-0563.
+    ///
+    /// [`SecureCell`]: super::secure_channel::SecureCell
+    fn secure_channel_state(&self) -> SecureChannelState {
+        SecureChannelState::LegacyBypass
+    }
+
+    /// Current secure epoch (monotonic, bumps on every validated transition).
+    /// Default `0` for wires without a [`SecureCell`]. `WirePool` uses this to
+    /// detect that a state change has occurred.
+    ///
+    /// [`SecureCell`]: super::secure_channel::SecureCell
+    fn secure_epoch(&self) -> u64 {
+        0
+    }
+
+    /// Wait until the secure epoch advances past `observed_epoch`, signalling
+    /// that the secure state may have changed (e.g. `Handshaking → Verified`,
+    /// rekey, or a terminal transition). Default: never resolves — unwrapped
+    /// wires have no transitions to observe, so a `WirePool` listener parked on
+    /// this simply stays inert. Physical impls override to delegate to their
+    /// [`SecureCell`].
+    ///
+    /// [`SecureCell`]: super::secure_channel::SecureCell
+    async fn await_secure_state_change(&self, _observed_epoch: u64) {
+        std::future::pending::<()>().await;
+    }
+
+    /// Declare the secure session terminally `Failed`. Called by `WirePool`
+    /// **only after connect retries are exhausted** — a single failed attempt
+    /// must stay non-terminal so a later retry on the same object can still
+    /// become sendable. Default no-op for wires without a [`SecureCell`].
+    ///
+    /// [`SecureCell`]: super::secure_channel::SecureCell
+    fn mark_secure_failed(&self) {}
 }
 
 /// Wire connection status

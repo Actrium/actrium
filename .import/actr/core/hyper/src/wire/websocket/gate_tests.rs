@@ -1,4 +1,5 @@
 use super::*;
+use crate::transport::secure_channel::SecureChannelState;
 use actr_protocol::{ActrType, IdentityClaims, Realm};
 use actr_runtime_mailbox::{MailboxStats, MessageRecord, StorageResult};
 use async_trait::async_trait;
@@ -386,15 +387,26 @@ fn empty_pending() -> PendingReplies {
     Arc::new(RwLock::new(HashMap::new()))
 }
 
+/// Insert an inbound-sink entry for `peer` with a sendable (`LegacyBypass`)
+/// secure cell. Tests that need a different state construct the tuple inline.
+async fn insert_sink_entry(inbound_sinks: &InboundSinkMap, peer: &ActrId, sink: WsSink) {
+    inbound_sinks.write().await.insert(
+        peer.clone(),
+        (sink, SecureCell::new(SecureChannelState::LegacyBypass)),
+    );
+}
+
 #[tokio::test]
 async fn finish_lane_task_last_lane_removes_sink_and_fires_disconnect() {
     let peer = test_actor_id(298);
     let active_lanes = Arc::new(AtomicUsize::new(1));
     let inbound_sinks: InboundSinkMap = Arc::new(RwLock::new(HashMap::new()));
-    inbound_sinks
-        .write()
-        .await
-        .insert(peer.clone(), Arc::new(tokio::sync::Mutex::new(None)));
+    insert_sink_entry(
+        &inbound_sinks,
+        &peer,
+        Arc::new(tokio::sync::Mutex::new(None)),
+    )
+    .await;
 
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let hook: HookCallback = Arc::new(move |event| {
@@ -427,10 +439,12 @@ async fn finish_lane_task_non_last_lane_keeps_sink_and_skips_disconnect() {
     let peer = test_actor_id(299);
     let active_lanes = Arc::new(AtomicUsize::new(2));
     let inbound_sinks: InboundSinkMap = Arc::new(RwLock::new(HashMap::new()));
-    inbound_sinks
-        .write()
-        .await
-        .insert(peer.clone(), Arc::new(tokio::sync::Mutex::new(None)));
+    insert_sink_entry(
+        &inbound_sinks,
+        &peer,
+        Arc::new(tokio::sync::Mutex::new(None)),
+    )
+    .await;
 
     let hook_calls = Arc::new(AtomicUsize::new(0));
     let hook_calls_for_hook = hook_calls.clone();
@@ -944,7 +958,7 @@ async fn send_response_returns_false_when_sink_is_none() {
     // Insert a None sink for the peer.
     let peer = test_actor_id(2);
     let sink: WsSink = Arc::new(tokio::sync::Mutex::new(None));
-    gate.inbound_sinks.write().await.insert(peer.clone(), sink);
+    insert_sink_entry(&gate.inbound_sinks, &peer, sink).await;
     let sent = gate
         .send_response(&peer, RpcEnvelope::default())
         .await
@@ -1258,4 +1272,62 @@ async fn receive_loop_admits_verified_connection() {
         .expect("loop must be consuming connections");
 
     assert_eq!(running.probe.take_connected().await, peer);
+}
+
+// ── send_response secure gate (RFC-0563 re-review) ──────────────────────
+
+/// A raw-sink `send_response` while the session is alive but NOT sendable
+/// (e.g. `Handshaking`) must fail closed — no bytes reach the sink.
+#[tokio::test]
+async fn send_response_rejected_while_secure_channel_not_sendable() {
+    let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
+    let gate = WebSocketGate::new(
+        rx,
+        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        Arc::new(DataChunkRegistry::new()),
+        None,
+    );
+    let peer = test_actor_id(310);
+    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(None));
+    gate.inbound_sinks.write().await.insert(
+        peer.clone(),
+        (sink, SecureCell::new(SecureChannelState::Handshaking)),
+    );
+
+    let result = gate.send_response(&peer, RpcEnvelope::default()).await;
+    assert!(
+        matches!(result, Err(actr_protocol::ActrError::Unavailable(_))),
+        "non-sendable secure channel must fail send_response, got {result:?}"
+    );
+    // Registration is kept: the session is alive and may become sendable.
+    assert!(gate.inbound_sinks.read().await.contains_key(&peer));
+}
+
+/// A terminal session must drop the registration and report "no inbound
+/// connection" so the caller falls back to another transport.
+#[tokio::test]
+async fn send_response_terminal_state_removes_registration() {
+    let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
+    let gate = WebSocketGate::new(
+        rx,
+        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        Arc::new(DataChunkRegistry::new()),
+        None,
+    );
+    let peer = test_actor_id(311);
+    let sink: WsSink = Arc::new(tokio::sync::Mutex::new(None));
+    gate.inbound_sinks.write().await.insert(
+        peer.clone(),
+        (sink, SecureCell::new(SecureChannelState::Closed)),
+    );
+
+    let sent = gate
+        .send_response(&peer, RpcEnvelope::default())
+        .await
+        .expect("terminal session should yield Ok(false), not an error");
+    assert!(!sent);
+    assert!(
+        !gate.inbound_sinks.read().await.contains_key(&peer),
+        "terminal session registration must be removed"
+    );
 }

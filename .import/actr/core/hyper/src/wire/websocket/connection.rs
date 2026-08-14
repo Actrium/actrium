@@ -1,7 +1,8 @@
 //! WebSocket transport connection implementation
 
 use crate::transport::{
-    ConnType, DataLane, NetworkError, NetworkResult, WebSocketDataLane, WireHandle, WsSink,
+    ConnType, DataLane, NetworkError, NetworkResult, SecureCell, SecureChannelState,
+    SecureDataLane, WebSocketDataLane, WireHandle, WsSink,
 };
 use actr_protocol::PayloadType;
 use async_trait::async_trait;
@@ -97,6 +98,10 @@ pub(crate) struct WebSocketConnection {
 
     /// connection status
     connected: Arc<RwLock<bool>>,
+
+    /// Secure-channel state owned by this physical WebSocket session (RFC-0563).
+    /// Phase 2 constructs `LegacyBypass`; phase 3 drives the real handshake.
+    secure: SecureCell,
 }
 
 impl WebSocketConnection {
@@ -120,6 +125,7 @@ impl WebSocketConnection {
             router: Arc::new(RwLock::new([None, None, None, None, None])),
             lane_cache: Arc::new(RwLock::new([None, None, None, None, None])),
             connected: Arc::new(RwLock::new(false)),
+            secure: SecureCell::new(SecureChannelState::LegacyBypass),
         }
     }
 
@@ -163,6 +169,7 @@ impl WebSocketConnection {
             router,
             lane_cache: Arc::new(RwLock::new([None, None, None, None, None])),
             connected,
+            secure: SecureCell::new(SecureChannelState::LegacyBypass),
         }
     }
 
@@ -306,6 +313,13 @@ impl WebSocketConnection {
         self.sink.clone()
     }
 
+    /// Return the session's secure cell so direct-sink senders
+    /// (`WebSocketGate::send_response`) can gate on the same state as the
+    /// wrapped `SecureDataLane`s.
+    pub(crate) fn secure_cell(&self) -> SecureCell {
+        self.secure.clone()
+    }
+
     /// Get or create DataLane (with caching)
     pub async fn get_lane(&self, payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
         self.get_lane_internal(payload_type).await
@@ -365,12 +379,24 @@ impl WebSocketConnection {
         // Get shared Sink
         let sink = self.sink.clone();
 
-        // Create WebSocketDataLane
-        Ok(Arc::new(WebSocketDataLane::new(sink, payload_type, rx)))
+        // Create WebSocketDataLane, wrapped in `SecureDataLane` so the cached
+        // lane gates both outbound `send()` and the response-reader `recv()`
+        // on this session's `SecureCell` (RFC-0563 review point 3).
+        let lane: Arc<dyn DataLane> = Arc::new(SecureDataLane::new(
+            Arc::new(WebSocketDataLane::new(sink, payload_type, rx)),
+            self.secure.clone(),
+        ));
+        Ok(lane)
     }
 
     /// Close connection
     pub async fn close(&self) -> NetworkResult<()> {
+        // Close admission: drive the secure session terminal first, so every
+        // path into this physical close (inherent call sites bypass the trait
+        // method — RFC-0563 review point on shadowed terminal driving) marks
+        // the session `Closed` and invalidates all wrapped `SecureDataLane`s.
+        self.secure.drive_terminal(SecureChannelState::Closed);
+
         *self.connected.write().await = false;
 
         // Close WebSocket (Send Close message)
@@ -404,6 +430,14 @@ impl WireHandle for WebSocketConnection {
     }
 
     async fn connect(&self) -> NetworkResult<()> {
+        // TODO(phase3): drive `LegacyBypass → New → Handshaking → Verified`
+        // once the authenticated handshake lands. For now connect() returns
+        // only when transport-ready (`LegacyBypass` is sendable).
+        //
+        // A single failed attempt does NOT drive terminal `Failed`: the
+        // `WirePool` retries this same object, and a terminal state would make
+        // a later successful attempt permanently unsendable. Failure is
+        // declared only at retry exhaustion (`mark_secure_failed`).
         self.connect().await
     }
 
@@ -412,11 +446,28 @@ impl WireHandle for WebSocketConnection {
     }
 
     async fn close(&self) -> NetworkResult<()> {
+        // The inherent `Self::close` owns terminal driving (see above).
         Self::close(self).await
     }
 
     async fn get_lane(&self, payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
         self.get_lane_internal(payload_type).await
+    }
+
+    fn secure_channel_state(&self) -> SecureChannelState {
+        self.secure.state()
+    }
+
+    fn secure_epoch(&self) -> u64 {
+        self.secure.epoch()
+    }
+
+    async fn await_secure_state_change(&self, observed_epoch: u64) {
+        self.secure.wait_after(observed_epoch).await;
+    }
+
+    fn mark_secure_failed(&self) {
+        self.secure.drive_terminal(SecureChannelState::Failed);
     }
 }
 

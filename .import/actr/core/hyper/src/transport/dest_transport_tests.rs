@@ -356,3 +356,108 @@ async fn has_healthy_connection_false_when_no_connections() {
     let rx = t.watch_ready();
     assert!(rx.borrow().is_empty());
 }
+
+// ── Rekey must not evict the wire (RFC-0563 re-review) ──────────────────
+
+/// Lane whose first send fails with `SecureChannelNotReady` (simulating a
+/// Verified→Rekeying rotation detected at send time); subsequent sends succeed
+/// (rekey completed, fresh lane re-acquired).
+#[derive(Debug)]
+struct RekeyRecoveryLane {
+    send_attempts: Arc<AtomicUsize>,
+    ok_sends: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl DataLane for RekeyRecoveryLane {
+    async fn send(&self, _data: bytes::Bytes) -> NetworkResult<()> {
+        let n = self.send_attempts.fetch_add(1, Ordering::Relaxed);
+        if n == 0 {
+            return Err(NetworkError::SecureChannelNotReady(
+                "rekey in flight".to_string(),
+            ));
+        }
+        self.ok_sends.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn lane_type(&self) -> &'static str {
+        "rekey-recovery"
+    }
+}
+
+#[derive(Debug)]
+struct RekeyRecoveryWire {
+    conn_type: ConnType,
+    send_attempts: Arc<AtomicUsize>,
+    ok_sends: Arc<AtomicUsize>,
+    close_calls: Arc<AtomicUsize>,
+}
+
+#[async_trait]
+impl WireHandle for RekeyRecoveryWire {
+    fn connection_type(&self) -> ConnType {
+        self.conn_type
+    }
+    fn priority(&self) -> u8 {
+        1
+    }
+    async fn connect(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+    fn is_connected(&self) -> bool {
+        true
+    }
+    async fn close(&self) -> NetworkResult<()> {
+        self.close_calls.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+    async fn get_lane(&self, _payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        Ok(Arc::new(RekeyRecoveryLane {
+            send_attempts: Arc::clone(&self.send_attempts),
+            ok_sends: Arc::clone(&self.ok_sends),
+        }))
+    }
+}
+
+/// Re-review scenario: a mid-rekey send error must wait for readiness and
+/// re-acquire a lane on the SAME wire — no eviction, no close, send succeeds.
+#[tokio::test]
+async fn rekey_not_ready_does_not_evict_wire_and_send_recovers() {
+    let send_attempts = Arc::new(AtomicUsize::new(0));
+    let ok_sends = Arc::new(AtomicUsize::new(0));
+    let close_calls = Arc::new(AtomicUsize::new(0));
+    let transport = test_transport(vec![Arc::new(RekeyRecoveryWire {
+        conn_type: ConnType::WebRTC,
+        send_attempts: Arc::clone(&send_attempts),
+        ok_sends: Arc::clone(&ok_sends),
+        close_calls: Arc::clone(&close_calls),
+    })])
+    .await;
+
+    let result = timeout(
+        Duration::from_secs(2),
+        transport.send_with_identity(PayloadType::RpcReliable, b"payload"),
+    )
+    .await
+    .expect("send must not hang on a mid-rekey wire");
+
+    assert!(
+        result.is_ok(),
+        "send must succeed after rekey recovery, got {result:?}"
+    );
+    assert_eq!(ok_sends.load(Ordering::Relaxed), 1);
+    assert_eq!(
+        close_calls.load(Ordering::Relaxed),
+        0,
+        "a rekeying (not closed) wire must NOT be closed or evicted"
+    );
+    // The wire is still pooled and acquirable.
+    assert!(
+        transport
+            .conn_mgr
+            .get_connection(ConnType::WebRTC)
+            .await
+            .is_some()
+    );
+}
