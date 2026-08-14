@@ -466,7 +466,7 @@ impl ActrRefWrapper {
         let ctx = self.inner.app_context().await;
 
         let response_bytes = ctx
-            .call_raw(
+            .call_raw_dest(
                 &Dest::Workload,
                 route_key,
                 proto_payload_type,

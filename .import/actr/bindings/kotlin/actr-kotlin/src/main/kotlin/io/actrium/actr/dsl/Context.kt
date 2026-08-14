@@ -4,8 +4,19 @@ package io.actrium.actr.dsl
 import io.actrium.actr.ActrId
 import io.actrium.actr.PayloadType
 
-/** Perform a typed RPC call with an explicit timeout. */
+/**
+ * Perform a typed RPC call with default timeout ([DEFAULT_RPC_TIMEOUT_MS]).
+ *
+ * Delegates to [callWithTimeout].
+ */
 suspend fun <Req, Resp> ActrContext.call(
+    target: ActrId,
+    rpc: RpcRequest<Req, Resp>,
+    request: Req,
+): Resp = callWithTimeout(target, rpc, request, DEFAULT_RPC_TIMEOUT_MS)
+
+/** Perform a typed RPC call with an explicit timeout. */
+suspend fun <Req, Resp> ActrContext.callWithTimeout(
     target: ActrId,
     rpc: RpcRequest<Req, Resp>,
     request: Req,
@@ -22,8 +33,19 @@ suspend fun <Req, Resp> ActrContext.call(
     return rpc.deserializeResponse(response)
 }
 
-/** Forward raw RPC bytes on the reliable lane with an explicit timeout. */
+/** Forward raw RPC bytes on the reliable lane with default timeout ([DEFAULT_RPC_TIMEOUT_MS]). */
 suspend fun ActrContext.callRaw(
+    target: ActrId,
+    routeKey: String,
+    payload: ByteArray,
+): ByteArray = callRawWithTimeout(target, routeKey, payload, DEFAULT_RPC_TIMEOUT_MS)
+
+/**
+ * Forward raw RPC bytes on the reliable lane with an explicit timeout.
+ *
+ * @throws IllegalArgumentException if `timeoutMs <= 0`
+ */
+suspend fun ActrContext.callRawWithTimeout(
     target: ActrId,
     routeKey: String,
     payload: ByteArray,

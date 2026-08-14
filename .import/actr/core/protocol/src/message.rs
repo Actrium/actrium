@@ -14,7 +14,7 @@
 //! With the RpcRequest trait, the framework can provide type-safe APIs:
 //! ```rust,ignore
 //! // Type-safe: compiler infers EchoResponse from EchoRequest::Response
-//! let response: EchoResponse = ctx.call(target, request, 30_000).await?;
+//! let response: EchoResponse = ctx.call(target, request).await?;
 //! ```
 //!
 //! # Implementation
@@ -36,7 +36,7 @@
 //! - It can be independently tested without runtime dependencies
 //! - It follows the "data definition layer" principle of actr-protocol
 
-use prost::Message as ProstMessage;
+use bytes::Bytes;
 
 use crate::generated::actr::{PayloadType, ReplyMode};
 
@@ -91,18 +91,18 @@ use crate::generated::actr::{PayloadType, ReplyMode};
 ///     let request = EchoRequest { message };
 ///
 ///     // Type inference: compiler knows Response = EchoResponse
-///     let response = ctx.call(target, request, 30_000).await?;
+///     let response = ctx.call(target, request).await?;
 ///
 ///     Ok(response.reply)
 /// }
 /// ```
-pub trait RpcRequest: ProstMessage + Default + Send + Sync + 'static {
+pub trait RpcRequest: Send + Sync + 'static {
     /// The response type associated with this RPC request.
     ///
     /// This associated type enables compile-time type checking of request/response pairs.
     /// When calling `ctx.call::<R>(...)`, the framework automatically decodes the
     /// response bytes into `R::Response`.
-    type Response: ProstMessage + Default + Send + Sync + 'static;
+    type Response: prost::Message + Default + Send + Sync + 'static;
 
     /// Returns the route key for this RPC method.
     ///
@@ -111,7 +111,7 @@ pub trait RpcRequest: ProstMessage + Default + Send + Sync + 'static {
     ///
     /// This method is used by the framework to automatically populate the RpcEnvelope's
     /// route_key field when making type-safe RPC calls.
-    fn route_key() -> &'static str;
+    fn route_key(&self) -> &'static str;
 
     /// Returns the PayloadType for this RPC method.
     ///
@@ -128,7 +128,7 @@ pub trait RpcRequest: ProstMessage + Default + Send + Sync + 'static {
     ///
     /// This method is used by the framework to select the appropriate transmission lane
     /// when making RPC calls.
-    fn payload_type() -> PayloadType {
+    fn payload_type(&self) -> PayloadType {
         PayloadType::RpcReliable
     }
 
@@ -157,4 +157,16 @@ pub trait RpcRequest: ProstMessage + Default + Send + Sync + 'static {
     fn reply_mode() -> ReplyMode {
         ReplyMode::Return
     }
+
+    /// Encodes the held protobuf request message into bytes for transmission.
+    ///
+    /// The framework calls this to obtain the payload bytes for the `RpcEnvelope`.
+    /// Implementations should encode the inner protobuf request message.
+    fn encode_request(&self) -> Bytes;
+
+    /// Decodes raw response bytes into the associated `Response` type.
+    ///
+    /// This is a static method (no `&self`) because decoding does not depend on
+    /// the request instance — only on the `Response` associated type.
+    fn decode_response(data: &[u8]) -> Result<Self::Response, prost::DecodeError>;
 }

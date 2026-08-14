@@ -5,7 +5,6 @@
 
 use std::rc::Rc;
 
-use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
     ActorResult, ActrError, ActrId, ActrType, Direction, MetadataEntry, PayloadType, RpcEnvelope,
     RpcRequest,
@@ -69,7 +68,7 @@ impl RuntimeContext {
         self
     }
 
-    async fn call_raw_with_type(
+    pub(crate) async fn call_raw_with_type(
         &self,
         target: &ActrId,
         route_key: &str,
@@ -235,18 +234,18 @@ impl WebContext for RuntimeContext {
         request: R,
         timeout_ms: i64,
     ) -> ActorResult<R::Response> {
-        let payload = request.encode_to_vec();
+        let payload = request.encode_request();
         let response_bytes = self
             .call_raw_with_type(
                 target,
-                R::route_key(),
-                R::payload_type(),
+                request.route_key(),
+                request.payload_type(),
                 &payload,
                 timeout_ms,
             )
             .await?;
 
-        R::Response::decode(response_bytes.as_slice()).map_err(|e| {
+        R::decode_response(response_bytes.as_slice()).map_err(|e| {
             actr_protocol::ActrError::DecodeFailure(format!(
                 "Failed to decode {}: {}",
                 std::any::type_name::<R::Response>(),
@@ -259,8 +258,8 @@ impl WebContext for RuntimeContext {
         // 1. Encode the message and delegate to the shared raw tell path.
         //    Passing the Vec by value lets tell_raw move it into Bytes with
         //    no extra copy (a &[u8] parameter would force a clone).
-        let payload = message.encode_to_vec();
-        self.tell_raw_with_type(target, R::route_key(), R::payload_type(), payload)
+        let payload = message.encode_request().to_vec();
+        self.tell_raw_with_type(target, message.route_key(), message.payload_type(), payload)
             .await
     }
 

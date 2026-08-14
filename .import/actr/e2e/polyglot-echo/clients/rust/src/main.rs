@@ -41,39 +41,78 @@ const STREAM_CHUNK_COUNT: u32 = 5;
 // align with the TypeScript driver's 15-second RPC timeout.
 const RPC_TIMEOUT_MS: i64 = 15_000;
 
-impl RpcRequest for EchoRequest {
+pub struct EchoEchoServiceEchoRpc {
+    pub request: EchoRequest,
+}
+
+impl RpcRequest for EchoEchoServiceEchoRpc {
     type Response = EchoResponse;
 
-    fn route_key() -> &'static str {
+    fn route_key(&self) -> &'static str {
         "echo.EchoService.Echo"
     }
 
-    fn payload_type() -> actr_protocol::PayloadType {
+    fn payload_type(&self) -> actr_protocol::PayloadType {
         actr_protocol::PayloadType::RpcReliable
+    }
+
+    fn encode_request(&self) -> Bytes {
+        use prost::Message as _;
+        self.request.encode_to_vec().into()
+    }
+
+    fn decode_response(data: &[u8]) -> Result<EchoResponse, prost::DecodeError> {
+        prost::Message::decode(data)
     }
 }
 
-impl RpcRequest for StartServerStreamRequest {
+pub struct EchoEchoStreamServiceStartServerStreamRpc {
+    pub request: StartServerStreamRequest,
+}
+
+impl RpcRequest for EchoEchoStreamServiceStartServerStreamRpc {
     type Response = StartServerStreamResponse;
 
-    fn route_key() -> &'static str {
+    fn route_key(&self) -> &'static str {
         "echo.EchoStreamService.StartServerStream"
     }
 
-    fn payload_type() -> actr_protocol::PayloadType {
+    fn payload_type(&self) -> actr_protocol::PayloadType {
         actr_protocol::PayloadType::RpcReliable
+    }
+
+    fn encode_request(&self) -> Bytes {
+        use prost::Message as _;
+        self.request.encode_to_vec().into()
+    }
+
+    fn decode_response(data: &[u8]) -> Result<StartServerStreamResponse, prost::DecodeError> {
+        prost::Message::decode(data)
     }
 }
 
-impl RpcRequest for SetupBidiRequest {
+pub struct EchoEchoStreamServiceSetupBidiRpc {
+    pub request: SetupBidiRequest,
+}
+
+impl RpcRequest for EchoEchoStreamServiceSetupBidiRpc {
     type Response = SetupBidiResponse;
 
-    fn route_key() -> &'static str {
+    fn route_key(&self) -> &'static str {
         "echo.EchoStreamService.SetupBidi"
     }
 
-    fn payload_type() -> actr_protocol::PayloadType {
+    fn payload_type(&self) -> actr_protocol::PayloadType {
         actr_protocol::PayloadType::RpcReliable
+    }
+
+    fn encode_request(&self) -> Bytes {
+        use prost::Message as _;
+        self.request.encode_to_vec().into()
+    }
+
+    fn decode_response(data: &[u8]) -> Result<SetupBidiResponse, prost::DecodeError> {
+        prost::Message::decode(data)
     }
 }
 
@@ -205,8 +244,10 @@ async fn scenario_echo(
     target: ActrId,
     message: &str,
 ) -> Result<()> {
-    let request = EchoRequest {
-        message: message.to_string(),
+    let request = EchoEchoServiceEchoRpc {
+        request: EchoRequest {
+            message: message.to_string(),
+        },
     };
     let response: EchoResponse = actr_ref
         .call_remote(target, request, RPC_TIMEOUT_MS)
@@ -268,10 +309,12 @@ async fn scenario_server_stream(
     let resp: StartServerStreamResponse = actr_ref
         .call_remote(
             target,
-            StartServerStreamRequest {
-                client_stream_id: stream_id.clone(),
-                chunk_count,
-                text: message.to_string(),
+            EchoEchoStreamServiceStartServerStreamRpc {
+                request: StartServerStreamRequest {
+                    client_stream_id: stream_id.clone(),
+                    chunk_count,
+                    text: message.to_string(),
+                },
             },
             RPC_TIMEOUT_MS,
         )
@@ -356,10 +399,12 @@ async fn scenario_bidi(
     let resp: SetupBidiResponse = actr_ref
         .call_remote(
             target.clone(),
-            SetupBidiRequest {
-                client_rx_stream_id: client_rx_id.clone(),
-                server_rx_stream_id: server_rx_id.clone(),
-                expected_chunks: chunk_count,
+            EchoEchoStreamServiceSetupBidiRpc {
+                request: SetupBidiRequest {
+                    client_rx_stream_id: client_rx_id.clone(),
+                    server_rx_stream_id: server_rx_id.clone(),
+                    expected_chunks: chunk_count,
+                },
             },
             RPC_TIMEOUT_MS,
         )

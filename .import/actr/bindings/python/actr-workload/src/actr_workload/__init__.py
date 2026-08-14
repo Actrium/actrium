@@ -4,6 +4,7 @@ from typing import Any
 
 from .constants import (
     COMPONENTIZE_PY_VERSION,
+    DEFAULT_RPC_TIMEOUT_MS,
     DEFAULT_WIT_RESOURCE,
     DEFAULT_WORLD,
     DEFAULT_WORLD_MODULE,
@@ -27,6 +28,7 @@ def __getattr__(name: str) -> Any:
 
 __all__ = [
     "COMPONENTIZE_PY_VERSION",
+    "DEFAULT_RPC_TIMEOUT_MS",
     "DEFAULT_WIT_RESOURCE",
     "DEFAULT_WORLD",
     "DEFAULT_WORLD_MODULE",

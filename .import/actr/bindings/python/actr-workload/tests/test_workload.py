@@ -45,7 +45,7 @@ class WorkloadAuthoringTests(unittest.TestCase):
 
         async def exercise() -> bytes:
             ctx = ActrContext(_Invocation())
-            return await ctx.call_raw(
+            return await ctx.call_raw_with_payload_type(
                 "target",
                 "echo.EchoService.Echo",
                 b"request",
@@ -59,6 +59,53 @@ class WorkloadAuthoringTests(unittest.TestCase):
         self.assertEqual(response, b"response")
         self.assertEqual(len(captured), 1)
         self.assertIsInstance(captured[0][-1], RpcSignal)
+
+    def test_call_raw_default_lane_applies_default_timeout(self) -> None:
+        from actr_workload import DEFAULT_RPC_TIMEOUT_MS, ActrContext
+
+        captured: list[tuple[object, ...]] = []
+
+        class RpcReliable:
+            pass
+
+        async def call_raw(*args: object) -> bytes:
+            captured.append(args)
+            return b"response"
+
+        host = SimpleNamespace(call_raw=call_raw)
+        types = SimpleNamespace(PayloadType_RpcReliable=RpcReliable)
+
+        async def exercise() -> bytes:
+            ctx = ActrContext(_Invocation())
+            return await ctx.call_raw("target", "echo.EchoService.Echo", b"request")
+
+        with patch("actr_workload.context._bindings", return_value=(host, types)):
+            response = asyncio.run(exercise())
+
+        self.assertEqual(response, b"response")
+        self.assertEqual(len(captured), 1)
+        # args: (ctx_token, target, route_key, payload, timeout_ms, payload_type)
+        self.assertEqual(captured[0][-2], DEFAULT_RPC_TIMEOUT_MS)
+        self.assertIsInstance(captured[0][-1], RpcReliable)
+
+    def test_explicit_timeout_lanes_reject_non_positive_timeout(self) -> None:
+        from actr_workload import ActrContext
+
+        async def call_raw(*args: object) -> bytes:
+            return b"response"
+
+        host = SimpleNamespace(call_raw=call_raw)
+        types = SimpleNamespace()
+
+        async def exercise() -> None:
+            ctx = ActrContext(_Invocation())
+            with self.assertRaises(ValueError):
+                await ctx.call_raw_with_timeout(
+                    "target", "echo.EchoService.Echo", b"request", 0
+                )
+
+        with patch("actr_workload.context._bindings", return_value=(host, types)):
+            asyncio.run(exercise())
 
     def test_authoring_workload_wraps_invocation_context(self) -> None:
         from actr_workload import ActrContext, Workload

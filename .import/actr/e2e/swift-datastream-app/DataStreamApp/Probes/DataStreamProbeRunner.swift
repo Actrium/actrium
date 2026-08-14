@@ -78,8 +78,8 @@ final class DataStreamProbeRunner: @unchecked Sendable {
         req.payloadMode = mode
         req.note = "DataStreamApp iOS probe"
 
-        let rd = try await ctx.callRaw(target: target, routeKey: Local_StartDuplexStreamRequest.routeKey,
-            payloadType: .rpcReliable, payload: try req.serializedData(), timeoutMs: 60_000)
+        let rd = try await ctx.callRawWithTimeout(target: target, routeKey: Local_StartDuplexStreamRequest.routeKey,
+            payload: try req.serializedData(), timeoutMs: 60_000)
         let resp = try Local_StartDuplexStreamResponse(serializedBytes: rd)
         log.append("Start: sid=\(resp.sessionID) s2c=\(resp.serviceToClientStreamID) status=\(resp.status)")
 
@@ -95,8 +95,8 @@ final class DataStreamProbeRunner: @unchecked Sendable {
     func finish(s: Session, log: inout [String]) async throws -> Local_FinishDuplexStreamResponse {
         var req = Local_FinishDuplexStreamRequest()
         req.sessionID = s.sid; req.clientToServiceStreamID = s.c2s; req.serviceToClientStreamID = s.s2c
-        let rd = try await ctx.callRaw(target: target, routeKey: Local_FinishDuplexStreamRequest.routeKey,
-            payloadType: .rpcReliable, payload: try req.serializedData(), timeoutMs: 30_000)
+        let rd = try await ctx.callRawWithTimeout(target: target, routeKey: Local_FinishDuplexStreamRequest.routeKey,
+            payload: try req.serializedData(), timeoutMs: 30_000)
         let resp = try Local_FinishDuplexStreamResponse(serializedBytes: rd)
         log.append("Finish: sid=\(resp.sessionID) c2sRecv=\(resp.clientChunksReceived) s2cSent=\(resp.serviceChunksSent) status=\(resp.status)")
         return resp
@@ -215,10 +215,9 @@ final class DataStreamProbeRunner: @unchecked Sendable {
         req.payloadMode = .streamReliable
         req.note = "DataStreamApp manual stream echo"
 
-        let rd = try await ctx.callRaw(
+        let rd = try await ctx.callRawWithTimeout(
             target: target,
             routeKey: Local_StartDuplexStreamRequest.routeKey,
-            payloadType: .rpcReliable,
             payload: try req.serializedData(),
             timeoutMs: 60_000
         )
@@ -244,10 +243,9 @@ final class DataStreamProbeRunner: @unchecked Sendable {
             req.sessionID = s.sid
             req.clientToServiceStreamID = s.c2s
             req.serviceToClientStreamID = s.s2c
-            let rd = try await ctx.callRaw(
+            let rd = try await ctx.callRawWithTimeout(
                 target: target,
                 routeKey: Local_FinishDuplexStreamRequest.routeKey,
-                payloadType: .rpcReliable,
                 payload: try req.serializedData(),
                 timeoutMs: 30_000
             )

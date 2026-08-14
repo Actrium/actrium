@@ -438,7 +438,7 @@ impl Context for MockContext {
         "mock-request"
     }
 
-    async fn call<R: actr_protocol::RpcRequest>(
+    async fn call_with_timeout<R: actr_protocol::RpcRequest>(
         &self,
         _target: &actr_framework::Dest,
         _request: R,
@@ -484,7 +484,7 @@ impl Context for MockContext {
         Err(ActrError::NotImplemented("mock context".to_string()))
     }
 
-    async fn call_raw(
+    async fn call_raw_with_timeout(
         &self,
         _target: &ActrId,
         _route_key: &str,

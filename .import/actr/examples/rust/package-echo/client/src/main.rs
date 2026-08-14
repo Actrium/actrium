@@ -23,20 +23,35 @@ use std::sync::Arc;
 use actr_protocol::RpcRequest;
 use anyhow::{Context, Result, anyhow, ensure};
 use base64::Engine;
+use bytes::Bytes;
 use serde_json::Value;
 use tracing::{error, info};
 
 use crate::echo::{EchoRequest, EchoResponse};
 
-impl RpcRequest for EchoRequest {
+/// Contract struct for echo.EchoService.Echo.
+pub struct EchoEchoServiceEchoRpc {
+    pub request: EchoRequest,
+}
+
+impl RpcRequest for EchoEchoServiceEchoRpc {
     type Response = EchoResponse;
 
-    fn route_key() -> &'static str {
+    fn route_key(&self) -> &'static str {
         "echo.EchoService.Echo"
     }
 
-    fn payload_type() -> actr_protocol::PayloadType {
+    fn payload_type(&self) -> actr_protocol::PayloadType {
         actr_protocol::PayloadType::RpcReliable
+    }
+
+    fn encode_request(&self) -> Bytes {
+        use prost::Message as _;
+        self.request.encode_to_vec().into()
+    }
+
+    fn decode_response(data: &[u8]) -> Result<EchoResponse, prost::DecodeError> {
+        prost::Message::decode(data)
     }
 }
 
@@ -214,8 +229,10 @@ async fn main() -> Result<()> {
         info!("[App] Dispatching to local guest: {}", line);
 
         match actr_ref
-            .call(EchoRequest {
-                message: line.clone(),
+            .call(EchoEchoServiceEchoRpc {
+                request: EchoRequest {
+                    message: line.clone(),
+                },
             }, 30_000)
             .await
         {

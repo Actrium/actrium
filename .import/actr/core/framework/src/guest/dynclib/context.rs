@@ -204,18 +204,19 @@ impl Context for DynclibContext {
         }
     }
 
-    async fn call<R: actr_protocol::RpcRequest>(
+    async fn call_with_timeout<R: actr_protocol::RpcRequest>(
         &self,
         target: &Dest,
         request: R,
         timeout_ms: i64,
     ) -> ActorResult<R::Response> {
+        crate::context::validate_rpc_timeout_ms(timeout_ms)?;
         let payload = HostCallV1 {
-            route_key: R::route_key().to_string(),
+            route_key: request.route_key().to_string(),
             dest: dest_to_v1(target),
-            payload: request.encode_to_vec(),
+            payload: request.encode_request().to_vec(),
             timeout_ms,
-            payload_type: R::payload_type() as i32,
+            payload_type: request.payload_type() as i32,
         };
         let frame = payload.to_frame().map_err(abi_error_to_actr)?;
         let reply = self.invoke_frame(frame)?;
@@ -224,7 +225,7 @@ impl Context for DynclibContext {
             return Err(reply_to_actr_error(reply));
         }
 
-        R::Response::decode(reply.payload.as_slice())
+        R::decode_response(reply.payload.as_slice())
             .map_err(|e| ActrError::DecodeFailure(format!("response decode failed: {e}")))
     }
 
@@ -234,10 +235,10 @@ impl Context for DynclibContext {
         message: R,
     ) -> ActorResult<()> {
         let payload = HostTellV1 {
-            route_key: R::route_key().to_string(),
+            route_key: message.route_key().to_string(),
             dest: dest_to_v1(target),
-            payload: message.encode_to_vec(),
-            payload_type: R::payload_type() as i32,
+            payload: message.encode_request().to_vec(),
+            payload_type: message.payload_type() as i32,
         };
         let frame = payload.to_frame().map_err(abi_error_to_actr)?;
         let reply = self.invoke_frame(frame)?;
@@ -330,13 +331,14 @@ impl Context for DynclibContext {
         })
     }
 
-    async fn call_raw(
+    async fn call_raw_with_timeout(
         &self,
         target: &ActrId,
         route_key: &str,
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
+        crate::context::validate_rpc_timeout_ms(timeout_ms)?;
         self.call_raw_with_payload_type(
             target,
             route_key,
@@ -355,6 +357,7 @@ impl Context for DynclibContext {
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
+        crate::context::validate_rpc_timeout_ms(timeout_ms)?;
         let request = HostCallRawV1 {
             route_key: route_key.to_string(),
             target: target.clone(),

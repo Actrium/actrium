@@ -29,10 +29,22 @@ pub struct SmokeEchoResponse {
     pub payload: Vec<u8>,
 }
 
-impl RpcRequest for EchoRequest {
+/// Contract struct for the echo test route.
+pub struct EchoRpc {
+    pub request: EchoRequest,
+}
+
+impl RpcRequest for EchoRpc {
     type Response = SmokeEchoResponse;
-    fn route_key() -> &'static str {
+    fn route_key(&self) -> &'static str {
         "echo"
+    }
+    fn encode_request(&self) -> Bytes {
+        use prost::Message as _;
+        self.request.encode_to_vec().into()
+    }
+    fn decode_response(data: &[u8]) -> Result<SmokeEchoResponse, prost::DecodeError> {
+        prost::Message::decode(data)
     }
 }
 
@@ -44,10 +56,22 @@ pub struct UnknownRouteRequest {
     pub payload: Vec<u8>,
 }
 
-impl RpcRequest for UnknownRouteRequest {
+/// Contract struct for the unknown-route test route.
+pub struct UnknownRouteRpc {
+    pub request: UnknownRouteRequest,
+}
+
+impl RpcRequest for UnknownRouteRpc {
     type Response = SmokeEchoResponse;
-    fn route_key() -> &'static str {
+    fn route_key(&self) -> &'static str {
         "no/such/route"
+    }
+    fn encode_request(&self) -> Bytes {
+        use prost::Message as _;
+        self.request.encode_to_vec().into()
+    }
+    fn decode_response(data: &[u8]) -> Result<SmokeEchoResponse, prost::DecodeError> {
+        prost::Message::decode(data)
     }
 }
 
@@ -160,10 +184,12 @@ async fn discover_required(caller: &ActrRef, target_type: &ActrType, expected: &
 async fn assert_echo_rpc(caller: &ActrRef, target: ActrId, payload: &[u8]) {
     let response = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        caller.call_remote::<EchoRequest>(
+        caller.call_remote::<EchoRpc>(
             target,
-            EchoRequest {
-                payload: payload.to_vec(),
+            EchoRpc {
+                request: EchoRequest {
+                    payload: payload.to_vec(),
+                },
             },
             30_000,
         ),
@@ -552,9 +578,11 @@ async fn two_nodes_rpc_unknown_route_returns_error() {
 
     let err = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        caller_actr.call_remote::<UnknownRouteRequest>(
+        caller_actr.call_remote::<UnknownRouteRpc>(
             target,
-            UnknownRouteRequest::default(),
+            UnknownRouteRpc {
+                request: UnknownRouteRequest::default(),
+            },
             30_000,
         ),
     )
@@ -849,10 +877,12 @@ async fn two_nodes_drop_ice_candidates_returns_bounded_rpc_result() {
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(60),
-        caller_actr.call_remote::<EchoRequest>(
+        caller_actr.call_remote::<EchoRpc>(
             target.clone(),
-            EchoRequest {
-                payload: b"x".to_vec(),
+            EchoRpc {
+                request: EchoRequest {
+                    payload: b"x".to_vec(),
+                },
             },
             30_000,
         ),
@@ -1086,9 +1116,9 @@ async fn peer_disconnect_triggers_coordinator_cleanup() {
     let context = caller_actr.app_context().await;
     let err = tokio::time::timeout(
         std::time::Duration::from_secs(10),
-        context.call_raw(
+        context.call_raw_dest(
             &Dest::Peer(target),
-            EchoRequest::route_key().to_string(),
+            "echo".to_string(),
             PayloadType::RpcReliable,
             EchoRequest {
                 payload: b"after-disconnect".to_vec(),

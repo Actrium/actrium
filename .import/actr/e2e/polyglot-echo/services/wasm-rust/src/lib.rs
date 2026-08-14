@@ -36,16 +36,15 @@ pub mod generated_stub {
 
         use super::echo::{EchoRequest, EchoResponse};
 
-        impl RpcRequest for EchoRequest {
+        pub struct EchoEchoServiceEchoRpc {
+            pub request: EchoRequest,
+        }
+        impl RpcRequest for EchoEchoServiceEchoRpc {
             type Response = EchoResponse;
-
-            fn route_key() -> &'static str {
-                "echo.EchoService.Echo"
-            }
-
-            fn payload_type() -> PayloadType {
-                PayloadType::RpcReliable
-            }
+            fn route_key(&self) -> &'static str { "echo.EchoService.Echo" }
+            fn payload_type(&self) -> PayloadType { PayloadType::RpcReliable }
+            fn encode_request(&self) -> Bytes { use prost::Message as _; self.request.encode_to_vec().into() }
+            fn decode_response(data: &[u8]) -> Result<EchoResponse, prost::DecodeError> { prost::Message::decode(data) }
         }
 
         #[cfg_attr(not(target_arch = "wasm32"), async_trait)]

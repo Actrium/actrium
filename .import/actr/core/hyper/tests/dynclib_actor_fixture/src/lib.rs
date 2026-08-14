@@ -1,7 +1,7 @@
 //! Dynclib actor fixture for e2e tests
 //!
 //! A simple cdylib actor implementing:
-//! - "test/double": reads i32 from payload, calls ctx.call_raw() to get x*2
+//! - "test/double": reads i32 from payload, calls ctx.call_raw_with_timeout() to get x*2
 //! - "test/typed-double": calls ctx.call() with an explicit 1234 ms timeout
 //! - "test/echo": returns payload as-is (no outbound calls)
 //! - "test/sleep": awaits a Tokio timer before returning
@@ -17,22 +17,36 @@ use bytes::Bytes;
 use std::time::UNIX_EPOCH;
 
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
-struct TypedDoubleRequest {
+pub struct TypedDoubleRequest {
     #[prost(int32, tag = "1")]
     value: i32,
 }
 
 #[derive(Clone, PartialEq, actr_protocol::prost::Message)]
-struct TypedDoubleResponse {
+pub struct TypedDoubleResponse {
     #[prost(int32, tag = "1")]
     value: i32,
 }
 
-impl RpcRequest for TypedDoubleRequest {
+/// Contract struct for the typed-double test route.
+pub struct TypedDoubleRpc {
+    pub request: TypedDoubleRequest,
+}
+
+impl RpcRequest for TypedDoubleRpc {
     type Response = TypedDoubleResponse;
 
-    fn route_key() -> &'static str {
+    fn route_key(&self) -> &'static str {
         "test/typed_double_impl"
+    }
+
+    fn encode_request(&self) -> Bytes {
+        use prost::Message as _;
+        self.request.encode_to_vec().into()
+    }
+
+    fn decode_response(data: &[u8]) -> Result<TypedDoubleResponse, prost::DecodeError> {
+        prost::Message::decode(data)
     }
 }
 
@@ -42,7 +56,7 @@ async fn record_hook<C: Context>(ctx: &C, name: &'static str) {
 
 async fn record_hook_value<C: Context>(ctx: &C, value: String) {
     let _ = ctx
-        .call_raw(
+        .call_raw_with_timeout(
             ctx.self_id(),
             "test/record_hook",
             Bytes::from(value),
@@ -108,10 +122,10 @@ impl MessageDispatcher for DoubleDispatcher {
                 }
                 let x = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
 
-                // Call ctx.call_raw() -> triggers vtable.call trampoline
+                // Call ctx.call_raw_with_timeout() -> triggers vtable.call trampoline
                 let target = ctx.self_id().clone();
                 let resp = ctx
-                    .call_raw(
+                    .call_raw_with_timeout(
                         &target,
                         "test/double_impl",
                         Bytes::from(x.to_le_bytes().to_vec()),
@@ -128,9 +142,11 @@ impl MessageDispatcher for DoubleDispatcher {
                 }
                 let value = i32::from_le_bytes([payload[0], payload[1], payload[2], payload[3]]);
                 let response = ctx
-                    .call(
+                    .call_with_timeout(
                         &Dest::Peer(ctx.self_id().clone()),
-                        TypedDoubleRequest { value },
+                        TypedDoubleRpc {
+                            request: TypedDoubleRequest { value },
+                        },
                         1_234,
                     )
                     .await?;
@@ -152,7 +168,7 @@ impl MessageDispatcher for DoubleDispatcher {
                     tokio::time::sleep(std::time::Duration::from_millis(50)).await;
                     let target = background_ctx.self_id().clone();
                     let _ = background_ctx
-                        .call_raw(&target, "test/spawned", Bytes::from(payload), 30_000)
+                        .call_raw_with_timeout(&target, "test/spawned", Bytes::from(payload), 30_000)
                         .await;
                 });
                 Ok(Bytes::from_static(b"spawned"))
@@ -162,7 +178,7 @@ impl MessageDispatcher for DoubleDispatcher {
                 actr_framework::guest::dynclib::spawn(async move {
                     let target = background_ctx.self_id().clone();
                     let _ = background_ctx
-                        .call_raw(&target, "test/background-started", Bytes::new(), 30_000)
+                        .call_raw_with_timeout(&target, "test/background-started", Bytes::new(), 30_000)
                         .await;
                     std::future::pending::<()>().await;
                 })?;

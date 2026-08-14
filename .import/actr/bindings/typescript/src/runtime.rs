@@ -150,7 +150,7 @@ impl ActrRef {
         let proto_payload_type: actr_protocol::PayloadType = payload_type.into();
         let ctx = self.inner.app_context().await;
         let response = ctx
-            .call_raw(
+            .call_raw_dest(
                 &Dest::Peer(target_id),
                 route_key,
                 proto_payload_type,

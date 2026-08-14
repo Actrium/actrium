@@ -2,7 +2,27 @@
 
 use actr_protocol::{ActorResult, ActrError, ActrId, ActrType, DataChunk, PayloadType};
 use async_trait::async_trait;
+use bytes::Bytes;
 use futures_util::future::BoxFuture;
+
+/// Default RPC timeout (milliseconds) applied by the four public Context APIs
+/// when the caller does not pass an explicit deadline.
+///
+/// Rust runtime helpers reference this constant directly. Other language
+/// facades expose the same value in their own runtime packages; generated
+/// dispatch code MUST NOT inline it.
+pub const DEFAULT_RPC_TIMEOUT_MS: i64 = 30_000;
+
+/// Reject invalid explicit RPC deadlines before a guest enters transport.
+#[allow(dead_code)]
+pub(crate) fn validate_rpc_timeout_ms(timeout_ms: i64) -> ActorResult<()> {
+    if timeout_ms <= 0 {
+        return Err(ActrError::InvalidArgument(format!(
+            "RPC call timeout_ms must be > 0, got {timeout_ms}"
+        )));
+    }
+    Ok(())
+}
 
 /// Boxed callback future that is `Send` on native targets and local on WASM.
 ///
@@ -71,7 +91,7 @@ impl<T: ?Sized> MaybeSendSync for T {}
 /// ```rust,ignore
 /// async fn my_handler<C: Context>(ctx: &C) {
 ///     let id = ctx.self_id();
-///     let response = ctx.call(&target, request, 30_000).await?;
+///     let response = ctx.call(&target, request).await?;
 /// }
 /// ```
 #[cfg_attr(not(target_arch = "wasm32"), async_trait)]
@@ -141,7 +161,7 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     ///
     /// ```rust,ignore
     /// let request = EchoRequest { message: "hello".to_string() };
-    /// let response: EchoResponse = ctx.call(&target, request, 5_000).await?;
+    /// let response: EchoResponse = ctx.call(&target, request).await?;
     /// //              ^^^^^^^^^^^^ Inferred from EchoRequest::Response
     /// ```
     ///
@@ -156,12 +176,28 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     ///
     /// - `target`: Target destination (`Dest::Host` for local, `Dest::Peer(id)` for remote)
     /// - `request`: Request message implementing `RpcRequest` trait
-    /// - `timeout_ms`: Positive timeout in milliseconds
+    ///
+    /// Applies the [`DEFAULT_RPC_TIMEOUT_MS`] deadline; pass an explicit value
+    /// through [`Context::call_with_timeout`] instead.
     ///
     /// # Returns
     ///
     /// Returns response message of type `R::Response`
     async fn call<R: actr_protocol::RpcRequest>(
+        &self,
+        target: &crate::Dest,
+        request: R,
+    ) -> ActorResult<R::Response> {
+        self.call_with_timeout(target, request, DEFAULT_RPC_TIMEOUT_MS)
+            .await
+    }
+
+    /// Send a type-safe RPC request with an explicit timeout (milliseconds).
+    ///
+    /// Same semantics as [`Context::call`], but the caller controls the
+    /// deadline. Implementations MUST validate `timeout_ms > 0` before entering
+    /// transport.
+    async fn call_with_timeout<R: actr_protocol::RpcRequest>(
         &self,
         target: &crate::Dest,
         request: R,
@@ -274,7 +310,10 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     /// - `target`: Target Actor ID
     /// - `route_key`: Route key (e.g., "echo.EchoService/Echo")
     /// - `payload`: Raw request payload bytes
-    /// - `timeout_ms`: Positive timeout in milliseconds
+    ///
+    /// Applies the [`DEFAULT_RPC_TIMEOUT_MS`] deadline and always sends on the
+    /// [`PayloadType::RpcReliable`] lane; use [`Context::call_raw_with_timeout`]
+    /// or [`Context::call_raw_with_payload_type`] for explicit control.
     ///
     /// # Returns
     ///
@@ -288,16 +327,31 @@ pub trait Context: Clone + MaybeSendSync + 'static {
     ///     &target_id,
     ///     "echo.EchoService/Echo",
     ///     request_bytes.into(),
-    ///     5_000,
     /// ).await?;
     /// ```
     async fn call_raw(
         &self,
         target: &ActrId,
         route_key: &str,
-        payload: bytes::Bytes,
+        payload: Bytes,
+    ) -> ActorResult<Bytes> {
+        self.call_raw_with_timeout(target, route_key, payload, DEFAULT_RPC_TIMEOUT_MS)
+            .await
+    }
+
+    /// Send a raw RPC request with an explicit timeout (milliseconds).
+    ///
+    /// Same semantics as [`Context::call_raw`], but the caller controls the
+    /// deadline. Implementations MUST validate `timeout_ms > 0` before entering
+    /// transport and MUST send the request on the [`PayloadType::RpcReliable`]
+    /// lane regardless of caller input.
+    async fn call_raw_with_timeout(
+        &self,
+        target: &ActrId,
+        route_key: &str,
+        payload: Bytes,
         timeout_ms: i64,
-    ) -> ActorResult<bytes::Bytes>;
+    ) -> ActorResult<Bytes>;
 
     /// Send a raw RPC request on an explicitly selected RPC payload lane.
     ///
@@ -320,7 +374,8 @@ pub trait Context: Clone + MaybeSendSync + 'static {
                 "this Context implementation does not support raw RPC lane {payload_type:?}"
             )));
         }
-        self.call_raw(target, route_key, payload, timeout_ms).await
+        self.call_raw_with_timeout(target, route_key, payload, timeout_ms)
+            .await
     }
 
     // ========== Fast Path: MediaTrack Methods (WebRTC Native) ==========
@@ -492,4 +547,201 @@ pub struct MediaSample {
 pub enum MediaType {
     Audio,
     Video,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Context, DEFAULT_RPC_TIMEOUT_MS};
+    use crate::{Dest, MediaSample};
+    use actr_protocol::{
+        ActorResult, ActrError, ActrId, ActrType, DataChunk, PayloadType, RpcRequest,
+    };
+    use async_trait::async_trait;
+    use bytes::Bytes;
+    use futures_util::future::BoxFuture;
+    use std::sync::{Arc, Mutex};
+
+    /// Captures the timeout values that reach the explicit-timeout lanes so
+    /// the trait's default-lane forwarding can be asserted.
+    #[derive(Clone)]
+    struct TimeoutRecordingContext {
+        self_id: ActrId,
+        recorded: Arc<Mutex<Vec<i64>>>,
+    }
+
+    impl TimeoutRecordingContext {
+        fn new() -> (Self, Arc<Mutex<Vec<i64>>>) {
+            let recorded = Arc::new(Mutex::new(Vec::new()));
+            (
+                Self {
+                    self_id: ActrId::default(),
+                    recorded: recorded.clone(),
+                },
+                recorded,
+            )
+        }
+    }
+
+    #[async_trait]
+    impl Context for TimeoutRecordingContext {
+        fn self_id(&self) -> &ActrId {
+            &self.self_id
+        }
+
+        fn caller_id(&self) -> Option<&ActrId> {
+            None
+        }
+
+        fn request_id(&self) -> &str {
+            "recording-ctx"
+        }
+
+        async fn call_with_timeout<R: RpcRequest>(
+            &self,
+            _target: &Dest,
+            _request: R,
+            timeout_ms: i64,
+        ) -> ActorResult<R::Response> {
+            self.recorded.lock().unwrap().push(timeout_ms);
+            Err(ActrError::NotImplemented("typed test stub".into()))
+        }
+
+        async fn tell<R: RpcRequest>(&self, _target: &Dest, _message: R) -> ActorResult<()> {
+            Ok(())
+        }
+
+        async fn register_stream<F>(&self, _stream_id: String, _callback: F) -> ActorResult<()>
+        where
+            F: Fn(DataChunk, ActrId) -> crate::MaybeSendBoxFuture<'static, ActorResult<()>>
+                + crate::MaybeSendSync
+                + 'static,
+        {
+            Ok(())
+        }
+
+        async fn unregister_stream(&self, _stream_id: &str) -> ActorResult<()> {
+            Ok(())
+        }
+
+        async fn send_data_chunk(
+            &self,
+            _target: &Dest,
+            _chunk: DataChunk,
+            _payload_type: PayloadType,
+        ) -> ActorResult<()> {
+            Ok(())
+        }
+
+        async fn discover_route_candidate(&self, _target_type: &ActrType) -> ActorResult<ActrId> {
+            Err(ActrError::NotImplemented("discover test stub".into()))
+        }
+
+        async fn call_raw_with_timeout(
+            &self,
+            _target: &ActrId,
+            _route_key: &str,
+            _payload: Bytes,
+            timeout_ms: i64,
+        ) -> ActorResult<Bytes> {
+            self.recorded.lock().unwrap().push(timeout_ms);
+            Ok(Bytes::new())
+        }
+
+        async fn register_media_track<F>(&self, _track_id: String, _callback: F) -> ActorResult<()>
+        where
+            F: Fn(MediaSample, ActrId) -> BoxFuture<'static, ActorResult<()>>
+                + Send
+                + Sync
+                + 'static,
+        {
+            Ok(())
+        }
+
+        async fn unregister_media_track(&self, _track_id: &str) -> ActorResult<()> {
+            Ok(())
+        }
+
+        async fn send_media_sample(
+            &self,
+            _target: &Dest,
+            _track_id: &str,
+            _sample: MediaSample,
+        ) -> ActorResult<()> {
+            Ok(())
+        }
+
+        async fn add_media_track(
+            &self,
+            _target: &Dest,
+            _track_id: &str,
+            _codec: &str,
+            _media_type: &str,
+        ) -> ActorResult<()> {
+            Ok(())
+        }
+
+        async fn remove_media_track(&self, _target: &Dest, _track_id: &str) -> ActorResult<()> {
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn call_raw_default_lane_applies_default_timeout() {
+        let (ctx, recorded) = TimeoutRecordingContext::new();
+
+        let _ = ctx
+            .call_raw(&ActrId::default(), "echo.EchoService/Echo", Bytes::new())
+            .await;
+
+        assert_eq!(
+            *recorded.lock().unwrap(),
+            vec![DEFAULT_RPC_TIMEOUT_MS],
+            "default raw lane must forward the shared default timeout",
+        );
+    }
+
+    #[tokio::test]
+    async fn call_raw_with_payload_type_forwards_reliable_lane() {
+        let (ctx, recorded) = TimeoutRecordingContext::new();
+
+        let _ = ctx
+            .call_raw_with_payload_type(
+                &ActrId::default(),
+                "echo.EchoService/Echo",
+                PayloadType::RpcReliable,
+                Bytes::new(),
+                5_000,
+            )
+            .await;
+
+        assert_eq!(
+            *recorded.lock().unwrap(),
+            vec![5_000],
+            "reliable lane must delegate to call_raw_with_timeout unchanged",
+        );
+    }
+
+    #[tokio::test]
+    async fn call_raw_with_payload_type_rejects_non_reliable_lane() {
+        let (ctx, recorded) = TimeoutRecordingContext::new();
+
+        let result = ctx
+            .call_raw_with_payload_type(
+                &ActrId::default(),
+                "echo.EchoService/Echo",
+                PayloadType::RpcSignal,
+                Bytes::new(),
+                5_000,
+            )
+            .await;
+
+        match result {
+            Err(ActrError::InvalidArgument(_)) => {}
+            other => panic!("expected InvalidArgument for RpcSignal lane, got {other:?}"),
+        }
+        assert!(
+            recorded.lock().unwrap().is_empty(),
+            "rejected lane must not reach the transport",
+        );
+    }
 }
