@@ -91,9 +91,11 @@ bindings are not present, so source modules remain importable before a build.
 Lifecycle and dispatch methods are still wrapped so their raw invocation
 context arrives as `ActrContext`.
 
-The package intentionally does not implement runtime hosting. Host
-execution belongs to the actr runtime; this package only supports Python
-workload authoring and build-time componentization.
+The package exposes an executable `ActrContext` facade over the generated
+componentize-py host imports, binding each exported invocation context to
+the four public RPC APIs. The package intentionally does not implement
+runtime hosting. Host execution belongs to the actr runtime; this package
+only supports Python workload authoring and build-time componentization.
 
 Importing `actr_workload.Workload` is guest-safe: build helpers are loaded
 only when `actr-workload` CLI commands or the build API are used.

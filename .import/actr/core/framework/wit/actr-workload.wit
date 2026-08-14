@@ -220,6 +220,7 @@ interface host {
         target: dest,
         route-key: string,
         payload: list<u8>,
+        payload-type: payload-type,
         timeout-ms: s64,
     ) -> result<list<u8>, actr-error>;
 

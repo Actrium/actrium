@@ -107,16 +107,30 @@ Protocol for workload-facing context values. Generated handlers accept
 
 **Methods:**
 
-- `func callRaw(target: ActrId, routeKey: String, payloadType: PayloadType, payload: Data, timeoutMs: Int64) async throws(ActrError) -> Data`
-  - Calls a remote actor via RPC
+- `func callWithTimeout<Req: RpcRequest>(target: ActrId, request: Req, timeoutMs: Int64) async throws(ActrError) -> Req.Response`
+  - Typed RPC with explicit timeout. Encodes `request` via its `RpcRequest` contract (`routeKey`, `payloadType`, protobuf codec). The payload lane comes from `Req.payloadType`, which may be `.rpcSignal`.
+  - **Parameters:**
+    - `target`: Target actor ID
+    - `request`: Method-specific generated `RpcRequest` contract
+    - `timeoutMs`: Timeout in milliseconds (must be > 0)
+  - **Returns:** The typed response message
+  - **Throws:** `ActrError.InvalidArgument` if `timeoutMs <= 0`; `ActrError` if the call fails
+
+- `func call<Req: RpcRequest>(target: ActrId, request: Req) async throws(ActrError) -> Req.Response`
+  - Typed RPC with default timeout (`DEFAULT_RPC_TIMEOUT_MS = 30_000`). Delegates to `callWithTimeout`.
+
+- `func callRawWithTimeout(target: ActrId, routeKey: String, payload: Data, timeoutMs: Int64) async throws(ActrError) -> Data`
+  - Raw RPC with explicit timeout. Always sends on `PayloadType.rpcReliable` regardless of caller input.
   - **Parameters:**
     - `target`: Target actor ID
     - `routeKey`: RPC route key
-    - `payloadType`: Payload transmission type (e.g., `.rpcReliable`, `.rpcSignal`)
     - `payload`: Request payload bytes
-    - `timeoutMs`: Timeout in milliseconds
+    - `timeoutMs`: Timeout in milliseconds (must be > 0)
   - **Returns:** Response payload bytes
-  - **Throws:** `ActrError` if the call fails
+  - **Throws:** `ActrError.InvalidArgument` if `timeoutMs <= 0`; `ActrError` if the call fails
+
+- `func callRaw(target: ActrId, routeKey: String, payload: Data) async throws(ActrError) -> Data`
+  - Raw RPC with default timeout (`DEFAULT_RPC_TIMEOUT_MS = 30_000`). Delegates to `callRawWithTimeout`. Always sends on `PayloadType.rpcReliable`.
 
 - `func discover(targetType: ActrType) async throws(ActrError) -> ActrId`
   - Discovers a single actor of the specified type
@@ -395,18 +409,34 @@ A concurrency-safe reference to a running ACTR actor. This is an `actor` type, p
 
 **Methods:**
 
-- `func call<Req: RpcRequest>(_ message: Req, timeoutMs: Int64 = 30_000) async throws(ActrError) -> Req.Response`
-  - Performs a type-safe Protobuf-based RPC call
+- `func call<Req: RpcRequest>(_ message: Req) async throws(ActrError) -> Req.Response`
+  - Typed RPC with default timeout (`DEFAULT_RPC_TIMEOUT_MS = 30_000`). Delegates to `callWithTimeout`.
   - **Type Parameters:**
-    - `Req`: Request message type conforming to `RpcRequest`
+    - `Req`: Method-specific generated `RpcRequest` contract type
   - **Parameters:**
     - `message`: Request message instance
-    - `timeoutMs`: Timeout in milliseconds
   - **Returns:** Response message instance (`Req.Response`)
-  - **Throws:** 
-    - `ActrError.DecodeFailure` if Protobuf encoding or decoding fails
-    - `ActrError` if the call fails
-  - **Note:** This method uses `Req.payloadType` and automatically handles Protobuf serialization/deserialization
+  - **Throws:** `ActrError` if the call fails
+
+- `func callWithTimeout<Req: RpcRequest>(_ message: Req, timeoutMs: Int64) async throws(ActrError) -> Req.Response`
+  - Typed RPC with explicit timeout. Encodes `request` via its `RpcRequest` contract (`routeKey`, `payloadType`, protobuf codec). The payload lane comes from `Req.payloadType`, which may be `.rpcSignal`.
+  - **Parameters:**
+    - `message`: Request message instance
+    - `timeoutMs`: Timeout in milliseconds (must be > 0)
+  - **Returns:** Response message instance (`Req.Response`)
+  - **Throws:** `ActrError.InvalidArgument` if `timeoutMs <= 0`; `ActrError.DecodeFailure` if Protobuf encoding or decoding fails; `ActrError` if the call fails
+
+- `func callRaw(routeKey: String, payload: Data) async throws -> Data`
+  - Raw RPC with default timeout (`DEFAULT_RPC_TIMEOUT_MS = 30_000`). Always sends on `PayloadType.rpcReliable`. Delegates to `callRawWithTimeout`.
+
+- `func callRawWithTimeout(routeKey: String, payload: Data, timeoutMs: Int64) async throws -> Data`
+  - Raw RPC with explicit timeout. Always sends on `PayloadType.rpcReliable` regardless of caller input.
+  - **Parameters:**
+    - `routeKey`: RPC route key (e.g., "echo.EchoService/Echo")
+    - `payload`: Message payload bytes (protobuf encoded)
+    - `timeoutMs`: Timeout in milliseconds (must be > 0)
+  - **Returns:** Response payload bytes (protobuf encoded)
+  - **Throws:** `ActrError.InvalidArgument` if `timeoutMs <= 0`; `ActrError` if the call fails
 
 - `func discover(type: ActrType, limit: Int = 1) async throws -> [ActrId]`
   - Discovers actors of the given type

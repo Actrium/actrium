@@ -13,7 +13,6 @@ use actr_protocol::{
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::future::BoxFuture;
-use prost::Message as ProstMessage;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -181,39 +180,40 @@ impl Context for WasmContext {
         &self.request_id
     }
 
-    async fn call<R: RpcRequest>(
+    async fn call_with_timeout<R: RpcRequest>(
         &self,
         target: &Dest,
         request: R,
         timeout_ms: i64,
     ) -> ActorResult<R::Response> {
-        let payload = request.encode_to_vec();
+        crate::context::validate_rpc_timeout_ms(timeout_ms)?;
+        let payload = request.encode_request().to_vec();
         // 0.4.0 async imports take OWNED params and a `ctx-token` first arg;
         // the call is `.await`ed (the host may suspend on real I/O).
         let result = wit_host::call(
             self.ctx_token,
             dest_to_wit(target),
-            R::route_key().to_string(),
+            request.route_key().to_string(),
             payload,
             timeout_ms,
-            payload_type_to_wit(R::payload_type()),
+            payload_type_to_wit(request.payload_type()),
         )
         .await;
         match result {
-            Ok(bytes) => R::Response::decode(bytes.as_slice())
+            Ok(bytes) => R::decode_response(bytes.as_slice())
                 .map_err(|e| ActrError::DecodeFailure(format!("response decode failed: {e}"))),
             Err(e) => Err(wit_actr_error_to_proto(e)),
         }
     }
 
     async fn tell<R: RpcRequest>(&self, target: &Dest, message: R) -> ActorResult<()> {
-        let payload = message.encode_to_vec();
+        let payload = message.encode_request().to_vec();
         wit_host::tell(
             self.ctx_token,
             dest_to_wit(target),
-            R::route_key().to_string(),
+            message.route_key().to_string(),
             payload,
-            payload_type_to_wit(R::payload_type()),
+            payload_type_to_wit(message.payload_type()),
         )
         .await
         .map_err(wit_actr_error_to_proto)
@@ -278,13 +278,14 @@ impl Context for WasmContext {
             .map_err(wit_actr_error_to_proto)
     }
 
-    async fn call_raw(
+    async fn call_raw_with_timeout(
         &self,
         target: &ActrId,
         route_key: &str,
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
+        crate::context::validate_rpc_timeout_ms(timeout_ms)?;
         self.call_raw_with_payload_type(
             target,
             route_key,
@@ -303,6 +304,7 @@ impl Context for WasmContext {
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
+        crate::context::validate_rpc_timeout_ms(timeout_ms)?;
         wit_host::call_raw(
             self.ctx_token,
             actr_id_to_wit(target),

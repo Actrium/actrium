@@ -828,7 +828,7 @@ async fn host_operation_handler(
     match pending {
         HostOperation::CallRaw(req) => {
             match ctx
-                .call_raw(
+                .call_raw_dest(
                     &Dest::Peer(req.target),
                     req.route_key,
                     guest_rpc_payload_type(req.payload_type),
@@ -853,8 +853,15 @@ async fn host_operation_handler(
                     return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
                 }
             };
+            let Some(_payload_type) = PayloadType::try_from(req.payload_type).ok() else {
+                tracing::error!(
+                    payload_type = req.payload_type,
+                    "call: payload type decode failed"
+                );
+                return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
+            };
             match ctx
-                .call_raw(
+                .call_raw_dest(
                     &dest,
                     req.route_key,
                     guest_rpc_payload_type(req.payload_type),
@@ -1037,7 +1044,7 @@ async fn stream_callback_host_operation_handler(
     match pending {
         HostOperation::CallRaw(req) => {
             match ctx
-                .call_raw(
+                .call_raw_dest(
                     &Dest::Peer(req.target),
                     req.route_key,
                     guest_rpc_payload_type(req.payload_type),
@@ -1055,8 +1062,11 @@ async fn stream_callback_host_operation_handler(
                 Some(d) => d,
                 None => return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR),
             };
+            let Some(_payload_type) = PayloadType::try_from(req.payload_type).ok() else {
+                return HostOperationResult::AbiError(abi_code::PROTOCOL_ERROR);
+            };
             match ctx
-                .call_raw(
+                .call_raw_dest(
                     &dest,
                     req.route_key,
                     guest_rpc_payload_type(req.payload_type),

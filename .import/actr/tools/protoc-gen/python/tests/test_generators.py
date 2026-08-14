@@ -166,7 +166,7 @@ class GeneratorTests(unittest.TestCase):
         )
         self.assertIn("target = await ctx.discover(actr_type)", content)
         self.assertIn(
-            'return await ctx.call_raw(target, route_key, payload, timeout_ms, "rpcReliable")',
+            'return await ctx.call_raw_with_payload_type(target, route_key, payload, timeout_ms, "rpcReliable")',
             content,
         )
 
@@ -185,7 +185,7 @@ class GeneratorTests(unittest.TestCase):
         content = generate_unified_dispatch([], [remote_route], {})
 
         self.assertIn(
-            'ctx.call_raw(target, route_key, payload, timeout_ms, "rpcSignal")',
+            'ctx.call_raw_with_payload_type(target, route_key, payload, timeout_ms, "rpcSignal")',
             content,
         )
 

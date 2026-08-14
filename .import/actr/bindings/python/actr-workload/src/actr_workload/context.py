@@ -4,22 +4,10 @@ import functools
 import importlib
 import os
 from collections.abc import Awaitable, Callable
-from typing import Any, ClassVar, Protocol, TypeVar
+from typing import Any, ClassVar
 
-from .constants import DEFAULT_WORLD_MODULE
-
-ResponseT = TypeVar("ResponseT", covariant=True)
-
-
-class RpcRequest(Protocol[ResponseT]):
-    """Typed request metadata and codec implemented by generated RPC classes."""
-
-    route_key: str
-    payload_type: Any
-
-    def encode_request(self) -> bytes: ...
-
-    def decode_response(self, data: bytes) -> ResponseT: ...
+from .constants import DEFAULT_RPC_TIMEOUT_MS, DEFAULT_WORLD_MODULE
+from .protocol import ResponseT, RpcRequest
 
 
 def _world_module() -> str:
@@ -63,6 +51,14 @@ class ActrContext:
         self,
         target: Any,
         request: RpcRequest[ResponseT],
+    ) -> ResponseT:
+        """Typed RPC with default timeout, delegating to `call_with_timeout`."""
+        return await self.call_with_timeout(target, request, DEFAULT_RPC_TIMEOUT_MS)
+
+    async def call_with_timeout(
+        self,
+        target: Any,
+        request: RpcRequest[ResponseT],
         timeout_ms: int,
     ) -> ResponseT:
         _validate_timeout(timeout_ms)
@@ -82,8 +78,30 @@ class ActrContext:
         target: Any,
         route_key: str,
         payload: bytes,
+    ) -> bytes:
+        """Raw RPC on the reliable lane with default timeout."""
+        return await self.call_raw_with_timeout(
+            target, route_key, payload, DEFAULT_RPC_TIMEOUT_MS
+        )
+
+    async def call_raw_with_timeout(
+        self,
+        target: Any,
+        route_key: str,
+        payload: bytes,
         timeout_ms: int,
-        payload_type: str = "rpcReliable",
+    ) -> bytes:
+        return await self.call_raw_with_payload_type(
+            target, route_key, payload, timeout_ms, "rpcReliable"
+        )
+
+    async def call_raw_with_payload_type(
+        self,
+        target: Any,
+        route_key: str,
+        payload: bytes,
+        timeout_ms: int,
+        payload_type: str,
     ) -> bytes:
         _validate_timeout(timeout_ms)
         host, types = _bindings()

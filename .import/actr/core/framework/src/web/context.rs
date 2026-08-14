@@ -38,7 +38,6 @@ use actr_protocol::{
 };
 use async_trait::async_trait;
 use futures_util::future::BoxFuture;
-use prost::Message as ProstMessage;
 
 use crate::{Context, Dest, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample};
 
@@ -149,6 +148,16 @@ fn actr_id_from_wit(id: &wit::ActrId) -> ActrId {
     }
 }
 
+fn payload_type_to_wit(payload_type: PayloadType) -> wit::PayloadType {
+    match payload_type {
+        PayloadType::RpcReliable => wit::PayloadType::RpcReliable,
+        PayloadType::RpcSignal => wit::PayloadType::RpcSignal,
+        PayloadType::StreamReliable => wit::PayloadType::StreamReliable,
+        PayloadType::StreamLatencyFirst => wit::PayloadType::StreamLatencyFirst,
+        PayloadType::MediaRtp => wit::PayloadType::MediaRtp,
+    }
+}
+
 fn wit_error_to_proto(e: wit::ActrError) -> ActrError {
     match e {
         wit::ActrError::Unavailable(m) => ActrError::Unavailable(m),
@@ -225,31 +234,29 @@ impl Context for WebContext {
     // integration phase. Leaving them as `todo!()` here lets dependents
     // type-check against the contract while the integration lands.
 
-    async fn call<R: RpcRequest>(
+    async fn call_with_timeout<R: RpcRequest>(
         &self,
         target: &Dest,
         request: R,
         timeout_ms: i64,
     ) -> ActorResult<R::Response> {
-        // Typed convenience: encode request via prost, delegate to call_raw,
-        // decode response back to the typed Response. Mirrors the wasip2
-        // `WasmContext::call` path so handler code is target-agnostic.
-        let actor = match target {
-            Dest::Peer(id) => id,
-            Dest::Host | Dest::Workload => {
-                return Err(Self::not_implemented("call → Host/Workload dest"));
-            }
-        };
-        let payload = request.encode_to_vec();
-        let bytes = self
-            .call_raw(
-                actor,
-                R::route_key(),
-                bytes::Bytes::from(payload),
-                timeout_ms,
-            )
-            .await?;
-        R::Response::decode(bytes.as_ref()).map_err(|e| {
+        crate::context::validate_rpc_timeout_ms(timeout_ms)?;
+        let payload = request.encode_request().to_vec();
+        let outcome = actr_web_abi::guest::call_with_request_id(
+            self.request_id(),
+            match target {
+                Dest::Host => wit::Dest::Host,
+                Dest::Workload => wit::Dest::Workload,
+                Dest::Peer(id) => wit::Dest::Peer(actr_id_to_wit(id)),
+            },
+            request.route_key().to_string(),
+            payload,
+            payload_type_to_wit(request.payload_type()),
+            timeout_ms,
+        )
+        .await;
+        let bytes = flatten_js(outcome)?;
+        R::decode_response(bytes.as_ref()).map_err(|e| {
             ActrError::DecodeFailure(format!("WebContext::call: response decode failed: {e}"))
         })
     }
@@ -258,7 +265,7 @@ impl Context for WebContext {
         // Fire-and-forget: route through `tell_with_request_id` so the host
         // can short-circuit without a response round-trip. Dest conversion
         // matches the guest-import contract exactly (§3.4).
-        let payload = message.encode_to_vec();
+        let payload = message.encode_request().to_vec();
         let wit_dest = match target {
             Dest::Host => wit::Dest::Host,
             Dest::Workload => wit::Dest::Workload,
@@ -267,20 +274,21 @@ impl Context for WebContext {
         let outcome = actr_web_abi::guest::tell_with_request_id(
             self.request_id(),
             wit_dest,
-            R::route_key().to_string(),
+            message.route_key().to_string(),
             payload,
         )
         .await;
         flatten_js(outcome)
     }
 
-    async fn call_raw(
+    async fn call_raw_with_timeout(
         &self,
         target: &ActrId,
         route_key: &str,
         payload: bytes::Bytes,
         timeout_ms: i64,
     ) -> ActorResult<bytes::Bytes> {
+        crate::context::validate_rpc_timeout_ms(timeout_ms)?;
         // The raw entry point is the one the typed `call` delegates to and
         // the only shape that actually traverses the sw-host HashMap
         // keyed by `request_id` (γ-unified §3.6).

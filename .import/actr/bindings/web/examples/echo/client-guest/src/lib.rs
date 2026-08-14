@@ -41,15 +41,28 @@ use echo::{EchoRequest, EchoResponse};
 
 const ECHO_SERVICE_ALIAS: &str = "EchoService";
 
-impl RpcRequest for EchoRequest {
+pub struct EchoEchoServiceEchoRpc {
+    pub request: EchoRequest,
+}
+
+impl RpcRequest for EchoEchoServiceEchoRpc {
     type Response = EchoResponse;
 
-    fn route_key() -> &'static str {
+    fn route_key(&self) -> &'static str {
         "echo.EchoService.Echo"
     }
 
-    fn payload_type() -> actr_protocol::PayloadType {
+    fn payload_type(&self) -> actr_protocol::PayloadType {
         actr_protocol::PayloadType::RpcReliable
+    }
+
+    fn encode_request(&self) -> Bytes {
+        use prost::Message as _;
+        self.request.encode_to_vec().into()
+    }
+
+    fn decode_response(data: &[u8]) -> Result<EchoResponse, prost::DecodeError> {
+        prost::Message::decode(data)
     }
 }
 
@@ -109,7 +122,7 @@ async fn proxy_echo<C: Context>(
     };
 
     match ctx
-        .call(&Dest::Peer(server_id.clone()), echo_req, 30_000)
+        .call(&Dest::Peer(server_id.clone()), EchoEchoServiceEchoRpc { request: echo_req })
         .await
     {
         Ok(resp) => Ok(resp),
@@ -122,7 +135,7 @@ async fn proxy_echo<C: Context>(
             let echo_req2 = EchoRequest {
                 message: req.message.clone(),
             };
-            ctx.call(&Dest::Peer(fresh_id), echo_req2, 30_000)
+            ctx.call(&Dest::Peer(fresh_id), EchoEchoServiceEchoRpc { request: echo_req2 })
                 .await
                 .map_err(|e2| {
                     ActrError::Internal(format!(

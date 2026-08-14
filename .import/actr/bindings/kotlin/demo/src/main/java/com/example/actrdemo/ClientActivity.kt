@@ -25,7 +25,6 @@ import echo.Echo.EchoResponse
 import io.actrium.actr.ActrException
 import io.actrium.actr.ActrType
 import io.actrium.actr.CleanupReason
-import io.actrium.actr.PayloadType
 import io.actrium.actr.dsl.*
 import io.actrium.demo.R
 import kotlinx.coroutines.Dispatchers
@@ -389,9 +388,8 @@ class ClientActivity : AppCompatActivity() {
         val doSend: suspend () -> Unit = {
             val request = EchoRequest.newBuilder().setMessage(message).build()
             val responsePayload =
-                ref.call(
+                ref.callRawWithTimeout(
                     "echo.EchoService.Echo",
-                    PayloadType.RPC_RELIABLE,
                     request.toByteArray(),
                     30000L,
                 )
@@ -440,9 +438,8 @@ class ClientActivity : AppCompatActivity() {
                         .build()
 
                 val responsePayload =
-                    ref.call(
+                    ref.callRawWithTimeout(
                         "data_stream_peer.StreamClient.StartStream",
-                        PayloadType.RPC_RELIABLE,
                         request.toByteArray(),
                         60000L,
                     )

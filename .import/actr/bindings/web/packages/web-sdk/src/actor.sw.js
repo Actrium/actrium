@@ -273,7 +273,14 @@ function installActrHostGlobals() {
   // id. This lets multiple concurrent dispatches share the single-threaded
   // JS bridge without clobbering each other's runtime context (TD-003).
 
-  self.actrHostCall = async function (requestId, target, routeKey, payload, timeoutMs) {
+  self.actrHostCall = async function (
+    requestId,
+    target,
+    routeKey,
+    payload,
+    payloadType,
+    timeoutMs,
+  ) {
     // actr-web-abi `call` passes `Dest` variant as `{ peer: {...} }` or
     // `"host"`/`"workload"`; sw-host's `host_call_async` reads `{ tag, val }`.
     // The WBG path is only exercised by the echo client which uses
@@ -293,6 +300,7 @@ function installActrHostGlobals() {
         destCamel,
         routeKey,
         u8,
+        payloadType,
         timeoutMs,
       );
       return { Ok: reply };

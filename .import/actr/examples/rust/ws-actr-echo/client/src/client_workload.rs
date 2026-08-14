@@ -70,7 +70,7 @@ impl actr_framework::MessageDispatcher for ClientDispatcher {
         info!("[ClientWorkload] via/through WebSocket [...]request[...]service[...]...");
 
         // via/through Dest::Peer [...]service[...] (willusing/use WebSocket channel)
-        let response: EchoResponse = ctx.call(&Dest::Peer(server_id), request, 30_000).await?;
+        let response: EchoResponse = ctx.call(&server_id, request).await?;
 
         info!(
             "[ClientWorkload] [...]service[...]response: {}",

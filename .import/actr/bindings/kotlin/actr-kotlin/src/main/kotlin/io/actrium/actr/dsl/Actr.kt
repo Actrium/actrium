@@ -11,7 +11,7 @@
  *
  * // Discover and call remote services
  * val echoService = ref.discoverOne("acme:EchoService:1.0.0")
- * val response = ref.call("echo.EchoService.Echo", request)
+ * val response = ref.callRaw("echo.EchoService.Echo", request)
  *
  * // Send data stream
  * ref.sendStream(target) {
@@ -476,7 +476,7 @@ class ActrNode private constructor(
      * ```kotlin
      * node.withStartedActor { ref ->
      *     val target = ref.discoverOne("acme:EchoService:1.0.0")
-     *     val response = ref.call("echo.EchoService.Echo", payload)
+     *     val response = ref.callRaw("echo.EchoService.Echo", payload)
      * }
      * // Actor is automatically shut down after the block
      * ```
@@ -509,7 +509,8 @@ class ActrNode private constructor(
  * - Scoped lifecycle helpers
  *
  * Methods:
- * - [call] / [tell] — RPC communication
+ * - [call] / [callWithTimeout] / [callRaw] / [callRawWithTimeout] — RPC communication
+ * - [tell] — One-way messaging
  * - [discover] / [discoverOne] — Service discovery
  * - [stop] / [shutdown] — Graceful shutdown
  */
@@ -533,11 +534,14 @@ class ActrRef internal constructor(
     fun actorId(): ActrId = inner.actorId()
 
     /**
-     * Perform an RPC call with explicit parameters.
+     * Perform an RPC call with explicit parameters (low-level transport).
      *
-     * For most use cases, prefer the convenience overload:
+     * For the canonical four-method API, prefer the convenience extensions:
      * ```kotlin
-     * ref.call("echo.EchoService.Echo", requestPayload)
+     * ref.callRaw("echo.EchoService.Echo", payload)
+     * ref.callRawWithTimeout("echo.EchoService.Echo", payload, 5000L)
+     * ref.call(EchoRpc, request)
+     * ref.callWithTimeout(EchoRpc, request, 5000L)
      * ```
      */
     suspend fun call(

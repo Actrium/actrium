@@ -21,15 +21,29 @@ use echo::{EchoRequest, EchoResponse};
 
 const ECHO_SERVICE_ALIAS: &str = "EchoService";
 
-impl RpcRequest for EchoRequest {
+/// Contract struct for echo.EchoService.Echo.
+pub struct EchoEchoServiceEchoRpc {
+    pub request: EchoRequest,
+}
+
+impl RpcRequest for EchoEchoServiceEchoRpc {
     type Response = EchoResponse;
 
-    fn route_key() -> &'static str {
+    fn route_key(&self) -> &'static str {
         "echo.EchoService.Echo"
     }
 
-    fn payload_type() -> actr_protocol::PayloadType {
+    fn payload_type(&self) -> actr_protocol::PayloadType {
         actr_protocol::PayloadType::RpcReliable
+    }
+
+    fn encode_request(&self) -> Bytes {
+        use prost::Message as _;
+        self.request.encode_to_vec().into()
+    }
+
+    fn decode_response(data: &[u8]) -> Result<EchoResponse, prost::DecodeError> {
+        prost::Message::decode(data)
     }
 }
 
@@ -87,14 +101,7 @@ async fn proxy_echo<C: Context>(
         message: req.message.clone(),
     };
 
-    match ctx
-        .call(
-            &actr_framework::Dest::Peer(server_id.clone()),
-            echo_req,
-            30_000,
-        )
-        .await
-    {
+    match ctx.call(&server_id, EchoEchoServiceEchoRpc { request: echo_req }).await {
         Ok(resp) => Ok(resp),
         Err(e) => {
             // Cache miss: clear cached id and retry once with fresh discovery
@@ -105,11 +112,7 @@ async fn proxy_echo<C: Context>(
             let echo_req2 = EchoRequest {
                 message: req.message.clone(),
             };
-            ctx.call(
-                &actr_framework::Dest::Peer(fresh_id),
-                echo_req2,
-                30_000,
-            )
+            ctx.call(&fresh_id, EchoEchoServiceEchoRpc { request: echo_req2 })
                 .await
                 .map_err(|e2| {
                     ActrError::Internal(format!(

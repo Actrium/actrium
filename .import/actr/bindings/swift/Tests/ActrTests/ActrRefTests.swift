@@ -119,10 +119,37 @@ extension Google_Protobuf_Empty: RpcRequest {
 @Test func injectedActrContextSupportsTypedCalls() async throws {
     let ctx = RecordingActrContext()
 
-    _ = try await ctx.call(target: ctx.selfId, request: Google_Protobuf_Empty(), timeoutMs: 5)
+    _ = try await ctx.callWithTimeout(target: ctx.selfId, request: Google_Protobuf_Empty(), timeoutMs: 5)
 
     #expect(ctx.calls.count == 1)
     #expect(ctx.calls.first?.routeKey == Google_Protobuf_Empty.routeKey)
     #expect(ctx.calls.first?.payloadType == .rpcSignal)
     #expect(ctx.calls.first?.timeoutMs == 5)
+}
+
+@Test func injectedActrContextDefaultLaneAppliesThirtySecondDefault() async throws {
+    let ctx = RecordingActrContext()
+
+    _ = try await ctx.call(target: ctx.selfId, request: Google_Protobuf_Empty())
+    _ = try await ctx.callRaw(target: ctx.selfId, routeKey: "test.Empty/Echo", payload: Data())
+
+    #expect(ctx.calls.count == 2)
+    #expect(ctx.calls.allSatisfy { $0.timeoutMs == defaultRpcTimeoutMs })
+    #expect(ctx.calls.last?.payloadType == .rpcReliable)
+}
+
+@Test func explicitTimeoutLanesRejectNonPositiveTimeout() async throws {
+    let ctx = RecordingActrContext()
+
+    do {
+        _ = try await ctx.callWithTimeout(target: ctx.selfId, request: Google_Protobuf_Empty(), timeoutMs: 0)
+        Issue.record("Expected InvalidArgument for timeoutMs=0")
+    } catch Actr.ActrError.InvalidArgument {}
+
+    do {
+        _ = try await ctx.callRawWithTimeout(target: ctx.selfId, routeKey: "test.Empty/Echo", payload: Data(), timeoutMs: -1)
+        Issue.record("Expected InvalidArgument for timeoutMs=-1")
+    } catch Actr.ActrError.InvalidArgument {}
+
+    #expect(ctx.calls.isEmpty)
 }

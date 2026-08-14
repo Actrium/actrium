@@ -26,13 +26,13 @@
 //! **Workload side**:
 //! ```rust,ignore
 //! // Call the host side
-//! ctx.call(&Dest::Host, request, 30_000).await?;
+//! ctx.call(&Dest::Host, request).await?;
 //!
 //! // Call self (outproc short-circuit)
-//! ctx.call(&Dest::Workload, request, 30_000).await?;
+//! ctx.call(&Dest::Workload, request).await?;
 //!
 //! // Call a remote peer
-//! ctx.call(&Dest::Peer(server_id), request, 30_000).await?;
+//! ctx.call(&Dest::Peer(server_id), request).await?;
 //! ```
 //!
 //! # Placement in actr-framework

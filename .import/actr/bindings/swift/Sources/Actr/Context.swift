@@ -133,27 +133,28 @@ public extension ActrContext {
         throw ActrError.NotImplemented(msg: "unregisterMediaTrack is not implemented by this ActrContext")
     }
 
-    func call(
-        target: ActrId,
-        routeKey: String,
-        payload: Data,
-        payloadType: PayloadType = .rpcReliable,
-        timeoutMs: Int64 = 30000
-    ) async throws(ActrError) -> Data {
-        try await callRaw(
-            target: target,
-            routeKey: routeKey,
-            payloadType: payloadType,
-            payload: payload,
-            timeoutMs: timeoutMs
-        )
-    }
-
+    /// Typed RPC with default timeout (`defaultRpcTimeoutMs`).
+    ///
+    /// Delegates to `callWithTimeout`.
     func call<Req: RpcRequest>(
         target: ActrId,
-        request: Req,
-        timeoutMs: Int64 = 30000
+        request: Req
     ) async throws(ActrError) -> Req.Response {
+        try await callWithTimeout(target: target, request: request, timeoutMs: defaultRpcTimeoutMs)
+    }
+
+    /// Typed RPC with explicit timeout.
+    ///
+    /// The payload lane comes from `Req.payloadType`. Throws
+    /// `ActrError.InvalidArgument` when `timeoutMs <= 0`.
+    func callWithTimeout<Req: RpcRequest>(
+        target: ActrId,
+        request: Req,
+        timeoutMs: Int64
+    ) async throws(ActrError) -> Req.Response {
+        guard timeoutMs > 0 else {
+            throw ActrError.InvalidArgument(msg: "timeoutMs must be > 0, got \(timeoutMs)")
+        }
         let requestData = try encodeProtobufMessage(request, context: "\(Req.self) request")
         let responseData = try await callRaw(
             target: target,
@@ -166,6 +167,44 @@ public extension ActrContext {
             Req.Response.self,
             from: responseData,
             context: "\(Req.Response.self) response"
+        )
+    }
+
+    /// Raw RPC on the reliable lane with default timeout (`defaultRpcTimeoutMs`).
+    ///
+    /// Delegates to `callRawWithTimeout`. Always sends on `PayloadType.rpcReliable`.
+    func callRaw(
+        target: ActrId,
+        routeKey: String,
+        payload: Data
+    ) async throws(ActrError) -> Data {
+        try await callRawWithTimeout(
+            target: target,
+            routeKey: routeKey,
+            payload: payload,
+            timeoutMs: defaultRpcTimeoutMs
+        )
+    }
+
+    /// Raw RPC on the reliable lane with explicit timeout.
+    ///
+    /// Always sends on `PayloadType.rpcReliable`. Throws
+    /// `ActrError.InvalidArgument` when `timeoutMs <= 0`.
+    func callRawWithTimeout(
+        target: ActrId,
+        routeKey: String,
+        payload: Data,
+        timeoutMs: Int64
+    ) async throws(ActrError) -> Data {
+        guard timeoutMs > 0 else {
+            throw ActrError.InvalidArgument(msg: "timeoutMs must be > 0, got \(timeoutMs)")
+        }
+        return try await callRaw(
+            target: target,
+            routeKey: routeKey,
+            payloadType: .rpcReliable,
+            payload: payload,
+            timeoutMs: timeoutMs
         )
     }
 

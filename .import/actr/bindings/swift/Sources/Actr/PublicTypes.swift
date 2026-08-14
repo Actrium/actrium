@@ -1,6 +1,12 @@
 import ActrBindings
 import Foundation
 
+/// Default RPC timeout in milliseconds (30 seconds).
+///
+/// Keep this value aligned with the other language runtimes:
+/// `DEFAULT_RPC_TIMEOUT_MS` in Rust, Kotlin, and Python.
+public let defaultRpcTimeoutMs: Int64 = 30_000
+
 public struct Realm: Equatable, Hashable, Sendable {
     public var realmId: UInt32
 

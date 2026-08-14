@@ -74,7 +74,7 @@ use std::pin::Pin;
 use std::rc::Rc;
 
 use actr_framework::Dest;
-use actr_protocol::{ActrError, ActrId, ActrType, Direction, RpcEnvelope};
+use actr_protocol::{ActrError, ActrId, ActrType, Direction, PayloadType, RpcEnvelope};
 use bytes::Bytes;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -412,11 +412,26 @@ pub async fn host_call_async(
     target: JsValue,
     route_key: String,
     payload: js_sys::Uint8Array,
+    payload_type: JsValue,
     timeout_ms: i64,
 ) -> Result<js_sys::Uint8Array, JsValue> {
     let ctx = ctx_get(&request_id)?;
     let dest = parse_dest(&target)?;
     let payload_bytes = payload.to_vec();
+    let payload_type: String = serde_wasm_bindgen::from_value(payload_type)
+        .map_err(|e| JsValue::from_str(&format!("invalid payload type: {e}")))?;
+    let payload_type = match payload_type.as_str() {
+        "rpc-reliable" => PayloadType::RpcReliable,
+        "rpc-signal" => PayloadType::RpcSignal,
+        "stream-reliable" => PayloadType::StreamReliable,
+        "stream-latency-first" => PayloadType::StreamLatencyFirst,
+        "media-rtp" => PayloadType::MediaRtp,
+        value => {
+            return Err(actr_error_to_js(ActrError::InvalidArgument(format!(
+                "unknown payload type: {value}"
+            ))));
+        }
+    };
 
     let actor_id = match dest {
         Dest::Peer(id) => id,
@@ -436,7 +451,13 @@ pub async fn host_call_async(
     );
 
     match ctx
-        .call_raw(&actor_id, &route_key, &payload_bytes, timeout_ms)
+        .call_raw_with_type(
+            &actor_id,
+            &route_key,
+            payload_type,
+            &payload_bytes,
+            timeout_ms,
+        )
         .await
     {
         Ok(response) => Ok(js_sys::Uint8Array::from(&response[..])),

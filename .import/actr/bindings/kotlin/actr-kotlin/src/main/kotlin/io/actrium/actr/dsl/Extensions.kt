@@ -15,26 +15,51 @@ import io.actrium.actr.actrErrorKind
 import io.actrium.actr.actrErrorRequiresDlq
 
 // ============================================================================
-// ActrRef Call Extensions - Convenience wrappers with default parameters
+// ActrRef — Raw RPC convenience wrappers (local workload proxy)
+// ============================================================================
+//
+// ActrRef wraps ActrRefWrapper and calls the local guest workload's dispatch()
+// method. These mirror the ActrContext raw API shape but without a target
+// parameter (the target is the local actor itself).
 // ============================================================================
 
 /**
- * Call via RPC proxy with default PayloadType.RPC_RELIABLE and 30s timeout.
+ * Raw RPC call to the local workload with default timeout ([DEFAULT_RPC_TIMEOUT_MS]).
  *
- * This sends a request through the local workload's RPC proxy mechanism.
- * The workload's dispatch() method handles routing to the remote actor.
+ * Always sends on [PayloadType.RPC_RELIABLE].
  *
- * Example:
- * ```kotlin
- * val response = ref.call("echo.EchoService.Echo", requestPayload)
- * ```
+ * @param routeKey RPC route key
+ * @param payload Serialized request payload
+ * @return Response payload bytes
  */
-suspend fun ActrRef.call(
+suspend fun ActrRef.callRaw(
     routeKey: String,
-    requestPayload: ByteArray,
-    payloadType: PayloadType = PayloadType.RPC_RELIABLE,
-    timeoutMs: Long = 30000L,
-): ByteArray = call(routeKey, payloadType, requestPayload, timeoutMs)
+    payload: ByteArray,
+): ByteArray = callRawWithTimeout(routeKey, payload, DEFAULT_RPC_TIMEOUT_MS)
+
+/**
+ * Raw RPC call to the local workload with explicit timeout.
+ *
+ * Always sends on [PayloadType.RPC_RELIABLE].
+ *
+ * @param routeKey RPC route key
+ * @param payload Serialized request payload
+ * @param timeoutMs Timeout in milliseconds (must be > 0)
+ * @return Response payload bytes
+ * @throws IllegalArgumentException if `timeoutMs <= 0`
+ */
+suspend fun ActrRef.callRawWithTimeout(
+    routeKey: String,
+    payload: ByteArray,
+    timeoutMs: Long,
+): ByteArray {
+    require(timeoutMs > 0) { "timeoutMs must be > 0, got $timeoutMs" }
+    return call(routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)
+}
+
+// ============================================================================
+// ActrRef — tell (one-way message, unchanged)
+// ============================================================================
 
 /**
  * Send a one-way message via RPC proxy with default PayloadType.RPC_RELIABLE.
@@ -75,9 +100,8 @@ suspend fun ActrRef.tell(
 suspend fun ActrRef.callCatching(
     routeKey: String,
     requestPayload: ByteArray,
-    payloadType: PayloadType = PayloadType.RPC_RELIABLE,
-    timeoutMs: Long = 30000L,
-): Result<ByteArray> = runCatching { call(routeKey, requestPayload, payloadType, timeoutMs) }
+    timeoutMs: Long = DEFAULT_RPC_TIMEOUT_MS,
+): Result<ByteArray> = runCatching { callRawWithTimeout(routeKey, requestPayload, timeoutMs) }
 
 /** Discover actors and wrap the result. */
 suspend fun ActrRef.discoverCatching(

@@ -279,18 +279,22 @@ impl RuntimeContext {
     }
 
     /// Execute a non-generic RPC request call (useful for language bindings).
+    ///
+    /// Low-level transport entry point that carries `Dest`, `PayloadType`, and
+    /// timeout arguments. The public typed APIs retain `Dest`; the public raw
+    /// APIs accept `ActrId` and fix the lane to `RpcReliable`.
     #[cfg_attr(
         feature = "opentelemetry",
         tracing::instrument(
             skip_all,
-            name = "RuntimeContext.call_raw",
+            name = "RuntimeContext.call_raw_dest",
             fields(
                 actr_id = %self.self_id,
                 route_key = %route_key,
             )
         )
     )]
-    pub async fn call_raw(
+    pub async fn call_raw_dest(
         &self,
         target: &Dest,
         route_key: String,
@@ -327,6 +331,36 @@ impl RuntimeContext {
         let target_id = self.extract_target_id(target);
         gate.send_request_with_type(target_id, payload_type, envelope)
             .await
+    }
+
+    /// Typed convenience wrapper around [`RuntimeContext::call_raw_dest`] that
+    /// encodes `request` via its `RpcRequest` contract and decodes the response.
+    ///
+    /// Kept as an inherent method for low-level callers that need an explicit
+    /// timeout while reaching `Dest::Host`, `Dest::Workload`, or a peer.
+    pub async fn call_dest<R: RpcRequest>(
+        &self,
+        target: &Dest,
+        request: R,
+        timeout_ms: i64,
+    ) -> ActorResult<R::Response> {
+        let payload: Bytes = request.encode_request();
+        let response_bytes = self
+            .call_raw_dest(
+                target,
+                request.route_key().to_string(),
+                request.payload_type(),
+                payload,
+                timeout_ms,
+            )
+            .await?;
+        R::decode_response(&response_bytes).map_err(|e| {
+            ActrError::DecodeFailure(format!(
+                "Failed to decode {}: {}",
+                std::any::type_name::<R::Response>(),
+                e
+            ))
+        })
     }
 
     /// Execute a non-generic RPC message call (fire-and-forget, useful for language bindings).
@@ -684,30 +718,28 @@ impl Context for RuntimeContext {
         feature = "opentelemetry",
         tracing::instrument(
             skip_all,
-            name = "RuntimeContext.call",
+            name = "RuntimeContext.call_with_timeout",
             fields(actr_id = %self.self_id)
         )
     )]
-    async fn call<R: RpcRequest>(
+    async fn call_with_timeout<R: RpcRequest>(
         &self,
         target: &Dest,
         request: R,
         timeout_ms: i64,
     ) -> ActorResult<R::Response> {
-        use actr_protocol::prost::Message as ProstMessage;
+        let payload: Bytes = request.encode_request();
+        let response_bytes = self
+            .call_raw_dest(
+                target,
+                request.route_key().to_string(),
+                request.payload_type(),
+                payload,
+                timeout_ms,
+            )
+            .await?;
 
-        let payload: Bytes = request.encode_to_vec().into();
-        let response_bytes = RuntimeContext::call_raw(
-            self,
-            target,
-            R::route_key().to_string(),
-            R::payload_type(),
-            payload,
-            timeout_ms,
-        )
-        .await?;
-
-        R::Response::decode(&*response_bytes).map_err(|e| {
+        R::decode_response(&response_bytes).map_err(|e| {
             ActrError::DecodeFailure(format!(
                 "Failed to decode {}: {}",
                 std::any::type_name::<R::Response>(),
@@ -725,15 +757,15 @@ impl Context for RuntimeContext {
         )
     )]
     async fn tell<R: RpcRequest>(&self, target: &Dest, message: R) -> ActorResult<()> {
-        crate::outbound::ensure_rpc_payload_type(R::payload_type())?;
+        crate::outbound::ensure_rpc_payload_type(message.payload_type())?;
 
         self.ensure_session_ready().await?;
 
         // 1. Encode the message.
-        let payload: Bytes = message.encode_to_vec().into();
+        let payload: Bytes = message.encode_request();
 
         // 2. Get the route key.
-        let route_key = R::route_key().to_string();
+        let route_key = message.route_key().to_string();
 
         // 3. Build the RpcEnvelope for fire-and-forget delivery.
         #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
@@ -759,7 +791,7 @@ impl Context for RuntimeContext {
         let target_id = self.extract_target_id(target);
 
         // 5. Dispatch through the Gate enum while preserving payload type.
-        gate.send_message_with_type(target_id, R::payload_type(), envelope)
+        gate.send_message_with_type(target_id, message.payload_type(), envelope)
             .await
     }
 
@@ -936,15 +968,14 @@ impl Context for RuntimeContext {
         })
     }
 
-    async fn call_raw(
+    async fn call_raw_with_timeout(
         &self,
         target: &ActrId,
         route_key: &str,
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
-        RuntimeContext::call_raw(
-            self,
+        self.call_raw_dest(
             &Dest::Peer(target.clone()),
             route_key.to_string(),
             PayloadType::RpcReliable,
@@ -962,8 +993,7 @@ impl Context for RuntimeContext {
         payload: Bytes,
         timeout_ms: i64,
     ) -> ActorResult<Bytes> {
-        RuntimeContext::call_raw(
-            self,
+        self.call_raw_dest(
             &Dest::Peer(target.clone()),
             route_key.to_string(),
             payload_type,

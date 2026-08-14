@@ -40,28 +40,26 @@ use proto::{
 
 // ── RpcRequest impl ──────────────────────────────────────────────────────────
 
-impl RpcRequest for StartServerStreamRequest {
+pub struct EchoEchoStreamServiceStartServerStreamRpc {
+    pub request: StartServerStreamRequest,
+}
+impl RpcRequest for EchoEchoStreamServiceStartServerStreamRpc {
     type Response = StartServerStreamResponse;
-
-    fn route_key() -> &'static str {
-        "echo.EchoStreamService.StartServerStream"
-    }
-
-    fn payload_type() -> actr_protocol::PayloadType {
-        PayloadType::RpcReliable
-    }
+    fn route_key(&self) -> &'static str { "echo.EchoStreamService.StartServerStream" }
+    fn payload_type(&self) -> actr_protocol::PayloadType { PayloadType::RpcReliable }
+    fn encode_request(&self) -> Bytes { use prost::Message as _; self.request.encode_to_vec().into() }
+    fn decode_response(data: &[u8]) -> Result<StartServerStreamResponse, prost::DecodeError> { prost::Message::decode(data) }
 }
 
-impl RpcRequest for SetupBidiRequest {
+pub struct EchoEchoStreamServiceSetupBidiRpc {
+    pub request: SetupBidiRequest,
+}
+impl RpcRequest for EchoEchoStreamServiceSetupBidiRpc {
     type Response = SetupBidiResponse;
-
-    fn route_key() -> &'static str {
-        "echo.EchoStreamService.SetupBidi"
-    }
-
-    fn payload_type() -> actr_protocol::PayloadType {
-        PayloadType::RpcReliable
-    }
+    fn route_key(&self) -> &'static str { "echo.EchoStreamService.SetupBidi" }
+    fn payload_type(&self) -> actr_protocol::PayloadType { PayloadType::RpcReliable }
+    fn encode_request(&self) -> Bytes { use prost::Message as _; self.request.encode_to_vec().into() }
+    fn decode_response(data: &[u8]) -> Result<SetupBidiResponse, prost::DecodeError> { prost::Message::decode(data) }
 }
 
 // ── Workload ─────────────────────────────────────────────────────────────────
