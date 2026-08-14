@@ -4697,6 +4697,7 @@ dependencies = [
  "actr-protocol",
  "async-trait",
  "bytes",
+ "tokio",
 ]
 
 [[package]]

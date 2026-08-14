@@ -9,6 +9,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Channels;
 
 namespace ActrSharp;
 
@@ -18,12 +19,14 @@ public sealed class ActrCabiException : Exception
     // -32, -33, -40, -41, -42) are distinct from every Rust callback status code so
     // a code alone identifies a managed-validation failure. The codes below
     // intentionally mirror Rust codes (-10 NULL_POINTER, -20 WORKLOAD_NOT_FOUND,
-    // -21 HANDLE_INVALID, -50 GENERIC_ERROR): the native surface surfaces these
-    // conditions synchronously (e.g. actr_workload_create returns null) and the
-    // managed wrapper uses the same code for the same condition for consistency.
+    // -21 HANDLE_INVALID, -22 REQUEST_ID_UNKNOWN, -50 GENERIC_ERROR): the
+    // native surface surfaces these conditions synchronously (e.g.
+    // actr_workload_create returns null) and the managed wrapper uses the same
+    // code for the same condition for consistency.
     public const int CodeNullPointer = -10;
     public const int CodeWorkloadNotFound = -20;
     public const int CodeHandleInvalid = -21;
+    public const int CodeRequestIdUnknown = -22;
     public const int CodeGenericError = -50;
     public const int CodeAbiMismatch = -30;
     public const int CodeActrMismatch = -31;
@@ -90,6 +93,9 @@ public sealed class ActrCabiException : Exception
 
     internal static string PtrToUtf8(nint ptr, nuint len)
     {
+        if (len == 0) return string.Empty;
+        if (ptr == nint.Zero)
+            throw new ActrCabiException(CodeNullPointer, "native UTF-8 buffer is null");
         if (len > int.MaxValue)
             throw new ActrCabiException(CodeGenericError, "native UTF-8 buffer is too large");
         var bytes = new byte[(int)len];
@@ -187,6 +193,23 @@ delegate void ActrDiscoverCallback(
     nuint errorLen,
     nint userData);
 
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+delegate void ActrStreamSinkCallback(
+    nint streamIdPtr, nuint streamIdLen,
+    nint payloadPtr, nuint payloadLen,
+    nint metadataPtr, nuint metadataLen,
+    ulong sequence,
+    byte chunkFlags, long timestampMs,
+    nint senderIdPtr, nuint senderIdLen,
+    nint userData);
+
+[UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+delegate void ActrReverseRpcCallback(
+    ulong requestId,
+    nint routePtr, nuint routeLen,
+    nint payloadPtr, nuint payloadLen,
+    nint userData);
+
 // ── Continuation registry ────────────────────────────────────────────────────
 
 static class ContinuationMap
@@ -226,7 +249,7 @@ static class ContinuationMap
 
 // ── Rooted reverse-P/Invoke trampolines ─────────────────────────────────────
 
-static class Trampolines
+static unsafe class Trampolines
 {
     // Static fields keep the delegates and their unmanaged thunks alive for the
     // lifetime of the process.
@@ -234,6 +257,8 @@ static class Trampolines
     public static readonly ActrCallCallback Call = CallImpl;
     public static readonly ActrDiscoverCallback Discover = DiscoverImpl;
     public static readonly ActrVoidCallback Void = VoidImpl;
+    public static readonly ActrStreamSinkCallback StreamSink = StreamSinkImpl;
+    public static readonly ActrReverseRpcCallback ReverseRpc = ReverseRpcImpl;
 
     static void HandleImpl(int status, nint resultHandle, nint errorPtr, nuint errorLen, nint userData)
     {
@@ -354,6 +379,98 @@ static class Trampolines
             completion?.TrySetException(error);
         }
     }
+
+    static void StreamSinkImpl(
+        nint streamIdPtr, nuint streamIdLen,
+        nint payloadPtr, nuint payloadLen,
+        nint metadataPtr, nuint metadataLen,
+        ulong sequence,
+        byte chunkFlags, long timestampMs,
+        nint senderIdPtr, nuint senderIdLen,
+        nint userData)
+    {
+        try
+        {
+            // Native buffers are valid only for this call. Copy every field
+            // before putting the event on the managed bounded queue.
+            var chunk = new ActrStreamChunk(
+                ActrCabiException.PtrToUtf8(streamIdPtr, streamIdLen),
+                CopyBuffer(payloadPtr, payloadLen),
+                sequence,
+                (chunkFlags & ActrStreamChunk.HasTimestampFlag) != 0 ? timestampMs : null,
+                ActrCabiException.PtrToUtf8(senderIdPtr, senderIdLen),
+                CopyMetadata(metadataPtr, metadataLen));
+            ActrHostBridge.OnStreamChunk(chunk);
+        }
+        catch
+        {
+            // Managed exceptions must never unwind across a native callback.
+        }
+    }
+
+    static void ReverseRpcImpl(
+        ulong requestId,
+        nint routePtr, nuint routeLen,
+        nint payloadPtr, nuint payloadLen,
+        nint userData)
+    {
+        try
+        {
+            ActrHostBridge.OnReverseRpc(
+                requestId,
+                ActrCabiException.PtrToUtf8(routePtr, routeLen),
+                CopyBuffer(payloadPtr, payloadLen));
+        }
+        catch
+        {
+            // Copying/dispatch failed before RespondAsync could map it. Reject
+            // immediately instead of retaining the Rust request until its
+            // deadline. The native side treats a raced late response as a
+            // harmless unknown id.
+            ActrHostBridge.RejectReverseRpc(requestId);
+        }
+    }
+
+    static byte[] CopyBuffer(nint ptr, nuint len)
+    {
+        if (len == 0) return [];
+        if (ptr == nint.Zero)
+            throw new ActrCabiException(ActrCabiException.CodeNullPointer, "native buffer is null");
+        if (len > int.MaxValue)
+            throw new ActrCabiException(ActrCabiException.CodeGenericError, "native buffer is too large");
+        var bytes = new byte[(int)len];
+        Marshal.Copy(ptr, bytes, 0, bytes.Length);
+        return bytes;
+    }
+
+    static ActrStreamMetadata[] CopyMetadata(nint ptr, nuint len)
+    {
+        if (len == 0) return [];
+        if (ptr == nint.Zero)
+            throw new ActrCabiException(ActrCabiException.CodeNullPointer, "native metadata is null");
+        if (len > int.MaxValue)
+            throw new ActrCabiException(ActrCabiException.CodeGenericError, "native metadata has too many entries");
+
+        var native = (NativeMetadataEntry*)ptr;
+        var metadata = new ActrStreamMetadata[(int)len];
+        for (int i = 0; i < metadata.Length; i++)
+        {
+            NativeMetadataEntry entry = native[i];
+            metadata[i] = new ActrStreamMetadata(
+                ActrCabiException.PtrToUtf8(entry.KeyPtr, entry.KeyLen),
+                ActrCabiException.PtrToUtf8(entry.ValuePtr, entry.ValueLen));
+        }
+        return metadata;
+    }
+}
+
+[StructLayout(LayoutKind.Sequential)]
+readonly struct NativeMetadataEntry
+{
+    internal readonly nint KeyPtr;
+    internal readonly nuint KeyLen;
+    internal readonly nint ValuePtr;
+    internal readonly nuint ValueLen;
 }
 
 // ── Native imports ──────────────────────────────────────────────────────────
@@ -520,6 +637,272 @@ static unsafe partial class Native
         nint refHandle,
         [MarshalAs(UnmanagedType.FunctionPtr)] ActrVoidCallback callback,
         nint userData);
+
+    // ── host bridge: stream sink + reverse RPC ─────────────────────────────
+
+    [LibraryImport("actr_cabi", EntryPoint = "actr_register_stream_sink")]
+    internal static partial int RegisterStreamSink(
+        [MarshalAs(UnmanagedType.FunctionPtr)] ActrStreamSinkCallback callback,
+        nint userData);
+
+    [LibraryImport("actr_cabi", EntryPoint = "actr_register_stream_sink")]
+    internal static partial int RegisterStreamSinkNull(nint callback, nint userData);
+
+    [LibraryImport("actr_cabi", EntryPoint = "actr_register_reverse_rpc_sink")]
+    internal static partial int RegisterReverseRpcSink(
+        [MarshalAs(UnmanagedType.FunctionPtr)] ActrReverseRpcCallback callback,
+        nint userData);
+
+    [LibraryImport("actr_cabi", EntryPoint = "actr_register_reverse_rpc_sink")]
+    internal static partial int RegisterReverseRpcSinkNull(nint callback, nint userData);
+
+    [LibraryImport("actr_cabi", EntryPoint = "actr_host_respond_reverse_rpc")]
+    private static partial int HostRespondImport(
+        ulong requestId,
+        int status,
+        byte* payload,
+        nuint payloadLen);
+
+    internal static int HostRespond(ulong requestId, int status, byte[]? payload)
+    {
+        if (payload is null || payload.Length == 0)
+            return HostRespondImport(requestId, status, null, 0);
+        fixed (byte* payloadPtr = payload)
+            return HostRespondImport(requestId, status, payloadPtr, (nuint)payload.Length);
+    }
+
+    [LibraryImport("actr_cabi", EntryPoint = "actr_stream_listen")]
+    private static partial int StreamListenImport(
+        nint refHandle,
+        byte* streamId,
+        nuint streamIdLen,
+        [MarshalAs(UnmanagedType.FunctionPtr)] ActrVoidCallback callback,
+        nint userData);
+
+    internal static int StreamListen(nint refHandle, byte[] streamId, ActrVoidCallback callback, nint userData)
+    {
+        fixed (byte* streamIdPtr = streamId)
+            return StreamListenImport(refHandle, streamIdPtr, (nuint)streamId.Length, callback, userData);
+    }
+
+    [LibraryImport("actr_cabi", EntryPoint = "actr_stream_unlisten")]
+    private static partial int StreamUnlistenImport(
+        nint refHandle,
+        byte* streamId,
+        nuint streamIdLen,
+        [MarshalAs(UnmanagedType.FunctionPtr)] ActrVoidCallback callback,
+        nint userData);
+
+    internal static int StreamUnlisten(nint refHandle, byte[] streamId, ActrVoidCallback callback, nint userData)
+    {
+        fixed (byte* streamIdPtr = streamId)
+            return StreamUnlistenImport(refHandle, streamIdPtr, (nuint)streamId.Length, callback, userData);
+    }
+}
+
+// ── Host bridge data ─────────────────────────────────────────────────────────
+
+/// <summary>A copied key/value metadata entry from a forwarded data chunk.</summary>
+public sealed record ActrStreamMetadata(string Key, string Value);
+
+/// <summary>
+/// One forwarded data-stream chunk. All fields, including metadata, are copied
+/// before the native callback returns.
+/// </summary>
+public sealed record ActrStreamChunk(
+    string StreamId,
+    byte[] Payload,
+    ulong Sequence,
+    long? TimestampMs,
+    string SenderId,
+    IReadOnlyList<ActrStreamMetadata> Metadata)
+{
+    /// <summary>Creates a chunk with no metadata (source-compatible helper).</summary>
+    public ActrStreamChunk(
+        string streamId,
+        byte[] payload,
+        ulong sequence,
+        long? timestampMs,
+        string senderId)
+        : this(streamId, payload, sequence, timestampMs, senderId, [])
+    {
+    }
+
+    /// <summary>Bit set when the producer annotated <see cref="TimestampMs"/>.</summary>
+    public const byte HasTimestampFlag = 0x01;
+}
+
+/// <summary>An inbound request a Rust workload explicitly delegated to its host.</summary>
+public sealed record ActrReverseRpcRequest(ulong RequestId, string Route, byte[] Payload);
+
+static class ActrHostBridge
+{
+    // Bounded, best-effort host dispatch. The native runtime can preserve its
+    // own reliable lane semantics, but a synchronous C callback cannot wait on
+    // arbitrary UI work without stalling that runtime worker.
+    internal const int StreamQueueCapacity = 256;
+
+    sealed class StreamRegistration(Action<ActrStreamChunk> handler)
+    {
+        internal Action<ActrStreamChunk> Handler { get; } = handler;
+    }
+
+    sealed record StreamQueueItem(StreamRegistration Registration, ActrStreamChunk Chunk);
+
+    static readonly Channel<StreamQueueItem> s_streamQueue =
+        Channel.CreateBounded<StreamQueueItem>(new BoundedChannelOptions(StreamQueueCapacity)
+        {
+            SingleReader = true,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+
+    static readonly object s_registrationLock = new();
+    static long s_droppedStreamChunkCount;
+    static StreamRegistration? s_streamRegistration;
+    static Func<ActrReverseRpcRequest, Task<byte[]>>? s_reverseHandler;
+
+    static ActrHostBridge()
+    {
+        _ = Task.Run(ProcessStreamQueueAsync);
+    }
+
+    internal static long DroppedStreamChunkCount => Interlocked.Read(ref s_droppedStreamChunkCount);
+
+    internal static int RegisterStreamHandler(Action<ActrStreamChunk>? handler, Func<int> nativeUpdate)
+    {
+        lock (s_registrationLock)
+        {
+            // Stop managed delivery before a native clear waits for any
+            // in-flight callback. Queued chunks observe this null handler too.
+            StreamRegistration? previous = Volatile.Read(ref s_streamRegistration);
+            if (handler is null) SetStreamHandler(null);
+            int code;
+            try
+            {
+                code = nativeUpdate();
+            }
+            catch
+            {
+                if (handler is null) Volatile.Write(ref s_streamRegistration, previous);
+                throw;
+            }
+            if (code != 0)
+            {
+                if (handler is null) Volatile.Write(ref s_streamRegistration, previous);
+                return code;
+            }
+            if (code == 0 && handler is not null) SetStreamHandler(handler);
+            return code;
+        }
+    }
+
+    internal static int RegisterReverseHandler(
+        Func<ActrReverseRpcRequest, Task<byte[]>>? handler,
+        Func<int> nativeUpdate)
+    {
+        lock (s_registrationLock)
+        {
+            Func<ActrReverseRpcRequest, Task<byte[]>>? previous = Volatile.Read(ref s_reverseHandler);
+            if (handler is null) SetReverseHandler(null);
+            int code;
+            try
+            {
+                code = nativeUpdate();
+            }
+            catch
+            {
+                if (handler is null) Volatile.Write(ref s_reverseHandler, previous);
+                throw;
+            }
+            if (code != 0)
+            {
+                if (handler is null) Volatile.Write(ref s_reverseHandler, previous);
+                return code;
+            }
+            if (code == 0 && handler is not null) SetReverseHandler(handler);
+            return code;
+        }
+    }
+
+    internal static void SetStreamHandler(Action<ActrStreamChunk>? handler) =>
+        Volatile.Write(
+            ref s_streamRegistration,
+            handler is null ? null : new StreamRegistration(handler));
+
+    internal static void SetReverseHandler(Func<ActrReverseRpcRequest, Task<byte[]>>? handler) =>
+        Volatile.Write(ref s_reverseHandler, handler);
+
+    internal static void OnStreamChunk(ActrStreamChunk chunk)
+    {
+        StreamRegistration? registration = Volatile.Read(ref s_streamRegistration);
+        if (registration is null) return;
+        if (!s_streamQueue.Writer.TryWrite(new StreamQueueItem(registration, chunk)))
+            Interlocked.Increment(ref s_droppedStreamChunkCount);
+    }
+
+    static async Task ProcessStreamQueueAsync()
+    {
+        await foreach (StreamQueueItem item in s_streamQueue.Reader.ReadAllAsync().ConfigureAwait(false))
+        {
+            // A clear or replacement invalidates queued work from the old
+            // registration. The queued item retains its delegate until it is
+            // discarded, so an in-flight native callback can never observe a
+            // collected delegate or dispatch an old chunk to a new handler.
+            if (!ReferenceEquals(item.Registration, Volatile.Read(ref s_streamRegistration))) continue;
+            try { item.Registration.Handler(item.Chunk); }
+            catch { /* One bad event cannot stop later dispatches. */ }
+        }
+    }
+
+    internal static void OnReverseRpc(ulong requestId, string route, byte[] payload) =>
+        _ = RespondAsync(requestId, route, payload);
+
+    internal static void RejectReverseRpc(ulong requestId)
+    {
+        try
+        {
+            _ = Native.HostRespond(requestId, ActrCabiException.CodeGenericError, null);
+        }
+        catch
+        {
+            // This runs on the native callback boundary; never allow a
+            // marshalling or loader failure to escape it.
+        }
+    }
+
+    static async Task RespondAsync(ulong requestId, string route, byte[] payload)
+    {
+        int status = 0;
+        byte[]? answer = null;
+        try
+        {
+            Func<ActrReverseRpcRequest, Task<byte[]>>? handler = Volatile.Read(ref s_reverseHandler);
+            if (handler is null)
+                status = ActrCabiException.CodeGenericError;
+            else
+            {
+                answer = await handler(new ActrReverseRpcRequest(requestId, route, payload)).ConfigureAwait(false);
+                if (answer is null) status = ActrCabiException.CodeGenericError;
+            }
+        }
+        catch
+        {
+            status = ActrCabiException.CodeGenericError;
+        }
+
+        // A late/duplicate id is already resolved natively. It is intentionally
+        // ignored here: a managed handler must not turn an expired request into
+        // an unobserved task failure.
+        try
+        {
+            _ = Native.HostRespond(requestId, status, answer);
+        }
+        catch
+        {
+            // Never leave an unobserved exception on the fire-and-forget
+            // callback task. The native deadline remains authoritative.
+        }
+    }
 }
 
 // ── ActrCabiNode ────────────────────────────────────────────────────────────
@@ -871,6 +1254,70 @@ public sealed class ActrCabiNode : IDisposable
                 targetTypeBytes,
                 Trampolines.Discover,
                 userData)));
+    }
+
+    // ── host bridge (process-global sinks + per-node stream listen) ────────
+
+    /// <summary>
+    /// The maximum number of copied stream chunks awaiting the managed
+    /// handler. On overflow ActrSharp drops the newest chunk and increments
+    /// <see cref="DroppedStreamChunkCount"/>; this bridge is therefore not a
+    /// reliable-delivery acknowledgement, even for a reliable native stream.
+    /// </summary>
+    public const int StreamQueueCapacity = ActrHostBridge.StreamQueueCapacity;
+
+    /// <summary>Total chunks dropped by ActrSharp's bounded managed queue.</summary>
+    public static long DroppedStreamChunkCount => ActrHostBridge.DroppedStreamChunkCount;
+
+    /// <summary>
+    /// Register the process-global handler for explicitly listened stream
+    /// chunks. Passing null clears the native sink and stops managed dispatch.
+    /// Delegates are rooted by ActrSharp; the handler runs serially on a
+    /// managed consumer task, never on a native runtime worker.
+    /// </summary>
+    public static void RegisterStreamSink(Action<ActrStreamChunk>? handler)
+    {
+        int code = ActrHostBridge.RegisterStreamHandler(handler, () => handler is null
+            ? SafeNative(() => Native.RegisterStreamSinkNull(nint.Zero, nint.Zero), "actr_register_stream_sink")
+            : SafeNative(() => Native.RegisterStreamSink(Trampolines.StreamSink, nint.Zero), "actr_register_stream_sink"));
+        if (code != 0) throw new ActrCabiException(code, "actr_register_stream_sink failed");
+    }
+
+    /// <summary>
+    /// Register the process-global handler for requests a Rust workload
+    /// explicitly delegates with <c>ask_host</c>. Return the response payload;
+    /// a throw maps to a host failure and a late response is ignored natively.
+    /// Passing null clears the native sink.
+    /// </summary>
+    public static void RegisterReverseRpcHandler(Func<ActrReverseRpcRequest, Task<byte[]>>? handler)
+    {
+        int code = ActrHostBridge.RegisterReverseHandler(handler, () => handler is null
+            ? SafeNative(() => Native.RegisterReverseRpcSinkNull(nint.Zero, nint.Zero), "actr_register_reverse_rpc_sink")
+            : SafeNative(() => Native.RegisterReverseRpcSink(Trampolines.ReverseRpc, nint.Zero), "actr_register_reverse_rpc_sink"));
+        if (code != 0) throw new ActrCabiException(code, "actr_register_reverse_rpc_sink failed");
+    }
+
+    /// <summary>
+    /// Subscribe this started node to exactly <paramref name="streamId"/>.
+    /// Only chunks for that id are forwarded to <see cref="RegisterStreamSink"/>.
+    /// </summary>
+    public Task ListenStream(string streamId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(streamId);
+        ActrCabiHandle refHandle = GetStartedHandle();
+        byte[] streamIdBytes = Encoding.UTF8.GetBytes(streamId);
+        return WithCallback(userData => WithDangerousRef(refHandle, ptr =>
+            _ = Native.StreamListen(ptr, streamIdBytes, Trampolines.Void, userData)));
+    }
+
+    /// <summary>Remove this node's explicit listener for <paramref name="streamId"/>.</summary>
+    public Task UnlistenStream(string streamId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(streamId);
+        ActrCabiHandle refHandle = GetStartedHandle();
+        byte[] streamIdBytes = Encoding.UTF8.GetBytes(streamId);
+        return WithCallback(userData => WithDangerousRef(refHandle, ptr =>
+            _ = Native.StreamUnlisten(ptr, streamIdBytes, Trampolines.Void, userData)));
     }
 
     public void Shutdown()

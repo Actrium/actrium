@@ -111,3 +111,72 @@ public class NativeValidationNegativeTests
         Assert.False(string.IsNullOrEmpty(ex.Rid));
     }
 }
+
+public class HostBridgeTests
+{
+    [Fact]
+    public void StreamChunk_record_carries_timestamp_nullability()
+    {
+        var metadata = new[] { new ActrStreamMetadata("content-type", "application/octet-stream") };
+        var annotated = new ActrStreamChunk("stream-1", [1, 2, 3], 7, 1234, "1a@7/acme:Ask:1.0.0", metadata);
+        Assert.Equal(1234, annotated.TimestampMs);
+        Assert.Equal("content-type", annotated.Metadata[0].Key);
+        Assert.Equal("application/octet-stream", annotated.Metadata[0].Value);
+
+        var plain = new ActrStreamChunk("stream-1", [], 8, null, "1a@7/acme:Ask:1.0.0", []);
+        Assert.Null(plain.TimestampMs);
+        Assert.Equal(ActrStreamChunk.HasTimestampFlag, (byte)0x01);
+    }
+
+    [Fact]
+    public void ReverseRpcRequest_record_roundtrips_fields()
+    {
+        var request = new ActrReverseRpcRequest(42, "ask.AskService/AskUserQuestion", [9, 9]);
+        Assert.Equal(42UL, request.RequestId);
+        Assert.Equal("ask.AskService/AskUserQuestion", request.Route);
+        Assert.Equal(2, request.Payload.Length);
+    }
+
+    [Fact]
+    public void RequestIdUnknown_code_is_minus_22()
+    {
+        Assert.Equal(-22, ActrCabiException.CodeRequestIdUnknown);
+    }
+
+    [Fact]
+    public void Host_bridge_public_api_has_bounded_stream_shape()
+    {
+        Assert.Equal(256, ActrCabiNode.StreamQueueCapacity);
+        Assert.True(ActrCabiNode.DroppedStreamChunkCount >= 0);
+        Assert.NotNull(typeof(ActrCabiNode).GetMethod(nameof(ActrCabiNode.ListenStream), [typeof(string)]));
+        Assert.NotNull(typeof(ActrCabiNode).GetMethod(nameof(ActrCabiNode.UnlistenStream), [typeof(string)]));
+        Assert.NotNull(typeof(ActrCabiNode).GetMethod(
+            nameof(ActrCabiNode.RegisterReverseRpcHandler),
+            [typeof(Func<ActrReverseRpcRequest, Task<byte[]>>)]));
+    }
+
+    // These test projects do not ship actr_cabi.dll, so every sink
+    // registration (including the null unregister path) must surface the
+    // actionable DllNotFound ActrCabiException rather than an opaque loader
+    // exception — mirroring InitRuntime/ValidateNative negative coverage.
+    [Fact]
+    public void RegisterStreamSink_without_native_dll_throws_actr_exception()
+    {
+        var ex = Assert.Throws<ActrCabiException>(() => ActrCabiNode.RegisterStreamSink(_ => { }));
+        Assert.Equal(ActrCabiException.CodeDllNotFound, ex.Code);
+
+        ex = Assert.Throws<ActrCabiException>(() => ActrCabiNode.RegisterStreamSink(null));
+        Assert.Equal(ActrCabiException.CodeDllNotFound, ex.Code);
+    }
+
+    [Fact]
+    public void RegisterReverseRpcHandler_without_native_dll_throws_actr_exception()
+    {
+        var ex = Assert.Throws<ActrCabiException>(() =>
+            ActrCabiNode.RegisterReverseRpcHandler(_ => Task.FromResult(Array.Empty<byte>())));
+        Assert.Equal(ActrCabiException.CodeDllNotFound, ex.Code);
+
+        ex = Assert.Throws<ActrCabiException>(() => ActrCabiNode.RegisterReverseRpcHandler(null));
+        Assert.Equal(ActrCabiException.CodeDllNotFound, ex.Code);
+    }
+}

@@ -28,6 +28,7 @@ futures-util = { workspace = true }
 actr-framework = { workspace = true }
 actr-protocol = { workspace = true }
 actr-mock-actrix = { workspace = true }
+tokio = { workspace = true }
 async-trait = { workspace = true }
 bytes = { workspace = true }
 tempfile = { workspace = true }

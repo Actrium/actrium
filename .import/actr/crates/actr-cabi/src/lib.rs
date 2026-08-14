@@ -7,6 +7,7 @@
 
 mod error;
 mod handle;
+mod host_sink;
 mod observer;
 mod registry;
 mod runtime;
@@ -21,18 +22,22 @@ pub use runtime::{init_runtime, shutdown_runtime};
 use std::ffi::{c_char, c_void};
 use std::path::Path;
 
-use actr_framework::Dest;
+use actr_framework::{Context, Dest};
 use actr_protocol::{ActrType, PayloadType};
 use bytes::Bytes;
 
 pub use crate::error::{
-    HANDLE_INVALID, INVALID_UTF8, NULL_POINTER, PANIC, RT_INIT_FAILED, RT_NOT_INITIALIZED, SUCCESS,
-    WORKLOAD_NOT_FOUND,
+    HANDLE_INVALID, INVALID_UTF8, NULL_POINTER, PANIC, REQUEST_ID_UNKNOWN, RT_INIT_FAILED,
+    RT_NOT_INITIALIZED, SUCCESS, WORKLOAD_NOT_FOUND,
 };
 use crate::error::{alloc_bytes, alloc_cstring, free_bytes, free_cstring};
 use crate::handle::{
     box_actr_ref, box_attached, box_init, box_registered, box_workload, clone_actr_ref,
     drop_actr_ref, drop_handle, take_attached, take_init, take_link_inputs, take_registered,
+};
+pub use crate::host_sink::{
+    ACTR_CHUNK_FLAG_HAS_TIMESTAMP, ReverseRpcCallback, StreamMetadataEntry, StreamSinkCallback,
+    ask_host, forward_chunk_to_host, pending_ask_count,
 };
 use crate::observer::{CabiObserver, ObserverCallbacks};
 
@@ -42,9 +47,8 @@ const GENERIC_ERROR: i32 = -50;
 // ── C callback typedefs ─────────────────────────────────────────────────────
 
 /// Completion callbacks run synchronously on the calling/runtime thread. A
-/// callback may re-enter actr-cabi because no registry lock is held, but it
-/// must not unwind across the C ABI boundary and must copy borrowed buffers
-/// before returning.
+/// callback may re-enter actr-cabi, but it must not unwind across the C ABI
+/// boundary and must copy borrowed buffers before returning.
 pub type ActrVoidCallback =
     extern "C" fn(status: i32, error_ptr: *const c_char, error_len: usize, user_data: *mut c_void);
 
@@ -900,6 +904,217 @@ pub unsafe extern "C" fn actr_ref_discover(
     })
 }
 
+// ── Host bridge: stream sink + reverse RPC ──────────────────────────────────
+
+/// Install (or clear, with a null sink) the process-global host stream-chunk
+/// sink. `actr_stream_listen` forwards every inbound DataChunk of a listened
+/// stream to this callback.
+///
+/// Callback contract (mirrors the observer hooks): it fires synchronously on
+/// actr-cabi runtime worker threads, may re-enter actr-cabi, must not unwind,
+/// and every buffer it receives is valid only for the duration of the call —
+/// copy before returning. `chunk_flags` bit `0x01` indicates that
+/// `timestamp_ms` is set. `sender_id` is the sending actor's
+/// `to_string_repr()` form. Metadata entries are forwarded as borrowed key /
+/// value pairs in the callback's `metadata_ptr` array.
+///
+/// # Safety
+///
+/// `sink` must be a valid function pointer (or null) and `user_data` must
+/// be safe to send across threads. Replacing or clearing waits for in-flight
+/// callbacks, so it is safe to release old `user_data` once this function
+/// returns. Calling either sink registration entry point from a sink callback
+/// returns `GENERIC_ERROR` to avoid self-deadlock.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_register_stream_sink(
+    sink: Option<host_sink::StreamSinkCallback>,
+    user_data: *mut c_void,
+) -> i32 {
+    catch_unwind_i32(|| match host_sink::set_stream_sink(sink, user_data) {
+        Ok(()) => SUCCESS,
+        Err(code) => code,
+    })
+}
+
+/// Install (or clear, with a null sink) the process-global reverse-RPC sink.
+///
+/// A Rust workload dispatcher calls `actr_cabi::ask_host(route, payload,
+/// timeout_ms)` for an inbound request the embedding host should answer; the
+/// host receives it through this callback and must eventually answer the
+/// carried `request_id` via `actr_host_respond_reverse_rpc`. Same callback
+/// contract as `actr_register_stream_sink` (synchronous, no unwinding,
+/// borrowed buffers).
+///
+/// # Safety
+///
+/// Same lifetime and in-callback registration restrictions as
+/// `actr_register_stream_sink`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_register_reverse_rpc_sink(
+    sink: Option<host_sink::ReverseRpcCallback>,
+    user_data: *mut c_void,
+) -> i32 {
+    catch_unwind_i32(|| match host_sink::set_reverse_sink(sink, user_data) {
+        Ok(()) => SUCCESS,
+        Err(code) => code,
+    })
+}
+
+/// Deliver the host's answer for a reverse-RPC request.
+///
+/// `status == 0` resolves the awaiting `ask_host` caller with `payload`;
+/// any other status resolves it with an `Unavailable` error carrying the
+/// status. Returns `REQUEST_ID_UNKNOWN` (-22) when `request_id` is
+/// unknown, already answered, or past its `ask_host` timeout. Synchronous —
+/// safe to call from any thread, including from inside the reverse-RPC sink
+/// callback.
+///
+/// # Safety
+///
+/// `payload_ptr` may be null with `payload_len == 0` for an empty payload,
+/// or point to `payload_len` readable bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_host_respond_reverse_rpc(
+    request_id: u64,
+    status: i32,
+    payload_ptr: *const u8,
+    payload_len: usize,
+) -> i32 {
+    catch_unwind_i32(|| {
+        let payload: &[u8] = if payload_ptr.is_null() {
+            if payload_len != 0 {
+                return NULL_POINTER;
+            }
+            &[]
+        } else {
+            // SAFETY: the function's contract requires a non-null
+            // `payload_ptr` to be readable for `payload_len` bytes.
+            unsafe { std::slice::from_raw_parts(payload_ptr, payload_len) }
+        };
+        match host_sink::host_respond(request_id, status, payload) {
+            Ok(()) => SUCCESS,
+            Err(code) => code,
+        }
+    })
+}
+
+/// Subscribe the node to one inbound data stream and forward every chunk to
+/// the registered host stream sink. Async — registration result via
+/// `callback`. One listener per `stream_id`: a second `listen` for the same
+/// id follows `Context::register_stream` semantics (replacement or error as
+/// implemented by the runtime).
+///
+/// Chunks arriving before a sink is registered are dropped (traced), not
+/// buffered. Only chunks whose `stream_id` exactly equals this argument reach
+/// this listener; unregistered stream ids are never forwarded by this API.
+///
+/// # Safety
+///
+/// `ref_handle` must be a valid `ActrRefHandle` (it is cloned, not
+/// consumed). `stream_id_ptr` must point to `stream_id_len` valid UTF-8
+/// bytes. `callback` must be a valid function pointer. `user_data` is passed
+/// verbatim and must be safe to send across threads.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_stream_listen(
+    ref_handle: *mut c_void,
+    stream_id_ptr: *const c_char,
+    stream_id_len: usize,
+    callback: Option<ActrVoidCallback>,
+    user_data: *mut c_void,
+) -> i32 {
+    with_void_callback(callback, user_data, |callback| {
+        let actr_ref = match clone_actr_ref(ref_handle) {
+            Some(actr_ref) => actr_ref,
+            None => {
+                emit_void_error(
+                    HANDLE_INVALID,
+                    "invalid actr ref handle",
+                    callback,
+                    user_data,
+                );
+                return HANDLE_INVALID;
+            }
+        };
+        // SAFETY: the function's contract requires `stream_id_ptr` to be
+        // readable for `stream_id_len` bytes whenever it is non-null.
+        let stream_id = match unsafe { decode_str(stream_id_ptr, stream_id_len) } {
+            Ok(stream_id) => stream_id,
+            Err(code) => {
+                emit_void_error(code, input_error(code, "stream id"), callback, user_data);
+                return code;
+            }
+        };
+        let ud = user_data as usize;
+        runtime::spawn_guarded(
+            async move {
+                let ctx = actr_ref.app_context().await;
+                match ctx
+                    .register_stream(stream_id, |chunk, sender| {
+                        host_sink::forward_chunk_to_host(&chunk, &sender);
+                        Box::pin(async { Ok(()) })
+                    })
+                    .await
+                {
+                    Ok(()) => callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void),
+                    Err(e) => emit_void_error(GENERIC_ERROR, e, callback, ud as *mut c_void),
+                }
+            },
+            move |code| emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
+        )
+    })
+}
+
+/// Stop forwarding one stream. Async — result via `callback`. Unlistening a
+/// stream that was never listened is an idempotent runtime no-op and completes
+/// successfully through `callback`. Chunks already accepted by the runtime
+/// may still finish their callback after unlisten completes.
+///
+/// # Safety
+///
+/// Same contract as `actr_stream_listen`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn actr_stream_unlisten(
+    ref_handle: *mut c_void,
+    stream_id_ptr: *const c_char,
+    stream_id_len: usize,
+    callback: Option<ActrVoidCallback>,
+    user_data: *mut c_void,
+) -> i32 {
+    with_void_callback(callback, user_data, |callback| {
+        let actr_ref = match clone_actr_ref(ref_handle) {
+            Some(actr_ref) => actr_ref,
+            None => {
+                emit_void_error(
+                    HANDLE_INVALID,
+                    "invalid actr ref handle",
+                    callback,
+                    user_data,
+                );
+                return HANDLE_INVALID;
+            }
+        };
+        // SAFETY: the function's contract requires `stream_id_ptr` to be
+        // readable for `stream_id_len` bytes whenever it is non-null.
+        let stream_id = match unsafe { decode_str(stream_id_ptr, stream_id_len) } {
+            Ok(stream_id) => stream_id,
+            Err(code) => {
+                emit_void_error(code, input_error(code, "stream id"), callback, user_data);
+                return code;
+            }
+        };
+        let ud = user_data as usize;
+        runtime::spawn_guarded(
+            async move {
+                let ctx = actr_ref.app_context().await;
+                match ctx.unregister_stream(&stream_id).await {
+                    Ok(()) => callback(SUCCESS, std::ptr::null(), 0, ud as *mut c_void),
+                    Err(e) => emit_void_error(GENERIC_ERROR, e, callback, ud as *mut c_void),
+                }
+            },
+            move |code| emit_void_error(code, "actr-cabi task failed", callback, ud as *mut c_void),
+        )
+    })
+}
 // ── ActrRef: shutdown ────────────────────────────────────────────────────────
 
 /// Shut down the actr node (synchronous). The handle remains valid for

@@ -48,6 +48,12 @@ await node.Register();                            // Node::register (actrix AIS)
 await node.Start();                               // Node::start → ActrRef
 byte[] resp = await node.Call("cabi.EchoApp.Echo", payload, timeoutMs: 30_000);
 
+// Streaming + host-answered reverse RPC (see the developer guide's
+// "Host stream sink & reverse RPC" section):
+ActrCabiNode.RegisterStreamSink(chunk => { /* forwarded DataChunk */ });
+await node.ListenStream(streamId);
+ActrCabiNode.RegisterReverseRpcHandler(async req => await AnswerInUiAsync(req));
+
 node.Shutdown();
 await node.WaitShutdown();
 ActrCabiNode.ShutdownRuntime();
