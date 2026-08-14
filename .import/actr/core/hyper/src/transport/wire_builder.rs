@@ -9,6 +9,7 @@ use super::Dest; // Re-exported from actr-framework
 use super::error::{NetworkError, NetworkResult};
 use super::lane::DataLane;
 use super::peer_transport::WireBuilder;
+use super::secure_channel::SecureChannelState;
 use super::wire_handle::{WireHandle, WireIdentity};
 use super::wire_pool::ConnType;
 use crate::lifecycle::CredentialState;
@@ -329,10 +330,13 @@ impl WireHandle for ClientWebSocketHandle {
     }
 
     async fn close(&self) -> NetworkResult<()> {
+        // `WebSocketConnection::close` drives the secure state to `Closed`.
         self.inner.close().await
     }
 
     async fn get_lane(&self, payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        // Lanes are created and `SecureDataLane`-wrapped by the inner
+        // `WebSocketConnection`, so they carry its `SecureCell` gate.
         self.inner.get_lane(payload_type).await
     }
 
@@ -341,6 +345,24 @@ impl WireHandle for ClientWebSocketHandle {
             peer_id: self.peer_id.clone(),
             session_id: self.session_id,
         })
+    }
+
+    // Secure-channel state is owned by the underlying `WebSocketConnection`
+    // physical session; delegate the trio so the pool observes the real state.
+    fn secure_channel_state(&self) -> SecureChannelState {
+        self.inner.secure_channel_state()
+    }
+
+    fn secure_epoch(&self) -> u64 {
+        self.inner.secure_epoch()
+    }
+
+    async fn await_secure_state_change(&self, observed_epoch: u64) {
+        self.inner.await_secure_state_change(observed_epoch).await;
+    }
+
+    fn mark_secure_failed(&self) {
+        self.inner.mark_secure_failed();
     }
 }
 
@@ -364,6 +386,10 @@ impl WireBuilder for DefaultWireBuilder {
             return Ok(Vec::new());
         };
 
+        // The physical `WebRtcConnection` owns its `SecureCell`, so returning it
+        // directly (rather than re-wrapping) preserves authenticated state/epoch
+        // across repeated lookups (RFC-0563 review point 4). TODO(phase3):
+        // compare the authenticated `secure_epoch` in stale-session checks.
         Ok(coordinator
             .existing_connection(target_id)
             .await
@@ -529,6 +555,9 @@ impl WireBuilder for DefaultWireBuilder {
             dest,
         );
 
+        // Physical `WireHandle` impls own their `SecureCell` and wrap their
+        // lanes in `SecureDataLane` at creation, so no decorator wrapping is
+        // needed here (RFC-0563 review point 4).
         Ok(connections)
     }
 }

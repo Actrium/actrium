@@ -18,6 +18,7 @@ use crate::inbound::DataChunkRegistry;
 use crate::key_cache::AisKeyCache;
 use crate::lifecycle::CredentialState;
 use crate::transport::WsSink;
+use crate::transport::secure_channel::SecureCell;
 use crate::wire::SignalingKeyFetcher;
 use crate::wire::webrtc::SignalingClient;
 use crate::wire::webrtc::{HookCallback, HookEvent};
@@ -56,13 +57,16 @@ pub(crate) struct WsAuthContext {
     pub(crate) signaling_client: Arc<dyn SignalingClient>,
 }
 
-/// Registry type: inbound peer ActrId → write-half of the WebSocket connection.
+/// Registry type: inbound peer ActrId → (write-half, secure cell) of the
+/// WebSocket connection.
 ///
 /// Populated when a peer connects inbound (after credential verification).
 /// Used by `send_response` to route server-to-client responses back over the
 /// same connection the client used to send the request — avoiding the need for
 /// a reverse WebRTC/WebSocket dial which would fail in test environments.
-type InboundSinkMap = Arc<RwLock<HashMap<ActrId, WsSink>>>;
+/// The cell travels with the sink so this raw-sink send path is gated on the
+/// same secure-session state as the wrapped `SecureDataLane`s (RFC-0563).
+type InboundSinkMap = Arc<RwLock<HashMap<ActrId, (WsSink, SecureCell)>>>;
 
 /// WebSocketGate - receives and routes inbound WebSocket messages
 pub(crate) struct WebSocketGate {
@@ -134,15 +138,31 @@ impl WebSocketGate {
         peer: &ActrId,
         mut envelope: RpcEnvelope,
     ) -> ActorResult<bool> {
-        let sink_opt = {
+        let entry_opt = {
             let map = self.inbound_sinks.read().await;
             map.get(peer).cloned()
         };
 
-        let sink = match sink_opt {
-            Some(s) => s,
+        let (sink, secure) = match entry_opt {
+            Some(entry) => entry,
             None => return Ok(false),
         };
+
+        // Secure-session gate for this raw-sink send path: the frame below
+        // bypasses the lane abstraction, so check the cell directly instead.
+        // Terminal → drop the registration (the wire is gone). Alive but not
+        // sendable (e.g. `Rekeying`) → transient error; the caller may retry
+        // or fall back once the session is sendable again.
+        let state = secure.state();
+        if state.is_terminal() {
+            self.inbound_sinks.write().await.remove(peer);
+            return Ok(false);
+        }
+        if !state.is_sendable() {
+            return Err(ActrError::Unavailable(format!(
+                "secure channel not sendable ({state:?}); cannot send response"
+            )));
+        }
 
         envelope.direction = Some(Direction::Response as i32);
 
@@ -457,7 +477,11 @@ impl WebSocketGate {
         // (e.g. WebRTC) that is already in use.
         if let Some(ref peer) = peer_id {
             let sink = conn.sink();
-            inbound_sinks.write().await.insert(peer.clone(), sink);
+            let secure = conn.secure_cell();
+            inbound_sinks
+                .write()
+                .await
+                .insert(peer.clone(), (sink, secure));
         }
 
         // Count active per-lane reader tasks. When the last one exits

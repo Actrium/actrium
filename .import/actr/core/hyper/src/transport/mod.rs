@@ -17,6 +17,7 @@ mod host_transport;
 pub(crate) mod lane;
 mod peer_transport;
 mod route_table;
+pub(crate) mod secure_channel;
 mod wire_builder;
 mod wire_handle;
 pub(crate) mod wire_pool;
@@ -27,6 +28,11 @@ pub use actr_framework::Dest;
 // Submodule-internal types (lanes, wire pool, sessions, dest_transport,
 // connection events broadcasters) stay reachable via their module paths
 // without duplicating re-exports here.
+
+// Secure-channel seam (RFC-0563): state, physical-session cell, and lane gate.
+// `SecureChannelState` is `pub` (returned by the `WireHandle::secure_channel_state`
+// trait method); the cell and lane decorator are `pub(crate)`.
+pub(crate) use secure_channel::{SecureCell, SecureChannelState, SecureDataLane};
 
 // DataLane core abstraction (trait kept pub for sw-host/peer_transport).
 #[cfg(feature = "test-utils")]

@@ -264,8 +264,53 @@ impl WirePool {
                             return;
                         }
 
+                        // Snapshot the epoch BEFORE the initial broadcast: any
+                        // transition landing between the snapshot and the
+                        // listener arming makes `await_secure_state_change`
+                        // return immediately, so the change cannot be lost.
+                        let initial_epoch = connection.secure_epoch();
+
                         // Broadcast new ready connection set (keep all connections, no replacement)
                         Self::broadcast_ready_connections(&connections, &ready_tx).await;
+
+                        // Observe asynchronous secure-state transitions (e.g.
+                        // `Handshaking → Verified`, rekey, terminal) and
+                        // re-broadcast so a sender parked on `watch_ready()` is
+                        // woken when a previously-unverified wire becomes
+                        // sendable (RFC-0563 review point 2). Inert in phase 2
+                        // (state stays `LegacyBypass`); phase 3 drives real
+                        // transitions via `SecureCell::set_state_validated`.
+                        {
+                            let conn = Arc::clone(&connection);
+                            let connections = Arc::clone(&connections);
+                            let ready_tx = ready_tx.clone();
+                            let shutdown = shutdown.clone();
+                            tokio::spawn(async move {
+                                let mut epoch = initial_epoch;
+                                loop {
+                                    // Check terminal BEFORE waiting: a wire
+                                    // that reached `Closed`/`Failed` before
+                                    // this task armed (or in a previous
+                                    // iteration) admits no further
+                                    // transitions, so parking on
+                                    // `await_secure_state_change` would never
+                                    // return. Re-broadcast so the ready set
+                                    // reflects the removal, then exit.
+                                    if conn.secure_channel_state().is_terminal() {
+                                        Self::broadcast_ready_connections(&connections, &ready_tx)
+                                            .await;
+                                        return;
+                                    }
+                                    tokio::select! {
+                                        _ = shutdown.cancelled() => return,
+                                        _ = conn.await_secure_state_change(epoch) => {}
+                                    }
+                                    epoch = conn.secure_epoch();
+                                    Self::broadcast_ready_connections(&connections, &ready_tx)
+                                        .await;
+                                }
+                            });
+                        }
 
                         return; // Success, exit
                     }
@@ -286,6 +331,11 @@ impl WirePool {
                 conn_type,
                 retry_config.max_attempts
             );
+
+            // Retry exhaustion is the single point that declares the secure
+            // session terminally dead. Individual failed attempts stay
+            // non-terminal so a later retry could still become sendable.
+            connection.mark_secure_failed();
 
             {
                 let mut conns = connections.write().await;
@@ -361,8 +411,10 @@ impl WirePool {
         let mut ready_set: ReadySet = HashSet::new();
 
         for conn_type in ConnType::ALL {
-            if let Some(WireStatus::Ready(_)) = &conns[conn_type.as_index()] {
-                ready_set.insert(conn_type);
+            if let Some(WireStatus::Ready(conn)) = &conns[conn_type.as_index()] {
+                if conn.secure_channel_state().is_sendable() {
+                    ready_set.insert(conn_type);
+                }
             }
         }
 
@@ -380,7 +432,9 @@ impl WirePool {
         let conns = self.connections.read().await;
 
         match &conns[conn_type.as_index()] {
-            Some(WireStatus::Ready(conn)) => Some(Arc::clone(conn)),
+            Some(WireStatus::Ready(conn)) if conn.secure_channel_state().is_sendable() => {
+                Some(Arc::clone(conn))
+            }
             _ => None,
         }
     }

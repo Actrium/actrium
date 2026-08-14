@@ -3,8 +3,8 @@
 use crate::transport::lane::classify_peer_connection_error;
 use crate::transport::session::ConnectionSession;
 use crate::transport::{
-    ConnType, DataChannelStateSignal, DataLane, NetworkError, NetworkResult, WebRtcDataLane,
-    WireHandle,
+    ConnType, DataChannelStateSignal, DataLane, NetworkError, NetworkResult, SecureCell,
+    SecureChannelState, SecureDataLane, WebRtcDataLane, WireHandle,
 };
 use crate::transport::{ConnectionEvent, ConnectionState};
 use crate::wire::webrtc::WebRtcInboundMessage;
@@ -165,6 +165,10 @@ pub(crate) struct WebRtcConnection {
 
     /// connection status (legacy, will be replaced by session.is_closed())
     connected: Arc<RwLock<bool>>,
+
+    /// Secure-channel state owned by this physical WebRTC session (RFC-0563).
+    /// Phase 2 constructs `LegacyBypass`; phase 3 drives the real handshake.
+    secure: SecureCell,
 }
 
 impl std::fmt::Debug for WebRtcConnection {
@@ -205,6 +209,7 @@ impl WebRtcConnection {
             event_tx,
             session: ConnectionSession::new(),
             connected: Arc::new(RwLock::new(true)),
+            secure: SecureCell::new(SecureChannelState::LegacyBypass),
         }
     }
 
@@ -483,6 +488,14 @@ impl WebRtcConnection {
             );
             return Ok(());
         }
+
+        // Close admission: drive the secure session terminal now, before the
+        // graceful drain. Every path into this physical close (inherent
+        // call sites in the coordinator bypass the trait method — RFC-0563
+        // review point on shadowed terminal driving) marks the session
+        // `Closed` and invalidates all wrapped `SecureDataLane`s. Idempotent
+        // no-op if already terminal.
+        self.secure.drive_terminal(SecureChannelState::Closed);
 
         // Cancel the session token — all callbacks holding a clone will notice
         self.session.cancel();
@@ -997,6 +1010,11 @@ impl WebRtcConnection {
             }
             signals[idx] = Some(lane.state_signal());
         }
+        // Wrap in `SecureDataLane` so the cached lane gates both outbound
+        // `send()` and the inbound reader's `recv()` on this session's
+        // `SecureCell` (RFC-0563 review point 3).
+        let lane: Arc<dyn DataLane> = lane;
+        let lane = Arc::new(SecureDataLane::new(lane, self.secure.clone()));
         Ok(lane)
     }
 
@@ -1382,7 +1400,12 @@ impl WebRtcConnection {
             }
             signals[idx] = Some(lane.state_signal());
         }
+        // Wrap in `SecureDataLane` so the cached lane gates both the inbound
+        // reader's `recv()` (spawned below) and outbound `send()` on this
+        // session's `SecureCell` (RFC-0563 review point 3). Wrapping before the
+        // cache commit and reader spawn ensures the reader holds the gated lane.
         let lane: Arc<dyn DataLane> = lane;
+        let lane: Arc<dyn DataLane> = Arc::new(SecureDataLane::new(lane, self.secure.clone()));
         {
             let mut cache = self.lane_cache.write().await;
             if self.is_closing_or_closed() {
@@ -1450,6 +1473,14 @@ impl WireHandle for WebRtcConnection {
     }
 
     async fn connect(&self) -> NetworkResult<()> {
+        // TODO(phase3): drive `LegacyBypass → New → Handshaking → Verified`
+        // once the authenticated handshake lands. For now connect() returns
+        // only when transport-ready (`LegacyBypass` is sendable).
+        //
+        // No per-attempt `Failed` drive: a terminal state would make a later
+        // successful `WirePool` retry on this same object permanently
+        // unsendable. Failure is declared only at retry exhaustion
+        // (`mark_secure_failed`).
         Self::connect(self).await
     }
 
@@ -1458,6 +1489,7 @@ impl WireHandle for WebRtcConnection {
     }
 
     async fn close(&self) -> NetworkResult<()> {
+        // The inherent `Self::close` (close_with_mode) owns terminal driving.
         Self::close(self).await
     }
 
@@ -1474,6 +1506,22 @@ impl WireHandle for WebRtcConnection {
             peer_id: self.peer_id.clone(),
             session_id: self.session_id(),
         })
+    }
+
+    fn secure_channel_state(&self) -> SecureChannelState {
+        self.secure.state()
+    }
+
+    fn secure_epoch(&self) -> u64 {
+        self.secure.epoch()
+    }
+
+    async fn await_secure_state_change(&self, observed_epoch: u64) {
+        self.secure.wait_after(observed_epoch).await;
+    }
+
+    fn mark_secure_failed(&self) {
+        self.secure.drive_terminal(SecureChannelState::Failed);
     }
 }
 
