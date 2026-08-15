@@ -71,8 +71,14 @@ export class NativeWorkerDispatch {
           dispatch: this.createProxyDispatch(),
           onLog: (value) => this.post({ type: 'log', message: value }),
           onRenderBatch: (batch) => this.post({ type: 'batch', batch }),
-          onGuestRunStateChange: (running) =>
-            this.post({ type: 'guestState', turnId: message.turnId, running }),
+          // The host survives the load turn, so this callback must resolve the
+          // active turn at call time. Capturing the load message's id would make
+          // every later event report against an already-finished turn and leave
+          // its watchdog permanently disarmed.
+          onGuestRunStateChange: (running) => {
+            if (!this.currentTurnId) return;
+            this.post({ type: 'guestState', turnId: this.currentTurnId, running });
+          },
         });
         await this.host.load(this.wasmSource);
         if (message.initialProps !== undefined) {

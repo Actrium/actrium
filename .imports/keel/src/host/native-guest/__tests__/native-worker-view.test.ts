@@ -10,6 +10,10 @@ import {
   NativeGuestWorkerView,
   type NativeGuestWorkerOptions,
 } from '../native-worker-view';
+import type {
+  MainToNativeWorkerMessage,
+  NativeWorkerToMainMessage,
+} from '../native-worker-protocol';
 
 const UI_GUEST = readFileSync(join(import.meta.dir, 'fixtures/ui-guest.wasm'));
 const ASSET_GUEST = readFileSync(join(import.meta.dir, 'fixtures/asset-guest.wasm'));
@@ -38,6 +42,32 @@ function makeEngine(
   options: Omit<NativeGuestWorkerOptions, 'components' | 'createWorker'>
 ): NativeGuestWorkerView {
   return new NativeGuestWorkerView({ ...options, components, createWorker: makeWorker });
+}
+
+class RunawayEventWorker {
+  onmessage: ((event: MessageEvent<NativeWorkerToMainMessage>) => void) | null = null;
+  onerror: ((event: ErrorEvent) => void) | null = null;
+  terminated = false;
+
+  postMessage(message: MainToNativeWorkerMessage): void {
+    if (message.type === 'init') {
+      this.emit({ type: 'ready' });
+    } else if (message.type === 'load') {
+      this.emit({ type: 'loaded', turnId: message.turnId, abiVersion: null });
+    } else if (message.type === 'event') {
+      this.emit({ type: 'guestState', turnId: message.turnId, running: true });
+    }
+  }
+
+  terminate(): void {
+    this.terminated = true;
+  }
+
+  private emit(message: NativeWorkerToMainMessage): void {
+    queueMicrotask(() =>
+      this.onmessage?.({ data: message } as MessageEvent<NativeWorkerToMainMessage>)
+    );
+  }
 }
 
 describe('NativeGuestWorkerView — off-main-thread native guest', () => {
@@ -232,6 +262,50 @@ describe('NativeGuestWorkerView — off-main-thread native guest', () => {
     await expect(engine.loadBundle()).rejects.toThrow(/watchdog/);
 
     expect(killed).toBe(true);
+    expect(engine.isDestroyed).toBe(true);
+  });
+
+  it('charges an event turn to its own watchdog and hard-kills its worker', async () => {
+    let killedTurn = 0;
+    const worker = new RunawayEventWorker();
+    engine = new NativeGuestWorkerView({
+      wasmBytes: new Uint8Array(),
+      contract: emptyContract,
+      hostModules: {},
+      components,
+      createWorker: () => worker,
+      watchdogTimeout: 20,
+      onWatchdogKill: ({ turnId }) => {
+        killedTurn = turnId;
+      },
+    });
+    engine.createReceiver();
+    await engine.loadBundle();
+
+    await expect(engine.sendEventAndWait('runaway')).rejects.toThrow(/watchdog/);
+
+    expect(killedTurn).toBeGreaterThan(1);
+    expect(engine.isDestroyed).toBe(true);
+    expect(worker.terminated).toBe(true);
+  });
+
+  it('terminates the worker even when the watchdog observer throws', async () => {
+    let observerCalled = false;
+    engine = makeEngine({
+      wasmBytes: RUNAWAY_GUEST,
+      contract: emptyContract,
+      hostModules: {},
+      watchdogTimeout: 100,
+      onWatchdogKill: () => {
+        observerCalled = true;
+        throw new Error('observer failed');
+      },
+    });
+    engine.createReceiver();
+
+    await expect(engine.loadBundle()).rejects.toThrow(/watchdog/);
+
+    expect(observerCalled).toBe(true);
     expect(engine.isDestroyed).toBe(true);
   });
 });
