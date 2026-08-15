@@ -180,6 +180,7 @@ describe('asset guest — ④ host:asset.info + host:asset.blit into guest memor
   it('the asset guest imports only host-provided functions (the seal)', () => {
     const allowed = new Set([
       'keel_host_call',
+      'keel_host_cancel',
       'keel_send_batch',
       'keel_log',
       'keel_now_ms',

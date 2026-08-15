@@ -25,6 +25,7 @@ const CEILINGS: Record<string, number> = {
   'ui-guest-json.wasm': 32,
   'event-guest.wasm': 32,
   'runaway-event.wasm': 32,
+  'clock-probe.wasm': 32,
   'heap-churn-guest.wasm': 32,
   'canvas-guest.wasm': 64,
   'canvas-present-guest.wasm': 48,

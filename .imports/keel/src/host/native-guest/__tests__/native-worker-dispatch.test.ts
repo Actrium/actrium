@@ -5,6 +5,7 @@ import { NativeWorkerDispatch } from '../native-worker-dispatch';
 import type { NativeWorkerToMainMessage } from '../native-worker-protocol';
 
 const EVENT_GUEST = readFileSync(join(import.meta.dir, 'fixtures/runaway-event.wasm'));
+const CLOCK_PROBE = readFileSync(join(import.meta.dir, 'fixtures/clock-probe.wasm'));
 
 describe('NativeWorkerDispatch — guest run-state attribution', () => {
   it('attributes a later event to the event turn instead of the completed load turn', async () => {
@@ -44,5 +45,38 @@ describe('NativeWorkerDispatch — guest run-state attribution', () => {
     expect(
       eventMessages.filter((message) => message.type === 'guestState' && message.turnId === 11)
     ).toHaveLength(0);
+  });
+
+  it('loads a clock-using guest in the worker without a missing-import LinkError', async () => {
+    const messages: NativeWorkerToMainMessage[] = [];
+    let notify: (() => void) | undefined;
+    const dispatch = new NativeWorkerDispatch({
+      post: (message) => {
+        messages.push(message);
+        notify?.();
+        notify = undefined;
+      },
+    });
+    const waitFor = async (
+      predicate: (message: NativeWorkerToMainMessage) => boolean
+    ): Promise<void> => {
+      while (!messages.some(predicate)) {
+        await new Promise<void>((resolve) => {
+          notify = resolve;
+        });
+      }
+    };
+
+    dispatch.handle({ type: 'init', wasmBytes: CLOCK_PROBE.slice().buffer });
+    dispatch.handle({ type: 'load', turnId: 7 });
+    await waitFor(
+      (message) =>
+        (message.type === 'loaded' && message.turnId === 7) ||
+        (message.type === 'turnError' && message.turnId === 7)
+    );
+    expect(messages.some((message) => message.type === 'turnError')).toBe(false);
+    expect(messages.some((message) => message.type === 'loaded' && message.turnId === 7)).toBe(
+      true
+    );
   });
 });
