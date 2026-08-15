@@ -420,12 +420,18 @@ export class NativeGuestWorkerView implements NativeGuestEngine {
     turn.timer = setTimeout(() => {
       const running = turn.runningSince === null ? 0 : Math.max(0, now() - turn.runningSince);
       const usedMs = turn.usedMs + running;
-      this.onWatchdogKill?.({ turnId, budgetMs: this.watchdogTimeout, usedMs });
-      this.failFatal(
-        new Error(
-          `[keel] native guest watchdog exceeded ${this.watchdogTimeout}ms of guest CPU in turn ${turnId}`
-        )
+      const killInfo = { turnId, budgetMs: this.watchdogTimeout, usedMs };
+      const error = new Error(
+        `[keel] native guest watchdog exceeded ${this.watchdogTimeout}ms of guest CPU in turn ${turnId}`
       );
+      // Termination is the safety boundary; an observability callback must not
+      // be able to prevent it by throwing.
+      this.failFatal(error);
+      try {
+        this.onWatchdogKill?.(killInfo);
+      } catch {
+        // Observability must never affect worker isolation.
+      }
     }, remaining);
   }
 
