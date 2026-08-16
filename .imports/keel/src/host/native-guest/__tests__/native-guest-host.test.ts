@@ -10,7 +10,13 @@ import { NativeGuestHost } from '../native-guest-host';
 // A tiny host module defined IN the test, mirroring the platform's host:store
 // contract (putText/getText shapes from host-store.ts): keel knows nothing
 // about specific capabilities, so this proves the native-guest ABI generically.
-function storeDispatch(options: { throwOnPut?: boolean } = {}) {
+function storeDispatch(
+  options: {
+    throwOnPut?: boolean;
+    structuredErrorOnPut?: boolean;
+    invalidStructuredErrorOnPut?: boolean;
+  } = {}
+) {
   const store = new Map<string, string>();
   const contract = defineKeelContract({
     version: '1',
@@ -42,6 +48,22 @@ function storeDispatch(options: { throwOnPut?: boolean } = {}) {
   const impl = implementHostModules(contract, {
     'host:store': {
       putText: async (i: { key: string; text: string }) => {
+        if (options.structuredErrorOnPut) {
+          throw Object.assign(new Error('must not cross the ABI'), {
+            name: 'HostError',
+            method: 'store.putText',
+            code: 'quota-exceeded',
+            retryable: false,
+          });
+        }
+        if (options.invalidStructuredErrorOnPut) {
+          throw Object.assign(new Error('credential must not cross the ABI'), {
+            name: 'HostError',
+            method: 'store.get',
+            code: 'Denied',
+            retryable: false,
+          });
+        }
         if (options.throwOnPut) throw new Error('put exploded');
         store.set(i.key, i.text);
         return { version: store.size };
@@ -82,6 +104,9 @@ const BLUR_GUEST = readFileSync(join(import.meta.dir, 'fixtures/blur-demo-guest.
 const EVENT_TRAP = readFileSync(join(import.meta.dir, 'fixtures/event-trap.wasm'));
 // Adversarial guest whose keel_alloc always returns 0 (exhausted allocator).
 const ALLOC_ZERO = readFileSync(join(import.meta.dir, 'fixtures/alloc-zero.wasm'));
+const CANCEL_CALL = readFileSync(join(import.meta.dir, 'fixtures/cancel-call.wasm'));
+// Hand-written guest that samples the synchronous monotonic clock during init.
+const CLOCK_PROBE = readFileSync(join(import.meta.dir, 'fixtures/clock-probe.wasm'));
 
 // --- tiny seeded PRNG + JSON generator for fuzzing (reproducible, no deps) ---
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
@@ -157,12 +182,82 @@ describe('NativeGuestHost — native (non-JS) guest host:* ABI', () => {
     expect(ok).toBe(0);
     expect(String(result.error)).toContain('not registered');
   });
+
+  it('preserves the strict HostError fields without leaking an internal message', async () => {
+    const { table } = storeDispatch({ structuredErrorOnPut: true });
+    const host = new NativeGuestHost({ dispatch: table });
+    await host.load(WASM);
+    await host.drain();
+
+    const { ok, result } = readResolve(host);
+    expect(ok).toBe(0);
+    expect(result).toEqual({
+      method: 'store.putText',
+      code: 'quota-exceeded',
+      retryable: false,
+    });
+  });
+
+  it('redacts a malformed or cross-method structured error', async () => {
+    const { table } = storeDispatch({ invalidStructuredErrorOnPut: true });
+    const host = new NativeGuestHost({ dispatch: table });
+    await host.load(WASM);
+    await host.drain();
+
+    const { ok, result } = readResolve(host);
+    expect(ok).toBe(0);
+    expect(result).toEqual({ error: 'host call failed' });
+    expect(JSON.stringify(result)).not.toContain('credential');
+  });
+});
+
+describe('NativeGuestHost — cancellable host calls', () => {
+  it('routes keel_host_cancel only to the matching in-flight callback', async () => {
+    const contract = defineKeelContract({
+      version: '1',
+      hostModules: {
+        'host:test': {
+          wait: rpc<{ value: number }, { ok: true }>({
+            schema: {
+              parseInput: (value) => ({ value: Number((value as { value?: unknown }).value) }),
+            },
+          }),
+        },
+      },
+      guestExports: {},
+    });
+    let sawAbort = false;
+    const table = createHostModuleDispatch(contract, {
+      'host:test': {
+        wait: (_input: unknown, context: { signal: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            const abort = () => {
+              sawAbort = true;
+              reject(new Error('cancelled'));
+            };
+            if (context.signal.aborted) abort();
+            else context.signal.addEventListener('abort', abort, { once: true });
+          }),
+      },
+    });
+    const host = new NativeGuestHost({ dispatch: table });
+    await host.load(CANCEL_CALL);
+    await host.drain();
+
+    expect(sawAbort).toBe(true);
+    expect((host.exports.resolved as () => number)()).toBe(1);
+    expect((host.exports.resolved_ok as () => number)()).toBe(0);
+  });
 });
 
 describe('NativeGuestHost — real Rust guest via the keel-native-guest SDK', () => {
   it('drives an async Rust guest (store::put("a","b").await) end to end', async () => {
     const { table, store } = storeDispatch();
-    const host = new NativeGuestHost({ dispatch: table });
+    const samples = [100.4, 103.8];
+    const host = new NativeGuestHost({
+      dispatch: table,
+      nowMs: () => samples.shift() ?? 0,
+    });
     await host.load(RUST_GUEST);
     await host.drain();
 
@@ -172,6 +267,8 @@ describe('NativeGuestHost — real Rust guest via the keel-native-guest SDK', ()
     const len = (host.exports.result_len as () => number)();
     expect(JSON.parse(new TextDecoder().decode(host.readBytes(ptr, len)))).toEqual({ version: 1 });
     expect(store.get('a')).toBe('b');
+    expect((host.exports.clock_first_ms as () => number)()).toBe(100);
+    expect((host.exports.clock_second_ms as () => number)()).toBe(103);
   });
 });
 
@@ -328,9 +425,11 @@ describe('NativeGuestHost — C guest via the C SDK (language-neutral ABI)', () 
       () => {},
       () => {}
     );
+    const clockSamples = [41.9, 47.2];
     const host = new NativeGuestHost({
       dispatch: {},
       onRenderBatch: (b) => receiver.applyBatch(b),
+      nowMs: () => clockSamples.shift() ?? 0,
     });
     await host.load(C_GUEST);
 
@@ -338,6 +437,8 @@ describe('NativeGuestHost — C guest via the C SDK (language-neutral ABI)', () 
     expect(tree?.type).toBe('View');
     expect(tree?.children[0].type).toBe('__TEXT__');
     expect(tree?.children[0].props.text).toBe('hello from c');
+    expect((host.exports.clock_first_ms as () => number)()).toBe(41);
+    expect((host.exports.clock_second_ms as () => number)()).toBe(47);
   });
 });
 
@@ -414,12 +515,13 @@ describe('NativeGuestHost — host->guest events (keel_on_event)', () => {
     const originalWarn = console.warn;
     console.warn = (message?: unknown) => void warnings.push(String(message));
     try {
-      // A payload past the AGGREGATE envelope cap — fail-closed in the codec.
-      // Note this is no longer `maxSegmentBytes + 1`: since issue #84 a single
-      // byte field larger than one segment is SPLIT across segments rather than
-      // refused, so the cap that still refuses is the envelope one.
-      const oversized = new Uint8Array(LIMITS.maxEnvelopeBytes + 1);
-      expect(() => host.emitEvent('ping', { chunk: oversized })).not.toThrow();
+      // Every part sits exactly at its own cap: 16 x 1 MiB segments plus a
+      // maxJsonBytes control plane. Their framing makes the aggregate envelope
+      // 76 bytes too large, so the outer cap still rejects it fail-closed.
+      const oversized = new Uint8Array(LIMITS.maxSegments * LIMITS.maxSegmentBytes);
+      const sentinelJsonBytes = 65; // JSON.stringify({chunk:{$b:[0..15]},pad:""})
+      const pad = 'x'.repeat(LIMITS.maxJsonBytes - sentinelJsonBytes);
+      expect(() => host.emitEvent('ping', { chunk: oversized, pad })).not.toThrow();
       // A circular payload — JSON.stringify throws on the plain path.
       const circular: Record<string, unknown> = {};
       circular.self = circular;
@@ -511,7 +613,13 @@ describe('NativeGuestHost — host->guest events (keel_on_event)', () => {
 });
 
 describe('NativeGuestHost — the seal is an import allowlist (automated)', () => {
-  const ALLOWED = new Set(['keel_host_call', 'keel_send_batch', 'keel_log', 'keel_on_event']);
+  const ALLOWED = new Set([
+    'keel_host_call',
+    'keel_host_cancel',
+    'keel_send_batch',
+    'keel_log',
+    'keel_now_ms',
+  ]);
   const guests: Array<[string, Uint8Array]> = [
     ['roundtrip', WASM],
     ['kv-guest', RUST_GUEST],
@@ -520,6 +628,7 @@ describe('NativeGuestHost — the seal is an import allowlist (automated)', () =
     ['event-guest', EVENT_GUEST],
     ['c-guest', C_GUEST],
     ['blur-demo-guest', BLUR_GUEST],
+    ['clock-probe', CLOCK_PROBE],
   ];
   for (const [name, bytes] of guests) {
     it(`${name}.wasm imports only host-provided functions (no fetch/socket/…)`, () => {
@@ -543,6 +652,35 @@ describe('NativeGuestHost — the seal is an import allowlist (automated)', () =
       threw = true;
     }
     expect(threw).toBe(true);
+  });
+});
+
+describe('NativeGuestHost — synchronous monotonic clock', () => {
+  it('gives native code useful sub-frame samples at a fixed 1 ms granularity', async () => {
+    const samples = [8.9, 10.2];
+    const host = new NativeGuestHost({ dispatch: {}, nowMs: () => samples.shift() ?? 0 });
+    await host.load(CLOCK_PROBE);
+    expect((host.exports.first as () => number)()).toBe(8);
+    expect((host.exports.second as () => number)()).toBe(10);
+    expect((host.exports.delta as () => number)()).toBe(2);
+  });
+
+  it('never exposes a backwards provider sample', async () => {
+    const samples = [20.8, 19.4];
+    const host = new NativeGuestHost({ dispatch: {}, nowMs: () => samples.shift() ?? 0 });
+    await host.load(CLOCK_PROBE);
+    expect((host.exports.first as () => number)()).toBe(20);
+    expect((host.exports.second as () => number)()).toBe(20);
+    expect((host.exports.delta as () => number)()).toBe(0);
+  });
+
+  it('turns non-finite provider samples into the last safe value', async () => {
+    const samples = [Number.NaN, Number.POSITIVE_INFINITY];
+    const host = new NativeGuestHost({ dispatch: {}, nowMs: () => samples.shift() ?? 0 });
+    await host.load(CLOCK_PROBE);
+    expect((host.exports.first as () => number)()).toBe(0);
+    expect((host.exports.second as () => number)()).toBe(0);
+    expect((host.exports.delta as () => number)()).toBe(0);
   });
 });
 

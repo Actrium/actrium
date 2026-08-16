@@ -50,7 +50,8 @@ const MAGIC_B3 = 0x31; // '1'
 export const LIMITS = {
   maxSegments: 16,
   maxSegmentBytes: 1024 * 1024, // 1 MiB
-  maxEnvelopeBytes: 4 * 1024 * 1024, // 4 MiB
+  // 16 MiB of segment payload + 256 KiB of bounded control-plane headroom.
+  maxEnvelopeBytes: 16 * 1024 * 1024 + 256 * 1024, // 16.25 MiB
   maxJsonBytes: 256 * 1024, // 256 KiB
 } as const;
 

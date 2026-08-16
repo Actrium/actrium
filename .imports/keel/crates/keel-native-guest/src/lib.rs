@@ -39,11 +39,16 @@ extern "C" {
         in_len: usize,
         cb_id: u32,
     );
+    /// Cancel one in-flight callback. Unknown/already-settled ids are no-ops.
+    fn keel_host_cancel(cb_id: u32);
     // One-way render channel: hand the host an operation batch (UTF-8 JSON).
     fn keel_send_batch(batch_ptr: *const u8, batch_len: usize);
     // One-way diagnostics channel: hand the host a UTF-8 log line
     // (native-guest-host.ts wires it to its `onLog` sink).
     fn keel_log(msg_ptr: *const u8, msg_len: usize);
+    // Synchronous, relative monotonic clock. The host fixes its granularity at
+    // 1 ms and never exposes wall-clock time through this import.
+    fn keel_now_ms() -> f64;
 }
 
 /// ABI version this SDK speaks. The generated `keel_abi_version` export hands
@@ -58,6 +63,18 @@ pub const KEEL_ABI_VERSION: u32 = 1;
 /// window for "what went wrong" — the panic handler reports through it too.
 pub fn log(msg: &str) {
     unsafe { keel_log(msg.as_ptr(), msg.len()) }
+}
+
+/// Low-risk timing utilities available to every native guest without an async
+/// host:* round trip or a manifest capability declaration.
+pub mod time {
+    /// Relative monotonic milliseconds at 1 ms host-defined granularity.
+    ///
+    /// Use differences between samples for profiling. The value has no wall
+    /// clock or timezone meaning and never decreases during one host lifetime.
+    pub fn now_ms() -> f64 {
+        unsafe { super::keel_now_ms() }
+    }
 }
 
 // ---- Global allocator: talc (memory.grow-backed, growable, real free) ----
@@ -369,12 +386,25 @@ pub struct HostCall {
     module: &'static str,
     method: &'static str,
     input: Vec<u8>,
+    cancelled_before_send: bool,
+    cancellation_requested: bool,
+    completed: bool,
 }
 
 impl Future for HostCall {
     type Output = (u32, Vec<u8>);
     fn poll(self: Pin<&mut Self>, _cx: &mut Context<'_>) -> Poll<Self::Output> {
         let this = self.get_mut();
+        if this.cancelled_before_send {
+            this.completed = true;
+            return Poll::Ready((
+                0,
+                Vec::from(
+                    &b"{\"method\":\"runtime.cancel\",\"code\":\"cancelled\",\"retryable\":false}"
+                        [..],
+                ),
+            ));
+        }
         if !this.sent {
             this.sent = true;
             unsafe {
@@ -391,13 +421,54 @@ impl Future for HostCall {
             return Poll::Pending;
         }
         match rt::take_result(this.cb) {
-            Some(result) => Poll::Ready(result),
+            Some(result) => {
+                this.completed = true;
+                Poll::Ready(result)
+            }
             None => Poll::Pending,
         }
     }
 }
 
+impl Drop for HostCall {
+    fn drop(&mut self) {
+        // Dropping a pending future releases any Rust borrow carried by a
+        // higher-level ByteSink call. Tell the host synchronously that it must
+        // stop the matching operation; unknown/already-settled ids are no-ops.
+        if self.sent && !self.completed && !self.cancellation_requested {
+            self.cancellation_requested = true;
+            unsafe { keel_host_cancel(self.cb) };
+        }
+    }
+}
+
 impl HostCall {
+    /// Whether the call has crossed the ABI boundary already.
+    pub fn was_sent(&self) -> bool {
+        self.sent
+    }
+
+    /// Request cancellation of this call.
+    ///
+    /// Before the first poll this guarantees that no host call is issued. Once
+    /// sent it invokes the additive `keel_host_cancel` ABI; completion still
+    /// arrives through the ordinary callback with the method's HostError.
+    pub fn cancel(&mut self) {
+        if self.cancellation_requested {
+            return;
+        }
+        self.cancellation_requested = true;
+        if self.sent {
+            unsafe { keel_host_cancel(self.cb) };
+        } else {
+            self.cancelled_before_send = true;
+        }
+    }
+
+    /// The callback id, useful for a higher-level cancellation token registry.
+    pub fn callback_id(&self) -> u32 {
+        self.cb
+    }
     /// Poll this pending host call WITHOUT awaiting it, so the single root task
     /// can keep presenting while the call is in flight instead of freezing on it.
     ///
@@ -458,6 +529,9 @@ pub fn host_call(module: &'static str, method: &'static str, input: Vec<u8>) -> 
         module,
         method,
         input,
+        cancelled_before_send: false,
+        cancellation_requested: false,
+        completed: false,
     }
 }
 
@@ -2696,6 +2770,14 @@ pub mod events {
     }
 }
 
+/// Versioned application.ist Host API v0.1 binding.
+///
+/// This is deliberately separate from the legacy convenience modules above:
+/// `0.1` is an exact, closed logical contract, not an alias for whichever
+/// host:* methods happen to exist in a runtime build.
+pub mod host_api_v01;
+mod host_api_v01_types;
+
 /// KBS1 binary-value ENVELOPE codec (`contracts/store-net-bytes.json`) — the R2
 /// first-class-bytes wire. ADDITIVE INFRA: compiled into the shipped guest
 /// (unlike the `binary-protocol` encoders), but it changes NO existing
@@ -2898,6 +2980,7 @@ mod test_shims {
     /// futures serialize on `conformance::wire_lock` (the SDK's rt statics
     /// assume a single thread), then drain this.
     pub(crate) static CALLS: Mutex<Vec<RecordedCall>> = Mutex::new(Vec::new());
+    pub(crate) static CANCELS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
 
     #[no_mangle]
     extern "C" fn keel_host_call(
@@ -2924,14 +3007,30 @@ mod test_shims {
             .push((module, method, input, cb_id));
     }
     #[no_mangle]
+    extern "C" fn keel_host_cancel(cb_id: u32) {
+        CANCELS
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(cb_id);
+    }
+    #[no_mangle]
     extern "C" fn keel_send_batch(_batch_ptr: *const u8, _batch_len: usize) {}
     #[no_mangle]
     extern "C" fn keel_log(_msg_ptr: *const u8, _msg_len: usize) {}
+    #[no_mangle]
+    extern "C" fn keel_now_ms() -> f64 {
+        1234.0
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use alloc::string::String;
+
+    #[test]
+    fn time_now_ms_calls_the_sync_clock_import() {
+        assert_eq!(super::time::now_ms(), 1234.0);
+    }
 
     fn esc(raw: &str) -> String {
         let mut out = String::new();

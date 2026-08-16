@@ -14,8 +14,11 @@ keel_native_guest::guest_main!(guest_main);
 
 static mut OK: i32 = -1;
 static mut RESULT: Vec<u8> = Vec::new();
+static mut CLOCK_FIRST_MS: f64 = 0.0;
+static mut CLOCK_SECOND_MS: f64 = 0.0;
 
 async fn guest_main() {
+    unsafe { CLOCK_FIRST_MS = keel_native_guest::time::now_ms() };
     match keel_native_guest::store::put("a", "b").await {
         Ok(bytes) => unsafe {
             OK = 1;
@@ -26,6 +29,7 @@ async fn guest_main() {
             RESULT = bytes;
         },
     }
+    unsafe { CLOCK_SECOND_MS = keel_native_guest::time::now_ms() };
 }
 
 #[no_mangle]
@@ -41,4 +45,14 @@ pub extern "C" fn result_ptr() -> *const u8 {
 #[no_mangle]
 pub extern "C" fn result_len() -> usize {
     unsafe { RESULT.len() }
+}
+
+#[no_mangle]
+pub extern "C" fn clock_first_ms() -> f64 {
+    unsafe { CLOCK_FIRST_MS }
+}
+
+#[no_mangle]
+pub extern "C" fn clock_second_ms() -> f64 {
+    unsafe { CLOCK_SECOND_MS }
 }

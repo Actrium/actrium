@@ -27,6 +27,10 @@ keel_host_call(const char *mod_ptr, keel_u32 mod_len, const char *method_ptr,
                keel_u32 method_len, const char *in_ptr, keel_u32 in_len,
                keel_u32 cb_id);
 
+/* Relative monotonic milliseconds, fixed to 1 ms granularity by the host. */
+__attribute__((import_module("env"), import_name("keel_now_ms"))) extern double
+keel_now_ms(void);
+
 /* ---- helpers ---- */
 static inline keel_u32 keel_strlen(const char *s) {
   keel_u32 n = 0;

@@ -13,6 +13,25 @@ export interface TimerManagerOptions {
   };
   engineId: string;
   onError?: (error: Error) => void;
+  /**
+   * Clock and host-timer primitives. Production leaves this unset.
+   * Tests pass a per-instance backend so scheduling can be driven in virtual
+   * time without patching `globalThis`.
+   */
+  timing?: TimerManagerTiming;
+}
+
+/**
+ * Host timing backend used for deadline math and native timer arming.
+ *
+ * `now` must be monotonic and relative (not a wall clock). The default is
+ * `performance.now()` when present, otherwise `Date.now() - origin`.
+ */
+export interface TimerManagerTiming {
+  now: () => number;
+  setTimeout: typeof globalThis.setTimeout;
+  clearTimeout: typeof globalThis.clearTimeout;
+  queueMicrotask: typeof globalThis.queueMicrotask;
 }
 
 /** Common fields shared by timeout and interval entries */
@@ -51,6 +70,21 @@ interface IntervalEntry extends TimerEntryBase {
 const MICROTASK_HANDLE = -1 as unknown as ReturnType<typeof setTimeout>;
 const PENDING_HANDLE = -2 as unknown as ReturnType<typeof setTimeout>;
 
+function createMonotonicNow(): { now: () => number; source: string } {
+  const performanceObj = globalThis.performance;
+  if (performanceObj && typeof performanceObj.now === 'function') {
+    return {
+      now: () => performanceObj.now(),
+      source: 'performance.now',
+    };
+  }
+  const origin = Date.now();
+  return {
+    now: () => Date.now() - origin,
+    source: 'Date.now-origin',
+  };
+}
+
 export class TimerManager {
   private timeoutMap = new Map<number, TimeoutEntry>();
   private intervalMap = new Map<number, IntervalEntry>();
@@ -75,35 +109,50 @@ export class TimerManager {
   private nativeClearTimeout: typeof clearTimeout;
   // Microtask scheduler for zero-delay optimisation
   private nativeQueueMicrotask: (fn: () => void) => void;
+  /** Monotonic relative clock used for every deadline. Never `Date.now()`. */
+  private readonly now: () => number;
 
   constructor(private options: TimerManagerOptions) {
-    // Save native timer functions to avoid recursion issues (with fallbacks for test environments)
-    const fallbackSetTimeout = ((fn: () => void) => {
-      Promise.resolve().then(fn);
-      // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
-      return 0 as any;
-    }) as typeof setTimeout;
+    const injected = options.timing;
+    let clockSource: string;
+    if (injected) {
+      this.now = injected.now;
+      this.nativeSetTimeout = injected.setTimeout;
+      this.nativeClearTimeout = injected.clearTimeout;
+      this.nativeQueueMicrotask = injected.queueMicrotask;
+      clockSource = 'injected';
+    } else {
+      const clock = createMonotonicNow();
+      this.now = clock.now;
+      clockSource = clock.source;
+      // Save native timer functions to avoid recursion issues (with fallbacks for test environments)
+      const fallbackSetTimeout = ((fn: () => void) => {
+        Promise.resolve().then(fn);
+        // biome-ignore lint/suspicious/noExplicitAny: Test/internal structure with dynamic types
+        return 0 as any;
+      }) as typeof setTimeout;
 
-    const fallbackClearTimeout = (() => {}) as typeof clearTimeout;
-    // Bind to globalThis: in the browser, window.setTimeout/clearTimeout throw
-    // "Illegal invocation" when called with any other `this` (a detached reference).
-    // Node/Bun don't care, which is why this only surfaces on the WASM/web path.
-    this.nativeSetTimeout =
-      typeof globalThis.setTimeout === 'function'
-        ? globalThis.setTimeout.bind(globalThis)
-        : fallbackSetTimeout;
-    this.nativeClearTimeout =
-      typeof globalThis.clearTimeout === 'function'
-        ? globalThis.clearTimeout.bind(globalThis)
-        : fallbackClearTimeout;
-    this.nativeQueueMicrotask =
-      typeof globalThis.queueMicrotask === 'function'
-        ? globalThis.queueMicrotask.bind(globalThis)
-        : (fn: () => void) => Promise.resolve().then(fn);
+      const fallbackClearTimeout = (() => {}) as typeof clearTimeout;
+      // Bind to globalThis: in the browser, window.setTimeout/clearTimeout throw
+      // "Illegal invocation" when called with any other `this` (a detached reference).
+      // Node/Bun don't care, which is why this only surfaces on the WASM/web path.
+      this.nativeSetTimeout =
+        typeof globalThis.setTimeout === 'function'
+          ? globalThis.setTimeout.bind(globalThis)
+          : fallbackSetTimeout;
+      this.nativeClearTimeout =
+        typeof globalThis.clearTimeout === 'function'
+          ? globalThis.clearTimeout.bind(globalThis)
+          : fallbackClearTimeout;
+      this.nativeQueueMicrotask =
+        typeof globalThis.queueMicrotask === 'function'
+          ? globalThis.queueMicrotask.bind(globalThis)
+          : (fn: () => void) => Promise.resolve().then(fn);
+    }
 
     if (this.options.debug) {
       this.options.logger.log(
-        `[TimerManager] Constructor: globalThis.setTimeout is ${typeof globalThis.setTimeout}`
+        `[TimerManager] Constructor: clock=${clockSource}; globalThis.setTimeout is ${typeof globalThis.setTimeout}`
       );
     }
   }
@@ -157,7 +206,7 @@ export class TimerManager {
       const current = entryMap.get(entry.id);
       if (!current || current.pendingToken !== token) return;
       if (this._isPaused) {
-        const elapsed = Date.now() - pauseTimeRef;
+        const elapsed = this.now() - pauseTimeRef;
         current.remainingTime = Math.max(0, delay - elapsed);
         current.handle = null;
         return;
@@ -239,7 +288,7 @@ export class TimerManager {
     // time instead of piling up a burst behind the gate.
     const handle = this.nativeSetTimeout(() => {
       this.runGuestCallback(() => {
-        const firedAt = Date.now();
+        const firedAt = this.now();
         entry.lastTickAt = firedAt;
 
         try {
@@ -265,12 +314,18 @@ export class TimerManager {
         // after it. If we have fallen a whole interval or more behind, skip the
         // slots we missed instead of firing a catch-up burst -- the same reason
         // the re-arm waits for the callback in the first place.
-        const now = Date.now();
+        const now = this.now();
         entry.nextTickAt += entry.delay;
         if (entry.nextTickAt <= now) {
           entry.nextTickAt = now + entry.delay;
         }
-        this.armIntervalTimer(entry, Math.max(0, entry.nextTickAt - now));
+        const nextDelay = Math.max(0, entry.nextTickAt - now);
+        if (this.options.debug) {
+          this.options.logger.log(
+            `[keel:${this.options.engineId}] interval ${entry.id} next delay=${nextDelay}ms (nextTickAt=${entry.nextTickAt})`
+          );
+        }
+        this.armIntervalTimer(entry, nextDelay);
       });
     }, delay);
 
@@ -292,7 +347,7 @@ export class TimerManager {
     if (this._isPaused) return;
     this._isPaused = true;
 
-    const now = Date.now();
+    const now = this.now();
 
     // Pause all timeouts - calculate and store remaining time
     for (const entry of this.timeoutMap.values()) {
@@ -339,7 +394,7 @@ export class TimerManager {
     if (!this._isPaused) return;
     this._isPaused = false;
 
-    const now = Date.now();
+    const now = this.now();
 
     // Resume all timeouts with remaining time
     for (const entry of this.timeoutMap.values()) {
@@ -393,7 +448,7 @@ export class TimerManager {
   createSetTimeoutPolyfill(): (fn: () => void, delay: number) => number {
     return (fn: () => void, delay: number) => {
       const id = ++this.timeoutIdCounter;
-      const now = Date.now();
+      const now = this.now();
 
       const entry: TimeoutEntry = {
         id,
@@ -459,7 +514,7 @@ export class TimerManager {
   createSetIntervalPolyfill(): (fn: () => void, delay: number) => number {
     return (fn: () => void, delay: number) => {
       const id = ++this.intervalIdCounter;
-      const now = Date.now();
+      const now = this.now();
 
       const entry: IntervalEntry = {
         id,

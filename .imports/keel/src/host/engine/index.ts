@@ -22,7 +22,7 @@ export {
   RUNTIME_HELPERS_CODE,
 } from './sandbox-helpers';
 export { DEVTOOLS_SHIM } from './shims';
-export type { TimerManagerOptions } from './timer-manager';
+export type { TimerManagerOptions, TimerManagerTiming } from './timer-manager';
 // Export refactored modules
 export { TimerManager } from './timer-manager';
 // Export types and interfaces

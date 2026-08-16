@@ -31,6 +31,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./host": "./src/host/index.ts",
+    "./host/native-worker": "./src/host/native-guest/native-worker-host.ts",
     "./guest": "./src/sdk/index.ts",
     "./host/preset": "./src/host/preset/index.ts",
     "./host/web": "./src/host/web/index.ts",
