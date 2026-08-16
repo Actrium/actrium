@@ -280,7 +280,7 @@ Reuse the existing bounds-check posture (`assertInBounds`,
 |---|---|---|
 | `MAX_SEGMENTS` | 16 | bounds the segment table — and the chunk count of one multi-segment value |
 | `MAX_SEGMENT_BYTES` | 1 MiB | **one segment / one decoder allocation** — not one logical value (see below) |
-| `MAX_ENVELOPE_BYTES` | 4 MiB | jsonLen + all segments + framing; the binding cap on one **value** |
+| `MAX_ENVELOPE_BYTES` | 16.25 MiB | admits all 16 bounded segments as one value, plus bounded control-plane headroom |
 | `MAX_JSON_BYTES` | 256 KiB | the control plane (new explicit cap; there is none today) |
 
 **Phase 2 — one logical value across several segments (issue #84).** In phase 1
@@ -299,11 +299,13 @@ fail-closed rule, instead of becoming `meta` + `chunk/<n>` keys whose
 compare-and-swap is per key — no way to version the set, and a partial write leaves
 a torn value only the application can detect.
 
-Deliberately **not** done here: raising `MAX_SEGMENT_BYTES` or `MAX_ENVELOPE_BYTES`
-(the other option on #84). The aggregate envelope cap is now what binds one value at
-~4 MiB, so raising it is a separate decision with its own allocation trade-off on
-both sides of the seam. See `store-net-bytes.CONFORMANCE.md` §2a for the six
-conformance requirements this form carries.
+`MAX_SEGMENT_BYTES` remains 1 MiB, preserving the bounded allocation granularity.
+`MAX_ENVELOPE_BYTES` was later raised from 4 MiB to 16.25 MiB after a real
+1600×1200 two-layer document measured 5,159,721 bytes and proved that the initial
+aggregate cap still forced application-level chunking. The new bound admits the
+full 16-segment budget as one atomic value; peak decoder residency remains bounded
+below 33 MiB (frame plus joined value). See `store-net-bytes.CONFORMANCE.md` §2a
+for the conformance requirements this form carries.
 
 Enforcement:
 - **Decode (both sides):** every `u32` length is validated against the remaining

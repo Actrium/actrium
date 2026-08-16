@@ -503,12 +503,13 @@ describe('NativeGuestHost — host->guest events (keel_on_event)', () => {
     const originalWarn = console.warn;
     console.warn = (message?: unknown) => void warnings.push(String(message));
     try {
-      // A payload past the AGGREGATE envelope cap — fail-closed in the codec.
-      // Note this is no longer `maxSegmentBytes + 1`: since issue #84 a single
-      // byte field larger than one segment is SPLIT across segments rather than
-      // refused, so the cap that still refuses is the envelope one.
-      const oversized = new Uint8Array(LIMITS.maxEnvelopeBytes + 1);
-      expect(() => host.emitEvent('ping', { chunk: oversized })).not.toThrow();
+      // Every part sits exactly at its own cap: 16 x 1 MiB segments plus a
+      // maxJsonBytes control plane. Their framing makes the aggregate envelope
+      // 76 bytes too large, so the outer cap still rejects it fail-closed.
+      const oversized = new Uint8Array(LIMITS.maxSegments * LIMITS.maxSegmentBytes);
+      const sentinelJsonBytes = 65; // JSON.stringify({chunk:{$b:[0..15]},pad:""})
+      const pad = 'x'.repeat(LIMITS.maxJsonBytes - sentinelJsonBytes);
+      expect(() => host.emitEvent('ping', { chunk: oversized, pad })).not.toThrow();
       // A circular payload — JSON.stringify throws on the plain path.
       const circular: Record<string, unknown> = {};
       circular.self = circular;
