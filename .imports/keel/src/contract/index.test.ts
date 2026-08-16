@@ -134,6 +134,36 @@ describe('keel/contract', () => {
     ]);
   });
 
+  test('rpc schemas preserve runtime-owned invocation context after parsing guest input', async () => {
+    const contract = defineKeelContract({
+      version: '1',
+      hostModules: {
+        'host:test': {
+          wait: rpc<{ value: number }, number>({
+            schema: {
+              parseInput: (value) => ({ value: Number((value as { value?: unknown }).value) }),
+              parseOutput: Number,
+            },
+          }),
+        },
+      },
+      guestExports: {},
+    });
+    const signal = new AbortController().signal;
+    let received: unknown;
+    const dispatch = createHostModuleDispatch(contract, {
+      'host:test': {
+        wait: (input: { value: number }, context: unknown) => {
+          received = context;
+          return input.value;
+        },
+      },
+    });
+
+    expect(dispatch['host:test']!.wait!({ value: '7' }, { signal })).toBe(7);
+    expect(received).toEqual({ signal });
+  });
+
   test('validates host module implementations', async () => {
     const contract = defineKeelContract({
       version: '1.0.0',
@@ -416,6 +446,28 @@ describe('createHostModuleDispatch', () => {
       'Boundary event validation failed for "host:theme.onThemeChanged": theme must be light or dark'
     );
     expect(seen).toEqual([{ theme: 'dark' }]);
+  });
+
+  test('subscription preserves an async handler completion after event validation', async () => {
+    let emit: ((event: unknown) => unknown) | undefined;
+    const dispatch = createHostModuleDispatch(buildContract(), {
+      'host:analytics': { track: async () => ({ ok: true }) },
+      'host:theme': {
+        onThemeChanged: (handler) => {
+          emit = handler as (event: unknown) => unknown;
+          return () => {};
+        },
+      },
+    });
+    let release!: () => void;
+    const handled = new Promise<void>((resolve) => { release = resolve; });
+
+    dispatch['host:theme']!.onThemeChanged!(() => handled);
+    const completion = emit?.({ theme: 'dark' });
+
+    expect(completion).toBe(handled);
+    release();
+    await completion;
   });
 
   test('implementation errors propagate unchanged (not wrapped as boundary errors)', async () => {

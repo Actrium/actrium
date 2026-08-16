@@ -1,5 +1,5 @@
 ;; Adversarial guest that imports an UNDECLARED function. The host provides only
-;; keel_host_call / keel_send_batch / keel_log in its importObject, so
+;; the explicit keel ABI allowlist in its importObject, so
 ;; WebAssembly.instantiate must reject this with a LinkError — the seal is the
 ;; import allowlist, enforced by the engine.
 (module

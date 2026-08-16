@@ -26,7 +26,7 @@ FIXTURES=../src/host/native-guest/__tests__/fixtures
 # separately with --no-default-features) is the back-compat, pre-promotion
 # JSON-only guest used to test the "guest without keel_wire_caps" host path.
 # blur-demo-guest is the SIMD/worker-pool compute demo (issue #57).
-GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest canvas-binary-guest ui-binary-guest blur-demo-guest"
+GUESTS="kv-guest ui-guest seq-guest event-guest heap-churn-guest canvas-guest canvas-present-guest canvas-gpu-guest canvas-escape-guest asset-guest canvas-binary-guest ui-binary-guest blur-demo-guest host-api-v01-guest"
 
 # Optional debug build: DWARF-carrying guests for source-level debugging inside
 # V8's wasm debugger (Chrome DevTools "C/C++ DevTools Support (DWARF)"). Output
@@ -71,6 +71,7 @@ stage canvas_gpu_guest canvas-gpu-guest.wasm
 stage canvas_escape_guest canvas-escape-guest.wasm
 stage asset_guest asset-guest.wasm
 stage blur_demo_guest blur-demo-guest.wasm
+stage host_api_v01_guest host-api-v01-guest.wasm
 
 # Back-compat fixture: a pre-promotion, JSON-only guest with the binary encoders
 # and keel_wire_caps compiled OUT (--no-default-features). SEPARATE invocation

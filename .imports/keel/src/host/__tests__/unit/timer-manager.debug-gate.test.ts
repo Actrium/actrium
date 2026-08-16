@@ -10,125 +10,131 @@
  * ran as two chains at once -- and every further pause/resume added another
  * (issue #107).
  *
- * The assertions are on tick SPACING, and each phase waits for a tick COUNT
- * rather than for a stretch of wall clock. Both choices are deliberate: an
- * extra chain shows up as two ticks landing milliseconds apart, a signature a
- * loaded machine cannot fake, whereas "how many ticks fit in 80 ms" says more
- * about the CI runner than about the timer (see the wall-clock cleanup in #97).
- * Under-delivery is caught by the wait never completing, not by an upper bound.
+ * Assertions are on live native handles owned by an injected virtual scheduler,
+ * not on callback spacing. Grid catch-up can legally deliver two ticks 1 ms
+ * apart with a single chain (issue #121); a min-gap check cannot tell that
+ * apart from the #107 double-arm.
  */
 
 import { describe, expect, it } from 'bun:test';
 import { TimerManager } from '../../engine/timer-manager';
+import { VirtualTimerScheduler } from './virtual-timer-scheduler';
 
-function makeOpts() {
+function makeOpts(clock: VirtualTimerScheduler) {
   return {
     debug: false,
     logger: { log: (..._a: unknown[]) => {}, error: (..._a: unknown[]) => {} },
     engineId: 'debug-gate',
+    timing: clock.timing,
   };
 }
 
-const tick = () => new Promise((r) => setTimeout(r, 0));
-const after = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** Smallest gap between consecutive ticks, or Infinity for fewer than two. */
-function minGap(stamps: number[]): number {
-  let min = Number.POSITIVE_INFINITY;
-  for (let i = 1; i < stamps.length; i++) {
-    min = Math.min(min, stamps[i] - stamps[i - 1]);
-  }
-  return min;
+function armInterval(
+  clock: VirtualTimerScheduler,
+  delay: number,
+  onTick: () => void = () => {}
+): { tm: TimerManager; id: number } {
+  const tm = new TimerManager(makeOpts(clock));
+  const id = tm.createSetIntervalPolyfill()(onTick, delay);
+  clock.flushMicrotasks();
+  return { tm, id };
 }
 
 /**
- * Drive one interval through `rounds` pause/resume cycles while a gate holds
- * its first tick, then release the gate and wait until `wantTicks` have landed.
- * Returns the tick timestamps.
+ * Arm, deliver the first tick into the gate, pause/resume `rounds` times,
+ * flush each resume, then release the held tick.
  */
-async function runGatedIntervalScenario(delay: number, rounds: number, wantTicks: number) {
-  const tm = new TimerManager(makeOpts());
-
+function runGatedPauseResume(rounds: number): {
+  clock: VirtualTimerScheduler;
+  tm: TimerManager;
+  id: number;
+  ticks: number;
+} {
+  const DELAY = 40;
+  const clock = new VirtualTimerScheduler();
   let held: (() => void) | null = null;
+  const tm = new TimerManager(makeOpts(clock));
   tm.setCallbackRunner((run) => {
     held = run;
   });
 
-  const stamps: number[] = [];
-  let reachedTarget: (() => void) | null = null;
-  const target = new Promise<void>((resolve) => {
-    reachedTarget = resolve;
-  });
+  let ticks = 0;
+  const id = tm.createSetIntervalPolyfill()(() => {
+    ticks += 1;
+  }, DELAY);
+  clock.flushMicrotasks();
+  expect(clock.liveTimerCount).toBe(1);
 
-  tm.createSetIntervalPolyfill()(() => {
-    stamps.push(Date.now());
-    if (stamps.length >= wantTicks) reachedTarget?.();
-  }, delay);
-
-  await tick(); // arm the first native timer
-  await after(delay + 15); // it fires; the gate grabs the callback
-  const gatedTick = held as unknown as (() => void) | null;
-  held = null;
+  clock.deliverNext(DELAY);
+  expect(held).not.toBeNull();
+  expect(clock.liveTimerCount).toBe(0);
+  expect(ticks).toBe(0);
 
   for (let i = 0; i < rounds; i++) {
     tm.pause();
     tm.resume();
-    await tick(); // let the resume's replacement timer actually arm
+    clock.flushMicrotasks();
+    expect(clock.liveTimerCount).toBe(1);
   }
 
-  tm.setCallbackRunner(null); // ungate: anything from here runs directly
-  gatedTick?.(); // the held tick finally runs, and re-arms
+  tm.setCallbackRunner(null);
+  held?.();
+  expect(clock.liveTimerCount).toBe(1);
+  expect(ticks).toBe(1);
 
-  // No wall-clock budget: a chain that stopped re-arming fails by never getting
-  // here, which the test timeout reports.
-  await target;
-  tm.clearAllTimers(); // stop the chain so it cannot bleed into the next test
-  return { tm, stamps, gatedTick };
+  return { clock, tm, id, ticks };
+}
+
+function assertGatedSingleChain(rounds: number): void {
+  const { clock, tm, id } = runGatedPauseResume(rounds);
+  tm.pause();
+  tm.resume();
+  clock.flushMicrotasks();
+  expect(clock.liveTimerCount).toBe(1);
+
+  tm.createClearIntervalPolyfill()(id);
+  expect(clock.liveTimerCount).toBe(0);
+  tm.clearAllTimers();
+}
+
+function assertNoGateReArm(): void {
+  const DELAY = 20;
+  const WANT = 4;
+  const clock = new VirtualTimerScheduler();
+  let count = 0;
+  const { tm, id } = armInterval(clock, DELAY, () => {
+    count += 1;
+  });
+
+  for (let i = 0; i < WANT; i++) {
+    clock.deliverNext();
+    expect(clock.liveTimerCount).toBe(1);
+  }
+  expect(count).toBe(WANT);
+
+  tm.createClearIntervalPolyfill()(id);
+  expect(clock.liveTimerCount).toBe(0);
+  tm.clearAllTimers();
 }
 
 describe('TimerManager: interval under debug gate + pause/resume', () => {
-  it('runs one chain, not two, when pause/resume crosses a gated tick', async () => {
-    const DELAY = 40;
-    const { stamps, gatedTick } = await runGatedIntervalScenario(DELAY, 1, 4);
-
-    expect(gatedTick).not.toBeNull();
-    // An orphaned second chain showed up here as ticks a few ms apart.
-    expect(minGap(stamps)).toBeGreaterThan(DELAY / 2);
+  it('runs one chain, not two, when pause/resume crosses a gated tick', () => {
+    assertGatedSingleChain(1);
   });
 
-  it('keeps a single chain across repeated pause/resume while gated', async () => {
-    const DELAY = 30;
-    // Each round used to orphan one more armed timer, so the tick rate grew
-    // with the number of pause/resume cycles.
-    const { stamps } = await runGatedIntervalScenario(DELAY, 3, 4);
-
-    expect(minGap(stamps)).toBeGreaterThan(DELAY / 2);
+  it('keeps a single chain across repeated pause/resume while gated', () => {
+    assertGatedSingleChain(3);
   });
 
-  it('still re-arms indefinitely with no gate installed', async () => {
-    const tm = new TimerManager(makeOpts());
+  it('still re-arms indefinitely with no gate installed', () => {
+    assertNoGateReArm();
+  });
 
-    const DELAY = 20;
-    const WANT = 4;
-    const stamps: number[] = [];
-    let reachedTarget: (() => void) | null = null;
-    const target = new Promise<void>((resolve) => {
-      reachedTarget = resolve;
-    });
-
-    const id = tm.createSetIntervalPolyfill()(() => {
-      stamps.push(Date.now());
-      if (stamps.length >= WANT) reachedTarget?.();
-    }, DELAY);
-
-    // The re-arm now clears the just-fired handle before arming the next one.
-    // Clearing the WRONG handle there would stop the chain dead, so the check
-    // that matters is that the chain keeps going -- reaching WANT at all. How
-    // long it takes is the runner's business, not the timer's.
-    await target;
-    tm.createClearIntervalPolyfill()(id);
-
-    expect(stamps.length).toBeGreaterThanOrEqual(WANT);
-    expect(minGap(stamps)).toBeGreaterThan(DELAY / 2);
+  it('gated handle regressions stay deterministic across 500 virtual runs', () => {
+    for (let i = 0; i < 500; i++) {
+      assertGatedSingleChain(1);
+      assertGatedSingleChain(3);
+      assertNoGateReArm();
+    }
   });
 });

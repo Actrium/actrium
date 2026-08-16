@@ -21,6 +21,7 @@
  * ABI v0 (headless / foundation):
  *   host  -> guest imports:  env.keel_host_call(mod_ptr,mod_len, method_ptr,method_len, in_ptr,in_len, cb_id)
  *                            env.keel_log(ptr,len)
+ *                            env.keel_now_ms() -> f64 (monotonic, 1 ms granularity)
  *   guest -> host  exports:  memory, keel_alloc(size)->ptr, keel_resolve(cb,ok,ptr,len), keel_init()
  *   guest -> host  exports (optional): keel_abi_version() -> u32,
  *                            keel_wire_caps(flags) (WIP binary op-batch gate),
@@ -51,6 +52,18 @@ const MAX_BATCH_DROP_WARNINGS = 10;
 
 /** Same cap for host->guest event drops (a per-frame event source could flood too). */
 const MAX_EVENT_DROP_WARNINGS = 10;
+
+/** Native guests get useful profiling resolution without a high-resolution side-channel. */
+const CLOCK_GRANULARITY_MS = 1;
+
+/** Default clock is relative and monotonic; the Date fallback never exposes wall time. */
+function defaultRawNowMs(): () => number {
+  if (typeof globalThis.performance?.now === 'function') {
+    return () => globalThis.performance.now();
+  }
+  const origin = Date.now();
+  return () => Date.now() - origin;
+}
 
 /**
  * Guest ABI versions this host understands. A guest may declare its version via
@@ -83,6 +96,73 @@ export interface NativeGuestHostOptions {
    * while this is off is dropped with a warning (fail-closed).
    */
   binaryOpBatch?: boolean;
+  /**
+   * Reports the intervals in which host JavaScript is entering guest
+   * WebAssembly. A worker proxy uses this to charge guest CPU time without
+   * charging time spent awaiting a host capability.
+   */
+  onGuestRunStateChange?: (running: boolean) => void;
+  /**
+   * Relative monotonic clock source for `env.keel_now_ms` (primarily for
+   * deterministic tests and platform ports). The host clamps it to 1 ms and
+   * never lets the guest observe a backwards or non-finite sample.
+   */
+  nowMs?: () => number;
+}
+
+/** Runtime-owned metadata passed after the schema-checked guest input. */
+export interface NativeHostCallContext {
+  /** Aborted by env.keel_host_cancel(callbackId). */
+  signal: AbortSignal;
+}
+
+/**
+ * Preserve the public v0.1 HostError shape across the native ABI without
+ * trusting an arbitrary thrown object. A module may only report an error for
+ * the method currently being dispatched, and error codes stay deliberately
+ * small and machine-readable. Everything else uses the legacy opaque fallback.
+ */
+// Reason: a guest-initiated host module may throw any JavaScript value at this ABI boundary.
+function structuredHostError(error: unknown, expectedMethod: string): object | null {
+  if (typeof error !== 'object' || error === null) return null;
+  try {
+    // Reason: each field of an arbitrary thrown value remains untrusted until checked below.
+    const candidate = error as { method?: unknown; code?: unknown; retryable?: unknown };
+    const method = candidate.method;
+    const code = candidate.code;
+    const retryable = candidate.retryable;
+    if (
+      method !== expectedMethod ||
+      typeof code !== 'string' ||
+      !/^[a-z][a-z0-9-]{0,62}$/.test(code) ||
+      typeof retryable !== 'boolean'
+    ) {
+      return null;
+    }
+    return { method, code, retryable };
+  } catch {
+    // A thrown object is untrusted and may expose throwing accessors.
+    return null;
+  }
+}
+
+// Reason: legacy host modules may throw arbitrary JavaScript values rather than Error objects.
+function legacyHostError(error: unknown): { error: string } {
+  try {
+    return { error: error instanceof Error ? error.message : String(error) };
+  } catch {
+    return { error: 'host call failed' };
+  }
+}
+
+// Reason: this guard classifies an arbitrary thrown value before any field is read.
+function resemblesStructuredHostError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  try {
+    return 'method' in error || 'code' in error || 'retryable' in error;
+  } catch {
+    return true;
+  }
 }
 
 export class NativeGuestHost {
@@ -92,16 +172,23 @@ export class NativeGuestHost {
   private readonly onLog?: (message: string) => void;
   private readonly onRenderBatch?: (batch: OperationBatch) => void;
   private readonly binaryOpBatch: boolean;
+  private readonly onGuestRunStateChange?: (running: boolean) => void;
+  private readonly rawNowMs: () => number;
   private readonly inflight = new Set<Promise<void>>();
+  private guestRunDepth = 0;
+  private readonly callControllers = new Map<number, AbortController>();
   private abiVersion: number | null = null;
   private batchDropWarnings = 0;
   private eventDropWarnings = 0;
+  private lastNowMs = 0;
 
   constructor(options: NativeGuestHostOptions) {
     this.dispatch = options.dispatch;
     this.onLog = options.onLog;
     this.onRenderBatch = options.onRenderBatch;
     this.binaryOpBatch = options.binaryOpBatch ?? true;
+    this.onGuestRunStateChange = options.onGuestRunStateChange;
+    this.rawNowMs = options.nowMs ?? defaultRawNowMs();
   }
 
   /**
@@ -114,7 +201,8 @@ export class NativeGuestHost {
   }
 
   /** Instantiate the guest `.wasm`, wire host imports, and run its entry. */
-  async load(wasmBytes: BufferSource): Promise<void> {
+  async load(wasmSource: BufferSource | WebAssembly.Module): Promise<void> {
+    const cancelHostCall = (cb: number) => this.onCancelHostCall(cb >>> 0);
     const importObject: WebAssembly.Imports = {
       env: {
         keel_host_call: (
@@ -127,44 +215,66 @@ export class NativeGuestHost {
           cb: number
         ) => this.onHostCall(mp >>> 0, ml >>> 0, xp >>> 0, xl >>> 0, ip >>> 0, il >>> 0, cb >>> 0),
         keel_log: (ptr: number, len: number) => this.onLog?.(this.readString(ptr >>> 0, len >>> 0)),
+        keel_now_ms: () => this.nowMs(),
         keel_send_batch: (ptr: number, len: number) => this.onSendBatch(ptr >>> 0, len >>> 0),
+        keel_host_cancel: cancelHostCall,
       },
     };
-    const { instance } = await WebAssembly.instantiate(wasmBytes, importObject);
+    const loaded = await this.runGuestAsync<
+      WebAssembly.Instance | WebAssembly.WebAssemblyInstantiatedSource
+    >(() =>
+      wasmSource instanceof WebAssembly.Module
+        ? WebAssembly.instantiate(wasmSource, importObject)
+        : WebAssembly.instantiate(wasmSource, importObject)
+    );
+    // The bytes overload returns { module, instance }; the already-compiled
+    // module overload returns the instance directly.
+    const instance = loaded instanceof WebAssembly.Instance ? loaded : loaded.instance;
     this.instance = instance;
     this.memory = instance.exports.memory as WebAssembly.Memory;
 
     // ABI version gate BEFORE keel_init: a guest that declares an unsupported
     // version must not run its entry (fail-closed). A guest that omits the
     // export is a pre-versioning guest and is tolerated.
-    const versionExport = instance.exports.keel_abi_version;
-    if (typeof versionExport === 'function') {
-      // May trap (guest code): let it propagate — a guest whose version probe
-      // traps must not run (same fail-closed posture as a failed instantiate).
-      const version = (versionExport as () => number)() >>> 0;
-      if (!SUPPORTED_GUEST_ABI_VERSIONS.has(version)) {
-        throw new Error(
-          `unsupported guest ABI version: ${version} (host supports: ${[...SUPPORTED_GUEST_ABI_VERSIONS].join(', ')})`
-        );
+    this.runGuest(() => {
+      const versionExport = instance.exports.keel_abi_version;
+      if (typeof versionExport === 'function') {
+        // May trap (guest code): let it propagate — a guest whose version probe
+        // traps must not run (same fail-closed posture as a failed instantiate).
+        const version = (versionExport as () => number)() >>> 0;
+        if (!SUPPORTED_GUEST_ABI_VERSIONS.has(version)) {
+          throw new Error(
+            `unsupported guest ABI version: ${version} (host supports: ${[...SUPPORTED_GUEST_ABI_VERSIONS].join(', ')})`
+          );
+        }
+        this.abiVersion = version;
+      } else {
+        this.abiVersion = null; // pre-versioning guest (ABI v0/v1 wire is identical): tolerated
       }
-      this.abiVersion = version;
-    } else {
-      this.abiVersion = null; // pre-versioning guest (ABI v0/v1 wire is identical): tolerated
-    }
 
-    // WIP binary op-batch: push the runtime half of the gate BEFORE keel_init,
-    // so the guest's very first render already goes out on the negotiated
-    // wire. Optional in both directions — a guest without the export (JSON-only
-    // build) is skipped, and with the option off the guest is never told, so
-    // old/new host x guest combinations all degrade to JSON.
-    if (this.binaryOpBatch) {
-      const wireCaps = instance.exports.keel_wire_caps;
-      if (typeof wireCaps === 'function') {
-        (wireCaps as (flags: number) => void)(WIRE_CAP_OP_BATCH_BINARY);
+      // WIP binary op-batch: push the runtime half of the gate BEFORE keel_init,
+      // so the guest's very first render already goes out on the negotiated
+      // wire. Optional in both directions — a guest without the export (JSON-only
+      // build) is skipped, and with the option off the guest is never told, so
+      // old/new host x guest combinations all degrade to JSON.
+      if (this.binaryOpBatch) {
+        const wireCaps = instance.exports.keel_wire_caps;
+        if (typeof wireCaps === 'function') {
+          (wireCaps as (flags: number) => void)(WIRE_CAP_OP_BATCH_BINARY);
+        }
       }
-    }
 
-    (instance.exports.keel_init as (() => void) | undefined)?.();
+      (instance.exports.keel_init as (() => void) | undefined)?.();
+    });
+  }
+
+  /** Return a finite, non-decreasing relative time at the ABI's fixed 1 ms granularity. */
+  private nowMs(): number {
+    const raw = this.rawNowMs();
+    if (!Number.isFinite(raw)) return this.lastNowMs;
+    const quantized = Math.floor(raw / CLOCK_GRANULARITY_MS) * CLOCK_GRANULARITY_MS;
+    this.lastNowMs = Math.max(0, this.lastNowMs, quantized);
+    return this.lastNowMs;
   }
 
   /** Resolve once every in-flight host call has run its keel_resolve. */
@@ -218,9 +328,11 @@ export class NativeGuestHost {
     }
 
     try {
-      const np = this.allocWrite(nameBytes);
-      const pp = this.allocWrite(payloadBytes);
-      onEvent(np, nameBytes.length, pp, payloadBytes.length);
+      this.runGuest(() => {
+        const np = this.allocWrite(nameBytes);
+        const pp = this.allocWrite(payloadBytes);
+        onEvent(np, nameBytes.length, pp, payloadBytes.length);
+      });
     } catch {
       // Delivery is guest-mediated (keel_alloc can hand back a bad pointer,
       // keel_on_event can trap). A hostile/broken guest must not make event
@@ -354,6 +466,13 @@ export class NativeGuestHost {
   }
 
   // --- ABI bridge: guest keel_host_call -> host dispatch -> guest keel_resolve ---
+  private onCancelHostCall(cb: number): void {
+    // Unknown/already-settled ids are intentionally idempotent. A guest may race
+    // cancellation with completion, and cancellation must never affect another
+    // callback merely because its id is absent.
+    this.callControllers.get(cb)?.abort();
+  }
+
   private onHostCall(
     mp: number,
     ml: number,
@@ -363,10 +482,17 @@ export class NativeGuestHost {
     il: number,
     cb: number
   ): void {
+    // A callback id names exactly one live call. Reuse would make a later cancel
+    // ambiguous and could resolve the same guest future twice, so reject it before
+    // dispatch. Resolution remains deferred by the task's first await below.
+    const duplicate = this.callControllers.has(cb);
+    const controller = new AbortController();
+    if (!duplicate) this.callControllers.set(cb, controller);
     // Everything guest-controlled (pointers, bytes, JSON) is read inside the try
     // so a hostile or malformed call fails closed (resolve ok=0) instead of
     // crashing the host.
     const task = (async () => {
+      let canonicalMethod = '';
       try {
         // MEMORY-SAFETY CRITICAL (cross-crate invariant): the host must never
         // resolve synchronously inside a guest-initiated call. keel_resolve
@@ -377,8 +503,10 @@ export class NativeGuestHost {
         // the guest has parked (it is suspended until then, so its buffer is
         // stable and no future is mid-poll). Do not remove this await.
         await Promise.resolve();
+        if (duplicate) throw new Error(`duplicate host callback id: ${cb}`);
         const moduleId = this.readString(mp, ml);
         const method = this.readString(xp, xl);
+        canonicalMethod = `${moduleId.startsWith('host:') ? moduleId.slice(5) : moduleId}.${method}`;
         // Payload framing fork (canvas-wire.DESIGN.md §1.4 + store-net-bytes
         // §B.2). Each binary wire has a DISTINCT 4-byte magic, all sharing byte 0
         // (0x4B 'K'), so the fork compares the FULL u32 — never byte 0 alone:
@@ -415,14 +543,28 @@ export class NativeGuestHost {
         if (typeof handler !== 'function') {
           throw new Error(`host module not registered: ${moduleId}.${method}`);
         }
-        const result = await handler(input);
+        const result = await handler(input, {
+          signal: controller.signal,
+        } satisfies NativeHostCallContext);
         this.resolve(cb, 1, result === undefined ? null : result);
       } catch (err) {
-        this.resolve(cb, 0, { error: err instanceof Error ? err.message : String(err) });
+        this.resolve(
+          cb,
+          0,
+          structuredHostError(err, canonicalMethod) ??
+            (resemblesStructuredHostError(err)
+              ? { error: 'host call failed' }
+              : legacyHostError(err))
+        );
       }
     })();
     this.inflight.add(task);
-    void task.finally(() => this.inflight.delete(task));
+    void task.finally(() => {
+      this.inflight.delete(task);
+      if (!duplicate && this.callControllers.get(cb) === controller) {
+        this.callControllers.delete(cb);
+      }
+    });
   }
 
   /** Write a JSON result into guest memory (via keel_alloc) and hand it back. */
@@ -441,19 +583,57 @@ export class NativeGuestHost {
       // reply is the IDENTICAL JSON.stringify bytes as today — no behaviour
       // change for any existing (non-binary) capability. Contract-agnostic: the
       // hoist is driven by the runtime type (Uint8Array), not per-module config.
-      const envelope = encodeKbs1Result(result);
-      const bytes = envelope ?? new TextEncoder().encode(JSON.stringify(result));
-      const ptr = this.allocWrite(bytes);
-      (
-        this.instance.exports.keel_resolve as (
-          cb: number,
-          ok: number,
-          ptr: number,
-          len: number
-        ) => void
-      )(cb, ok, ptr, bytes.length);
+      this.runGuest(() => {
+        const envelope = encodeKbs1Result(result);
+        const bytes = envelope ?? new TextEncoder().encode(JSON.stringify(result));
+        const ptr = this.allocWrite(bytes);
+        (
+          this.instance.exports.keel_resolve as (
+            cb: number,
+            ok: number,
+            ptr: number,
+            len: number
+          ) => void
+        )(cb, ok, ptr, bytes.length);
+      });
     } catch {
       // guest-mediated write failed; abandon this cb.
+    }
+  }
+
+  /** Run one synchronous guest entry while reporting a balanced run interval. */
+  private runGuest<T>(run: () => T): T {
+    this.setGuestRunning(true);
+    try {
+      return run();
+    } finally {
+      this.setGuestRunning(false);
+    }
+  }
+
+  /** Account for instantiation too: a module start section can run arbitrary guest code. */
+  private async runGuestAsync<T>(run: () => Promise<T>): Promise<T> {
+    this.setGuestRunning(true);
+    try {
+      return await run();
+    } finally {
+      this.setGuestRunning(false);
+    }
+  }
+
+  private setGuestRunning(running: boolean): void {
+    if (running) {
+      this.guestRunDepth++;
+      if (this.guestRunDepth !== 1) return;
+    } else {
+      if (this.guestRunDepth === 0) return;
+      this.guestRunDepth--;
+      if (this.guestRunDepth !== 0) return;
+    }
+    try {
+      this.onGuestRunStateChange?.(running);
+    } catch {
+      // Observability must never become a guest capability or affect execution.
     }
   }
 }

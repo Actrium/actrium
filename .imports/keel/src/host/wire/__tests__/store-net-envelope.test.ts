@@ -305,12 +305,14 @@ describe('store-net-envelope — fail-closed', () => {
 
   it('envelope-too-big on the ENCODE side when segments aggregate past the cap', () => {
     // The decode-side aggregate check is above; this locks the matching encode
-    // guard (four at-cap 1 MiB segments already exceed the 4 MiB envelope cap).
+    // guard. Every individual part is at its own cap, but their framing pushes the
+    // aggregate frame over maxEnvelopeBytes.
     const segs = Array.from(
-      { length: 4 },
+      { length: LIMITS.maxSegments },
       () => new Uint8Array(LIMITS.maxSegmentBytes)
     );
-    expectReason(() => encodeEnvelope('{}', segs), 'envelope-too-big');
+    const json = ' '.repeat(LIMITS.maxJsonBytes);
+    expectReason(() => encodeEnvelope(json, segs), 'envelope-too-big');
   });
 });
 
@@ -332,19 +334,17 @@ describe('store-net-envelope — at-cap acceptance', () => {
   });
 
   it('a frame whose total length is exactly maxEnvelopeBytes is accepted', () => {
-    // Layout = 12 (magic+jsonLen+segCount) + jsonLen + Σ(4 + segLen). Size four
-    // segments to land the total exactly on the cap; frame.length self-checks.
-    const segCount = 4;
-    const header = 12 + '{}'.length;
-    const body = LIMITS.maxEnvelopeBytes - header - segCount * 4;
-    const per = Math.floor(body / segCount);
-    const rem = body % segCount;
-    expect(per + rem).toBeLessThanOrEqual(LIMITS.maxSegmentBytes);
+    // Layout = 12 + jsonLen + Σ(4 + segLen). Use the full 16 MiB segment
+    // budget, then size a valid JSON string to consume the remaining headroom.
     const segs = Array.from(
-      { length: segCount },
-      (_, i) => new Uint8Array(per + (i === 0 ? rem : 0))
+      { length: LIMITS.maxSegments },
+      () => new Uint8Array(LIMITS.maxSegmentBytes)
     );
-    const frame = encodeEnvelope('{}', segs);
+    const framing = 12 + LIMITS.maxSegments * 4;
+    const jsonLen = LIMITS.maxEnvelopeBytes - framing - LIMITS.maxSegments * LIMITS.maxSegmentBytes;
+    const json = `"${'x'.repeat(jsonLen - 2)}"`;
+    expect(new TextEncoder().encode(json)).toHaveLength(jsonLen);
+    const frame = encodeEnvelope(json, segs);
     expect(frame.length).toBe(LIMITS.maxEnvelopeBytes);
     expect(() => decodeEnvelope(frame)).not.toThrow();
   });
@@ -785,6 +785,18 @@ describe('store-net-envelope — multi-segment values (#84)', () => {
     const back = decodeKbs1Request(frame as Uint8Array) as { value: Uint8Array };
     expect(back.value.length).toBe(value.length);
     expect([...back.value]).toEqual([...value]);
+  });
+
+  it('round-trips the reported 5,159,721-byte document through the full host path', () => {
+    const size = 5_159_721; // application.ist#36: real 1600x1200 two-layer document
+    const value = new Uint8Array(size);
+    for (let i = 0; i < value.length; i++) value[i] = (i * 31) & 0xff;
+    const frame = encodeKbs1Result({ value }) as Uint8Array;
+    expect(decodeEnvelope(frame).segments).toHaveLength(5);
+    const back = decodeKbs1Request(frame) as { value: Uint8Array };
+    expect(back.value).toHaveLength(size);
+    for (let i = 0; i < size; i += 4093) expect(back.value[i]).toBe(value[i]);
+    expect(back.value[size - 1]).toBe(value[size - 1]);
   });
 
   it('the joined value cannot outweigh the frame that carried it', () => {
