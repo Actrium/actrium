@@ -16,13 +16,20 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
-import { TimerManager } from '../../engine/timer-manager';
+import { TimerManager, type TimerManagerTiming } from '../../engine/timer-manager';
+import { VirtualTimerScheduler } from './virtual-timer-scheduler';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function createOptions(overrides?: Partial<{ debug: boolean; onError: (e: Error) => void }>) {
+function createOptions(
+  overrides?: Partial<{
+    debug: boolean;
+    onError: (e: Error) => void;
+    timing: TimerManagerTiming;
+  }>
+) {
   const logs: string[] = [];
   const errors: Array<{ msg: string; err?: unknown }> = [];
   return {
@@ -34,6 +41,7 @@ function createOptions(overrides?: Partial<{ debug: boolean; onError: (e: Error)
       },
       engineId: 'test',
       onError: overrides?.onError,
+      timing: overrides?.timing,
     },
     logs,
     errors,
@@ -76,6 +84,66 @@ async function waitUntil(predicate: () => boolean, timeoutMs = 5000) {
     await waitMs(5);
   }
   await flushMicrotasks();
+}
+
+/**
+ * Grid scheduling after a 50 ms callback on a 60 ms interval: next native
+ * timeout must be 10 ms, then 60 ms. Restart-the-clock would request 60, 60.
+ */
+function assertGridSchedulingAfterSlowCallback(): void {
+  const DELAY = 60;
+  const BLOCK = 50;
+  const clock = new VirtualTimerScheduler();
+  const local = new TimerManager(createOptions({ timing: clock.timing }).opts);
+  const ticks: number[] = [];
+  let blocked = false;
+
+  local.createSetIntervalPolyfill()(() => {
+    ticks.push(clock.now);
+    if (!blocked) {
+      blocked = true;
+      clock.advance(BLOCK);
+    }
+  }, DELAY);
+
+  clock.flushMicrotasks();
+  expect(clock.lastRequestedDelay).toBe(DELAY);
+  expect(clock.liveTimerCount).toBe(1);
+
+  clock.deliverNext(DELAY);
+  expect(clock.lastRequestedDelay).toBe(DELAY - BLOCK);
+  expect(clock.liveTimerCount).toBe(1);
+
+  clock.deliverNext(DELAY * 2);
+  expect(clock.lastRequestedDelay).toBe(DELAY);
+  expect(clock.liveTimerCount).toBe(1);
+  expect(ticks).toEqual([DELAY, DELAY * 2]);
+
+  local.clearAllTimers();
+  expect(clock.liveTimerCount).toBe(0);
+}
+
+/**
+ * A 20 ms tick delivered at virtual time 39 must re-arm for 1 ms and leave
+ * exactly one native timer. minGap-style wall-clock assertions treat that
+ * 1 ms catch-up as a duplicate chain; it is the documented grid behaviour.
+ */
+function assertLateDeliveryCatchUp(): void {
+  const DELAY = 20;
+  const LATE_AT = 39;
+  const clock = new VirtualTimerScheduler();
+  const local = new TimerManager(createOptions({ timing: clock.timing }).opts);
+
+  local.createSetIntervalPolyfill()(() => {}, DELAY);
+  clock.flushMicrotasks();
+  expect(clock.lastRequestedDelay).toBe(DELAY);
+
+  clock.deliverNext(LATE_AT);
+  expect(clock.lastRequestedDelay).toBe(DELAY * 2 - LATE_AT);
+  expect(clock.liveTimerCount).toBe(1);
+
+  local.clearAllTimers();
+  expect(clock.liveTimerCount).toBe(0);
 }
 
 // ---------------------------------------------------------------------------
@@ -287,38 +355,51 @@ describe('TimerManager', () => {
       expect(fired).toBe(false);
     });
 
-    it('a slow callback does not push the following ticks back', async () => {
-      // Ticks run on a grid anchored at creation, so one that overruns borrows
-      // from the next interval instead of shifting every tick after it.
-      //
-      // Only the FIRST callback blocks, for just under one interval -- enough to
-      // eat into the next slot, not enough to skip it (a callback that overruns
-      // by more than a whole interval re-anchors instead, which is the burst test
-      // below). So the gap after the slow tick should look like any other gap:
-      //   grid scheduling -> gap1 ~= gap2 ~= DELAY
-      //   restart-the-clock -> gap1 ~= DELAY + BLOCK, gap2 ~= DELAY
-      // The assertion compares the two gaps from the SAME run rather than against
-      // a fixed deadline, so a busy machine slows both and cannot fake a pass.
-      const DELAY = 60;
-      const BLOCK = 50;
-      const setI = tm.createSetIntervalPolyfill();
-      const at: number[] = [];
-      let blocked = false;
-      setI(() => {
-        at.push(Date.now());
-        if (!blocked) {
-          blocked = true;
-          const until = Date.now() + BLOCK;
-          while (Date.now() < until) {
-            /* occupy the loop, the way a heavy guest callback would */
-          }
-        }
-      }, DELAY);
+    it('a slow callback does not push the following ticks back', () => {
+      assertGridSchedulingAfterSlowCallback();
+    });
 
-      await waitUntil(() => at.length >= 3);
-      const gapAfterSlowTick = at[1] - at[0];
-      const gapAfterNormalTick = at[2] - at[1];
-      expect(gapAfterSlowTick - gapAfterNormalTick).toBeLessThan(BLOCK / 2);
+    it('a late delivery borrows from the next interval and keeps one chain', () => {
+      assertLateDeliveryCatchUp();
+    });
+
+    it('grid catch-up stays deterministic across 500 virtual runs', () => {
+      for (let i = 0; i < 500; i++) {
+        assertGridSchedulingAfterSlowCallback();
+        assertLateDeliveryCatchUp();
+      }
+    });
+
+    it('injected timing does not replace global timers', () => {
+      const beforeSetTimeout = globalThis.setTimeout;
+      const beforeClearTimeout = globalThis.clearTimeout;
+      const beforeQueueMicrotask = globalThis.queueMicrotask;
+      const clock = new VirtualTimerScheduler();
+      const local = new TimerManager(createOptions({ timing: clock.timing }).opts);
+      local.createSetIntervalPolyfill()(() => {}, 20);
+      clock.flushMicrotasks();
+      expect(globalThis.setTimeout).toBe(beforeSetTimeout);
+      expect(globalThis.clearTimeout).toBe(beforeClearTimeout);
+      expect(globalThis.queueMicrotask).toBe(beforeQueueMicrotask);
+      expect(clock.liveTimerCount).toBe(1);
+      local.clearAllTimers();
+    });
+
+    it('production deadline arithmetic uses performance.now when available', () => {
+      const original = performance.now;
+      let calls = 0;
+      performance.now = function nowSpy(this: Performance) {
+        calls += 1;
+        return original.call(this);
+      };
+      try {
+        const local = new TimerManager(createOptions().opts);
+        local.createSetTimeoutPolyfill()(() => {}, 10);
+        expect(calls).toBeGreaterThan(0);
+        local.clearAllTimers();
+      } finally {
+        performance.now = original;
+      }
     });
 
     it('a long pause does not release a catch-up burst on resume', async () => {
