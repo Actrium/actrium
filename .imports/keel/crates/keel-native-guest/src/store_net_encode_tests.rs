@@ -470,13 +470,12 @@ fn malformed_array_sentinels_are_rejected() {
 
 #[test]
 fn envelope_too_big_rejected() {
-    // Several at-cap segments whose aggregate exceeds MAX_ENVELOPE_BYTES even
-    // though each respects MAX_SEGMENT_BYTES.
+    // Every individual part is at its own cap, but the framing pushes their
+    // aggregate frame over MAX_ENVELOPE_BYTES.
     let seg = std::vec![0u8; MAX_SEGMENT_BYTES];
-    let n = MAX_ENVELOPE_BYTES / MAX_SEGMENT_BYTES + 1;
-    assert!(n <= MAX_SEGMENTS, "test needs n within the segment cap");
-    let refs: StdVec<&[u8]> = (0..n).map(|_| &seg[..]).collect();
-    assert_eq!(encode_envelope("{}", &refs), Err(Reason::EnvelopeTooBig));
+    let refs: StdVec<&[u8]> = (0..MAX_SEGMENTS).map(|_| &seg[..]).collect();
+    let json = StdString::from_utf8(std::vec![b' '; MAX_JSON_BYTES]).unwrap();
+    assert_eq!(encode_envelope(&json, &refs), Err(Reason::EnvelopeTooBig));
 }
 
 #[test]
@@ -572,23 +571,19 @@ fn at_cap_boundaries_are_accepted() {
     assert_eq!(decode_envelope(&frame).unwrap().json.len(), MAX_JSON_BYTES);
 
     // maxEnvelopeBytes: a frame whose TOTAL length is exactly MAX_ENVELOPE_BYTES.
-    // Layout = 12 (magic+jsonLen+segCount) + jsonLen + Σ(4 + segLen). Size four
-    // equal-ish segments to land the total exactly on the cap; the frame.len()
-    // assertion below self-checks the arithmetic.
-    let seg_count = 4usize;
-    let header = 12 + "{}".len();
-    let body = MAX_ENVELOPE_BYTES - header - seg_count * 4; // total segment bytes
-    let per = body / seg_count;
-    let rem = body % seg_count;
-    assert!(
-        per + rem <= MAX_SEGMENT_BYTES,
-        "each segment must be within its cap"
-    );
+    // Use the full 16 MiB segment budget, then size a valid JSON string to consume
+    // the remaining control-plane headroom.
+    let seg_count = MAX_SEGMENTS;
+    let framing = 12 + seg_count * 4;
+    let segment_bytes = seg_count * MAX_SEGMENT_BYTES;
+    let json_len = MAX_ENVELOPE_BYTES - framing - segment_bytes;
+    let json = StdString::from("\"") + &"x".repeat(json_len - 2) + "\"";
+    assert_eq!(json.len(), json_len);
     let segs: StdVec<StdVec<u8>> = (0..seg_count)
-        .map(|i| std::vec![0xabu8; per + if i == 0 { rem } else { 0 }])
+        .map(|_| std::vec![0xabu8; MAX_SEGMENT_BYTES])
         .collect();
     let refs: StdVec<&[u8]> = segs.iter().map(|s| s.as_slice()).collect();
-    let frame = encode_envelope("{}", &refs).unwrap();
+    let frame = encode_envelope(&json, &refs).unwrap();
     assert_eq!(
         frame.len(),
         MAX_ENVELOPE_BYTES,

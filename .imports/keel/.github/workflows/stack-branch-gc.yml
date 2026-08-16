@@ -1,0 +1,138 @@
+# Garbage-collect stack/* pointer branches on Actrium/keel.
+#
+# stack/* exists so GitHub can use it as a PR base. It is not a release line.
+# Native "delete head on merge" does not remove a *base* branch, so this
+# workflow is the forced cleanup.
+#
+#   push to main — delete a stack/* tip that is already in main, and that no
+#                  open PR still uses as its base.
+#   weekly       — also delete abandoned pointers (no open PR as base, tip
+#                  older than 7 days), even if they never landed on main.
+name: stack-branch-gc
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "main-advance (only landed tips) or weekly (also stale unused tips)"
+        required: false
+        default: weekly
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  gc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Collect unused stack/* pointers
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
+        run: |
+          set -euo pipefail
+
+          if [ "${EVENT_NAME}" = "push" ]; then
+            MODE=main-advance
+          elif [ "${EVENT_NAME}" = "schedule" ]; then
+            MODE=weekly
+          else
+            MODE="${INPUT_MODE:-weekly}"
+          fi
+          echo "mode=${MODE}"
+
+          STALE_SECONDS=$((7 * 24 * 60 * 60))
+          NOW=$(date -u +%s)
+
+          mapfile -t ROWS < <(
+            gh api --paginate "repos/${GH_REPO}/git/matching-refs/heads/stack" \
+              --jq '.[] | [.ref, .object.sha] | @tsv' || true
+          )
+
+          if [ "${#ROWS[@]}" -eq 0 ]; then
+            echo "no stack/* refs; nothing to do"
+            exit 0
+          fi
+
+          MAIN_SHA=$(gh api "repos/${GH_REPO}/commits/main" --jq .sha)
+          echo "main=${MAIN_SHA}"
+
+          deleted=0
+          kept=0
+
+          for row in "${ROWS[@]}"; do
+            ref="${row%%$'\t'*}"
+            sha="${row#*$'\t'}"
+            branch="${ref#refs/heads/}"
+            if [[ "${branch}" != stack/* ]]; then
+              echo "skip unexpected ref ${ref}"
+              continue
+            fi
+
+            echo "consider ${branch} sha=${sha}"
+
+            open_bases=$(
+              gh api "repos/${GH_REPO}/pulls?state=open&base=${branch}&per_page=1" --jq 'length'
+            )
+            if [ "${open_bases}" != "0" ]; then
+              echo "keep ${branch}: at least one open PR still uses it as base"
+              kept=$((kept + 1))
+              continue
+            fi
+
+            compare=$(
+              gh api "repos/${GH_REPO}/compare/${MAIN_SHA}...${sha}" \
+                --jq '{ahead:.ahead_by,behind:.behind_by,status:.status}'
+            )
+            ahead=$(echo "${compare}" | jq -r .ahead)
+            echo "compare ${branch} vs main: ${compare}"
+
+            # ahead==0 means every commit on the pointer is already on main
+            # (identical to main, or strictly behind it).
+            landed=0
+            if [ "${ahead}" = "0" ]; then
+              landed=1
+            fi
+
+            stale=0
+            if [ "${MODE}" = "weekly" ]; then
+              commit_date=$(
+                gh api "repos/${GH_REPO}/commits/${sha}" --jq .commit.committer.date
+              )
+              commit_epoch=$(date -u -d "${commit_date}" +%s)
+              age=$((NOW - commit_epoch))
+              echo "tip age ${age}s (commit ${commit_date})"
+              if [ "${age}" -ge "${STALE_SECONDS}" ]; then
+                stale=1
+              fi
+            fi
+
+            if [ "${landed}" = "1" ]; then
+              echo "delete ${branch}: tip is already contained in main and unused as a base"
+            elif [ "${MODE}" = "weekly" ] && [ "${stale}" = "1" ]; then
+              echo "delete ${branch}: unused as a base and tip older than 7 days"
+            else
+              echo "keep ${branch}: not landed on main, and not a weekly stale unused tip"
+              kept=$((kept + 1))
+              continue
+            fi
+
+            # DELETE /git/refs/heads/<branch>; branch already includes stack/.
+            if gh api --method DELETE "repos/${GH_REPO}/git/refs/heads/${branch}"; then
+              echo "deleted ${branch}"
+              deleted=$((deleted + 1))
+            else
+              echo "error: failed to delete ${branch}" >&2
+              exit 1
+            fi
+          done
+
+          echo "done mode=${MODE} deleted=${deleted} kept=${kept}"
