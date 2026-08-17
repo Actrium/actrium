@@ -5,7 +5,7 @@ import SwiftProtobufPluginLibrary
 
 @main
 struct ActrFrameworkGenerator {
-    static let version = "0.8.4"
+    static let version = "0.9.0"
 
     // MARK: - DispatchSpec model
 
