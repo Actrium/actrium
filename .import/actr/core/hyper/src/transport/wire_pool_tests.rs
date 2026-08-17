@@ -305,11 +305,10 @@ async fn identity_checks_return_false_when_not_ready() {
         peer_id: actr_protocol::ActrId::default(),
         session_id: 1,
     };
-    // No Ready slot → both identity checks are false.
-    assert!(
-        !pool
-            .connection_matches_identity(ConnType::WebRTC, &id)
-            .await
+    // No Ready slot → no session match, and nothing to mark closed.
+    assert_eq!(
+        pool.session_match(ConnType::WebRTC, &id).await,
+        super::SessionMatch::NoMatch
     );
     assert!(
         !pool
@@ -847,11 +846,18 @@ async fn mark_closed_if_same_matches_and_mismatches() {
         pool.mark_connection_closed_if_same(ConnType::WebSocket, &id)
             .await
     );
-    // Slot now Failed → no longer matches anything.
-    assert!(
-        !pool
-            .connection_matches_identity(ConnType::WebSocket, &id)
-            .await
+    // Slot is now `Failed(Some(id))`: a same-session close event must still
+    // match as Retained (the wire just died — it is NOT stale), while a
+    // different session must not match.
+    assert_eq!(
+        pool.session_match(ConnType::WebSocket, &id).await,
+        super::SessionMatch::Retained,
+        "a Failed slot retaining the same identity is not stale"
+    );
+    assert_eq!(
+        pool.session_match(ConnType::WebSocket, &other).await,
+        super::SessionMatch::NoMatch,
+        "a Failed slot must not match a different identity"
     );
 
     // Re-ready a fresh wire, then assert a mismatched identity does NOT close.

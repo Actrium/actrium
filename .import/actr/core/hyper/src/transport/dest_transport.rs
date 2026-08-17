@@ -491,22 +491,40 @@ impl DestTransport {
         self.conn_mgr.watch_ready()
     }
 
-    /// Check whether the active WebRTC wire still carries the given identity.
+    /// Compare the WebRTC slot against the given `(peer_id, session_id)`.
     ///
     /// Used by PeerTransport (session-guarded cleanup) to decide whether a
-    /// `ConnectionClosed` event is stale or matches the current wire.
-    pub(crate) async fn matches_webrtc_session(
+    /// `ConnectionClosed` event refers to the live wire, a wire that already
+    /// died, or a stale session.
+    pub(crate) async fn webrtc_session_match(
         &self,
         peer_id: &actr_protocol::ActrId,
         session_id: u64,
-    ) -> bool {
+    ) -> super::wire_pool::SessionMatch {
         let expected = WireIdentity::WebRtc {
             peer_id: peer_id.clone(),
             session_id,
         };
         self.conn_mgr
-            .connection_matches_identity(ConnType::WebRTC, &expected)
+            .session_match(ConnType::WebRTC, &expected)
             .await
+    }
+
+    /// Whether any lane in this transport is currently sendable (Ready).
+    ///
+    /// Used to decide whether pending requests still have a live wire that
+    /// can deliver their responses (e.g. a surviving WebSocket lane after a
+    /// WebRTC wire died).
+    pub(crate) async fn has_ready_connection(&self) -> bool {
+        self.conn_mgr
+            .get_connection(ConnType::WebRTC)
+            .await
+            .is_some()
+            || self
+                .conn_mgr
+                .get_connection(ConnType::WebSocket)
+                .await
+                .is_some()
     }
 }
 
