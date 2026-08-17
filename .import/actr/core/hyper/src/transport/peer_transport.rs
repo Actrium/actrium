@@ -103,6 +103,28 @@ enum DestState {
     Connected(Arc<DestTransport>),
 }
 
+/// Outcome of [`PeerTransport::close_webrtc_transport_if_session`].
+///
+/// Separates the cases a boolean `Ok(false)` used to collapse, so the caller
+/// can pick the right pending-request cleanup: only `Closed` and `AlreadyDead`
+/// (when no live lane remains) mean the peer's connection is gone.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum WebrtcCloseOutcome {
+    /// The WebRTC wire was Ready with this session and has now been closed.
+    Closed,
+    /// The wire for this session already died (slot retains its identity);
+    /// nothing was closed. Cleanup depends on the remaining lanes.
+    AlreadyDead,
+    /// A connecting flight is running — transient close during retry; pending
+    /// requests keep waiting for the flight.
+    Connecting,
+    /// No transport entry exists for the destination — the connection is gone.
+    Absent,
+    /// The entry holds a different session — replaced by a fresh wire that
+    /// owns the pending requests.
+    Replaced,
+}
+
 /// Cancellation guard for the task that owns a connection flight.
 ///
 /// `get_or_create_transport` is commonly wrapped in a caller deadline. If that
@@ -328,6 +350,37 @@ impl PeerTransport {
     pub async fn is_connecting(&self, dest: &Dest) -> bool {
         let transports = self.transports.read().await;
         matches!(transports.get(dest), Some(DestState::Connecting(_)))
+    }
+
+    /// Check whether a destination currently has a `Connected` transport
+    /// entry in the map.
+    ///
+    /// Note this checks the map entry, not wire liveness: a `Connected`
+    /// entry can hold a dead WebRTC slot kept alive only by its WebSocket
+    /// lane (until `spawn_ready_monitor` reaps it). Use [`Self::has_ready_wire`]
+    /// when the question is "can a response still arrive".
+    pub async fn has_connected_transport(&self, dest: &Dest) -> bool {
+        let transports = self.transports.read().await;
+        matches!(transports.get(dest), Some(DestState::Connected(_)))
+    }
+
+    /// Check whether a destination has any sendable (Ready) wire — e.g. a
+    /// surviving WebSocket lane after the WebRTC wire died.
+    ///
+    /// Used by the PeerGate cleanup path to decide whether pending requests
+    /// still have a live lane that can deliver their responses.
+    pub async fn has_ready_wire(&self, dest: &Dest) -> bool {
+        let transport = {
+            let transports = self.transports.read().await;
+            match transports.get(dest) {
+                Some(DestState::Connected(transport)) => Some(Arc::clone(transport)),
+                _ => None,
+            }
+        };
+        match transport {
+            Some(transport) => transport.has_ready_connection().await,
+            None => false,
+        }
     }
 
     /// Get or create DestTransport for specified Dest
@@ -781,11 +834,10 @@ impl PeerTransport {
     /// matches `(peer_id, session_id)`, leaving the WebSocket fallback lane
     /// (and any in-flight RPC responses it carries) intact.
     ///
-    /// Returns `Ok(true)` when the WebRTC connection was actually closed.
-    /// Returns `Ok(false)` when the event is stale (identity mismatch) or the
-    /// transport state has already changed — in that case **no** pending
-    /// requests should be cleaned, and the peer should be removed from
-    /// `closing_peers` immediately.
+    /// The returned [`WebrtcCloseOutcome`] separates the cases a boolean used
+    /// to collapse, so the caller can pick the right pending-request cleanup:
+    /// only `Closed` — or `AlreadyDead` with no live lane left — mean the
+    /// peer's connection is actually gone.
     ///
     /// Called by the WebRTC connection-closed event handler so that outbound
     /// WebSocket response-reader tasks are not inadvertently terminated when a
@@ -803,42 +855,45 @@ impl PeerTransport {
         dest: &Dest,
         peer_id: &ActrId,
         session_id: u64,
-    ) -> NetworkResult<bool> {
+    ) -> NetworkResult<WebrtcCloseOutcome> {
         // Clone the current transport without awaiting under the map lock.
         let transport = {
             let transports = self.transports.read().await;
             match transports.get(dest) {
-                Some(DestState::Connected(transport)) => Some(Arc::clone(transport)),
-                _ => None, // Connecting or absent → stale
+                Some(DestState::Connected(transport)) => Arc::clone(transport),
+                Some(DestState::Connecting(_)) => return Ok(WebrtcCloseOutcome::Connecting),
+                None => return Ok(WebrtcCloseOutcome::Absent),
             }
         };
 
-        let Some(transport) = transport else {
-            tracing::debug!(
-                "Stale close event for {:?} (session {} mismatch or transport absent)",
-                dest,
-                session_id
-            );
-            return Ok(false);
-        };
-
-        if !transport.matches_webrtc_session(peer_id, session_id).await {
-            tracing::debug!(
-                "Stale close event for {:?} (session {} mismatch or transport absent)",
-                dest,
-                session_id
-            );
-            return Ok(false);
+        match transport.webrtc_session_match(peer_id, session_id).await {
+            super::wire_pool::SessionMatch::Ready => {
+                tracing::debug!(
+                    "Closing only WebRTC connection for {:?} (WebSocket kept alive)",
+                    dest
+                );
+                transport
+                    .close_connection(super::wire_pool::ConnType::WebRTC)
+                    .await?;
+                Ok(WebrtcCloseOutcome::Closed)
+            }
+            super::wire_pool::SessionMatch::Retained => {
+                tracing::debug!(
+                    "WebRTC wire for {:?} (session {}) already dead; nothing to close",
+                    dest,
+                    session_id
+                );
+                Ok(WebrtcCloseOutcome::AlreadyDead)
+            }
+            super::wire_pool::SessionMatch::NoMatch => {
+                tracing::debug!(
+                    "Stale close event for {:?} (session {} mismatch or transport absent)",
+                    dest,
+                    session_id
+                );
+                Ok(WebrtcCloseOutcome::Replaced)
+            }
         }
-
-        tracing::debug!(
-            "Closing only WebRTC connection for {:?} (WebSocket kept alive)",
-            dest
-        );
-        transport
-            .close_connection(super::wire_pool::ConnType::WebRTC)
-            .await?;
-        Ok(true)
     }
 
     /// Close DestTransport for specified Dest (full teardown, including WebSocket).
@@ -885,13 +940,14 @@ impl PeerTransport {
     }
 
     /// Session-guarded close: only tear down the transport if the active
-    /// WebRTC wire still matches the given `(peer_id, session_id)` pair.
+    /// WebRTC wire is still **live** with the given `(peer_id, session_id)`.
     ///
     /// Returns `Ok(true)` when the transport was actually closed.
-    /// Returns `Ok(false)` when the event is stale (identity mismatch)
-    /// or the transport state has already changed — in that case **no**
-    /// pending requests should be cleaned, and the peer should be removed
-    /// from `closing_peers` immediately.
+    /// Returns `Ok(false)` when the session is stale (mismatch) or its wire
+    /// already died (retained `Failed` tombstone). A dead wire never
+    /// authorizes the full teardown: the timeout's target is gone, and
+    /// tearing down the whole `DestTransport` would kill a surviving
+    /// WebSocket lane (and its response readers) for no benefit.
     pub(crate) async fn close_transport_if_webrtc_session(
         &self,
         dest: &Dest,
@@ -916,16 +972,18 @@ impl PeerTransport {
             return Ok(false);
         };
 
-        if !transport.matches_webrtc_session(peer_id, session_id).await {
+        if transport.webrtc_session_match(peer_id, session_id).await
+            != super::wire_pool::SessionMatch::Ready
+        {
             tracing::debug!(
-                "Stale close event for {:?} (session {} mismatch or transport absent)",
+                "Skipped full close for {:?}: WebRTC session {} is not live (replaced or already dead)",
                 dest,
                 session_id
             );
             return Ok(false);
         }
 
-        // 2. Identity matches → proceed with the normal close path.
+        // 2. Live identity match → proceed with the normal close path.
         self.close_transport(dest).await?;
         Ok(true)
     }

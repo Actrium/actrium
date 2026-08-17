@@ -129,8 +129,13 @@ pub enum WireStatus {
     /// Connection ready
     Ready(Arc<dyn WireHandle>),
 
-    /// Connection failed
-    Failed,
+    /// Connection failed/closed. Carries the last known `WireIdentity` so the
+    /// session-guarded close path can tell a same-session close (identity
+    /// matches → not stale) apart from a replaced wire (identity differs →
+    /// stale; the new wire owns the pending requests). `None` only when the
+    /// slot never carried an identity — identities are minted when the wire is
+    /// built, so they are retained even for wires that never reached `Ready`.
+    Failed(Option<WireIdentity>),
 }
 
 impl Clone for WireStatus {
@@ -138,7 +143,7 @@ impl Clone for WireStatus {
         match self {
             WireStatus::Connecting => WireStatus::Connecting,
             WireStatus::Ready(handle) => WireStatus::Ready(Arc::clone(handle)),
-            WireStatus::Failed => WireStatus::Failed,
+            WireStatus::Failed(id) => WireStatus::Failed(id.clone()),
         }
     }
 }

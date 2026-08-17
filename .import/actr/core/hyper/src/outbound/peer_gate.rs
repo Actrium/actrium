@@ -11,7 +11,7 @@ use super::ensure_stream_payload_type;
 use crate::lifecycle::SendProjection;
 use crate::transport::{
     ConnectionEvent, ConnectionState, Dest, DestTransportRef, NetworkResult, PayloadTypeExt,
-    PeerTransport, SentTransportSlot, WireIdentity,
+    PeerTransport, SentTransportSlot, WebrtcCloseOutcome, WireIdentity,
 };
 use crate::wire::webrtc::{NetworkRecoveryStatus, WebRtcCoordinator};
 use actr_framework::{Bytes, MediaSample};
@@ -262,9 +262,19 @@ impl PeerGate {
                     Ok(event) => event,
                     Err(broadcast::error::RecvError::Lagged(n)) => {
                         tracing::warn!(
-                            "PeerGate event listener lagged by {} events, continuing",
+                            "PeerGate event listener lagged by {} events, reconciling state",
                             n
                         );
+                        // The skipped window may have dropped a
+                        // `ConnectionClosed` (or a recovery event); without
+                        // reconciliation its cleanup never runs and callers
+                        // park until their own timeout (issue #581).
+                        Self::reconcile_after_lag(
+                            &pending_requests,
+                            &closing_peers,
+                            &transport_manager,
+                        )
+                        .await;
                         continue;
                     }
                     Err(broadcast::error::RecvError::Closed) => {
@@ -403,11 +413,22 @@ impl PeerGate {
                             closing_peers.write().await.insert(peer_id.clone());
                         } // Lock released here
 
-                        // 1. Session-guarded cleanup: only close the WebRTC wire if it
-                        //    still carries the same session_id.  If the identity
-                        //    mismatches (stale event from an old session that has
-                        //    already been replaced), skip the close and do NOT clean
-                        //    pending requests — they belong to the current wire.
+                        // 1. Session-guarded cleanup: close the WebRTC wire only
+                        //    when it is still the live wire for this session.
+                        //    The outcome separates the cases that decide
+                        //    pending-request cleanup:
+                        //    - `Closed`: the live wire was closed now — the
+                        //      event's session is finished;
+                        //    - `AlreadyDead`: this session's wire died earlier
+                        //      (terminal transition or self-heal already
+                        //      retired it); a duplicate terminal event for an
+                        //      already-processed session lands here too, so
+                        //      pending requests may only be failed when no
+                        //      live lane remains that could deliver responses;
+                        //    - `Replaced`/`Connecting`: a different wire owns
+                        //      the pending requests — never fail them here;
+                        //    - `Absent`: the dest entry was already torn down —
+                        //      the connection is dead, pending MUST be cleaned.
                         //
                         //    We intentionally do NOT tear down the whole transport here
                         //    because that would also close any outbound WebSocket
@@ -420,21 +441,69 @@ impl PeerGate {
                             .close_webrtc_transport_if_session(&dest, peer_id, *event_session_id)
                             .await
                         {
-                            Ok(true) => {
+                            Ok(WebrtcCloseOutcome::Closed) => {
                                 tracing::info!(
                                     "Closed WebRTC connection for peer {} (session {}, WebSocket kept alive)",
                                     peer_id,
                                     event_session_id
                                 );
                             }
-                            Ok(false) => {
+                            Ok(WebrtcCloseOutcome::AlreadyDead) => {
+                                if transport_manager.has_ready_wire(&dest).await {
+                                    // The session's wire died earlier and a live
+                                    // lane (e.g. WebSocket) remains — it still
+                                    // owns the pending requests. This also keeps
+                                    // duplicate terminal events for an already-
+                                    // processed session inert.
+                                    tracing::debug!(
+                                        "Close event for peer {} (session {}) matched an already-dead wire; a live lane remains, leaving pending requests intact",
+                                        peer_id,
+                                        event_session_id
+                                    );
+                                    closing_peers.write().await.remove(peer_id);
+                                    continue;
+                                }
+                                // No live lane left — fall through to clean
+                                // pending requests parked on a dead connection.
                                 tracing::debug!(
-                                    "Stale close event for peer {} (session {}), skipping cleanup",
+                                    "Close event for peer {} (session {}) matched an already-dead wire with no live lane; cleaning pending requests",
+                                    peer_id,
+                                    event_session_id
+                                );
+                            }
+                            Ok(WebrtcCloseOutcome::Connecting) => {
+                                // A connection flight started after the earlier
+                                // `is_connecting` check — treat it the same as a
+                                // transient close during retry.
+                                tracing::debug!(
+                                    "Ignoring transient close for peer {} while connection factory is still running",
+                                    peer_id
+                                );
+                                closing_peers.write().await.remove(peer_id);
+                                continue;
+                            }
+                            Ok(WebrtcCloseOutcome::Replaced) => {
+                                // Replaced by a fresh session — a live wire
+                                // still owns the pending requests.
+                                tracing::debug!(
+                                    "Stale close event for peer {} (session {}) replaced by a live transport; leaving pending requests intact",
                                     peer_id,
                                     event_session_id
                                 );
                                 closing_peers.write().await.remove(peer_id);
                                 continue;
+                            }
+                            Ok(WebrtcCloseOutcome::Absent) => {
+                                // Transport already torn down and not
+                                // connecting — the connection is dead. Fall
+                                // through to clean pending requests instead of
+                                // leaving them parked on a readiness that can
+                                // never arrive.
+                                tracing::debug!(
+                                    "Close event for peer {} (session {}) found no live transport; cleaning pending requests",
+                                    peer_id,
+                                    event_session_id
+                                );
                             }
                             Err(e) => {
                                 tracing::warn!(
@@ -485,6 +554,79 @@ impl PeerGate {
                 }
             }
         });
+    }
+
+    /// Reconcile `pending_requests` and `closing_peers` against the transport
+    /// manager's current state after the broadcast receiver lagged and
+    /// dropped a window of events (issue #581).
+    ///
+    /// A dropped window may have contained `ConnectionClosed` — whose cleanup
+    /// removes pending requests — and the recovery events that unmark
+    /// `closing_peers` (`StateChanged { Connected }`, `DataChannelOpened`,
+    /// successful `IceRestartCompleted`). Without reconciliation those
+    /// cleanups never run and callers hang until their own timeout.
+    ///
+    /// Idempotent with the normal event path:
+    /// - a pending request is failed only when its target no longer has any
+    ///   transport (neither `Connecting` nor `Connected`) — exactly the state
+    ///   in which the `ConnectionClosed` arm cleans it; a live transport —
+    ///   whether a connecting retry or a connected replacement wire — still
+    ///   owns the request;
+    /// - a `closing_peers` entry is removed once its peer is no longer in a
+    ///   connecting flight: both the missed `ConnectionClosed` cleanup and
+    ///   the missed recovery events end with the mark removed.
+    async fn reconcile_after_lag(
+        pending_requests: &PendingRequestsMap,
+        closing_peers: &Arc<RwLock<HashSet<ActrId>>>,
+        transport_manager: &PeerTransport,
+    ) {
+        let targets: Vec<ActrId> = {
+            let pending = pending_requests.read().await;
+            pending.values().map(|(target, _)| target.clone()).collect()
+        };
+
+        let mut dead_targets = Vec::new();
+        for target in &targets {
+            let dest = Dest::peer(target.clone());
+            if !transport_manager.is_connecting(&dest).await
+                && !transport_manager.has_connected_transport(&dest).await
+            {
+                dead_targets.push(target.clone());
+            }
+        }
+
+        if !dead_targets.is_empty() {
+            let mut cleaned = 0usize;
+            let mut pending = pending_requests.write().await;
+            for target in dead_targets {
+                let keys_to_remove: Vec<_> = pending
+                    .iter()
+                    .filter(|(_, (t, _))| t == &target)
+                    .map(|(key, _)| key.clone())
+                    .collect();
+                for key in keys_to_remove {
+                    if let Some((_, tx)) = pending.remove(&key) {
+                        let _ =
+                            tx.send(Err(ActrError::Unavailable("Connection closed".to_string())));
+                        cleaned += 1;
+                    }
+                }
+            }
+            drop(pending);
+            tracing::info!(
+                "Lag reconciliation released {} pending requests on dead peers",
+                cleaned
+            );
+        }
+
+        let closing: Vec<ActrId> = closing_peers.read().await.iter().cloned().collect();
+        for peer in closing {
+            let dest = Dest::peer(peer.clone());
+            if !transport_manager.is_connecting(&dest).await {
+                closing_peers.write().await.remove(&peer);
+                tracing::debug!("Lag reconciliation unmarked closing peer {}", peer);
+            }
+        }
     }
 
     /// Handle response message (called by MessageDispatcher)
@@ -1562,6 +1704,80 @@ mod tests {
             projection_rx,
         );
         (gate, transport, projection_tx, builds, sends)
+    }
+
+    #[tokio::test]
+    async fn lag_reconciliation_fails_pending_request_on_dead_peer() {
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(CountingSuccessfulWireBuilder {
+                builds: Arc::new(AtomicUsize::new(0)),
+                sends: Arc::new(AtomicUsize::new(0)),
+            }),
+        ));
+        let dead = test_actor_id(9);
+
+        let pending: PendingRequestsMap = Arc::new(RwLock::new(HashMap::new()));
+        let (tx, mut rx) = oneshot::channel();
+        pending
+            .write()
+            .await
+            .insert("lag-dead".to_string(), (dead.clone(), tx));
+
+        let closing_peers: Arc<RwLock<HashSet<ActrId>>> = Arc::new(RwLock::new(HashSet::new()));
+        closing_peers.write().await.insert(dead.clone());
+
+        PeerGate::reconcile_after_lag(&pending, &closing_peers, &transport).await;
+
+        assert!(
+            pending.read().await.is_empty(),
+            "pending request on a peer with no transport must be released"
+        );
+        let result = rx
+            .try_recv()
+            .expect("released pending must receive an error");
+        assert!(result.is_err(), "released pending must be failed");
+        assert!(
+            closing_peers.read().await.is_empty(),
+            "closing mark for a peer without a connecting flight must be removed"
+        );
+    }
+
+    #[tokio::test]
+    async fn lag_reconciliation_keeps_pending_request_on_live_transport() {
+        let (gate, transport, _projection_tx, _builds, _sends) =
+            gate_with_projection(SendProjection::Normal);
+        let target = test_actor_id(2);
+
+        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
+            .await
+            .expect("successful wire builder should deliver the message");
+
+        let dest = Dest::peer(target.clone());
+        assert!(
+            transport.has_connected_transport(&dest).await,
+            "precondition: dest must hold a Connected transport"
+        );
+
+        let pending: PendingRequestsMap = Arc::new(RwLock::new(HashMap::new()));
+        let (tx, mut rx) = oneshot::channel();
+        pending
+            .write()
+            .await
+            .insert("lag-live".to_string(), (target, tx));
+        let closing_peers: Arc<RwLock<HashSet<ActrId>>> = Arc::new(RwLock::new(HashSet::new()));
+
+        PeerGate::reconcile_after_lag(&pending, &closing_peers, &transport).await;
+
+        assert_eq!(
+            pending.read().await.len(),
+            1,
+            "a pending request whose peer still has a live transport must be kept"
+        );
+        assert!(
+            rx.try_recv().is_err(),
+            "kept pending must not be resolved by reconciliation"
+        );
     }
 
     #[tokio::test]

@@ -56,7 +56,7 @@ pub use host_transport::HostTransport;
 pub(crate) use host_transport::HostTransport;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use peer_transport::PeerTransport;
-pub(crate) use peer_transport::{DestTransportRef, SentTransportSlot};
+pub(crate) use peer_transport::{DestTransportRef, SentTransportSlot, WebrtcCloseOutcome};
 #[cfg(feature = "test-utils")]
 pub use peer_transport::{PeerTransport, WireBuilder};
 

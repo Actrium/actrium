@@ -38,6 +38,24 @@ impl ConnType {
 /// Set of ready connections
 pub(crate) type ReadySet = HashSet<ConnType>;
 
+/// Outcome of comparing a connection slot against an expected `WireIdentity`.
+///
+/// Distinguishes a live same-session wire from a dead one so callers can pick
+/// the right teardown/cleanup scope instead of collapsing both into "match".
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SessionMatch {
+    /// The slot is `Ready` and carries the expected identity — the live wire
+    /// for this session.
+    Ready,
+    /// The slot is `Failed` but retains the expected identity — this
+    /// session's wire already died. The event is NOT stale, but closing the
+    /// wire is a no-op; cleanup must be decided from the remaining lanes.
+    Retained,
+    /// No match: slot empty, `Connecting`, or carrying a different identity
+    /// (replaced by a fresh session).
+    NoMatch,
+}
+
 /// Retry configuration
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct RetryConfig {
@@ -337,16 +355,19 @@ impl WirePool {
             // non-terminal so a later retry could still become sendable.
             connection.mark_secure_failed();
 
+            // Capture the wire's identity before transitioning out of Ready so
+            // a later same-session close event is not misjudged as stale.
+            let failed_identity = connection.identity();
             {
                 let mut conns = connections.write().await;
-                conns[conn_type.as_index()] = Some(WireStatus::Failed);
+                conns[conn_type.as_index()] = Some(WireStatus::Failed(failed_identity));
 
                 // Check if all connections failed
                 let remaining = pending.load(Ordering::Relaxed);
                 if remaining == 0 {
                     let all_failed = conns
                         .iter()
-                        .all(|s| matches!(s, Some(WireStatus::Failed) | None));
+                        .all(|s| matches!(s, Some(WireStatus::Failed(_)) | None));
 
                     if all_failed {
                         tracing::error!("💀💀 All connections failed");
@@ -384,7 +405,7 @@ impl WirePool {
                     tracing::debug!("⏭️ [{:?}] Skipping - already Connecting", conn_type);
                     false
                 }
-                Some(WireStatus::Failed) | None => {
+                Some(WireStatus::Failed(_)) | None => {
                     tracing::info!(
                         "🔄 [{:?}] Starting connection (was {:?})",
                         conn_type,
@@ -454,11 +475,21 @@ impl WirePool {
     /// Mark a connection as closed/failed
     ///
     /// Called by upper layers (DestTransport) when closing connections.
-    /// This replaces the per-connection event listener pattern.
+    /// This replaces the per-connection event listener pattern. Preserves the
+    /// wire's last `WireIdentity` so a subsequent same-session close event is
+    /// not misjudged as stale.
     pub(crate) async fn mark_connection_closed(&self, conn_type: ConnType) {
         {
             let mut conns = self.connections.write().await;
-            conns[conn_type.as_index()] = Some(WireStatus::Failed);
+            let last_identity = match &conns[conn_type.as_index()] {
+                // Capture the Ready wire's identity before retiring it.
+                Some(WireStatus::Ready(handle)) => handle.identity(),
+                // Already Failed — preserve the previously captured identity.
+                Some(WireStatus::Failed(id)) => id.clone(),
+                // Never Ready, no identity to retain.
+                _ => None,
+            };
+            conns[conn_type.as_index()] = Some(WireStatus::Failed(last_identity));
         }
 
         // Update ready set
@@ -467,23 +498,31 @@ impl WirePool {
         tracing::debug!("🔌 Marked {:?} connection as closed", conn_type);
     }
 
-    /// Check whether the active ready slot for a connection type still matches
-    /// the given `WireIdentity`.
+    /// Compare a connection slot against the given `WireIdentity`.
     ///
-    /// Returns `true` only when the slot is `Ready` and the underlying wire
-    /// reports the same identity. Returns `false` for `Connecting`, `Failed`,
-    /// `None`, or a mismatched wire (stale or replaced).
-    pub(crate) async fn connection_matches_identity(
+    /// Returns [`SessionMatch::Ready`] when the slot holds the live wire for
+    /// this session, [`SessionMatch::Retained`] when the wire for this
+    /// session already died but its identity is retained on the `Failed`
+    /// slot, and [`SessionMatch::NoMatch`] otherwise (empty, `Connecting`,
+    /// or a different session).
+    pub(crate) async fn session_match(
         &self,
         conn_type: ConnType,
         expected_identity: &WireIdentity,
-    ) -> bool {
+    ) -> SessionMatch {
         let conns = self.connections.read().await;
         match &conns[conn_type.as_index()] {
             Some(WireStatus::Ready(handle)) => {
-                handle.identity().as_ref() == Some(expected_identity)
+                if handle.identity().as_ref() == Some(expected_identity) {
+                    SessionMatch::Ready
+                } else {
+                    SessionMatch::NoMatch
+                }
             }
-            _ => false,
+            Some(WireStatus::Failed(Some(last_identity))) if last_identity == expected_identity => {
+                SessionMatch::Retained
+            }
+            _ => SessionMatch::NoMatch,
         }
     }
 
@@ -512,11 +551,12 @@ impl WirePool {
                     }
                 }
                 _ => {
-                    // Not Ready — nothing to mark
+                    // Not Ready — nothing to transition, and we must not
+                    // clobber a previously-retained Failed identity.
                     return false;
                 }
             }
-            conns[conn_type.as_index()] = Some(WireStatus::Failed);
+            conns[conn_type.as_index()] = Some(WireStatus::Failed(Some(expected_identity.clone())));
         }
 
         Self::broadcast_ready_connections(&self.connections, &self.ready_tx).await;
