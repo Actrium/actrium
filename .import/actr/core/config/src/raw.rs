@@ -258,7 +258,9 @@ pub struct RawStorageConfig {
 /// WebRTC configuration
 ///
 /// Without port range configured, uses default mode (random ports).
-/// With port_range_start/end configured, enables fixed port mode.
+/// `port_range_start/end` currently cannot enable fixed port mode: the
+/// wildcard ICE-restart rebind overrides them, so validation rejects a
+/// configured range rather than silently ignoring it.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawWebRtcConfig {
     /// STUN server URL list (e.g., ["stun:localhost:3478"])
@@ -289,11 +291,12 @@ pub struct RawWebRtcConfig {
     #[serde(default)]
     pub ice_relay_acceptance_min_wait: Option<u64>,
 
-    /// UDP port range start (optional, enables fixed port mode when configured)
+    /// UDP port range start (optional; currently rejected while ICE-restart
+    /// recovery binds a wildcard address — see WebRtcAdvancedConfig::validate)
     #[serde(default)]
     pub port_range_start: Option<u16>,
 
-    /// UDP port range end (optional, enables fixed port mode when configured)
+    /// UDP port range end (optional; rejected together with port_range_start)
     #[serde(default)]
     pub port_range_end: Option<u16>,
 
