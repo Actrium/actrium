@@ -282,6 +282,14 @@ type UdpPorts = Option<(u16, u16)>;
 #[derive(Clone, Debug)]
 pub struct WebRtcAdvancedConfig {
     /// UDP port policy
+    ///
+    /// **Currently rejected at startup by [`WebRtcAdvancedConfig::validate`].**
+    /// ICE-restart recovery binds a wildcard UDP address so webrtc-rs can
+    /// rebind to fresh ephemeral ports on every ICE restart, which is
+    /// incompatible with pinning a fixed port range. Rejected rather than
+    /// silently ignored because a fixed port is a deployment precondition
+    /// (firewall pinholes). This lifts once upstream can rebind on ICE
+    /// restart while honoring a configured port range.
     pub udp_ports: UdpPorts,
     /// Fixed local UDP port for a process-shared ICE UDP mux (opt-in).
     ///
@@ -290,8 +298,7 @@ pub struct WebRtcAdvancedConfig {
     /// the shared ICE UDP mux, so honoring this option is impossible; a fixed
     /// port is a deployment precondition (firewall pinholes are opened for
     /// it), and silently binding an ephemeral port instead would present as
-    /// "node healthy but unreachable". Use `udp_ports` for a fixed port
-    /// range.
+    /// "node healthy but unreachable".
     pub ice_udp_mux_port: Option<u16>,
     /// NAT 1:1 public IP mapping.
     ///
@@ -331,8 +338,7 @@ impl WebRtcAdvancedConfig {
             return Err(crate::error::ConfigError::InvalidConfig(format!(
                 "ice_udp_mux_port = {port} is not supported with webrtc-rs 0.20: \
                  the shared ICE UDP mux is not exposed upstream and every peer \
-                 connection would bind an ephemeral port instead. Remove the \
-                 option, or use udp_ports for a fixed port range"
+                 connection would bind an ephemeral port instead. Remove the option"
             )));
         }
         if !self.public_ips.is_empty() {
@@ -343,6 +349,36 @@ impl WebRtcAdvancedConfig {
                  configured. Remove the option; front the node with TURN or \
                  run it on a public interface",
                 self.public_ips
+            )));
+        }
+        // NOTE: keep this check last so the more specific rejections above
+        // (ice_udp_mux_port, public_ips) still name themselves when several
+        // unsupported options are combined with a port range.
+        //
+        // A configured UDP port range cannot be honored while ICE-restart
+        // recovery forces a wildcard bind. webrtc-rs 0.20.3 rebinds
+        // `0.0.0.0:0` on every ICE restart (webrtc-rs/webrtc#868, #874) so a
+        // peer stalled after a mobile network handover recovers; leaving the
+        // bind unresolved lets the driver enumerate the current interfaces
+        // and pick a fresh ephemeral port each time. Pinning a fixed port
+        // range is incompatible with that, so the negotiator would silently
+        // override `udp_ports`. A fixed port is a deployment precondition
+        // (operators open firewall pinholes for it), and silently ignoring it
+        // would present as "node healthy but unreachable" — reject loudly
+        // instead. This is temporary: the restriction lifts once upstream can
+        // rebind on ICE restart while still honoring a configured port range,
+        // at which point this branch and the wildcard bind are reverted
+        // together.
+        if let Some((min, max)) = self.udp_ports {
+            return Err(crate::error::ConfigError::InvalidConfig(format!(
+                "udp_ports (port_range_start/port_range_end) = {min}-{max} is not \
+                 supported while ICE-restart recovery binds a wildcard UDP address: \
+                 webrtc-rs 0.20.3 rebinds 0.0.0.0:0 on every ICE restart and picks \
+                 a fresh ephemeral port, so the configured range would be silently \
+                 overridden and the firewall pinholes opened for it would not match \
+                 the ports actually bound. Remove the option; it is rejected only \
+                 until upstream can rebind on ICE restart while honoring a fixed \
+                 port range"
             )));
         }
         Ok(())

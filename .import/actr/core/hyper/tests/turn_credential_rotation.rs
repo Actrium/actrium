@@ -363,19 +363,15 @@ async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_tur
         .expect("Actrix TURN service should stop");
 }
 
-/// A plain ICE restart (no credential change) must reuse the existing TURN
-/// allocation rather than tear it down and re-allocate on a fresh socket.
+/// A plain ICE restart (no credential change) must refresh the TURN allocation
+/// after the upstream socket rebind replaces the transport.
 ///
 /// A re-allocation is detected by counting the server's TURN authentication
-/// transactions: reusing the allocation performs no new Allocate (and, because
-/// the channel bindings/permissions are still within their lifetimes, no new
-/// authenticated transaction at all), so the count stays flat — whereas a
-/// re-allocation would authenticate again.  This is the boundary the
-/// fresh-relay-socket rebinding must not cross: the rebind is gated on a
-/// configuration change, so a plain restart keeps the existing socket and
-/// allocation and never risks a same-5-tuple 437.
+/// transactions. The upstream Android recovery path deliberately drops and
+/// rebinds the UDP transport on every ICE restart, so its old TURN allocation
+/// cannot be reused and a fresh allocation must authenticate again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn plain_ice_restart_reuses_relay_allocation_without_reallocating() {
+async fn plain_ice_restart_rebinds_and_refreshes_relay_allocation() {
     install_test_crypto_provider();
     init_logging();
 
@@ -441,9 +437,9 @@ async fn plain_ice_restart_reuses_relay_allocation_without_reallocating() {
 
     let auth_before = auth_calls.load(Ordering::SeqCst);
 
-    // A plain ICE restart: no credential change, so the relayer keeps the
-    // existing allocation (it re-emits the existing relay candidate) and the
-    // driver must not tear down / rebind the relay socket.
+    // A plain ICE restart: although the credentials are unchanged, the
+    // upstream recovery path replaces the UDP transport and its relay
+    // allocation.
     offerer
         .coordinator
         .restart_ice(&answerer.id)
@@ -453,12 +449,12 @@ async fn plain_ice_restart_reuses_relay_allocation_without_reallocating() {
     // The relay data path must keep carrying RPC traffic after the restart.
     assert_rpc_eventually_succeeds(&offerer, &answerer.id, "plain_restart_after").await;
 
-    // The decisive assertion: the restart performed no new TURN allocation,
-    // which would have forced at least one more authenticated transaction.
+    // The decisive assertion: the transport rebind performed a new TURN
+    // allocation, which requires at least one new authenticated transaction.
     let auth_after = auth_calls.load(Ordering::SeqCst);
-    assert_eq!(
-        auth_after, auth_before,
-        "plain ICE restart must reuse the existing TURN allocation (no new TURN authentication)"
+    assert!(
+        auth_after > auth_before,
+        "plain ICE restart must refresh the TURN allocation after rebinding the UDP transport"
     );
 
     echo_task.abort();

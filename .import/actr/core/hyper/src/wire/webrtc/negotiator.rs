@@ -26,6 +26,15 @@ pub use actr_config::{IceTransportPolicy, WebRtcConfig};
 /// even if an old v0.20 driver is temporarily non-cooperative while timing out.
 const WEBRTC_REACTOR_POOL_SIZE: usize = 8;
 
+/// Wildcard bind used for ICE-restart recovery. The v0.20.3 driver expands a
+/// wildcard into current concrete interface candidates on every bind, so an
+/// ICE restart can follow a mobile network handover without reusing a stale
+/// concrete address.
+///
+/// Keeping the configured form in the driver also lets each rebind choose a
+/// fresh ephemeral port rather than reusing the socket being replaced.
+const ICE_RESTART_WILDCARD_ADDR: &str = "0.0.0.0:0";
+
 /// WebRTC negotiator
 #[derive(Clone)]
 pub(crate) struct WebRtcNegotiator {
@@ -45,14 +54,6 @@ pub(crate) struct WebRtcNegotiator {
     /// Runtime::spawn_reactor rather than the ambient Runtime::spawn path.
     #[cfg(test)]
     reactor_spawn_probe: Arc<AtomicBool>,
-    /// Serializes fixed-port selection + builder bind across concurrent
-    /// answerer `PeerConnection` creations sharing this negotiator, so two
-    /// creations cannot both probe-select the same first free port and race
-    /// one into `AddrInUse`. v0.20's `with_udp_addrs` takes addr strings, not
-    /// bound sockets, so the probe cannot be handed over atomically; this
-    /// lock is the bounded substitute. Per-coordinator (per-node), not
-    /// process-global.
-    port_select_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl WebRtcNegotiator {
@@ -79,7 +80,6 @@ impl WebRtcNegotiator {
             packet_blocked: None,
             #[cfg(test)]
             reactor_spawn_probe: Arc::new(AtomicBool::new(false)),
-            port_select_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -269,6 +269,11 @@ impl WebRtcNegotiator {
         // Apply ICE candidate acceptance wait times (for both Offerer and Answerer)
         self.apply_ice_wait_times(&mut setting_engine);
 
+        // Enable upstream webrtc-rs/webrtc#868: rebind UDP sockets on ICE restart so
+        // a peer stalled after ~10s background (Android) recovers instead of wedging.
+        // Opt-in flag added in webrtc-rs/rtc#168.
+        setting_engine.set_discard_local_candidates_during_ice_restart(true);
+
         // Apply advanced parameters (UDP ports) only for Answerer
         if is_answerer {
             tracing::info!(
@@ -286,16 +291,7 @@ impl WebRtcNegotiator {
         // chain before it crosses the async boundary.
         let registry = register_default_interceptors(Registry::new(), &mut media_engine)?.boxed();
         let events = RTCPeerConnection::events();
-        // Hold the fixed-port selection lock across select + the builder's bind
-        // so two concurrent answerer creations sharing this negotiator cannot
-        // both probe-select the same first free port (one would then hit
-        // AddrInUse). Offerer (ephemeral port) is uncontended and skipped.
-        let _port_guard = if is_answerer && self.config.advanced.udp_ports.is_some() {
-            Some(self.port_select_lock.lock().await)
-        } else {
-            None
-        };
-        let udp_addrs = self.select_udp_bind_addrs(is_answerer)?;
+        let udp_addrs = self.select_udp_bind_addrs();
         let peer_connection_builder = PeerConnectionBuilder::new()
             .with_configuration(rtc_config)
             .with_media_engine(media_engine)
@@ -322,10 +318,6 @@ impl WebRtcNegotiator {
             None => peer_connection_builder,
         };
         let peer_connection = peer_connection_builder.build().await?;
-        // The builder has bound the selected port by now; release the
-        // fixed-port lock before the callback wiring so concurrent answerer
-        // creations are not serialized past the bind.
-        drop(_port_guard);
         let peer_connection = RTCPeerConnection::new(
             Arc::new(peer_connection) as Arc<dyn PeerConnection>,
             events,
@@ -402,121 +394,24 @@ impl WebRtcNegotiator {
         let advanced = &self.config.advanced;
 
         if let Some((min, max)) = advanced.udp_ports {
-            tracing::info!(
-                "🔧 UDP port range requested: {}-{} (selected before builder bind)",
+            tracing::warn!(
                 min,
-                max
+                max,
+                wildcard_bind = ICE_RESTART_WILDCARD_ADDR,
+                "Configured UDP port range is ignored while wildcard ICE-restart recovery is enabled"
             );
         } else {
-            tracing::info!("🔧 Using default random UDP ports");
+            tracing::info!(
+                wildcard_bind = ICE_RESTART_WILDCARD_ADDR,
+                "🔧 Using wildcard UDP bind for ICE-restart recovery"
+            );
         }
     }
 
-    fn eligible_ipv4_bind_ips(
-        interfaces: impl IntoIterator<Item = (std::net::IpAddr, bool, bool)>,
-    ) -> Vec<std::net::Ipv4Addr> {
-        use std::collections::BTreeSet;
-        use std::net::IpAddr;
-
-        interfaces
-            .into_iter()
-            .filter_map(|(ip, is_oper_up, is_loopback)| match ip {
-                IpAddr::V4(ip) if is_oper_up && !is_loopback && !ip.is_unspecified() => Some(ip),
-                _ => None,
-            })
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    }
-
-    fn local_ipv4_bind_ips() -> Vec<std::net::Ipv4Addr> {
-        use std::net::{IpAddr, Ipv4Addr, UdpSocket};
-
-        let mut local_ips = match if_addrs::get_if_addrs() {
-            Ok(interfaces) => {
-                Self::eligible_ipv4_bind_ips(interfaces.into_iter().map(|interface| {
-                    (
-                        interface.ip(),
-                        interface.is_oper_up(),
-                        interface.is_loopback(),
-                    )
-                }))
-            }
-            Err(error) => {
-                tracing::warn!(%error, "failed to enumerate local interfaces for ICE gathering");
-                Vec::new()
-            }
-        };
-
-        if local_ips.is_empty() {
-            // Keep local development usable when the host has no active
-            // non-loopback IPv4 interface. The route probe does not send any
-            // packets; it only lets the OS choose a concrete source address.
-            let fallback = UdpSocket::bind("0.0.0.0:0")
-                .ok()
-                .and_then(|socket| {
-                    socket.connect("8.8.8.8:80").ok()?;
-                    match socket.local_addr().ok()?.ip() {
-                        IpAddr::V4(ip) if !ip.is_unspecified() => Some(ip),
-                        _ => None,
-                    }
-                })
-                .unwrap_or(Ipv4Addr::LOCALHOST);
-            tracing::warn!(%fallback, "no active non-loopback IPv4 interface found; using ICE fallback address");
-            local_ips.push(fallback);
-        }
-
-        tracing::info!(
-            ?local_ips,
-            "using concrete IPv4 interfaces for ICE gathering"
-        );
-        local_ips
-    }
-
-    fn select_udp_bind_addrs(&self, is_answerer: bool) -> NetworkResult<Vec<String>> {
-        use std::net::{SocketAddr, UdpSocket};
-
-        // rtc/webrtc 0.20 builds host candidates directly from each bound
-        // socket's local_addr(); it does not expand 0.0.0.0 into interface
-        // addresses. Bind every concrete active IPv4 interface so SDP never
-        // advertises an unusable 0.0.0.0 candidate and multi-homed/offline-LAN
-        // hosts remain reachable through every eligible NIC.
-        let local_ips = Self::local_ipv4_bind_ips();
-
-        if is_answerer && let Some((min, max)) = self.config.advanced.udp_ports {
-            'ports: for port in min..=max {
-                let mut probes = Vec::with_capacity(local_ips.len());
-                for local_ip in &local_ips {
-                    match UdpSocket::bind(SocketAddr::new((*local_ip).into(), port)) {
-                        Ok(socket) => probes.push(socket),
-                        Err(_) => continue 'ports,
-                    }
-                }
-                drop(probes);
-                return Ok(local_ips
-                    .into_iter()
-                    .map(|ip| SocketAddr::new(ip.into(), port).to_string())
-                    .collect());
-            }
-            // The port range is a firewall-pinhole deployment precondition:
-            // an ephemeral port the firewall does not open presents as
-            // "node healthy but unreachable". Fail connection creation so the
-            // operator sees the misconfiguration instead of a silently dead
-            // node. (A small AddrInUse window remains between this probe's
-            // socket drop and the builder's bind: `with_udp_addrs` takes addr
-            // strings, not bound sockets, so the probe cannot be handed over.
-            // The per-coordinator `port_select_lock` in `create_peer_connection`
-            // closes the Actr-internal race.)
-            return Err(crate::transport::NetworkError::Other(anyhow::anyhow!(
-                "no free UDP port in the configured firewall-pinhole range \
-                 {min}-{max}; refusing to fall back to an ephemeral port"
-            )));
-        }
-
-        Ok(local_ips
-            .into_iter()
-            .map(|ip| SocketAddr::new(ip.into(), 0).to_string())
-            .collect())
+    fn select_udp_bind_addrs(&self) -> Vec<String> {
+        // Keep the wildcard unresolved so webrtc-rs can enumerate the current
+        // interfaces and choose fresh ephemeral ports on every ICE restart.
+        vec![ICE_RESTART_WILDCARD_ADDR.to_owned()]
     }
 
     /// Create Offer (Trickle ICE mode)

@@ -567,9 +567,11 @@ impl ParserV1 {
         let ice_prflx_acceptance_min_wait = raw.ice_prflx_acceptance_min_wait.unwrap_or(40);
         let ice_relay_acceptance_min_wait = raw.ice_relay_acceptance_min_wait.unwrap_or(100);
 
-        // Note: ice_udp_mux_port is rejected by validation below (webrtc-rs
-        // 0.20 does not expose the shared ICE UDP mux), so udp_ports is the
-        // only fixed-port mechanism that reaches the runtime.
+        // Note: ice_udp_mux_port, public_ips, and udp_ports are all rejected by
+        // the validation below — the first two are unsupported by webrtc-rs
+        // 0.20, and udp_ports is incompatible with the wildcard ICE-restart
+        // rebind — so no fixed-port / fixed-address mechanism reaches the
+        // runtime.
         let advanced = WebRtcAdvancedConfig {
             udp_ports,
             ice_udp_mux_port: raw.ice_udp_mux_port,
