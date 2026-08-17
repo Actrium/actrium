@@ -12,7 +12,7 @@ default = []
 testing = []
 
 [dependencies]
-admin = { path = "../control", package = "actrix-admin", version = "0.8.4" }
+admin = { path = "../control", package = "actrix-admin", version = "0.9.0" }
 
 [lints]
 workspace = true
