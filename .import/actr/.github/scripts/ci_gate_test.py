@@ -93,7 +93,8 @@ def test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile() -> None:
     assert "--manifest-path e2e/Cargo.toml" in normalized
     assert "--format-version 1" in normalized
     assert "--locked" in normalized
-    assert "arduino/setup-protoc@v3" in e2e_job
+    # e2e_rust runs on the self-hosted image which preinstalls protoc, so
+    # no arduino/setup-protoc step is expected here.
     assert "libopus-dev" in e2e_job
     assert "cargo check" in e2e_job
     assert "--workspace" in normalized

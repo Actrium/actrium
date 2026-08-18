@@ -63,14 +63,24 @@ runner config as `ACTIONS_RUNNER_INPUT_JITCONFIG`, the stock agent
 
 1. **ARC controller** (once per cluster):
    ```bash
-   helm install arc \
+   ARC_VERSION=0.14.2
+
+   helm upgrade --install arc \
      oci://ghcr.io/actions/actions-runner-controller-charts/gha-runner-scale-set-controller \
+     --version "${ARC_VERSION}" \
      -n arc-systems --create-namespace
    ```
+   Pin the version: the `app.kubernetes.io/version` label in
+   `autoscaling-runner-set.yaml` must match the installed chart version, or
+   the controller will delete the scale set on reconcile. When upgrading,
+   update `ARC_VERSION` here and the label in the manifest in the same PR.
+   Verify with `helm list -n arc-systems --filter '^arc$'`.
 2. **GitHub App** (preferred) or PAT with organization runner
    permissions. The App's ID, Installation ID, and private key go into a
    secret (below).
-3. **Image pushed** to GHCR (below).
+3. **Image pushed** to a registry the cluster can pull from
+   (`ghcr.io/actrium/runner` by default; internal deployments may
+   substitute a private registry). See "Build and push the image".
 
 ### Create the GitHub App secret
 
@@ -105,12 +115,21 @@ kubectl -n arc-runners create secret docker-registry ghcr-pull \
   --docker-password=<read:packages PAT>
 ```
 
+Internal clusters can redirect the image to a private registry by editing
+`image:` (and `imagePullSecrets`) at apply time; keep the manifests here
+registry-neutral.
+
 ### Apply the manifest
 
 ```bash
 kubectl apply -f docker/runner/autoscaling-runner-set.yaml
 kubectl -n arc-runners get autoscalingrunnerset,ephemeralrunner -w
 ```
+
+Note: the manifest carries `app.kubernetes.io/version` matching the
+installed controller chart. The controller deletes scale sets whose
+version label is missing or outside its major.minor — after a controller
+upgrade, bump the label in the same PR.
 
 The scale set registers runners with the scale-set name (`actrium-linux`)
 plus the labels in `runnerScaleSetLabels` (`self-hosted`, `Linux`,

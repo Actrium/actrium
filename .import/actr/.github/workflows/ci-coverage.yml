@@ -14,21 +14,11 @@ env:
 jobs:
   coverage-rust:
     name: Rust Coverage
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-          targets: wasm32-wasip2,wasm32-unknown-unknown
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm Component Model toolchain
         run: |
           cargo install wasm-component-ld --version 0.5.26 --locked
@@ -37,7 +27,6 @@ jobs:
         run: cargo install wasm-pack --version 0.15.0 --locked
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash bindings/web/scripts/sync-cli-assets.sh --build
       - name: Run coverage
@@ -62,7 +51,7 @@ jobs:
 
   coverage-web-rust:
     name: Web Rust Host Unit Coverage
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     defaults:
@@ -70,21 +59,8 @@ jobs:
         working-directory: bindings/web
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: llvm-tools-preview
-          targets: wasm32-unknown-unknown
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: bindings/web -> target
       - name: Run coverage
         run: |
           host_target="$(rustc -vV | sed -n 's/^host: //p')"
@@ -124,7 +100,7 @@ jobs:
 
   coverage-web-wasm:
     name: Web Rust Wasm Coverage
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     defaults:
@@ -132,15 +108,6 @@ jobs:
         working-directory: bindings/web
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust nightly
-        uses: dtolnay/rust-toolchain@nightly
-        with:
-          targets: wasm32-unknown-unknown
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
       - name: Install wasm-capable clang
         run: |
           sudo apt-get update
@@ -172,9 +139,6 @@ jobs:
           chromedriver --version
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: bindings/web -> target
       - name: Run wasm coverage
         env:
           WASM_BINDGEN_USE_BROWSER: "1"
@@ -194,7 +158,7 @@ jobs:
 
   coverage-typescript:
     name: TypeScript Coverage
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     defaults:
@@ -208,14 +172,6 @@ jobs:
           node-version: "24"
           cache: "npm"
           cache-dependency-path: bindings/typescript/package.json
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
-      - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
         run: npm install
       - name: Build native binding
@@ -237,7 +193,7 @@ jobs:
 
   coverage-kotlin:
     name: Kotlin Coverage
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     defaults:
@@ -268,7 +224,7 @@ jobs:
 
   coverage-summary:
     name: Coverage Summary
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     needs:
       - coverage-rust
       - coverage-web-rust
@@ -323,7 +279,7 @@ jobs:
 
   publish-pages:
     name: Publish Coverage Pages
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     needs:
       - coverage-rust
       - coverage-web-rust

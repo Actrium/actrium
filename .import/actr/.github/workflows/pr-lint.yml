@@ -7,10 +7,14 @@ on:
 permissions:
   pull-requests: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   title:
     name: Validate PR title
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Check conventional commit format
         run: |

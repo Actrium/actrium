@@ -16,10 +16,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   determine:
     name: Determine Affected Targets
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     outputs:
       mode: ${{ steps.targets.outputs.mode }}
       changed_files_json: ${{ steps.targets.outputs.changed_files_json }}
@@ -45,6 +49,12 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install SQLite CLI
+        run: |
+          if ! command -v sqlite3 >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y sqlite3
+          fi
       - name: Test target detection
         run: python .github/scripts/ci_targets_test.py
       - name: Test CI configuration
@@ -70,18 +80,11 @@ jobs:
     name: Rust E2E Compile
     needs: determine
     if: needs.determine.outputs.e2e_rust == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
       - name: Install native dependencies
         run: |
           sudo apt-get update
@@ -93,7 +96,7 @@ jobs:
             --format-version 1 \
             --locked \
             > "$RUNNER_TEMP/e2e-metadata.json"
-          python - "$RUNNER_TEMP/e2e-metadata.json" <<'PY'
+          python3 - "$RUNNER_TEMP/e2e-metadata.json" <<'PY'
           import json
           import pathlib
           import sys
@@ -117,13 +120,13 @@ jobs:
     name: Dependency Audit
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
       - name: Install cargo-audit
-        run: cargo install cargo-audit --version 0.22.2 --locked
+        run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
         # Existing advisories outside the WASM host are tracked separately:
         # maxminddb (framework GeoIP), protobuf 2 (prometheus), rsa (TURN).
@@ -137,7 +140,7 @@ jobs:
     name: Rust
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
@@ -157,18 +160,12 @@ jobs:
         # path, not only in the manual-dispatch ci-rust.yml job, otherwise it
         # provides zero regression prevention for merges.
         run: bash .github/workflows/scripts/check-payload-logging.sh
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-          # wasm32-wasip2 is required by core/hyper/build.rs to compile the
-          # wasm_actor_fixture Component under --all-features (wasm-engine).
-          targets: wasm32-wasip2,wasm32-unknown-unknown
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install native build dependencies
+        run: |
+          if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists openssl || ! command -v cmake >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libssl-dev cmake
+          fi
       - name: Verify actr-hyper WIT drift
         # The V2 WIT is shipped in the actr-hyper tarball so host bindgen works
         # without the sibling framework crate. Fail fast if the copy drifts.
@@ -184,14 +181,18 @@ jobs:
             ~/.cargo/bin/wasm-tools
           key: cargo-tools-v1-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
       - name: Install wasm-pack
-        if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked --force
-      - name: Install wasm Component Model toolchain
-        if: steps.cargo-tools.outputs.cache-hit != 'true'
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked --force
-          cargo install wasm-tools --version 1.253.0 --locked --force
-      - uses: Swatinem/rust-cache@v2
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+      - name: Install wasm Component Model toolchain
+        run: |
+          if ! command -v wasm-component-ld >/dev/null 2>&1; then
+            cargo install wasm-component-ld --version 0.5.26 --locked --force
+          fi
+          if ! command -v wasm-tools >/dev/null 2>&1; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
       - name: Generate CLI web runtime assets
         run: bash bindings/web/scripts/sync-cli-assets.sh --build
       - name: Check formatting
@@ -306,7 +307,7 @@ jobs:
     name: Rust MSRV (1.95)
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
@@ -322,11 +323,14 @@ jobs:
         uses: dtolnay/rust-toolchain@1.95.0
         with:
           targets: wasm32-wasip2,wasm32-unknown-unknown
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
+      - name: Clear repository Rust toolchain override
+        run: rustup override unset || true
+      - name: Install native build dependencies
+        run: |
+          if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists openssl || ! command -v cmake >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libssl-dev cmake
+          fi
       - name: Cache cargo-installed tools
         id: cargo-tools
         uses: actions/cache@v4
@@ -337,14 +341,18 @@ jobs:
             ~/.cargo/bin/wasm-tools
           key: cargo-tools-v1-${{ runner.os }}-wp0.15.0-wcld0.5.26-wt1.253.0
       - name: Install wasm-pack
-        if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked --force
-      - name: Install wasm Component Model toolchain
-        if: steps.cargo-tools.outputs.cache-hit != 'true'
         run: |
-          cargo install wasm-component-ld --version 0.5.26 --locked --force
-          cargo install wasm-tools --version 1.253.0 --locked --force
-      - uses: Swatinem/rust-cache@v2
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
+      - name: Install wasm Component Model toolchain
+        run: |
+          if ! command -v wasm-component-ld >/dev/null 2>&1; then
+            cargo install wasm-component-ld --version 0.5.26 --locked --force
+          fi
+          if ! command -v wasm-tools >/dev/null 2>&1; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
       - name: Generate CLI web runtime assets
         run: bash bindings/web/scripts/sync-cli-assets.sh --build
       - name: Build at MSRV (locked)
@@ -354,7 +362,7 @@ jobs:
     name: TypeScript
     needs: determine
     if: needs.determine.outputs.ts_binding == 'true'
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     steps:
@@ -367,14 +375,6 @@ jobs:
           cache-dependency-path: |
             bindings/typescript/package.json
             tools/protoc-gen/typescript/package-lock.json
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
-      - uses: Swatinem/rust-cache@v2
       - name: Install dependencies
         working-directory: bindings/typescript
         run: npm install
@@ -403,7 +403,7 @@ jobs:
     name: TypeScript Workload
     needs: determine
     if: needs.determine.outputs.ts_workload == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     steps:
@@ -441,7 +441,7 @@ jobs:
     name: Python Codegen
     needs: determine
     if: needs.determine.outputs.python_codegen == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     defaults:
@@ -459,11 +459,6 @@ jobs:
         run: pip install -e .
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
-      - name: Set up protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
       - name: Smoke generate typed workload
         run: |
           tmp="$(mktemp -d)"
@@ -541,7 +536,7 @@ jobs:
     name: Python Workload
     needs: determine
     if: needs.determine.outputs.python_workload == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     steps:
@@ -552,16 +547,6 @@ jobs:
           python-version: "3.13"
           cache: "pip"
           cache-dependency-path: bindings/python/actr-workload/pyproject.toml
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
       - name: Verify actr-hyper WIT drift
         # The V2 WIT is shipped in the actr-hyper tarball so host bindgen works
         # without the sibling framework crate. Fail fast if the copy drifts.
@@ -576,11 +561,15 @@ jobs:
             ~/.cargo/bin/wasm-pack
           key: cargo-tools-v1-${{ runner.os }}-wt1.253.0-wp0.15.0
       - name: Install wasm-tools
-        if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-tools --version 1.253.0 --locked --force
+        run: |
+          if ! command -v wasm-tools >/dev/null 2>&1; then
+            cargo install wasm-tools --version 1.253.0 --locked --force
+          fi
       - name: Install wasm-pack
-        if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked --force
+        run: |
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
       - name: Verify TypeScript workload WIT drift
         run: |
           cmp core/framework/wit-v2/actr-workload.wit bindings/typescript/actr-workload/src/wit-v2/actr-workload.wit
@@ -721,7 +710,7 @@ jobs:
     name: Web
     needs: determine
     if: needs.determine.outputs.web_binding == 'true'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     env:
@@ -729,17 +718,6 @@ jobs:
       RUST_BACKTRACE: 1
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-          targets: wasm32-unknown-unknown
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
-      - uses: Swatinem/rust-cache@v2
       - name: Cache cargo-installed tools
         id: cargo-tools
         uses: actions/cache@v4
@@ -748,8 +726,10 @@ jobs:
             ~/.cargo/bin/wasm-pack
           key: cargo-tools-v1-${{ runner.os }}-wp0.15.0
       - name: Install wasm-pack
-        if: steps.cargo-tools.outputs.cache-hit != 'true'
-        run: cargo install wasm-pack --version 0.15.0 --locked --force
+        run: |
+          if ! command -v wasm-pack >/dev/null 2>&1; then
+            cargo install wasm-pack --version 0.15.0 --locked --force
+          fi
       - name: Check formatting
         working-directory: bindings/web
         run: cargo fmt --all -- --check
@@ -770,21 +750,17 @@ jobs:
     name: C and Go Workloads
     needs: determine
     if: needs.determine.outputs.c_go_workloads == 'true'
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-targets: false
+      - name: Install native build dependencies
+        run: |
+          if ! command -v pkg-config >/dev/null 2>&1 || ! pkg-config --exists openssl || ! command -v cmake >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y pkg-config libssl-dev cmake
+          fi
       - name: Install pinned native workload toolchains
         env:
           WIT_BINDGEN_SHA256: 06b173e5aa3f3a0f5b5597c3502e2885fc9c63300f59a21151971249dda82bf4
@@ -868,7 +844,7 @@ jobs:
 
   cjk:
     name: CJK Gate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     if: always()
     permissions:
       contents: read
@@ -889,7 +865,7 @@ jobs:
 
   gate:
     name: Gate
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     if: always()
     needs:
       - determine
@@ -928,7 +904,7 @@ jobs:
     steps:
       - name: Summarize gate
         run: |
-          python - <<'PY'
+          python3 - <<'PY'
           import json
           import os
           import sys
