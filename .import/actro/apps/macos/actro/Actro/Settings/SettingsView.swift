@@ -8,7 +8,6 @@ enum SettingsTab: String, CaseIterable {
     case privacy = "Privacy"
     case sync = "Sync"
     case shortcuts = "Shortcuts"
-    case terminal = "Terminal"
 
     var icon: String {
         switch self {
@@ -17,7 +16,6 @@ enum SettingsTab: String, CaseIterable {
         case .privacy: return "hand.raised.fill"
         case .sync: return "arrow.triangle.2.circlepath"
         case .shortcuts: return "keyboard"
-        case .terminal: return "terminal"
         }
     }
 }
@@ -84,8 +82,6 @@ struct SettingsView: View {
             SyncSettingsView()
         case .shortcuts:
             ShortcutsSettingsView()
-        case .terminal:
-            TerminalSettingsView()
         }
     }
 }

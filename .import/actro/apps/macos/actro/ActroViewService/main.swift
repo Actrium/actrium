@@ -1,16 +1,11 @@
 //
 //  main.swift
-//  ActroViewService
+//  ActroRenderer
 //
-//  ViewBridge XPC service entry point.
+//  Browser-style Renderer Helper entry point.
 //
 
 import Foundation
 import Cocoa
 
-// Register our view controller class before starting the service
-// This also initializes ServiceReactNativeHost early to set up pendingTabId listener
-registerActroServiceViewController()
-
-// Start the ViewBridge service (does not return)
-viewBridgeServiceMain(serviceName: "ActroViewService")
+RendererProcessController.runFromCommandLine()

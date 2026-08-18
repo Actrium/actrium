@@ -46,7 +46,6 @@ build_apple() {
         exit 1
     fi
 
-    "$REPO_ROOT/crates/actro-terminal/build-xcframework.sh"
     "$REPO_ROOT/crates/actro-core/build-xcframework.sh"
     "$REPO_ROOT/crates/actro-vault/build-xcframework.sh"
 }

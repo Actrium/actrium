@@ -960,7 +960,6 @@ private struct ToolbarContentView: View {
         switch tab.contentType {
         case .web: return .web
         case .reactNative, .native: return .app
-        case .ssh, .sftp, .remoteDesktop: return .app
         case .empty: return .empty
         }
     }

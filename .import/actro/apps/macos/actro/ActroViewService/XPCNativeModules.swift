@@ -9,6 +9,20 @@
 import Foundation
 import React
 
+private enum NativeHostTransport {
+    static func post(name: String, userInfo: [String: Any] = [:]) {
+        if RendererProcessController.sendHostEvent(name: name, userInfo: userInfo) {
+            return
+        }
+        DistributedNotificationCenter.default().postNotificationName(
+            NSNotification.Name(name),
+            object: nil,
+            userInfo: userInfo.isEmpty ? nil : userInfo,
+            deliverImmediately: true
+        )
+    }
+}
+
 // MARK: - StartPage Module
 
 /// Native module for Start Page actions from React Native (XPC Service version)
@@ -24,12 +38,9 @@ class StartPageModule: NSObject {
 
         NSLog("[StartPageModule] Opening URL: \(urlString)")
 
-        // Send to host process via DistributedNotificationCenter
-        DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.openURLFromStartPage"),
-            object: nil,
-            userInfo: ["url": urlString],
-            deliverImmediately: true
+        NativeHostTransport.post(
+            name: "com.actro.openURLFromStartPage",
+            userInfo: ["url": urlString]
         )
     }
 
@@ -59,11 +70,9 @@ class HistoryModule: NSObject {
 
         NSLog("[HistoryModule] Opening history item: \(itemId), url: \(urlString)")
 
-        DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.openHistoryItem"),
-            object: nil,
-            userInfo: ["itemId": itemId, "url": urlString],
-            deliverImmediately: true
+        NativeHostTransport.post(
+            name: "com.actro.openHistoryItem",
+            userInfo: ["itemId": itemId, "url": urlString]
         )
     }
 
@@ -71,11 +80,9 @@ class HistoryModule: NSObject {
     func deleteHistoryItem(_ itemId: String) {
         NSLog("[HistoryModule] Delete history item: \(itemId)")
 
-        DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.deleteHistoryItem"),
-            object: nil,
-            userInfo: ["itemId": itemId],
-            deliverImmediately: true
+        NativeHostTransport.post(
+            name: "com.actro.deleteHistoryItem",
+            userInfo: ["itemId": itemId]
         )
     }
 
@@ -83,11 +90,9 @@ class HistoryModule: NSObject {
     func restoreGroup(_ groupId: String) {
         NSLog("[HistoryModule] Restore group: \(groupId)")
 
-        DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.restoreHistoryGroup"),
-            object: nil,
-            userInfo: ["groupId": groupId],
-            deliverImmediately: true
+        NativeHostTransport.post(
+            name: "com.actro.restoreHistoryGroup",
+            userInfo: ["groupId": groupId]
         )
     }
 
@@ -95,12 +100,7 @@ class HistoryModule: NSObject {
     func clearHistory() {
         NSLog("[HistoryModule] Clear all history")
 
-        DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.clearHistory"),
-            object: nil,
-            userInfo: nil,
-            deliverImmediately: true
-        )
+        NativeHostTransport.post(name: "com.actro.clearHistory")
     }
 
     @objc
@@ -129,11 +129,9 @@ class BookmarksModule: NSObject {
 
         NSLog("[BookmarksModule] Opening bookmark: \(bookmarkId), url: \(urlString)")
 
-        DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.openBookmark"),
-            object: nil,
-            userInfo: ["bookmarkId": bookmarkId, "url": urlString],
-            deliverImmediately: true
+        NativeHostTransport.post(
+            name: "com.actro.openBookmark",
+            userInfo: ["bookmarkId": bookmarkId, "url": urlString]
         )
     }
 
@@ -141,11 +139,9 @@ class BookmarksModule: NSObject {
     func deleteBookmark(_ bookmarkId: String) {
         NSLog("[BookmarksModule] Delete bookmark: \(bookmarkId)")
 
-        DistributedNotificationCenter.default().postNotificationName(
-            NSNotification.Name("com.actro.deleteBookmark"),
-            object: nil,
-            userInfo: ["bookmarkId": bookmarkId],
-            deliverImmediately: true
+        NativeHostTransport.post(
+            name: "com.actro.deleteBookmark",
+            userInfo: ["bookmarkId": bookmarkId]
         )
     }
 
@@ -172,6 +168,9 @@ class NativeLogger: NSObject {
 
     /// Write to shared IPC debug log file for cross-process log correlation
     private static func writeToIPCLog(_ message: String) {
+        if RendererProcessController.isRendererProcess {
+            return
+        }
         let timestamp: String = {
             let now = Date()
             let formatter = DateFormatter()
@@ -194,6 +193,13 @@ class NativeLogger: NSObject {
     }
 
     private static func sendToHost(level: String, source: String, message: String) {
+        if RendererProcessController.sendConsoleLog(
+            level: level,
+            source: source,
+            message: message
+        ) {
+            return
+        }
         // Send log to host process for DevTools Console
         DistributedNotificationCenter.default().postNotificationName(
             NSNotification.Name("com.actro.xpcLog"),

@@ -14,6 +14,7 @@ import SwiftProtobuf
 class IPCConnection {
     private let server: IPCServer
     private let tabId: String
+    private let filesystemSocketPath: String?
     private var pendingRequests: [UInt32: CheckedContinuation<Actro_Ipc_IPCMessage, Error>] = [:]
     private var nextRequestId: UInt32 = 1
     private let lock = NSLock()
@@ -24,11 +25,26 @@ class IPCConnection {
     var onConsoleLog: ((String, String, String) -> Void)?
     var onCrash: ((String) -> Void)?
     var onDisconnected: (() -> Void)?
+    var onHostEvent: ((String, String, String) -> Void)?
 
     init(tabId: String) {
+        let socketPath = IPCSocketPath.forTab(tabId)
         self.tabId = tabId
-        self.server = IPCServer(socketPath: IPCSocketPath.forTab(tabId))
+        self.filesystemSocketPath = socketPath
+        self.server = IPCServer(socketPath: socketPath)
 
+        configureServerCallbacks()
+    }
+
+    init(tabId: String, connectedSocket: Int32) {
+        self.tabId = tabId
+        self.filesystemSocketPath = nil
+        self.server = IPCServer(connectedSocket: connectedSocket)
+
+        configureServerCallbacks()
+    }
+
+    private func configureServerCallbacks() {
         server.onMessage = { [weak self] data in
             self?.handleMessage(data)
         }
@@ -39,7 +55,7 @@ class IPCConnection {
     }
 
     var socketPath: String {
-        IPCSocketPath.forTab(tabId)
+        filesystemSocketPath ?? ""
     }
 
     /// Start listening for Helper connection
@@ -230,6 +246,9 @@ class IPCConnection {
             case .crashReport(let crash):
                 onCrash?(crash.reason)
 
+            case .hostEvent(let event):
+                onHostEvent?(event.name, event.userInfoJson, event.tabID)
+
             default:
                 NSLog("IPCConnection: Unhandled message: \(msg)")
             }
@@ -259,6 +278,17 @@ class IPCHelperConnection {
         self.tabId = tabId
         self.client = IPCClient(socketPath: socketPath)
 
+        configureClientCallbacks()
+    }
+
+    init(tabId: String, connectedSocket: Int32) {
+        self.tabId = tabId
+        self.client = IPCClient(connectedSocket: connectedSocket)
+
+        configureClientCallbacks()
+    }
+
+    private func configureClientCallbacks() {
         client.onMessage = { [weak self] data in
             self?.handleMessage(data)
         }
@@ -327,6 +357,15 @@ class IPCHelperConnection {
         msg.consoleLog.message = message
         msg.consoleLog.source = source
 
+        try send(msg)
+    }
+
+    func sendHostEvent(name: String, userInfoJSON: String, tabId: String = "") throws {
+        var msg = Actro_Ipc_IPCMessage()
+        msg.hostEvent = Actro_Ipc_HostEvent()
+        msg.hostEvent.name = name
+        msg.hostEvent.userInfoJson = userInfoJSON
+        msg.hostEvent.tabID = tabId
         try send(msg)
     }
 

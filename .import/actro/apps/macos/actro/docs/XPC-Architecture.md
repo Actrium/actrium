@@ -1,5 +1,7 @@
 # Actro XPC Multi-Process Architecture
 
+> 历史文档。现行路径见 [Renderer-Process-Pool.md](Renderer-Process-Pool.md)。安装包不再包含 `RCTViewService*.xpc`。
+
 ## Core Principles
 
 ### 1:1:1 Architecture (重要原则)

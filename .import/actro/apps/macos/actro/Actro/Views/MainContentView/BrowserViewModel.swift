@@ -69,8 +69,6 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         return tabs.first(where: { $0.id == currentTabId })
     }
 
-    private var sshObservers: [NSObjectProtocol] = []
-
     init() {
         // Initialize slot positions first
         initializeSlotPositions()
@@ -85,87 +83,10 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
         currentTabId = startTab.id
         tabSlotPositions[startTab.id] = 0
         actroMode = .focus(tabId: startTab.id)
-
-        setupSSHObservers()
     }
 
     private func persistBrowserPageSession() {
         browserDataRepository.saveSession(tabs: tabs, currentTabId: currentTabId)
-    }
-
-    private func setupSSHObservers() {
-        sshObservers.append(
-            NotificationCenter.default.addObserver(
-                forName: .sshCloseTab,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                guard let self,
-                      let sessionId = notification.userInfo?["sessionId"] as? String,
-                      let tab = self.tabs.first(where: { $0.sshSessionId == sessionId }) else { return }
-                self.closeTab(id: tab.id)
-            }
-        )
-
-        sshObservers.append(
-            NotificationCenter.default.addObserver(
-                forName: .sshTitleChanged,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                guard let self,
-                      let sessionId = notification.userInfo?["sessionId"] as? String,
-                      let title = notification.userInfo?["title"] as? String,
-                      let tabIndex = self.tabs.firstIndex(where: { $0.sshSessionId == sessionId }) else { return }
-                self.tabs[tabIndex].title = title
-            }
-        )
-
-        sshObservers.append(
-            NotificationCenter.default.addObserver(
-                forName: .sshReconnect,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                guard let self,
-                      let sessionId = notification.userInfo?["sessionId"] as? String,
-                      let tabIndex = self.tabs.firstIndex(where: { $0.sshSessionId == sessionId }) else { return }
-                // Disconnect old session, assign new sessionId — XPC service will create actual SSH session
-                TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
-                let newSessionId = UUID().uuidString
-                self.tabs[tabIndex].sshSessionId = newSessionId
-                self.objectWillChange.send()
-            }
-        )
-
-        // Remote desktop observers
-        sshObservers.append(
-            NotificationCenter.default.addObserver(
-                forName: .remoteDesktopCloseTab,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                guard let self,
-                      let sessionId = notification.userInfo?["sessionId"] as? String,
-                      let tab = self.tabs.first(where: { $0.remoteDesktopSessionId == sessionId }) else { return }
-                self.closeTab(id: tab.id)
-            }
-        )
-        sshObservers.append(
-            NotificationCenter.default.addObserver(
-                forName: .remoteDesktopReconnect,
-                object: nil,
-                queue: .main
-            ) { [weak self] notification in
-                guard let self,
-                      let sessionId = notification.userInfo?["sessionId"] as? String,
-                      let tabIndex = self.tabs.firstIndex(where: { $0.remoteDesktopSessionId == sessionId }) else { return }
-                RemoteDesktopXPCBridge.shared.disconnectSession(sessionId: sessionId)
-                let newSessionId = UUID().uuidString
-                self.tabs[tabIndex].remoteDesktopSessionId = newSessionId
-                self.objectWillChange.send()
-            }
-        )
     }
 
     @discardableResult
@@ -242,19 +163,6 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
 
         // 如果这是最后一个标签页，关闭后退出应用
         if tabs.count == 1 {
-            // Disconnect SSH/SFTP/RemoteDesktop session before exiting
-            if let tab = tabs.first {
-                if let sessionId = tab.sshSessionId {
-                    TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
-                }
-                if let sessionId = tab.sftpSessionId {
-                    SFTPSessionBridge.shared.disconnectSession(sessionId: sessionId)
-                    SFTPBrowserViewModel.removeViewModel(for: sessionId)
-                }
-                if let sessionId = tab.remoteDesktopSessionId {
-                    RemoteDesktopXPCBridge.shared.disconnectSession(sessionId: sessionId)
-                }
-            }
             logger.debug("🚪 关闭最后一个标签页，应用即将退出")
             browserDataRepository.saveSession(tabs: [], currentTabId: nil)
             NSApplication.shared.terminate(nil)
@@ -278,20 +186,6 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                         actroMode = .focus(tabId: newTabId)
                     }
                 }
-            }
-        }
-
-        // Disconnect SSH/SFTP/RemoteDesktop session if this tab has one
-        if let tab = tabs.first(where: { $0.id == id }) {
-            if let sessionId = tab.sshSessionId {
-                TerminalXPCBridge.shared.disconnectSession(sessionId: sessionId)
-            }
-            if let sessionId = tab.sftpSessionId {
-                SFTPSessionBridge.shared.disconnectSession(sessionId: sessionId)
-                SFTPBrowserViewModel.removeViewModel(for: sessionId)
-            }
-            if let sessionId = tab.remoteDesktopSessionId {
-                RemoteDesktopXPCBridge.shared.disconnectSession(sessionId: sessionId)
             }
         }
 
@@ -861,64 +755,6 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
                 return
             }
 
-            // Handle ssh:// URL — session created in XPC service, not here
-            if url.scheme == "ssh" {
-                logger.notice("[navigateCurrentTab] SSH connection: \(url.absoluteString)")
-                let sessionId = UUID().uuidString
-                tabs[index].url = url
-                tabs[index].sshSessionId = sessionId
-                tabs[index].sftpSessionId = nil
-                tabs[index].title = url.host ?? "SSH"
-                tabs[index].unifiedScript = nil
-                tabs[index].leftPanelScript = nil
-                tabs[index].rightPanelScript = nil
-                tabs[index].guestScript = nil
-                tabs[index].systemTabType = nil
-                tabs[index].contractName = nil
-                objectWillChange.send()
-                persistBrowserPageSession()
-                return
-            }
-
-            // Handle sftp:// URL
-            if url.scheme == "sftp" {
-                logger.notice("[navigateCurrentTab] SFTP connection: \(url.absoluteString)")
-                let sessionId = UUID().uuidString
-                tabs[index].url = url
-                tabs[index].sftpSessionId = sessionId
-                tabs[index].sshSessionId = nil
-                tabs[index].title = "SFTP: \(url.host ?? "")"
-                tabs[index].unifiedScript = nil
-                tabs[index].leftPanelScript = nil
-                tabs[index].rightPanelScript = nil
-                tabs[index].guestScript = nil
-                tabs[index].systemTabType = nil
-                tabs[index].contractName = nil
-                objectWillChange.send()
-                persistBrowserPageSession()
-                return
-            }
-
-            // Handle ardp:// URL — remote desktop connection
-            if url.scheme == "ardp" {
-                logger.notice("[navigateCurrentTab] Remote desktop connection: \(url.absoluteString)")
-                let sessionId = UUID().uuidString
-                tabs[index].url = url
-                tabs[index].remoteDesktopSessionId = sessionId
-                tabs[index].sshSessionId = nil
-                tabs[index].sftpSessionId = nil
-                tabs[index].title = "Remote: \(url.host ?? url.absoluteString)"
-                tabs[index].unifiedScript = nil
-                tabs[index].leftPanelScript = nil
-                tabs[index].rightPanelScript = nil
-                tabs[index].guestScript = nil
-                tabs[index].systemTabType = nil
-                tabs[index].contractName = nil
-                objectWillChange.send()
-                persistBrowserPageSession()
-                return
-            }
-
             logger.notice("🌐 [navigateCurrentTab] 导航到 URL: \(url.absoluteString)")
             // 更新 Tab 为 Web 内容
             tabs[index].url = url
@@ -1066,7 +902,12 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
     }
 
     /// 检查输入是否是本地文件路径
-    private func isLocalFilePath(_ input: String) -> Bool {
+    func isLocalFilePath(_ input: String) -> Bool {
+        // actro://... may itself point at an .actr archive. It must be parsed as
+        // an application URL instead of being treated as a literal filesystem path.
+        if ActroAppURLScheme.hasSupportedPrefix(input) {
+            return false
+        }
         // 以 / 开头是绝对路径
         if input.hasPrefix("/") {
             return true
@@ -1090,13 +931,10 @@ class BrowserViewModel: ObservableObject, ActroModePublisher {
     /// - 如果是 about:/http/https/actro，直接解析
     /// - 如果看起来像域名（包含 . 且不包含空格），添加 https:// 前缀
     func parseURL(_ input: String) -> URL? {
-        // 已经是完整 URL (http/https/about/actro/ssh)
+        // 已经是完整 URL (http/https/about/actro)
         if input.hasPrefix("http://") || input.hasPrefix("https://") ||
            input.hasPrefix("about:") ||
-           ActroAppURLScheme.hasSupportedPrefix(input) ||
-           input.hasPrefix("ssh://") ||
-           input.hasPrefix("sftp://") ||
-           input.hasPrefix("ardp://") {
+           ActroAppURLScheme.hasSupportedPrefix(input) {
             return URL(string: input)
         }
 

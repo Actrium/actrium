@@ -3,7 +3,6 @@
 //  Actro
 //
 //  Shared utility for requesting remote NSViewControllers from ViewBridge XPC services.
-//  Used by both TerminalXPCBridge and XPCServicePool on the host side.
 //
 
 import Foundation
@@ -35,7 +34,7 @@ enum ViewBridgeHostError: Error, LocalizedError {
 /// `requestViewController:fromServiceWithBundleIdentifier:connectionHandler:`.
 ///
 /// - Parameters:
-///   - className: The VC class name in the service (e.g. "TerminalServiceViewController")
+///   - className: The VC class name in the service (e.g. "ActroServiceViewController")
 ///   - bundleIdentifier: The XPC service bundle identifier
 ///   - completion: Called on main thread with the remote VC or error
 func requestRemoteViewController(

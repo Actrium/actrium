@@ -24,5 +24,9 @@ let package = Package(
                 .enableExperimentalFeature("StrictConcurrency"),
             ]
         ),
+        .testTarget(
+            name: "ActroIPCTests",
+            dependencies: ["ActroIPC"]
+        ),
     ]
 )

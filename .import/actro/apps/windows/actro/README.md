@@ -404,13 +404,6 @@ active. `Esc` requests the document to leave page full-screen first, or exits br
 full-screen when the page is not full-screen. This is local window orchestration
 and should not move into Rust.
 
-## Related Assets
-
-`third_party/rustdesk-actr` is a remote desktop technology reference, not the
-Windows Actro browser client. It may inform future capture, input, clipboard,
-audio, or remote-control work, but any promoted code should be extracted into a
-shared crate or a Windows-specific adapter deliberately.
-
 Local reference or scratch checkouts should live under `internal/`, not under
 `apps/`. `apps/` is reserved for the Actro platform clients.
 

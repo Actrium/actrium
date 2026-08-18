@@ -375,55 +375,9 @@ public class ViewBridgeHostView: NSView {
 
         NSLog("ViewBridgeHostView: Requesting \(serviceViewControllerClassName) from \(serviceBundleIdentifier)")
 
-        // 🔥 优化：尝试复用预热的 ViewController
-        // 使用异步消费，如果 prewarm 正在进行中会等待其完成
-        Task { @MainActor [weak self] in
-            guard let self = self else { return }
-
-            // 🔑 DEBUG 模式下增加超时时间，因为 Xcode 调试器会导致 XPC 启动变慢
-            #if DEBUG
-            let prewarmTimeout: TimeInterval = 5.0  // DEBUG: 5 秒（调试器附加会变慢）
-            #else
-            let prewarmTimeout: TimeInterval = 2.0  // RELEASE: 2 秒
-            #endif
-
-            if let prewarmSlot = await XPCServicePool.shared.consumePrewarmedSlotAsync(
-                bundleIdentifier: self.serviceBundleIdentifier,
-                timeout: prewarmTimeout
-            ) {
-                NSLog("ViewBridgeHostView: ✨ Using prewarmed ViewController! (internalId=%@)",
-                      prewarmSlot.internalId?.prefix(8).description ?? "nil")
-
-                // 🔑 发送 bindTab 通知，告诉 Service 将 prewarm entry 绑定到我们的 tabId
-                if let tabId = self.coordinator?.tabId, let internalId = prewarmSlot.internalId {
-                    let bindName = "com.actro.bindTab.\(ActroHostProcessId).\(self.serviceBundleIdentifier)"
-                    DistributedNotificationCenter.default().postNotificationName(
-                        NSNotification.Name(bindName),
-                        object: nil,
-                        userInfo: [
-                            RuntimeBridgeContract.tabId: tabId.uuidString,
-                            "internalId": internalId,
-                            "hostProcessId": ActroHostProcessId
-                        ],
-                        deliverImmediately: true
-                    )
-                    NSLog("ViewBridgeHostView: 📤 Sent bindTab: tabId=%@, internalId=%@",
-                          String(tabId.uuidString.prefix(8)), String(internalId.prefix(8)))
-                } else {
-                    NSLog("⚠️ ViewBridgeHostView: Cannot send bindTab - tabId=%@, internalId=%@",
-                          self.coordinator?.tabId?.uuidString.prefix(8).description ?? "nil",
-                          prewarmSlot.internalId?.prefix(8).description ?? "nil")
-                }
-
-                self.handleConnectionResult(viewController: prewarmSlot.viewController, error: nil)
-                // 🔑 消费后异步预热下一个
-                XPCServicePool.shared.ensureOnePrewarmedSlot()
-                return
-            }
-
-            // Prewarm 不可用，继续创建新连接
-            self.requestRemoteViewControllerDirect()
-        }
+        // Live tabs use RendererProcessPool. Keep the legacy ViewBridge
+        // request path for leftover snapshot helpers only.
+        requestRemoteViewControllerDirect()
     }
 
     /// 用于捕获新连接的 internalId
@@ -880,6 +834,9 @@ extension Notification.Name {
 /// 集中处理所有尺寸同步逻辑 - 这是 Host 端尺寸更新的唯一入口
 final class ViewBridgeCoordinator {
     weak var hostView: ViewBridgeHostView?
+    /// Browser-style Renderer host. During migration this coexists with the old
+    /// ViewBridge reference, but a Tab owns at most one active rendering path.
+    weak var rendererHostView: RendererSurfaceHostView?
     /// Callback when XPC connection is established
     var onConnectionEstablished: (() -> Void)?
 
@@ -939,6 +896,11 @@ final class ViewBridgeCoordinator {
     /// 2. tabId - 让 Service 绑定 pending entry
     /// 3. 基本配置 - 让 Service 可以开始渲染
     private func sendBootstrapTabConfig() {
+        // Renderer IPC has an explicit request/response handshake and does not
+        // need the legacy DistributedNotification bootstrap.
+        if rendererHostView != nil {
+            return
+        }
         guard let tabId = tabId,
               let serviceId = allocatedServiceId else {
             ipcLog("⚠️ sendBootstrapTabConfig: missing tabId or allocatedServiceId")
@@ -1405,6 +1367,7 @@ final class ViewBridgeCoordinator {
 
         // 1. 更新 hostView 的本地 frame（始终执行）
         hostView?.applyFrameSize(size)
+        rendererHostView?.apply(size: size, isOverviewMode: isOverviewMode)
 
         // 2. 🔑 检查四个条件都满足才能发送通知
         //    否则由 didSet 触发的 trySendInitialConfig 会处理
@@ -1420,7 +1383,7 @@ final class ViewBridgeCoordinator {
     }
 
     func captureSnapshot() -> NSImage? {
-        return hostView?.captureSnapshot()
+        rendererHostView?.captureSnapshot() ?? hostView?.captureSnapshot()
     }
 
     /// Send a containerSizeChanged notification to the XPC service
@@ -1430,6 +1393,15 @@ final class ViewBridgeCoordinator {
         guard let tabId = tabId,
               let serviceId = allocatedServiceId else {
             NSLog("⚠️ [Coordinator] Cannot send containerSizeChanged - no tabId or serviceId")
+            return
+        }
+
+        if rendererHostView != nil {
+            RendererProcessPool.shared.updateViewport(
+                tabId: tabId,
+                size: size,
+                isOverviewMode: isOverviewMode
+            )
             return
         }
 
@@ -1470,6 +1442,13 @@ final class ViewBridgeCoordinator {
         guard let tabId = tabId,
               let serviceId = allocatedServiceId else {
             ipcLog("⚠️ sendLeftPanelVisibilityChanged: missing tabId or allocatedServiceId")
+            return
+        }
+
+        if let rendererHostView, let tabConfig {
+            var config = tabConfig.toDictionary(isOverviewMode: isOverviewMode)
+            config["leftPanelVisible"] = visible
+            rendererHostView.apply(config: config)
             return
         }
 
@@ -1540,10 +1519,12 @@ final class ViewBridgeCoordinator {
         // 断开 ViewBridge 连接
         hostView?.disconnect()
         hostView = nil
+        rendererHostView?.prepareForReuse()
+        rendererHostView = nil
 
         if let tabId = tabId, allocatedServiceId != nil {
-            XPCServicePool.shared.releaseService(for: tabId)
-            ipcLog("📦 Coordinator cleanup: Tab \(String(tabId.uuidString.prefix(8))) released service and disconnected")
+            RendererProcessPool.shared.releaseRenderer(for: tabId)
+            ipcLog("📦 Coordinator cleanup: Tab \(String(tabId.uuidString.prefix(8))) released renderer")
         }
         allocatedServiceId = nil
         xpcServiceReady = false
@@ -2169,31 +2150,22 @@ struct UnifiedReactNativeLayer: View {
                       currentPosition.x, currentPosition.y)
 
         ZStack(alignment: .topLeading) {
-            // 🔑 关键：始终渲染 PersistentViewBridgeView，尺寸随模式变化（Media Query 风格）
-            if ViewBridgeHostView.isAvailable, isServiceAllocated, let serviceId = coordinator.allocatedServiceId {
-                PersistentViewBridgeView(
+            // Renderer surface stays mounted while Focus/Overview only changes
+            // its viewport and placement.
+            if isServiceAllocated, coordinator.allocatedServiceId != nil {
+                PersistentRendererProcessView(
                     tabId: tab.id,
-                    serviceBundleIdentifier: serviceId,
+                    fingerprint: fingerprint,
                     coordinator: coordinator,
-                    size: currentSize,  // 🔑 尺寸随模式变化：Focus=viewportSize, Overview=cardSize
-                    allowsHitTesting: isFocused && !isTransitioning  // 🔑 Overview 模式禁用，让手势穿透到 Grid
+                    size: currentSize,
+                    allowsHitTesting: isFocused && !isTransitioning,
+                    config: currentRendererConfig
                 )
                 .frame(width: currentSize.width, height: currentSize.height, alignment: .topLeading)
                 .onAppear {
                     isLoading = false
-                    if coordinator.hostView?.hasRemoteViewController == true && !coordinator.hasConnection {
-                        coordinator.hasConnection = true
-                        // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
-                        IPCBridgeAdapter.shared.markTabConnected(tab.id)
-                    }
-                    if coordinator.hasConnection && coordinator.xpcServiceReady && isCoordinatorViewportSizeValid {
-                        sendTabConfigIfReady()
-                    }
+                    coordinator.hasConnection = true
                 }
-            } else if !ViewBridgeHostView.isAvailable {
-                Text("ViewBridge not available")
-                    .foregroundColor(.secondary)
-                    .frame(width: currentSize.width, height: currentSize.height)
             } else if let error = errorMessage {
                 Text(error)
                     .foregroundColor(.red)
@@ -2342,8 +2314,34 @@ struct UnifiedReactNativeLayer: View {
             coordinator.lastSentReloadKey = nil
             sendTabConfigIfReady()
         }
-        // 🔑 尺寸变化由 PersistentViewBridgeView.updateNSView 统一处理
+        // 尺寸变化由 PersistentRendererProcessView.updateNSView 统一处理
         // 不再需要 onChange 监听，避免多源竞争导致尺寸抖动
+    }
+
+    private var currentRendererConfig: [String: Any] {
+        var config: [String: Any] = [
+            RuntimeBridgeContract.tabId: tab.id.uuidString,
+            RuntimeBridgeContract.title: tab.title,
+            "backgroundColor": tab.backgroundColor,
+            RuntimeBridgeContract.containerWidth: currentSize.width,
+            RuntimeBridgeContract.containerHeight: currentSize.height,
+            "isOverviewMode": !isFocused,
+            "leftPanelVisible": tab.leftPanelDefaultVisible,
+            "rightPanelVisible": tab.rightPanelDefaultVisible,
+            "bookmarks": bookmarks,
+            "recentHistory": recentHistory,
+            "reloadKey": tab.reloadNonce
+        ]
+        if let systemAppType = tab.systemTabType?.rawValue {
+            config[RuntimeBridgeContract.systemAppType] = systemAppType
+        }
+        if let unifiedScript = tab.unifiedScript {
+            config["unifiedScript"] = unifiedScript
+        }
+        if let leftPanelScript = tab.leftPanelScript {
+            config["leftPanelScript"] = leftPanelScript
+        }
+        return config
     }
 
     /// 检查 viewportSize 是否有效（不是初始的 100x100）- 用于直接访问 view 的 viewportSize
@@ -2364,26 +2362,21 @@ struct UnifiedReactNativeLayer: View {
             if !serviceAllocated {
                 serviceAllocated = true
             }
-            // 🔑 快速路径：检查是否已预热，直接标记 ready
+            // 快速路径：检查预热 Renderer 是否已连接。
             checkPrewarmStatusAndSetReady()
-            // 设置 XPC ready listener（备用）
-            setupXPCReadyListener()
             return
         }
 
         do {
-            let serviceId = try XPCServicePool.shared.allocateService(
+            let serviceId = try RendererProcessPool.shared.allocateRenderer(
                 for: tab.id,
                 fingerprint: fingerprint
             )
             coordinator.allocatedServiceId = serviceId
             // 🔑 触发 SwiftUI 重渲染
             serviceAllocated = true
-            // 🔑 快速路径：检查是否已预热
             checkPrewarmStatusAndSetReady()
-            // 设置 XPC ready listener（备用）
-            setupXPCReadyListener()
-        } catch let error as XPCServicePoolError {
+        } catch let error as RendererProcessPoolError {
             errorMessage = error.localizedDescription
         } catch {
             errorMessage = error.localizedDescription
@@ -2394,16 +2387,12 @@ struct UnifiedReactNativeLayer: View {
     private func checkPrewarmStatusAndSetReady() {
         guard let serviceId = coordinator.allocatedServiceId else { return }
 
-        // 检查 Service 是否已 ready（通过预热或之前的连接）
-        if XPCServicePool.shared.isServiceReady(bundleIdentifier: serviceId) {
+        if RendererProcessPool.shared.isRendererReady(identifier: serviceId) {
             if !coordinator.xpcServiceReady {
                 coordinator.xpcServiceReady = true
-                // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
-                IPCBridgeAdapter.shared.markServiceReady(serviceId)
-                NSLog("🔥 [Prewarm] Service %@ already ready, fast path enabled",
+                NSLog("🔥 [Prewarm] Renderer %@ already ready, fast path enabled",
                       serviceId.components(separatedBy: ".").last ?? "")
             }
-            // 立即尝试发送 config（如果连接也已建立）
             sendTabConfigIfReady()
         }
     }
@@ -2433,8 +2422,6 @@ struct UnifiedReactNativeLayer: View {
                 return
             }
 
-            // 标记到 pool，供后续新 Tab 查询
-            XPCServicePool.shared.markServiceReady(bundleIdentifier: serviceId)
             // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
             IPCBridgeAdapter.shared.markServiceReady(serviceId)
             coordinator.xpcServiceReady = true
@@ -2505,7 +2492,7 @@ struct UnifiedReactNativeLayer: View {
             return
         }
 
-        guard coordinator.hasConnection && coordinator.xpcServiceReady,
+        guard coordinator.hasConnection,
               let serviceId = coordinator.allocatedServiceId else {
             NSLog("⚠️ [sendTabConfig] tab=%@ SKIP: hasConnection=%d, xpcReady=%d, serviceId=%@",
                   tabIdShort, coordinator.hasConnection ? 1 : 0,
@@ -2556,16 +2543,7 @@ struct UnifiedReactNativeLayer: View {
               tab.systemTabType?.rawValue ?? "nil",
               bookmarks.count, recentHistory.count)
 
-        if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            let notificationName = "com.actro.tabConfig.\(ActroHostProcessId).\(serviceId)"
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name(notificationName),
-                object: nil,
-                userInfo: ["config": jsonString],
-                deliverImmediately: true
-            )
-        }
+        coordinator.rendererHostView?.apply(config: tabConfig)
     }
 }
 
@@ -2625,416 +2603,3 @@ struct ViewBridgeTabView: NSViewRepresentable {
     }
 }
 
-// MARK: - ViewBridge Multi-Process Tab View
-
-/// A view that displays tab content via ViewBridge XPC service
-/// Remote view size 跟随 TabPanel 实际尺寸，RN 自适应
-///
-/// 多进程架构：基于应用指纹分配进程
-/// - 相同应用（fingerprint 相同）= 共享同一个 RCTViewService 进程
-/// - 不同应用 = 分配不同的 RCTViewService 进程
-/// - 最多同时运行 4 个不同的 RN 应用
-struct ViewBridgeMultiProcessTabView: View {
-    let tab: Tab
-    let fingerprint: String  // 应用指纹
-    let containerSize: CGSize  // TabPanel 实际尺寸
-    let coordinator: ViewBridgeCoordinator
-    var isFocused: Bool = false  // 是否当前 focused
-
-    // 只保留 UI 相关的 @State，XPC 状态全部移到 coordinator
-    @State private var isLoading = true
-    @State private var errorMessage: String?
-    // 用于触发 UI 刷新的状态（coordinator 变化不会自动触发 SwiftUI 刷新）
-    @State private var serviceAllocated = false
-
-    // 监听 resize 状态，用于显示快照遮罩
-    @ObservedObject private var resizeState = WindowResizeState.shared
-
-    init(tab: Tab, fingerprint: String, containerSize: CGSize, coordinator: ViewBridgeCoordinator, isFocused: Bool = false) {
-        self.tab = tab
-        self.fingerprint = fingerprint
-        self.containerSize = containerSize
-        self.coordinator = coordinator
-        self.isFocused = isFocused
-
-        // 设置 coordinator 的 tabId 和 tabConfig
-        ipcLog("🏗️ ViewBridgeMultiProcessTabView.init: tab=\(String(tab.id.uuidString.prefix(8))), systemTabType=\(tab.systemTabType?.rawValue ?? "nil")")
-        coordinator.tabId = tab.id
-        coordinator.tabConfig = XPCTabConfig(
-            tabId: tab.id,
-            title: tab.title,
-            backgroundColor: tab.backgroundColor,
-            containerSize: containerSize,
-            systemAppType: tab.systemTabType?.rawValue,
-            unifiedScript: tab.unifiedScript,
-            leftPanelScript: tab.leftPanelScript,
-            leftPanelVisible: tab.leftPanelDefaultVisible,
-            rightPanelVisible: tab.rightPanelDefaultVisible,
-            bookmarks: [],
-            recentHistory: [],
-            reloadKey: tab.reloadNonce
-        )
-    }
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            // 多进程架构：基于应用指纹分配进程
-            // 使用 serviceAllocated 触发 UI 刷新，实际 serviceId 从 coordinator 获取
-            if ViewBridgeHostView.isAvailable, serviceAllocated, let serviceId = coordinator.allocatedServiceId {
-                ViewBridgeTabView(
-                    tabId: tab.id,
-                    contentSize: containerSize,
-                    coordinator: coordinator,
-                    serviceBundleIdentifier: serviceId
-                )
-                // 稳定的 id 确保 View 不会因为 containerSize 变化而被重建
-                .id(tab.id)
-                .frame(width: containerSize.width, height: containerSize.height, alignment: .topLeading)
-                .clipped()
-                .onAppear {
-                    isLoading = false
-
-                    // 设置 XPC service ready 监听器（如果还没设置）
-                    setupXPCReadyListener()
-
-                    // 设置连接建立回调
-                    coordinator.onConnectionEstablished = { [tab] in
-                        coordinator.hasConnection = true
-                        // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
-                        IPCBridgeAdapter.shared.markTabConnected(tab.id)
-                        // 只有当 XPC service 也准备好后才发送 config
-                        sendTabConfigIfReady()
-                    }
-
-                    // 🔑 检查连接是否已建立（可能在 onAppear 之前就建立了）
-                    if coordinator.hasConnection && coordinator.xpcServiceReady {
-                        NSLog("🔗 [MultiProcess.onAppear] Connection already established, sending config")
-                        sendTabConfigIfReady()
-                    }
-                }
-                .onChange(of: tab.unifiedScript) { _, _ in
-                    sendTabConfigToService()
-                }
-                .onChange(of: tab.systemTabType) { _, newValue in
-                    // 🔑 系统 Tab 类型变化时（如从 startPage 切换到 history），重新发送 config
-                    NSLog("🔄 [MultiProcess] systemTabType changed to %@, resending config",
-                          newValue?.rawValue ?? "nil")
-                    sendTabConfigToService()
-                }
-                .onChange(of: isFocused) { _, newValue in
-                    if newValue && coordinator.hasConnection {
-                        sendTabConfigToService()
-                    }
-                }
-            } else if !ViewBridgeHostView.isAvailable {
-                unavailableView
-            } else if errorMessage != nil {
-                // 显示错误（如进程池已满）
-                errorView(errorMessage!)
-            } else {
-                // 等待进程池分配
-                ProgressView("Allocating process...")
-                    .controlSize(.regular)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
-
-            if isLoading && serviceAllocated && errorMessage == nil {
-                loadingView
-            }
-
-            // 拖动 resize 时的快照遮罩层
-            // 复用 TabSnapshotCacheManager 的 Slot A (focusSnapshot)
-            if resizeState.isWaitingForSizeApplied,
-               resizeState.activeTabId == tab.id,
-               let snapshot = TabSnapshotCacheManager.shared.focusSnapshot(for: tab.id) {
-                Image(nsImage: snapshot)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: containerSize.width, height: containerSize.height)
-                    .clipped()
-                    .allowsHitTesting(false)
-            }
-        }
-        .frame(width: containerSize.width, height: containerSize.height, alignment: .topLeading)
-        .onAppear {
-            allocateServiceIfNeeded()
-        }
-        // 不在 onDisappear 中释放资源 - 资源由 ViewBridgeCoordinator.deinit 管理
-        // 这样可以避免 SwiftUI View 重建时意外释放 XPC 连接
-    }
-
-    /// 从进程池分配 service
-    private func allocateServiceIfNeeded() {
-        // 如果已经分配过，直接返回（但确保 @State 同步）
-        if coordinator.allocatedServiceId != nil {
-            if !serviceAllocated {
-                serviceAllocated = true
-            }
-            if let serviceId = coordinator.allocatedServiceId {
-                setupConnectionBindingListener(for: serviceId)
-                // 🔥 快速路径：检查是否已预热
-                checkPrewarmStatusAndSetReady(serviceId: serviceId)
-            }
-            return
-        }
-
-        do {
-            coordinator.allocatedServiceId = try XPCServicePool.shared.allocateService(for: tab.id, fingerprint: fingerprint)
-            // 触发 SwiftUI 重新渲染
-            serviceAllocated = true
-            if let serviceId = coordinator.allocatedServiceId {
-                setupConnectionBindingListener(for: serviceId)
-                // 🔥 快速路径：检查是否已预热
-                checkPrewarmStatusAndSetReady(serviceId: serviceId)
-            }
-        } catch let error as XPCServicePoolError {
-            errorMessage = error.localizedDescription
-        } catch {
-            errorMessage = "Failed to allocate RN process: \(error.localizedDescription)"
-        }
-    }
-
-    /// 🔥 快速路径：如果 Service 已预热，直接标记 ready
-    private func checkPrewarmStatusAndSetReady(serviceId: String) {
-        if XPCServicePool.shared.isServiceReady(bundleIdentifier: serviceId) {
-            if !coordinator.xpcServiceReady {
-                coordinator.xpcServiceReady = true
-                // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
-                IPCBridgeAdapter.shared.markServiceReady(serviceId)
-                NSLog("🔥 [MultiProcess.Prewarm] Service %@ already ready, fast path enabled",
-                      serviceId.components(separatedBy: ".").last ?? "")
-            }
-            sendTabConfigIfReady()
-        }
-    }
-
-    /// 设置 XPC service ready 通知监听器
-    private func setupXPCReadyListener() {
-        // 使用 coordinator 的状态，避免重复设置
-        guard coordinator.xpcReadyObserver == nil else { return }
-
-        // Get the allocated service bundle identifier from coordinator
-        guard let expectedBundleId = coordinator.allocatedServiceId else {
-            return
-        }
-
-        // 🔥 快速路径已在 checkPrewarmStatusAndSetReady 中处理
-        // 这里仅设置监听器作为备用
-
-        coordinator.xpcReadyObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.xpcServiceReady"),
-            object: nil,
-            queue: .main
-        ) { [coordinator, expectedBundleId] notification in
-            // Filter by bundle identifier - only accept notifications from our target service
-            guard let userInfo = notification.userInfo,
-                  let notifyingBundleId = userInfo["bundleId"] as? String,
-                  notifyingBundleId == expectedBundleId else {
-                return
-            }
-            // 过滤：只处理属于本进程的通知
-            if let hostPid = userInfo["hostProcessId"] as? Int32,
-               hostPid != ActroHostProcessId {
-                return
-            }
-
-            // 标记到 pool，供后续新 Tab 查询
-            XPCServicePool.shared.markServiceReady(bundleIdentifier: expectedBundleId)
-
-            // 🔑 通知 IPCBridgeAdapter，同步状态到 IPCInteractionManager
-            IPCBridgeAdapter.shared.markServiceReady(expectedBundleId)
-
-            // Broadcast Metro config to XPC service before it creates RCTBridge
-            Task { @MainActor in
-                if let port = MetroManager.shared.actualPort {
-                    let config: [String: Any] = [
-                        "host": MetroManager.shared.address,
-                        "port": port
-                    ]
-                    DistributedNotificationCenter.default().postNotificationName(
-                        NSNotification.Name("com.actro.metro.config"),
-                        object: nil,
-                        userInfo: config,
-                        deliverImmediately: true
-                    )
-                }
-            }
-
-            coordinator.xpcServiceReady = true
-            sendTabConfigIfReady()
-        }
-
-        // 🔑 设置 listenerReady 监听器 - 解决竞态条件
-        setupListenerReadyListenerForMultiProcess(serviceId: expectedBundleId)
-    }
-
-    /// 设置 Service "listener ready" 通知监听器 (MultiProcess 版本)
-    private func setupListenerReadyListenerForMultiProcess(serviceId: String) {
-        guard coordinator.listenerReadyObserver == nil else { return }
-
-        let listenerReadyName = "com.actro.listenerReady.\(ActroHostProcessId).\(serviceId)"
-        ipcLog("🎧 [MultiProcess] Setting up listenerReady listener: \(listenerReadyName)")
-
-        coordinator.listenerReadyObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name(listenerReadyName),
-            object: nil,
-            queue: .main
-        ) { [weak coordinator] notification in
-            guard let coordinator = coordinator else { return }
-            guard let userInfo = notification.userInfo,
-                  let notifyingServiceId = userInfo["serviceId"] as? String,
-                  notifyingServiceId == serviceId else { return }
-
-            let tabIdShort = coordinator.tabId?.uuidString.prefix(8) ?? "nil"
-            ipcLog("📥 [MultiProcess.HOST] Received listenerReady for tab=\(tabIdShort), re-sending containerSizeChanged")
-
-            // 🔑 重置 lastSentContainerSize 强制重新发送
-            coordinator.resetLastSentContainerSize()
-            coordinator.trySendInitialConfig()
-        }
-    }
-
-    /// 监听 service 端的 connectionCreated，并发送 tabId->internalId 显式绑定
-    /// Only processes notifications that match our tabId to avoid cross-tab binding conflicts
-    private func setupConnectionBindingListener(for serviceId: String) {
-        guard coordinator.connectionCreatedObserver == nil else { return }
-
-        coordinator.connectionCreatedObserver = DistributedNotificationCenter.default().addObserver(
-            forName: NSNotification.Name("com.actro.xpcConnectionCreated"),
-            object: nil,
-            queue: .main
-        ) { [weak coordinator, tabId = tab.id] notification in
-            _ = coordinator  // silence unused capture warning
-            guard let info = notification.userInfo,
-                  let bundleId = info["bundleId"] as? String,
-                  bundleId == serviceId,
-                  let internalId = info["internalId"] as? String else { return }
-            // 过滤：只处理属于本进程的通知
-            if let hostPid = info["hostProcessId"] as? Int32,
-               hostPid != ActroHostProcessId {
-                return
-            }
-
-            // CRITICAL: Only process if this notification is for OUR tab
-            if let notificationTabId = info[RuntimeBridgeContract.tabId] as? String {
-                guard notificationTabId == tabId.uuidString else { return }
-            }
-
-            let bindName = "com.actro.bindTab.\(ActroHostProcessId).\(serviceId)"
-            let bindInfo: [String: Any] = [
-                RuntimeBridgeContract.tabId: tabId.uuidString,
-                "internalId": internalId
-            ]
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name(bindName),
-                object: nil,
-                userInfo: bindInfo,
-                deliverImmediately: true
-            )
-        }
-    }
-
-    /// 仅当 ViewBridge 连接和 XPC service listener 都就绪时才发送 config
-    private func sendTabConfigIfReady() {
-        guard coordinator.hasConnection && coordinator.xpcServiceReady else {
-            return
-        }
-        sendTabConfigToService()
-    }
-
-    private var loadingView: some View {
-        VStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.small)
-            Text("Connecting to ViewBridge service...")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor).opacity(0.9))
-    }
-
-    private var unavailableView: some View {
-        VStack(spacing: 16) {
-            Image(systemName: "xmark.circle")
-                .font(.system(size: 48))
-                .foregroundColor(.red)
-            Text("ViewBridge Not Available")
-                .font(.headline)
-            Text("The ViewBridge framework is not available on this system.")
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-
-    /// Send tab configuration to the ViewBridge service via DistributedNotificationCenter
-    private func sendTabConfigToService() {
-        // Get the target service bundle identifier from coordinator
-        guard let targetServiceId = coordinator.allocatedServiceId else {
-            return
-        }
-
-        // Build tab config dictionary
-        var tabConfig: [String: Any] = [
-            RuntimeBridgeContract.tabId: tab.id.uuidString,
-            RuntimeBridgeContract.title: tab.title,
-            "backgroundColor": tab.backgroundColor,
-            RuntimeBridgeContract.containerWidth: containerSize.width,
-            RuntimeBridgeContract.containerHeight: containerSize.height,
-            // 🔑 从状态管理器读取最新状态，而不是 coordinator 本地缓存
-            "isOverviewMode": ViewBridgeCoordinatorManager.shared.currentOverviewMode
-        ]
-
-        // Add optional scripts
-        if let unifiedScript = tab.unifiedScript {
-            tabConfig["unifiedScript"] = unifiedScript
-        }
-        if let leftPanelScript = tab.leftPanelScript {
-            tabConfig["leftPanelScript"] = leftPanelScript
-        }
-        if let rightPanelScript = tab.rightPanelScript {
-            tabConfig["rightPanelScript"] = rightPanelScript
-        }
-        if let guestScript = tab.guestScript {
-            tabConfig["guestScript"] = guestScript
-        }
-
-        // Add system app type if present (RN expects the canonical bridge key)
-        if let systemTabType = tab.systemTabType {
-            tabConfig[RuntimeBridgeContract.systemAppType] = systemTabType.rawValue
-        }
-
-        // Serialize to JSON and send using service-specific notification name
-        if let jsonData = try? JSONSerialization.data(withJSONObject: tabConfig),
-           let jsonString = String(data: jsonData, encoding: .utf8) {
-            let notificationName = "com.actro.tabConfig.\(ActroHostProcessId).\(targetServiceId)"
-            DistributedNotificationCenter.default().postNotificationName(
-                NSNotification.Name(notificationName),
-                object: nil,
-                userInfo: ["config": jsonString],
-                deliverImmediately: true
-            )
-        }
-    }
-
-    private func errorView(_ message: String) -> some View {
-        VStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle")
-                .font(.system(size: 32))
-                .foregroundColor(.orange)
-            Text("Connection Error")
-                .font(.headline)
-            Text(message)
-                .font(.system(size: 12))
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(nsColor: .windowBackgroundColor))
-    }
-}

@@ -1,7 +1,9 @@
 # Actro Multi-Process Rendering - 阶段性总结
 
-> **当前分支**: `experiment/viewbridge`
-> **主攻方向**: ViewBridge Framework (NSRemoteView)
+> 历史实验记录。现行路径见 [Renderer-Process-Pool.md](Renderer-Process-Pool.md)。
+>
+> **当时分支**: `experiment/viewbridge`
+> **当时主攻**: ViewBridge Framework (NSRemoteView)
 
 ---
 

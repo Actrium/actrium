@@ -110,9 +110,9 @@ const customConfig = {
       require.resolve('./src/ensure-console-assert.js'),
       ...defaultPolyfills,
     ],
-    getModulesRunBeforeMainModule: () => [
-      require.resolve('./src/ensure-console-assert.js'),
-    ],
+    // `ensure-console-assert.js` is already emitted as a raw polyfill above.
+    // Registering the same file as a pre-main CommonJS module makes Metro append
+    // `__r(<id>)` without emitting a matching `__d(...)` definition.
   },
   transformer: {
     asyncRequireModulePath,

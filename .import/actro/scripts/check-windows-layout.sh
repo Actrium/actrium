@@ -154,24 +154,6 @@ check_pattern_in_each_file \
   docs/migration/windows-client.md
 
 check_pattern_in_each_file \
-  'third_party/rustdesk-actr' \
-  "Windows docs keep rustdesk-actr separate from the browser client" \
-  "Windows docs do not separate rustdesk-actr from the Windows browser client" \
-  apps/windows/actro/README.md \
-  docs/migration/windows-client.md
-
-tracked_rustdesk_app_files="$(
-  git ls-files apps/rustdesk-actr 2>/dev/null || true
-)"
-
-if [[ -n "$tracked_rustdesk_app_files" ]]; then
-  print_failure "tracked rustdesk scratch files exist under apps/"
-  printf '%s\n' "$tracked_rustdesk_app_files"
-else
-  print_ok "rustdesk scratch app is not tracked"
-fi
-
-check_pattern_in_each_file \
   'Microsoft\.Web\.WebView2' \
   "Windows project references WebView2" \
   "Windows project does not reference WebView2" \

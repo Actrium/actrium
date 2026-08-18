@@ -27,7 +27,6 @@ end
 
 target 'Actro' do
   platform :macos, '14.0'
-  use_actro_react_native
 end
 
 target 'ActroTests' do
@@ -35,8 +34,8 @@ target 'ActroTests' do
   use_actro_react_native
 end
 
-# ViewBridge XPC service with React Native
-target 'ActroViewService' do
+# Homogeneous browser-style Renderer Helper with React Native
+target 'ActroRenderer' do
   platform :macos, '14.0'
   use_actro_react_native
 end
