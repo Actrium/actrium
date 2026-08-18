@@ -92,6 +92,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         file \
         openssh-client \
         sudo \
+        python3 \
+        python3-pip \
+        python3-venv \
+        lsb-release \
     && rm -rf /var/lib/apt/lists/*
 
 ###############################################################################
@@ -209,7 +213,11 @@ RUN set -eux; \
     install_binary wasm-tools \
         "https://github.com/bytecodealliance/wasm-tools/releases/download/v1.253.0/wasm-tools-1.253.0-${tools_arch}.tar.gz" \
         4e2898f7ca3bd0536218ed9b7b36ff7b86954c57ae0e6272fde69728cbe01088; \
-    wasm-pack --version; wasm-component-ld --version; wasm-tools --version
+    install_binary sccache \
+        "https://github.com/mozilla/sccache/releases/download/v0.10.0/sccache-v0.10.0-x86_64-unknown-linux-musl.tar.gz" \
+        1fbb35e135660d04a2d5e42b59c7874d39b3deb17de56330b25b713ec59f849b; \
+    wasm-pack --version; wasm-component-ld --version; wasm-tools --version; \
+    sccache --version
 
 # protoc — the CI uses arduino/setup-protoc@v3 with vars.PROTOC_VERSION.
 # We pin to a release from the protobuf repo and drop it on PATH.
@@ -229,10 +237,139 @@ RUN set -eux; \
     rm /tmp/protoc.zip; \
     protoc --version
 
+# mold linker — optional fast ld for CI link steps. The image only ships the
+# binary; activation is per-job via RUSTFLAGS="-C link-arg=-fuse-ld=mold"
+# (injected by the runner manifest), so local/other uses are unaffected.
+# The tarball ships bin/mold + bin/ld.mold (the name gcc/clang look up for
+# -fuse-ld=mold), extracted into /usr/local.
+# GITHUB_PROXY can prefix the github.com URL in regions where release
+# downloads are slow.
+RUN set -eux; \
+    mold_url="https://github.com/rui314/mold/releases/download/v2.40.4/mold-2.40.4-x86_64-linux.tar.gz"; \
+    if [ -n "${GITHUB_PROXY}" ]; then mold_url="${GITHUB_PROXY%/}/${mold_url}"; fi; \
+    curl -fsSL --retry 3 --retry-all-errors -o /tmp/mold.tar.gz "$mold_url"; \
+    echo "4c999e19ffa31afa5aa429c679b665d5e2ca5a6b6832ad4b79668e8dcf3d8ec1  /tmp/mold.tar.gz" | sha256sum --check --status; \
+    tar xzf /tmp/mold.tar.gz --strip-components=1 -C /usr/local; \
+    rm /tmp/mold.tar.gz; \
+    mold --version; \
+    # prove -fuse-ld=mold resolves through the compiler driver
+    echo 'int main(void){return 0;}' | cc -x c - -fuse-ld=mold -o /tmp/moldtest && /tmp/moldtest && rm /tmp/moldtest
+
+###############################################################################
+# Stage 3.5: hosted toolcache + Android SDK
+#
+# actions/setup-python, setup-node, setup-java honor $RUNNER_TOOL_CACHE:
+# with a matching pre-populated entry they SKIP the download entirely.
+# android-actions/setup-android honors $ANDROID_SDK_ROOT the same way.
+# Without this, every job re-downloads its toolchain from github.com —
+# 5-10 minutes per job from slow links. Layout follows actions/tool-cache
+# convention: <tool>/<semver>/<arch>/ plus an <arch>.complete marker file
+# INSIDE <semver>/ (e.g. Python/3.11.16/x64.complete). The marker lives
+# next to the <arch>/ dir and its name is exactly `<arch>.complete` —
+# not `<semver>.<arch>.complete` — or tc.find() misses it and the action
+# silently re-downloads.
+###############################################################################
+FROM toolchain AS toolcache
+
+ARG GITHUB_PROXY
+# Pinned toolcache versions. Bump to upgrade; workflows ask for loose ranges
+# ("3.11", "24", "17") so any patch version here satisfies them.
+ARG PY311=3.11.16
+ARG PY311_TAG=3.11.16-31661435402
+ARG PY313=3.13.15
+ARG PY313_TAG=3.13.15-31064747964
+ARG NODE_VERSION=24.19.0
+# Adoptium release string; directory name in the toolcache must be a semver
+# that satisfies "17".
+ARG JDK_VERSION=17.0.20+8
+# cmdline-tools build id from dl.google.com (12.0 stable).
+ARG CMDLINE_TOOLS=11076708
+
+USER root
+
+ENV RUNNER_TOOL_CACHE=/opt/hostedtoolcache \
+    ANDROID_HOME=/usr/local/lib/android/sdk \
+    ANDROID_SDK_ROOT=/usr/local/lib/android/sdk
+
+# Python 3.11 + 3.13 into the toolcache (prebuilt tarballs from the same
+# actions/python-versions releases setup-python downloads).
+RUN set -eux; \
+    install_python() { \
+        local ver="$1" tag="$2"; \
+        local dest="$RUNNER_TOOL_CACHE/Python/${ver}/x64"; \
+        local url="https://github.com/actions/python-versions/releases/download/${tag}/python-${ver}-linux-22.04-x64.tar.gz"; \
+        if [ -n "${GITHUB_PROXY}" ]; then url="${GITHUB_PROXY%/}/${url}"; fi; \
+        mkdir -p "$dest"; \
+        curl -fsSL --retry 3 --retry-all-errors "$url" | tar xz -C "$dest"; \
+        touch "$RUNNER_TOOL_CACHE/Python/${ver}/x64.complete"; \
+        # setup-python's own install path creates python/pip aliases on top
+        # of the tarball (bin/ ships python3 only); replicate them so
+        # scripts calling `python` / `pip` work against the cached copy.
+        ln -sf python3 "$dest/bin/python"; \
+        ln -sf pip3 "$dest/bin/pip"; \
+        "$dest/bin/python3" --version; "$dest/bin/python" --version; \
+    }; \
+    install_python "$PY311" "$PY311_TAG"; \
+    install_python "$PY313" "$PY313_TAG"
+
+# Node 24 into the toolcache (nodejs.org; no GH proxy redirect needed there,
+# but allow it for parity in case the arg points at a mirror of nodejs.org).
+RUN set -eux; \
+    dest="$RUNNER_TOOL_CACHE/node/${NODE_VERSION}/x64"; \
+    mkdir -p "$dest"; \
+    curl -fsSL --retry 3 --retry-all-errors "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-x64.tar.gz" \
+      | tar xz --strip-components=1 -C "$dest"; \
+    touch "$RUNNER_TOOL_CACHE/node/${NODE_VERSION}/x64.complete"; \
+    "$dest/bin/node" --version
+
+# Temurin JDK 17 into the toolcache (adoptium GitHub release; GITHUB_PROXY
+# applies). The extracted JDK also drives sdkmanager below.
+RUN set -eux; \
+    dest="$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64"; \
+    jdk_ver_noplus="$(echo "$JDK_VERSION" | tr '+' '_')"; \
+    jdk_ver_url="$(echo "$JDK_VERSION" | sed 's/+/%2B/')"; \
+    url="https://github.com/adoptium/temurin17-binaries/releases/download/jdk-${jdk_ver_url}/OpenJDK17U-jdk_x64_linux_hotspot_${jdk_ver_noplus}.tar.gz"; \
+    if [ -n "${GITHUB_PROXY}" ]; then url="${GITHUB_PROXY%/}/${url}"; fi; \
+    mkdir -p "$dest"; \
+    curl -fsSL --retry 3 --retry-all-errors "$url" | tar xz --strip-components=1 -C "$dest"; \
+    touch "$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64.complete"; \
+    "$dest/bin/java" -version
+
+# Android cmdline-tools + the exact packages ci-kotlin installs
+# (platforms;android-34, build-tools;34.0.0). setup-android then finds a
+# valid SDK at $ANDROID_SDK_ROOT and only runs sdkmanager for missing
+# packages — of which there are none. dl.google.com downloaded directly
+# (no GitHub proxy applies).
+RUN set -eux; \
+    mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"; \
+    curl -fsSL --retry 3 --retry-all-errors -o /tmp/cmdline-tools.zip \
+      "https://dl.google.com/android/repository/commandlinetools-linux-${CMDLINE_TOOLS}_latest.zip"; \
+    unzip -q /tmp/cmdline-tools.zip -d "$ANDROID_SDK_ROOT/cmdline-tools"; \
+    mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"; \
+    rm /tmp/cmdline-tools.zip; \
+    export JAVA_HOME="$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64"; \
+    sdkm="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"; \
+    yes | "$sdkm" --licenses >/dev/null; \
+    "$sdkm" --install "platforms;android-34" "build-tools;34.0.0"; \
+    "$sdkm" --list_installed | grep -E 'android-34|build-tools;34'
+
+# Everything above installed as root; hand the toolcache + SDK to the
+# runner user so job-time sdkmanager/package writes also work.
+RUN chown -R runner:runner /opt/hostedtoolcache /usr/local/lib/android
+
 ###############################################################################
 # Stage 4: final image
 ###############################################################################
-FROM toolchain AS final
+FROM toolcache AS final
+
+# Re-declare toolcache version ARGs: Docker ARGs do NOT cross stage boundaries,
+# so without these the ENV PATH and sanity RUN below would need hardcoded
+# versions. Keeping them as ARG lets `--build-arg NODE_VERSION=...` propagate
+# all the way through.
+ARG PY311=3.11.16
+ARG PY313=3.13.15
+ARG NODE_VERSION=24.19.0
+ARG JDK_VERSION=17.0.20+8
 
 # Default user: runner (non-root, matches GitHub Actions convention).
 USER runner
@@ -244,15 +381,41 @@ WORKDIR /home/runner
 ENV RUNNER_MANUALLY_TRAP_SIG=1 \
     ACTIONS_RUNNER_PRINT_LOG_TO_STDOUT=1
 
+# GitHub-hosted runners keep node/java on PATH system-wide; jobs and Rust
+# tests that shell out to `npm`/`java` directly (without a setup-* step,
+# e.g. cli/tests/typescript_gen_scenarios.rs runs `npm install`) depend on
+# that. Put the toolcache bins on PATH so this image matches. setup-*
+# steps still hit the toolcache for version resolution as usual.
+ENV PATH="/opt/hostedtoolcache/node/${NODE_VERSION}/x64/bin:/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64/bin:${PATH}"
+
 # Sanity-check the toolchain is on PATH at build time; a missing binary
 # fails the build instead of failing a CI job later.
 RUN set -eux; \
     rustc --version; cargo --version; rustfmt --version; cargo-clippy --version; \
     protoc --version; git --version; jq --version; sqlite3 --version; \
+    python3 --version; pip3 --version; lsb_release -d; \
+    node --version; npm --version; java -version; \
+    sccache --version; mold --version; \
     rustup run nightly rustc --version; \
     rustup component list --installed | grep -qE 'llvm-tools'; \
     rustup target list --installed | grep -q wasm32-unknown-unknown; \
-    rustup target list --installed | grep -q wasm32-wasip2
+    rustup target list --installed | grep -q wasm32-wasip2; \
+    \
+    # toolcache: every entry setup-* should find must exist WITH its
+    # .complete marker, else the action silently re-downloads at job time.
+    /opt/hostedtoolcache/Python/${PY311}/x64/bin/python3 --version; \
+    /opt/hostedtoolcache/Python/${PY311}/x64/bin/python --version; \
+    /opt/hostedtoolcache/Python/${PY311}/x64/bin/pip --version; \
+    /opt/hostedtoolcache/Python/${PY313}/x64/bin/python3 --version; \
+    /opt/hostedtoolcache/node/${NODE_VERSION}/x64/bin/node --version; \
+    /opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64/bin/java -version; \
+    test -f /opt/hostedtoolcache/Python/${PY311}/x64.complete; \
+    test -f /opt/hostedtoolcache/Python/${PY313}/x64.complete; \
+    test -f /opt/hostedtoolcache/node/${NODE_VERSION}/x64.complete; \
+    test -f "/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64.complete"; \
+    JAVA_HOME=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64 \
+      "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --list_installed \
+      | grep -qE 'platforms;android-34|build-tools;34.0.0'
 
 # The runner agent is registered at container start (ARC injects the JIT
 # config via env, or config.sh runs manually); no ENTRYPOINT here so both

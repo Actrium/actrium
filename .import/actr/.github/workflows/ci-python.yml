@@ -7,10 +7,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   workload:
     name: Python Workload Authoring Check
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -22,18 +26,6 @@ jobs:
           cache: "pip"
           cache-dependency-path: bindings/python/actr-workload/pyproject.toml
 
-      - name: Set up Rust
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-
-      - uses: Swatinem/rust-cache@v2
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
 
       - name: Install wasm-tools
         run: cargo install wasm-tools --version 1.253.0 --locked

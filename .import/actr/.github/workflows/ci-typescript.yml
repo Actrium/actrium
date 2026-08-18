@@ -7,10 +7,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-build:
     name: TypeScript Format, Lint And Build
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
 
@@ -21,16 +25,6 @@ jobs:
           cache: "npm"
           cache-dependency-path: bindings/typescript/package.json
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
-
-      - uses: Swatinem/rust-cache@v2
 
       - name: Install dependencies
         working-directory: bindings/typescript
@@ -58,7 +52,7 @@ jobs:
 
   workload:
     name: TypeScript Workload Authoring Check
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - uses: actions/checkout@v5
 

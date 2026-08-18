@@ -14,7 +14,7 @@ defaults:
 jobs:
   build:
     name: Build & Check
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -31,12 +31,6 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
-
-      - name: Set up protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
 
       - name: Smoke generate typed workload
         run: |

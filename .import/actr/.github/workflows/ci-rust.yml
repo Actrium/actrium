@@ -12,16 +12,20 @@ env:
   # the fixture tests out — symmetric with ci-gate.yml.
   ACTR_REQUIRE_WASM_FIXTURE: "1"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   audit:
     name: Dependency Audit
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v5
       - name: Install cargo-audit
-        run: cargo install cargo-audit --version 0.22.2 --locked
+        run: cargo install cargo-audit --version 0.22.2 --locked --force
       - name: Audit Cargo.lock
         # Existing advisories outside the WASM host are tracked separately:
         # maxminddb (framework GeoIP), protobuf 2 (prometheus), rsa (TURN).
@@ -33,17 +37,12 @@ jobs:
 
   format:
     name: Format Check
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt
-      - uses: Swatinem/rust-cache@v2
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -54,15 +53,12 @@ jobs:
   # fast-fails before the heavier build / test jobs.
   wit-lint:
     name: WIT shape consistency
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
       - name: WIT <-> DynClib ABI drift check
         run: cargo run -p wit-lint --release
 
@@ -84,23 +80,12 @@ jobs:
 
   build:
     name: Build
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          # wasm32-wasip2 is required for the Component Model guest fixture
-          # rebuilt by core/hyper/build.rs under --all-features (wasm-engine).
-          targets: wasm32-wasip2,wasm32-unknown-unknown
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
       # Component Model toolchain:
       # - wasm-component-ld >= 0.5.22 is required to link the V2 async-world
       #   guest fixture (actr:workload@0.3.0) built by core/hyper/build.rs; that
@@ -116,7 +101,6 @@ jobs:
           cargo install wasm-tools --version 1.253.0 --locked
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.15.0 --locked
-      - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash bindings/web/scripts/sync-cli-assets.sh --build
       - name: Build workspace
@@ -126,21 +110,12 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-wasip2,wasm32-unknown-unknown
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ github.token }}
-          version: ${{ vars.PROTOC_VERSION }}
       # Phase 1 Component Model toolchain — see `build` job for rationale.
       - name: Install wasm Component Model toolchain
         run: |
@@ -148,7 +123,6 @@ jobs:
           cargo install wasm-tools --version 1.253.0 --locked
       - name: Install wasm-pack
         run: cargo install wasm-pack --version 0.15.0 --locked
-      - uses: Swatinem/rust-cache@v2
       - name: Generate CLI web runtime assets
         run: bash bindings/web/scripts/sync-cli-assets.sh --build
       - name: Verify RFC-0400 timer inventory
@@ -158,20 +132,12 @@ jobs:
 
   dynclib-e2e:
     name: Dynclib E2E
-    runs-on: ubuntu-latest-m
+    runs-on: [self-hosted, Linux, X64]
     permissions:
       contents: read
       actions: read
     steps:
       - uses: actions/checkout@v5
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-          version: ${{ vars.PROTOC_VERSION }}
-      - uses: Swatinem/rust-cache@v2
       - name: Run dynclib tests
         run: |
           set -euo pipefail

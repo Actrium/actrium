@@ -12,7 +12,7 @@ env:
 
 concurrency:
   group: e2e-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   package-runtime-echo-e2e:
