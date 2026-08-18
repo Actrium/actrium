@@ -27,4 +27,4 @@ IPC 调试日志：
 
 系统日志（含 RN/JS Error）：
 
-`log stream --predicate 'process CONTAINS "Actro" OR process CONTAINS "RCTViewService"' --style compact`
+`log stream --predicate 'process CONTAINS "Actro" OR process CONTAINS "ActroRenderer"' --style compact`

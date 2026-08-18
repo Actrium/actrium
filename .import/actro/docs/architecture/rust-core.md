@@ -702,9 +702,8 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
   after the migration, the view models also backfill existing local http/https
   history/bookmarks into `actro_browser.db` with idempotent upserts and
   platform-scoped meta flags. Full native tab state still serves system tabs,
-  ACTR tabs, SSH/SFTP, remote desktop, and tab groups. Do not store
-  `actro://`, ACTR package, SSH/SFTP, system, or remote-desktop tabs in the
-  browser page schema.
+  ACTR tabs, and tab groups. Do not store `actro://`, ACTR package, or system
+  tabs in the browser page schema.
 - iOS now has the matching first product call path through
   `apps/ios/actro/Actro/Database/BrowserDataRepository.swift`. It records
   http/https `HistoryItem` visits from `HistoryViewModel`, writes browser-page
@@ -960,21 +959,7 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
      native adapters can expose direct UniFFI wrappers once they need native-side
      config generation.
 
-6. **Terminal, SSH, and SFTP engine**
-   - Already lives in `crates/actro-terminal`.
-   - Terminal search and URL detection now have Rust-owned row helper APIs.
-     The macOS app and terminal service helper structs now call those generated
-     bindings for search and detection.
-   - Continue moving grid helper logic into Rust when those helpers are needed
-     beyond macOS or when another platform consumes terminal rows.
-
-7. **Remote desktop protocol/video/input core**
-   - Already lives in `crates/actro-remote`.
-   - Platform layers should supply capture/render/input adapter code; protocol,
-     frame collection, display negotiation, and input message construction stay
-     in Rust.
-
-8. **Vault cryptography and migration core**
+6. **Vault cryptography and migration core**
    - Key derivation, encryption/decryption, vault item serialization, schema
      migration, and password verification should become Rust-owned before adding
      mobile/Windows vaults.
@@ -1041,9 +1026,8 @@ keeping Swift/Kotlin workflow code readable and avoiding repeated tiny FFI hops.
 3. Replace TS/Swift/Kotlin manifest and bridge validators with calls into
    `actro-core`.
 4. Move shared persistence and vault logic once domain types are consumed.
-5. Keep terminal, vault, and remote desktop as separate Rust crates because they
-   have heavier or security-sensitive dependencies and independent
-   release/build surfaces.
+5. Keep vault cryptography in its own Rust crate because it has a
+   security-sensitive dependency and release surface.
 
 ## Current Actro Core FFI Surface
 
@@ -1273,8 +1257,7 @@ Packages instead of copying generated Swift into app targets:
 - `platform/apple/packages/ActroCore`
 - `platform/apple/packages/ActroVault`
 
-This keeps each UniFFI module's generated helper symbols isolated and avoids
-collisions with other generated bindings such as terminal/remote modules.
+This keeps each UniFFI module's generated helper symbols isolated.
 Each crate's `build-xcframework.sh` produces a multi-platform XCFramework with
 macOS, iOS device, and iOS simulator slices, then syncs the generated Swift
 binding into the matching package.
@@ -1394,8 +1377,8 @@ fallbacks, contract metadata, permissions, history-system-app data,
 macOS tab bundle fingerprints now delegate their stable hashing rule to
 `ActroCore.stableContentFingerprint`. The Rust helper owns only the
 deterministic SHA-256-prefix contract used to name script bundles/process
-groups; macOS still owns `TabContentType`, Web/SSH/SFTP/remote-desktop routing,
-XPC service selection, and lifecycle orchestration in Swift.
+groups; macOS still owns `TabContentType`, Web/RN/native routing, XPC service
+selection, and lifecycle orchestration in Swift.
 `check:rust-boundary` guards against reintroducing local `CryptoKit` /
 `SHA256.hash` fingerprint logic in the macOS tab model.
 
@@ -1620,9 +1603,8 @@ local or CI regeneration:
 
 - `runtime` regenerates the React Native TypeScript contract module from
   `actro-core`.
-- `apple` builds `ActroTerminal`, `ActroCore`, and `ActroVault` XCFrameworks,
-  refreshes terminal Swift bindings in the macOS targets, and refreshes core
-  and vault Swift files in `platform/apple/packages/*`.
+- `apple` builds `ActroCore` and `ActroVault` XCFrameworks and refreshes their
+  Swift files in `platform/apple/packages/*`.
 - `android` builds the generated Kotlin bindings and JNI libraries in
   `packages/actro-native-kotlin`, and regenerates the Android app's
   Rust-owned compile-time persistence contract.
@@ -1632,7 +1614,6 @@ Heavy binary slices are local build artifacts and are ignored by git:
 
 - `crates/actro-core/ActroCore.xcframework/**/libactro_core.a`
 - `crates/actro-vault/ActroVault.xcframework/**/libactro_vault.a`
-- `crates/actro-terminal/ActroTerminal.xcframework/**/libactro_terminal.a`
 - `packages/actro-native-kotlin/src/main/jniLibs/**/*.so`
 
 Lightweight package manifests, generated Swift/Kotlin/TypeScript binding
@@ -1641,8 +1622,7 @@ Use `npm run check:generated` to verify that the lightweight Rust-generated
 TypeScript and Android contract sources are present, match the current
 generators, and are consumed through the runtime `coreContract` adapter instead
 of direct generated-file imports; `npm run verify:all` includes this check.
-This matches the existing terminal/remote crate pattern without forcing large
-binary blobs into normal source commits.
+This keeps large binary blobs out of normal source commits.
 
 ## Next Rust Candidates
 
@@ -1736,16 +1716,7 @@ binary blobs into normal source commits.
      stay platform-owned unless multiple producers/consumers prove the shared
      contract is simpler than local code.
 
-3. **Terminal row/grid adapter cleanup**
-   - `crates/actro-terminal` now exports `search_terminal_rows`,
-     `terminal_search_match_contains`, `detect_terminal_urls`, and
-     `terminal_url_at`. macOS `TerminalSearchModel.swift` and
-     `TerminalURLDetector.swift` now call the Rust search/detection APIs.
-   - The next step is to move shared row extraction/grid adapter rules deeper
-     into Rust when iOS, Android, or Windows gains terminal UI call sites, while
-     keeping per-cell hover/current-match checks local to the UI hot path.
-
-4. **ASR post-processing split**
+3. **ASR post-processing split**
    - `actro-core` now owns ASR language/model-dir mapping, bundled model
      asset/storage path planning, ready-marker naming, Vosk final and partial
      JSON result parsing, segmented Chinese final-result punctuation rules, and
@@ -1759,30 +1730,13 @@ binary blobs into normal source commits.
      Vosk/Kotlin/HanLP/Rust call chain keeps creating unnecessary boundary
      hopping.
 
-5. **Remaining native package integrity wiring**
+4. **Remaining native package integrity wiring**
    - `actro-core` now exposes manifest integrity planning through both the RN
      generated TypeScript contract and native UniFFI. RN plus macOS/iOS now
      execute file hashing against that shared plan. The next step is wiring the
      future Windows loader, plus any future Android native loader if one appears,
      to the same contract. Extract the Apple Swift helper only if more Apple
      loader call sites appear.
-
-## Current Actro Terminal FFI Surface
-
-`actro-terminal` remains the Rust owner for SSH, terminal grid extraction, and
-SFTP. It now also exports pure terminal text helper APIs:
-
-- `search_terminal_rows`
-- `terminal_search_match_contains`
-- `detect_terminal_urls`
-- `terminal_url_at`
-
-The generated Swift bindings were regenerated into the macOS app, terminal
-service, and SFTP service targets. The macOS app and terminal service
-`TerminalSearchModel.swift` and `TerminalURLDetector.swift` files are now thin
-adapters over Rust search/detection calls. They still keep hot-path range
-checks in Swift so cell rendering does not cross the FFI boundary for every
-hover or highlight lookup.
 
 ## Current Actro Vault FFI Surface
 

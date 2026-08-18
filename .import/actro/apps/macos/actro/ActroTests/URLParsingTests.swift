@@ -28,6 +28,16 @@ struct URLParsingTests {
         #expect(url?.absoluteString == "actro://settings")
     }
 
+    @Test func actroArchiveURL_isNotMisclassifiedAsLocalPath() {
+        #expect(vm.isLocalFilePath("actro:///tmp/example.actr") == false)
+        #expect(vm.parseURL("actro:///tmp/example.actr")?.path == "/tmp/example.actr")
+    }
+
+    @Test func plainArchivePath_isStillRecognizedAsLocalPath() {
+        #expect(vm.isLocalFilePath("/tmp/example.actr"))
+        #expect(vm.isLocalFilePath("example.actr"))
+    }
+
     // MARK: - Domain-like Input (auto-prefix https)
 
     @Test func parseURL_domainWithDot_addsHttps() {

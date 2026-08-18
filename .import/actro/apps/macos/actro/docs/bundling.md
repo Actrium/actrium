@@ -1,11 +1,11 @@
 # React Native Bundle 构建指南
 
-Actro 项目包含两个独立的 React Native bundle，分别用于不同的 XPC Service：
+Actro 项目包含独立的 React Native bundle。现行 Helper 是单一 `ActroRenderer.app`，按 fingerprint 隔离进程，不再复制 `RCTViewService*.xpc`。详见 [Renderer-Process-Pool.md](Renderer-Process-Pool.md)。
 
 | Bundle | 入口文件 | 输出文件 | 用途 |
 |--------|----------|----------|------|
-| System Apps | `index-system.tsx` | `system.jsbundle` | RCTViewService0 专用（系统应用） |
-| Actr Host | `index-actr.tsx` | `actr.jsbundle` | RCTViewService1-N（插件应用） |
+| System Apps | `index-system.tsx` | `system.jsbundle` | 系统 Renderer（`system.*`） |
+| Actr Host | `index-actr.tsx` | `actr.jsbundle` | 普通应用 Renderer |
 
 ## 快速使用
 

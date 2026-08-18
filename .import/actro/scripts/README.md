@@ -35,8 +35,8 @@ the script is used across multiple top-level areas.
   `packages/actro-runtime`, the macOS compatibility layout points at the
   monorepo package/runtime locations, reserved future package boundaries have
   README files, `internal/` remains git-ignored, and temporary migration
-  worktrees such as `apps/macos/askit`, `apps/macos/rill`, and
-  `apps/rustdesk-actr/` do not live under `apps/`.
+  worktrees such as `apps/macos/askit` and `apps/macos/rill` do not live under
+  `apps/`.
 - `check-generated-contracts.sh` regenerates the lightweight Rust-owned
   TypeScript and Android compile-time contract sources into a temporary
   directory and verifies that the checked-in copies are current. It also checks
@@ -50,8 +50,7 @@ the script is used across multiple top-level areas.
   access centralized in `apps/windows/actro/src/ActroCore.cs`.
 - `check-windows-layout.sh` verifies the current Windows project contract:
   `apps/windows/actro/` exists, WebView2 remains the expected shell host,
-  `third_party/rustdesk-actr/` is documented as a reference rather than the
-  Windows browser client, the browser application context owns multi-window
+  the browser application context owns multi-window
   lifecycle including private-window creation/cleanup, startup options expose
   private-window mode plus positional/repeated initial addresses, the browser
   tab strip/lifecycle is present, duplicate-tab creation is present, the browser

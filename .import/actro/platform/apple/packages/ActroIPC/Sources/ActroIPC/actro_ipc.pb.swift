@@ -88,6 +88,14 @@ public struct Actro_Ipc_IPCMessage: Sendable {
     set {payload = .terminate(newValue)}
   }
 
+  public var destroyTab: Actro_Ipc_DestroyTabRequest {
+    get {
+      if case .destroyTab(let v)? = payload {return v}
+      return Actro_Ipc_DestroyTabRequest()
+    }
+    set {payload = .destroyTab(newValue)}
+  }
+
   /// Helper -> Actro
   public var ready: Actro_Ipc_ReadyResponse {
     get {
@@ -169,6 +177,22 @@ public struct Actro_Ipc_IPCMessage: Sendable {
     set {payload = .executeJsResponse(newValue)}
   }
 
+  public var viewportApplied: Actro_Ipc_ViewportApplied {
+    get {
+      if case .viewportApplied(let v)? = payload {return v}
+      return Actro_Ipc_ViewportApplied()
+    }
+    set {payload = .viewportApplied(newValue)}
+  }
+
+  public var hostEvent: Actro_Ipc_HostEvent {
+    get {
+      if case .hostEvent(let v)? = payload {return v}
+      return Actro_Ipc_HostEvent()
+    }
+    set {payload = .hostEvent(newValue)}
+  }
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public enum OneOf_Payload: Equatable, Sendable {
@@ -180,6 +204,7 @@ public struct Actro_Ipc_IPCMessage: Sendable {
     case getMetrics(Actro_Ipc_GetMetricsRequest)
     case getSurfaceID(Actro_Ipc_GetSurfaceIDRequest)
     case terminate(Actro_Ipc_TerminateRequest)
+    case destroyTab(Actro_Ipc_DestroyTabRequest)
     /// Helper -> Actro
     case ready(Actro_Ipc_ReadyResponse)
     case surfaceUpdated(Actro_Ipc_SurfaceUpdated)
@@ -191,6 +216,8 @@ public struct Actro_Ipc_IPCMessage: Sendable {
     case surfaceIDResponse(Actro_Ipc_SurfaceIDResponse)
     case loadContentResponse(Actro_Ipc_LoadContentResponse)
     case executeJsResponse(Actro_Ipc_ExecuteJSResponse)
+    case viewportApplied(Actro_Ipc_ViewportApplied)
+    case hostEvent(Actro_Ipc_HostEvent)
 
   }
 
@@ -228,6 +255,10 @@ public struct Actro_Ipc_LoadContentRequest: Sendable {
 
   public var permissions: [String] = []
 
+  /// Canonical business configuration. This preserves the complete ViewBridge
+  /// payload while the typed transport evolves independently.
+  public var configJson: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -241,6 +272,12 @@ public struct Actro_Ipc_UpdateViewportRequest: Sendable {
   public var width: Double = 0
 
   public var height: Double = 0
+
+  public var tabID: String = String()
+
+  public var requestID: UInt32 = 0
+
+  public var isOverviewMode: Bool = false
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -271,6 +308,8 @@ public struct Actro_Ipc_InputEvent: Sendable {
   public var keyCode: UInt32 = 0
 
   public var characters: String = String()
+
+  public var tabID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -342,6 +381,8 @@ public struct Actro_Ipc_ExecuteJSRequest: Sendable {
 
   public var code: String = String()
 
+  public var tabID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -362,6 +403,8 @@ public struct Actro_Ipc_GetSurfaceIDRequest: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
+  public var tabID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -379,6 +422,18 @@ public struct Actro_Ipc_TerminateRequest: Sendable {
   public init() {}
 }
 
+public struct Actro_Ipc_DestroyTabRequest: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var tabID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
 public struct Actro_Ipc_ReadyResponse: Sendable {
   // SwiftProtobuf.Message conformance is added in an extension below. See the
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
@@ -389,6 +444,10 @@ public struct Actro_Ipc_ReadyResponse: Sendable {
   public var width: UInt32 = 0
 
   public var height: UInt32 = 0
+
+  public var rendererID: String = String()
+
+  public var processID: Int32 = 0
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -402,6 +461,8 @@ public struct Actro_Ipc_SurfaceUpdated: Sendable {
 
   public var surfaceID: UInt32 = 0
 
+  public var tabID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -413,6 +474,8 @@ public struct Actro_Ipc_TitleChanged: Sendable {
   // methods supported on all messages.
 
   public var title: String = String()
+
+  public var tabID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -427,6 +490,8 @@ public struct Actro_Ipc_NavigationRequest: Sendable {
   public var url: String = String()
 
   public var newTab: Bool = false
+
+  public var tabID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -445,6 +510,26 @@ public struct Actro_Ipc_ConsoleLog: Sendable {
 
   public var source: String = String()
 
+  public var tabID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Generic, allow-listed business action forwarded from a sandboxed Renderer
+/// to the Browser Broker. `user_info_json` must contain a JSON object.
+public struct Actro_Ipc_HostEvent: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var name: String = String()
+
+  public var userInfoJson: String = String()
+
+  public var tabID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -456,6 +541,8 @@ public struct Actro_Ipc_CrashReport: Sendable {
   // methods supported on all messages.
 
   public var reason: String = String()
+
+  public var tabID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -491,6 +578,8 @@ public struct Actro_Ipc_SurfaceIDResponse: Sendable {
 
   public var surfaceID: UInt32 = 0
 
+  public var tabID: String = String()
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -506,6 +595,8 @@ public struct Actro_Ipc_LoadContentResponse: Sendable {
   public var success: Bool = false
 
   public var errorMessage: String = String()
+
+  public var tabID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
@@ -525,6 +616,222 @@ public struct Actro_Ipc_ExecuteJSResponse: Sendable {
 
   public var errorMessage: String = String()
 
+  public var tabID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Actro_Ipc_ViewportApplied: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var tabID: String = String()
+
+  public var requestID: UInt32 = 0
+
+  public var width: Double = 0
+
+  public var height: Double = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Host -> Service: Tab configuration
+/// Notification: com.actro.tabConfig.<serviceBundleId>
+public struct Actro_Ipc_XPCTabConfig: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// Core identifier (UUID string)
+  public var tabID: String = String()
+
+  /// Tab metadata
+  public var title: String = String()
+
+  public var backgroundColor: String = String()
+
+  /// Container dimensions
+  public var containerWidth: Double = 0
+
+  public var containerHeight: Double = 0
+
+  /// System app type (mutually exclusive with scripts)
+  /// Values: "startPage", "history", "bookmarks", "debug", "loading"
+  public var systemAppType: String = String()
+
+  /// ACTR scripts (for regular RN apps)
+  public var unifiedScript: String = String()
+
+  public var leftPanelScript: String = String()
+
+  public var rightPanelScript: String = String()
+
+  public var guestScript: String = String()
+
+  /// Panel visibility
+  public var leftPanelVisible: Bool = false
+
+  public var rightPanelVisible: Bool = false
+
+  /// Reload trigger
+  public var reloadKey: Int32 = 0
+
+  /// System app data
+  public var bookmarks: [Actro_Ipc_BookmarkData] = []
+
+  public var recentHistory: [Actro_Ipc_HistoryItemData] = []
+
+  public var historyGroups: [Actro_Ipc_HistoryGroupData] = []
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Service -> Host: Service ready notification
+/// Notification: com.actro.xpcServiceReady
+public struct Actro_Ipc_XPCServiceReady: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// e.g., "io.actrium.actro.rctviewservice0"
+  public var serviceBundleID: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Service -> Host: Tab render state
+/// Notification: com.actro.tabState.<tabId>
+public struct Actro_Ipc_XPCTabState: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var tabID: String = String()
+
+  public var state: Actro_Ipc_XPCTabState.TabRenderState = .loading
+
+  public var errorMessage: String = String()
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public enum TabRenderState: SwiftProtobuf.Enum, Swift.CaseIterable {
+    public typealias RawValue = Int
+    case loading // = 0
+    case ready // = 1
+    case error // = 2
+    case UNRECOGNIZED(Int)
+
+    public init() {
+      self = .loading
+    }
+
+    public init?(rawValue: Int) {
+      switch rawValue {
+      case 0: self = .loading
+      case 1: self = .ready
+      case 2: self = .error
+      default: self = .UNRECOGNIZED(rawValue)
+      }
+    }
+
+    public var rawValue: Int {
+      switch self {
+      case .loading: return 0
+      case .ready: return 1
+      case .error: return 2
+      case .UNRECOGNIZED(let i): return i
+      }
+    }
+
+    // The compiler won't synthesize support with the UNRECOGNIZED case.
+    public static let allCases: [Actro_Ipc_XPCTabState.TabRenderState] = [
+      .loading,
+      .ready,
+      .error,
+    ]
+
+  }
+
+  public init() {}
+}
+
+/// Service -> Host: Tab navigation request
+/// Notification: com.actro.tabNavigation.<tabId>
+public struct Actro_Ipc_XPCTabNavigation: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var tabID: String = String()
+
+  public var url: String = String()
+
+  public var openInNewTab: Bool = false
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+/// Data types for system apps
+public struct Actro_Ipc_BookmarkData: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: String = String()
+
+  public var title: String = String()
+
+  public var appURL: String = String()
+
+  public var faviconURL: String = String()
+
+  public var createdAt: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Actro_Ipc_HistoryItemData: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  public var id: String = String()
+
+  public var title: String = String()
+
+  public var appURL: String = String()
+
+  public var visitedAt: Int64 = 0
+
+  public var unknownFields = SwiftProtobuf.UnknownStorage()
+
+  public init() {}
+}
+
+public struct Actro_Ipc_HistoryGroupData: Sendable {
+  // SwiftProtobuf.Message conformance is added in an extension below. See the
+  // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
+  // methods supported on all messages.
+
+  /// e.g., "2024-01-15"
+  public var date: String = String()
+
+  public var items: [Actro_Ipc_HistoryItemData] = []
+
   public var unknownFields = SwiftProtobuf.UnknownStorage()
 
   public init() {}
@@ -536,7 +843,7 @@ fileprivate let _protobuf_package = "actro.ipc"
 
 extension Actro_Ipc_IPCMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".IPCMessage"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{4}\u{9}load_content\0\u{3}update_viewport\0\u{3}input_event\0\u{3}execute_js\0\u{3}get_metrics\0\u{3}get_surface_id\0\u{1}terminate\0\u{2}\"ready\0\u{3}surface_updated\0\u{3}title_changed\0\u{3}navigation_request\0\u{3}console_log\0\u{3}crash_report\0\u{3}metrics_response\0\u{3}surface_id_response\0\u{3}load_content_response\0\u{3}execute_js_response\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{4}\u{9}load_content\0\u{3}update_viewport\0\u{3}input_event\0\u{3}execute_js\0\u{3}get_metrics\0\u{3}get_surface_id\0\u{1}terminate\0\u{3}destroy_tab\0\u{2}!ready\0\u{3}surface_updated\0\u{3}title_changed\0\u{3}navigation_request\0\u{3}console_log\0\u{3}crash_report\0\u{3}metrics_response\0\u{3}surface_id_response\0\u{3}load_content_response\0\u{3}execute_js_response\0\u{3}viewport_applied\0\u{3}host_event\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -634,6 +941,19 @@ extension Actro_Ipc_IPCMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
         if let v = v {
           if hadOneofValue {try decoder.handleConflictingOneOf()}
           self.payload = .terminate(v)
+        }
+      }()
+      case 17: try {
+        var v: Actro_Ipc_DestroyTabRequest?
+        var hadOneofValue = false
+        if let current = self.payload {
+          hadOneofValue = true
+          if case .destroyTab(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.payload = .destroyTab(v)
         }
       }()
       case 50: try {
@@ -766,6 +1086,32 @@ extension Actro_Ipc_IPCMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
           self.payload = .executeJsResponse(v)
         }
       }()
+      case 60: try {
+        var v: Actro_Ipc_ViewportApplied?
+        var hadOneofValue = false
+        if let current = self.payload {
+          hadOneofValue = true
+          if case .viewportApplied(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.payload = .viewportApplied(v)
+        }
+      }()
+      case 61: try {
+        var v: Actro_Ipc_HostEvent?
+        var hadOneofValue = false
+        if let current = self.payload {
+          hadOneofValue = true
+          if case .hostEvent(let m) = current {v = m}
+        }
+        try decoder.decodeSingularMessageField(value: &v)
+        if let v = v {
+          if hadOneofValue {try decoder.handleConflictingOneOf()}
+          self.payload = .hostEvent(v)
+        }
+      }()
       default: break
       }
     }
@@ -808,6 +1154,10 @@ extension Actro_Ipc_IPCMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       guard case .terminate(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 16)
     }()
+    case .destroyTab?: try {
+      guard case .destroyTab(let v)? = self.payload else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 17)
+    }()
     case .ready?: try {
       guard case .ready(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 50)
@@ -848,6 +1198,14 @@ extension Actro_Ipc_IPCMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       guard case .executeJsResponse(let v)? = self.payload else { preconditionFailure() }
       try visitor.visitSingularMessageField(value: v, fieldNumber: 59)
     }()
+    case .viewportApplied?: try {
+      guard case .viewportApplied(let v)? = self.payload else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 60)
+    }()
+    case .hostEvent?: try {
+      guard case .hostEvent(let v)? = self.payload else { preconditionFailure() }
+      try visitor.visitSingularMessageField(value: v, fieldNumber: 61)
+    }()
     case nil: break
     }
     try unknownFields.traverse(visitor: &visitor)
@@ -863,7 +1221,7 @@ extension Actro_Ipc_IPCMessage: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 extension Actro_Ipc_LoadContentRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".LoadContentRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}content_type\0\u{1}content\0\u{3}background_color\0\u{4}\u{7}tab_id\0\u{1}title\0\u{3}left_panel_visible\0\u{3}right_panel_visible\0\u{3}reload_key\0\u{4}\u{6}contract_name\0\u{3}contract_version\0\u{1}permissions\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}content_type\0\u{1}content\0\u{3}background_color\0\u{4}\u{7}tab_id\0\u{1}title\0\u{3}left_panel_visible\0\u{3}right_panel_visible\0\u{3}reload_key\0\u{4}\u{6}contract_name\0\u{3}contract_version\0\u{1}permissions\0\u{4}\u{8}config_json\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -882,6 +1240,7 @@ extension Actro_Ipc_LoadContentRequest: SwiftProtobuf.Message, SwiftProtobuf._Me
       case 20: try { try decoder.decodeSingularStringField(value: &self.contractName) }()
       case 21: try { try decoder.decodeSingularInt32Field(value: &self.contractVersion) }()
       case 22: try { try decoder.decodeRepeatedStringField(value: &self.permissions) }()
+      case 30: try { try decoder.decodeSingularStringField(value: &self.configJson) }()
       default: break
       }
     }
@@ -921,6 +1280,9 @@ extension Actro_Ipc_LoadContentRequest: SwiftProtobuf.Message, SwiftProtobuf._Me
     if !self.permissions.isEmpty {
       try visitor.visitRepeatedStringField(value: self.permissions, fieldNumber: 22)
     }
+    if !self.configJson.isEmpty {
+      try visitor.visitSingularStringField(value: self.configJson, fieldNumber: 30)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -936,6 +1298,7 @@ extension Actro_Ipc_LoadContentRequest: SwiftProtobuf.Message, SwiftProtobuf._Me
     if lhs.contractName != rhs.contractName {return false}
     if lhs.contractVersion != rhs.contractVersion {return false}
     if lhs.permissions != rhs.permissions {return false}
+    if lhs.configJson != rhs.configJson {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -943,7 +1306,7 @@ extension Actro_Ipc_LoadContentRequest: SwiftProtobuf.Message, SwiftProtobuf._Me
 
 extension Actro_Ipc_UpdateViewportRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".UpdateViewportRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}width\0\u{1}height\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}width\0\u{1}height\0\u{4}\u{8}tab_id\0\u{3}request_id\0\u{3}is_overview_mode\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -953,6 +1316,9 @@ extension Actro_Ipc_UpdateViewportRequest: SwiftProtobuf.Message, SwiftProtobuf.
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularDoubleField(value: &self.width) }()
       case 2: try { try decoder.decodeSingularDoubleField(value: &self.height) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
+      case 11: try { try decoder.decodeSingularUInt32Field(value: &self.requestID) }()
+      case 12: try { try decoder.decodeSingularBoolField(value: &self.isOverviewMode) }()
       default: break
       }
     }
@@ -965,12 +1331,24 @@ extension Actro_Ipc_UpdateViewportRequest: SwiftProtobuf.Message, SwiftProtobuf.
     if self.height.bitPattern != 0 {
       try visitor.visitSingularDoubleField(value: self.height, fieldNumber: 2)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
+    if self.requestID != 0 {
+      try visitor.visitSingularUInt32Field(value: self.requestID, fieldNumber: 11)
+    }
+    if self.isOverviewMode != false {
+      try visitor.visitSingularBoolField(value: self.isOverviewMode, fieldNumber: 12)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Actro_Ipc_UpdateViewportRequest, rhs: Actro_Ipc_UpdateViewportRequest) -> Bool {
     if lhs.width != rhs.width {return false}
     if lhs.height != rhs.height {return false}
+    if lhs.tabID != rhs.tabID {return false}
+    if lhs.requestID != rhs.requestID {return false}
+    if lhs.isOverviewMode != rhs.isOverviewMode {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -978,7 +1356,7 @@ extension Actro_Ipc_UpdateViewportRequest: SwiftProtobuf.Message, SwiftProtobuf.
 
 extension Actro_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".InputEvent"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}x\0\u{1}y\0\u{3}scroll_delta_x\0\u{3}scroll_delta_y\0\u{1}button\0\u{1}modifiers\0\u{3}key_code\0\u{1}characters\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}type\0\u{1}x\0\u{1}y\0\u{3}scroll_delta_x\0\u{3}scroll_delta_y\0\u{1}button\0\u{1}modifiers\0\u{3}key_code\0\u{1}characters\0\u{4}\u{b}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -995,6 +1373,7 @@ extension Actro_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       case 7: try { try decoder.decodeSingularUInt32Field(value: &self.modifiers) }()
       case 8: try { try decoder.decodeSingularUInt32Field(value: &self.keyCode) }()
       case 9: try { try decoder.decodeSingularStringField(value: &self.characters) }()
+      case 20: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1028,6 +1407,9 @@ extension Actro_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if !self.characters.isEmpty {
       try visitor.visitSingularStringField(value: self.characters, fieldNumber: 9)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 20)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1041,6 +1423,7 @@ extension Actro_Ipc_InputEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if lhs.modifiers != rhs.modifiers {return false}
     if lhs.keyCode != rhs.keyCode {return false}
     if lhs.characters != rhs.characters {return false}
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1052,7 +1435,7 @@ extension Actro_Ipc_InputEvent.EventType: SwiftProtobuf._ProtoNameProviding {
 
 extension Actro_Ipc_ExecuteJSRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ExecuteJSRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}code\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}code\0\u{4}\u{9}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1061,6 +1444,7 @@ extension Actro_Ipc_ExecuteJSRequest: SwiftProtobuf.Message, SwiftProtobuf._Mess
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.code) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1070,11 +1454,15 @@ extension Actro_Ipc_ExecuteJSRequest: SwiftProtobuf.Message, SwiftProtobuf._Mess
     if !self.code.isEmpty {
       try visitor.visitSingularStringField(value: self.code, fieldNumber: 1)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Actro_Ipc_ExecuteJSRequest, rhs: Actro_Ipc_ExecuteJSRequest) -> Bool {
     if lhs.code != rhs.code {return false}
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1101,18 +1489,29 @@ extension Actro_Ipc_GetMetricsRequest: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 extension Actro_Ipc_GetSurfaceIDRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".GetSurfaceIDRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap()
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
-    // Load everything into unknown fields
-    while try decoder.nextFieldNumber() != nil {}
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
+      default: break
+      }
+    }
   }
 
   public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 1)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Actro_Ipc_GetSurfaceIDRequest, rhs: Actro_Ipc_GetSurfaceIDRequest) -> Bool {
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1148,9 +1547,39 @@ extension Actro_Ipc_TerminateRequest: SwiftProtobuf.Message, SwiftProtobuf._Mess
   }
 }
 
+extension Actro_Ipc_DestroyTabRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".DestroyTabRequest"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}tab_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_DestroyTabRequest, rhs: Actro_Ipc_DestroyTabRequest) -> Bool {
+    if lhs.tabID != rhs.tabID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
 extension Actro_Ipc_ReadyResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ReadyResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}surface_id\0\u{1}width\0\u{1}height\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}surface_id\0\u{1}width\0\u{1}height\0\u{4}\u{7}renderer_id\0\u{3}process_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1161,6 +1590,8 @@ extension Actro_Ipc_ReadyResponse: SwiftProtobuf.Message, SwiftProtobuf._Message
       case 1: try { try decoder.decodeSingularUInt32Field(value: &self.surfaceID) }()
       case 2: try { try decoder.decodeSingularUInt32Field(value: &self.width) }()
       case 3: try { try decoder.decodeSingularUInt32Field(value: &self.height) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.rendererID) }()
+      case 11: try { try decoder.decodeSingularInt32Field(value: &self.processID) }()
       default: break
       }
     }
@@ -1176,6 +1607,12 @@ extension Actro_Ipc_ReadyResponse: SwiftProtobuf.Message, SwiftProtobuf._Message
     if self.height != 0 {
       try visitor.visitSingularUInt32Field(value: self.height, fieldNumber: 3)
     }
+    if !self.rendererID.isEmpty {
+      try visitor.visitSingularStringField(value: self.rendererID, fieldNumber: 10)
+    }
+    if self.processID != 0 {
+      try visitor.visitSingularInt32Field(value: self.processID, fieldNumber: 11)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1183,6 +1620,8 @@ extension Actro_Ipc_ReadyResponse: SwiftProtobuf.Message, SwiftProtobuf._Message
     if lhs.surfaceID != rhs.surfaceID {return false}
     if lhs.width != rhs.width {return false}
     if lhs.height != rhs.height {return false}
+    if lhs.rendererID != rhs.rendererID {return false}
+    if lhs.processID != rhs.processID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1190,7 +1629,7 @@ extension Actro_Ipc_ReadyResponse: SwiftProtobuf.Message, SwiftProtobuf._Message
 
 extension Actro_Ipc_SurfaceUpdated: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SurfaceUpdated"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}surface_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}surface_id\0\u{4}\u{9}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1199,6 +1638,7 @@ extension Actro_Ipc_SurfaceUpdated: SwiftProtobuf.Message, SwiftProtobuf._Messag
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularUInt32Field(value: &self.surfaceID) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1208,11 +1648,15 @@ extension Actro_Ipc_SurfaceUpdated: SwiftProtobuf.Message, SwiftProtobuf._Messag
     if self.surfaceID != 0 {
       try visitor.visitSingularUInt32Field(value: self.surfaceID, fieldNumber: 1)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Actro_Ipc_SurfaceUpdated, rhs: Actro_Ipc_SurfaceUpdated) -> Bool {
     if lhs.surfaceID != rhs.surfaceID {return false}
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1220,7 +1664,7 @@ extension Actro_Ipc_SurfaceUpdated: SwiftProtobuf.Message, SwiftProtobuf._Messag
 
 extension Actro_Ipc_TitleChanged: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".TitleChanged"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}title\0\u{4}\u{9}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1229,6 +1673,7 @@ extension Actro_Ipc_TitleChanged: SwiftProtobuf.Message, SwiftProtobuf._MessageI
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.title) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1238,11 +1683,15 @@ extension Actro_Ipc_TitleChanged: SwiftProtobuf.Message, SwiftProtobuf._MessageI
     if !self.title.isEmpty {
       try visitor.visitSingularStringField(value: self.title, fieldNumber: 1)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Actro_Ipc_TitleChanged, rhs: Actro_Ipc_TitleChanged) -> Bool {
     if lhs.title != rhs.title {return false}
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1250,7 +1699,7 @@ extension Actro_Ipc_TitleChanged: SwiftProtobuf.Message, SwiftProtobuf._MessageI
 
 extension Actro_Ipc_NavigationRequest: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".NavigationRequest"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}url\0\u{3}new_tab\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}url\0\u{3}new_tab\0\u{4}\u{8}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1260,6 +1709,7 @@ extension Actro_Ipc_NavigationRequest: SwiftProtobuf.Message, SwiftProtobuf._Mes
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.url) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self.newTab) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1272,12 +1722,16 @@ extension Actro_Ipc_NavigationRequest: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.newTab != false {
       try visitor.visitSingularBoolField(value: self.newTab, fieldNumber: 2)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Actro_Ipc_NavigationRequest, rhs: Actro_Ipc_NavigationRequest) -> Bool {
     if lhs.url != rhs.url {return false}
     if lhs.newTab != rhs.newTab {return false}
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1285,7 +1739,7 @@ extension Actro_Ipc_NavigationRequest: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 extension Actro_Ipc_ConsoleLog: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ConsoleLog"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}level\0\u{1}message\0\u{1}source\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}level\0\u{1}message\0\u{1}source\0\u{4}\u{7}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1296,6 +1750,7 @@ extension Actro_Ipc_ConsoleLog: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
       case 1: try { try decoder.decodeSingularStringField(value: &self.level) }()
       case 2: try { try decoder.decodeSingularStringField(value: &self.message) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.source) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1311,6 +1766,9 @@ extension Actro_Ipc_ConsoleLog: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if !self.source.isEmpty {
       try visitor.visitSingularStringField(value: self.source, fieldNumber: 3)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1318,6 +1776,47 @@ extension Actro_Ipc_ConsoleLog: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
     if lhs.level != rhs.level {return false}
     if lhs.message != rhs.message {return false}
     if lhs.source != rhs.source {return false}
+    if lhs.tabID != rhs.tabID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Actro_Ipc_HostEvent: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".HostEvent"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}name\0\u{3}user_info_json\0\u{4}\u{8}tab_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.name) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.userInfoJson) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.name.isEmpty {
+      try visitor.visitSingularStringField(value: self.name, fieldNumber: 1)
+    }
+    if !self.userInfoJson.isEmpty {
+      try visitor.visitSingularStringField(value: self.userInfoJson, fieldNumber: 2)
+    }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_HostEvent, rhs: Actro_Ipc_HostEvent) -> Bool {
+    if lhs.name != rhs.name {return false}
+    if lhs.userInfoJson != rhs.userInfoJson {return false}
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1325,7 +1824,7 @@ extension Actro_Ipc_ConsoleLog: SwiftProtobuf.Message, SwiftProtobuf._MessageImp
 
 extension Actro_Ipc_CrashReport: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".CrashReport"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reason\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}reason\0\u{4}\u{9}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1334,6 +1833,7 @@ extension Actro_Ipc_CrashReport: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
       // enabled. https://github.com/apple/swift-protobuf/issues/1034
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularStringField(value: &self.reason) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1343,11 +1843,15 @@ extension Actro_Ipc_CrashReport: SwiftProtobuf.Message, SwiftProtobuf._MessageIm
     if !self.reason.isEmpty {
       try visitor.visitSingularStringField(value: self.reason, fieldNumber: 1)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Actro_Ipc_CrashReport, rhs: Actro_Ipc_CrashReport) -> Bool {
     if lhs.reason != rhs.reason {return false}
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1405,7 +1909,7 @@ extension Actro_Ipc_MetricsResponse: SwiftProtobuf.Message, SwiftProtobuf._Messa
 
 extension Actro_Ipc_SurfaceIDResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".SurfaceIDResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}surface_id\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{3}surface_id\0\u{4}\u{8}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1415,6 +1919,7 @@ extension Actro_Ipc_SurfaceIDResponse: SwiftProtobuf.Message, SwiftProtobuf._Mes
       switch fieldNumber {
       case 1: try { try decoder.decodeSingularUInt32Field(value: &self.requestID) }()
       case 2: try { try decoder.decodeSingularUInt32Field(value: &self.surfaceID) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1427,12 +1932,16 @@ extension Actro_Ipc_SurfaceIDResponse: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if self.surfaceID != 0 {
       try visitor.visitSingularUInt32Field(value: self.surfaceID, fieldNumber: 2)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
   public static func ==(lhs: Actro_Ipc_SurfaceIDResponse, rhs: Actro_Ipc_SurfaceIDResponse) -> Bool {
     if lhs.requestID != rhs.requestID {return false}
     if lhs.surfaceID != rhs.surfaceID {return false}
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1440,7 +1949,7 @@ extension Actro_Ipc_SurfaceIDResponse: SwiftProtobuf.Message, SwiftProtobuf._Mes
 
 extension Actro_Ipc_LoadContentResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".LoadContentResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}success\0\u{3}error_message\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}success\0\u{3}error_message\0\u{4}\u{7}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1451,6 +1960,7 @@ extension Actro_Ipc_LoadContentResponse: SwiftProtobuf.Message, SwiftProtobuf._M
       case 1: try { try decoder.decodeSingularUInt32Field(value: &self.requestID) }()
       case 2: try { try decoder.decodeSingularBoolField(value: &self.success) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.errorMessage) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1466,6 +1976,9 @@ extension Actro_Ipc_LoadContentResponse: SwiftProtobuf.Message, SwiftProtobuf._M
     if !self.errorMessage.isEmpty {
       try visitor.visitSingularStringField(value: self.errorMessage, fieldNumber: 3)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1473,6 +1986,7 @@ extension Actro_Ipc_LoadContentResponse: SwiftProtobuf.Message, SwiftProtobuf._M
     if lhs.requestID != rhs.requestID {return false}
     if lhs.success != rhs.success {return false}
     if lhs.errorMessage != rhs.errorMessage {return false}
+    if lhs.tabID != rhs.tabID {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }
@@ -1480,7 +1994,7 @@ extension Actro_Ipc_LoadContentResponse: SwiftProtobuf.Message, SwiftProtobuf._M
 
 extension Actro_Ipc_ExecuteJSResponse: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
   public static let protoMessageName: String = _protobuf_package + ".ExecuteJSResponse"
-  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}success\0\u{1}result\0\u{3}error_message\0")
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}request_id\0\u{1}success\0\u{1}result\0\u{3}error_message\0\u{4}\u{6}tab_id\0")
 
   public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
     while let fieldNumber = try decoder.nextFieldNumber() {
@@ -1492,6 +2006,7 @@ extension Actro_Ipc_ExecuteJSResponse: SwiftProtobuf.Message, SwiftProtobuf._Mes
       case 2: try { try decoder.decodeSingularBoolField(value: &self.success) }()
       case 3: try { try decoder.decodeSingularStringField(value: &self.result) }()
       case 4: try { try decoder.decodeSingularStringField(value: &self.errorMessage) }()
+      case 10: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
       default: break
       }
     }
@@ -1510,6 +2025,9 @@ extension Actro_Ipc_ExecuteJSResponse: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if !self.errorMessage.isEmpty {
       try visitor.visitSingularStringField(value: self.errorMessage, fieldNumber: 4)
     }
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 10)
+    }
     try unknownFields.traverse(visitor: &visitor)
   }
 
@@ -1518,6 +2036,401 @@ extension Actro_Ipc_ExecuteJSResponse: SwiftProtobuf.Message, SwiftProtobuf._Mes
     if lhs.success != rhs.success {return false}
     if lhs.result != rhs.result {return false}
     if lhs.errorMessage != rhs.errorMessage {return false}
+    if lhs.tabID != rhs.tabID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Actro_Ipc_ViewportApplied: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".ViewportApplied"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}tab_id\0\u{3}request_id\0\u{1}width\0\u{1}height\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
+      case 2: try { try decoder.decodeSingularUInt32Field(value: &self.requestID) }()
+      case 3: try { try decoder.decodeSingularDoubleField(value: &self.width) }()
+      case 4: try { try decoder.decodeSingularDoubleField(value: &self.height) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 1)
+    }
+    if self.requestID != 0 {
+      try visitor.visitSingularUInt32Field(value: self.requestID, fieldNumber: 2)
+    }
+    if self.width.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.width, fieldNumber: 3)
+    }
+    if self.height.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.height, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_ViewportApplied, rhs: Actro_Ipc_ViewportApplied) -> Bool {
+    if lhs.tabID != rhs.tabID {return false}
+    if lhs.requestID != rhs.requestID {return false}
+    if lhs.width != rhs.width {return false}
+    if lhs.height != rhs.height {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Actro_Ipc_XPCTabConfig: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".XPCTabConfig"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}tab_id\0\u{1}title\0\u{3}background_color\0\u{4}\u{7}container_width\0\u{3}container_height\0\u{4}\u{9}system_app_type\0\u{4}\u{a}unified_script\0\u{3}left_panel_script\0\u{3}right_panel_script\0\u{3}guest_script\0\u{4}\u{7}left_panel_visible\0\u{3}right_panel_visible\0\u{4}\u{9}reload_key\0\u{2}\u{a}bookmarks\0\u{3}recent_history\0\u{3}history_groups\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.title) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.backgroundColor) }()
+      case 10: try { try decoder.decodeSingularDoubleField(value: &self.containerWidth) }()
+      case 11: try { try decoder.decodeSingularDoubleField(value: &self.containerHeight) }()
+      case 20: try { try decoder.decodeSingularStringField(value: &self.systemAppType) }()
+      case 30: try { try decoder.decodeSingularStringField(value: &self.unifiedScript) }()
+      case 31: try { try decoder.decodeSingularStringField(value: &self.leftPanelScript) }()
+      case 32: try { try decoder.decodeSingularStringField(value: &self.rightPanelScript) }()
+      case 33: try { try decoder.decodeSingularStringField(value: &self.guestScript) }()
+      case 40: try { try decoder.decodeSingularBoolField(value: &self.leftPanelVisible) }()
+      case 41: try { try decoder.decodeSingularBoolField(value: &self.rightPanelVisible) }()
+      case 50: try { try decoder.decodeSingularInt32Field(value: &self.reloadKey) }()
+      case 60: try { try decoder.decodeRepeatedMessageField(value: &self.bookmarks) }()
+      case 61: try { try decoder.decodeRepeatedMessageField(value: &self.recentHistory) }()
+      case 62: try { try decoder.decodeRepeatedMessageField(value: &self.historyGroups) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 1)
+    }
+    if !self.title.isEmpty {
+      try visitor.visitSingularStringField(value: self.title, fieldNumber: 2)
+    }
+    if !self.backgroundColor.isEmpty {
+      try visitor.visitSingularStringField(value: self.backgroundColor, fieldNumber: 3)
+    }
+    if self.containerWidth.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.containerWidth, fieldNumber: 10)
+    }
+    if self.containerHeight.bitPattern != 0 {
+      try visitor.visitSingularDoubleField(value: self.containerHeight, fieldNumber: 11)
+    }
+    if !self.systemAppType.isEmpty {
+      try visitor.visitSingularStringField(value: self.systemAppType, fieldNumber: 20)
+    }
+    if !self.unifiedScript.isEmpty {
+      try visitor.visitSingularStringField(value: self.unifiedScript, fieldNumber: 30)
+    }
+    if !self.leftPanelScript.isEmpty {
+      try visitor.visitSingularStringField(value: self.leftPanelScript, fieldNumber: 31)
+    }
+    if !self.rightPanelScript.isEmpty {
+      try visitor.visitSingularStringField(value: self.rightPanelScript, fieldNumber: 32)
+    }
+    if !self.guestScript.isEmpty {
+      try visitor.visitSingularStringField(value: self.guestScript, fieldNumber: 33)
+    }
+    if self.leftPanelVisible != false {
+      try visitor.visitSingularBoolField(value: self.leftPanelVisible, fieldNumber: 40)
+    }
+    if self.rightPanelVisible != false {
+      try visitor.visitSingularBoolField(value: self.rightPanelVisible, fieldNumber: 41)
+    }
+    if self.reloadKey != 0 {
+      try visitor.visitSingularInt32Field(value: self.reloadKey, fieldNumber: 50)
+    }
+    if !self.bookmarks.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.bookmarks, fieldNumber: 60)
+    }
+    if !self.recentHistory.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.recentHistory, fieldNumber: 61)
+    }
+    if !self.historyGroups.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.historyGroups, fieldNumber: 62)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_XPCTabConfig, rhs: Actro_Ipc_XPCTabConfig) -> Bool {
+    if lhs.tabID != rhs.tabID {return false}
+    if lhs.title != rhs.title {return false}
+    if lhs.backgroundColor != rhs.backgroundColor {return false}
+    if lhs.containerWidth != rhs.containerWidth {return false}
+    if lhs.containerHeight != rhs.containerHeight {return false}
+    if lhs.systemAppType != rhs.systemAppType {return false}
+    if lhs.unifiedScript != rhs.unifiedScript {return false}
+    if lhs.leftPanelScript != rhs.leftPanelScript {return false}
+    if lhs.rightPanelScript != rhs.rightPanelScript {return false}
+    if lhs.guestScript != rhs.guestScript {return false}
+    if lhs.leftPanelVisible != rhs.leftPanelVisible {return false}
+    if lhs.rightPanelVisible != rhs.rightPanelVisible {return false}
+    if lhs.reloadKey != rhs.reloadKey {return false}
+    if lhs.bookmarks != rhs.bookmarks {return false}
+    if lhs.recentHistory != rhs.recentHistory {return false}
+    if lhs.historyGroups != rhs.historyGroups {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Actro_Ipc_XPCServiceReady: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".XPCServiceReady"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}service_bundle_id\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.serviceBundleID) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.serviceBundleID.isEmpty {
+      try visitor.visitSingularStringField(value: self.serviceBundleID, fieldNumber: 1)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_XPCServiceReady, rhs: Actro_Ipc_XPCServiceReady) -> Bool {
+    if lhs.serviceBundleID != rhs.serviceBundleID {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Actro_Ipc_XPCTabState: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".XPCTabState"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}tab_id\0\u{1}state\0\u{3}error_message\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
+      case 2: try { try decoder.decodeSingularEnumField(value: &self.state) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.errorMessage) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 1)
+    }
+    if self.state != .loading {
+      try visitor.visitSingularEnumField(value: self.state, fieldNumber: 2)
+    }
+    if !self.errorMessage.isEmpty {
+      try visitor.visitSingularStringField(value: self.errorMessage, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_XPCTabState, rhs: Actro_Ipc_XPCTabState) -> Bool {
+    if lhs.tabID != rhs.tabID {return false}
+    if lhs.state != rhs.state {return false}
+    if lhs.errorMessage != rhs.errorMessage {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Actro_Ipc_XPCTabState.TabRenderState: SwiftProtobuf._ProtoNameProviding {
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{2}\0LOADING\0\u{1}READY\0\u{1}ERROR\0")
+}
+
+extension Actro_Ipc_XPCTabNavigation: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".XPCTabNavigation"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{3}tab_id\0\u{1}url\0\u{3}open_in_new_tab\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.tabID) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.url) }()
+      case 3: try { try decoder.decodeSingularBoolField(value: &self.openInNewTab) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.tabID.isEmpty {
+      try visitor.visitSingularStringField(value: self.tabID, fieldNumber: 1)
+    }
+    if !self.url.isEmpty {
+      try visitor.visitSingularStringField(value: self.url, fieldNumber: 2)
+    }
+    if self.openInNewTab != false {
+      try visitor.visitSingularBoolField(value: self.openInNewTab, fieldNumber: 3)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_XPCTabNavigation, rhs: Actro_Ipc_XPCTabNavigation) -> Bool {
+    if lhs.tabID != rhs.tabID {return false}
+    if lhs.url != rhs.url {return false}
+    if lhs.openInNewTab != rhs.openInNewTab {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Actro_Ipc_BookmarkData: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".BookmarkData"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}title\0\u{3}app_url\0\u{3}favicon_url\0\u{3}created_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.title) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.appURL) }()
+      case 4: try { try decoder.decodeSingularStringField(value: &self.faviconURL) }()
+      case 5: try { try decoder.decodeSingularInt64Field(value: &self.createdAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    if !self.title.isEmpty {
+      try visitor.visitSingularStringField(value: self.title, fieldNumber: 2)
+    }
+    if !self.appURL.isEmpty {
+      try visitor.visitSingularStringField(value: self.appURL, fieldNumber: 3)
+    }
+    if !self.faviconURL.isEmpty {
+      try visitor.visitSingularStringField(value: self.faviconURL, fieldNumber: 4)
+    }
+    if self.createdAt != 0 {
+      try visitor.visitSingularInt64Field(value: self.createdAt, fieldNumber: 5)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_BookmarkData, rhs: Actro_Ipc_BookmarkData) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.title != rhs.title {return false}
+    if lhs.appURL != rhs.appURL {return false}
+    if lhs.faviconURL != rhs.faviconURL {return false}
+    if lhs.createdAt != rhs.createdAt {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Actro_Ipc_HistoryItemData: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".HistoryItemData"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}id\0\u{1}title\0\u{3}app_url\0\u{3}visited_at\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.id) }()
+      case 2: try { try decoder.decodeSingularStringField(value: &self.title) }()
+      case 3: try { try decoder.decodeSingularStringField(value: &self.appURL) }()
+      case 4: try { try decoder.decodeSingularInt64Field(value: &self.visitedAt) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.id.isEmpty {
+      try visitor.visitSingularStringField(value: self.id, fieldNumber: 1)
+    }
+    if !self.title.isEmpty {
+      try visitor.visitSingularStringField(value: self.title, fieldNumber: 2)
+    }
+    if !self.appURL.isEmpty {
+      try visitor.visitSingularStringField(value: self.appURL, fieldNumber: 3)
+    }
+    if self.visitedAt != 0 {
+      try visitor.visitSingularInt64Field(value: self.visitedAt, fieldNumber: 4)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_HistoryItemData, rhs: Actro_Ipc_HistoryItemData) -> Bool {
+    if lhs.id != rhs.id {return false}
+    if lhs.title != rhs.title {return false}
+    if lhs.appURL != rhs.appURL {return false}
+    if lhs.visitedAt != rhs.visitedAt {return false}
+    if lhs.unknownFields != rhs.unknownFields {return false}
+    return true
+  }
+}
+
+extension Actro_Ipc_HistoryGroupData: SwiftProtobuf.Message, SwiftProtobuf._MessageImplementationBase, SwiftProtobuf._ProtoNameProviding {
+  public static let protoMessageName: String = _protobuf_package + ".HistoryGroupData"
+  public static let _protobuf_nameMap = SwiftProtobuf._NameMap(bytecode: "\0\u{1}date\0\u{1}items\0")
+
+  public mutating func decodeMessage<D: SwiftProtobuf.Decoder>(decoder: inout D) throws {
+    while let fieldNumber = try decoder.nextFieldNumber() {
+      // The use of inline closures is to circumvent an issue where the compiler
+      // allocates stack space for every case branch when no optimizations are
+      // enabled. https://github.com/apple/swift-protobuf/issues/1034
+      switch fieldNumber {
+      case 1: try { try decoder.decodeSingularStringField(value: &self.date) }()
+      case 2: try { try decoder.decodeRepeatedMessageField(value: &self.items) }()
+      default: break
+      }
+    }
+  }
+
+  public func traverse<V: SwiftProtobuf.Visitor>(visitor: inout V) throws {
+    if !self.date.isEmpty {
+      try visitor.visitSingularStringField(value: self.date, fieldNumber: 1)
+    }
+    if !self.items.isEmpty {
+      try visitor.visitRepeatedMessageField(value: self.items, fieldNumber: 2)
+    }
+    try unknownFields.traverse(visitor: &visitor)
+  }
+
+  public static func ==(lhs: Actro_Ipc_HistoryGroupData, rhs: Actro_Ipc_HistoryGroupData) -> Bool {
+    if lhs.date != rhs.date {return false}
+    if lhs.items != rhs.items {return false}
     if lhs.unknownFields != rhs.unknownFields {return false}
     return true
   }

@@ -26,12 +26,10 @@ try {
 import React, { useState, useEffect, useCallback } from 'react';
 import { AppRegistry, LogBox, View, Text, NativeModules, Platform, StyleSheet, DeviceEventEmitter, LayoutChangeEvent } from 'react-native';
 
-// Lazy imports for system apps
-const HistoryApp = React.lazy(() => import('./src/system-apps/HistoryApp'));
-const BookmarksApp = React.lazy(() => import('./src/system-apps/bookmarks/BookmarksApp'));
-const BookmarkTagsApp = React.lazy(() => import('./src/system-apps/BookmarkTagsApp'));
-const SettingsApp = React.lazy(() => import('./src/system-apps/SettingsApp'));
-const GlobalSearchApp = React.lazy(() => import('./src/system-apps/globalsearch/GlobalSearchApp'));
+// System apps share one Renderer runtime and are already present in this
+// bundle. Resolve them synchronously on first use: React.lazy's Promise state
+// can leak across independent surfaces, while top-level imports eagerly execute
+// optional native integrations that an unrelated system page does not use.
 
 // Lazy import for ACTR apps (with unifiedScript)
 const ActrApp = React.lazy(() => import('./src/actr-host/ActrApp').then(m => ({ default: m.ActrApp })));
@@ -110,6 +108,68 @@ interface SystemAppProps {
   isLeftPanelVisible?: boolean;
   isRightPanelVisible?: boolean;
 }
+
+const SystemAppContent: React.FC<{
+  appType: string;
+  tab: NonNullable<SystemAppProps['tab']>;
+  containerWidth?: number;
+  containerHeight?: number;
+  isOverviewMode?: boolean;
+}> = ({
+  appType,
+  tab,
+  containerWidth,
+  containerHeight,
+  isOverviewMode,
+}) => {
+  switch (appType) {
+    case 'loading':
+      return (
+        <View style={styles.loading}>
+          <Text style={styles.loadingTitle}>Renderer Ready</Text>
+          <Text style={styles.loadingSubtitle}>Waiting for tab config...</Text>
+        </View>
+      );
+    case 'history': {
+      const HistoryApp = require('./src/system-apps/HistoryApp').default;
+      return (
+        <HistoryApp
+          items={tab.historyItems ?? []}
+          groups={tab.historyGroups ?? []}
+          containerWidth={containerWidth}
+          containerHeight={containerHeight}
+          isOverviewMode={isOverviewMode}
+        />
+      );
+    }
+    case 'bookmarks': {
+      const BookmarksApp =
+        require('./src/system-apps/bookmarks/BookmarksApp').default;
+      return <BookmarksApp />;
+    }
+    case 'bookmarkTags': {
+      const BookmarkTagsApp =
+        require('./src/system-apps/BookmarkTagsApp').default;
+      return <BookmarkTagsApp />;
+    }
+    case 'settings': {
+      const SettingsApp = require('./src/system-apps/SettingsApp').default;
+      return <SettingsApp />;
+    }
+    case 'globalSearch': {
+      const GlobalSearchApp =
+        require('./src/system-apps/globalsearch/GlobalSearchApp').default;
+      return <GlobalSearchApp />;
+    }
+    default:
+      return (
+        <View style={styles.loading}>
+          <Text style={styles.loadingTitle}>Unsupported system app</Text>
+          <Text style={styles.loadingSubtitle}>{appType}</Text>
+        </View>
+      );
+  }
+};
 
 const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
   // 🔑 Use onLayout for live container size — most reliable on macOS
@@ -191,41 +251,13 @@ const SystemAppRouter: React.FC<SystemAppProps> = (initialProps) => {
   return (
     <View style={styles.container} onLayout={handleLayout}>
       <ErrorBoundary>
-        <React.Suspense fallback={<LoadingFallback />}>
-          {tab.systemAppType === 'loading' && (
-            <View style={styles.loading}>
-              <Text style={styles.loadingTitle}>XPC Service Ready</Text>
-              <Text style={styles.loadingSubtitle}>Waiting for tab config...</Text>
-            </View>
-          )}
-          {tab.systemAppType === 'history' && (
-            <HistoryApp
-              items={tab.historyItems ?? []}
-              groups={tab.historyGroups ?? []}
-              containerWidth={containerWidth}
-              containerHeight={containerHeight}
-              isOverviewMode={isOverviewMode}
-            />
-          )}
-          {tab.systemAppType === 'bookmarks' && (
-            <BookmarksApp />
-          )}
-          {tab.systemAppType === 'bookmarkTags' && (
-            <BookmarkTagsApp />
-          )}
-          {tab.systemAppType === 'settings' && (
-            <SettingsApp />
-          )}
-          {tab.systemAppType === 'globalSearch' && (
-            <GlobalSearchApp />
-          )}
-          {!['loading', 'history', 'bookmarks', 'bookmarkTags', 'settings', 'globalSearch'].includes(tab.systemAppType) && (
-            <View style={styles.loading}>
-              <Text style={styles.loadingTitle}>Unsupported system app</Text>
-              <Text style={styles.loadingSubtitle}>{tab.systemAppType}</Text>
-            </View>
-          )}
-        </React.Suspense>
+        <SystemAppContent
+          appType={tab.systemAppType}
+          tab={tab}
+          containerWidth={containerWidth}
+          containerHeight={containerHeight}
+          isOverviewMode={isOverviewMode}
+        />
       </ErrorBoundary>
     </View>
   );

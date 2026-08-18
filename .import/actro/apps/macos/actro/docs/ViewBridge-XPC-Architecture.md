@@ -1,5 +1,7 @@
 # ViewBridge XPC 架构文档
 
+> 历史文档。现行路径见 [Renderer-Process-Pool.md](Renderer-Process-Pool.md)。
+
 ## 1. 架构概述
 
 Actro 使用 ViewBridge (macOS 私有框架) 实现跨进程视图渲染，将 React Native 内容运行在独立的 XPC Service 进程中。

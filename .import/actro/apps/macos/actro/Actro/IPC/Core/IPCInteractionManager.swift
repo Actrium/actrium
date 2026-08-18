@@ -154,8 +154,8 @@ public final class IPCInteractionManager: ObservableObject {
 
     /// Allocate a service for a tab
     public func allocateService(for tabId: UUID, fingerprint: String) throws -> String {
-        // Delegate to XPCServicePool for actual allocation
-        let serviceId = try XPCServicePool.shared.allocateService(for: tabId, fingerprint: fingerprint)
+        // Delegate to the dynamic Renderer broker for actual allocation.
+        let serviceId = try RendererProcessPool.shared.allocateRenderer(for: tabId, fingerprint: fingerprint)
 
         // Initialize tab state
         var state = tabStates[tabId] ?? IPCTabState()
@@ -233,7 +233,7 @@ public final class IPCInteractionManager: ObservableObject {
 
         // Release from pool
         if state.serviceId != nil {
-            XPCServicePool.shared.releaseService(for: tabId)
+            RendererProcessPool.shared.releaseRenderer(for: tabId)
         }
 
         // Clean up state

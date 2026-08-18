@@ -19,6 +19,7 @@ message IPCMessage {
         GetMetricsRequest get_metrics = 14;
         GetSurfaceIDRequest get_surface_id = 15;
         TerminateRequest terminate = 16;
+        DestroyTabRequest destroy_tab = 17;
 
         // Helper -> Actro
         ReadyResponse ready = 50;
@@ -31,6 +32,8 @@ message IPCMessage {
         SurfaceIDResponse surface_id_response = 57;
         LoadContentResponse load_content_response = 58;
         ExecuteJSResponse execute_js_response = 59;
+        ViewportApplied viewport_applied = 60;
+        HostEvent host_event = 61;
     }
 }
 
@@ -54,11 +57,18 @@ message LoadContentRequest {
     string contract_name = 20;
     int32 contract_version = 21;
     repeated string permissions = 22;
+
+    // Canonical business configuration. This preserves the complete ViewBridge
+    // payload while the typed transport evolves independently.
+    string config_json = 30;
 }
 
 message UpdateViewportRequest {
     double width = 1;
     double height = 2;
+    string tab_id = 10;
+    uint32 request_id = 11;
+    bool is_overview_mode = 12;
 }
 
 message InputEvent {
@@ -71,6 +81,7 @@ message InputEvent {
     uint32 modifiers = 7;     // shift=1, control=2, option=4, command=8
     uint32 key_code = 8;
     string characters = 9;
+    string tab_id = 20;
 
     enum EventType {
         MOUSE_MOVE = 0;
@@ -86,16 +97,22 @@ message InputEvent {
 
 message ExecuteJSRequest {
     string code = 1;
+    string tab_id = 10;
 }
 
 message GetMetricsRequest {
 }
 
 message GetSurfaceIDRequest {
+    string tab_id = 1;
 }
 
 message TerminateRequest {
     string reason = 1;
+}
+
+message DestroyTabRequest {
+    string tab_id = 1;
 }
 
 // ============================================
@@ -106,29 +123,44 @@ message ReadyResponse {
     uint32 surface_id = 1;
     uint32 width = 2;
     uint32 height = 3;
+    string renderer_id = 10;
+    int32 process_id = 11;
 }
 
 message SurfaceUpdated {
     uint32 surface_id = 1;
+    string tab_id = 10;
 }
 
 message TitleChanged {
     string title = 1;
+    string tab_id = 10;
 }
 
 message NavigationRequest {
     string url = 1;
     bool new_tab = 2;
+    string tab_id = 10;
 }
 
 message ConsoleLog {
     string level = 1;    // "log", "info", "warn", "error"
     string message = 2;
     string source = 3;
+    string tab_id = 10;
+}
+
+// Generic, allow-listed business action forwarded from a sandboxed Renderer
+// to the Browser Broker. `user_info_json` must contain a JSON object.
+message HostEvent {
+    string name = 1;
+    string user_info_json = 2;
+    string tab_id = 10;
 }
 
 message CrashReport {
     string reason = 1;
+    string tab_id = 10;
 }
 
 message MetricsResponse {
@@ -142,12 +174,14 @@ message MetricsResponse {
 message SurfaceIDResponse {
     uint32 request_id = 1;
     uint32 surface_id = 2;
+    string tab_id = 10;
 }
 
 message LoadContentResponse {
     uint32 request_id = 1;
     bool success = 2;
     string error_message = 3;
+    string tab_id = 10;
 }
 
 message ExecuteJSResponse {
@@ -155,6 +189,14 @@ message ExecuteJSResponse {
     bool success = 2;
     string result = 3;
     string error_message = 4;
+    string tab_id = 10;
+}
+
+message ViewportApplied {
+    string tab_id = 1;
+    uint32 request_id = 2;
+    double width = 3;
+    double height = 4;
 }
 
 // ============================================
