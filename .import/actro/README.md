@@ -95,5 +95,4 @@ orchestration, and Windows WebView2 policy stay platform-owned.
 Forms + WebView2 browser shell plus `src/ActroCore.cs`, the centralized C#
 adapter for the Rust ActroCore C ABI. `npm run verify:windows` validates the
 project metadata on every host and runs `dotnet build` whenever a .NET SDK is
-available; Windows hosts require the SDK. `third_party/rustdesk-actr/` is a
-remote desktop technology reference, not the Actro Windows browser client.
+available; Windows hosts require the SDK.

@@ -161,7 +161,6 @@ apps/windows/actro/native/    Ignored local Windows native DLL artifact
 crates/actro-core/include/actro_core.h
                               Minimal C ABI header for Windows and other C
                               hosts.
-third_party/rustdesk-actr/     Remote desktop technology reference only.
 ```
 
 ## First Implementation Shape

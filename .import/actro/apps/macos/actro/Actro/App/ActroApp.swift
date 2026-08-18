@@ -551,8 +551,8 @@ struct ActroApp: App {
             if let holder = WebViewHolderManager.shared.existingHolder(for: tab.id) {
                 holder.showInspector()
             }
-        case .reactNative, .empty, .native, .ssh, .sftp, .remoteDesktop:
-            // ACTR/RN tab, native, empty, SSH, SFTP, or remote desktop: use built-in DevTools
+        case .reactNative, .empty, .native:
+            // ACTR/RN, native, and empty tabs use built-in DevTools
             devTools.toggle()
         }
     }

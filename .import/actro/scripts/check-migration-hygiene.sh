@@ -391,8 +391,7 @@ fi
 temporary_worktree_matches=""
 for temp_worktree in \
   apps/macos/askit \
-  apps/macos/rill \
-  apps/rustdesk-actr
+  apps/macos/rill
 do
   if [ -e "$temp_worktree" ] || [ -L "$temp_worktree" ]; then
     temporary_worktree_matches="${temporary_worktree_matches}${temp_worktree}

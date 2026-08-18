@@ -4,12 +4,6 @@ members = [
     "crates/actro-core",
     "crates/actro-sync-server",
     "crates/actro-vault",
-    "crates/actro-terminal",
-    "crates/actro-remote",
-]
-exclude = [
-    "third_party/actor-rtc-actr",
-    "third_party/rustdesk-actr",
 ]
 
 [workspace.package]

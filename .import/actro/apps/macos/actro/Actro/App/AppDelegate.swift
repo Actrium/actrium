@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        RendererProcessPool.shared.shutdown()
         VaultManager.shared.lock()
     }
 
@@ -70,17 +71,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         // Initialize TabProcessManager
         _ = TabProcessManager.shared
 
-        // Prewarm XPC services
+        // Prewarm the browser-style homogeneous Renderer pool.
         Task { @MainActor in
-            _ = XPCServicePool.shared.verifyServiceBundles()
-            await XPCServicePool.shared.prewarmInitialServicesAsync()
+            _ = RendererProcessPool.shared.verifyRendererHelper()
+            await RendererProcessPool.shared.prewarmInitialRenderersAsync()
         }
-
-        // Prewarm terminal XPC services (establish ViewBridge connections early)
-        TerminalServicePool.shared.prewarmServices()
-
-        // Initialize SFTP callback handler
-        SFTPCallbackHandler.shared.activate()
 
         // Initialize vault manager
         _ = VaultManager.shared

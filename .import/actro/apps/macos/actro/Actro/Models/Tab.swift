@@ -21,15 +21,6 @@ enum TabContentType: Equatable {
     /// Native SwiftUI content (runs in main process, no XPC needed)
     case native(type: NativeContentType)
 
-    /// SSH terminal session
-    case ssh(sessionId: String)
-
-    /// SFTP file browser session
-    case sftp(sessionId: String)
-
-    /// Remote desktop session
-    case remoteDesktop(sessionId: String)
-
     /// 空白 Tab（无内容）
     case empty
 }
@@ -137,15 +128,6 @@ struct Tab: Identifiable {
     /// Custom app icon (SF Symbol name) - can be set by RCTNApp
     var appIcon: String?
 
-    /// SSH session ID (set when navigating to ssh:// URL)
-    var sshSessionId: String?
-
-    /// SFTP session ID (set when navigating to sftp:// URL)
-    var sftpSessionId: String?
-
-    /// Remote desktop session ID (set when navigating to ardp:// URL)
-    var remoteDesktopSessionId: String?
-
     init(
         title: String,
         url: URL? = nil,
@@ -164,10 +146,7 @@ struct Tab: Identifiable {
         leftPanelDefaultVisible: Bool = true,
         rightPanelDefaultVisible: Bool = false,
         backgroundColor: String? = nil,
-        appIcon: String? = nil,
-        sshSessionId: String? = nil,
-        sftpSessionId: String? = nil,
-        remoteDesktopSessionId: String? = nil
+        appIcon: String? = nil
     ) {
         self.title = title
         self.url = url
@@ -187,9 +166,6 @@ struct Tab: Identifiable {
         self.rightPanelDefaultVisible = rightPanelDefaultVisible
         self.backgroundColor = backgroundColor ?? "#1e1e1e"
         self.appIcon = appIcon
-        self.sshSessionId = sshSessionId
-        self.sftpSessionId = sftpSessionId
-        self.remoteDesktopSessionId = remoteDesktopSessionId
     }
 
     // MARK: - Content Type Detection
@@ -199,27 +175,15 @@ struct Tab: Identifiable {
     var contentType: TabContentType {
         let result: TabContentType
 
-        // 1. 检查是否为 SSH session
-        if let url = url, url.scheme == "ssh", let sessionId = sshSessionId {
-            result = .ssh(sessionId: sessionId)
-        }
-        // 1b. 检查是否为 SFTP session
-        else if let url = url, url.scheme == "sftp", let sessionId = sftpSessionId {
-            result = .sftp(sessionId: sessionId)
-        }
-        // 1c. Check for remote desktop session
-        else if let url = url, url.scheme == "ardp", let sessionId = remoteDesktopSessionId {
-            result = .remoteDesktop(sessionId: sessionId)
-        }
-        // 2. 检查是否为 Web URL (http/https)
-        else if let url = url, url.scheme == "http" || url.scheme == "https" {
+        // 1. 检查是否为 Web URL (http/https)
+        if let url = url, url.scheme == "http" || url.scheme == "https" {
             result = .web(url: url)
         }
-        // 3. 检查是否为 RN 应用（有脚本内容）
+        // 2. 检查是否为 RN 应用（有脚本内容）
         else if let fingerprint = bundleFingerprint {
             result = .reactNative(bundleFingerprint: fingerprint)
         }
-        // 4. 系统 Tab - startPage 使用原生 SwiftUI，其他系统页面仍用 RN
+        // 3. 系统 Tab - startPage 使用原生 SwiftUI，其他系统页面仍用 RN
         else if let systemType = systemTabType {
             switch systemType {
             case .startPage:
@@ -228,7 +192,7 @@ struct Tab: Identifiable {
                 result = .reactNative(bundleFingerprint: "system.\(systemType.rawValue)")
             }
         }
-        // 5. 空白 Tab
+        // 4. 空白 Tab
         else {
             result = .empty
         }

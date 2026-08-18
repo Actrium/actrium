@@ -20,12 +20,6 @@ crates/actro-core/ActroCore.xcframework/**/libactro_core.a
 crates/actro-vault/generated/
 crates/actro-vault/xcframework-staging/
 crates/actro-vault/ActroVault.xcframework/**/libactro_vault.a
-crates/actro-terminal/libactro_terminal.a
-crates/actro-terminal/ActroTerminal.xcframework/macos-arm64_x86_64/libactro_terminal.a
-crates/actro-remote/libactro_remote.a
-crates/actro-remote/xcframework-staging/
-crates/actro-remote/ActroRemote.xcframework/macos-arm64/libactro_remote.a
-
 # Apple
 DerivedData/
 .build/
@@ -50,6 +44,9 @@ apps/android/actro/android/app/src/main/assets/model/asr/
 # Local scratch / memory files
 internal/
 .gemini-clipboard/
+__pycache__/
+*.pyc
+.DS_Store
 
 # Local environment
 .env

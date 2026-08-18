@@ -28,10 +28,5 @@
 	<key>com.apple.security.cs.disable-library-validation</key>
 	<true/>
 
-	<!-- Temporary file access for debugging -->
-	<key>com.apple.security.temporary-exception.files.absolute-path.read-write</key>
-	<array>
-		<string>/tmp/</string>
-	</array>
 </dict>
 </plist>

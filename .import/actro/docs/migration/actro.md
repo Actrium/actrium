@@ -29,19 +29,15 @@ tree under the macOS app directory.
 
 ```text
 Actro/                    -> apps/macos/actro/Actro/
-Actro*Service/            -> apps/macos/actro/Actro*Service/
+ActroViewService/         -> apps/macos/actro/ActroViewService/
 ActroTests/               -> apps/macos/actro/ActroTests/
 ActroUITests/             -> apps/macos/actro/ActroUITests/
 Packages/ActroIPC/        -> platform/apple/packages/ActroIPC/
 Shared/IPC/                -> apps/macos/actro/Shared/IPC/
-actro-terminal/           -> crates/actro-terminal/
-actro-remote/             -> crates/actro-remote/
 legacy runtime directory  -> packages/actro-runtime/
 docs/                      -> apps/macos/actro/docs/
 rill/                      -> packages/rill/
 askit/                     -> packages/askit/
-rustdesk-actr/             -> third_party/rustdesk-actr/
-actor-rtc/actr pinned rev  -> third_party/actor-rtc-actr/
 ```
 
 macOS now references these monorepo locations directly. The legacy runtime and
@@ -69,23 +65,8 @@ workspace:
 xcodebuild -workspace Actro.xcworkspace -scheme Actro -configuration Debug -destination platform=macOS CODE_SIGNING_ALLOWED=NO build
 ```
 
-The Rust FFI crates also rebuild from their new locations:
-
-```text
-crates/actro-terminal/build-xcframework.sh
-crates/actro-remote/build-xcframework.sh
-```
-
-`actro-remote` requires the native libraries installed by vcpkg
-(`libyuv`, `libvpx`, `aom`) through `VCPKG_ROOT`. The repo declares these in
-`vcpkg.json` and provides `scripts/bootstrap-native-deps.sh`, but vcpkg itself
-and installed artifacts remain outside the repo.
-
 ## Remaining Risks
 
-- The pinned `actor-rtc/actr` source is a legacy compatibility dependency for
-  Actro remote desktop only; it is not the intended long-term Actro runtime
-  dependency model.
 - Windows has a WebView2 browser shell project at `apps/windows/actro/`, plus
   native tab strip/navigation chrome, generated local history/bookmark pages,
   provider sync settings, and a `window.actroHost` JSON bridge for core status,

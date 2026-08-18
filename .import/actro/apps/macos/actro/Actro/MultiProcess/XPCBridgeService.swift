@@ -155,7 +155,7 @@ final class XPCBridgeService: ObservableObject {
             return existing
         }
 
-        let serviceId = try XPCServicePool.shared.allocateService(for: tabId, fingerprint: fingerprint)
+        let serviceId = try RendererProcessPool.shared.allocateRenderer(for: tabId, fingerprint: fingerprint)
 
         var state = tabStates[tabId] ?? XPCTabState()
         state.serviceId = serviceId
@@ -189,7 +189,7 @@ final class XPCBridgeService: ObservableObject {
         guard let state = tabStates[tabId] else { return }
 
         if state.serviceId != nil {
-            XPCServicePool.shared.releaseService(for: tabId)
+            RendererProcessPool.shared.releaseRenderer(for: tabId)
         }
 
         ipcAdapter.releaseTab(tabId)

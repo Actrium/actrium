@@ -84,7 +84,7 @@ private func debugLog(_ message: String) {
 /// ViewBridge automatically syncs Host's NSRemoteView frame here
 /// Key insight: ViewBridge updates the superview's bounds, so we use Auto Layout
 /// to pin this view to the superview and automatically follow size changes.
-private class ResizableContainerView: NSView {
+final class ResizableContainerView: NSView {
     /// 使用 flipped 坐标系以匹配 Host 端 (ContainerView.isFlipped = true)
     /// 这确保子视图从左上角开始布局，而不是左下角
     override var isFlipped: Bool { true }
@@ -369,31 +369,20 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
     override func bridgelessEnabled() -> Bool { return true }
     override func turboModuleEnabled() -> Bool { return true }
 
-    /// Lazily resolved host app bundle URL
-    private lazy var _hostAppBundleURL: URL? = {
-        // Bundle.main in XPC service may be the XPC bundle, not the host app bundle.
+    /// The Runtime belongs to the single Renderer product. Keeping it here
+    /// preserves one on-disk copy while allowing the sandboxed Helper to load
+    /// its own resource without a cross-bundle filesystem exception.
+    private lazy var _rendererBundleURL: URL? = {
         if let url = Bundle.main.url(forResource: "system", withExtension: "jsbundle") {
-            ipcLog("🔧 bundleURL: resolved via Bundle.main")
+            ipcLog("🔧 bundleURL: resolved via Renderer Bundle.main")
             return url
         }
-        // Construct host app bundle path from executable path
-        let execPath = ProcessInfo.processInfo.arguments[0]
-        var dir = (execPath as NSString).deletingLastPathComponent
-        dir = (dir as NSString).deletingLastPathComponent
-        dir = (dir as NSString).deletingLastPathComponent
-        dir = (dir as NSString).deletingLastPathComponent
-        dir = (dir as NSString).deletingLastPathComponent
-        let path = (dir as NSString).appendingPathComponent("Resources/system.jsbundle")
-        if FileManager.default.fileExists(atPath: path) {
-            ipcLog("🔧 bundleURL: resolved via host app path: \(path)")
-            return URL(fileURLWithPath: path)
-        }
-        ipcLog("❌ bundleURL: not found! Bundle.main=\(Bundle.main.bundlePath) hostPath=\(path)")
+        ipcLog("❌ bundleURL: missing from Renderer bundle \(Bundle.main.bundlePath)")
         return nil
     }()
 
     override func bundleURL() -> URL? {
-        let url = _hostAppBundleURL
+        let url = _rendererBundleURL
         ipcLog("📎 bundleURL() called → \(url?.lastPathComponent ?? "nil") [thread=\(Thread.isMainThread ? "main" : "bg")]")
         return url
     }
@@ -403,7 +392,7 @@ private class ServiceReactNativeFactoryDelegate: RCTDefaultReactNativeFactoryDel
 
 /// Represents a single Tab's ViewController and root view
 /// Key component for 1:1:1 architecture
-private class TabViewControllerEntry {
+final class TabViewControllerEntry {
     /// The tabId from Host (assigned when first config is received)
     /// Initially nil until Host sends tabConfig with the real tabId
     var tabId: String?
@@ -451,7 +440,7 @@ private class TabViewControllerEntry {
 
 /// Manages shared RCTHost and per-Tab root views (Bridgeless Mode)
 /// Singleton per XPC service process
-private class ServiceReactNativeHost {
+final class ServiceReactNativeHost {
     static let shared = ServiceReactNativeHost()
 
     private var factoryDelegate: ServiceReactNativeFactoryDelegate?
@@ -526,11 +515,12 @@ private class ServiceReactNativeHost {
         RCTInspectorDevServerHelper.disableDebugger()
         #endif
 
-        // Setup listeners
-        setupTabConfigListener()
-
-        // Start XPC listener for new IPC module
-        startXPCListener()
+        // A manually spawned Renderer uses its private Broker socket. ViewBridge
+        // listeners are only needed by the legacy XPC entry point.
+        if !RendererProcessController.isRendererProcess {
+            setupTabConfigListener()
+            startXPCListener()
+        }
     }
 
     /// Start the XPC listener for new IPC module
@@ -686,6 +676,64 @@ private class ServiceReactNativeHost {
         pendingEntryOrder.append(internalId)  // Track creation order for FIFO
         ipcLog("📝 registerPendingEntry: internalId=\(String(internalId.prefix(8))), pendingEntries=\(pendingEntries.count), pendingOrder=\(pendingEntryOrder.count)")
         return entry
+    }
+
+    /// Create and register a Tab root owned by a manually spawned Renderer.
+    ///
+    /// Unlike ViewBridge, the Broker already supplies the canonical tabId, so
+    /// there is no pending internalId/FIFO binding phase.
+    func createRendererEntry(tabId: String, size: CGSize) -> TabViewControllerEntry {
+        if let existing = getTabEntry(tabId: tabId) {
+            return existing
+        }
+
+        let validSize = CGSize(
+            width: max(size.width, 1),
+            height: max(size.height, 1)
+        )
+        let container = ResizableContainerView(frame: NSRect(origin: .zero, size: validSize))
+        container.wantsLayer = true
+        container.layer?.backgroundColor = NSColor.clear.cgColor
+        container.autoresizingMask = [.width, .height]
+
+        let entry = registerPendingEntry(
+            internalId: tabId,
+            containerView: container,
+            viewController: nil
+        )
+        entry.containerSize = validSize
+        bind(hostTabId: tabId, toInternalId: tabId)
+        setupReactNativeContent(for: entry)
+        return entry
+    }
+
+    /// Apply the canonical Host configuration directly over the Renderer IPC.
+    func applyRendererConfig(
+        _ config: [String: Any],
+        completion: @escaping (Bool, String?) -> Void
+    ) {
+        handleTabConfig(config, completion: completion)
+    }
+
+    /// Resize one Renderer Tab and update its media-query properties.
+    func resizeRendererEntry(
+        tabId: String,
+        size: CGSize,
+        requestId: UInt32,
+        isOverviewMode: Bool
+    ) {
+        handleContainerSizeChanged(
+            tabId: tabId,
+            size: size,
+            requestId: Int(requestId),
+            isOverviewMode: isOverviewMode
+        ) { _, _ in }
+    }
+
+    /// Remove a Renderer Tab without terminating the shared fingerprint process.
+    func destroyRendererEntry(tabId: String) {
+        guard let entry = getTabEntry(tabId: tabId) else { return }
+        unregisterEntry(internalId: entry.internalId)
     }
 
     /// Unregister a Tab when its ViewController is destroyed
@@ -1167,6 +1215,12 @@ private class ServiceReactNativeHost {
 
     /// 通知 Host 端尺寸更新已完成
     private func postSizeApplied(tabId: String, size: CGSize, requestId: String = "?") {
+        // The Browser Broker receives the typed viewport acknowledgement from
+        // RendererProcessController. The legacy distributed notification is
+        // both redundant and forbidden by the Renderer sandbox.
+        if RendererProcessController.isRendererProcess {
+            return
+        }
         let notificationName: String
         if let pid = hostProcessId {
             notificationName = "com.actro.sizeApplied.\(pid).\(serviceBundleId)"

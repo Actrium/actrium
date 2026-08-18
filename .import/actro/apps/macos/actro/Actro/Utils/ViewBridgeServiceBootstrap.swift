@@ -3,7 +3,6 @@
 //  Actro
 //
 //  Shared utilities for ViewBridge XPC service entry points.
-//  Used by both ActroViewService and ActroTerminalService.
 //
 
 import Foundation
@@ -19,7 +18,7 @@ import ObjectiveC
 /// we create the subclass dynamically using objc_allocateClassPair.
 ///
 /// - Parameters:
-///   - className: The class name to register (e.g. "TerminalServiceViewController")
+///   - className: The class name to register (e.g. "ActroServiceViewController")
 ///   - loadView: Block called when the VC's loadView is invoked
 ///   - viewDidLayout: Optional block called when the VC's viewDidLayout is invoked
 ///   - dealloc: Optional block called when the VC is deallocated
@@ -85,7 +84,7 @@ func registerServiceViewControllerClass(
 /// Loads the ViewBridge framework and calls NSViewServiceApplicationMain.
 /// This function does not return (calls exit()).
 ///
-/// - Parameter serviceName: Name for logging (e.g. "ActroTerminalService")
+/// - Parameter serviceName: Name used in service logs.
 func viewBridgeServiceMain(serviceName: String) -> Never {
     let frameworkPath = "/System/Library/PrivateFrameworks/ViewBridge.framework/ViewBridge"
 
