@@ -107,6 +107,12 @@ Helper 根据 Tab 对应的隐藏窗口重建 `NSEvent`，由窗口发送给 RN 
 模式禁止命中测试；Focus 模式获取 First Responder 并接收键盘事件。捏合返回
 Overview 在主进程处理，不依赖远程 NSView。
 
+跨进程 Accessibility 走同一条 IPC，不依赖成熟第三方库（Chrome Remote Cocoa
+不开放）。Helper 把 NSView / `NSAccessibility` 树快照成 `AccessibilityTree`，
+主进程用标准 `NSAccessibilityElement` 代理这棵树。VoiceOver 看到的是系统角色
+（按钮、分组、文本），按压等动作再经 IPC 回到 Renderer。像素层共享仍然不是
+完整 NSView 语义；这是最小可用 AX 代理，不是完整远程 AX 树同步。
+
 ## 6. 生命周期与故障恢复
 
 Renderer 状态：
@@ -200,6 +206,7 @@ Bundle ID `io.actrium.actro.renderer` 创建 provisioning profile；这是账号
 Mac App Store。Actro 当前已使用私有 ViewBridge，因此本次迁移不新增发布渠道类别，
 但必须在支持的 macOS 版本上做运行探测和失败降级。
 
-Chrome 的 Remote Cocoa 还包含完整的跨进程 Accessibility 代理。Actro 首版迁移需
-至少保留键盘焦点与基础可访问性容器；完整远程 AX 树应作为独立验证项，不能把像素
-层共享误认为完整的 NSView 语义共享。
+Chrome Remote Cocoa 的完整 AX 代理没有可引用的成熟开源库。Actro 用最小实现：
+Renderer 导出 `AccessibilityTree`，`RendererSurfaceHostView` 作为 AX 分组暴露
+子节点，动作经 `accessibility_action` 回传。键盘焦点仍走输入 IPC。没有远程
+完整 AX API 覆盖（自定义参数、滚动区域细节、实时文本选择范围）。

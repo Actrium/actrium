@@ -31,6 +31,7 @@ extension Notification.Name {
     static let rendererSurfaceUpdated = Notification.Name("rendererSurfaceUpdated")
     static let rendererProcessCrashed = Notification.Name("rendererProcessCrashed")
     static let rendererViewportApplied = Notification.Name("rendererViewportApplied")
+    static let rendererAccessibilityUpdated = Notification.Name("rendererAccessibilityUpdated")
 }
 
 /// Browser-style broker for a dynamically sized pool of homogeneous Renderer
@@ -264,6 +265,43 @@ final class RendererProcessPool: ObservableObject {
         try? worker.connection.sendInputEvent(tabEvent)
     }
 
+    func requestAccessibilityTree(for tabId: UUID) {
+        guard let worker = worker(for: tabId), worker.isReady else { return }
+        Task { @MainActor in
+            guard let tree = try? await worker.connection.getAccessibilityTree(
+                tabId: tabId.uuidString
+            ) else {
+                return
+            }
+            self.publish(tree: tree)
+        }
+    }
+
+    func performAccessibilityAction(
+        tabId: UUID,
+        nodeId: UInt64,
+        action: String
+    ) -> Bool {
+        guard let worker = worker(for: tabId), worker.isReady else { return false }
+        Task { @MainActor in
+            _ = try? await worker.connection.sendAccessibilityAction(
+                tabId: tabId.uuidString,
+                nodeId: nodeId,
+                action: action
+            )
+        }
+        return true
+    }
+
+    private func publish(tree: Actro_Ipc_AccessibilityTree) {
+        guard let tabId = UUID(uuidString: tree.tabID) else { return }
+        NotificationCenter.default.post(
+            name: .rendererAccessibilityUpdated,
+            object: nil,
+            userInfo: ["tabId": tabId, "tree": tree]
+        )
+    }
+
     // MARK: - Startup and diagnostics
 
     @discardableResult
@@ -427,6 +465,10 @@ final class RendererProcessPool: ObservableObject {
                 object: nil,
                 userInfo: ["tabId": tabId, "contextId": contextId]
             )
+        }
+
+        worker.connection.onAccessibilityTree = { [weak self] tree in
+            self?.publish(tree: tree)
         }
 
         worker.connection.onTabTitleChanged = { tabIdString, title in

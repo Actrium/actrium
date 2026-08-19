@@ -64,6 +64,10 @@ final class RendererSurfaceHostView: NSView {
     private var lastConfiguredFingerprint: String?
     private var lastSentSize: CGSize?
     private var recoveryAttempt = 0
+    private var accessibilityObserver: NSObjectProtocol?
+    private var accessibilityElements: [RemoteAccessibilityElement] = []
+    private var accessibilityById: [UInt64: RemoteAccessibilityElement] = [:]
+    private var accessibilityTree = Actro_Ipc_AccessibilityTree()
 
     private static let layerHostClass: AnyClass? = NSClassFromString("CALayerHost")
 
@@ -85,6 +89,9 @@ final class RendererSurfaceHostView: NSView {
         if let crashObserver {
             NotificationCenter.default.removeObserver(crashObserver)
         }
+        if let accessibilityObserver {
+            NotificationCenter.default.removeObserver(accessibilityObserver)
+        }
     }
 
     private func setup() {
@@ -104,6 +111,20 @@ final class RendererSurfaceHostView: NSView {
                 return
             }
             self.installContext(contextId)
+        }
+
+        accessibilityObserver = NotificationCenter.default.addObserver(
+            forName: .rendererAccessibilityUpdated,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let self,
+                  let tabId = notification.userInfo?["tabId"] as? UUID,
+                  tabId == self.tabId,
+                  let tree = notification.userInfo?["tree"] as? Actro_Ipc_AccessibilityTree else {
+                return
+            }
+            self.applyAccessibilityTree(tree)
         }
 
         crashObserver = NotificationCenter.default.addObserver(
@@ -180,6 +201,7 @@ final class RendererSurfaceHostView: NSView {
                     return
                 }
                 self.installContext(contextId)
+                RendererProcessPool.shared.requestAccessibilityTree(for: tabId)
                 RendererProcessPool.shared.updateViewport(
                     tabId: tabId,
                     size: self.bounds.size,
@@ -349,6 +371,75 @@ final class RendererSurfaceHostView: NSView {
 
     override var acceptsFirstResponder: Bool { true }
     override var isFlipped: Bool { true }
+
+    override func isAccessibilityElement() -> Bool { true }
+
+    override func accessibilityRole() -> NSAccessibility.Role { .group }
+
+    override func accessibilityLabel() -> String? {
+        let title = coordinator?.tabConfig?.title ?? ""
+        return title.isEmpty ? "Application content" : title
+    }
+
+    override func accessibilityChildren() -> [Any]? {
+        accessibilityElements
+    }
+
+    override func accessibilityHitTest(_ point: NSPoint) -> Any? {
+        guard let window else { return self }
+        let inWindow = window.convertFromScreen(NSRect(origin: point, size: .zero)).origin
+        let local = convert(inWindow, from: nil)
+        if let nodeId = RemoteAccessibilitySnapshot.hitTest(accessibilityTree, point: local),
+           let element = accessibilityById[nodeId] {
+            return element
+        }
+        return self
+    }
+
+    override var accessibilityFocusedUIElement: Any? {
+        if accessibilityTree.focusedID != 0 {
+            return accessibilityById[accessibilityTree.focusedID]
+        }
+        return self
+    }
+
+    func performRemoteAccessibilityAction(_ action: String, nodeId: UInt64) -> Bool {
+        guard let tabId else { return false }
+        return RendererProcessPool.shared.performAccessibilityAction(
+            tabId: tabId,
+            nodeId: nodeId,
+            action: action
+        )
+    }
+
+    private func applyAccessibilityTree(_ tree: Actro_Ipc_AccessibilityTree) {
+        accessibilityTree = tree
+        var byId: [UInt64: RemoteAccessibilityElement] = [:]
+        for node in tree.nodes {
+            let element = RemoteAccessibilityElement(node: node, host: self)
+            byId[node.nodeID] = element
+        }
+        for node in tree.nodes {
+            guard let element = byId[node.nodeID] else { continue }
+            element.setChildren(node.childIds.compactMap { byId[$0] })
+        }
+        let roots = tree.nodes.filter { $0.parentID == 0 }
+        let hostChildren: [RemoteAccessibilityElement]
+        if roots.count == 1, let root = roots.first, !root.childIds.isEmpty {
+            hostChildren = root.childIds.compactMap { byId[$0] }
+        } else {
+            hostChildren = roots.compactMap { byId[$0.nodeID] }
+        }
+        for element in hostChildren {
+            element.setAccessibilityParent(self)
+        }
+        accessibilityElements = hostChildren
+        accessibilityById = byId
+        NSAccessibility.post(element: self, notification: .layoutChanged)
+        if tree.focusedID != 0, let focused = byId[tree.focusedID] {
+            NSAccessibility.post(element: focused, notification: .focusedUIElementChanged)
+        }
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         allowsInput && bounds.contains(point) ? self : nil
