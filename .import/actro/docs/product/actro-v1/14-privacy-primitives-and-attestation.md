@@ -218,7 +218,7 @@ Contract 的作用是让所有图变化在 capability 创建前可拦截。它�
 
 ### 4.3 状态变化
 
-不做全图分布式提交。变化 Actor 本地原子切换 `ActorStateId`，同步废除旧密钥、旧通道和旧 Capability，进入保障挂起。事件可以丢失。
+不做全图分布式提交。变化 Actor 本地原子切换 `ActorStateId`，同步废除旧密钥、旧通道和旧 Capability，进入保障挂起。事件可以丢失。`ActorState` 含单调修订号：配置回滚也得到新状态根，废除是持久的，旧权力不因回滚复活。
 
 ```text
 Change → SUSPENDED → 取证 / 评定 → Resume（须有当前 AA）→ 尝试 Publish
@@ -344,6 +344,8 @@ Actr 网络应同时提供：
 protocolVersion
 sourceActorId
 targetActorId
+sourceActorStateId
+targetActorStateId
 sourceRuntimeInstanceId
 targetRuntimeInstanceId
 sourceCredentialDigest
@@ -356,6 +358,8 @@ attestationResultDigest
 channelNonce
 roles
 ```
+
+双方当前 `ActorStateId` 必须进入联合 transcript 并被双向认证：只对本方字段做 MAC 不足以抵抗旧状态问候重放（见 [安全协议](../../security/03-protocol.zh.md) §3 与形式模型 F-CHAN-01）。任一方 `ActorStateId` 变化后，旧通道不得承载应用数据，须针对新状态重新握手。
 
 Actor Host 必须证明持有 Actor key 和临时会话 key。若目标运行在 TEE 中，临时解密公钥必须由 TEE 内生成，或被 TEE 安全持有，并进入 attestation Evidence/Result。
 
@@ -525,6 +529,7 @@ Service 自签“我安全”不能形成 Assured Edge。只有用户/组织/Rea
 ```text
 fresh nonce
 + ActorId
++ current ActorStateId
 + runtimeInstanceId
 + workload/package digest
 + policy digest
@@ -841,7 +846,7 @@ fail          → 关闭 edge、撤销 capability、停止 key release
 recovered     → 新 nonce、新 Result、绑新 `ActorStateId` 的通道与密钥
 ```
 
-不能因 Verifier 暂时不可用而继续沿用无限期缓存证明。
+不能因 Verifier 暂时不可用而继续沿用无限期缓存证明。核对 `expiresAt`、Attestation Result 与 Capability 有效期所用的本地时钟不可回拨——执行方与评定方同受此约束，可被回拨的时钟会让过期材料重新被接受。
 
 ## 17. 稳定错误码
 
