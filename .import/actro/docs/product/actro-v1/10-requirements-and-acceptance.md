@@ -141,7 +141,7 @@
 | FR-SEC-029 | NativeCapsule 只有在第三方代码执行前完成独立进程 OS sandbox、关闭原始出口并只开放 brokered IPC 时，才可以评为 `CONTROLLED`。 |
 | FR-SEC-030 | 三色内部必须保留 identity、artifact provenance、workload confinement、compute confidentiality、channel security、storage protection、egress closure 和 output control 等多维事实。 |
 | FR-SEC-031 | 每条网络 Actor edge 必须具有双向认证、机密性、完整性、前向保密和防重放；signaling、TURN 与普通 relay 不得持有 payload key。 |
-| FR-SEC-032 | Actor Secure Channel 握手必须绑定两端 ActorId/runtime、credential、临时 key、目标 Service、policy、attestation result、nonce 和角色。 |
+| FR-SEC-032 | Actor Secure Channel 握手必须绑定两端 ActorId、当前 `ActorStateId`、runtime、credential、临时 key、目标 Service、policy、attestation result、nonce 和角色，并双向认证联合 transcript。 |
 | FR-SEC-033 | transport TLS/DTLS/QUIC 成功不能单独生成 channel security pass；必须完成 Actor 身份、运行实例和 session key 绑定。 |
 | FR-SEC-034 | Workspace、snapshot、backup、cache、index 和临时文件必须按 data class 实施 envelope encryption；ActorId 不得充当密钥。 |
 | FR-SEC-035 | Data Policy 必须按数据类别和操作声明 required assurance dimensions；非 required 维度不得使公共数据无条件 unknown。 |
@@ -169,6 +169,10 @@
 | FR-SEC-057 | 风险接受不能把缺失证明提升为绿；平台硬失败和无效通道不得由用户覆盖。 |
 | FR-SEC-058 | 图结构不变但证据到期、验证者 / TCB / 凭据撤销、策略或状态指纹变化时，同样必须重评。 |
 | FR-SEC-059 | GPU/NPU Attestation 不得被解释为 LLM Server 无日志；只有被度量的日志配置、封闭 egress/audit capabilities 或可信 Certified Privacy Domain retention claim 才能评估日志口子。 |
+| FR-SEC-060 | `ActorState.revision` 必须由状态权威单调递增并进入 `ActorStateId`；内容回滚不得复现旧状态根，旧 Capability / 结论不得因回滚恢复有效。 |
+| FR-SEC-061 | 可出示 Actr 身份的端点必须按 Actor 目标评定，不得声明为 HTTPS/域名汇绕过跨 Principal 评分；目标类别不可判定时该出口保持 `UNKNOWN`；信任汇的授权界面必须呈现为「数据离开保障范围」。 |
+| FR-SEC-062 | 执行方与评定方用于期限、证据与凭证有效期核对的本地时钟均不可回拨。 |
+| FR-SEC-063 | `EncGraph` 标识符必须落在受限 ASCII 字符集；`ApplicationStateId` 叶子必须按 `ActorId` 排序且每个 `ActorId` 恰好一个叶子。 |
 
 ## 2. 非功能需求
 
