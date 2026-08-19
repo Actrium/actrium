@@ -170,6 +170,25 @@ final class RendererProcessController {
             }
         }
 
+        connection.onGetAccessibilityTree = { [weak self] tabId, reply in
+            DispatchQueue.main.async {
+                reply(self?.surfaces[tabId]?.accessibilityTree() ?? Actro_Ipc_AccessibilityTree())
+            }
+        }
+
+        connection.onAccessibilityAction = { [weak self] request, reply in
+            DispatchQueue.main.async {
+                let ok = self?.surfaces[request.tabID]?.performAccessibility(
+                    action: request.action,
+                    nodeId: request.nodeID
+                ) ?? false
+                if ok {
+                    self?.publishAccessibilityTree(tabId: request.tabID)
+                }
+                reply(ok, ok ? nil : "Accessibility action failed")
+            }
+        }
+
         connection.onGetMetrics = { reply in
             reply(RendererProcessController.metrics())
         }
@@ -244,6 +263,7 @@ final class RendererProcessController {
 
             if success {
                 surface.commit()
+                self.publishAccessibilityTree(tabId: tabId)
                 try? self.connection.sendSurfaceUpdated(
                     surfaceId: surface.contextId,
                     tabId: tabId
@@ -285,6 +305,12 @@ final class RendererProcessController {
             width: size.width,
             height: size.height
         )
+        publishAccessibilityTree(tabId: tabId)
+    }
+
+    func publishAccessibilityTree(tabId: String) {
+        guard let surface = surfaces[tabId] else { return }
+        try? connection.sendAccessibilityTree(surface.accessibilityTree())
     }
 
     private func destroyTab(_ tabId: String) {
@@ -329,6 +355,9 @@ private final class RendererTabSurface {
     let container: ResizableContainerView
     let window: NSWindow
     let context: RendererCAContext
+    private var generation: UInt64 = 0
+    private var accessibilityObservers: [NSObjectProtocol] = []
+    private var accessibilityPublishWork: DispatchWorkItem?
 
     var contextId: UInt32 {
         context.contextId
@@ -363,6 +392,20 @@ private final class RendererTabSurface {
         container.wantsLayer = true
         context.layer = container.layer
         commit()
+        observeAccessibility()
+    }
+
+    func accessibilityTree() -> Actro_Ipc_AccessibilityTree {
+        generation += 1
+        return RendererAccessibility.snapshot(
+            tabId: tabId,
+            root: container,
+            generation: generation
+        )
+    }
+
+    func performAccessibility(action: String, nodeId: UInt64) -> Bool {
+        RendererAccessibility.perform(action: action, nodeId: nodeId, in: container)
     }
 
     func resize(to size: CGSize) {
@@ -380,9 +423,53 @@ private final class RendererTabSurface {
     }
 
     func close() {
+        accessibilityPublishWork?.cancel()
+        accessibilityPublishWork = nil
+        for observer in accessibilityObservers {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        accessibilityObservers.removeAll()
         context.layer = nil
         window.contentView = nil
         window.close()
+    }
+
+    private func observeAccessibility() {
+        let names: [Notification.Name] = [
+            Notification.Name(NSAccessibility.Notification.focusedUIElementChanged.rawValue),
+            Notification.Name(NSAccessibility.Notification.layoutChanged.rawValue),
+            Notification.Name(NSAccessibility.Notification.valueChanged.rawValue),
+            Notification.Name(NSAccessibility.Notification.titleChanged.rawValue),
+            Notification.Name(NSAccessibility.Notification.selectedChildrenChanged.rawValue)
+        ]
+        for name in names {
+            let observer = NotificationCenter.default.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] notification in
+                guard let self else { return }
+                if let view = notification.object as? NSView, view.window !== self.window {
+                    return
+                }
+                self.scheduleAccessibilityPublish()
+            }
+            accessibilityObservers.append(observer)
+        }
+    }
+
+    private func scheduleAccessibilityPublish() {
+        accessibilityPublishWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pushAccessibilityTree()
+        }
+        accessibilityPublishWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08, execute: work)
+    }
+
+    private func pushAccessibilityTree() {
+        guard let controller = RendererProcessLifetime.shared.controller else { return }
+        controller.publishAccessibilityTree(tabId: tabId)
     }
 
     func dispatch(_ input: Actro_Ipc_InputEvent) {

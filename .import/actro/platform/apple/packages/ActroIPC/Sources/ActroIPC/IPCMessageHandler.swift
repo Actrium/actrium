@@ -33,6 +33,7 @@ public class IPCConnection {
     public var onTabCrash: ((String, String) -> Void)?
     public var onViewportApplied: ((String, UInt32, Double, Double) -> Void)?
     public var onHostEvent: ((String, String, String) -> Void)?
+    public var onAccessibilityTree: ((Actro_Ipc_AccessibilityTree) -> Void)?
 
     public init(tabId: String) {
         let socketPath = IPCSocketPath.forTab(tabId)
@@ -234,6 +235,37 @@ public class IPCConnection {
         try? sendOneWay(msg)
     }
 
+    public func getAccessibilityTree(tabId: String) async throws -> Actro_Ipc_AccessibilityTree {
+        var msg = Actro_Ipc_IPCMessage()
+        msg.getAccessibilityTree = Actro_Ipc_GetAccessibilityTreeRequest()
+        msg.getAccessibilityTree.tabID = tabId
+        let response = try await sendRequest(msg)
+        guard case .accessibilityTree(let tree) = response.payload else {
+            throw IPCError.unexpectedResponse
+        }
+        return tree
+    }
+
+    public func sendAccessibilityAction(
+        tabId: String,
+        nodeId: UInt64,
+        action: String
+    ) async throws -> Bool {
+        var msg = Actro_Ipc_IPCMessage()
+        msg.accessibilityAction = Actro_Ipc_AccessibilityActionRequest()
+        msg.accessibilityAction.tabID = tabId
+        msg.accessibilityAction.nodeID = nodeId
+        msg.accessibilityAction.action = action
+        let response = try await sendRequest(msg)
+        guard case .accessibilityActionResponse(let result) = response.payload else {
+            throw IPCError.unexpectedResponse
+        }
+        if !result.success {
+            throw IPCMessageError.loadFailed(result.errorMessage)
+        }
+        return true
+    }
+
     // MARK: - Private
 
     private func sendRequest(_ message: Actro_Ipc_IPCMessage) async throws -> Actro_Ipc_IPCMessage {
@@ -327,6 +359,9 @@ public class IPCConnection {
             case .hostEvent(let event):
                 onHostEvent?(event.name, event.userInfoJson, event.tabID)
 
+            case .accessibilityTree(let tree):
+                onAccessibilityTree?(tree)
+
             default:
                 NSLog("IPCConnection: Unhandled message: \(msg)")
             }
@@ -355,6 +390,8 @@ public class IPCHelperConnection {
     public var onTabExecuteJS: ((String, String, @escaping (Bool, String?, String?) -> Void) -> Void)?
     public var onTabGetSurfaceID: ((String, @escaping (UInt32) -> Void) -> Void)?
     public var onDestroyTab: ((String) -> Void)?
+    public var onGetAccessibilityTree: ((String, @escaping (Actro_Ipc_AccessibilityTree) -> Void) -> Void)?
+    public var onAccessibilityAction: ((Actro_Ipc_AccessibilityActionRequest, @escaping (Bool, String?) -> Void) -> Void)?
 
     public init(tabId: String, socketPath: String) {
         self.tabId = tabId
@@ -492,6 +529,12 @@ public class IPCHelperConnection {
         try send(msg)
     }
 
+    public func sendAccessibilityTree(_ tree: Actro_Ipc_AccessibilityTree) throws {
+        var msg = Actro_Ipc_IPCMessage()
+        msg.accessibilityTree = tree
+        try send(msg)
+    }
+
     // MARK: - Private
 
     private func send(_ message: Actro_Ipc_IPCMessage) throws {
@@ -580,6 +623,24 @@ public class IPCHelperConnection {
 
             case .destroyTab(let req):
                 onDestroyTab?(req.tabID)
+
+            case .getAccessibilityTree(let req):
+                onGetAccessibilityTree?(req.tabID) { [weak self] tree in
+                    var resp = Actro_Ipc_IPCMessage()
+                    resp.accessibilityTree = tree
+                    try? self?.sendResponse(requestId: requestId, resp)
+                }
+
+            case .accessibilityAction(let req):
+                onAccessibilityAction?(req) { [weak self] success, error in
+                    var resp = Actro_Ipc_IPCMessage()
+                    resp.accessibilityActionResponse = Actro_Ipc_AccessibilityActionResponse()
+                    resp.accessibilityActionResponse.requestID = requestId
+                    resp.accessibilityActionResponse.tabID = req.tabID
+                    resp.accessibilityActionResponse.success = success
+                    resp.accessibilityActionResponse.errorMessage = error ?? ""
+                    try? self?.sendResponse(requestId: requestId, resp)
+                }
 
             default:
                 NSLog("IPCHelperConnection: Unhandled message: \(msg)")
