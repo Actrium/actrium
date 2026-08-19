@@ -1,13 +1,14 @@
 name: Release ActrSharp
 
-# Manually validates or recovers ActrSharp publishing for an existing stable
-# release tag. New versions are still published by the staged release train.
+# Manually validates or recovers ActrSharp publishing for an existing release
+# tag, stable or pre-release. New versions are still published by the staged
+# release train.
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing stable release tag, for example v0.8.0.
+        description: Existing release tag, for example v0.8.0 or v0.8.0-rc.1.
         required: true
         type: string
       dry_run:
@@ -37,8 +38,8 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-            echo "::error::Expected a stable release tag in vX.Y.Z form, got $TAG"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || {
+            echo "::error::Expected a release tag in vX.Y.Z or vX.Y.Z-<pre> form, got $TAG"
             exit 1
           }
 

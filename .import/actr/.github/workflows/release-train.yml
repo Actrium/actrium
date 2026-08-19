@@ -87,7 +87,7 @@ jobs:
 
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
-          elif printf '%s\n' "$HEAD_COMMIT_MESSAGE" | grep -qE '^chore\(release\): basic train v[0-9]+\.[0-9]+\.[0-9]+'; then
+          elif printf '%s\n' "$HEAD_COMMIT_MESSAGE" | grep -qE '^chore\(release\): basic train v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -176,7 +176,13 @@ jobs:
           fi
           echo "version=${ver}" >> "$GITHUB_OUTPUT"
           echo "dry_run=${{ inputs.dry_run || 'false' }}" >> "$GITHUB_OUTPUT"
-          echo "pre_release=${{ inputs.pre_release || 'false' }}" >> "$GITHUB_OUTPUT"
+          # Push-triggered runs have no inputs: any dashed version (e.g.
+          # 0.8.0-rc.1) is a pre-release, so infer the flag from the version.
+          if [[ "${{ inputs.pre_release || 'false' }}" == "true" || "$ver" == *-* ]]; then
+            echo "pre_release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pre_release=false" >> "$GITHUB_OUTPUT"
+          fi
           echo "skip_python=${{ inputs.skip_python || 'false' }}" >> "$GITHUB_OUTPUT"
           if [[ "${{ needs.gate.outputs.target_branch }}" == "main" ]]; then
             echo "maintenance_release=false" >> "$GITHUB_OUTPUT"

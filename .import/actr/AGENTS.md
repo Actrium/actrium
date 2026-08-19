@@ -79,6 +79,29 @@ During 0.x early development, prefer conservative bumping to avoid unnecessary v
 - **`refactor:` (no bump)** — Pure internal restructuring with zero behavioral change.
 - **`chore:`, `ci:`, `build:`, `docs:`, `test:` (no bump)** — Maintenance, CI, dependencies, documentation, tests.
 
+### Pre-release channels (alpha / beta / rc)
+
+The release train also supports pre-release versions (`X.Y.Z-alpha.1`,
+`X.Y.Z-rc.1`, …) driven by **PR labels**, not commit types. Commit types keep
+deciding the `X.Y.Z` core; labels only decide the suffix channel:
+
+- Apply `release:alpha` / `release:beta` / `release:rc` to a feature/fix PR to
+  start a pre-release line. The next automatic release-prepare run derives
+  `X.Y.Z` from commit types as usual and appends `-<channel>.N`; `N` continues
+  from existing tags so a new version always sorts above published ones.
+- Once the workspace is on a line, unlabeled commits continue it
+  (`alpha.1 → alpha.2 → …`) — new `feat:` commits stay on the same line too.
+- A strictly higher-maturity label escalates the channel on the same trio
+  (`0.8.0-alpha.2` + `release:rc` → `0.8.0-rc.1`); equal or lower labels are
+  ignored (never downgrades).
+- Labels can **never** finalize a release: cutting the stable `X.Y.Z` requires
+  a manual *Release Prepare* `workflow_dispatch` with an explicit `version`.
+- Pre-releases publish as GitHub pre-releases (never `latest`); when npm
+  publishing is re-enabled they use per-channel dist-tags
+  (`alpha`/`beta`/`rc`, fallback `pre`), and Python packages go to TestPyPI.
+- Maintenance branches (`release-X.Y`) never accept pre-releases.
+
+
 - Each PR should describe the change scope, mention affected crates or directories, and link to any relevant issues or design docs.
 - Include reproduction or validation steps (commands, screenshots, or log excerpts) so reviewers can verify behavior quickly.
 - Ensure generated files are up to date (`actr gen …`) and that formatters/tests have been run prior to opening a PR.
