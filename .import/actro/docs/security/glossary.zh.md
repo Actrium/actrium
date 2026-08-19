@@ -9,7 +9,7 @@
 | Rill | 受约束的 Guest / Host 工作负载模型 |
 | Actor | 唯一规范节点；宏观通信与执行边界 |
 | ActorId | 实例稳定、可认证身份 |
-| ActorState / ActorStateId | 当前实例事实及其内容根 |
+| ActorState / ActorStateId | 当前实例事实及其内容根；含单调修订号，内容回滚不复现旧根 |
 | Actor 主体 | 用户在品牌 / 软件层识别的对象 |
 | Actor 实例 | `(节点应用 + 配置) + 宿主环境` |
 | Principal / PrincipalId | 使用主体及其外部不透明标识 |

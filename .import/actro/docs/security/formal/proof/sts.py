@@ -1,13 +1,35 @@
-"""有界迁移系统。对 2 个 Actor 的可达状态做 BFS，核验安全不变量。
+"""有界迁移系统：主模型（n≤2）、数据世代、对抗性本地时钟、回滚复活。
 
-这是有界模型的完全证明：坏状态不可达。不是无界系统的归纳不变量证明。
+四个模型都是有界完全搜索：在给定边界内坏状态不可达；不是无界归纳证明。
+
+结构约定（防「守卫即模型」的空洞检查）：
+- 可执行守卫统一取自 semantics.py，与 Z3 层共享同一定义源；
+- 安全不变量在 invariants() 里独立重算，不复用守卫的返回值；
+- 对抗性迁移总是「尝试」坏行为，由守卫决定是否放行：守卫被
+  mutants.py 换成坏定义时，相应不变量必须报警（变异回归）。
+
+主模型的刻意保守化，见随附文档：
+- ActorStateId 建模为 (revision, cfg, transfers)：revision 单调递增，
+  能力声明（transfers）是状态身份的一部分（对应 h_cap），内容回滚
+  也得到新 sid；
+- Change 不再全局抹除已发布快照（分布式中不存在该原子操作），
+  旧快照保留在状态里，由 ready() 的指针核对拒绝——这才是
+  Thm 12 / A10 的真实内容；
+- Retain 与跨 Principal 判定在 theory.py 与 check_formal_model.py
+  中检查，主模型不再携带常量维度。
 """
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, replace
 from enum import IntEnum
-from typing import Iterable
+from typing import Iterable, Iterator
+
+try:
+    from . import semantics
+except ImportError:  # pragma: no cover - 直接脚本运行
+    import semantics
 
 
 class Gate(IntEnum):
@@ -21,98 +43,99 @@ class Verdict(IntEnum):
     UNCONTROLLED = 2
 
 
-PROTECTED = frozenset({"transfer", "retain", "process"})
+# 能力声明菜单：空、未受控 sink、指向对端 Actor。
+TRANSFER_MENU: tuple[tuple[tuple[str, object], ...], ...] = (
+    (),
+    (("sink", -1),),
+    (("actor", "peer"),),
+)
 
-
-@dataclass(frozen=True)
-class Cap:
-    issuer: str
-    actor: int
-    sid: int
-    scope: frozenset[str]
-    revoked: bool = False
+MAX_REVISION = 2
 
 
 @dataclass(frozen=True)
 class Actor:
     principal: int
-    sid: int
+    revision: int
+    cfg: int
+    transfers: tuple[tuple[str, object], ...]
     gate: Gate
-    keys_for: int | None
-    tmax: int
-    retain: Verdict
-    transfers: tuple[tuple[str, int], ...]
-    # transfers: ("actor", target_index) or ("sink", sink_id)
-    aa_sid: int | None
+    keys_current: bool
+    aa_current: bool
     verifier: str
+
+
+def sid_of(actor: Actor) -> tuple:
+    """ActorStateId 的有界替身：revision 单调、h_cap（transfers）参与身份。"""
+    return (actor.revision, actor.cfg, actor.transfers)
 
 
 @dataclass(frozen=True)
 class Snapshot:
-    sids: tuple[int, ...]
-    aa_sids: tuple[int, ...]
+    sids: tuple[tuple, ...]
     color: Verdict
 
 
 @dataclass(frozen=True)
 class State:
     actors: tuple[Actor, ...]
-    now: int
     app: Snapshot | None
-    leak: bool = False
 
 
-def actor_verdict(actor: Actor) -> Verdict:
-    acc = actor.retain
+def _peer_index(state: State, i: int) -> int | None:
+    n = len(state.actors)
+    if n < 2:
+        return None
+    return (i + 1) % n
+
+
+def eval_actor(state: State, i: int) -> Verdict:
+    """粗粒度判定：同 Principal 可解析 Actor 目标与非负 sink 记 C，其余记 X。
+
+    E-Acc / E-C-Sink 的完整判断关系在 check_formal_model.judge_transfer。
+    """
+    actor = state.actors[i]
+    acc = Verdict.CONTROLLED
     for kind, target in actor.transfers:
         if kind == "actor":
-            same = actor.principal == 0 and target == 0 or actor.principal == 1
-            # target principal: actors[target].principal if in range — computed by caller
-            acc = acc if acc > Verdict.UNKNOWN else Verdict.UNKNOWN
-        elif target < 0:
-            acc = Verdict.UNCONTROLLED
-        else:
-            acc = acc
-    return acc
-
-
-def eval_actor(actor: Actor, peers: tuple[Actor, ...]) -> Verdict:
-    acc = actor.retain
-    for kind, target in actor.transfers:
-        if kind == "actor":
-            if target < 0 or target >= len(peers):
-                acc = max(acc, Verdict.UNCONTROLLED)
-                continue
-            peer = peers[target]
-            if peer.principal != actor.principal:
+            peer = _peer_index(state, i)
+            if peer is None or state.actors[peer].principal != actor.principal:
                 acc = max(acc, Verdict.UNCONTROLLED)
             else:
                 acc = max(acc, Verdict.CONTROLLED)
         elif kind == "sink":
-            acc = max(acc, Verdict.UNCONTROLLED if target < 0 else Verdict.CONTROLLED)
+            acc = max(
+                acc,
+                Verdict.UNCONTROLLED if target < 0 else Verdict.CONTROLLED,
+            )
     return acc
 
 
-def app_color(actors: tuple[Actor, ...]) -> Verdict:
-    acc = Verdict.CONTROLLED
-    for actor in actors:
-        acc = max(acc, eval_actor(actor, actors))
-    return acc
+def app_color(state: State) -> Verdict:
+    return max(
+        (eval_actor(state, i) for i in range(len(state.actors))),
+        default=Verdict.CONTROLLED,
+    )
 
 
 def ready(state: State) -> bool:
+    """A12：指针当前、全员 ACTIVE，且每个成员的结论绑定当前状态。"""
     if state.app is None:
         return False
-    if any(actor.gate is Gate.SUSPENDED for actor in state.actors):
-        return False
-    if tuple(actor.sid for actor in state.actors) != state.app.sids:
-        return False
-    if tuple(-1 if actor.aa_sid is None else actor.aa_sid for actor in state.actors) != state.app.aa_sids:
-        return False
-    return True
+    pointer_current = tuple(sid_of(a) for a in state.actors) == state.app.sids
+    none_suspended = all(a.gate is Gate.ACTIVE for a in state.actors)
+    aa_all_current = all(a.aa_current for a in state.actors)
+    return bool(
+        semantics.ready_ok(
+            has_app=True,
+            pointer_current=pointer_current,
+            none_suspended=none_suspended,
+        )
+        and aa_all_current
+    )
 
 
-def displayed(state: State):
+def displayed(state: State) -> Verdict | None:
     if not ready(state):
         return None
     return state.app.color
@@ -121,9 +144,11 @@ def displayed(state: State):
 def depends(state: State, i: int, j: int) -> bool:
     if i == j:
         return False
-    left = state.actors[i]
-    right = state.actors[j]
-    return ("actor", j) in left.transfers or ("actor", i) in right.transfers
+    peer_i = _peer_index(state, i)
+    peer_j = _peer_index(state, j)
+    left = ("actor", "peer") in state.actors[i].transfers and peer_i == j
+    right = ("actor", "peer") in state.actors[j].transfers and peer_j == i
+    return left or right
 
 
 def depends_on_suspended(state: State, i: int) -> bool:
@@ -134,273 +159,236 @@ def depends_on_suspended(state: State, i: int) -> bool:
     )
 
 
-def cap_ok(state: State, actor_i: int, cap: Cap, op: str) -> bool:
-    actor = state.actors[actor_i]
-    return (
-        cap.issuer != f"actor-{actor_i}"
-        and cap.actor == actor_i
-        and cap.sid == actor.sid
-        and op in cap.scope
-        and not cap.revoked
-        and state.now < actor.tmax
-        and actor.keys_for == actor.sid
-        and actor.gate is Gate.ACTIVE
-        and not depends_on_suspended(state, actor_i)
-    )
+def exec_guard(state: State, i: int) -> bool:
+    """受保护操作的实现侧守卫（可被变异测试替换）。
 
-
-def initial(n: int = 2) -> State:
-    actors = tuple(
-        Actor(
-            principal=0,
-            sid=0,
-            gate=Gate.ACTIVE,
-            keys_for=0,
-            tmax=5,
-            retain=Verdict.CONTROLLED,
-            transfers=(),
-            aa_sid=0,
-            verifier="verifier",
+    Capability 为当前状态现造，sid_match 恒真；持有旧凭证的攻击者
+    在 explore_rollback 里建模。时间语义在 explore_clocks 与共享守卫。
+    """
+    actor = state.actors[i]
+    return bool(
+        semantics.exec_gate_ok(
+            gate_active=actor.gate is Gate.ACTIVE,
+            keys_current=actor.keys_current,
+            sid_match=semantics.cap_sid_match(sid_of(actor), sid_of(actor)),
+            time_ok=True,
         )
-        for _ in range(n)
+        and not depends_on_suspended(state, i)
     )
-    snap = Snapshot(
-        sids=tuple(0 for _ in actors),
-        aa_sids=tuple(0 for _ in actors),
-        color=app_color(actors),
-    )
-    return State(actors=actors, now=0, app=snap, leak=False)
+
+
+def uncontrolled_exec_possible(state: State) -> bool:
+    """独立于展示路径重算：当前是否存在可执行的未受控出口。"""
+    for i, actor in enumerate(state.actors):
+        if not exec_guard(state, i):
+            continue
+        for kind, target in actor.transfers:
+            if kind == "sink" and target < 0:
+                return True
+            if kind == "actor":
+                peer = _peer_index(state, i)
+                if peer is None or (
+                    state.actors[peer].principal != actor.principal
+                ):
+                    return True
+    return False
+
+
+def _set_actor(state: State, i: int, actor: Actor, **state_kw) -> State:
+    actors = list(state.actors)
+    actors[i] = actor
+    return replace(state, actors=tuple(actors), **state_kw)
 
 
 def step_change(
-    state: State,
-    i: int,
-    new_sid: int,
-    transfers: tuple[tuple[str, int], ...] | None = None,
+    state: State, i: int, cfg: int, transfers: tuple[tuple[str, object], ...]
 ) -> State | None:
     actor = state.actors[i]
-    if new_sid == actor.sid and transfers is None:
+    if actor.revision >= MAX_REVISION:
+        return None
+    if cfg == actor.cfg and transfers == actor.transfers:
         return None
     updated = replace(
         actor,
-        sid=new_sid,
+        revision=actor.revision + 1,
+        cfg=cfg,
+        transfers=transfers,
         gate=Gate.SUSPENDED,
-        keys_for=None,
-        aa_sid=None,
-        transfers=actor.transfers if transfers is None else transfers,
+        keys_current=False,
+        aa_current=False,
     )
-    actors = list(state.actors)
-    actors[i] = updated
-    return replace(state, actors=tuple(actors), app=None)
+    # 注意：不抹除 state.app。旧快照副本在分布式系统中无法被全局原子
+    # 删除；它必须被 ready() 的当前指针核对拒绝，而不是被建模删除。
+    return _set_actor(state, i, updated)
 
 
 def step_attest(state: State, i: int) -> State | None:
     actor = state.actors[i]
     if actor.verifier == f"actor-{i}":
         return None
-    updated = replace(actor, aa_sid=actor.sid)
-    actors = list(state.actors)
-    actors[i] = updated
-    return replace(state, actors=tuple(actors))
+    if actor.aa_current:
+        return None
+    return _set_actor(state, i, replace(actor, aa_current=True))
 
 
 def step_resume(state: State, i: int) -> State | None:
     actor = state.actors[i]
     if actor.gate is not Gate.SUSPENDED:
         return None
-    if actor.aa_sid != actor.sid:
+    if not actor.aa_current:
         return None
-    updated = replace(actor, gate=Gate.ACTIVE, keys_for=actor.sid)
-    actors = list(state.actors)
-    actors[i] = updated
-    return replace(state, actors=tuple(actors))
+    return _set_actor(
+        state, i, replace(actor, gate=Gate.ACTIVE, keys_current=True)
+    )
 
 
 def step_publish(state: State) -> State | None:
-    if any(actor.gate is Gate.SUSPENDED for actor in state.actors):
-        return None
-    if any(actor.aa_sid != actor.sid for actor in state.actors):
+    leaves_ok = all(
+        semantics.publish_leaf_ok(
+            leaf_current=True,  # 叶子由当前指针现算
+            aa_matches_leaf=actor.aa_current,
+            gate_active=actor.gate is Gate.ACTIVE,
+        )
+        for actor in state.actors
+    )
+    if not leaves_ok:
         return None
     snap = Snapshot(
-        sids=tuple(actor.sid for actor in state.actors),
-        aa_sids=tuple(-1 if actor.aa_sid is None else actor.aa_sid for actor in state.actors),
-        color=app_color(state.actors),
+        sids=tuple(sid_of(a) for a in state.actors),
+        color=app_color(state),
     )
+    if state.app == snap:
+        return None
     return replace(state, app=snap)
 
 
-def step_exec(state: State, i: int, op: str, target: int | None) -> State | None:
-    actor = state.actors[i]
-    cap = Cap("verifier", i, actor.sid, PROTECTED)
-    if not cap_ok(state, i, cap, op):
-        return None
-    if op == "process":
-        return state
-    if op == "retain":
-        return replace(state, leak=True) if actor.retain is Verdict.UNCONTROLLED else state
-    if op == "transfer":
-        declared = False
-        for kind, declared_target in actor.transfers:
-            if kind == "actor" and declared_target == target:
-                declared = True
-            if kind == "sink" and declared_target == target:
-                declared = True
-        if not declared:
-            return None
-        if target is not None and 0 <= target < len(state.actors):
-            peer = state.actors[target]
-            if peer.gate is Gate.SUSPENDED:
-                return None
-            if peer.principal != actor.principal:
-                return replace(state, leak=True)
-        if target is not None and target < 0:
-            return replace(state, leak=True)
-        return state
-    return None
-
-
-def step_tick(state: State) -> State | None:
-    return replace(state, now=state.now + 1)
-
-
-def successors(state: State) -> Iterable[tuple[str, State]]:
-    n = len(state.actors)
-    for i in range(n):
-        for sid in range(3):
-            nxt = step_change(state, i, sid)
-            if nxt:
-                yield f"change-{i}-{sid}", nxt
-            nxt = step_change(state, i, sid, (("sink", -1),))
-            if nxt:
-                yield f"change-{i}-{sid}-leak", nxt
-            if n > 1:
-                nxt = step_change(state, i, sid, (("actor", (i + 1) % n),))
+def successors(state: State) -> Iterator[tuple[str, State]]:
+    for i in range(len(state.actors)):
+        for cfg in (0, 1):
+            for menu_index, transfers in enumerate(TRANSFER_MENU):
+                nxt = step_change(state, i, cfg, transfers)
                 if nxt:
-                    yield f"change-{i}-{sid}-peer", nxt
+                    yield f"change-{i}-{cfg}-{menu_index}", nxt
         nxt = step_attest(state, i)
         if nxt:
             yield f"attest-{i}", nxt
         nxt = step_resume(state, i)
         if nxt:
             yield f"resume-{i}", nxt
-        for op in ("transfer", "retain", "process"):
-            for target in list(range(n)) + [-1, None]:
-                if op != "transfer" and target is not None:
-                    continue
-                nxt = step_exec(state, i, op, target)
-                if nxt:
-                    yield f"exec-{i}-{op}-{target}", nxt
     nxt = step_publish(state)
     if nxt:
         yield "publish", nxt
-    if state.now < 6:
-        nxt = step_tick(state)
-        if nxt:
-            yield "tick", nxt
-
-
-def current_uncontrolled_possible(state: State) -> bool:
-    for i, actor in enumerate(state.actors):
-        if not cap_ok(
-            state,
-            i,
-            Cap("verifier", i, actor.sid, PROTECTED),
-            "transfer",
-        ) and not cap_ok(
-            state,
-            i,
-            Cap("verifier", i, actor.sid, PROTECTED),
-            "retain",
-        ):
-            continue
-        if actor.retain is Verdict.UNCONTROLLED and cap_ok(
-            state, i, Cap("verifier", i, actor.sid, PROTECTED), "retain"
-        ):
-            return True
-        for kind, target in actor.transfers:
-            if not cap_ok(
-                state, i, Cap("verifier", i, actor.sid, PROTECTED), "transfer"
-            ):
-                continue
-            if kind == "sink" and target < 0:
-                return True
-            if kind == "actor" and (
-                target < 0
-                or target >= len(state.actors)
-                or state.actors[target].principal != actor.principal
-            ):
-                return True
-    return False
 
 
 def invariants(state: State) -> list[str]:
+    """安全不变量：独立重算，不复用守卫返回值。"""
     bad: list[str] = []
     shown = displayed(state)
-    if shown is Verdict.CONTROLLED and current_uncontrolled_possible(state):
-        bad.append("green-and-current-uncontrolled-exec")
-    if shown is Verdict.CONTROLLED and any(
-        actor.gate is Gate.SUSPENDED for actor in state.actors
-    ):
-        bad.append("green-while-suspended")
-    if state.app is not None:
-        if state.app.sids != tuple(actor.sid for actor in state.actors):
-            if ready(state):
-                bad.append("ready-with-stale-app")
-        if any(
-            aa != sid
-            for sid, aa in zip(state.app.sids, state.app.aa_sids)
-        ):
-            bad.append("mixed-snapshot-published")
+    if shown is Verdict.CONTROLLED:
+        if uncontrolled_exec_possible(state):
+            bad.append("green-and-current-uncontrolled-exec")
+        if any(a.gate is Gate.SUSPENDED for a in state.actors):
+            bad.append("green-while-suspended")
+        if state.app.color != app_color(state):
+            bad.append("displayed-color-stale")
     for i, actor in enumerate(state.actors):
-        if actor.gate is Gate.SUSPENDED and actor.keys_for == actor.sid:
-            # resume assigns keys; mid-suspend must not have current keys
-            if actor.aa_sid != actor.sid:
-                bad.append(f"suspended-has-keys-{i}")
-        if actor.verifier == f"actor-{i}" and actor.aa_sid == actor.sid:
+        if actor.gate is Gate.SUSPENDED and actor.keys_current:
+            bad.append(f"suspended-has-current-keys-{i}")
+        if actor.verifier == f"actor-{i}" and actor.aa_current:
             bad.append(f"self-signed-{i}")
-        if actor.gate is Gate.ACTIVE and depends_on_suspended(state, i):
-            if cap_ok(
-                state, i, Cap("verifier", i, actor.sid, PROTECTED), "process"
-            ):
-                bad.append(f"protected-while-depending-on-suspended-{i}")
+        if depends_on_suspended(state, i) and exec_guard(state, i):
+            bad.append(f"protected-while-depending-on-suspended-{i}")
     return bad
 
 
-def explore(n: int = 2, limit: int = 20000) -> dict[str, object]:
-    start = initial(n)
-    seen: set[State] = set()
-    queue = [start]
+def initial(n: int = 2) -> State:
+    actors = tuple(
+        Actor(
+            principal=0,
+            revision=0,
+            cfg=0,
+            transfers=(),
+            gate=Gate.ACTIVE,
+            keys_current=True,
+            aa_current=True,
+            verifier="verifier",
+        )
+        for _ in range(n)
+    )
+    state = State(actors=actors, app=None)
+    return replace(
+        state,
+        app=Snapshot(
+            sids=tuple(sid_of(a) for a in actors), color=app_color(state)
+        ),
+    )
+
+
+def _bfs(
+    start,
+    successor_fn,
+    invariant_fn,
+    limit: int,
+    tag: dict[str, object],
+) -> dict[str, object]:
+    seen = set()
+    queue = deque([start])
     violations: list[dict[str, object]] = []
     transitions = 0
-    while queue and len(seen) < limit:
-        state = queue.pop()
+    truncated = False
+    while queue:
+        if len(seen) >= limit:
+            truncated = True
+            break
+        state = queue.popleft()
         if state in seen:
             continue
         seen.add(state)
-        bad = invariants(state)
+        bad = invariant_fn(state)
         if bad:
             violations.append({"bad": bad, "state": str(state)})
             continue
-        for _label, nxt in successors(state):
+        for _label, nxt in successor_fn(state):
             transitions += 1
             if nxt not in seen:
                 queue.append(nxt)
+    status = "PASS"
+    if violations:
+        status = "FAIL"
+    elif truncated:
+        # 静默截断等于未验证：触顶必须显式失败。
+        status = "FAIL"
+        violations.append({"bad": ["state-limit-truncated"], "state": ""})
     return {
-        "status": "PASS" if not violations else "FAIL",
+        "status": status,
         "states": len(seen),
         "transitions": transitions,
         "violations": violations[:10],
+        "truncated": truncated,
         "bounded": True,
-        "actors": n,
+        **tag,
     }
+
+
+def explore(n: int = 2, limit: int = 400_000) -> dict[str, object]:
+    return _bfs(
+        initial(n),
+        successors,
+        invariants,
+        limit,
+        {"model": "main", "actors": n},
+    )
+
+
+# --- 数据世代专用模型 ---
 
 
 @dataclass(frozen=True)
 class GenState:
     sid: int
     gate: Gate
-    keys_for: int | None
-    aa_sid: int | None
+    keys_current: bool
+    aa_current: bool
     transfers: tuple[tuple[str, int], ...]
     data_gen: int | None
     data_allowed: tuple[tuple[str, int], ...]
@@ -408,184 +396,216 @@ class GenState:
 
 
 def _gen_active(state: GenState) -> bool:
-    return (
-        state.gate is Gate.ACTIVE
-        and state.keys_for == state.sid
-        and state.aa_sid == state.sid
-    )
+    return state.gate is Gate.ACTIVE and state.keys_current and state.aa_current
 
 
 def _gen_allowed(state: GenState) -> frozenset[tuple[str, int]]:
     current = frozenset(state.transfers)
     if state.data_gen is None:
         return current
-    return current & frozenset(state.data_allowed)
+    acquired = frozenset(state.data_allowed)
+    return frozenset(
+        effect
+        for effect in current | acquired
+        if semantics.allowed_effect(effect in current, effect in acquired)
+    )
 
 
-def explore_generation(limit: int = 4000) -> dict[str, object]:
+def _gen_successors(state: GenState) -> Iterator[tuple[str, GenState]]:
+    if _gen_active(state):
+        if state.data_gen is None:
+            yield "acquire", replace(
+                state, data_gen=state.sid, data_allowed=state.transfers
+            )
+        if ("sink", -1) in _gen_allowed(state):
+            yield "exec-sink", replace(state, leak=True)
+    if state.sid < 2:
+        for label, transfers in (
+            ("leaky", (("sink", -1),)),
+            ("same", state.transfers),
+        ):
+            yield f"change-{label}", replace(
+                state,
+                sid=state.sid + 1,
+                gate=Gate.SUSPENDED,
+                keys_current=False,
+                aa_current=False,
+                transfers=transfers,
+            )
+    if not state.aa_current:
+        yield "attest", replace(state, aa_current=True)
+    if state.gate is Gate.SUSPENDED and state.aa_current:
+        yield "resume", replace(state, gate=Gate.ACTIVE, keys_current=True)
+
+
+def _gen_invariants(state: GenState) -> list[str]:
+    bad: list[str] = []
+    if state.leak and state.data_gen is not None:
+        if ("sink", -1) not in state.data_allowed:
+            bad.append("old-data-left-via-new-only-exit")
+    if state.gate is Gate.SUSPENDED and state.keys_current:
+        bad.append("suspended-has-current-keys")
+    return bad
+
+
+def explore_generation(limit: int = 20_000) -> dict[str, object]:
     start = GenState(
         sid=0,
         gate=Gate.ACTIVE,
-        keys_for=0,
-        aa_sid=0,
+        keys_current=True,
+        aa_current=True,
         transfers=(),
         data_gen=None,
         data_allowed=(),
         leak=False,
     )
-    seen: set[GenState] = set()
-    queue = [start]
-    violations: list[str] = []
-    transitions = 0
+    return _bfs(
+        start, _gen_successors, _gen_invariants, limit, {"model": "generation"}
+    )
 
-    def push(nxt: GenState | None) -> None:
-        nonlocal transitions
-        if nxt is None:
-            return
-        transitions += 1
-        if nxt not in seen:
-            queue.append(nxt)
 
-    while queue and len(seen) < limit:
-        state = queue.pop()
-        if state in seen:
-            continue
-        seen.add(state)
-        if state.leak and state.data_gen is not None:
-            if ("sink", -1) not in state.data_allowed:
-                violations.append("old-data-left-via-new-only-exit")
-                continue
-        if state.gate is Gate.SUSPENDED and state.keys_for == state.sid:
-            if state.aa_sid != state.sid:
-                violations.append("suspended-has-keys")
-                continue
-
-        if _gen_active(state):
-            if state.data_gen is None:
-                push(
-                    replace(
-                        state,
-                        data_gen=state.sid,
-                        data_allowed=state.transfers,
-                    )
-                )
-            else:
-                push(state)
-            allowed = _gen_allowed(state)
-            if ("sink", -1) in allowed:
-                push(replace(state, leak=True))
-            if ("sink", -1) in state.transfers and ("sink", -1) not in allowed:
-                # new-only exit must be refused, not taken
-                pass
-        if state.sid < 2:
-            push(
-                replace(
-                    state,
-                    sid=state.sid + 1,
-                    gate=Gate.SUSPENDED,
-                    keys_for=None,
-                    aa_sid=None,
-                    transfers=(("sink", -1),),
-                )
-            )
-            push(
-                replace(
-                    state,
-                    sid=state.sid + 1,
-                    gate=Gate.SUSPENDED,
-                    keys_for=None,
-                    aa_sid=None,
-                    transfers=state.transfers,
-                )
-            )
-        if state.gate is Gate.SUSPENDED:
-            attested = replace(state, aa_sid=state.sid)
-            push(attested)
-            if attested.aa_sid == attested.sid:
-                push(replace(attested, gate=Gate.ACTIVE, keys_for=attested.sid))
-
-    return {
-        "status": "PASS" if not violations else "FAIL",
-        "states": len(seen),
-        "transitions": transitions,
-        "violations": violations[:10],
-        "bounded": True,
-        "model": "generation",
-    }
+# --- 对抗性本地时钟模型 ---
 
 
 @dataclass(frozen=True)
 class ClockState:
     nows: tuple[int, ...]
+    highest: tuple[int, ...]
     expired_exec: bool
 
 
-def explore_clocks(n: int = 2, horizon: int = 4, tmax: int = 3) -> dict[str, object]:
-    start = ClockState(nows=tuple(0 for _ in range(n)), expired_exec=False)
-    seen: set[ClockState] = set()
-    queue = [start]
-    violations: list[str] = []
-    transitions = 0
-    while queue:
-        state = queue.pop()
-        if state in seen:
-            continue
-        seen.add(state)
-        if state.expired_exec:
-            violations.append("exec-after-local-expiry")
-            continue
-        for i in range(n):
-            if state.nows[i] < horizon:
-                nxt_nows = list(state.nows)
-                nxt_nows[i] += 1
-                nxt = ClockState(nows=tuple(nxt_nows), expired_exec=False)
-                transitions += 1
-                if nxt not in seen:
-                    queue.append(nxt)
-            if state.nows[i] >= tmax:
-                # must refuse; attempting exec must not yield expired_exec
-                continue
-            transitions += 1
-            idle = ClockState(nows=state.nows, expired_exec=False)
-            if idle not in seen:
-                queue.append(idle)
-    # no transition sets expired_exec, and clocks only increase
-    for state in seen:
-        if any(
-            later < earlier
-            for later, earlier in zip(state.nows, start.nows)
-        ):
-            violations.append("clock-set-back")
-    return {
-        "status": "PASS" if not violations else "FAIL",
-        "states": len(seen),
-        "transitions": transitions,
-        "violations": violations[:10],
-        "bounded": True,
-        "model": "clocks",
-        "actors": n,
-    }
+def _clock_successors(
+    state: ClockState, *, horizon: int, tmax: int
+) -> Iterator[tuple[str, ClockState]]:
+    for i, now in enumerate(state.nows):
+        if now < horizon:
+            nows = list(state.nows)
+            nows[i] = now + 1
+            highest = list(state.highest)
+            highest[i] = max(highest[i], now + 1)
+            yield f"tick-{i}", replace(
+                state, nows=tuple(nows), highest=tuple(highest)
+            )
+        # 对抗性回拨尝试：守卫（只增不减）决定是否放行。
+        candidate = now - 1
+        if candidate >= 0 and semantics.tick_ok(candidate, now):
+            nows = list(state.nows)
+            nows[i] = candidate
+            yield f"rollback-{i}", replace(state, nows=tuple(nows))
+        # 对抗性执行尝试：无条件尝试，由共享守卫放行或拒绝。
+        if semantics.exec_time_ok(now, tmax):
+            if now >= tmax:
+                yield f"exec-expired-{i}", replace(state, expired_exec=True)
+            # now < tmax 的合法执行不改状态，无需入图。
+
+
+def _clock_invariants(state: ClockState) -> list[str]:
+    bad: list[str] = []
+    if state.expired_exec:
+        bad.append("exec-after-local-expiry")
+    if any(now < high for now, high in zip(state.nows, state.highest)):
+        bad.append("clock-set-back")
+    return bad
+
+
+def explore_clocks(
+    n: int = 2, horizon: int = 4, tmax: int = 3, limit: int = 20_000
+) -> dict[str, object]:
+    start = ClockState(
+        nows=tuple(0 for _ in range(n)),
+        highest=tuple(0 for _ in range(n)),
+        expired_exec=False,
+    )
+    return _bfs(
+        start,
+        lambda s: _clock_successors(s, horizon=horizon, tmax=tmax),
+        _clock_invariants,
+        limit,
+        {"model": "clocks", "actors": n},
+    )
+
+
+# --- 回滚复活模型：持旧 Capability 的攻击者 ---
+
+
+@dataclass(frozen=True)
+class RollState:
+    revision: int
+    cfg: int
+    gate: Gate
+    keys_current: bool
+    aa_current: bool
+    resurrected: bool
+
+
+HELD_CAP_SID = (0, 0)  # 初始状态签发的 Capability，绑定 (revision=0, cfg=0)
+
+
+def roll_sid(state: RollState) -> tuple[int, int]:
+    return (state.revision, state.cfg)
+
+
+def _roll_successors(
+    state: RollState, *, max_rev: int
+) -> Iterator[tuple[str, RollState]]:
+    if state.revision < max_rev:
+        yield "change", replace(
+            state,
+            revision=state.revision + 1,
+            cfg=1 - state.cfg,  # 来回翻转配置：rev 2 时内容回到初始值
+            gate=Gate.SUSPENDED,
+            keys_current=False,
+            aa_current=False,
+        )
+    if not state.aa_current:
+        yield "attest", replace(state, aa_current=True)
+    if state.gate is Gate.SUSPENDED and state.aa_current:
+        yield "resume", replace(state, gate=Gate.ACTIVE, keys_current=True)
+    # 对抗性尝试：使用初始状态签发的旧 Capability。
+    usable = semantics.exec_gate_ok(
+        gate_active=state.gate is Gate.ACTIVE,
+        keys_current=state.keys_current,
+        sid_match=semantics.cap_sid_match(roll_sid(state), HELD_CAP_SID),
+        time_ok=True,
+    )
+    if usable and state.revision > 0:
+        yield "exec-held-cap", replace(state, resurrected=True)
+
+
+def _roll_invariants(state: RollState) -> list[str]:
+    if state.resurrected:
+        return ["old-capability-resurrected-after-rollback"]
+    return []
+
+
+def explore_rollback(max_rev: int = 3, limit: int = 5_000) -> dict[str, object]:
+    start = RollState(
+        revision=0,
+        cfg=0,
+        gate=Gate.ACTIVE,
+        keys_current=True,
+        aa_current=True,
+        resurrected=False,
+    )
+    return _bfs(
+        start,
+        lambda s: _roll_successors(s, max_rev=max_rev),
+        _roll_invariants,
+        limit,
+        {"model": "rollback"},
+    )
 
 
 def check_sts() -> dict[str, object]:
-    first = explore(2)
-    if first["status"] != "PASS":
-        return first
-    solo = explore(1)
-    if solo["status"] != "PASS":
-        return solo
-    generation = explore_generation()
-    if generation["status"] != "PASS":
-        return generation
-    clocks = explore_clocks()
-    if clocks["status"] != "PASS":
-        return clocks
-    return {
-        "status": "PASS",
-        "models": {
-            "n=1": solo,
-            "n=2": first,
-            "generation": generation,
-            "clocks": clocks,
-        },
+    models = {
+        "n=1": explore(1),
+        "n=2": explore(2),
+        "generation": explore_generation(),
+        "clocks": explore_clocks(),
+        "rollback": explore_rollback(),
     }
+    failed = [name for name, body in models.items() if body["status"] != "PASS"]
+    if failed:
+        first = models[failed[0]]
+        return {**first, "status": "FAIL", "failed_model": failed[0]}
+    return {"status": "PASS", "models": models}

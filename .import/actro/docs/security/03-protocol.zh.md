@@ -20,6 +20,7 @@ ActorState {
   layout_version
   actor_id
   principal_id
+  revision
   package_fingerprint
   instance_configuration_fingerprint
   effective_capability_declaration_fingerprint
@@ -28,6 +29,8 @@ ActorState {
 ```
 
 `ActorStateId` 按固定角色组合这些子指纹。交换角色、改任一叶子或改布局版本，都必须得到不同的根。证据、信任策略、评定结果、风险接受和是否在线，一律不进 `ActorState`。
+
+`revision` 由状态权威维护，单调递增，每次状态提交严格加一，永不回退。它保证**内容回滚不复现旧 `ActorStateId`**：把配置改回历史值得到的是携带新修订号的新状态。因此「状态变化废除旧权力」是持久语义——绑定旧状态根的 Capability、通道与结论不会因回滚复活；要在回滚后的状态上行使权力，必须由权力来源对新状态根重新签发。
 
 每个修订期只有一个可认证状态权威：原子提交新 `ActorStateId`，并同步废除旧状态的会话密钥、Capability 适用性和受保护动作。验证、执行、通道和界面必须引用同一个 `ActorStateId`，禁止各自拼接零散字段。
 
@@ -40,6 +43,8 @@ ActorState {
 Host 做不到开发者要求的窄范围时，只能拒绝启动，或生成自己真正能执行的较宽声明并切换 `ActorState`。禁止保留虚假窄范围，禁止静默扩大。
 
 非 Actor `Transfer` 判为受控，必须同时满足：Host 能把实际目标限制在声明集合内，且集合中每个当前目标都属于用户策略认可的输出边界。
+
+目标分类不是声明方的自由选择：凡是能出示 Actr 身份、可按 Actor 评定的端点，必须按 `Transfer(Actor)` 建模并接受跨 Principal 与有效依赖规则，禁止改写为域名或 API 类非 Actor 目标绕过评分。Host 或验证者无法判定目标类别时，该出口停在未知，不得判受控。用户信任一个非 Actor 目标，语义是「认可数据离开本模型的保障范围」；该目标此后的保留与再流出不在本应用图内评定。
 
 V1 不允许 Actor 自行转授权。Capability 由权力来源直接签发给唯一目标，至少绑定：
 
@@ -95,7 +100,9 @@ Assurance 验证者结合状态、证据、规则和用户策略给出的结论
 
 `ActorAssurance` 精确绑定 `ActorId`、`ActorStateId`、证据集指纹、信任策略、规则和有效期，并逐项记录 `CONTROLLED / UNKNOWN / UNCONTROLLED` 及原因。`Retain` 的映射固定：确认存在即未受控，无法确认即未知，确认不可恢复才视为该效果不存在。用户信任保留主体或接受较短期限，都不能把它写成受控。
 
-同一评定上下文（`ActorStateId` + 策略版本 + 规则集）若存在多份均通过核验的 `ActorAssurance`，节点结论取它们的最弱项。禁止挑选较绿的一份发布或展示。只有一份被策略接受，就没有第二份可吵。信错唯一验证者是策略前提为假，不是两家打架。
+同一评定上下文（`ActorStateId` + 策略版本 + 规则集）若存在多份均通过核验的 `ActorAssurance`，节点结论取它们的最弱项。禁止挑选较绿的一份发布或展示。只有一份被策略接受，就没有第二份可吵。信错唯一验证者是策略前提为假，不是两家打架。最弱项约束作用于评定者可见的被接受集合；被扣留、从未出示的结论不可检测，本模型不为此背书。
+
+核对证据与结论有效期所用的评定方本地时钟，与执行期限时钟同受不可回拨要求约束；可被回拨的核验时钟会让过期材料重新被接受。
 
 签名后的结论可复用，不绑定接收者或会话，也不是权限令牌。每个依赖方使用前必须自行核验签名、验证者当前信任、状态、策略、规则和 `not_after`。
 
@@ -126,6 +133,8 @@ structureId = H("actrium/structure/v1", EncGraph(G))
 ```
 
 节点或边集合不同，则编码字节不同。输入顺序、空白或键序不得改变摘要。哈希碰撞仍归 A4。
+
+进入 `EncGraph` 的 `ActorId` 与 `PrincipalId` 必须落在受限 ASCII 字符集 `[a-z0-9._:-]`（推荐：指纹小写十六进制），超出即拒绝编码，消除 JSON 转义与 Unicode 归一化的跨语言歧义。`ApplicationStateId` 的叶子序列按 `ActorId` 排序；每个 `ActorId` 恰好一个叶子，重复即拒绝发布。
 
 `ApplicationStateId` 承诺结构身份、Principal、以及每个 `ActorId + ActorStateId + H(ActorAssurance)`。应用评定者只对这个根签一次名。持有单节点材料和 Merkle 成员证明时，应能用对数次哈希确认该节点确实被当前应用根涵盖。发布所用的节点结论不得强于该评定上下文里全部被接受 `ActorAssurance` 的最弱项。
 
@@ -180,7 +189,9 @@ LocalContinue(b | Changed) :=
 | ID | 要求 |
 | --- | --- |
 | `ACTR-SEC-ID-001…010` | ActorId 可认证；单 Principal；同 Principal 不授权；统一内容寻址 ActorState；唯一状态权威；主体 / 实例信任分离 |
+| `ACTR-SEC-ID-011` | `ActorState.revision` 单调递增并进入 `ActorStateId`；内容回滚不得复现旧状态根 |
 | `ACTR-SEC-CAP-001…012` | 有效声明闭合且有指纹；未声明不可用；禁止虚假窄范围；Capability 直签并绑定状态；执行前按当前状态与数据世代检查；输入授权不改颜色 |
+| `ACTR-SEC-CAP-013` | 可出示 Actr 身份的目标必须按 Actor 目标评定；目标类别不可判定时该出口保持未知 |
 | `ACTR-SEC-CHAN-001…009` | 应用数据必须走有效通道；握手绑定双方状态；直连与 TURN 同明文边界；失败阻断；延迟消息按当前权限与数据世代执行 |
 | `ACTR-SEC-DATA-001…009` | 按效果建模；交付前建立不可延长的期限；失联由本地收口；可恢复即 Retain；出口必须进声明 |
 | `ACTR-SEC-DATA-010` | 应用数据带取得世代；受保护效果的目标必须属于「取得时声明 ∩ 当前声明」 |
@@ -188,6 +199,8 @@ LocalContinue(b | Changed) :=
 | `ACTR-SEC-EVID-011` | 同一评定上下文多份被接受结论取最弱项；禁止挑选较绿的验证者 |
 | `ACTR-SEC-GRAPH-001…010` | 图由有效 Actor Transfer 自动形成；无根、无成员名单；结构变化换身份；全量无权重汇聚；发布前复核快照 |
 | `ACTR-SEC-GRAPH-011` | `structureId` 使用本节 `EncGraph` 规范编码；编码对带标签图单射 |
+| `ACTR-SEC-GRAPH-012` | `EncGraph` 标识符限定受限 ASCII 字符集；叶子按 ActorId 排序且每个 ActorId 恰好一个叶子 |
 | `ACTR-SEC-EXEC-001…010` | 本地原子提交并废除旧权力；变化 Actor 保障挂起；应用结论异步重建；事件不是唯一失效机制；旧消息 / 长操作 / 重试按「当前声明 ∩ 取得世代」检查 |
 | `ACTR-SEC-EXEC-011` | 未依赖变化 Actor 的成员可按 `LocalContinue` 继续自身工作；无法判断依赖则停 |
 | `ACTR-SEC-EXEC-012` | 期限与 Capability 时间窗口使用执行方本地时钟；本地时钟不可回拨 |
+| `ACTR-SEC-EXEC-013` | 评定方核对证据 / 结论 / 凭证有效期所用的本地时钟同样不可回拨 |

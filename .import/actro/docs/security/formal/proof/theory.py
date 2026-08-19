@@ -6,8 +6,10 @@ import itertools
 from enum import IntEnum
 
 try:
+    from . import semantics
     from .kernel import Formula, Kernel, Thm, atom, forall, land, limpl
 except ImportError:
+    import semantics
     from kernel import Formula, Kernel, Thm, atom, forall, land, limpl
 
 
@@ -317,7 +319,8 @@ def build_theory() -> tuple[Kernel, dict[str, Thm]]:
     )
 
     def allowed_for(in_old: bool, in_new: bool) -> bool:
-        return in_old and in_new
+        # 与 STS / Z3 共享同一守卫定义（防漂移）。
+        return bool(semantics.allowed_effect(in_new, in_old))
 
     k.decide_finite(
         "thm18_old_data_blocked_from_new_exit",
@@ -402,7 +405,7 @@ def build_theory() -> tuple[Kernel, dict[str, Thm]]:
 
     def local_clock(args: tuple[int, int, int]) -> bool:
         now_a, now_b, tmax = args
-        exec_a = now_a < tmax
+        exec_a = bool(semantics.exec_time_ok(now_a, tmax))
         if now_a >= tmax:
             return exec_a is False
         _ = now_b
