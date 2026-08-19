@@ -12,6 +12,7 @@ if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 
 from channel import check_channel
+from mutants import check_mutants
 from sts import check_sts
 from theory import check_theory
 from z3_theory import check_z3
@@ -23,6 +24,7 @@ def main() -> int:
         "z3": check_z3(),
         "sts": check_sts(),
         "channel": check_channel(),
+        "mutants": check_mutants(),
     }
     failed = [
         name

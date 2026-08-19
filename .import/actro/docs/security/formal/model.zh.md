@@ -18,7 +18,7 @@
 2. **相对可靠**（Thm 7）。若 A1–A13 成立，且快照当前、图就绪，绿色足以推出：当前不存在可执行的模型内泄漏。绿色只保证这次就绪切面，不保证曾经存在一个全图同时世界，也不否定历史上已经发生的泄漏。
 3. **弱项不可抵消**（Thm 3–6、A13）。未受控必红；无红而有未知必黄。增加节点、风险接受、数据输入授权都不能把弱项洗绿。同一评定上下文的多份结论取最弱项。
 4. **图外 Actor 出口不能靠纳图偷绿**（Thm 8）。跨 Principal 或无效依赖的 `Transfer(Actor(_))` 不入图，且不得判 `CONTROLLED`。
-5. **状态、世代与执行隔离**（Thm 10–14、18）。`ActorStateId` 变化后，旧通道、旧 Capability、旧结论失效；挂起期间不得产生新的应用 `Transfer`／`Retain`；旧数据不能走新出口；信箱按当前声明与取得世代声明的交集执行。
+5. **状态、世代与执行隔离**（Thm 10–14、18）。`ActorStateId` 变化后，旧通道、旧 Capability、旧结论失效；单调修订号保证内容回滚也不复活旧权力；挂起期间不得产生新的应用 `Transfer`／`Retain`；旧数据不能走新出口；信箱按当前声明与取得世代声明的交集执行。
 6. **发布抗拼接**（Thm 9、15、19）。混合快照不能成为可接受的 `ApplicationAssurance`；叶子必须同时绑定 Actor、状态和节点结论；`EncGraph` 对带标签图单射。
 7. **不需要全图分布式提交**（Thm 12 推论、Imp 1、Thm 20）。本地原子废除旧权力即可保证安全；未依赖变化节点的成员可以局部继续。
 8. **失联与撤销有可证上界**（Imp 2–3、Thm 16、21）。最高保障必须本地收口；期限相对本地不可回拨时钟。完全离线最迟到 `expiresAt`。授权不可自行扩大见 Thm 17。
@@ -43,10 +43,12 @@ $$
 
 | 层 | 内容 | 状态 |
 | --- | --- | --- |
-| 机械化 | 三值格、图划分、Merkle、判断、跨 Principal、颜色独立、绿色相对安全 | [proof/theory.py](proof/theory.py) 有限完全判定；[proof/z3_theory.py](proof/z3_theory.py) SMT 量词证明 |
-| 有界 STS | Change／Attest／Resume／Publish／Exec；n≤2 可达状态；另含数据世代与本地时钟专用穷举 | [proof/sts.py](proof/sts.py)，n=2 时 10,710 态 |
-| 握手穷举 | 联合 transcript 认证下的身份／状态绑定与重放 | [proof/channel.py](proof/channel.py)，729 条迹 |
-| 回归 | 对象绑定、证据、Capability、挂起 | [check_formal_model.py](check_formal_model.py) |
+| 共享守卫 | Exec／时钟／世代／发布／Ready 的守卫单一定义源，STS 与 Z3 共用 | [proof/semantics.py](proof/semantics.py) |
+| 机械化 | 三值格、图划分、Merkle、判断、跨 Principal、颜色独立、绿色相对安全 | [proof/theory.py](proof/theory.py) 有限完全判定；[proof/z3_theory.py](proof/z3_theory.py) SMT 量词证明（守卫取自共享定义；部分条目为定义一致性锁定，非独立证明） |
+| 有界 STS | Change／Attest／Resume／Publish；n≤2 可达状态；另含数据世代、对抗性本地时钟、回滚复活专用穷举 | [proof/sts.py](proof/sts.py)，n=2 时 14,400 态；旧快照不被全局抹除，由 Ready 指针核对拒绝；触及状态上限即失败 |
+| 握手穷举 | 联合 transcript 认证下的身份／状态绑定、重放与两侧一致性（双侧独立视图） | [proof/channel.py](proof/channel.py)，7,056 条迹 |
+| 回归 | 对象绑定、证据、Capability、挂起、回滚、编码字符集 | [check_formal_model.py](check_formal_model.py) |
+| 变异回归 | 把守卫换成已知坏定义，断言对应检查器必须报警（防「守卫即模型」空洞） | [proof/mutants.py](proof/mutants.py)，8 个变异体 |
 | 公理 | 完整中介、计算密码学、证据覆盖现实、可信时间、完整发现 | A1–A13，见缺陷表 |
 | 未做 | Lean／Tamarin 无界归纳与计算密码归约；实现符合性 | §22 |
 
@@ -84,11 +86,12 @@ sid_a(t)=H(
   \mathsf{actrium/actor\text{-}state/v1},
   id(a),
   principal(a),
+  rev_a(t),
   h_{pkg},h_{cfg},h_{cap},h_{env}
 )
 $$
 
-四个子指纹分别是软件包、实例配置、有效能力声明和宿主环境。证据、策略和评定结果不属于 \(s_a\)。
+四个子指纹分别是软件包、实例配置、有效能力声明和宿主环境。\(rev_a\) 是状态权威维护的单调递增修订号：每次 Change 严格加一，永不回退。因此**内容回滚不复现旧 \(sid\)**——把配置改回旧值得到的是携带新修订号的新状态，绑定旧 \(sid\) 的 Capability、通道与 `ActorAssurance` 不会复活（Thm 10）。证据、策略和评定结果不属于 \(s_a\)。
 
 ### 2.3 隐私效果
 
@@ -216,6 +219,8 @@ $$
 
 精确地址不属于 \(TrustedSinks(q)\) 时，不得仅因「写得很准」判 \(\mathbf C\)。
 
+目标分类本身是被约束的事实，不是声明方的自由选择：凡是能出示 Actr 身份、可按 Actor 评定的端点，必须按 \(\operatorname{Transfer}(Actor(b))\) 处理，不得改写为 \(\mathcal X\) 中的域名或 API 目标来绕过跨 Principal 规则（E-X-OutGraph）。Host 或验证者无法判定目标类别时，停在 \(\mathbf U\)。
+
 **E-X-Transfer**  
 若 \(Acc\) 中存在确认该出口已超出可信行为边界的证据，则
 
@@ -290,6 +295,8 @@ $$
 
 不同 \(qid\) 或规则集是不同评定，不是冲突。单一被信任验证者作假，是 \(q\) 为假（A6），不是两家打架。
 
+\(AccAA(ctx)\) 的最弱项约束作用于评定者**可见**的被接受集合。被扣留、未送达的更弱结论不可检测；本模型不声称能发现「存在但从未出示的 AA」。
+
 ## 4. 应用图
 
 ### 4.1 有效依赖
@@ -338,6 +345,8 @@ structureId(G)=H(\mathsf{actrium/structure/v1},EncGraph(G))
 $$
 
 节点集、边集或 Principal 任一不同，则编码字节不同（Thm 19）。输入顺序、空白或对象键序不得改变摘要。依赖增删会改变 \(structureId\)，除非发生哈希碰撞（A4）。
+
+进入 \(EncGraph\) 的 `ActorId` 与 `PrincipalId` 必须落在受限 ASCII 字符集 `[a-z0-9._:-]`（推荐：指纹的小写十六进制），超出即拒绝编码。这消除 JSON 字符串转义与 Unicode 归一化在跨语言实现间的歧义空间。
 
 ## 5. 四对象与 Merkle 树
 
@@ -437,6 +446,8 @@ Actor-to-Actor 应用数据仅通过满足端到端机密性、完整性、双�
 
 需要失联后继续计算的 Actor 具有 Workload 不可延长、不可通过时钟回拨推迟的最晚使用期限；到期后明文能力和效果由本地可信机制关闭。
 
+不可回拨要求同样适用于**一切参与接受判定的时钟**：E-Acc 与 A10 里评定方核对 \(notAfter\) 所用的 \(now_v\) 若可被本地攻击者回拨，过期证据与过期结论会被重新接受。
+
 ### A9　完整图发现
 
 发现机制取得无向依赖的完整连通分量，包括只通过入边与种子相连的 Actor。
@@ -491,6 +502,7 @@ $$
 $$
 Change_a(s\to s'):
 \begin{cases}
+rev_a:=rev_a+1\\
 sid_a:=sid(s')\\
 gate_a:=SUSPENDED\\
 K_a:=\emptyset,\quad Ch_a:=\emptyset\\
@@ -499,7 +511,7 @@ emit(StateChanged(a,sid(s),sid(s')))
 \end{cases}
 $$
 
-信箱中已有数据的世代不变，不得改写成 \(s'\)。前四项属于同一本地提交边界。事件可以延迟或丢失。
+信箱中已有数据的世代不变，不得改写成 \(s'\)。前五项属于同一本地提交边界。事件可以延迟或丢失。修订号只增不减，因此 \(sid(s')\) 必然是新值，即使 \(s'\) 的内容与某个历史状态相同。已发布的旧 `ApplicationAssurance` 副本**不会被全局抹除**——它们由依赖方按 A10 对当前指针复验时拒绝，不依赖任何全图原子删除。
 
 ### 7.2 Exec
 
@@ -528,6 +540,7 @@ $$
 4. 每个 \(a\in V_G\) 的 \(gate_a=ACTIVE\)；
 5. \(appid\) 按 §5.2 重算一致。
 6. 若某节点 \(AccAA=\emptyset\) 且 \(T\neq\emptyset\)，不得把它当作 \(\mathbf C\) 发布。
+7. 每个 `ActorId` 在叶子序列中恰好出现一次。
 
 任一混合或仍有挂起即失败，不得发布。成功后 \(App:=(G,appid,APPA,snapshot)\)。
 
@@ -707,6 +720,8 @@ A6 把「用户信错主体」保留为相对前提：\(Green=Green(\vec s,\Gamm
 
 Capability 绑定 \((ActorId,sid(s))\)。变化后 \(sid(s')\neq sid(s)\)，相等检查失败。
 
+因为修订号 \(rev_a\) 参与 \(sid\) 且单调递增，本定理**不依赖「状态不回访」**：把配置内容改回旧值得到的仍是新 \(sid\)，历史上签发的 Capability 不因内容回滚而复活（回滚穷举见 [proof/sts.py](proof/sts.py) 的 rollback 模型，回归见 `verify_rollback_revision`）。撤销语义因此是持久的：一旦 Change，绑定旧 \(sid\) 的权力在该实例的余下生命周期内永久不匹配，除非签发者对新状态另行签发。
+
 ### Thm 11　旧通道不能承载新状态应用数据
 
 **Prop**（A3 ∧ A5）。握手绑定双方当前 `ActorStateId`。状态权威废除旧会话密钥后，旧通道不能被当前状态合法使用。
@@ -884,7 +899,7 @@ $$
 (id_A,sid_A,ephk_A,id_B,sid_B,ephk_B,session)
 $$
 
-而不是只认证单方 Hello。只签本方字段时，旧 `sid` 问候可被信令重放（缺陷 F-CHAN-01）。双方都接受后，各自看到的对端必须是对方当前 `ActorId + ActorStateId`。有界 Dolev-Yao 穷举见 [proof/channel.py](proof/channel.py)。
+而不是只认证单方 Hello。只签本方字段时，旧 `sid` 问候可被信令重放（缺陷 F-CHAN-01）。双方都接受后，各自看到的对端必须是对方当前 `ActorId + ActorStateId`，且两侧的联合 transcript 必须一致。有界 Dolev-Yao 穷举见 [proof/channel.py](proof/channel.py)：A、B 两侧视图独立枚举，攻击者语料含旧会话真实 MAC 与伪造 MAC，「接受即当前、两侧一致」是被检验的结论而非建模前提；单方 MAC 的坏定义由变异回归证明可被检出。该穷举仍是单会话对、符号模型，不替代 Tamarin／ProVerif。
 
 ### Prop 3　重放
 
@@ -972,7 +987,17 @@ CE-01…CE-17 的可执行核心已进入回归脚本或证明套件。CE-07 的
 | Tamarin／ProVerif | 握手、重放、TURN、Capability 不可伪造 | 未做 |
 | Lean／Coq | 格、图划分、Merkle、Thm 7 的抽象证明 | 未做 |
 
-先运行 [proof/check_proofs.py](proof/check_proofs.py)，再运行 [check_formal_model.py](check_formal_model.py)。后者穷举或定向检查：
+先运行 [proof/check_proofs.py](proof/check_proofs.py)，再运行 [check_formal_model.py](check_formal_model.py)。
+
+证明套件遵守三条结构纪律，防止「守卫即模型」的空洞检查：
+
+1. 可执行守卫（Exec 前置、时钟、世代交集、发布前置、Ready）在 [proof/semantics.py](proof/semantics.py) 单点定义，STS 与 Z3 共用，手写副本间不可能漂移；
+2. 安全不变量在各模型中独立重算，不复用守卫返回值；对抗性迁移总是「尝试」坏行为，由守卫决定放行；
+3. [proof/mutants.py](proof/mutants.py) 把守卫逐一换成已知坏定义（去掉过期检查、允许拨回时钟、去掉世代交集、忽略修订号、忽略当前指针、去掉依赖检查、单方 MAC、最弱项换最强项），断言对应检查器必须报警。任一变异体存活，整个套件失败。
+
+有界搜索触及状态上限即显式失败，不存在静默截断。
+
+[check_formal_model.py](check_formal_model.py) 穷举或定向检查：
 
 - 三值聚合的交换／结合／幂等，以及排列无关；
 - 增加或削弱节点的单调性；
@@ -982,10 +1007,10 @@ CE-01…CE-17 的可执行核心已进入回归脚本或证明套件。CE-07 的
 - 跨 Principal 边不入图，且图外 Actor 出口不得为 \(\mathbf C\)；
 - 证据过期、错绑、不受信、真伪冲突时的判断；
 - Merkle 成员证明与换叶攻击；
-- Capability 字段扩大／错绑／撤销／过期；
+- Capability 字段扩大／错绑／撤销／过期；修订号回滚不复活旧凭证；
 - 挂起隔离与期限后拒绝；
-- 混合快照拒绝发布；
-- `EncGraph` 单射与排列无关；
+- 混合快照与重复 `ActorId` 叶子拒绝发布；
+- `EncGraph` 单射、排列无关与标识符字符集约束；
 - 数据世代交集；验证者最弱项；本地时钟；Depends／LocalContinue。
 
 本次运行通过脚本打印的断言数。该结果用于防止定义和可执行模型漂移，不能替代 A1–A13 的现实证据。

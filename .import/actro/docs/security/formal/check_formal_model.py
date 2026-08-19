@@ -154,14 +154,16 @@ def merkle_verify(leaf: str, proof: Sequence[tuple[str, str]], root: str) -> boo
 def actor_state_id(
     actor_id: str,
     principal_id: str,
+    revision: str,
     package: str,
     config: str,
     capabilities: str,
     environment: str,
 ) -> str:
+    """revision 由状态权威单调递增：内容回滚也得到新 ActorStateId。"""
     return digest(
         "actrium/actor-state/v1",
-        (actor_id, principal_id, package, config, capabilities, environment),
+        (actor_id, principal_id, revision, package, config, capabilities, environment),
     )
 
 
@@ -169,11 +171,31 @@ def app_leaf(actor_id: str, state_id: str, assurance_id: str) -> str:
     return digest("actrium/application-leaf/v1", (actor_id, state_id, assurance_id))
 
 
+_ENC_ID_ALLOWED = frozenset(
+    "abcdefghijklmnopqrstuvwxyz0123456789._:-"
+)
+
+
+def _require_canonical_id(value: str) -> str:
+    """EncGraph 内的标识符必须落在受限 ASCII 字符集，杜绝 JSON 转义歧义。"""
+    if not value or any(ch not in _ENC_ID_ALLOWED for ch in value):
+        raise ValueError(f"EncGraph 标识符超出受限字符集: {value!r}")
+    return value
+
+
 def enc_graph(
     principal_id: str,
     nodes: Sequence[str],
     edges: Sequence[tuple[str, str]],
 ) -> str:
+    nodes = tuple(nodes)
+    edges = tuple(edges)
+    _require_canonical_id(principal_id)
+    for node in nodes:
+        _require_canonical_id(node)
+    for src, dst in edges:
+        _require_canonical_id(src)
+        _require_canonical_id(dst)
     ordered_nodes = sorted(set(nodes))
     ordered_edges = sorted(set((src, dst) for src, dst in edges))
     return json.dumps(
@@ -243,9 +265,12 @@ def local_continue(
 
 
 def app_state_id(
-    structure_id: str, principal_id: str, leaves: Sequence[str]
+    structure_id: str,
+    principal_id: str,
+    leaves: Sequence[tuple[str, str]],
 ) -> str:
-    ordered = tuple(sorted(leaves))
+    """leaves 是 (actor_id, leaf_digest) 对；按 ActorId 排序建树（§5.2）。"""
+    ordered = tuple(leaf for _actor, leaf in sorted(leaves))
     return digest(
         "actrium/application-state/v1",
         (structure_id, principal_id, merkle_root(ordered)),
@@ -511,13 +536,16 @@ class SnapshotLeaf:
 
 
 def publish_ok(leaves: Sequence[SnapshotLeaf], structure_id: str, principal: str):
+    if len({leaf.actor_id for leaf in leaves}) != len(leaves):
+        return None  # 每个 ActorId 恰好一个叶子
     if any(
         leaf.leaf_sid != leaf.current_sid or leaf.assurance_sid != leaf.leaf_sid
         for leaf in leaves
     ):
         return None
     encoded = [
-        app_leaf(leaf.actor_id, leaf.leaf_sid, leaf.assurance_id) for leaf in leaves
+        (leaf.actor_id, app_leaf(leaf.actor_id, leaf.leaf_sid, leaf.assurance_id))
+        for leaf in leaves
     ]
     return app_state_id(structure_id, principal, encoded)
 
@@ -804,7 +832,7 @@ def verify_merkle_and_binding() -> int:
                 checked += 1
             checked += 1
 
-    base = ("actor-a", "principal-1", "pkg-1", "cfg-1", "cap-1", "env-1")
+    base = ("actor-a", "principal-1", "0", "pkg-1", "cfg-1", "cap-1", "env-1")
     base_state = actor_state_id(*base)
     for index in range(len(base)):
         changed = list(base)
@@ -812,14 +840,20 @@ def verify_merkle_and_binding() -> int:
         assert actor_state_id(*changed) != base_state
         checked += 1
 
-    leaf_a = app_leaf("actor-a", base_state, "aa-1")
-    leaf_b = app_leaf("actor-b", "sid-b", "aa-b")
+    # 回滚不复现旧 sid：内容相同但 revision 不同，得到不同状态根。
+    rolled_back = ("actor-a", "principal-1", "2", "pkg-1", "cfg-1", "cap-1", "env-1")
+    assert actor_state_id(*rolled_back) != base_state
+    assert actor_state_id(*base) == base_state
+    checked += 2
+
+    leaf_a = ("actor-a", app_leaf("actor-a", base_state, "aa-1"))
+    leaf_b = ("actor-b", app_leaf("actor-b", "sid-b", "aa-b"))
     app = app_state_id("structure-1", "principal-1", (leaf_a, leaf_b))
     assert app == app_state_id("structure-1", "principal-1", (leaf_b, leaf_a))
     assert app != app_state_id("structure-1", "principal-1", (leaf_a,))
     assert app != app_state_id("structure-2", "principal-1", (leaf_a, leaf_b))
     assert app != app_state_id("structure-1", "principal-2", (leaf_a, leaf_b))
-    spliced = app_leaf("actor-a", base_state, "aa-old")
+    spliced = ("actor-a", app_leaf("actor-a", base_state, "aa-old"))
     assert app_state_id("structure-1", "principal-1", (spliced, leaf_b)) != app
     checked += 5
     return checked
@@ -912,6 +946,13 @@ def verify_snapshot_publish() -> int:
     )
     assert publish_ok(later, "g1", "p") != appid
     checked += 1
+
+    duplicated = (
+        consistent[0],
+        SnapshotLeaf("a", "s1", "s1", "s1", "aa-1-bis"),
+    )
+    assert publish_ok(duplicated, "g1", "p") is None
+    checked += 1
     return checked
 
 
@@ -927,6 +968,15 @@ def verify_enc_graph() -> int:
     assert enc_graph("p", nodes, edges) != enc_graph("p", ("a", "b"), edges)
     assert structure_id("p", nodes, edges) == structure_id("p", ("a", "c", "b"), (("a", "b"), ("c", "a")))
     checked += 6
+
+    # 标识符字符集受限（D-ENC-02）：超集直接拒绝，不产生歧义编码。
+    for bad_id in ("A", "空", "a b", "a\\b", 'a"b', ""):
+        try:
+            enc_graph("p", (bad_id,), ())
+        except ValueError:
+            checked += 1
+        else:
+            raise AssertionError(f"应拒绝非规范标识符: {bad_id!r}")
 
     labels = ("n0", "n1", "n2")
     for node_count in range(1, 4):
@@ -1028,6 +1078,47 @@ def verify_depends_and_continue() -> int:
     return checked
 
 
+def verify_rollback_revision() -> int:
+    """D-ROLL-01：内容回滚不复活旧 Capability。"""
+    checked = 0
+    trusted = frozenset({"issuer"})
+    content = ("pkg-1", "cfg-1", "cap-1", "env-1")
+    sid_r0 = actor_state_id("a", "p", "0", *content)
+    sid_r2 = actor_state_id("a", "p", "2", *content)
+    assert sid_r0 != sid_r2
+    checked += 1
+
+    held = Capability(
+        issuer="issuer",
+        issuer_key_holder="issuer",
+        actor_id="a",
+        state_id=sid_r0,
+        scope=frozenset({"transfer"}),
+        not_before=0,
+        expires_at=10,
+    )
+    # 签发时（revision 0）可用。
+    assert capability_accepts(
+        held,
+        current_actor="a",
+        current_state=sid_r0,
+        operation="transfer",
+        now=1,
+        trusted_issuers=trusted,
+    )
+    # 状态变化两次后内容回到原值（revision 2）：旧凭证仍然不匹配。
+    assert not capability_accepts(
+        held,
+        current_actor="a",
+        current_state=sid_r2,
+        operation="transfer",
+        now=1,
+        trusted_issuers=trusted,
+    )
+    checked += 2
+    return checked
+
+
 def verify_local_clocks() -> int:
     checked = 0
     tmax = 3
@@ -1063,6 +1154,7 @@ def main() -> None:
         "assurance_join": verify_assurance_join(),
         "depends_and_continue": verify_depends_and_continue(),
         "local_clocks": verify_local_clocks(),
+        "rollback_revision": verify_rollback_revision(),
     }
     print(
         json.dumps(
