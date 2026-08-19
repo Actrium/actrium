@@ -52,7 +52,7 @@ EncGraph    = actrium/graph/v1 规范 JSON（排序后的 ActorId 与有向边�
 
 不进入图：仅安装未执行的 Program、无有效依赖的同 Realm Actor、跨 Principal Actor。跨 Principal 或无效 Actor 出口仍在发起方计分，不得判 `CONTROLLED`。
 
-非 Actor 目标（屏幕、文件、Workspace、HTTPS API）是 Host 可强制的汇。TLS 主机名只证明送到该域名，不证明域内不继续外泄。只转发端到端密文的 TURN 不入图。
+非 Actor 目标（屏幕、文件、Workspace、HTTPS API）是 Host 可强制的汇。TLS 主机名只证明送到该域名，不证明域内不继续外泄。目标分类不由声明方自选：可出示 Actr 身份的端点必须按 Actor 目标评定并接受跨 Principal 规则，不得改写成 HTTPS 汇绕过评分；类别无法判定时该出口保持 `UNKNOWN`。用户信任一个汇的语义是「认可数据离开保障范围」。只转发端到端密文的 TURN 不入图。
 
 Front 的最终节点结论是：
 
@@ -64,7 +64,7 @@ Host 能做而 Guest 不能做的出口，仍是这个 Actor 的出口。不能�
 
 ## 4. 状态变化
 
-不做全图分布式提交。顺序：本地提交新 `ActorStateId` → 废除旧权力 → 保障挂起 → 异步重建切面。
+不做全图分布式提交。顺序：本地提交新 `ActorStateId` → 废除旧权力 → 保障挂起 → 异步重建切面。`ActorState` 含状态权威维护的单调修订号：配置回滚也得到新状态根，被废除的旧 Capability、通道与结论不会因回滚复活。
 
 ```text
 Depends(b, a)           := 无向有效依赖边
@@ -108,7 +108,7 @@ Host 可以为 Guest 提供证据或作为验证者签发 `ActorAssurance`，但
 
 ### 5.5 外部 HTTPS
 
-不是 Actor。无授权却能发送：`UNCONTROLLED`。策略要求验证对端内部处理但无证据：`UNKNOWN`。用户明确授权的终端汇可以是 `CONTROLLED`，只表示汇点受控，不表示对端内部安全。
+不是 Actor。无授权却能发送：`UNCONTROLLED`。策略要求验证对端内部处理但无证据：`UNKNOWN`。用户明确授权的终端汇可以是 `CONTROLLED`，只表示汇点受控，不表示对端内部安全。前提是该端点确实不可按 Actor 评定：能出示 Actr 身份的端点必须按 Actor 目标建模（见 §3），不得以 HTTPS 汇的名义授权。
 
 ## 6. 声明是输入
 
