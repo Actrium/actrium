@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing stable release tag, for example v0.3.12.
+        description: Existing release tag, for example v0.3.12 or v0.4.0-rc.1.
         required: true
         type: string
 
@@ -26,8 +26,8 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-            echo "::error::Expected a stable release tag in vX.Y.Z form, got $TAG"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || {
+            echo "::error::Expected a release tag in vX.Y.Z or vX.Y.Z-<pre> form, got $TAG"
             exit 1
           }
           git ls-remote --exit-code --tags \

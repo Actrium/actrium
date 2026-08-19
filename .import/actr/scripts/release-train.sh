@@ -112,6 +112,7 @@ DRY_RUN=false
 PREPARE_ONLY=false
 SKIP_PYTHON=false
 PRE_RELEASE=false
+PRE_RELEASE_TYPE=""
 SKIP_WEB=false
 AUTO_VERSION=false
 RUN_MODE="publish"
@@ -135,11 +136,19 @@ Usage:
 
 Options:
   --version <X.Y.Z>  Stable semver used by the monorepo-managed release train (optional in CI).
+                     Pre-release versions (X.Y.Z-rc.1, X.Y.Z-alpha.1) are also accepted;
+                     --pre-release is implied automatically for dashed versions.
   --dry-run          Validate the full flow in a disposable worktree without publishing.
   --prepare-only     Update release versions, validate, and commit locally for a release PR.
   --skip-python      Skip Python package validation, version update, and publishing.
-  --pre-release      Mark this release as a pre-release (e.g. 0.2.2-pre.1).
-                     Uses npm tag "pre" and allows pre-release semver versions.
+  --pre-release      Mark this release as a pre-release (e.g. 0.2.2-rc.1).
+                     Uses the per-channel npm tag (alpha/beta/rc, else "pre") and
+                     publishes Python packages to TestPyPI.
+  --pre-release-type <alpha|beta|rc>
+                     Only meaningful with --prepare-only: start (or escalate to) the
+                     given pre-release channel based on PR labels detected by CI.
+                     Ignored when the workspace is already on an equal or higher
+                     channel; never produces a stable version.
   --branch <branch>  Target release branch (default: main). Maintenance branches
                      must use release-X.Y and can only publish X.Y patch releases.
   --stage <name>     Run a single stage instead of the full pipeline.
@@ -364,6 +373,11 @@ calculate_next_version() {
   local current=$1
   local bump=$2
 
+  # Pre-release/build suffixes must never reach the arithmetic below
+  # ("0-rc.1 + 1" is a bash arithmetic error); the bump always operates
+  # on the stable core.
+  current=${current%%+*}
+  current=${current%%-*}
   IFS='.' read -r major minor patch <<< "$current"
 
   # Pre-1.0 (0.y.z) policy: SemVer designates the MINOR as the breaking axis
@@ -382,6 +396,119 @@ calculate_next_version() {
     patch) echo "${major}.${minor}.$((patch + 1))" ;;
     *) echo "$current" ;;
   esac
+}
+
+# Normalize the first dot-separated pre-release identifier of a version to a
+# channel name: alpha/beta/rc for their SemVer-ish spellings, "pre" for
+# everything else. Empty input yields an empty channel.
+pre_release_channel_from_version() {
+  local version=$1 identifier
+  [[ "$version" == *-* ]] || return 0
+  identifier=${version%%+*}
+  identifier=${identifier#*-}
+  identifier=${identifier%%.*}
+  case "$identifier" in
+    a|alpha) echo "alpha" ;;
+    b|beta) echo "beta" ;;
+    c|rc) echo "rc" ;;
+    *) echo "pre" ;;
+  esac
+}
+
+# Maturity rank used to decide whether a label may escalate the channel:
+# alpha(0) < beta(1) < rc(2). "pre" ranks below alpha.
+pre_release_channel_rank() {
+  case "$1" in
+    alpha) echo 0 ;;
+    beta) echo 1 ;;
+    rc) echo 2 ;;
+    *) echo -1 ;;
+  esac
+}
+
+# Next iteration number for <core>-<channel>.N based on existing tags
+# (both the current v-prefix and the legacy release-train-v prefix).
+next_pre_release_number() {
+  local core=$1
+  local channel=$2
+  local tag number max_number=0
+
+  while IFS= read -r tag; do
+    [[ -n "$tag" ]] || continue
+    number=${tag##*${channel}.}
+    if [[ "$number" =~ ^[0-9]+$ ]] && (( number > max_number )); then
+      max_number=$number
+    fi
+  done < <(git -C "${WORK_REPO_ROOT:-$ORIGINAL_REPO_ROOT}" tag --list \
+      "v${core}-${channel}.*" "${LEGACY_FINAL_TAG_PREFIX}${core}-${channel}.*")
+
+  echo "$((max_number + 1))"
+}
+
+# Next iteration for <core>-<channel>.N that clears both existing tags and
+# the workspace's own iteration. Reading tags alone lets a half-finished
+# release wedge the line: if the release PR for 0.8.0-alpha.2 merged (the
+# workspace now carries alpha.2) but the train's tag/publish stage failed,
+# the newest tag is still alpha.1, every later auto prepare would re-derive
+# exactly the workspace version, commit nothing (git diff --quiet), and
+# report skip forever.
+next_pre_release_iteration() {
+  local core=$1
+  local channel=$2
+  local workspace_ver=$3
+  local candidate workspace_iter
+
+  candidate=$(next_pre_release_number "$core" "$channel")
+  if [[ "$workspace_ver" == "${core}-${channel}."* ]]; then
+    workspace_iter=${workspace_ver#"${core}-${channel}."}
+    workspace_iter=${workspace_iter%%+*}
+    if [[ "$workspace_iter" =~ ^[0-9]+$ ]] && (( workspace_iter + 1 > candidate )); then
+      candidate=$((workspace_iter + 1))
+    fi
+  fi
+  echo "$candidate"
+}
+
+# Derive the next version for an automatic --prepare-only run. Conventional
+# commits decide the X.Y.Z core; PRE_RELEASE_TYPE (from PR labels detected by
+# CI) decides the suffix channel. A workspace already on a pre-release line
+# is never auto-finalized: it continues its channel or escalates when the
+# label carries strictly higher maturity.
+resolve_auto_prepare_version() {
+  local current_ver=$1
+  local bump=$2
+  local current_channel label_rank current_rank base_ver core
+
+  current_channel=$(pre_release_channel_from_version "$current_ver")
+  if [[ -n "$current_channel" ]]; then
+    label_rank=$(pre_release_channel_rank "$PRE_RELEASE_TYPE")
+    current_rank=$(pre_release_channel_rank "$current_channel")
+    core=${current_ver%%-*}
+    if [[ -n "$PRE_RELEASE_TYPE" ]] && (( label_rank > current_rank )); then
+      printf '%s\n' "${core}-${PRE_RELEASE_TYPE}.$(next_pre_release_iteration "$core" "$PRE_RELEASE_TYPE" "$current_ver")"
+      return
+    fi
+    printf '%s\n' "${core}-${current_channel}.$(next_pre_release_iteration "$core" "$current_channel" "$current_ver")"
+    return
+  fi
+
+  if [[ -n "$PRE_RELEASE_TYPE" ]]; then
+    base_ver=$(calculate_next_version "$current_ver" "$bump")
+    printf '%s\n' "${base_ver}-${PRE_RELEASE_TYPE}.$(next_pre_release_iteration "$base_ver" "$PRE_RELEASE_TYPE" "$current_ver")"
+    return
+  fi
+
+  calculate_next_version "$current_ver" "$bump"
+}
+
+# A dashed version is a pre-release regardless of how it was provided;
+# implying the flag keeps callers (CI dry-runs, manual --version input)
+# from having to pass --pre-release redundantly.
+ensure_pre_release_flag() {
+  if [[ "$VERSION" == *-* && "$PRE_RELEASE" == false ]]; then
+    PRE_RELEASE=true
+    log_info "Version ${VERSION} contains a pre-release identifier; implying --pre-release"
+  fi
 }
 
 parse_args() {
@@ -407,6 +534,10 @@ parse_args() {
         PRE_RELEASE=true
         shift
         ;;
+      --pre-release-type)
+        PRE_RELEASE_TYPE="${2:-}"
+        shift 2
+        ;;
       --branch)
         RELEASE_BRANCH="${2:-main}"
         shift 2
@@ -428,6 +559,20 @@ parse_args() {
 
   if [[ -z "$VERSION" ]]; then
     AUTO_VERSION=true
+  fi
+
+  if [[ -n "$PRE_RELEASE_TYPE" ]]; then
+    case "$PRE_RELEASE_TYPE" in
+      alpha|beta|rc) ;;
+      *)
+        fail "--pre-release-type must be alpha, beta, or rc; got ${PRE_RELEASE_TYPE}"
+        return 1
+        ;;
+    esac
+    if [[ "$PREPARE_ONLY" != true ]]; then
+      fail "--pre-release-type only applies to --prepare-only runs"
+      return 1
+    fi
   fi
 
   if [[ "$DRY_RUN" == true && "$PREPARE_ONLY" == true ]]; then
@@ -484,7 +629,10 @@ configure_release_channel() {
   if [[ "$RELEASE_BRANCH" == "main" ]]; then
     RELEASE_LINE="${version_core%.*}"
     if [[ "$PRE_RELEASE" == true ]]; then
-      NPM_DIST_TAG="pre"
+      # Per-channel npm tags so consumers can pin maturity: alpha/beta/rc map
+      # to their own dist-tag; any other pre-release identifier falls back
+      # to the shared "pre" tag.
+      NPM_DIST_TAG=$(pre_release_channel_from_version "$VERSION")
     else
       NPM_DIST_TAG="latest"
     fi
@@ -2396,13 +2544,16 @@ main() {
         log_info "No publishable conventional-commit changes since last release; nothing to prepare"
         exit 0
       fi
-      VERSION=$(calculate_next_version "$current_ver" "$bump")
-      log_info "Auto-detected version: ${VERSION} (bump: ${bump}, current: ${current_ver})"
+      VERSION=$(resolve_auto_prepare_version "$current_ver" "$bump")
+      log_info "Auto-detected version: ${VERSION} (bump: ${bump}, current: ${current_ver}, label: ${PRE_RELEASE_TYPE:-none})"
     else
       VERSION=$(current_workspace_version)
       log_info "Using workspace version: ${VERSION}"
     fi
   fi
+
+  ensure_pre_release_flag
+
 
   validate_version
   configure_release_channel

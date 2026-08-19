@@ -95,6 +95,7 @@ reset_release_train_state() {
   PREPARE_ONLY=false
   SKIP_PYTHON=false
   PRE_RELEASE=false
+  PRE_RELEASE_TYPE=""
   SKIP_WEB=false
   RUN_MODE="publish"
   RELEASE_SHA=""
@@ -166,6 +167,443 @@ test_calculate_next_version_caps_pre_1_0_breaking_to_minor() {
   # Post-1.0: the cap does not apply; a breaking change is a real major bump.
   assert_eq "2.0.0" "$(calculate_next_version "1.4.2" "major")" "1.x breaking is major"
   assert_eq "1.5.0" "$(calculate_next_version "1.4.2" "minor")" "1.x feat is minor"
+}
+
+test_calculate_next_version_strips_pre_release_suffix() {
+  reset_release_train_state
+
+  # The bump must operate on the stable core; feeding "0-rc.1" into bash
+  # arithmetic is a syntax error, so suffixes are stripped up front.
+  assert_eq "0.8.1" "$(calculate_next_version "0.8.0-rc.1" "patch")" "patch on pre-release core"
+  assert_eq "0.9.0" "$(calculate_next_version "0.8.0-alpha.2" "minor")" "minor on pre-release core"
+  assert_eq "2.0.0" "$(calculate_next_version "1.4.2-rc.3" "major")" "major on pre-release core"
+  assert_eq "0.8.1" "$(calculate_next_version "0.8.0-rc.1+build.5" "patch")" "build metadata stripped"
+}
+
+test_pre_release_channel_helpers() {
+  reset_release_train_state
+
+  assert_eq "alpha" "$(pre_release_channel_from_version "0.8.0-alpha.1")" "alpha channel"
+  assert_eq "alpha" "$(pre_release_channel_from_version "0.8.0-a.2")" "short alpha spellings"
+  assert_eq "beta" "$(pre_release_channel_from_version "0.8.0-beta.1")" "beta channel"
+  assert_eq "beta" "$(pre_release_channel_from_version "0.8.0-b.1")" "short beta spellings"
+  assert_eq "rc" "$(pre_release_channel_from_version "0.8.0-rc.1")" "rc channel"
+  assert_eq "rc" "$(pre_release_channel_from_version "0.8.0-c.1")" "short rc spellings"
+  assert_eq "pre" "$(pre_release_channel_from_version "0.8.0-dev.4")" "fallback channel"
+  assert_eq "" "$(pre_release_channel_from_version "0.8.0")" "stable has no channel"
+
+  assert_eq "0" "$(pre_release_channel_rank "alpha")" "alpha rank"
+  assert_eq "1" "$(pre_release_channel_rank "beta")" "beta rank"
+  assert_eq "2" "$(pre_release_channel_rank "rc")" "rc rank"
+  assert_eq "-1" "$(pre_release_channel_rank "pre")" "pre rank"
+}
+
+test_next_pre_release_number_respects_existing_tags() {
+  reset_release_train_state
+
+  local temp_repo previous_root
+  temp_repo=$(mktemp -d)
+  previous_root=$ORIGINAL_REPO_ROOT
+  git -C "$temp_repo" init -q
+  git -C "$temp_repo" -c user.name="Release Test" -c user.email="release-test@example.com" commit -q --allow-empty -m "init"
+  git -C "$temp_repo" tag v0.8.0-alpha.1
+  git -C "$temp_repo" tag v0.8.0-alpha.2
+  git -C "$temp_repo" tag v0.8.0-rc.1
+  git -C "$temp_repo" tag release-train-v0.8.0-rc.2
+  ORIGINAL_REPO_ROOT=$temp_repo
+
+  assert_eq "3" "$(next_pre_release_number "0.8.0" "alpha")" "alpha continues after max tag"
+  assert_eq "3" "$(next_pre_release_number "0.8.0" "rc")" "rc honors legacy tag prefix"
+  assert_eq "1" "$(next_pre_release_number "0.9.0" "rc")" "fresh trio starts at 1"
+
+  ORIGINAL_REPO_ROOT=$previous_root
+  rm -rf "$temp_repo"
+}
+
+test_resolve_auto_prepare_version_starts_continues_and_escalates() {
+  reset_release_train_state
+
+  local temp_repo previous_root
+  temp_repo=$(mktemp -d)
+  previous_root=$ORIGINAL_REPO_ROOT
+  git -C "$temp_repo" init -q
+  git -C "$temp_repo" -c user.name="Release Test" -c user.email="release-test@example.com" commit -q --allow-empty -m "init"
+  git -C "$temp_repo" tag v0.8.0-alpha.2
+  ORIGINAL_REPO_ROOT=$temp_repo
+
+  # Label starts a new line on top of the detected bump.
+  PRE_RELEASE_TYPE="rc"
+  assert_eq "0.8.0-rc.1" "$(resolve_auto_prepare_version "0.7.0" "minor")" "label starts rc line"
+
+  # Unlabeled continuation of the current line (never auto-finalizes).
+  PRE_RELEASE_TYPE=""
+  assert_eq "0.8.0-alpha.3" "$(resolve_auto_prepare_version "0.8.0-alpha.2" "patch")" "unlabeled continues line"
+  assert_eq "0.8.0-alpha.3" "$(resolve_auto_prepare_version "0.8.0-alpha.2" "minor")" "feat stays on the line"
+
+  # Higher-maturity label escalates the channel on the same trio.
+  PRE_RELEASE_TYPE="rc"
+  assert_eq "0.8.0-rc.1" "$(resolve_auto_prepare_version "0.8.0-alpha.2" "patch")" "label escalates channel"
+
+  # Equal or lower maturity labels are ignored; the line continues.
+  PRE_RELEASE_TYPE="alpha"
+  assert_eq "0.8.0-alpha.3" "$(resolve_auto_prepare_version "0.8.0-alpha.2" "patch")" "same-channel label ignored"
+  git -C "$temp_repo" tag v0.8.0-rc.1
+  PRE_RELEASE_TYPE="beta"
+  assert_eq "0.8.0-rc.2" "$(resolve_auto_prepare_version "0.8.0-rc.1" "patch")" "lower label ignored on tagged rc line"
+
+  # No label on a stable workspace keeps today's stable behavior.
+  PRE_RELEASE_TYPE=""
+  assert_eq "0.8.0" "$(resolve_auto_prepare_version "0.7.0" "minor")" "stable path unchanged"
+
+  ORIGINAL_REPO_ROOT=$previous_root
+  rm -rf "$temp_repo"
+}
+
+test_resolve_auto_prepare_version_advances_past_workspace_iteration() {
+  reset_release_train_state
+
+  local temp_repo previous_root
+  temp_repo=$(mktemp -d)
+  previous_root=$ORIGINAL_REPO_ROOT
+  git -C "$temp_repo" init -q
+  git -C "$temp_repo" -c user.name="Release Test" -c user.email="release-test@example.com" commit -q --allow-empty -m "init"
+
+  # Half-finished release: the prepare PR for 0.8.0-alpha.2 merged (the
+  # workspace carries alpha.2) but the train's tag/publish stage failed, so
+  # the newest tag is still alpha.1. The next auto prepare must move past
+  # the workspace version or commit_release_prepare skips forever.
+  git -C "$temp_repo" tag v0.8.0-alpha.1
+  ORIGINAL_REPO_ROOT=$temp_repo
+
+  PRE_RELEASE_TYPE=""
+  assert_eq "0.8.0-alpha.3" "$(resolve_auto_prepare_version "0.8.0-alpha.2" "patch")" \
+    "continuation clears the workspace iteration"
+
+  # Re-labeled rc from a wedged rc attempt: workspace 0.8.0-rc.2, newest rc
+  # tag rc.1 — the next rc must clear rc.2.
+  git -C "$temp_repo" tag v0.8.0-rc.1
+  PRE_RELEASE_TYPE="rc"
+  assert_eq "0.8.0-rc.3" "$(resolve_auto_prepare_version "0.8.0-rc.2" "patch")" \
+    "re-dispatched rc clears the workspace iteration"
+
+  # A stable workspace never influences iteration numbering.
+  PRE_RELEASE_TYPE="rc"
+  git -C "$temp_repo" tag v0.9.0-rc.1
+  assert_eq "0.9.0-rc.2" "$(resolve_auto_prepare_version "0.8.0" "minor")" \
+    "stable workspace uses tag-based numbering"
+
+  ORIGINAL_REPO_ROOT=$previous_root
+  rm -rf "$temp_repo"
+}
+
+test_ensure_pre_release_flag_implies_for_dashed_versions() {
+  reset_release_train_state
+
+  VERSION="0.8.0-rc.1"
+  PRE_RELEASE=false
+  ensure_pre_release_flag
+  assert_eq "true" "$PRE_RELEASE" "dashed version implies pre-release"
+
+  VERSION="0.8.0"
+  PRE_RELEASE=false
+  ensure_pre_release_flag
+  assert_eq "false" "$PRE_RELEASE" "stable version does not imply pre-release"
+}
+
+test_parse_pre_release_type_argument() {
+  reset_release_train_state
+
+  parse_args --version 1.2.3 --prepare-only --pre-release-type rc
+  assert_eq "rc" "$PRE_RELEASE_TYPE" "valid pre-release type"
+
+  if parse_args --version 1.2.3 --prepare-only --pre-release-type nightly 2>/dev/null; then
+    printf 'parse_args must reject unknown pre-release types\n' >&2
+    exit 1
+  fi
+
+  reset_release_train_state
+  if parse_args --version 1.2.3 --pre-release-type rc 2>/dev/null; then
+    printf 'parse_args must reject --pre-release-type outside prepare mode\n' >&2
+    exit 1
+  fi
+}
+
+test_release_channel_maps_pre_release_channels_to_npm_tags() {
+  reset_release_train_state
+  RELEASE_BRANCH="main"
+
+  VERSION="0.8.0-alpha.1"
+  PRE_RELEASE=true
+  configure_release_channel
+  assert_eq "alpha" "$NPM_DIST_TAG" "alpha npm tag"
+
+  reset_release_train_state
+  RELEASE_BRANCH="main"
+  VERSION="0.8.0-beta.2"
+  PRE_RELEASE=true
+  configure_release_channel
+  assert_eq "beta" "$NPM_DIST_TAG" "beta npm tag"
+
+  reset_release_train_state
+  RELEASE_BRANCH="main"
+  VERSION="0.8.0-rc.1"
+  PRE_RELEASE=true
+  configure_release_channel
+  assert_eq "rc" "$NPM_DIST_TAG" "rc npm tag"
+
+  reset_release_train_state
+  RELEASE_BRANCH="main"
+  VERSION="0.8.0-dev.3"
+  PRE_RELEASE=true
+  SKIP_PYTHON=true
+  configure_release_channel
+  assert_eq "pre" "$NPM_DIST_TAG" "fallback npm tag"
+
+  reset_release_train_state
+  RELEASE_BRANCH="main"
+  VERSION="0.8.0"
+  PRE_RELEASE=false
+  configure_release_channel
+  assert_eq "latest" "$NPM_DIST_TAG" "stable npm tag"
+}
+
+test_asset_release_workflows_accept_pre_release_tags() {
+  reset_release_train_state
+
+  local workflow
+  for workflow in \
+    .github/workflows/_actr-cli-release.yml \
+    .github/workflows/_actrix-release.yml \
+    .github/workflows/_protoc-plugins-release.yml; do
+    if ! grep -q '\^v(\[0-9\]+\\\.\[0-9\]+\\\.\[0-9\]+(-\[0-9A-Za-z-\]+(\\\.\[0-9A-Za-z-\]+)\*)?)\$' "$workflow"; then
+      printf '%s must accept vX.Y.Z-<pre> release tags\n' "$workflow" >&2
+      exit 1
+    fi
+    if ! grep -q '\^validation-v(' "$workflow"; then
+      printf '%s must keep the validation-v tag branch\n' "$workflow" >&2
+      exit 1
+    fi
+  done
+
+  for workflow in \
+    .github/workflows/release-actr-cli.yml \
+    .github/workflows/release-actrix.yml \
+    .github/workflows/release-protoc-plugins.yml; do
+    if ! grep -q '\^v\[0-9\]+\\\.\[0-9\]+\\\.\[0-9\]+(-\[0-9A-Za-z-\]+(\\\.\[0-9A-Za-z-\]+)\*)?\$' "$workflow"; then
+      printf '%s must accept vX.Y.Z-<pre> release tags\n' "$workflow" >&2
+      exit 1
+    fi
+  done
+}
+
+test_release_train_workflow_accepts_pre_release_commits() {
+  reset_release_train_state
+
+  # Anchored pattern from the gate; hyphens are allowed inside pre-release
+  # identifiers so it stays consistent with the asset-workflow regexes.
+  local pattern='^chore\(release\): basic train v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+  if ! grep -qF "$pattern" .github/workflows/release-train.yml; then
+    printf 'release train gate regex must match pre-release commit titles\n' >&2
+    exit 1
+  fi
+
+  # Behavioral: exercise the exact gate pattern against the commit shapes
+  # the prepare flow can emit, so an accidental tightening or loosening
+  # fails here instead of silently skipping the train.
+  local sample
+  for sample in \
+    'chore(release): basic train v0.8.0' \
+    'chore(release): basic train v0.8.0-rc.1' \
+    'chore(release): basic train v0.8.0-alpha.12' \
+    'chore(release): basic train v0.8.0-beta.1.rc.2' \
+    'chore(release): basic train v0.8.0-x-y.1'; do
+    if ! [[ "$sample" =~ $pattern ]]; then
+      printf 'gate regex must accept %s\n' "$sample" >&2
+      exit 1
+    fi
+  done
+  for sample in \
+    'chore(release): basic train v0.8.0-rc.1 trailing' \
+    'chore(release): basic train v0.8' \
+    'feat: basic train v0.8.0-rc.1'; do
+    if [[ "$sample" =~ $pattern ]]; then
+      printf 'gate regex must reject %s\n' "$sample" >&2
+      exit 1
+    fi
+  done
+
+  if ! grep -q 'pre_release=true' .github/workflows/release-train.yml; then
+    printf 'release train context must infer pre_release from dashed versions\n' >&2
+    exit 1
+  fi
+}
+
+test_release_prepare_workflow_detects_pre_release_labels() {
+  reset_release_train_state
+
+  if ! grep -q 'Detect pre-release label' .github/workflows/release-prepare.yml; then
+    printf 'release prepare must detect pre-release PR labels\n' >&2
+    exit 1
+  fi
+
+  if ! grep -q -- '--pre-release-type' .github/workflows/release-prepare.yml; then
+    printf 'release prepare must pass --pre-release-type to the script\n' >&2
+    exit 1
+  fi
+
+  if ! grep -qF 'scripts/detect-pre-release-label.sh' .github/workflows/release-prepare.yml; then
+    printf 'release prepare must delegate label detection to the script\n' >&2
+    exit 1
+  fi
+
+  # Merge-time bounded query: a creation-ordered --limit window silently
+  # drops long-lived PRs merged right after a tag.
+  if ! grep -qF -- '--search "merged:>=' .github/workflows/release-prepare.yml; then
+    printf 'release prepare must bound the merged-PR query by merge time\n' >&2
+    exit 1
+  fi
+
+  if ! grep -q 'version:' .github/workflows/release-prepare.yml; then
+    printf 'release prepare must expose a manual version input for finalize\n' >&2
+    exit 1
+  fi
+}
+
+test_release_prepare_workflow_passes_inputs_through_env() {
+  reset_release_train_state
+
+  # Script-injection guard: dispatch inputs must reach bash through env
+  # indirection, never via ${{ }} interpolation inside run:.
+  if ! grep -qF 'INPUT_VERSION: ${{ inputs.version }}' .github/workflows/release-prepare.yml; then
+    printf 'release prepare must pass inputs.version through an env var\n' >&2
+    exit 1
+  fi
+  if ! grep -qF 'PRE_RELEASE_LABEL: ${{ steps.label.outputs.type }}' .github/workflows/release-prepare.yml; then
+    printf 'release prepare must pass the detected label through an env var\n' >&2
+    exit 1
+  fi
+  if ! grep -qF 'args+=(--version "$INPUT_VERSION")' .github/workflows/release-prepare.yml; then
+    printf 'release prepare must consume the version via the env var\n' >&2
+    exit 1
+  fi
+  if ! grep -qF 'args+=(--pre-release-type "$PRE_RELEASE_LABEL")' .github/workflows/release-prepare.yml; then
+    printf 'release prepare must consume the label via the env var\n' >&2
+    exit 1
+  fi
+}
+
+test_verify_workflow_triggers_on_concrete_asset_workflows() {
+  reset_release_train_state
+
+  local verify=.github/workflows/release-train-verify.yml
+  local workflow
+  for workflow in \
+    .github/workflows/release-actr-cli.yml \
+    .github/workflows/release-actrix.yml \
+    .github/workflows/release-protoc-plugins.yml; do
+    local count
+    count=$(grep -Fc "$workflow" "$verify")
+    if [ "$count" -lt 2 ]; then
+      printf '%s must appear in both push and pull_request path filters of %s\n' "$workflow" "$verify" >&2
+      exit 1
+    fi
+  done
+
+  if [ "$(grep -Fc 'scripts/detect-pre-release-label.sh' "$verify")" -lt 2 ]; then
+    printf 'the label detection script must trigger the verify workflow\n' >&2
+    exit 1
+  fi
+}
+
+write_detect_fixtures() {
+  # $1: PR JSON, $2: commit list
+  cat >"$1" <<'JSON'
+[
+  {
+    "number": 101,
+    "labels": [{ "name": "release:alpha" }],
+    "mergeCommit": { "oid": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+  },
+  {
+    "number": 102,
+    "labels": [{ "name": "release:beta" }],
+    "mergeCommit": { "oid": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" }
+  },
+  {
+    "number": 103,
+    "labels": [{ "name": "release:rc" }],
+    "mergeCommit": { "oid": "cccccccccccccccccccccccccccccccccccccccc" }
+  },
+  {
+    "number": 104,
+    "labels": [],
+    "mergeCommit": { "oid": "dddddddddddddddddddddddddddddddddddddddd" }
+  }
+]
+JSON
+  printf '%s\n' \
+    aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
+    bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb \
+    cccccccccccccccccccccccccccccccccccccccc \
+    dddddddddddddddddddddddddddddddddddddddd >"$2"
+}
+
+test_detect_pre_release_label_prefers_highest_maturity() {
+  local prs commits
+  prs=$(mktemp --suffix=.json)
+  commits=$(mktemp)
+
+  write_detect_fixtures "$prs" "$commits"
+  assert_eq "rc" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+    "rc wins over beta and alpha"
+
+  # Drop the rc PR; beta must win over alpha.
+  jq '[.[] | select(.number != 103)]' "$prs" >"${prs}.tmp" && mv "${prs}.tmp" "$prs"
+  assert_eq "beta" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+    "beta wins over alpha"
+
+  jq '[.[] | select(.number != 102)]' "$prs" >"${prs}.tmp" && mv "${prs}.tmp" "$prs"
+  assert_eq "alpha" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+    "alpha detected when alone"
+
+  jq '[.[] | select(.number != 101)]' "$prs" >"${prs}.tmp" && mv "${prs}.tmp" "$prs"
+  assert_eq "" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+    "no output without labeled PRs"
+
+  rm -f "$prs" "$commits"
+}
+
+test_detect_pre_release_label_ignores_prs_outside_commit_range() {
+  local prs commits
+  prs=$(mktemp --suffix=.json)
+  commits=$(mktemp)
+
+  write_detect_fixtures "$prs" "$commits"
+  # Only the unlabeled PR's merge commit is in range.
+  printf '%s\n' dddddddddddddddddddddddddddddddddddddddd >"$commits"
+  assert_eq "" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+    "labeled PR merged before the last tag is ignored"
+
+  # Multiple labels on one PR: the highest-maturity channel must win.
+  jq '[.[] | select(.number == 101) | .labels += [{ "name": "release:rc" }]]' \
+    "$prs" >"${prs}.tmp" && mv "${prs}.tmp" "$prs"
+  printf '%s\n' aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa >"$commits"
+  assert_eq "rc" "$(scripts/detect-pre-release-label.sh "$prs" "$commits")" \
+    "rc beats alpha on the same PR"
+
+  rm -f "$prs" "$commits"
+}
+
+test_detect_pre_release_label_reads_json_from_stdin() {
+  local prs commits
+  prs=$(mktemp --suffix=.json)
+  commits=$(mktemp)
+
+  write_detect_fixtures "$prs" "$commits"
+  assert_eq "rc" "$(scripts/detect-pre-release-label.sh - "$commits" <"$prs")" \
+    "JSON payload can arrive on stdin"
+
+  rm -f "$prs" "$commits"
 }
 
 test_parse_prepare_only_mode() {
@@ -1856,6 +2294,10 @@ test_actrsharp_release_workflow_supports_manual_recovery() {
     printf 'manual ActrSharp workflow must default to an explicit dry-run choice\n' >&2
     exit 1
   }
+  grep -q '\^v\[0-9\]+\\\.\[0-9\]+\\\.\[0-9\]+(-\[0-9A-Za-z-\]+(\\\.\[0-9A-Za-z-\]+)\*)?\$' "$manual" || {
+    printf 'manual ActrSharp recovery must accept vX.Y.Z-<pre> tags\n' >&2
+    exit 1
+  }
   grep -Fq '$tagRefspec = "{0}:{0}" -f $tagRef' "$reusable" || {
     printf 'ActrSharp tag refspec must delimit the PowerShell environment variable\n' >&2
     exit 1
@@ -1948,6 +2390,22 @@ test_actrix_release_stages_binaries_with_bash() {
 
 test_detect_conventional_bump_reads_commit_without_trailing_newline
 test_calculate_next_version_caps_pre_1_0_breaking_to_minor
+test_calculate_next_version_strips_pre_release_suffix
+test_pre_release_channel_helpers
+test_next_pre_release_number_respects_existing_tags
+test_resolve_auto_prepare_version_starts_continues_and_escalates
+test_resolve_auto_prepare_version_advances_past_workspace_iteration
+test_ensure_pre_release_flag_implies_for_dashed_versions
+test_parse_pre_release_type_argument
+test_release_channel_maps_pre_release_channels_to_npm_tags
+test_asset_release_workflows_accept_pre_release_tags
+test_release_train_workflow_accepts_pre_release_commits
+test_release_prepare_workflow_detects_pre_release_labels
+test_release_prepare_workflow_passes_inputs_through_env
+test_verify_workflow_triggers_on_concrete_asset_workflows
+test_detect_pre_release_label_prefers_highest_maturity
+test_detect_pre_release_label_ignores_prs_outside_commit_range
+test_detect_pre_release_label_reads_json_from_stdin
 test_parse_prepare_only_mode
 test_parse_stage_argument
 test_parse_stage_publish_rust

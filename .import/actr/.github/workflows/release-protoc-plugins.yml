@@ -37,8 +37,8 @@ jobs:
           TAG: ${{ steps.resolve.outputs.tag }}
         run: |
           set -euo pipefail
-          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
-            echo "::error::Expected a stable release tag in vX.Y.Z form, got $TAG"
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$ ]] || {
+            echo "::error::Expected a release tag in vX.Y.Z or vX.Y.Z-<pre> form, got $TAG"
             exit 1
           }
           git ls-remote --exit-code --tags \
