@@ -28,6 +28,17 @@ def _job(workflow: str, name: str, next_name: str) -> str:
     return workflow[job_start:next_job_start]
 
 
+def test_gate_aggregates_webrtc_v020_domain() -> None:
+    workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
+    # `gate` is the workflow's final job, so slice from its key to EOF.
+    gate = workflow[workflow.index("  gate:\n"):]
+    # The v0.20 domain must stay in the gate's needs list and in the Python
+    # summary dict; dropping either would detach the v0.20 migration from the
+    # gating decision without failing any other structure pin.
+    assert "webrtc_v020" in gate
+    assert "WEBRTC_V020_RESULT" in gate
+
+
 def test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
     rust_job = _job(workflow, "rust", "test")
@@ -827,6 +838,7 @@ def test_service_readiness_waits_for_exact_registration() -> None:
 
 
 if __name__ == "__main__":
+    test_gate_aggregates_webrtc_v020_domain()
     test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm()
     test_rust_test_gate_restores_cache_before_installing_tools()
     test_msrv_gate_builds_full_workspace_on_pinned_toolchain()

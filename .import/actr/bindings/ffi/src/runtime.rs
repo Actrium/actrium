@@ -747,6 +747,87 @@ mod tests {
         config_path
     }
 
+    fn write_test_manifest(dir: &std::path::Path) -> std::path::PathBuf {
+        let manifest_path = dir.join("manifest.toml");
+        std::fs::write(
+            &manifest_path,
+            r#"edition = 1
+
+[package]
+name = "LinkedProbe"
+manufacturer = "acme"
+version = "0.1.0"
+
+[dependencies]
+echo = { actr_type = "acme:EchoService:1.0.0" }
+"#,
+        )
+        .expect("write manifest.toml");
+        manifest_path
+    }
+
+    #[tokio::test]
+    async fn linked_manifest_constructor_enforces_manifest_identity() {
+        let mut server = MockActrixServer::start()
+            .await
+            .expect("mock actrix server should start");
+        let temp = tempdir().expect("temp dir");
+        write_test_config(temp.path(), &server);
+        let manifest_path = write_test_manifest(temp.path());
+        let manifest_type = actr_protocol::ActrType::from_string_repr("acme:LinkedProbe:0.1.0")
+            .expect("manifest actor type");
+
+        let init = load_linked_init(manifest_path.to_str().unwrap(), &manifest_type)
+            .await
+            .expect("load manifest-backed linked node");
+        assert_eq!(init.runtime_config().actr_type(), &manifest_type);
+
+        let workload = DynamicWorkload::new(
+            Box::new(TestLifecycleBridge::default()),
+            None,
+            None,
+            None,
+            None,
+            None,
+        );
+        let attached = init
+            .with_actor_type(manifest_type.clone())
+            .link(workload.as_ref().clone())
+            .await
+            .expect("link manifest-backed workload");
+        let node = register_linked_node(attached)
+            .await
+            .expect("register manifest-backed linked node");
+        let actr_ref = node
+            .start()
+            .await
+            .expect("start manifest-backed linked node");
+        let resolved = actr_ref
+            .resolve_dependency("echo".to_string())
+            .await
+            .expect("resolve dependency supplied by linked manifest");
+        assert_eq!(
+            resolved,
+            crate::types::ActrType {
+                manufacturer: "acme".to_string(),
+                name: "EchoService".to_string(),
+                version: "1.0.0".to_string(),
+            }
+        );
+
+        let wrong_type = actr_protocol::ActrType::from_string_repr("other:Override:9.9.9").unwrap();
+        let error = match load_linked_init(manifest_path.to_str().unwrap(), &wrong_type).await {
+            Ok(_) => panic!("mismatching linked identity should fail"),
+            Err(error) => error,
+        };
+        assert!(
+            error
+                .to_string()
+                .contains("does not match requested actor type")
+        );
+        server.shutdown().await;
+    }
+
     async fn linked_node_for_test(config_path: &std::path::Path) -> ActrResult<Arc<ActrNode>> {
         let workload = DynamicWorkload::new(
             Box::new(TestLifecycleBridge::default()),

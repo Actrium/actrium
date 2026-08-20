@@ -156,9 +156,9 @@ impl InboundDispatcher {
         if let Some((target, response_tx)) = pending.remove(&request_id) {
             drop(pending);
             tracing::debug!(
-                "Received RPC Response: request_id={}, target={}",
-                request_id,
-                target
+                request_id = %request_id,
+                target = %target,
+                "Received RPC Response"
             );
 
             let result = match (envelope.payload, envelope.error) {

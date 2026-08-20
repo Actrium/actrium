@@ -393,12 +393,24 @@ impl PeerGate {
         let mut sendability = manager.subscribe_peer_sendability_changed();
         let manager = Arc::downgrade(manager);
         let pending = Arc::downgrade(pending_requests);
+        // Grace-task registry shared with the spawned tasks: each task
+        // self-removes on completion (guarded by its registration id, so a
+        // replaced newer task is never evicted by an older one's cleanup).
+        // Without self-cleanup a peer whose last observed edge was
+        // non-sendable and which is then closed/removed never sees the rising
+        // edge that was the only removal path, leaking its entry forever.
+        let grace_tasks = Arc::new(std::sync::Mutex::new(HashMap::<
+            ActrId,
+            (u64, tokio::task::JoinHandle<()>),
+        >::new()));
+        let grace_seq = std::sync::atomic::AtomicU64::new(1);
         tokio::spawn(async move {
-            let mut grace_tasks = HashMap::<ActrId, tokio::task::JoinHandle<()>>::new();
             loop {
                 match sendability.recv().await {
                     Ok((peer, true)) => {
-                        if let Some(task) = grace_tasks.remove(&peer) {
+                        if let Some((_, task)) =
+                            grace_tasks.lock().expect("grace task map").remove(&peer)
+                        {
                             task.abort();
                         }
                     }
@@ -406,7 +418,13 @@ impl PeerGate {
                         let task_manager = manager.clone();
                         let task_pending = pending.clone();
                         let task_peer = peer.clone();
+                        let task_map = grace_tasks.clone();
+                        let task_id = grace_seq.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         let task = tokio::spawn(async move {
+                            // Core grace logic: wait out the grace period, then
+                            // release the peer's pending waiters unless the peer
+                            // recovered. Early exits fall through to the shared
+                            // self-cleanup below.
                             crate::timer::sleep(
                                 crate::timer::ids::PEER_PENDING_RECOVERY_GRACE,
                                 PENDING_RECOVERY_GRACE,
@@ -418,25 +436,33 @@ impl PeerGate {
                                     .await
                                     .is_some_and(|snapshot| snapshot.sendable)
                             {
-                                return;
-                            }
-                            let Some(pending) = task_pending.upgrade() else {
-                                return;
-                            };
-                            let mut requests = pending.write().await;
-                            let request_ids = requests
-                                .iter()
-                                .filter(|(_, (target, _))| target == &task_peer)
-                                .map(|(request_id, _)| request_id.clone())
-                                .collect::<Vec<_>>();
-                            for request_id in request_ids {
-                                if let Some((_target, sender)) = requests.remove(&request_id) {
-                                    let _ =
-                                        sender.send(Err(Self::send_projection_not_ready_error()));
+                            } else if let Some(pending) = task_pending.upgrade() {
+                                let mut requests = pending.write().await;
+                                let request_ids = requests
+                                    .iter()
+                                    .filter(|(_, (target, _))| target == &task_peer)
+                                    .map(|(request_id, _)| request_id.clone())
+                                    .collect::<Vec<_>>();
+                                for request_id in request_ids {
+                                    if let Some((_target, sender)) = requests.remove(&request_id) {
+                                        let _ = sender
+                                            .send(Err(Self::send_projection_not_ready_error()));
+                                    }
                                 }
                             }
+                            // Self-cleanup on every exit path: drop this task's
+                            // registration unless a newer grace task for the
+                            // same peer already replaced it.
+                            let mut map = task_map.lock().expect("grace task map");
+                            if map
+                                .get(&task_peer)
+                                .is_some_and(|(current_id, _)| *current_id == task_id)
+                            {
+                                map.remove(&task_peer);
+                            }
                         });
-                        if let Some(stale) = grace_tasks.insert(peer, task) {
+                        let mut map = grace_tasks.lock().expect("grace task map");
+                        if let Some((_, stale)) = map.insert(peer, (task_id, task)) {
                             stale.abort();
                         }
                     }
@@ -445,12 +471,12 @@ impl PeerGate {
                             skipped,
                             "sendability cleanup lagged; cancelling stale recovery grace tasks"
                         );
-                        for (_, task) in grace_tasks.drain() {
+                        for (_, (_, task)) in grace_tasks.lock().expect("grace task map").drain() {
                             task.abort();
                         }
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => {
-                        for (_, task) in grace_tasks.drain() {
+                        for (_, (_, task)) in grace_tasks.lock().expect("grace task map").drain() {
                             task.abort();
                         }
                         break;
@@ -1293,6 +1319,15 @@ impl PeerGate {
         // Delivery uncertainty on a session close mid-flight is surfaced by
         // the v0.20 lane send itself (RtcSendError::DataChunkDeliveryUncertain
         // mapped at the transport boundary); no separate tracker lives here.
+        //
+        // Reclaim semantics: unlike the retired 0.14 path (which recorded the
+        // chosen transport in a sent-slot and force-closed it on deadline
+        // expiry), the v0.20 architecture makes the Controller's recovery the
+        // canonical reclaim mechanism — the recovery deadline, ICE/DTLS state
+        // monitoring, and terminal transport cleanup retire an unhealthy
+        // session. A chunk-send timeout therefore only fails this send; it
+        // deliberately does not tear down the transport (a timeout is not
+        // proof the transport is bad — the remote may simply be slow).
         match crate::timer::timeout(
             crate::timer::ids::PEER_REQUEST_DEADLINE,
             send_timeout,

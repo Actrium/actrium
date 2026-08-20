@@ -964,14 +964,20 @@ jobs:
           repo-token: ${{ github.token }}
           version: ${{ vars.PROTOC_VERSION }}
       - uses: Swatinem/rust-cache@v2
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@cargo-nextest
       # Gate the parallel webrtc-rs v0.20 migration path (the `webrtc-v020`
       # optional feature), which is otherwise not exercised by CI.
       - name: Check (webrtc-v020)
         run: cargo check -p actr-hyper --features webrtc-v020 --all-targets
       - name: Clippy (webrtc-v020, deny warnings)
         run: cargo clippy -p actr-hyper --all-targets --features webrtc-v020 -- -D warnings
+      # nextest (not bare cargo test): the real-PC suites in this filter hit
+      # CI-load handshake-timing flakes, and libtest would fail the whole job
+      # on the first one without retries or running the rest. nextest picks up
+      # the .config/nextest.toml retry overrides and --no-fail-fast semantics.
       - name: Test (webrtc-v020)
-        run: "cargo test -p actr-hyper --features webrtc-v020 --lib v020::"
+        run: cargo nextest run -p actr-hyper --features webrtc-v020 -E 'test(/^wire::webrtc::v020/)' --no-fail-fast
 
   cjk:
     name: CJK Gate
