@@ -258,3 +258,128 @@ fn test_lane_type_name() {
     let lane = MpscLane::new(PayloadType::RpcReliable, tx, rx);
     assert_eq!(lane.lane_type(), "Mpsc");
 }
+
+// ── ReassemblyBuffer rejection paths (memory-exhaustion defenses) ──────────
+//
+// Each guard below defends a distinct adversarial/malformed shape; a
+// regression in the arithmetic would silently weaken the bounds, so every
+// rejection path is pinned by a dedicated test (the `#[cfg(test)] insert`
+// wrapper discards errors, so these drive `try_insert` directly).
+
+/// Limits small enough to trip every budget deterministically.
+fn tiny_limits() -> ReassemblyLimits {
+    ReassemblyLimits {
+        max_messages: 2,
+        max_bytes: 64,
+        max_message_bytes: 48,
+        max_fragments_per_message: 2,
+    }
+}
+
+fn frag(len: usize) -> Bytes {
+    Bytes::from(vec![0u8; len])
+}
+
+#[test]
+fn try_insert_rejects_invalid_index() {
+    let mut buf = ReassemblyBuffer::with_limits(tiny_limits());
+    // total_frags == 0 is invalid.
+    let err = buf.try_insert(1, 0, 0, frag(8)).unwrap_err();
+    assert!(matches!(
+        err,
+        ReassemblyError::InvalidIndex { index: 0, total: 0 }
+    ));
+    // frag_index >= total_frags is invalid.
+    let err = buf.try_insert(1, 2, 2, frag(8)).unwrap_err();
+    assert!(matches!(
+        err,
+        ReassemblyError::InvalidIndex { index: 2, total: 2 }
+    ));
+    // The rejected message left no partial state behind.
+    assert!(buf.try_insert(1, 0, 1, frag(8)).unwrap().is_some());
+}
+
+#[test]
+fn try_insert_rejects_too_many_fragments() {
+    let mut buf = ReassemblyBuffer::with_limits(tiny_limits());
+    let err = buf.try_insert(1, 0, 3, frag(8)).unwrap_err();
+    assert!(matches!(
+        err,
+        ReassemblyError::TooManyFragments { total: 3, max: 2 }
+    ));
+    // Discarded: the same msg_id restarts cleanly.
+    assert!(buf.try_insert(1, 0, 2, frag(8)).unwrap().is_none());
+}
+
+#[test]
+fn try_insert_rejects_inconsistent_total() {
+    let mut buf = ReassemblyBuffer::with_limits(tiny_limits());
+    assert!(buf.try_insert(1, 0, 2, frag(8)).unwrap().is_none());
+    // total=1 is within every earlier guard (index < total <= max) but
+    // disagrees with the recorded total of 2.
+    let err = buf.try_insert(1, 0, 1, frag(8)).unwrap_err();
+    assert!(matches!(
+        err,
+        ReassemblyError::InconsistentTotal {
+            msg_id: 1,
+            expected: 2,
+            actual: 1
+        }
+    ));
+    // The inconsistent entry was discarded, not merged.
+    assert!(buf.try_insert(1, 0, 2, frag(8)).unwrap().is_none());
+}
+
+#[test]
+fn try_insert_rejects_when_message_budget_exhausted() {
+    let mut buf = ReassemblyBuffer::with_limits(tiny_limits());
+    // Two in-flight (incomplete) messages fill the message budget.
+    assert!(buf.try_insert(1, 0, 2, frag(8)).unwrap().is_none());
+    assert!(buf.try_insert(2, 0, 2, frag(8)).unwrap().is_none());
+    let err = buf.try_insert(3, 0, 2, frag(8)).unwrap_err();
+    assert!(matches!(err, ReassemblyError::MessageBudgetExhausted));
+    // Completing a message frees its slot for a new one.
+    assert!(buf.try_insert(1, 1, 2, frag(8)).unwrap().is_some());
+    assert!(buf.try_insert(3, 0, 2, frag(8)).unwrap().is_none());
+}
+
+#[test]
+fn try_insert_rejects_message_too_large() {
+    let mut buf = ReassemblyBuffer::with_limits(tiny_limits());
+    // First fragment is fine; the second pushes the message past
+    // max_message_bytes (48): 24 + 28 > 48.
+    assert!(buf.try_insert(1, 0, 2, frag(24)).unwrap().is_none());
+    let err = buf.try_insert(1, 1, 2, frag(28)).unwrap_err();
+    assert!(matches!(err, ReassemblyError::MessageTooLarge));
+    // The oversized message was discarded wholesale: its bytes no longer
+    // count against the budget.
+    assert!(buf.try_insert(1, 0, 2, frag(24)).unwrap().is_none());
+}
+
+#[test]
+fn try_insert_rejects_when_byte_budget_exhausted() {
+    let mut buf = ReassemblyBuffer::with_limits(tiny_limits());
+    // 32 + 32 == max_bytes (64): both fit per-message but the aggregate is
+    // now full. The next insert must extend an EXISTING message (a new msg_id
+    // would hit the message-budget guard first) and stay under the
+    // per-message cap so only the aggregate guard can fire.
+    assert!(buf.try_insert(1, 0, 2, frag(32)).unwrap().is_none());
+    assert!(buf.try_insert(2, 0, 2, frag(32)).unwrap().is_none());
+    let err = buf.try_insert(1, 1, 2, frag(8)).unwrap_err();
+    assert!(matches!(err, ReassemblyError::ByteBudgetExhausted));
+    // The rejected extension discards message 1 wholesale: its 32 bytes left
+    // the aggregate (only message 2's 32 remain), and the message restarts
+    // from its first fragment.
+    assert!(buf.try_insert(1, 0, 2, frag(8)).unwrap().is_none());
+    assert!(buf.try_insert(1, 1, 2, frag(8)).unwrap().is_some());
+}
+
+#[test]
+fn try_insert_duplicate_fragment_consumes_no_budget() {
+    let mut buf = ReassemblyBuffer::with_limits(tiny_limits());
+    assert!(buf.try_insert(1, 0, 2, frag(16)).unwrap().is_none());
+    // Retransmitted duplicate is accepted (Ok(None)) without accounting.
+    assert!(buf.try_insert(1, 0, 2, frag(16)).unwrap().is_none());
+    // Budget still holds only one copy: 16 (dup) + 32 == 48 == per-message cap.
+    assert!(buf.try_insert(1, 1, 2, frag(32)).unwrap().is_some());
+}

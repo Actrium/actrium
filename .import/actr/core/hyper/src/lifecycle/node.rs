@@ -245,6 +245,13 @@ pub(crate) type V020ResponseRoute = ();
 /// Priority: inbound WebSocket connection (if the caller dialled us directly) →
 /// the v0.20 RTC lane. Module-level so both the inline mailbox path and the
 /// gate-on continuation share one implementation.
+/// How long the v0.20 response path waits for the caller's peer to become
+/// sendable before falling through to the gate-off delivery path. Named (like
+/// DATA_CHUNK_SEND_TIMEOUT / TELL_SEND_TIMEOUT) so the budget stays tunable
+/// and greppable; the wait is an `.await` inside the mailbox reply path, so
+/// the "Gate off" fallback serializes replies behind it by design.
+const CALLER_SENDABLE_WAIT: std::time::Duration = std::time::Duration::from_secs(10);
+
 async fn send_envelope_to_caller(
     ws_gate: &Option<Arc<crate::wire::websocket::WebSocketGate>>,
     _v020_route: &V020ResponseRoute,
@@ -285,7 +292,7 @@ async fn send_envelope_to_caller(
             let mut rx = handle.subscribe();
             let waited = crate::timer::timeout(
                 crate::timer::ids::WEBRTC_PEER_SENDABLE,
-                std::time::Duration::from_secs(10),
+                CALLER_SENDABLE_WAIT,
                 async {
                     loop {
                         if rx.borrow().sendable {

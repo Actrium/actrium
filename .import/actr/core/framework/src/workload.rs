@@ -411,7 +411,7 @@ pub trait Workload: crate::MaybeSendSync + 'static {
     /// per peer for de-duplication.
     async fn on_webrtc_state_changed<C: Context>(&self, _ctx: &C, event: &WebRtcPeerState) {
         tracing::debug!(
-            peer = %event.peer,
+            peer = %event.peer.to_string_repr(),
             status = ?event.status,
             sendable = event.sendable,
             "webrtc state changed",
