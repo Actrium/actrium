@@ -13,7 +13,7 @@
 //! - Stale events from old sessions are filtered by the coordinator
 //! - Messages can be sent and received on the new connection
 
-use actr_hyper::test_support::{TestHarness, make_actor_id};
+use actr_hyper::test_support::TestHarness;
 use std::time::Duration;
 
 /// Initialize tracing for test output
@@ -54,8 +54,16 @@ async fn test_stale_callbacks_do_not_kill_new_connection() {
     harness.connect(100, 200).await;
     tracing::info!("✅ Phase 1 complete: Connection established and verified");
 
-    // Record session_id of the first connection via event subscription
-    let mut event_rx = harness.peer(100).subscribe_events();
+    // Record the physical PC generation. v0.20 tags every handler/pump event
+    // with this identity; a Hard Recovery must move to a strictly newer one.
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
+    let old_generation = harness
+        .peer(100)
+        .rtc
+        .generation(&target)
+        .await
+        .expect("connected peer has a generation");
 
     harness.reset_counters();
 
@@ -64,35 +72,34 @@ async fn test_stale_callbacks_do_not_kill_new_connection() {
     tracing::info!("   Old DataChannel callbacks will fire asynchronously");
     harness.simulate_disconnect();
 
-    // Wait for ICE to detect disconnection and DC callbacks to fire
-    tracing::info!("⏳ Waiting 10s for ICE disconnection + DC close callbacks...");
-    tokio::time::sleep(Duration::from_secs(10)).await;
-
-    // Drain stale events (they should carry session_1's session_id)
-    let mut stale_event_count = 0;
-    while let Ok(event) = event_rx.try_recv() {
-        tracing::info!("📨 Stale event during outage: {:?}", event);
-        stale_event_count += 1;
-    }
-    tracing::info!(
-        "📊 Received {} events during outage (will become stale after reconnect)",
-        stale_event_count
-    );
+    harness
+        .peer(100)
+        .rtc
+        .wait_state(&target, Duration::from_secs(5), |state| !state.sendable)
+        .await
+        .expect("outage must revoke sendability");
 
     // ==================== Phase 3: Network recovery + reconnect ====================
     tracing::info!("🟢 Phase 3: Restoring network...");
     harness.simulate_reconnect();
-
-    // Small delay for signaling to stabilize
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Trigger reconnection (simulates NetworkEvent::Available)
-    tracing::info!("📱 Triggering retry_failed_connections()...");
-    harness.peer(100).retry_failed().await;
-
-    // Wait for ICE restart to complete and new connection to stabilize
-    tracing::info!("⏳ Waiting for ICE restart + new connection...");
-    tokio::time::sleep(Duration::from_secs(10)).await;
+    // Force the RFC Hard Recovery path on both logical peers so the old
+    // generation is retired while its callbacks/pumps may still be draining.
+    harness.peer(100).rtc.force_reconnect();
+    harness.peer(200).rtc.force_reconnect();
+    let recovered = harness
+        .peer(100)
+        .rtc
+        .wait_state(&target, Duration::from_secs(20), |state| {
+            state.sendable && state.pc_generation > old_generation
+        })
+        .await
+        .expect("new generation must become sendable");
+    harness
+        .peer(200)
+        .rtc
+        .wait_sendable(&source, Duration::from_secs(20))
+        .await;
+    assert!(recovered.pc_generation > old_generation);
 
     // ==================== Phase 4: Verify new connection survives ====================
     tracing::info!("📤 Phase 4: Verifying new connection is alive...");
@@ -163,12 +170,14 @@ async fn test_stale_callbacks_do_not_kill_new_connection() {
     tracing::info!("✅ test_stale_callbacks_do_not_kill_new_connection passed!");
 }
 
-/// Test: Session ID filtering in coordinator event listener
+/// Test: generation filtering survives controller retirement/recreation
 ///
 /// Verifies that events from old sessions are ignored by the coordinator's
 /// event listener, preventing stale cleanup on new connections.
 ///
-/// This test injects synthetic stale events to directly test the filter.
+/// This uses the real close/recreate boundary. The recreated controller starts
+/// above the retired generation floor; any late Handler/pump completion from
+/// the old controller therefore cannot alias or tear down the replacement.
 #[tokio::test]
 async fn test_session_id_filtering_ignores_stale_events() {
     init_tracing();
@@ -182,19 +191,37 @@ async fn test_session_id_filtering_ignores_stale_events() {
     harness.connect(100, 200).await;
     tracing::info!("✅ Connection established");
 
-    // Subscribe to events to observe what happens
-    let mut event_rx = harness.peer(100).subscribe_events();
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
+    let retired_generation = harness
+        .peer(100)
+        .rtc
+        .generation(&target)
+        .await
+        .expect("initial generation");
 
-    // Inject a STALE ConnectionClosed event with session_id=0 (definitely not current)
-    // This simulates what happens when an old connection's close event fires late
-    tracing::info!("🧪 Injecting stale ConnectionClosed event (session_id=0)...");
-    let stale_event = actr_hyper::transport::ConnectionEvent::ConnectionClosed {
-        peer_id: make_actor_id(200),
-        session_id: 0, // Stale session_id — won't match current PeerState.session_id
-    };
-    harness.peer(100).send_event(stale_event);
+    assert!(harness.peer(100).rtc.close_peer(&target).await);
+    assert!(harness.peer(200).rtc.close_peer(&source).await);
+    assert!(harness.peer(100).rtc.state(&target).await.is_none());
 
-    // Wait a bit for the event listener to process
+    harness.peer(100).rtc.connect(target.clone()).await;
+    let replacement = harness
+        .peer(100)
+        .rtc
+        .wait_sendable(&target, Duration::from_secs(20))
+        .await;
+    harness
+        .peer(200)
+        .rtc
+        .wait_sendable(&source, Duration::from_secs(20))
+        .await;
+    assert!(
+        replacement.pc_generation > retired_generation,
+        "controller recreation must preserve a monotone generation floor"
+    );
+
+    // Give retiring tasks/callbacks a scheduling window after the replacement
+    // has become authoritative.
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // The connection should STILL be alive — stale event was filtered
@@ -216,20 +243,12 @@ async fn test_session_id_filtering_ignores_stale_events() {
         Err(_) => panic!("❌ Connection dead after stale event injection!"),
     }
 
-    // Drain event_rx to confirm events were processed
-    let mut events_seen = 0;
-    while let Ok(event) = event_rx.try_recv() {
-        tracing::debug!("  Event observed: {:?}", event);
-        events_seen += 1;
-    }
-    tracing::info!("📊 Events processed after injection: {}", events_seen);
-
     tracing::info!("╔══════════════════════════════════════════════════════╗");
     tracing::info!("║   Session ID Filtering Test — PASSED                ║");
     tracing::info!("╠══════════════════════════════════════════════════════╣");
-    tracing::info!("║ • Stale ConnectionClosed (session_id=0) was ignored ║");
+    tracing::info!("║ • Retired generation callbacks were ignored         ║");
     tracing::info!("║ • Current connection survived and handled messages  ║");
-    tracing::info!("║ • Coordinator event listener filtering works        ║");
+    tracing::info!("║ • Controller generation filtering works             ║");
     tracing::info!("╚══════════════════════════════════════════════════════╝");
 
     tracing::info!("✅ test_session_id_filtering_ignores_stale_events passed!");

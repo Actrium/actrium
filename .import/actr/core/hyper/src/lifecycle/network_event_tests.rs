@@ -6,7 +6,6 @@ use actr_protocol::{
     AIdCredential, ActrId, Pong, RegisterRequest, RegisterResponse, RouteCandidatesRequest,
     RouteCandidatesResponse, ServiceAvailabilityState, SignalingEnvelope, UnregisterResponse,
 };
-use std::sync::Condvar;
 use std::sync::Mutex as StdMutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering as AtomicOrdering};
 use tokio::sync::{Notify, Semaphore, broadcast, mpsc, watch};
@@ -224,7 +223,7 @@ fn restarted_monitor_gets_a_fresh_epoch_while_clones_keep_the_incarnation() {
 async fn newer_monitor_incarnation_fences_old_lifecycle_and_snapshot_facts() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
     let processor: Arc<dyn NetworkEventProcessor> =
-        Arc::new(DefaultNetworkEventProcessor::new(signaling.clone(), None));
+        Arc::new(DefaultNetworkEventProcessor::new(signaling.clone()));
     let (event_tx, event_rx) = mpsc::channel(8);
     let (fact_sink, channel) =
         supervisor_internal_channel_with_profile(tp::LifecycleProfile::Gated);
@@ -352,21 +351,6 @@ fn observed_effect_outcomes_preserve_every_completion_class() {
 }
 
 #[test]
-fn default_processor_without_coordinator_cannot_create_barriers() {
-    let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
-    let processor = DefaultNetworkEventProcessor::new(signaling, None);
-    let cleanup = NetworkEvent::CleanupConnections {
-        reason: CleanupReason::ManualReset,
-    };
-    let background = NetworkEvent::AppLifecycleChanged {
-        state: AppLifecycleState::Background,
-    };
-
-    assert!(processor.begin_network_event_barrier(&cleanup).is_none());
-    assert!(processor.begin_network_event_barrier(&background).is_none());
-}
-
-#[test]
 fn session_notification_without_fact_sink_is_a_safe_noop() {
     let (event_tx, _event_rx) = mpsc::channel(1);
     let handle = NetworkEventHandle::new(event_tx);
@@ -460,213 +444,9 @@ fn recovery_effect_errors_preserve_typed_network_diagnoses() {
 }
 
 #[test]
-fn lifecycle_barrier_is_scoped_to_events_that_change_connections() {
-    let cases = [
-        (
-            NetworkEvent::NetworkPathChanged {
-                snapshot: snapshot(1, NetworkAvailability::Unavailable),
-            },
-            true,
-        ),
-        (
-            NetworkEvent::NetworkPathChanged {
-                snapshot: snapshot(2, NetworkAvailability::Available),
-            },
-            true,
-        ),
-        (
-            NetworkEvent::NetworkPathChanged {
-                snapshot: snapshot(3, NetworkAvailability::Unknown),
-            },
-            false,
-        ),
-        (
-            NetworkEvent::AppLifecycleChanged {
-                state: AppLifecycleState::Background,
-            },
-            false,
-        ),
-        (
-            NetworkEvent::AppLifecycleChanged {
-                state: AppLifecycleState::Foreground {
-                    background_duration_ms: LONG_BACKGROUND_RECONNECT_THRESHOLD_MS - 1,
-                },
-            },
-            false,
-        ),
-        (
-            NetworkEvent::AppLifecycleChanged {
-                state: AppLifecycleState::Foreground {
-                    background_duration_ms: LONG_BACKGROUND_RECONNECT_THRESHOLD_MS,
-                },
-            },
-            true,
-        ),
-        (
-            NetworkEvent::CleanupConnections {
-                reason: CleanupReason::ManualReset,
-            },
-            true,
-        ),
-        (
-            NetworkEvent::ForceReconnect {
-                reason: ReconnectReason::ManualReconnect,
-            },
-            true,
-        ),
-    ];
-
-    for (event, expected) in cases {
-        assert_eq!(
-            network_event_needs_lifecycle_barrier(&event),
-            expected,
-            "{event:?}"
-        );
-    }
-}
-
-struct DequeueBarrierProcessor {
-    coordinator: Arc<crate::wire::webrtc::WebRtcCoordinator>,
-    prepare_entered: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
-    prepare_release: Arc<(StdMutex<bool>, Condvar)>,
-}
-
-#[async_trait::async_trait]
-impl NetworkEventProcessor for DequeueBarrierProcessor {
-    fn prepare_network_event(&self, _event: &NetworkEvent) {
-        if let Some(entered) = self
-            .prepare_entered
-            .lock()
-            .expect("prepare entered mutex poisoned")
-            .take()
-        {
-            let _ = entered.send(());
-        }
-        let released = self
-            .prepare_release
-            .0
-            .lock()
-            .expect("prepare release mutex poisoned");
-        let _released = self
-            .prepare_release
-            .1
-            .wait_while(released, |released| !*released)
-            .expect("prepare release mutex poisoned");
-    }
-
-    fn begin_network_event_barrier(&self, event: &NetworkEvent) -> Option<NetworkEventBarrier> {
-        network_event_needs_lifecycle_barrier(event).then(|| NetworkEventBarrier {
-            _cleanup_guard: self.coordinator.cleanup_guard(),
-        })
-    }
-
-    async fn process_network_available(&self) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn process_network_lost(&self) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn process_network_type_changed(
-        &self,
-        _is_wifi: bool,
-        _is_cellular: bool,
-    ) -> Result<(), String> {
-        Ok(())
-    }
-
-    async fn cleanup_connections(&self) -> Result<(), String> {
-        Ok(())
-    }
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn dequeue_barrier_is_held_until_send_projection_is_published() {
-    use crate::inbound::MediaFrameRegistry;
-    use crate::test_support::{dummy_credential, make_actor_id};
-    use crate::wire::webrtc::{WebRtcConfig, WebRtcCoordinator};
-
-    let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
-    let coordinator = Arc::new(WebRtcCoordinator::new(
-        make_actor_id(1),
-        CredentialState::new(dummy_credential(), None, None),
-        signaling,
-        WebRtcConfig::default(),
-        Arc::new(MediaFrameRegistry::new()),
-    ));
-    let (prepare_entered_tx, prepare_entered_rx) = tokio::sync::oneshot::channel();
-    let prepare_release = Arc::new((StdMutex::new(false), Condvar::new()));
-    let processor: Arc<dyn NetworkEventProcessor> = Arc::new(DequeueBarrierProcessor {
-        coordinator: coordinator.clone(),
-        prepare_entered: StdMutex::new(Some(prepare_entered_tx)),
-        prepare_release: prepare_release.clone(),
-    });
-
-    let (event_tx, event_rx) = mpsc::channel(1);
-    let (fact_sink, channel) = supervisor_internal_channel();
-    let mut send_projection_rx = channel.subscribe_send_projection();
-    let handle = NetworkEventHandle::new_with_fact_sink(event_tx, fact_sink);
-    let shutdown = CancellationToken::new();
-    let reconciler = tokio::spawn(run_network_event_reconciler_with_channel(
-        event_rx,
-        channel,
-        processor,
-        shutdown.clone(),
-    ));
-    let event = tokio::spawn(async move {
-        handle
-            .handle_network_path_changed(snapshot(1, NetworkAvailability::Unavailable))
-            .await
-    });
-
-    prepare_entered_rx
-        .await
-        .expect("reconciler should enter synchronous event preparation");
-    assert_eq!(
-        *send_projection_rx.borrow_and_update(),
-        tp::SendProjection::Normal
-    );
-
-    assert!(
-        coordinator.cleanup_in_progress(),
-        "dequeued lifecycle work must hold the coordinator barrier during preparation"
-    );
-
-    {
-        let mut released = prepare_release
-            .0
-            .lock()
-            .expect("prepare release mutex poisoned");
-        *released = true;
-        prepare_release.1.notify_all();
-    }
-
-    event
-        .await
-        .expect("network event task should join")
-        .expect("network event should be accepted");
-    assert!(
-        !coordinator.cleanup_in_progress(),
-        "accepted lifecycle work must release mutation authority"
-    );
-    assert_eq!(
-        *send_projection_rx.borrow(),
-        tp::SendProjection::ExistingOnly,
-        "the barrier must not release before the stricter projection is visible"
-    );
-
-    shutdown.cancel();
-    tokio::time::timeout(Duration::from_secs(1), reconciler)
-        .await
-        .expect("reconciler should stop")
-        .expect("reconciler should not panic");
-}
-
-#[test]
 fn signaling_directive_only_fences_superseded_connection_attempts() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
-    let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
+    let processor = DefaultNetworkEventProcessor::new(signaling.clone());
 
     processor.invalidate_signaling_connection_attempts();
     assert_eq!(
@@ -809,7 +589,7 @@ async fn cancelled_recovery_action_does_not_poison_later_actions() {
         .block_disconnect
         .store(true, AtomicOrdering::SeqCst);
     let processor: Arc<dyn NetworkEventProcessor> =
-        Arc::new(DefaultNetworkEventProcessor::new(signaling.clone(), None));
+        Arc::new(DefaultNetworkEventProcessor::new(signaling.clone()));
 
     // Run a ForceReconnect effect and cancel it once it is mid-teardown (blocked
     // in disconnect) but before it can complete — exactly what the reconciler
@@ -846,7 +626,7 @@ async fn cancelled_recovery_action_does_not_poison_later_actions() {
 #[tokio::test]
 async fn force_reconnect_does_not_delegate_retry_ownership_to_socket() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
-    let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
+    let processor = DefaultNetworkEventProcessor::new(signaling.clone());
 
     processor
         .force_reconnect()
@@ -857,7 +637,7 @@ async fn force_reconnect_does_not_delegate_retry_ownership_to_socket() {
 #[tokio::test]
 async fn force_reconnect_failure_reports_without_scheduling_local_retry() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(true));
-    let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
+    let processor = DefaultNetworkEventProcessor::new(signaling.clone());
 
     let result = processor.force_reconnect().await;
 
@@ -877,7 +657,7 @@ async fn force_reconnect_failure_reports_without_scheduling_local_retry() {
 #[tokio::test]
 async fn restore_failure_reports_without_resetting_socket_backoff() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(true));
-    let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
+    let processor = DefaultNetworkEventProcessor::new(signaling.clone());
 
     let result = processor
         .process_network_recovery_action(NetworkRecoveryAction::Restore)
@@ -894,7 +674,7 @@ async fn restore_failure_reports_without_resetting_socket_backoff() {
 #[tokio::test]
 async fn restore_executes_one_quick_connect_without_socket_backoff() {
     let signaling = Arc::new(ForceReconnectFakeSignalingClient::new(false));
-    let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
+    let processor = DefaultNetworkEventProcessor::new(signaling.clone());
 
     processor
         .process_network_recovery_action(NetworkRecoveryAction::Restore)
@@ -1448,6 +1228,8 @@ async fn gated_reconciler_waits_for_authoritative_foreground() {
         ReconcilerConfig {
             profile,
             clock_origin,
+            #[cfg(feature = "webrtc-v020")]
+            v020_recovery: None,
         },
     ));
 
@@ -1512,6 +1294,8 @@ async fn current_effect_fact_and_event_storm_preserve_monotonic_supervisor_statu
         ReconcilerConfig {
             profile,
             clock_origin,
+            #[cfg(feature = "webrtc-v020")]
+            v020_recovery: None,
         },
     ));
 
@@ -1927,7 +1711,7 @@ impl SignalingClient for TeardownFakeSignaling {
 #[tokio::test]
 async fn bounded_cleanup_invalidates_up_front_and_records_residuals() {
     let signaling = Arc::new(TeardownFakeSignaling::new(DisconnectMode::Err));
-    let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
+    let processor = DefaultNetworkEventProcessor::new(signaling.clone());
 
     let report = processor
         .bounded_cleanup(std::time::Duration::from_secs(10))
@@ -1949,7 +1733,7 @@ async fn bounded_cleanup_invalidates_up_front_and_records_residuals() {
 #[tokio::test(start_paused = true)]
 async fn bounded_cleanup_abandons_remaining_steps_at_budget() {
     let signaling = Arc::new(TeardownFakeSignaling::new(DisconnectMode::Hang));
-    let processor = DefaultNetworkEventProcessor::new(signaling.clone(), None);
+    let processor = DefaultNetworkEventProcessor::new(signaling.clone());
     let budget = std::time::Duration::from_millis(100);
 
     // Drive time forward past the budget while the hanging disconnect is in

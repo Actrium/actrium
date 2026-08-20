@@ -1,298 +1,138 @@
-//! Reproduce stale WebRTC send-path reuse on the answerer after the peer fails.
+//! Stale WebRTC readiness regression tests for the answerer send path.
 //!
-//! The production failure was not that signaling stopped. The narrower contract
-//! is that after the answerer observes WebRTC `Disconnected`/`Failed`, new
-//! outbound RPCs must not continue to use the old cached `DestTransport` or
-//! DataChannel just because local ready state still looks open.
+//! The v0.20 controller snapshot is the sole sendability authority. These
+//! tests use real VNet/signaling loss and recovery instead of injecting the
+//! removed 0.14 `ConnectionEvent` stream.
+
+use std::time::Duration;
 
 use actr_hyper::test_support::TestHarness;
-use actr_hyper::transport::{ConnectionEvent, ConnectionState, Dest};
-use actr_protocol::{ActrId, PayloadType, RpcEnvelope};
-use std::time::Duration;
+use actr_protocol::{Direction, RpcEnvelope};
 
 const OFFERER_SERIAL: u64 = 100;
 const ANSWERER_SERIAL: u64 = 200;
 
-fn init_tracing() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_file(true)
-        .with_line_number(true)
-        .with_test_writer()
-        .try_init()
-        .ok();
+fn request(request_id: &str) -> RpcEnvelope {
+    RpcEnvelope {
+        request_id: request_id.into(),
+        route_key: "test.method".into(),
+        payload: Some(bytes::Bytes::from_static(b"answerer-probe")),
+        direction: Some(Direction::Request as i32),
+        timeout_ms: 30_000,
+        ..Default::default()
+    }
 }
 
-async fn wait_for_data_channel_opened(
-    event_rx: &mut tokio::sync::broadcast::Receiver<ConnectionEvent>,
-    peer_id: &ActrId,
-    payload_type: PayloadType,
-    timeout: Duration,
-) -> u64 {
-    let deadline = tokio::time::Instant::now() + timeout;
-
-    loop {
-        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
-        assert!(
-            !remaining.is_zero(),
-            "timed out waiting for {:?} DataChannelOpened for peer {}",
-            payload_type,
-            peer_id
-        );
-
-        match tokio::time::timeout(remaining, event_rx.recv()).await {
-            Ok(Ok(ConnectionEvent::DataChannelOpened {
-                peer_id: event_peer,
-                session_id,
-                payload_type: event_payload_type,
-            })) if &event_peer == peer_id && event_payload_type == payload_type => {
-                return session_id;
-            }
-            Ok(Ok(_)) => {}
-            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(n))) => {
-                tracing::warn!("connection event receiver lagged by {} events", n);
-            }
-            Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => {
-                panic!("connection event channel closed while waiting for DataChannelOpened");
-            }
-            Err(_) => {
-                panic!(
-                    "timed out waiting for {:?} DataChannelOpened for peer {}",
-                    payload_type, peer_id
-                );
-            }
-        }
-    }
+async fn connected() -> TestHarness {
+    let mut harness = TestHarness::with_vnet().await;
+    harness.add_peer(OFFERER_SERIAL).await;
+    harness.add_peer(ANSWERER_SERIAL).await;
+    harness.connect(OFFERER_SERIAL, ANSWERER_SERIAL).await;
+    harness
 }
 
 #[tokio::test]
 async fn answerer_failed_peer_does_not_keep_sending_on_stale_webrtc() {
-    init_tracing();
+    let harness = connected().await;
+    let offerer = harness.peer(OFFERER_SERIAL).id.clone();
+    let answerer = harness.peer(ANSWERER_SERIAL).id.clone();
 
-    let mut harness = TestHarness::with_vnet().await;
-    harness.add_peer(OFFERER_SERIAL).await;
-    harness.add_peer(ANSWERER_SERIAL).await;
+    // Hold both packet and signaling paths down so the answerer cannot recover
+    // before the send-path assertion observes the authoritative unavailable
+    // snapshot.
+    harness.simulate_disconnect();
+    harness
+        .peer(ANSWERER_SERIAL)
+        .rtc
+        .wait_state(&offerer, Duration::from_secs(5), |state| !state.sendable)
+        .await
+        .expect("answerer must publish sendable=false during failure");
 
-    let offerer_id = harness.peer(OFFERER_SERIAL).id.clone();
-    let offerer_dest = Dest::peer(offerer_id.clone());
-    let mut answerer_events = harness.peer(ANSWERER_SERIAL).subscribe_events();
-
-    tracing::info!("Step 1: establish initial WebRTC transport via offerer -> answerer");
-    harness.connect(OFFERER_SERIAL, ANSWERER_SERIAL).await;
-
-    let session_id = wait_for_data_channel_opened(
-        &mut answerer_events,
-        &offerer_id,
-        PayloadType::RpcReliable,
-        Duration::from_secs(5),
-    )
-    .await;
-
-    let answerer_peer = harness.peer(ANSWERER_SERIAL);
-    assert!(
-        answerer_peer
-            .transport_manager
-            .has_dest(&offerer_dest)
-            .await,
-        "answerer should have cached a DestTransport to the offerer after sending the connect response"
-    );
-
-    tracing::info!(
-        "Step 2: answerer observes offerer side as Failed, session_id={}",
-        session_id
-    );
-    answerer_peer.send_event(ConnectionEvent::StateChanged {
-        peer_id: offerer_id.clone(),
-        session_id,
-        state: ConnectionState::Failed,
-    });
-
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let _offerer_echo = harness
-        .peer(OFFERER_SERIAL)
-        .start_echo_responder("offerer_echo_for_answerer_probe");
-    let _answerer_receiver = answerer_peer.start_response_receiver("answerer_probe_receiver");
-
-    let envelope = RpcEnvelope {
-        request_id: "answerer-failed-peer-should-not-use-stale-webrtc".to_string(),
-        route_key: "test.ping".to_string(),
-        payload: Some(bytes::Bytes::from_static(b"answerer-ping-after-failed")),
-        direction: Some(actr_protocol::Direction::Request as i32),
-        timeout_ms: 30_000,
-        ..Default::default()
-    };
-
-    tracing::info!("Step 3: answerer sends after Failed; it must not write to stale WebRTC");
     let started = std::time::Instant::now();
     let result = tokio::time::timeout(
         Duration::from_secs(2),
-        answerer_peer.gate.send_request(&offerer_id, envelope),
+        harness
+            .peer(ANSWERER_SERIAL)
+            .gate
+            .send_request(&offerer, request("answerer-send-during-failure")),
     )
-    .await;
+    .await
+    .expect("send must fail promptly instead of using a stale DataChannel");
+    assert!(result.is_err());
+    assert!(started.elapsed() < Duration::from_secs(2));
+    assert_eq!(harness.peer(ANSWERER_SERIAL).pending_count().await, 0);
 
-    match result {
-        Ok(Err(err)) => {
-            let msg = err.to_string();
-            assert!(
-                msg.contains("connection not ready")
-                    || msg.contains("closing")
-                    || msg.contains("not ready")
-                    || msg.contains("Disconnected")
-                    || msg.contains("Failed")
-                    || msg.contains("Connection closed"),
-                "unexpected fast-fail error after Failed event: {msg}"
-            );
-            assert!(
-                started.elapsed() < Duration::from_secs(2),
-                "request should fail fast instead of waiting for the RPC timeout"
-            );
-        }
-        Ok(Ok(_)) => {
-            panic!("answerer request unexpectedly succeeded through a peer already marked Failed");
-        }
-        Err(_) => {
-            panic!("answerer request hung for 2s; likely reused stale WebRTC transport");
-        }
-    }
+    harness.simulate_reconnect();
+    harness
+        .peer(ANSWERER_SERIAL)
+        .rtc
+        .wait_sendable(&offerer, Duration::from_secs(20))
+        .await;
+    harness
+        .peer(OFFERER_SERIAL)
+        .rtc
+        .wait_sendable(&answerer, Duration::from_secs(20))
+        .await;
+    let response = harness
+        .peer(ANSWERER_SERIAL)
+        .gate
+        .send_request(&offerer, request("answerer-send-after-recovery"))
+        .await
+        .expect("answerer must use the recovered session");
+    assert_eq!(response.as_ref(), b"pong");
+    harness.shutdown().await;
 }
 
 #[tokio::test]
 async fn stale_failed_event_does_not_reblock_peer_after_same_session_recovers() {
-    init_tracing();
+    let harness = connected().await;
+    let offerer = harness.peer(OFFERER_SERIAL).id.clone();
+    let original_generation = harness
+        .peer(ANSWERER_SERIAL)
+        .rtc
+        .generation(&offerer)
+        .await
+        .expect("initial generation");
 
-    let mut harness = TestHarness::with_vnet().await;
-    harness.add_peer(OFFERER_SERIAL).await;
-    harness.add_peer(ANSWERER_SERIAL).await;
+    harness.simulate_disconnect();
+    let unavailable = harness
+        .peer(ANSWERER_SERIAL)
+        .rtc
+        .wait_state(&offerer, Duration::from_secs(5), |state| !state.sendable)
+        .await
+        .expect("disconnect must revoke sendability");
 
-    let offerer_id = harness.peer(OFFERER_SERIAL).id.clone();
-    let mut answerer_events = harness.peer(ANSWERER_SERIAL).subscribe_events();
-
-    tracing::info!("Step 1: establish initial WebRTC transport via offerer -> answerer");
-    harness.connect(OFFERER_SERIAL, ANSWERER_SERIAL).await;
-
-    let session_id = wait_for_data_channel_opened(
-        &mut answerer_events,
-        &offerer_id,
-        PayloadType::RpcReliable,
-        Duration::from_secs(5),
-    )
-    .await;
-    let stale_session_id = session_id.saturating_sub(1);
-
-    let answerer_peer = harness.peer(ANSWERER_SERIAL);
-
-    tracing::info!(
-        "Step 2: current session enters Failed and is guarded, session_id={}",
-        session_id
+    harness.simulate_reconnect();
+    let recovered = harness
+        .peer(ANSWERER_SERIAL)
+        .rtc
+        .wait_sendable(&offerer, Duration::from_secs(20))
+        .await;
+    assert_eq!(
+        recovered.pc_generation, original_generation,
+        "ordinary network restoration should use a same-PC ICE restart"
     );
-    answerer_peer.send_event(ConnectionEvent::StateChanged {
-        peer_id: offerer_id.clone(),
-        session_id,
-        state: ConnectionState::Failed,
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(recovered.revision > unavailable.revision);
 
-    // #359: a transient Connected event on the guarded session must NOT
-    // restore business sendability — the old DataChannel may still report
-    // Open while its SCTP association is dead. Sends must keep failing fast.
-    answerer_peer.send_event(ConnectionEvent::StateChanged {
-        peer_id: offerer_id.clone(),
-        session_id,
-        state: ConnectionState::Connected,
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await;
+    // Give delayed driver ticks from the failed ICE epoch a scheduling window.
+    // A current-generation snapshot must remain authoritative after the soft
+    // recovery completion.
+    tokio::time::sleep(Duration::from_millis(750)).await;
+    let settled = harness
+        .peer(ANSWERER_SERIAL)
+        .rtc
+        .state(&offerer)
+        .await
+        .expect("answerer snapshot after recovery");
+    assert!(settled.sendable);
+    assert_eq!(settled.pc_generation, original_generation);
 
-    let guarded_envelope = RpcEnvelope {
-        request_id: "answerer-send-during-unresolved-recovery".to_string(),
-        route_key: "test.ping".to_string(),
-        payload: Some(bytes::Bytes::from_static(
-            b"answerer-ping-during-unresolved-recovery",
-        )),
-        direction: Some(actr_protocol::Direction::Request as i32),
-        timeout_ms: 30_000,
-        ..Default::default()
-    };
-    let guarded_started = std::time::Instant::now();
-    let guarded_result = tokio::time::timeout(
-        Duration::from_secs(2),
-        answerer_peer
-            .gate
-            .send_request(&offerer_id, guarded_envelope),
-    )
-    .await;
-    match guarded_result {
-        Ok(Err(err)) => {
-            let msg = err.to_string();
-            assert!(
-                msg.contains("connection not ready")
-                    || msg.contains("not ready")
-                    || msg.contains("closing")
-                    || msg.contains("Failed"),
-                "expected ConnectionNotReady while recovery is unresolved, got: {msg}"
-            );
-            assert!(
-                guarded_started.elapsed() < Duration::from_secs(2),
-                "guarded request should fail fast instead of waiting for the RPC timeout"
-            );
-        }
-        Ok(Ok(_)) => {
-            panic!(
-                "send unexpectedly succeeded on a transient Connected while recovery is unresolved (#359)"
-            );
-        }
-        Err(_) => {
-            panic!("guarded send hung instead of failing fast");
-        }
-    }
-
-    tracing::info!(
-        "Step 3: authoritative restart completion resolves the guard, session_id={}",
-        session_id
-    );
-    answerer_peer.send_event(ConnectionEvent::IceRestartCompleted {
-        peer_id: offerer_id.clone(),
-        session_id,
-        success: true,
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    tracing::info!(
-        "Step 4: delayed Failed from stale session must not reblock peer, stale_session_id={}",
-        stale_session_id
-    );
-    answerer_peer.send_event(ConnectionEvent::StateChanged {
-        peer_id: offerer_id.clone(),
-        session_id: stale_session_id,
-        state: ConnectionState::Failed,
-    });
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    let envelope = RpcEnvelope {
-        request_id: "answerer-send-after-stale-failed-event".to_string(),
-        route_key: "test.ping".to_string(),
-        payload: Some(bytes::Bytes::from_static(
-            b"answerer-ping-after-stale-failed",
-        )),
-        direction: Some(actr_protocol::Direction::Request as i32),
-        timeout_ms: 30_000,
-        ..Default::default()
-    };
-
-    tracing::info!("Step 5: answerer sends after stale Failed; send should go through");
-    let result = tokio::time::timeout(
-        Duration::from_secs(2),
-        answerer_peer.gate.send_message(&offerer_id, envelope),
-    )
-    .await;
-
-    match result {
-        Ok(Ok(())) => {}
-        Ok(Err(err)) => {
-            panic!("answerer send failed after stale Failed event: {err}");
-        }
-        Err(_) => {
-            panic!("answerer send hung after stale Failed event");
-        }
-    }
+    let response = harness
+        .peer(ANSWERER_SERIAL)
+        .gate
+        .send_request(&offerer, request("answerer-after-stale-driver-ticks"))
+        .await
+        .expect("stale failure observation must not reblock the recovered peer");
+    assert_eq!(response.as_ref(), b"pong");
+    harness.shutdown().await;
 }

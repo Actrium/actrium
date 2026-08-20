@@ -447,6 +447,12 @@ pub enum HookEvent {
         peer_id: ActrId,
         status: WebRtcPeerStatus,
     },
+    /// S6-5: a revision of the peer's unified state (v0.20 backend). Carries
+    /// the full FFI-safe snapshot; fires on every snapshot revision advance
+    /// (initial replay included for late-installed workloads).
+    WebRtcStateChanged {
+        state: actr_framework::WebRtcPeerState,
+    },
     DataChunkDeliveryUncertain {
         stream_id: String,
         session_id: u64,
@@ -2424,7 +2430,7 @@ impl SignalingClient for WebSocketSignalingClient {
         self.send_envelope(envelope).await?;
 
         // Do not wait for UnregisterResponse here because the signaling stream
-        // is also consumed by WebRtcCoordinator. Waiting could race with that loop
+        // is also consumed by the v0.20 signaling router. Waiting could race with that loop
         // and lead to spurious timeouts. Treat Unregister as best-effort.
         // not wait for the response , because the signaling stream have multi customers use it, fixme: should wait for the response
         Ok(UnregisterResponse {

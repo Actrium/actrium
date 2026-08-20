@@ -63,6 +63,10 @@ pub(crate) struct ActrRefShared {
     pub(crate) shutdown_token: CancellationToken,
     /// Background task handles (receive loops, WebRTC coordinator, etc.)
     pub(crate) task_handles: Mutex<Vec<JoinHandle<()>>>,
+    /// v0.20 connection manager (v0.20 backend only). Backs the RTC status
+    /// query/list/subscribe APIs (S6-4).
+    #[cfg(feature = "webrtc-v020")]
+    pub(crate) v020_manager: Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>,
 }
 
 /// ActrRef - Lightweight reference to a running Actor
@@ -104,6 +108,47 @@ impl ActrRef {
     /// Return a clone of the `SessionState` handle, if set.
     pub fn session_state(&self) -> Option<SessionState> {
         self.shared.session_state.clone()
+    }
+
+    /// S6-4: query one peer's current WebRTC state (v0.20 backend). Returns
+    /// `None` when the peer has no controller or the node runs the 0.14
+    /// backend.
+    #[cfg(feature = "webrtc-v020")]
+    pub async fn get_rtc_peer_status(
+        &self,
+        peer: &ActrId,
+    ) -> Option<actr_framework::WebRtcPeerState> {
+        let manager = self.shared.v020_manager.as_ref()?;
+        manager.get_snapshot(peer).await.map(|s| s.to_public())
+    }
+
+    /// S6-4: list every current peer's WebRTC state (v0.20 backend; empty on
+    /// the 0.14 backend).
+    #[cfg(feature = "webrtc-v020")]
+    pub async fn list_rtc_peer_statuses(&self) -> Vec<actr_framework::WebRtcPeerState> {
+        match self.shared.v020_manager.as_ref() {
+            Some(manager) => manager
+                .list_snapshots()
+                .await
+                .iter()
+                .map(|s| s.to_public())
+                .collect(),
+            None => Vec::new(),
+        }
+    }
+
+    /// S6-4: subscribe to one peer's WebRTC state changes (v0.20 backend).
+    /// The receiver replays the current state immediately on subscribe (RFC:
+    /// "SUBSCRIBE MUST replay the latest Snapshot immediately"). Returns
+    /// `None` when the peer has no controller or the node runs the 0.14
+    /// backend.
+    #[cfg(feature = "webrtc-v020")]
+    pub async fn subscribe_rtc_peer_status(
+        &self,
+        peer: &ActrId,
+    ) -> Option<tokio::sync::watch::Receiver<actr_framework::WebRtcPeerState>> {
+        let manager = self.shared.v020_manager.as_ref()?;
+        manager.subscribe_public(peer).await
     }
 
     /// Call the local workload with a typed RPC request.

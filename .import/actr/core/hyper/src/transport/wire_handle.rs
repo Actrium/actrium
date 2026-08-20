@@ -29,6 +29,20 @@ pub enum WireIdentity {
     WebSocket { peer_id: ActrId, session_id: u64 },
 }
 
+/// Stable identity of one logical WebRTC transport attempt.
+///
+/// Unlike [`WireIdentity`], this identity survives PC generation replacement
+/// during Hard Recovery. The controller lifecycle id prevents an event from a
+/// removed controller matching its replacement; `transport_epoch` prevents a
+/// delayed terminal event from an earlier attempt matching a later `Connect`
+/// on the same long-lived controller.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WebRtcTransportLifecycle {
+    pub peer_id: ActrId,
+    pub controller_lifecycle_id: u64,
+    pub transport_epoch: u64,
+}
+
 /// WireHandle - Unified interface for Wire layer connections
 ///
 /// # Design Philosophy
@@ -118,32 +132,33 @@ pub trait WireHandle: Send + Sync + std::fmt::Debug {
     ///
     /// [`SecureCell`]: super::secure_channel::SecureCell
     fn mark_secure_failed(&self) {}
+
+    /// Stable WebRTC connection-flight identity used for terminal cache
+    /// retirement. Non-WebRTC handles return `None`.
+    fn webrtc_transport_lifecycle(&self) -> Option<WebRtcTransportLifecycle> {
+        None
+    }
 }
 
 /// Wire connection status
 #[derive(Debug)]
 pub enum WireStatus {
     /// Connecting
-    Connecting,
+    Connecting(Arc<dyn WireHandle>),
 
     /// Connection ready
     Ready(Arc<dyn WireHandle>),
 
-    /// Connection failed/closed. Carries the last known `WireIdentity` so the
-    /// session-guarded close path can tell a same-session close (identity
-    /// matches → not stale) apart from a replaced wire (identity differs →
-    /// stale; the new wire owns the pending requests). `None` only when the
-    /// slot never carried an identity — identities are minted when the wire is
-    /// built, so they are retained even for wires that never reached `Ready`.
-    Failed(Option<WireIdentity>),
+    /// Connection failed
+    Failed(Arc<dyn WireHandle>),
 }
 
 impl Clone for WireStatus {
     fn clone(&self) -> Self {
         match self {
-            WireStatus::Connecting => WireStatus::Connecting,
+            WireStatus::Connecting(handle) => WireStatus::Connecting(Arc::clone(handle)),
             WireStatus::Ready(handle) => WireStatus::Ready(Arc::clone(handle)),
-            WireStatus::Failed(id) => WireStatus::Failed(id.clone()),
+            WireStatus::Failed(handle) => WireStatus::Failed(Arc::clone(handle)),
         }
     }
 }

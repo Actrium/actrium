@@ -27,13 +27,10 @@ use std::sync::Arc;
 use actr_framework::{
     Bytes, Context, MaybeSendBoxFuture, MaybeSendSync, MessageDispatcher, Workload,
 };
-use actr_hyper::outbound::{HostGate, PeerGate};
-use actr_hyper::test_support::{TestSignalingServer, create_peer_with_websocket, make_actor_id};
-use actr_hyper::transport::{
-    DefaultWireBuilder, DefaultWireBuilderConfig, HostTransport, PeerTransport,
-};
+use actr_hyper::outbound::HostGate;
+use actr_hyper::test_support::TestHarness;
+use actr_hyper::transport::HostTransport;
 use actr_protocol::PayloadType;
-use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{ActorResult, ActrError, ActrId, RpcEnvelope};
 use async_trait::async_trait;
 use tokio_util::sync::CancellationToken;
@@ -390,133 +387,12 @@ async fn inproc_no_traceparent_yields_empty() {
 // Scenario B — WebRTC / WebSocket transport (PeerGate)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Spawn a responder on `coordinator` that decodes each arriving RpcEnvelope,
-/// extracts `traceparent`, and sends it back as the response payload via `gate`.
-///
-/// The responder reflects `traceparent` (or `""` if absent) so the caller can
-/// assert field fidelity across the full protobuf-serialise → WebRTC
-/// data-channel → protobuf-deserialise stack.
-fn spawn_trace_reflector(
-    coordinator: Arc<actr_hyper::wire::WebRtcCoordinator>,
-    gate: Arc<PeerGate>,
-    name: &str,
-) -> tokio::task::JoinHandle<()> {
-    let name = name.to_string();
-    tokio::spawn(async move {
-        tracing::info!("{name}: trace reflector started");
-        loop {
-            match coordinator.receive_message().await {
-                Ok(Some((sender_id_bytes, message_data, _pt))) => {
-                    let sender_id = match ActrId::decode(&sender_id_bytes[..]) {
-                        Ok(id) => id,
-                        Err(e) => {
-                            tracing::error!("{name}: decode sender_id: {e}");
-                            continue;
-                        }
-                    };
-
-                    let request = match RpcEnvelope::decode(message_data.as_ref()) {
-                        Ok(e) => e,
-                        Err(e) => {
-                            tracing::error!("{name}: decode envelope: {e}");
-                            continue;
-                        }
-                    };
-
-                    // Echo received traceparent back as payload bytes.
-                    let tp_bytes = request
-                        .traceparent
-                        .as_deref()
-                        .unwrap_or("")
-                        .as_bytes()
-                        .to_vec();
-
-                    let response = RpcEnvelope {
-                        request_id: request.request_id.clone(),
-                        route_key: "response".to_string(),
-                        payload: Some(Bytes::from(tp_bytes)),
-                        direction: Some(actr_protocol::Direction::Response as i32),
-                        timeout_ms: 0,
-                        ..Default::default()
-                    };
-
-                    if let Err(e) = gate.send_message(&sender_id, response).await {
-                        tracing::error!("{name}: send_message for {}: {e}", request.request_id);
-                    }
-                }
-                Ok(None) => {
-                    tracing::info!("{name}: channel closed");
-                    break;
-                }
-                Err(e) => {
-                    tracing::error!("{name}: receive_message error: {e}");
-                    break;
-                }
-            }
-        }
-    })
-}
-
-/// Route responses arriving at `coordinator` into `gate.handle_response`.
-fn spawn_response_router(
-    coordinator: Arc<actr_hyper::wire::WebRtcCoordinator>,
-    gate: Arc<PeerGate>,
-    name: &str,
-) -> tokio::task::JoinHandle<()> {
-    let name = name.to_string();
-    tokio::spawn(async move {
-        tracing::info!("{name}: response router started");
-        loop {
-            match coordinator.receive_message().await {
-                Ok(Some((_sender_id_bytes, message_data, _pt))) => {
-                    match RpcEnvelope::decode(message_data.as_ref()) {
-                        Ok(envelope) => {
-                            let result = if let Some(error) = envelope.error {
-                                Err(ActrError::Unavailable(format!(
-                                    "RPC error {}: {}",
-                                    error.code, error.message
-                                )))
-                            } else if let Some(payload) = envelope.payload {
-                                Ok(payload)
-                            } else {
-                                Err(ActrError::DecodeFailure(
-                                    "no payload or error in response".to_string(),
-                                ))
-                            };
-
-                            if let Err(e) = gate.handle_response(&envelope.request_id, result).await
-                            {
-                                tracing::warn!("{name}: handle_response error: {e}");
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("{name}: decode response: {e}");
-                        }
-                    }
-                }
-                Ok(None) => {
-                    tracing::info!("{name}: channel closed");
-                    break;
-                }
-                Err(e) => {
-                    tracing::error!("{name}: receive error: {e}");
-                    break;
-                }
-            }
-        }
-    })
-}
-
-/// Build a `PeerGate` + `PeerTransport` pair around a `WebRtcCoordinator`.
-fn build_peer_gate(
-    id: ActrId,
-    coordinator: Arc<actr_hyper::wire::WebRtcCoordinator>,
-) -> (Arc<PeerGate>, Arc<PeerTransport>) {
-    let wire_config = DefaultWireBuilderConfig::default();
-    let wire_builder = Arc::new(DefaultWireBuilder::new(Some(coordinator), wire_config));
-    let transport = Arc::new(PeerTransport::new(id, wire_builder));
-    let gate = Arc::new(PeerGate::new(transport.clone(), None));
-    (gate, transport)
+async fn webrtc_harness(a: u64, b: u64) -> TestHarness {
+    let mut harness = TestHarness::new().await;
+    harness.add_peer(a).await;
+    harness.add_peer(b).await;
+    harness.connect(a, b).await;
+    harness
 }
 
 /// Scenario B-1: traceparent survives protobuf serialisation over the WebRTC
@@ -529,28 +405,8 @@ async fn webrtc_traceparent_preserved_across_transport() {
         .try_init()
         .ok();
 
-    let server = TestSignalingServer::start().await.unwrap();
-    let server_url = server.url();
-
-    let id_a = make_actor_id(501);
-    let id_b = make_actor_id(502);
-
-    // ── Establish peers ───────────────────────────────────────────────────────
-    let (coord_a, _client_a) = create_peer_with_websocket(id_a.clone(), &server_url)
-        .await
-        .expect("peer A connect");
-    let (coord_b, _client_b) = create_peer_with_websocket(id_b.clone(), &server_url)
-        .await
-        .expect("peer B connect");
-
-    let (gate_a, _transport_a) = build_peer_gate(id_a.clone(), coord_a.clone());
-    let (gate_b, _transport_b) = build_peer_gate(id_b.clone(), coord_b.clone());
-
-    // ── Peer B: reflect traceparent back in payload ───────────────────────────
-    let _reflector = spawn_trace_reflector(coord_b.clone(), gate_b.clone(), "peer_b");
-
-    // ── Peer A: route responses ───────────────────────────────────────────────
-    let _router = spawn_response_router(coord_a.clone(), gate_a.clone(), "peer_a_resp");
+    let harness = webrtc_harness(501, 502).await;
+    let id_b = harness.peer(502).id.clone();
 
     // ── Send request with traceparent ─────────────────────────────────────────
     let envelope = RpcEnvelope {
@@ -566,7 +422,7 @@ async fn webrtc_traceparent_preserved_across_transport() {
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        gate_a.send_request(&id_b, envelope),
+        harness.peer(501).gate.send_request(&id_b, envelope),
     )
     .await
     .expect("send_request must complete within 20 s")
@@ -578,6 +434,7 @@ async fn webrtc_traceparent_preserved_across_transport() {
         echoed, TRACE_PARENT,
         "traceparent must survive protobuf encode → WebRTC → protobuf decode unchanged"
     );
+    harness.shutdown().await;
 }
 
 /// Scenario B-2: an envelope without traceparent carries no trace context.
@@ -589,24 +446,8 @@ async fn webrtc_no_traceparent_yields_empty() {
         .try_init()
         .ok();
 
-    let server = TestSignalingServer::start().await.unwrap();
-    let server_url = server.url();
-
-    let id_a = make_actor_id(601);
-    let id_b = make_actor_id(602);
-
-    let (coord_a, _client_a) = create_peer_with_websocket(id_a.clone(), &server_url)
-        .await
-        .expect("peer A connect");
-    let (coord_b, _client_b) = create_peer_with_websocket(id_b.clone(), &server_url)
-        .await
-        .expect("peer B connect");
-
-    let (gate_a, _transport_a) = build_peer_gate(id_a.clone(), coord_a.clone());
-    let (gate_b, _transport_b) = build_peer_gate(id_b.clone(), coord_b.clone());
-
-    let _reflector = spawn_trace_reflector(coord_b.clone(), gate_b.clone(), "peer_b2");
-    let _router = spawn_response_router(coord_a.clone(), gate_a.clone(), "peer_a2_resp");
+    let harness = webrtc_harness(601, 602).await;
+    let id_b = harness.peer(602).id.clone();
 
     let envelope = RpcEnvelope {
         request_id: uuid::Uuid::new_v4().to_string(),
@@ -621,7 +462,7 @@ async fn webrtc_no_traceparent_yields_empty() {
 
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(20),
-        gate_a.send_request(&id_b, envelope),
+        harness.peer(601).gate.send_request(&id_b, envelope),
     )
     .await
     .expect("send_request must complete within 20 s")
@@ -632,4 +473,5 @@ async fn webrtc_no_traceparent_yields_empty() {
         echoed.is_empty(),
         "absent traceparent should not appear on the callee, got: {echoed:?}"
     );
+    harness.shutdown().await;
 }

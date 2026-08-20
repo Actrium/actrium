@@ -6,6 +6,7 @@ import io.actrium.actr.dsl.ActrContext
 import io.actrium.actr.dsl.PeerEvent
 import io.actrium.actr.dsl.SignalingObserver
 import io.actrium.actr.dsl.WebRtcObserver
+import io.actrium.actr.dsl.WebRtcPeerState
 import io.actrium.actr.dsl.WebRtcPeerStatus
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -41,6 +42,9 @@ class ConnectionTracker {
     private val pendingRetry = AtomicReference<(suspend () -> Unit)?>()
     private val retryTimer = AtomicReference<Job?>(null)
 
+    /** Last observed sendable flag per peer (S6-8 sendable-edge detection). */
+    private val lastSendable = ConcurrentHashMap<ActrId, Boolean>()
+
     /** Invoked on the runtime thread after every transition; hop to Main to refresh UI. */
     var onEvent: ((String) -> Unit)? = null
 
@@ -56,6 +60,7 @@ class ConnectionTracker {
     fun reset() {
         signalingReady.set(false)
         webRtcStatus.clear()
+        lastSendable.clear()
         retryTimer.getAndSet(null)?.cancel()
         pendingRetry.set(null)
     }
@@ -104,6 +109,25 @@ class ConnectionTracker {
                 val s = e.status ?: WebRtcPeerStatus.IDLE
                 webRtcStatus[e.peer] = s
                 emit("webrtc ${e.peer.serialNumber}: ${s.name.lowercase()}")
+            }
+
+            override suspend fun onStateChanged(
+                ctx: ActrContext,
+                state: WebRtcPeerState,
+            ) {
+                // Unified per-revision snapshot (v0.20 backend, Stage 6/8):
+                // keep the readiness map in sync and fire the pending retry
+                // on the post-Connected sendable edge — the same contract as
+                // onConnected, driven by the unified snapshot.
+                val wasSendable = lastSendable.put(state.peer, state.sendable) ?: false
+                webRtcStatus[state.peer] = state.status
+                emit(
+                    "webrtc ${state.peer.serialNumber}: state rev=${state.revision} " +
+                        "sendable=${state.sendable} path=${state.networkPath}",
+                )
+                if (!wasSendable && state.sendable) {
+                    takeRetry()?.invoke()
+                }
             }
         }
 

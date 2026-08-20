@@ -9,8 +9,7 @@ use crate::lifecycle::membership::MembershipHandle;
 use crate::lifecycle::session_state::SessionPhase;
 use crate::lifecycle::{CredentialState, SignalingRecoveryRequestCause};
 use crate::transport::{AuthVerdict, NetworkError};
-use crate::wire::webrtc::gate::WebRtcGate;
-use crate::wire::webrtc::{HookCallback, HookEvent, SignalingClient, WebRtcCoordinator};
+use crate::wire::webrtc::{HookCallback, HookEvent, SignalingClient};
 use actr_protocol::{ActrId, RegisterRequest, ServiceAvailabilityState};
 use actr_runtime_mailbox::Mailbox;
 use std::sync::Arc;
@@ -149,8 +148,6 @@ async fn send_heartbeat_and_handle_response(
     _realm_secret: Option<&str>,
     credential_manager: Option<&CredentialManager>,
     hook_callback: Option<&HookCallback>,
-    _webrtc_coordinator: Option<&Arc<WebRtcCoordinator>>,
-    _webrtc_gate: Option<&Arc<WebRtcGate>>,
     membership: Option<&MembershipHandle>,
 ) -> Option<ActrId> {
     // Terminal realm denial: stop pinging entirely. A connected socket that was
@@ -368,8 +365,6 @@ pub async fn heartbeat_task(
     realm_secret: Option<String>,
     credential_manager: Option<CredentialManager>,
     hook_callback: Option<HookCallback>,
-    webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
-    webrtc_gate: Option<Arc<WebRtcGate>>,
     membership: Option<MembershipHandle>,
 ) {
     let mut interval =
@@ -423,8 +418,6 @@ pub async fn heartbeat_task(
                     realm_secret.as_deref(),
                     credential_manager.as_ref(),
                     hook_callback.as_ref(),
-                    webrtc_coordinator.as_ref(),
-                    webrtc_gate.as_ref(),
                     membership.as_ref(),
                 )
                 .await {

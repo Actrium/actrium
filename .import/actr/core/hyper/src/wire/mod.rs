@@ -76,9 +76,9 @@ pub(crate) fn direction_for_routing(
 // Re-export commonly used types. Submodule-internal types (gate / negotiator /
 // connection / websocket) stay reachable via module paths rather than
 // duplicated re-exports here.
+#[cfg(feature = "test-utils")]
+pub use webrtc::WebSocketSignalingClient;
 pub use webrtc::{
     AuthConfig, AuthType, DisconnectReason, InboundQueueConfig, ReconnectConfig, SignalingClient,
     SignalingConfig, SignalingEvent, SignalingStats, WebRtcConfig,
 };
-#[cfg(feature = "test-utils")]
-pub use webrtc::{WebRtcCoordinator, WebSocketSignalingClient};

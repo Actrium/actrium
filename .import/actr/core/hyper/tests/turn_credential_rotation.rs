@@ -1,80 +1,37 @@
-//! TURN credential rotation integration test.
-//!
-//! The peers are restricted to relay candidates and authenticate against the
-//! real TURN implementation used by Actrix.  After a credential refresh, the
-//! test observes a fresh TURN authentication and the restart request issued by
-//! the active-peer rotation watcher.
+//! TURN credential rotation through webrtc-rs v0.20 `set_configuration`.
 
-use actr_config::{IceServer, IceTransportPolicy};
-use actr_hyper::{
-    inbound::MediaFrameRegistry,
-    lifecycle::CredentialState,
-    outbound::PeerGate,
-    test_support::{
-        TestSignalingServer, dummy_credential, install_test_crypto_provider, make_actor_id,
-        spawn_echo_responder, spawn_response_receiver,
-    },
-    transport::{DefaultWireBuilder, DefaultWireBuilderConfig, PeerTransport},
-    wire::webrtc::{SignalingClient, WebRtcConfig, WebRtcCoordinator, WebSocketSignalingClient},
-};
-use actr_protocol::{ActrId, Direction, RpcEnvelope, TurnCredential};
+use std::net::SocketAddr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use actr_hyper::test_support::{TestHarness, install_test_crypto_provider, make_actor_id};
+use actr_protocol::{ActrId, RpcEnvelope, TurnCredential};
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use hmac::{Hmac, Mac};
 use sha1::Sha1;
-use std::{
-    net::SocketAddr,
-    sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    },
-    time::{Duration, SystemTime, UNIX_EPOCH},
-};
-use tokio::{net::UdpSocket, task::JoinHandle};
+use tokio::net::UdpSocket;
 use turn_crate::auth::AuthHandler;
+use webrtc::peer_connection::{
+    RTCConfiguration, RTCConfigurationBuilder, RTCIceServer, RTCIceTransportPolicy,
+};
 
 const TURN_REALM: &str = "actr.test";
 const TURN_SHARED_TEST_KEY: &str = "turn-rotation-integration-key";
-const TEST_TIMEOUT: Duration = Duration::from_secs(20);
-/// Bound on how long the relay path may take to settle after an ICE restart.
-/// webrtc-rs v0.20 refreshes an existing allocation when TURN credentials
-/// change, so this does not intentionally wait for a 437/re-allocation path.
-const ROTATION_RECOVERY_TIMEOUT: Duration = Duration::from_secs(60);
+const WAIT: Duration = Duration::from_secs(60);
 
 type HmacSha1 = Hmac<Sha1>;
 
-/// Install a tracing subscriber that also bridges the `log` records emitted by
-/// the webrtc-rs / TURN crates, so a failing run can show the TURN Allocate /
-/// Refresh exchange on stderr. Level comes from `RUST_LOG`; the default is
-/// quiet — use e.g.
-/// `RUST_LOG=info,turn=debug,rtc_turn=debug,rtc_ice=debug` to trace the relay
-/// re-allocation during rotation.  No-op if a subscriber is already set.
-fn init_logging() {
-    use tracing_subscriber::EnvFilter;
-    let _ = tracing_log::LogTracer::init();
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_test_writer()
-        .try_init();
-}
-
-/// An [`AuthHandler`] that delegates to the real Actrix [`turn::Authenticator`]
-/// while counting how many TURN authentication transactions the server
-/// performs.  Unlike [`turn::Authenticator::cache_stats`] (which dedupes by
-/// username and so cannot tell "reused an allocation" apart from
-/// "re-allocated with the same credential"), an invocation count rises on every
-/// Allocate/Refresh/ChannelBind — so a *fresh* allocation is always visible.
 struct CountingAuthenticator {
     inner: Arc<turn::Authenticator>,
     auth_calls: Arc<AtomicUsize>,
 }
 
 impl CountingAuthenticator {
-    fn new(shared_key: &str) -> (Self, Arc<AtomicUsize>) {
+    fn new() -> (Self, Arc<AtomicUsize>) {
         let auth_calls = Arc::new(AtomicUsize::new(0));
         let inner = Arc::new(
-            turn::Authenticator::new(shared_key.to_owned())
-                .expect("Actrix TURN authenticator should initialize"),
+            turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned()).expect("TURN authenticator"),
         );
         (
             Self {
@@ -98,30 +55,10 @@ impl AuthHandler for CountingAuthenticator {
     }
 }
 
-struct RelayPeer {
-    id: ActrId,
-    credential_state: CredentialState,
-    coordinator: Arc<WebRtcCoordinator>,
-    signaling_client: Arc<dyn SignalingClient>,
-    gate: Arc<PeerGate>,
-    transport: Arc<PeerTransport>,
-}
-
-impl RelayPeer {
-    async fn shutdown(self) {
-        self.coordinator.shutdown_background_tasks().await;
-        let _ = self.transport.close_all().await;
-        let _ = self.coordinator.close_all_peers().await;
-        let _ = self.signaling_client.disconnect().await;
-    }
-}
-
-fn make_turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
+fn turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
     let username = format!("{expires_at}:{id}");
-    let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes())
-        .expect("HMAC-SHA1 accepts the fixed test key");
+    let mut mac = HmacSha1::new_from_slice(TURN_SHARED_TEST_KEY.as_bytes()).unwrap();
     mac.update(username.as_bytes());
-
     TurnCredential {
         username,
         password: BASE64_STANDARD.encode(mac.finalize().into_bytes()),
@@ -129,342 +66,184 @@ fn make_turn_credential(id: &ActrId, expires_at: u64) -> TurnCredential {
     }
 }
 
-fn relay_only_config(turn_address: std::net::SocketAddr) -> WebRtcConfig {
-    WebRtcConfig {
-        ice_servers: vec![IceServer {
-            urls: vec![format!("turn:{turn_address}?transport=udp")],
-            username: None,
-            credential: None,
-        }],
-        ice_transport_policy: IceTransportPolicy::Relay,
-        ..Default::default()
-    }
+fn relay_configuration(address: SocketAddr, credential: &TurnCredential) -> RTCConfiguration {
+    RTCConfigurationBuilder::default()
+        .with_ice_servers(vec![RTCIceServer {
+            urls: vec![format!("turn:{address}?transport=udp")],
+            username: credential.username.clone(),
+            credential: credential.password.clone(),
+        }])
+        .with_ice_transport_policy(RTCIceTransportPolicy::Relay)
+        .build()
 }
 
-async fn create_relay_peer(
-    id: ActrId,
-    server_url: &str,
-    webrtc_config: WebRtcConfig,
-    turn_credential: TurnCredential,
-) -> RelayPeer {
-    let credential_state = CredentialState::new(dummy_credential(), None, Some(turn_credential));
-    let signaling_client = WebSocketSignalingClient::connect_to_with_identity(
-        server_url,
-        id.clone(),
-        credential_state.clone(),
-    )
-    .await
-    .expect("peer should connect to the test signaling server");
-    let signaling_client = signaling_client as Arc<dyn SignalingClient>;
-    let coordinator = Arc::new(WebRtcCoordinator::new(
-        id.clone(),
-        credential_state.clone(),
-        signaling_client.clone(),
-        webrtc_config,
-        Arc::new(MediaFrameRegistry::new()),
-    ));
-    coordinator
-        .clone()
-        .start()
+async fn rpc(harness: &TestHarness, from: u64, to: u64, id: &str) {
+    let response = harness
+        .peer(from)
+        .gate
+        .send_request(
+            &harness.peer(to).id,
+            RpcEnvelope {
+                request_id: id.to_string(),
+                route_key: "turn.rotation.test".to_string(),
+                payload: Some(bytes::Bytes::from_static(b"ping")),
+                timeout_ms: 20_000,
+                ..Default::default()
+            },
+        )
         .await
-        .expect("peer coordinator should start");
-
-    let wire_builder = Arc::new(DefaultWireBuilder::new(
-        Some(coordinator.clone()),
-        DefaultWireBuilderConfig::default(),
-    ));
-    let transport = Arc::new(PeerTransport::new(id.clone(), wire_builder));
-    let gate = Arc::new(PeerGate::new(transport.clone(), Some(coordinator.clone())));
-
-    RelayPeer {
-        id,
-        credential_state,
-        coordinator,
-        signaling_client,
-        gate,
-        transport,
-    }
-}
-
-fn request(request_id: &str) -> RpcEnvelope {
-    RpcEnvelope {
-        request_id: request_id.to_owned(),
-        route_key: "turn.rotation.test".to_owned(),
-        payload: Some(bytes::Bytes::from_static(b"ping")),
-        direction: Some(Direction::Request as i32),
-        timeout_ms: TEST_TIMEOUT.as_millis() as i64,
-        ..Default::default()
-    }
-}
-
-async fn assert_rpc_succeeds(peer: &RelayPeer, target: &ActrId, request_id: &str) {
-    let response = tokio::time::timeout(
-        TEST_TIMEOUT,
-        peer.gate.send_request(target, request(request_id)),
-    )
-    .await
-    .expect("relay RPC should finish before its deadline")
-    .expect("relay RPC should succeed");
+        .expect("relay RPC");
     assert_eq!(response.as_ref(), b"pong");
 }
 
-/// Assert that the relay data path carries RPC traffic after a credential
-/// rotation, retrying until the ICE restart and in-place TURN refresh settle.
-///
-/// Traffic can fail transiently while the new ICE generation is negotiated.
-/// Each attempt uses a fresh request id so a timed-out pending entry never
-/// collides with a retry.
-async fn assert_rpc_eventually_succeeds(peer: &RelayPeer, target: &ActrId, base_request_id: &str) {
-    tokio::time::timeout(ROTATION_RECOVERY_TIMEOUT, async {
-        let mut attempt = 0u32;
-        loop {
-            let request_id = format!("{base_request_id}_{attempt}");
-            attempt += 1;
-            match tokio::time::timeout(
-                Duration::from_secs(2),
-                peer.gate.send_request(target, request(&request_id)),
-            )
-            .await
-            {
-                Ok(Ok(response)) if response.as_ref() == b"pong" => break,
-                Ok(Ok(_)) | Ok(Err(_)) | Err(_) => {
-                    tokio::time::sleep(Duration::from_millis(200)).await;
-                }
-            }
-        }
-    })
-    .await
-    .expect("relay RPC should recover after the TURN credential rotation");
-}
-
-async fn wait_for_turn_auth_entries(authenticator: &turn::Authenticator, expected_minimum: usize) {
-    tokio::time::timeout(TEST_TIMEOUT, async {
-        loop {
-            if authenticator.cache_stats().0 >= expected_minimum {
-                return;
-            }
+async fn wait_until(mut predicate: impl FnMut() -> bool) {
+    tokio::time::timeout(WAIT, async {
+        while !predicate() {
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("Actrix TURN server should authenticate the expected credentials");
+    .expect("condition should become true");
 }
 
-async fn wait_for_ice_restart(server: &TestSignalingServer) {
-    tokio::time::timeout(TEST_TIMEOUT, async {
-        loop {
-            if server.get_ice_restart_count() >= 1 {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
-    })
-    .await
-    .expect("credential update should initiate an ICE restart");
+async fn start_turn(
+    auth: Arc<dyn AuthHandler + Send + Sync>,
+) -> (SocketAddr, turn_crate::server::Server) {
+    let socket = Arc::new(UdpSocket::bind("127.0.0.1:0").await.unwrap());
+    let address = socket.local_addr().unwrap();
+    let server = turn::create_turn_server(socket, "127.0.0.1", TURN_REALM, auth)
+        .await
+        .expect("TURN server");
+    (address, server)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn turn_credential_rotation_propagates_new_relay_credentials_to_actrix_turn() {
     install_test_crypto_provider();
-    init_logging();
-
-    let turn_socket = Arc::new(
-        UdpSocket::bind("127.0.0.1:0")
-            .await
-            .expect("test TURN socket should bind"),
+    let authenticator = Arc::new(
+        turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned()).expect("TURN authenticator"),
     );
-    let turn_address = turn_socket
-        .local_addr()
-        .expect("test TURN socket should report its address");
-    let turn_authenticator = Arc::new(
-        turn::Authenticator::new(TURN_SHARED_TEST_KEY.to_owned())
-            .expect("Actrix TURN authenticator should initialize"),
-    );
-    let turn_server = turn::create_turn_server(
-        turn_socket,
-        "127.0.0.1",
-        TURN_REALM,
-        turn_authenticator.clone(),
-    )
-    .await
-    .expect("Actrix TURN service should start");
-
-    let mut signaling_server = TestSignalingServer::start()
-        .await
-        .expect("test signaling server should start");
+    let (turn_address, turn_server) = start_turn(authenticator.clone()).await;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after Unix epoch")
+        .unwrap()
         .as_secs();
     let offerer_id = make_actor_id(46_501);
     let answerer_id = make_actor_id(46_502);
-    let config = relay_only_config(turn_address);
-    assert_eq!(config.ice_transport_policy, IceTransportPolicy::Relay);
+    let old_offerer = turn_credential(&offerer_id, now + 300);
+    let answerer_credential = turn_credential(&answerer_id, now + 300);
 
-    let offerer = create_relay_peer(
-        offerer_id.clone(),
-        &signaling_server.url(),
-        config.clone(),
-        make_turn_credential(&offerer_id, now + 300),
-    )
-    .await;
-    let answerer = create_relay_peer(
-        answerer_id.clone(),
-        &signaling_server.url(),
-        config,
-        make_turn_credential(&answerer_id, now + 300),
-    )
-    .await;
-
-    let echo_task: JoinHandle<()> = spawn_echo_responder(
-        answerer.coordinator.clone(),
-        answerer.gate.clone(),
-        "turn-answerer",
-    );
-    let response_task: JoinHandle<()> = spawn_response_receiver(
-        offerer.coordinator.clone(),
-        offerer.gate.clone(),
-        "turn-offerer",
-    );
-
-    assert_rpc_succeeds(&offerer, &answerer.id, "turn_rotation_initial").await;
-    wait_for_turn_auth_entries(turn_authenticator.as_ref(), 2).await;
-
-    signaling_server.reset_counters();
-    offerer
-        .credential_state
-        .update_for_test(
-            dummy_credential(),
-            None,
-            Some(make_turn_credential(&offerer.id, now + 600)),
+    let mut harness = TestHarness::new().await;
+    harness
+        .add_peer_with_rtc_configuration(46_501, relay_configuration(turn_address, &old_offerer))
+        .await;
+    harness
+        .add_peer_with_rtc_configuration(
+            46_502,
+            relay_configuration(turn_address, &answerer_credential),
         )
         .await;
+    harness.connect(46_501, 46_502).await;
+    rpc(&harness, 46_501, 46_502, "turn_rotation_initial").await;
+    wait_until(|| authenticator.cache_stats().0 >= 2).await;
 
-    wait_for_ice_restart(&signaling_server).await;
-    // The new username must authenticate against Actrix during the in-place
-    // TURN allocation refresh. It becomes the third unique authenticator cache
-    // entry (offerer old, answerer old, offerer refreshed).
-    wait_for_turn_auth_entries(turn_authenticator.as_ref(), 3).await;
-
-    // The assertion under test: the existing relay path carries RPC traffic
-    // again after configuration refresh plus ICE restart, without relying on
-    // the old 437/rebuild behavior.
-    assert_rpc_eventually_succeeds(&offerer, &answerer.id, "turn_rotation_after").await;
-
-    echo_task.abort();
-    response_task.abort();
-    let _ = echo_task.await;
-    let _ = response_task.await;
-    offerer.shutdown().await;
-    answerer.shutdown().await;
-    signaling_server.shutdown().await;
-    turn::shutdown_turn_server(&turn_server)
+    let new_credential = turn_credential(&offerer_id, now + 600);
+    harness
+        .peer(46_501)
+        .rtc
+        .refresh_configuration(
+            &answerer_id,
+            relay_configuration(turn_address, &new_credential),
+        )
         .await
-        .expect("Actrix TURN service should stop");
+        .expect("v0.20 set_configuration command");
+    harness.peer(46_501).rtc.network_unavailable();
+    harness
+        .peer(46_501)
+        .rtc
+        .wait_state(&answerer_id, WAIT, |state| !state.sendable)
+        .await
+        .expect("credential refresh recovery should gate sends before restart");
+    harness.peer(46_501).rtc.network_available();
+    harness
+        .peer(46_501)
+        .rtc
+        .wait_sendable(&answerer_id, WAIT)
+        .await;
+
+    wait_until(|| authenticator.cache_stats().0 >= 3).await;
+    rpc(&harness, 46_501, 46_502, "turn_rotation_after").await;
+    harness.shutdown().await;
+    turn::shutdown_turn_server(&turn_server).await.unwrap();
 }
 
-/// A plain ICE restart (no credential change) must refresh the TURN allocation
-/// after the upstream socket rebind replaces the transport.
-///
 /// A re-allocation is detected by counting the server's TURN authentication
-/// transactions. The upstream Android recovery path deliberately drops and
-/// rebinds the UDP transport on every ICE restart, so its old TURN allocation
-/// cannot be reused and a fresh allocation must authenticate again.
+/// transactions. The v0.20 factory enables the upstream ICE-restart rebind
+/// (webrtc-rs/webrtc#868), so a plain ICE restart drops and rebinds the UDP
+/// transport; its old TURN allocation cannot be reused and a fresh allocation
+/// must authenticate again.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn plain_ice_restart_rebinds_and_refreshes_relay_allocation() {
     install_test_crypto_provider();
-    init_logging();
-
-    let (counting_auth, auth_calls) = CountingAuthenticator::new(TURN_SHARED_TEST_KEY);
-
-    let turn_socket = Arc::new(
-        UdpSocket::bind("127.0.0.1:0")
-            .await
-            .expect("test TURN socket should bind"),
-    );
-    let turn_address = turn_socket
-        .local_addr()
-        .expect("test TURN socket should report its address");
-    let turn_server = turn::create_turn_server(
-        turn_socket,
-        "127.0.0.1",
-        TURN_REALM,
-        Arc::new(counting_auth),
-    )
-    .await
-    .expect("Actrix TURN service should start");
-
-    let mut signaling_server = TestSignalingServer::start()
-        .await
-        .expect("test signaling server should start");
+    let (counting, auth_calls) = CountingAuthenticator::new();
+    let (turn_address, turn_server) = start_turn(Arc::new(counting)).await;
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after Unix epoch")
+        .unwrap()
         .as_secs();
     let offerer_id = make_actor_id(46_521);
     let answerer_id = make_actor_id(46_522);
-    let config = relay_only_config(turn_address);
-    assert_eq!(config.ice_transport_policy, IceTransportPolicy::Relay);
 
-    let offerer = create_relay_peer(
-        offerer_id.clone(),
-        &signaling_server.url(),
-        config.clone(),
-        make_turn_credential(&offerer_id, now + 300),
-    )
-    .await;
-    let answerer = create_relay_peer(
-        answerer_id.clone(),
-        &signaling_server.url(),
-        config,
-        make_turn_credential(&answerer_id, now + 300),
-    )
-    .await;
-
-    let echo_task: JoinHandle<()> = spawn_echo_responder(
-        answerer.coordinator.clone(),
-        answerer.gate.clone(),
-        "turn-answerer",
-    );
-    let response_task: JoinHandle<()> = spawn_response_receiver(
-        offerer.coordinator.clone(),
-        offerer.gate.clone(),
-        "turn-offerer",
-    );
-
-    // Establish the relay data path before the restart.
-    assert_rpc_succeeds(&offerer, &answerer.id, "plain_restart_initial").await;
-
+    let mut harness = TestHarness::new().await;
+    harness
+        .add_peer_with_rtc_configuration(
+            46_521,
+            relay_configuration(turn_address, &turn_credential(&offerer_id, now + 300)),
+        )
+        .await;
+    harness
+        .add_peer_with_rtc_configuration(
+            46_522,
+            relay_configuration(turn_address, &turn_credential(&answerer_id, now + 300)),
+        )
+        .await;
+    harness.connect(46_521, 46_522).await;
+    rpc(&harness, 46_521, 46_522, "plain_restart_initial").await;
     let auth_before = auth_calls.load(Ordering::SeqCst);
 
-    // A plain ICE restart: although the credentials are unchanged, the
-    // upstream recovery path replaces the UDP transport and its relay
-    // allocation.
-    offerer
-        .coordinator
-        .restart_ice(&answerer.id)
+    harness.peer(46_521).rtc.network_unavailable();
+    harness.peer(46_522).rtc.network_unavailable();
+    harness
+        .peer(46_521)
+        .rtc
+        .wait_state(&answerer_id, WAIT, |state| !state.sendable)
         .await
-        .expect("plain ICE restart should be accepted");
+        .expect("offerer should gate sends while ICE restart is pending");
+    harness
+        .peer(46_522)
+        .rtc
+        .wait_state(&offerer_id, WAIT, |state| !state.sendable)
+        .await
+        .expect("answerer should gate sends while ICE restart is pending");
+    harness.peer(46_521).rtc.network_available();
+    harness.peer(46_522).rtc.network_available();
+    harness
+        .peer(46_521)
+        .rtc
+        .wait_sendable(&answerer_id, WAIT)
+        .await;
+    harness
+        .peer(46_522)
+        .rtc
+        .wait_sendable(&offerer_id, WAIT)
+        .await;
+    rpc(&harness, 46_521, 46_522, "plain_restart_after").await;
 
-    // The relay data path must keep carrying RPC traffic after the restart.
-    assert_rpc_eventually_succeeds(&offerer, &answerer.id, "plain_restart_after").await;
-
-    // The decisive assertion: the transport rebind performed a new TURN
-    // allocation, which requires at least one new authenticated transaction.
     let auth_after = auth_calls.load(Ordering::SeqCst);
     assert!(
         auth_after > auth_before,
-        "plain ICE restart must refresh the TURN allocation after rebinding the UDP transport"
+        "plain ICE restart must refresh the TURN allocation after the rebind replaces the UDP transport"
     );
-
-    echo_task.abort();
-    response_task.abort();
-    let _ = echo_task.await;
-    let _ = response_task.await;
-    offerer.shutdown().await;
-    answerer.shutdown().await;
-    signaling_server.shutdown().await;
-    turn::shutdown_turn_server(&turn_server)
-        .await
-        .expect("Actrix TURN service should stop");
+    harness.shutdown().await;
+    turn::shutdown_turn_server(&turn_server).await.unwrap();
 }

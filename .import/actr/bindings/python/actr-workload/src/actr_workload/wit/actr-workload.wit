@@ -1,14 +1,22 @@
 // actr workload contract — Component Model WIT, lane-aware async world
 //
+// `actr:workload@0.5.0` extends the lane-aware 0.4.0 contract with the
+// unified WebRTC peer-state export (`on-webrtc-state-changed`) carried by
+// the v0.20 RTC backend. Adding a required guest export is a contract break
+// for already-compiled packages, hence the version bump; the host rejects
+// pre-0.5.0 worlds at load with an actionable rebuild hint.
+//
 // `actr:workload@0.4.0` extends the timeout-aware 0.3.0 contract with an
 // explicit `payload-type` argument on the `call` / `tell` / `call-raw` host
 // imports, so a guest's typed RPC calls travel on the lane declared via
 // `(actr.payload_type)` in the protobuf schema instead of the host-chosen
-// default lane. 0.3.0 had itself extended the run_concurrent-ready 0.2.0
-// contract with explicit per-call timeout arguments. The async design is a
-// controlled fork of the retired `actr:workload@0.1.0` contract that turns
-// every host import and every workload export into a real WIT `async func`.
-// That single change is what unlocks wasmtime 46's Component
+// default lane.
+//
+// `actr:workload@0.3.0` extends the run_concurrent-ready 0.2.0 contract with
+// explicit per-call timeout arguments. The async design is a controlled fork
+// of the retired `actr:workload@0.1.0` contract that turns every host import
+// and every workload export into a real WIT `async func`. That single change
+// is what unlocks wasmtime 46's Component
 // Model Concurrency: multiple `dispatch` calls may be IN FLIGHT on one
 // component instance, cooperatively interleaving at each host-import `.await`.
 //
@@ -35,7 +43,7 @@
 //    `invocation-ctx` record; the SDK answers `ctx.self_id()` etc. locally.
 //
 // 3. Every host import takes a `ctx-token: u64` first parameter. Every guest
-//    export, including the twelve infallible observation hooks, receives a
+//    export, including the thirteen infallible observation hooks, receives a
 //    complete `invocation-ctx`. Its token keys the host's per-invocation table
 //    (`HostState.invocations`), letting the host recover the correct
 //    `HostAbiFn` / `InvocationContext` for the calling task even when several
@@ -45,7 +53,7 @@
 // stdlib-ish names during binding generation (e.g. `actr-error` rather
 // than bare `error`, which clashes with `wasi:io/error`).
 
-package actr:workload@0.4.0;
+package actr:workload@0.5.0;
 
 // ─────────────────────────────────────────────────────────────────────────
 // Shared value types
@@ -140,6 +148,47 @@ interface types {
         connecting,
         connected,
         recovering,
+    }
+
+    // Stable reason a WebRTC peer is unavailable — one-to-one with
+    // `actr_framework::WebRtcUnavailableReason`. Carried by
+    // `webrtc-peer-state.unavailable-reason` so guests react to terminal or
+    // recoverable unavailability without parsing error strings.
+    variant webrtc-unavailable-reason {
+        connection-not-ready,
+        peer-connection-build-failed,
+        negotiation-failed,
+        ice-restart-failed,
+        peer-connection-rebuild-failed,
+        unsupported-rtc-capability,
+        rtc-resource-limit-exceeded,
+        recovery-exhausted,
+        closed,
+    }
+
+    // Whether the selected ICE candidate pair is direct or relayed —
+    // one-to-one with `actr_framework::WebRtcNetworkPath`. `unknown` until
+    // stats resolve the selected pair; never blocks `sendable`.
+    variant webrtc-network-path {
+        unknown,
+        direct,
+        relayed,
+    }
+
+    // Point-in-time unified WebRTC peer state — one-to-one with
+    // `actr_framework::WebRtcPeerState`, carried by `on-webrtc-state-changed`.
+    // `revision` is monotonic per peer so guests can de-duplicate;
+    // `pc-generation` bumps on every hard-recovery rebuild. The latest value
+    // is replayed immediately to new subscribers.
+    record webrtc-peer-state {
+        peer: actr-id,
+        pc-generation: u64,
+        revision: u64,
+        status: webrtc-peer-status,
+        sendable: bool,
+        network-path: webrtc-network-path,
+        relayed: option<bool>,
+        unavailable-reason: option<webrtc-unavailable-reason>,
     }
 
     // Structured error — one-to-one with `actr_protocol::ActrError`.
@@ -301,13 +350,13 @@ interface host {
 // ─────────────────────────────────────────────────────────────────────────
 //
 // One `dispatch` entry that takes an RpcEnvelope and returns the reply
-// bytes, plus the sixteen observation hooks from
+// bytes, plus the seventeen observation hooks from
 // actr_framework::Workload. Every export is a real `async func`. The four
 // lifecycle hooks and `on-data-chunk` are fallible; `dispatch`,
 // `on-data-chunk`, and the four lifecycle hooks additionally take an
 // `invocation-ctx` so the guest SDK can answer `ctx.self_id()` /
 // `caller_id()` / `request_id()` locally and carry the `ctx-token` into
-// host imports. The twelve infallible observation hooks receive the same
+// host imports. The thirteen infallible observation hooks receive the same
 // complete context so identity semantics match linked and dynclib workloads.
 
 interface workload {
@@ -317,6 +366,7 @@ interface workload {
         actr-id,
         data-chunk,
         peer-event,
+        webrtc-peer-state,
         error-event,
         credential-event,
         backpressure-event,
@@ -354,6 +404,13 @@ interface workload {
     on-webrtc-connecting: async func(event: peer-event, ctx: invocation-ctx);
     on-webrtc-connected: async func(event: peer-event, ctx: invocation-ctx);
     on-webrtc-disconnected: async func(event: peer-event, ctx: invocation-ctx);
+
+    // ── Transport: WebRTC unified state (1, infallible, 0.5.0) ───────────
+
+    // Unified per-peer state hook fed by the v0.20 RTC backend: carries the
+    // full `webrtc-peer-state` snapshot on every transition, subsuming the
+    // connecting/connected/disconnected triple for state-machine consumers.
+    on-webrtc-state-changed: async func(event: webrtc-peer-state, ctx: invocation-ctx);
 
     // ── Credential (2, infallible) ───────────────────────────────────────
 

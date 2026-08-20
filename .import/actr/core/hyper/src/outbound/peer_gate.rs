@@ -4,27 +4,23 @@
 //! - Wrap PeerTransport (Protobuf serialization)
 //! - Used for cross-process communication (WebRTC + WebSocket)
 //! - Maintain pending_requests (Request/Response matching)
-//! - Block new requests to peers being cleaned up (closing_peers)
 
-use super::data_chunk_activity::{DataChunkActivityTracker, DataChunkRecordState};
 use super::ensure_stream_payload_type;
 use crate::lifecycle::SendProjection;
 use crate::transport::{
-    ConnectionEvent, ConnectionState, Dest, DestTransportRef, NetworkResult, PayloadTypeExt,
-    PeerTransport, SentTransportSlot, WebrtcCloseOutcome, WireIdentity,
+    Dest, DestTransportRef, NetworkResult, PayloadTypeExt, PeerTransport, SentTransportSlot,
+    WireIdentity,
 };
-use crate::wire::webrtc::{NetworkRecoveryStatus, WebRtcCoordinator};
 use actr_framework::{Bytes, MediaSample};
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
     ActorResult, ActrError, ActrId, Classify, ConnectionNotReadyInfo, Direction, PayloadType,
     RpcEnvelope,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock, broadcast, oneshot, watch};
-use tokio::time::Instant;
+use tokio::sync::{Mutex, RwLock, oneshot, watch};
 
 /// Pending requests map type: request_id -> (target_actor_id, oneshot response sender)
 pub(crate) type PendingRequestsMap =
@@ -46,6 +42,12 @@ const DATA_CHUNK_SEND_TIMEOUT: Duration = Duration::from_secs(15);
 /// attempts themselves, so a reliable tell can still complete all retries
 /// while a stalled transport is capped instead of hanging indefinitely.
 const TELL_SEND_TIMEOUT: Duration = Duration::from_secs(13);
+/// Preserve in-flight reliable RPCs across a brief sendability dip, but do not
+/// let a remote-side recovery leave response waits parked until their much
+/// longer business deadline.
+#[cfg(feature = "webrtc-v020")]
+const PENDING_RECOVERY_GRACE: Duration = Duration::from_secs(5);
+
 /// Per-operation send authority captured at outbound admission.
 ///
 /// Once an operation observes `ExistingOnly`, later policy relaxation must
@@ -67,6 +69,25 @@ impl SendAdmission {
     }
 }
 
+/// A `SessionFactory` that never builds — the gate test seam's manager is
+/// always empty, so a build attempt is a test bug.
+#[cfg(all(feature = "webrtc-v020", feature = "test-utils"))]
+struct NoopSessionFactory;
+
+#[cfg(all(feature = "webrtc-v020", feature = "test-utils"))]
+#[async_trait::async_trait]
+impl crate::wire::webrtc::v020::peer::effects::SessionFactory for NoopSessionFactory {
+    async fn build(
+        &self,
+        _handler: Arc<crate::wire::webrtc::v020::event_handler::WebRtcEventHandler>,
+    ) -> Result<Arc<dyn crate::wire::webrtc::v020::peer::effects::SessionOps>, webrtc::error::Error>
+    {
+        Err(webrtc::error::Error::Other(
+            "NoopSessionFactory never builds (gate test seam)".to_string(),
+        ))
+    }
+}
+
 /// PeerGate - Outproc transport adapter (outbound)
 ///
 /// # Features
@@ -74,7 +95,12 @@ impl SendAdmission {
 /// - Defaults to PayloadType::RpcReliable for RPC messages
 /// - Maintain pending_requests for Request/Response matching
 /// - Support MediaTrack sending via WebRTC
-/// - Block new requests to peers being cleaned up (closing_peers)
+///
+/// The v0.20 `RtcConnectionManager`'s `RtcPeerSnapshot.sendable` is the only
+/// RTC preflight (RFC §"Send path and SendPermit": "PeerGate MUST delete its
+/// own recovering-peer collection; the Controller Snapshot and LaneHandle are
+/// the only preflight status sources"). There is no recovering/closing-peer
+/// tracking here.
 pub struct PeerGate {
     /// PeerTransport instance
     transport_manager: Arc<PeerTransport>,
@@ -83,27 +109,360 @@ pub struct PeerGate {
     /// Stores both the target ActorId and response sender for efficient cleanup by peer
     pending_requests: PendingRequestsMap,
 
-    /// WebRTC coordinator (optional, for MediaTrack support)
-    webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
-
-    #[allow(unused)]
-    /// todo: Peers currently being cleaned up (block new requests) ,closed requests will be cleaned up in event listener
-    closing_peers: Arc<RwLock<HashSet<ActrId>>>,
-
-    /// Recently sent `send_data_chunk` chunks used to surface delivery
-    /// uncertainty when WebRTC/DataChannel state changes mid-stream.
-    active_data_chunks: Arc<RwLock<DataChunkActivityTracker>>,
+    /// The v0.20 connection manager: the RTC preflight authority.
+    #[cfg(feature = "webrtc-v020")]
+    v020_manager: Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
 
     /// Live global send authority derived by the recovery supervisor.
     send_projection_rx: watch::Receiver<SendProjection>,
 }
 
 impl PeerGate {
-    fn connection_not_ready_error(status: &NetworkRecoveryStatus) -> ActrError {
-        ActrError::ConnectionNotReady(ConnectionNotReadyInfo::new(
-            status.elapsed_ms(),
-            status.timeout_ms(),
-        ))
+    /// Create a PeerGate: the v0.20 `RtcConnectionManager`'s snapshot is the
+    /// only RTC preflight (RFC item 5). There is no recovering/closing-peer
+    /// tracking — the gate never populates or consults any.
+    ///
+    /// `send_projection_rx` is the recovery supervisor's live projection;
+    /// nodes without a network-event handle pass `None` for the always-Normal
+    /// default.
+    #[cfg(feature = "webrtc-v020")]
+    pub(crate) fn with_v020_manager(
+        transport_manager: Arc<PeerTransport>,
+        v020_manager: Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        pending_requests: PendingRequestsMap,
+        send_projection_rx: Option<watch::Receiver<SendProjection>>,
+    ) -> Self {
+        Self::spawn_pending_close_cleanup(&v020_manager, &transport_manager, &pending_requests);
+        Self::spawn_terminal_transport_cleanup(
+            &v020_manager,
+            &transport_manager,
+            &pending_requests,
+        );
+        Self::spawn_pending_invalidated_generation_cleanup(&v020_manager, &pending_requests);
+        Self::spawn_pending_sendability_cleanup(&v020_manager, &pending_requests);
+        Self {
+            transport_manager,
+            pending_requests,
+            v020_manager,
+            send_projection_rx: send_projection_rx
+                .unwrap_or_else(Self::normal_send_projection_receiver),
+        }
+    }
+
+    /// Release pending work and retire the exact cached connection flight when
+    /// a Controller reaches terminal unavailable `Idle` (for example
+    /// `RecoveryExhausted`). Generation invalidation deliberately keeps the
+    /// logical transport; this terminal edge removes it so the next send dials
+    /// a fresh transport instead of reusing a closed ready wire.
+    #[cfg(feature = "webrtc-v020")]
+    fn spawn_terminal_transport_cleanup(
+        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        transport_manager: &Arc<PeerTransport>,
+        pending_requests: &PendingRequestsMap,
+    ) {
+        let mut retired = manager.subscribe_peer_transport_retired();
+        let manager = Arc::downgrade(manager);
+        let transports = Arc::downgrade(transport_manager);
+        let pending = Arc::downgrade(pending_requests);
+        tokio::spawn(async move {
+            loop {
+                match retired.recv().await {
+                    Ok(retirement) => {
+                        let peer = retirement.lifecycle.peer_id.clone();
+                        let Some(pending) = pending.upgrade() else {
+                            break;
+                        };
+                        let drained = {
+                            let mut requests = pending.write().await;
+                            let request_ids = requests
+                                .iter()
+                                .filter(|(_, (target, _))| target == &peer)
+                                .map(|(request_id, _)| request_id.clone())
+                                .collect::<Vec<_>>();
+                            request_ids
+                                .into_iter()
+                                .filter_map(|request_id| requests.remove(&request_id))
+                                .collect::<Vec<_>>()
+                        };
+                        for (_target, sender) in drained {
+                            let _ = sender.send(Err(Self::send_projection_not_ready_error()));
+                        }
+
+                        if let Some(transports) = transports.upgrade() {
+                            let dest = Dest::peer(peer.clone());
+                            match transports
+                                .close_transport_if_webrtc_lifecycle(&dest, &retirement.lifecycle)
+                                .await
+                            {
+                                Ok(true) => tracing::info!(
+                                    peer = ?peer,
+                                    reason = ?retirement.reason,
+                                    transport_epoch = retirement.lifecycle.transport_epoch,
+                                    "retired terminal WebRTC DestTransport"
+                                ),
+                                Ok(false) => tracing::debug!(
+                                    peer = ?peer,
+                                    reason = ?retirement.reason,
+                                    transport_epoch = retirement.lifecycle.transport_epoch,
+                                    "terminal transport already absent or replaced"
+                                ),
+                                Err(error) => tracing::warn!(
+                                    peer = ?peer,
+                                    reason = ?retirement.reason,
+                                    %error,
+                                    "failed to retire terminal WebRTC DestTransport"
+                                ),
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(
+                            skipped,
+                            "terminal-transport cleanup lagged; releasing all pending RPCs"
+                        );
+                        let Some(pending) = pending.upgrade() else {
+                            break;
+                        };
+                        let drained = {
+                            let mut requests = pending.write().await;
+                            requests.drain().map(|(_, value)| value).collect::<Vec<_>>()
+                        };
+                        for (_target, sender) in drained {
+                            let _ = sender.send(Err(Self::send_projection_not_ready_error()));
+                        }
+                        let (Some(manager), Some(transports)) =
+                            (manager.upgrade(), transports.upgrade())
+                        else {
+                            break;
+                        };
+                        for retirement in manager.list_terminal_transport_retirements().await {
+                            let dest = Dest::peer(retirement.lifecycle.peer_id.clone());
+                            if let Err(error) = transports
+                                .close_transport_if_webrtc_lifecycle(&dest, &retirement.lifecycle)
+                                .await
+                            {
+                                tracing::warn!(
+                                    peer = ?retirement.lifecycle.peer_id,
+                                    %error,
+                                    "failed terminal-transport reconciliation after lag"
+                                );
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    /// Release already-sent RPCs when the manager starts explicit peer
+    /// teardown. Snapshot preflight governs new sends; this edge governs the
+    /// response wait that remains after bytes have entered the DataChannel.
+    #[cfg(feature = "webrtc-v020")]
+    fn spawn_pending_close_cleanup(
+        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        transport_manager: &Arc<PeerTransport>,
+        pending_requests: &PendingRequestsMap,
+    ) {
+        let mut closing = manager.subscribe_peer_closing();
+        let transports = Arc::downgrade(transport_manager);
+        let pending = Arc::downgrade(pending_requests);
+        tokio::spawn(async move {
+            loop {
+                match closing.recv().await {
+                    Ok((peer, pc_generation)) => {
+                        let Some(pending) = pending.upgrade() else {
+                            break;
+                        };
+                        let mut requests = pending.write().await;
+                        let request_ids = requests
+                            .iter()
+                            .filter(|(_, (target, _))| target == &peer)
+                            .map(|(request_id, _)| request_id.clone())
+                            .collect::<Vec<_>>();
+                        for request_id in request_ids {
+                            if let Some((_target, sender)) = requests.remove(&request_id) {
+                                let _ = sender.send(Err(Self::send_projection_not_ready_error()));
+                            }
+                        }
+                        drop(requests);
+                        if let Some(transports) = transports.upgrade() {
+                            let dest = Dest::peer(peer.clone());
+                            let close_result = if pc_generation == 0 {
+                                transports.close_transport(&dest).await.map(|_| true)
+                            } else {
+                                transports
+                                    .close_transport_if_webrtc_session(&dest, &peer, pc_generation)
+                                    .await
+                            };
+                            if let Err(error) = close_result {
+                                tracing::warn!(
+                                    %error,
+                                    "failed to evict DestTransport after peer close"
+                                );
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(
+                            skipped,
+                            "peer-close cleanup lagged; conservatively releasing all pending RPCs"
+                        );
+                        let Some(pending) = pending.upgrade() else {
+                            break;
+                        };
+                        let drained = {
+                            let mut requests = pending.write().await;
+                            requests.drain().map(|(_, value)| value).collect::<Vec<_>>()
+                        };
+                        for (_target, sender) in drained {
+                            let _ = sender.send(Err(Self::send_projection_not_ready_error()));
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    /// Release response waits when the Controller starts replacing the Session
+    /// that carried them. Unlike explicit close cleanup, this deliberately
+    /// keeps the DestTransport: hard recovery replaces its generation in place
+    /// and the generation-aware v0.20 lanes become usable after convergence.
+    /// A soft-recovery sendability dip does not retire a Session, so reliable
+    /// work already accepted by the lane remains eligible to complete.
+    #[cfg(feature = "webrtc-v020")]
+    fn spawn_pending_invalidated_generation_cleanup(
+        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        pending_requests: &PendingRequestsMap,
+    ) {
+        let mut invalidated = manager.subscribe_peer_generation_invalidated();
+        let pending = Arc::downgrade(pending_requests);
+        tokio::spawn(async move {
+            loop {
+                match invalidated.recv().await {
+                    Ok((peer, _generation)) => {
+                        let Some(pending) = pending.upgrade() else {
+                            break;
+                        };
+                        let mut requests = pending.write().await;
+                        let request_ids = requests
+                            .iter()
+                            .filter(|(_, (target, _))| target == &peer)
+                            .map(|(request_id, _)| request_id.clone())
+                            .collect::<Vec<_>>();
+                        for request_id in request_ids {
+                            if let Some((_target, sender)) = requests.remove(&request_id) {
+                                let _ = sender.send(Err(Self::send_projection_not_ready_error()));
+                            }
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(
+                            skipped,
+                            "generation-invalidation cleanup lagged; releasing all pending RPCs"
+                        );
+                        let Some(pending) = pending.upgrade() else {
+                            break;
+                        };
+                        let drained = {
+                            let mut requests = pending.write().await;
+                            requests.drain().map(|(_, value)| value).collect::<Vec<_>>()
+                        };
+                        for (_target, sender) in drained {
+                            let _ = sender.send(Err(Self::send_projection_not_ready_error()));
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    /// Bound pending response waits when this endpoint only learns about a
+    /// remote-side recovery through its own Controller callbacks. A paired
+    /// rising edge cancels the grace period, preserving the v0.14 behavior for
+    /// short Soft Recovery. If the peer stays non-sendable, only correlation
+    /// waiters are released; the DestTransport remains available for the
+    /// Controller's generation-aware recovery path.
+    #[cfg(feature = "webrtc-v020")]
+    fn spawn_pending_sendability_cleanup(
+        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        pending_requests: &PendingRequestsMap,
+    ) {
+        let mut sendability = manager.subscribe_peer_sendability_changed();
+        let manager = Arc::downgrade(manager);
+        let pending = Arc::downgrade(pending_requests);
+        tokio::spawn(async move {
+            let mut grace_tasks = HashMap::<ActrId, tokio::task::JoinHandle<()>>::new();
+            loop {
+                match sendability.recv().await {
+                    Ok((peer, true)) => {
+                        if let Some(task) = grace_tasks.remove(&peer) {
+                            task.abort();
+                        }
+                    }
+                    Ok((peer, false)) => {
+                        let task_manager = manager.clone();
+                        let task_pending = pending.clone();
+                        let task_peer = peer.clone();
+                        let task = tokio::spawn(async move {
+                            crate::timer::sleep(
+                                crate::timer::ids::PEER_PENDING_RECOVERY_GRACE,
+                                PENDING_RECOVERY_GRACE,
+                            )
+                            .await;
+                            if let Some(manager) = task_manager.upgrade()
+                                && manager
+                                    .get_snapshot(&task_peer)
+                                    .await
+                                    .is_some_and(|snapshot| snapshot.sendable)
+                            {
+                                return;
+                            }
+                            let Some(pending) = task_pending.upgrade() else {
+                                return;
+                            };
+                            let mut requests = pending.write().await;
+                            let request_ids = requests
+                                .iter()
+                                .filter(|(_, (target, _))| target == &task_peer)
+                                .map(|(request_id, _)| request_id.clone())
+                                .collect::<Vec<_>>();
+                            for request_id in request_ids {
+                                if let Some((_target, sender)) = requests.remove(&request_id) {
+                                    let _ =
+                                        sender.send(Err(Self::send_projection_not_ready_error()));
+                                }
+                            }
+                        });
+                        if let Some(stale) = grace_tasks.insert(peer, task) {
+                            stale.abort();
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                        tracing::warn!(
+                            skipped,
+                            "sendability cleanup lagged; cancelling stale recovery grace tasks"
+                        );
+                        for (_, task) in grace_tasks.drain() {
+                            task.abort();
+                        }
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        for (_, task) in grace_tasks.drain() {
+                            task.abort();
+                        }
+                        break;
+                    }
+                }
+            }
+        });
+    }
+
+    fn normal_send_projection_receiver() -> watch::Receiver<SendProjection> {
+        let (_tx, rx) = watch::channel(SendProjection::Normal);
+        rx
     }
 
     fn send_projection_not_ready_error() -> ActrError {
@@ -125,508 +484,32 @@ impl PeerGate {
         Ok(admission.tighten(self.current_send_admission()?))
     }
 
-    async fn notify_active_data_chunks_uncertain(
-        webrtc_coordinator: &WebRtcCoordinator,
-        active_data_chunks: &Arc<RwLock<DataChunkActivityTracker>>,
-        peer_id: &ActrId,
-        session_id: u64,
-        reason: &str,
-    ) {
-        let notices = {
-            let mut tracker = active_data_chunks.write().await;
-            tracker.mark_delivery_uncertain(peer_id, session_id, reason, Instant::now())
-        };
-
-        for notice in notices {
-            webrtc_coordinator
-                .notify_data_chunk_delivery_uncertain(
-                    notice.stream_id,
-                    notice.session_id,
-                    notice.reason,
-                )
-                .await;
-        }
-    }
-
-    async fn record_active_data_chunk_if_needed(
-        &self,
-        target: &ActrId,
-        stream_id: &str,
-        session_id: u64,
-        now: Instant,
-    ) -> bool {
-        let record_state = {
-            let tracker = self.active_data_chunks.read().await;
-            tracker.record_state(target, stream_id, session_id, now)
-        };
-
-        if record_state != DataChunkRecordState::Fresh {
-            self.active_data_chunks.write().await.record_stream(
-                target,
-                stream_id.to_string(),
-                session_id,
-                now,
-            );
-        }
-
-        record_state == DataChunkRecordState::Missing
-    }
-
-    /// Create new PeerGate with a pre-allocated `pending_requests` map.
-    ///
-    /// Use this when the map must be shared with other components (e.g.
-    /// `DefaultWireBuilder`) before `PeerGate` itself is constructed.
-    pub fn with_pending_requests(
-        transport_manager: Arc<PeerTransport>,
-        webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
-        pending_requests: PendingRequestsMap,
-    ) -> Self {
-        Self::with_pending_requests_and_send_projection(
-            transport_manager,
-            webrtc_coordinator,
-            pending_requests,
-            Self::normal_send_projection_receiver(),
+    /// An empty v0.20 manager for gate tests: no peer ever has a controller,
+    /// so the snapshot preflight admits and the injected transport drives the
+    /// behavior under test.
+    #[cfg(all(feature = "webrtc-v020", feature = "test-utils"))]
+    fn empty_manager_for_test() -> Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager> {
+        let (signaling_tx, _drop_rx) = tokio::sync::mpsc::channel(1);
+        Arc::new(
+            crate::wire::webrtc::v020::manager::RtcConnectionManager::new(
+                Arc::new(NoopSessionFactory),
+                signaling_tx,
+            ),
         )
     }
 
-    /// Production constructor with the recovery supervisor's live send
-    /// projection. Kept crate-private so the projection remains an internal
-    /// policy contract rather than a second public configuration surface.
-    pub(crate) fn with_pending_requests_and_send_projection(
-        transport_manager: Arc<PeerTransport>,
-        webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
-        pending_requests: PendingRequestsMap,
-        send_projection_rx: watch::Receiver<SendProjection>,
-    ) -> Self {
-        let closing_peers = Arc::new(RwLock::new(HashSet::new()));
-        let active_data_chunks = Arc::new(RwLock::new(DataChunkActivityTracker::default()));
-
-        // Start event listener if coordinator is available
-        if let Some(ref coordinator) = webrtc_coordinator {
-            Self::spawn_event_listener(
-                coordinator.subscribe_events(),
-                Arc::clone(coordinator),
-                Arc::clone(&pending_requests),
-                Arc::clone(&closing_peers),
-                Arc::clone(&active_data_chunks),
-                Arc::clone(&transport_manager),
-            );
-        }
-
-        Self {
+    /// Test-support constructor (test-utils): a gate over an EMPTY v0.20
+    /// manager (see [`Self::empty_manager_for_test`]) with the always-Normal
+    /// projection default. Lets integration tests build a gate without naming
+    /// the crate-private manager/factory/projection types.
+    #[cfg(all(feature = "webrtc-v020", feature = "test-utils"))]
+    pub fn for_test(transport_manager: Arc<PeerTransport>) -> Self {
+        Self::with_v020_manager(
             transport_manager,
-            pending_requests,
-            webrtc_coordinator,
-            closing_peers,
-            active_data_chunks,
-            send_projection_rx,
-        }
-    }
-
-    fn normal_send_projection_receiver() -> watch::Receiver<SendProjection> {
-        let (_tx, rx) = watch::channel(SendProjection::Normal);
-        rx
-    }
-
-    /// Create new PeerGate
-    ///
-    /// # Arguments
-    /// - `transport_manager`: PeerTransport instance
-    /// - `webrtc_coordinator`: Optional WebRTC coordinator for MediaTrack support
-    #[allow(dead_code)]
-    pub fn new(
-        transport_manager: Arc<PeerTransport>,
-        webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
-    ) -> Self {
-        let pending_requests = Arc::new(RwLock::new(HashMap::new()));
-        Self::with_pending_requests(transport_manager, webrtc_coordinator, pending_requests)
-    }
-
-    /// Spawn event listener task to handle connection events
-    ///
-    /// This is the **ONLY** WebRTC event subscriber in the cleanup chain.
-    /// On `ConnectionClosed` it closes only the WebRTC handle so that an
-    /// outbound WebSocket connection (if present) continues to serve
-    /// response-reader tasks.
-    fn spawn_event_listener(
-        mut event_rx: broadcast::Receiver<ConnectionEvent>,
-        webrtc_coordinator: Arc<WebRtcCoordinator>,
-        pending_requests: PendingRequestsMap,
-        closing_peers: Arc<RwLock<HashSet<ActrId>>>,
-        active_data_chunks: Arc<RwLock<DataChunkActivityTracker>>,
-        transport_manager: Arc<PeerTransport>,
-    ) {
-        tokio::spawn(async move {
-            loop {
-                let event = match event_rx.recv().await {
-                    Ok(event) => event,
-                    Err(broadcast::error::RecvError::Lagged(n)) => {
-                        tracing::warn!(
-                            "PeerGate event listener lagged by {} events, reconciling state",
-                            n
-                        );
-                        // The skipped window may have dropped a
-                        // `ConnectionClosed` (or a recovery event); without
-                        // reconciliation its cleanup never runs and callers
-                        // park until their own timeout (issue #581).
-                        Self::reconcile_after_lag(
-                            &pending_requests,
-                            &closing_peers,
-                            &transport_manager,
-                        )
-                        .await;
-                        continue;
-                    }
-                    Err(broadcast::error::RecvError::Closed) => {
-                        tracing::debug!("PeerGate event listener stopped (channel closed)");
-                        break;
-                    }
-                };
-                tracing::debug!("PeerGate received connection event: {:?}", event);
-                match &event {
-                    ConnectionEvent::StateChanged {
-                        peer_id,
-                        session_id,
-                        state: ConnectionState::Connected,
-                        ..
-                    }
-                    | ConnectionEvent::DataChannelOpened {
-                        peer_id,
-                        session_id,
-                        ..
-                    } => {
-                        let is_sendable = webrtc_coordinator
-                            .is_peer_sendable_session(peer_id, *session_id)
-                            .await;
-
-                        if is_sendable {
-                            closing_peers.write().await.remove(peer_id);
-                            tracing::debug!("Peer {} is sendable again", peer_id);
-                        } else {
-                            tracing::debug!(
-                                peer_id = ?peer_id,
-                                event_session_id = session_id,
-                                is_sendable = is_sendable,
-                                "Ignoring recovery unblock event until current session is sendable",
-                            );
-                        }
-                    }
-
-                    ConnectionEvent::IceRestartCompleted {
-                        peer_id,
-                        session_id,
-                        success: true,
-                        ..
-                    } => {
-                        let is_sendable = webrtc_coordinator
-                            .is_peer_sendable_session(peer_id, *session_id)
-                            .await;
-
-                        if is_sendable {
-                            closing_peers.write().await.remove(peer_id);
-                            tracing::debug!("Peer {} is sendable again", peer_id);
-                        } else {
-                            tracing::debug!(
-                                peer_id = ?peer_id,
-                                event_session_id = session_id,
-                                is_sendable = is_sendable,
-                                "Ignoring recovery unblock event until current session is sendable",
-                            );
-                        }
-                    }
-
-                    ConnectionEvent::IceRestartCompleted {
-                        peer_id,
-                        session_id,
-                        success: false,
-                        ..
-                    } => {
-                        if webrtc_coordinator
-                            .is_active_session(peer_id, *session_id)
-                            .await
-                        {
-                            Self::notify_active_data_chunks_uncertain(
-                                &webrtc_coordinator,
-                                &active_data_chunks,
-                                peer_id,
-                                *session_id,
-                                "ice restart failed",
-                            )
-                            .await;
-                        }
-                        tracing::debug!(
-                            "Peer {} ICE restart failed; coordinator teardown owns the session",
-                            peer_id
-                        );
-                    }
-
-                    ConnectionEvent::DataChannelClosed {
-                        peer_id,
-                        session_id,
-                        payload_type: PayloadType::StreamReliable | PayloadType::StreamLatencyFirst,
-                    } => {
-                        Self::notify_active_data_chunks_uncertain(
-                            &webrtc_coordinator,
-                            &active_data_chunks,
-                            peer_id,
-                            *session_id,
-                            "data channel closed",
-                        )
-                        .await;
-                    }
-
-                    // Clean pending requests and trigger downstream cleanup when connection is fully closed
-                    ConnectionEvent::StateChanged {
-                        peer_id,
-                        state: ConnectionState::Closed,
-                        session_id: event_session_id,
-                        ..
-                    }
-                    | ConnectionEvent::ConnectionClosed {
-                        peer_id,
-                        session_id: event_session_id,
-                    } => {
-                        let dest = Dest::peer(peer_id.clone());
-
-                        Self::notify_active_data_chunks_uncertain(
-                            &webrtc_coordinator,
-                            &active_data_chunks,
-                            peer_id,
-                            *event_session_id,
-                            "connection closed",
-                        )
-                        .await;
-
-                        // A close event may belong to a failed intermediate WebRTC attempt while
-                        // the factory is still retrying. In that case the original RPC should keep
-                        // waiting instead of being failed as "connection closed".
-                        if transport_manager.is_connecting(&dest).await {
-                            tracing::debug!(
-                                "Ignoring transient close for peer {} while connection factory is still running",
-                                peer_id
-                            );
-                            continue;
-                        }
-
-                        // Mark peer as closing (release lock immediately to avoid deadlock)
-                        {
-                            closing_peers.write().await.insert(peer_id.clone());
-                        } // Lock released here
-
-                        // 1. Session-guarded cleanup: close the WebRTC wire only
-                        //    when it is still the live wire for this session.
-                        //    The outcome separates the cases that decide
-                        //    pending-request cleanup:
-                        //    - `Closed`: the live wire was closed now — the
-                        //      event's session is finished;
-                        //    - `AlreadyDead`: this session's wire died earlier
-                        //      (terminal transition or self-heal already
-                        //      retired it); a duplicate terminal event for an
-                        //      already-processed session lands here too, so
-                        //      pending requests may only be failed when no
-                        //      live lane remains that could deliver responses;
-                        //    - `Replaced`/`Connecting`: a different wire owns
-                        //      the pending requests — never fail them here;
-                        //    - `Absent`: the dest entry was already torn down —
-                        //      the connection is dead, pending MUST be cleaned.
-                        //
-                        //    We intentionally do NOT tear down the whole transport here
-                        //    because that would also close any outbound WebSocket
-                        //    connection in the same DestTransport.  The WebSocket
-                        //    connection carries response-reader tasks that must
-                        //    survive a WebRTC disconnect.  `spawn_ready_monitor`
-                        //    will remove the DestTransport entry once all
-                        //    connections (including WebSocket) are gone.
-                        match transport_manager
-                            .close_webrtc_transport_if_session(&dest, peer_id, *event_session_id)
-                            .await
-                        {
-                            Ok(WebrtcCloseOutcome::Closed) => {
-                                tracing::info!(
-                                    "Closed WebRTC connection for peer {} (session {}, WebSocket kept alive)",
-                                    peer_id,
-                                    event_session_id
-                                );
-                            }
-                            Ok(WebrtcCloseOutcome::AlreadyDead) => {
-                                if transport_manager.has_ready_wire(&dest).await {
-                                    // The session's wire died earlier and a live
-                                    // lane (e.g. WebSocket) remains — it still
-                                    // owns the pending requests. This also keeps
-                                    // duplicate terminal events for an already-
-                                    // processed session inert.
-                                    tracing::debug!(
-                                        "Close event for peer {} (session {}) matched an already-dead wire; a live lane remains, leaving pending requests intact",
-                                        peer_id,
-                                        event_session_id
-                                    );
-                                    closing_peers.write().await.remove(peer_id);
-                                    continue;
-                                }
-                                // No live lane left — fall through to clean
-                                // pending requests parked on a dead connection.
-                                tracing::debug!(
-                                    "Close event for peer {} (session {}) matched an already-dead wire with no live lane; cleaning pending requests",
-                                    peer_id,
-                                    event_session_id
-                                );
-                            }
-                            Ok(WebrtcCloseOutcome::Connecting) => {
-                                // A connection flight started after the earlier
-                                // `is_connecting` check — treat it the same as a
-                                // transient close during retry.
-                                tracing::debug!(
-                                    "Ignoring transient close for peer {} while connection factory is still running",
-                                    peer_id
-                                );
-                                closing_peers.write().await.remove(peer_id);
-                                continue;
-                            }
-                            Ok(WebrtcCloseOutcome::Replaced) => {
-                                // Replaced by a fresh session — a live wire
-                                // still owns the pending requests.
-                                tracing::debug!(
-                                    "Stale close event for peer {} (session {}) replaced by a live transport; leaving pending requests intact",
-                                    peer_id,
-                                    event_session_id
-                                );
-                                closing_peers.write().await.remove(peer_id);
-                                continue;
-                            }
-                            Ok(WebrtcCloseOutcome::Absent) => {
-                                // Transport already torn down and not
-                                // connecting — the connection is dead. Fall
-                                // through to clean pending requests instead of
-                                // leaving them parked on a readiness that can
-                                // never arrive.
-                                tracing::debug!(
-                                    "Close event for peer {} (session {}) found no live transport; cleaning pending requests",
-                                    peer_id,
-                                    event_session_id
-                                );
-                            }
-                            Err(e) => {
-                                tracing::warn!(
-                                    "Failed to close WebRTC connection for peer {}: {}",
-                                    peer_id,
-                                    e
-                                );
-                            }
-                        }
-
-                        // 2. Clean pending requests for this peer
-                        let mut pending = pending_requests.write().await;
-
-                        // Collect request_ids that belong to this peer
-                        let keys_to_remove: Vec<_> = pending
-                            .iter()
-                            .filter_map(|(req_id, (target, _))| {
-                                if target == peer_id {
-                                    Some(req_id.clone())
-                                } else {
-                                    None
-                                }
-                            })
-                            .collect();
-
-                        let cleaned_count = keys_to_remove.len();
-
-                        tracing::info!(
-                            "Cleaned {} pending requests for peer {}",
-                            cleaned_count,
-                            peer_id
-                        );
-
-                        // Remove and send error to all pending requests for this peer
-                        for key in keys_to_remove {
-                            if let Some((_, tx)) = pending.remove(&key) {
-                                let _ = tx.send(Err(ActrError::Unavailable(
-                                    "Connection closed".to_string(),
-                                )));
-                            }
-                        }
-                        drop(pending); // Release lock before calling downstream
-
-                        closing_peers.write().await.remove(peer_id);
-                    }
-
-                    _ => {} // Ignore other events
-                }
-            }
-        });
-    }
-
-    /// Reconcile `pending_requests` and `closing_peers` against the transport
-    /// manager's current state after the broadcast receiver lagged and
-    /// dropped a window of events (issue #581).
-    ///
-    /// A dropped window may have contained `ConnectionClosed` — whose cleanup
-    /// removes pending requests — and the recovery events that unmark
-    /// `closing_peers` (`StateChanged { Connected }`, `DataChannelOpened`,
-    /// successful `IceRestartCompleted`). Without reconciliation those
-    /// cleanups never run and callers hang until their own timeout.
-    ///
-    /// Idempotent with the normal event path:
-    /// - a pending request is failed only when its target no longer has any
-    ///   transport (neither `Connecting` nor `Connected`) — exactly the state
-    ///   in which the `ConnectionClosed` arm cleans it; a live transport —
-    ///   whether a connecting retry or a connected replacement wire — still
-    ///   owns the request;
-    /// - a `closing_peers` entry is removed once its peer is no longer in a
-    ///   connecting flight: both the missed `ConnectionClosed` cleanup and
-    ///   the missed recovery events end with the mark removed.
-    async fn reconcile_after_lag(
-        pending_requests: &PendingRequestsMap,
-        closing_peers: &Arc<RwLock<HashSet<ActrId>>>,
-        transport_manager: &PeerTransport,
-    ) {
-        let targets: Vec<ActrId> = {
-            let pending = pending_requests.read().await;
-            pending.values().map(|(target, _)| target.clone()).collect()
-        };
-
-        let mut dead_targets = Vec::new();
-        for target in &targets {
-            let dest = Dest::peer(target.clone());
-            if !transport_manager.is_connecting(&dest).await
-                && !transport_manager.has_connected_transport(&dest).await
-            {
-                dead_targets.push(target.clone());
-            }
-        }
-
-        if !dead_targets.is_empty() {
-            let mut cleaned = 0usize;
-            let mut pending = pending_requests.write().await;
-            for target in dead_targets {
-                let keys_to_remove: Vec<_> = pending
-                    .iter()
-                    .filter(|(_, (t, _))| t == &target)
-                    .map(|(key, _)| key.clone())
-                    .collect();
-                for key in keys_to_remove {
-                    if let Some((_, tx)) = pending.remove(&key) {
-                        let _ =
-                            tx.send(Err(ActrError::Unavailable("Connection closed".to_string())));
-                        cleaned += 1;
-                    }
-                }
-            }
-            drop(pending);
-            tracing::info!(
-                "Lag reconciliation released {} pending requests on dead peers",
-                cleaned
-            );
-        }
-
-        let closing: Vec<ActrId> = closing_peers.read().await.iter().cloned().collect();
-        for peer in closing {
-            let dest = Dest::peer(peer.clone());
-            if !transport_manager.is_connecting(&dest).await {
-                closing_peers.write().await.remove(&peer);
-                tracing::debug!("Lag reconciliation unmarked closing peer {}", peer);
-            }
-        }
+            Self::empty_manager_for_test(),
+            Arc::new(RwLock::new(HashMap::new())),
+            None,
+        )
     }
 
     /// Handle response message (called by MessageDispatcher)
@@ -698,30 +581,61 @@ impl PeerGate {
         envelope
     }
 
+    /// Outbound admission. The global send projection is read before any
+    /// await so globally blocked work fails fast.
+    ///
+    /// The v0.20 Controller Snapshot is the only RTC preflight (RFC item 5):
+    /// a peer whose controller exists but is not sendable (recovery window)
+    /// is rejected; a peer with NO controller yet is admitted so the
+    /// transport dials on demand (0.14 parity: no recovery entry -> admit),
+    /// which is also what keeps WebSocket-only destinations sendable.
     async fn preflight_send(&self, target: &ActrId, dest: &Dest) -> ActorResult<SendAdmission> {
-        // Admission is a pure, fail-fast read of authoritative state. It never
-        // advances recovery, tears down transports, or waits for a guard: those
-        // effects belong to the coordinator's event/deadline drivers.
         let admission = self.current_send_admission()?;
 
-        if let Some(coordinator) = &self.webrtc_coordinator {
-            if coordinator.cleanup_in_progress() {
+        #[cfg(feature = "webrtc-v020")]
+        {
+            if self.v020_manager.is_closing(target).await {
                 return Err(Self::send_projection_not_ready_error());
             }
-
-            if let Some(status) = coordinator.peer_recovery_status(target).await {
-                return Err(Self::connection_not_ready_error(&status));
+            if let Some(snapshot) = self.v020_manager.get_snapshot(target).await
+                && !snapshot.sendable
+                // `Idle` is a terminal *attempt* state, not a permanent peer
+                // tombstone.  A later business send must be allowed to dial
+                // again after an initial build/role-negotiation failure.  The
+                // manager's closing tombstone above still fences explicit
+                // teardown, while Recovering remains fail-fast as required by
+                // the RFC sendability contract.
+                && snapshot.status != actr_framework::WebRtcPeerStatus::Idle
+                // The request that created the destination flight is allowed
+                // to bootstrap an initially Idle peer. Concurrent requests
+                // can observe the newly-created Controller as Connecting
+                // before the same flight becomes a committed DestTransport;
+                // they must join that bounded flight rather than fail merely
+                // because they lost the creation race. This is transport
+                // admission, not a second RTC state authority: inbound-only
+                // Connecting peers without this exact destination flight are
+                // still rejected.
+                && !(snapshot.status == actr_framework::WebRtcPeerStatus::Connecting
+                    && self.transport_manager.is_connecting(dest).await)
+            {
+                // The snapshot may have become sendable while the flight check
+                // awaited its transport lock. Re-read before rejecting so a
+                // readiness edge cannot be turned into a false negative.
+                if self
+                    .v020_manager
+                    .get_snapshot(target)
+                    .await
+                    .is_some_and(|latest| {
+                        !latest.sendable && latest.status != actr_framework::WebRtcPeerStatus::Idle
+                    })
+                {
+                    return Err(Self::send_projection_not_ready_error());
+                }
             }
         }
 
-        if self.closing_peers.read().await.contains(target)
-            || self.transport_manager.is_closing(dest).await
-        {
-            return Err(Self::send_projection_not_ready_error());
-        }
-
-        // Policy may have tightened during the coordinator/session awaits.
-        // Keep the strictest projection seen by this operation.
+        // Policy may have tightened during the snapshot await. Keep the
+        // strictest projection seen by this operation.
         self.tighten_with_current_projection(admission)
     }
 }
@@ -731,7 +645,6 @@ impl PeerGate {
     ///
     /// Retry is applied only when `NetworkError::kind()` is `Transient`.
     /// Non-transient errors are returned immediately without retry.
-    #[cfg(any(test, feature = "test-utils"))]
     async fn send_with_retry(
         &self,
         dest: &Dest,
@@ -764,7 +677,6 @@ impl PeerGate {
         .await
     }
 
-    #[cfg(any(test, feature = "test-utils"))]
     async fn send_with_retry_policy(
         &self,
         dest: &Dest,
@@ -888,10 +800,6 @@ impl PeerGate {
         sent_transport: Option<DestTransportRef>,
     ) {
         let Some(sent_transport) = sent_transport else {
-            // The deadline fired before a transport was selected (the send was
-            // still waiting on a Connecting flight). Closing here cancels that
-            // flight — fail-fast so the next send redials immediately instead
-            // of waiting out the flight's own creation deadline.
             tracing::warn!(
                 peer = ?target,
                 "Request timed out before a sent transport was recorded; closing transport"
@@ -938,17 +846,10 @@ impl PeerGate {
                     ),
                 }
             }
-            // Two cases share the instance-guarded close: the send resolved on
-            // a WebSocket wire (a WebSocket session id is minted per builder
-            // and is not comparable across DestTransport instances), or the
-            // send hung before its wire identity was recorded
-            // (`wire_identity: None` from the selection-time record). In both,
-            // only reclaim the transport if it is still the same instance that
-            // sent; a replacement rebuilt by an earlier reclaim is untouched.
             Some(WireIdentity::WebSocket { .. }) | None => {
                 tracing::warn!(
                     peer = ?target,
-                    "Request timed out after send; closing transport if instance still matches"
+                    "Request timed out after send without wire identity; closing transport if instance still matches"
                 );
                 match transport_manager
                     .close_transport_if_current(&dest, &sent_transport)
@@ -1043,10 +944,7 @@ impl PeerGate {
 
         let result =
             crate::timer::timeout(crate::timer::ids::PEER_REQUEST_DEADLINE, timeout, async {
-                // 5a. Send with per-PayloadType retry on transient failures.
-                // The selected transport is recorded into the slot before the
-                // wire send can hang, so a deadline expiring during the send
-                // phase still reclaims that exact instance.
+                // 5a. Send with per-PayloadType retry on transient failures
                 self.send_with_retry_record_identity(
                     &dest,
                     payload_type,
@@ -1185,105 +1083,144 @@ impl PeerGate {
         let data = Self::serialize_envelope(&envelope);
         let dest = Self::actr_id_to_dest(target);
         let admission = self.preflight_send(target, &dest).await?;
-
-        // Capture the transport selected for the send so a tell-path timeout
-        // (e.g. a half-open WebSocket the send hangs on with no FIN) reclaims
-        // that exact instance, exactly as the request/response path does. The
-        // slot is written at selection time — before the wire send can hang —
-        // so on the timeout branch it is populated whenever the send had
-        // already picked a transport, and the reclaim goes through the
-        // instance-guarded close rather than an unguarded `close_transport`.
-        let sent_transport: SentTransportSlot = Arc::new(Mutex::new(None));
-        let sent_transport_for_send = Arc::clone(&sent_transport);
-        let send = async {
-            self.send_with_retry_record_identity(
-                &dest,
-                payload_type,
-                &data,
-                admission,
-                Some(&sent_transport_for_send),
+        let send = self.send_with_retry(&dest, payload_type, &data, admission);
+        if let Some(send_timeout) = send_timeout {
+            match crate::timer::timeout(
+                crate::timer::ids::PEER_REQUEST_DEADLINE,
+                send_timeout,
+                send,
             )
-            .await?;
-            Ok::<_, ActrError>(())
-        };
-
-        let result = if let Some(send_timeout) = send_timeout {
-            crate::timer::timeout(crate::timer::ids::PEER_REQUEST_DEADLINE, send_timeout, send)
-                .await
-        } else {
-            Ok(send.await)
-        };
-
-        match result {
-            Ok(inner) => inner,
-            Err(_) => {
-                // Deadline expired: the send never resolved (typically a
-                // half-open wire with no FIN). Reclaim the selected transport
-                // so the next tell rebuilds a fresh one, mirroring the
-                // request/response timeout path at the call site.
-                let transport_manager = self.transport_manager.clone();
-                let stale_dest = dest.clone();
-                let stale_target = target.clone();
-                let sent_transport = sent_transport.lock().await.clone();
-                tokio::spawn(async move {
-                    Self::close_timed_out_request_transport(
-                        transport_manager,
-                        stale_dest,
-                        stale_target,
-                        sent_transport,
-                    )
-                    .await;
-                });
-                Err(ActrError::TimedOut)
+            .await
+            {
+                Ok(result) => result,
+                Err(_) => Err(ActrError::TimedOut),
             }
+        } else {
+            send.await
         }
     }
 
-    /// Send media sample via WebRTC native track
-    ///
-    /// # Parameters
-    /// - `target`: Target Actor ID
-    /// - `track_id`: Media track identifier
-    /// - `sample`: Media sample data
-    ///
-    /// # Implementation Note
-    /// Delegates to WebRtcCoordinator which manages WebRTC Tracks
+    /// S6-10: v0.20 `send_media_sample` — the peer's outbound track writer
+    /// (data plane). Admission mirrors the 0.14 path (ExistingOnly allowed:
+    /// sending uses an already-registered track).
+    #[cfg(feature = "webrtc-v020")]
+    async fn send_media_sample_v020(
+        &self,
+        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        target: &ActrId,
+        track_id: &str,
+        sample: MediaSample,
+    ) -> ActorResult<()> {
+        let dest = Self::actr_id_to_dest(target);
+        let admission = self.preflight_send(target, &dest).await?;
+        self.tighten_with_current_projection(admission)?;
+
+        let Some(handle) = manager.get_controller(target).await else {
+            return Err(Self::send_projection_not_ready_error());
+        };
+        handle
+            .send_media_sample(track_id, &sample)
+            .await
+            .map_err(|e| ActrError::Unavailable(format!("WebRTC send failed: {e}")))
+    }
+
+    /// S6-10: v0.20 `add_media_track` — ensure the peer connection (a track
+    /// add may establish it, 0.14 parity), then register the track on the
+    /// active session. Renegotiation rides the controller's effect path.
+    #[cfg(feature = "webrtc-v020")]
+    async fn add_media_track_v020(
+        &self,
+        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        target: &ActrId,
+        track_id: &str,
+        codec: &str,
+        media_type: &str,
+    ) -> ActorResult<()> {
+        let dest = Self::actr_id_to_dest(target);
+        let admission = self.preflight_send(target, &dest).await?;
+        if self.tighten_with_current_projection(admission)? == SendAdmission::ExistingOnly {
+            return Err(Self::send_projection_not_ready_error());
+        }
+
+        let handle = manager.ensure_controller(target.clone()).await;
+        handle
+            .connect()
+            .await
+            .map_err(|_| Self::send_projection_not_ready_error())?;
+
+        // The track needs an active session; wait (bounded) for the peer to
+        // reach sendable, watching the snapshot rather than polling.
+        let mut rx = handle.subscribe();
+        let ready = crate::timer::timeout(
+            crate::timer::ids::WEBRTC_PEER_SENDABLE,
+            std::time::Duration::from_secs(10),
+            async move {
+                loop {
+                    if rx.borrow().sendable {
+                        return;
+                    }
+                    if rx.changed().await.is_err() {
+                        return;
+                    }
+                }
+            },
+        )
+        .await;
+        if ready.is_err() || !handle.snapshot().sendable {
+            return Err(Self::send_projection_not_ready_error());
+        }
+
+        handle
+            .add_media_track(track_id, codec, media_type)
+            .await
+            .map_err(|e| ActrError::Unavailable(format!("WebRTC add track failed: {e}")))
+    }
+
+    /// S6-10: v0.20 `remove_media_track` — unregister the writer and remove
+    /// the track from the active session (renegotiates).
+    #[cfg(feature = "webrtc-v020")]
+    async fn remove_media_track_v020(
+        &self,
+        manager: &Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+        target: &ActrId,
+        track_id: &str,
+    ) -> ActorResult<()> {
+        let dest = Self::actr_id_to_dest(target);
+        let admission = self.preflight_send(target, &dest).await?;
+        if self.tighten_with_current_projection(admission)? == SendAdmission::ExistingOnly {
+            return Err(Self::send_projection_not_ready_error());
+        }
+
+        let Some(handle) = manager.get_controller(target).await else {
+            return Err(ActrError::Unavailable(format!(
+                "track not found: {track_id} (no connection to peer)"
+            )));
+        };
+        handle
+            .remove_media_track(track_id)
+            .await
+            .map_err(|e| ActrError::Unavailable(format!("WebRTC remove track failed: {e}")))
+    }
+
+    /// Send a media sample via the peer's v0.20 outbound track writer (data
+    /// plane). Admission mirrors 0.14 (ExistingOnly allowed: sending uses an
+    /// already-registered track).
+    #[cfg(feature = "webrtc-v020")]
     pub async fn send_media_sample(
         &self,
         target: &ActrId,
         track_id: &str,
         sample: MediaSample,
     ) -> ActorResult<()> {
-        tracing::debug!(
-            "PeerGate::send_media_sample to {:?}, track_id={}",
-            target,
-            track_id
-        );
-
-        let dest = Self::actr_id_to_dest(target);
-        let admission = self.preflight_send(target, &dest).await?;
-
-        // Sending a sample only uses an already-registered track, so
-        // ExistingOnly remains valid. Re-read here so a projection that
-        // tightened during preflight cannot admit a newly blocked send.
-        self.tighten_with_current_projection(admission)?;
-
-        // Check if WebRTC coordinator is available
-        let coordinator = self.webrtc_coordinator.as_ref().ok_or_else(|| {
-            ActrError::NotImplemented("MediaTrack requires WebRTC coordinator".to_string())
-        })?;
-
-        // Delegate to WebRtcCoordinator
-        coordinator
-            .send_media_sample(target, track_id, sample)
+        let manager = self.v020_manager.clone();
+        self.send_media_sample_v020(&manager, target, track_id, sample)
             .await
-            .map_err(|e| ActrError::Unavailable(format!("WebRTC send failed: {e}")))?;
-
-        tracing::debug!("Sent media sample to {:?}", target);
-        Ok(())
     }
 
-    /// Add a media track to the WebRTC connection with the target
+    /// Add a media track on the v0.20 peer connection (the controller may
+    /// establish the connection first) and renegotiate. Renegotiation is
+    /// offerer-only (RFC-0504 §"Deliberate regressions").
+    #[cfg(feature = "webrtc-v020")]
     pub async fn add_media_track(
         &self,
         target: &ActrId,
@@ -1291,58 +1228,17 @@ impl PeerGate {
         codec: &str,
         media_type: &str,
     ) -> ActorResult<()> {
-        tracing::debug!(
-            "PeerGate::add_media_track to {:?}, track_id={}, codec={}, type={}",
-            target,
-            track_id,
-            codec,
-            media_type
-        );
-
-        let dest = Self::actr_id_to_dest(target);
-        let admission = self.preflight_send(target, &dest).await?;
-
-        // Adding a track can establish a connection and always renegotiates
-        // SDP. ExistingOnly therefore cannot safely enter the coordinator.
-        if self.tighten_with_current_projection(admission)? == SendAdmission::ExistingOnly {
-            return Err(Self::send_projection_not_ready_error());
-        }
-
-        let coordinator = self.webrtc_coordinator.as_ref().ok_or_else(|| {
-            ActrError::NotImplemented("MediaTrack requires WebRTC coordinator".to_string())
-        })?;
-
-        coordinator
-            .add_dynamic_track(target, track_id.to_string(), codec, media_type)
-            .await?;
-
-        Ok(())
+        let manager = self.v020_manager.clone();
+        self.add_media_track_v020(&manager, target, track_id, codec, media_type)
+            .await
     }
 
-    /// Remove a media track from the WebRTC connection with the target.
+    /// Remove a media track from the v0.20 peer connection (renegotiates).
+    #[cfg(feature = "webrtc-v020")]
     pub async fn remove_media_track(&self, target: &ActrId, track_id: &str) -> ActorResult<()> {
-        tracing::debug!(
-            "PeerGate::remove_media_track to {:?}, track_id={}",
-            target,
-            track_id
-        );
-
-        let dest = Self::actr_id_to_dest(target);
-        let admission = self.preflight_send(target, &dest).await?;
-
-        // Removing a track triggers SDP renegotiation on an existing
-        // connection. ExistingOnly permits traffic on committed sessions, but
-        // must not start any new negotiation.
-        if self.tighten_with_current_projection(admission)? == SendAdmission::ExistingOnly {
-            return Err(Self::send_projection_not_ready_error());
-        }
-
-        let coordinator = self.webrtc_coordinator.as_ref().ok_or_else(|| {
-            ActrError::NotImplemented("MediaTrack requires WebRTC coordinator".to_string())
-        })?;
-
-        coordinator.remove_dynamic_track(target, track_id).await?;
-        Ok(())
+        let manager = self.v020_manager.clone();
+        self.remove_media_track_v020(&manager, target, track_id)
+            .await
     }
 
     /// Send DataChunk (Fast Path)
@@ -1390,96 +1286,24 @@ impl PeerGate {
 
         ensure_stream_payload_type(payload_type)?;
 
-        // // Check if target is being cleaned up
-        // if self.closing_peers.read().await.contains(target) {
-        //     return Err(ActrError::Unavailable(format!(
-        //         "Connection to {} is closing",
-        //         target.to_string_repr()
-        //     )));
-        // }
-
         // Convert ActrId to Dest
         let dest = Self::actr_id_to_dest(target);
         let admission = self.preflight_send(target, &dest).await?;
 
-        // `ensure_stream_payload_type` above guarantees `payload_type` is a
-        // stream variant, so every call tracks an active DataChunk unconditionally.
-        let stream_session_id = if let Some(coordinator) = &self.webrtc_coordinator {
-            coordinator.get_peer_session_id(target).await
-        } else {
-            None
-        };
-
-        let recorded_before_send = if let Some(session_id) = stream_session_id {
-            self.record_active_data_chunk_if_needed(target, stream_id, session_id, Instant::now())
-                .await
-        } else {
-            false
-        };
-
-        // Record the selected transport at selection time so a chunk-send
-        // deadline (half-open wire with no FIN) can reclaim that exact
-        // instance, mirroring the tell and request/response timeout paths.
-        let sent_transport: SentTransportSlot = Arc::new(Mutex::new(None));
-        let result = match crate::timer::timeout(
+        // Delivery uncertainty on a session close mid-flight is surfaced by
+        // the v0.20 lane send itself (RtcSendError::DataChunkDeliveryUncertain
+        // mapped at the transport boundary); no separate tracker lives here.
+        match crate::timer::timeout(
             crate::timer::ids::PEER_REQUEST_DEADLINE,
             send_timeout,
-            self.send_once_with_admission(
-                &dest,
-                payload_type,
-                &data,
-                admission,
-                Some(&sent_transport),
-            ),
+            self.send_once_with_admission(&dest, payload_type, &data, admission, None),
         )
         .await
         {
             Ok(Ok(_identity)) => Ok(()),
             Ok(Err(e)) => Err(e),
-            Err(_) => {
-                // Deadline expired: the single send attempt hung. Reclaim the
-                // recorded transport instance so the next chunk rebuilds a
-                // fresh one; the guarded close skips a transport that has
-                // already been replaced.
-                let transport_manager = self.transport_manager.clone();
-                let stale_dest = dest.clone();
-                let stale_target = target.clone();
-                let sent_transport = sent_transport.lock().await.clone();
-                tokio::spawn(async move {
-                    Self::close_timed_out_request_transport(
-                        transport_manager,
-                        stale_dest,
-                        stale_target,
-                        sent_transport,
-                    )
-                    .await;
-                });
-                Err(ActrError::TimedOut)
-            }
-        };
-
-        if result.is_err() {
-            if recorded_before_send && let Some(session_id) = stream_session_id {
-                self.active_data_chunks
-                    .write()
-                    .await
-                    .remove_stream_session(target, stream_id, session_id);
-            }
-        } else if stream_session_id.is_none()
-            && let Some(coordinator) = &self.webrtc_coordinator
-        {
-            if let Some(session_id) = coordinator.get_peer_session_id(target).await {
-                self.record_active_data_chunk_if_needed(
-                    target,
-                    stream_id,
-                    session_id,
-                    Instant::now(),
-                )
-                .await;
-            }
+            Err(_) => Err(ActrError::TimedOut),
         }
-
-        result
     }
 }
 
@@ -1492,6 +1316,7 @@ impl Drop for PeerGate {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::timer::timeout;
     use crate::transport::{
         ConnType, DataLane, NetworkError, NetworkResult, WireBuilder, WireHandle,
     };
@@ -1664,6 +1489,62 @@ mod tests {
         sends: Arc<AtomicUsize>,
     }
 
+    #[derive(Debug)]
+    struct LifecycleWebRtcWire {
+        lifecycle: crate::transport::WebRtcTransportLifecycle,
+        close_count: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl WireHandle for LifecycleWebRtcWire {
+        fn connection_type(&self) -> ConnType {
+            ConnType::WebRTC
+        }
+
+        fn priority(&self) -> u8 {
+            1
+        }
+
+        async fn connect(&self) -> NetworkResult<()> {
+            Ok(())
+        }
+
+        fn is_connected(&self) -> bool {
+            true
+        }
+
+        async fn close(&self) -> NetworkResult<()> {
+            self.close_count.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        async fn get_lane(&self, _payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+            Ok(Arc::new(SuccessfulLane {
+                sends: Arc::new(AtomicUsize::new(0)),
+            }))
+        }
+
+        fn webrtc_transport_lifecycle(&self) -> Option<crate::transport::WebRtcTransportLifecycle> {
+            Some(self.lifecycle.clone())
+        }
+    }
+
+    struct LifecycleWireBuilder {
+        wire: Arc<LifecycleWebRtcWire>,
+        builds: Arc<AtomicUsize>,
+    }
+
+    #[async_trait]
+    impl WireBuilder for LifecycleWireBuilder {
+        async fn create_connections(
+            &self,
+            _dest: &Dest,
+        ) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
+            self.builds.fetch_add(1, Ordering::SeqCst);
+            Ok(vec![self.wire.clone()])
+        }
+    }
+
     #[async_trait]
     impl WireBuilder for CountingSuccessfulWireBuilder {
         async fn create_connections(
@@ -1697,87 +1578,13 @@ mod tests {
         ));
         let pending_requests = Arc::new(RwLock::new(HashMap::new()));
         let (projection_tx, projection_rx) = watch::channel(projection);
-        let gate = PeerGate::with_pending_requests_and_send_projection(
+        let gate = PeerGate::with_v020_manager(
             transport.clone(),
-            None,
+            PeerGate::empty_manager_for_test(),
             pending_requests,
-            projection_rx,
+            Some(projection_rx),
         );
         (gate, transport, projection_tx, builds, sends)
-    }
-
-    #[tokio::test]
-    async fn lag_reconciliation_fails_pending_request_on_dead_peer() {
-        let transport = Arc::new(PeerTransport::new(
-            test_actor_id(1),
-            Arc::new(CountingSuccessfulWireBuilder {
-                builds: Arc::new(AtomicUsize::new(0)),
-                sends: Arc::new(AtomicUsize::new(0)),
-            }),
-        ));
-        let dead = test_actor_id(9);
-
-        let pending: PendingRequestsMap = Arc::new(RwLock::new(HashMap::new()));
-        let (tx, mut rx) = oneshot::channel();
-        pending
-            .write()
-            .await
-            .insert("lag-dead".to_string(), (dead.clone(), tx));
-
-        let closing_peers: Arc<RwLock<HashSet<ActrId>>> = Arc::new(RwLock::new(HashSet::new()));
-        closing_peers.write().await.insert(dead.clone());
-
-        PeerGate::reconcile_after_lag(&pending, &closing_peers, &transport).await;
-
-        assert!(
-            pending.read().await.is_empty(),
-            "pending request on a peer with no transport must be released"
-        );
-        let result = rx
-            .try_recv()
-            .expect("released pending must receive an error");
-        assert!(result.is_err(), "released pending must be failed");
-        assert!(
-            closing_peers.read().await.is_empty(),
-            "closing mark for a peer without a connecting flight must be removed"
-        );
-    }
-
-    #[tokio::test]
-    async fn lag_reconciliation_keeps_pending_request_on_live_transport() {
-        let (gate, transport, _projection_tx, _builds, _sends) =
-            gate_with_projection(SendProjection::Normal);
-        let target = test_actor_id(2);
-
-        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
-            .await
-            .expect("successful wire builder should deliver the message");
-
-        let dest = Dest::peer(target.clone());
-        assert!(
-            transport.has_connected_transport(&dest).await,
-            "precondition: dest must hold a Connected transport"
-        );
-
-        let pending: PendingRequestsMap = Arc::new(RwLock::new(HashMap::new()));
-        let (tx, mut rx) = oneshot::channel();
-        pending
-            .write()
-            .await
-            .insert("lag-live".to_string(), (target, tx));
-        let closing_peers: Arc<RwLock<HashSet<ActrId>>> = Arc::new(RwLock::new(HashSet::new()));
-
-        PeerGate::reconcile_after_lag(&pending, &closing_peers, &transport).await;
-
-        assert_eq!(
-            pending.read().await.len(),
-            1,
-            "a pending request whose peer still has a live transport must be kept"
-        );
-        assert!(
-            rx.try_recv().is_err(),
-            "kept pending must not be resolved by reconciliation"
-        );
     }
 
     #[tokio::test]
@@ -1870,8 +1677,12 @@ mod tests {
         assert_eq!(sends.load(Ordering::SeqCst), 0);
     }
 
+    /// ExistingOnly admission: media work on a peer with no live session
+    /// fails fast with ConnectionNotReady (samples pass the projection check
+    /// but find no controller; topology changes are rejected at the tighten
+    /// step) and nothing reaches the transport.
     #[tokio::test]
-    async fn existing_only_allows_media_samples_but_rejects_track_negotiation() {
+    async fn existing_only_media_ops_fail_fast_without_a_session() {
         let (gate, _transport, _projection_tx, builds, sends) =
             gate_with_projection(SendProjection::ExistingOnly);
         let target = test_actor_id(2);
@@ -1879,8 +1690,8 @@ mod tests {
         let sample_error = gate
             .send_media_sample(&target, "audio", test_media_sample())
             .await
-            .expect_err("admitted sample should reach the missing coordinator");
-        assert!(matches!(sample_error, ActrError::NotImplemented(_)));
+            .expect_err("a sample with no live session must fail fast");
+        assert!(matches!(sample_error, ActrError::ConnectionNotReady(_)));
 
         let track_error = gate
             .add_media_track(&target, "audio", "OPUS", "audio")
@@ -1916,6 +1727,82 @@ mod tests {
 
         assert_eq!(builds.load(Ordering::SeqCst), 1);
         assert_eq!(sends.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn recovery_exhaustion_event_retires_cached_transport_and_pending_rpc() {
+        let target = test_actor_id(2);
+        let lifecycle = crate::transport::WebRtcTransportLifecycle {
+            peer_id: target.clone(),
+            controller_lifecycle_id: 11,
+            transport_epoch: 4,
+        };
+        let close_count = Arc::new(AtomicUsize::new(0));
+        let builds = Arc::new(AtomicUsize::new(0));
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(LifecycleWireBuilder {
+                wire: Arc::new(LifecycleWebRtcWire {
+                    lifecycle: lifecycle.clone(),
+                    close_count: close_count.clone(),
+                }),
+                builds: builds.clone(),
+            }),
+        ));
+        let manager = PeerGate::empty_manager_for_test();
+        let pending_requests = Arc::new(RwLock::new(HashMap::new()));
+        let gate =
+            PeerGate::with_v020_manager(transport.clone(), manager.clone(), pending_requests, None);
+
+        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
+            .await
+            .expect("seed transport send");
+        let dest = Dest::peer(target.clone());
+        assert!(transport.has_dest(&dest).await);
+        let pending = gate
+            .register_pending_for_test("terminal-pending", target.clone())
+            .await;
+
+        manager.publish_peer_transport_retired_for_test(
+            crate::wire::webrtc::v020::status::PeerTransportRetirement {
+                lifecycle: lifecycle.clone(),
+                reason: actr_framework::WebRtcUnavailableReason::RecoveryExhausted,
+            },
+        );
+
+        let pending_result = timeout(
+            crate::timer::ids::PEER_REQUEST_DEADLINE,
+            Duration::from_secs(1),
+            pending,
+        )
+        .await
+        .expect("terminal cleanup must wake pending RPC")
+        .expect("pending sender must resolve");
+        assert!(matches!(
+            pending_result,
+            Err(ActrError::ConnectionNotReady(_))
+        ));
+        timeout(
+            crate::timer::ids::PEER_TRANSPORT_HEALTH,
+            Duration::from_secs(1),
+            async {
+                while transport.has_dest(&dest).await || transport.is_closing(&dest).await {
+                    tokio::task::yield_now().await;
+                }
+            },
+        )
+        .await
+        .expect("terminal cleanup must evict the cached destination");
+        assert_eq!(
+            close_count.load(Ordering::SeqCst),
+            0,
+            "terminal event cleanup must not recursively close its Controller wire"
+        );
+
+        gate.send_message_with_type(&target, PayloadType::RpcReliable, RpcEnvelope::default())
+            .await
+            .expect("next send must build a fresh destination flight");
+        assert_eq!(builds.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
@@ -1962,20 +1849,6 @@ mod tests {
         assert_eq!(sends.load(Ordering::SeqCst), 0);
     }
 
-    #[test]
-    fn connection_not_ready_window_matches_the_recovery_deadline() {
-        let now = tokio::time::Instant::now();
-        let status = NetworkRecoveryStatus::new_for_test(7, "test recovery", now);
-        let ActrError::ConnectionNotReady(info) = PeerGate::connection_not_ready_error(&status)
-        else {
-            panic!("recovery admission must return ConnectionNotReady");
-        };
-        assert!(
-            info.retry_after_ms
-                .is_some_and(|retry_after_ms| retry_after_ms <= status.timeout_ms())
-        );
-    }
-
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn send_message_with_type_times_out_before_reliable_retry_backoff_completes() {
         let attempts = Arc::new(AtomicUsize::new(0));
@@ -1985,7 +1858,7 @@ mod tests {
                 attempts: attempts.clone(),
             }),
         ));
-        let gate = PeerGate::new(transport, None);
+        let gate = PeerGate::for_test(transport);
         let target = test_actor_id(2);
 
         let err = gate
@@ -2064,7 +1937,7 @@ mod tests {
             test_actor_id(1),
             Arc::new(PendingWireBuilder),
         ));
-        let gate = PeerGate::new(transport, None);
+        let gate = PeerGate::for_test(transport);
         let target = test_actor_id(2);
 
         let err = gate

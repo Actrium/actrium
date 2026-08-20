@@ -210,6 +210,17 @@ impl WorkloadHookObserver for RecordingObserver {
         ));
     }
 
+    async fn on_webrtc_state_changed(
+        &self,
+        _ctx: &RuntimeContext,
+        state: &actr_framework::WebRtcPeerState,
+    ) {
+        let _ = self.tx.send(format!(
+            "on_webrtc_state_changed:peer={}:revision={}:sendable={}",
+            state.peer.serial_number, state.revision, state.sendable
+        ));
+    }
+
     async fn on_credential_renewed(&self, _ctx: &RuntimeContext, event: &CredentialEvent) {
         let secs = event
             .new_expiry
@@ -321,6 +332,21 @@ async fn hook_callback_routes_observation_hooks_to_observer_with_payload() {
                 status: WebRtcPeerStatus::Recovering,
             },
             "on_webrtc_disconnected:peer=4:relayed=none",
+        ),
+        (
+            HookEvent::WebRtcStateChanged {
+                state: actr_framework::WebRtcPeerState {
+                    peer: test_actr_id(8),
+                    pc_generation: 1,
+                    revision: 7,
+                    status: WebRtcPeerStatus::Connected,
+                    sendable: true,
+                    network_path: actr_framework::WebRtcNetworkPath::Direct,
+                    relayed: Some(false),
+                    unavailable_reason: None,
+                },
+            },
+            "on_webrtc_state_changed:peer=8:revision=7:sendable=true",
         ),
         (
             HookEvent::WebSocketConnectStart {

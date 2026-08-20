@@ -88,6 +88,17 @@ final class ActrService: ObservableObject {
                 let marker = "ACTR_E2E_RETRY:ConnectionNotReady retryAfterMs=\(retryAfterMs)"
                 print(marker)
                 FileHandle.standardError.write(Data("\(marker)\n".utf8))
+
+                // S6-8: post-Connected retry contract via the unified
+                // snapshot. If any tracked peer is already sendable, retry
+                // immediately instead of sleeping out the hint — the hint is
+                // a fallback, not a readiness promise.
+                if let actorRef,
+                   await actorRef.listRtcPeerStatuses().contains(where: { $0.sendable })
+                {
+                    continue
+                }
+
                 try await Task.sleep(for: .milliseconds(Int64(retryAfterMs)))
             }
         }

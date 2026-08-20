@@ -123,6 +123,7 @@ impl MediaFrameRegistry {
     }
 
     /// Get active track count
+    #[cfg(any(test, feature = "test-utils"))]
     pub fn active_tracks(&self) -> usize {
         self.callbacks.len()
     }

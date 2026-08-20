@@ -6,7 +6,7 @@
 use super::Dest; // Re-exported from actr-framework
 use super::error::{NetworkError, NetworkResult};
 use super::route_table::{DataLaneType, PayloadTypeExt};
-use super::wire_handle::{WireHandle, WireIdentity};
+use super::wire_handle::{WebRtcTransportLifecycle, WireHandle, WireIdentity};
 use super::wire_pool::{ConnType, ReadySet, RetryConfig, WirePool};
 use actr_protocol::PayloadType;
 use std::sync::Arc;
@@ -80,6 +80,7 @@ impl DestTransport {
         Self::new_inner(
             dest,
             connections,
+            RetryConfig::default(),
             #[cfg(test)]
             None,
         )
@@ -92,15 +93,25 @@ impl DestTransport {
         connections: Vec<Arc<dyn WireHandle>>,
         creation_barrier: Option<Arc<tokio::sync::Barrier>>,
     ) -> NetworkResult<Self> {
-        Self::new_inner(dest, connections, creation_barrier).await
+        Self::new_inner(dest, connections, RetryConfig::default(), creation_barrier).await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn new_with_retry_config(
+        dest: Dest,
+        connections: Vec<Arc<dyn WireHandle>>,
+        retry_config: RetryConfig,
+    ) -> NetworkResult<Self> {
+        Self::new_inner(dest, connections, retry_config, None).await
     }
 
     async fn new_inner(
         dest: Dest,
         connections: Vec<Arc<dyn WireHandle>>,
+        retry_config: RetryConfig,
         #[cfg(test)] creation_barrier: Option<Arc<tokio::sync::Barrier>>,
     ) -> NetworkResult<Self> {
-        let conn_mgr = Arc::new(WirePool::new(RetryConfig::default()));
+        let conn_mgr = Arc::new(WirePool::new(retry_config));
         let mut creation_guard =
             DestTransportCreationGuard::new(Arc::clone(&conn_mgr), connections);
 
@@ -418,15 +429,12 @@ impl DestTransport {
         Ok(())
     }
 
-    /// Close a single connection type without affecting other connections in
-    /// the pool.
-    ///
-    /// Used when a WebRTC connection closes but the WebSocket connection for
-    /// the same peer should remain alive (e.g. for response routing).
+    /// Close one connection type without affecting the other fallback wire.
+    #[allow(dead_code)]
     pub(crate) async fn close_connection(&self, conn_type: ConnType) -> NetworkResult<()> {
-        if let Some(conn) = self.conn_mgr.get_connection(conn_type).await {
-            if let Err(e) = conn.close().await {
-                tracing::warn!("Failed to close {:?} connection: {}", conn_type, e);
+        if let Some(connection) = self.conn_mgr.get_connection(conn_type).await {
+            if let Err(error) = connection.close().await {
+                tracing::warn!("Failed to close {:?} connection: {}", conn_type, error);
             } else {
                 tracing::debug!("Closed {:?} connection", conn_type);
             }
@@ -467,6 +475,33 @@ impl DestTransport {
         }
     }
 
+    /// Retire a connection flight after the WebRTC Controller has already
+    /// entered terminal cleanup. The Controller owns and closes the physical
+    /// Session/PeerConnection; invoking `WireHandle::close()` here would feed
+    /// an explicit manager close back into that in-flight close barrier. Close
+    /// fallback wires, detach the terminal WebRTC slot, and stop all pool work.
+    pub(crate) async fn retire_terminal_webrtc_flight(&self) -> NetworkResult<()> {
+        let mut first_error = None;
+        if let Some(connection) = self.conn_mgr.get_connection(ConnType::WebSocket).await {
+            if let Err(error) = connection.close().await {
+                first_error = Some(error);
+            }
+            self.conn_mgr
+                .mark_connection_closed(ConnType::WebSocket)
+                .await;
+        }
+        // The matching Controller retirement edge guarantees that every
+        // physical WebRTC generation has its own CloseSession effect/barrier.
+        // This layer owns only the ready-slot/cache lifetime.
+        self.conn_mgr.mark_connection_closed(ConnType::WebRTC).await;
+        self.conn_mgr.close_all().await;
+
+        match first_error {
+            Some(error) => Err(error),
+            None => Ok(()),
+        }
+    }
+
     /// Check if any connection is still healthy
     ///
     /// Used by health checker to detect failed connections
@@ -491,40 +526,40 @@ impl DestTransport {
         self.conn_mgr.watch_ready()
     }
 
-    /// Compare the WebRTC slot against the given `(peer_id, session_id)`.
+    /// Whether at least one wire can still become or remain ready.
+    pub(crate) async fn has_live_connection_candidate(&self) -> bool {
+        self.conn_mgr
+            .has_live_candidate(&[ConnType::WebSocket, ConnType::WebRTC])
+            .await
+    }
+
+    /// Check whether the active WebRTC wire still carries the given identity.
     ///
     /// Used by PeerTransport (session-guarded cleanup) to decide whether a
-    /// `ConnectionClosed` event refers to the live wire, a wire that already
-    /// died, or a stale session.
-    pub(crate) async fn webrtc_session_match(
+    /// `ConnectionClosed` event is stale or matches the current wire.
+    pub(crate) async fn matches_webrtc_session(
         &self,
         peer_id: &actr_protocol::ActrId,
         session_id: u64,
-    ) -> super::wire_pool::SessionMatch {
+    ) -> bool {
         let expected = WireIdentity::WebRtc {
             peer_id: peer_id.clone(),
             session_id,
         };
         self.conn_mgr
-            .session_match(ConnType::WebRTC, &expected)
+            .connection_matches_identity(ConnType::WebRTC, &expected)
             .await
     }
 
-    /// Whether any lane in this transport is currently sendable (Ready).
-    ///
-    /// Used to decide whether pending requests still have a live wire that
-    /// can deliver their responses (e.g. a surviving WebSocket lane after a
-    /// WebRTC wire died).
-    pub(crate) async fn has_ready_connection(&self) -> bool {
+    /// Whether the ready WebRTC wire belongs to the exact logical transport
+    /// attempt that reached terminal `Idle`.
+    pub(crate) async fn matches_webrtc_transport_lifecycle(
+        &self,
+        expected: &WebRtcTransportLifecycle,
+    ) -> bool {
         self.conn_mgr
-            .get_connection(ConnType::WebRTC)
+            .connection_matches_webrtc_lifecycle(expected)
             .await
-            .is_some()
-            || self
-                .conn_mgr
-                .get_connection(ConnType::WebSocket)
-                .await
-                .is_some()
     }
 }
 

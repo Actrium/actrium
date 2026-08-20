@@ -423,6 +423,113 @@ public struct PeerEvent: Equatable, Hashable, Sendable {
     }
 }
 
+/// Stable reason a WebRTC peer is unavailable (v0.20 backend, Stage 6).
+public enum WebRTCUnavailableReason: Equatable, Hashable, Sendable {
+    case connectionNotReady
+    case peerConnectionBuildFailed
+    case negotiationFailed
+    case iceRestartFailed
+    case peerConnectionRebuildFailed
+    case unsupportedRtcCapability
+    case rtcResourceLimitExceeded
+    case recoveryExhausted
+    case closed
+
+    init(bridge: ActrBindings.WebRtcUnavailableReasonBridge) {
+        switch bridge {
+        case .connectionNotReady:
+            self = .connectionNotReady
+        case .peerConnectionBuildFailed:
+            self = .peerConnectionBuildFailed
+        case .negotiationFailed:
+            self = .negotiationFailed
+        case .iceRestartFailed:
+            self = .iceRestartFailed
+        case .peerConnectionRebuildFailed:
+            self = .peerConnectionRebuildFailed
+        case .unsupportedRtcCapability:
+            self = .unsupportedRtcCapability
+        case .rtcResourceLimitExceeded:
+            self = .rtcResourceLimitExceeded
+        case .recoveryExhausted:
+            self = .recoveryExhausted
+        case .closed:
+            self = .closed
+        }
+    }
+}
+
+/// Whether the selected ICE candidate pair is direct or relayed (v0.20
+/// backend, Stage 6). Resolved asynchronously from stats; never blocks
+/// `sendable`.
+public enum WebRTCNetworkPath: Equatable, Hashable, Sendable {
+    case unknown
+    case direct
+    case relayed
+
+    init(bridge: ActrBindings.WebRtcNetworkPathBridge) {
+        switch bridge {
+        case .unknown:
+            self = .unknown
+        case .direct:
+            self = .direct
+        case .relayed:
+            self = .relayed
+        }
+    }
+}
+
+/// A point-in-time, unified view of one WebRTC peer's state (v0.20 backend,
+/// Stage 6). Returned by `ActrRef.getRtcPeerStatus` /
+/// `listRtcPeerStatuses` and delivered to `WebRTCObserver.onStateChanged`.
+/// `revision` is monotonic per peer, so consumers can de-duplicate; a
+/// subscriber replays the latest state immediately on subscribe.
+public struct WebRTCPeerState: Equatable, Hashable, Sendable {
+    public var peer: ActrId
+    public var pcGeneration: UInt64
+    public var revision: UInt64
+    public var status: WebRTCPeerStatus
+    public var sendable: Bool
+    public var networkPath: WebRTCNetworkPath
+    /// Derived from `networkPath`; kept for one compatibility cycle — new
+    /// consumers should read `networkPath`.
+    public var relayed: Bool?
+    public var unavailableReason: WebRTCUnavailableReason?
+
+    public init(
+        peer: ActrId,
+        pcGeneration: UInt64,
+        revision: UInt64,
+        status: WebRTCPeerStatus,
+        sendable: Bool,
+        networkPath: WebRTCNetworkPath,
+        relayed: Bool?,
+        unavailableReason: WebRTCUnavailableReason?
+    ) {
+        self.peer = peer
+        self.pcGeneration = pcGeneration
+        self.revision = revision
+        self.status = status
+        self.sendable = sendable
+        self.networkPath = networkPath
+        self.relayed = relayed
+        self.unavailableReason = unavailableReason
+    }
+
+    init(bridge: ActrBindings.WebRtcPeerStateBridge) {
+        self.init(
+            peer: ActrId(bridge: bridge.peer),
+            pcGeneration: bridge.pcGeneration,
+            revision: bridge.revision,
+            status: WebRTCPeerStatus(bridge: bridge.status),
+            sendable: bridge.sendable,
+            networkPath: WebRTCNetworkPath(bridge: bridge.networkPath),
+            relayed: bridge.relayed,
+            unavailableReason: bridge.unavailableReason.map(WebRTCUnavailableReason.init(bridge:))
+        )
+    }
+}
+
 public struct CredentialEvent: Equatable, Hashable, Sendable {
     public var newExpiryMs: Int64
 

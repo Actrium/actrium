@@ -198,7 +198,7 @@ async fn rpc_signal_retries_once_then_fails_with_correct_backoff() {
     let call_times_ref = Arc::clone(&builder.call_times);
 
     let transport = Arc::new(PeerTransport::new(local_actor_id(), Arc::new(builder)));
-    let gate = PeerGate::new(transport, None);
+    let gate = PeerGate::for_test(transport);
 
     let start = Instant::now();
     let result = gate
@@ -251,7 +251,7 @@ async fn rpc_signal_backoff_fires_no_earlier_than_its_deadline() {
     let call_times_ref = Arc::clone(&builder.call_times);
 
     let transport = Arc::new(PeerTransport::new(local_actor_id(), Arc::new(builder)));
-    let gate = Arc::new(PeerGate::new(transport, None));
+    let gate = Arc::new(PeerGate::for_test(transport));
 
     let send_task = {
         let gate = Arc::clone(&gate);
@@ -344,7 +344,7 @@ async fn client_error_is_not_retried() {
         local_actor_id(),
         Arc::new(ClientErrorBuilder),
     ));
-    let gate = PeerGate::new(transport, None);
+    let gate = PeerGate::for_test(transport);
 
     let start = Instant::now();
     let result = gate
@@ -387,7 +387,7 @@ async fn rpc_reliable_two_transient_failures_then_success() {
     let call_times_ref = Arc::clone(&builder.call_times);
 
     let transport = Arc::new(PeerTransport::new(local_actor_id(), Arc::new(builder)));
-    let gate = Arc::new(PeerGate::new(transport, None));
+    let gate = Arc::new(PeerGate::for_test(transport));
 
     let start = Instant::now();
 

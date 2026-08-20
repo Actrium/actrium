@@ -5,7 +5,7 @@
 
 use super::backoff::ExponentialBackoff;
 use super::error::{NetworkError, NetworkResult};
-use super::wire_handle::{WireHandle, WireIdentity, WireStatus};
+use super::wire_handle::{WebRtcTransportLifecycle, WireHandle, WireIdentity, WireStatus};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
@@ -37,24 +37,6 @@ impl ConnType {
 
 /// Set of ready connections
 pub(crate) type ReadySet = HashSet<ConnType>;
-
-/// Outcome of comparing a connection slot against an expected `WireIdentity`.
-///
-/// Distinguishes a live same-session wire from a dead one so callers can pick
-/// the right teardown/cleanup scope instead of collapsing both into "match".
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SessionMatch {
-    /// The slot is `Ready` and carries the expected identity — the live wire
-    /// for this session.
-    Ready,
-    /// The slot is `Failed` but retains the expected identity — this
-    /// session's wire already died. The event is NOT stale, but closing the
-    /// wire is a no-op; cleanup must be decided from the remaining lanes.
-    Retained,
-    /// No match: slot empty, `Connecting`, or carrying a different identity
-    /// (replaced by a fresh session).
-    NoMatch,
-}
 
 /// Retry configuration
 #[derive(Debug, Clone, Copy)]
@@ -104,6 +86,11 @@ pub(crate) struct WirePool {
     /// Connection status (array optimization: WebSocket=0, WebRTC=1)
     connections: Arc<RwLock<[Option<WireStatus>; 2]>>,
 
+    /// Immutable CAS key captured when the WebRTC connection flight obtains a
+    /// Controller attempt. It intentionally survives Ready -> Failed so a
+    /// racing send-path invalidation cannot erase terminal-cleanup identity.
+    webrtc_lifecycle: Arc<RwLock<Option<WebRtcTransportLifecycle>>>,
+
     /// Ready connection set (broadcast)
     ready_tx: watch::Sender<ReadySet>,
     ready_rx: watch::Receiver<ReadySet>,
@@ -128,6 +115,7 @@ impl WirePool {
 
         Self {
             connections: Arc::new(RwLock::new([None, None])),
+            webrtc_lifecycle: Arc::new(RwLock::new(None)),
             ready_tx: tx,
             ready_rx: rx,
             pending: Arc::new(AtomicU8::new(0)),
@@ -146,12 +134,16 @@ impl WirePool {
     /// - Use `add_connection_smart()` if you want to skip already-ready connections
     pub(crate) async fn add_connection(&self, connection: Arc<dyn WireHandle>) {
         let conn_type = connection.connection_type();
+        if conn_type == ConnType::WebRTC {
+            *self.webrtc_lifecycle.write().await = None;
+        }
         {
             let mut conns = self.connections.write().await;
-            conns[conn_type.as_index()] = Some(WireStatus::Connecting);
+            conns[conn_type.as_index()] = Some(WireStatus::Connecting(Arc::clone(&connection)));
         }
 
         let connections = Arc::clone(&self.connections);
+        let webrtc_lifecycle = Arc::clone(&self.webrtc_lifecycle);
         let ready_tx = self.ready_tx.clone();
         let pending = Arc::clone(&self.pending);
         let retry_config = self.retry_config;
@@ -261,6 +253,10 @@ impl WirePool {
                         // Compare-and-commit under the same lock used by
                         // `close_all`: a connection completing concurrently
                         // with close must never resurrect the cleared slot.
+                        if conn_type == ConnType::WebRTC {
+                            *webrtc_lifecycle.write().await =
+                                connection.webrtc_transport_lifecycle();
+                        }
                         let committed = {
                             let mut conns = connections.write().await;
                             if closed.load(Ordering::Acquire) {
@@ -272,6 +268,9 @@ impl WirePool {
                             }
                         };
                         if !committed {
+                            if conn_type == ConnType::WebRTC {
+                                *webrtc_lifecycle.write().await = None;
+                            }
                             if let Err(error) = connection.close().await {
                                 tracing::warn!(
                                     "Failed to close {:?} connection completed after pool close: {}",
@@ -350,29 +349,53 @@ impl WirePool {
                 retry_config.max_attempts
             );
 
+            if conn_type == ConnType::WebRTC {
+                *webrtc_lifecycle.write().await = connection.webrtc_transport_lifecycle();
+            }
+
             // Retry exhaustion is the single point that declares the secure
             // session terminally dead. Individual failed attempts stay
             // non-terminal so a later retry could still become sendable.
             connection.mark_secure_failed();
 
-            // Capture the wire's identity before transitioning out of Ready so
-            // a later same-session close event is not misjudged as stale.
-            let failed_identity = connection.identity();
-            {
+            // A connection can allocate resources before returning an error
+            // (notably a WebRTC Controller/PeerConnection that never reaches
+            // sendable). Retry exhaustion is terminal for this wire flight, so
+            // explicitly close it before discarding the handle from the slot.
+            if let Err(error) = connection.close().await {
+                tracing::warn!(
+                    "Failed to close {:?} connection after retry exhaustion: {}",
+                    conn_type,
+                    error
+                );
+            }
+
+            let committed_failure = {
                 let mut conns = connections.write().await;
-                conns[conn_type.as_index()] = Some(WireStatus::Failed(failed_identity));
+                if closed.load(Ordering::Acquire) {
+                    false
+                } else {
+                    conns[conn_type.as_index()] = Some(WireStatus::Failed(Arc::clone(&connection)));
 
-                // Check if all connections failed
-                let remaining = pending.load(Ordering::Relaxed);
-                if remaining == 0 {
-                    let all_failed = conns
-                        .iter()
-                        .all(|s| matches!(s, Some(WireStatus::Failed(_)) | None));
+                    // Check if all connections failed
+                    let remaining = pending.load(Ordering::Relaxed);
+                    if remaining == 0 {
+                        let all_failed = conns
+                            .iter()
+                            .all(|s| matches!(s, Some(WireStatus::Failed(_)) | None));
 
-                    if all_failed {
-                        tracing::error!("💀💀 All connections failed");
+                        if all_failed {
+                            tracing::error!("💀💀 All connections failed");
+                        }
                     }
+                    true
                 }
+            };
+            if !committed_failure {
+                if conn_type == ConnType::WebRTC {
+                    *webrtc_lifecycle.write().await = None;
+                }
+                return;
             }
 
             Self::broadcast_ready_connections(&connections, &ready_tx).await;
@@ -401,7 +424,7 @@ impl WirePool {
                     tracing::debug!("⏭️ [{:?}] Skipping - already Ready", conn_type);
                     false
                 }
-                Some(WireStatus::Connecting) => {
+                Some(WireStatus::Connecting(_)) => {
                     tracing::debug!("⏭️ [{:?}] Skipping - already Connecting", conn_type);
                     false
                 }
@@ -467,7 +490,7 @@ impl WirePool {
         conn_types.iter().any(|conn_type| {
             matches!(
                 &conns[conn_type.as_index()],
-                Some(WireStatus::Ready(_)) | Some(WireStatus::Connecting)
+                Some(WireStatus::Ready(_)) | Some(WireStatus::Connecting(_))
             )
         })
     }
@@ -475,21 +498,19 @@ impl WirePool {
     /// Mark a connection as closed/failed
     ///
     /// Called by upper layers (DestTransport) when closing connections.
-    /// This replaces the per-connection event listener pattern. Preserves the
-    /// wire's last `WireIdentity` so a subsequent same-session close event is
-    /// not misjudged as stale.
+    /// This replaces the per-connection event listener pattern.
     pub(crate) async fn mark_connection_closed(&self, conn_type: ConnType) {
         {
             let mut conns = self.connections.write().await;
-            let last_identity = match &conns[conn_type.as_index()] {
-                // Capture the Ready wire's identity before retiring it.
-                Some(WireStatus::Ready(handle)) => handle.identity(),
-                // Already Failed — preserve the previously captured identity.
-                Some(WireStatus::Failed(id)) => id.clone(),
-                // Never Ready, no identity to retain.
-                _ => None,
+            let status = conns[conn_type.as_index()].take();
+            conns[conn_type.as_index()] = match status {
+                Some(
+                    WireStatus::Connecting(handle)
+                    | WireStatus::Ready(handle)
+                    | WireStatus::Failed(handle),
+                ) => Some(WireStatus::Failed(handle)),
+                None => None,
             };
-            conns[conn_type.as_index()] = Some(WireStatus::Failed(last_identity));
         }
 
         // Update ready set
@@ -498,32 +519,57 @@ impl WirePool {
         tracing::debug!("🔌 Marked {:?} connection as closed", conn_type);
     }
 
-    /// Compare a connection slot against the given `WireIdentity`.
+    /// Check whether the active ready slot for a connection type still matches
+    /// the given `WireIdentity`.
     ///
-    /// Returns [`SessionMatch::Ready`] when the slot holds the live wire for
-    /// this session, [`SessionMatch::Retained`] when the wire for this
-    /// session already died but its identity is retained on the `Failed`
-    /// slot, and [`SessionMatch::NoMatch`] otherwise (empty, `Connecting`,
-    /// or a different session).
-    pub(crate) async fn session_match(
+    /// Returns `true` only when the slot is `Ready` and the underlying wire
+    /// reports the same identity. Returns `false` for `Connecting`, `Failed`,
+    /// `None`, or a mismatched wire (stale or replaced).
+    pub(crate) async fn connection_matches_identity(
         &self,
         conn_type: ConnType,
         expected_identity: &WireIdentity,
-    ) -> SessionMatch {
+    ) -> bool {
         let conns = self.connections.read().await;
         match &conns[conn_type.as_index()] {
             Some(WireStatus::Ready(handle)) => {
-                if handle.identity().as_ref() == Some(expected_identity) {
-                    SessionMatch::Ready
-                } else {
-                    SessionMatch::NoMatch
-                }
+                handle.identity().as_ref() == Some(expected_identity)
             }
-            Some(WireStatus::Failed(Some(last_identity))) if last_identity == expected_identity => {
-                SessionMatch::Retained
-            }
-            _ => SessionMatch::NoMatch,
+            _ => false,
         }
+    }
+
+    /// Check whether the WebRTC slot belongs to the exact logical connection
+    /// flight named by a terminal Controller event. Failed/connecting slots
+    /// retain their handle identity so a send-path race cannot erase the CAS
+    /// key before terminal transport cleanup consumes it.
+    pub(crate) async fn connection_matches_webrtc_lifecycle(
+        &self,
+        expected: &WebRtcTransportLifecycle,
+    ) -> bool {
+        let conns = self.connections.read().await;
+        let current = match &conns[ConnType::WebRTC.as_index()] {
+            Some(
+                WireStatus::Connecting(handle)
+                | WireStatus::Ready(handle)
+                | WireStatus::Failed(handle),
+            ) => handle.webrtc_transport_lifecycle(),
+            _ => None,
+        };
+        drop(conns);
+
+        // A long-lived v0.20 Controller can advance to a fresh transport epoch
+        // while the same Ready WireHandle remains cached. Its live identity is
+        // authoritative: consulting the commit-time snapshot first would let a
+        // delayed terminal event for epoch N evict the healthy epoch N+1.
+        if let Some(current) = current {
+            return &current == expected;
+        }
+
+        // Failed/closed handles may no longer expose their Controller. Retain
+        // the commit-time key only as a fallback so terminal cleanup can still
+        // remove that dead flight.
+        self.webrtc_lifecycle.read().await.as_ref() == Some(expected)
     }
 
     /// Compare-and-swap close: mark a connection as Failed **only if** the
@@ -551,12 +597,15 @@ impl WirePool {
                     }
                 }
                 _ => {
-                    // Not Ready — nothing to transition, and we must not
-                    // clobber a previously-retained Failed identity.
+                    // Not Ready — nothing to mark
                     return false;
                 }
             }
-            conns[conn_type.as_index()] = Some(WireStatus::Failed(Some(expected_identity.clone())));
+            let handle = match conns[conn_type.as_index()].take() {
+                Some(WireStatus::Ready(handle)) => handle,
+                _ => unreachable!("ready slot was validated above"),
+            };
+            conns[conn_type.as_index()] = Some(WireStatus::Failed(handle));
         }
 
         Self::broadcast_ready_connections(&self.connections, &self.ready_tx).await;
@@ -580,6 +629,8 @@ impl WirePool {
         // 2. Clear all connection status
         let mut conns = self.connections.write().await;
         *conns = [None, None];
+        drop(conns);
+        *self.webrtc_lifecycle.write().await = None;
 
         // 3. Broadcast empty ready set
         let _ = self.ready_tx.send(HashSet::new());

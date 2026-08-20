@@ -283,17 +283,18 @@ timer_inventory! {
         success: "send and response path completes", interrupt: "caller cancellation or completion",
         expiry: "close stale transport and return timeout", reset: "new request only", external: false
     },
+    PEER_PENDING_RECOVERY_GRACE => {
+        id: "outbound.peer.pending_recovery_grace", owner: "peer_gate", category: BusinessHysteresis,
+        duration: "PENDING_RECOVERY_GRACE", arm: "an authoritative peer snapshot loses sendability",
+        success: "the same peer becomes sendable again", interrupt: "peer recovery or gate shutdown",
+        expiry: "release pending RPC response waits without closing the destination transport",
+        reset: "each distinct sendability falling edge", external: false
+    },
     CORRELATION_RESPONSE => {
         id: "transport.correlation.response", owner: "correlation", category: FailureDeadline,
         duration: "caller response timeout", arm: "pending RPC awaits response",
         success: "oneshot response", interrupt: "response channel close",
         expiry: "remove pending correlation and return timeout", reset: "new RPC only", external: false
-    },
-    LANE_INITIAL_READY => {
-        id: "transport.lane.initial_ready", owner: "lane", category: FailureDeadline,
-        duration: "INITIAL_CONNECTION_TIMEOUT", arm: "lane waits for initial open state",
-        success: "watch state becomes ready or terminal", interrupt: "terminal state",
-        expiry: "return connection timeout", reset: "replacement lane only", external: false
     },
     PEER_TRANSPORT_CREATE => {
         id: "transport.peer.create", owner: "peer_transport", category: FailureDeadline,
@@ -337,71 +338,11 @@ timer_inventory! {
         success: "region reports completion", interrupt: "generation replacement or shutdown",
         expiry: "emit generation-tagged deadline", reset: "new region only", external: false
     },
-    DATA_CHANNEL_DRAIN => {
-        id: "webrtc.data_channel.drain", owner: "webrtc_connection", category: FailureDeadline,
-        duration: "DATA_CHANNEL_DRAIN_TIMEOUT", arm: "connection close waits for buffered drain",
-        success: "buffered-low notification", interrupt: "peer connection terminal state",
-        expiry: "continue close with residual", reset: "new close only", external: false
-    },
-    DATA_CHANNEL_CLOSE => {
-        id: "webrtc.data_channel.close", owner: "webrtc_connection", category: FailureDeadline,
-        duration: "DATA_CHANNEL_CLOSE_TIMEOUT", arm: "connection teardown closes all cached channels, or a refused registration closes its fresh channel",
-        success: "every data channel close returns", interrupt: "connection drop",
-        expiry: "states already flipped to Closing; continue teardown", reset: "new close only", external: false
-    },
-    PEER_CONNECTION_CLOSE => {
-        id: "webrtc.peer_connection.close", owner: "webrtc_connection", category: FailureDeadline,
-        duration: "PEER_CONNECTION_CLOSE_TIMEOUT", arm: "physical peer close starts",
-        success: "peer connection closes", interrupt: "connection drop",
-        expiry: "return bounded close error", reset: "new connection only", external: false
-    },
-    WEBRTC_CLOSE_FALLBACK => {
-        id: "webrtc.coordinator.close_fallback", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "PEER_CONNECTION_CLOSE_FALLBACK_TIMEOUT", arm: "normal close path leaves peer open",
-        success: "fallback close completes", interrupt: "peer drop",
-        expiry: "drop remaining peer resources", reset: "new peer only", external: false
-    },
     WEBRTC_PEER_SENDABLE => {
         id: "webrtc.coordinator.peer_sendable", owner: "webrtc_coordinator", category: FailureDeadline,
         duration: "caller readiness timeout", arm: "send waits for current ready session",
         success: "state event plus authoritative ready check", interrupt: "event stream close",
         expiry: "return no sendable session", reset: "new send wait only", external: false
-    },
-    WEBRTC_INITIAL_READINESS => {
-        id: "webrtc.coordinator.initial_readiness", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "ICE and DataChannel readiness budgets", arm: "new peer session awaits readiness",
-        success: "retained state or readiness event", interrupt: "terminal event or replacement session",
-        expiry: "fail connection attempt", reset: "ICE-connected transition starts DataChannel stage", external: false
-    },
-    STALE_PEER_EXPIRY => {
-        id: "webrtc.coordinator.stale_peer_expiry", owner: "webrtc_coordinator", category: RetentionExpiry,
-        duration: "nearest peer-state retention deadline, capped at STALE_PEER_IDLE_INTERVAL", arm: "peer enters retained non-ready state",
-        success: "peer state changes", interrupt: "state-change notification or shutdown",
-        expiry: "reap due peers and resynchronize lost transitions", reset: "material peer-state transition only", external: false
-    },
-    STALE_PEER_IDLE_TICK => {
-        id: "webrtc.coordinator.stale_peer_idle_tick", owner: "webrtc_coordinator", category: ProtocolSchedule,
-        duration: "STALE_PEER_IDLE_INTERVAL", arm: "no peer holds a reap deadline",
-        success: "fallback reconciliation scan runs", interrupt: "state-change notification or shutdown",
-        expiry: "run reconciliation scan (lost transitions have no wake)", reset: "next scan only", external: false
-    },
-    WEBRTC_CLOSE_ALL_QUIESCE => {
-        id: "webrtc.coordinator.close_all_quiesce", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "one CLOSE_ALL_QUIESCE_TIMEOUT deadline", arm: "close-all fences creators",
-        success: "all restart/creator tasks quiesce", interrupt: "all tasks complete",
-        expiry: "abort remaining tasks and continue teardown", reset: "one close-all operation", external: false
-    },
-    WEBRTC_CLOSE_ALL_HOOK => {
-        id: "webrtc.coordinator.close_all_hook", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "shared CLOSE_ALL_HOOK_TIMEOUT deadline", arm: "close-all invokes peer hooks",
-        success: "hook completes", interrupt: "shared overall deadline",
-        expiry: "skip unfinished hook and close peer", reset: "one close-all operation", external: false
-    },
-    WEBRTC_PEER_TEARDOWN_HOOK => {
-        id: "webrtc.coordinator.peer_teardown_hook", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "PEER_TEARDOWN_HOOK_TIMEOUT", arm: "single-peer teardown delivers the disconnected lifecycle hook",
-        success: "hook future completes", interrupt: "hook completion",
-        expiry: "skip hook and proceed to physical close", reset: "new teardown only", external: false
     },
     WEBRTC_PEER_RECOVERY_DEADLINE => {
         id: "webrtc.coordinator.peer_recovery_deadline", owner: "peer_recovery", category: FailureDeadline,
@@ -411,59 +352,25 @@ timer_inventory! {
         expiry: "enqueue identity-checked teardown for the exact stale session",
         reset: "new session/recovery revision only; duplicate facts never extend it", external: false
     },
-    WEBRTC_CONNECTION_READY => {
-        id: "webrtc.coordinator.connection_ready", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "INITIAL_CONNECTION_TIMEOUT or caller wait budget", arm: "connection attempt awaits ready signal",
-        success: "ready oneshot or authoritative state", interrupt: "cancellation token or terminal state",
-        expiry: "fail current attempt", reset: "replacement attempt only", external: false
-    },
-    WEBRTC_CANDIDATE_FLUSH => {
-        id: "webrtc.coordinator.candidate_flush", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "REMOTE_CANDIDATE_FLUSH_TIMEOUT", arm: "buffered remote ICE candidates become applicable",
-        success: "all current candidates apply", interrupt: "session replacement",
-        expiry: "retain/report candidate failure", reset: "new candidate batch", external: false
-    },
-    WEBRTC_SIGNALING_WORKER_IDLE => {
-        id: "webrtc.coordinator.signaling_worker_idle", owner: "webrtc_coordinator", category: RetentionExpiry,
-        duration: "SIGNALING_PEER_WORKER_IDLE_TIMEOUT", arm: "a peer signaling FIFO becomes idle",
-        success: "a new signaling envelope arrives", interrupt: "coordinator shutdown",
-        expiry: "retire the idle peer worker", reset: "after each handled envelope", external: false
-    },
-    WEBRTC_SEND_OVERALL => {
-        id: "webrtc.coordinator.send_overall", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "OVERALL_TIMEOUT or caller send budget", arm: "coordinator send/create operation starts",
-        success: "operation completes", interrupt: "caller cancellation or close",
-        expiry: "return timed out", reset: "new operation only", external: false
-    },
-    WEBRTC_RETRY_BACKOFF => {
-        id: "webrtc.coordinator.retry_backoff", owner: "webrtc_coordinator", category: FailureBackoff,
-        duration: "connection/send/ICE retry pacing", arm: "retryable WebRTC operation fails or a prerequisite is unavailable",
-        success: "retry eligibility becomes true", interrupt: "shutdown, wake notification, or generation replacement",
-        expiry: "retry current generation", reset: "successful readiness transition or new generation", external: false
-    },
-    WEBRTC_ICE_GATHERING => {
-        id: "webrtc.coordinator.ice_gathering", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "remaining ICE gathering/restart budget", arm: "ICE restart waits for gathering",
-        success: "gathering-complete notification", interrupt: "restart wake or session replacement",
-        expiry: "abort restart attempt", reset: "new restart generation", external: false
-    },
     WEBRTC_ICE_RESTART_WAIT => {
         id: "webrtc.coordinator.ice_restart_wait", owner: "webrtc_coordinator", category: FailureDeadline,
         duration: "per-attempt restart timeout", arm: "ICE restart attempt awaits committed connected state",
         success: "state event plus authoritative state", interrupt: "restart wake or session replacement",
         expiry: "classify attempt timeout", reset: "new restart attempt", external: false
     },
-    WEBRTC_ROLE_NEGOTIATION => {
-        id: "webrtc.coordinator.role_negotiation", owner: "webrtc_coordinator", category: FailureDeadline,
-        duration: "ROLE_NEGOTIATION_TIMEOUT", arm: "simultaneous connection negotiates role",
-        success: "role result channel", interrupt: "peer/session replacement",
-        expiry: "fail negotiation", reset: "new negotiation generation", external: false
-    },
     SIGNALING_CONNECT => {
         id: "signaling.connect", owner: "signaling_client", category: FailureDeadline,
         duration: "configured connect timeout", arm: "WebSocket connect starts",
         success: "WebSocket handshake", interrupt: "generation invalidation",
         expiry: "fail current connect generation", reset: "new generation only", external: false
+    },
+    SIGNALING_INBOUND_RETRY_BACKOFF => {
+        id: "signaling.inbound.retry_backoff", owner: "signaling_router", category: FailureBackoff,
+        duration: "bounded exponential backoff, 50ms doubling to a 1s cap",
+        arm: "the sole v0.20 signaling consumer observes the inbound queue close or a receive error",
+        success: "backoff deadline", interrupt: "router shutdown",
+        expiry: "retry receive on the (possibly replaced) inbound queue",
+        reset: "a received envelope", external: false
     },
     SIGNALING_REQUEST_RESPONSE => {
         id: "signaling.request_response", owner: "signaling_client", category: FailureDeadline,
@@ -512,6 +419,54 @@ timer_inventory! {
         duration: "InboundQueueConfig.backpressure_timeout", arm: "receiver enqueues unmatched/push envelope onto a full bounded inbound queue",
         success: "queue capacity granted within the deadline", interrupt: "inbound channel reset or receiver abort",
         expiry: "fail closed (drop connection and reconnect)", reset: "new enqueue only", external: false
+    },
+    RTC_BUILD_JITTER => {
+        id: "webrtc.build_jitter", owner: "rtc_peer_controller", category: FailureBackoff,
+        duration: "BuildThrottle.max_jitter (random per-peer)", arm: "session build or restart effect is submitted",
+        success: "jitter delay elapses", interrupt: "controller shutdown",
+        expiry: "proceed to the build semaphore", reset: "each build or restart effect", external: false
+    },
+    RTC_CONFIGURATION_REFRESH => {
+        id: "webrtc.configuration_refresh", owner: "rtc_connection_manager", category: FailureDeadline,
+        duration: "CONFIGURATION_REFRESH_TIMEOUT", arm: "TURN/ICE configuration is broadcast to one peer controller",
+        success: "the controller applies or rejects the configuration", interrupt: "controller termination",
+        expiry: "skip the unresponsive peer and continue refreshing others", reset: "each peer refresh operation", external: false
+    },
+    RTC_ROLE_NEGOTIATION_WAIT => {
+        id: "webrtc.role_negotiation_wait", owner: "rtc_peer_controller", category: FailureDeadline,
+        duration: "ROLE_NEGOTIATION_TIMEOUT", arm: "a role-negotiation epoch sends RoleNegotiation",
+        success: "matching RoleAssignment arrives", interrupt: "close or controller shutdown",
+        expiry: "emit identity-checked role-negotiation deadline", reset: "new negotiation epoch only", external: false
+    },
+    RTC_CLOSE_ALL_DEADLINE => {
+        id: "webrtc.close_all_deadline", owner: "rtc_connection_manager", category: FailureDeadline,
+        duration: "CLOSE_ALL_OVERALL_TIMEOUT", arm: "close_all fences and drains the peer registry",
+        success: "all controller tasks join", interrupt: "overall deadline",
+        expiry: "abort and join remaining controller tasks", reset: "one close_all operation", external: false
+    },
+    RTC_CLOSE_PEER_DEADLINE => {
+        id: "webrtc.close_peer_deadline", owner: "rtc_connection_manager", category: FailureDeadline,
+        duration: "CLOSE_PEER_OVERALL_TIMEOUT", arm: "one peer controller begins terminal close",
+        success: "the controller task joins", interrupt: "peer close completion",
+        expiry: "abort the controller and start explicit Session cleanup", reset: "one close_peer operation", external: false
+    },
+    RTC_CLOSE_PEER_FALLBACK => {
+        id: "webrtc.close_peer_fallback", owner: "rtc_connection_manager", category: FailureDeadline,
+        duration: "CLOSE_PEER_FALLBACK_TIMEOUT", arm: "the normal peer close deadline expires",
+        success: "all retained Sessions close explicitly", interrupt: "fallback cleanup completion",
+        expiry: "retire the closing tombstone and report cleanup timeout", reset: "one expired close_peer operation", external: false
+    },
+    RTC_LOCAL_ADDRESS_REFRESH => {
+        id: "webrtc.local_address_refresh", owner: "rtc_address_monitor", category: CompatibilityPolling,
+        duration: "2s production fallback (25ms in unit tests)", arm: "node-owned address monitor starts",
+        success: "next interface snapshot sampled", interrupt: "node shutdown",
+        expiry: "enumerate active interface addresses", reset: "fixed period", external: false
+    },
+    RTC_TEST_FAULT_DELAY => {
+        id: "webrtc.test_fault_delay", owner: "deterministic_network", category: ProtocolSchedule,
+        duration: "NetworkFault::Delay duration", arm: "a test fault delays a signaling message",
+        success: "delay elapses and the message is delivered", interrupt: "test cancellation",
+        expiry: "deliver the delayed message", reset: "each delayed message", external: false
     },
     WEBSOCKET_ACCEPT_BACKOFF => {
         id: "websocket.accept_backoff", owner: "websocket_server", category: FailureBackoff,
@@ -607,21 +562,6 @@ pub(crate) struct AuditedSleep {
     started: Instant,
     deadline: Instant,
     finished: bool,
-}
-
-impl AuditedSleep {
-    pub(crate) fn reset(mut self: Pin<&mut Self>, deadline: Instant) {
-        let this = self.as_mut().get_mut();
-        this.started = Instant::now();
-        this.deadline = deadline;
-        this.finished = false;
-        trace_armed(
-            this.definition,
-            deadline.saturating_duration_since(this.started),
-            deadline,
-        );
-        this.inner.as_mut().reset(deadline);
-    }
 }
 
 impl Future for AuditedSleep {
@@ -962,8 +902,20 @@ mod tests {
                 "certificate cache freshness; deliberately tracks real elapsed time",
             ),
             (
-                "wire/webrtc/adapter.rs",
-                "webrtc v0.20 get_stats() requires a std::time::Instant report stamp; the stamp is consumed by the upstream stats collector and never compared against a lifecycle deadline",
+                "wire/webrtc/test_runtime.rs",
+                "webrtc v0.20 Runtime methods require std::time::Instant; this adapter forwards that upstream clock contract and never makes an Actr lifecycle decision",
+            ),
+            (
+                "wire/webrtc/v020/fault.rs",
+                "the instrumented webrtc v0.20 Runtime must preserve upstream std::time::Instant method signatures; PolicyClock owns Actr recovery deadlines",
+            ),
+            (
+                "wire/webrtc/v020/media.rs",
+                "the test-only RtpSender mock implements the upstream get_stats(std::time::Instant) signature and never gates lifecycle state",
+            ),
+            (
+                "wire/webrtc/v020/peer/effects.rs",
+                "webrtc v0.20 get_stats() requires a std::time::Instant report stamp; the report is observation-only and never gates sendability or recovery",
             ),
         ];
 

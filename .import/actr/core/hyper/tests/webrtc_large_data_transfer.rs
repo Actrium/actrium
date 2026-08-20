@@ -13,13 +13,10 @@
 //! - Sequential large messages (verify msg_id counter works)
 
 use actr_hyper::outbound::PeerGate;
-use actr_hyper::test_support::{TestHarness, make_actor_id, spawn_response_receiver};
-use actr_hyper::wire::webrtc::WebRtcCoordinator;
-use actr_protocol::prost::Message as ProstMessage;
+use actr_hyper::test_support::{TestHarness, make_actor_id};
 use actr_protocol::{ActrId, Direction, RpcEnvelope};
 use bytes::Bytes;
 use sha2::{Digest, Sha256};
-use std::sync::Arc;
 use std::sync::LazyLock;
 use std::time::Duration;
 
@@ -27,25 +24,10 @@ use std::time::Duration;
 static WEBRTC_LARGE_DATA_TEST_LOCK: LazyLock<tokio::sync::Mutex<()>> =
     LazyLock::new(|| tokio::sync::Mutex::new(()));
 
-struct BackgroundTasks(Vec<tokio::task::JoinHandle<()>>);
+struct BackgroundTasks;
 
 impl BackgroundTasks {
-    async fn shutdown(mut self) {
-        for task in &self.0 {
-            task.abort();
-        }
-        while let Some(task) = self.0.pop() {
-            let _ = task.await;
-        }
-    }
-}
-
-impl Drop for BackgroundTasks {
-    fn drop(&mut self) {
-        for task in &self.0 {
-            task.abort();
-        }
-    }
+    async fn shutdown(self) {}
 }
 
 fn init_tracing() {
@@ -72,85 +54,6 @@ fn generate_test_data(size: usize) -> (Vec<u8>, [u8; 32]) {
     (data, hash)
 }
 
-/// Spawn a "data echo" responder on the target peer.
-///
-/// Unlike the default `start_echo_responder` (which returns a fixed "pong"),
-/// this responder echoes back the **full request payload** so that the sender
-/// can verify end-to-end data integrity.
-fn spawn_data_echo_responder(
-    coordinator: Arc<WebRtcCoordinator>,
-    gate: Arc<PeerGate>,
-    name: &str,
-) -> tokio::task::JoinHandle<()> {
-    let name = name.to_string();
-    tokio::spawn(async move {
-        tracing::info!("🎯 {} data-echo responder started", name);
-        loop {
-            match coordinator.receive_message().await {
-                Ok(Some((sender_id_bytes, message_data, _payload_type))) => {
-                    let sender_id = match ActrId::decode(&sender_id_bytes[..]) {
-                        Ok(id) => id,
-                        Err(e) => {
-                            tracing::error!("{}: Failed to decode sender ID: {}", name, e);
-                            continue;
-                        }
-                    };
-
-                    match RpcEnvelope::decode(message_data.as_ref()) {
-                        Ok(request) => {
-                            let payload_len =
-                                request.payload.as_ref().map(|p| p.len()).unwrap_or(0);
-                            tracing::info!(
-                                "📨 {} received request: {} ({} bytes payload)",
-                                name,
-                                request.request_id,
-                                payload_len,
-                            );
-
-                            // Echo back the same payload
-                            let response = RpcEnvelope {
-                                request_id: request.request_id.clone(),
-                                route_key: "response".to_string(),
-                                payload: request.payload.clone(),
-                                timeout_ms: 0,
-                                direction: Some(Direction::Response as i32),
-                                ..Default::default()
-                            };
-
-                            if let Err(e) = gate.send_message(&sender_id, response).await {
-                                tracing::error!(
-                                    "{}: Failed to send echo response for {}: {}",
-                                    name,
-                                    request.request_id,
-                                    e
-                                );
-                            } else {
-                                tracing::info!(
-                                    "✅ {} echoed {} bytes for {}",
-                                    name,
-                                    payload_len,
-                                    request.request_id,
-                                );
-                            }
-                        }
-                        Err(e) => {
-                            tracing::error!("{}: Failed to decode RpcEnvelope: {}", name, e);
-                        }
-                    }
-                }
-                Ok(None) => {
-                    tracing::info!("📪 {} channel closed", name);
-                    break;
-                }
-                Err(e) => {
-                    tracing::error!("{}: Error receiving message: {}", name, e);
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-        }
-    })
-}
-
 /// Set up a two-peer connection with data-echo responder.
 ///
 /// This replaces `harness.connect()` because `connect()` starts its own
@@ -162,24 +65,6 @@ async fn setup_connected_peers(from_serial: u64, to_serial: u64) -> (TestHarness
     let mut harness = TestHarness::new().await;
     harness.add_peer(from_serial).await;
     harness.add_peer(to_serial).await;
-
-    let mut bg_tasks = Vec::new();
-
-    // Start data-echo responder on target peer (echoes full payload)
-    let echo_handle = spawn_data_echo_responder(
-        harness.peer(to_serial).coordinator.clone(),
-        harness.peer(to_serial).gate.clone(),
-        &format!("data_echo_{}", to_serial),
-    );
-    bg_tasks.push(echo_handle);
-
-    // Start response receiver on source peer
-    let recv_handle = spawn_response_receiver(
-        harness.peer(from_serial).coordinator.clone(),
-        harness.peer(from_serial).gate.clone(),
-        &format!("recv_{}", from_serial),
-    );
-    bg_tasks.push(recv_handle);
 
     // Send initial small request to establish connection (triggers lazy WebRTC setup)
     let target_id = make_actor_id(to_serial);
@@ -214,7 +99,7 @@ async fn setup_connected_peers(from_serial: u64, to_serial: u64) -> (TestHarness
     // Brief stabilization
     tokio::time::sleep(Duration::from_millis(300)).await;
 
-    (harness, BackgroundTasks(bg_tasks))
+    (harness, BackgroundTasks)
 }
 
 /// Helper: send a large payload and verify the echoed response with multi-layer
@@ -535,21 +420,6 @@ async fn test_bidirectional_large_data() {
 
     // ── Direction 2: peer 200 → peer 100 (96 KB, answerer sends) ──
     tracing::info!("📤 Direction 2: peer 200 → peer 100 (96 KB, answerer sends)");
-
-    // Swap the single-consumer message handlers while retaining the same peer
-    // connection established above.
-    let _reverse_tasks = BackgroundTasks(vec![
-        spawn_data_echo_responder(
-            harness.peer(100).coordinator.clone(),
-            harness.peer(100).gate.clone(),
-            "data_echo_100",
-        ),
-        spawn_response_receiver(
-            harness.peer(200).coordinator.clone(),
-            harness.peer(200).gate.clone(),
-            "recv_200",
-        ),
-    ]);
 
     // Verify the reverse request path before sending the large payload.
     let target_100 = make_actor_id(100);

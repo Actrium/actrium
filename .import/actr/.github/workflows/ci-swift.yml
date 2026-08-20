@@ -31,7 +31,7 @@ jobs:
           key: uniffi-bindgen-0.31.1-${{ runner.os }}-${{ runner.arch }}
       - name: Install UniFFI bindgen
         if: steps.cache-uniffi.outputs.cache-hit != 'true'
-        run: cargo install --locked uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+        run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
       - name: Install Swift tools and libraries
         run: brew install swiftlint opus
       - name: Run SwiftLint

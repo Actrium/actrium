@@ -79,7 +79,7 @@ use std::time::Duration;
 use tokio::time::Instant;
 
 use crate::transport::{NetworkError, PeerTransport};
-use crate::wire::webrtc::{CleanupGuard, SignalingClient, WebRtcCoordinator};
+use crate::wire::webrtc::SignalingClient;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -92,7 +92,7 @@ use super::session_state::{SessionPhase, SessionState};
 
 const NETWORK_EVENT_RESULT_TIMEOUT: Duration = Duration::from_secs(5);
 const SIGNALING_PROBE_TIMEOUT: Duration = Duration::from_secs(1);
-pub(super) const LONG_BACKGROUND_RECONNECT_THRESHOLD_MS: u64 = 30_000;
+pub(crate) const LONG_BACKGROUND_RECONNECT_THRESHOLD_MS: u64 = 30_000;
 /// Upper bound accepted for `background_duration_ms` (30 days, in ms).
 ///
 /// Bindings derive the duration from wall-clock timestamps, so a clock jump
@@ -104,12 +104,6 @@ pub(super) const MAX_BACKGROUND_DURATION_MS: u64 = 2_592_000_000;
 static NEXT_NETWORK_EVENT_REQUEST_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_NETWORK_RECOVERY_ACTION_ID: AtomicU64 = AtomicU64::new(1);
 static NEXT_NETWORK_SOURCE_EPOCH: AtomicU64 = AtomicU64::new(1);
-
-/// Keeps outbound sends behind a network-event lifecycle barrier while the
-/// reconciler evaluates and processes a queued decision cycle.
-pub struct NetworkEventBarrier {
-    _cleanup_guard: CleanupGuard,
-}
 
 /// Mobile network path snapshot.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -379,21 +373,6 @@ impl TeardownReport {
     }
 }
 
-fn network_event_needs_lifecycle_barrier(event: &NetworkEvent) -> bool {
-    match event {
-        NetworkEvent::NetworkPathChanged { snapshot } => {
-            snapshot.is_offline() || snapshot.should_restore()
-        }
-        NetworkEvent::AppLifecycleChanged { state } => match state {
-            AppLifecycleState::Background => false,
-            AppLifecycleState::Foreground {
-                background_duration_ms,
-            } => *background_duration_ms >= LONG_BACKGROUND_RECONNECT_THRESHOLD_MS,
-        },
-        NetworkEvent::CleanupConnections { .. } | NetworkEvent::ForceReconnect { .. } => true,
-    }
-}
-
 /// Accept facts only from the newest attached platform-monitor incarnation.
 ///
 /// Network snapshots also carry an incarnation-local sequence that the policy
@@ -479,12 +458,6 @@ pub trait NetworkEventProcessor: Send + Sync {
     /// attempt. The supervisor shell calls this synchronously before cancelling
     /// a superseded recovery effect.
     fn invalidate_signaling_connection_attempts(&self) {}
-
-    /// Enter a lifecycle barrier as soon as a queued event is observed by the
-    /// reconciler. The default is no barrier for custom processors.
-    fn begin_network_event_barrier(&self, _event: &NetworkEvent) -> Option<NetworkEventBarrier> {
-        None
-    }
 
     /// Process network available event
     ///
@@ -677,8 +650,9 @@ impl SignalingRecoveryState {
 /// Default network event processor implementation
 pub struct DefaultNetworkEventProcessor {
     signaling_client: Arc<dyn SignalingClient>,
-    webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
     peer_transport: Option<Arc<PeerTransport>>,
+    #[cfg(feature = "webrtc-v020")]
+    v020_manager: Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>,
     debounce_config: DebounceConfig,
     debounce_state: Option<Arc<DebounceState>>,
     recovery_state: Arc<SignalingRecoveryState>,
@@ -686,13 +660,9 @@ pub struct DefaultNetworkEventProcessor {
 }
 
 impl DefaultNetworkEventProcessor {
-    pub fn new(
-        signaling_client: Arc<dyn SignalingClient>,
-        webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
-    ) -> Self {
+    pub fn new(signaling_client: Arc<dyn SignalingClient>) -> Self {
         Self::new_with_debounce_and_peer_transport(
             signaling_client,
-            webrtc_coordinator,
             DebounceConfig::default(),
             None,
         )
@@ -700,25 +670,17 @@ impl DefaultNetworkEventProcessor {
 
     pub fn new_with_debounce(
         signaling_client: Arc<dyn SignalingClient>,
-        webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
         debounce_config: DebounceConfig,
     ) -> Self {
-        Self::new_with_debounce_and_peer_transport(
-            signaling_client,
-            webrtc_coordinator,
-            debounce_config,
-            None,
-        )
+        Self::new_with_debounce_and_peer_transport(signaling_client, debounce_config, None)
     }
 
     pub(crate) fn new_with_peer_transport(
         signaling_client: Arc<dyn SignalingClient>,
-        webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
         peer_transport: Option<Arc<PeerTransport>>,
     ) -> Self {
         Self::new_with_debounce_and_peer_transport(
             signaling_client,
-            webrtc_coordinator,
             DebounceConfig::default(),
             peer_transport,
         )
@@ -726,7 +688,6 @@ impl DefaultNetworkEventProcessor {
 
     pub(crate) fn new_with_debounce_and_peer_transport(
         signaling_client: Arc<dyn SignalingClient>,
-        webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
         debounce_config: DebounceConfig,
         peer_transport: Option<Arc<PeerTransport>>,
     ) -> Self {
@@ -734,8 +695,9 @@ impl DefaultNetworkEventProcessor {
             (!debounce_config.window.is_zero()).then(|| Arc::new(DebounceState::new()));
         Self {
             signaling_client,
-            webrtc_coordinator,
             peer_transport,
+            #[cfg(feature = "webrtc-v020")]
+            v020_manager: None,
             debounce_config,
             debounce_state,
             recovery_state: Arc::new(SignalingRecoveryState::new()),
@@ -748,12 +710,13 @@ impl DefaultNetworkEventProcessor {
         self
     }
 
-    fn lifecycle_barrier(&self) -> Option<NetworkEventBarrier> {
-        self.webrtc_coordinator
-            .as_ref()
-            .map(|coordinator| NetworkEventBarrier {
-                _cleanup_guard: coordinator.cleanup_guard(),
-            })
+    #[cfg(feature = "webrtc-v020")]
+    pub(crate) fn with_v020_manager(
+        mut self,
+        manager: Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>,
+    ) -> Self {
+        self.v020_manager = manager;
+        self
     }
 
     /// Check whether an event should be filtered by debounce
@@ -914,13 +877,6 @@ impl DefaultNetworkEventProcessor {
         reason: &str,
         action_id: Option<u64>,
     ) -> Result<(), NetworkRecoveryError> {
-        let _cleanup_guard = self.lifecycle_barrier();
-        let recovery_targets = if let Some(coordinator) = self.webrtc_coordinator.clone() {
-            coordinator.begin_network_recovery(reason).await
-        } else {
-            Vec::new()
-        };
-
         self.ensure_signaling_healthy_once_typed(reason, action_id)
             .await?;
 
@@ -930,17 +886,10 @@ impl DefaultNetworkEventProcessor {
             session.set_active().await;
         }
 
-        let coordinator = self.webrtc_coordinator.clone();
-
-        if let Some(coordinator) = coordinator {
-            if recovery_targets.is_empty() {
-                tracing::info!("♻️ Resuming ICE restart for peers already in network recovery");
-            } else {
-                tracing::info!("♻️ Triggering ICE restart for recovering connections...");
-            }
-            coordinator.restart_network_recovery_connections().await;
-        }
-
+        // RTC recovery is deliberately not started here. The global
+        // supervisor first commits the signaling generation; the v0.20
+        // controllers observe that committed generation through their
+        // recovery gate and only then launch ICE restart / SDP effects.
         Ok(())
     }
 
@@ -971,23 +920,6 @@ impl DefaultNetworkEventProcessor {
             })
     }
 
-    /// A signaling-only probe must not conclude recovery for WebRTC peers that
-    /// still carry an unresolved session recovery guard (#359): "signaling is
-    /// alive" is not evidence that a peer's data path recovered. After the
-    /// signaling channel is verified alive, continue (or trigger) ICE restart
-    /// for exactly the guarded peers. This is a no-op when no peer is
-    /// recovering, so a short-foreground probe stays signaling-only for fully
-    /// ready peers.
-    async fn continue_guarded_webrtc_recovery_after_probe(&self, reason: &str) {
-        if let Some(coordinator) = self.webrtc_coordinator.clone() {
-            tracing::debug!(
-                reason = reason,
-                "Signaling probe succeeded; continuing WebRTC recovery for guarded peers"
-            );
-            coordinator.restart_network_recovery_connections().await;
-        }
-    }
-
     /// Legacy self-healing probe: on failure, disconnect the unhealthy socket
     /// and restore in the same call.
     ///
@@ -999,11 +931,7 @@ impl DefaultNetworkEventProcessor {
     /// derive the successor action.
     async fn probe_or_restore_typed(&self, reason: &str) -> Result<(), NetworkRecoveryError> {
         match self.probe_connectivity_typed().await {
-            Ok(()) => {
-                self.continue_guarded_webrtc_recovery_after_probe(reason)
-                    .await;
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(e) => {
                 tracing::warn!(
                     reason = reason,
@@ -1035,8 +963,7 @@ impl DefaultNetworkEventProcessor {
     /// so the rebuild is derived centrally by `translate()` within one probe
     /// timeout instead of inline here.
     async fn probe_signaling_liveness_typed(&self) -> Result<(), NetworkRecoveryError> {
-        let result = self
-            .signaling_client
+        self.signaling_client
             .probe_alive(SIGNALING_PROBE_TIMEOUT)
             .await
             .map_err(|error| {
@@ -1049,12 +976,7 @@ impl DefaultNetworkEventProcessor {
                     "network_event.probe.liveness_failed"
                 );
                 error
-            });
-        if result.is_ok() {
-            self.continue_guarded_webrtc_recovery_after_probe("SupervisorProbe")
-                .await;
-        }
-        result
+            })
     }
 
     async fn process_network_available_typed(&self) -> Result<(), NetworkRecoveryError> {
@@ -1081,14 +1003,7 @@ impl DefaultNetworkEventProcessor {
     }
 
     async fn process_offline(&self) -> Result<(), String> {
-        let _cleanup_guard = self.lifecycle_barrier();
         tracing::info!("📱 Processing: Network offline");
-
-        if let Some(ref coordinator) = self.webrtc_coordinator {
-            coordinator.begin_network_recovery("NetworkLost").await;
-            tracing::info!("🧹 Clearing pending ICE restart attempts...");
-            coordinator.clear_pending_restarts().await;
-        }
 
         tracing::info!("🔌 Disconnecting WebSocket...");
         let _ = self.signaling_client.disconnect().await;
@@ -1099,14 +1014,8 @@ impl DefaultNetworkEventProcessor {
     /// The confirmed-offline disconnect steps, accumulating step residuals in
     /// order instead of collapsing them to a single boolean.
     async fn process_offline_collect(&self) -> Vec<String> {
-        let _cleanup_guard = self.lifecycle_barrier();
         let mut residuals = Vec::new();
         tracing::info!("📱 Processing: Network offline (bounded)");
-
-        if let Some(ref coordinator) = self.webrtc_coordinator {
-            coordinator.begin_network_recovery("NetworkLost").await;
-            coordinator.clear_pending_restarts().await;
-        }
 
         if let Err(e) = self.signaling_client.disconnect().await {
             residuals.push(format!("offline signaling disconnect failed: {e}"));
@@ -1120,9 +1029,7 @@ impl DefaultNetworkEventProcessor {
     /// local signaling, coordinator, and transport resources — is always
     /// attempted to completion; residuals are diagnostics, not early returns.
     async fn cleanup_connections_collect(&self) -> Vec<String> {
-        let _cleanup_guard = self.lifecycle_barrier();
         let mut residuals: Vec<String> = Vec::new();
-        let mut initial_coordinator_close_failed = false;
 
         tracing::info!("🧹 Cleaning up all connections (bounded)...");
 
@@ -1139,24 +1046,11 @@ impl DefaultNetworkEventProcessor {
             }
         }
 
-        // Step 2: Clear pending ICE restart attempts.
-        if let Some(ref coordinator) = self.webrtc_coordinator {
-            tracing::info!("♻️  Clearing pending ICE restart attempts...");
-            coordinator.clear_pending_restarts().await;
-        }
-
-        // Step 3: Remove coordinator-owned peer sessions first and force-close
-        // them without draining DataChannels.
-        if let Some(ref coordinator) = self.webrtc_coordinator {
-            tracing::info!("🔻 Force-closing all WebRTC peer connections...");
-            if let Err(e) = coordinator.close_all_peers_immediately().await {
-                let err_msg = format!("Failed to close all peers: {}", e);
-                tracing::warn!("⚠️  {}", err_msg);
-                initial_coordinator_close_failed = true;
-                residuals.push(err_msg);
-            } else {
-                tracing::info!("✅ All WebRTC peer connections closed");
-            }
+        // Step 2: Drain every v0.20 peer controller, including inbound-only
+        // controllers that have no PeerTransport entry.
+        #[cfg(feature = "webrtc-v020")]
+        if let Some(manager) = self.v020_manager.as_ref() {
+            manager.close_all().await;
         }
 
         // Step 4: Cancel PeerTransport singleflight and close any remaining
@@ -1172,19 +1066,12 @@ impl DefaultNetworkEventProcessor {
             }
         }
 
-        // Step 5: A cancelled PeerTransport creator may have crossed the first
-        // drain before observing its token. The signaling socket is already
-        // down, so this final authoritative sweep closes anything it handed to
-        // the coordinator without opening another ingress window.
-        if let Some(ref coordinator) = self.webrtc_coordinator {
-            tracing::info!("🔻 Finalizing WebRTC coordinator cleanup...");
-            if let Err(e) = coordinator.close_all_peers_immediately().await {
-                let err_msg = format!("Failed to finalize peer cleanup: {e}");
-                tracing::warn!("⚠️  {}", err_msg);
-                residuals.push(err_msg);
-            } else if initial_coordinator_close_failed {
-                tracing::info!("✅ Final WebRTC cleanup recovered the initial close failure");
-            }
+        // Step 4: A cancelled PeerTransport creator may have crossed the first
+        // drain before observing its token. Repeat the bounded manager drain
+        // after creators have been cancelled.
+        #[cfg(feature = "webrtc-v020")]
+        if let Some(manager) = self.v020_manager.as_ref() {
+            manager.close_all().await;
         }
 
         residuals
@@ -1306,14 +1193,6 @@ impl DefaultNetworkEventProcessor {
 impl NetworkEventProcessor for DefaultNetworkEventProcessor {
     fn invalidate_signaling_connection_attempts(&self) {
         self.signaling_client.invalidate_generation();
-    }
-
-    fn begin_network_event_barrier(&self, event: &NetworkEvent) -> Option<NetworkEventBarrier> {
-        if network_event_needs_lifecycle_barrier(event) {
-            self.lifecycle_barrier()
-        } else {
-            None
-        }
     }
 
     /// Process network available event
@@ -1767,18 +1646,78 @@ impl SupervisorInternalChannel {
         self.send_projection_tx.subscribe()
     }
 
-    /// Select the constructor-time lifecycle profile before the reconciler is
-    /// started. The node creates this channel eagerly so headless runtimes and
-    /// mobile runtimes share the same always-on supervisor wiring.
+    /// Switch the lifecycle profile in place (#568): the channel is created
+    /// eagerly with `Ungated` at node construction and every node — including
+    /// headless runtimes that never create a public `NetworkEventHandle` —
+    /// keeps the same supervisor input queue; `create_network_event_handle`
+    /// only retargets the profile.
     pub(crate) fn set_profile(&mut self, profile: tp::LifecycleProfile) {
         self.profile = profile;
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct ReconcilerConfig {
     profile: tp::LifecycleProfile,
     clock_origin: Instant,
+    #[cfg(feature = "webrtc-v020")]
+    v020_recovery: Option<Arc<crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor>>,
+}
+
+#[cfg(feature = "webrtc-v020")]
+fn publish_v020_network_fact(
+    feed: &crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor,
+    event: &NetworkEvent,
+) {
+    use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
+
+    let fact = match event {
+        NetworkEvent::NetworkPathChanged { snapshot } if snapshot.is_offline() => {
+            Some(RtcNetworkEvent::NetworkUnavailable)
+        }
+        NetworkEvent::NetworkPathChanged { snapshot } if snapshot.should_restore() => {
+            Some(RtcNetworkEvent::NetworkAvailable)
+        }
+        NetworkEvent::AppLifecycleChanged {
+            state: AppLifecycleState::Background,
+        } => Some(RtcNetworkEvent::AppBackground),
+        NetworkEvent::AppLifecycleChanged {
+            state:
+                AppLifecycleState::Foreground {
+                    background_duration_ms,
+                },
+        } => Some(RtcNetworkEvent::AppForeground {
+            background_duration_ms: *background_duration_ms,
+        }),
+        NetworkEvent::ForceReconnect { .. } => Some(RtcNetworkEvent::ForceReconnect),
+        _ => None,
+    };
+    if let Some(fact) = fact {
+        feed.publish(fact);
+    }
+}
+
+#[cfg(feature = "webrtc-v020")]
+fn sync_v020_signaling_generation(
+    feed: &crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor,
+    supervisor: &RecoverySupervisor,
+) {
+    let view = supervisor.view();
+    let recovery_gate_open = view.recovery_mode == tp::RecoveryModeState::Active
+        && view.app_phase != tp::AppPhaseState::Background
+        && matches!(
+            view.network_path,
+            tp::NetworkPathState::Unknown | tp::NetworkPathState::Online
+        )
+        && view.recovery_intent == tp::RecoveryIntentState::Idle
+        && view.cleanup_work == tp::CleanupWorkState::Idle
+        && view.offline_work == tp::OfflineWorkState::Idle
+        && view.execution == tp::ExecutionState::Idle;
+    feed.set_signaling_generation(
+        recovery_gate_open
+            .then_some(view.live_signaling_generation)
+            .flatten(),
+    );
 }
 
 /// Create the supervisor's internal input channel plus a [`SupervisorFactSink`]
@@ -1848,6 +1787,8 @@ pub(crate) async fn run_network_event_reconciler_with_channel_and_status(
         ReconcilerConfig {
             profile,
             clock_origin,
+            #[cfg(feature = "webrtc-v020")]
+            v020_recovery: None,
         },
     )
     .await;
@@ -1873,6 +1814,8 @@ pub async fn run_network_event_reconciler(
         ReconcilerConfig {
             profile: tp::LifecycleProfile::Ungated,
             clock_origin,
+            #[cfg(feature = "webrtc-v020")]
+            v020_recovery: None,
         },
     )
     .await;
@@ -1904,6 +1847,8 @@ pub async fn run_network_event_reconciler_with_status(
         ReconcilerConfig {
             profile: tp::LifecycleProfile::Ungated,
             clock_origin,
+            #[cfg(feature = "webrtc-v020")]
+            v020_recovery: None,
         },
     )
     .await;
@@ -1938,6 +1883,79 @@ pub(crate) async fn run_network_event_reconciler_with_channel(
         ReconcilerConfig {
             profile,
             clock_origin,
+            #[cfg(feature = "webrtc-v020")]
+            v020_recovery: None,
+        },
+    )
+    .await;
+}
+
+/// Production entry point for the v0.20 backend. The lifecycle supervisor
+/// remains the sole owner of signaling recovery; accepted network/App facts
+/// and its committed signaling generation are projected to peer controllers.
+#[cfg(feature = "webrtc-v020")]
+pub(crate) async fn run_network_event_reconciler_with_channel_and_v020_recovery(
+    event_rx: mpsc::Receiver<NetworkEventRequest>,
+    channel: SupervisorInternalChannel,
+    processor: Arc<dyn NetworkEventProcessor>,
+    shutdown_token: CancellationToken,
+    v020_recovery: Arc<crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor>,
+) {
+    let (status_tx, _status_rx) = watch::channel(SupervisorStatus::default());
+    let SupervisorInternalChannel {
+        tx,
+        rx,
+        send_projection_tx,
+        profile,
+        clock_origin,
+    } = channel;
+    reconcile_loop(
+        event_rx,
+        tx,
+        rx,
+        processor,
+        shutdown_token,
+        status_tx,
+        send_projection_tx,
+        ReconcilerConfig {
+            profile,
+            clock_origin,
+            v020_recovery: Some(v020_recovery),
+        },
+    )
+    .await;
+}
+
+/// Test-support variant retaining the supervisor status stream while using the
+/// production v0.20 signaling-generation projection.
+#[cfg(all(feature = "webrtc-v020", any(test, feature = "test-utils")))]
+pub(crate) async fn run_network_event_reconciler_with_channel_and_v020_recovery_and_status(
+    event_rx: mpsc::Receiver<NetworkEventRequest>,
+    channel: SupervisorInternalChannel,
+    processor: Arc<dyn NetworkEventProcessor>,
+    shutdown_token: CancellationToken,
+    v020_recovery: Arc<crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor>,
+    status_tx: watch::Sender<SupervisorStatus>,
+) {
+    let SupervisorInternalChannel {
+        tx,
+        rx,
+        send_projection_tx,
+        profile,
+        clock_origin,
+    } = channel;
+    reconcile_loop(
+        event_rx,
+        tx,
+        rx,
+        processor,
+        shutdown_token,
+        status_tx,
+        send_projection_tx,
+        ReconcilerConfig {
+            profile,
+            clock_origin,
+            v020_recovery: Some(v020_recovery),
         },
     )
     .await;
@@ -1959,11 +1977,18 @@ async fn reconcile_loop(
     let ReconcilerConfig {
         profile,
         clock_origin,
+        #[cfg(feature = "webrtc-v020")]
+        v020_recovery,
     } = config;
     tracing::info!(?profile, "🔄 Network event reconciler started");
 
     let start = clock_origin;
     let mut supervisor = RecoverySupervisor::new(profile);
+
+    #[cfg(feature = "webrtc-v020")]
+    if let Some(feed) = &v020_recovery {
+        sync_v020_signaling_generation(feed, &supervisor);
+    }
 
     let mut timers: HashMap<tp::TimerId, tokio::task::AbortHandle> = HashMap::new();
     let mut effect: Option<RunningEffect> = None;
@@ -1997,6 +2022,10 @@ async fn reconcile_loop(
                     &mut timers, &mut effect, &processor, &status_tx, &mut last_action_id,
                     &mut last_outcome, &send_projection_tx,
                 );
+                #[cfg(feature = "webrtc-v020")]
+                if let Some(feed) = &v020_recovery {
+                    sync_v020_signaling_generation(feed, &supervisor);
+                }
                 if terminate || shutdown_teardown_discharged(&supervisor) {
                     break;
                 }
@@ -2008,6 +2037,10 @@ async fn reconcile_loop(
                     &mut effect, &processor, &status_tx, &mut last_action_id, &mut last_outcome,
                     &send_projection_tx,
                 );
+                #[cfg(feature = "webrtc-v020")]
+                if let Some(feed) = &v020_recovery {
+                    sync_v020_signaling_generation(feed, &supervisor);
+                }
                 if terminate {
                     tracing::info!("🛑 Supervisor ended at shutdown deadline");
                     break;
@@ -2044,7 +2077,6 @@ async fn reconcile_loop(
                     }
                     continue;
                 }
-                let event_barrier = processor.begin_network_event_barrier(&event);
                 processor.prepare_network_event(&event);
                 let now = start.elapsed();
                 let observed_at = request
@@ -2052,14 +2084,25 @@ async fn reconcile_loop(
                     .checked_duration_since(start)
                     .unwrap_or(Duration::ZERO);
                 let input = event_to_input(&event, epoch, observed_at);
+                #[cfg(feature = "webrtc-v020")]
+                let previous_revision = supervisor.view().policy_revision;
                 let terminate = handle_supervisor_input(
                     &mut supervisor, input, now, start, &internal_tx, &mut timers,
                     &mut effect, &processor, &status_tx, &mut last_action_id, &mut last_outcome,
                     &send_projection_tx,
                 );
-                // The dequeue barrier only bridges the gap until the new
-                // projection is published and any effect is handed off.
-                drop(event_barrier);
+                #[cfg(feature = "webrtc-v020")]
+                if let Some(feed) = &v020_recovery {
+                    // Close/open the signaling recovery gate before publishing
+                    // the network edge. Controllers synchronously reconcile
+                    // the watch snapshot before reducing that edge, so
+                    // NetworkAvailable cannot race ahead of supervisor-owned
+                    // probe/reconnect work.
+                    sync_v020_signaling_generation(feed, &supervisor);
+                    if supervisor.view().policy_revision != previous_revision {
+                        publish_v020_network_fact(feed, &event);
+                    }
+                }
                 // Acceptance: reply as soon as the fact is accepted and one
                 // synchronous reconcile round completes. The result does not
                 // wait for effect completion (RFC-0400 invariant 11).

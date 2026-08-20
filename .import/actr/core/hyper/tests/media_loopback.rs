@@ -18,11 +18,7 @@
 
 use actr_framework::{MediaSample, MediaType};
 use actr_hyper::inbound::{MediaFrameRegistry, MediaTrackCallback};
-use actr_hyper::test_support::{
-    TestSignalingServer,
-    utils::{create_credential_state_for_test, dummy_credential, make_actor_id},
-};
-use actr_hyper::wire::webrtc::{WebRtcConfig, WebRtcCoordinator, WebSocketSignalingClient};
+use actr_hyper::test_support::{TestHarness, make_actor_id};
 use actr_protocol::ActrId;
 use futures_util::future::BoxFuture;
 use std::sync::Arc;
@@ -65,41 +61,6 @@ fn make_video_sample(timestamp: u32, size: usize) -> MediaSample {
         codec: "H264".to_string(),
         media_type: MediaType::Video,
     }
-}
-
-/// Create a coordinator with a caller-owned `Arc<MediaFrameRegistry>` so the
-/// test can register callbacks independently of the peer setup helpers.
-async fn create_coordinator_with_registry(
-    id: ActrId,
-    server_url: &str,
-    registry: Arc<MediaFrameRegistry>,
-) -> Arc<WebRtcCoordinator> {
-    let credential_state = create_credential_state_for_test(dummy_credential());
-
-    let signaling_client = WebSocketSignalingClient::connect_to_with_identity(
-        server_url,
-        id.clone(),
-        credential_state.clone(),
-    )
-    .await
-    .expect("failed to connect to test signaling server");
-
-    let config = WebRtcConfig::default();
-
-    let coordinator = Arc::new(WebRtcCoordinator::new(
-        id,
-        credential_state,
-        signaling_client as Arc<dyn actr_hyper::wire::webrtc::SignalingClient>,
-        config,
-        registry,
-    ));
-
-    let c = coordinator.clone();
-    tokio::spawn(async move {
-        let _ = c.start().await;
-    });
-
-    coordinator
 }
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -471,10 +432,10 @@ async fn test_registry_sender_id_forwarded() {
 // Test 7: WebRTC media track e2e — audio RTP loopback (ignored by default)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 //
-// Full path: coordinator A adds OPUS track → negotiates SDP with coordinator B
-// over in-process WebSocket signaling → A calls send_media_sample() which
-// writes RTP via RTCTrackRemote → B's on_track callback fires → B's
-// MediaFrameRegistry::dispatch() is called → user callback receives frame.
+// Full path: PeerGate A adds an OPUS track → RtcPeerController negotiates SDP
+// over production WebSocket signaling → the v0.20 TrackLocal writer emits RTP
+// → B's build-time EventHandler registers TrackRemote → its sole poll pump
+// dispatches through MediaFrameRegistry → the business callback receives it.
 //
 // This test is marked #[ignore] because it requires real ICE/DTLS negotiation
 // (~3–10 s) and an in-process mock-actrix signaling server. Run it with:
@@ -496,27 +457,18 @@ async fn test_media_rtp_audio_loopback() {
     init_tracing();
     tracing::info!("═══ test_media_rtp_audio_loopback ═══");
 
-    // ── Start in-process signaling server ───────────────────────────────────
-    let server = TestSignalingServer::start()
-        .await
-        .expect("failed to start signaling server");
-    let server_url = server.url();
-
-    // ── Build both coordinators, B owns a testable registry ─────────────────
+    // ── Build both production v0.20 peers, B owns a testable registry ───────
     let id_a = make_actor_id(701);
     let id_b = make_actor_id(702);
-
     let registry_b = Arc::new(MediaFrameRegistry::new());
-
-    let coord_a = create_coordinator_with_registry(
-        id_a.clone(),
-        &server_url,
-        Arc::new(MediaFrameRegistry::new()), // A sends, doesn't receive
-    )
-    .await;
-
-    let coord_b =
-        create_coordinator_with_registry(id_b.clone(), &server_url, registry_b.clone()).await;
+    let mut harness = TestHarness::new().await;
+    harness.add_peer(id_a.serial_number).await;
+    harness
+        .add_peer_with_media_registry(id_b.serial_number, registry_b.clone())
+        .await;
+    harness
+        .connect(id_a.serial_number, id_b.serial_number)
+        .await;
 
     // ── Register callback on B's registry ────────────────────────────────────
     const FRAMES_EXPECTED: usize = 3;
@@ -556,7 +508,12 @@ async fn test_media_rtp_audio_loopback() {
     tracing::info!("A: adding dynamic OPUS track toward B ...");
     tokio::time::timeout(
         Duration::from_secs(15),
-        coord_a.add_dynamic_track(&id_b, "opus-audio-loopback".to_string(), "OPUS", "audio"),
+        harness.peer(id_a.serial_number).gate.add_media_track(
+            &id_b,
+            "opus-audio-loopback",
+            "OPUS",
+            "audio",
+        ),
     )
     .await
     .expect("add_dynamic_track timed out")
@@ -567,7 +524,9 @@ async fn test_media_rtp_audio_loopback() {
     // ── A sends synthetic Opus frames to B ───────────────────────────────────
     for i in 0..10u32 {
         let sample = make_audio_sample(i * 960, 160); // 20 ms Opus @ 48 kHz
-        if let Err(e) = coord_a
+        if let Err(e) = harness
+            .peer(id_a.serial_number)
+            .gate
             .send_media_sample(&id_b, "opus-audio-loopback", sample)
             .await
         {
@@ -596,8 +555,10 @@ async fn test_media_rtp_audio_loopback() {
     );
 
     // Cleanup
-    let _ = coord_a
-        .remove_dynamic_track(&id_b, "opus-audio-loopback")
+    let _ = harness
+        .peer(id_a.serial_number)
+        .gate
+        .remove_media_track(&id_b, "opus-audio-loopback")
         .await;
-    let _ = coord_b; // keep alive until here
+    harness.shutdown().await;
 }

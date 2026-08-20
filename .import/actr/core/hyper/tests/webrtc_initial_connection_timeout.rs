@@ -1,9 +1,6 @@
-use actr_hyper::test_support::{
-    TestHarness, TestSignalingServer, create_peer_with_websocket, make_actor_id,
-};
+use actr_hyper::test_support::TestHarness;
 use actr_protocol::{
-    ActrError, ActrId, SignalingEnvelope, actr_relay, session_description::Type as SdpType,
-    signaling_envelope,
+    ActrId, SignalingEnvelope, actr_relay, session_description::Type as SdpType, signaling_envelope,
 };
 use std::time::{Duration, Instant};
 
@@ -60,12 +57,7 @@ async fn initial_connection_waits_for_delayed_ice_candidate_without_factory_retr
     let elapsed = started.elapsed();
 
     assert!(
-        harness
-            .peer(5100)
-            .coordinator
-            .has_open_data_channel_for_test(&answerer_id)
-            .await
-            .expect("peer lookup should succeed"),
+        harness.peer(5100).rtc.is_sendable(&answerer_id).await,
         "create_connection must return only after DataChannel is open"
     );
     assert!(
@@ -93,32 +85,26 @@ async fn initial_connection_waits_for_delayed_ice_candidate_without_factory_retr
 async fn role_negotiation_timeout_is_shorter_than_initial_connection_budget() {
     init_tracing();
 
-    let server = TestSignalingServer::start().await.unwrap();
-
-    let offerer_id = make_actor_id(5300);
-    let answerer_id = make_actor_id(5400);
-    let (offerer, _offerer_client) = create_peer_with_websocket(offerer_id, &server.url())
-        .await
-        .unwrap();
-    let (_answerer, _answerer_client) =
-        create_peer_with_websocket(answerer_id.clone(), &server.url())
-            .await
-            .unwrap();
-
-    server.pause_forwarding();
+    let mut harness = TestHarness::new().await;
+    harness.add_peer(5300).await;
+    harness.add_peer(5400).await;
+    let answerer_id = harness.peer(5400).id.clone();
+    harness.server.pause_forwarding();
 
     let started = Instant::now();
-    let result = tokio::time::timeout(
-        Duration::from_secs(7),
-        offerer.initiate_connection(&answerer_id),
-    )
-    .await
-    .expect("role negotiation should fail inside the short timeout");
+    harness.peer(5300).rtc.connect(answerer_id.clone()).await;
+    let result = harness
+        .peer(5300)
+        .rtc
+        .wait_state(&answerer_id, Duration::from_secs(7), |state| {
+            state.unavailable_reason.is_some()
+        })
+        .await;
     let elapsed = started.elapsed();
 
     assert!(
-        matches!(result, Err(ActrError::TimedOut)),
-        "expected role negotiation timeout, got {result:?}"
+        result.is_some(),
+        "expected the v0.20 controller snapshot to expose role-negotiation failure"
     );
     assert!(
         elapsed >= Duration::from_secs(4),
@@ -128,4 +114,6 @@ async fn role_negotiation_timeout_is_shorter_than_initial_connection_budget() {
         elapsed < Duration::from_secs(7),
         "role negotiation must not consume the old 15s window; elapsed={elapsed:?}"
     );
+
+    harness.shutdown().await;
 }

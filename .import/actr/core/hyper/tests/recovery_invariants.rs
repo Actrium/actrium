@@ -365,7 +365,7 @@ async fn wait_for_event(
 async fn inv1_stale_and_duplicate_snapshots_cannot_advance_policy_but_a_new_epoch_does() {
     let client = Arc::new(FakeSignalingClient::new());
     client.connect().await.expect("initial connect");
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let (status_tx, mut status_rx) = watch::channel(SupervisorStatus::default());
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -456,7 +456,7 @@ async fn inv1_stale_and_duplicate_snapshots_cannot_advance_policy_but_a_new_epoc
 async fn inv2_online_rollback_before_grace_performs_no_disconnect() {
     let client = Arc::new(FakeSignalingClient::new());
     client.connect().await.expect("initial connect");
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let shutdown = tokio_util::sync::CancellationToken::new();
     let processor: Arc<dyn NetworkEventProcessor> = processor;
@@ -502,7 +502,7 @@ async fn inv2_online_rollback_before_grace_performs_no_disconnect() {
 async fn inv3_offline_candidate_permits_existing_session_without_immediate_disconnect() {
     let client = Arc::new(FakeSignalingClient::new());
     client.connect().await.expect("initial connect");
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let shutdown = tokio_util::sync::CancellationToken::new();
     let processor: Arc<dyn NetworkEventProcessor> = processor;
@@ -538,7 +538,7 @@ async fn inv3_offline_candidate_permits_existing_session_without_immediate_disco
 async fn inv6_duplicate_foreground_creates_no_recovery_work() {
     let client = Arc::new(FakeSignalingClient::new());
     client.connect().await.expect("initial connect");
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let handle = NetworkEventHandle::new(event_tx);
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -581,7 +581,7 @@ async fn inv10_repeated_availability_failures_back_off_instead_of_hot_looping() 
     client.set_probe_success(false);
     client.set_connect_should_fail(true);
 
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let handle = NetworkEventHandle::new(event_tx);
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -636,7 +636,7 @@ async fn inv11_acceptance_does_not_wait_for_effect_completion() {
     let client = Arc::new(FakeSignalingClient::new());
     client.connect().await.expect("initial connect");
     let mut events = client.subscribe_events();
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let shutdown = tokio_util::sync::CancellationToken::new();
     let processor: Arc<dyn NetworkEventProcessor> = processor;
@@ -683,7 +683,7 @@ async fn inv30_shutdown_deadline_terminates_the_supervisor_loop() {
     // and restarting cleanup after the deadline.
     let client = Arc::new(FakeSignalingClient::new());
     client.connect().await.expect("initial connect");
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let (status_tx, mut status_rx) = watch::channel(SupervisorStatus::default());
     // A shutdown token that is never cancelled: termination must come solely

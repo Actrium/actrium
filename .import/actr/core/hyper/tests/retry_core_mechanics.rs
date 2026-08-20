@@ -4,7 +4,7 @@
 #![allow(deprecated)]
 //! Deterministic tests for the outbound retry core.
 //!
-//! The VNet retry tests exercise realistic recovery flows, but they cannot
+//! End-to-end retry tests exercise realistic recovery flows, but they cannot
 //! precisely force "attempt 1 delivered, then returned a transient error".
 //! This file uses fake transport components so we can assert the retry and
 //! receiver-dedup invariants directly.
@@ -388,7 +388,7 @@ fn gate_with_lane_and_transport(
         delay: builder_delay,
     });
     let transport = Arc::new(PeerTransport::new(make_actor_id(1), builder));
-    let gate = Arc::new(PeerGate::new(transport.clone(), None));
+    let gate = Arc::new(PeerGate::for_test(transport.clone()));
     (gate, lane, stats, transport)
 }
 
@@ -1661,7 +1661,7 @@ async fn request_timeout_does_not_close_replaced_webrtc_session() {
         target: target.clone(),
     });
     let transport = Arc::new(PeerTransport::new(make_actor_id(1), builder));
-    let gate = Arc::new(PeerGate::new(transport.clone(), None));
+    let gate = Arc::new(PeerGate::for_test(transport.clone()));
 
     let stale_request = tokio::spawn({
         let gate = gate.clone();

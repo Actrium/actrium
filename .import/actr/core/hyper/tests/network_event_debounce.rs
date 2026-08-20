@@ -585,7 +585,6 @@ async fn test_l0_duplicate_path_storms_execute_one_settled_action() {
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -658,7 +657,6 @@ async fn test_network_available_probes_when_already_connected() {
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -721,7 +719,6 @@ async fn test_supervisor_restore_bypasses_legacy_available_debounce() {
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_secs(60),
         },
@@ -761,7 +758,6 @@ async fn test_network_available_rebuilds_when_signaling_probe_fails() {
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -794,7 +790,6 @@ async fn test_short_foreground_failed_probe_disconnects_before_restore() {
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -823,7 +818,7 @@ async fn test_short_foreground_failed_probe_disconnects_before_restore() {
 async fn test_short_foreground_probes_without_starting_an_extra_connect() {
     let client = Arc::new(FakeSignalingClient::new());
     client.publish_connected();
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
 
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let handle = NetworkEventHandle::new_with_result_timeout(event_tx, Duration::from_secs(2));
@@ -862,7 +857,7 @@ async fn test_default_recovery_uses_snapshot_state_instead_of_timed_debounce() {
 
     let client = Arc::new(FakeSignalingClient::new());
     client.publish_connected();
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let handle = NetworkEventHandle::new_with_result_timeout(event_tx, Duration::from_secs(2));
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -898,7 +893,6 @@ async fn test_network_available_connects_without_probe_when_disconnected() {
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -924,7 +918,6 @@ async fn test_debounce_does_not_cross_event_types() {
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -965,7 +958,6 @@ async fn test_direct_available_then_type_changed_probes_each_event_type() {
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(2000),
         },
@@ -1022,7 +1014,6 @@ async fn test_type_changed_works_without_prior_available() {
 
     let processor = DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(2000),
         },
@@ -1054,7 +1045,6 @@ async fn test_batch_available_type_changed_probes_signaling_once() {
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -1099,7 +1089,6 @@ async fn test_batch_restore_rebuilds_once_when_signaling_probe_fails() {
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -1131,7 +1120,6 @@ async fn test_batch_lost_available_type_changed_prefers_restore() {
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -1252,7 +1240,6 @@ async fn test_cleanup_batches_disconnect_without_reconnect() {
 
         let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
             client.clone(),
-            None,
             DebounceConfig {
                 window: Duration::from_millis(500),
             },
@@ -1321,7 +1308,6 @@ async fn test_network_event_handle_rolls_back_offline_before_grace_expires() {
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -1426,7 +1412,7 @@ async fn test_offline_candidate_drained_after_non_offline_head_owns_grace() {
     let client = Arc::new(FakeSignalingClient::new());
     client.publish_connected();
     let mut events = client.subscribe_events();
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
 
     let (online_tx, online_rx) = tokio::sync::oneshot::channel();
@@ -1499,7 +1485,7 @@ async fn test_new_offline_candidate_after_fast_rollback_restarts_grace() {
     let client = Arc::new(FakeSignalingClient::new());
     client.publish_connected();
     let mut events = client.subscribe_events();
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
 
     let mut results = Vec::new();
@@ -1565,7 +1551,7 @@ async fn test_reconnect_intent_survives_across_reconciler_receive_cycles() {
     client.publish_connected();
     let mut events = client.subscribe_events();
 
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let handle = NetworkEventHandle::new_with_result_timeout(event_tx, Duration::from_secs(2));
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -1668,7 +1654,7 @@ async fn test_background_preserves_healthy_session_and_admits_reconnect_under_un
     client.publish_connected();
     let mut events = client.subscribe_events();
 
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let handle = NetworkEventHandle::new_with_result_timeout(event_tx, Duration::from_secs(2));
     let shutdown = tokio_util::sync::CancellationToken::new();
@@ -1730,7 +1716,6 @@ async fn test_material_path_updates_bypass_legacy_debounce() {
 
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -1828,7 +1813,6 @@ async fn test_l1_pre_start_queued_event_drains_when_reconciler_starts() {
     let client = Arc::new(FakeSignalingClient::new());
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -1878,7 +1862,7 @@ async fn test_l1_pre_start_queued_event_drains_when_reconciler_starts() {
 #[tokio::test]
 async fn test_l1_old_handle_after_reconciler_shutdown_fails_fast() {
     let client = Arc::new(FakeSignalingClient::new());
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client, None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(1);
     let handle = NetworkEventHandle::new_with_result_timeout(event_tx, Duration::from_millis(100));
 
@@ -1922,7 +1906,7 @@ async fn test_l1_old_handle_after_reconciler_shutdown_fails_fast() {
 #[tokio::test]
 async fn test_l1_reconciler_shutdown_during_offline_grace_is_bounded() {
     let client = Arc::new(FakeSignalingClient::new());
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client, None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let handle = NetworkEventHandle::new_with_result_timeout(event_tx, Duration::from_millis(150));
 
@@ -1954,7 +1938,6 @@ async fn test_l1_command_apis_complete_through_network_event_handle() {
     client.publish_connected();
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(500),
         },
@@ -2004,7 +1987,7 @@ async fn test_l1_command_apis_complete_through_network_event_handle() {
 async fn test_l1_cleanup_is_a_batch_barrier_for_later_recovery_facts() {
     let client = Arc::new(FakeSignalingClient::new());
     client.publish_connected();
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let (cleanup_tx, cleanup_rx) = tokio::sync::oneshot::channel();
     let (online_tx, online_rx) = tokio::sync::oneshot::channel();
@@ -2061,7 +2044,7 @@ async fn test_l1_cleanup_is_a_batch_barrier_for_later_recovery_facts() {
 async fn test_l1_explicit_cleanup_bypasses_offline_grace() {
     let client = Arc::new(FakeSignalingClient::new());
     client.publish_connected();
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client, None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client));
 
     let (event_tx, event_rx) = tokio::sync::mpsc::channel(10);
     let handle = NetworkEventHandle::new_with_result_timeout(event_tx, Duration::from_secs(2));
@@ -2142,7 +2125,6 @@ async fn test_reconciler_ignores_cancelled_network_event_callers() {
     let client = Arc::new(FakeSignalingClient::new());
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client,
-        None,
         DebounceConfig {
             window: Duration::from_millis(10),
         },
@@ -2193,7 +2175,6 @@ async fn test_l1_handle_drop_while_event_pending_does_not_poison_reconciler() {
     let client = Arc::new(FakeSignalingClient::new());
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client,
-        None,
         DebounceConfig {
             window: Duration::from_millis(10),
         },
@@ -2306,7 +2287,6 @@ async fn test_l1_cloned_handles_mixed_concurrent_calls_complete_without_crossed_
     client.publish_connected();
     let processor = Arc::new(DefaultNetworkEventProcessor::new_with_debounce(
         client.clone(),
-        None,
         DebounceConfig {
             window: Duration::from_millis(50),
         },
@@ -2397,7 +2377,7 @@ async fn supervisor_probe_effect_reports_typed_outcome_without_inline_restore() 
     let client = Arc::new(FakeSignalingClient::new());
     client.publish_connected();
     client.set_probe_success(false);
-    let processor = DefaultNetworkEventProcessor::new(client.clone(), None);
+    let processor = DefaultNetworkEventProcessor::new(client.clone());
 
     let err = processor
         .process_network_recovery_effect(NetworkRecoveryAction::Probe)
@@ -2426,7 +2406,7 @@ async fn legacy_probe_action_retains_self_healing_restore() {
     let client = Arc::new(FakeSignalingClient::new());
     client.publish_connected();
     client.set_probe_success(false);
-    let processor = DefaultNetworkEventProcessor::new(client.clone(), None);
+    let processor = DefaultNetworkEventProcessor::new(client.clone());
 
     processor
         .process_network_recovery_action(NetworkRecoveryAction::Probe)
@@ -2444,7 +2424,7 @@ async fn legacy_probe_action_retains_self_healing_restore() {
 async fn route_change_with_live_signaling_probes_then_escalates_to_restore() {
     let client = Arc::new(FakeSignalingClient::new());
     client.publish_connected();
-    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone(), None));
+    let processor = Arc::new(DefaultNetworkEventProcessor::new(client.clone()));
     let processor: Arc<dyn NetworkEventProcessor> = processor;
     let (handle, sink, shutdown, reconciler, mut status_rx) =
         actr_hyper::test_support::spawn_network_event_supervisor_with_status(processor);

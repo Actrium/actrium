@@ -767,7 +767,7 @@ jobs:
 
       - name: Install UniFFI bindgen
         if: steps.cache-uniffi.outputs.cache-hit != 'true'
-        run: cargo install --locked uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+        run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
 
       - name: Install native dependencies
         run: brew install opus
@@ -941,7 +941,7 @@ jobs:
 
       - name: Install UniFFI bindgen
         if: steps.cache-uniffi.outputs.cache-hit != 'true'
-        run: cargo install --locked uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
+        run: cargo install --locked --force uniffi --version 0.31.1 --features cli --bin uniffi-bindgen
 
       - name: Build Kotlin Android package
         working-directory: source/bindings/kotlin

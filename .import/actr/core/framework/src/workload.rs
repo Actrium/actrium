@@ -43,6 +43,73 @@ pub struct PeerEvent {
     pub status: Option<WebRtcPeerStatus>,
 }
 
+/// Stable, FFI-safe reason a WebRTC peer is unavailable (RFC §"Error model":
+/// "a Snapshot's `unavailable_reason` SHOULD use a stable enum rather than
+/// exposing underlying error strings to the FFI").
+///
+/// `#[non_exhaustive]` per the API compatibility policy (AGENTS.md): the
+/// recovery state machine grows new failure modes as additive fixes, and
+/// boundary mappings (FFI / WIT) must decide how to project an unknown
+/// variant instead of being source-broken by one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum WebRtcUnavailableReason {
+    ConnectionNotReady,
+    PeerConnectionBuildFailed,
+    NegotiationFailed,
+    IceRestartFailed,
+    PeerConnectionRebuildFailed,
+    UnsupportedRtcCapability,
+    RtcResourceLimitExceeded,
+    RecoveryExhausted,
+    Closed,
+}
+
+/// Whether the selected ICE candidate pair is direct or relayed (v0.20
+/// backend). Resolved asynchronously from stats; never blocks
+/// `Connected`/`sendable`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum WebRtcNetworkPath {
+    /// Stats have not resolved the selected pair yet.
+    #[default]
+    Unknown,
+    /// Direct peer-to-peer path (no TURN relay on either side).
+    Direct,
+    /// TURN-relayed path.
+    Relayed,
+}
+
+/// A point-in-time, FFI-safe view of one WebRTC peer's state (Stage 6 unified
+/// snapshot; RFC §"RtcPeerSnapshot"). Returned by the node's
+/// get/list/subscribe status APIs and carried by `on_webrtc_state_changed`.
+///
+/// Subscribers replay the latest value immediately on subscribe; `revision`
+/// is monotonic per peer so consumers can de-duplicate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WebRtcPeerState {
+    /// Remote peer identity.
+    pub peer: ActrId,
+    /// Monotonic PeerConnection generation (bumps on every Hard Recovery
+    /// rebuild).
+    pub pc_generation: u64,
+    /// Monotonic snapshot revision (per-peer dedup key).
+    pub revision: u64,
+    /// Coarse lifecycle status.
+    pub status: WebRtcPeerStatus,
+    /// Whether business sends are currently admitted.
+    pub sendable: bool,
+    /// The selected ICE path (S6-7a). `Unknown` until stats resolve it; never
+    /// blocks `sendable`.
+    pub network_path: WebRtcNetworkPath,
+    /// `Some(true)` if the selected ICE pair traverses a TURN relay,
+    /// `Some(false)` for direct, `None` while stats have not resolved.
+    /// Derived from `network_path`; kept for one compatibility cycle — new
+    /// consumers should read `network_path`.
+    pub relayed: Option<bool>,
+    /// Stable reason the peer is unavailable, when it is.
+    pub unavailable_reason: Option<WebRtcUnavailableReason>,
+}
+
 /// Error event payload passed to [`Workload::on_error`].
 ///
 /// Wraps the structured cause ([`ActrError`]), a coarse domain
@@ -332,6 +399,23 @@ pub trait Workload: crate::MaybeSendSync + 'static {
     /// Called when a WebRTC P2P connection to a peer is lost.
     async fn on_webrtc_disconnected<C: Context>(&self, _ctx: &C, event: &PeerEvent) {
         tracing::warn!(peer = %event.peer, "webrtc disconnected");
+    }
+
+    /// Called on every revision of a peer's unified WebRTC state (Stage 6
+    /// v0.20 backend). Carries the full FFI-safe snapshot — status,
+    /// sendability, relay path, unavailable reason — so consumers that want
+    /// more than the three coarse legacy hooks can observe everything.
+    ///
+    /// A workload installed late still receives the current state on the
+    /// first projection pass (initial replay), and `revision` is monotonic
+    /// per peer for de-duplication.
+    async fn on_webrtc_state_changed<C: Context>(&self, _ctx: &C, event: &WebRtcPeerState) {
+        tracing::debug!(
+            peer = %event.peer,
+            status = ?event.status,
+            sendable = event.sendable,
+            "webrtc state changed",
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────

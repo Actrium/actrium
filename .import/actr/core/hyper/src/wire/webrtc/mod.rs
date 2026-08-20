@@ -1,33 +1,25 @@
-//! WebRTC subsystem
+//! WebRTC subsystem (v0.20 backend).
 //!
-//! Complete WebRTC P2P ConnectManage, package include:
-//! - signaling protocol quotient (Offer/Answer/ICE)
-//! - Connect build independent andManage
-//! - OutboundGate Implementation
+//! The 0.14 stack (coordinator/connection/negotiator/gate) was removed in
+//! Stage 7; what remains here is the shared signaling client plus the v0.20
+//! `RtcConnectionManager`/`RtcPeerController`/`PeerConnectionSession`
+//! architecture under `v020/`.
 
-pub(crate) mod adapter;
-pub(crate) mod connection; // WebRtcConnection Implementation
-mod coordinator;
-pub(crate) mod gate;
-pub(crate) mod negotiator;
-pub(crate) mod peer_recovery;
 mod signaling;
 #[cfg(any(test, feature = "test-utils"))]
-mod test_runtime;
+pub(crate) mod test_runtime;
 pub(crate) mod trace;
-
-pub(crate) type WebRtcInboundMessage = (Vec<u8>, actr_framework::Bytes, actr_protocol::PayloadType);
+// The `allow(dead_code)` keeps the v0.20 surface's currently-unused items
+// (observation accessors, convenience constructors) out of the warning set
+// until the S7B-8 cleanup pass trims them deliberately.
+#[cfg(feature = "webrtc-v020")]
+#[allow(dead_code)]
+pub(crate) mod v020;
 
 // Re-export public WebRTC surface from this module boundary; internal hook
 // plumbing stays crate-private except under test-utils, where integration
 // tests can install recorders without standing up a full node.
-pub(crate) use coordinator::CleanupGuard;
-#[cfg(not(feature = "test-utils"))]
-pub(crate) use coordinator::WebRtcCoordinator;
-#[cfg(feature = "test-utils")]
-pub use coordinator::{DetachedPeerForTest, WebRtcCoordinator};
-pub use negotiator::WebRtcConfig;
-pub(crate) use peer_recovery::NetworkRecoveryStatus;
+pub use actr_config::WebRtcConfig;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use signaling::WebSocketSignalingClient;
 pub use signaling::{

@@ -149,8 +149,8 @@ pub use dest::Dest;
 pub use dispatcher::MessageDispatcher;
 pub use reply::{Deliver, Reply, ReplyDeadline, ReplyOutcome};
 pub use workload::{
-    BackpressureEvent, CredentialEvent, ErrorCategory, ErrorEvent, PeerEvent, WebRtcPeerStatus,
-    Workload,
+    BackpressureEvent, CredentialEvent, ErrorCategory, ErrorEvent, PeerEvent, WebRtcNetworkPath,
+    WebRtcPeerState, WebRtcPeerStatus, WebRtcUnavailableReason, Workload,
 };
 
 // Re-export commonly used types for user convenience

@@ -262,6 +262,12 @@ typedef void (*UniffiCallbackInterfaceLogCallbackMethod0)(uint64_t, RustBuffer, 
     );
 
 #endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_RTC_PEER_STATE_LISTENER_METHOD0
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_RTC_PEER_STATE_LISTENER_METHOD0
+typedef void (*UniffiCallbackInterfaceRtcPeerStateListenerMethod0)(uint64_t, RustBuffer, UniffiForeignFutureCompleteVoid _Nonnull, uint64_t, UniffiForeignFutureDroppedCallbackStruct* _Nonnull
+    );
+
+#endif
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_CREDENTIAL_OBSERVER_BRIDGE_METHOD0
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_CREDENTIAL_OBSERVER_BRIDGE_METHOD0
 typedef void (*UniffiCallbackInterfaceCredentialObserverBridgeMethod0)(uint64_t, uint64_t, RustBuffer, UniffiForeignFutureCompleteVoid _Nonnull, uint64_t, UniffiForeignFutureDroppedCallbackStruct* _Nonnull
@@ -313,6 +319,12 @@ typedef void (*UniffiCallbackInterfaceWebRtcObserverBridgeMethod1)(uint64_t, uin
 #ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_WEB_RTC_OBSERVER_BRIDGE_METHOD2
 #define UNIFFI_FFIDEF_CALLBACK_INTERFACE_WEB_RTC_OBSERVER_BRIDGE_METHOD2
 typedef void (*UniffiCallbackInterfaceWebRtcObserverBridgeMethod2)(uint64_t, uint64_t, RustBuffer, UniffiForeignFutureCompleteVoid _Nonnull, uint64_t, UniffiForeignFutureDroppedCallbackStruct* _Nonnull
+    );
+
+#endif
+#ifndef UNIFFI_FFIDEF_CALLBACK_INTERFACE_WEB_RTC_OBSERVER_BRIDGE_METHOD3
+#define UNIFFI_FFIDEF_CALLBACK_INTERFACE_WEB_RTC_OBSERVER_BRIDGE_METHOD3
+typedef void (*UniffiCallbackInterfaceWebRtcObserverBridgeMethod3)(uint64_t, uint64_t, RustBuffer, UniffiForeignFutureCompleteVoid _Nonnull, uint64_t, UniffiForeignFutureDroppedCallbackStruct* _Nonnull
     );
 
 #endif
@@ -391,6 +403,15 @@ typedef struct UniffiVTableCallbackInterfaceLogCallback {
 } UniffiVTableCallbackInterfaceLogCallback;
 
 #endif
+#ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_RTC_PEER_STATE_LISTENER
+#define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_RTC_PEER_STATE_LISTENER
+typedef struct UniffiVTableCallbackInterfaceRtcPeerStateListener {
+    UniffiCallbackInterfaceFree _Nonnull uniffiFree;
+    UniffiCallbackInterfaceClone _Nonnull uniffiClone;
+    UniffiCallbackInterfaceRtcPeerStateListenerMethod0 _Nonnull onState;
+} UniffiVTableCallbackInterfaceRtcPeerStateListener;
+
+#endif
 #ifndef UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_CREDENTIAL_OBSERVER_BRIDGE
 #define UNIFFI_FFIDEF_V_TABLE_CALLBACK_INTERFACE_CREDENTIAL_OBSERVER_BRIDGE
 typedef struct UniffiVTableCallbackInterfaceCredentialObserverBridge {
@@ -429,6 +450,7 @@ typedef struct UniffiVTableCallbackInterfaceWebRtcObserverBridge {
     UniffiCallbackInterfaceWebRtcObserverBridgeMethod0 _Nonnull onConnecting;
     UniffiCallbackInterfaceWebRtcObserverBridgeMethod1 _Nonnull onConnected;
     UniffiCallbackInterfaceWebRtcObserverBridgeMethod2 _Nonnull onDisconnected;
+    UniffiCallbackInterfaceWebRtcObserverBridgeMethod3 _Nonnull onStateChanged;
 } UniffiVTableCallbackInterfaceWebRtcObserverBridge;
 
 #endif
@@ -631,9 +653,19 @@ uint64_t uniffi_actr_fn_method_actrrefwrapper_call(uint64_t ptr, RustBuffer rout
 uint64_t uniffi_actr_fn_method_actrrefwrapper_discover(uint64_t ptr, RustBuffer target_type, uint32_t count
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_GET_RTC_PEER_STATUS
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_GET_RTC_PEER_STATUS
+uint64_t uniffi_actr_fn_method_actrrefwrapper_get_rtc_peer_status(uint64_t ptr, RustBuffer peer
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_IS_SHUTTING_DOWN
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_IS_SHUTTING_DOWN
 int8_t uniffi_actr_fn_method_actrrefwrapper_is_shutting_down(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_LIST_RTC_PEER_STATUSES
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_LIST_RTC_PEER_STATUSES
+uint64_t uniffi_actr_fn_method_actrrefwrapper_list_rtc_peer_statuses(uint64_t ptr
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_RESOLVE_DEPENDENCY
@@ -644,6 +676,11 @@ uint64_t uniffi_actr_fn_method_actrrefwrapper_resolve_dependency(uint64_t ptr, R
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_SHUTDOWN
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_SHUTDOWN
 void uniffi_actr_fn_method_actrrefwrapper_shutdown(uint64_t ptr, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_SUBSCRIBE_RTC_PEER_STATUS
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_SUBSCRIBE_RTC_PEER_STATUS
+uint64_t uniffi_actr_fn_method_actrrefwrapper_subscribe_rtc_peer_status(uint64_t ptr, RustBuffer peer, uint64_t listener
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_ACTRREFWRAPPER_TELL
@@ -684,6 +721,16 @@ uint64_t uniffi_actr_fn_method_networkeventhandlewrapper_handle_app_lifecycle_ch
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_NETWORKEVENTHANDLEWRAPPER_HANDLE_NETWORK_PATH_CHANGED
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_METHOD_NETWORKEVENTHANDLEWRAPPER_HANDLE_NETWORK_PATH_CHANGED
 uint64_t uniffi_actr_fn_method_networkeventhandlewrapper_handle_network_path_changed(uint64_t ptr, RustBuffer snapshot
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_CLONE_RTCPEERSTATESUBSCRIPTION
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_CLONE_RTCPEERSTATESUBSCRIPTION
+uint64_t uniffi_actr_fn_clone_rtcpeerstatesubscription(uint64_t handle, RustCallStatus *_Nonnull out_status
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_FREE_RTCPEERSTATESUBSCRIPTION
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_FREE_RTCPEERSTATESUBSCRIPTION
+void uniffi_actr_fn_free_rtcpeerstatesubscription(uint64_t handle, RustCallStatus *_Nonnull out_status
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_CLONE_DYNAMICWORKLOAD
@@ -729,6 +776,11 @@ void uniffi_actr_fn_init_callback_vtable_mediatrackcallback(const UniffiVTableCa
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_INIT_CALLBACK_VTABLE_LOGCALLBACK
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_INIT_CALLBACK_VTABLE_LOGCALLBACK
 void uniffi_actr_fn_init_callback_vtable_logcallback(const UniffiVTableCallbackInterfaceLogCallback* _Nonnull vtable
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_INIT_CALLBACK_VTABLE_RTCPEERSTATELISTENER
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_FN_INIT_CALLBACK_VTABLE_RTCPEERSTATELISTENER
+void uniffi_actr_fn_init_callback_vtable_rtcpeerstatelistener(const UniffiVTableCallbackInterfaceRtcPeerStateListener* _Nonnull vtable
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_FN_INIT_CALLBACK_VTABLE_CREDENTIALOBSERVERBRIDGE
@@ -1113,13 +1165,13 @@ uint16_t uniffi_actr_checksum_method_contextbridge_call_raw(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_CALLER_ID
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_CALLER_ID
 uint16_t uniffi_actr_checksum_method_contextbridge_caller_id(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_DISCOVER
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_DISCOVER
 uint16_t uniffi_actr_checksum_method_contextbridge_discover(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_LOG
@@ -1143,19 +1195,19 @@ uint16_t uniffi_actr_checksum_method_contextbridge_register_stream(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REMOVE_MEDIA_TRACK
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REMOVE_MEDIA_TRACK
 uint16_t uniffi_actr_checksum_method_contextbridge_remove_media_track(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REQUEST_ID
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_REQUEST_ID
 uint16_t uniffi_actr_checksum_method_contextbridge_request_id(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_RESOLVE_DEPENDENCY
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_RESOLVE_DEPENDENCY
 uint16_t uniffi_actr_checksum_method_contextbridge_resolve_dependency(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CONTEXTBRIDGE_SELF_ID
@@ -1236,21 +1288,39 @@ uint16_t uniffi_actr_checksum_method_actrrefwrapper_discover(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_GET_RTC_PEER_STATUS
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_GET_RTC_PEER_STATUS
+uint16_t uniffi_actr_checksum_method_actrrefwrapper_get_rtc_peer_status(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_IS_SHUTTING_DOWN
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_IS_SHUTTING_DOWN
 uint16_t uniffi_actr_checksum_method_actrrefwrapper_is_shutting_down(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_LIST_RTC_PEER_STATUSES
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_LIST_RTC_PEER_STATUSES
+uint16_t uniffi_actr_checksum_method_actrrefwrapper_list_rtc_peer_statuses(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_RESOLVE_DEPENDENCY
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_RESOLVE_DEPENDENCY
 uint16_t uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency(void
-
+    
 );
 #endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_SHUTDOWN
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_SHUTDOWN
 uint16_t uniffi_actr_checksum_method_actrrefwrapper_shutdown(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_SUBSCRIBE_RTC_PEER_STATUS
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_ACTRREFWRAPPER_SUBSCRIBE_RTC_PEER_STATUS
+uint16_t uniffi_actr_checksum_method_actrrefwrapper_subscribe_rtc_peer_status(void
     
 );
 #endif
@@ -1344,6 +1414,12 @@ uint16_t uniffi_actr_checksum_method_logcallback_on_log(void
     
 );
 #endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_RTCPEERSTATELISTENER_ON_STATE
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_RTCPEERSTATELISTENER_ON_STATE
+uint16_t uniffi_actr_checksum_method_rtcpeerstatelistener_on_state(void
+    
+);
+#endif
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CREDENTIALOBSERVERBRIDGE_ON_RENEWED
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_CREDENTIALOBSERVERBRIDGE_ON_RENEWED
 uint16_t uniffi_actr_checksum_method_credentialobserverbridge_on_renewed(void
@@ -1395,6 +1471,12 @@ uint16_t uniffi_actr_checksum_method_webrtcobserverbridge_on_connected(void
 #ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_WEBRTCOBSERVERBRIDGE_ON_DISCONNECTED
 #define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_WEBRTCOBSERVERBRIDGE_ON_DISCONNECTED
 uint16_t uniffi_actr_checksum_method_webrtcobserverbridge_on_disconnected(void
+    
+);
+#endif
+#ifndef UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_WEBRTCOBSERVERBRIDGE_ON_STATE_CHANGED
+#define UNIFFI_FFIDEF_UNIFFI_ACTR_CHECKSUM_METHOD_WEBRTCOBSERVERBRIDGE_ON_STATE_CHANGED
+uint16_t uniffi_actr_checksum_method_webrtcobserverbridge_on_state_changed(void
     
 );
 #endif
@@ -1452,3 +1534,4 @@ uint32_t ffi_actr_uniffi_contract_version(void
     
 );
 #endif
+

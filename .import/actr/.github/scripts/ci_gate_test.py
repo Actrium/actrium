@@ -44,12 +44,16 @@ def test_rust_gate_avoids_slow_workspace_tests_and_unused_prewarm() -> None:
 
     # The separate test job (not inside rust) runs the Rust suite via
     # cargo-nextest (integration retries live in .config/nextest.toml), plus
-    # doctests on the libtest harness (nextest skips them).
+    # doctests on the libtest harness (nextest skips them). The job shards
+    # into realtime (real-PC suites) and rest legs; both run nextest and the
+    # rest leg keeps the doctests.
     assert "  test:" in workflow
     test_job = _job(workflow, "test", "rust_msrv")
-    assert "- name: Run tests (nextest)" in test_job
+    assert "shard: [realtime, rest]" in test_job
+    assert "- name: Run tests (nextest, ${{ matrix.shard }} shard)" in test_job
     assert "cargo nextest run --workspace" in test_job
     assert "cargo test --doc --workspace" in test_job
+    assert 'if: matrix.shard == \'rest\'' in test_job
 
 
 def test_rust_test_gate_restores_cache_before_installing_tools() -> None:

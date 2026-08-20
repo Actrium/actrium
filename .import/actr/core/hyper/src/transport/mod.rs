@@ -9,7 +9,6 @@
 //! - WireBuilder: Wire layer component builder
 
 mod backoff;
-mod connection_event;
 pub(crate) mod correlation;
 mod dest_transport;
 mod error;
@@ -36,10 +35,26 @@ pub(crate) use secure_channel::{SecureCell, SecureChannelState, SecureDataLane};
 
 // DataLane core abstraction (trait kept pub for sw-host/peer_transport).
 #[cfg(feature = "test-utils")]
-pub use lane::{DataChannelStateSignal, DataLane};
+pub use lane::DataLane;
 #[cfg(not(feature = "test-utils"))]
-pub(crate) use lane::{DataChannelStateSignal, DataLane};
-pub(crate) use lane::{MpscLane, WebRtcDataLane, WebSocketDataLane, WsSink};
+pub(crate) use lane::DataLane;
+#[cfg(feature = "test-utils")]
+pub(crate) use lane::notify_webrtc_fragment_sent_for_test;
+pub(crate) use lane::{MpscLane, WebSocketDataLane, WsSink};
+#[cfg(feature = "test-utils")]
+pub use lane::{
+    WebRtcFragmentSendEvent, WebRtcFragmentSendHook, WebRtcFragmentSendHookGuard,
+    install_webrtc_fragment_send_hook_for_test,
+};
+// Fragment codec: shared between 0.14 WebRtcDataLane and v0.20 V020DataLane
+// so both produce byte-identical wire format on the DataChannel. Only
+// re-exported when the v0.20 feature is active — 0.14 uses them internally
+// within `lane.rs` and does not need the re-export.
+#[cfg(feature = "webrtc-v020")]
+pub(crate) use lane::{
+    DC_MAX_PAYLOAD_SIZE, FRAGMENT_HEADER_SIZE, ReassemblyBuffer, ReassemblyLimits,
+    decode_fragment_header, encode_fragment_header,
+};
 pub(crate) use route_table::{PayloadTypeExt, RetryPolicy};
 
 // ConnType leaks through the public `WireHandle::connection_type` method,
@@ -56,7 +71,7 @@ pub use host_transport::HostTransport;
 pub(crate) use host_transport::HostTransport;
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use peer_transport::PeerTransport;
-pub(crate) use peer_transport::{DestTransportRef, SentTransportSlot, WebrtcCloseOutcome};
+pub(crate) use peer_transport::{DestTransportRef, SentTransportSlot};
 #[cfg(feature = "test-utils")]
 pub use peer_transport::{PeerTransport, WireBuilder};
 
@@ -66,9 +81,9 @@ pub use wire_builder::{DefaultWireBuilder, DefaultWireBuilderConfig};
 #[cfg(not(feature = "test-utils"))]
 pub(crate) use wire_builder::{DefaultWireBuilder, DefaultWireBuilderConfig};
 #[cfg(feature = "test-utils")]
-pub use wire_handle::{WireHandle, WireIdentity};
+pub use wire_handle::{WebRtcTransportLifecycle, WireHandle, WireIdentity};
 #[cfg(not(feature = "test-utils"))]
-pub(crate) use wire_handle::{WireHandle, WireIdentity};
+pub(crate) use wire_handle::{WebRtcTransportLifecycle, WireHandle, WireIdentity};
 
 // Error types
 pub use error::{AuthVerdict, NetworkError, NetworkResult};
@@ -78,11 +93,8 @@ pub use backoff::ExponentialBackoff;
 
 // Connection events are re-exported at the transport module boundary; the
 // broadcaster stays crate-internal.
-pub(crate) use connection_event::ConnectionEventBroadcaster;
-pub use connection_event::{ConnectionEvent, ConnectionState};
 
 // Connection session
-pub(crate) mod session;
 
 /// Validate a caller-supplied RPC timeout at a call entry point and convert
 /// it into a [`std::time::Duration`].

@@ -257,10 +257,9 @@ pub struct RawStorageConfig {
 
 /// WebRTC configuration
 ///
-/// Without port range configured, uses default mode (random ports).
-/// `port_range_start/end` currently cannot enable fixed port mode: the
-/// wildcard ICE-restart rebind overrides them, so validation rejects a
-/// configured range rather than silently ignoring it.
+/// The v0.20 backend uses per-PeerConnection ephemeral UDP ports. Legacy
+/// port-range fields remain parseable for a clear migration error, but any
+/// configured range is rejected rather than silently ignored.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RawWebRtcConfig {
     /// STUN server URL list (e.g., ["stun:localhost:3478"])
@@ -291,12 +290,11 @@ pub struct RawWebRtcConfig {
     #[serde(default)]
     pub ice_relay_acceptance_min_wait: Option<u64>,
 
-    /// UDP port range start (optional; currently rejected while ICE-restart
-    /// recovery binds a wildcard address — see WebRtcAdvancedConfig::validate)
+    /// Legacy UDP port range start (unsupported by the v0.20 backend)
     #[serde(default)]
     pub port_range_start: Option<u16>,
 
-    /// UDP port range end (optional; rejected together with port_range_start)
+    /// Legacy UDP port range end (unsupported by the v0.20 backend)
     #[serde(default)]
     pub port_range_end: Option<u16>,
 
@@ -306,7 +304,7 @@ pub struct RawWebRtcConfig {
     /// set.** webrtc-rs 0.20 does not expose the shared ICE UDP mux, so the
     /// configured port would never be bound; failing fast beats silently
     /// falling back to an ephemeral port that the firewall does not open.
-    /// Use the port range above for fixed-port deployments.
+    /// Fixed-port deployments require an upstream/fork socket-injection seam.
     #[serde(default)]
     pub ice_udp_mux_port: Option<u16>,
 

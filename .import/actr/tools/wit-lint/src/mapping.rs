@@ -6,7 +6,7 @@
 //! -------------
 //!
 //! Only the items the DynClib C ABI actually implements are cross-checked.
-//! That excludes the 16 observation hooks and their event payload records,
+//! That excludes the 17 observation hooks and their event payload records,
 //! which live exclusively on the WASM Component Model path. Those items are
 //! listed in the `wit_only` set so the mapping explicitly acknowledges
 //! them; anything the lint otherwise doesn't recognise will trip drift.
@@ -343,7 +343,7 @@ fn check_function(
 }
 
 // ─────────────────────────────────────────────────────────────────────────
-// The canonical mapping table for actr-workload@0.4.0.
+// The canonical mapping table for actr-workload@0.5.0.
 // ─────────────────────────────────────────────────────────────────────────
 
 /// Canonical mapping used by the production lint invocation.
@@ -428,7 +428,7 @@ pub fn default_mapping() -> Mapping {
             },
         ],
         wit_only: [
-            // 16 observation hooks — WASM only, implemented via
+            // 17 observation hooks — WASM only, implemented via
             // wit-bindgen-generated Guest trait; DynClib dispatches only
             // the one `dispatch` entry.
             "workload.on-start",
@@ -444,11 +444,16 @@ pub fn default_mapping() -> Mapping {
             "workload.on-webrtc-connecting",
             "workload.on-webrtc-connected",
             "workload.on-webrtc-disconnected",
+            // 0.5.0: unified per-peer state hook fed by the v0.20 backend.
+            "workload.on-webrtc-state-changed",
             "workload.on-credential-renewed",
             "workload.on-credential-expiring",
             "workload.on-mailbox-backpressure",
             // Event payload records carried by the hooks above.
             "peer-event",
+            "webrtc-peer-state",
+            "webrtc-network-path",
+            "webrtc-unavailable-reason",
             "error-event",
             "credential-event",
             "backpressure-event",

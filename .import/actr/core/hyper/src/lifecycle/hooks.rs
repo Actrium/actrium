@@ -79,6 +79,13 @@ pub(crate) trait WorkloadHookObserver: Send + Sync + 'static {
     async fn on_webrtc_connecting(&self, _ctx: &RuntimeContext, _event: &PeerEvent) {}
     async fn on_webrtc_connected(&self, _ctx: &RuntimeContext, _event: &PeerEvent) {}
     async fn on_webrtc_disconnected(&self, _ctx: &RuntimeContext, _event: &PeerEvent) {}
+    /// S6-5: unified per-revision state hook (v0.20 backend).
+    async fn on_webrtc_state_changed(
+        &self,
+        _ctx: &RuntimeContext,
+        _state: &actr_framework::WebRtcPeerState,
+    ) {
+    }
 
     // Credential
     async fn on_credential_renewed(&self, _ctx: &RuntimeContext, _event: &CredentialEvent) {}
@@ -254,6 +261,23 @@ impl WorkloadHookObserver for ChainedHookObserver {
             call_observation_hook(
                 "on_webrtc_disconnected:second",
                 self.second.on_webrtc_disconnected(ctx, event),
+            ),
+        );
+    }
+
+    async fn on_webrtc_state_changed(
+        &self,
+        ctx: &RuntimeContext,
+        state: &actr_framework::WebRtcPeerState,
+    ) {
+        tokio::join!(
+            call_observation_hook(
+                "on_webrtc_state_changed:first",
+                self.first.on_webrtc_state_changed(ctx, state),
+            ),
+            call_observation_hook(
+                "on_webrtc_state_changed:second",
+                self.second.on_webrtc_state_changed(ctx, state),
             ),
         );
     }
@@ -472,6 +496,11 @@ async fn deliver_hook_event(
                 observer.on_webrtc_disconnected(ctx, &event).await;
             }
         }
+        HookEvent::WebRtcStateChanged { state } => {
+            if let (Some(ctx), Some(observer)) = (ctx_opt.as_ref(), observer) {
+                observer.on_webrtc_state_changed(ctx, &state).await;
+            }
+        }
         HookEvent::DataChunkDeliveryUncertain {
             stream_id,
             session_id,
@@ -555,6 +584,7 @@ fn hook_event_label(event: &HookEvent) -> &'static str {
         HookEvent::WebRtcConnectStart { .. } => "on_webrtc_connecting",
         HookEvent::WebRtcConnected { .. } => "on_webrtc_connected",
         HookEvent::WebRtcDisconnected { .. } => "on_webrtc_disconnected",
+        HookEvent::WebRtcStateChanged { .. } => "on_webrtc_state_changed",
         HookEvent::DataChunkDeliveryUncertain { .. } => "on_error",
         HookEvent::WebSocketConnectStart { .. } => "on_websocket_connecting",
         HookEvent::WebSocketConnected { .. } => "on_websocket_connected",
@@ -581,6 +611,15 @@ fn log_hook_event(event: &HookEvent) {
         }
         HookEvent::WebRtcDisconnected { peer_id, status } => {
             tracing::warn!(peer = %peer_id, status = ?status, "webrtc disconnected");
+        }
+        HookEvent::WebRtcStateChanged { state } => {
+            tracing::debug!(
+                peer = %state.peer,
+                status = ?state.status,
+                sendable = state.sendable,
+                revision = state.revision,
+                "webrtc state changed"
+            );
         }
         HookEvent::DataChunkDeliveryUncertain {
             stream_id,
