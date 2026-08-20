@@ -629,6 +629,9 @@ internal interface UniffiCallbackInterfaceMediaTrackCallbackMethod0 : com.sun.jn
 internal interface UniffiCallbackInterfaceLogCallbackMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`level`: RustBuffer.ByValue,`target`: RustBuffer.ByValue,`message`: RustBuffer.ByValue,`timestampMs`: Long,`uniffiOutReturn`: Pointer,uniffiCallStatus: UniffiRustCallStatus,)
 }
+internal interface UniffiCallbackInterfaceRtcPeerStateListenerMethod0 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`state`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,)
+}
 internal interface UniffiCallbackInterfaceCredentialObserverBridgeMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`ctx`: Long,`event`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,)
 }
@@ -655,6 +658,9 @@ internal interface UniffiCallbackInterfaceWebRtcObserverBridgeMethod1 : com.sun.
 }
 internal interface UniffiCallbackInterfaceWebRtcObserverBridgeMethod2 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`ctx`: Long,`event`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,)
+}
+internal interface UniffiCallbackInterfaceWebRtcObserverBridgeMethod3 : com.sun.jna.Callback {
+    fun callback(`uniffiHandle`: Long,`ctx`: Long,`state`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,)
 }
 internal interface UniffiCallbackInterfaceWebSocketObserverBridgeMethod0 : com.sun.jna.Callback {
     fun callback(`uniffiHandle`: Long,`ctx`: Long,`event`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,)
@@ -737,6 +743,25 @@ internal open class UniffiVTableCallbackInterfaceLogCallback(
     }
 
 }
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "onState")
+internal open class UniffiVTableCallbackInterfaceRtcPeerStateListener(
+    @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+    @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+    @JvmField internal var `onState`: UniffiCallbackInterfaceRtcPeerStateListenerMethod0? = null,
+) : Structure() {
+    class UniffiByValue(
+        `uniffiFree`: UniffiCallbackInterfaceFree? = null,
+        `uniffiClone`: UniffiCallbackInterfaceClone? = null,
+        `onState`: UniffiCallbackInterfaceRtcPeerStateListenerMethod0? = null,
+    ): UniffiVTableCallbackInterfaceRtcPeerStateListener(`uniffiFree`,`uniffiClone`,`onState`,), Structure.ByValue
+
+   internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceRtcPeerStateListener) {
+        `uniffiFree` = other.`uniffiFree`
+        `uniffiClone` = other.`uniffiClone`
+        `onState` = other.`onState`
+    }
+
+}
 @Structure.FieldOrder("uniffiFree", "uniffiClone", "onRenewed", "onExpiring")
 internal open class UniffiVTableCallbackInterfaceCredentialObserverBridge(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
@@ -803,13 +828,14 @@ internal open class UniffiVTableCallbackInterfaceSignalingObserverBridge(
     }
 
 }
-@Structure.FieldOrder("uniffiFree", "uniffiClone", "onConnecting", "onConnected", "onDisconnected")
+@Structure.FieldOrder("uniffiFree", "uniffiClone", "onConnecting", "onConnected", "onDisconnected", "onStateChanged")
 internal open class UniffiVTableCallbackInterfaceWebRtcObserverBridge(
     @JvmField internal var `uniffiFree`: UniffiCallbackInterfaceFree? = null,
     @JvmField internal var `uniffiClone`: UniffiCallbackInterfaceClone? = null,
     @JvmField internal var `onConnecting`: UniffiCallbackInterfaceWebRtcObserverBridgeMethod0? = null,
     @JvmField internal var `onConnected`: UniffiCallbackInterfaceWebRtcObserverBridgeMethod1? = null,
     @JvmField internal var `onDisconnected`: UniffiCallbackInterfaceWebRtcObserverBridgeMethod2? = null,
+    @JvmField internal var `onStateChanged`: UniffiCallbackInterfaceWebRtcObserverBridgeMethod3? = null,
 ) : Structure() {
     class UniffiByValue(
         `uniffiFree`: UniffiCallbackInterfaceFree? = null,
@@ -817,7 +843,8 @@ internal open class UniffiVTableCallbackInterfaceWebRtcObserverBridge(
         `onConnecting`: UniffiCallbackInterfaceWebRtcObserverBridgeMethod0? = null,
         `onConnected`: UniffiCallbackInterfaceWebRtcObserverBridgeMethod1? = null,
         `onDisconnected`: UniffiCallbackInterfaceWebRtcObserverBridgeMethod2? = null,
-    ): UniffiVTableCallbackInterfaceWebRtcObserverBridge(`uniffiFree`,`uniffiClone`,`onConnecting`,`onConnected`,`onDisconnected`,), Structure.ByValue
+        `onStateChanged`: UniffiCallbackInterfaceWebRtcObserverBridgeMethod3? = null,
+    ): UniffiVTableCallbackInterfaceWebRtcObserverBridge(`uniffiFree`,`uniffiClone`,`onConnecting`,`onConnected`,`onDisconnected`,`onStateChanged`,), Structure.ByValue
 
    internal fun uniffiSetValue(other: UniffiVTableCallbackInterfaceWebRtcObserverBridge) {
         `uniffiFree` = other.`uniffiFree`
@@ -825,6 +852,7 @@ internal open class UniffiVTableCallbackInterfaceWebRtcObserverBridge(
         `onConnecting` = other.`onConnecting`
         `onConnected` = other.`onConnected`
         `onDisconnected` = other.`onDisconnected`
+        `onStateChanged` = other.`onStateChanged`
     }
 
 }
@@ -967,11 +995,17 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_method_actrrefwrapper_discover(
     ): Short
+    external fun uniffi_actr_checksum_method_actrrefwrapper_get_rtc_peer_status(
+    ): Short
     external fun uniffi_actr_checksum_method_actrrefwrapper_is_shutting_down(
+    ): Short
+    external fun uniffi_actr_checksum_method_actrrefwrapper_list_rtc_peer_statuses(
     ): Short
     external fun uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency(
     ): Short
     external fun uniffi_actr_checksum_method_actrrefwrapper_shutdown(
+    ): Short
+    external fun uniffi_actr_checksum_method_actrrefwrapper_subscribe_rtc_peer_status(
     ): Short
     external fun uniffi_actr_checksum_method_actrrefwrapper_tell(
     ): Short
@@ -1003,6 +1037,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_method_logcallback_on_log(
     ): Short
+    external fun uniffi_actr_checksum_method_rtcpeerstatelistener_on_state(
+    ): Short
     external fun uniffi_actr_checksum_method_credentialobserverbridge_on_renewed(
     ): Short
     external fun uniffi_actr_checksum_method_credentialobserverbridge_on_expiring(
@@ -1020,6 +1056,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_actr_checksum_method_webrtcobserverbridge_on_connected(
     ): Short
     external fun uniffi_actr_checksum_method_webrtcobserverbridge_on_disconnected(
+    ): Short
+    external fun uniffi_actr_checksum_method_webrtcobserverbridge_on_state_changed(
     ): Short
     external fun uniffi_actr_checksum_method_websocketobserverbridge_on_connecting(
     ): Short
@@ -1058,6 +1096,7 @@ internal object UniffiLib {
         uniffiCallbackInterfaceLogCallback.register(this)
         uniffiCallbackInterfaceMailboxObserverBridge.register(this)
         uniffiCallbackInterfaceMediaTrackCallback.register(this)
+        uniffiCallbackInterfaceRtcPeerStateListener.register(this)
         uniffiCallbackInterfaceSignalingObserverBridge.register(this)
         uniffiCallbackInterfaceWebRtcObserverBridge.register(this)
         uniffiCallbackInterfaceWebSocketObserverBridge.register(this)
@@ -1072,11 +1111,11 @@ external fun uniffi_actr_fn_method_contextbridge_add_media_track(`ptr`: Long,`ta
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_call_raw(`ptr`: Long,`target`: RustBuffer.ByValue,`routeKey`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,`payload`: RustBuffer.ByValue,`timeoutMs`: Long,
 ): Long
-external fun uniffi_actr_fn_method_contextbridge_caller_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_method_contextbridge_caller_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_method_contextbridge_discover(`ptr`: Long,`targetType`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_contextbridge_log(`ptr`: Long,`level`: RustBuffer.ByValue,`msg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_method_contextbridge_log(`ptr`: Long,`level`: RustBuffer.ByValue,`msg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_actr_fn_method_contextbridge_register_media_track(`ptr`: Long,`trackId`: RustBuffer.ByValue,`callback`: Long,
 ): Long
@@ -1084,11 +1123,11 @@ external fun uniffi_actr_fn_method_contextbridge_register_stream(`ptr`: Long,`st
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_remove_media_track(`ptr`: Long,`target`: RustBuffer.ByValue,`trackId`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_contextbridge_request_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_method_contextbridge_request_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_method_contextbridge_resolve_dependency(`ptr`: Long,`alias`: RustBuffer.ByValue,
 ): Long
-external fun uniffi_actr_fn_method_contextbridge_self_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_method_contextbridge_self_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_actr_fn_method_contextbridge_send_data_chunk(`ptr`: Long,`target`: RustBuffer.ByValue,`chunk`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,
 ): Long
@@ -1134,12 +1173,18 @@ external fun uniffi_actr_fn_method_actrrefwrapper_call(`ptr`: Long,`routeKey`: R
 ): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_discover(`ptr`: Long,`targetType`: RustBuffer.ByValue,`count`: Int,
 ): Long
+external fun uniffi_actr_fn_method_actrrefwrapper_get_rtc_peer_status(`ptr`: Long,`peer`: RustBuffer.ByValue,
+): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_is_shutting_down(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_actr_fn_method_actrrefwrapper_list_rtc_peer_statuses(`ptr`: Long,
+): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_resolve_dependency(`ptr`: Long,`alias`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_shutdown(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_actr_fn_method_actrrefwrapper_subscribe_rtc_peer_status(`ptr`: Long,`peer`: RustBuffer.ByValue,`listener`: Long,
+): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_tell(`ptr`: Long,`routeKey`: RustBuffer.ByValue,`payloadType`: RustBuffer.ByValue,`messagePayload`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_actrrefwrapper_wait_for_shutdown(`ptr`: Long,
@@ -1156,23 +1201,29 @@ external fun uniffi_actr_fn_method_networkeventhandlewrapper_handle_app_lifecycl
 ): Long
 external fun uniffi_actr_fn_method_networkeventhandlewrapper_handle_network_path_changed(`ptr`: Long,`snapshot`: RustBuffer.ByValue,
 ): Long
+external fun uniffi_actr_fn_clone_rtcpeerstatesubscription(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_actr_fn_free_rtcpeerstatesubscription(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_actr_fn_clone_dynamicworkload(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_actr_fn_free_dynamicworkload(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_actr_fn_constructor_dynamicworkload_new(`lifecycle`: Long,`signaling`: RustBuffer.ByValue,`websocket`: RustBuffer.ByValue,`webrtc`: RustBuffer.ByValue,`credential`: RustBuffer.ByValue,`mailbox`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
-external fun uniffi_actr_fn_clone_runtimeobservers(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_clone_runtimeobservers(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
-external fun uniffi_actr_fn_free_runtimeobservers(`handle`: Long,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_free_runtimeobservers(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
-external fun uniffi_actr_fn_constructor_runtimeobservers_new(`signaling`: RustBuffer.ByValue,`websocket`: RustBuffer.ByValue,`webrtc`: RustBuffer.ByValue,`credential`: RustBuffer.ByValue,`mailbox`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus,
+external fun uniffi_actr_fn_constructor_runtimeobservers_new(`signaling`: RustBuffer.ByValue,`websocket`: RustBuffer.ByValue,`webrtc`: RustBuffer.ByValue,`credential`: RustBuffer.ByValue,`mailbox`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Long
 external fun uniffi_actr_fn_init_callback_vtable_datachunkcallback(`vtable`: UniffiVTableCallbackInterfaceDataChunkCallback,
 ): Unit
 external fun uniffi_actr_fn_init_callback_vtable_mediatrackcallback(`vtable`: UniffiVTableCallbackInterfaceMediaTrackCallback,
 ): Unit
 external fun uniffi_actr_fn_init_callback_vtable_logcallback(`vtable`: UniffiVTableCallbackInterfaceLogCallback,
+): Unit
+external fun uniffi_actr_fn_init_callback_vtable_rtcpeerstatelistener(`vtable`: UniffiVTableCallbackInterfaceRtcPeerStateListener,
 ): Unit
 external fun uniffi_actr_fn_init_callback_vtable_credentialobserverbridge(`vtable`: UniffiVTableCallbackInterfaceCredentialObserverBridge,
 ): Unit
@@ -1367,7 +1418,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_request_id() != 61345.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_contextbridge_resolve_dependency() != 9905.toShort()) {
+    if (lib.uniffi_actr_checksum_method_contextbridge_resolve_dependency() != 64130.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_self_id() != 56416.toShort()) {
@@ -1409,13 +1460,22 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_discover() != 21192.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_get_rtc_peer_status() != 47575.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_is_shutting_down() != 50332.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency() != 37283.toShort()) {
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_list_rtc_peer_statuses() != 18889.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_resolve_dependency() != 33582.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_shutdown() != 60173.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_actrrefwrapper_subscribe_rtc_peer_status() != 51801.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_actrrefwrapper_tell() != 38430.toShort()) {
@@ -1463,6 +1523,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_logcallback_on_log() != 3599.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actr_checksum_method_rtcpeerstatelistener_on_state() != 27684.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actr_checksum_method_credentialobserverbridge_on_renewed() != 1839.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1488,6 +1551,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_webrtcobserverbridge_on_disconnected() != 44359.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_webrtcobserverbridge_on_state_changed() != 48957.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_websocketobserverbridge_on_connecting() != 31917.toShort()) {
@@ -2394,7 +2460,7 @@ open class ActrNode: Disposable, AutoCloseable, ActrNodeInterface
     )
     }
 
-
+        
     }
     
 }
@@ -2540,19 +2606,45 @@ public interface ActrRefWrapperInterface {
     suspend fun `discover`(`targetType`: ActrType, `count`: kotlin.UInt): List<ActrId>
     
     /**
+     * Query one peer's current WebRTC state (v0.20 backend). Returns `None`
+     * when the peer has no controller, the node runs the 0.14 backend, or
+     * the build does not enable `webrtc-v020`.
+     */
+    suspend fun `getRtcPeerStatus`(`peer`: ActrId): WebRtcPeerStateBridge?
+    
+    /**
      * Check if shutdown is already in progress.
      */
     fun `isShuttingDown`(): kotlin.Boolean
     
     /**
+     * List every current peer's WebRTC state (v0.20 backend; empty on 0.14
+     * or when the build does not enable `webrtc-v020`).
+     */
+    suspend fun `listRtcPeerStatuses`(): List<WebRtcPeerStateBridge>
+    
+    /**
      * Resolve a dependency alias to its declared `ActrType`.
+     *
+     * App-side convenience wrapper around `app_context().resolve_dependency(alias)`.
+     * Used by generated remote-route dispatch arms to resolve their declared
+     * dependency alias before route discovery.
      */
     suspend fun `resolveDependency`(`alias`: kotlin.String): ActrType
-
+    
     /**
      * Trigger shutdown.
      */
     fun `shutdown`()
+    
+    /**
+     * Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+     * listener immediately receives the current state (initial replay).
+     * Dropping the returned subscription stops delivery. Returns `None` when
+     * the peer has no controller, the node runs the 0.14 backend, or the
+     * build does not enable `webrtc-v020`.
+     */
+    suspend fun `subscribeRtcPeerStatus`(`peer`: ActrId, `listener`: RtcPeerStateListener): RtcPeerStateSubscription?
     
     /**
      * Send a one-way message to the local guest workload.
@@ -2732,6 +2824,31 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
 
     
     /**
+     * Query one peer's current WebRTC state (v0.20 backend). Returns `None`
+     * when the peer has no controller, the node runs the 0.14 backend, or
+     * the build does not enable `webrtc-v020`.
+     */
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `getRtcPeerStatus`(`peer`: ActrId) : WebRtcPeerStateBridge? {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_actrrefwrapper_get_rtc_peer_status(
+                uniffiHandle,
+                FfiConverterTypeActrId.lower(`peer`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterOptionalTypeWebRtcPeerStateBridge.lift(it) },
+        // Error FFI converter
+        UniffiNullRustCallStatusErrorHandler,
+    )
+    }
+
+    
+    /**
      * Check if shutdown is already in progress.
      */override fun `isShuttingDown`(): kotlin.Boolean {
             return FfiConverterBoolean.lift(
@@ -2748,7 +2865,35 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
 
     
     /**
+     * List every current peer's WebRTC state (v0.20 backend; empty on 0.14
+     * or when the build does not enable `webrtc-v020`).
+     */
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `listRtcPeerStatuses`() : List<WebRtcPeerStateBridge> {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_actrrefwrapper_list_rtc_peer_statuses(
+                uniffiHandle,
+                
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterSequenceTypeWebRtcPeerStateBridge.lift(it) },
+        // Error FFI converter
+        UniffiNullRustCallStatusErrorHandler,
+    )
+    }
+
+    
+    /**
      * Resolve a dependency alias to its declared `ActrType`.
+     *
+     * App-side convenience wrapper around `app_context().resolve_dependency(alias)`.
+     * Used by generated remote-route dispatch arms to resolve their declared
+     * dependency alias before route discovery.
      */
     @Throws(ActrException::class)
     @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
@@ -2763,13 +2908,14 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
         { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
         { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
         { FfiConverterTypeActrType.lift(it) },
+        // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-
-
+    
     /**
      * Trigger shutdown.
      */override fun `shutdown`()
@@ -2783,6 +2929,33 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
     }
     
     
+
+    
+    /**
+     * Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+     * listener immediately receives the current state (initial replay).
+     * Dropping the returned subscription stops delivery. Returns `None` when
+     * the peer has no controller, the node runs the 0.14 backend, or the
+     * build does not enable `webrtc-v020`.
+     */
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `subscribeRtcPeerStatus`(`peer`: ActrId, `listener`: RtcPeerStateListener) : RtcPeerStateSubscription? {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_actrrefwrapper_subscribe_rtc_peer_status(
+                uniffiHandle,
+                FfiConverterTypeActrId.lower(`peer`),FfiConverterTypeRtcPeerStateListener.lower(`listener`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
+        { FfiConverterOptionalTypeRtcPeerStateSubscription.lift(it) },
+        // Error FFI converter
+        UniffiNullRustCallStatusErrorHandler,
+    )
+    }
 
     
     /**
@@ -2996,7 +3169,7 @@ public interface ContextBridgeInterface {
      * Caller actor ID when this context was created from an inbound actor call.
      */
     fun `callerId`(): ActrId?
-
+    
     /**
      * Discover an actor of the specified type
      *
@@ -3012,7 +3185,7 @@ public interface ContextBridgeInterface {
      * Emit a workload-scoped log record through the runtime's context logging hook.
      */
     fun `log`(`level`: LogLevel, `msg`: kotlin.String)
-
+    
     /**
      * Register a callback for incoming media track samples
      */
@@ -3032,17 +3205,17 @@ public interface ContextBridgeInterface {
      * Request ID associated with the current dispatch or lifecycle context.
      */
     fun `requestId`(): kotlin.String
-
+    
     /**
      * Resolve a declared dependency alias to its canonical actor type.
      */
     suspend fun `resolveDependency`(`alias`: kotlin.String): ActrType
-
+    
     /**
      * Current actor ID associated with this context.
      */
     fun `selfId`(): ActrId
-
+    
     /**
      * Send a DataChunk to a remote actor (Fast Path)
      *
@@ -3254,9 +3427,9 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     }
     )
     }
+    
 
-
-
+    
     /**
      * Discover an actor of the specified type
      *
@@ -3290,7 +3463,7 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     /**
      * Emit a workload-scoped log record through the runtime's context logging hook.
      */override fun `log`(`level`: LogLevel, `msg`: kotlin.String)
-        =
+        = 
     callWithHandle {
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_method_contextbridge_log(
@@ -3298,10 +3471,10 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         FfiConverterTypeLogLevel.lower(`level`),FfiConverterString.lower(`msg`),_status)
 }
     }
+    
+    
 
-
-
-
+    
     /**
      * Register a callback for incoming media track samples
      */
@@ -3390,8 +3563,9 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     }
     )
     }
+    
 
-
+    
     /**
      * Resolve a declared dependency alias to its canonical actor type.
      */
@@ -3408,13 +3582,14 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_rust_buffer(future, callback, continuation) },
         { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_rust_buffer(future, continuation) },
         { future -> UniffiLib.ffi_actr_rust_future_free_rust_buffer(future) },
+        // lift function
         { FfiConverterTypeActrType.lift(it) },
+        // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-
-
+    
     /**
      * Current actor ID associated with this context.
      */override fun `selfId`(): ActrId {
@@ -3428,9 +3603,9 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     }
     )
     }
+    
 
-
-
+    
     /**
      * Send a DataChunk to a remote actor (Fast Path)
      *
@@ -4608,6 +4783,249 @@ public object FfiConverterTypeOpusEncoder: FfiConverter<OpusEncoder, Long> {
 
 
 /**
+ * A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+ * it aborts the delivery task.
+ */
+public interface RtcPeerStateSubscriptionInterface {
+    
+    companion object
+}
+
+/**
+ * A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+ * it aborts the delivery task.
+ */
+open class RtcPeerStateSubscription: Disposable, AutoCloseable, RtcPeerStateSubscriptionInterface
+{
+
+    @Suppress("UNUSED_PARAMETER")
+    /**
+     * @suppress
+     */
+    constructor(withHandle: UniffiWithHandle, handle: Long) {
+        this.handle = handle
+        this.cleanable = UniffiLib.CLEANER.register(this, UniffiCleanAction(handle))
+    }
+
+    /**
+     * @suppress
+     *
+     * This constructor can be used to instantiate a fake object. Only used for tests. Any
+     * attempt to actually use an object constructed this way will fail as there is no
+     * connected Rust object.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    constructor(noHandle: NoHandle) {
+        this.handle = 0
+        this.cleanable = null
+    }
+
+    protected val handle: Long
+    protected val cleanable: UniffiCleaner.Cleanable?
+
+    private val wasDestroyed = AtomicBoolean(false)
+    private val callCounter = AtomicLong(1)
+
+    override fun destroy() {
+        // Only allow a single call to this method.
+        // TODO: maybe we should log a warning if called more than once?
+        if (this.wasDestroyed.compareAndSet(false, true)) {
+            // This decrement always matches the initial count of 1 given at creation time.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    @Synchronized
+    override fun close() {
+        this.destroy()
+    }
+
+    internal inline fun <R> callWithHandle(block: (handle: Long) -> R): R {
+        // Check and increment the call counter, to keep the object alive.
+        // This needs a compare-and-set retry loop in case of concurrent updates.
+        do {
+            val c = this.callCounter.get()
+            if (c == 0L) {
+                throw IllegalStateException("${this.javaClass.simpleName} object has already been destroyed")
+            }
+            if (c == Long.MAX_VALUE) {
+                throw IllegalStateException("${this.javaClass.simpleName} call counter would overflow")
+            }
+        } while (! this.callCounter.compareAndSet(c, c + 1L))
+        // Now we can safely do the method call without the handle being freed concurrently.
+        try {
+            return block(this.uniffiCloneHandle())
+        } finally {
+            // This decrement always matches the increment we performed above.
+            if (this.callCounter.decrementAndGet() == 0L) {
+                cleanable?.clean()
+            }
+        }
+    }
+
+    // Use a static inner class instead of a closure so as not to accidentally
+    // capture `this` as part of the cleanable's action.
+    private class UniffiCleanAction(private val handle: Long) : Runnable {
+        override fun run() {
+            if (handle == 0.toLong()) {
+                // Fake object created with `NoHandle`, don't try to free.
+                return;
+            }
+            uniffiRustCall { status ->
+                UniffiLib.uniffi_actr_fn_free_rtcpeerstatesubscription(handle, status)
+            }
+        }
+    }
+
+    /**
+     * @suppress
+     */
+    fun uniffiCloneHandle(): Long {
+        if (handle == 0.toLong()) {
+            throw InternalException("uniffiCloneHandle() called on NoHandle object");
+        }
+        return uniffiRustCall() { status ->
+            UniffiLib.uniffi_actr_fn_clone_rtcpeerstatesubscription(handle, status)
+        }
+    }
+
+    
+
+    
+
+
+    
+    
+    /**
+     * @suppress
+     */
+    companion object
+    
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeRtcPeerStateSubscription: FfiConverter<RtcPeerStateSubscription, Long> {
+    override fun lower(value: RtcPeerStateSubscription): Long {
+        return value.uniffiCloneHandle()
+    }
+
+    override fun lift(value: Long): RtcPeerStateSubscription {
+        return RtcPeerStateSubscription(UniffiWithHandle, value)
+    }
+
+    override fun read(buf: ByteBuffer): RtcPeerStateSubscription {
+        return lift(buf.getLong())
+    }
+
+    override fun allocationSize(value: RtcPeerStateSubscription) = 8UL
+
+    override fun write(value: RtcPeerStateSubscription, buf: ByteBuffer) {
+        buf.putLong(lower(value))
+    }
+}
+
+
+// This template implements a class for working with a Rust struct via a handle
+// to the live Rust struct on the other side of the FFI.
+//
+// There's some subtlety here, because we have to be careful not to operate on a Rust
+// struct after it has been dropped, and because we must expose a public API for freeing
+// theq Kotlin wrapper object in lieu of reliable finalizers. The core requirements are:
+//
+//   * Each instance holds an opaque handle to the underlying Rust struct.
+//     Method calls need to read this handle from the object's state and pass it in to
+//     the Rust FFI.
+//
+//   * When an instance is no longer needed, its handle should be passed to a
+//     special destructor function provided by the Rust FFI, which will drop the
+//     underlying Rust struct.
+//
+//   * Given an instance, calling code is expected to call the special
+//     `destroy` method in order to free it after use, either by calling it explicitly
+//     or by using a higher-level helper like the `use` method. Failing to do so risks
+//     leaking the underlying Rust struct.
+//
+//   * We can't assume that calling code will do the right thing, and must be prepared
+//     to handle Kotlin method calls executing concurrently with or even after a call to
+//     `destroy`, and to handle multiple (possibly concurrent!) calls to `destroy`.
+//
+//   * We must never allow Rust code to operate on the underlying Rust struct after
+//     the destructor has been called, and must never call the destructor more than once.
+//     Doing so may trigger memory unsafety.
+//
+//   * To mitigate many of the risks of leaking memory and use-after-free unsafety, a `Cleaner`
+//     is implemented to call the destructor when the Kotlin object becomes unreachable.
+//     This is done in a background thread. This is not a panacea, and client code should be aware that
+//      1. the thread may starve if some there are objects that have poorly performing
+//     `drop` methods or do significant work in their `drop` methods.
+//      2. the thread is shared across the whole library. This can be tuned by using `android_cleaner = true`,
+//         or `android = true` in the [`kotlin` section of the `uniffi.toml` file](https://mozilla.github.io/uniffi-rs/kotlin/configuration.html).
+//
+// If we try to implement this with mutual exclusion on access to the handle, there is the
+// possibility of a race between a method call and a concurrent call to `destroy`:
+//
+//    * Thread A starts a method call, reads the value of the handle, but is interrupted
+//      before it can pass the handle over the FFI to Rust.
+//    * Thread B calls `destroy` and frees the underlying Rust struct.
+//    * Thread A resumes, passing the already-read handle value to Rust and triggering
+//      a use-after-free.
+//
+// One possible solution would be to use a `ReadWriteLock`, with each method call taking
+// a read lock (and thus allowed to run concurrently) and the special `destroy` method
+// taking a write lock (and thus blocking on live method calls). However, we aim not to
+// generate methods with any hidden blocking semantics, and a `destroy` method that might
+// block if called incorrectly seems to meet that bar.
+//
+// So, we achieve our goals by giving each instance an associated `AtomicLong` counter to track
+// the number of in-flight method calls, and an `AtomicBoolean` flag to indicate whether `destroy`
+// has been called. These are updated according to the following rules:
+//
+//    * The initial value of the counter is 1, indicating a live object with no in-flight calls.
+//      The initial value for the flag is false.
+//
+//    * At the start of each method call, we atomically check the counter.
+//      If it is 0 then the underlying Rust struct has already been destroyed and the call is aborted.
+//      If it is nonzero them we atomically increment it by 1 and proceed with the method call.
+//
+//    * At the end of each method call, we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+//    * When `destroy` is called, we atomically flip the flag from false to true.
+//      If the flag was already true we silently fail.
+//      Otherwise we atomically decrement and check the counter.
+//      If it has reached zero then we destroy the underlying Rust struct.
+//
+// Astute readers may observe that this all sounds very similar to the way that Rust's `Arc<T>` works,
+// and indeed it is, with the addition of a flag to guard against multiple calls to `destroy`.
+//
+// The overall effect is that the underlying Rust struct is destroyed only when `destroy` has been
+// called *and* all in-flight method calls have completed, avoiding violating any of the expectations
+// of the underlying Rust code.
+//
+// This makes a cleaner a better alternative to _not_ calling `destroy()` as
+// and when the object is finished with, but the abstraction is not perfect: if the Rust object's `drop`
+// method is slow, and/or there are many objects to cleanup, and it's on a low end Android device, then the cleaner
+// thread may be starved, and the app will leak memory.
+//
+// In this case, `destroy`ing manually may be a better solution.
+//
+// The cleaner can live side by side with the manual calling of `destroy`. In the order of responsiveness, uniffi objects
+// with Rust peers are reclaimed:
+//
+// 1. By calling the `destroy` method of the object, which calls `rustObject.free()`. If that doesn't happen:
+// 2. When the object becomes unreachable, AND the Cleaner thread gets to call `rustObject.free()`. If the thread is starved then:
+// 3. The memory is reclaimed when the process terminates.
+//
+// [1] https://stackoverflow.com/questions/24376768/can-java-finalize-an-object-when-it-is-still-in-scope/24380219
+//
+
+
+/**
  * Runtime-only observers for package-backed hosts.
  *
  * Unlike [`DynamicWorkload`], this object does not represent actor business
@@ -4616,7 +5034,7 @@ public object FfiConverterTypeOpusEncoder: FfiConverter<OpusEncoder, Long> {
  * while the package guest continues to own actor dispatch.
  */
 public interface RuntimeObserversInterface {
-
+    
     companion object
 }
 
@@ -4656,10 +5074,10 @@ open class RuntimeObservers: Disposable, AutoCloseable, RuntimeObserversInterfac
      * Construct host-side observers for a package-backed runtime.
      */
     constructor(`signaling`: SignalingObserverBridge?, `websocket`: WebSocketObserverBridge?, `webrtc`: WebRtcObserverBridge?, `credential`: CredentialObserverBridge?, `mailbox`: MailboxObserverBridge?) :
-        this(UniffiWithHandle,
+        this(UniffiWithHandle, 
     uniffiRustCall() { _status ->
     UniffiLib.uniffi_actr_fn_constructor_runtimeobservers_new(
-
+    
         FfiConverterOptionalTypeSignalingObserverBridge.lower(`signaling`),FfiConverterOptionalTypeWebSocketObserverBridge.lower(`websocket`),FfiConverterOptionalTypeWebRtcObserverBridge.lower(`webrtc`),FfiConverterOptionalTypeCredentialObserverBridge.lower(`credential`),FfiConverterOptionalTypeMailboxObserverBridge.lower(`mailbox`),_status)
 }
     )
@@ -4735,18 +5153,18 @@ open class RuntimeObservers: Disposable, AutoCloseable, RuntimeObserversInterfac
         }
     }
 
+    
+
+    
 
 
-
-
-
-
-
+    
+    
     /**
      * @suppress
      */
     companion object
-
+    
 }
 
 
@@ -5389,7 +5807,7 @@ data class PeerEventBridge (
      * `None` for WebSocket (not applicable).
      */
     var `relayed`: kotlin.Boolean?
-    ,
+    , 
     /**
      * Coarse WebRTC send-readiness state. `None` for WebSocket and old
      * compatibility paths where the status is not available.
@@ -5488,7 +5906,7 @@ data class RpcEnvelopeBridge (
      * Request ID for correlation
      */
     var `requestId`: kotlin.String
-    ,
+    , 
     /**
      * Request deadline in milliseconds. Responses and tells carry zero.
      */
@@ -5528,6 +5946,105 @@ public object FfiConverterTypeRpcEnvelopeBridge: FfiConverterRustBuffer<RpcEnvel
             FfiConverterByteArray.write(value.`payload`, buf)
             FfiConverterString.write(value.`requestId`, buf)
             FfiConverterLong.write(value.`timeoutMs`, buf)
+    }
+}
+
+
+
+/**
+ * FFI-shaped unified WebRTC peer state (Stage 6, v0.20 backend). Carried by
+ * `WebRtcObserverBridge::on_state_changed` and the `ActrRefWrapper` status
+ * query/list/subscribe APIs. `revision` is monotonic per peer (dedup key).
+ */
+data class WebRtcPeerStateBridge (
+    /**
+     * Remote peer identity.
+     */
+    var `peer`: ActrId
+    , 
+    /**
+     * Monotonic PeerConnection generation (bumps on Hard Recovery rebuilds).
+     */
+    var `pcGeneration`: kotlin.ULong
+    , 
+    /**
+     * Monotonic snapshot revision (per-peer dedup key).
+     */
+    var `revision`: kotlin.ULong
+    , 
+    /**
+     * Coarse lifecycle status.
+     */
+    var `status`: WebRtcPeerStatusBridge
+    , 
+    /**
+     * Whether business sends are currently admitted.
+     */
+    var `sendable`: kotlin.Boolean
+    , 
+    /**
+     * The selected ICE path (`Unknown` until stats resolve it).
+     */
+    var `networkPath`: WebRtcNetworkPathBridge
+    , 
+    /**
+     * `Some(true)` TURN-relayed, `Some(false)` direct, `None` unresolved.
+     * Derived from `network_path`; kept for one compatibility cycle — new
+     * consumers should read `network_path`.
+     */
+    var `relayed`: kotlin.Boolean?
+    , 
+    /**
+     * Stable reason the peer is unavailable, when it is.
+     */
+    var `unavailableReason`: WebRtcUnavailableReasonBridge?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<WebRtcPeerStateBridge> {
+    override fun read(buf: ByteBuffer): WebRtcPeerStateBridge {
+        return WebRtcPeerStateBridge(
+            FfiConverterTypeActrId.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterULong.read(buf),
+            FfiConverterTypeWebRtcPeerStatusBridge.read(buf),
+            FfiConverterBoolean.read(buf),
+            FfiConverterTypeWebRtcNetworkPathBridge.read(buf),
+            FfiConverterOptionalBoolean.read(buf),
+            FfiConverterOptionalTypeWebRtcUnavailableReasonBridge.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: WebRtcPeerStateBridge) = (
+            FfiConverterTypeActrId.allocationSize(value.`peer`) +
+            FfiConverterULong.allocationSize(value.`pcGeneration`) +
+            FfiConverterULong.allocationSize(value.`revision`) +
+            FfiConverterTypeWebRtcPeerStatusBridge.allocationSize(value.`status`) +
+            FfiConverterBoolean.allocationSize(value.`sendable`) +
+            FfiConverterTypeWebRtcNetworkPathBridge.allocationSize(value.`networkPath`) +
+            FfiConverterOptionalBoolean.allocationSize(value.`relayed`) +
+            FfiConverterOptionalTypeWebRtcUnavailableReasonBridge.allocationSize(value.`unavailableReason`)
+    )
+
+    override fun write(value: WebRtcPeerStateBridge, buf: ByteBuffer) {
+            FfiConverterTypeActrId.write(value.`peer`, buf)
+            FfiConverterULong.write(value.`pcGeneration`, buf)
+            FfiConverterULong.write(value.`revision`, buf)
+            FfiConverterTypeWebRtcPeerStatusBridge.write(value.`status`, buf)
+            FfiConverterBoolean.write(value.`sendable`, buf)
+            FfiConverterTypeWebRtcNetworkPathBridge.write(value.`networkPath`, buf)
+            FfiConverterOptionalBoolean.write(value.`relayed`, buf)
+            FfiConverterOptionalTypeWebRtcUnavailableReasonBridge.write(value.`unavailableReason`, buf)
     }
 }
 
@@ -6049,14 +6566,14 @@ public object FfiConverterTypeErrorKind: FfiConverterRustBuffer<ErrorKind> {
  */
 
 enum class LogLevel {
-
+    
     TRACE,
     DEBUG,
     INFO,
     WARN,
     ERROR;
 
-
+    
 
 
     companion object
@@ -6374,15 +6891,63 @@ public object FfiConverterTypeReconnectReason: FfiConverterRustBuffer<ReconnectR
 
 
 
+/**
+ * Whether the selected ICE candidate pair is direct or relayed (v0.20
+ * backend, Stage 6). Mirrors `actr_framework::WebRtcNetworkPath`.
+ */
+
+enum class WebRtcNetworkPathBridge {
+    
+    /**
+     * Stats have not resolved the selected pair yet.
+     */
+    UNKNOWN,
+    /**
+     * Direct peer-to-peer path.
+     */
+    DIRECT,
+    /**
+     * TURN-relayed path.
+     */
+    RELAYED;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWebRtcNetworkPathBridge: FfiConverterRustBuffer<WebRtcNetworkPathBridge> {
+    override fun read(buf: ByteBuffer) = try {
+        WebRtcNetworkPathBridge.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: WebRtcNetworkPathBridge) = 4UL
+
+    override fun write(value: WebRtcNetworkPathBridge, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
 
 enum class WebRtcPeerStatusBridge {
-
+    
     IDLE,
     CONNECTING,
     CONNECTED,
     RECOVERING;
 
-
+    
 
 
     companion object
@@ -6402,6 +6967,51 @@ public object FfiConverterTypeWebRtcPeerStatusBridge: FfiConverterRustBuffer<Web
     override fun allocationSize(value: WebRtcPeerStatusBridge) = 4UL
 
     override fun write(value: WebRtcPeerStatusBridge, buf: ByteBuffer) {
+        buf.putInt(value.ordinal + 1)
+    }
+}
+
+
+
+
+
+/**
+ * Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, v0.20
+ * backend). Mirrors `actr_framework::WebRtcUnavailableReason`.
+ */
+
+enum class WebRtcUnavailableReasonBridge {
+    
+    CONNECTION_NOT_READY,
+    PEER_CONNECTION_BUILD_FAILED,
+    NEGOTIATION_FAILED,
+    ICE_RESTART_FAILED,
+    PEER_CONNECTION_REBUILD_FAILED,
+    UNSUPPORTED_RTC_CAPABILITY,
+    RTC_RESOURCE_LIMIT_EXCEEDED,
+    RECOVERY_EXHAUSTED,
+    CLOSED;
+
+    
+
+
+    companion object
+}
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeWebRtcUnavailableReasonBridge: FfiConverterRustBuffer<WebRtcUnavailableReasonBridge> {
+    override fun read(buf: ByteBuffer) = try {
+        WebRtcUnavailableReasonBridge.values()[buf.getInt() - 1]
+    } catch (e: IndexOutOfBoundsException) {
+        throw RuntimeException("invalid enum value, something is very wrong!!", e)
+    }
+
+    override fun allocationSize(value: WebRtcUnavailableReasonBridge) = 4UL
+
+    override fun write(value: WebRtcUnavailableReasonBridge, buf: ByteBuffer) {
         buf.putInt(value.ordinal + 1)
     }
 }
@@ -6867,6 +7477,92 @@ public object FfiConverterTypeMediaTrackCallback: FfiConverterCallbackInterface<
 
 
 /**
+ * Listener for per-peer WebRTC state updates (Stage 6, v0.20 backend).
+ */
+public interface RtcPeerStateListener {
+    
+    /**
+     * Called with the peer's current state on subscribe (initial replay) and
+     * on every subsequent state revision.
+     */
+    suspend fun `onState`(`state`: WebRtcPeerStateBridge)
+    
+    companion object
+}
+
+
+
+// Put the implementation in an object so we don't pollute the top-level namespace
+internal object uniffiCallbackInterfaceRtcPeerStateListener {
+    internal object `onState`: UniffiCallbackInterfaceRtcPeerStateListenerMethod0 {
+        override fun callback(`uniffiHandle`: Long,`state`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,) {
+            val uniffiObj = FfiConverterTypeRtcPeerStateListener.handleMap.get(uniffiHandle)
+            val makeCall = suspend { ->
+                uniffiObj.`onState`(
+                    FfiConverterTypeWebRtcPeerStateBridge.lift(`state`),
+                )
+            }
+            val uniffiHandleSuccess = { _: Unit ->
+                val uniffiResult = UniffiForeignFutureResultVoid.UniffiByValue(
+                    UniffiRustCallStatus.ByValue()
+                )
+                uniffiResult.write()
+                uniffiFutureCallback.callback(uniffiCallbackData, uniffiResult)
+            }
+            val uniffiHandleError = { callStatus: UniffiRustCallStatus.ByValue ->
+                uniffiFutureCallback.callback(
+                    uniffiCallbackData,
+                    UniffiForeignFutureResultVoid.UniffiByValue(
+                        callStatus,
+                    ),
+                )
+            }
+            uniffiTraitInterfaceCallAsync(
+                makeCall,
+                uniffiHandleSuccess,
+                uniffiHandleError,
+                uniffiOutDroppedCallback
+            )
+        }
+    }
+
+    internal object uniffiFree: UniffiCallbackInterfaceFree {
+        override fun callback(handle: Long) {
+            FfiConverterTypeRtcPeerStateListener.handleMap.remove(handle)
+        }
+    }
+
+    internal object uniffiClone: UniffiCallbackInterfaceClone {
+        override fun callback(handle: Long): Long {
+            return FfiConverterTypeRtcPeerStateListener.handleMap.clone(handle)
+        }
+    }
+
+    internal var vtable = UniffiVTableCallbackInterfaceRtcPeerStateListener.UniffiByValue(
+        uniffiFree,
+        uniffiClone,
+        `onState`,
+    )
+
+    // Registers the foreign callback with the Rust side.
+    // This method is generated for each callback interface.
+    internal fun register(lib: UniffiLib) {
+        lib.uniffi_actr_fn_init_callback_vtable_rtcpeerstatelistener(vtable)
+    }
+}
+
+/**
+ * The ffiConverter which transforms the Callbacks in to handles to pass to Rust.
+ *
+ * @suppress
+ */
+public object FfiConverterTypeRtcPeerStateListener: FfiConverterCallbackInterface<RtcPeerStateListener>()
+
+
+
+
+
+/**
  * Optional observer for signaling-layer events.
  */
 public interface SignalingObserverBridge {
@@ -7027,6 +7723,13 @@ public interface WebRtcObserverBridge {
     
     suspend fun `onDisconnected`(`ctx`: ContextBridge, `event`: PeerEventBridge)
     
+    /**
+     * Unified per-revision state hook (Stage 6, v0.20 backend). Fires on
+     * every snapshot revision; a late-registered workload receives the
+     * current state on the first projection pass.
+     */
+    suspend fun `onStateChanged`(`ctx`: ContextBridge, `state`: WebRtcPeerStateBridge)
+    
     companion object
 }
 
@@ -7130,6 +7833,38 @@ internal object uniffiCallbackInterfaceWebRtcObserverBridge {
             )
         }
     }
+    internal object `onStateChanged`: UniffiCallbackInterfaceWebRtcObserverBridgeMethod3 {
+        override fun callback(`uniffiHandle`: Long,`ctx`: Long,`state`: RustBuffer.ByValue,`uniffiFutureCallback`: UniffiForeignFutureCompleteVoid,`uniffiCallbackData`: Long,`uniffiOutDroppedCallback`: UniffiForeignFutureDroppedCallbackStruct,) {
+            val uniffiObj = FfiConverterTypeWebRtcObserverBridge.handleMap.get(uniffiHandle)
+            val makeCall = suspend { ->
+                uniffiObj.`onStateChanged`(
+                    FfiConverterTypeContextBridge.lift(`ctx`),
+                    FfiConverterTypeWebRtcPeerStateBridge.lift(`state`),
+                )
+            }
+            val uniffiHandleSuccess = { _: Unit ->
+                val uniffiResult = UniffiForeignFutureResultVoid.UniffiByValue(
+                    UniffiRustCallStatus.ByValue()
+                )
+                uniffiResult.write()
+                uniffiFutureCallback.callback(uniffiCallbackData, uniffiResult)
+            }
+            val uniffiHandleError = { callStatus: UniffiRustCallStatus.ByValue ->
+                uniffiFutureCallback.callback(
+                    uniffiCallbackData,
+                    UniffiForeignFutureResultVoid.UniffiByValue(
+                        callStatus,
+                    ),
+                )
+            }
+            uniffiTraitInterfaceCallAsync(
+                makeCall,
+                uniffiHandleSuccess,
+                uniffiHandleError,
+                uniffiOutDroppedCallback
+            )
+        }
+    }
 
     internal object uniffiFree: UniffiCallbackInterfaceFree {
         override fun callback(handle: Long) {
@@ -7149,6 +7884,7 @@ internal object uniffiCallbackInterfaceWebRtcObserverBridge {
         `onConnecting`,
         `onConnected`,
         `onDisconnected`,
+        `onStateChanged`,
     )
 
     // Registers the foreign callback with the Rust side.
@@ -7730,6 +8466,38 @@ public object FfiConverterOptionalTypeContextBridge: FfiConverterRustBuffer<Cont
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeRtcPeerStateSubscription: FfiConverterRustBuffer<RtcPeerStateSubscription?> {
+    override fun read(buf: ByteBuffer): RtcPeerStateSubscription? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeRtcPeerStateSubscription.read(buf)
+    }
+
+    override fun allocationSize(value: RtcPeerStateSubscription?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeRtcPeerStateSubscription.allocationSize(value)
+        }
+    }
+
+    override fun write(value: RtcPeerStateSubscription?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeRtcPeerStateSubscription.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeActrId: FfiConverterRustBuffer<ActrId?> {
     override fun read(buf: ByteBuffer): ActrId? {
         if (buf.get().toInt() == 0) {
@@ -7762,6 +8530,38 @@ public object FfiConverterOptionalTypeActrId: FfiConverterRustBuffer<ActrId?> {
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<WebRtcPeerStateBridge?> {
+    override fun read(buf: ByteBuffer): WebRtcPeerStateBridge? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeWebRtcPeerStateBridge.read(buf)
+    }
+
+    override fun allocationSize(value: WebRtcPeerStateBridge?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeWebRtcPeerStateBridge.allocationSize(value)
+        }
+    }
+
+    override fun write(value: WebRtcPeerStateBridge?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeWebRtcPeerStateBridge.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterOptionalTypeWebRtcPeerStatusBridge: FfiConverterRustBuffer<WebRtcPeerStatusBridge?> {
     override fun read(buf: ByteBuffer): WebRtcPeerStatusBridge? {
         if (buf.get().toInt() == 0) {
@@ -7784,6 +8584,38 @@ public object FfiConverterOptionalTypeWebRtcPeerStatusBridge: FfiConverterRustBu
         } else {
             buf.put(1)
             FfiConverterTypeWebRtcPeerStatusBridge.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeWebRtcUnavailableReasonBridge: FfiConverterRustBuffer<WebRtcUnavailableReasonBridge?> {
+    override fun read(buf: ByteBuffer): WebRtcUnavailableReasonBridge? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeWebRtcUnavailableReasonBridge.read(buf)
+    }
+
+    override fun allocationSize(value: WebRtcUnavailableReasonBridge?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeWebRtcUnavailableReasonBridge.allocationSize(value)
+        }
+    }
+
+    override fun write(value: WebRtcUnavailableReasonBridge?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeWebRtcUnavailableReasonBridge.write(value, buf)
         }
     }
 }
@@ -8095,6 +8927,34 @@ public object FfiConverterSequenceTypeMetadataEntry: FfiConverterRustBuffer<List
 
 
 
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuffer<List<WebRtcPeerStateBridge>> {
+    override fun read(buf: ByteBuffer): List<WebRtcPeerStateBridge> {
+        val len = buf.getInt()
+        return List<WebRtcPeerStateBridge>(len) {
+            FfiConverterTypeWebRtcPeerStateBridge.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<WebRtcPeerStateBridge>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeWebRtcPeerStateBridge.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<WebRtcPeerStateBridge>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeWebRtcPeerStateBridge.write(it, buf)
+        }
+    }
+}
+
+
+
+
 
 
 
@@ -8210,3 +9070,5 @@ public object FfiConverterSequenceTypeMetadataEntry: FfiConverterRustBuffer<List
     )
     }
     
+
+

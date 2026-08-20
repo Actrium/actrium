@@ -1,5 +1,4 @@
 use super::*;
-use crate::inbound::MediaFrameRegistry;
 use crate::lifecycle::credential_manager::{CredentialManager, RegistrationContext};
 use crate::lifecycle::membership::{
     MembershipController, PublishedCredential, spawn_membership_controller,
@@ -7,7 +6,7 @@ use crate::lifecycle::membership::{
 use crate::lifecycle::session_state::SessionPhase;
 use crate::lifecycle::{SessionSnapshot, SessionState, SignalingRecoveryRequestCause};
 use crate::transport::{NetworkError, NetworkResult};
-use crate::wire::webrtc::{DisconnectReason, SignalingEvent, SignalingStats, WebRtcConfig};
+use crate::wire::webrtc::{DisconnectReason, SignalingEvent, SignalingStats};
 use actr_protocol::prost::Message as _;
 use actr_protocol::{
     AIdCredential, ActrType, CredentialWarning, IdentityClaims, Pong, Realm, RegisterResponse,
@@ -424,8 +423,6 @@ async fn heartbeat_tick_requests_recovery_without_driving_disconnected_socket() 
         None,
         None,
         None,
-        None,
-        None,
     ));
 
     tokio::time::timeout(Duration::from_secs(1), async {
@@ -506,8 +503,6 @@ async fn membership_heartbeat_never_drives_disconnected_socket() {
         None,
         None,
         None,
-        None,
-        None,
         Some(membership),
     ));
 
@@ -569,8 +564,6 @@ async fn run_membership_heartbeat_ticks(
         "http://127.0.0.1:1".to_string(),
         None,
         Some(manager),
-        None,
-        None,
         None,
         Some(membership),
     ));
@@ -637,14 +630,6 @@ async fn credential_expiry_does_not_re_register_or_update_webrtc_local_id() {
     let renewed_id = test_actor_id(2);
     let credential_state = CredentialState::new(test_credential(), None, None);
     let signaling_client = Arc::new(ExpiredHeartbeatSignalingClient::new());
-    let coordinator = Arc::new(WebRtcCoordinator::new(
-        initial_id.clone(),
-        credential_state.clone(),
-        signaling_client.clone(),
-        WebRtcConfig::default(),
-        Arc::new(MediaFrameRegistry::new()),
-    ));
-
     let register_response = RegisterResponse {
         result: Some(register_response::Result::Success(
             register_response::RegisterOk {
@@ -694,14 +679,11 @@ async fn credential_expiry_does_not_re_register_or_update_webrtc_local_id() {
         None,
         None,
         None,
-        Some(&coordinator),
-        None,
         None,
     )
     .await;
 
     assert_eq!(updated_id, None);
-    assert_eq!(coordinator.local_id_for_test(), initial_id);
 }
 
 #[tokio::test]
@@ -745,8 +727,6 @@ async fn invalid_expiry_skips_both_expired_and_warning_hooks() {
             None,
             None,
             Some(&callback),
-            None,
-            None,
             None,
         )
         .await;
@@ -853,8 +833,6 @@ async fn credential_warning_triggers_credential_manager_renewal() {
         &server.url(),
         None,
         Some(&manager),
-        None,
-        None,
         None,
         None,
     )
@@ -1203,8 +1181,6 @@ async fn connected_heartbeat_403_reports_terminal_realm_denied() {
         None,
         Some(engine.clone()),
         None,
-        None,
-        None,
         Some(handle),
     ));
 
@@ -1389,8 +1365,6 @@ async fn heartbeat_ticks_track_the_configured_interval_in_virtual_time() {
         None,
         None,
         None,
-        None,
-        None,
     ));
 
     // The first tick fires immediately on task start.
@@ -1453,8 +1427,6 @@ async fn heartbeat_interval_bursts_missed_ticks_after_a_long_virtual_pause() {
         None,
         None,
         None,
-        None,
-        None,
     ));
 
     wait_for_with_bounded_advance("first heartbeat", || {
@@ -1504,8 +1476,6 @@ async fn assert_ping_timeout_boundary(heartbeat_interval: Duration, expected_tim
                 &heartbeat_register_request(&actor_id),
                 &mut consecutive_failures,
                 "http://127.0.0.1:1",
-                None,
-                None,
                 None,
                 None,
                 None,

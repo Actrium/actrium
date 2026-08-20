@@ -1,360 +1,177 @@
-//! Integration tests for PeerGate
+//! PeerGate connection establishment, teardown, and rebuild integration tests.
 //!
-//! Tests focus on:
-//! - Creating new peer connections
-//! - Rebuilding peer connections after failure
-//! - Connection cleanup and state management
+//! All scenarios use the production webrtc-rs v0.20 layering and real
+//! WebSocket signaling. No synthetic 0.14 `ConnectionEvent` is injected.
 
-use actr_hyper::outbound::PeerGate;
-use actr_hyper::test_support::{TestSignalingServer, create_peer_with_websocket, make_actor_id};
-use actr_hyper::transport::{
-    ConnectionEvent, ConnectionState as TransportConnectionState, DefaultWireBuilder,
-    DefaultWireBuilderConfig, PeerTransport,
-};
-use actr_protocol::RpcEnvelope;
-use std::sync::Arc;
 use std::time::Duration;
 
-// ========== Tests ==========
+use actr_hyper::test_support::TestHarness;
+use actr_protocol::{Direction, RpcEnvelope};
+
+async fn connected() -> TestHarness {
+    let mut harness = TestHarness::new().await;
+    harness.add_peer(100).await;
+    harness.add_peer(200).await;
+    harness.connect(100, 200).await;
+    harness
+}
+
+async fn rpc(harness: &TestHarness, request_id: &str) {
+    let response = tokio::time::timeout(
+        Duration::from_secs(10),
+        harness.peer(100).spawn_request(200, request_id, 10_000),
+    )
+    .await
+    .unwrap_or_else(|_| panic!("{request_id} timed out"))
+    .expect("request task must not panic")
+    .unwrap_or_else(|error| panic!("{request_id} failed: {error}"));
+    assert_eq!(response.as_ref(), b"pong");
+}
 
 #[tokio::test]
 async fn test_peer_connection_establishment() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_test_writer()
-        .try_init()
-        .ok();
+    let harness = connected().await;
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
 
-    let server = TestSignalingServer::start().await.unwrap();
-
-    let id_a = make_actor_id(100);
-    let id_b = make_actor_id(200);
-
-    // Create coordinators
-    let (coord_a, _client_a) = create_peer_with_websocket(id_a.clone(), &server.url())
+    let offerer = harness
+        .peer(100)
+        .rtc
+        .state(&target)
         .await
-        .unwrap();
-    let (_coord_b, _client_b) = create_peer_with_websocket(id_b.clone(), &server.url())
+        .expect("offerer snapshot");
+    let answerer = harness
+        .peer(200)
+        .rtc
+        .state(&source)
         .await
-        .unwrap();
-
-    tracing::info!("🔗 Creating connection from A to B...");
-
-    // Initiate connection
-    let ready_rx = coord_a
-        .initiate_connection(&id_b)
-        .await
-        .expect("Failed to initiate");
-
-    match tokio::time::timeout(Duration::from_secs(10), ready_rx).await {
-        Ok(Ok(_)) => tracing::info!("✅ Connection established!"),
-        Ok(Err(_)) => panic!("Connection failed"),
-        Err(_) => panic!("Connection timed out"),
-    }
-
-    tracing::info!("✅ test_peer_connection_establishment passed!");
+        .expect("answerer snapshot");
+    assert!(offerer.sendable && answerer.sendable);
+    assert!(offerer.pc_generation > 0 && answerer.pc_generation > 0);
+    rpc(&harness, "establishment-probe").await;
+    harness.shutdown().await;
 }
 
 #[tokio::test]
 async fn test_connection_rebuild_after_failure() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_line_number(true)
-        .with_file(true)
-        .with_test_writer()
-        .try_init()
-        .ok();
+    let harness = connected().await;
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
+    let old_generation = harness.peer(100).rtc.generation(&target).await.unwrap();
+    harness.reset_counters();
 
-    let server = TestSignalingServer::start().await.unwrap();
-
-    let id_a = make_actor_id(100);
-    let id_b = make_actor_id(200);
-
-    // Create coordinators
-    let (coord_a, _client_a) = create_peer_with_websocket(id_a.clone(), &server.url())
-        .await
-        .unwrap();
-    let (_coord_b, _client_b) = create_peer_with_websocket(id_b.clone(), &server.url())
-        .await
-        .unwrap();
-
-    tracing::info!("🔗 Step 1: Establishing initial connection...");
-
-    let ready_rx = coord_a
-        .initiate_connection(&id_b)
-        .await
-        .expect("Failed to initiate");
-    tokio::time::timeout(Duration::from_secs(10), ready_rx)
-        .await
-        .expect("timeout")
-        .expect("failed");
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    tracing::info!("💥 Step 2: Simulating connection failure...");
-
-    // Simulate failure with real session_id
-    let sid = coord_a.get_peer_session_id(&id_b).await.unwrap_or(0);
-    coord_a
-        .event_sender()
-        .send(ConnectionEvent::StateChanged {
-            peer_id: id_b.clone(),
-            session_id: sid,
-            state: TransportConnectionState::Failed,
-        })
-        .ok();
-
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    tracing::info!("♻️ Step 3: Rebuilding connection...");
-
-    server.reset_counters();
-    let initial_count = server.get_ice_restart_count();
-
-    // Trigger retry (rebuild)
-    coord_a.retry_failed_connections().await;
-
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-
-    // Verify rebuild attempt was made
-    let restart_count = server.get_ice_restart_count();
-    tracing::info!(
-        "📊 ICE restart offers sent: {} -> {}",
-        initial_count,
-        restart_count
+    // Preserve the legacy trigger: a failed PeerConnection callback, followed
+    // by the network-online retry hint. The compatibility seam publishes the
+    // v0.20 `PeerConnectionStateChanged(Failed)` fact through the exact mailbox
+    // used by `PeerConnectionEventHandler`.
+    assert_eq!(
+        harness.peer(100).rtc.fail_peer(&target).await.unwrap(),
+        old_generation
     );
-
-    assert!(
-        restart_count > initial_count,
-        "Expected ICE restart count to increase"
+    harness.peer(100).retry_failed().await;
+    harness
+        .wait_for_ice_restart_count(1, Duration::from_secs(20))
+        .await;
+    let recovered = harness
+        .peer(100)
+        .rtc
+        .wait_state(&target, Duration::from_secs(20), |state| state.sendable)
+        .await
+        .expect("failed connection must become sendable after ICE restart");
+    harness
+        .peer(200)
+        .rtc
+        .wait_sendable(&source, Duration::from_secs(20))
+        .await;
+    assert_eq!(
+        recovered.pc_generation, old_generation,
+        "Failed without an address change uses same-generation soft recovery"
     );
-
-    tracing::info!("✅ test_connection_rebuild_after_failure passed!");
+    rpc(&harness, "rebuild-probe").await;
+    harness.shutdown().await;
 }
 
 #[tokio::test]
 async fn test_pending_requests_cleanup_on_close() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_test_writer()
-        .try_init()
-        .ok();
+    let harness = connected().await;
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
+    let gate = harness.peer(100).gate.clone();
 
-    let server = TestSignalingServer::start().await.unwrap();
-
-    let id_a = make_actor_id(100);
-    let id_b = make_actor_id(200);
-
-    // Create coordinators
-    let (coord_a, _client_a) = create_peer_with_websocket(id_a.clone(), &server.url())
+    // The harness deliberately suppresses the business response for this
+    // route, leaving a real request pending after it crossed the DataChannel.
+    let request_target = target.clone();
+    let request = tokio::spawn(async move {
+        gate.send_request(
+            &request_target,
+            RpcEnvelope {
+                request_id: "pending-cleanup-on-close".into(),
+                route_key: "test.no_response".into(),
+                payload: Some(bytes::Bytes::from_static(b"pending")),
+                direction: Some(Direction::Request as i32),
+                timeout_ms: 30_000,
+                ..Default::default()
+            },
+        )
         .await
-        .unwrap();
-    let (_coord_b, _client_b) = create_peer_with_websocket(id_b.clone(), &server.url())
-        .await
-        .unwrap();
-
-    // Create PeerGate
-    let wire_config = DefaultWireBuilderConfig::default();
-    let wire_builder = Arc::new(DefaultWireBuilder::new(Some(coord_a.clone()), wire_config));
-    let transport_mgr = Arc::new(PeerTransport::new(id_a.clone(), wire_builder));
-    let gate_a = Arc::new(PeerGate::new(transport_mgr, Some(coord_a.clone())));
-
-    tracing::info!("🔗 Establishing connection...");
-
-    let ready_rx = coord_a
-        .initiate_connection(&id_b)
-        .await
-        .expect("Failed to initiate");
-    tokio::time::timeout(Duration::from_secs(10), ready_rx)
-        .await
-        .expect("timeout")
-        .expect("failed");
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    tracing::info!("📤 Sending pending request...");
-
-    // Send a request that won't get a response
-    let envelope = RpcEnvelope {
-        request_id: "test_request_1".to_string(),
-        route_key: "test.method".to_string(),
-        payload: Some(bytes::Bytes::from(vec![1, 2, 3])),
-        direction: Some(actr_protocol::Direction::Request as i32),
-        timeout_ms: 30000,
-        ..Default::default()
-    };
-
-    let request_handle = tokio::spawn({
-        let gate = gate_a.clone();
-        let id = id_b.clone();
-        async move { gate.send_request(&id, envelope).await }
     });
 
-    tokio::time::sleep(Duration::from_millis(100)).await;
-
-    let pending_before = gate_a.pending_count().await;
-    tracing::info!("📊 Pending before close: {}", pending_before);
-    assert_eq!(pending_before, 1);
-
-    tracing::info!("💥 Closing connection...");
-
-    // Simulate connection close with real session_id
-    let sid = coord_a.get_peer_session_id(&id_b).await.unwrap_or(0);
-    coord_a
-        .event_sender()
-        .send(ConnectionEvent::ConnectionClosed {
-            peer_id: id_b.clone(),
-            session_id: sid,
-        })
-        .ok();
-
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    let pending_after = loop {
-        let pending = gate_a.pending_count().await;
-        if pending == 0 || tokio::time::Instant::now() >= deadline {
-            break pending;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while harness.peer(100).pending_count().await != 1 {
+            tokio::task::yield_now().await;
         }
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    };
-    tracing::info!("📊 Pending after close: {}", pending_after);
-    assert_eq!(pending_after, 0, "Pending requests should be cleaned up");
+    })
+    .await
+    .expect("request must enter the pending map");
 
-    // Request should fail
-    match tokio::time::timeout(Duration::from_secs(1), request_handle).await {
-        Ok(Ok(Err(_))) => tracing::info!("✅ Request correctly failed"),
-        Ok(Ok(Ok(_))) => panic!("Request should have failed"),
-        Ok(Err(_)) => panic!("Request task panicked"),
-        Err(_) => panic!("Request didn't complete"),
-    }
+    let (closed_a, closed_b) = tokio::join!(
+        harness.peer(100).rtc.close_peer(&target),
+        harness.peer(200).rtc.close_peer(&source),
+    );
+    assert!(closed_a && closed_b);
 
-    tracing::info!("✅ test_pending_requests_cleanup_on_close passed!");
+    let result = tokio::time::timeout(Duration::from_secs(5), request)
+        .await
+        .expect("controller close must release pending requests")
+        .expect("request task must not panic");
+    assert!(
+        result.is_err(),
+        "a closed request cannot produce a response"
+    );
+    assert_eq!(harness.peer(100).pending_count().await, 0);
+    harness.shutdown().await;
 }
 
 #[tokio::test]
 async fn test_reconnect_and_send_after_close() {
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_test_writer()
-        .try_init()
-        .ok();
+    let harness = connected().await;
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
+    let retired_generation = harness.peer(100).rtc.generation(&target).await.unwrap();
 
-    let server = TestSignalingServer::start().await.unwrap();
+    let (closed_a, closed_b) = tokio::join!(
+        harness.peer(100).rtc.close_peer(&target),
+        harness.peer(200).rtc.close_peer(&source),
+    );
+    assert!(closed_a && closed_b);
+    assert!(harness.peer(100).rtc.state(&target).await.is_none());
 
-    let id_a = make_actor_id(100);
-    let id_b = make_actor_id(200);
+    harness.peer(100).rtc.connect(target.clone()).await;
+    let replacement = harness
+        .peer(100)
+        .rtc
+        .wait_sendable(&target, Duration::from_secs(20))
+        .await;
+    harness
+        .peer(200)
+        .rtc
+        .wait_sendable(&source, Duration::from_secs(20))
+        .await;
+    assert!(
+        replacement.pc_generation > retired_generation,
+        "manager tombstones must prevent generation reuse"
+    );
 
-    // Create coordinators
-    let (coord_a, _client_a) = create_peer_with_websocket(id_a.clone(), &server.url())
-        .await
-        .unwrap();
-    let (coord_b, _client_b) = create_peer_with_websocket(id_b.clone(), &server.url())
-        .await
-        .unwrap();
-
-    // Create PeerGates for both peers
-    let wire_config_a = DefaultWireBuilderConfig::default();
-    let wire_builder_a = Arc::new(DefaultWireBuilder::new(
-        Some(coord_a.clone()),
-        wire_config_a,
-    ));
-    let transport_mgr_a = Arc::new(PeerTransport::new(id_a.clone(), wire_builder_a));
-    let gate_a = Arc::new(PeerGate::new(transport_mgr_a, Some(coord_a.clone())));
-
-    let wire_config_b = DefaultWireBuilderConfig::default();
-    let wire_builder_b = Arc::new(DefaultWireBuilder::new(
-        Some(coord_b.clone()),
-        wire_config_b,
-    ));
-    let transport_mgr_b = Arc::new(PeerTransport::new(id_b.clone(), wire_builder_b));
-    let _gate_b = Arc::new(PeerGate::new(transport_mgr_b, Some(coord_b.clone())));
-
-    tracing::info!("🔗 Step 1: Establishing initial connection...");
-
-    let ready_rx = coord_a
-        .initiate_connection(&id_b)
-        .await
-        .expect("Failed to initiate");
-    tokio::time::timeout(Duration::from_secs(10), ready_rx)
-        .await
-        .expect("timeout")
-        .expect("failed");
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    tracing::info!("📤 Step 2: Sending first message...");
-
-    // Try to send a message (we'll just verify it doesn't error out)
-    let envelope1 = RpcEnvelope {
-        request_id: "test_request_1".to_string(),
-        route_key: "test.method".to_string(),
-        payload: Some(bytes::Bytes::from(vec![1, 2, 3])),
-        direction: Some(actr_protocol::Direction::Request as i32),
-        timeout_ms: 5000,
-        ..Default::default()
-    };
-
-    // Send in background and let it timeout (no response handler set up)
-    let _send1 = tokio::spawn({
-        let gate = gate_a.clone();
-        let id = id_b.clone();
-        async move { gate.send_request(&id, envelope1).await }
-    });
-
-    // Give it time to send
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    tracing::info!("💥 Step 3: Closing connection...");
-
-    // Close the connection from peer A's side with real session_id
-    let sid = coord_a.get_peer_session_id(&id_b).await.unwrap_or(0);
-    coord_a
-        .event_sender()
-        .send(ConnectionEvent::ConnectionClosed {
-            peer_id: id_b.clone(),
-            session_id: sid,
-        })
-        .ok();
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    tracing::info!("🔗 Step 4: Rebuilding connection...");
-
-    // Re-initiate connection
-    let ready_rx2 = coord_a
-        .initiate_connection(&id_b)
-        .await
-        .expect("Failed to re-initiate");
-
-    match tokio::time::timeout(Duration::from_secs(10), ready_rx2).await {
-        Ok(Ok(_)) => tracing::info!("✅ Connection re-established!"),
-        Ok(Err(_)) => panic!("Connection failed to re-establish"),
-        Err(_) => panic!("Connection re-establishment timed out"),
-    }
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    tracing::info!("📤 Step 5: Sending second message after reconnect...");
-
-    // Send another message to verify the connection works
-    let envelope2 = RpcEnvelope {
-        request_id: "test_request_2".to_string(),
-        route_key: "test.method".to_string(),
-        payload: Some(bytes::Bytes::from(vec![4, 5, 6])),
-        direction: Some(actr_protocol::Direction::Request as i32),
-        timeout_ms: 5000,
-        ..Default::default()
-    };
-
-    let _send2 = tokio::spawn({
-        let gate = gate_a.clone();
-        let id = id_b.clone();
-        async move { gate.send_request(&id, envelope2).await }
-    });
-
-    // Give it time to send
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    tracing::info!("✅ Step 6: Verifying message was sent...");
-
-    tracing::info!("✅ test_reconnect_and_send_after_close passed!");
+    rpc(&harness, "request-after-explicit-close").await;
+    harness.shutdown().await;
 }

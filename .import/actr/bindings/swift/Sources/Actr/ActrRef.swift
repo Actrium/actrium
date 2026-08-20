@@ -98,13 +98,30 @@ public final class ActrRef: Sendable {
         }
     }
 
-    /// Resolve a dependency alias declared by the workload metadata.
-    public func resolveDependency(alias: String) async throws(ActrError) -> ActrType {
-        do {
-            return ActrType(bridge: try await inner.resolveDependency(alias: alias))
-        } catch {
-            throw ActrError(error: error)
-        }
+    /// Query one peer's current WebRTC state (v0.20 backend). `nil` when the
+    /// peer has no controller or the node runs the 0.14 backend.
+    public func getRtcPeerStatus(peer: ActrId) async -> WebRTCPeerState? {
+        await inner.getRtcPeerStatus(peer: peer.bridge).map(WebRTCPeerState.init(bridge:))
+    }
+
+    /// List every current peer's WebRTC state (v0.20 backend; empty on 0.14).
+    public func listRtcPeerStatuses() async -> [WebRTCPeerState] {
+        await inner.listRtcPeerStatuses().map(WebRTCPeerState.init(bridge:))
+    }
+
+    /// Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+    /// handler immediately receives the current state (initial replay), then
+    /// every revision. The returned subscription stops delivery on deinit.
+    /// `nil` when the peer has no controller or the node runs the 0.14
+    /// backend.
+    public func subscribeRtcPeerStatus(
+        peer: ActrId,
+        onState: @escaping @Sendable (WebRTCPeerState) -> Void
+    ) async -> RtcPeerStateSubscription? {
+        await inner.subscribeRtcPeerStatus(
+            peer: peer.bridge,
+            listener: ClosureRtcPeerStateListener(onState)
+        )
     }
 
     /// Shuts down the actor and waits for it to terminate.
@@ -145,20 +162,6 @@ public final class ActrRef: Sendable {
         }
     }
 
-    /// Sends a type-safe one-way message using its generated route and lane.
-    public func tell<Req: RpcRequest>(_ message: Req) async throws(ActrError) {
-        do {
-            let payload = try encodeProtobufMessage(message, context: "\(Req.self) message")
-            try await inner.tell(
-                routeKey: Req.routeKey,
-                payloadType: Req.payloadType.bridge,
-                messagePayload: payload
-            )
-        } catch {
-            throw ActrError(error: error)
-        }
-    }
-
     /// Wait for shutdown to complete
     public func waitForShutdown() async {
         await inner.waitForShutdown()
@@ -174,5 +177,18 @@ public final class ActrRef: Sendable {
         self.retainedWorkload = retainedWorkload
         self.retainedObservers = retainedObservers
         self.retainedMonitoringResource = retainedMonitoringResource
+    }
+}
+
+/// Closure-based `RtcPeerStateListener` for `ActrRef.subscribeRtcPeerStatus`.
+private final class ClosureRtcPeerStateListener: ActrBindings.RtcPeerStateListener, @unchecked Sendable {
+    private let handler: @Sendable (WebRTCPeerState) -> Void
+
+    init(_ handler: @escaping @Sendable (WebRTCPeerState) -> Void) {
+        self.handler = handler
+    }
+
+    func onState(state: ActrBindings.WebRtcPeerStateBridge) async {
+        handler(WebRTCPeerState(bridge: state))
     }
 }

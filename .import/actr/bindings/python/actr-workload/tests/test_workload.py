@@ -176,6 +176,7 @@ class WorkloadAuthoringTests(unittest.TestCase):
             ("on_webrtc_connecting", "event, ctx"),
             ("on_webrtc_connected", "event, ctx"),
             ("on_webrtc_disconnected", "event, ctx"),
+            ("on_webrtc_state_changed", "event, ctx"),
             ("on_credential_renewed", "event, ctx"),
             ("on_credential_expiring", "event, ctx"),
             ("on_mailbox_backpressure", "event, ctx"),

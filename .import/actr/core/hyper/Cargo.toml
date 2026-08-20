@@ -14,7 +14,10 @@ categories = ["asynchronous", "cryptography", "network-programming"]
 workspace = true
 
 [features]
-default = []
+# The v0.20 backend is the default and only PeerConnection implementation.
+# Disabling default features is supported for non-RTC build surfaces; it does
+# not select the removed 0.14 stack.
+default = ["webrtc-v020"]
 wasm-engine = ["dep:wasmtime", "dep:wasmtime-wasi"]
 dynclib-engine = ["dep:libloading"]
 opentelemetry = [
@@ -25,8 +28,24 @@ opentelemetry = [
   "dep:opentelemetry_sdk",
   "dep:tracing-opentelemetry",
 ]
-# Enable test utilities for integration tests (e.g., force ICE restart on all connections)
-test-utils = ["dep:actr-mock-actrix", "dep:rustls", "dep:webrtc-util"]
+# Enable test utilities for integration tests (e.g., packet filtering and
+# forced recovery against real local peer connections).
+test-utils = [
+  "dep:actr-mock-actrix",
+  "dep:actrix-signaling-service",
+  "dep:actrix-stun-service",
+  "dep:actrix-turn",
+  "dep:axum",
+  "dep:hmac",
+  "dep:platform",
+  "dep:rustls",
+  "dep:sha1",
+  "dep:turn_crate",
+  "dep:webrtc-util",
+]
+# Transitional source gate. The v0.20 dependencies themselves are mandatory;
+# this feature only keeps the cutover diff bisectable until the module rename.
+webrtc-v020 = []
 
 [dependencies]
 # === Internal ===
@@ -102,6 +121,7 @@ rand.workspace = true
 webrtc.workspace = true
 rtc.workspace = true
 rtc-rtp.workspace = true
+if-addrs.workspace = true
 tokio-tungstenite.workspace = true
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-native-roots", "rustls-tls-webpki-roots", "json"] }
 url.workspace = true
@@ -115,8 +135,16 @@ dashmap.workspace = true
 dotenvy = "0.15"
 num_cpus = "1.17"
 actr-mock-actrix = { workspace = true, optional = true }
+actrix-signaling-service = { package = "actrix-signaling", path = "../../actrix/crates/signaling", optional = true }
+actrix-stun-service = { package = "actrix-stun", path = "../../actrix/crates/stun", optional = true }
+actrix-turn = { path = "../../actrix/crates/turn", optional = true }
+axum = { workspace = true, optional = true }
+hmac = { workspace = true, optional = true }
+platform = { package = "actrix-platform", path = "../../actrix/crates/platform", optional = true }
 rustls = { workspace = true, optional = true }
-webrtc-util = { version = "0.12", optional = true }
+sha1 = { version = "0.10", optional = true }
+turn_crate = { workspace = true, optional = true }
+webrtc-util = { workspace = true, optional = true }
 
 # WASM Runtime (optional, native-only)
 wasmtime = { workspace = true, optional = true }
@@ -160,6 +188,4 @@ actr-pack.workspace = true
 actr-config.workspace = true
 actr-hyper = { path = ".", features = ["test-utils"] }
 actr-framework = { workspace = true, features = ["test-utils"] }
-actrix-turn = { path = "../../actrix/crates/turn" }
-turn_crate = { workspace = true }
 tracing-log = "0.2"

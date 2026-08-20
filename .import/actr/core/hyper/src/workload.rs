@@ -84,6 +84,8 @@ pub(crate) enum PackageHookEvent {
     WebRtcConnecting(PeerEvent),
     WebRtcConnected(PeerEvent),
     WebRtcDisconnected(PeerEvent),
+    /// S6-5: unified per-revision state hook (v0.20 backend).
+    WebRtcStateChanged(actr_framework::WebRtcPeerState),
     CredentialRenewed(CredentialEvent),
     CredentialExpiring(CredentialEvent),
     MailboxBackpressure(BackpressureEvent),
@@ -101,6 +103,7 @@ impl PackageHookEvent {
             PackageHookEvent::WebRtcConnecting(_) => "hook:on_webrtc_connecting",
             PackageHookEvent::WebRtcConnected(_) => "hook:on_webrtc_connected",
             PackageHookEvent::WebRtcDisconnected(_) => "hook:on_webrtc_disconnected",
+            PackageHookEvent::WebRtcStateChanged(_) => "hook:on_webrtc_state_changed",
             PackageHookEvent::CredentialRenewed(_) => "hook:on_credential_renewed",
             PackageHookEvent::CredentialExpiring(_) => "hook:on_credential_expiring",
             PackageHookEvent::MailboxBackpressure(_) => "hook:on_mailbox_backpressure",
@@ -162,6 +165,13 @@ pub(crate) trait LinkedWorkloadHandle: Send + Sync + 'static {
     async fn on_webrtc_connecting(&self, _ctx: &RuntimeContext, _event: &PeerEvent) {}
     async fn on_webrtc_connected(&self, _ctx: &RuntimeContext, _event: &PeerEvent) {}
     async fn on_webrtc_disconnected(&self, _ctx: &RuntimeContext, _event: &PeerEvent) {}
+    /// S6-5: unified per-revision state hook (v0.20 backend).
+    async fn on_webrtc_state_changed(
+        &self,
+        _ctx: &RuntimeContext,
+        _state: &actr_framework::WebRtcPeerState,
+    ) {
+    }
 
     // Credential
     async fn on_credential_renewed(&self, _ctx: &RuntimeContext, _event: &CredentialEvent) {}
@@ -290,6 +300,13 @@ impl<W: FrameworkWorkload> LinkedWorkloadHandle for WorkloadAdapter<W> {
     async fn on_webrtc_disconnected(&self, ctx: &RuntimeContext, event: &PeerEvent) {
         self.inner.on_webrtc_disconnected(ctx, event).await
     }
+    async fn on_webrtc_state_changed(
+        &self,
+        ctx: &RuntimeContext,
+        state: &actr_framework::WebRtcPeerState,
+    ) {
+        self.inner.on_webrtc_state_changed(ctx, state).await
+    }
 
     // ── Credential ───────────────────────────────────────────────────────
     async fn on_credential_renewed(&self, ctx: &RuntimeContext, event: &CredentialEvent) {
@@ -366,6 +383,13 @@ impl crate::lifecycle::hooks::WorkloadHookObserver for LinkedHandleObserver {
     }
     async fn on_webrtc_disconnected(&self, ctx: &RuntimeContext, event: &PeerEvent) {
         self.handle.on_webrtc_disconnected(ctx, event).await
+    }
+    async fn on_webrtc_state_changed(
+        &self,
+        ctx: &RuntimeContext,
+        state: &actr_framework::WebRtcPeerState,
+    ) {
+        self.handle.on_webrtc_state_changed(ctx, state).await
     }
     async fn on_credential_renewed(&self, ctx: &RuntimeContext, event: &CredentialEvent) {
         self.handle.on_credential_renewed(ctx, event).await
@@ -498,6 +522,19 @@ impl crate::lifecycle::hooks::WorkloadHookObserver for PackageHookObserver {
             "on_webrtc_disconnected",
             ctx,
             PackageHookEvent::WebRtcDisconnected(event.clone()),
+        )
+        .await;
+    }
+
+    async fn on_webrtc_state_changed(
+        &self,
+        ctx: &RuntimeContext,
+        state: &actr_framework::WebRtcPeerState,
+    ) {
+        self.dispatch_hook(
+            "on_webrtc_state_changed",
+            ctx,
+            PackageHookEvent::WebRtcStateChanged(state.clone()),
         )
         .await;
     }
@@ -885,6 +922,52 @@ fn peer_status_to_v1(status: WebRtcPeerStatus) -> u32 {
 }
 
 #[cfg(feature = "dynclib-engine")]
+fn network_path_to_v1(path: actr_framework::WebRtcNetworkPath) -> u32 {
+    use actr_framework::WebRtcNetworkPath;
+    use actr_framework::guest::dynclib_abi::webrtc_network_path as np;
+    match path {
+        WebRtcNetworkPath::Unknown => np::UNKNOWN,
+        WebRtcNetworkPath::Direct => np::DIRECT,
+        WebRtcNetworkPath::Relayed => np::RELAYED,
+    }
+}
+
+#[cfg(feature = "dynclib-engine")]
+fn unavailable_reason_to_v1(reason: actr_framework::WebRtcUnavailableReason) -> u32 {
+    use actr_framework::WebRtcUnavailableReason;
+    use actr_framework::guest::dynclib_abi::webrtc_unavailable_reason as rs;
+    match reason {
+        WebRtcUnavailableReason::ConnectionNotReady => rs::CONNECTION_NOT_READY,
+        WebRtcUnavailableReason::PeerConnectionBuildFailed => rs::PEER_CONNECTION_BUILD_FAILED,
+        WebRtcUnavailableReason::NegotiationFailed => rs::NEGOTIATION_FAILED,
+        WebRtcUnavailableReason::IceRestartFailed => rs::ICE_RESTART_FAILED,
+        WebRtcUnavailableReason::PeerConnectionRebuildFailed => rs::PEER_CONNECTION_REBUILD_FAILED,
+        WebRtcUnavailableReason::UnsupportedRtcCapability => rs::UNSUPPORTED_RTC_CAPABILITY,
+        WebRtcUnavailableReason::RtcResourceLimitExceeded => rs::RTC_RESOURCE_LIMIT_EXCEEDED,
+        WebRtcUnavailableReason::RecoveryExhausted => rs::RECOVERY_EXHAUSTED,
+        WebRtcUnavailableReason::Closed => rs::CLOSED,
+        // The enum is non_exhaustive so new failure modes stay additive;
+        // project an unknown reason onto the closest v1 ABI bucket rather
+        // than breaking the boundary mapping.
+        _ => rs::UNSUPPORTED_RTC_CAPABILITY,
+    }
+}
+
+#[cfg(feature = "dynclib-engine")]
+fn webrtc_state_to_v1(state: actr_framework::WebRtcPeerState) -> guest_abi::WebRtcStateV1 {
+    guest_abi::WebRtcStateV1 {
+        peer: state.peer,
+        pc_generation: state.pc_generation,
+        revision: state.revision,
+        status: peer_status_to_v1(state.status),
+        sendable: state.sendable,
+        network_path: network_path_to_v1(state.network_path),
+        relayed: state.relayed,
+        unavailable_reason: state.unavailable_reason.map(unavailable_reason_to_v1),
+    }
+}
+
+#[cfg(feature = "dynclib-engine")]
 fn credential_event_to_v1(event: CredentialEvent) -> guest_abi::CredentialEventV1 {
     guest_abi::CredentialEventV1 {
         new_expiry: timestamp_to_v1(event.new_expiry),
@@ -913,6 +996,7 @@ pub(crate) fn encode_guest_hook_request(
         credential: None,
         backpressure: None,
         bridge_token,
+        webrtc_state: None,
     };
 
     match event {
@@ -960,6 +1044,10 @@ pub(crate) fn encode_guest_hook_request(
         PackageHookEvent::MailboxBackpressure(event) => {
             request.hook = guest_abi::runtime_hook::ON_MAILBOX_BACKPRESSURE;
             request.backpressure = Some(backpressure_event_to_v1(event));
+        }
+        PackageHookEvent::WebRtcStateChanged(state) => {
+            request.hook = guest_abi::runtime_hook::ON_WEBRTC_STATE_CHANGED;
+            request.webrtc_state = Some(webrtc_state_to_v1(state));
         }
     }
 

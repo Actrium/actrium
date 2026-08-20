@@ -127,6 +127,9 @@ export const workload = {
   async onWebrtcDisconnected(_event, ctx) {
     await withInvocationCtx(ctx, async () => {});
   },
+  async onWebrtcStateChanged(_event, ctx) {
+    await withInvocationCtx(ctx, async () => {});
+  },
   async onCredentialRenewed(_event, ctx) {
     await withInvocationCtx(ctx, async () => {});
   },

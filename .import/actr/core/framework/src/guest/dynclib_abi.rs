@@ -75,6 +75,32 @@ pub mod webrtc_peer_status {
     pub const RECOVERING: u32 = 3;
 }
 
+/// `WebRtcNetworkPath` discriminants carried by [`WebRtcStateV1::network_path`].
+/// One-to-one with `actr_framework::WebRtcNetworkPath`; 0-based to mirror the
+/// enum's declaration order.
+pub mod webrtc_network_path {
+    pub const UNKNOWN: u32 = 0;
+    pub const DIRECT: u32 = 1;
+    pub const RELAYED: u32 = 2;
+}
+
+/// `WebRtcUnavailableReason` discriminants carried by
+/// [`WebRtcStateV1::unavailable_reason`]. One-to-one with
+/// `actr_framework::WebRtcUnavailableReason`; 0-based to mirror the enum's
+/// declaration order. `optional` prost fields track presence, so
+/// `Some(CLOSED)` is distinct from `None`.
+pub mod webrtc_unavailable_reason {
+    pub const CONNECTION_NOT_READY: u32 = 0;
+    pub const PEER_CONNECTION_BUILD_FAILED: u32 = 1;
+    pub const NEGOTIATION_FAILED: u32 = 2;
+    pub const ICE_RESTART_FAILED: u32 = 3;
+    pub const PEER_CONNECTION_REBUILD_FAILED: u32 = 4;
+    pub const UNSUPPORTED_RTC_CAPABILITY: u32 = 5;
+    pub const RTC_RESOURCE_LIMIT_EXCEEDED: u32 = 6;
+    pub const RECOVERY_EXHAUSTED: u32 = 7;
+    pub const CLOSED: u32 = 8;
+}
+
 /// Observation hook identifiers carried by [`GuestHookV1`].
 pub mod runtime_hook {
     pub const ON_SIGNALING_CONNECTING: u32 = 1;
@@ -89,6 +115,9 @@ pub mod runtime_hook {
     pub const ON_CREDENTIAL_RENEWED: u32 = 10;
     pub const ON_CREDENTIAL_EXPIRING: u32 = 11;
     pub const ON_MAILBOX_BACKPRESSURE: u32 = 12;
+    /// Unified per-peer WebRTC state snapshot (v0.20 backend); payload rides
+    /// in [`GuestHookV1::webrtc_state`].
+    pub const ON_WEBRTC_STATE_CHANGED: u32 = 13;
 }
 
 /// Dedicated payload used by `actr_init`.
@@ -322,6 +351,34 @@ pub struct PeerEventV1 {
     pub status: Option<u32>,
 }
 
+/// Unified per-peer WebRTC state snapshot (actr_framework::WebRtcPeerState)
+/// carried by the `ON_WEBRTC_STATE_CHANGED` hook (0.4.0 contract, v0.20
+/// backend). `revision` is monotonic per peer so guests can de-duplicate;
+/// `pc_generation` bumps on every hard-recovery rebuild.
+#[derive(Clone, PartialEq, prost::Message)]
+pub struct WebRtcStateV1 {
+    #[prost(message, required, tag = "1")]
+    pub peer: ActrId,
+    #[prost(uint64, tag = "2")]
+    pub pc_generation: u64,
+    #[prost(uint64, tag = "3")]
+    pub revision: u64,
+    /// `WebRtcPeerStatus` discriminant (see [`webrtc_peer_status`]).
+    #[prost(uint32, tag = "4")]
+    pub status: u32,
+    #[prost(bool, tag = "5")]
+    pub sendable: bool,
+    /// `WebRtcNetworkPath` discriminant (see [`webrtc_network_path`]).
+    #[prost(uint32, tag = "6")]
+    pub network_path: u32,
+    #[prost(bool, optional, tag = "7")]
+    pub relayed: Option<bool>,
+    /// `WebRtcUnavailableReason` discriminant (see
+    /// [`webrtc_unavailable_reason`]); `None` while the peer is available.
+    #[prost(uint32, optional, tag = "8")]
+    pub unavailable_reason: Option<u32>,
+}
+
 /// Credential lifecycle event payload.
 #[derive(Clone, PartialEq, prost::Message)]
 pub struct CredentialEventV1 {
@@ -353,6 +410,11 @@ pub struct GuestHookV1 {
     pub backpressure: Option<BackpressureEventV1>,
     #[prost(uint64, tag = "6")]
     pub bridge_token: u64,
+    /// Payload for `ON_WEBRTC_STATE_CHANGED` (0.4.0 contract). Older guests
+    /// reply `UNSUPPORTED_OP` for the unknown hook id, which the host treats
+    /// as a dropped observation (hooks are infallible, best-effort).
+    #[prost(message, optional, tag = "7")]
+    pub webrtc_state: Option<WebRtcStateV1>,
 }
 
 /// ABI-level destination encoding (replaces hand-rolled 0x00/0x01/0x02 byte protocol).

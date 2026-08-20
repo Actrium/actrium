@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 //
-// C implementation of the async actr:workload@0.4.0 guest contract.
+// C implementation of the async actr:workload@0.5.0 guest contract.
 //
 // Every export completes immediately, but still uses wit-bindgen's async-lift
 // entrypoints and explicit task-return helpers. The invocation context is
@@ -139,6 +139,24 @@ DEFINE_PEER_EVENT_HOOK(on_websocket_disconnected)
 DEFINE_PEER_EVENT_HOOK(on_webrtc_connecting)
 DEFINE_PEER_EVENT_HOOK(on_webrtc_connected)
 DEFINE_PEER_EVENT_HOOK(on_webrtc_disconnected)
+
+// 0.5.0: unified per-peer WebRTC state hook. The record owns heap strings
+// (peer actr-id), so it must be released with the generated free helper.
+actr_workload_guest_v2_callback_code_t
+exports_actr_workload_workload_on_webrtc_state_changed(
+    exports_actr_workload_workload_webrtc_peer_state_t *event,
+    exports_actr_workload_workload_invocation_ctx_t *ctx) {
+    exports_actr_workload_workload_webrtc_peer_state_free(event);
+    exports_actr_workload_workload_invocation_ctx_free(ctx);
+    exports_actr_workload_workload_on_webrtc_state_changed_return();
+    return ACTR_WORKLOAD_GUEST_V2_CALLBACK_CODE_EXIT;
+}
+
+actr_workload_guest_v2_callback_code_t
+exports_actr_workload_workload_on_webrtc_state_changed_callback(
+    actr_workload_guest_v2_event_t *event) {
+    return callback_exit(event);
+}
 
 #define DEFINE_SCALAR_EVENT_HOOK(name, event_type)                           \
     actr_workload_guest_v2_callback_code_t                                  \

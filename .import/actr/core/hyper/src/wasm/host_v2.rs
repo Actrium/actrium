@@ -1,4 +1,4 @@
-//! WasmWorkloadV2 — the `actr:workload@0.4.0` async-world execution path.
+//! WasmWorkloadV2 — the `actr:workload@0.5.0` async-world execution path.
 //!
 //! The sole actr:workload execution path (the 0.1.0 synchronous serial
 //! world is retired — a component exporting it is rejected at load by
@@ -22,7 +22,10 @@ use actr_framework::guest::dynclib_abi::{
     HostCallRawV1, HostCallV1, HostDiscoverV1, HostRegisterStreamV1, HostResolveDependencyV1,
     HostSendDataChunkV1, HostTellV1, HostUnregisterStreamV1,
 };
-use actr_framework::{BackpressureEvent, CredentialEvent, PeerEvent, WebRtcPeerStatus};
+use actr_framework::{
+    BackpressureEvent, CredentialEvent, PeerEvent, WebRtcNetworkPath, WebRtcPeerState,
+    WebRtcPeerStatus, WebRtcUnavailableReason,
+};
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
     ActrError, ActrId, ActrType, ConnectionNotReadyInfo, DataChunk, MetadataEntry, PayloadType,
@@ -38,7 +41,9 @@ use super::component_bindings_v2::actr::workload::types::{
     BackpressureEvent as WitBackpressureEvent, CredentialEvent as WitCredentialEvent,
     DataChunk as WitDataChunk, Dest as WitDest, Host as TypesHostV2,
     InvocationCtx as WitInvocationCtx, PayloadType as WitPayloadType, PeerEvent as WitPeerEvent,
-    Realm as WitRealm, RpcEnvelope as WitRpcEnvelope, WebrtcPeerStatus as WitWebrtcPeerStatus,
+    Realm as WitRealm, RpcEnvelope as WitRpcEnvelope, WebrtcNetworkPath as WitWebrtcNetworkPath,
+    WebrtcPeerState as WitWebrtcPeerState, WebrtcPeerStatus as WitWebrtcPeerStatus,
+    WebrtcUnavailableReason as WitWebrtcUnavailableReason,
 };
 use super::error::{WasmError, WasmResult};
 use super::host::{HostState, epoch_deadline_ticks};
@@ -472,6 +477,58 @@ fn proto_webrtc_peer_status_to_wit(status: WebRtcPeerStatus) -> WitWebrtcPeerSta
         WebRtcPeerStatus::Connecting => WitWebrtcPeerStatus::Connecting,
         WebRtcPeerStatus::Connected => WitWebrtcPeerStatus::Connected,
         WebRtcPeerStatus::Recovering => WitWebrtcPeerStatus::Recovering,
+    }
+}
+
+fn proto_webrtc_network_path_to_wit(path: WebRtcNetworkPath) -> WitWebrtcNetworkPath {
+    match path {
+        WebRtcNetworkPath::Unknown => WitWebrtcNetworkPath::Unknown,
+        WebRtcNetworkPath::Direct => WitWebrtcNetworkPath::Direct,
+        WebRtcNetworkPath::Relayed => WitWebrtcNetworkPath::Relayed,
+    }
+}
+
+fn proto_webrtc_unavailable_reason_to_wit(
+    reason: WebRtcUnavailableReason,
+) -> WitWebrtcUnavailableReason {
+    match reason {
+        WebRtcUnavailableReason::ConnectionNotReady => {
+            WitWebrtcUnavailableReason::ConnectionNotReady
+        }
+        WebRtcUnavailableReason::PeerConnectionBuildFailed => {
+            WitWebrtcUnavailableReason::PeerConnectionBuildFailed
+        }
+        WebRtcUnavailableReason::NegotiationFailed => WitWebrtcUnavailableReason::NegotiationFailed,
+        WebRtcUnavailableReason::IceRestartFailed => WitWebrtcUnavailableReason::IceRestartFailed,
+        WebRtcUnavailableReason::PeerConnectionRebuildFailed => {
+            WitWebrtcUnavailableReason::PeerConnectionRebuildFailed
+        }
+        WebRtcUnavailableReason::UnsupportedRtcCapability => {
+            WitWebrtcUnavailableReason::UnsupportedRtcCapability
+        }
+        WebRtcUnavailableReason::RtcResourceLimitExceeded => {
+            WitWebrtcUnavailableReason::RtcResourceLimitExceeded
+        }
+        WebRtcUnavailableReason::RecoveryExhausted => WitWebrtcUnavailableReason::RecoveryExhausted,
+        WebRtcUnavailableReason::Closed => WitWebrtcUnavailableReason::Closed,
+        // Non_exhaustive source enum: an unknown reason still needs a WIT
+        // projection; use the generic capability bucket.
+        _ => WitWebrtcUnavailableReason::UnsupportedRtcCapability,
+    }
+}
+
+fn proto_webrtc_peer_state_to_wit(state: WebRtcPeerState) -> WitWebrtcPeerState {
+    WitWebrtcPeerState {
+        peer: proto_actr_id_to_wit(&state.peer),
+        pc_generation: state.pc_generation,
+        revision: state.revision,
+        status: proto_webrtc_peer_status_to_wit(state.status),
+        sendable: state.sendable,
+        network_path: proto_webrtc_network_path_to_wit(state.network_path),
+        relayed: state.relayed,
+        unavailable_reason: state
+            .unavailable_reason
+            .map(proto_webrtc_unavailable_reason_to_wit),
     }
 }
 
@@ -2120,7 +2177,7 @@ async fn run_data_chunk_region(
 
 /// Region-internal observation-hook call. Extracted from `call_hook_event` so
 /// both the per-region serial path (M4) and the interleaved barrier path (M5)
-/// share exactly one copy of the twelve-arm dispatch.
+/// share exactly one copy of the thirteen-arm dispatch.
 async fn run_hook_region(
     accessor: &Accessor<HostState>,
     bindings: &ActrWorkloadGuestV2,
@@ -2158,6 +2215,10 @@ async fn run_hook_region(
         }
         PackageHookEvent::WebRtcDisconnected(event) => {
             wl.call_on_webrtc_disconnected(accessor, proto_peer_event_to_wit(event), inv)
+                .await
+        }
+        PackageHookEvent::WebRtcStateChanged(state) => {
+            wl.call_on_webrtc_state_changed(accessor, proto_webrtc_peer_state_to_wit(state), inv)
                 .await
         }
         PackageHookEvent::CredentialRenewed(event) => {

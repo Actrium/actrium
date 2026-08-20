@@ -110,6 +110,38 @@ fn package_hook_cases() -> Vec<(TestPackageHookEvent, &'static str)> {
             "on_webrtc_disconnected:peer=1:relayed=none:status=idle",
         ),
         (
+            TestPackageHookEvent::WebRtcStateChanged {
+                state: actr_framework::WebRtcPeerState {
+                    peer: test_actr_id(),
+                    pc_generation: 2,
+                    revision: 3,
+                    status: WebRtcPeerStatus::Connected,
+                    sendable: true,
+                    network_path: actr_framework::WebRtcNetworkPath::Direct,
+                    relayed: Some(true),
+                    unavailable_reason: None,
+                },
+            },
+            "on_webrtc_state_changed:peer=1:gen=2:rev=3:status=connected:sendable=true:path=direct:relayed=true:reason=none",
+        ),
+        (
+            TestPackageHookEvent::WebRtcStateChanged {
+                state: actr_framework::WebRtcPeerState {
+                    peer: test_actr_id(),
+                    pc_generation: 4,
+                    revision: 5,
+                    status: WebRtcPeerStatus::Recovering,
+                    sendable: false,
+                    network_path: actr_framework::WebRtcNetworkPath::Relayed,
+                    relayed: None,
+                    unavailable_reason: Some(
+                        actr_framework::WebRtcUnavailableReason::IceRestartFailed,
+                    ),
+                },
+            },
+            "on_webrtc_state_changed:peer=1:gen=4:rev=5:status=recovering:sendable=false:path=relayed:relayed=none:reason=ice-restart-failed",
+        ),
+        (
             TestPackageHookEvent::CredentialRenewed { new_expiry: expiry },
             "on_credential_renewed:expiry=1725000000",
         ),

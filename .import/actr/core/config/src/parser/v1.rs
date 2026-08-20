@@ -543,8 +543,8 @@ impl ParserV1 {
         };
 
         // Parse port configuration
-        let (udp_ports, public_ips) =
-            if let (Some(start), Some(end)) = (raw.port_range_start, raw.port_range_end) {
+        let (udp_ports, public_ips) = match (raw.port_range_start, raw.port_range_end) {
+            (Some(start), Some(end)) => {
                 // Port range configured, enable fixed port mode
                 if start >= end {
                     // Invalid port range, return error
@@ -556,10 +556,17 @@ impl ParserV1 {
                     // Port range mode
                     (Some((start, end)), raw.public_ips.clone())
                 }
-            } else {
+            }
+            (None, None) => {
                 // No port range configured, use default mode (random ports)
                 (None, Vec::new())
-            };
+            }
+            _ => {
+                return Err(ConfigError::InvalidConfig(
+                    "port_range_start and port_range_end must be configured together".to_string(),
+                ));
+            }
+        };
 
         // Parse ICE acceptance wait times
         let ice_host_acceptance_min_wait = raw.ice_host_acceptance_min_wait.unwrap_or(0);
@@ -567,11 +574,9 @@ impl ParserV1 {
         let ice_prflx_acceptance_min_wait = raw.ice_prflx_acceptance_min_wait.unwrap_or(40);
         let ice_relay_acceptance_min_wait = raw.ice_relay_acceptance_min_wait.unwrap_or(100);
 
-        // Note: ice_udp_mux_port, public_ips, and udp_ports are all rejected by
-        // the validation below — the first two are unsupported by webrtc-rs
-        // 0.20, and udp_ports is incompatible with the wildcard ICE-restart
-        // rebind — so no fixed-port / fixed-address mechanism reaches the
-        // runtime.
+        // `ice_udp_mux_port` is rejected below and `udp_ports` is rejected by
+        // the v0.20 node capability guard: upstream exposes neither the shared
+        // mux nor an atomic port-range allocator/pre-bound-socket seam.
         let advanced = WebRtcAdvancedConfig {
             udp_ports,
             ice_udp_mux_port: raw.ice_udp_mux_port,
@@ -940,6 +945,44 @@ manufacturer = "acme"
             err.to_string().contains("ice_udp_mux_port"),
             "unexpected error: {err}"
         );
+    }
+
+    #[test]
+    fn test_parse_webrtc_udp_port_range_rejected() {
+        let tmpdir = TempDir::new().unwrap();
+        let parser = ParserV1::new(tmpdir.path().join("actr.toml"));
+        let raw = crate::raw::RawWebRtcConfig {
+            port_range_start: Some(50000),
+            port_range_end: Some(50100),
+            ..Default::default()
+        };
+        let err = parser.parse_webrtc(&raw).unwrap_err();
+        assert!(
+            err.to_string().contains("udp_ports"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn test_parse_webrtc_partial_udp_port_range_rejected() {
+        let tmpdir = TempDir::new().unwrap();
+        let parser = ParserV1::new(tmpdir.path().join("actr.toml"));
+        for raw in [
+            crate::raw::RawWebRtcConfig {
+                port_range_start: Some(50000),
+                ..Default::default()
+            },
+            crate::raw::RawWebRtcConfig {
+                port_range_end: Some(50100),
+                ..Default::default()
+            },
+        ] {
+            let err = parser.parse_webrtc(&raw).unwrap_err();
+            assert!(
+                err.to_string().contains("must be configured together"),
+                "unexpected error: {err}"
+            );
+        }
     }
 
     #[test]

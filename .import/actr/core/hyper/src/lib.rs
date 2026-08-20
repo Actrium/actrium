@@ -220,13 +220,13 @@ pub use transport::{
 pub use transport::{Dest, ExponentialBackoff, NetworkError, NetworkResult};
 
 // Layer 0: Wire layer
+#[cfg(all(not(target_arch = "wasm32"), feature = "test-utils"))]
+pub use wire::WebSocketSignalingClient;
 #[cfg(not(target_arch = "wasm32"))]
 pub use wire::{
     AuthConfig, AuthType, DisconnectReason, InboundQueueConfig, ReconnectConfig, SignalingClient,
     SignalingConfig, SignalingEvent, SignalingStats, WebRtcConfig,
 };
-#[cfg(all(not(target_arch = "wasm32"), feature = "test-utils"))]
-pub use wire::{WebRtcCoordinator, WebSocketSignalingClient};
 
 // Mailbox (from actr-runtime-mailbox crate)
 #[cfg(not(target_arch = "wasm32"))]
@@ -240,13 +240,6 @@ pub use actr_runtime_mailbox::{
 // Runtime workload abstraction
 #[cfg(not(target_arch = "wasm32"))]
 pub use workload::{HostAbiFn, HostOperation, HostOperationResult, InvocationContext};
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Constants
-// ═══════════════════════════════════════════════════════════════════════════════
-
-pub(crate) const INITIAL_CONNECTION_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(12);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Prelude
@@ -276,13 +269,13 @@ pub mod prelude {
     pub use actr_framework::{MediaSample, MediaType};
 
     // ── Layer 0: Wire / WebRTC (native-only) ────────────────────────────────
+    #[cfg(feature = "test-utils")]
+    pub use crate::wire::webrtc::WebSocketSignalingClient;
     #[cfg(not(target_arch = "wasm32"))]
     pub use crate::wire::webrtc::{
         AuthConfig, AuthType, DisconnectReason, InboundQueueConfig, ReconnectConfig,
         SignalingClient, SignalingConfig, SignalingEvent, SignalingStats, WebRtcConfig,
     };
-    #[cfg(feature = "test-utils")]
-    pub use crate::wire::webrtc::{WebRtcCoordinator, WebSocketSignalingClient};
 
     // ── Mailbox (native-only) ───────────────────────────────────────────────
     #[cfg(not(target_arch = "wasm32"))]

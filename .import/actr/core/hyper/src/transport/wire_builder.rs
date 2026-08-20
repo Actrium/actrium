@@ -9,13 +9,11 @@ use super::Dest; // Re-exported from actr-framework
 use super::error::{NetworkError, NetworkResult};
 use super::lane::DataLane;
 use super::peer_transport::WireBuilder;
-use super::secure_channel::SecureChannelState;
 use super::wire_handle::{WireHandle, WireIdentity};
 use super::wire_pool::ConnType;
 use crate::lifecycle::CredentialState;
 use crate::lifecycle::session_state::SessionState;
 use crate::outbound::PendingRequestsMap;
-use crate::wire::webrtc::WebRtcCoordinator;
 use crate::wire::websocket::WebSocketConnection;
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{ActrError, ActrId, Direction, PayloadType, RpcEnvelope};
@@ -77,8 +75,13 @@ impl Default for DefaultWireBuilderConfig {
 ///
 /// Creates WebRTC and/or WebSocket wire handles from configuration and supports attempting multiple connection types during the same creation pass.
 pub struct DefaultWireBuilder {
-    /// Optional WebRTC coordinator.
-    webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
+    /// Optional v0.20 RTC connection manager (W5). When set, the builder
+    /// creates v0.20 `V020WireHandle` connections instead of 0.14
+    /// `WebRtcConnection`. The two are mutually exclusive — the node-level
+    /// switch (W5) ensures only one is set.
+    #[cfg(feature = "webrtc-v020")]
+    #[allow(dead_code)] // set by W5 node-level switch
+    v020_manager: Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>,
 
     /// Local node identity hex string used as `X-Actr-Source-ID` in outbound WebSocket handshakes.
     local_id_hex: String,
@@ -111,14 +114,11 @@ impl DefaultWireBuilder {
     /// Create a new wire builder.
     ///
     /// # Arguments
-    /// - `webrtc_coordinator`: WebRTC coordinator when WebRTC support is enabled
     /// - `config`: builder configuration
-    pub fn new(
-        webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
-        config: DefaultWireBuilderConfig,
-    ) -> Self {
+    pub fn new(config: DefaultWireBuilderConfig) -> Self {
         Self {
-            webrtc_coordinator,
+            #[cfg(feature = "webrtc-v020")]
+            v020_manager: None,
             local_id_hex: config.local_id_hex.clone(),
             session_state: config.session_state.clone(),
             discovered_ws_addresses: config.discovered_ws_addresses.clone(),
@@ -127,6 +127,18 @@ impl DefaultWireBuilder {
             ws_session_counter: Arc::new(AtomicU64::new(0)),
             config,
         }
+    }
+
+    /// Set the v0.20 RTC connection manager (W5). When set, the builder
+    /// creates v0.20 connections instead of 0.14 WebRTC connections.
+    #[cfg(feature = "webrtc-v020")]
+    #[allow(dead_code)] // called by W5 node-level switch
+    pub(crate) fn with_v020_manager(
+        mut self,
+        manager: Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>,
+    ) -> Self {
+        self.v020_manager = Some(manager);
+        self
     }
 
     /// Look up the direct WebSocket URL for the target node, sourced only from service discovery.
@@ -330,13 +342,10 @@ impl WireHandle for ClientWebSocketHandle {
     }
 
     async fn close(&self) -> NetworkResult<()> {
-        // `WebSocketConnection::close` drives the secure state to `Closed`.
         self.inner.close().await
     }
 
     async fn get_lane(&self, payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
-        // Lanes are created and `SecureDataLane`-wrapped by the inner
-        // `WebSocketConnection`, so they carry its `SecureCell` gate.
         self.inner.get_lane(payload_type).await
     }
 
@@ -345,24 +354,6 @@ impl WireHandle for ClientWebSocketHandle {
             peer_id: self.peer_id.clone(),
             session_id: self.session_id,
         })
-    }
-
-    // Secure-channel state is owned by the underlying `WebSocketConnection`
-    // physical session; delegate the trio so the pool observes the real state.
-    fn secure_channel_state(&self) -> SecureChannelState {
-        self.inner.secure_channel_state()
-    }
-
-    fn secure_epoch(&self) -> u64 {
-        self.inner.secure_epoch()
-    }
-
-    async fn await_secure_state_change(&self, observed_epoch: u64) {
-        self.inner.await_secure_state_change(observed_epoch).await;
-    }
-
-    fn mark_secure_failed(&self) {
-        self.inner.mark_secure_failed();
     }
 }
 
@@ -375,26 +366,25 @@ impl WireBuilder for DefaultWireBuilder {
     }
 
     async fn existing_connections(&self, dest: &Dest) -> NetworkResult<Vec<Arc<dyn WireHandle>>> {
-        if !self.config.enable_webrtc || !dest.is_peer() {
-            return Ok(Vec::new());
+        // v0.20 controllers own the physical inbound/outbound PeerConnection
+        // independently of PeerTransport. ExistingOnly response traffic may
+        // materialize a local DestTransport around that already-sendable
+        // Session; it must not dial or negotiate a new connection.
+        #[cfg(feature = "webrtc-v020")]
+        if self.config.enable_webrtc
+            && let Some(manager) = self.v020_manager.as_ref()
+            && let Some(peer_id) = dest.as_peer_id()
+            && let Some(controller) = manager.get_controller(peer_id).await
+            && controller.snapshot().sendable
+        {
+            let handle = crate::wire::webrtc::v020::wire_handle::V020WireHandle::from_existing(
+                manager.clone(),
+                peer_id.clone(),
+                controller,
+            );
+            return Ok(vec![Arc::new(handle) as Arc<dyn WireHandle>]);
         }
-
-        let Some(coordinator) = &self.webrtc_coordinator else {
-            return Ok(Vec::new());
-        };
-        let Some(target_id) = dest.as_peer_id() else {
-            return Ok(Vec::new());
-        };
-
-        // The physical `WebRtcConnection` owns its `SecureCell`, so returning it
-        // directly (rather than re-wrapping) preserves authenticated state/epoch
-        // across repeated lookups (RFC-0563 review point 4). TODO(phase3):
-        // compare the authenticated `secure_epoch` in stale-session checks.
-        Ok(coordinator
-            .existing_connection(target_id)
-            .await
-            .map(|connection| vec![Arc::new(connection) as Arc<dyn WireHandle>])
-            .unwrap_or_default())
+        Ok(Vec::new())
     }
 
     #[cfg_attr(feature = "opentelemetry", tracing::instrument(skip_all))]
@@ -487,66 +477,39 @@ impl WireBuilder for DefaultWireBuilder {
 
         // 4. Attempt to create a WebRTC connection.
         if self.config.enable_webrtc {
-            if let Some(coordinator) = &self.webrtc_coordinator {
-                // WebRTC is only supported for peer destinations.
-                if dest.is_peer() {
-                    tracing::debug!("🏭 [Factory] Creating WebRTC connection to: {:?}", dest);
-
-                    // Check cancellation before long-running operation
+            // v0.20 path (W5): when the v0.20 manager is set, create a
+            // V020WireHandle instead of using the 0.14 coordinator.
+            #[cfg(feature = "webrtc-v020")]
+            if let Some(ref v020_manager) = self.v020_manager {
+                if let Some(target_id) = dest.as_peer_id() {
+                    tracing::debug!("[Factory] Creating v0.20 WebRTC connection to: {:?}", dest);
                     check_cancelled(&cancel_token)?;
-
-                    match coordinator
-                        .create_connection(dest, cancel_token.clone())
-                        .await
-                    {
-                        Ok(webrtc_conn) => {
-                            // Check cancellation again after creation.
-                            if let Err(e) = check_cancelled(&cancel_token) {
-                                // Clean up the newly created connection through
-                                // the coordinator's session-guarded path: the
-                                // peers-map entry is removed before the physical
-                                // close. A bare `close()` here relies on the
-                                // ConnectionClosed broadcast reaching the
-                                // internal listener, which can be dropped under
-                                // channel lag and would leave the peer entry
-                                // (and the ICE UDP sockets it pins) behind.
-                                if let Some(target) = dest.as_peer_id() {
-                                    coordinator
-                                        .cleanup_failed_connection(
-                                            target,
-                                            webrtc_conn,
-                                            "connection factory cancelled after creation",
-                                        )
-                                        .await;
-                                } else if let Err(close_err) = webrtc_conn.close().await {
-                                    tracing::warn!(
-                                        "⚠️ [Factory] Failed to close cancelled connection: {}",
-                                        close_err
-                                    );
-                                }
-                                return Err(e);
-                            }
-                            connections.push(Arc::new(webrtc_conn) as Arc<dyn WireHandle>);
-                        }
-                        Err(e) => {
-                            tracing::warn!(
-                                "❌ [Factory] WebRTC connection creation failed: {:?}: {}",
-                                dest,
-                                e
-                            );
-                            // Do not return an error here; allow other connection types to proceed.
-                        }
-                    }
-                } else {
-                    tracing::debug!(
-                        "ℹ️ [Factory] WebRTC does not support this destination type, skipping"
+                    let handle = crate::wire::webrtc::v020::wire_handle::V020WireHandle::new(
+                        v020_manager.clone(),
+                        target_id.clone(),
                     );
+                    // Drive the v0.20 controller to connect. An RTC failure
+                    // must not abort the whole build: the WebSocket candidate
+                    // (pushed above) is still a usable wire, so log, skip the
+                    // RTC candidate, and let the pool fall back to WebSocket.
+                    // (Cancellation was checked immediately above and tears
+                    // the pool down separately.)
+                    if let Err(error) = handle.connect().await {
+                        tracing::warn!(
+                            dest = ?dest,
+                            %error,
+                            "[Factory] v0.20 WebRTC connect failed; \
+                             falling back to the WebSocket candidate"
+                        );
+                    } else {
+                        connections.push(Arc::new(handle) as Arc<dyn WireHandle>);
+                    }
                 }
-            } else {
-                tracing::warn!(
-                    "⚠️ [Factory] WebRTC is enabled but no WebRtcCoordinator was provided"
-                );
+                // When v020 is active, skip the 0.14 coordinator entirely.
+                return Ok(connections);
             }
+
+            // The 0.14 coordinator creation arm was deleted with the 0.14 stack.
         }
 
         tracing::info!(
@@ -555,9 +518,6 @@ impl WireBuilder for DefaultWireBuilder {
             dest,
         );
 
-        // Physical `WireHandle` impls own their `SecureCell` and wrap their
-        // lanes in `SecureDataLane` at creation, so no decorator wrapping is
-        // needed here (RFC-0563 review point 4).
         Ok(connections)
     }
 }

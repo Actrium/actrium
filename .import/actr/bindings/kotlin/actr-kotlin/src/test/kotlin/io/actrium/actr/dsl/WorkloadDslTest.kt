@@ -112,7 +112,7 @@ class WorkloadDslTest {
                 assertFailsWith<IllegalStateException> {
                     workload.dispatch(
                         ctx,
-                        RpcEnvelope("echo.Echo", byteArrayOf(1, 2, 3), "req-1", 0L),
+                        RpcEnvelope("echo.Echo", byteArrayOf(1, 2, 3), "req-1", timeoutMs = 0),
                     )
                 }
 
@@ -150,7 +150,7 @@ class WorkloadDslTest {
                 assertFailsWith<IllegalStateException> {
                     workload.dispatch(
                         ctx,
-                        RpcEnvelope("echo.Echo", byteArrayOf(), "req-2", 0L),
+                        RpcEnvelope("echo.Echo", byteArrayOf(), "req-2", timeoutMs = 0),
                     )
                 }
 

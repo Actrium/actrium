@@ -11,107 +11,139 @@ pub use actr_mock_actrix::MockActrixServer;
 /// preserves the original `TestSignalingServer` API used by hyper integration
 /// tests.
 pub struct TestSignalingServer {
-    inner: MockActrixServer,
+    inner: Option<MockActrixServer>,
+    external_url: Option<String>,
 }
 
 impl TestSignalingServer {
     /// Start the test server on a random available port.
     pub async fn start() -> anyhow::Result<Self> {
-        super::utils::install_test_crypto_provider();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         Ok(Self {
-            inner: MockActrixServer::start().await?,
+            inner: Some(MockActrixServer::start().await?),
+            external_url: None,
         })
     }
 
     /// Start the test server on the specified port.
     pub async fn start_on_port(port: u16) -> anyhow::Result<Self> {
-        super::utils::install_test_crypto_provider();
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
         Ok(Self {
-            inner: MockActrixServer::start_on_port(port).await?,
+            inner: Some(MockActrixServer::start_on_port(port).await?),
+            external_url: None,
         })
     }
 
+    /// Represent a signaling endpoint owned by another fixture (for example
+    /// [`crate::test_support::ActrixTestServices`]). No mock server is started;
+    /// protocol-specific controls are intentionally unavailable.
+    pub fn external(url: impl Into<String>) -> Self {
+        Self {
+            inner: None,
+            external_url: Some(url.into()),
+        }
+    }
+
+    fn controlled(&self) -> &MockActrixServer {
+        self.inner
+            .as_ref()
+            .expect("signaling fault control requires the compatibility mock backend")
+    }
+
     pub fn url(&self) -> String {
-        self.inner.url()
+        self.external_url
+            .clone()
+            .unwrap_or_else(|| self.controlled().url())
     }
 
     pub fn port(&self) -> u16 {
-        self.inner.port()
+        self.inner.as_ref().map_or_else(
+            || {
+                url::Url::parse(self.external_url.as_deref().expect("external URL"))
+                    .expect("valid external signaling URL")
+                    .port_or_known_default()
+                    .expect("external signaling URL has a port")
+            },
+            MockActrixServer::port,
+        )
     }
 
     pub async fn shutdown(&mut self) {
-        self.inner.shutdown().await;
+        if let Some(inner) = &mut self.inner {
+            inner.shutdown().await;
+        }
     }
 
     pub fn pause_forwarding(&self) {
-        self.inner.pause_forwarding();
+        self.controlled().pause_forwarding();
     }
 
     pub fn resume_forwarding(&self) {
-        self.inner.resume_forwarding();
+        self.controlled().resume_forwarding();
     }
 
     pub fn drop_next_ice_restart_requests(&self, count: u32) {
-        self.inner.drop_next_ice_restart_requests(count);
+        self.controlled().drop_next_ice_restart_requests(count);
     }
 
     pub fn blackhole_websocket_io(&self) {
-        self.inner.blackhole_websocket_io();
+        self.controlled().blackhole_websocket_io();
     }
 
     pub fn restore_websocket_io(&self) {
-        self.inner.restore_websocket_io();
+        self.controlled().restore_websocket_io();
     }
 
     pub fn drop_next_ice_candidates(&self, count: u32) {
-        self.inner.drop_next_ice_candidates(count);
+        self.controlled().drop_next_ice_candidates(count);
     }
 
     pub fn drop_next_ice_candidates_for(&self, count: u32, duration: std::time::Duration) {
-        self.inner.drop_next_ice_candidates_for(count, duration);
+        self.controlled()
+            .drop_next_ice_candidates_for(count, duration);
     }
 
     pub fn delay_ice_candidates_for(&self, duration: std::time::Duration) {
-        self.inner.delay_ice_candidates_for(duration);
+        self.controlled().delay_ice_candidates_for(duration);
     }
 
     pub fn delayed_ice_candidate_count(&self) -> u32 {
-        self.inner.delayed_ice_candidate_count()
+        self.controlled().delayed_ice_candidate_count()
     }
 
     pub fn drop_next_offers(&self, count: u32) {
-        self.inner.drop_next_offers(count);
+        self.controlled().drop_next_offers(count);
     }
 
     pub fn message_count(&self) -> u32 {
-        self.inner.message_count()
+        self.controlled().message_count()
     }
 
     pub async fn received_messages(&self) -> Vec<actr_protocol::SignalingEnvelope> {
-        self.inner.received_messages().await
+        self.controlled().received_messages().await
     }
 
     pub fn get_ice_restart_count(&self) -> u32 {
-        self.inner.ice_restart_count()
+        self.controlled().ice_restart_count()
     }
 
     pub fn get_ice_restart_request_count(&self) -> u32 {
-        self.inner.ice_restart_request_count()
+        self.controlled().ice_restart_request_count()
     }
 
     pub fn get_connection_count(&self) -> u32 {
-        self.inner.connection_count()
+        self.controlled().connection_count()
     }
 
     pub fn get_disconnection_count(&self) -> u32 {
-        self.inner.disconnection_count()
+        self.controlled().disconnection_count()
     }
 
     pub fn reset_counters(&self) {
-        self.inner.reset_counters();
+        self.controlled().reset_counters();
     }
 
     pub fn is_running(&self) -> bool {
-        self.inner.is_running()
+        self.inner.as_ref().is_none_or(MockActrixServer::is_running)
     }
 }

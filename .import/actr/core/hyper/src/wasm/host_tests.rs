@@ -80,10 +80,30 @@ fn probe_world_accepts_current_v4_component() {
     let src = r#"
         (component
           (instance $v4)
-          (export "actr:workload/workload@0.4.0" (instance $v4))
+          (export "actr:workload/workload@0.5.0" (instance $v4))
         )
     "#;
     probe_wat(src).expect("current workload ABI should be accepted");
+}
+
+#[test]
+fn probe_world_rejects_retired_v4_component_with_rebuild_hint() {
+    let src = r#"
+        (component
+          (instance $v4)
+          (export "actr:workload/workload@0.4.0" (instance $v4))
+        )
+    "#;
+    let err = probe_wat(src).unwrap_err();
+    assert!(matches!(err, WasmError::LoadFailed(_)));
+    assert!(
+        err.to_string().contains("on-webrtc-state-changed")
+            && err.to_string().contains("@0.5.0")
+            && err
+                .to_string()
+                .contains("rebuild the package with the current SDK"),
+        "unexpected message: {err}"
+    );
 }
 
 #[test]
@@ -97,7 +117,11 @@ fn probe_world_rejects_retired_v3_component_with_rebuild_hint() {
     let err = probe_wat(src).unwrap_err();
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
-        err.to_string().contains("payload-type lane") && err.to_string().contains("@0.4.0"),
+        err.to_string().contains("payload-type lane")
+            && err.to_string().contains("@0.5.0")
+            && err
+                .to_string()
+                .contains("rebuild the package with the current SDK"),
         "unexpected message: {err}"
     );
 }
@@ -113,7 +137,7 @@ fn probe_world_rejects_retired_v2_component_with_rebuild_hint() {
     let err = probe_wat(src).unwrap_err();
     assert!(matches!(err, WasmError::LoadFailed(_)));
     assert!(
-        err.to_string().contains("caller-selected timeout") && err.to_string().contains("@0.4.0"),
+        err.to_string().contains("caller-selected timeout") && err.to_string().contains("@0.5.0"),
         "unexpected message: {err}"
     );
 }

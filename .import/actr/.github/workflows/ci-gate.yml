@@ -151,8 +151,13 @@ jobs:
       # (missing wasm32-wasip2 / wasm-component-ld) rather than silently
       # compiling the fixture tests out.
       ACTR_REQUIRE_WASM_FIXTURE: "1"
+      # rustc-level compilation cache shared with the Test (Rust) shards.
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
       - name: OTel payload-logging guard
         # Anti-regression guard for issue #484: the OTel tracing bridge exports
         # every tracing event that passes the filter to vector → VictoriaLogs
@@ -193,8 +198,20 @@ jobs:
           if ! command -v wasm-tools >/dev/null 2>&1; then
             cargo install wasm-tools --version 1.253.0 --locked --force
           fi
+      - name: Cache CLI web runtime assets
+        # Same source-hash key as the Test (Rust) shards: the sw-host wasm is
+        # a release wasm-pack compile (~2 min) derived only from bindings/web.
+        uses: actions/cache@v4
+        with:
+          path: cli/assets/web-runtime
+          key: cli-web-runtime-v1-${{ hashFiles('bindings/web/packages/**', 'bindings/web/crates/**', 'bindings/web/scripts/**') }}
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: |
+          if [ -f cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+            bash bindings/web/scripts/sync-cli-assets.sh --skip-sw-host
+          else
+            bash bindings/web/scripts/sync-cli-assets.sh --build
+          fi
       - name: Check formatting
         run: cargo fmt --all -- --check
       - name: Test Rust protoc plugin well-known types
@@ -206,13 +223,25 @@ jobs:
 
 
   test:
-    name: Test (Rust)
+    name: Test (Rust, ${{ matrix.shard }})
     needs: determine
     if: needs.determine.outputs.rust_core == 'true'
     runs-on: ubuntu-latest-m
     permissions:
       contents: read
       actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        # Two semantic shards on separate runners:
+        # - realtime: suites driving real PeerConnections / real child
+        #   processes. They are wall-clock sensitive (ICE/DTLS handshakes,
+        #   soft-recovery escalation windows) and flake when they contend with
+        #   ~2.7k unit tests for CPU; isolating them on their own runner cut
+        #   both flake rate and wall time (measured per-binary durations in
+        #   the CI nextest summary drove this list).
+        # - rest: everything else (mostly in-process unit tests).
+        shard: [realtime, rest]
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
@@ -220,6 +249,33 @@ jobs:
       # (missing wasm32-wasip2 / wasm-component-ld) rather than silently
       # compiling the fixture tests out.
       ACTR_REQUIRE_WASM_FIXTURE: "1"
+      # ~2.7k test binaries with debug info blow the runner's ~14 GB SSD and
+      # slow linking; CI failures do not need local-variable debug info.
+      CARGO_PROFILE_TEST_DEBUG: "0"
+      # sccache (GitHub Actions cache backend) replaces per-job target
+      # caching, which `cache-targets: false` above cannot provide at this
+      # workspace size. Covers rustc invocations across shards/jobs.
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
+      # nextest filterset selecting the realtime shard's binaries; the rest
+      # shard runs `not(...)`. Keep in sync with the shard rationale above.
+      REALTIME_BINARIES: >-
+        binary(mobile_rtc_pair_contract)
+        | binary(mobile_rtc_multi_peer)
+        | binary(webrtc_large_mobile_recovery)
+        | binary(mobile_full_disconnect_recovery)
+        | binary(mobile_network_event_scenarios)
+        | binary(ice_restart)
+        | binary(ice_restart_with_signaling_disruption)
+        | binary(webrtc_large_data_transfer)
+        | binary(webrtc_initial_connection_timeout)
+        | binary(media_loopback)
+        | binary(dynclib_actor_e2e)
+        | binary(rust_echo)
+        | binary(outproc_disconnect_reconnect)
+        | binary(outproc_connection_rebuild)
+        | binary(recovery_vnet_supervisor)
+        | binary(mock_actrix_integration)
     steps:
       - uses: actions/checkout@v5
       - name: Setup Rust
@@ -241,6 +297,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-targets: false
+      - name: Run sccache-cache
+        # rustc-level compilation cache backed by the GitHub Actions cache.
+        # The workspace's full test-target set exceeds what rust-cache can
+        # store on the runner disk; sccache keeps only a working set locally.
+        uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install prebuilt WebAssembly tools
         env:
           WASM_PACK_SHA256: c09f971ecaed9a2efc80fdcea7a00ef6b53c7fadc8c57d1f61b53a6aa66b668a
@@ -274,8 +335,21 @@ jobs:
           wasm-pack --version
           wasm-component-ld --version
           wasm-tools --version
+      - name: Cache CLI web runtime assets
+        # The sw-host wasm build is a full wasm-pack release compile (~2 min)
+        # whose output depends only on bindings/web sources. Restore it by
+        # source hash; on a hit only the cheap non-wasm asset sync runs.
+        uses: actions/cache@v4
+        with:
+          path: cli/assets/web-runtime
+          key: cli-web-runtime-v1-${{ hashFiles('bindings/web/packages/**', 'bindings/web/crates/**', 'bindings/web/scripts/**') }}
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: |
+          if [ -f cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+            bash bindings/web/scripts/sync-cli-assets.sh --skip-sw-host
+          else
+            bash bindings/web/scripts/sync-cli-assets.sh --build
+          fi
       - name: Free disk space
         # `cargo nextest run --workspace --all-features` builds every test
         # target into a cold target/ (cache-targets: false), which can exceed
@@ -292,16 +366,25 @@ jobs:
         # Prebuilt binary. Pin to a fixed release for reproducibility if
         # desired via `taiki-e/install-action@v2` with `tool: cargo-nextest@<ver>`.
         uses: taiki-e/install-action@cargo-nextest
-      - name: Run tests (nextest)
+      - name: Run tests (nextest, ${{ matrix.shard }} shard)
         # Integration tests (tests/) get bounded retries via .config/nextest.toml.
         # --no-fail-fast: run the whole suite even when a test fails. With the
         # default fail-fast, a single failure (e.g. a retry-free unit test that
         # flakes) cancels the remaining ~1.9k tests, hiding their results and
         # wasting the cold build. Surface every failure in one run instead.
-        run: cargo nextest run --workspace --all-features --no-fail-fast
+        run: |
+          if [ "${{ matrix.shard }}" = realtime ]; then
+            cargo nextest run --workspace --all-features --no-fail-fast -E "$REALTIME_BINARIES"
+          else
+            cargo nextest run --workspace --all-features --no-fail-fast -E "not($REALTIME_BINARIES)"
+          fi
       - name: Run doctests
         # nextest does not run doctests; keep them on the libtest harness.
+        if: matrix.shard == 'rest'
         run: cargo test --doc --workspace --all-features
+      - name: sccache stats
+        if: always()
+        run: sccache --show-stats || true
 
   rust_msrv:
     name: Rust MSRV (1.95)
@@ -317,8 +400,15 @@ jobs:
       # Force the wasip2 guest fixture to link under the pinned MSRV toolchain
       # instead of silently compiling the fixture tests out.
       ACTR_REQUIRE_WASM_FIXTURE: "1"
+      # rustc-level compilation cache (MSRV entries are namespaced by the
+      # compiler version, so they never collide with the stable-toolchain
+      # shards but do accelerate subsequent MSRV runs).
+      RUSTC_WRAPPER: sccache
+      SCCACHE_GHA_ENABLED: "true"
     steps:
       - uses: actions/checkout@v5
+      - name: Run sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.9
       - name: Setup Rust (MSRV)
         uses: dtolnay/rust-toolchain@1.95.0
         with:
@@ -353,8 +443,18 @@ jobs:
           if ! command -v wasm-tools >/dev/null 2>&1; then
             cargo install wasm-tools --version 1.253.0 --locked --force
           fi
+      - name: Cache CLI web runtime assets
+        uses: actions/cache@v4
+        with:
+          path: cli/assets/web-runtime
+          key: cli-web-runtime-v1-${{ hashFiles('bindings/web/packages/**', 'bindings/web/crates/**', 'bindings/web/scripts/**') }}
       - name: Generate CLI web runtime assets
-        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+        run: |
+          if [ -f cli/assets/web-runtime/actr_sw_host_bg.wasm ]; then
+            bash bindings/web/scripts/sync-cli-assets.sh --skip-sw-host
+          else
+            bash bindings/web/scripts/sync-cli-assets.sh --build
+          fi
       - name: Build at MSRV (locked)
         run: cargo build --workspace --all-targets --all-features --locked
 
@@ -842,6 +942,37 @@ jobs:
           --ignored
           --nocapture
 
+  webrtc_v020:
+    name: WebRTC v0.20
+    needs: determine
+    if: needs.determine.outputs.rust_core == 'true'
+    runs-on: ubuntu-latest-m
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      RUST_BACKTRACE: 1
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip2,wasm32-unknown-unknown
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ github.token }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - uses: Swatinem/rust-cache@v2
+      # Gate the parallel webrtc-rs v0.20 migration path (the `webrtc-v020`
+      # optional feature), which is otherwise not exercised by CI.
+      - name: Check (webrtc-v020)
+        run: cargo check -p actr-hyper --features webrtc-v020 --all-targets
+      - name: Clippy (webrtc-v020, deny warnings)
+        run: cargo clippy -p actr-hyper --all-targets --features webrtc-v020 -- -D warnings
+      - name: Test (webrtc-v020)
+        run: "cargo test -p actr-hyper --features webrtc-v020 --lib v020::"
+
   cjk:
     name: CJK Gate
     runs-on: [self-hosted, Linux, X64]
@@ -882,6 +1013,7 @@ jobs:
       - web
       - c_go_workloads
       - test
+      - webrtc_v020
       - cjk
     env:
       MODE: ${{ needs.determine.outputs.mode }}
@@ -900,6 +1032,7 @@ jobs:
       C_GO_WORKLOADS_RESULT: ${{ needs.c_go_workloads.result }}
       E2E_RUST_RESULT: ${{ needs.e2e_rust.result }}
       TEST_RESULT: ${{ needs.test.result }}
+      WEBRTC_V020_RESULT: ${{ needs.webrtc_v020.result }}
       CJK_RESULT: ${{ needs.cjk.result }}
     steps:
       - name: Summarize gate
@@ -923,6 +1056,7 @@ jobs:
               "c_go_workloads": os.environ["C_GO_WORKLOADS_RESULT"],
               "e2e_rust": os.environ["E2E_RUST_RESULT"],
               "test": os.environ["TEST_RESULT"],
+              "webrtc_v020": os.environ["WEBRTC_V020_RESULT"],
               "cjk": os.environ["CJK_RESULT"],
           }
 

@@ -307,7 +307,11 @@ async fn websocket_handler(
 
         Some((actor_id, credential))
     } else {
-        None
+        // The bare router is an in-process integration fixture: it skips
+        // credential validation, but still binds a syntactically valid URL
+        // identity so the production relay path can address the connection.
+        // Production always uses `require_url_auth=true` above.
+        parse_url_identity(&params).ok()
     };
 
     let webrtc_role = params.get("webrtc_role").cloned();

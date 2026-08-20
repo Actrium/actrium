@@ -32,8 +32,7 @@ use tokio::sync::Mutex;
 
 use crate::ais_client::{AisClient, ReissueError, RenewError, new_control_attempt_id};
 use crate::transport::PeerTransport;
-use crate::wire::webrtc::gate::WebRtcGate;
-use crate::wire::webrtc::{HookCallback, HookEvent, SignalingClient, WebRtcCoordinator};
+use crate::wire::webrtc::{HookCallback, HookEvent, SignalingClient};
 
 use super::membership::PublishedCredential;
 use super::network_event::SignalingRecoveryRequestCause;
@@ -136,9 +135,17 @@ struct PendingControlAttempts {
 pub(crate) struct HardRebindHandles {
     pub signaling_client: Arc<dyn SignalingClient>,
     pub credential_state: CredentialState,
-    pub webrtc_coordinator: Option<Arc<WebRtcCoordinator>>,
-    pub webrtc_gate: Option<Arc<WebRtcGate>>,
     pub peer_transport: Option<Arc<PeerTransport>>,
+    /// v0.20 manager (W5 exclusive backend). Hard rebind must drain v0.20
+    /// peers exactly like the 0.14 coordinator close below — otherwise
+    /// old-identity sessions survive the identity change.
+    #[cfg(feature = "webrtc-v020")]
+    pub v020_manager: Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>,
+    /// v0.20 signaling identity cell. Rebind adopts a fresh `ActrId`; the
+    /// v0.20 transport must stamp it on outbound envelopes (0.14 parity:
+    /// `coordinator.set_local_id`).
+    #[cfg(feature = "webrtc-v020")]
+    pub v020_local_id: Option<crate::wire::webrtc::v020::signaling::SharedLocalId>,
 }
 
 impl CredentialManager {
@@ -637,11 +644,6 @@ async fn run_hard_rebind(
         .await;
 
     if let Some(handles) = hard_rebind_handles {
-        let _cleanup_guard = handles
-            .webrtc_coordinator
-            .as_ref()
-            .map(|coordinator| coordinator.cleanup_guard());
-
         // Stop ingress on the old authenticated socket before draining peer
         // state. Otherwise a delayed old-identity Offer or RoleAssignment can
         // recreate a peer between close-all and disconnect.
@@ -649,22 +651,23 @@ async fn run_hard_rebind(
             tracing::warn!(error = %err, "hard rebind signaling disconnect failed");
         }
 
-        if let Some(coordinator) = handles.webrtc_coordinator.as_ref()
-            && let Err(err) = coordinator.close_all_peers_immediately().await
-        {
-            tracing::warn!(error = %err, "hard rebind failed to close old WebRTC peers");
+        // v0.20 backend: drain all peer controllers (bounded by the manager's
+        // overall close_all deadline), mirroring the 0.14 coordinator drain.
+        #[cfg(feature = "webrtc-v020")]
+        if let Some(manager) = handles.v020_manager.as_ref() {
+            manager.close_all().await;
         }
         if let Some(peer_transport) = handles.peer_transport.as_ref()
             && let Err(err) = peer_transport.close_all().await
         {
             tracing::warn!(error = %err, "hard rebind failed to close old peer transports");
         }
-        // Finalize after cancelling PeerTransport creators that may have
-        // crossed the first coordinator drain.
-        if let Some(coordinator) = handles.webrtc_coordinator.as_ref()
-            && let Err(err) = coordinator.close_all_peers_immediately().await
-        {
-            tracing::warn!(error = %err, "hard rebind failed to finalize WebRTC peer cleanup");
+        // v0.20 finalize: an in-flight outbound connect may have created a
+        // controller after the first drain; close_all on an empty registry
+        // returns immediately.
+        #[cfg(feature = "webrtc-v020")]
+        if let Some(manager) = handles.v020_manager.as_ref() {
+            manager.close_all().await;
         }
 
         handles
@@ -685,13 +688,12 @@ async fn run_hard_rebind(
             .set_credential_state(handles.credential_state.clone())
             .await;
 
-        if let Some(coordinator) = handles.webrtc_coordinator.as_ref() {
-            coordinator
-                .set_local_id(new_snapshot.actor_id.clone())
-                .await;
-        }
-        if let Some(gate) = handles.webrtc_gate.as_ref() {
-            gate.set_local_id(new_snapshot.actor_id.clone()).await;
+        // v0.20 backend: the shared signaling identity cell follows the
+        // committed ActrId (fresh after `/register`, unchanged after
+        // `/reissue` — uniform with the coordinator/gate re-id above).
+        #[cfg(feature = "webrtc-v020")]
+        if let Some(local_id) = handles.v020_local_id.as_ref() {
+            local_id.set(new_snapshot.actor_id.clone());
         }
 
         session
@@ -1195,13 +1197,12 @@ async fn run_credential_only_hard_rebind(
             .signaling_client
             .set_actor_id(new_snapshot.actor_id.clone())
             .await;
-        if let Some(coordinator) = handles.webrtc_coordinator.as_ref() {
-            coordinator
-                .set_local_id(new_snapshot.actor_id.clone())
-                .await;
-        }
-        if let Some(gate) = handles.webrtc_gate.as_ref() {
-            gate.set_local_id(new_snapshot.actor_id.clone()).await;
+        // v0.20 backend: the shared signaling identity cell follows the
+        // committed ActrId (fresh after `/register`, unchanged after
+        // `/reissue` — uniform with the coordinator/gate re-id above).
+        #[cfg(feature = "webrtc-v020")]
+        if let Some(local_id) = handles.v020_local_id.as_ref() {
+            local_id.set(new_snapshot.actor_id.clone());
         }
     }
 

@@ -20,7 +20,7 @@ use crate::ActrResult;
 use crate::context::ContextBridge;
 use actr_framework::{
     BackpressureEvent, Bytes, Context, CredentialEvent, ErrorCategory, ErrorEvent,
-    MessageDispatcher, PeerEvent, WebRtcPeerStatus, Workload,
+    MessageDispatcher, PeerEvent, WebRtcPeerState, WebRtcPeerStatus, Workload,
 };
 use actr_protocol::{ActorResult, ActrError, RpcEnvelope};
 use async_trait::async_trait;
@@ -94,6 +94,104 @@ impl From<&PeerEvent> for PeerEventBridge {
             peer: ev.peer.clone().into(),
             relayed: ev.relayed,
             status: ev.status.map(Into::into),
+        }
+    }
+}
+
+/// Stable, FFI-safe reason a WebRTC peer is unavailable (Stage 6, v0.20
+/// backend). Mirrors `actr_framework::WebRtcUnavailableReason`.
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WebRtcUnavailableReasonBridge {
+    ConnectionNotReady,
+    PeerConnectionBuildFailed,
+    NegotiationFailed,
+    IceRestartFailed,
+    PeerConnectionRebuildFailed,
+    UnsupportedRtcCapability,
+    RtcResourceLimitExceeded,
+    RecoveryExhausted,
+    Closed,
+}
+
+impl From<actr_framework::WebRtcUnavailableReason> for WebRtcUnavailableReasonBridge {
+    fn from(reason: actr_framework::WebRtcUnavailableReason) -> Self {
+        use actr_framework::WebRtcUnavailableReason as R;
+        match reason {
+            R::ConnectionNotReady => Self::ConnectionNotReady,
+            R::PeerConnectionBuildFailed => Self::PeerConnectionBuildFailed,
+            R::NegotiationFailed => Self::NegotiationFailed,
+            R::IceRestartFailed => Self::IceRestartFailed,
+            R::PeerConnectionRebuildFailed => Self::PeerConnectionRebuildFailed,
+            R::UnsupportedRtcCapability => Self::UnsupportedRtcCapability,
+            R::RtcResourceLimitExceeded => Self::RtcResourceLimitExceeded,
+            R::RecoveryExhausted => Self::RecoveryExhausted,
+            R::Closed => Self::Closed,
+            // The source enum is non_exhaustive; project an unknown reason
+            // onto the generic capability bucket to keep the bridge additive.
+            _ => Self::UnsupportedRtcCapability,
+        }
+    }
+}
+
+/// Whether the selected ICE candidate pair is direct or relayed (v0.20
+/// backend, Stage 6). Mirrors `actr_framework::WebRtcNetworkPath`.
+#[derive(uniffi::Enum, Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum WebRtcNetworkPathBridge {
+    /// Stats have not resolved the selected pair yet.
+    #[default]
+    Unknown,
+    /// Direct peer-to-peer path.
+    Direct,
+    /// TURN-relayed path.
+    Relayed,
+}
+
+impl From<actr_framework::WebRtcNetworkPath> for WebRtcNetworkPathBridge {
+    fn from(path: actr_framework::WebRtcNetworkPath) -> Self {
+        match path {
+            actr_framework::WebRtcNetworkPath::Unknown => Self::Unknown,
+            actr_framework::WebRtcNetworkPath::Direct => Self::Direct,
+            actr_framework::WebRtcNetworkPath::Relayed => Self::Relayed,
+        }
+    }
+}
+
+/// FFI-shaped unified WebRTC peer state (Stage 6, v0.20 backend). Carried by
+/// `WebRtcObserverBridge::on_state_changed` and the `ActrRefWrapper` status
+/// query/list/subscribe APIs. `revision` is monotonic per peer (dedup key).
+#[derive(uniffi::Record, Clone, Debug, PartialEq, Eq)]
+pub struct WebRtcPeerStateBridge {
+    /// Remote peer identity.
+    pub peer: crate::types::ActrId,
+    /// Monotonic PeerConnection generation (bumps on Hard Recovery rebuilds).
+    pub pc_generation: u64,
+    /// Monotonic snapshot revision (per-peer dedup key).
+    pub revision: u64,
+    /// Coarse lifecycle status.
+    pub status: WebRtcPeerStatusBridge,
+    /// Whether business sends are currently admitted.
+    pub sendable: bool,
+    /// The selected ICE path (`Unknown` until stats resolve it).
+    pub network_path: WebRtcNetworkPathBridge,
+    /// `Some(true)` TURN-relayed, `Some(false)` direct, `None` unresolved.
+    /// Derived from `network_path`; kept for one compatibility cycle — new
+    /// consumers should read `network_path`.
+    pub relayed: Option<bool>,
+    /// Stable reason the peer is unavailable, when it is.
+    pub unavailable_reason: Option<WebRtcUnavailableReasonBridge>,
+}
+
+impl From<actr_framework::WebRtcPeerState> for WebRtcPeerStateBridge {
+    fn from(state: actr_framework::WebRtcPeerState) -> Self {
+        Self {
+            peer: state.peer.into(),
+            pc_generation: state.pc_generation,
+            revision: state.revision,
+            status: state.status.into(),
+            sendable: state.sendable,
+            network_path: state.network_path.into(),
+            relayed: state.relayed,
+            unavailable_reason: state.unavailable_reason.map(Into::into),
         }
     }
 }
@@ -247,6 +345,10 @@ pub trait WebRtcObserverBridge: Send + Sync + 'static {
     async fn on_connecting(&self, ctx: Arc<ContextBridge>, event: PeerEventBridge);
     async fn on_connected(&self, ctx: Arc<ContextBridge>, event: PeerEventBridge);
     async fn on_disconnected(&self, ctx: Arc<ContextBridge>, event: PeerEventBridge);
+    /// Unified per-revision state hook (Stage 6, v0.20 backend). Fires on
+    /// every snapshot revision; a late-registered workload receives the
+    /// current state on the first projection pass.
+    async fn on_state_changed(&self, ctx: Arc<ContextBridge>, state: WebRtcPeerStateBridge);
 }
 
 /// Optional observer for credential lifecycle events.
@@ -469,6 +571,16 @@ impl Workload for RuntimeObservers {
         obs.on_disconnected(ctx_bridge, event.into()).await;
     }
 
+    async fn on_webrtc_state_changed<C: Context>(&self, ctx: &C, event: &WebRtcPeerState) {
+        let Some(obs) = self.webrtc.clone() else {
+            return;
+        };
+        let Ok(ctx_bridge) = ContextBridge::try_from_context(ctx) else {
+            return;
+        };
+        obs.on_state_changed(ctx_bridge, event.clone().into()).await;
+    }
+
     // ── Credential observers ─────────────────────────────────────────────
 
     async fn on_credential_renewed<C: Context>(&self, ctx: &C, event: &CredentialEvent) {
@@ -635,6 +747,16 @@ impl Workload for DynamicWorkload {
             return;
         };
         obs.on_disconnected(ctx_bridge, event.into()).await;
+    }
+
+    async fn on_webrtc_state_changed<C: Context>(&self, ctx: &C, event: &WebRtcPeerState) {
+        let Some(obs) = self.webrtc.clone() else {
+            return;
+        };
+        let Ok(ctx_bridge) = ContextBridge::try_from_context(ctx) else {
+            return;
+        };
+        obs.on_state_changed(ctx_bridge, event.clone().into()).await;
     }
 
     // ── Credential observers ─────────────────────────────────────────────

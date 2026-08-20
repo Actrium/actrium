@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 // Package export_actr_workload_workload implements every export in the
-// asynchronous actr:workload/workload@0.4.0 interface.
+// asynchronous actr:workload/workload@0.5.0 interface.
 package export_actr_workload_workload
 
 import (
@@ -62,6 +62,8 @@ func OnWebrtcConnecting(_ types.PeerEvent, _ types.InvocationCtx) {}
 func OnWebrtcConnected(_ types.PeerEvent, _ types.InvocationCtx) {}
 
 func OnWebrtcDisconnected(_ types.PeerEvent, _ types.InvocationCtx) {}
+
+func OnWebrtcStateChanged(_ types.WebrtcPeerState, _ types.InvocationCtx) {}
 
 func OnCredentialRenewed(_ types.CredentialEvent, _ types.InvocationCtx) {}
 

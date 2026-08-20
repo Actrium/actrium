@@ -55,6 +55,58 @@ pub fn peer_status_from_v1(status: u32) -> Option<crate::WebRtcPeerStatus> {
     }
 }
 
+/// Decode a dynclib `WebRtcNetworkPath` discriminant (see
+/// [`dynclib_abi::webrtc_network_path`]) into the framework enum. Unknown
+/// discriminants degrade to [`crate::WebRtcNetworkPath::Unknown`], which is
+/// already the "not yet resolved" state consumers must handle.
+pub fn network_path_from_v1(path: u32) -> crate::WebRtcNetworkPath {
+    use crate::guest::dynclib_abi::webrtc_network_path as np;
+    match path {
+        np::UNKNOWN => crate::WebRtcNetworkPath::Unknown,
+        np::DIRECT => crate::WebRtcNetworkPath::Direct,
+        np::RELAYED => crate::WebRtcNetworkPath::Relayed,
+        other => {
+            tracing::warn!(
+                discriminant = other,
+                "unknown dynclib WebRtcNetworkPath discriminant; degrading to Unknown"
+            );
+            crate::WebRtcNetworkPath::Unknown
+        }
+    }
+}
+
+/// Decode a dynclib `WebRtcUnavailableReason` discriminant (see
+/// [`dynclib_abi::webrtc_unavailable_reason`]) into the framework enum.
+pub fn unavailable_reason_from_v1(reason: u32) -> Option<crate::WebRtcUnavailableReason> {
+    use crate::guest::dynclib_abi::webrtc_unavailable_reason as rs;
+    match reason {
+        rs::CONNECTION_NOT_READY => Some(crate::WebRtcUnavailableReason::ConnectionNotReady),
+        rs::PEER_CONNECTION_BUILD_FAILED => {
+            Some(crate::WebRtcUnavailableReason::PeerConnectionBuildFailed)
+        }
+        rs::NEGOTIATION_FAILED => Some(crate::WebRtcUnavailableReason::NegotiationFailed),
+        rs::ICE_RESTART_FAILED => Some(crate::WebRtcUnavailableReason::IceRestartFailed),
+        rs::PEER_CONNECTION_REBUILD_FAILED => {
+            Some(crate::WebRtcUnavailableReason::PeerConnectionRebuildFailed)
+        }
+        rs::UNSUPPORTED_RTC_CAPABILITY => {
+            Some(crate::WebRtcUnavailableReason::UnsupportedRtcCapability)
+        }
+        rs::RTC_RESOURCE_LIMIT_EXCEEDED => {
+            Some(crate::WebRtcUnavailableReason::RtcResourceLimitExceeded)
+        }
+        rs::RECOVERY_EXHAUSTED => Some(crate::WebRtcUnavailableReason::RecoveryExhausted),
+        rs::CLOSED => Some(crate::WebRtcUnavailableReason::Closed),
+        other => {
+            tracing::warn!(
+                discriminant = other,
+                "unknown dynclib WebRtcUnavailableReason discriminant; dropping reason"
+            );
+            None
+        }
+    }
+}
+
 // The Component Model wasm runtime glue is gated on `not(feature = "web")`
 // so the `wasm32-unknown-unknown` + `web` target (which routes through
 // `actr-web-abi` instead) does not link the wit-bindgen host imports that
@@ -81,14 +133,14 @@ pub mod __wasm_macro_support {
         run_on_data_chunk, run_on_error, run_on_mailbox_backpressure, run_on_ready,
         run_on_signaling_connected, run_on_signaling_connecting, run_on_signaling_disconnected,
         run_on_start, run_on_stop, run_on_webrtc_connected, run_on_webrtc_connecting,
-        run_on_webrtc_disconnected, run_on_websocket_connected, run_on_websocket_connecting,
-        run_on_websocket_disconnected,
+        run_on_webrtc_disconnected, run_on_webrtc_state_changed, run_on_websocket_connected,
+        run_on_websocket_connecting, run_on_websocket_disconnected,
     };
     pub use super::wasm::generated::actr::workload::types::{
         ActrError as WitActrError, ActrId as WitActrId, BackpressureEvent as WitBackpressureEvent,
         CredentialEvent as WitCredentialEvent, DataChunk as WitDataChunk,
         ErrorEvent as WitErrorEvent, InvocationCtx as WitInvocationCtx, PeerEvent as WitPeerEvent,
-        RpcEnvelope as WitRpcEnvelope,
+        RpcEnvelope as WitRpcEnvelope, WebrtcPeerState as WitWebRtcPeerState,
     };
     pub use super::wasm::generated::exports::actr::workload::workload::Guest;
 }
@@ -304,6 +356,17 @@ macro_rules! entry {
                     ctx: $crate::guest::__wasm_macro_support::WitInvocationCtx,
                 ) {
                     $crate::guest::__wasm_macro_support::run_on_webrtc_disconnected(
+                        __actr_workload(),
+                        event,
+                        ctx,
+                    ).await
+                }
+
+                async fn on_webrtc_state_changed(
+                    event: $crate::guest::__wasm_macro_support::WitWebRtcPeerState,
+                    ctx: $crate::guest::__wasm_macro_support::WitInvocationCtx,
+                ) {
+                    $crate::guest::__wasm_macro_support::run_on_webrtc_state_changed(
                         __actr_workload(),
                         event,
                         ctx,
@@ -692,6 +755,27 @@ macro_rules! entry {
                                 None => return $crate::guest::dynclib_abi::code::PROTOCOL_ERROR,
                             };
                             __actr_poll_unit!(workload.on_mailbox_backpressure(&ctx, &event));
+                        }
+                        $crate::guest::dynclib_abi::runtime_hook::ON_WEBRTC_STATE_CHANGED => {
+                            let event = match payload.webrtc_state {
+                                Some(state) => $crate::WebRtcPeerState {
+                                    peer: state.peer,
+                                    pc_generation: state.pc_generation,
+                                    revision: state.revision,
+                                    status: $crate::guest::peer_status_from_v1(state.status)
+                                        .unwrap_or($crate::WebRtcPeerStatus::Idle),
+                                    sendable: state.sendable,
+                                    network_path: $crate::guest::network_path_from_v1(
+                                        state.network_path,
+                                    ),
+                                    relayed: state.relayed,
+                                    unavailable_reason: state
+                                        .unavailable_reason
+                                        .and_then($crate::guest::unavailable_reason_from_v1),
+                                },
+                                None => return $crate::guest::dynclib_abi::code::PROTOCOL_ERROR,
+                            };
+                            __actr_poll_unit!(workload.on_webrtc_state_changed(&ctx, &event));
                         }
                         _ => return $crate::guest::dynclib_abi::code::UNSUPPORTED_OP,
                     }

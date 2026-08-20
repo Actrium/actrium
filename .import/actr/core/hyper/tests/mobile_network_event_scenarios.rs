@@ -19,11 +19,9 @@ use actr_hyper::lifecycle::{
     process_network_event_batch, run_network_event_reconciler,
     run_network_event_reconciler_with_status, select_network_recovery_action,
 };
-use actr_hyper::outbound::PeerGate;
 use actr_hyper::test_support::{TestHarness, install_test_crypto_provider};
-use actr_hyper::wire::webrtc::WebRtcCoordinator;
-use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrId, DataChunk, Direction, PayloadType, RpcEnvelope};
+use actr_protocol::prost::Message as _;
+use actr_protocol::{DataChunk, PayloadType};
 use tokio::sync::Semaphore;
 use tokio_util::sync::CancellationToken;
 
@@ -712,83 +710,11 @@ fn parse_mobile_jsonl_events(jsonl: &str) -> Vec<NetworkEvent> {
     events
 }
 
-fn spawn_rpc_router(
-    coordinator: Arc<WebRtcCoordinator>,
-    gate: Arc<PeerGate>,
-    name: &str,
-) -> tokio::task::JoinHandle<()> {
-    let name = name.to_string();
-    tokio::spawn(async move {
-        loop {
-            match coordinator.receive_message().await {
-                Ok(Some((sender_bytes, message_data, _payload_type))) => {
-                    let sender_id = match ActrId::decode(sender_bytes.as_slice()) {
-                        Ok(sender_id) => sender_id,
-                        Err(e) => {
-                            tracing::error!("{} failed to decode sender ActrId: {}", name, e);
-                            continue;
-                        }
-                    };
-
-                    let envelope = match RpcEnvelope::decode(message_data.as_ref()) {
-                        Ok(envelope) => envelope,
-                        Err(e) => {
-                            tracing::error!("{} failed to decode RpcEnvelope: {}", name, e);
-                            continue;
-                        }
-                    };
-
-                    if envelope.route_key == "response" {
-                        let result = if let Some(error) = envelope.error {
-                            Err(actr_protocol::ActrError::Unavailable(format!(
-                                "RPC error {}: {}",
-                                error.code, error.message
-                            )))
-                        } else if let Some(payload) = envelope.payload {
-                            Ok(payload)
-                        } else {
-                            Err(actr_protocol::ActrError::DecodeFailure(
-                                "Invalid response: no payload or error".to_string(),
-                            ))
-                        };
-
-                        if let Err(e) = gate.handle_response(&envelope.request_id, result).await {
-                            tracing::error!(
-                                "{} failed to handle response {}: {}",
-                                name,
-                                envelope.request_id,
-                                e
-                            );
-                        }
-                        continue;
-                    }
-
-                    let response = RpcEnvelope {
-                        request_id: envelope.request_id.clone(),
-                        route_key: "response".to_string(),
-                        payload: envelope.payload.clone(),
-                        timeout_ms: 0,
-                        direction: Some(Direction::Response as i32),
-                        ..Default::default()
-                    };
-
-                    if let Err(e) = gate.send_message(&sender_id, response).await {
-                        tracing::error!(
-                            "{} failed to send echo response for {}: {}",
-                            name,
-                            envelope.request_id,
-                            e
-                        );
-                    }
-                }
-                Ok(None) => break,
-                Err(e) => {
-                    tracing::error!("{} receive loop failed: {}", name, e);
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-        }
-    })
+fn spawn_rpc_router(_name: &str) -> tokio::task::JoinHandle<()> {
+    // `TestHarness` owns the sole v0.20 InboundRouter consumer and already
+    // performs request/response dispatch. Keep a cancellable task only for the
+    // app-kill/restart orchestration exercised by these scenarios.
+    tokio::spawn(std::future::pending())
 }
 
 async fn setup_bidirectional_mobile_server_harness(
@@ -804,16 +730,8 @@ async fn setup_bidirectional_mobile_server_harness(
 
     let bg_tasks = BackgroundTasks {
         handles: vec![
-            spawn_rpc_router(
-                harness.peer(case.mobile_serial).coordinator.clone(),
-                harness.peer(case.mobile_serial).gate.clone(),
-                "mobile_network_event_router",
-            ),
-            spawn_rpc_router(
-                harness.peer(case.server_serial).coordinator.clone(),
-                harness.peer(case.server_serial).gate.clone(),
-                "server_network_event_router",
-            ),
+            spawn_rpc_router("mobile_network_event_router"),
+            spawn_rpc_router("server_network_event_router"),
         ],
     };
 
@@ -1471,11 +1389,9 @@ async fn test_mobile_app_kill_cleanup_then_restart_online_recovers_bidirectional
             "{label} server send while killed should not leak pending state"
         );
 
-        bg_tasks.handles.push(spawn_rpc_router(
-            harness.peer(case.mobile_serial).coordinator.clone(),
-            harness.peer(case.mobile_serial).gate.clone(),
-            "mobile_network_event_router_restarted",
-        ));
+        bg_tasks
+            .handles
+            .push(spawn_rpc_router("mobile_network_event_router_restarted"));
 
         let restart_events = vec![online_event(20), wifi_event(21)];
         assert_eq!(
@@ -1567,8 +1483,6 @@ async fn test_mobile_app_kill_restart_offline_bounds_server_send_until_online_re
 
         harness.simulate_disconnect();
         bg_tasks.handles.push(spawn_rpc_router(
-            harness.peer(case.mobile_serial).coordinator.clone(),
-            harness.peer(case.mobile_serial).gate.clone(),
             "mobile_network_event_router_restarted_offline",
         ));
 

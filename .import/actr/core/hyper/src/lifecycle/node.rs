@@ -231,14 +231,23 @@ pub(crate) async fn inproc_send_reply(
     }
 }
 
+/// The v0.20 response route (present only on the v0.20 backend).
+#[cfg(feature = "webrtc-v020")]
+pub(crate) type V020ResponseRoute =
+    Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>;
+/// Zero-sized stand-in on the 0.14 backend (the v0.20 manager type does not
+/// exist there); the response path never reads it.
+#[cfg(not(feature = "webrtc-v020"))]
+pub(crate) type V020ResponseRoute = ();
+
 /// Send `response_envelope` back to `caller` via the best available transport.
 ///
 /// Priority: inbound WebSocket connection (if the caller dialled us directly) →
-/// WebRTC gate. Module-level so both the inline mailbox path and the gate-on
-/// continuation share one implementation.
+/// the v0.20 RTC lane. Module-level so both the inline mailbox path and the
+/// gate-on continuation share one implementation.
 async fn send_envelope_to_caller(
     ws_gate: &Option<Arc<crate::wire::websocket::WebSocketGate>>,
-    webrtc_gate: &Option<Arc<crate::wire::webrtc::gate::WebRtcGate>>,
+    _v020_route: &V020ResponseRoute,
     caller: &ActrId,
     response_envelope: RpcEnvelope,
     request_id: &str,
@@ -266,45 +275,99 @@ async fn send_envelope_to_caller(
         }
     }
 
-    // 2. Fall back to WebRTC gate.
-    if let Some(gate) = webrtc_gate {
-        if let Err(e) = gate.send_response(caller, response_envelope).await {
+    // 2. v0.20 backend: route the response through the peer's reliable lane.
+    // The request arrived over this lane, so the peer session exists and is
+    // sendable (RpcReliable IS the readiness anchor); the bounded wait only
+    // covers snapshot projection lag on a freshly connected pair.
+    #[cfg(feature = "webrtc-v020")]
+    if let Some(manager) = _v020_route {
+        if let Some(handle) = manager.get_controller(caller).await {
+            let mut rx = handle.subscribe();
+            let waited = crate::timer::timeout(
+                crate::timer::ids::WEBRTC_PEER_SENDABLE,
+                std::time::Duration::from_secs(10),
+                async {
+                    loop {
+                        if rx.borrow().sendable {
+                            return;
+                        }
+                        if rx.changed().await.is_err() {
+                            return;
+                        }
+                    }
+                },
+            )
+            .await;
+            if waited.is_ok() && handle.snapshot().sendable {
+                let mut buf = Vec::new();
+                match response_envelope.encode(&mut buf) {
+                    Ok(()) => {
+                        match handle
+                            .send(
+                                crate::wire::webrtc::v020::status::LaneKind::RpcReliable,
+                                bytes::Bytes::from(buf),
+                            )
+                            .await
+                        {
+                            Ok(()) => return,
+                            Err(e) => {
+                                tracing::error!(
+                                    severity = 7,
+                                    error_category = "transport_error",
+                                    request_id = request_id,
+                                    "❌ v0.20 response send failed: {e:?}"
+                                );
+                                return;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            severity = 7,
+                            error_category = "transport_error",
+                            request_id = request_id,
+                            "❌ v0.20 response encode failed: {e}"
+                        );
+                        return;
+                    }
+                }
+            }
             tracing::error!(
                 severity = 7,
                 error_category = "transport_error",
                 request_id = request_id,
-                "❌ WebRtcGate send_response failed: {:?}",
-                e
+                "❌ v0.20 peer not sendable for response within the wait window"
             );
+            return;
         }
-    } else {
         tracing::error!(
             severity = 7,
             error_category = "transport_error",
             request_id = request_id,
-            "❌ No gate available to send response"
+            "❌ no v0.20 controller for response caller"
         );
     }
+
+    // The 0.14 WebRtcGate fallback used to live here; the v0.20 arm above is
+    // the only RTC response route now.
+    #[cfg(not(feature = "webrtc-v020"))]
+    tracing::error!(
+        severity = 7,
+        error_category = "transport_error",
+        request_id = request_id,
+        "❌ No gate available to send response"
+    );
 }
 
-/// Send the reply for one mailbox (State Path) request back to its caller and
-/// ACK the durable message.
-///
-/// This is the "reply + ack tail" of the mailbox loop, extracted so the
-/// gate-off inline path and the gate-on continuation (pushed into the loop's
-/// `FuturesUnordered`) run bit-for-bit identical logic. The per-message
-/// `reply → ack` order is preserved exactly; only *across* messages may an ack
-/// overlap a later message's dispatch (gate-on only, a documented behaviour
-/// change bounded by the dedup TTL).
-#[allow(clippy::too_many_arguments)]
 /// Send the RESPONSE envelope for an inbound mailbox call (Ok or Err path).
 /// Does NOT ACK the durable mailbox message — the caller (RETURN receive
 /// loop or EXPLICIT `ReplyDeliver`) is responsible for acking separately so
 /// that EXPLICIT can ACK at dispatch-completion (RFC-0323 §4: ack-at-return)
 /// rather than at reply time.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn mailbox_send_reply(
     ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
-    webrtc_gate: Option<Arc<crate::wire::webrtc::gate::WebRtcGate>>,
+    v020_route: V020ResponseRoute,
     caller: Result<ActrId, String>,
     request_id: String,
     route_key: String,
@@ -333,7 +396,7 @@ pub(crate) async fn mailbox_send_reply(
                 #[cfg(feature = "opentelemetry")]
                 let send_fut = send_envelope_to_caller(
                     &ws_gate,
-                    &webrtc_gate,
+                    &v020_route,
                     &caller,
                     response_envelope,
                     &request_id,
@@ -342,7 +405,7 @@ pub(crate) async fn mailbox_send_reply(
                 #[cfg(not(feature = "opentelemetry"))]
                 let send_fut = send_envelope_to_caller(
                     &ws_gate,
-                    &webrtc_gate,
+                    &v020_route,
                     &caller,
                     response_envelope,
                     &request_id,
@@ -393,7 +456,7 @@ pub(crate) async fn mailbox_send_reply(
 
                 send_envelope_to_caller(
                     &ws_gate,
-                    &webrtc_gate,
+                    &v020_route,
                     &caller,
                     error_envelope,
                     &request_id,
@@ -426,7 +489,7 @@ pub(crate) async fn mailbox_ack(mailbox: Arc<dyn Mailbox>, msg_id: uuid::Uuid, r
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn mailbox_reply_and_ack(
     ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
-    webrtc_gate: Option<Arc<crate::wire::webrtc::gate::WebRtcGate>>,
+    v020_route: V020ResponseRoute,
     mailbox: Arc<dyn Mailbox>,
     caller: Result<ActrId, String>,
     request_id: String,
@@ -440,7 +503,7 @@ pub(crate) async fn mailbox_reply_and_ack(
 ) {
     mailbox_send_reply(
         ws_gate,
-        webrtc_gate,
+        v020_route,
         caller,
         request_id.clone(),
         route_key,
@@ -531,14 +594,20 @@ pub(crate) struct Inner {
     /// Unified identity/credential snapshot for renewal and hard rebind.
     pub(crate) session_state: Option<SessionState>,
 
-    /// WebRTC coordinator (created after startup)
-    pub(crate) webrtc_coordinator: Option<Arc<crate::wire::webrtc::WebRtcCoordinator>>,
+    /// v0.20 connection manager (created after startup; v0.20 backend only).
+    /// Backs the node-level RTC status query/list/subscribe APIs (S6-4).
+    #[cfg(feature = "webrtc-v020")]
+    pub(crate) v020_manager: Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>,
+
+    /// v0.20 inbound mailbox slot (v0.20 backend only): the late-bound mailbox
+    /// reference the W3b inbound bridge reads to route DataChannel payloads
+    /// into the node mailbox. Filled when the receive loops start.
+    #[cfg(feature = "webrtc-v020")]
+    pub(crate) v020_inbound_mailbox_slot:
+        Option<crate::wire::webrtc::v020::inbound_bridge::MailboxSlot>,
 
     /// Peer transport manager (created after startup)
     pub(crate) peer_transport: Option<Arc<crate::transport::PeerTransport>>,
-
-    /// WebRTC Gate (created after startup)
-    pub(crate) webrtc_gate: Option<Arc<crate::wire::webrtc::gate::WebRtcGate>>,
 
     /// WebSocket Gate (direct-connect mode inbound, optional)
     pub(crate) websocket_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
@@ -740,11 +809,6 @@ impl CredentialState {
     /// Get TURN credential (HMAC time-limited credential)
     pub async fn turn_credential(&self) -> Option<TurnCredential> {
         self.inner.read().await.turn_credential.clone()
-    }
-
-    pub(crate) async fn turn_snapshot(&self) -> (Option<TurnCredential>, u64) {
-        let guard = self.inner.read().await;
-        (guard.turn_credential.clone(), guard.turn_revision)
     }
 
     pub(crate) fn subscribe_turn_revision(&self) -> watch::Receiver<u64> {
@@ -1352,6 +1416,40 @@ fn spawn_workload_stop_task(
     tokio::spawn(task)
 }
 
+/// W6 config guard for the v0.20 backend (Stage 7 Phase A decision): reject
+/// unsupported capabilities at startup instead of degrading silently.
+/// `ice_udp_mux_port` has no upstream v0.20 equivalent; TURN over TLS/TCP is
+/// silently skipped by webrtc-rs v0.20 (issue #848), so it is a hard error —
+/// the operator must fix the config, not discover a skipped server at runtime.
+#[cfg(feature = "webrtc-v020")]
+fn validate_v020_config(config: &actr_config::WebRtcConfig) -> ActorResult<()> {
+    if config.advanced.ice_udp_mux_port.is_some() {
+        return Err(ActrError::Internal(
+            "ice_udp_mux_port is not supported in v0.20 mode \
+             (upstream webrtc-rs v0.20 has no shared ICE UDP mux)"
+                .to_string(),
+        ));
+    }
+    if config.advanced.udp_ports.is_some() {
+        return Err(ActrError::Internal(
+            "WebRTC UDP port ranges are not supported in v0.20 mode \
+             (webrtc-rs v0.20 exposes explicit bind addresses but no EphemeralUDP range)"
+                .to_string(),
+        ));
+    }
+    for server in &config.ice_servers {
+        for url in &server.urls {
+            if url.starts_with("turns:") || url.contains("transport=tcp") {
+                return Err(ActrError::Internal(format!(
+                    "TURN over TLS/TCP is not supported in v0.20 mode \
+                     (webrtc-rs issue #848): {url}"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl Inner {
     #[allow(dead_code)]
     pub(crate) fn package_manifest(&self) -> Option<&actr_pack::PackageManifest> {
@@ -1712,9 +1810,13 @@ impl Inner {
                         // caller-side bound, not a tokio-await deadline.
                         let reply_deadline =
                             crate::lifecycle::dedup::caller_reply_deadline(envelope.timeout_ms);
+                        #[cfg(feature = "webrtc-v020")]
+                        let v020_route: V020ResponseRoute = self.v020_manager.clone();
+                        #[cfg(not(feature = "webrtc-v020"))]
+                        let v020_route: V020ResponseRoute = ();
                         let (deliver, _flag) = crate::lifecycle::reply_deliver::ReplyDeliver::new(
                             self.websocket_gate.clone(),
-                            self.webrtc_gate.clone(),
+                            v020_route,
                             self.dedup_state.clone(),
                             self.outstanding_replies.clone(),
                             envelope.request_id.clone(),
@@ -1951,8 +2053,10 @@ impl Inner {
 
         let client = Arc::new(WebSocketSignalingClient::new(signaling_config));
         // The recovery supervisor is present for every node, including
-        // headless runtimes that never create a public NetworkEventHandle.
-        // Resource facts may queue before `start()` spawns the reconciler.
+        // headless runtimes that never create a public NetworkEventHandle
+        // (#568). Resource facts may queue before `start()` spawns the
+        // reconciler; `create_network_event_handle` only retargets the
+        // profile on this eagerly created channel.
         let (supervisor_fact_sink, network_event_internal) =
             crate::lifecycle::network_event::supervisor_internal_channel_with_profile(
                 LifecycleProfile::Ungated,
@@ -2103,9 +2207,11 @@ impl Inner {
             actor_id: None,
             credential_state: None,
             session_state: None,
-            webrtc_coordinator: None,
+            #[cfg(feature = "webrtc-v020")]
+            v020_manager: None,
+            #[cfg(feature = "webrtc-v020")]
+            v020_inbound_mailbox_slot: None,
             peer_transport: None,
-            webrtc_gate: None,
             websocket_gate: None,
             shell_to_workload: Some(shell_to_workload),
             workload_to_shell: Some(workload_to_shell),
@@ -2243,6 +2349,11 @@ impl Inner {
             None
         };
 
+        // The internal channel was created eagerly with `Ungated` at node
+        // construction (#568): a fact sink over its sender is already wired
+        // into the signaling client and session state, so signaling and
+        // session facts share the supervisor's policy-ordered input queue.
+        // Creating the handle only retargets the profile in place.
         self.network_event_internal
             .as_mut()
             .expect("recovery supervisor channel must exist before start")
@@ -2435,33 +2546,32 @@ impl Inner {
         }
 
         tracing::info!("📡 Connecting to signaling server (with credential)");
-        // The initial handshake is one attempt, not an internal retry loop.
-        // Failure leaves a supervisor-owned recovery obligation queued while
-        // the remaining resource owners are wired. Typed auth verdicts are
-        // first handed to MembershipController once it exists.
+        // A typed auth verdict on the INITIAL handshake (401 credential
+        // rejection or 403 realm denial) must reach the same membership-recovery
+        // path as the connected case. Before the controller is installed the
+        // explicit connect loop cannot report it, so when the controller is
+        // enabled we capture the verdict here and hand it to the controller once
+        // it is spawned (below) instead of failing startup on a credential the
+        // recovery engine could refresh. With the controller disabled, behavior
+        // is unchanged: any connect failure aborts start.
         let mut deferred_initial_verdict: Option<crate::transport::AuthVerdict> = None;
         match self.signaling_client.connect().await {
             Ok(()) => tracing::info!("✅ Connected to signaling server"),
-            Err(e) => {
-                if let Some(verdict) = e.auth_verdict()
-                    && self.membership_controller_enabled
-                {
+            Err(e) => match e.auth_verdict() {
+                Some(verdict) if self.membership_controller_enabled => {
                     tracing::warn!(
                         ?verdict,
                         error = %e,
                         "📡 Initial signaling handshake returned a typed auth verdict; deferring to membership recovery instead of failing startup"
                     );
                     deferred_initial_verdict = Some(verdict);
-                } else {
-                    tracing::warn!(
-                        error = %e,
-                        "📡 Initial signaling attempt failed; deferring retries to RecoverySupervisor"
-                    );
-                    self.signaling_client.request_signaling_recovery(
-                        crate::lifecycle::SignalingRecoveryRequestCause::InitialConnectDeferred,
-                    );
                 }
-            }
+                _ => {
+                    return Err(ActrError::Unavailable(format!(
+                        "Signaling connect failed: {e}"
+                    )));
+                }
+            },
         }
 
         // Collect background task handles so they can be managed by ActrRefShared later.
@@ -2640,58 +2750,262 @@ impl Inner {
                 .validate()
                 .map_err(|e| ActrError::InvalidArgument(e.to_string()))?;
 
+            #[allow(unused_variables)] // registry is consumed by the RTC inbound bridge
             let media_frame_registry = self.media_frame_registry.clone();
 
-            // Create WebRtcCoordinator
-            let coordinator = Arc::new(crate::wire::webrtc::WebRtcCoordinator::new(
-                actor_id.clone(),
-                credential_state.clone(),
-                self.signaling_client.clone(),
-                self.config.webrtc.clone(),
-                media_frame_registry,
-            ));
+            // Pre-allocate the pending-requests map so it can be shared between
+            // DefaultWireBuilder (for outbound WS response reader tasks), the
+            // v0.20 inbound dispatcher, and PeerGate (request/response
+            // matching).
+            let pending_requests: crate::outbound::PendingRequestsMap =
+                Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
-            // Install the WebRTC hook callback — fires
-            // WebRtcConnectStart / Connected (with relayed info) /
-            // Disconnected HookEvents on every peer state change.
-            {
-                let actor_id_for_hook = actor_id.clone();
-                let credential_state_for_hook = credential_state.clone();
-                // Snapshot before outproc_gate is wired up (just below). This
-                // preserves the pre-refactor behavior where WebRTC-event
-                // hook contexts carry outproc_gate = None.
-                let ctx_builder_snapshot = self.bootstrap_ctx_builder();
-                let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
-                    Arc::new(move || {
-                        let snapshot = ctx_builder_snapshot.clone();
-                        let actor_id = actor_id_for_hook.clone();
-                        let credential_state = credential_state_for_hook.clone();
-                        Box::pin(async move {
-                            Some(
-                                snapshot.build_bootstrap(
+            // W5: v0.20 exclusive backend switch. When the `webrtc-v020`
+            // feature is enabled, the v0.20 stack replaces the 0.14
+            // coordinator entirely (RFC rollback: "revert as a whole, never
+            // per-peer backend mixing"). The 0.14 coordinator is NOT
+            // constructed in v0.20 mode.
+            //
+            // The v0.20 path is the exclusive production RTC backend; its
+            // manager/controller/recovery stack is constructed as one unit.
+            #[cfg(feature = "webrtc-v020")]
+            let (v020_manager, v020_local_id, v020_mailbox_slot): (
+                Option<Arc<crate::wire::webrtc::v020::manager::RtcConnectionManager>>,
+                Option<crate::wire::webrtc::v020::signaling::SharedLocalId>,
+                Option<crate::wire::webrtc::v020::inbound_bridge::MailboxSlot>,
+            ) = {
+                use crate::wire::webrtc::v020;
+
+                // W6: fail-fast on unsupported v0.20 config capabilities
+                // (capability matrix). Don't silently degrade.
+                validate_v020_config(&self.config.webrtc)?;
+
+                // Create the v0.20 factory with production config.
+                let buffer_config = v020::config::RtcBufferConfig::default();
+                buffer_config.validate().map_err(|error| {
+                    ActrError::Internal(format!(
+                        "invalid v0.20 RTC resource configuration: {error}"
+                    ))
+                })?;
+                let runtime_config = v020::runtime::RtcRuntimeConfig::desktop_default()
+                    .with_buffer_config(buffer_config.clone());
+                let address_provider = Arc::new(v020::address::DesktopLocalAddressProvider::new());
+                let ice_servers: Vec<webrtc::peer_connection::RTCIceServer> = self
+                    .config
+                    .webrtc
+                    .ice_servers
+                    .iter()
+                    .map(|s| webrtc::peer_connection::RTCIceServer {
+                        urls: s.urls.clone(),
+                        username: s.username.clone().unwrap_or_default(),
+                        credential: s.credential.clone().unwrap_or_default(),
+                    })
+                    .collect();
+                let ice_transport_policy = match self.config.webrtc.ice_transport_policy {
+                    actr_config::IceTransportPolicy::All => {
+                        webrtc::peer_connection::RTCIceTransportPolicy::All
+                    }
+                    actr_config::IceTransportPolicy::Relay => {
+                        webrtc::peer_connection::RTCIceTransportPolicy::Relay
+                    }
+                };
+                let rtc_configuration = webrtc::peer_connection::RTCConfigurationBuilder::default()
+                    .with_ice_servers(ice_servers)
+                    .with_ice_transport_policy(ice_transport_policy)
+                    .with_bundle_policy(webrtc::peer_connection::RTCBundlePolicy::Balanced)
+                    .with_rtcp_mux_policy(webrtc::peer_connection::RTCRtcpMuxPolicy::Require)
+                    .with_ice_candidate_pool_size(0)
+                    .build();
+                let mut setting_engine = webrtc::peer_connection::SettingEngine::default();
+                setting_engine.set_host_acceptance_min_wait(Some(
+                    std::time::Duration::from_millis(
+                        self.config.webrtc.advanced.ice_host_acceptance_min_wait,
+                    ),
+                ));
+                setting_engine.set_srflx_acceptance_min_wait(Some(
+                    std::time::Duration::from_millis(
+                        self.config.webrtc.advanced.ice_srflx_acceptance_min_wait,
+                    ),
+                ));
+                setting_engine.set_prflx_acceptance_min_wait(Some(
+                    std::time::Duration::from_millis(
+                        self.config.webrtc.advanced.ice_prflx_acceptance_min_wait,
+                    ),
+                ));
+                setting_engine.set_relay_acceptance_min_wait(Some(
+                    std::time::Duration::from_millis(
+                        self.config.webrtc.advanced.ice_relay_acceptance_min_wait,
+                    ),
+                ));
+                // Inventory marker: the four acceptance waits above are
+                // protocol-selection timers executed inside v0.20's ICE agent.
+                let _ = crate::timer::ids::EXTERNAL_ICE_CANDIDATE_SELECTION;
+                let factory = Arc::new(
+                    v020::factory::PeerConnectionFactory::new_with_configuration(
+                        runtime_config,
+                        address_provider.clone(),
+                        rtc_configuration,
+                    )
+                    .with_turn_credential_provider(Arc::new(credential_state.clone()))
+                    .with_setting_engine(setting_engine),
+                );
+
+                // Create the v0.20 signaling channel + manager + router.
+                // CF-1: the local identity lives in a shared, rebind-updatable
+                // cell so hard rebind can adopt the fresh ActrId (0.14 parity:
+                // coordinator.set_local_id). Stage 6: the node media registry
+                // is attached so session track pumps dispatch received RTP to
+                // the same business surface as the 0.14 stack.
+                let (signaling_tx, signaling_rx) = tokio::sync::mpsc::channel(256);
+                // W3b production wiring: route inbound v0.20 data-plane
+                // payloads through the shared InboundDispatcher (RPC → mailbox
+                // / pending_requests, DataChunk → DataChunkRegistry). Without
+                // this the manager's default `InboundRouter::discard()` drops
+                // every inbound payload. The mailbox is late-bound (filled
+                // when the receive loops start).
+                let inbound_mailbox_slot: v020::inbound_bridge::MailboxSlot =
+                    std::sync::Arc::new(tokio::sync::RwLock::new(None));
+                let inbound_dispatcher =
+                    Arc::new(crate::inbound::dispatcher::InboundDispatcher::new(
+                        pending_requests.clone(),
+                        self.data_chunk_registry.clone(),
+                    ));
+                let (inbound_handler, inbound_dispatch_tasks) =
+                    v020::inbound_bridge::dispatcher_bridge(
+                        inbound_dispatcher,
+                        inbound_mailbox_slot.clone(),
+                        self.shutdown_token.child_token(),
+                    );
+                task_handles.push(inbound_dispatch_tasks);
+                let v020_manager = Arc::new(
+                    v020::manager::RtcConnectionManager::with_inbound_config(
+                        factory.clone(),
+                        signaling_tx,
+                        Arc::new(v020::inbound::InboundRouter::new_with_config(
+                            inbound_handler,
+                            buffer_config.clone(),
+                        )),
+                        buffer_config,
+                    )
+                    .with_media_registry(media_frame_registry.clone()),
+                );
+                // AIS rotates the HMAC TURN credential together with the actor
+                // credential. Apply the new value to live v0.20 sessions via
+                // set_configuration(); every future Factory build also reads
+                // the same shared provider, so idle/new generations cannot
+                // retain the bootstrap credential.
+                {
+                    let mut turn_revision_rx = credential_state.subscribe_turn_revision();
+                    let factory_for_turn_refresh = factory.clone();
+                    let manager_for_turn_refresh = v020_manager.clone();
+                    let turn_refresh_shutdown = self.shutdown_token.child_token();
+                    let turn_refresh_handle = tokio::spawn(async move {
+                        loop {
+                            tokio::select! {
+                                _ = turn_refresh_shutdown.cancelled() => break,
+                                changed = turn_revision_rx.changed() => {
+                                    if changed.is_err() {
+                                        break;
+                                    }
+                                    let revision = *turn_revision_rx.borrow_and_update();
+                                    match factory_for_turn_refresh.current_configuration().await {
+                                        Ok(configuration) => {
+                                            let refreshed_peers = manager_for_turn_refresh
+                                                .refresh_all_configurations(configuration)
+                                                .await;
+                                            tracing::info!(
+                                                revision,
+                                                refreshed_peers,
+                                                "v0.20 TURN credential configuration refreshed"
+                                            );
+                                        }
+                                        Err(error) => tracing::error!(
+                                            revision,
+                                            error = %error,
+                                            "v0.20 TURN credential refresh could not materialize RTC configuration"
+                                        ),
+                                    }
+                                }
+                            }
+                        }
+                    });
+                    task_handles.push(turn_refresh_handle);
+                }
+                // S7A-3 (P1): bridge local-address changes into the recovery
+                // supervisor so interface switches trigger Hard Recovery in
+                // production. Native desktop enumeration is refreshed by the
+                // monitor; mobile providers can additionally push change edges.
+                let address_monitor = v020::recovery::spawn_address_monitor(
+                    address_provider,
+                    v020_manager.supervisor().clone(),
+                    self.shutdown_token.child_token(),
+                );
+                task_handles.push(address_monitor);
+
+                let v020_local_id = v020::signaling::SharedLocalId::new(actor_id.clone());
+                let v020_transport = v020::signaling::ws_transport::V020SignalingTransport::new(
+                    self.signaling_client.clone(),
+                    v020_local_id.clone(),
+                    credential_state.clone(),
+                );
+                let v020_router = v020::signaling::router::SignalingRouter::new(
+                    v020_manager.clone(),
+                    v020_local_id.clone(),
+                );
+                let router_shutdown = self.shutdown_token.child_token();
+                let router_handle = tokio::spawn(async move {
+                    tokio::select! {
+                        _ = router_shutdown.cancelled() => {}
+                        _ = v020_router.run(v020_transport, signaling_rx) => {}
+                    }
+                });
+                task_handles.push(router_handle);
+
+                // Pull forward the snapshot→hook projection (B3): subscribe
+                // to each peer's snapshot and fire the 3 hooks on transitions.
+                // Without this the cutover silently drops business-visible hooks.
+                {
+                    let hook_observer = self.hook_observer.clone();
+                    let actor_id_for_hook = actor_id.clone();
+                    let credential_state_for_hook = credential_state.clone();
+                    let ctx_builder_snapshot = self.bootstrap_ctx_builder();
+                    let ctx_builder: crate::lifecycle::hooks::HookContextBuilder =
+                        Arc::new(move || {
+                            let snapshot = ctx_builder_snapshot.clone();
+                            let actor_id = actor_id_for_hook.clone();
+                            let credential_state = credential_state_for_hook.clone();
+                            Box::pin(async move {
+                                Some(snapshot.build_bootstrap(
                                     &actor_id,
                                     &credential_state.credential().await,
-                                ),
-                            )
-                        })
+                                ))
+                            })
+                        });
+                    let manager_for_hooks = v020_manager.clone();
+                    let hook_shutdown = self.shutdown_token.child_token();
+                    let hook_projection_handle = tokio::spawn(async move {
+                        v020::notification::run_hook_projection(
+                            manager_for_hooks,
+                            hook_observer,
+                            ctx_builder,
+                            hook_shutdown,
+                        )
+                        .await;
                     });
-                let cb = crate::lifecycle::hooks::build_hook_callback(
-                    self.hook_observer.clone(),
-                    ctx_builder,
-                );
-                coordinator.set_hook_callback(cb);
-            }
+                    task_handles.push(hook_projection_handle);
+                }
+
+                (
+                    Some(v020_manager),
+                    Some(v020_local_id),
+                    Some(inbound_mailbox_slot),
+                )
+            };
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // 1.6. Create PeerTransport + PeerGate (new architecture)
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             tracing::info!("🏗️  Creating PeerTransport with WebRTC support");
-
-            // Pre-allocate the pending-requests map so it can be shared between
-            // DefaultWireBuilder (for outbound WS response reader tasks) and
-            // PeerGate (for request/response matching).
-            let pending_requests: crate::outbound::PendingRequestsMap =
-                Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
 
             // Create DefaultWireBuilder with WebRTC coordinator
             use crate::transport::{DefaultWireBuilder, DefaultWireBuilderConfig};
@@ -2714,47 +3028,42 @@ impl Inner {
                 // to deliver server responses back to `send_request_with_type` futures.
                 pending_requests: Some(pending_requests.clone()),
             };
-            let wire_builder = Arc::new(DefaultWireBuilder::new(
-                Some(coordinator.clone()),
-                wire_builder_config,
-            ));
+            let wire_builder = {
+                let builder = DefaultWireBuilder::new(wire_builder_config);
+                #[cfg(feature = "webrtc-v020")]
+                let builder = builder.with_v020_manager(
+                    v020_manager
+                        .clone()
+                        .expect("v0.20 manager must exist on the v0.20 backend"),
+                );
+                #[cfg(not(feature = "webrtc-v020"))]
+                let builder = builder;
+                Arc::new(builder)
+            };
 
             // Create PeerTransport
             use crate::transport::PeerTransport;
             let transport_manager = Arc::new(PeerTransport::new(actor_id.clone(), wire_builder));
             self.peer_transport = Some(transport_manager.clone());
 
-            // Create PeerGate with the pre-allocated pending_requests map and WebRTC coordinator.
+            // Create PeerGate with the pre-allocated pending_requests map.
+            // The v0.20 manager is the only send authority (W5); nodes
+            // without a network-event handle get the always-Normal projection
+            // default inside the constructor.
             use crate::outbound::PeerGate;
-            let outproc_gate = Arc::new(match self.send_projection_rx.take() {
-                Some(send_projection_rx) => PeerGate::with_pending_requests_and_send_projection(
-                    transport_manager.clone(),
-                    Some(coordinator.clone()),
-                    pending_requests.clone(),
-                    send_projection_rx,
-                ),
-                None => PeerGate::with_pending_requests(
-                    transport_manager.clone(),
-                    Some(coordinator.clone()),
-                    pending_requests.clone(),
-                ),
-            });
+            #[cfg(feature = "webrtc-v020")]
+            let outproc_gate = Arc::new(PeerGate::with_v020_manager(
+                transport_manager.clone(),
+                v020_manager
+                    .clone()
+                    .expect("v0.20 manager must exist on the v0.20 backend"),
+                pending_requests.clone(),
+                self.send_projection_rx.take(),
+            ));
             let outproc_gate_enum = Gate::Peer(outproc_gate.clone());
             tracing::info!("PeerTransport + PeerGate initialized");
 
             let data_chunk_registry = self.data_chunk_registry.clone();
-
-            // Create WebRtcGate with shared pending_requests and DataChunkRegistry
-            let gate = Arc::new(crate::wire::webrtc::gate::WebRtcGate::new(
-                coordinator.clone(),
-                pending_requests,
-                data_chunk_registry.clone(),
-            ));
-            // Set local_id
-            gate.set_local_id(actor_id.clone()).await;
-            tracing::info!(
-                "✅ WebRtcGate created with shared pending_requests and DataChunkRegistry"
-            );
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
             // 1.7. Wire the outproc gate into Inner so subsequent
@@ -2766,16 +3075,22 @@ impl Inner {
             self.outproc_gate = Some(outproc_gate_enum);
             tracing::info!("✅ Node runtime gates fully initialized (inproc + outproc)");
 
-            // Save references
-            self.webrtc_coordinator = Some(coordinator.clone());
-            self.webrtc_gate = Some(gate.clone());
+            // Save references. The v0.20 manager backs the node-level status
+            // APIs (S6-4).
+            #[cfg(feature = "webrtc-v020")]
+            {
+                self.v020_manager = v020_manager.clone();
+                self.v020_inbound_mailbox_slot = v020_mailbox_slot.clone();
+            }
             credential_manager
                 .install_hard_rebind_handles(HardRebindHandles {
                     signaling_client: self.signaling_client.clone(),
                     credential_state: credential_state.clone(),
-                    webrtc_coordinator: Some(coordinator.clone()),
-                    webrtc_gate: Some(gate.clone()),
                     peer_transport: Some(transport_manager.clone()),
+                    #[cfg(feature = "webrtc-v020")]
+                    v020_manager: v020_manager.clone(),
+                    #[cfg(feature = "webrtc-v020")]
+                    v020_local_id: v020_local_id.clone(),
                 })
                 .await;
             tracing::info!("✅ WebRTC infrastructure initialized");
@@ -2868,18 +3183,7 @@ impl Inner {
                     stale_revision,
                     "📡 Reporting deferred initial-handshake auth verdict to membership controller for recovery"
                 );
-                use crate::lifecycle::membership::MembershipResolution;
-                match handle.resolve(verdict, stale_revision).await {
-                    MembershipResolution::Published | MembershipResolution::Superseded => {
-                        // Credential publication emitted its own material fact.
-                    }
-                    MembershipResolution::Deferred => {
-                        self.signaling_client.request_signaling_recovery(
-                            crate::lifecycle::SignalingRecoveryRequestCause::InitialConnectDeferred,
-                        );
-                    }
-                    MembershipResolution::Denied | MembershipResolution::Shutdown => {}
-                }
+                handle.report(verdict, stale_revision).await;
             }
 
             // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -2993,8 +3297,6 @@ impl Inner {
                 let register_request_for_heartbeat = register_request.clone();
                 let credential_manager_for_heartbeat = credential_manager.clone();
                 let membership_handle_for_heartbeat = membership_handle.clone();
-                let webrtc_coordinator_for_heartbeat = self.webrtc_coordinator.clone();
-                let webrtc_gate_for_heartbeat = self.webrtc_gate.clone();
 
                 // Use interval from registration response, default to 30s
                 let heartbeat_interval_secs = register_ok.signaling_heartbeat_interval_secs;
@@ -3017,8 +3319,6 @@ impl Inner {
                     realm_secret_for_heartbeat,
                     Some(credential_manager_for_heartbeat),
                     node_hook_callback.clone(),
-                    webrtc_coordinator_for_heartbeat,
-                    webrtc_gate_for_heartbeat,
                     membership_handle_for_heartbeat,
                 ));
                 task_handles.push(heartbeat_handle);
@@ -3035,47 +3335,56 @@ impl Inner {
                 use crate::lifecycle::network_event::DefaultNetworkEventProcessor;
 
                 // A closed external receiver is intentional for headless
-                // deployments: internal signaling/session facts, timers and
-                // completions continue to drive the always-on supervisor.
+                // deployments: signaling/session facts still drive the
+                // always-on lifecycle supervisor.
                 let event_rx = self.network_event_rx.take().unwrap_or_else(|| {
                     let (_event_tx, event_rx) = tokio::sync::mpsc::channel(1);
                     event_rx
                 });
 
-                // Create DefaultNetworkEventProcessor
-                // If debounce config exists, use new_with_debounce
                 let event_processor =
                     if let Some(config) = self.network_event_debounce_config.clone() {
-                        Arc::new(
-                            DefaultNetworkEventProcessor::new_with_debounce_and_peer_transport(
-                                self.signaling_client.clone(),
-                                self.webrtc_coordinator.clone(),
-                                config,
-                                self.peer_transport.clone(),
-                            )
-                            .with_session_state(session_state.clone()),
+                        DefaultNetworkEventProcessor::new_with_debounce_and_peer_transport(
+                            self.signaling_client.clone(),
+                            config,
+                            self.peer_transport.clone(),
                         )
                     } else {
-                        Arc::new(
-                            DefaultNetworkEventProcessor::new_with_peer_transport(
-                                self.signaling_client.clone(),
-                                self.webrtc_coordinator.clone(),
-                                self.peer_transport.clone(),
-                            )
-                            .with_session_state(session_state.clone()),
+                        DefaultNetworkEventProcessor::new_with_peer_transport(
+                            self.signaling_client.clone(),
+                            self.peer_transport.clone(),
                         )
-                    };
+                    }
+                    .with_session_state(session_state.clone());
+                #[cfg(feature = "webrtc-v020")]
+                let event_processor = event_processor.with_v020_manager(self.v020_manager.clone());
+                let event_processor = Arc::new(event_processor);
 
                 let shutdown = self.shutdown_token.clone();
-                // The internal channel is created with the handle; a fact sink
-                // over its sender was already wired into the signaling client and
-                // session state, so signaling and session facts share the
-                // supervisor's policy-ordered input queue.
+                // S7A-3 (P1): the v0.20 recovery supervisor feed — accepted
+                // network/app facts are republished to v0.20 controllers.
+                #[cfg(feature = "webrtc-v020")]
+                let v020_recovery_feed = self
+                    .v020_manager
+                    .as_ref()
+                    .map(|manager| manager.supervisor().clone());
                 let internal_channel = self
                     .network_event_internal
                     .take()
                     .expect("always-on recovery supervisor channel missing at start");
                 let network_event_handle = tokio::spawn(async move {
+                    #[cfg(feature = "webrtc-v020")]
+                    if let Some(feed) = v020_recovery_feed {
+                        crate::lifecycle::network_event::run_network_event_reconciler_with_channel_and_v020_recovery(
+                            event_rx,
+                            internal_channel,
+                            event_processor,
+                            shutdown,
+                            feed,
+                        )
+                        .await;
+                        return;
+                    }
                     crate::lifecycle::network_event::run_network_event_reconciler_with_channel(
                         event_rx,
                         internal_channel,
@@ -3103,7 +3412,8 @@ impl Inner {
                 let client = self.signaling_client.clone();
                 let actor_id_for_unreg = actor_id.clone();
                 let credential_state_for_unreg = credential_state.clone();
-                let webrtc_coordinator = self.webrtc_coordinator.clone();
+                #[cfg(feature = "webrtc-v020")]
+                let v020_manager_for_unreg = self.v020_manager.clone();
 
                 let unregister_handle = tokio::spawn(async move {
                     // Wait for shutdown signal
@@ -3113,20 +3423,13 @@ impl Inner {
                         actor_id_for_unreg
                     );
 
-                    // 1. Close all WebRTC peer connections first (if any)
-                    if let Some(coord) = webrtc_coordinator {
-                        if let Err(e) = coord.close_all_peers().await {
-                            tracing::warn!(
-                                "⚠️ Failed to close all WebRTC peers before UnregisterRequest: {}",
-                                e
-                            );
-                        } else {
-                            tracing::info!("✅ All WebRTC peers closed before UnregisterRequest");
-                        }
-                    } else {
-                        tracing::debug!(
-                            "WebRTC coordinator not found before UnregisterRequest (no WebRTC?)"
-                        );
+                    // 1. Close all WebRTC peer connections first (if any).
+                    // The v0.20 manager's close_all is bounded by its internal
+                    // deadline; the 0.14 coordinator leg is gone.
+                    #[cfg(feature = "webrtc-v020")]
+                    if let Some(manager) = v020_manager_for_unreg {
+                        manager.close_all().await;
+                        tracing::info!("✅ All WebRTC peers closed before UnregisterRequest");
                     }
 
                     // 2. Then send UnregisterRequest with a timeout (e.g. 5 seconds)
@@ -3194,6 +3497,10 @@ impl Inner {
             .expect("CredentialState must be initialized in start()");
         let session_state = credential_manager.session_state();
         let shutdown_token = self.shutdown_token.clone();
+        // S6-4: capture the v0.20 manager before `self` moves into the Arc so
+        // ActrRefShared can expose the status APIs.
+        #[cfg(feature = "webrtc-v020")]
+        let v020_manager = self.v020_manager.clone();
         let node_ref = Arc::new(self);
 
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -3214,22 +3521,13 @@ impl Inner {
         // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
         tracing::info!("🚀 Starting WebRTC background loops");
 
-        // Start WebRtcCoordinator signaling loop
-        if let Some(coordinator) = &node_ref.webrtc_coordinator {
-            coordinator.clone().start().await.map_err(|e| {
-                ActrError::Unavailable(format!("WebRtcCoordinator start failed: {e}"))
-            })?;
-            tracing::info!("✅ WebRtcCoordinator signaling loop started");
-        }
-
-        // Start WebRtcGate message receive loop (route to Mailbox)
-        if let Some(gate) = &node_ref.webrtc_gate {
-            gate.start_receive_loop(node_ref.mailbox.clone())
-                .await
-                .map_err(|e| {
-                    ActrError::Unavailable(format!("WebRtcGate receive loop start failed: {e}"))
-                })?;
-            tracing::info!("✅ WebRtcGate → Mailbox routing started");
+        // Start the v0.20 signaling router; the lifecycle supervisor owns the
+        // signaling connection itself.
+        // v0.20 backend (W3b): publish the mailbox to the inbound bridge so
+        // v0.20 DataChannel payloads route into the node mailbox.
+        #[cfg(feature = "webrtc-v020")]
+        if let Some(slot) = &node_ref.v020_inbound_mailbox_slot {
+            *slot.write().await = Some(node_ref.mailbox.clone());
         }
 
         // Start WebSocketGate message receive loop (route to Mailbox, direct-connect mode)
@@ -3717,8 +4015,11 @@ impl Inner {
         {
             let node = node_ref.clone();
             let mailbox = node_ref.mailbox.clone();
-            let webrtc_gate = node_ref.webrtc_gate.clone();
             let ws_gate = node_ref.websocket_gate.clone();
+            #[cfg(feature = "webrtc-v020")]
+            let v020_route: V020ResponseRoute = node_ref.v020_manager.clone();
+            #[cfg(not(feature = "webrtc-v020"))]
+            let v020_route: V020ResponseRoute = ();
             let shutdown = shutdown_token.clone();
             let mailbox_enqueue_wake = mailbox_enqueue_wake.clone();
             let outstanding_replies = node_ref.outstanding_replies.clone();
@@ -3904,7 +4205,7 @@ impl Inner {
                                                 let tracestate = envelope.tracestate.clone();
                                                 let msg_id = msg_record.id;
                                                 let ws_gate = ws_gate.clone();
-                                                let webrtc_gate = webrtc_gate.clone();
+                                                let v020_route = v020_route.clone();
                                                 let mailbox_c = mailbox.clone();
                                                 #[cfg(not(feature = "opentelemetry"))]
                                                 let span = tracing::Span::none();
@@ -3914,8 +4215,9 @@ impl Inner {
                                                     // + back-pressure; the reply+ack continuation
                                                     // overlaps with later messages. Per-message
                                                     // reply→ack order is unchanged inside the tail.
-                                                    let caller_owned =
-                                                        caller_id_result.clone().map_err(|e| e.to_string());
+                                                    let caller_owned = caller_id_result
+                                                        .clone()
+                                                        .map_err(|e| e.to_string());
                                                     let reply_sink = crate::lifecycle::reply_deliver::ReplySink::Mailbox {
                                                         caller: caller_owned.clone(),
                                                         msg_id,
@@ -3928,7 +4230,7 @@ impl Inner {
                                                         match cont.await {
                                                             IncomingOutcome::Replied(result) => {
                                                                 mailbox_reply_and_ack(
-                                                                    ws_gate, webrtc_gate, mailbox_c,
+                                                                    ws_gate, v020_route, mailbox_c,
                                                                     caller_owned, request_id, route_key,
                                                                     traceparent, tracestate, expects_response,
                                                                     msg_id, result, span,
@@ -3956,7 +4258,7 @@ impl Inner {
                                                     match handle_incoming_fut.await {
                                                         IncomingOutcome::Replied(result) => {
                                                             mailbox_reply_and_ack(
-                                                                ws_gate, webrtc_gate, mailbox_c,
+                                                                ws_gate, v020_route, mailbox_c,
                                                                 caller_owned, request_id, route_key,
                                                                 traceparent, tracestate, expects_response,
                                                                 msg_id, result, span,
@@ -4093,6 +4395,8 @@ impl Inner {
             session_state: Some(session_state),
             shutdown_token,
             task_handles: Mutex::new(task_handles),
+            #[cfg(feature = "webrtc-v020")]
+            v020_manager: v020_manager.clone(),
         });
 
         // Create ActrRef

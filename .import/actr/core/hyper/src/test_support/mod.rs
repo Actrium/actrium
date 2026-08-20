@@ -15,28 +15,82 @@ use actr_pack::PackageManifest;
 use actr_protocol::{AIdCredential, ActrId};
 use std::sync::Arc;
 
-#[path = "../../tests/common/harness.rs"]
-pub mod harness;
-mod real_data_channel;
+mod actrix_services;
+mod mobile_rtc_pair;
+mod rtc_harness;
 #[path = "../../tests/common/signaling.rs"]
 pub mod signaling;
-#[path = "../../tests/common/utils.rs"]
-pub mod utils;
 #[path = "../../tests/common/vnet.rs"]
 pub mod vnet;
-#[path = "../../tests/common/wait.rs"]
-pub mod wait;
 
-pub use harness::{TestHarness, TestPeer};
-pub use real_data_channel::RealDataChannelPair;
-pub use signaling::TestSignalingServer;
-pub use utils::{
-    create_credential_state_for_test, create_peer_with_vnet, create_peer_with_websocket,
-    dummy_credential, install_test_crypto_provider, make_actor_id, spawn_echo_responder,
-    spawn_response_receiver, spawn_rpc_dispatcher,
+pub use crate::transport::{
+    WebRtcFragmentSendEvent, WebRtcFragmentSendHook, WebRtcFragmentSendHookGuard,
+    install_webrtc_fragment_send_hook_for_test,
 };
+pub use crate::wire::webrtc::test_runtime::{
+    DirectedRtcFaultHandle, DirectedRtcFaultMetrics, DirectedRtcFaultRegistry, LinkDirection,
+    PacketRule,
+};
+pub use crate::wire::webrtc::v020::address::TestLocalAddressProvider;
+pub use crate::wire::webrtc::v020::fault::{
+    DirectedSignalingFaultMetrics, DirectedSignalingFaultRegistry, SignalingFaultRule,
+    SignalingMessageClass, SignalingTraceEvent,
+};
+pub use actrix_services::ActrixTestServices;
+pub use mobile_rtc_pair::{
+    ConnectionInitiator, MobileEventDriver, MobileRtcPairHarness, PairEndpoint, PairSnapshot,
+};
+pub use rtc_harness::{
+    RtcAwareNetworkEventProcessor, TestBuildThrottleObservation, TestEvidenceEvent,
+    TestEvidenceFailureGuard, TestEvidenceTimeline, TestHarness, TestPeer, TestRtcControl,
+    TestRtcHookRecorder, TestRtcPeerResourceObservation, TestRtcResourceObservation, TestRtcRole,
+};
+pub use signaling::TestSignalingServer;
 pub use vnet::{VNetPair, create_vnet_pair};
-pub use wait::*;
+
+/// Install the rustls provider used by integration-test WebSocket clients.
+pub fn install_test_crypto_provider() {
+    let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+}
+
+/// Create a credential state backed by the supplied test credential.
+pub fn create_credential_state_for_test(
+    credential: AIdCredential,
+) -> crate::lifecycle::CredentialState {
+    crate::lifecycle::CredentialState::new(credential, None, None)
+}
+
+/// Compatibility namespace for integration tests that import the elementary
+/// helpers through `test_support::utils`. RTC construction lives in
+/// [`TestHarness`] so every integration topology uses the v0.20 stack.
+pub mod utils {
+    pub use super::{
+        create_credential_state_for_test, dummy_credential, install_test_crypto_provider,
+        make_actor_id,
+    };
+}
+
+/// Create a test ActrId with the given serial number.
+pub fn make_actor_id(serial_number: u64) -> ActrId {
+    ActrId {
+        realm: actr_protocol::Realm { realm_id: 1 },
+        serial_number,
+        r#type: actr_protocol::ActrType {
+            manufacturer: "acme".to_string(),
+            name: "node".to_string(),
+            version: "1.0.0".to_string(),
+        },
+    }
+}
+
+/// Create a dummy credential for testing.
+pub fn dummy_credential() -> AIdCredential {
+    AIdCredential {
+        key_id: 7,
+        claims: bytes::Bytes::from_static(b"dummy-claims"),
+        signature: bytes::Bytes::from(vec![0u8; 64]),
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct TimerObservation {
@@ -105,11 +159,6 @@ where
         && inflight.is_empty()
 }
 
-pub use crate::transport::lane::{
-    WebRtcFragmentSendEvent, WebRtcFragmentSendHook, WebRtcFragmentSendHookGuard,
-    install_webrtc_fragment_send_hook_for_test,
-};
-
 /// Spawn the production reconciler shape with its normalized fact channel.
 ///
 /// Integration tests use this instead of the public status-only entry point
@@ -141,6 +190,43 @@ pub fn spawn_gated_network_event_supervisor(
 ) {
     let (fact_sink, channel) = crate::lifecycle::supervisor_internal_channel_gated();
     spawn_network_event_supervisor_with_channel(processor, fact_sink, channel)
+}
+
+/// Spawn the gated lifecycle reconciler with the same v0.20 recovery feed as
+/// `Node::start()` and expose its policy status stream.
+///
+/// `processor` must not publish `RtcNetworkEvent` itself. Use
+/// [`TestPeer::production_network_processor`], not the compatibility
+/// [`RtcAwareNetworkEventProcessor`], so each accepted platform fact reaches
+/// the manager supervisor exactly once.
+pub fn spawn_gated_v020_network_event_supervisor(
+    processor: Arc<dyn crate::lifecycle::NetworkEventProcessor>,
+    rtc: &TestRtcControl,
+) -> (
+    crate::lifecycle::NetworkEventHandle,
+    crate::lifecycle::SupervisorFactSink,
+    tokio_util::sync::CancellationToken,
+    tokio::task::JoinHandle<()>,
+    tokio::sync::watch::Receiver<crate::lifecycle::SupervisorStatus>,
+) {
+    let (fact_sink, channel) = crate::lifecycle::supervisor_internal_channel_gated();
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel(128);
+    let handle =
+        crate::lifecycle::NetworkEventHandle::new_with_fact_sink(event_tx, fact_sink.clone());
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let (status_tx, status_rx) =
+        tokio::sync::watch::channel(crate::lifecycle::SupervisorStatus::default());
+    let task = tokio::spawn(
+        crate::lifecycle::run_network_event_reconciler_with_channel_and_v020_recovery_and_status(
+            event_rx,
+            channel,
+            processor,
+            shutdown.clone(),
+            rtc.recovery_supervisor(),
+            status_tx,
+        ),
+    );
+    (handle, fact_sink, shutdown, task, status_rx)
 }
 
 /// Spawn the production reconciler shape with its fact channel *and* the
@@ -289,6 +375,9 @@ pub enum TestPackageHookEvent {
         peer: ActrId,
         status: actr_framework::WebRtcPeerStatus,
     },
+    WebRtcStateChanged {
+        state: actr_framework::WebRtcPeerState,
+    },
     CredentialRenewed {
         new_expiry: std::time::SystemTime,
     },
@@ -350,6 +439,7 @@ impl From<TestPackageHookEvent> for crate::workload::PackageHookEvent {
                     status: Some(status),
                 })
             }
+            TestPackageHookEvent::WebRtcStateChanged { state } => Self::WebRtcStateChanged(state),
             TestPackageHookEvent::CredentialRenewed { new_expiry } => {
                 Self::CredentialRenewed(actr_framework::CredentialEvent { new_expiry })
             }
@@ -468,6 +558,9 @@ impl TestPackageHookObserver {
                         },
                     )
                     .await;
+            }
+            TestPackageHookEvent::WebRtcStateChanged { state } => {
+                self.observer.on_webrtc_state_changed(ctx, &state).await;
             }
             TestPackageHookEvent::CredentialRenewed { new_expiry } => {
                 self.observer
@@ -832,7 +925,10 @@ pub struct TestWorkloadRunner {
 impl TestWorkloadRunner {
     /// Spawn a serial runner owning `workload`. Crate-internal because
     /// `Workload` is a `pub(crate)` type; integration tests obtain a runner via
-    /// [`TestWasmWorkload::into_workload_runner`].
+    /// [`TestWasmWorkload::into_workload_runner`]. Gated to `wasm-engine`
+    /// because that is the only caller: under `dynclib-engine`-only builds the
+    /// runner is constructed directly (see `into_interleaved_runner` users).
+    #[cfg(feature = "wasm-engine")]
     pub(crate) fn spawn(workload: crate::workload::Workload) -> Self {
         Self {
             handle: crate::executor::spawn_runner(workload),

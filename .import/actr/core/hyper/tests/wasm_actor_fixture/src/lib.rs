@@ -86,6 +86,49 @@ fn status_label(event: &actr_framework::PeerEvent) -> &'static str {
     }
 }
 
+fn state_status_label(status: actr_framework::WebRtcPeerStatus) -> &'static str {
+    match status {
+        actr_framework::WebRtcPeerStatus::Idle => "idle",
+        actr_framework::WebRtcPeerStatus::Connecting => "connecting",
+        actr_framework::WebRtcPeerStatus::Connected => "connected",
+        actr_framework::WebRtcPeerStatus::Recovering => "recovering",
+    }
+}
+
+fn network_path_label(path: actr_framework::WebRtcNetworkPath) -> &'static str {
+    match path {
+        actr_framework::WebRtcNetworkPath::Unknown => "unknown",
+        actr_framework::WebRtcNetworkPath::Direct => "direct",
+        actr_framework::WebRtcNetworkPath::Relayed => "relayed",
+    }
+}
+
+fn reason_label(reason: Option<actr_framework::WebRtcUnavailableReason>) -> &'static str {
+    use actr_framework::WebRtcUnavailableReason as R;
+    match reason {
+        Some(R::ConnectionNotReady) => "connection-not-ready",
+        Some(R::PeerConnectionBuildFailed) => "peer-connection-build-failed",
+        Some(R::NegotiationFailed) => "negotiation-failed",
+        Some(R::IceRestartFailed) => "ice-restart-failed",
+        Some(R::PeerConnectionRebuildFailed) => "peer-connection-rebuild-failed",
+        Some(R::UnsupportedRtcCapability) => "unsupported-rtc-capability",
+        Some(R::RtcResourceLimitExceeded) => "rtc-resource-limit-exceeded",
+        Some(R::RecoveryExhausted) => "recovery-exhausted",
+        Some(R::Closed) => "closed",
+        // Non_exhaustive enum: an unknown future reason still needs a label.
+        Some(_) => "unsupported-rtc-capability",
+        None => "none",
+    }
+}
+
+fn opt_bool_label(value: Option<bool>) -> &'static str {
+    match value {
+        Some(true) => "true",
+        Some(false) => "false",
+        None => "none",
+    }
+}
+
 async fn record_peer_hook<C: Context>(
     ctx: &C,
     name: &'static str,
@@ -324,6 +367,28 @@ impl Workload for DoubleActor {
 
     async fn on_webrtc_disconnected<C: Context>(&self, ctx: &C, event: &actr_framework::PeerEvent) {
         record_peer_hook(ctx, "on_webrtc_disconnected", event).await;
+    }
+
+    async fn on_webrtc_state_changed<C: Context>(
+        &self,
+        ctx: &C,
+        event: &actr_framework::WebRtcPeerState,
+    ) {
+        record_hook_value(
+            ctx,
+            format!(
+                "on_webrtc_state_changed:peer={}:gen={}:rev={}:status={}:sendable={}:path={}:relayed={}:reason={}",
+                event.peer.serial_number,
+                event.pc_generation,
+                event.revision,
+                state_status_label(event.status),
+                event.sendable,
+                network_path_label(event.network_path),
+                opt_bool_label(event.relayed),
+                reason_label(event.unavailable_reason),
+            ),
+        )
+        .await;
     }
 
     async fn on_credential_renewed<C: Context>(

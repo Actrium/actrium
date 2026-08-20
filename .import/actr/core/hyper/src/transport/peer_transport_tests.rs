@@ -1,6 +1,7 @@
 use super::*;
-use crate::transport::ConnType;
 use crate::transport::lane::DataLane;
+use crate::transport::wire_pool::RetryConfig;
+use crate::transport::{ConnType, WebRtcTransportLifecycle};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::time::{Duration, timeout};
 
@@ -93,6 +94,7 @@ async fn close_transport_if_current_replaced_instance_does_not_mark_closing() {
 struct CountingWire {
     conn_type: ConnType,
     identity: Option<WireIdentity>,
+    lifecycle: Option<WebRtcTransportLifecycle>,
     close_count: Arc<AtomicUsize>,
     close_notify: Notify,
 }
@@ -100,6 +102,45 @@ struct CountingWire {
 #[derive(Debug)]
 struct FailingCloseWire {
     close_count: AtomicUsize,
+}
+
+#[derive(Debug)]
+struct FailingConnectWire {
+    attempts: AtomicUsize,
+    close_count: AtomicUsize,
+}
+
+#[async_trait]
+impl WireHandle for FailingConnectWire {
+    fn connection_type(&self) -> ConnType {
+        ConnType::WebRTC
+    }
+
+    fn priority(&self) -> u8 {
+        1
+    }
+
+    async fn connect(&self) -> NetworkResult<()> {
+        self.attempts.fetch_add(1, Ordering::SeqCst);
+        Err(NetworkError::ConnectionError(
+            "forced connect failure".into(),
+        ))
+    }
+
+    fn is_connected(&self) -> bool {
+        false
+    }
+
+    async fn close(&self) -> NetworkResult<()> {
+        self.close_count.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    }
+
+    async fn get_lane(&self, _payload_type: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        Err(NetworkError::ConnectionClosed(
+            "wire never connected".into(),
+        ))
+    }
 }
 
 #[async_trait]
@@ -150,6 +191,7 @@ impl CountingWire {
         Self {
             conn_type,
             identity,
+            lifecycle: None,
             close_count: Arc::new(AtomicUsize::new(0)),
             close_notify: Notify::new(),
         }
@@ -157,6 +199,11 @@ impl CountingWire {
 
     fn close_count(&self) -> usize {
         self.close_count.load(Ordering::Relaxed)
+    }
+
+    fn with_lifecycle(mut self, lifecycle: WebRtcTransportLifecycle) -> Self {
+        self.lifecycle = Some(lifecycle);
+        self
     }
 }
 
@@ -193,6 +240,10 @@ impl WireHandle for CountingWire {
 
     fn identity(&self) -> Option<WireIdentity> {
         self.identity.clone()
+    }
+
+    fn webrtc_transport_lifecycle(&self) -> Option<WebRtcTransportLifecycle> {
+        self.lifecycle.clone()
     }
 }
 
@@ -891,12 +942,10 @@ async fn peer_transport_with_webrtc_and_ws(
         .expect("transport should be created");
 
     // `DestTransport::new` spawns background `connect` tasks; wait for the
-    // WebRTC wire to become Ready so `webrtc_session_match` can observe it.
+    // WebRTC wire to become Ready so `matches_webrtc_session` can observe it.
     let ready = timeout(Duration::from_secs(2), async {
         loop {
-            if transport.webrtc_session_match(&peer_id, session_id).await
-                == crate::transport::wire_pool::SessionMatch::Ready
-            {
+            if transport.matches_webrtc_session(&peer_id, session_id).await {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(5)).await;
@@ -911,6 +960,104 @@ async fn peer_transport_with_webrtc_and_ws(
         .insert(dest.clone(), DestState::Connected(Arc::new(transport)));
 
     (mgr, dest)
+}
+
+#[tokio::test]
+async fn terminal_lifecycle_close_is_instance_guarded() {
+    let peer_id = ActrId::default();
+    let active_lifecycle = WebRtcTransportLifecycle {
+        peer_id: peer_id.clone(),
+        controller_lifecycle_id: 9,
+        transport_epoch: 3,
+    };
+    let stale_lifecycle = WebRtcTransportLifecycle {
+        transport_epoch: 2,
+        ..active_lifecycle.clone()
+    };
+    let wire = Arc::new(
+        CountingWire::new(ConnType::WebRTC, None).with_lifecycle(active_lifecycle.clone()),
+    );
+    let mgr = PeerTransport::new(peer_id, create_test_factory());
+    let dest = Dest::host();
+    let transport = Arc::new(
+        DestTransport::new(dest.clone(), vec![wire.clone()])
+            .await
+            .expect("transport should be created"),
+    );
+    wait_for_ready(&transport, ConnType::WebRTC).await;
+    mgr.transports
+        .write()
+        .await
+        .insert(dest.clone(), DestState::Connected(transport.clone()));
+
+    assert!(
+        !mgr.close_transport_if_webrtc_lifecycle(&dest, &stale_lifecycle)
+            .await
+            .expect("stale lifecycle cleanup")
+    );
+    assert_eq!(mgr.dest_count().await, 1);
+    assert_eq!(wire.close_count(), 0);
+
+    // A send-path close race can transition the WebRTC slot to Failed before
+    // the Controller's terminal event is consumed. The failed slot must retain
+    // the lifecycle identity so terminal cleanup can still evict the flight.
+    transport
+        .close_connection(ConnType::WebRTC)
+        .await
+        .expect("seed failed WebRTC slot");
+    assert_eq!(wire.close_count(), 1);
+
+    assert!(
+        mgr.close_transport_if_webrtc_lifecycle(&dest, &active_lifecycle)
+            .await
+            .expect("matching lifecycle cleanup")
+    );
+    assert_eq!(mgr.dest_count().await, 0);
+    assert_eq!(
+        wire.close_count(),
+        1,
+        "terminal retirement must not close the Controller wire a second time"
+    );
+}
+
+#[tokio::test]
+async fn all_failed_before_first_ready_evicts_destination() {
+    let wire = Arc::new(FailingConnectWire {
+        attempts: AtomicUsize::new(0),
+        close_count: AtomicUsize::new(0),
+    });
+    let manager = PeerTransport::new(ActrId::default(), create_test_factory());
+    let dest = Dest::host();
+    let transport = Arc::new(
+        DestTransport::new_with_retry_config(
+            dest.clone(),
+            vec![wire.clone()],
+            RetryConfig {
+                max_attempts: 1,
+                initial_delay_ms: 0,
+                max_delay_ms: 0,
+                multiplier: 1.0,
+            },
+        )
+        .await
+        .expect("failed wire still constructs a connection flight"),
+    );
+    manager
+        .transports
+        .write()
+        .await
+        .insert(dest.clone(), DestState::Connected(transport.clone()));
+    manager.spawn_ready_monitor(dest, transport);
+
+    timeout(Duration::from_secs(1), async {
+        while manager.dest_count().await != 0 {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("all-failed connection flight must be evicted");
+    assert_eq!(wire.attempts.load(Ordering::SeqCst), 1);
+    assert_eq!(wire.close_count.load(Ordering::SeqCst), 1);
 }
 
 #[tokio::test]
@@ -935,16 +1082,12 @@ async fn close_webrtc_transport_if_session_closes_only_webrtc_keeps_websocket() 
     )
     .await;
 
-    let outcome = mgr
+    let closed = mgr
         .close_webrtc_transport_if_session(&dest, &peer_id, session_id)
         .await
         .expect("session-matched close should not error");
 
-    assert_eq!(
-        outcome,
-        super::WebrtcCloseOutcome::Closed,
-        "matching session should close the WebRTC wire"
-    );
+    assert!(closed, "matching session should close the WebRTC wire");
     assert_eq!(
         webrtc.close_count(),
         1,
@@ -954,69 +1097,6 @@ async fn close_webrtc_transport_if_session_closes_only_webrtc_keeps_websocket() 
         websocket.close_count(),
         0,
         "WebSocket fallback wire must NOT be closed by a WebRTC-only teardown"
-    );
-}
-
-#[tokio::test]
-async fn close_webrtc_transport_if_session_already_dead_leaves_websocket_owner() {
-    let peer_id = ActrId::default();
-    let session_id = 42u64;
-
-    let webrtc = Arc::new(CountingWire::new(
-        ConnType::WebRTC,
-        Some(WireIdentity::WebRtc {
-            peer_id: peer_id.clone(),
-            session_id,
-        }),
-    ));
-    let websocket = Arc::new(CountingWire::new(ConnType::WebSocket, None));
-
-    let (mgr, dest) = peer_transport_with_webrtc_and_ws(
-        peer_id.clone(),
-        session_id,
-        webrtc.clone(),
-        websocket.clone(),
-    )
-    .await;
-
-    // First terminal event for the session: closes the live WebRTC wire.
-    let first = mgr
-        .close_webrtc_transport_if_session(&dest, &peer_id, session_id)
-        .await
-        .expect("first close should not error");
-    assert_eq!(
-        first,
-        super::WebrtcCloseOutcome::Closed,
-        "first terminal event closes the live wire"
-    );
-
-    // A duplicate terminal event for the same session (e.g. the
-    // `StateChanged{Closed}` emitted after `ConnectionClosed`) hits the
-    // retained Failed tombstone. It must NOT be treated as another
-    // connection loss: nothing left to close, and the surviving WebSocket
-    // lane still owns any pending requests registered after the first event.
-    let second = mgr
-        .close_webrtc_transport_if_session(&dest, &peer_id, session_id)
-        .await
-        .expect("duplicate close should not error");
-    assert_eq!(
-        second,
-        super::WebrtcCloseOutcome::AlreadyDead,
-        "duplicate terminal event for a dead session reports AlreadyDead"
-    );
-    assert_eq!(
-        webrtc.close_count(),
-        1,
-        "already-dead wire must not be closed again"
-    );
-    assert_eq!(
-        websocket.close_count(),
-        0,
-        "surviving WebSocket lane must stay open for a dead-session duplicate"
-    );
-    assert!(
-        mgr.has_ready_wire(&dest).await,
-        "the WebSocket lane should still be the peer's ready wire"
     );
 }
 
@@ -1044,16 +1124,12 @@ async fn close_webrtc_transport_if_session_skips_on_stale_session() {
     .await;
 
     // A stale close event referencing a different session must be a no-op.
-    let outcome = mgr
+    let closed = mgr
         .close_webrtc_transport_if_session(&dest, &peer_id, stale_session)
         .await
         .expect("stale close should not error");
 
-    assert_eq!(
-        outcome,
-        super::WebrtcCloseOutcome::Replaced,
-        "stale session close should be skipped"
-    );
+    assert!(!closed, "stale session close should be skipped");
     assert_eq!(
         webrtc.close_count(),
         0,
@@ -1063,61 +1139,6 @@ async fn close_webrtc_transport_if_session_skips_on_stale_session() {
         websocket.close_count(),
         0,
         "WebSocket wire must NOT be closed for a stale session"
-    );
-}
-
-#[tokio::test]
-async fn close_transport_if_webrtc_session_skips_full_teardown_on_dead_wire() {
-    let peer_id = ActrId::default();
-    let session_id = 42u64;
-
-    let webrtc = Arc::new(CountingWire::new(
-        ConnType::WebRTC,
-        Some(WireIdentity::WebRtc {
-            peer_id: peer_id.clone(),
-            session_id,
-        }),
-    ));
-    let websocket = Arc::new(CountingWire::new(ConnType::WebSocket, None));
-
-    let (mgr, dest) = peer_transport_with_webrtc_and_ws(
-        peer_id.clone(),
-        session_id,
-        webrtc.clone(),
-        websocket.clone(),
-    )
-    .await;
-
-    // Kill the WebRTC wire first (self-heal / terminal transition path):
-    // the slot becomes a Failed tombstone retaining the session identity
-    // while the WebSocket lane stays Ready.
-    let outcome = mgr
-        .close_webrtc_transport_if_session(&dest, &peer_id, session_id)
-        .await
-        .expect("close should not error");
-    assert_eq!(outcome, super::WebrtcCloseOutcome::Closed);
-
-    // A request-timeout reclaim for a request sent over that session must
-    // NOT escalate to the full teardown: the target wire is already dead,
-    // and closing the whole DestTransport would kill the healthy WebSocket
-    // lane and its response readers.
-    let torn_down = mgr
-        .close_transport_if_webrtc_session(&dest, &peer_id, session_id)
-        .await
-        .expect("timeout reclaim close should not error");
-
-    assert!(
-        !torn_down,
-        "a dead WebRTC wire must not authorize full transport teardown"
-    );
-    assert_eq!(
-        websocket.close_count(),
-        0,
-        "the surviving WebSocket lane must stay open after the timeout reclaim"
-    );
-    assert!(
-        mgr.has_ready_wire(&dest).await,
-        "the dest should still have its ready WebSocket wire"
     );
 }
 

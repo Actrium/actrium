@@ -51,7 +51,7 @@ async fn test_no_ws_connection_without_discovery() {
         session_state: None,
         pending_requests: None,
     };
-    let factory = DefaultWireBuilder::new(None, config);
+    let factory = DefaultWireBuilder::new(config);
     let dest = Dest::peer(ActrId::default());
     let connections = factory.create_connections(&dest).await.unwrap();
     assert!(connections.is_empty());
@@ -75,7 +75,7 @@ async fn test_ws_connection_from_discovery() {
         session_state: None,
         pending_requests: None,
     };
-    let factory = DefaultWireBuilder::new(None, config);
+    let factory = DefaultWireBuilder::new(config);
     let dest = Dest::peer(actor_id);
     let connections = factory.create_connections(&dest).await.unwrap();
     assert_eq!(connections.len(), 1);
@@ -98,7 +98,7 @@ async fn existing_connection_lookup_never_creates_discovered_websocket() {
         session_state: None,
         pending_requests: None,
     };
-    let factory = DefaultWireBuilder::new(None, config);
+    let factory = DefaultWireBuilder::new(config);
 
     let connections = factory
         .existing_connections(&Dest::peer(actor_id))
@@ -115,7 +115,7 @@ async fn existing_connection_lookup_without_coordinator_is_empty() {
         enable_webrtc: true,
         ..Default::default()
     };
-    let factory = DefaultWireBuilder::new(None, config);
+    let factory = DefaultWireBuilder::new(config);
 
     let connections = factory
         .existing_connections(&Dest::peer(ActrId::default()))
@@ -155,7 +155,7 @@ async fn cancelled_token_aborts_before_any_connection() {
         session_state: None,
         pending_requests: None,
     };
-    let factory = DefaultWireBuilder::new(None, config);
+    let factory = DefaultWireBuilder::new(config);
 
     let token = CancellationToken::new();
     token.cancel();
@@ -174,13 +174,10 @@ async fn cancelled_token_aborts_before_any_connection() {
 async fn resolve_websocket_url_miss_then_hit_for_actor() {
     let map = Arc::new(RwLock::new(HashMap::new()));
     let id = ActrId::default();
-    let factory = DefaultWireBuilder::new(
-        None,
-        DefaultWireBuilderConfig {
-            discovered_ws_addresses: map.clone(),
-            ..Default::default()
-        },
-    );
+    let factory = DefaultWireBuilder::new(DefaultWireBuilderConfig {
+        discovered_ws_addresses: map.clone(),
+        ..Default::default()
+    });
 
     // Cache miss → None.
     assert!(

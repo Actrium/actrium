@@ -38,36 +38,86 @@ fn prepare_typescript_codegen_tools() -> &'static Path {
             dir.display()
         );
 
-        println!("Running npm install in {}...", dir.display());
-        let npm_install = Command::new("npm")
-            .args(["install"])
-            .current_dir(&dir)
-            .output()
-            .expect("failed to run npm install");
-        if !npm_install.status.success() {
-            panic!(
-                "npm install failed:\nstdout: {}\nstderr: {}",
-                String::from_utf8_lossy(&npm_install.stdout),
-                String::from_utf8_lossy(&npm_install.stderr)
-            );
-        }
-
-        println!("Running npm run bundle in {}...", dir.display());
-        let npm_bundle = Command::new("npm")
-            .args(["run", "bundle"])
-            .current_dir(&dir)
-            .output()
-            .expect("failed to run npm run bundle");
-        if !npm_bundle.status.success() {
-            panic!(
-                "npm bundle failed:\nstdout: {}\nstderr: {}",
-                String::from_utf8_lossy(&npm_bundle.stdout),
-                String::from_utf8_lossy(&npm_bundle.stderr)
-            );
+        // nextest runs each test in its own process, so the OnceLock does not
+        // stop sibling test processes from running npm install concurrently
+        // into the same node_modules (observed in CI as ENOTEMPTY rename
+        // races inside node_modules). Serialize across processes with an
+        // exclusive lock file plus a done marker: the winner runs
+        // install/bundle, the losers wait for the marker. A lock left behind
+        // by a killed run is reclaimed after a staleness deadline.
+        let lock = dir.join(".npm-prepare.lock");
+        let done = dir.join(".npm-prepare.done");
+        let wait_deadline = std::time::Instant::now() + std::time::Duration::from_secs(15 * 60);
+        let mut installed = done.exists();
+        while !installed {
+            let acquired = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock)
+                .is_ok();
+            if acquired {
+                // Re-check: a winner may have finished while we raced the lock.
+                installed = done.exists();
+                if !installed {
+                    run_npm_prepare(&dir);
+                    fs::write(&done, b"ok").expect("write npm-prepare done marker");
+                }
+                let _ = fs::remove_file(&lock);
+                break;
+            }
+            // Somebody else is preparing; the marker is all we need.
+            if done.exists() {
+                break;
+            }
+            // Reclaim a stale lock (holder died mid-install).
+            if let Ok(metadata) = fs::metadata(&lock)
+                && let Ok(modified) = metadata.modified()
+                && modified.elapsed().unwrap_or_default() > std::time::Duration::from_secs(10 * 60)
+            {
+                let _ = fs::remove_file(&lock);
+                continue;
+            }
+            if std::time::Instant::now() > wait_deadline {
+                panic!(
+                    "timed out waiting for a sibling test process to finish npm prepare in {}",
+                    dir.display()
+                );
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
 
         dir
     })
+}
+
+fn run_npm_prepare(dir: &Path) {
+    println!("Running npm install in {}...", dir.display());
+    let npm_install = Command::new("npm")
+        .args(["install"])
+        .current_dir(dir)
+        .output()
+        .expect("failed to run npm install");
+    if !npm_install.status.success() {
+        panic!(
+            "npm install failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&npm_install.stdout),
+            String::from_utf8_lossy(&npm_install.stderr)
+        );
+    }
+
+    println!("Running npm run bundle in {}...", dir.display());
+    let npm_bundle = Command::new("npm")
+        .args(["run", "bundle"])
+        .current_dir(dir)
+        .output()
+        .expect("failed to run npm run bundle");
+    if !npm_bundle.status.success() {
+        panic!(
+            "npm bundle failed:\nstdout: {}\nstderr: {}",
+            String::from_utf8_lossy(&npm_bundle.stdout),
+            String::from_utf8_lossy(&npm_bundle.stderr)
+        );
+    }
 }
 
 fn run_actr(args: &[&str], cwd: &Path) -> Output {

@@ -27,6 +27,42 @@ struct CountingFailWire {
     changed: tokio::sync::Notify,
 }
 
+#[derive(Debug)]
+struct AdvancingLifecycleWire {
+    lifecycle: std::sync::Mutex<crate::transport::WebRtcTransportLifecycle>,
+}
+
+#[async_trait::async_trait]
+impl WireHandle for AdvancingLifecycleWire {
+    fn connection_type(&self) -> ConnType {
+        ConnType::WebRTC
+    }
+
+    fn priority(&self) -> u8 {
+        1
+    }
+
+    async fn connect(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+
+    fn is_connected(&self) -> bool {
+        true
+    }
+
+    async fn close(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+
+    async fn get_lane(&self, _: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        Err(NetworkError::NotImplemented("mock has no lane".into()))
+    }
+
+    fn webrtc_transport_lifecycle(&self) -> Option<crate::transport::WebRtcTransportLifecycle> {
+        Some(self.lifecycle.lock().expect("lifecycle lock").clone())
+    }
+}
+
 #[async_trait::async_trait]
 impl WireHandle for CountingFailWire {
     fn connection_type(&self) -> ConnType {
@@ -213,6 +249,40 @@ async fn close_all_marks_pool_closed_and_clears_ready() {
 }
 
 #[tokio::test]
+async fn live_webrtc_lifecycle_overrides_stale_commit_snapshot() {
+    let epoch_1 = crate::transport::WebRtcTransportLifecycle {
+        peer_id: actr_protocol::ActrId::default(),
+        controller_lifecycle_id: 7,
+        transport_epoch: 1,
+    };
+    let epoch_2 = crate::transport::WebRtcTransportLifecycle {
+        transport_epoch: 2,
+        ..epoch_1.clone()
+    };
+    let wire = Arc::new(AdvancingLifecycleWire {
+        lifecycle: std::sync::Mutex::new(epoch_1.clone()),
+    });
+    let pool = WirePool::new(fast_retry());
+    pool.add_connection(wire.clone()).await;
+
+    tokio::time::timeout(Duration::from_secs(2), async {
+        while pool.get_connection(ConnType::WebRTC).await.is_none() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("WebRTC wire should become ready");
+    assert!(pool.connection_matches_webrtc_lifecycle(&epoch_1).await);
+
+    *wire.lifecycle.lock().expect("lifecycle lock") = epoch_2.clone();
+    assert!(
+        !pool.connection_matches_webrtc_lifecycle(&epoch_1).await,
+        "old terminal event must not match the advanced live attempt"
+    );
+    assert!(pool.connection_matches_webrtc_lifecycle(&epoch_2).await);
+}
+
+#[tokio::test]
 async fn close_all_interrupts_an_inflight_connection_attempt() {
     let pool = WirePool::new(RetryConfig::default());
     let wire = Arc::new(BlockingWire {
@@ -305,10 +375,11 @@ async fn identity_checks_return_false_when_not_ready() {
         peer_id: actr_protocol::ActrId::default(),
         session_id: 1,
     };
-    // No Ready slot → no session match, and nothing to mark closed.
-    assert_eq!(
-        pool.session_match(ConnType::WebRTC, &id).await,
-        super::SessionMatch::NoMatch
+    // No Ready slot → both identity checks are false.
+    assert!(
+        !pool
+            .connection_matches_identity(ConnType::WebRTC, &id)
+            .await
     );
     assert!(
         !pool
@@ -676,10 +747,10 @@ async fn inbound_frames_rejected_before_auth() {
 /// the wire's secure state goes terminal (`Closed`/`Failed`), rather than
 /// parking forever and leaking the wire's `Arc`.
 ///
-/// Observed via `Arc::strong_count`: once the pool retires the slot, the only
-/// remaining co-owner besides the test is the listener task; after the
-/// terminal transition it must release its clone, leaving the test as sole
-/// owner.
+/// Observed via `Arc::strong_count`: v0.20 deliberately retains the failed
+/// handle in `WireStatus::Failed(handle)` for transport-lifecycle CAS. After
+/// the terminal transition the listener must release its clone, leaving only
+/// the test and the pool's failed slot.
 #[tokio::test]
 async fn listener_task_exits_on_terminal_secure_state() {
     let pool = WirePool::new(fast_retry());
@@ -706,11 +777,11 @@ async fn listener_task_exits_on_terminal_secure_state() {
     .expect("Verified wire must surface as ready");
     tokio::time::sleep(Duration::from_millis(50)).await;
 
-    // Retire the slot — the pool drops its clone; only the listener + test
-    // remain.
+    // Retire the slot. v0.20 keeps the failed handle for lifecycle identity,
+    // so test + pool + listener remain until the terminal edge is observed.
     pool.mark_connection_closed(ConnType::WebSocket).await;
     assert!(
-        Arc::strong_count(&wire) >= 2,
+        Arc::strong_count(&wire) >= 3,
         "listener must still hold the wire after slot retirement"
     );
 
@@ -719,15 +790,19 @@ async fn listener_task_exits_on_terminal_secure_state() {
     assert!(cell.set_state_validated(SecureChannelState::Verified, SecureChannelState::Closed,));
 
     // Wait for the listener to observe the terminal transition and drop its
-    // clone. If the exit-on-terminal guard is removed, this times out.
+    // clone. The pool intentionally retains one failed-slot clone (the
+    // `Failed(handle)` lifecycle identity that `mark_connection_closed_if_same`
+    // compares against, #582). If the exit-on-terminal guard is removed, the
+    // wait above times out stuck at three.
     tokio::time::timeout(Duration::from_secs(2), async {
-        while Arc::strong_count(&wire) > 1 {
+        while Arc::strong_count(&wire) > 2 {
             tokio::task::yield_now().await;
         }
     })
     .await
     .expect("listener task must exit on terminal secure state, not leak the wire Arc");
-    assert_eq!(Arc::strong_count(&wire), 1);
+    // Steady state: test + pool's retained failed-slot clone.
+    assert_eq!(Arc::strong_count(&wire), 2);
 }
 
 // ── add_connection: failure path ────────────────────────────────────────
@@ -846,18 +921,11 @@ async fn mark_closed_if_same_matches_and_mismatches() {
         pool.mark_connection_closed_if_same(ConnType::WebSocket, &id)
             .await
     );
-    // Slot is now `Failed(Some(id))`: a same-session close event must still
-    // match as Retained (the wire just died — it is NOT stale), while a
-    // different session must not match.
-    assert_eq!(
-        pool.session_match(ConnType::WebSocket, &id).await,
-        super::SessionMatch::Retained,
-        "a Failed slot retaining the same identity is not stale"
-    );
-    assert_eq!(
-        pool.session_match(ConnType::WebSocket, &other).await,
-        super::SessionMatch::NoMatch,
-        "a Failed slot must not match a different identity"
+    // Slot now Failed → no longer matches anything.
+    assert!(
+        !pool
+            .connection_matches_identity(ConnType::WebSocket, &id)
+            .await
     );
 
     // Re-ready a fresh wire, then assert a mismatched identity does NOT close.
@@ -1015,8 +1083,10 @@ async fn terminal_before_listener_arm_exits_without_parking() {
     let pool = WirePool::new(fast_retry());
     let rx = pool.watch_ready();
 
+    // `Closed` is a true terminal state (`is_terminal`); `LegacyBypass` is a
+    // live phase-2 sendable state and would legitimately park the listener.
     let wire = Arc::new(TerminalBeforeArmWire {
-        secure: SecureCell::new(SecureChannelState::LegacyBypass),
+        secure: SecureCell::new(SecureChannelState::Closed),
     });
     pool.add_connection(wire.clone()).await;
 
@@ -1028,16 +1098,20 @@ async fn terminal_before_listener_arm_exits_without_parking() {
         "terminal wire must not surface as ready"
     );
 
-    // Retire the slot (drops the pool's clone); the only remaining co-owner is
-    // the listener. The pre-arm terminal probe must make it exit promptly.
+    // Retire the slot; the pool retains the failed handle for lifecycle
+    // identity, so the remaining co-owners are the test, the pool, and the
+    // listener. The pre-arm terminal probe must make the listener exit
+    // promptly, releasing its clone.
     pool.mark_connection_closed(ConnType::WebSocket).await;
     tokio::time::timeout(Duration::from_secs(2), async {
-        while Arc::strong_count(&wire) > 1 {
+        while Arc::strong_count(&wire) > 2 {
             tokio::task::yield_now().await;
         }
     })
     .await
     .expect("listener must exit on pre-arm terminal state, not park forever");
+    // Steady state: test + pool's retained failed-slot clone.
+    assert_eq!(Arc::strong_count(&wire), 2);
 }
 
 // ── Connect-retry vs terminal Failed (RFC-0563 re-review) ───────────────

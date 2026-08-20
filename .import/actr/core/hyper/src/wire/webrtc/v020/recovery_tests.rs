@@ -1,0 +1,262 @@
+//! Tests for `RtcRecoverySupervisor` and the `LocalAddressProvider` bridge
+//! (S5-1 / S5-5), plus `BuildThrottle` (S5-7).
+
+use std::net::IpAddr;
+use std::sync::Mutex as StdMutex;
+
+use tokio::sync::{broadcast, watch};
+
+use super::address::LocalAddressSnapshot;
+use super::recovery::{
+    BuildThrottle, LocalAddressProvider, NETWORK_EVENT_CAPACITY, RtcNetworkEvent,
+    RtcRecoverySupervisor, same_address_set, spawn_address_monitor,
+};
+
+#[tokio::test]
+async fn publish_delivers_to_all_subscribers() {
+    let supervisor = RtcRecoverySupervisor::new();
+    let mut rx1 = supervisor.subscribe();
+    let mut rx2 = supervisor.subscribe();
+
+    assert_eq!(supervisor.publish(RtcNetworkEvent::NetworkAvailable), 2);
+
+    assert_eq!(rx1.recv().await.unwrap(), RtcNetworkEvent::NetworkAvailable);
+    assert_eq!(rx2.recv().await.unwrap(), RtcNetworkEvent::NetworkAvailable);
+}
+
+#[tokio::test]
+async fn publish_with_no_subscribers_returns_zero() {
+    let supervisor = RtcRecoverySupervisor::new();
+    assert_eq!(supervisor.publish(RtcNetworkEvent::ForceReconnect), 0);
+}
+
+#[tokio::test]
+async fn late_subscriber_misses_prior_events() {
+    let supervisor = RtcRecoverySupervisor::new();
+    let _ = supervisor.publish(RtcNetworkEvent::NetworkUnavailable);
+
+    let mut rx = supervisor.subscribe();
+    let _ = supervisor.publish(RtcNetworkEvent::NetworkAvailable);
+
+    // The late subscriber only sees the event published after it subscribed.
+    assert_eq!(rx.recv().await.unwrap(), RtcNetworkEvent::NetworkAvailable);
+}
+
+#[tokio::test]
+async fn lagging_receiver_skips_missed_events_and_continues() {
+    let supervisor = RtcRecoverySupervisor::new();
+    let mut rx = supervisor.subscribe();
+
+    // Publish more events than the internal buffer can hold to force lag.
+    // The broadcast channel buffers capacity + 1; send beyond that evicts
+    // the oldest, so the receiver falls behind.
+    for _ in 0..NETWORK_EVENT_CAPACITY + 10 {
+        let _ = supervisor.publish(RtcNetworkEvent::ForceReconnect);
+    }
+
+    // The next recv should report a lag (missed events), then subsequent
+    // recv gets the latest.
+    let outcome = rx.recv().await;
+    assert!(
+        matches!(outcome, Err(broadcast::error::RecvError::Lagged(_))),
+        "expected lag, got {outcome:?}"
+    );
+
+    // After the lag, the receiver continues from the current point.
+    let latest = rx.recv().await;
+    assert_eq!(latest.unwrap(), RtcNetworkEvent::ForceReconnect);
+}
+
+#[tokio::test]
+async fn app_lifecycle_publish_methods_broadcast_correctly() {
+    let supervisor = RtcRecoverySupervisor::new();
+    let mut rx = supervisor.subscribe();
+
+    assert_eq!(supervisor.publish_app_background(), 1);
+    assert_eq!(rx.recv().await.unwrap(), RtcNetworkEvent::AppBackground);
+
+    assert_eq!(supervisor.publish_app_foreground(5_000), 1);
+    assert_eq!(
+        rx.recv().await.unwrap(),
+        RtcNetworkEvent::AppForeground {
+            background_duration_ms: 5_000
+        }
+    );
+}
+
+#[test]
+fn same_address_set_ignores_order_and_detects_changes() {
+    let a: Vec<IpAddr> = vec!["192.168.1.1".parse().unwrap(), "10.0.0.1".parse().unwrap()];
+    let b: Vec<IpAddr> = vec!["10.0.0.1".parse().unwrap(), "192.168.1.1".parse().unwrap()];
+    assert!(same_address_set(&a, &b), "same set, different order");
+    let duplicates: Vec<IpAddr> = vec![
+        "10.0.0.1".parse().unwrap(),
+        "192.168.1.1".parse().unwrap(),
+        "10.0.0.1".parse().unwrap(),
+    ];
+    assert!(
+        same_address_set(&a, &duplicates),
+        "duplicates do not constitute an address-set change"
+    );
+
+    let c: Vec<IpAddr> = vec![
+        "192.168.1.1".parse().unwrap(),
+        "172.16.0.1".parse().unwrap(),
+    ];
+    assert!(!same_address_set(&a, &c), "different set");
+
+    assert!(same_address_set(&[], &[]), "both empty");
+    assert!(!same_address_set(&a, &[]), "one empty");
+}
+
+// --- LocalAddressProvider stub + address-monitor tests ---
+
+struct StubAddressProvider {
+    tx: watch::Sender<LocalAddressSnapshot>,
+    current: StdMutex<Vec<IpAddr>>,
+}
+
+impl StubAddressProvider {
+    fn new(initial: Vec<IpAddr>) -> std::sync::Arc<Self> {
+        let (tx, _) = watch::channel(LocalAddressSnapshot::new(initial.clone()));
+        std::sync::Arc::new(Self {
+            tx,
+            current: StdMutex::new(initial),
+        })
+    }
+
+    fn publish(&self, addresses: Vec<IpAddr>) {
+        *self.current.lock().unwrap() = addresses.clone();
+        let _ = self.tx.send(LocalAddressSnapshot::new(addresses));
+    }
+
+    fn set_current_without_notification(&self, addresses: Vec<IpAddr>) {
+        *self.current.lock().unwrap() = addresses;
+    }
+}
+
+#[async_trait::async_trait]
+impl LocalAddressProvider for StubAddressProvider {
+    async fn current_addresses(
+        &self,
+    ) -> Result<Vec<IpAddr>, crate::wire::webrtc::v020::address::LocalAddressError> {
+        Ok(self.current.lock().unwrap().clone())
+    }
+
+    fn subscribe_changes(&self) -> watch::Receiver<LocalAddressSnapshot> {
+        self.tx.subscribe()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn address_monitor_broadcasts_on_change() {
+    let provider = StubAddressProvider::new(vec!["192.168.1.1".parse().unwrap()]);
+    let supervisor = std::sync::Arc::new(RtcRecoverySupervisor::new());
+    let mut rx = supervisor.subscribe();
+
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let monitor = spawn_address_monitor(provider.clone(), supervisor, shutdown.clone());
+
+    // Publish a different address set.
+    provider.publish(vec!["10.0.0.1".parse().unwrap()]);
+
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("timed out waiting for address change")
+        .expect("channel closed");
+    assert_eq!(event, RtcNetworkEvent::LocalAddressChanged);
+    shutdown.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(2), monitor)
+        .await
+        .expect("address monitor did not converge after cancellation")
+        .expect("address monitor panicked");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn address_monitor_silent_when_addresses_unchanged() {
+    let addr: IpAddr = "192.168.1.1".parse().unwrap();
+    let provider = StubAddressProvider::new(vec![addr]);
+    let supervisor = std::sync::Arc::new(RtcRecoverySupervisor::new());
+    let mut rx = supervisor.subscribe();
+
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let monitor = spawn_address_monitor(provider.clone(), supervisor, shutdown.clone());
+
+    // Publish the same address set (reordered to ensure order-independence).
+    provider.publish(vec![addr]);
+
+    // Wait briefly to confirm no event arrives.
+    let outcome = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
+    assert!(
+        outcome.is_err(),
+        "should not broadcast when the address set is unchanged"
+    );
+    shutdown.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(2), monitor)
+        .await
+        .expect("address monitor did not converge after cancellation")
+        .expect("address monitor panicked");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn address_monitor_polling_fallback_detects_native_interface_change() {
+    let provider = StubAddressProvider::new(vec!["192.168.1.1".parse().unwrap()]);
+    let supervisor = std::sync::Arc::new(RtcRecoverySupervisor::new());
+    let mut rx = supervisor.subscribe();
+    let shutdown = tokio_util::sync::CancellationToken::new();
+    let monitor = spawn_address_monitor(provider.clone(), supervisor, shutdown.clone());
+
+    // Simulate a platform provider whose native API exposes the new address
+    // synchronously but cannot publish a watch edge.
+    provider.set_current_without_notification(vec!["10.0.0.1".parse().unwrap()]);
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+        .await
+        .expect("polling fallback missed address change")
+        .expect("supervisor channel closed");
+    assert_eq!(event, RtcNetworkEvent::LocalAddressChanged);
+
+    shutdown.cancel();
+    tokio::time::timeout(std::time::Duration::from_secs(2), monitor)
+        .await
+        .expect("address monitor did not converge after cancellation")
+        .expect("address monitor panicked");
+}
+
+// --- S5-7: BuildThrottle tests ---
+
+#[tokio::test]
+async fn build_throttle_limits_concurrency() {
+    let throttle = std::sync::Arc::new(BuildThrottle::new(2, std::time::Duration::ZERO));
+
+    // Acquire two permits (the max).
+    let _p1 = throttle.acquire().await;
+    let _p2 = throttle.acquire().await;
+
+    // A third acquire should not complete immediately.
+    let t3 = throttle.clone();
+    let third = tokio::spawn(async move { t3.acquire().await });
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert!(!third.is_finished(), "third acquire should be blocked");
+
+    // Release one permit; the third should now complete.
+    drop(_p1);
+    let _p3 = tokio::time::timeout(std::time::Duration::from_secs(2), third)
+        .await
+        .expect("third acquire should complete after release")
+        .expect("spawn panicked");
+}
+
+#[tokio::test]
+async fn build_throttle_jitter_delays_acquire() {
+    let throttle = BuildThrottle::new(1, std::time::Duration::from_millis(100));
+    let start = std::time::Instant::now();
+    let _permit = throttle.acquire().await;
+    let elapsed = start.elapsed();
+    // With a 100ms max jitter, the acquire should take at least 0ms (jitter
+    // can be 0) but at most ~100ms + scheduling overhead. We only verify it
+    // completes — the semaphore is not contended.
+    assert!(
+        elapsed < std::time::Duration::from_secs(2),
+        "acquire should complete quickly with no contention, took {elapsed:?}"
+    );
+}

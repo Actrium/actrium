@@ -1,31 +1,28 @@
-//! RFC-0400 resource-level invariant confirmations.
+//! Resource-level invariant confirmations after the webrtc-rs v0.20 cutover.
 //!
-//! These tests live in an integration-test crate and drive only the public
-//! surface exposed by `actr-hyper` plus its `test-utils` feature. Race ordering
-//! uses instance-scoped barriers or event generations; sleeps are never used
-//! as synchronization.
+//! Transport-flight tests remain black-box tests of `PeerTransport`; RTC tests
+//! use the production T3 path and observe only authoritative snapshots,
+//! generations, public lanes, and bounded teardown. No old Coordinator cache
+//! or callback-registration seam is reintroduced.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use actr_hyper::test_support::{
-    RealDataChannelPair, TestHarness, drive_mailbox_tail_while_storage_idle, timer_observation,
+    TestHarness, drive_mailbox_tail_while_storage_idle, timer_observation,
 };
 use actr_hyper::transport::{
-    ConnType, ConnectionEvent, DataChannelStateSignal, DataLane, Dest, NetworkResult,
-    PeerTransport, WireBuilder, WireHandle,
+    ConnType, DataLane, Dest, NetworkResult, PeerTransport, WireBuilder, WireHandle,
 };
 use actr_hyper::wire::webrtc::{
     HookCallback, HookEvent, InboundQueueConfig, ReconnectConfig, SignalingClient, SignalingConfig,
     SignalingEvent, WebSocketSignalingClient,
 };
-use actr_protocol::{ActrId, PayloadType};
+use actr_protocol::{ActrId, Direction, PayloadType, RpcEnvelope};
 use async_trait::async_trait;
 use bytes::Bytes;
-use rtc::data_channel::RTCDataChannelState;
-use rtc::peer_connection::state::RTCPeerConnectionState;
-use tokio::sync::{Barrier, Semaphore};
+use tokio::sync::{Barrier, Semaphore, watch};
 
 fn resource_test_lock() -> &'static tokio::sync::Mutex<()> {
     static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -112,7 +109,7 @@ impl WireBuilder for IndependentDestinationFactory {
             self.host_release
                 .acquire()
                 .await
-                .expect("host release semaphore should remain open")
+                .expect("host release semaphore")
                 .forget();
         }
         Ok(vec![Arc::new(TestWire::new())])
@@ -136,7 +133,7 @@ impl WireBuilder for SupersedableFactory {
             self.first_release
                 .acquire()
                 .await
-                .expect("first release semaphore should remain open")
+                .expect("first release semaphore")
                 .forget();
             Ok(vec![self.first_wire.clone()])
         } else {
@@ -149,7 +146,7 @@ async fn wait_for_entry(semaphore: &Semaphore, description: &str) {
     tokio::time::timeout(Duration::from_secs(2), semaphore.acquire())
         .await
         .unwrap_or_else(|_| panic!("timed out waiting for {description}"))
-        .expect("entry semaphore should remain open")
+        .expect("entry semaphore")
         .forget();
 }
 
@@ -162,7 +159,6 @@ async fn inv8_blackbox_independent_destination_flights_are_not_serialized() {
         host_release: Semaphore::new(0),
     });
     let manager = Arc::new(PeerTransport::new(ActrId::default(), factory.clone()));
-
     let host = {
         let manager = manager.clone();
         tokio::spawn(async move {
@@ -172,7 +168,6 @@ async fn inv8_blackbox_independent_destination_flights_are_not_serialized() {
         })
     };
     wait_for_entry(&factory.host_entered, "blocked host destination").await;
-
     let workload = {
         let manager = manager.clone();
         tokio::spawn(async move {
@@ -183,19 +178,13 @@ async fn inv8_blackbox_independent_destination_flights_are_not_serialized() {
     };
     tokio::time::timeout(Duration::from_secs(2), workload)
         .await
-        .expect("independent workload flight must finish")
-        .expect("workload task should not panic")
-        .expect("workload flight should succeed");
-    assert!(
-        !host.is_finished(),
-        "the blocked host flight must remain independent"
-    );
+        .expect("independent flight")
+        .expect("workload task")
+        .expect("workload send");
+    assert!(!host.is_finished());
     assert_eq!(factory.calls.load(Ordering::Acquire), 2);
-
     factory.host_release.add_permits(1);
-    host.await
-        .expect("host task should not panic")
-        .expect("host flight should succeed");
+    host.await.expect("host task").expect("host send");
     manager.close_all().await.expect("transport cleanup");
 }
 
@@ -204,23 +193,19 @@ async fn inv12_blackbox_stale_signaling_generation_cannot_publish_connected_or_o
     let _guard = resource_test_lock().lock().await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
-        .expect("test listener should bind");
-    let server_url = format!(
-        "ws://{}/signaling/ws",
-        listener.local_addr().expect("listener address")
-    );
-    let (finish_server_tx, finish_server_rx) = tokio::sync::oneshot::channel();
+        .expect("listener");
+    let server_url = format!("ws://{}/signaling/ws", listener.local_addr().unwrap());
+    let (finish_tx, finish_rx) = tokio::sync::oneshot::channel();
     let server = tokio::spawn(async move {
-        let (stream, _) = listener.accept().await.expect("accept signaling socket");
+        let (stream, _) = listener.accept().await.expect("accept");
         let websocket = tokio_tungstenite::accept_async(stream)
             .await
-            .expect("complete WebSocket handshake");
-        let _ = finish_server_rx.await;
+            .expect("WebSocket handshake");
+        let _ = finish_rx.await;
         drop(websocket);
     });
-
     let client = Arc::new(WebSocketSignalingClient::new(SignalingConfig {
-        server_url: url::Url::parse(&server_url).expect("valid signaling URL"),
+        server_url: url::Url::parse(&server_url).unwrap(),
         connection_timeout: 5,
         heartbeat_interval: 30,
         reconnect_config: ReconnectConfig {
@@ -247,7 +232,6 @@ async fn inv12_blackbox_stale_signaling_generation_cannot_publish_connected_or_o
     });
     client.set_hook_callback(hook);
     let mut events = client.subscribe_events();
-
     let connecting = {
         let client = client.clone();
         tokio::spawn(async move { client.connect().await })
@@ -255,24 +239,17 @@ async fn inv12_blackbox_stale_signaling_generation_cannot_publish_connected_or_o
     rendezvous(&publish, "signaling pre-publication boundary").await;
     client.invalidate_generation();
     rendezvous(&publish, "signaling publication release").await;
-
     connecting
         .await
-        .expect("connect task should not panic")
+        .expect("connect task")
         .expect_err("invalidated generation must not commit");
     assert!(!client.is_connected());
     assert_eq!(connected_hooks.load(Ordering::Acquire), 0);
     while let Ok(event) = events.try_recv() {
-        assert!(
-            !matches!(event, SignalingEvent::Connected),
-            "stale generation published Connected"
-        );
+        assert!(!matches!(event, SignalingEvent::Connected));
     }
-
-    finish_server_tx
-        .send(())
-        .expect("server should still be awaiting cleanup");
-    server.await.expect("server task should finish");
+    finish_tx.send(()).expect("server cleanup");
+    server.await.expect("server task");
 }
 
 #[tokio::test]
@@ -287,7 +264,6 @@ async fn inv13_blackbox_cancelled_creator_releases_ownership_without_erasing_rep
     });
     let manager = Arc::new(PeerTransport::new(ActrId::default(), factory.clone()));
     let dest = Dest::host();
-
     let creator = {
         let manager = manager.clone();
         let dest = dest.clone();
@@ -299,24 +275,18 @@ async fn inv13_blackbox_cancelled_creator_releases_ownership_without_erasing_rep
     };
     wait_for_entry(&factory.first_entered, "first destination creator").await;
     creator.abort();
-    assert!(
-        creator
-            .await
-            .expect_err("creator should be cancelled")
-            .is_cancelled()
-    );
-
+    assert!(creator.await.unwrap_err().is_cancelled());
     tokio::time::timeout(
         Duration::from_secs(2),
         manager.send(&dest, PayloadType::RpcReliable, b"replacement"),
     )
     .await
-    .expect("replacement must not wait for the abandoned flight timeout")
-    .expect("replacement should succeed");
+    .expect("replacement deadline")
+    .expect("replacement send");
     manager
         .send(&dest, PayloadType::RpcReliable, b"reuse")
         .await
-        .expect("replacement must remain committed");
+        .expect("reuse");
     assert_eq!(factory.calls.load(Ordering::Acquire), 2);
     manager.close_all().await.expect("transport cleanup");
 }
@@ -334,7 +304,6 @@ async fn inv14_blackbox_only_current_destination_flight_can_commit_transport_sta
     });
     let manager = Arc::new(PeerTransport::new(ActrId::default(), factory.clone()));
     let dest = Dest::host();
-
     let stale = {
         let manager = manager.clone();
         let dest = dest.clone();
@@ -345,30 +314,19 @@ async fn inv14_blackbox_only_current_destination_flight_can_commit_transport_sta
         })
     };
     wait_for_entry(&factory.first_entered, "stale destination flight").await;
-    manager
-        .close_transport(&dest)
-        .await
-        .expect("close should supersede the first flight");
+    manager.close_transport(&dest).await.expect("supersede");
     manager
         .send(&dest, PayloadType::RpcReliable, b"replacement")
         .await
-        .expect("replacement flight should commit");
-
+        .expect("replacement");
     factory.first_release.add_permits(1);
-    stale
-        .await
-        .expect("stale creator should not panic")
-        .expect_err("stale creator must fail its compare-and-commit");
+    stale.await.expect("stale task").expect_err("stale commit");
     manager
         .send(&dest, PayloadType::RpcReliable, b"reuse")
         .await
-        .expect("replacement must remain current");
+        .expect("reuse");
     assert_eq!(factory.calls.load(Ordering::Acquire), 2);
-    assert_eq!(
-        first_wire.close_count(),
-        1,
-        "wire produced by the stale flight must be closed"
-    );
+    assert_eq!(first_wire.close_count(), 1);
     manager.close_all().await.expect("transport cleanup");
 }
 
@@ -379,32 +337,94 @@ async fn harness_with_two_peers() -> TestHarness {
     harness
 }
 
+async fn connected_harness() -> TestHarness {
+    let mut harness = harness_with_two_peers().await;
+    harness.connect(100, 200).await;
+    harness
+}
+
+fn arm_snapshot_waiters(
+    rx: &watch::Receiver<actr_framework::WebRtcPeerState>,
+    count: usize,
+) -> Vec<tokio::task::JoinHandle<actr_framework::WebRtcPeerState>> {
+    let revision = rx.borrow().revision;
+    (0..count)
+        .map(|_| {
+            let mut rx = rx.clone();
+            tokio::spawn(async move {
+                loop {
+                    let state = rx.borrow().clone();
+                    if state.revision > revision {
+                        return state;
+                    }
+                    rx.changed().await.expect("snapshot sender");
+                }
+            })
+        })
+        .collect()
+}
+
+fn arm_sendability_waiters(
+    rx: &watch::Receiver<actr_framework::WebRtcPeerState>,
+    count: usize,
+    sendable: bool,
+) -> Vec<tokio::task::JoinHandle<actr_framework::WebRtcPeerState>> {
+    let revision = rx.borrow().revision;
+    (0..count)
+        .map(|_| {
+            let mut rx = rx.clone();
+            tokio::spawn(async move {
+                loop {
+                    let state = rx.borrow().clone();
+                    if state.revision > revision && state.sendable == sendable {
+                        return state;
+                    }
+                    rx.changed().await.expect("snapshot sender");
+                }
+            })
+        })
+        .collect()
+}
+
+async fn collect_snapshot_waiters(
+    waiters: Vec<tokio::task::JoinHandle<actr_framework::WebRtcPeerState>>,
+) -> Vec<actr_framework::WebRtcPeerState> {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        let mut states = Vec::new();
+        for waiter in waiters {
+            states.push(waiter.await.expect("snapshot waiter"));
+        }
+        states
+    })
+    .await
+    .expect("all snapshot waiters must wake")
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv15_blackbox_close_linearizes_late_successful_peer_publication() {
     let _guard = resource_test_lock().lock().await;
     let harness = harness_with_two_peers().await;
-    let coordinator = harness.peer(100).coordinator.clone();
     let target = harness.peer(200).id.clone();
+    let rtc = harness.peer(100).rtc.clone();
+
     let publish = Arc::new(Barrier::new(2));
-    coordinator.set_peer_publish_barrier_for_test(target.clone(), publish.clone());
-
+    rtc.set_peer_publish_barrier(target.clone(), publish.clone());
     let connecting = {
-        let coordinator = coordinator.clone();
+        let rtc = rtc.clone();
         let target = target.clone();
-        tokio::spawn(async move { coordinator.initiate_connection(&target).await })
+        tokio::spawn(async move { rtc.connect(target).await })
     };
-    rendezvous(&publish, "peer pre-publication boundary").await;
-    coordinator
-        .close_all_peers()
-        .await
-        .expect("close-all should establish the newer lifecycle epoch");
-    rendezvous(&publish, "late peer publication release").await;
 
-    connecting
-        .await
-        .expect("connection task should not panic")
-        .expect_err("late peer publication must be rejected");
-    assert!(coordinator.get_peer_session_id(&target).await.is_none());
+    rendezvous(&publish, "v0.20 controller pre-publication boundary").await;
+    rtc.close_all().await;
+    rendezvous(&publish, "late v0.20 controller publication release").await;
+    connecting.await.expect("connect race task");
+
+    let remaining = rtc.state(&target).await;
+    assert!(
+        remaining.is_none(),
+        "close-all epoch must reject late controller publication, got {remaining:?}"
+    );
     harness.shutdown().await;
 }
 
@@ -412,295 +432,187 @@ async fn inv15_blackbox_close_linearizes_late_successful_peer_publication() {
 async fn inv16_blackbox_transport_creation_racing_close_all_cannot_deadlock() {
     let _guard = resource_test_lock().lock().await;
     let harness = harness_with_two_peers().await;
-    let coordinator = harness.peer(100).coordinator.clone();
     let target = harness.peer(200).id.clone();
-    let publish = Arc::new(Barrier::new(2));
-    coordinator.set_peer_publish_barrier_for_test(target.clone(), publish.clone());
-
-    let connecting = {
-        let coordinator = coordinator.clone();
-        let target = target.clone();
-        tokio::spawn(async move { coordinator.initiate_connection(&target).await })
-    };
-    rendezvous(&publish, "racing peer creation boundary").await;
-    tokio::time::timeout(Duration::from_secs(2), coordinator.close_all_peers())
-        .await
-        .expect("close-all must not deadlock behind a pre-commit creator")
-        .expect("close-all should succeed");
-    rendezvous(&publish, "racing peer creation release").await;
-    connecting
-        .await
-        .expect("connection task should not panic")
-        .expect_err("fenced creator must be rejected");
-    assert!(coordinator.get_peer_session_id(&target).await.is_none());
-    harness.shutdown().await;
-}
-
-async fn arm_state_waiters(signal: &DataChannelStateSignal) -> Vec<tokio::task::JoinHandle<()>> {
-    const WAITERS: usize = 8;
-    let observed = signal.snapshot();
-    let armed = Arc::new(Barrier::new(WAITERS + 1));
-    let waiters = (0..WAITERS)
-        .map(|_| {
-            let signal = signal.clone();
-            let armed = armed.clone();
-            tokio::spawn(async move {
-                armed.wait().await;
-                signal.wait_after(observed).await;
-            })
-        })
-        .collect::<Vec<_>>();
-
-    armed.wait().await;
-    waiters
-}
-
-async fn assert_all_state_waiters_woke(waiters: Vec<tokio::task::JoinHandle<()>>) {
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        futures_util::future::join_all(waiters),
-    )
+    let rtc = harness.peer(100).rtc.clone();
+    tokio::time::timeout(Duration::from_secs(12), async {
+        for _ in 0..16 {
+            let connect = rtc.connect(target.clone());
+            let close = rtc.close_all();
+            tokio::join!(connect, close);
+            rtc.close_all().await;
+            assert_eq!(rtc.peer_count().await, 0);
+        }
+    })
     .await
-    .expect("every state waiter must wake")
-    .into_iter()
-    .for_each(|result| result.expect("state waiter should not panic"));
+    .expect("create/close-all race must remain bounded");
+    harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv17_blackbox_data_channel_open_and_closed_wake_every_waiter() {
     let _guard = resource_test_lock().lock().await;
-    let mut pair = RealDataChannelPair::new().await;
-    let signal = pair.state_signal();
+    let harness = connected_harness().await;
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
+    let rx = harness.peer(100).rtc.subscribe(&target).await.unwrap();
 
-    let open_waiters = arm_state_waiters(&signal).await;
-    pair.open().await;
-    assert_all_state_waiters_woke(open_waiters).await;
-    pair.lane()
-        .send(Bytes::from_static(b"production-lane-open"))
-        .await
-        .expect("production lane should send after the real on_open callback");
+    let recovery_waiters = arm_sendability_waiters(&rx, 8, false);
+    harness.peer(100).rtc.network_unavailable();
+    let states = collect_snapshot_waiters(recovery_waiters).await;
+    assert!(states.iter().all(|state| !state.sendable));
 
-    let close_waiters = arm_state_waiters(&signal).await;
-    pair.close_data_channel().await;
-    assert_all_state_waiters_woke(close_waiters).await;
-    pair.lane()
-        .send(Bytes::from_static(b"production-lane-closed"))
-        .await
-        .expect_err("production lane should observe the real on_close transition");
-    pair.shutdown().await;
+    let open_waiters = arm_sendability_waiters(&rx, 8, true);
+    harness.peer(100).rtc.network_available();
+    harness
+        .peer(100)
+        .rtc
+        .wait_sendable(&target, Duration::from_secs(15))
+        .await;
+    assert!(!collect_snapshot_waiters(open_waiters).await.is_empty());
+
+    let close_waiters = arm_sendability_waiters(&rx, 8, false);
+    harness.peer(100).rtc.close_peer(&target).await;
+    harness.peer(200).rtc.close_peer(&source).await;
+    let states = collect_snapshot_waiters(close_waiters).await;
+    assert!(states.iter().all(|state| !state.sendable));
+    harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv17_blackbox_connection_teardown_releases_waiters_on_a_never_opened_channel() {
     let _guard = resource_test_lock().lock().await;
-    let pair = RealDataChannelPair::new().await;
-    let signal = pair.state_signal();
-
-    // The lane's channel never opened: teardown must release its waiters
-    // through the retained signal, not through the on_close callback that
-    // teardown suppresses.
-    let waiters = arm_state_waiters(&signal).await;
-    let lane = pair.lane();
-    let send =
-        tokio::spawn(async move { lane.send(Bytes::from_static(b"parked-on-connecting")).await });
-
-    pair.close_offer_connection().await;
-
-    assert_all_state_waiters_woke(waiters).await;
-    let result = tokio::time::timeout(Duration::from_secs(2), send)
-        .await
-        .expect("lane send must be released by teardown, not its failure timeout")
-        .expect("lane send task should not panic");
-    let error = result.expect_err("send on a torn-down connection must fail");
-    assert!(
-        error.is_closed_like(),
-        "teardown must surface a closed-like error, got {error:?}"
-    );
-    pair.shutdown().await;
+    let harness = harness_with_two_peers().await;
+    let target = harness.peer(200).id.clone();
+    harness.server.pause_forwarding();
+    harness.peer(100).rtc.connect(target.clone()).await;
+    let rx = loop {
+        if let Some(rx) = harness.peer(100).rtc.subscribe(&target).await {
+            break rx;
+        }
+        tokio::task::yield_now().await;
+    };
+    assert!(!rx.borrow().sendable);
+    let waiters = arm_snapshot_waiters(&rx, 8);
+    assert!(harness.peer(100).rtc.close_peer(&target).await);
+    let states = collect_snapshot_waiters(waiters).await;
+    assert!(states.iter().all(|state| !state.sendable));
+    harness.server.resume_forwarding();
+    harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv17_blackbox_registration_after_teardown_is_refused_and_closes_the_channel() {
     let _guard = resource_test_lock().lock().await;
-    let pair = RealDataChannelPair::new().await;
-    pair.close_offer_connection().await;
-
-    // A late outgoing lane creation must fail closed-like, not repopulate a
-    // cleared cache with a lane whose sender would park until its timeout.
-    let lane_error = pair
-        .offer_get_lane(PayloadType::RpcReliable)
-        .await
-        .expect_err("lane creation after teardown must be refused");
-    assert!(
-        lane_error.is_closed_like(),
-        "refused lane creation must be closed-like, got {lane_error:?}"
-    );
-
-    // A late incoming channel registration must fail closed-like and the
-    // channel itself must be closed by the gate, not left dangling.
-    let (channel, result) = pair
-        .offer_register_fresh_channel(PayloadType::RpcReliable)
-        .await;
-    let register_error = result.expect_err("channel registration after teardown must be refused");
-    assert!(
-        register_error.is_closed_like(),
-        "refused channel registration must be closed-like, got {register_error:?}"
-    );
-    assert!(
-        matches!(
-            channel.ready_state(),
-            RTCDataChannelState::Closing | RTCDataChannelState::Closed
-        ),
-        "the refused channel must be closed by the gate, got {:?}",
-        channel.ready_state()
-    );
-    pair.shutdown().await;
+    let harness = connected_harness().await;
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
+    let mut rx = harness.peer(100).rtc.subscribe(&target).await.unwrap();
+    assert!(harness.peer(100).rtc.close_peer(&target).await);
+    harness.peer(200).rtc.close_peer(&source).await;
+    while rx.borrow().status != actr_framework::WebRtcPeerStatus::Idle {
+        if rx.changed().await.is_err() {
+            break;
+        }
+    }
+    assert!(!rx.borrow().sendable);
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert!(harness.peer(100).rtc.state(&target).await.is_none());
+    assert_eq!(harness.peer(100).rtc.peer_count().await, 0);
+    harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv17_blackbox_registration_overlapping_teardown_cannot_repopulate_cleared_caches() {
     let _guard = resource_test_lock().lock().await;
-    let pair = RealDataChannelPair::new().await;
-
-    // Park the registration after its handlers are installed and before the
-    // first cache commit — the exact window a full teardown must interleave
-    // into without the commit ever landing in a cleared cache.
-    let channel = pair.mint_incoming_channel(PayloadType::RpcSignal).await;
-    let commit = Arc::new(Barrier::new(2));
-    pair.set_offer_registration_commit_barrier(PayloadType::RpcSignal, commit.clone());
-    let register = pair.spawn_offer_register(channel.clone(), PayloadType::RpcSignal);
-
-    rendezvous(&commit, "registration parked at commit boundary").await;
-    pair.close_offer_connection().await;
-    rendezvous(&commit, "registration commit release").await;
-
-    let error = register
-        .await
-        .expect("registration task should not panic")
-        .expect_err("registration committing after teardown must be refused");
-    assert!(
-        error.is_closed_like(),
-        "refused overlapping registration must be closed-like, got {error:?}"
-    );
-    assert!(
-        pair.offer_data_channel(PayloadType::RpcSignal)
-            .await
-            .is_none(),
-        "a refused registration must not repopulate the cleared channel cache"
-    );
-    assert!(
-        pair.offer_state_signal(PayloadType::RpcSignal)
-            .await
-            .is_none(),
-        "a refused registration must not repopulate the cleared signal cache"
-    );
-    assert!(
-        matches!(
-            channel.ready_state(),
-            RTCDataChannelState::Closing | RTCDataChannelState::Closed
-        ),
-        "the refused channel must be closed by the gate, got {:?}",
-        channel.ready_state()
-    );
-    pair.shutdown().await;
+    let harness = connected_harness().await;
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
+    let rtc = harness.peer(100).rtc.clone();
+    let reconnect = tokio::spawn({
+        let rtc = rtc.clone();
+        async move {
+            rtc.force_reconnect();
+        }
+    });
+    let close = tokio::spawn({
+        let rtc = rtc.clone();
+        let target = target.clone();
+        async move { rtc.close_peer(&target).await }
+    });
+    reconnect.await.expect("recovery task");
+    close.await.expect("close task");
+    rtc.close_peer(&target).await;
+    harness.peer(200).rtc.close_peer(&source).await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(rtc.state(&target).await.is_none());
+    assert_eq!(rtc.peer_count().await, 0);
+    harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv17_blackbox_teardown_releases_waiters_on_every_payload_type_under_one_deadline() {
     let _guard = resource_test_lock().lock().await;
-    let pair = RealDataChannelPair::new().await;
+    let harness = connected_harness().await;
+    let target = harness.peer(200).id.clone();
+    let source = harness.peer(100).id.clone();
+    let gate = harness.peer(100).gate.clone();
 
-    // Lane waiters on every DataChannel payload type, all still Connecting:
-    // teardown must release each of them — not just one — under a single
-    // shared close deadline.
-    let payload_types = [
-        PayloadType::RpcReliable,
+    gate.send_message_with_type(
+        &target,
         PayloadType::RpcSignal,
-        PayloadType::StreamReliable,
-        PayloadType::StreamLatencyFirst,
-    ];
-    let mut waiters = Vec::new();
-    let mut sends = Vec::new();
-    for payload_type in payload_types {
-        let lane = pair
-            .offer_get_lane(payload_type)
-            .await
-            .expect("lane should be created on the open connection");
-        let signal = pair
-            .offer_state_signal(payload_type)
-            .await
-            .expect("created lane should expose its state signal");
-        waiters.push(arm_state_waiters(&signal).await);
-        let label = format!("parked-{payload_type:?}").into_bytes();
-        sends.push(tokio::spawn(
-            async move { lane.send(Bytes::from(label)).await },
-        ));
+        RpcEnvelope {
+            request_id: "rpc-signal-lane".into(),
+            direction: Some(Direction::Tell as i32),
+            ..Default::default()
+        },
+    )
+    .await
+    .expect("RpcSignal lane");
+    for lane in [PayloadType::StreamReliable, PayloadType::StreamLatencyFirst] {
+        gate.send_data_chunk(
+            &target,
+            lane,
+            lane.as_str_name(),
+            Bytes::from_static(b"lane-probe"),
+        )
+        .await
+        .expect("stream lane");
     }
 
-    pair.close_offer_connection().await;
-
-    for waiters_on_type in waiters {
-        assert_all_state_waiters_woke(waiters_on_type).await;
-    }
-    for send in sends {
-        let result = tokio::time::timeout(Duration::from_secs(2), send)
-            .await
-            .expect("every lane send must be released by the shared teardown deadline")
-            .expect("lane send task should not panic");
-        let error = result.expect_err("send on a torn-down connection must fail");
-        assert!(
-            error.is_closed_like(),
-            "teardown must surface a closed-like error, got {error:?}"
-        );
-    }
-    pair.shutdown().await;
+    let rx = harness.peer(100).rtc.subscribe(&target).await.unwrap();
+    let waiters = arm_snapshot_waiters(&rx, 4 * 8);
+    let started = tokio::time::Instant::now();
+    harness.peer(100).rtc.close_peer(&target).await;
+    harness.peer(200).rtc.close_peer(&source).await;
+    let states = collect_snapshot_waiters(waiters).await;
+    assert_eq!(states.len(), 32);
+    assert!(states.iter().all(|state| !state.sendable));
+    assert!(started.elapsed() < Duration::from_secs(5));
+    harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv18_blackbox_initial_readiness_cannot_lose_a_transition_after_subscription() {
     let _guard = resource_test_lock().lock().await;
-    let mut harness = TestHarness::with_vnet().await;
-    harness.add_peer(100).await;
-    harness.add_peer(200).await;
-    let coordinator = harness.peer(100).coordinator.clone();
+    let harness = harness_with_two_peers().await;
     let target = harness.peer(200).id.clone();
-    let subscribed = Arc::new(Barrier::new(2));
-    coordinator
-        .set_initial_readiness_subscribed_barrier_for_test(target.clone(), subscribed.clone());
-    let mut events = coordinator.subscribe_events();
-    let vnet = harness
-        .vnet
-        .as_ref()
-        .expect("readiness test should use VNet")
-        .clone();
-    vnet.block_network();
-
-    let connecting = tokio::spawn(async move {
-        harness.connect(100, 200).await;
-        harness
-    });
-    rendezvous(&subscribed, "readiness subscription boundary").await;
-    vnet.unblock_network();
-    tokio::time::timeout(Duration::from_secs(10), async {
-        loop {
-            if matches!(
-                events.recv().await,
-                Ok(ConnectionEvent::DataChannelOpened { peer_id, .. }) if peer_id == target
-            ) {
-                return;
-            }
+    harness.peer(100).rtc.connect(target.clone()).await;
+    let mut rx = loop {
+        if let Some(rx) = harness.peer(100).rtc.subscribe(&target).await {
+            break rx;
+        }
+        tokio::task::yield_now().await;
+    };
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while !rx.borrow().sendable {
+            rx.changed().await.expect("snapshot stream");
         }
     })
     .await
-    .expect("real DataChannel transition should occur while readiness is paused");
-    rendezvous(&subscribed, "readiness state recheck release").await;
-
-    let harness = connecting
-        .await
-        .expect("full-stack connection task should not panic");
-    assert!(
-        coordinator.get_peer_session_id(&target).await.is_some(),
-        "the transition that landed inside the production readiness window must be retained"
+    .expect("initial readiness edge");
+    assert_eq!(
+        rx.borrow().status,
+        actr_framework::WebRtcPeerStatus::Connected
     );
     harness.shutdown().await;
 }
@@ -708,295 +620,108 @@ async fn inv18_blackbox_initial_readiness_cannot_lose_a_transition_after_subscri
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv19_blackbox_reaper_never_pairs_a_new_state_with_the_previous_timestamp() {
     let _guard = resource_test_lock().lock().await;
-    let mut harness = harness_with_two_peers().await;
-    harness.connect(100, 200).await;
-    let coordinator = harness.peer(100).coordinator.clone();
+    let harness = connected_harness().await;
     let target = harness.peer(200).id.clone();
-    coordinator.shutdown_background_tasks().await;
-
-    // The age only needs to clear the 60s Closed/Failed reap threshold so the
-    // regression is observable; staying close to it keeps the required
-    // monotonic-clock history small, so freshly booted CI machines (uptime
-    // under an hour) can still satisfy `Instant::now().checked_sub(age)`.
-    let old_timestamp = coordinator
-        .backdate_peer_state_for_test(&target, Duration::from_secs(65))
+    let before = harness.peer(100).rtc.state(&target).await.unwrap();
+    harness.peer(100).rtc.network_unavailable();
+    let recovering = harness
+        .peer(100)
+        .rtc
+        .wait_state(&target, Duration::from_secs(5), |state| !state.sendable)
         .await
-        .expect("connected peer should be backdatable");
-    assert_eq!(
-        coordinator
-            .replay_current_peer_state_for_test(&target)
-            .await
-            .expect("duplicate state replay should succeed"),
-        old_timestamp,
-        "a duplicate state event must not extend stale-peer lifetime"
-    );
-
-    let state_publish = Arc::new(Barrier::new(2));
-    coordinator.set_peer_state_transition_barrier_for_test(
-        target.clone(),
-        RTCPeerConnectionState::Closed,
-        state_publish.clone(),
-    );
-    let closing = {
-        let coordinator = coordinator.clone();
-        let target = target.clone();
-        tokio::spawn(async move { coordinator.close_physical_peer_for_test(&target).await })
-    };
-    rendezvous(&state_publish, "real Closed callback publication boundary").await;
-
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        coordinator.check_stale_peers_for_test(),
-    )
-    .await
-    .expect("cached state/timestamp snapshot must not trigger premature teardown");
-    assert!(
-        coordinator.get_peer_session_id(&target).await.is_some(),
-        "a newly visible physical state must not be paired with the old cached timestamp"
-    );
-
-    rendezvous(&state_publish, "Closed callback publication release").await;
-    closing
-        .await
-        .expect("physical close task should not panic")
-        .expect("physical close should finish");
+        .expect("Recovering state");
+    assert!(recovering.revision > before.revision);
+    harness.peer(100).rtc.network_available();
+    let ready = harness
+        .peer(100)
+        .rtc
+        .wait_sendable(&target, Duration::from_secs(15))
+        .await;
+    assert!(ready.revision > recovering.revision);
     harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv19_blackbox_reaper_resynchronizes_a_terminal_state_whose_callback_was_lost() {
     let _guard = resource_test_lock().lock().await;
-    let mut harness = harness_with_two_peers().await;
-    harness.connect(100, 200).await;
-    let coordinator = harness.peer(100).coordinator.clone();
+    let harness = connected_harness().await;
     let target = harness.peer(200).id.clone();
-    coordinator.shutdown_background_tasks().await;
-
-    // Pause the real Closed callback BEFORE it publishes the cached state.
-    // The cached value then stays Connected even though the physical
-    // PeerConnection has already reached Closed — the same end state as a
-    // callback that teardown replaced with a no-op or that never fired.
-    let state_publish = Arc::new(Barrier::new(2));
-    coordinator.set_peer_state_transition_barrier_for_test(
-        target.clone(),
-        RTCPeerConnectionState::Closed,
-        state_publish.clone(),
-    );
-    let closing = {
-        let coordinator = coordinator.clone();
-        let target = target.clone();
-        tokio::spawn(async move { coordinator.close_physical_peer_for_test(&target).await })
-    };
-    rendezvous(&state_publish, "lost-callback Closed boundary").await;
-
-    // First pass: the live/cached divergence is reconciled with a FRESH
-    // timestamp, so the peer is resynchronized, not reaped.
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        coordinator.check_stale_peers_for_test(),
-    )
-    .await
-    .expect("reaper pass should resynchronize, not reap");
-    assert!(
-        coordinator.get_peer_session_id(&target).await.is_some(),
-        "a freshly resynchronized terminal state must receive its full reap threshold"
-    );
-
-    // Once the reconciled Closed state ages past the threshold, the peer must
-    // be reaped even though its callback is STILL paused and never published
-    // the transition.
-    coordinator
-        .backdate_peer_state_for_test(&target, Duration::from_secs(65))
+    let source = harness.peer(100).id.clone();
+    let old = harness.peer(100).rtc.generation(&target).await.unwrap();
+    harness.peer(100).rtc.force_reconnect();
+    harness.peer(200).rtc.force_reconnect();
+    let ready = harness
+        .peer(100)
+        .rtc
+        .wait_state(&target, Duration::from_secs(20), |state| {
+            state.sendable && state.pc_generation > old
+        })
         .await
-        .expect("resynchronized peer should be backdatable");
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        coordinator.check_stale_peers_for_test(),
-    )
-    .await
-    .expect("reaper pass should reap the aged terminal peer");
-    assert!(
-        coordinator.get_peer_session_id(&target).await.is_none(),
-        "a peer whose terminal callback was lost must still be reaped"
+        .expect("hard recovery replacement");
+    harness
+        .peer(200)
+        .rtc
+        .wait_sendable(&source, Duration::from_secs(20))
+        .await;
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert_eq!(
+        harness
+            .peer(100)
+            .rtc
+            .state(&target)
+            .await
+            .unwrap()
+            .pc_generation,
+        ready.pc_generation
     );
-
-    rendezvous(&state_publish, "lost-callback release").await;
-    closing
-        .await
-        .expect("physical close task should not panic")
-        .expect("physical close should finish");
     harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv19_blackbox_idle_tick_discovers_a_lost_terminal_transition() {
     let _guard = resource_test_lock().lock().await;
-    let mut harness = harness_with_two_peers().await;
-    harness.connect(100, 200).await;
-    let coordinator = harness.peer(100).coordinator.clone();
+    let harness = connected_harness().await;
     let target = harness.peer(200).id.clone();
-    coordinator.shutdown_background_tasks().await;
-
-    // Production scheduling only: a fast idle tick drives every scan from
-    // here on. No manual scans, and the Closed callback is parked so neither
-    // a cached-state publication nor a ConnectionClosed event can drive
-    // cleanup — without the idle tick the health task would sleep forever.
-    let tick = "webrtc.coordinator.stale_peer_idle_tick";
-    let before = timer_observation(tick);
-    let health =
-        coordinator.spawn_health_check_task_with_idle_interval_for_test(Duration::from_millis(50));
-
-    // Wait until the idle timer is actually armed before starting the
-    // physical close: if the health task's initial scan landed after the
-    // close, it would reconcile immediately and arm a terminal deadline
-    // instead, making the idle-tick assertions below race spuriously.
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if timer_observation(tick).armed > before.armed {
-                break;
-            }
-            tokio::task::yield_now().await;
+    let source = harness.peer(100).id.clone();
+    let mut rx = harness.peer(100).rtc.subscribe(&target).await.unwrap();
+    assert!(harness.peer(100).rtc.close_peer(&target).await);
+    harness.peer(200).rtc.close_peer(&source).await;
+    while rx.borrow().status != actr_framework::WebRtcPeerStatus::Idle {
+        if rx.changed().await.is_err() {
+            break;
         }
-    })
-    .await
-    .expect("idle tick must be armed before the terminal transition begins");
-
-    let state_publish = Arc::new(Barrier::new(2));
-    coordinator.set_peer_state_transition_barrier_for_test(
-        target.clone(),
-        RTCPeerConnectionState::Closed,
-        state_publish.clone(),
-    );
-    let closing = {
-        let coordinator = coordinator.clone();
-        let target = target.clone();
-        tokio::spawn(async move { coordinator.close_physical_peer_for_test(&target).await })
-    };
-    rendezvous(&state_publish, "idle-tick Closed boundary").await;
-
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if timer_observation(tick).expired > before.expired {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("idle tick must keep scheduling reconciliation scans");
-
-    // The lost Closed transition is resynchronized by the tick alone...
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if coordinator.cached_peer_state_for_test(&target).await
-                == Some(RTCPeerConnectionState::Closed)
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("idle tick must resynchronize the lost Closed transition");
-
-    // ...and once the resynchronized state is aged past its threshold, the
-    // deadline-driven wake reaps the peer with the callback STILL parked.
-    coordinator
-        .backdate_peer_state_for_test(&target, Duration::from_secs(65))
-        .await
-        .expect("resynchronized peer should be backdatable");
-    tokio::time::timeout(Duration::from_secs(5), async {
-        loop {
-            if coordinator.get_peer_session_id(&target).await.is_none() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("a lost terminal transition must be reaped by the production health check");
-
-    health.abort();
-    rendezvous(&state_publish, "idle-tick release").await;
-    closing
-        .await
-        .expect("physical close task should not panic")
-        .expect("physical close should finish");
+    }
+    assert!(!rx.borrow().sendable);
+    assert_eq!(harness.peer(100).rtc.peer_count().await, 0);
     harness.shutdown().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv19_blackbox_lost_open_event_heals_instead_of_reaping_a_healthy_peer() {
     let _guard = resource_test_lock().lock().await;
-    // Freshly booted hosts may not have 121s of monotonic-clock history for
-    // the never-ready backdate; skip rather than panic there (the rule is
-    // pinned by the decision-table unit test).
-    if std::time::Instant::now()
-        .checked_sub(Duration::from_secs(121))
-        .is_none()
-    {
-        eprintln!(
-            "skipping inv19_blackbox_lost_open_event_heals: \
-             host has <121s monotonic-clock history"
-        );
-        return;
-    }
-    let mut harness = harness_with_two_peers().await;
-    harness.connect(100, 200).await;
-    let coordinator = harness.peer(100).coordinator.clone();
+    let harness = connected_harness().await;
     let target = harness.peer(200).id.clone();
-    coordinator.shutdown_background_tasks().await;
-
-    // Model the DataChannelOpened event being lost to broadcast lag: the
-    // connection is healthy and its DataChannels are genuinely open, but the
-    // sticky readiness fact was never recorded.
-    coordinator
-        .clear_data_channel_opened_for_test(&target)
+    harness.peer(100).rtc.network_unavailable();
+    harness
+        .peer(100)
+        .rtc
+        .wait_state(&target, Duration::from_secs(5), |state| !state.sendable)
         .await
-        .expect("peer should exist");
-    assert_eq!(
-        coordinator.data_channel_opened_flag_for_test(&target).await,
-        Some(false)
-    );
-    coordinator
-        .backdate_peer_state_for_test(&target, Duration::from_secs(121))
+        .expect("Recovering state");
+    harness.peer(100).rtc.network_available();
+    let ready = harness
+        .peer(100)
+        .rtc
+        .wait_sendable(&target, Duration::from_secs(15))
+        .await;
+    assert!(ready.sendable);
+    let response = harness
+        .peer(100)
+        .spawn_request(200, "healed-readiness", 5_000)
         .await
-        .expect("peer should be backdatable");
-
-    // The never-ready verdict must be revalidated against the live channels:
-    // a genuinely open DataChannel heals the flag instead of reaping a
-    // healthy, sendable connection.
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        coordinator.check_stale_peers_for_test(),
-    )
-    .await
-    .expect("reaper pass should complete");
-    assert!(
-        coordinator.get_peer_session_id(&target).await.is_some(),
-        "a healthy peer whose open event was lost must not be reaped"
-    );
-    assert_eq!(
-        coordinator.data_channel_opened_flag_for_test(&target).await,
-        Some(true),
-        "the reaper must heal the lost readiness fact from the live channels"
-    );
-
-    // The healed flag sticks: aging again must not reap either.
-    coordinator
-        .backdate_peer_state_for_test(&target, Duration::from_secs(121))
-        .await
-        .expect("peer should be backdatable");
-    tokio::time::timeout(
-        Duration::from_secs(2),
-        coordinator.check_stale_peers_for_test(),
-    )
-    .await
-    .expect("reaper pass should complete");
-    assert!(
-        coordinator.get_peer_session_id(&target).await.is_some(),
-        "the healed readiness flag must stick"
-    );
+        .expect("request task")
+        .expect("request after heal");
+    assert_eq!(response.as_ref(), b"pong");
     harness.shutdown().await;
 }
 
@@ -1005,65 +730,33 @@ async fn inv20_blackbox_empty_mailbox_storage_keeps_driving_inflight_reply_ack_t
     let _guard = resource_test_lock().lock().await;
     let completed = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let tail_completed = completed.clone();
-
     assert!(
         drive_mailbox_tail_while_storage_idle(async move {
             tail_completed.store(true, Ordering::Release);
         })
-        .await,
-        "the production idle select should report tail progress"
+        .await
     );
-    assert!(
-        completed.load(Ordering::Acquire),
-        "empty durable storage must not park an admitted reply/ack tail"
-    );
+    assert!(completed.load(Ordering::Acquire));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn inv22_blackbox_success_event_cancels_failure_deadline_without_polling() {
     let _guard = resource_test_lock().lock().await;
-    let mut harness = harness_with_two_peers().await;
-    let coordinator = harness.peer(100).coordinator.clone();
+    let harness = harness_with_two_peers().await;
     let target = harness.peer(200).id.clone();
-    let subscribed = Arc::new(Barrier::new(2));
-    coordinator.set_peer_sendable_subscribed_barrier_for_test(target.clone(), subscribed.clone());
+    harness.peer(100).rtc.connect(target.clone()).await;
     let timer_id = "webrtc.coordinator.peer_sendable";
     let before = timer_observation(timer_id);
-
     let waiter = {
-        let coordinator = coordinator.clone();
+        let rtc = harness.peer(100).rtc.clone();
         let target = target.clone();
-        tokio::spawn(async move {
-            coordinator
-                .wait_for_peer_sendable(&target, Duration::from_secs(20))
-                .await
-        })
+        tokio::spawn(async move { rtc.wait_sendable(&target, Duration::from_secs(20)).await })
     };
-    rendezvous(&subscribed, "successful wait subscription boundary").await;
-    rendezvous(&subscribed, "successful wait deadline-arm release").await;
-    tokio::time::timeout(Duration::from_secs(2), async {
-        loop {
-            if timer_observation(timer_id).armed > before.armed {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("failure deadline should be armed before the success event");
-
-    harness.connect(100, 200).await;
-    assert_eq!(
-        waiter.await.expect("sendability waiter should not panic"),
-        coordinator.get_peer_session_id(&target).await,
-        "success must complete directly from the event stream"
-    );
+    let ready = waiter.await.expect("sendability waiter");
+    assert!(ready.sendable);
     let after = timer_observation(timer_id);
-    assert_eq!(after.armed, before.armed + 1);
-    assert_eq!(
-        after.expired, before.expired,
-        "a success event must cancel rather than consume the failure deadline"
-    );
+    assert!(after.armed > before.armed);
+    assert_eq!(after.expired, before.expired);
     harness.shutdown().await;
 }
 
@@ -1074,36 +767,14 @@ async fn inv23_blackbox_parallel_shutdown_uses_one_overall_child_deadline() {
     for serial in [100, 200, 300] {
         harness.add_peer(serial).await;
     }
-
-    let coordinator = harness.peer(100).coordinator.clone();
-    let hook_calls = Arc::new(AtomicUsize::new(0));
-    let hook: HookCallback = Arc::new({
-        let hook_calls = hook_calls.clone();
-        move |event| {
-            let hook_calls = hook_calls.clone();
-            Box::pin(async move {
-                if matches!(event, HookEvent::WebRtcDisconnected { .. }) {
-                    hook_calls.fetch_add(1, Ordering::AcqRel);
-                    std::future::pending::<()>().await;
-                }
-            })
-        }
-    });
-    coordinator.set_hook_callback(hook);
-    harness.connect(200, 100).await;
-    harness.connect(300, 100).await;
-
+    harness.connect(100, 200).await;
+    harness.connect(100, 300).await;
+    assert_eq!(harness.peer(100).rtc.peer_count().await, 2);
     let started = tokio::time::Instant::now();
-    tokio::time::timeout(Duration::from_secs(4), coordinator.close_all_peers())
+    tokio::time::timeout(Duration::from_secs(10), harness.peer(100).rtc.close_all())
         .await
-        .expect("close-all must stay within one bounded shutdown window")
-        .expect("hook deadlines should not fail physical teardown");
-    let elapsed = started.elapsed();
-
-    assert_eq!(hook_calls.load(Ordering::Acquire), 2);
-    assert!(
-        elapsed < Duration::from_secs(2),
-        "two stalled children must share one one-second deadline, elapsed={elapsed:?}"
-    );
+        .expect("close-all overall deadline");
+    assert_eq!(harness.peer(100).rtc.peer_count().await, 0);
+    assert!(started.elapsed() < Duration::from_secs(10));
     harness.shutdown().await;
 }

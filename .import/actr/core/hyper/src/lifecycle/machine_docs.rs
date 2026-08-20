@@ -12,9 +12,10 @@
 //!   sorts their input labels, grouping through a sorted `Vec` rather than a
 //!   hash map.
 //!
-//! Entry points are provided for all nine normative machines: the three policy
-//! machines, the five pre-RFC lifecycle machines, and the peer-scoped WebRTC
-//! recovery child machine.
+//! Entry points are provided for the eight RFC-0400 node-level policy and
+//! lifecycle machines. Peer-scoped RTC recovery is owned by the
+//! `RtcPeerController` reducer and documented with RFC-0504's transition
+//! tables rather than a second runtime state machine.
 //!
 //! The generator is a documentation and CI tool by design: it is consumed by
 //! tests and the RFC's checked regeneration mode, not by any runtime path. The
@@ -27,7 +28,6 @@ use yasm::StateMachine;
 use super::recovery_execution::RecoveryExecutionMachine;
 use super::recovery_policy::machines::{cleanup_work, recovery_mode, retry_gate};
 use super::recovery_supervisor::{app_phase, offline_work, path, recovery};
-use crate::wire::webrtc::peer_recovery::machine::PeerRecoveryMachine;
 
 /// Generate a transition table sorted by `(current_state, input, next_state)`.
 ///
@@ -119,9 +119,8 @@ fn doc<SM: StateMachine>(name: &'static str) -> CanonicalDoc {
     }
 }
 
-/// The canonical documentation for all nine normative machines, in a stable
-/// order. Node-level policy comes first, followed by the peer recovery child
-/// machine that owns one exact WebRTC session generation.
+/// The canonical documentation for all eight RFC-0400 node-level machines, in
+/// a stable order.
 pub(crate) fn all_machine_docs() -> Vec<CanonicalDoc> {
     vec![
         doc::<recovery_mode::RecoveryModeMachine>("recovery-mode"),
@@ -132,7 +131,6 @@ pub(crate) fn all_machine_docs() -> Vec<CanonicalDoc> {
         doc::<recovery::RecoveryIntentMachine>("recovery-intent"),
         doc::<offline_work::OfflineWorkMachine>("offline-work"),
         doc::<RecoveryExecutionMachine>("recovery-execution"),
-        doc::<PeerRecoveryMachine>("peer-recovery"),
     ]
 }
 
@@ -141,9 +139,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_nine_machines_have_canonical_docs() {
+    fn all_eight_node_machines_have_canonical_docs() {
         let docs = all_machine_docs();
-        assert_eq!(docs.len(), 9);
+        assert_eq!(docs.len(), 8);
         for d in &docs {
             assert!(d.mermaid.starts_with("stateDiagram-v2\n"), "{}", d.name);
             assert!(

@@ -281,15 +281,9 @@ type UdpPorts = Option<(u16, u16)>;
 /// WebRTC advanced parameter configuration
 #[derive(Clone, Debug)]
 pub struct WebRtcAdvancedConfig {
-    /// UDP port policy
-    ///
-    /// **Currently rejected at startup by [`WebRtcAdvancedConfig::validate`].**
-    /// ICE-restart recovery binds a wildcard UDP address so webrtc-rs can
-    /// rebind to fresh ephemeral ports on every ICE restart, which is
-    /// incompatible with pinning a fixed port range. Rejected rather than
-    /// silently ignored because a fixed port is a deployment precondition
-    /// (firewall pinholes). This lifts once upstream can rebind on ICE
-    /// restart while honoring a configured port range.
+    /// Legacy UDP port range. Unsupported by the v0.20 backend and rejected
+    /// during validation because upstream accepts explicit addresses only,
+    /// without an atomic range allocator or pre-bound socket injection.
     pub udp_ports: UdpPorts,
     /// Fixed local UDP port for a process-shared ICE UDP mux (opt-in).
     ///
@@ -298,7 +292,9 @@ pub struct WebRtcAdvancedConfig {
     /// the shared ICE UDP mux, so honoring this option is impossible; a fixed
     /// port is a deployment precondition (firewall pinholes are opened for
     /// it), and silently binding an ephemeral port instead would present as
-    /// "node healthy but unreachable".
+    /// "node healthy but unreachable". Fixed shared ports and UDP port ranges
+    /// are both unsupported by the v0.20 backend and must be removed from the
+    /// deployment configuration.
     pub ice_udp_mux_port: Option<u16>,
     /// NAT 1:1 public IP mapping.
     ///
@@ -338,7 +334,8 @@ impl WebRtcAdvancedConfig {
             return Err(crate::error::ConfigError::InvalidConfig(format!(
                 "ice_udp_mux_port = {port} is not supported with webrtc-rs 0.20: \
                  the shared ICE UDP mux is not exposed upstream and every peer \
-                 connection would bind an ephemeral port instead. Remove the option"
+                 connection would bind an ephemeral port instead. Remove the \
+                 option; fixed shared ports and UDP port ranges are not +                 available on the v0.20 backend"
             )));
         }
         if !self.public_ips.is_empty() {
@@ -351,34 +348,12 @@ impl WebRtcAdvancedConfig {
                 self.public_ips
             )));
         }
-        // NOTE: keep this check last so the more specific rejections above
-        // (ice_udp_mux_port, public_ips) still name themselves when several
-        // unsupported options are combined with a port range.
-        //
-        // A configured UDP port range cannot be honored while ICE-restart
-        // recovery forces a wildcard bind. webrtc-rs 0.20.3 rebinds
-        // `0.0.0.0:0` on every ICE restart (webrtc-rs/webrtc#868, #874) so a
-        // peer stalled after a mobile network handover recovers; leaving the
-        // bind unresolved lets the driver enumerate the current interfaces
-        // and pick a fresh ephemeral port each time. Pinning a fixed port
-        // range is incompatible with that, so the negotiator would silently
-        // override `udp_ports`. A fixed port is a deployment precondition
-        // (operators open firewall pinholes for it), and silently ignoring it
-        // would present as "node healthy but unreachable" — reject loudly
-        // instead. This is temporary: the restriction lifts once upstream can
-        // rebind on ICE restart while still honoring a configured port range,
-        // at which point this branch and the wildcard bind are reverted
-        // together.
-        if let Some((min, max)) = self.udp_ports {
+        if let Some((start, end)) = self.udp_ports {
             return Err(crate::error::ConfigError::InvalidConfig(format!(
-                "udp_ports (port_range_start/port_range_end) = {min}-{max} is not \
-                 supported while ICE-restart recovery binds a wildcard UDP address: \
-                 webrtc-rs 0.20.3 rebinds 0.0.0.0:0 on every ICE restart and picks \
-                 a fresh ephemeral port, so the configured range would be silently \
-                 overridden and the firewall pinholes opened for it would not match \
-                 the ports actually bound. Remove the option; it is rejected only \
-                 until upstream can rebind on ICE restart while honoring a fixed \
-                 port range"
+                "udp_ports = {start}..{end} is not supported with webrtc-rs 0.20: \
+                 upstream exposes explicit bind addresses but no atomic UDP \
+                 port-range allocator or pre-bound socket injection. Remove \
+                 the range and allow per-PeerConnection ephemeral ports"
             )));
         }
         Ok(())

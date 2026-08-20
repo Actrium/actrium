@@ -16,8 +16,8 @@
 //! 2. does a stale close event avoid deleting the current active transport?
 //! 3. does a normal RPC call still recover after the same stream probe?
 
-use actr_hyper::test_support::TestHarness;
-use actr_hyper::transport::{ConnectionEvent, ConnectionState, Dest};
+use actr_hyper::test_support::{TestHarness, TestRtcControl};
+use actr_hyper::transport::Dest;
 use actr_protocol::prost::Message;
 use actr_protocol::{DataChunk, PayloadType};
 use std::time::Duration;
@@ -35,10 +35,7 @@ fn init_tracing() {
         .ok();
 }
 
-fn spawn_event_storm(
-    event_tx: tokio::sync::broadcast::Sender<ConnectionEvent>,
-    peer_id: actr_protocol::ActrId,
-) -> tokio::task::JoinHandle<()> {
+fn spawn_event_storm(rtc: TestRtcControl) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let bursts = [
             Duration::from_millis(0),
@@ -50,28 +47,22 @@ fn spawn_event_storm(
             tokio::time::sleep(delay).await;
 
             for seq in 0..256 {
-                let event = match seq % 4 {
-                    0 => ConnectionEvent::StateChanged {
-                        peer_id: peer_id.clone(),
-                        session_id: 0,
-                        state: ConnectionState::Connecting,
-                    },
-                    1 => ConnectionEvent::DataChannelOpened {
-                        peer_id: peer_id.clone(),
-                        session_id: 0,
-                        payload_type: PayloadType::RpcSignal,
-                    },
-                    2 => ConnectionEvent::IceRestartStarted {
-                        peer_id: peer_id.clone(),
-                        session_id: 0,
-                    },
-                    _ => ConnectionEvent::NewRoleAssignment {
-                        peer_id: peer_id.clone(),
-                        is_offerer: seq % 2 == 0,
-                    },
-                };
-
-                let _ = event_tx.send(event);
+                // Stress the actual v0.20 recovery ingress. Repeated facts are
+                // intentionally coalesced/deduplicated by each controller.
+                match seq % 4 {
+                    0 => {
+                        rtc.network_unavailable();
+                    }
+                    1 => {
+                        rtc.network_available();
+                    }
+                    2 => {
+                        rtc.local_address_changed();
+                    }
+                    _ => {
+                        rtc.force_reconnect();
+                    }
+                }
             }
 
             tracing::info!("🌪️ Injected 256 synthetic connection events");
@@ -151,6 +142,12 @@ async fn test_real_disconnect_stream_send_recovers_and_stale_close_is_ignored() 
         TARGET_SERIAL
     );
     harness.connect(SOURCE_SERIAL, TARGET_SERIAL).await;
+    expect_request_eventually_ok(
+        &harness,
+        "stale-transport-initial-request",
+        Duration::from_secs(10),
+    )
+    .await;
 
     let source_peer = harness.peer(SOURCE_SERIAL);
     let target_id = harness.peer(TARGET_SERIAL).id.clone();
@@ -162,7 +159,7 @@ async fn test_real_disconnect_stream_send_recovers_and_stale_close_is_ignored() 
     );
 
     tracing::info!("🔴 Step 2: Real disconnect + broadcast storm");
-    let storm_handle = spawn_event_storm(source_peer.coordinator.event_sender(), target_id.clone());
+    let storm_handle = spawn_event_storm(source_peer.rtc.clone());
     harness.simulate_disconnect();
     tokio::time::sleep(Duration::from_secs(15)).await;
     storm_handle.await.expect("event storm task should finish");
@@ -218,29 +215,30 @@ async fn test_real_disconnect_stream_send_recovers_and_stale_close_is_ignored() 
     )
     .await;
 
-    tracing::info!("🧪 Step 6: Send stale ConnectionClosed sentinel");
-    let receiver_count = source_peer
-        .coordinator
-        .event_sender()
-        .send(ConnectionEvent::ConnectionClosed {
-            peer_id: target_id.clone(),
-            session_id: 0,
+    tracing::info!("🧪 Step 6: Retire another generation and let stale callbacks drain");
+    let old_generation = source_peer
+        .rtc
+        .generation(&target_id)
+        .await
+        .expect("active generation before hard recovery");
+    source_peer.rtc.force_reconnect();
+    harness.peer(TARGET_SERIAL).rtc.force_reconnect();
+    source_peer
+        .rtc
+        .wait_state(&target_id, Duration::from_secs(20), |state| {
+            state.sendable && state.pc_generation > old_generation
         })
-        .expect("sentinel event should be broadcast");
-    tokio::time::sleep(Duration::from_millis(200)).await;
+        .await
+        .expect("replacement generation should become sendable");
+    tokio::time::sleep(Duration::from_millis(500)).await;
     let dest_after_sentinel = source_peer.transport_manager.has_dest(&dest).await;
     tracing::info!(
-        "🧪 Stale ConnectionClosed delivered to {} receivers, dest still cached={}",
-        receiver_count,
-        dest_after_sentinel
+        "🧪 Retired callbacks drained; destination still cached={}",
+        dest_after_sentinel,
     );
 
     assert!(
-        receiver_count > 0,
-        "expected stale sentinel close event to reach at least one receiver"
-    );
-    assert!(
         dest_after_sentinel,
-        "stale session close event must not clean the active transport"
+        "retired generation callbacks must not clean the active transport"
     );
 }

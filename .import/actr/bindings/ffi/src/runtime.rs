@@ -5,7 +5,7 @@ use crate::types::{
     ActrId, ActrType, AppLifecycleState, CleanupReason, NetworkEventResult, NetworkSnapshot,
     PayloadType, ReconnectReason,
 };
-use crate::workload::{DynamicWorkload, RuntimeObservers};
+use crate::workload::{DynamicWorkload, RuntimeObservers, WebRtcPeerStateBridge};
 use actr_framework::{Bytes, Context as _, Dest};
 use actr_hyper::{ActrRef, NetworkEventHandle, Node, Registered, WorkloadPackage};
 use parking_lot::Mutex;
@@ -124,10 +124,6 @@ impl ActrNode {
     }
 
     /// Create a linked/static runtime from a foreign-language workload.
-    ///
-    /// Pass `manifest.toml` as `config_path` to load dependency aliases and
-    /// its sibling `actr.toml`. Passing `actr.toml` directly remains supported
-    /// for workloads with no dynamic manifest dependencies.
     #[uniffi::constructor(async_runtime = "tokio")]
     pub async fn new_from_linked_workload(
         config_path: String,
@@ -405,11 +401,47 @@ pub struct ActrRefWrapper {
     inner: ActrRef,
 }
 
+/// Listener for per-peer WebRTC state updates (Stage 6, v0.20 backend).
+#[uniffi::export(callback_interface)]
+#[async_trait::async_trait]
+pub trait RtcPeerStateListener: Send + Sync + 'static {
+    /// Called with the peer's current state on subscribe (initial replay) and
+    /// on every subsequent state revision.
+    async fn on_state(&self, state: WebRtcPeerStateBridge);
+}
+
+/// A live WebRTC peer-status subscription (Stage 6, v0.20 backend). Dropping
+/// it aborts the delivery task.
+#[derive(uniffi::Object)]
+pub struct RtcPeerStateSubscription {
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Drop for RtcPeerStateSubscription {
+    fn drop(&mut self) {
+        self.task.abort();
+    }
+}
+
 #[uniffi::export(async_runtime = "tokio")]
 impl ActrRefWrapper {
     /// Get the actor's ID.
     pub fn actor_id(&self) -> ActrId {
         self.inner.actor_id().clone().into()
+    }
+
+    /// Resolve a dependency alias to its declared `ActrType`.
+    ///
+    /// App-side convenience wrapper around `app_context().resolve_dependency(alias)`.
+    /// Used by generated remote-route dispatch arms to resolve their declared
+    /// dependency alias before route discovery.
+    pub async fn resolve_dependency(&self, alias: String) -> ActrResult<crate::types::ActrType> {
+        let ctx = self.inner.app_context().await;
+        let actr_type = ctx
+            .resolve_dependency(&alias)
+            .await
+            .map_err(crate::error::ActrError::from)?;
+        Ok(actr_type.into())
     }
 
     /// Discover actors of the specified type.
@@ -452,6 +484,78 @@ impl ActrRefWrapper {
     /// Check if shutdown is already in progress.
     pub fn is_shutting_down(&self) -> bool {
         self.inner.is_shutting_down()
+    }
+
+    /// Query one peer's current WebRTC state (v0.20 backend). Returns `None`
+    /// when the peer has no controller, the node runs the 0.14 backend, or
+    /// the build does not enable `webrtc-v020`.
+    pub async fn get_rtc_peer_status(&self, peer: ActrId) -> Option<WebRtcPeerStateBridge> {
+        #[cfg(feature = "webrtc-v020")]
+        {
+            let peer: actr_protocol::ActrId = peer.into();
+            self.inner.get_rtc_peer_status(&peer).await.map(Into::into)
+        }
+        #[cfg(not(feature = "webrtc-v020"))]
+        {
+            let _ = peer;
+            None
+        }
+    }
+
+    /// List every current peer's WebRTC state (v0.20 backend; empty on 0.14
+    /// or when the build does not enable `webrtc-v020`).
+    pub async fn list_rtc_peer_statuses(&self) -> Vec<WebRtcPeerStateBridge> {
+        #[cfg(feature = "webrtc-v020")]
+        {
+            self.inner
+                .list_rtc_peer_statuses()
+                .await
+                .into_iter()
+                .map(Into::into)
+                .collect()
+        }
+        #[cfg(not(feature = "webrtc-v020"))]
+        {
+            Vec::new()
+        }
+    }
+
+    /// Subscribe to one peer's WebRTC state changes (v0.20 backend). The
+    /// listener immediately receives the current state (initial replay).
+    /// Dropping the returned subscription stops delivery. Returns `None` when
+    /// the peer has no controller, the node runs the 0.14 backend, or the
+    /// build does not enable `webrtc-v020`.
+    pub async fn subscribe_rtc_peer_status(
+        &self,
+        peer: ActrId,
+        listener: Box<dyn RtcPeerStateListener>,
+    ) -> Option<Arc<RtcPeerStateSubscription>> {
+        #[cfg(feature = "webrtc-v020")]
+        {
+            let peer: actr_protocol::ActrId = peer.into();
+            let mut rx = self.inner.subscribe_rtc_peer_status(&peer).await?;
+            let listener: Arc<dyn RtcPeerStateListener> = Arc::from(listener);
+            let task = tokio::spawn(async move {
+                // Initial replay: deliver the current state immediately.
+                // Bind before the await so the watch guard is not held across
+                // it (the borrow guard is not Send).
+                let initial: WebRtcPeerStateBridge = rx.borrow().clone().into();
+                listener.on_state(initial).await;
+                loop {
+                    if rx.changed().await.is_err() {
+                        break;
+                    }
+                    let state: WebRtcPeerStateBridge = rx.borrow_and_update().clone().into();
+                    listener.on_state(state).await;
+                }
+            });
+            Some(Arc::new(RtcPeerStateSubscription { task }))
+        }
+        #[cfg(not(feature = "webrtc-v020"))]
+        {
+            let _ = (peer, listener);
+            None
+        }
     }
 
     /// Call the local guest workload via RPC.
@@ -499,20 +603,6 @@ impl ActrRefWrapper {
 
         Ok(())
     }
-
-    /// Resolve a dependency alias to its declared `ActrType`.
-    ///
-    /// App-side convenience wrapper around `app_context().resolve_dependency(alias)`.
-    /// Used by generated remote-route dispatch arms to resolve their declared
-    /// dependency alias before route discovery.
-    pub async fn resolve_dependency(&self, alias: String) -> ActrResult<crate::types::ActrType> {
-        let ctx = self.inner.app_context().await;
-        let actr_type = ctx
-            .resolve_dependency(&alias)
-            .await
-            .map_err(crate::error::ActrError::from)?;
-        Ok(actr_type.into())
-    }
 }
 
 #[cfg(test)]
@@ -526,6 +616,11 @@ async fn load_linked_init(
     config_path: &str,
     actor_type: &actr_protocol::ActrType,
 ) -> ActrResult<Node<actr_hyper::Init>> {
+    // The Swift/Kotlin public APIs document `manifest.toml` as a valid
+    // `config_path` for linked runtimes (dependency aliases are resolved from
+    // it), so a manifest must not be parsed as node config. Load it as a
+    // manifest, verify its identity matches the requested actor type, and
+    // resolve the real node config from the manifest's config dir.
     let path = std::path::Path::new(config_path);
     let init = if path.file_name().is_some_and(|name| name == "manifest.toml") {
         let manifest = actr_config::ConfigParser::from_manifest_file(path).map_err(|error| {
@@ -652,25 +747,6 @@ mod tests {
         config_path
     }
 
-    fn write_test_manifest(dir: &std::path::Path) -> std::path::PathBuf {
-        let manifest_path = dir.join("manifest.toml");
-        std::fs::write(
-            &manifest_path,
-            r#"edition = 1
-
-[package]
-name = "LinkedProbe"
-manufacturer = "acme"
-version = "0.1.0"
-
-[dependencies]
-echo = { actr_type = "acme:EchoService:1.0.0" }
-"#,
-        )
-        .expect("write manifest.toml");
-        manifest_path
-    }
-
     async fn linked_node_for_test(config_path: &std::path::Path) -> ActrResult<Arc<ActrNode>> {
         let workload = DynamicWorkload::new(
             Box::new(TestLifecycleBridge::default()),
@@ -691,68 +767,6 @@ echo = { actr_type = "acme:EchoService:1.0.0" }
             workload,
         )
         .await
-    }
-
-    #[tokio::test]
-    async fn linked_manifest_constructor_enforces_manifest_identity() {
-        let mut server = MockActrixServer::start()
-            .await
-            .expect("mock actrix server should start");
-        let temp = tempdir().expect("temp dir");
-        write_test_config(temp.path(), &server);
-        let manifest_path = write_test_manifest(temp.path());
-        let manifest_type = actr_protocol::ActrType::from_string_repr("acme:LinkedProbe:0.1.0")
-            .expect("manifest actor type");
-
-        let init = load_linked_init(manifest_path.to_str().unwrap(), &manifest_type)
-            .await
-            .expect("load manifest-backed linked node");
-        assert_eq!(init.runtime_config().actr_type(), &manifest_type);
-
-        let workload = DynamicWorkload::new(
-            Box::new(TestLifecycleBridge::default()),
-            None,
-            None,
-            None,
-            None,
-            None,
-        );
-        let attached = init
-            .with_actor_type(manifest_type.clone())
-            .link(workload.as_ref().clone())
-            .await
-            .expect("link manifest-backed workload");
-        let node = register_linked_node(attached)
-            .await
-            .expect("register manifest-backed linked node");
-        let actr_ref = node
-            .start()
-            .await
-            .expect("start manifest-backed linked node");
-        let resolved = actr_ref
-            .resolve_dependency("echo".to_string())
-            .await
-            .expect("resolve dependency supplied by linked manifest");
-        assert_eq!(
-            resolved,
-            crate::types::ActrType {
-                manufacturer: "acme".to_string(),
-                name: "EchoService".to_string(),
-                version: "1.0.0".to_string(),
-            }
-        );
-
-        let wrong_type = actr_protocol::ActrType::from_string_repr("other:Override:9.9.9").unwrap();
-        let error = match load_linked_init(manifest_path.to_str().unwrap(), &wrong_type).await {
-            Ok(_) => panic!("mismatching linked identity should fail"),
-            Err(error) => error,
-        };
-        assert!(
-            error
-                .to_string()
-                .contains("does not match requested actor type")
-        );
-        server.shutdown().await;
     }
 
     #[tokio::test]

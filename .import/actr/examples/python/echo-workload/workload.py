@@ -65,6 +65,9 @@ class Workload(WorkloadProtocol):
     async def on_webrtc_disconnected(self, event, ctx) -> None:
         return None
 
+    async def on_webrtc_state_changed(self, event, ctx) -> None:
+        return None
+
     async def on_credential_renewed(self, event, ctx) -> None:
         return None
 

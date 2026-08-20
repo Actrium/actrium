@@ -36,7 +36,8 @@ use actr_protocol::{ActrError, Direction, RpcEnvelope};
 use bytes::Bytes;
 
 use crate::workload::{
-    BackpressureEvent, CredentialEvent, ErrorCategory, ErrorEvent, PeerEvent, WebRtcPeerStatus,
+    BackpressureEvent, CredentialEvent, ErrorCategory, ErrorEvent, PeerEvent, WebRtcNetworkPath,
+    WebRtcPeerState, WebRtcPeerStatus, WebRtcUnavailableReason,
 };
 use crate::{MessageDispatcher, Workload};
 
@@ -117,6 +118,59 @@ fn webrtc_peer_status_from_wit(s: wit_types::WebrtcPeerStatus) -> WebRtcPeerStat
         wit_types::WebrtcPeerStatus::Connecting => WebRtcPeerStatus::Connecting,
         wit_types::WebrtcPeerStatus::Connected => WebRtcPeerStatus::Connected,
         wit_types::WebrtcPeerStatus::Recovering => WebRtcPeerStatus::Recovering,
+    }
+}
+
+fn webrtc_network_path_from_wit(p: wit_types::WebrtcNetworkPath) -> WebRtcNetworkPath {
+    match p {
+        wit_types::WebrtcNetworkPath::Unknown => WebRtcNetworkPath::Unknown,
+        wit_types::WebrtcNetworkPath::Direct => WebRtcNetworkPath::Direct,
+        wit_types::WebrtcNetworkPath::Relayed => WebRtcNetworkPath::Relayed,
+    }
+}
+
+fn webrtc_unavailable_reason_from_wit(
+    r: wit_types::WebrtcUnavailableReason,
+) -> WebRtcUnavailableReason {
+    match r {
+        wit_types::WebrtcUnavailableReason::ConnectionNotReady => {
+            WebRtcUnavailableReason::ConnectionNotReady
+        }
+        wit_types::WebrtcUnavailableReason::PeerConnectionBuildFailed => {
+            WebRtcUnavailableReason::PeerConnectionBuildFailed
+        }
+        wit_types::WebrtcUnavailableReason::NegotiationFailed => {
+            WebRtcUnavailableReason::NegotiationFailed
+        }
+        wit_types::WebrtcUnavailableReason::IceRestartFailed => {
+            WebRtcUnavailableReason::IceRestartFailed
+        }
+        wit_types::WebrtcUnavailableReason::PeerConnectionRebuildFailed => {
+            WebRtcUnavailableReason::PeerConnectionRebuildFailed
+        }
+        wit_types::WebrtcUnavailableReason::UnsupportedRtcCapability => {
+            WebRtcUnavailableReason::UnsupportedRtcCapability
+        }
+        wit_types::WebrtcUnavailableReason::RtcResourceLimitExceeded => {
+            WebRtcUnavailableReason::RtcResourceLimitExceeded
+        }
+        wit_types::WebrtcUnavailableReason::RecoveryExhausted => {
+            WebRtcUnavailableReason::RecoveryExhausted
+        }
+        wit_types::WebrtcUnavailableReason::Closed => WebRtcUnavailableReason::Closed,
+    }
+}
+
+fn webrtc_peer_state_from_wit(s: wit_types::WebrtcPeerState) -> WebRtcPeerState {
+    WebRtcPeerState {
+        peer: super::context_helpers::actr_id_from_wit(&s.peer),
+        pc_generation: s.pc_generation,
+        revision: s.revision,
+        status: webrtc_peer_status_from_wit(s.status),
+        sendable: s.sendable,
+        network_path: webrtc_network_path_from_wit(s.network_path),
+        relayed: s.relayed,
+        unavailable_reason: s.unavailable_reason.map(webrtc_unavailable_reason_from_wit),
     }
 }
 
@@ -346,6 +400,18 @@ pub async fn run_on_webrtc_disconnected<W: Workload>(
     let ctx = WasmContext::from_invocation(inv);
     let event = peer_event_from_wit(event);
     workload.on_webrtc_disconnected(&ctx, &event).await;
+}
+
+// ── WebRTC unified state (1, infallible, 0.4.0) ───────────────────────────
+
+pub async fn run_on_webrtc_state_changed<W: Workload>(
+    workload: &W,
+    event: wit_types::WebrtcPeerState,
+    inv: wit_types::InvocationCtx,
+) {
+    let ctx = WasmContext::from_invocation(inv);
+    let event = webrtc_peer_state_from_wit(event);
+    workload.on_webrtc_state_changed(&ctx, &event).await;
 }
 
 // ── Credential (2, infallible) ────────────────────────────────────────────

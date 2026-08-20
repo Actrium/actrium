@@ -31,21 +31,12 @@
 //! the receiver strips the header and returns the payload directly.
 
 use super::error::{NetworkError, NetworkResult, is_tungstenite_closed};
-use crate::INITIAL_CONNECTION_TIMEOUT;
-use crate::wire::webrtc::adapter::{RTCDataChannel, RTCDataChannelState, RTCPeerConnectionState};
 use actr_protocol::PayloadType;
 use async_trait::async_trait;
 use futures_util::SinkExt;
 use futures_util::stream::SplitSink;
 use std::collections::HashMap;
-#[cfg(feature = "test-utils")]
-use std::future::Future;
-#[cfg(feature = "test-utils")]
-use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
-#[cfg(feature = "test-utils")]
-use std::sync::{Mutex as StdMutex, OnceLock};
 use std::time::Instant;
 use tokio::net::TcpStream;
 use tokio::sync::{Mutex, mpsc};
@@ -62,14 +53,18 @@ use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 const DC_MAX_MESSAGE_SIZE: usize = 65535;
 
 /// Size of the fragment header prepended to every DataChannel message.
-const FRAGMENT_HEADER_SIZE: usize = 8;
+pub(crate) const FRAGMENT_HEADER_SIZE: usize = 8;
 
 /// Stale fragment entries older than this are evicted from ReassemblyBuffer.
 const REASSEMBLY_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
 /// Maximum payload bytes that fit in one DataChannel message after the header.
-const DC_MAX_PAYLOAD_SIZE: usize = DC_MAX_MESSAGE_SIZE - FRAGMENT_HEADER_SIZE;
+pub(crate) const DC_MAX_PAYLOAD_SIZE: usize = DC_MAX_MESSAGE_SIZE - FRAGMENT_HEADER_SIZE;
 
+// Keep the historical integration-test seam at the fragmentation boundary.
+// The v0.20 data plane moved fragmentation from `WebRtcDataLane` into
+// `RtcPeerControllerHandle`, but the legacy mobile interruption tests still
+// need to pause a concrete multi-fragment send at the same point in time.
 #[cfg(feature = "test-utils")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WebRtcFragmentSendEvent {
@@ -81,19 +76,21 @@ pub struct WebRtcFragmentSendEvent {
 }
 
 #[cfg(feature = "test-utils")]
-pub type WebRtcFragmentSendHookFuture = Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+pub type WebRtcFragmentSendHookFuture =
+    std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>>;
 
 #[cfg(feature = "test-utils")]
 pub type WebRtcFragmentSendHook =
     Arc<dyn Fn(WebRtcFragmentSendEvent) -> WebRtcFragmentSendHookFuture + Send + Sync + 'static>;
 
 #[cfg(feature = "test-utils")]
-static WEBRTC_FRAGMENT_SEND_HOOK: OnceLock<StdMutex<Option<WebRtcFragmentSendHook>>> =
-    OnceLock::new();
+static WEBRTC_FRAGMENT_SEND_HOOK: std::sync::OnceLock<
+    std::sync::Mutex<Option<WebRtcFragmentSendHook>>,
+> = std::sync::OnceLock::new();
 
 #[cfg(feature = "test-utils")]
-fn webrtc_fragment_send_hook_slot() -> &'static StdMutex<Option<WebRtcFragmentSendHook>> {
-    WEBRTC_FRAGMENT_SEND_HOOK.get_or_init(|| StdMutex::new(None))
+fn webrtc_fragment_send_hook_slot() -> &'static std::sync::Mutex<Option<WebRtcFragmentSendHook>> {
+    WEBRTC_FRAGMENT_SEND_HOOK.get_or_init(|| std::sync::Mutex::new(None))
 }
 
 #[cfg(feature = "test-utils")]
@@ -123,7 +120,7 @@ pub fn install_webrtc_fragment_send_hook_for_test(
 }
 
 #[cfg(feature = "test-utils")]
-async fn notify_webrtc_fragment_sent_for_test(event: WebRtcFragmentSendEvent) {
+pub(crate) async fn notify_webrtc_fragment_sent_for_test(event: WebRtcFragmentSendEvent) {
     let hook = {
         webrtc_fragment_send_hook_slot()
             .lock()
@@ -144,6 +141,66 @@ struct FragmentEntry {
     /// Timestamp when the first fragment arrived (for TTL eviction).
     created_at: Instant,
     fragments: HashMap<u16, bytes::Bytes>,
+    bytes: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReassemblyLimits {
+    pub(crate) max_messages: usize,
+    pub(crate) max_bytes: usize,
+    pub(crate) max_message_bytes: usize,
+    pub(crate) max_fragments_per_message: u16,
+}
+
+impl Default for ReassemblyLimits {
+    fn default() -> Self {
+        Self {
+            max_messages: 64,
+            max_bytes: 16 * 1024 * 1024,
+            max_message_bytes: 8 * 1024 * 1024,
+            max_fragments_per_message: (8usize * 1024 * 1024)
+                .div_ceil(DC_MAX_PAYLOAD_SIZE)
+                .min(u16::MAX as usize) as u16,
+        }
+    }
+}
+
+impl ReassemblyLimits {
+    #[cfg(feature = "webrtc-v020")]
+    pub(crate) fn from_buffer_config(
+        config: &crate::wire::webrtc::v020::config::RtcBufferConfig,
+    ) -> Self {
+        let fragments = config
+            .max_inbound_message_bytes
+            .div_ceil(DC_MAX_PAYLOAD_SIZE)
+            .min(u16::MAX as usize) as u16;
+        Self {
+            max_messages: config.max_reassembly_messages,
+            max_bytes: config.max_reassembly_bytes,
+            max_message_bytes: config.max_inbound_message_bytes,
+            max_fragments_per_message: fragments.max(1),
+        }
+    }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub(crate) enum ReassemblyError {
+    #[error("invalid fragment index {index} for total {total}")]
+    InvalidIndex { index: u16, total: u16 },
+    #[error("fragment count {total} exceeds configured maximum {max}")]
+    TooManyFragments { total: u16, max: u16 },
+    #[error("fragment total changed for message {msg_id}: expected {expected}, got {actual}")]
+    InconsistentTotal {
+        msg_id: u32,
+        expected: u16,
+        actual: u16,
+    },
+    #[error("reassembly message-count budget exhausted")]
+    MessageBudgetExhausted,
+    #[error("reassembly byte budget exhausted")]
+    ByteBudgetExhausted,
+    #[error("reassembled message exceeds configured maximum")]
+    MessageTooLarge,
 }
 
 /// Accumulates in-flight fragmented messages keyed by `msg_id`.
@@ -154,12 +211,21 @@ struct FragmentEntry {
 ///   on each `insert()` call to prevent unbounded memory growth.
 pub(crate) struct ReassemblyBuffer {
     pending: HashMap<u32, FragmentEntry>,
+    pending_bytes: usize,
+    limits: ReassemblyLimits,
 }
 
 impl ReassemblyBuffer {
-    fn new() -> Self {
+    #[cfg(test)]
+    pub(crate) fn new() -> Self {
+        Self::with_limits(ReassemblyLimits::default())
+    }
+
+    pub(crate) fn with_limits(limits: ReassemblyLimits) -> Self {
         Self {
             pending: HashMap::new(),
+            pending_bytes: 0,
+            limits,
         }
     }
 
@@ -167,26 +233,100 @@ impl ReassemblyBuffer {
     ///
     /// Returns the fully reassembled payload when all fragments for `msg_id`
     /// have arrived, or `None` if more fragments are still missing.
-    fn insert(
+    #[cfg(test)]
+    pub(crate) fn insert(
         &mut self,
         msg_id: u32,
         frag_index: u16,
         total_frags: u16,
         payload: bytes::Bytes,
     ) -> Option<bytes::Bytes> {
+        self.try_insert(msg_id, frag_index, total_frags, payload)
+            .ok()
+            .flatten()
+    }
+
+    /// Bounded insertion used by the v0.20 production pump. Every malformed or
+    /// over-budget fragment is reported explicitly; partial state for the
+    /// affected message is discarded so an attacker cannot permanently poison
+    /// a message id or retain its bytes until the TTL.
+    pub(crate) fn try_insert(
+        &mut self,
+        msg_id: u32,
+        frag_index: u16,
+        total_frags: u16,
+        payload: bytes::Bytes,
+    ) -> Result<Option<bytes::Bytes>, ReassemblyError> {
         // Evict stale entries
         self.evict_stale();
+
+        if total_frags == 0 || frag_index >= total_frags {
+            self.discard(msg_id);
+            return Err(ReassemblyError::InvalidIndex {
+                index: frag_index,
+                total: total_frags,
+            });
+        }
+        if total_frags > self.limits.max_fragments_per_message {
+            self.discard(msg_id);
+            return Err(ReassemblyError::TooManyFragments {
+                total: total_frags,
+                max: self.limits.max_fragments_per_message,
+            });
+        }
+        if let Some(entry) = self.pending.get(&msg_id) {
+            if entry.total != total_frags {
+                let expected = entry.total;
+                self.discard(msg_id);
+                return Err(ReassemblyError::InconsistentTotal {
+                    msg_id,
+                    expected,
+                    actual: total_frags,
+                });
+            }
+            if entry.fragments.contains_key(&frag_index) {
+                // Retransmitted duplicate: it consumes no additional budget.
+                return Ok(None);
+            }
+        } else if self.pending.len() >= self.limits.max_messages {
+            return Err(ReassemblyError::MessageBudgetExhausted);
+        }
+
+        let entry_bytes = self
+            .pending
+            .get(&msg_id)
+            .map(|entry| entry.bytes)
+            .unwrap_or(0);
+        if entry_bytes
+            .checked_add(payload.len())
+            .is_none_or(|bytes| bytes > self.limits.max_message_bytes)
+        {
+            self.discard(msg_id);
+            return Err(ReassemblyError::MessageTooLarge);
+        }
+        if self
+            .pending_bytes
+            .checked_add(payload.len())
+            .is_none_or(|bytes| bytes > self.limits.max_bytes)
+        {
+            self.discard(msg_id);
+            return Err(ReassemblyError::ByteBudgetExhausted);
+        }
 
         let entry = self.pending.entry(msg_id).or_insert_with(|| FragmentEntry {
             total: total_frags,
             created_at: Instant::now(),
             fragments: HashMap::new(),
+            bytes: 0,
         });
+        entry.bytes += payload.len();
+        self.pending_bytes += payload.len();
         entry.fragments.insert(frag_index, payload);
 
         if entry.fragments.len() == entry.total as usize {
             // All fragments arrived – reassemble in order.
             let entry = self.pending.remove(&msg_id).unwrap();
+            self.pending_bytes = self.pending_bytes.saturating_sub(entry.bytes);
             let mut ordered: Vec<(u16, bytes::Bytes)> = entry.fragments.into_iter().collect();
             ordered.sort_by_key(|(idx, _)| *idx);
 
@@ -195,9 +335,15 @@ impl ReassemblyBuffer {
             for (_, frag) in ordered {
                 out.extend_from_slice(&frag);
             }
-            Some(out.freeze())
+            Ok(Some(out.freeze()))
         } else {
-            None
+            Ok(None)
+        }
+    }
+
+    fn discard(&mut self, msg_id: u32) {
+        if let Some(entry) = self.pending.remove(&msg_id) {
+            self.pending_bytes = self.pending_bytes.saturating_sub(entry.bytes);
         }
     }
 
@@ -205,9 +351,11 @@ impl ReassemblyBuffer {
     fn evict_stale(&mut self) {
         let now = Instant::now();
         let before = self.pending.len();
+        let mut evicted_bytes = 0usize;
         self.pending.retain(|msg_id, entry| {
             let age = now.duration_since(entry.created_at);
             if age > REASSEMBLY_TTL {
+                evicted_bytes = evicted_bytes.saturating_add(entry.bytes);
                 tracing::warn!(
                     "evicting stale reassembly entry: msg_id={} \
                      (age={:.1}s, {}/{} fragments received)",
@@ -221,6 +369,7 @@ impl ReassemblyBuffer {
                 true
             }
         });
+        self.pending_bytes = self.pending_bytes.saturating_sub(evicted_bytes);
         let evicted = before - self.pending.len();
         if evicted > 0 {
             tracing::info!(
@@ -236,7 +385,12 @@ impl ReassemblyBuffer {
 
 /// Encode a fragment header into `buf` (8 bytes).
 #[inline]
-fn encode_fragment_header(buf: &mut Vec<u8>, msg_id: u32, frag_index: u16, total_frags: u16) {
+pub(crate) fn encode_fragment_header(
+    buf: &mut Vec<u8>,
+    msg_id: u32,
+    frag_index: u16,
+    total_frags: u16,
+) {
     buf.extend_from_slice(&msg_id.to_be_bytes());
     buf.extend_from_slice(&frag_index.to_be_bytes());
     buf.extend_from_slice(&total_frags.to_be_bytes());
@@ -250,7 +404,9 @@ fn encode_fragment_header(buf: &mut Vec<u8>, msg_id: u32, frag_index: u16, total
 /// Returns [`NetworkError::DataChannelError`] when the message is shorter than
 /// [`FRAGMENT_HEADER_SIZE`].
 #[inline]
-fn decode_fragment_header(raw: bytes::Bytes) -> NetworkResult<(u32, u16, u16, bytes::Bytes)> {
+pub(crate) fn decode_fragment_header(
+    raw: bytes::Bytes,
+) -> NetworkResult<(u32, u16, u16, bytes::Bytes)> {
     if raw.len() < FRAGMENT_HEADER_SIZE {
         return Err(NetworkError::DataChannelError(format!(
             "fragment too short: {} bytes (minimum {})",
@@ -337,56 +493,12 @@ pub trait DataLane: Send + Sync + std::fmt::Debug {
     #[allow(dead_code)]
     fn lane_type(&self) -> &'static str;
 
-    /// Check if the underlying transport is healthy.
-    ///
-    /// Returns `true` by default. Override for lanes backed by stateful
-    /// connections (e.g. WebRTC DataChannel) to check actual state.
+    /// Whether the lane's backing transport is still usable. Stateless lanes
+    /// default to healthy; v0.20 lanes project their controller sendability so
+    /// the secure wrapper does not hide a retired RTC generation.
+    #[allow(dead_code)]
     fn is_healthy(&self) -> bool {
         true
-    }
-}
-
-/// Event-driven DataChannel state signal shared by the real Open/Closed
-/// callbacks and every lane waiter.
-///
-/// The generation closes the `Notify` registration window: a transition that
-/// lands immediately before a waiter arms its notification is still observable
-/// through [`Self::wait_after`].
-#[derive(Clone, Debug, Default)]
-pub struct DataChannelStateSignal {
-    generation: Arc<AtomicU64>,
-    changed: Arc<tokio::sync::Notify>,
-}
-
-impl DataChannelStateSignal {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn snapshot(&self) -> u64 {
-        self.generation.load(Ordering::Acquire)
-    }
-
-    pub fn publish(&self) {
-        self.generation.fetch_add(1, Ordering::AcqRel);
-        self.changed.notify_waiters();
-    }
-
-    pub async fn wait_after(&self, observed_generation: u64) {
-        loop {
-            if self.snapshot() != observed_generation {
-                return;
-            }
-
-            let changed = self.changed.notified();
-            tokio::pin!(changed);
-            changed.as_mut().enable();
-
-            if self.snapshot() != observed_generation {
-                return;
-            }
-            changed.await;
-        }
     }
 }
 
@@ -469,323 +581,6 @@ impl DataLane for MpscLane {
     #[inline]
     fn lane_type(&self) -> &'static str {
         "Mpsc"
-    }
-}
-
-// ── WebRtcDataLane ────────────────────────────────────────────────────────────
-
-/// WebRTC DataChannel Lane
-///
-/// Transmits messages via WebRTC DataChannel with transparent fragmentation
-/// for messages exceeding [`DC_MAX_PAYLOAD_SIZE`].
-#[derive(Clone)]
-pub(crate) struct WebRtcDataLane {
-    /// Underlying DataChannel
-    pub(crate) data_channel: Arc<RTCDataChannel>,
-
-    /// Receive channel (shared, uses Bytes for zero-copy)
-    rx: Arc<Mutex<mpsc::Receiver<bytes::Bytes>>>,
-
-    /// Monotonically increasing message-id counter for fragment correlation.
-    msg_id_counter: Arc<AtomicU32>,
-
-    /// Per-lane reassembly state for multi-fragment messages.
-    reassembly: Arc<Mutex<ReassemblyBuffer>>,
-
-    /// Woken by the DataChannel open/close callbacks.
-    state_changed: DataChannelStateSignal,
-}
-
-impl std::fmt::Debug for WebRtcDataLane {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "WebRtcDataLane(..)")
-    }
-}
-
-impl WebRtcDataLane {
-    /// Create WebRTC DataChannel DataLane
-    #[inline]
-    pub(crate) fn new(
-        data_channel: Arc<RTCDataChannel>,
-        rx: mpsc::Receiver<bytes::Bytes>,
-        state_changed: DataChannelStateSignal,
-    ) -> Self {
-        Self {
-            data_channel,
-            rx: Arc::new(Mutex::new(rx)),
-            msg_id_counter: Arc::new(AtomicU32::new(0)),
-            reassembly: Arc::new(Mutex::new(ReassemblyBuffer::new())),
-            state_changed,
-        }
-    }
-
-    /// The signal this lane's waiters observe. `WebRtcConnection` retains one
-    /// copy per slot so teardown can publish a terminal transition after the
-    /// DataChannel callbacks have been detached.
-    pub(crate) fn state_signal(&self) -> DataChannelStateSignal {
-        self.state_changed.clone()
-    }
-}
-
-fn classify_data_channel_send_error(
-    error: webrtc::error::Error,
-    state: RTCDataChannelState,
-    operation: &str,
-) -> NetworkError {
-    let is_closed = matches!(
-        &error,
-        webrtc::error::Error::ErrConnectionClosed
-            | webrtc::error::Error::ErrClosedPipe
-            | webrtc::error::Error::ErrDataChannelClosed
-            | webrtc::error::Error::ErrStreamClosed
-            | webrtc::error::Error::ErrAssociationClosedBeforeConn
-            | webrtc::error::Error::ErrAssociationHandshakeClosed
-    );
-    let is_not_open = matches!(
-        &error,
-        webrtc::error::Error::ErrDataChannelNotOpen
-            | webrtc::error::Error::ErrSCTPNotEstablished
-            | webrtc::error::Error::ErrPayloadDataStateNotExist
-    );
-    let detail = format!("{operation}: {error}");
-
-    if is_closed
-        || matches!(
-            state,
-            RTCDataChannelState::Closed | RTCDataChannelState::Closing
-        )
-    {
-        NetworkError::DataChannelClosed(format!("{state:?}: {detail}"))
-    } else if is_not_open || state != RTCDataChannelState::Open {
-        NetworkError::DataChannelNotOpen(format!("{state:?}: {detail}"))
-    } else {
-        NetworkError::DataChannelError(detail)
-    }
-}
-
-/// Classify a peer-connection operation failure (e.g. `create_data_channel`)
-/// into a structured `NetworkError`.
-///
-/// The webrtc error variant is checked before the peer-connection state:
-/// the state is sampled after the failure and may still read a transitional
-/// value (e.g. `Connecting`/`Disconnected`) when webrtc already reported the
-/// connection as closed, so relying on the state alone would misclassify a
-/// dead connection as a generic `WebRtcError`.
-pub(crate) fn classify_peer_connection_error(
-    error: webrtc::error::Error,
-    state: RTCPeerConnectionState,
-) -> NetworkError {
-    let is_closed = matches!(
-        &error,
-        webrtc::error::Error::ErrConnectionClosed | webrtc::error::Error::ErrClosedPipe
-    );
-
-    if is_closed
-        || matches!(
-            state,
-            RTCPeerConnectionState::Closed | RTCPeerConnectionState::Failed
-        )
-    {
-        NetworkError::PeerConnectionClosed(format!("{state:?}: {error}"))
-    } else {
-        NetworkError::WebRtcError(error.to_string())
-    }
-}
-
-#[async_trait]
-impl DataLane for WebRtcDataLane {
-    async fn send(&self, data: bytes::Bytes) -> NetworkResult<()> {
-        // Keep the lane wait aligned with initial WebRTC connection readiness.
-        // Open/close callbacks drive the wait; the timer is only a failure bound.
-        let deadline = tokio::time::Instant::now() + INITIAL_CONNECTION_TIMEOUT;
-        loop {
-            let observed_generation = self.state_changed.snapshot();
-            let state = self.data_channel.ready_state();
-            if state == RTCDataChannelState::Open {
-                break;
-            }
-            if state == RTCDataChannelState::Closed || state == RTCDataChannelState::Closing {
-                return Err(NetworkError::DataChannelClosed(format!("{state:?}")));
-            }
-            // Close the callback-registration race before awaiting the event.
-            let state_after_subscribe = self.data_channel.ready_state();
-            if state_after_subscribe != state {
-                continue;
-            }
-
-            let changed = self.state_changed.wait_after(observed_generation);
-            tokio::pin!(changed);
-            if crate::timer::timeout_at(
-                crate::timer::ids::LANE_INITIAL_READY,
-                deadline,
-                &mut changed,
-            )
-            .await
-            .is_err()
-            {
-                // Deliberately not a closed-like variant: treating a stuck
-                // Connecting channel as closed would make the stale-candidate
-                // retry path wait a full INITIAL_CONNECTION_TIMEOUT per cycle
-                // and risks evict loops on slow networks. Genuinely dead
-                // channels are caught structurally by
-                // `classify_data_channel_send_error` and by
-                // `ConnectionEvent::DataChannelClosed`-driven cleanup.
-                return Err(NetworkError::DataChannelError(format!(
-                    "DataChannel open timeout: {state_after_subscribe:?}"
-                )));
-            }
-        }
-
-        let msg_id = self.msg_id_counter.fetch_add(1, Ordering::Relaxed);
-        let data_len = data.len();
-
-        if data_len <= DC_MAX_PAYLOAD_SIZE {
-            // Single fragment (total_frags = 1)
-            let mut buf = Vec::with_capacity(FRAGMENT_HEADER_SIZE + data_len);
-            encode_fragment_header(&mut buf, msg_id, 0, 1);
-            buf.extend_from_slice(&data);
-            let frame = bytes::Bytes::from(buf);
-            self.data_channel.send(&frame).await.map_err(|error| {
-                classify_data_channel_send_error(
-                    error,
-                    self.data_channel.ready_state(),
-                    "Send failed",
-                )
-            })?;
-            #[cfg(feature = "test-utils")]
-            notify_webrtc_fragment_sent_for_test(WebRtcFragmentSendEvent {
-                msg_id,
-                frag_index: 0,
-                total_frags: 1,
-                fragment_payload_len: data_len,
-                message_len: data_len,
-            })
-            .await;
-            tracing::trace!(
-                "sent single fragment: msg_id={} payload={} bytes",
-                msg_id,
-                data_len
-            );
-        } else {
-            // Multi-fragment send
-            let total_frags = data_len.div_ceil(DC_MAX_PAYLOAD_SIZE);
-            if total_frags > u16::MAX as usize {
-                return Err(NetworkError::DataChannelError(format!(
-                    "message too large: {data_len} bytes would require {total_frags} fragments (max {})",
-                    u16::MAX
-                )));
-            }
-            let total_frags = total_frags as u16;
-            tracing::debug!(
-                "fragmenting message: msg_id={} total_bytes={} fragments={}",
-                msg_id,
-                data_len,
-                total_frags
-            );
-            for (frag_index, chunk) in data.chunks(DC_MAX_PAYLOAD_SIZE).enumerate() {
-                let mut buf = Vec::with_capacity(FRAGMENT_HEADER_SIZE + chunk.len());
-                encode_fragment_header(&mut buf, msg_id, frag_index as u16, total_frags);
-                buf.extend_from_slice(chunk);
-                let frame = bytes::Bytes::from(buf);
-                self.data_channel.send(&frame).await.map_err(|error| {
-                    classify_data_channel_send_error(
-                        error,
-                        self.data_channel.ready_state(),
-                        &format!("Send fragment {frag_index} failed"),
-                    )
-                })?;
-                #[cfg(feature = "test-utils")]
-                notify_webrtc_fragment_sent_for_test(WebRtcFragmentSendEvent {
-                    msg_id,
-                    frag_index: frag_index as u16,
-                    total_frags,
-                    fragment_payload_len: chunk.len(),
-                    message_len: data_len,
-                })
-                .await;
-                tracing::debug!(
-                    "sent fragment {}/{}: msg_id={} chunk={} bytes",
-                    frag_index + 1,
-                    total_frags,
-                    msg_id,
-                    chunk.len()
-                );
-            }
-        }
-        Ok(())
-    }
-
-    async fn recv(&self) -> NetworkResult<bytes::Bytes> {
-        loop {
-            let raw = {
-                let mut receiver = self.rx.lock().await;
-                receiver.recv().await.ok_or_else(|| {
-                    NetworkError::ChannelClosed("DataLane receiver closed".to_string())
-                })?
-            };
-            let (msg_id, frag_index, total_frags, payload) = decode_fragment_header(raw)?;
-            if total_frags == 1 {
-                // Single-fragment fast path
-                return Ok(payload);
-            }
-            // Multi-fragment: accumulate and reassemble
-            let mut buf = self.reassembly.lock().await;
-            if let Some(complete) = buf.insert(msg_id, frag_index, total_frags, payload) {
-                tracing::debug!(
-                    "reassembled message: msg_id={} total_bytes={}",
-                    msg_id,
-                    complete.len()
-                );
-                return Ok(complete);
-            }
-            // Fragment stored; wait for the rest
-        }
-    }
-
-    async fn try_recv(&self) -> NetworkResult<Option<bytes::Bytes>> {
-        // Drain available fragments until we either assemble a complete message
-        // or the channel has no more pending data.
-        loop {
-            let raw = {
-                let mut receiver = self.rx.lock().await;
-                match receiver.try_recv() {
-                    Ok(data) => data,
-                    Err(mpsc::error::TryRecvError::Empty) => return Ok(None),
-                    Err(mpsc::error::TryRecvError::Disconnected) => {
-                        return Err(NetworkError::ChannelClosed(
-                            "Lane receiver closed".to_string(),
-                        ));
-                    }
-                }
-            };
-            let (msg_id, frag_index, total_frags, payload) = decode_fragment_header(raw)?;
-            if total_frags == 1 {
-                return Ok(Some(payload));
-            }
-            let mut buf = self.reassembly.lock().await;
-            if let Some(complete) = buf.insert(msg_id, frag_index, total_frags, payload) {
-                tracing::debug!(
-                    "reassembled message (try_recv): msg_id={} total_bytes={}",
-                    msg_id,
-                    complete.len()
-                );
-                return Ok(Some(complete));
-            }
-            // Fragment stored, try to read the next one immediately
-        }
-    }
-
-    #[inline]
-    fn lane_type(&self) -> &'static str {
-        "WebRtcDataChannel"
-    }
-
-    fn is_healthy(&self) -> bool {
-        let state = self.data_channel.ready_state();
-        !matches!(
-            state,
-            RTCDataChannelState::Closed | RTCDataChannelState::Closing
-        )
     }
 }
 

@@ -2045,6 +2045,68 @@ async fn plain_node_surface_keeps_headless_profile_ungated() {
         .expect("plain node reconciler should shut down cleanly");
 }
 
+// ── S7A-1: W6 v020 config fail-fast ────────────────────────────────────────
+
+#[cfg(feature = "webrtc-v020")]
+mod v020_config_guard {
+    use actr_config::{IceServer, WebRtcConfig};
+
+    fn config_with_url(url: &str) -> WebRtcConfig {
+        WebRtcConfig {
+            ice_servers: vec![IceServer {
+                urls: vec![url.to_string()],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn turns_tls_url_is_a_hard_error() {
+        let err =
+            super::super::validate_v020_config(&config_with_url("turns:turn.example.com:5349"))
+                .expect_err("turns: must fail fast");
+        assert!(err.to_string().contains("issue #848"), "got: {err}");
+    }
+
+    #[test]
+    fn turn_tcp_transport_is_a_hard_error() {
+        let err = super::super::validate_v020_config(&config_with_url(
+            "turn:turn.example.com:3478?transport=tcp",
+        ))
+        .expect_err("transport=tcp must fail fast");
+        assert!(err.to_string().contains("issue #848"), "got: {err}");
+    }
+
+    #[test]
+    fn udp_mux_port_is_a_hard_error() {
+        let mut config = WebRtcConfig::default();
+        config.advanced.ice_udp_mux_port = Some(5000);
+        let err = super::super::validate_v020_config(&config)
+            .expect_err("ice_udp_mux_port must fail fast");
+        assert!(err.to_string().contains("ice_udp_mux_port"), "got: {err}");
+    }
+
+    #[test]
+    fn udp_port_range_is_a_hard_error() {
+        let mut config = WebRtcConfig::default();
+        config.advanced.udp_ports = Some((40_000, 40_100));
+        let err =
+            super::super::validate_v020_config(&config).expect_err("UDP port range must fail fast");
+        assert!(err.to_string().contains("port ranges"), "got: {err}");
+    }
+
+    #[test]
+    fn plain_udp_turn_and_stun_pass() {
+        let mut config = config_with_url("turn:turn.example.com:3478?transport=udp");
+        config.ice_servers.push(IceServer {
+            urls: vec!["stun:stun.example.com:3478".to_string()],
+            ..Default::default()
+        });
+        super::super::validate_v020_config(&config).expect("UDP TURN/STUN is supported");
+    }
+}
+
 #[test]
 fn guest_rpc_payload_type_maps_known_lanes_and_degrades_unknown() {
     assert_eq!(guest_rpc_payload_type(0), PayloadType::RpcReliable);

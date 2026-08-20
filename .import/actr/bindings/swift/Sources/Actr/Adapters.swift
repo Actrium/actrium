@@ -25,6 +25,15 @@ public protocol WebRTCObserver: AnyObject, Sendable {
     func onConnecting(ctx: Context, event: PeerEvent) async
     func onConnected(ctx: Context, event: PeerEvent) async
     func onDisconnected(ctx: Context, event: PeerEvent) async
+    /// Unified per-revision state hook (v0.20 backend, Stage 6). Fires on
+    /// every snapshot revision; a late-registered observer receives the
+    /// current state on the first projection pass.
+    func onStateChanged(ctx: Context, state: WebRTCPeerState) async
+}
+
+extension WebRTCObserver {
+    /// Default no-op so existing observers stay source-compatible.
+    public func onStateChanged(ctx: Context, state: WebRTCPeerState) async {}
 }
 
 public protocol CredentialObserver: AnyObject, Sendable {
@@ -264,6 +273,10 @@ final class WebRTCObserverAdapter: ActrBindings.WebRtcObserverBridge, @unchecked
 
     func onDisconnected(ctx: ActrBindings.ContextBridge, event: ActrBindings.PeerEventBridge) async {
         await observer.onDisconnected(ctx: Context(bridge: ctx), event: PeerEvent(bridge: event))
+    }
+
+    func onStateChanged(ctx: ActrBindings.ContextBridge, state: ActrBindings.WebRtcPeerStateBridge) async {
+        await observer.onStateChanged(ctx: Context(bridge: ctx), state: WebRTCPeerState(bridge: state))
     }
 }
 

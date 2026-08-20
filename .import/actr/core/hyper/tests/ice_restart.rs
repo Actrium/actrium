@@ -1,21 +1,14 @@
-//! ICE Restart Integration Tests
-//!
-//! Tests the ICE restart mechanism under various scenarios:
-//! - Basic ICE restart on established connection
-//! - Rapid repeated ICE restart calls (de-duplication)
-//! - Network state change scenarios
+//! Soft ICE recovery integration tests for the v0.20 controller architecture.
 
-use actr_hyper::test_support::{
-    TestHarness, TestSignalingServer, create_peer_with_websocket, install_test_crypto_provider,
-    make_actor_id,
-};
+use std::time::Duration;
+
+use actr_hyper::test_support::{TestHarness, install_test_crypto_provider};
 use actr_protocol::{
     ActrId, SignalingEnvelope, actr_relay, ice_restart_rejected, session_description,
     signaling_envelope,
 };
-use std::time::Duration;
 
-// ==================== Tests ====================
+const WAIT: Duration = Duration::from_secs(30);
 
 fn restart_rejection_exchange(
     messages: &[SignalingEnvelope],
@@ -23,12 +16,10 @@ fn restart_rejection_exchange(
     answerer: &ActrId,
 ) -> Option<(String, i32)> {
     let mut restart_exchange_ids = Vec::new();
-
     for envelope in messages {
         let Some(signaling_envelope::Flow::ActrRelay(relay)) = envelope.flow.as_ref() else {
             continue;
         };
-
         if relay.source == *offerer
             && relay.target == *answerer
             && let Some(actr_relay::Payload::SessionDescription(description)) =
@@ -37,10 +28,7 @@ fn restart_rejection_exchange(
             && let Some(exchange_id) = description.sdp_exchange_id.as_ref()
         {
             restart_exchange_ids.push(exchange_id.clone());
-            continue;
-        }
-
-        if relay.source == *answerer
+        } else if relay.source == *answerer
             && relay.target == *offerer
             && let Some(actr_relay::Payload::IceRestartRejected(rejection)) = relay.payload.as_ref()
             && restart_exchange_ids.contains(&rejection.sdp_exchange_id)
@@ -51,508 +39,216 @@ fn restart_rejection_exchange(
             ));
         }
     }
-
     None
 }
 
-async fn wait_for_restart_rejection(
-    harness: &TestHarness,
-    offerer: &ActrId,
-    answerer: &ActrId,
-) -> (String, i32) {
-    tokio::time::timeout(Duration::from_secs(4), async {
-        loop {
-            let messages = harness.server.received_messages().await;
-            if let Some(rejection) = restart_rejection_exchange(&messages, offerer, answerer) {
-                return rejection;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-    })
-    .await
-    .expect("answerer must explicitly reject the correlated restart offer")
+async fn connected(a: u64, b: u64) -> TestHarness {
+    let mut harness = TestHarness::new().await;
+    harness.add_peer(a).await;
+    harness.add_peer(b).await;
+    harness.connect(a, b).await;
+    harness
 }
 
-async fn wait_for_peer_rebuilt(
+async fn wait_recovered(
     harness: &TestHarness,
-    offerer_id: &ActrId,
-    answerer_id: &ActrId,
-    old_offerer_session: u64,
-    old_answerer_session: u64,
-) -> (u64, u64) {
-    tokio::time::timeout(Duration::from_secs(15), async {
+    a: u64,
+    b: u64,
+    a_revision: u64,
+    b_revision: u64,
+) -> (
+    actr_framework::WebRtcPeerState,
+    actr_framework::WebRtcPeerState,
+) {
+    tokio::time::timeout(WAIT, async {
         loop {
-            let offerer_session = harness
-                .peer(901)
-                .coordinator
-                .get_peer_session_id(answerer_id)
-                .await;
-            let answerer_session = harness
-                .peer(902)
-                .coordinator
-                .get_peer_session_id(offerer_id)
-                .await;
-            if let (Some(offerer_session), Some(answerer_session)) =
-                (offerer_session, answerer_session)
-                && offerer_session != old_offerer_session
-                && answerer_session != old_answerer_session
+            let a_state = harness.peer(a).rtc.state(&harness.peer(b).id).await;
+            let b_state = harness.peer(b).rtc.state(&harness.peer(a).id).await;
+            if let (Some(a_state), Some(b_state)) = (a_state, b_state)
+                && a_state.sendable
+                && b_state.sendable
+                && a_state.revision > a_revision
+                && b_state.revision > b_revision
             {
-                return (offerer_session, answerer_session);
+                break (a_state, b_state);
             }
-            tokio::time::sleep(Duration::from_millis(25)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
         }
     })
     .await
-    .expect("restart rejection should autonomously establish a fresh peer session")
+    .expect("both endpoints should complete a new recovery epoch")
 }
 
-/// Regression for #436: the Answerer has forgotten its peer while the Offerer
-/// still owns the old PeerConnection and sends an ICE restart offer.
+async fn soft_recover(
+    harness: &TestHarness,
+    a: u64,
+    b: u64,
+) -> (
+    actr_framework::WebRtcPeerState,
+    actr_framework::WebRtcPeerState,
+) {
+    let a_before = harness
+        .peer(a)
+        .rtc
+        .state(&harness.peer(b).id)
+        .await
+        .expect("endpoint A state");
+    let b_before = harness
+        .peer(b)
+        .rtc
+        .state(&harness.peer(a).id)
+        .await
+        .expect("endpoint B state");
+    harness.peer(a).rtc.network_unavailable();
+    harness.peer(b).rtc.network_unavailable();
+    harness.peer(a).rtc.network_available();
+    harness.peer(b).rtc.network_available();
+    wait_recovered(harness, a, b, a_before.revision, b_before.revision).await
+}
+
+/// An offer arriving after the answerer removed its old controller must create
+/// a fresh answerer controller; it must not depend on stale global peer state.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_unknown_answerer_session_rejects_restart_and_rebuilds_autonomously() {
     install_test_crypto_provider();
-
-    let mut harness = TestHarness::new().await;
-    harness.add_peer(901).await;
-    harness.add_peer(902).await;
-    harness.connect(901, 902).await;
-
+    let harness = connected(901, 902).await;
     let offerer_id = harness.peer(901).id.clone();
     let answerer_id = harness.peer(902).id.clone();
-    let old_offerer_session = harness
-        .peer(901)
-        .coordinator
-        .get_peer_session_id(&answerer_id)
-        .await
-        .expect("offerer should have an established session");
-    let old_answerer_session = harness
-        .peer(902)
-        .coordinator
-        .get_peer_session_id(&offerer_id)
-        .await
-        .expect("answerer should have an established session");
+    let old_offerer = harness.peer(901).rtc.state(&answerer_id).await.unwrap();
+    let old_answerer = harness.peer(902).rtc.state(&offerer_id).await.unwrap();
 
-    let detached_answerer = harness
-        .peer(902)
-        .coordinator
-        .detach_peer_state_for_test(&offerer_id, old_answerer_session)
-        .await
-        .expect("test should detach only the answerer coordinator state");
-    assert!(
-        harness
-            .peer(902)
-            .coordinator
-            .get_peer_session_id(&offerer_id)
-            .await
-            .is_none(),
-        "answerer coordinator state must be absent before the restart offer"
-    );
-    assert_eq!(
-        harness
-            .peer(901)
-            .coordinator
-            .get_peer_session_id(&answerer_id)
-            .await,
-        Some(old_offerer_session),
-        "offerer must still retain the stale session"
-    );
+    assert!(harness.peer(902).rtc.close_peer(&offerer_id).await);
+    assert_eq!(harness.peer(902).rtc.peer_count().await, 0);
 
-    harness
-        .peer(901)
-        .restart_ice(902)
-        .await
-        .expect("offerer should start ICE restart");
+    harness.peer(901).rtc.network_unavailable();
+    harness.peer(901).rtc.network_available();
 
-    let (_exchange_id, rejection_reason) =
-        wait_for_restart_rejection(&harness, &offerer_id, &answerer_id).await;
+    let (_, rejection_reason) = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(rejection) = restart_rejection_exchange(
+                &harness.server.received_messages().await,
+                &offerer_id,
+                &answerer_id,
+            ) {
+                break rejection;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("answerer must reject the correlated restart offer");
     assert_eq!(
         rejection_reason,
-        ice_restart_rejected::Reason::NoActiveSession as i32,
-        "restart rejection must identify the missing active session"
+        ice_restart_rejected::Reason::NoActiveSession as i32
     );
-    detached_answerer
-        .close()
-        .await
-        .expect("detached answerer connection should close");
 
-    let (new_offerer_session, new_answerer_session) = wait_for_peer_rebuilt(
-        &harness,
-        &offerer_id,
-        &answerer_id,
-        old_offerer_session,
-        old_answerer_session,
-    )
-    .await;
+    let (offerer, answerer) = tokio::time::timeout(WAIT, async {
+        loop {
+            let offerer = harness.peer(901).rtc.state(&answerer_id).await;
+            let answerer = harness.peer(902).rtc.state(&offerer_id).await;
+            if let (Some(offerer), Some(answerer)) = (offerer, answerer)
+                && offerer.sendable
+                && answerer.sendable
+                && offerer.pc_generation > old_offerer.pc_generation
+                && answerer.pc_generation > old_answerer.pc_generation
+            {
+                break (offerer, answerer);
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("restart rejection must rebuild both peer generations");
 
-    let request = harness
+    let response = harness
         .peer(901)
-        .spawn_request(902, "issue_508_autonomous_rebuild", 15_000);
-    let response = tokio::time::timeout(Duration::from_secs(20), request)
+        .spawn_request(902, "issue_508_autonomous_rebuild", 15_000)
         .await
-        .expect("fresh RPC should not time out")
         .expect("fresh RPC task should join")
         .expect("fresh RPC should succeed after full renegotiation");
     assert_eq!(response.as_ref(), b"pong");
-
-    assert_ne!(new_offerer_session, old_offerer_session);
-    assert_ne!(new_answerer_session, old_answerer_session);
-
+    assert!(offerer.pc_generation > old_offerer.pc_generation);
+    assert!(answerer.pc_generation > old_answerer.pc_generation);
+    assert_eq!(harness.peer(902).rtc.peer_count().await, 1);
     harness.shutdown().await;
 }
 
-/// Test basic ICE restart on an established connection
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_basic_ice_restart() {
     install_test_crypto_provider();
+    let harness = connected(100, 200).await;
+    let target = harness.peer(200).id.clone();
+    let old = harness.peer(100).rtc.state(&target).await.unwrap();
 
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_file(true)
-        .with_line_number(true)
-        .with_test_writer()
-        .try_init()
-        .ok();
-
-    let server = TestSignalingServer::start().await.unwrap();
-
-    // Create two peers
-    let id_offerer = make_actor_id(100);
-    let id_answerer = make_actor_id(200);
-
-    let (peer_offerer, _client_a) = create_peer_with_websocket(id_offerer.clone(), &server.url())
-        .await
-        .unwrap();
-    let (_peer_answerer, _client_b) =
-        create_peer_with_websocket(id_answerer.clone(), &server.url())
-            .await
-            .unwrap();
-
-    // Establish connection
-    tracing::info!("🔗 Establishing initial connection...");
-    let ready_rx = peer_offerer
-        .initiate_connection(&id_answerer)
-        .await
-        .expect("initiate failed");
-
-    match tokio::time::timeout(Duration::from_secs(10), ready_rx).await {
-        Ok(Ok(_)) => {
-            tracing::info!("✅ Initial connection established!");
-        }
-        Ok(Err(_)) => panic!("Connection failed (channel closed)"),
-        Err(_) => panic!("Connection timed out"),
-    }
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Wait a bit to ensure ICE restart count is reset or tracked properly
-    // The server tracks total ICE restart offers, so we can check if it increases
-    let initial_count = server.get_ice_restart_count();
-
-    // Trigger ICE restart
-    tracing::info!("♻️ Triggering ICE restart...");
-    peer_offerer
-        .restart_ice(&id_answerer)
-        .await
-        .expect("restart_ice failed");
-
-    // Wait a bit for ICE restart to process
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-
-    // Verify ICE restart offer was sent
-    let count = server.get_ice_restart_count();
-    tracing::info!("📊 ICE restart offers sent: {}", count);
-    assert!(
-        count > initial_count,
-        "Expected ICE restart count to increase (initial: {}, current: {})",
-        initial_count,
-        count
-    );
-
-    tracing::info!("✅ Basic ICE restart test passed!");
+    let (new, _) = soft_recover(&harness, 100, 200).await;
+    assert_eq!(new.pc_generation, old.pc_generation);
+    assert!(new.revision > old.revision);
+    assert!(new.sendable);
+    harness.shutdown().await;
 }
 
-/// Test rapid repeated ICE restart calls (de-duplication)
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_rapid_ice_restart_deduplication() {
     install_test_crypto_provider();
+    let harness = connected(300, 400).await;
+    let target = harness.peer(400).id.clone();
+    let old = harness.peer(300).rtc.state(&target).await.unwrap();
 
-    tracing_subscriber::fmt()
-        .with_file(true)
-        .with_line_number(true)
-        .with_max_level(tracing::Level::DEBUG)
-        .with_test_writer()
-        .try_init()
-        .ok();
-
-    let server = TestSignalingServer::start().await.unwrap();
-
-    // Create two peers
-    let id_offerer = make_actor_id(300);
-    let id_answerer = make_actor_id(400);
-
-    let (peer_offerer, _client_a) = create_peer_with_websocket(id_offerer.clone(), &server.url())
-        .await
-        .unwrap();
-    let (_peer_answerer, _client_b) =
-        create_peer_with_websocket(id_answerer.clone(), &server.url())
-            .await
-            .unwrap();
-
-    // Establish connection
-    tracing::info!("🔗 Establishing initial connection...");
-    let ready_rx = peer_offerer
-        .initiate_connection(&id_answerer)
-        .await
-        .expect("initiate failed");
-
-    match tokio::time::timeout(Duration::from_secs(10), ready_rx).await {
-        Ok(Ok(_)) => {
-            tracing::info!("✅ Initial connection established!");
-        }
-        Ok(Err(_)) => panic!("Connection failed (channel closed)"),
-        Err(_) => panic!("Connection timed out"),
+    for _ in 0..32 {
+        harness.peer(300).rtc.network_unavailable();
+        harness.peer(300).rtc.network_available();
     }
-
-    // Capture initial count
-    let initial_count = server.get_ice_restart_count();
-
-    // Trigger multiple ICE restarts in rapid succession (simulating network jitter)
-    tracing::info!("♻️ Triggering 5 rapid ICE restart calls...");
-
-    let peer = peer_offerer.clone();
-    let target = id_answerer.clone();
-    let handles: Vec<_> = (0..5)
-        .map(|i| {
-            let p = peer.clone();
-            let t = target.clone();
-            tokio::spawn(async move {
-                tracing::info!("🔄 ICE restart call #{}", i + 1);
-                let _ = p.restart_ice(&t).await;
-            })
+    let state = harness
+        .peer(300)
+        .rtc
+        .wait_state(&target, WAIT, |state| {
+            state.sendable && state.revision > old.revision
         })
-        .collect();
-
-    // Wait for all calls to complete
-    for h in handles {
-        h.await.ok();
-    }
-
-    // Wait for any in-flight restarts to process
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-
-    // Check de-duplication: should only see 1 or 2 ICE restart offers at most
-    // (Some may slip through the race condition window, but not all 5)
-    let new_count = server.get_ice_restart_count();
-    let delta = new_count - initial_count;
-    tracing::info!("📊 New ICE restart offers sent: {}", delta);
-
-    // Ideally we want delta == 1, but due to potential race conditions,
-    // we allow up to 2 to pass through. 5 would indicate no de-duplication.
-    assert!(
-        delta <= 3,
-        "Expected at most 3 ICE restart offers with de-duplication, got {}. \
-         This suggests the de-duplication mechanism may not be working properly.",
-        delta
-    );
-
-    if delta == 1 {
-        tracing::info!("✅ Perfect de-duplication: only 1 offer sent!");
-    } else {
-        tracing::warn!(
-            "⚠️ De-duplication not perfect: {} offers sent (expected 1)",
-            delta
-        );
-    }
-
-    tracing::info!("✅ Rapid ICE restart de-duplication test passed!");
+        .await
+        .expect("rapid restart recovery state");
+    assert_eq!(state.pc_generation, old.pc_generation);
+    assert!(state.revision > old.revision);
+    assert_eq!(harness.peer(300).rtc.peer_count().await, 1);
+    harness.shutdown().await;
 }
 
-/// Test ICE restart with sequential calls (should allow second restart after first completes)
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_sequential_ice_restart() {
     install_test_crypto_provider();
+    let harness = connected(500, 600).await;
+    let target = harness.peer(600).id.clone();
+    let initial = harness.peer(500).rtc.state(&target).await.unwrap();
 
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_test_writer()
-        .with_file(true)
-        .with_line_number(true)
-        .try_init()
-        .ok();
+    let (first, _) = soft_recover(&harness, 500, 600).await;
+    let (second, _) = soft_recover(&harness, 500, 600).await;
 
-    let server = TestSignalingServer::start().await.unwrap();
-
-    // Create two peers
-    let id_offerer = make_actor_id(500);
-    let id_answerer = make_actor_id(600);
-
-    let (peer_offerer, _client_a) = create_peer_with_websocket(id_offerer.clone(), &server.url())
-        .await
-        .unwrap();
-    let (_peer_answerer, _client_b) =
-        create_peer_with_websocket(id_answerer.clone(), &server.url())
-            .await
-            .unwrap();
-
-    // Establish connection
-    tracing::info!("🔗 Establishing initial connection...");
-    let ready_rx = peer_offerer
-        .initiate_connection(&id_answerer)
-        .await
-        .expect("initiate failed");
-
-    match tokio::time::timeout(Duration::from_secs(10), ready_rx).await {
-        Ok(Ok(_)) => {
-            tracing::info!("✅ Initial connection established!");
-        }
-        Ok(Err(_)) => panic!("Connection failed (channel closed)"),
-        Err(_) => panic!("Connection timed out"),
-    }
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    // First ICE restart
-    let initial_count = server.get_ice_restart_count();
-    tracing::info!("♻️ First ICE restart...");
-    peer_offerer
-        .restart_ice(&id_answerer)
-        .await
-        .expect("first restart_ice failed");
-
-    // Wait for ICE restart offer to be sent and processed
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    let count1 = server.get_ice_restart_count();
-    tracing::info!("📊 First restart offers: {}", count1);
-
-    // Wait for first restart to complete or timeout
-    tokio::time::sleep(Duration::from_secs(6)).await;
-
-    // Second ICE restart (after first completes/times out)
-
-    tracing::info!("♻️ Second ICE restart (after first finished)...");
-    peer_offerer
-        .restart_ice(&id_answerer)
-        .await
-        .expect("second restart_ice failed");
-
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    let count2 = server.get_ice_restart_count();
-    tracing::info!("📊 Second restart offers: {}", count2);
-
-    // Both restarts should have sent offers
-    assert!(
-        count1 > initial_count,
-        "First restart should send at least 1 offer"
-    );
-    assert!(
-        count2 > count1,
-        "Second restart should send at least 1 more offer"
-    );
-
-    tracing::info!("✅ Sequential ICE restart test passed!");
+    assert_eq!(first.pc_generation, initial.pc_generation);
+    assert_eq!(second.pc_generation, initial.pc_generation);
+    assert!(first.revision > initial.revision);
+    assert!(second.revision > first.revision);
+    harness.shutdown().await;
 }
 
-/// Test simultaneous ICE restart from both sides (glare scenario)
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn test_simultaneous_ice_restart_glare() {
     install_test_crypto_provider();
+    let harness = connected(700, 800).await;
+    let a_id = harness.peer(700).id.clone();
+    let b_id = harness.peer(800).id.clone();
+    let a_generation = harness.peer(700).rtc.generation(&b_id).await.unwrap();
+    let b_generation = harness.peer(800).rtc.generation(&a_id).await.unwrap();
+    let a_before = harness.peer(700).rtc.state(&b_id).await.unwrap();
+    let b_before = harness.peer(800).rtc.state(&a_id).await.unwrap();
 
-    tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_test_writer()
-        .try_init()
-        .ok();
+    harness.peer(700).rtc.network_unavailable();
+    harness.peer(800).rtc.network_unavailable();
+    let (_, _) = tokio::join!(async { harness.peer(700).rtc.network_available() }, async {
+        harness.peer(800).rtc.network_available()
+    },);
 
-    let server = TestSignalingServer::start().await.unwrap();
-
-    // Create two peers
-    let id_peer_a = make_actor_id(700);
-    let id_peer_b = make_actor_id(800);
-
-    let (peer_a, _client_a) = create_peer_with_websocket(id_peer_a.clone(), &server.url())
-        .await
-        .unwrap();
-    let (peer_b, _client_b) = create_peer_with_websocket(id_peer_b.clone(), &server.url())
-        .await
-        .unwrap();
-
-    // Establish initial connection (peer_a is offerer due to lower serial number)
-    tracing::info!("🔗 Establishing initial connection...");
-    let ready_rx = peer_a
-        .initiate_connection(&id_peer_b)
-        .await
-        .expect("initiate failed");
-
-    match tokio::time::timeout(Duration::from_secs(10), ready_rx).await {
-        Ok(Ok(_)) => {
-            tracing::info!("✅ Initial connection established!");
-        }
-        Ok(Err(_)) => panic!("Connection failed (channel closed)"),
-        Err(_) => panic!("Connection timed out"),
-    }
-
-    // Wait for connection to stabilize
-    tokio::time::sleep(Duration::from_millis(200)).await;
-
-    // Capture initial count
-    let initial_count = server.get_ice_restart_count();
-
-    // Trigger ICE restart from BOTH sides simultaneously
-    tracing::info!("♻️ Triggering SIMULTANEOUS ICE restart from both peers...");
-
-    let peer_a_clone = peer_a.clone();
-    let peer_b_clone = peer_b.clone();
-    let id_b_clone = id_peer_b.clone();
-    let id_a_clone = id_peer_a.clone();
-
-    // Launch both restarts concurrently
-    let (result_a, result_b) = tokio::join!(
-        async move {
-            tracing::info!("🔄 Peer A (700) triggering ICE restart...");
-            peer_a_clone.restart_ice(&id_b_clone).await
-        },
-        async move {
-            tracing::info!("🔄 Peer B (800) triggering ICE restart...");
-            peer_b_clone.restart_ice(&id_a_clone).await
-        }
-    );
-
-    // Both calls should complete without error
-    result_a.expect("Peer A ICE restart failed");
-    result_b.expect("Peer B ICE restart failed");
-
-    tracing::info!("✅ Both ICE restart calls completed");
-
-    // Wait for the glare scenario to be resolved
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-
-    // Check the ICE restart offer count
-    let final_count = server.get_ice_restart_count();
-    let delta = final_count - initial_count;
-    tracing::info!("📊 New ICE restart offers sent: {}", delta);
-
-    // We expect at least 1 offer (could be 2 if both sent before collision detection)
-    assert!(
-        delta >= 1,
-        "Expected at least 1 ICE restart offer in glare scenario, got {}",
-        delta
-    );
-
-    // The system should not send excessive offers (indicating a signaling storm)
-    assert!(
-        delta <= 4,
-        "Too many ICE restart offers sent ({}), possible signaling storm",
-        delta
-    );
-
-    if delta == 1 {
-        tracing::info!("✅ Perfect glare resolution: collision detected before second offer sent");
-    } else if delta == 2 {
-        tracing::info!("✅ Good glare resolution: both offers sent, collision resolved cleanly");
-    } else {
-        tracing::warn!(
-            "⚠️ Glare resolution with {} offers (acceptable but not optimal)",
-            delta
-        );
-    }
-
-    tracing::info!("✅ Simultaneous ICE restart (glare) test passed!");
+    let (a, b) = wait_recovered(&harness, 700, 800, a_before.revision, b_before.revision).await;
+    assert_eq!(a.pc_generation, a_generation);
+    assert_eq!(b.pc_generation, b_generation);
+    assert!(a.sendable && b.sendable);
+    harness.shutdown().await;
 }
