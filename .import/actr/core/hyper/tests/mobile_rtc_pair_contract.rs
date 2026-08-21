@@ -757,11 +757,16 @@ async fn p11_signaling_partition_does_not_kill_an_established_data_plane() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn p12_dropped_soft_restart_offer_escalates_once_to_hard_replacement() {
+async fn p12_dropped_soft_restart_offer_retries_on_the_same_peer_connection() {
     let mut pair = MobileRtcPairHarness::new(51_096, 51_095).await;
     pair.establish(ConnectionInitiator::A).await;
     let initial = pair.wait_pair_ready(WAIT).await;
     let trace_baseline = pair.signaling_trace().len();
+    let restart_hit_baseline = pair.signaling_hits(
+        PairEndpoint::A,
+        PairEndpoint::B,
+        SignalingMessageClass::IceRestartOffer,
+    );
     pair.set_signaling_fault(
         LinkDirection::AToB,
         SignalingMessageClass::IceRestartOffer,
@@ -772,22 +777,32 @@ async fn p12_dropped_soft_restart_offer_escalates_once_to_hard_replacement() {
     pair.foreground(PairEndpoint::A, Duration::from_secs(5))
         .await;
     pair.harness()
-        .peer(pair.serial(PairEndpoint::A))
-        .rtc
-        .wait_state(&pair.id(PairEndpoint::B), WAIT, |state| {
-            state.sendable && state.pc_generation > initial.a_to_b.pc_generation
-        })
+        .signaling_faults
+        .wait_for_hits_after(
+            &pair.id(PairEndpoint::A),
+            &pair.id(PairEndpoint::B),
+            SignalingMessageClass::IceRestartOffer,
+            restart_hit_baseline,
+            WAIT,
+        )
         .await
-        .expect("soft deadline must escalate A to a replacement");
-    pair.harness()
-        .peer(pair.serial(PairEndpoint::B))
-        .rtc
-        .wait_state(&pair.id(PairEndpoint::A), WAIT, |state| {
-            state.sendable && state.pc_generation > initial.b_to_a.pc_generation
-        })
-        .await
-        .expect("B must switch to the hard replacement");
-    assert!(pair.signaling_fault_metrics().dropped > 0);
+        .expect("the first soft restart offer must hit the injected drop");
+    assert!(
+        pair.signaling_trace()[trace_baseline..]
+            .iter()
+            .any(|event| {
+                event.from == pair.id(PairEndpoint::A)
+                    && event.to == pair.id(PairEndpoint::B)
+                    && event.class == SignalingMessageClass::IceRestartOffer
+                    && event.rule == SignalingFaultRule::Drop
+            }),
+        "the first soft restart offer must record the injected drop"
+    );
+    pair.heal_signaling_faults();
+    let restored = pair.wait_pair_ready(WAIT).await;
+    assert_eq!(restored.a_to_b.pc_generation, initial.a_to_b.pc_generation);
+    assert_eq!(restored.b_to_a.pc_generation, initial.b_to_a.pc_generation);
+
     let recovery_trace = pair.signaling_trace();
     let dropped_restart_exchanges = recovery_trace[trace_baseline..]
         .iter()
@@ -800,18 +815,25 @@ async fn p12_dropped_soft_restart_offer_escalates_once_to_hard_replacement() {
     assert_eq!(
         dropped_restart_exchanges.len(),
         1,
-        "Soft recovery must own one exchange before Hard escalation"
+        "the injected fault must drop exactly the first soft exchange"
+    );
+    let restart_exchanges = recovery_trace[trace_baseline..]
+        .iter()
+        .filter(|event| event.class == SignalingMessageClass::IceRestartOffer)
+        .filter_map(|event| event.exchange_id.clone())
+        .collect::<HashSet<_>>();
+    assert!(
+        restart_exchanges.len() >= 2,
+        "the attempt timeout must create a fresh soft exchange on the same PC"
     );
     assert_eq!(
         recovery_trace[trace_baseline..]
             .iter()
             .filter(|event| event.class == SignalingMessageClass::Offer)
             .count(),
-        1,
-        "Hard escalation must create exactly one replacement offer"
+        0,
+        "a dropped soft offer must not trigger an ordinary hard-replacement offer"
     );
-    pair.heal_signaling_faults();
-    pair.wait_pair_ready(WAIT).await;
     assert_eq!(
         pair.harness()
             .peer(pair.serial(PairEndpoint::A))
@@ -828,7 +850,7 @@ async fn p12_dropped_soft_restart_offer_escalates_once_to_hard_replacement() {
             .await,
         1
     );
-    pair.assert_rpc_both_directions("p12_soft_to_hard").await;
+    pair.assert_rpc_both_directions("p12_soft_retry").await;
     pair.shutdown().await;
 }
 

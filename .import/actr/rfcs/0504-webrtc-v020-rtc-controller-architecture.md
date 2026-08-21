@@ -1343,6 +1343,12 @@ process:
 6. Answerer sends a restart request, and Offerer initiates Offer;
 7. Only accept Candidates matching the new ICE generation/ufrag;
 8. Re-publish Connected after PC and `RpcReliable` are restored.
+If one Offerer ICE restart attempt times out while the local address and active
+Session are still usable, the Controller starts another Soft Recovery attempt
+on the same PC generation. The Answerer instead retransmits its correlated
+restart request within a bounded request budget; exhaustion retains the Hard
+Recovery fallback because the remote Session may no longer exist. The total
+recovery-cycle budget still bounds these retries.
 Soft Recovery does not increase PC generation.
 
 ### Hard Recovery
@@ -1350,8 +1356,8 @@ Soft Recovery does not increase PC generation.
 Hard Recovery is suitable for:
 - Local interface or IP changes;
 - PeerConnection driver exits or the status does not converge;
-- Soft Recovery times out or exceeds the retry budget;
--Session mailbox overflow;
+- A Soft Recovery operation fails irrecoverably;
+- Session mailbox overflow;
 - The current socket/bind plan cannot be used anymore;
 - Application lifecycle policy requires the connection to be re-established.
 process:
@@ -1376,7 +1382,14 @@ flowchart TB
     AddressChanged -->|"No"| Soft["Soft Recovery<br/>same PC generation<br/>ICE generation + 1"]
     Soft --> SoftResult{"ICE restart successful?"}
     SoftResult -->|"Success"| Ready["RpcReliable Open<br/> Release Connected"]
-    SoftResult -->|"Failure"| Hard["Hard Recovery<br/>PC generation + 1"]
+    SoftResult -->|"Offerer attempt timeout"| Budget{"Recovery-cycle budget remains?"}
+    Budget -->|"Yes"| Soft
+    Budget -->|"No"| Terminal["Terminal recovery cleanup"]
+    SoftResult -->|"Answerer request timeout"| RequestBudget{"Request budget remains?"}
+    RequestBudget -->|"Yes"| Retransmit["Retransmit correlated restart request"]
+    Retransmit --> SoftResult
+    RequestBudget -->|"No"| Hard
+    SoftResult -->|"Irrecoverable failure"| Hard["Hard Recovery<br/>PC generation + 1"]
 
     AddressChanged -->|"Yes"| Hard
     Hard --> Pending["Build Pending Session"]

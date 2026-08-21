@@ -2425,7 +2425,7 @@ fn network_available_starts_soft_recovery_when_recovering() {
 }
 
 #[test]
-fn exact_soft_recovery_deadline_escalates_without_duplicate_fact_extension() {
+fn exact_soft_recovery_deadline_retries_same_pc_without_duplicate_fact_extension() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let generation = drive_offerer_to_sendable(&mut state);
 
@@ -2462,6 +2462,89 @@ fn exact_soft_recovery_deadline_escalates_without_duplicate_fact_extension() {
     assert!(stale.is_empty());
     assert_eq!(state.building_generation, None);
 
+    let ice_generation = state.ice_generation;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: epoch,
+        },
+    );
+    assert!(has_restart_ice(&effects, generation));
+    assert!(!has_build_session(&effects, generation + 1));
+    assert_eq!(state.active_generation, Some(generation));
+    assert_eq!(state.building_generation, None);
+    assert_eq!(state.ice_generation, ice_generation + 1);
+    assert!(
+        state.recovery_epoch > epoch,
+        "the next soft attempt owns a new epoch"
+    );
+}
+
+#[test]
+fn transport_ready_soft_recovery_deadline_retries_same_pc() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_sendable(&mut state);
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    let epoch = state.recovery_epoch;
+    let ice_generation = state.ice_generation;
+
+    // A restart answer may be applied just before an old positive transport
+    // callback advances the soft round to TransportReady. This is still the
+    // active PC, not a pending Hard replacement.
+    state.phase = RtcPeerPhase::TransportReady;
+    state.recovery_negotiated = true;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryDeadlineElapsed {
+            recovery_epoch: epoch,
+        },
+    );
+
+    assert!(has_restart_ice(&effects, generation));
+    assert!(!has_build_session(&effects, generation + 1));
+    assert_eq!(state.active_generation, Some(generation));
+    assert_eq!(state.ice_generation, ice_generation + 1);
+}
+
+#[test]
+fn exhausted_answerer_restart_request_escalates_to_hard_recovery() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let request = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert!(!has_restart_ice(&request, generation));
+    assert!(has_restart_request(&request, 1));
+
+    // Model an exhausted correlated-request budget. Unlike the Offerer, the
+    // Answerer cannot create another restart offer itself; repeating a fresh
+    // request cycle forever would strand it when the remote controller was
+    // intentionally closed by a long-background reconnect.
+    state.local_restart_request_attempt = u32::MAX;
+    let epoch = state.recovery_epoch;
     let effects = reduce(
         &mut state,
         RtcPeerInput::RecoveryDeadlineElapsed {
@@ -2469,11 +2552,8 @@ fn exact_soft_recovery_deadline_escalates_without_duplicate_fact_extension() {
         },
     );
     assert!(has_build_session(&effects, generation + 1));
+    assert_eq!(state.active_generation, Some(generation));
     assert_eq!(state.building_generation, Some(generation + 1));
-    assert!(
-        state.recovery_epoch > epoch,
-        "hard replacement owns a new epoch"
-    );
 }
 
 #[test]
@@ -2842,7 +2922,7 @@ fn refresh_configuration_suppressed_during_close() {
 }
 
 #[test]
-fn total_recovery_budget_survives_soft_retry_and_hard_escalation() {
+fn total_recovery_budget_survives_same_pc_soft_retry() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     let active = drive_offerer_to_sendable(&mut state);
 
@@ -2861,18 +2941,24 @@ fn total_recovery_budget_survives_soft_retry_and_hard_escalation() {
     );
     let attempt_epoch = state.recovery_epoch;
 
-    // The per-attempt deadline escalates Soft -> Hard and changes the attempt
-    // epoch, but must never extend/change the total cycle identity.
-    let hard = reduce(
+    // The per-attempt deadline starts another Soft attempt on the same PC and
+    // changes the attempt epoch, but must never extend/change the total cycle
+    // identity.
+    let retry = reduce(
         &mut state,
         RtcPeerInput::RecoveryDeadlineElapsed {
             recovery_epoch: attempt_epoch,
         },
     );
-    assert!(hard.iter().any(|effect| matches!(
+    assert!(retry.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::RestartIce { generation, .. } if *generation == active
+    )));
+    assert!(!retry.iter().any(|effect| matches!(
         effect,
         RtcPeerEffect::BuildSession { generation, .. } if *generation > active
     )));
+    assert_eq!(state.active_generation, Some(active));
     assert_eq!(state.recovery_cycle, cycle);
 
     let exhausted = reduce(

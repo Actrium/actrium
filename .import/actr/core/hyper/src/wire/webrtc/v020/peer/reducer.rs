@@ -695,7 +695,12 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                 if matches!(
                     state.phase,
                     RtcPeerPhase::Negotiating | RtcPeerPhase::TransportReady
-                ) {
+                ) && (state.pending_generation.is_some() || state.ice_generation == 0)
+                {
+                    // Negotiating/TransportReady are shared by Soft and Hard
+                    // recovery. A pending generation, or generation-local ICE
+                    // epoch zero after a break-before-make build, identifies
+                    // this as a Hard replacement attempt.
                     // A Hard replacement built successfully but its signaling,
                     // SDP, transport, or readiness anchor did not converge in
                     // the attempt window. Retire the non-authoritative
@@ -725,6 +730,33 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                     // arms one fresh per-attempt deadline.
                     state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
                     send_answerer_restart_request(state, &mut effects);
+                } else if state.role == Role::Offerer
+                    && state.active_generation.is_some()
+                    && matches!(
+                        state.phase,
+                        RtcPeerPhase::Recovering
+                            | RtcPeerPhase::Negotiating
+                            | RtcPeerPhase::TransportReady
+                    )
+                {
+                    // Preserve the 0.14 Offerer recovery policy: a temporary
+                    // network loss gets multiple ICE-restart attempts on the
+                    // existing PeerConnection. The stable recovery-cycle timer
+                    // remains the overall 60-second bound, while this new
+                    // attempt epoch gives the controller a fresh six-second
+                    // attempt timer.
+                    // Hard Recovery is reserved for an address change, an
+                    // unusable/closed Session, or another explicit hard-failure
+                    // fact instead of being the first timeout response.
+                    //
+                    // The Answerer is intentionally excluded. It already
+                    // retransmits one correlated restart request up to its
+                    // bounded request budget above; exhausting that budget is
+                    // evidence that the remote Session may no longer exist and
+                    // must keep the legacy Hard Recovery fallback.
+                    state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
+                    state.recovery_attempt_started = false;
+                    start_soft_recovery(state, &mut effects);
                 } else {
                     start_hard_recovery(state, &mut effects);
                 }
@@ -1884,7 +1916,7 @@ fn terminate_transport_attempt(
 /// retiring, pending → active). When there is no active session (initial
 /// build failure, orphaned), falls back to break-before-make.
 ///
-/// Triggers: local address change, Soft Recovery failure/timeout, mailbox
+/// Triggers: local address change, irrecoverable Soft Recovery failure, mailbox
 /// overflow, `ForceReconnect`. Hard Recovery is also suitable for: driver exit,
 /// non-converging status, socket/bind plan unusable, app lifecycle policy
 /// (RFC §"Hard Recovery is suitable for").
