@@ -946,6 +946,60 @@ async fn failed_hard_replacement_retries_on_the_attempt_deadline() {
 }
 
 #[tokio::test]
+async fn soft_recovery_attempt_timeout_retries_on_the_same_pc_generation() {
+    let mut h = ControllerTestHarness::spawn(710);
+    drive_offerer_to_sendable(&mut h).await;
+
+    h.supervisor.publish(RtcNetworkEvent::NetworkUnavailable);
+    await_snapshot(&h.handle, "T1 soft recovery entry", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Recovering && !snapshot.sendable
+    })
+    .await;
+    h.supervisor.publish(RtcNetworkEvent::NetworkAvailable);
+
+    let first = h.next_effect().await;
+    assert!(matches!(
+        first.effect,
+        RtcPeerEffect::RestartIce { generation: 1, .. }
+    ));
+    let first_ice_generation = first
+        .identity
+        .ice_generation
+        .expect("first soft attempt has an ICE generation");
+
+    h.clock.advance(Duration::from_secs(6));
+    let retry = h.next_effect().await;
+    assert!(matches!(
+        retry.effect,
+        RtcPeerEffect::RestartIce { generation: 1, .. }
+    ));
+    assert!(
+        retry
+            .identity
+            .ice_generation
+            .is_some_and(|generation| generation > first_ice_generation),
+        "the retry must own a fresh ICE generation"
+    );
+    let snapshot = h.handle.snapshot();
+    assert_eq!(snapshot.pc_generation, 1);
+    assert_eq!(
+        snapshot.status,
+        actr_framework::WebRtcPeerStatus::Recovering
+    );
+    assert!(!snapshot.sendable);
+
+    h.effects
+        .complete(shutdown_completion(&first))
+        .await
+        .expect("settle stale first soft attempt");
+    h.effects
+        .complete(shutdown_completion(&retry))
+        .await
+        .expect("settle soft retry");
+    h.shutdown().await;
+}
+
+#[tokio::test]
 async fn hung_hard_replacement_negotiation_is_retired_and_retried() {
     let mut h = ControllerTestHarness::spawn(709);
     drive_offerer_to_sendable(&mut h).await;
