@@ -1333,7 +1333,12 @@ process:
 1. Controller issues `Recovering` and cancels the old SendPermit;
 2. `ice_generation += 1`;
 3. Call `set_configuration()` when necessary;
-4. Call `restart_ice()`;
+4. The Offerer calls `restart_ice()`. The Answerer performs no local
+   `restart_ice()` here: v0.20 applies the implicit local ICE restart (ufrag
+   roll, stale candidate discard, socket rebind per webrtc-rs/webrtc#868)
+   inside `set_remote_description()` when it detects the Offerer's changed
+   credentials, so the Answerer's credentials can only roll atomically with
+   an incoming restart offer — never out from under an answer it just sent;
 5. Offerer creates restart Offer;
 6. Answerer sends a restart request, and Offerer initiates Offer;
 7. Only accept Candidates matching the new ICE generation/ufrag;

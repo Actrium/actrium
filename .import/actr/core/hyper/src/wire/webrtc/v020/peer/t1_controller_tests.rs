@@ -824,21 +824,9 @@ async fn fresh_remote_offer_cancels_the_previous_recovery_budget() {
     })
     .await;
     h.supervisor.publish(RtcNetworkEvent::NetworkAvailable);
-    let restart = h.next_effect().await;
-    assert!(matches!(restart.effect, RtcPeerEffect::RestartIce { .. }));
-    let restart_ice_generation = restart
-        .identity
-        .ice_generation
-        .expect("RestartIce identity carries ICE generation");
-    h.effects
-        .complete(EffectCompletion::RestartIce {
-            generation: restart.identity.pc_generation,
-            operation_id: restart.identity.operation_id,
-            ice_generation: restart_ice_generation,
-            result: Ok(()),
-        })
-        .await
-        .expect("complete T1 answerer ICE restart");
+    // Request-only answerer recovery: the restart request goes straight to
+    // signaling; the local restart happens implicitly when the remote restart
+    // offer is applied, so no RestartIce effect is dispatched here.
     let (_, recovery_message) = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("T1 restart request timeout")
