@@ -130,6 +130,28 @@ fn init_rust_echo_service(parent: &std::path::Path, name: &str) -> std::path::Pa
     parent.join(name)
 }
 
+fn init_rust_empty_service(parent: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let out = run_actr(
+        &[
+            "init",
+            "-l",
+            "rust",
+            "--template",
+            "empty",
+            "--role",
+            "service",
+            "--signaling",
+            "wss://loran1.actrium-dev.example",
+            "--manufacturer",
+            "acme",
+            name,
+        ],
+        parent,
+    );
+    assert_actr_success(&out, "actr init (empty service)");
+    parent.join(name)
+}
+
 fn init_rust_echo_both(parent: &std::path::Path, name: &str) -> std::path::PathBuf {
     let out = run_actr(
         &[
@@ -267,13 +289,15 @@ fn rust_echo_app_scaffold() {
         lib.contains("pub mod generated;"),
         "app lib should include generated modules"
     );
+    // The bridge proto has no local RPC routes, so the unified workload
+    // registers the unit handler and forwards remote calls via dispatch.
     assert!(
-        lib.contains("EchoAppBridge"),
-        "app lib should define a local bridge workload"
+        lib.contains("actr_dispatch::ActrWorkload"),
+        "app lib should register the unified workload"
     );
     assert!(
-        lib.contains("ClientAppHandler for EchoAppBridge"),
-        "app lib should implement the generated bridge trait"
+        lib.contains("entry!(ActrWorkload<()>, ActrWorkload::new(()))"),
+        "app lib should register the unit-handler unified workload"
     );
 }
 
@@ -331,8 +355,12 @@ fn rust_echo_service_scaffold() {
     // -- lib.rs --
     let main = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
     assert!(
-        main.contains("EchoServiceWorkload"),
-        "service library should wire the generated workload wrapper"
+        main.contains("actr_handler::ActrHandler"),
+        "service library should compose the generated ActrHandler adapter"
+    );
+    assert!(
+        main.contains("ActrWorkload<ActrHandler<EchoServiceImpl>>"),
+        "service library should wire the unified workload through ActrHandler"
     );
     assert!(
         main.contains("entry!("),
@@ -461,6 +489,11 @@ service ChatService {
 }
 "#;
 
+const EMPTY_SERVICE_PROTO: &str = r#"syntax = "proto3";
+package empty_shell;
+service EmptyShell {}
+"#;
+
 /// Helper: write a remote proto under protos/remote/<dependency-alias>/<stem>.proto.
 fn write_remote_proto(dir: &std::path::Path, alias: &str, stem: &str, content: &str) {
     let proto_dir = dir.join("protos/remote").join(alias);
@@ -476,6 +509,102 @@ fn add_manifest_dependency(dir: &std::path::Path, alias: &str, actr_type: &str) 
     let insert_at = manifest.find(marker).expect("manifest dependencies table") + marker.len();
     manifest.insert_str(insert_at, &dependency);
     std::fs::write(path, manifest).unwrap();
+}
+
+fn set_manifest_exports(dir: &std::path::Path, exports: &[&str]) {
+    let path = dir.join("manifest.toml");
+    let manifest = std::fs::read_to_string(&path).unwrap();
+    let quoted = exports
+        .iter()
+        .map(|export| format!("\"{export}\""))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let updated = manifest.replacen(
+        "exports = [\"protos/local/local.proto\"]",
+        &format!("exports = [{quoted}]"),
+        1,
+    );
+    std::fs::write(path, updated).unwrap();
+}
+
+#[test]
+fn rust_gen_empty_only_local_service_uses_unit_workload_and_checks() {
+    let tmp = TempDir::new().unwrap();
+    let dir = init_rust_empty_service(tmp.path(), "empty-only-service");
+    std::fs::write(dir.join("protos/local/local.proto"), EMPTY_SERVICE_PROTO).unwrap();
+
+    let out = run_actr(&["gen", "-l", "rust"], &dir);
+    assert_actr_success(&out, "actr gen (empty-only local service)");
+
+    assert!(
+        !dir.join("src/generated/actr_handler.rs").exists(),
+        "empty-only local services have no local routes, so actr_handler.rs must not be generated"
+    );
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib.contains("ActrWorkload<()>") && lib.contains("ActrWorkload::new(())"),
+        "empty-only entry must use the unit handler:\n{lib}"
+    );
+    assert!(
+        !lib.contains("actr_handler::ActrHandler") && !lib.contains("EmptyShellImpl"),
+        "empty-only entry must not compose missing ActrHandler services:\n{lib}"
+    );
+
+    let metadata: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("src/generated/actr-gen-meta.json")).unwrap(),
+    )
+    .unwrap();
+    let local_service = &metadata["local_services"][0];
+    assert!(local_service.get("workload_type").is_none());
+    assert!(local_service.get("dispatcher_type").is_none());
+
+    append_workspace_patch(&dir);
+    let check = cargo_check(&dir);
+    assert_actr_success(&check, "cargo check (empty-only local service)");
+}
+
+#[test]
+fn rust_gen_empty_and_nonempty_local_services_compose_only_routed_service_and_check() {
+    let tmp = TempDir::new().unwrap();
+    let dir = init_rust_empty_service(tmp.path(), "mixed-local-service");
+    std::fs::remove_file(dir.join("protos/local/local.proto")).unwrap();
+    std::fs::write(dir.join("protos/local/empty.proto"), EMPTY_SERVICE_PROTO).unwrap();
+    std::fs::write(dir.join("protos/local/echo.proto"), ECHO_PROTO).unwrap();
+    set_manifest_exports(
+        &dir,
+        &["protos/local/empty.proto", "protos/local/echo.proto"],
+    );
+
+    let out = run_actr(&["gen", "-l", "rust"], &dir);
+    assert_actr_success(&out, "actr gen (empty + nonempty local services)");
+
+    let adapter = std::fs::read_to_string(dir.join("src/generated/actr_handler.rs")).unwrap();
+    assert!(
+        adapter.contains("EchoServiceHandler") && !adapter.contains("EmptyShellHandler"),
+        "adapter must include only services with local routes:\n{adapter}"
+    );
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib.contains("ActrWorkload<ActrHandler<EchoServiceImpl>>"),
+        "entry composes the nonempty service:\n{lib}"
+    );
+    assert!(
+        !lib.contains("EmptyShellImpl"),
+        "entry must not include the empty service as a handler generic or constructor arg:\n{lib}"
+    );
+
+    let metadata: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.join("src/generated/actr-gen-meta.json")).unwrap(),
+    )
+    .unwrap();
+    for service in metadata["local_services"].as_array().unwrap() {
+        assert!(service.get("workload_type").is_none());
+        assert!(service.get("dispatcher_type").is_none());
+    }
+
+    append_workspace_patch(&dir);
+    let check = cargo_check(&dir);
+    assert_actr_success(&check, "cargo check (empty + nonempty local services)");
 }
 
 /// Verify that `actr gen` emits a unified dispatcher for one remote service.
@@ -559,5 +688,193 @@ fn rust_echo_app_gen_two_remote_services() {
     assert!(
         !dir.join("src/local_service.rs").exists(),
         "empty bridge proto should still skip local_service.rs"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Rust codegen: two local services sharing an RPC name
+// ---------------------------------------------------------------------------
+
+const ASK_PROTO: &str = r#"syntax = "proto3";
+package ask;
+message AskRequest { string question = 1; }
+message AskResponse { string answer = 1; }
+service AskService {
+  rpc Ask(AskRequest) returns (AskResponse);
+}
+"#;
+
+const CHAT_ASK_PROTO: &str = r#"syntax = "proto3";
+package chat;
+message ChatRequest { string question = 1; }
+message ChatResponse { string answer = 1; }
+service ChatService {
+  rpc Ask(ChatRequest) returns (ChatResponse);
+}
+"#;
+
+/// End-to-end: two local services with the SAME RPC name must generate
+/// successfully for Rust. The unified dispatcher keeps unique internal
+/// routes (`ask_service_ask` / `chat_service_ask`) while the business
+/// handlers keep the protobuf-named `ask` methods.
+#[test]
+fn rust_gen_two_local_services_same_rpc_name() {
+    let tmp = TempDir::new().unwrap();
+    let dir = init_rust_echo_app(tmp.path(), "same-rpc-app");
+
+    // Replace the empty bridge proto with two local services that share
+    // the RPC name `Ask`.
+    std::fs::write(dir.join("protos/local/ask.proto"), ASK_PROTO).unwrap();
+    std::fs::write(dir.join("protos/local/chat.proto"), CHAT_ASK_PROTO).unwrap();
+    std::fs::remove_file(dir.join("protos/local/local.proto")).unwrap();
+    let manifest_path = dir.join("manifest.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap().replace(
+        "exports = []",
+        "exports = [\"protos/local/ask.proto\", \"protos/local/chat.proto\"]",
+    );
+    std::fs::write(&manifest_path, manifest).unwrap();
+
+    // The init template ships its own user-owned lib.rs (a unit-handler
+    // bridge entry); `actr gen` must preserve user entries by design. Remove
+    // it so this test exercises the generated entry composition path.
+    std::fs::remove_file(dir.join("src/lib.rs")).unwrap();
+
+    let out = run_actr(&["gen", "-l", "rust"], &dir);
+    assert_actr_success(&out, "actr gen (two local services, same RPC name)");
+
+    // The sealed dispatcher trait carries the prefixed internal routes.
+    let dispatch = std::fs::read_to_string(dir.join("src/generated/actr_dispatch.rs")).unwrap();
+    assert!(
+        dispatch.contains("async fn ask_service_ask"),
+        "dispatcher must expose the ask_service_ask route:\n{dispatch}"
+    );
+    assert!(
+        dispatch.contains("async fn chat_service_ask"),
+        "dispatcher must expose the chat_service_ask route:\n{dispatch}"
+    );
+    assert!(
+        dispatch.contains("\"ask.AskService.Ask\"")
+            && dispatch.contains("\"chat.ChatService.Ask\""),
+        "dispatcher must route both proto route keys:\n{dispatch}"
+    );
+
+    // The generated adapter forwards each prefixed route to the
+    // protobuf-named business method on the matching service field.
+    let adapter = std::fs::read_to_string(dir.join("src/generated/actr_handler.rs")).unwrap();
+    assert!(
+        adapter.contains("self.ask_service.ask"),
+        "adapter forwards AskService::ask:\n{adapter}"
+    );
+    assert!(
+        adapter.contains("self.chat_service.ask"),
+        "adapter forwards ChatService::ask:\n{adapter}"
+    );
+
+    // Per-service business scaffolds keep the same protobuf method name.
+    let ask_svc = std::fs::read_to_string(dir.join("src/ask_service.rs")).unwrap();
+    let chat_svc = std::fs::read_to_string(dir.join("src/chat_service.rs")).unwrap();
+    assert!(
+        ask_svc.contains("async fn ask<")
+            && ask_svc.contains("impl AskServiceHandler for AskServiceImpl"),
+        "AskService scaffold keeps the protobuf-named ask method:\n{ask_svc}"
+    );
+    assert!(
+        chat_svc.contains("async fn ask<")
+            && chat_svc.contains("impl ChatServiceHandler for ChatServiceImpl"),
+        "ChatService scaffold keeps the protobuf-named ask method:\n{chat_svc}"
+    );
+
+    // The lib.rs entry composes both implementations positionally.
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib.contains("ActrWorkload<ActrHandler<AskServiceImpl, ChatServiceImpl>>"),
+        "entry composes both service impls:\n{lib}"
+    );
+}
+// ---------------------------------------------------------------------------
+// Rust codegen: stale artifacts after losing local routes
+// ---------------------------------------------------------------------------
+
+/// End-to-end P1 repro: regenerate WITHOUT `--clean` after the workload
+/// loses its local routes. The stale `actr_handler.rs` (and stale
+/// `*_actor.rs`) from the previous run must be removed instead of being
+/// re-exported by mod.rs against the regenerated marker-trait dispatcher.
+#[test]
+fn rust_gen_stale_adapter_removed_when_local_routes_disappear() {
+    let tmp = TempDir::new().unwrap();
+    let dir = init_rust_echo_app(tmp.path(), "stale-adapter-app");
+
+    // Run 1: two local services (shared RPC name) → adapter generated.
+    std::fs::write(dir.join("protos/local/ask.proto"), ASK_PROTO).unwrap();
+    std::fs::write(dir.join("protos/local/chat.proto"), CHAT_ASK_PROTO).unwrap();
+    std::fs::remove_file(dir.join("protos/local/local.proto")).unwrap();
+    let manifest_path = dir.join("manifest.toml");
+    let manifest = std::fs::read_to_string(&manifest_path).unwrap().replace(
+        "exports = []",
+        "exports = [\"protos/local/ask.proto\", \"protos/local/chat.proto\"]",
+    );
+    std::fs::write(&manifest_path, manifest).unwrap();
+    std::fs::remove_file(dir.join("src/lib.rs")).unwrap();
+
+    let out = run_actr(&["gen", "-l", "rust"], &dir);
+    assert_actr_success(&out, "actr gen (local services)");
+    assert!(dir.join("src/generated/actr_handler.rs").exists());
+
+    // Run 2: the workload becomes remote-only — no `--clean`.
+    std::fs::remove_file(dir.join("protos/local/ask.proto")).unwrap();
+    std::fs::remove_file(dir.join("protos/local/chat.proto")).unwrap();
+    std::fs::create_dir_all(dir.join("protos/remote/svc")).unwrap();
+    std::fs::write(dir.join("protos/remote/svc/ask.proto"), ASK_PROTO).unwrap();
+    let manifest = std::fs::read_to_string(&manifest_path)
+        .unwrap()
+        .replace(
+            "exports = [\"protos/local/ask.proto\", \"protos/local/chat.proto\"]",
+            "exports = []",
+        )
+        .replace(
+            "[dependencies]",
+            "[dependencies]\nsvc = { actr_type = \"acme:AskService:1.0.0\" }",
+        );
+    std::fs::write(&manifest_path, manifest).unwrap();
+    // Drop user-owned files so run 2 recreates the remote-only entry.
+    let _ = std::fs::remove_file(dir.join("src/lib.rs"));
+    let _ = std::fs::remove_file(dir.join("src/ask_service.rs"));
+    let _ = std::fs::remove_file(dir.join("src/chat_service.rs"));
+
+    let out = run_actr(&["gen", "-l", "rust"], &dir);
+    assert_actr_success(&out, "actr gen (remote-only, no --clean)");
+
+    // Stale tool-owned artifacts are gone...
+    assert!(
+        !dir.join("src/generated/actr_handler.rs").exists(),
+        "stale actr_handler.rs must be removed when no local routes remain"
+    );
+    assert!(
+        !dir.join("src/generated/chat_actor.rs").exists(),
+        "stale chat_actor.rs must be removed with its proto"
+    );
+    // ...and mod.rs no longer exports them.
+    let mod_rs = std::fs::read_to_string(dir.join("src/generated/mod.rs")).unwrap();
+    assert!(
+        !mod_rs.contains("actr_handler"),
+        "mod.rs must drop the adapter:\n{mod_rs}"
+    );
+    assert!(
+        !mod_rs.contains("chat_actor"),
+        "mod.rs must drop stale actor modules:\n{mod_rs}"
+    );
+
+    // The dispatcher is the remote-only marker-trait shape with the unit
+    // handler, so the generated tree compiles without the adapter.
+    let dispatch = std::fs::read_to_string(dir.join("src/generated/actr_dispatch.rs")).unwrap();
+    assert!(dispatch.contains("impl ActrDispatchHandler for ()"));
+    assert!(dispatch.contains("resolve_dependency"));
+
+    // The regenerated entry uses the unit handler (the scaffold template
+    // renders the entry! invocation across multiple lines).
+    let lib = std::fs::read_to_string(dir.join("src/lib.rs")).unwrap();
+    assert!(
+        lib.contains("ActrWorkload<()>") && lib.contains("ActrWorkload::new(())"),
+        "regenerated entry should use the unit handler, got:\n{lib}"
     );
 }

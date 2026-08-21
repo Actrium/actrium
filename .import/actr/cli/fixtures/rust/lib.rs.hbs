@@ -1,20 +1,12 @@
 //! {{PROJECT_NAME}} — local guest bridge for the Rust echo app.
+//!
+//! The bridge proto defines no local RPC routes, so the unified workload
+//! registers the `()` handler and forwards remote calls through
+//! `generated::actr_dispatch`.
 
 pub mod generated;
 
 use actr_framework::entry;
-use async_trait::async_trait;
+use generated::actr_dispatch::ActrWorkload;
 
-use generated::local_actor::{{PROJECT_NAME_PASCAL}}ClientAppHandler;
-use generated::local_actor::{{PROJECT_NAME_PASCAL}}ClientAppWorkload;
-
-pub struct EchoAppBridge;
-
-#[cfg_attr(target_arch = "wasm32", async_trait(?Send))]
-#[cfg_attr(not(target_arch = "wasm32"), async_trait)]
-impl {{PROJECT_NAME_PASCAL}}ClientAppHandler for EchoAppBridge {}
-
-entry!(
-    {{PROJECT_NAME_PASCAL}}ClientAppWorkload<EchoAppBridge>,
-    {{PROJECT_NAME_PASCAL}}ClientAppWorkload::new(EchoAppBridge)
-);
+entry!(ActrWorkload<()>, ActrWorkload::new(()));

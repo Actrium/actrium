@@ -38,6 +38,8 @@ pub struct ScaffoldMethod {
     pub route_key: String,
     pub input_ref: TypeRef,
     pub output_ref: TypeRef,
+    /// Declared `actr.reply_mode` for this RPC (RFC-0323).
+    pub reply_mode: crate::commands::codegen::dispatch_spec::ReplyMode,
 }
 
 impl ScaffoldCatalog {
@@ -56,8 +58,8 @@ impl ScaffoldCatalog {
                     package: service.package.clone(),
                     proto_file: PathBuf::from(&service.proto_file),
                     handler_interface: Some(service.handler_interface.clone()),
-                    workload_type: Some(service.workload_type.clone()),
-                    dispatcher_type: Some(service.dispatcher_type.clone()),
+                    workload_type: non_empty_metadata_value(&service.workload_type),
+                    dispatcher_type: non_empty_metadata_value(&service.dispatcher_type),
                     client_type: None,
                     dependency_alias: None,
                     actr_type: None,
@@ -72,6 +74,7 @@ impl ScaffoldCatalog {
                             route_key: method.route_key.clone(),
                             input_ref: method.input_ref.clone(),
                             output_ref: method.output_ref.clone(),
+                            reply_mode: method.reply_mode,
                         })
                         .collect(),
                 })
@@ -108,6 +111,7 @@ impl ScaffoldCatalog {
                             route_key: method.route_key.clone(),
                             input_ref: method.input_ref.clone(),
                             output_ref: method.output_ref.clone(),
+                            reply_mode: method.reply_mode,
                         })
                         .collect(),
                 })
@@ -123,6 +127,14 @@ impl ScaffoldCatalog {
                 .remote_services
                 .iter()
                 .any(|service| !service.methods.is_empty())
+    }
+}
+
+fn non_empty_metadata_value(value: &str) -> Option<String> {
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
     }
 }
 

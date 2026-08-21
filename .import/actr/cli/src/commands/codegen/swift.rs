@@ -151,6 +151,13 @@ fn colorize_warning_output(output: &str) -> String {
 impl LanguageGenerator for SwiftGenerator {
     async fn generate_infrastructure(&self, context: &GenContext) -> Result<Vec<PathBuf>> {
         info!("🔧 Generating Swift infrastructure code...");
+
+        // Swift dispatches by the bare method name, so two local services
+        // sharing an RPC name cannot be generated for this language.
+        crate::commands::codegen::dispatch_spec::reject_bare_method_name_collisions(
+            &context.proto_model,
+        )?;
+
         let mut generated_files = Vec::new();
 
         let local_actrframework_plugin = self.ensure_required_tools()?;

@@ -288,9 +288,10 @@ fn make_local_service(
 
 #[test]
 fn dispatch_spec_rejects_colliding_local_handler_method_names() {
-    // Two LOCAL services from different proto packages share the method name
-    // "Echo". The aggregated Kotlin/Swift handler dispatches by method name
-    // only, so this collision must be caught at build time.
+    // Two LOCAL services with the SAME service name from different proto
+    // packages share the method name "Echo". Their <service>_<method>
+    // identifiers collide (`echo_service_echo`) for every generator, so this
+    // must be caught at build time regardless of target language.
     let model = ProtoModel {
         files: vec![],
         local_services: vec![
@@ -321,6 +322,93 @@ fn dispatch_spec_rejects_colliding_local_handler_method_names() {
         msg.contains("svc.a.EchoService.Echo") && msg.contains("svc.b.EchoService.Echo"),
         "error must name both colliding routes: {msg}",
     );
+}
+
+#[test]
+fn dispatch_spec_allows_same_rpc_name_across_services() {
+    // Two local services with DIFFERENT names sharing the RPC name "Ask":
+    // legal for Rust/Python/TypeScript, whose dispatchers use the
+    // `<service>_<method>` prefix (`ask_service_ask` / `chat_service_ask`).
+    // Only the bare-method-name generators (Kotlin/Swift) reject this, via
+    // `reject_bare_method_name_collisions`.
+    let model = ProtoModel {
+        files: vec![],
+        local_services: vec![
+            make_local_service(
+                "AskService",
+                "ask",
+                "local/ask.proto",
+                vec![("Ask", "ask.AskService.Ask")],
+            ),
+            make_local_service(
+                "ChatService",
+                "chat",
+                "local/chat.proto",
+                vec![("Ask", "chat.ChatService.Ask")],
+            ),
+        ],
+        remote_services: vec![],
+    };
+
+    let spec =
+        DispatchSpec::build(&model).expect("same RPC name across services must build a spec");
+    assert_eq!(spec.routes.len(), 2);
+}
+
+#[test]
+fn bare_method_name_collision_check_targets_kotlin_swift_dispatch() {
+    let model = ProtoModel {
+        files: vec![],
+        local_services: vec![
+            make_local_service(
+                "AskService",
+                "ask",
+                "local/ask.proto",
+                vec![("Ask", "ask.AskService.Ask")],
+            ),
+            make_local_service(
+                "ChatService",
+                "chat",
+                "local/chat.proto",
+                vec![("Ask", "chat.ChatService.Ask")],
+            ),
+        ],
+        remote_services: vec![],
+    };
+
+    // Kotlin/Swift dispatch by the bare method name → rejected with an
+    // actionable error.
+    let err = super::reject_bare_method_name_collisions(&model)
+        .expect_err("bare method name collision must be rejected for Kotlin/Swift");
+    let msg = err.to_string();
+    assert!(msg.contains("`ask`"), "error must name the method: {msg}");
+    assert!(
+        msg.contains("ask.AskService.Ask") && msg.contains("chat.ChatService.Ask"),
+        "error must name both routes: {msg}"
+    );
+
+    // Distinct method names pass the bare-name check (the universal
+    // <service>_<method> constraint is enforced by DispatchSpec::build).
+    let ok_model = ProtoModel {
+        files: vec![],
+        local_services: vec![
+            make_local_service(
+                "AskService",
+                "ask",
+                "local/ask.proto",
+                vec![("Query", "ask.AskService.Query")],
+            ),
+            make_local_service(
+                "ChatService",
+                "chat",
+                "local/chat.proto",
+                vec![("Ask", "chat.ChatService.Ask")],
+            ),
+        ],
+        remote_services: vec![],
+    };
+    super::reject_bare_method_name_collisions(&ok_model)
+        .expect("distinct method names must pass the bare-name check");
 }
 
 #[test]

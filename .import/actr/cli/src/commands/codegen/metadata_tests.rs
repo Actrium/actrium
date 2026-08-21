@@ -30,8 +30,30 @@ fn from_proto_model_populates_local_and_remote() {
     let meta = ActrGenMetadata::from_proto_model(SupportedLanguage::Rust, &model).unwrap();
     assert_eq!(meta.local_services.len(), 1);
     assert_eq!(meta.local_services[0].name, "EchoService");
+    assert!(meta.local_services[0].workload_type.is_empty());
+    assert!(meta.local_services[0].dispatcher_type.is_empty());
     assert_eq!(meta.language, "rust");
     assert!(meta.remote_services.is_empty());
+}
+
+#[test]
+fn rust_local_metadata_serialization_omits_removed_per_service_runtime_types() {
+    let model = ProtoModel {
+        files: vec![],
+        local_services: vec![svc_model("EchoService", super::super::ProtoSide::Local)],
+        remote_services: vec![],
+    };
+    let meta = ActrGenMetadata::from_proto_model(SupportedLanguage::Rust, &model).unwrap();
+    let value = serde_json::to_value(&meta).unwrap();
+    let service = &value["local_services"][0];
+    assert!(
+        service.get("workload_type").is_none(),
+        "Rust metadata must not claim a removed per-service workload type: {service}"
+    );
+    assert!(
+        service.get("dispatcher_type").is_none(),
+        "Rust metadata must not claim a removed per-service dispatcher type: {service}"
+    );
 }
 
 #[test]
@@ -411,4 +433,26 @@ fn load_metadata_rejects_missing_type_refs() {
         message.contains("missing field `input_ref`"),
         "unexpected error message: {message}"
     );
+}
+
+#[test]
+fn load_metadata_accepts_rust_local_service_without_removed_runtime_types() {
+    let dir = TempDir::new().unwrap();
+    let json = r#"{
+        "plugin_version": "actr-cli",
+        "language": "rust",
+        "local_services": [{
+            "name": "EchoService",
+            "package": "echo",
+            "proto_file": "local/echo.proto",
+            "handler_interface": "EchoServiceHandler",
+            "methods": []
+        }],
+        "remote_services": []
+    }"#;
+    std::fs::write(dir.path().join("actr-gen-meta.json"), json).unwrap();
+    let meta = load_metadata(dir.path()).unwrap().unwrap();
+    assert_eq!(meta.local_services.len(), 1);
+    assert!(meta.local_services[0].workload_type.is_empty());
+    assert!(meta.local_services[0].dispatcher_type.is_empty());
 }
