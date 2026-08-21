@@ -11,7 +11,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::{self, Read, Write};
 
 use actr_framework_protoc_codegen::{
-    DispatchSpec, ExplicitPayloadTypeMap, GeneratorRole, ModernGenerator, RemoteServiceInfo,
+    ActrHandlerGenerator, DispatchSpec, ExplicitPayloadTypeMap, GeneratorRole, ModernGenerator,
     UnifiedDispatcherGenerator, build_explicit_payload_types, extract_reply_modes,
 };
 use actr_protocol::{PackageName, ServiceName};
@@ -45,8 +45,6 @@ struct LocalServiceMetadata {
     package: String,
     proto_file: String,
     handler_interface: String,
-    workload_type: String,
-    dispatcher_type: String,
     methods: Vec<MethodMetadata>,
 }
 
@@ -71,6 +69,9 @@ struct MethodMetadata {
     route_key: String,
     input_ref: TypeRef,
     output_ref: TypeRef,
+    /// Declared `actr.reply_mode` for this RPC (RFC-0323), camelCase to
+    /// match the CLI's metadata schema.
+    reply_mode: &'static str,
 }
 
 #[derive(Serialize)]
@@ -275,7 +276,8 @@ fn generate_code(
         .iter()
         .map(|(k, v)| (k.clone(), v))
         .collect();
-    let unified_generator = UnifiedDispatcherGenerator::new(&spec, &generator_type_owners);
+    let unified_generator =
+        UnifiedDispatcherGenerator::new(&spec, &generator_type_owners, reply_modes);
     let unified_code = unified_generator.generate(&methods_refs)?;
     let unified_file_name = "actr_dispatch.rs".to_string();
     metadata.generated_files.push(unified_file_name.clone());
@@ -284,6 +286,23 @@ fn generate_code(
         content: Some(unified_code),
         ..Default::default()
     });
+
+    // Generate the aggregate `actr_handler.rs` adapter — one generic field per
+    // local proto Service, forwarding the sealed dispatcher trait's prefixed
+    // route methods to the protobuf-named `{Service}Handler` business methods.
+    // Remote-only workloads skip this file and use `()` as the handler.
+    let actr_handler_generator =
+        ActrHandlerGenerator::new(&spec, &generator_type_owners, reply_modes);
+    if actr_handler_generator.has_local_services() {
+        let adapter_code = actr_handler_generator.generate()?;
+        let adapter_file_name = "actr_handler.rs".to_string();
+        metadata.generated_files.push(adapter_file_name.clone());
+        response.file.push(File {
+            name: Some(adapter_file_name),
+            content: Some(adapter_code),
+            ..Default::default()
+        });
+    }
 
     // Sort metadata route lists for deterministic output.
     metadata.generated_local_routes.sort();
@@ -451,14 +470,10 @@ fn generate_service_code(
         explicit_payload_types.clone(),
     );
 
-    // Pass an empty `remote_services` slice — the per-service Dispatcher no
-    // longer embeds remote forwarding arms with `ActrType` strings. Remote
-    // forwarding is handled by the unified `actr_dispatch.rs`.
-    let final_code = if role == GeneratorRole::ServerSide {
-        generator.generate_with_remotes(&service.method, &[])?
-    } else {
-        generator.generate(&service.method)?
-    };
+    // The per-service output only carries RpcRequest impls, the Handler
+    // trait, and client helpers; workload-level dispatch (including remote
+    // forwarding) is handled by the unified `actr_dispatch.rs`.
+    let final_code = generator.generate(&service.method)?;
 
     // Generate different file suffixes based on role
     let file_suffix = match role {
@@ -468,15 +483,19 @@ fn generate_service_code(
 
     // Build metadata for this service.
     if is_local {
-        metadata
-            .local_services
-            .push(build_local_service_metadata(file, service, type_owners)?);
+        metadata.local_services.push(build_local_service_metadata(
+            file,
+            service,
+            type_owners,
+            reply_modes,
+        )?);
     } else {
         metadata.remote_services.push(build_remote_service_metadata(
             file,
             service,
             spec,
             type_owners,
+            reply_modes,
         )?);
     }
 
@@ -492,18 +511,17 @@ fn build_local_service_metadata(
     file: &FileDescriptorProto,
     service: &ServiceDescriptorProto,
     type_owners: &HashMap<String, TypeOwner>,
+    reply_modes: &HashMap<String, actr_protocol::ReplyMode>,
 ) -> Result<LocalServiceMetadata> {
     Ok(LocalServiceMetadata {
         name: service.name().to_string(),
         package: file.package().to_string(),
         proto_file: normalize_proto_path(file.name()),
         handler_interface: format!("{}Handler", service.name()),
-        workload_type: format!("{}Workload", service.name()),
-        dispatcher_type: format!("{}Dispatcher", service.name()),
         methods: service
             .method
             .iter()
-            .map(|method| build_method_metadata(file, service, method, type_owners))
+            .map(|method| build_method_metadata(file, service, method, type_owners, reply_modes))
             .collect::<Result<Vec<_>>>()?,
     })
 }
@@ -513,6 +531,7 @@ fn build_remote_service_metadata(
     service: &ServiceDescriptorProto,
     spec: &DispatchSpec,
     type_owners: &HashMap<String, TypeOwner>,
+    reply_modes: &HashMap<String, actr_protocol::ReplyMode>,
 ) -> Result<RemoteServiceMetadata> {
     // Derive the dependency alias from the DispatchSpec routes that belong
     // to this service. All routes for a remote service share the same alias.
@@ -566,7 +585,7 @@ fn build_remote_service_metadata(
         methods: service
             .method
             .iter()
-            .map(|method| build_method_metadata(file, service, method, type_owners))
+            .map(|method| build_method_metadata(file, service, method, type_owners, reply_modes))
             .collect::<Result<Vec<_>>>()?,
     })
 }
@@ -576,6 +595,7 @@ fn build_method_metadata(
     service: &ServiceDescriptorProto,
     method: &prost_types::MethodDescriptorProto,
     type_owners: &HashMap<String, TypeOwner>,
+    reply_modes: &HashMap<String, actr_protocol::ReplyMode>,
 ) -> Result<MethodMetadata> {
     let package = file.package();
     let route_key = if package.is_empty() {
@@ -600,12 +620,18 @@ fn build_method_metadata(
         type_owners,
     )?;
 
+    let reply_mode = match reply_modes.get(&route_key) {
+        Some(actr_protocol::ReplyMode::Explicit) => "explicit",
+        _ => "return",
+    };
+
     Ok(MethodMetadata {
         name: method.name().to_string(),
         snake_name: method.name().to_snake_case(),
         route_key,
         input_ref,
         output_ref,
+        reply_mode,
     })
 }
 
@@ -715,14 +741,6 @@ impl ProtoSource {
             Self::Remote
         })
     }
-}
-
-// Allow the legacy RemoteServiceInfo struct to be re-exported from the
-// library crate without warnings — it is referenced by the re-export at
-// the top of the file but no longer constructed by the new code path.
-#[allow(dead_code)]
-fn _silence_unused_warning() -> RemoteServiceInfo {
-    unreachable!("legacy helper — never called")
 }
 
 #[cfg(test)]
@@ -852,6 +870,15 @@ mod tests {
 
         let metadata_json = serde_json::to_string_pretty(&metadata).unwrap();
         let metadata_value: serde_json::Value = serde_json::from_str(&metadata_json).unwrap();
+        let service = &metadata_value["local_services"][0];
+        assert!(
+            service.get("workload_type").is_none(),
+            "Rust metadata must not claim a removed per-service workload type: {service}"
+        );
+        assert!(
+            service.get("dispatcher_type").is_none(),
+            "Rust metadata must not claim a removed per-service dispatcher type: {service}"
+        );
         let method = &metadata_value["local_services"][0]["methods"][0];
         assert_eq!(
             method["input_ref"]["type_name"],

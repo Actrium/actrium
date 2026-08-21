@@ -1,19 +1,22 @@
+use crate::commands::codegen::metadata::load_metadata;
 use crate::commands::codegen::scaffold::ScaffoldCatalog;
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
 use crate::utils::to_snake_case;
 use async_trait::async_trait;
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
 use tracing::{debug, info, warn};
 
 pub struct RustGenerator;
 
-const HANDLER_SCAFFOLD_MARKER: &str = "// ACTR: generated Rust handler scaffold";
+const SERVICE_SCAFFOLD_MARKER: &str = "// ACTR: generated Rust service scaffold";
 const ENTRY_PLACEHOLDER_MARKER: &str = "// ACTR: generated Rust workload entry placeholder";
 const ENTRY_SCAFFOLD_MARKER: &str = "// ACTR: generated Rust workload entry scaffold";
-const UNIFIED_HANDLER_MODULE: &str = "actr_handler";
-const UNIFIED_HANDLER_TYPE: &str = "ActrHandler";
+/// Generated aggregate adapter module (fully tool-owned, under `generated/`).
+const GENERATED_HANDLER_MODULE: &str = "actr_handler";
+const GENERATED_HANDLER_TYPE: &str = "ActrHandler";
 
 #[async_trait]
 impl LanguageGenerator for RustGenerator {
@@ -47,6 +50,14 @@ impl LanguageGenerator for RustGenerator {
             &manufacturer,
         )?;
 
+        // Without `--clean` the output directory keeps files from previous
+        // runs. Reconcile the tool-owned plugin artifacts against this run's
+        // metadata BEFORE building mod.rs, so a workload that lost its last
+        // local route does not keep a stale `actr_handler.rs` (or stale
+        // `*_actor.rs`/`*_client.rs`) that no longer matches the regenerated
+        // `ActrDispatchHandler` and breaks compilation.
+        self.remove_stale_plugin_artifacts(output)?;
+
         self.generate_mod_rs(output).await?;
 
         info!("✅ Infrastructure code generation completed");
@@ -61,13 +72,9 @@ impl LanguageGenerator for RustGenerator {
     ) -> Result<Vec<PathBuf>> {
         info!("📝 Generating user code scaffold...");
 
-        if !catalog.local_services.is_empty() {
-            self.generate_unified_handler_scaffold(
-                catalog,
-                &context.output,
-                context.overwrite_user_code,
-            )
-            .await?;
+        for service in &catalog.local_services {
+            self.generate_service_scaffold(service, &context.output, context.overwrite_user_code)
+                .await?;
         }
 
         if !catalog.local_services.is_empty() || !catalog.remote_services.is_empty() {
@@ -268,6 +275,72 @@ impl RustGenerator {
         Ok(())
     }
 
+    /// Delete tool-owned plugin artifacts left by previous runs that this
+    /// run did not regenerate.
+    ///
+    /// The actrframework plugin conditionally emits files (`actr_handler.rs`
+    /// only for workloads with local routes; `*_actor.rs` / `*_client.rs`
+    /// per proto file), and `actr gen` without `--clean` never wipes the
+    /// output directory. A stale artifact would be picked up by the mod.rs
+    /// directory scan while its counterpart (`ActrDispatchHandler`, message
+    /// modules) was regenerated with a different shape, producing compile
+    /// errors such as "method is not a member of trait". The freshly written
+    /// `actr-gen-meta.json` (`generated_files`) is the source of truth for
+    /// what this run owns; anything matching the plugin-owned patterns but
+    /// absent from it is removed. Prost message modules keep the historical
+    /// scan-based behavior.
+    fn remove_stale_plugin_artifacts(&self, output: &Path) -> Result<()> {
+        let generated: BTreeSet<String> = load_metadata(output)
+            .ok()
+            .flatten()
+            .map(|metadata| metadata.generated_files)
+            .unwrap_or_default()
+            .into_iter()
+            .collect();
+
+        if generated.is_empty() {
+            // No (or unreadable) metadata — never guess; keep previous files.
+            return Ok(());
+        }
+
+        let entries = std::fs::read_dir(output).map_err(|e| {
+            ActrCliError::config_error(format!("Failed to read output directory: {e}"))
+        })?;
+
+        for entry in entries {
+            let entry = entry.map_err(|e| ActrCliError::config_error(e.to_string()))?;
+            let path = entry.path();
+            let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) else {
+                continue;
+            };
+            if path.extension().unwrap_or_default() != "rs" {
+                continue;
+            }
+            let plugin_owned = file_stem == "actr_dispatch"
+                || file_stem == "actr_handler"
+                || file_stem.ends_with("_actor")
+                || file_stem.ends_with("_client");
+            if !plugin_owned {
+                continue;
+            }
+            let file_name = format!("{file_stem}.rs");
+            if generated.contains(&file_name) {
+                continue;
+            }
+
+            make_writable_recursive(&path)?;
+            std::fs::remove_file(&path).map_err(|e| {
+                ActrCliError::config_error(format!(
+                    "Failed to remove stale generated artifact {}: {e}",
+                    path.display()
+                ))
+            })?;
+            info!("🗑️  Removed stale generated artifact: {:?}", path);
+        }
+
+        Ok(())
+    }
+
     fn set_generated_files_readonly(&self, output: &Path) -> Result<()> {
         use std::fs;
 
@@ -311,6 +384,7 @@ impl RustGenerator {
 
         let mut proto_modules = Vec::new();
         let mut service_modules = Vec::new();
+        let mut runtime_modules = Vec::new();
 
         use std::fs;
         for entry in fs::read_dir(output).map_err(|e| {
@@ -327,7 +401,12 @@ impl RustGenerator {
                     continue;
                 }
 
-                if file_name.ends_with("_actor") || file_name.ends_with("_client") {
+                if file_name == GENERATED_HANDLER_MODULE {
+                    // The aggregate ActrHandler adapter is generated runtime
+                    // glue (not a protobuf module); it only exists when the
+                    // DispatchSpec has local services.
+                    runtime_modules.push(format!("pub mod {file_name};"));
+                } else if file_name.ends_with("_actor") || file_name.ends_with("_client") {
                     service_modules.push(format!("pub mod {file_name};"));
                 } else {
                     proto_modules.push(format!("pub mod {file_name};"));
@@ -337,6 +416,16 @@ impl RustGenerator {
 
         proto_modules.sort();
         service_modules.sort();
+        runtime_modules.sort();
+
+        let runtime_section = if runtime_modules.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n// Unified runtime adapter (generated by protoc-gen-actrframework)\n{}\n",
+                runtime_modules.join("\n")
+            )
+        };
 
         let mod_content = format!(
             "//! Automatically generated code module\n\
@@ -344,6 +433,7 @@ impl RustGenerator {
              //! This module is automatically generated by the `actr gen` command, including:\n\
              //! - protobuf message type definitions\n\
              //! - Actor framework code (router, traits)\n\
+             //! - unified runtime adapter composing the per-service handlers\n\
              //!\n\
              //! ⚠️ Do not manually modify files in this directory\n\
              \n\
@@ -352,7 +442,7 @@ impl RustGenerator {
              \n\
              // Actor framework code (generated by protoc-gen-actrframework)\n\
              {}\n\
-             \n\
+             {runtime_section}\n\
              // Common types are defined in their respective modules, please import as needed\n",
             proto_modules.join("\n"),
             service_modules.join("\n"),
@@ -365,9 +455,16 @@ impl RustGenerator {
         Ok(())
     }
 
-    async fn generate_unified_handler_scaffold(
+    /// Generate one user-owned business scaffold per local proto Service:
+    /// `src/<service>.rs` with `{Service}Impl`, `new()`, and an
+    /// `impl {Service}Handler` whose methods keep the protobuf RPC names.
+    ///
+    /// Existing files are user code: they are only rewritten when they still
+    /// match the tool-owned scaffold byte-for-byte, or when
+    /// `--overwrite-user-code` is passed.
+    async fn generate_service_scaffold(
         &self,
-        catalog: &ScaffoldCatalog,
+        service: &crate::commands::codegen::scaffold::ScaffoldService,
         output: &Path,
         overwrite_user_code: bool,
     ) -> Result<()> {
@@ -375,8 +472,8 @@ impl RustGenerator {
         std::fs::create_dir_all(&src_dir).map_err(|e| {
             ActrCliError::config_error(format!("Failed to create src directory: {e}"))
         })?;
-        let path = src_dir.join(format!("{UNIFIED_HANDLER_MODULE}.rs"));
-        let scaffold = self.generate_unified_handler_scaffold_content(catalog);
+        let path = src_dir.join(format!("{}.rs", service_module_name(service)));
+        let scaffold = self.generate_service_scaffold_content(service);
         if path.exists() && !overwrite_user_code {
             let current = std::fs::read_to_string(&path).map_err(|e| {
                 ActrCliError::config_error(format!("Failed to read {}: {e}", path.display()))
@@ -387,9 +484,12 @@ impl RustGenerator {
             }
         }
         std::fs::write(&path, scaffold).map_err(|e| {
-            ActrCliError::config_error(format!("Failed to write Rust handler scaffold: {e}"))
+            ActrCliError::config_error(format!("Failed to write Rust service scaffold: {e}"))
         })?;
-        info!("📄 Generated unified Rust handler scaffold: {:?}", path);
+        info!(
+            "📄 Generated Rust service scaffold for {}: {:?}",
+            service.name, path
+        );
         Ok(())
     }
 
@@ -446,28 +546,79 @@ impl RustGenerator {
         Ok(is_generated_entry_placeholder(&content) || is_default_cargo_lib_rs(&content))
     }
 
+    /// Entry point for a new project: declare each routed local service
+    /// module, import the `{Service}Impl` types, and compose them through
+    /// the generated `ActrHandler` adapter into the unified `ActrWorkload`.
+    /// Remote-only and empty-only workloads use `()`.
     fn generate_entry_scaffold_content(&self, catalog: &ScaffoldCatalog) -> String {
-        let (handler_module, handler_import, handler_type, handler_value) =
-            if catalog.local_services.is_empty() {
-                (String::new(), String::new(), "()", "()")
-            } else {
-                (
-                    format!("pub mod {UNIFIED_HANDLER_MODULE};\n"),
-                    format!("pub use crate::{UNIFIED_HANDLER_MODULE}::{UNIFIED_HANDLER_TYPE};\n"),
-                    UNIFIED_HANDLER_TYPE,
-                    "ActrHandler::new()",
-                )
-            };
+        // Compose services in the same deterministic (snake-name) order the
+        // generated ActrHandler adapter uses for its generic parameters, so
+        // positional `ActrHandler::new(a, b)` arguments match
+        // `ActrHandler<A, B>`.
+        let mut services: Vec<_> = catalog
+            .local_services
+            .iter()
+            .filter(|service| !service.methods.is_empty())
+            .collect();
+        services.sort_by_key(|service| service_module_name(service));
+
+        let (service_modules, service_imports, handler_type, handler_value) = if services.is_empty()
+        {
+            (
+                String::new(),
+                String::new(),
+                "()".to_string(),
+                "()".to_string(),
+            )
+        } else {
+            let modules = services
+                .iter()
+                .map(|service| format!("pub mod {};", service_module_name(service)))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let imports = services
+                .iter()
+                .map(|service| {
+                    format!(
+                        "use {}::{};",
+                        service_module_name(service),
+                        service_impl_name(service)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let generics = services
+                .iter()
+                .map(|service| service_impl_name(service))
+                .collect::<Vec<_>>()
+                .join(", ");
+            let ctor_args = services
+                .iter()
+                .map(|service| format!("{}::new()", service_impl_name(service)))
+                .collect::<Vec<_>>()
+                .join(", ");
+            (
+                format!("{modules}\n"),
+                format!("{imports}\n"),
+                format!("{GENERATED_HANDLER_TYPE}<{generics}>"),
+                format!("{GENERATED_HANDLER_TYPE}::new({ctor_args})"),
+            )
+        };
+        let handler_import = if services.is_empty() {
+            String::new()
+        } else {
+            format!("use generated::{GENERATED_HANDLER_MODULE}::{GENERATED_HANDLER_TYPE};\n")
+        };
 
         format!(
             r#"{ENTRY_SCAFFOLD_MARKER}
 //! Entry point for the generated unified ACTR workload.
 
 pub mod generated;
-{handler_module}
+{service_modules}
 use actr_framework::entry;
 use generated::actr_dispatch::ActrWorkload;
-{handler_import}
+{handler_import}{service_imports}
 entry!(
     ActrWorkload<{handler_type}>,
     ActrWorkload::new({handler_value})
@@ -476,46 +627,108 @@ entry!(
         )
     }
 
-    fn generate_unified_handler_scaffold_content(&self, catalog: &ScaffoldCatalog) -> String {
-        let methods = catalog
-            .local_services
+    /// Business scaffold for one local proto Service: `{Service}Impl`,
+    /// `new()`, and `impl {Service}Handler` with the protobuf RPC method
+    /// names preserved. Return-mode methods keep the 0.6
+    /// `ActorResult<Response>` shape; EXPLICIT methods (declared via
+    /// `actr.reply_mode` in the .proto) take a `Reply<Response>` handle.
+    fn generate_service_scaffold_content(
+        &self,
+        service: &crate::commands::codegen::scaffold::ScaffoldService,
+    ) -> String {
+        let handler_trait = service
+            .handler_interface
+            .clone()
+            .unwrap_or_else(|| format!("{}Handler", service.name));
+        let actor_module = actor_module_name(service);
+        let impl_name = service_impl_name(service);
+        let uses_reply = service.methods.iter().any(is_explicit_method);
+
+        let mut uses: BTreeSet<String> = BTreeSet::new();
+        for method in &service.methods {
+            uses.insert(rust_scaffold_qualified_type(
+                &method.input_ref,
+                &method.input_type,
+            ));
+            uses.insert(rust_scaffold_qualified_type(
+                &method.output_ref,
+                &method.output_type,
+            ));
+        }
+        let use_lines = uses
             .iter()
-            .flat_map(|service| {
-                service.methods.iter().map(move |method| {
-                    let method_name =
-                        format!("{}_{}", to_snake_case(&service.name), method.snake_name);
-                    let input_type =
-                        rust_scaffold_qualified_type(&method.input_ref, &method.input_type);
-                    let output_type =
-                        rust_scaffold_qualified_type(&method.output_ref, &method.output_type);
+            .map(|path| format!("use {path};"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let reply_use = if uses_reply {
+            "use actr_framework::Reply;\n"
+        } else {
+            ""
+        };
+
+        let methods = service
+            .methods
+            .iter()
+            .map(|method| {
+                let method_name = &method.snake_name;
+                // Signatures stay fully qualified (matching the generated
+                // trait); the body references the imported short names so the
+                // top-of-file `use` set stays meaningful.
+                let input_type =
+                    rust_scaffold_qualified_type(&method.input_ref, &method.input_type);
+                let output_type =
+                    rust_scaffold_qualified_type(&method.output_ref, &method.output_type);
+                let input_short = rust_message_import_name(&method.input_ref);
+                let output_short = rust_message_import_name(&method.output_ref);
+                let service_name = &service.name;
+                let rpc_name = &method.name;
+                if is_explicit_method(method) {
+                    format!(
+                        r#"    async fn {method_name}<C: Context>(
+        &self,
+        _req: {input_type},
+        _ctx: &C,
+        reply: Reply<{output_type}>,
+    ) -> ActorResult<()> {{
+        let _ = ({input_short}::default(), {output_short}::default(), &reply);
+        todo!("Implement {service_name}.{rpc_name}, then reply.send(Ok(resp))")
+    }}
+"#
+                    )
+                } else {
                     format!(
                         r#"    async fn {method_name}<C: Context>(
         &self,
         _req: {input_type},
         _ctx: &C,
     ) -> ActorResult<{output_type}> {{
+        let _ = ({input_short}::default(), {output_short}::default());
         todo!("Implement {service_name}.{rpc_name}")
     }}
-"#,
-                        service_name = service.name,
-                        rpc_name = method.name,
+"#
                     )
-                })
+                }
             })
             .collect::<Vec<_>>()
             .join("\n");
 
+        let service_name = &service.name;
+        let route_prefix = route_prefix(service);
         format!(
-            r#"{HANDLER_SCAFFOLD_MARKER}
-//! Unified business-logic handler for every local DispatchSpec route.
+            r#"{SERVICE_SCAFFOLD_MARKER}
+//! Business logic for the {service_name} service.
+//!
+//! Implement each RPC below; the generated `generated::actr_handler::ActrHandler`
+//! adapter routes `{route_prefix}.*` envelopes to these methods.
 
-use crate::generated::actr_dispatch::ActrDispatchHandler;
+use crate::generated::{actor_module}::{handler_trait};
+{use_lines}
 use actr_framework::Context;
-use actr_protocol::ActorResult;
+{reply_use}use actr_protocol::ActorResult;
 
-pub struct {UNIFIED_HANDLER_TYPE};
+pub struct {impl_name};
 
-impl {UNIFIED_HANDLER_TYPE} {{
+impl {impl_name} {{
     pub fn new() -> Self {{
         Self
     }}
@@ -523,7 +736,7 @@ impl {UNIFIED_HANDLER_TYPE} {{
 
 #[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
 #[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
-impl ActrDispatchHandler for {UNIFIED_HANDLER_TYPE} {{
+impl {handler_trait} for {impl_name} {{
 {methods}
 }}
 "#
@@ -923,6 +1136,43 @@ fn src_dir_from_output(output: &Path) -> PathBuf {
         .parent()
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("src"))
+}
+
+/// Snake-case module/file name for a local service's user scaffold:
+/// `src/<service>.rs`.
+fn service_module_name(service: &crate::commands::codegen::scaffold::ScaffoldService) -> String {
+    to_snake_case(&service.name)
+}
+
+/// Concrete business type users implement per local service: `{Service}Impl`.
+fn service_impl_name(service: &crate::commands::codegen::scaffold::ScaffoldService) -> String {
+    format!("{}Impl", service.name)
+}
+
+/// Generated actor module declaring the `{Service}Handler` trait:
+/// `<proto_file_stem>_actor` (matches the protoc plugin's file naming).
+fn actor_module_name(service: &crate::commands::codegen::scaffold::ScaffoldService) -> String {
+    let stem = service
+        .proto_file
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or(&service.name);
+    format!("{}_actor", to_snake_case(stem))
+}
+
+/// `package.Service` prefix used in scaffold doc comments.
+fn route_prefix(service: &crate::commands::codegen::scaffold::ScaffoldService) -> String {
+    if service.package.is_empty() {
+        service.name.clone()
+    } else {
+        format!("{}.{}", service.package, service.name)
+    }
+}
+
+/// Whether the RPC method was declared `REPLY_MODE_EXPLICIT` in protobuf —
+/// an explicitly distinct semantic, scaffolded with a `Reply<T>` handle.
+fn is_explicit_method(method: &crate::commands::codegen::scaffold::ScaffoldMethod) -> bool {
+    method.reply_mode == crate::commands::codegen::ReplyMode::Explicit
 }
 
 fn rust_message_import_name(type_ref: &crate::commands::codegen::TypeRef) -> String {

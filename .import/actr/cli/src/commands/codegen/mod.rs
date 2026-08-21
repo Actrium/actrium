@@ -12,7 +12,8 @@ mod typescript;
 pub use crate::commands::SupportedLanguage;
 use crate::error::Result;
 pub use dispatch_spec::{
-    DISPATCH_SPEC_FILE, DISPATCH_SPEC_SCHEMA_VERSION, DispatchRoute, DispatchSpec,
+    DISPATCH_SPEC_FILE, DISPATCH_SPEC_SCHEMA_VERSION, DispatchRoute, DispatchSpec, ReplyMode,
+    reject_bare_method_name_collisions,
 };
 use kotlin::KotlinGenerator;
 pub use metadata::{

@@ -459,6 +459,12 @@ impl LanguageGenerator for KotlinGenerator {
     async fn generate_infrastructure(&self, context: &GenContext) -> Result<Vec<PathBuf>> {
         info!("🔧 Generating Kotlin Actor infrastructure code...");
 
+        // Kotlin dispatches by the bare method name, so two local services
+        // sharing an RPC name cannot be generated for this language.
+        crate::commands::codegen::dispatch_spec::reject_bare_method_name_collisions(
+            &context.proto_model,
+        )?;
+
         // Find or build the Kotlin plugin
         let plugin_path = self.ensure_required_tools()?;
         info!("✅ Using Kotlin plugin: {:?}", plugin_path);

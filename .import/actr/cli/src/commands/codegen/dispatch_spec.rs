@@ -16,6 +16,18 @@ use std::collections::HashMap;
 pub const DISPATCH_SPEC_SCHEMA_VERSION: &str = "v1";
 pub const DISPATCH_SPEC_FILE: &str = "actr-dispatch-spec.v1.json";
 
+/// How the callee delivers an RPC response (RFC-0323), mirrored from the
+/// protobuf `actr.reply_mode` method option. `Return` is the default and
+/// keeps the pre-RFC-0323 behavior; `Explicit` hands the callee a movable
+/// reply handle so it may return before the reply is produced.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ReplyMode {
+    #[default]
+    Return,
+    Explicit,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DispatchRoute {
@@ -114,24 +126,22 @@ impl DispatchSpec {
         }
 
         // Reject local handler identifier collisions after language codegen
-        // normalization. Kotlin/Swift dispatch by normalized method name;
-        // Rust/Python/TypeScript prefix that name with the normalized service.
-        // Distinct proto identifiers such as `FooBar` and `Foo_Bar` otherwise
-        // collapse to the same generated member and fail at compile time.
-        let mut method_only_owner: HashMap<String, String> = HashMap::new();
+        // normalization. The spec itself is language-independent, so the only
+        // universal constraint is the <service>_<method> normalized pair that
+        // every generator emits (Rust/Python/TypeScript dispatch on it
+        // directly; distinct proto identifiers such as `FooBar` and `Foo_Bar`
+        // otherwise collapse to the same generated member and fail at compile
+        // time).
+        //
+        // Kotlin/Swift dispatch by the bare normalized method name, so two
+        // local services may share an RPC name for the other languages. That
+        // stricter check lives in
+        // [`reject_bare_method_name_collisions`], invoked by the Kotlin and
+        // Swift generators only.
         let mut service_method_owner: HashMap<String, String> = HashMap::new();
         for route in &routes {
             if route.dependency_alias.is_none() {
                 let normalized_method = to_snake_case(&route.method);
-                if let Some(existing) =
-                    method_only_owner.insert(normalized_method.clone(), route.route_key.clone())
-                {
-                    return Err(ActrCliError::config_error(format!(
-                        "handler method name collision after normalization to `{normalized_method}`: \
-                         `{existing}` and `{}`; Kotlin/Swift dispatch by method name only",
-                        route.route_key
-                    )));
-                }
 
                 let service_name = route
                     .proto_service
@@ -146,7 +156,7 @@ impl DispatchSpec {
                     return Err(ActrCliError::config_error(format!(
                         "handler method name collision after normalization to \
                          `{normalized_service_method}`: `{existing}` and `{}`; \
-                         Rust/Python/TypeScript dispatch by service and method name",
+                         every generator dispatches by service and method name",
                         route.route_key
                     )));
                 }
@@ -175,6 +185,31 @@ impl DispatchSpec {
             panic!("failed to serialize DispatchSpec: {e}");
         })
     }
+}
+
+/// Reject bare normalized method-name collisions across local services.
+///
+/// Kotlin and Swift dispatch by the bare method name (no service prefix), so
+/// two local services sharing an RPC name — legal for Rust/Python/TypeScript,
+/// which dispatch on `<service>_<method>` — cannot be generated for those two
+/// languages. Invoked from the Kotlin/Swift generators only; the spec build
+/// itself stays language-independent.
+pub fn reject_bare_method_name_collisions(model: &ProtoModel) -> Result<()> {
+    let mut owner: HashMap<String, String> = HashMap::new();
+    for service in &model.local_services {
+        for method in &service.methods {
+            let normalized = to_snake_case(&method.name);
+            if let Some(existing) = owner.insert(normalized.clone(), method.route_key.clone()) {
+                return Err(ActrCliError::config_error(format!(
+                    "handler method name collision after normalization to `{normalized}`: \
+                     `{existing}` and `{}`; Kotlin/Swift dispatch by method name only, \
+                     rename one of the RPCs to generate for this language",
+                    method.route_key
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Compute a SHA-256 hex digest of the given byte slice.

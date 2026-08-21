@@ -35,6 +35,7 @@ fn from_metadata_maps_local_and_remote_to_scaffold_services() {
                     proto_file: "echo.proto".into(),
                     generated_type: None,
                 },
+                reply_mode: crate::commands::codegen::ReplyMode::Return,
             }],
         }],
         remote_services: vec![],
