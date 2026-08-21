@@ -1696,6 +1696,129 @@ EOF
   rm -rf "$temp_dir"
 }
 
+test_update_versions_rewrites_prerelease_embedded_versions() {
+  reset_release_train_state
+
+  local temp_dir main_kt
+  temp_dir=$(mktemp -d)
+  main_kt="$temp_dir/tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt"
+  mkdir -p "$temp_dir/bindings/typescript" "$temp_dir/bindings/cabi/csharp/ActrSharp"
+
+  printf '{"name":"@actrium/actr","version":"0.9.0"}' \
+    >"$temp_dir/bindings/typescript/package.json"
+  printf '<Project><PropertyGroup><Version>0.9.0</Version></PropertyGroup></Project>\n' \
+    >"$temp_dir/bindings/cabi/csharp/ActrSharp/ActrSharp.csproj"
+
+  WORK_REPO_ROOT="$temp_dir"
+  SKIP_PYTHON=true
+
+  # Stub out all Cargo.toml paths.
+  for f in \
+    Cargo.toml \
+    bindings/web/Cargo.toml \
+    core/protocol/Cargo.toml \
+    core/service-compat/Cargo.toml \
+    core/config/Cargo.toml \
+    core/framework/Cargo.toml \
+    core/runtime-mailbox/Cargo.toml \
+    core/runtime/Cargo.toml \
+    core/platform-traits/Cargo.toml \
+    core/pack/Cargo.toml \
+    core/hyper/Cargo.toml \
+    core/platform-native/Cargo.toml \
+    testing/mock-actrix/Cargo.toml \
+    tools/protoc-gen/rust/Cargo.toml \
+    tools/protoc-gen/web/Cargo.toml \
+    cli/Cargo.toml \
+    actrix/crates/contracts/Cargo.toml \
+    actrix/crates/signer/Cargo.toml \
+    actrix/crates/platform/Cargo.toml \
+    actrix/crates/control/Cargo.toml \
+    actrix/crates/mfr/Cargo.toml \
+    actrix/crates/signaling/Cargo.toml \
+    actrix/crates/stun/Cargo.toml \
+    actrix/crates/turn/Cargo.toml \
+    actrix/crates/ais/Cargo.toml \
+    actrix/crates/sdk/Cargo.toml \
+    actrix/crates/actrixd/Cargo.toml \
+    bindings/typescript/Cargo.toml \
+    bindings/web/crates/actr-web-abi/Cargo.toml \
+    bindings/web/crates/common/Cargo.toml \
+    bindings/web/crates/sw-host/Cargo.toml \
+    bindings/web/crates/dom-bridge/Cargo.toml \
+    bindings/web/crates/mailbox-web/Cargo.toml \
+    bindings/web/crates/platform-web/Cargo.toml \
+    bindings/web/crates/framework-web-entry-smoke/Cargo.toml; do
+    mkdir -p "$(dirname "$temp_dir/$f")"
+    printf '[package]\nversion = "0.9.0"\n' >"$temp_dir/$f"
+  done
+
+  # Create web packages.
+  for wp in actr-dom web-sdk web-react; do
+    mkdir -p "$temp_dir/bindings/web/packages/$wp"
+    printf '{"name":"@actrium/actr-dom","version":"0.9.0"}' >"$temp_dir/bindings/web/packages/$wp/package.json"
+  done
+
+  # Create workload package.
+  mkdir -p "$temp_dir/bindings/typescript/actr-workload"
+  printf '{"name":"@actrium/actr-workload","version":"0.9.0"}' >"$temp_dir/bindings/typescript/actr-workload/package.json"
+
+  # Create protoc plugin version sources.
+  mkdir -p \
+    "$temp_dir/tools/protoc-gen/swift/Sources/framework-codegen-swift" \
+    "$temp_dir/tools/protoc-gen/typescript/src" \
+    "$temp_dir/tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen"
+  printf 'struct Generator { static let version = "0.9.0" }\n' \
+    >"$temp_dir/tools/protoc-gen/swift/Sources/framework-codegen-swift/main.swift"
+  printf 'const VERSION = "0.9.0";\n' \
+    >"$temp_dir/tools/protoc-gen/typescript/src/main.ts"
+  printf '{"name":"framework-codegen-typescript","version":"0.9.0"}\n' \
+    >"$temp_dir/tools/protoc-gen/typescript/package.json"
+  printf '{"name":"framework-codegen-typescript","version":"0.9.0","lockfileVersion":3,"packages":{"":{"version":"0.9.0"}}}\n' \
+    >"$temp_dir/tools/protoc-gen/typescript/package-lock.json"
+  printf 'version = "0.9.0"\n' \
+    >"$temp_dir/tools/protoc-gen/kotlin/build.gradle.kts"
+  cat >"$main_kt" <<'EOF'
+println("protoc-gen-actrframework-kotlin 0.9.0")
+println("    0.9.0")
+EOF
+
+  # Plain version -> pre-release bump.
+  VERSION="0.10.0-alpha.1"
+  update_versions
+  assert_eq \
+    'println("protoc-gen-actrframework-kotlin 0.10.0-alpha.1")
+println("    0.10.0-alpha.1")' \
+    "$(cat "$main_kt")" \
+    "Kotlin plugin version after plain-to-prerelease bump"
+
+  # Re-running the bump against an already-pre-release tree must stay
+  # idempotent; this mirrors the release-train verify dry-run that reruns on
+  # the release-prepare merge commit.
+  update_versions
+  assert_eq \
+    'println("protoc-gen-actrframework-kotlin 0.10.0-alpha.1")
+println("    0.10.0-alpha.1")' \
+    "$(cat "$main_kt")" \
+    "Kotlin plugin version after idempotent prerelease re-run"
+  assert_eq \
+    'version = "0.10.0-alpha.1"' \
+    "$(cat "$temp_dir/tools/protoc-gen/kotlin/build.gradle.kts")" \
+    "Kotlin plugin Gradle version after idempotent prerelease re-run"
+
+  # Pre-release -> pre-release bump must consume the previous suffix instead
+  # of appending to it.
+  VERSION="0.10.0-rc.1"
+  update_versions
+  assert_eq \
+    'println("protoc-gen-actrframework-kotlin 0.10.0-rc.1")
+println("    0.10.0-rc.1")' \
+    "$(cat "$main_kt")" \
+    "Kotlin plugin version after prerelease-to-prerelease bump"
+
+  rm -rf "$temp_dir"
+}
+
 test_publish_web_packages_skips_puppeteer_download() {
   reset_release_train_state
 
@@ -2441,6 +2564,7 @@ test_release_prepare_stages_workload_lockfile
 test_notify_wechat_includes_nuget_packages
 test_release_prepare_refreshes_and_stages_e2e_lockfile
 test_update_versions_syncs_optional_dependencies
+test_update_versions_rewrites_prerelease_embedded_versions
 test_publish_web_packages_skips_puppeteer_download
 test_cli_zigbuild_uses_zigbuild_arguments_without_build_subcommand
 test_cli_release_state_rows_match_report_schema
