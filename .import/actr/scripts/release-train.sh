@@ -1246,13 +1246,13 @@ embedded_versions = [
     ),
     (
         repo / "tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt",
-        r'(protoc-gen-actrframework-kotlin )[0-9]+\.[0-9]+\.[0-9]+',
+        r'(protoc-gen-actrframework-kotlin )[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?',
         rf'\g<1>{version}',
         1,
     ),
     (
         repo / "tools/protoc-gen/kotlin/src/main/kotlin/io/actrium/codegen/Main.kt",
-        r'(println\("    )[0-9]+\.[0-9]+\.[0-9]+("\))',
+        r'(println\("    )[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?("\))',
         rf'\g<1>{version}\g<2>',
         1,
     ),
