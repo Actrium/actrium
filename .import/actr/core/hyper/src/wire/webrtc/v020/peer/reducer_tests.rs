@@ -2274,18 +2274,12 @@ fn answerer_restart_completion_sends_correlated_request() {
     let generation = drive_answerer_to_negotiating(&mut state);
     drive_to_sendable(&mut state, generation);
 
-    let restart = reduce(&mut state, failed_tick(generation));
-    let (operation_id, ice_generation) = restart_identity(&restart, generation);
-    let effects = reduce(
-        &mut state,
-        RtcPeerInput::Completion(EffectCompletion::RestartIce {
-            generation,
-            operation_id,
-            ice_generation,
-            result: Ok(()),
-        }),
-    );
-
+    // Request-only answerer recovery: the failed tick starts soft recovery
+    // with no local RestartIce effect — the restart request is dispatched
+    // immediately, and the local restart happens implicitly when the remote
+    // restart offer is applied.
+    let effects = reduce(&mut state, failed_tick(generation));
+    assert!(!has_restart_ice(&effects, generation));
     assert!(has_restart_request(&effects, 1));
     assert!(state.local_restart_request_id.is_some());
 }
@@ -3678,6 +3672,111 @@ fn answerer_applies_new_ufrag_offer_as_soft_ice_restart() {
     );
 }
 
+/// The answerer's own soft recovery is request-only: no local RestartIce
+/// effect is dispatched, and its local ICE restart happens implicitly when the
+/// offerer's restart offer is applied. A local restart_ice() racing that offer
+/// would re-roll credentials after the answer was sent, wedge the round (the
+/// offerer de-dupes the attempt-1 request), and escalate both ends to a Hard
+/// rebuild at the attempt deadline.
+#[test]
+fn answerer_soft_recovery_sends_request_without_local_restart_ice() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_negotiating(&mut state);
+    drive_to_sendable(&mut state, generation);
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+
+    assert!(
+        !has_restart_ice(&effects, generation),
+        "answerer soft recovery must not dispatch a local RestartIce effect"
+    );
+    assert!(
+        has_restart_request(&effects, 1),
+        "answerer soft recovery dispatches the restart request directly"
+    );
+    assert!(state.recovery_inflight);
+    assert!(state.recovery_attempt_started);
+    assert!(!state.recovery_negotiated);
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+}
+
+/// Once the answerer joins the offerer's recovery round by applying the
+/// restart offer, its already-sent request is complete: the answer path must
+/// not re-emit another restart request (a late duplicate would race the
+/// answer and re-roll credentials out from under it).
+#[test]
+fn answerer_does_not_reemit_request_after_applying_restart_offer() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_answerer_to_sendable_with_ufrag(&mut state, "remote-1");
+
+    // The answerer's own round starts (request-only).
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkUnavailable,
+        )),
+    );
+    let start = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::NetworkAvailable,
+        )),
+    );
+    assert!(has_restart_request(&start, 1));
+
+    // The offerer's restart offer lands: the answerer applies it (implicit
+    // local restart inside set_remote_description) and must produce only the
+    // remote-description effect — never another restart request.
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRemoteIceRestartOffer(Box::new(
+            sdp_with_ufrag(RTCSdpType::Offer, "remote-2"),
+        ))),
+    );
+    assert!(has_set_remote(&effects, generation));
+    assert!(
+        !has_restart_ice(&effects, generation),
+        "the local restart is implicit in set_remote_description, not an effect"
+    );
+    assert!(
+        !effects.iter().any(|e| matches!(
+            e,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { .. },
+                ..
+            }
+        )),
+        "applying the restart offer must not re-emit the restart request"
+    );
+
+    // The answer path follows the remote description completion.
+    let set_remote_operation = pending_operation(
+        &state,
+        PendingRtcOperationKind::SetRemoteDescription,
+        generation,
+    );
+    let answer_effects = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::SetRemoteDescription {
+            generation,
+            operation_id: set_remote_operation,
+            result: Ok(()),
+        }),
+    );
+    assert!(has_create_answer(&answer_effects, generation));
+}
+
 /// A normal (non-restart-tagged) offer with fresh ICE credentials comes from
 /// a replacement physical PeerConnection. The established answerer must retire
 /// its old generation and build a fresh Session instead of applying that SDP to
@@ -3903,8 +4002,8 @@ fn answerer_deadline_after_background_defer_retransmits_same_request() {
     let generation = drive_answerer_to_negotiating(&mut state);
     drive_to_sendable(&mut state, generation);
 
-    // Soft recovery starts: the answerer emits its restart request once the
-    // RestartIce effect completes.
+    // Soft recovery starts: the answerer emits its restart request
+    // immediately (request-only recovery — no local RestartIce effect).
     reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(Ev::NetworkUnavailable)),
@@ -3913,25 +4012,21 @@ fn answerer_deadline_after_background_defer_retransmits_same_request() {
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(Ev::NetworkAvailable)),
     );
-    let (ice_generation, operation_id) = start_effects
-        .iter()
-        .find_map(|effect| match effect {
-            RtcPeerEffect::RestartIce {
-                ice_generation,
-                operation_id,
+    assert!(
+        !start_effects
+            .iter()
+            .any(|effect| matches!(effect, RtcPeerEffect::RestartIce { .. })),
+        "answerer soft recovery must not dispatch a local RestartIce effect"
+    );
+    assert!(
+        start_effects.iter().any(|effect| matches!(
+            effect,
+            RtcPeerEffect::SendSignaling {
+                message: SignalingMessage::IceRestartRequest { attempt: 1, .. },
                 ..
-            } => Some((*ice_generation, *operation_id)),
-            _ => None,
-        })
-        .expect("soft recovery must emit RestartIce");
-    reduce(
-        &mut state,
-        RtcPeerInput::Completion(EffectCompletion::RestartIce {
-            generation,
-            operation_id,
-            ice_generation,
-            result: Ok(()),
-        }),
+            }
+        )),
+        "answerer soft recovery must dispatch the restart request directly"
     );
     assert!(state.recovery_attempt_started);
     let request_id = state.local_restart_request_id.clone();

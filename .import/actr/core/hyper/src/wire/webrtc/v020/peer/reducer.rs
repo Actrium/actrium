@@ -1664,10 +1664,13 @@ fn reduce_network_event(
     }
 }
 
-/// S5-2: start Soft Recovery — keep the current PeerConnection, increase the
-/// ICE generation, and issue `restart_ice()`. The offerer follows with a
-/// restart `CreateOffer` after the `RestartIce` completion (RFC §"Soft
-/// Recovery" steps 2/4). Soft Recovery does not increase the PC generation.
+/// S5-2: start Soft Recovery — keep the current PeerConnection and increase
+/// the ICE generation. The offerer issues `restart_ice()` and follows with a
+/// restart `CreateOffer` after the `RestartIce` completion; the answerer
+/// performs no local restart and sends the restart request directly, its
+/// local restart being implicit in applying the offerer's restart offer
+/// (RFC §"Soft Recovery" steps 2/4). Soft Recovery does not increase the PC
+/// generation.
 fn clear_negotiation_for_recovery(state: &mut RtcPeerState) {
     retain_lifecycle_operations(state);
     state.pending_remote_offer = None;
@@ -1710,13 +1713,31 @@ fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     state.pc_connected = false;
     state.phase = RtcPeerPhase::Recovering;
     state.bump_revision();
-    if let Some(generation) = state.active_generation {
-        let operation_id = state.alloc_operation();
-        effects.push(RtcPeerEffect::RestartIce {
-            generation,
-            operation_id,
-            ice_generation: state.ice_generation,
-        });
+    if state.active_generation.is_none() {
+        return;
+    }
+    match state.role {
+        Role::Offerer | Role::Undetermined => {
+            let operation_id = state.alloc_operation();
+            effects.push(RtcPeerEffect::RestartIce {
+                generation: state.active_generation.expect("guarded live generation"),
+                operation_id,
+                ice_generation: state.ice_generation,
+            });
+        }
+        Role::Answerer => {
+            // The answerer performs no local restart_ice() here. Upstream rtc
+            // 0.20 applies the implicit local ICE restart (ufrag roll, stale
+            // candidate discard, socket rebind per webrtc-rs/webrtc#868) inside
+            // set_remote_description when it detects the offerer's changed
+            // credentials — the answerer's local state can therefore only roll
+            // atomically with an incoming restart offer, never out from under
+            // an answer it just sent. A local restart_ice() racing that offer
+            // would instead re-roll credentials after the answer, wedge the
+            // round (the offerer de-dupes the attempt-1 request), and escalate
+            // both ends to a Hard rebuild at the attempt deadline.
+            send_answerer_restart_request(state, effects);
+        }
     }
 }
 
@@ -2666,9 +2687,11 @@ fn reduce_completion(
                 Ok(()) => {
                     // S5-2: Soft Recovery step 5 — the offerer creates a
                     // restart Offer (with a new ICE ufrag from restart_ice).
-                    // The answerer just waits for the remote's restart offer
-                    // (no effect); its `restart_ice()` already marked the
-                    // next `create_answer()` as a restart answer.
+                    // The answerer never reaches this branch: its soft
+                    // recovery sends the restart request directly without a
+                    // local restart_ice() effect (see start_soft_recovery),
+                    // and its local restart happens implicitly when the
+                    // remote restart offer is applied.
                     if state.role == Role::Offerer {
                         let operation_id = state.alloc_operation();
                         state.pending_local_restart_exchange_id = Some(format!(
@@ -2680,7 +2703,19 @@ fn reduce_completion(
                             operation_id,
                         });
                     } else if state.role == Role::Answerer {
-                        send_answerer_restart_request(state, effects);
+                        // A RestartIce completion on an answerer means the
+                        // effect was dispatched before this role's recovery
+                        // switched to request-only (e.g. role resolved after
+                        // dispatch). The request may already have been sent;
+                        // re-sending the same correlated attempt is idempotent
+                        // on the offerer (duplicate attempt is dropped), so
+                        // stay silent here and let the attempt deadline own
+                        // retransmission.
+                        tracing::debug!(
+                            peer = %state.peer_id.to_string_repr(),
+                            generation,
+                            "answerer RestartIce completion ignored; request-only recovery owns signaling"
+                        );
                     }
                 }
                 Err(_) => {
