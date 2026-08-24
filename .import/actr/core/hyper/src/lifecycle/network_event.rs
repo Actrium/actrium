@@ -998,6 +998,14 @@ impl DefaultNetworkEventProcessor {
         self.cleanup_connections()
             .await
             .map_err(|error| NetworkRecoveryError::from_opaque("ForceReconnect cleanup", error))?;
+        // cleanup_connections disconnected signaling and drained the old
+        // inbound queue before close_all suppressed the retired peers. A new
+        // signaling generation must accept passive RoleAssignment/Offer again;
+        // otherwise an endpoint that remains the answerer can never rebuild.
+        #[cfg(feature = "webrtc-v020")]
+        if let Some(manager) = self.v020_manager.as_ref() {
+            manager.reopen_all_inbound_admission();
+        }
         self.restore_signaling_and_webrtc_from_network_event_typed("ForceReconnect", action_id)
             .await
     }

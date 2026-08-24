@@ -260,6 +260,54 @@ async fn ensure_waits_for_inflight_close_before_recreating_peer() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn cancelled_close_peer_retires_its_closing_tombstone() {
+    let entered = Arc::new(tokio::sync::Semaphore::new(0));
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let (signaling_tx, _signaling_rx) = mpsc::channel(16);
+    let mgr = Arc::new(RtcConnectionManager::new(
+        Arc::new(BlockingBuildFactory {
+            entered: entered.clone(),
+            release,
+        }),
+        signaling_tx,
+    ));
+    let peer = test_actor_id(91);
+
+    mgr.connect(peer.clone()).await;
+    let handle = mgr.get_controller(&peer).await.expect("controller");
+    handle
+        .apply_role_assignment(true)
+        .await
+        .expect("role assignment command");
+    timeout(WAIT, entered.acquire())
+        .await
+        .expect("build did not start")
+        .expect("build-entered semaphore")
+        .forget();
+
+    let close_mgr = mgr.clone();
+    let close_peer = peer.clone();
+    let close = tokio::spawn(async move { close_mgr.close_peer(&close_peer).await });
+    timeout(WAIT, async {
+        while !mgr.is_closing(&peer).await {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("manager did not install closing tombstone");
+
+    close.abort();
+    let _ = close.await;
+
+    let replacement = timeout(WAIT, mgr.ensure_controller(peer.clone()))
+        .await
+        .expect("cancelled close left a permanent closing tombstone");
+    assert_eq!(replacement.peer_id(), &peer);
+    assert!(!mgr.is_closing(&peer).await);
+    assert!(mgr.close_peer(&peer).await);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn incoming_offer_creates_answerer_controller() {
     let (mgr, _rx) = manager();
     let peer = test_actor_id(2);
@@ -388,6 +436,25 @@ async fn close_all_rejects_late_inbound_recreation_until_local_connect() {
     assert!(
         mgr.get_controller(&peer).await.is_some(),
         "an explicit local connect must reopen inbound admission"
+    );
+    assert!(mgr.close_peer(&peer).await);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn new_signaling_generation_reopens_passive_inbound_admission() {
+    let (mgr, _rx) = manager();
+    let peer = test_actor_id(55);
+    mgr.ensure_controller(peer.clone()).await;
+    mgr.close_all().await;
+
+    mgr.reopen_all_inbound_admission();
+    let mut offer = RTCSessionDescription::default();
+    offer.sdp_type = webrtc::peer_connection::RTCSdpType::Offer;
+    mgr.handle_incoming_offer(peer.clone(), offer).await;
+
+    assert!(
+        mgr.get_controller(&peer).await.is_some(),
+        "a fresh signaling generation must admit a passive answerer"
     );
     assert!(mgr.close_peer(&peer).await);
 }
