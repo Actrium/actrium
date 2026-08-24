@@ -689,6 +689,18 @@ impl RtcConnectionManager {
             .remove(peer);
     }
 
+    /// Re-open passive controller creation after node-wide cleanup has fenced
+    /// and drained the old signaling generation. The lifecycle owner calls
+    /// this before installing a fresh signaling generation, so messages from
+    /// the retired socket cannot recreate peers while legitimate Offers on the
+    /// replacement socket remain admissible.
+    pub(crate) fn reopen_all_inbound_admission(&self) {
+        self.inbound_suppressed_peers
+            .lock()
+            .expect("RTC inbound-admission lock poisoned")
+            .clear();
+    }
+
     /// Non-blocking signaling response used by the router for protocol-level
     /// rejects. The router is the single inbound consumer and must not head-of-
     /// line block unrelated peers on a full outbound queue.
@@ -874,7 +886,7 @@ impl RtcConnectionManager {
     /// lock is released (invariant #9). The command/lane senders are dropped
     /// before joining so the controller's event loop observes the closed channel
     /// and exits — otherwise the join would wait forever.
-    pub(crate) async fn close_peer(&self, peer: &ActrId) -> bool {
+    pub(crate) async fn close_peer(self: &Arc<Self>, peer: &ActrId) -> bool {
         enum CloseAction {
             Start(Box<PeerEntry>, Arc<CloseMarker>),
             Wait(Arc<CloseMarker>),
@@ -918,6 +930,15 @@ impl RtcConnectionManager {
                 true
             }
             CloseAction::Start(entry, marker) => {
+                // Like close_all, close_peer may itself be wrapped in an
+                // application/lifecycle timeout. If that outer future is
+                // cancelled after the Closing slot is published, retire the
+                // marker from Drop so ensure_controller cannot wait forever.
+                let mut cleanup_guard = TombstoneCleanupGuard {
+                    manager: Arc::clone(self),
+                    markers: vec![(peer.clone(), marker.clone())],
+                    finished: false,
+                };
                 let entry = *entry;
                 // Request owners must wake before the physical close barrier
                 // finishes; otherwise a sent request retains its full RPC
@@ -957,6 +978,7 @@ impl RtcConnectionManager {
                     cleanup_handle.mark_secure_closed();
                 }
                 self.finish_close(peer, &marker).await;
+                cleanup_guard.finished = true;
                 true
             }
         }
