@@ -246,7 +246,7 @@ struct WorkspaceMainView: View {
                                 guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 // Update tab URL when page uses History.pushState/replaceState
                                 if let newURL = newURL {
-                                    NSLog("🔗 WorkspaceMainView: Updating tab \(focusedTabId) URL to: \(newURL.absoluteString)")
+                                    NSLog("🔗 WorkspaceMainView: Updating web tab URL")
                                     viewModel.updateTabURL(for: focusedTabId, url: newURL)
                                 }
                             },

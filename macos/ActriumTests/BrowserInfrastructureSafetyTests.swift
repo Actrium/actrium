@@ -152,6 +152,24 @@ struct BrowserInfrastructureSafetyTests {
         #expect(!WebMediaPermissionPolicy.canRequestCapture(scheme: "file", host: ""))
     }
 
+    @Test func untrustedPagesCannotNavigateIntoLocalOrApplicationSchemes() throws {
+        let webURL = try #require(URL(string: "https://example.com/path"))
+        let localFile = try #require(URL(string: "file:///Users/example/private"))
+        let applicationURL = try #require(URL(string: "actro://settings"))
+        let dataURL = try #require(URL(string: "data:text/html,hello"))
+        let blankURL = try #require(URL(string: "about:blank"))
+
+        #expect(WebNavigationSecurityPolicy.canNavigateInsideWebView(webURL))
+        #expect(WebNavigationSecurityPolicy.canNavigateInsideWebView(blankURL))
+        #expect(!WebNavigationSecurityPolicy.canNavigateInsideWebView(localFile))
+        #expect(!WebNavigationSecurityPolicy.canNavigateInsideWebView(applicationURL))
+        #expect(!WebNavigationSecurityPolicy.canNavigateInsideWebView(dataURL))
+        #expect(WebNavigationSecurityPolicy.canOpenInBrowserTab(webURL))
+        #expect(!WebNavigationSecurityPolicy.canOpenInBrowserTab(localFile))
+        #expect(WebNavigationSecurityPolicy.canDownload(dataURL))
+        #expect(!WebNavigationSecurityPolicy.canDownload(localFile))
+    }
+
     private static func sessionTab(
         id: UUID,
         title: String,

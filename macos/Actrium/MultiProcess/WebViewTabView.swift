@@ -937,31 +937,15 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             return
         }
 
-        // Check for Content-Disposition: attachment header
-        let contentDisposition = response.allHeaderFields["Content-Disposition"] as? String ?? ""
-        let isAttachment = contentDisposition.lowercased().contains("attachment")
+        let contentDisposition = response.value(forHTTPHeaderField: "Content-Disposition") ?? ""
+        let isAttachment = contentDisposition
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .hasPrefix("attachment")
 
-        // Check for non-renderable MIME types
-        let mimeType = response.mimeType ?? ""
-        let downloadMIMETypes = [
-            "application/octet-stream",
-            "application/zip",
-            "application/x-zip-compressed",
-            "application/x-rar-compressed",
-            "application/x-7z-compressed",
-            "application/x-tar",
-            "application/gzip",
-            "application/msword",
-            "application/vnd.openxmlformats-officedocument",
-            "application/x-apple-diskimage",
-            "application/x-msdos-program",
-            "application/x-bzip",
-            "application/x-bzip2"
-        ]
-        let shouldDownloadByMIME = downloadMIMETypes.contains(where: { mimeType.hasPrefix($0) })
-
-        // Download if: attachment header OR (can't show AND is download MIME type)
-        if isAttachment || (!navigationResponse.canShowMIMEType && shouldDownloadByMIME) {
+        // Any response WebKit cannot render is a download. Restricting this to
+        // a handwritten MIME allowlist silently breaks legitimate file types.
+        if isAttachment || !navigationResponse.canShowMIMEType {
             decisionHandler(.download)
             NSLog("📥 WebViewHolder: Response became a download")
         } else {
@@ -983,6 +967,11 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
         // Check for download attribute on links
         if navigationAction.shouldPerformDownload {
+            guard let url, WebNavigationSecurityPolicy.canDownload(url) else {
+                decisionHandler(.cancel)
+                NSLog("📥 WebViewHolder: Blocked download from unsupported URL scheme")
+                return
+            }
             decisionHandler(.download)
             NSLog("📥 WebViewHolder: Link has download attribute - returning .download")
             return
@@ -996,6 +985,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             // proxy/session state match the page that initiated the download.
             decisionHandler(.download)
             NSLog("📥 WebViewHolder: Option+click download")
+            return
+        }
+
+        if let url, !WebNavigationSecurityPolicy.canNavigateInsideWebView(url) {
+            decisionHandler(.cancel)
+            NSLog("🌐 WebViewHolder: Blocked unsupported top-level URL scheme")
             return
         }
 
