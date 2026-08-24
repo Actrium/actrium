@@ -27,6 +27,15 @@ nonisolated struct CredentialOrigin: Equatable {
         self.host = rawHost.hasSuffix(".") ? String(rawHost.dropLast()) : rawHost
         self.port = url.port ?? (scheme == "https" ? 443 : 80)
     }
+
+    var storageURLString: String {
+        var components = URLComponents()
+        components.scheme = scheme
+        components.host = host
+        let defaultPort = scheme == "https" ? 443 : 80
+        components.port = port == defaultPort ? nil : port
+        return components.string ?? "\(scheme)://\(host)"
+    }
 }
 
 @MainActor
@@ -64,7 +73,8 @@ final class AutofillManager: ObservableObject {
 
         return vaultItems.compactMap { item in
             guard let urlFieldValue = item.fields.first(where: { $0.label == "URL" })?.value,
-                  !urlFieldValue.isEmpty else {
+                  !urlFieldValue.isEmpty,
+                  urlFieldValue.utf8.count <= 65_536 else {
                 return nil
             }
             // Handle URLs without scheme
@@ -90,8 +100,13 @@ final class AutofillManager: ObservableObject {
         // vault unlock, but the prompt itself should not be gated.
         guard VaultManager.shared.state != .notSetup else { return }
 
-        guard let parsedURL = URL(string: url),
-              let domain = extractDomain(from: parsedURL) else { return }
+        guard url.utf8.count <= 65_536,
+              username.utf8.count <= 4_096,
+              password.utf8.count <= 16_384,
+              let parsedURL = URL(string: url),
+              let origin = CredentialOrigin(url: parsedURL) else { return }
+        let domain = origin.host
+        let storageURL = origin.storageURLString
 
         // Check never-save list
         guard !neverSaveDomains.contains(domain) else { return }
@@ -106,7 +121,7 @@ final class AutofillManager: ObservableObject {
 
             // Different password — offer to update
             pendingSaveAction = SavePasswordAction(
-                url: url,
+                url: storageURL,
                 domain: domain,
                 username: username,
                 password: password,
@@ -116,7 +131,7 @@ final class AutofillManager: ObservableObject {
         } else {
             // New credentials — offer to save
             pendingSaveAction = SavePasswordAction(
-                url: url,
+                url: storageURL,
                 domain: domain,
                 username: username,
                 password: password,

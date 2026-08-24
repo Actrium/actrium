@@ -97,6 +97,8 @@ struct BrowserInfrastructureSafetyTests {
         #expect(exact != subdomain)
         #expect(exact != downgraded)
         #expect(exact != alternatePort)
+        #expect(exact.storageURLString == "https://example.com")
+        #expect(alternatePort.storageURLString == "https://example.com:8443")
     }
 
     @Test func cancelledAndDownloadTransitionErrorsDoNotReplaceThePage() throws {
