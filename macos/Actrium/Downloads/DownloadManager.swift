@@ -26,7 +26,7 @@ class DownloadItem: ObservableObject, Identifiable {
     @Published var error: String?
     @Published var fileExists: Bool = true
 
-    weak var download: WKDownload?
+    var download: WKDownload?
 
     /// Check if the downloaded file still exists on disk
     func checkFileExists() {
@@ -91,6 +91,7 @@ class DownloadManager: ObservableObject {
 
     @Published var downloads: [DownloadItem] = []
     @Published var hasActiveDownloads: Bool = false
+    private var webKitDownloadHandlers: [ObjectIdentifier: DownloadDelegateHandler] = [:]
 
     private init() {}
 
@@ -190,7 +191,7 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
         }
 
         task.resume()
-        NSLog("📥 URLSessionDownloader: Started download - \(url.lastPathComponent)")
+        NSLog("📥 URLSessionDownloader: Started download")
     }
 
     /// Cancel a download
@@ -228,13 +229,14 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
             Task { @MainActor in
                 item.destinationURL = destinationURL
                 DownloadManager.shared.updateItem(item, state: .completed)
-                NSLog("📥 URLSessionDownloader: Download completed - \(item.filename) -> \(destinationURL.path)")
+                NSLog("📥 URLSessionDownloader: Download completed")
             }
         } catch {
             Task { @MainActor in
                 item.error = error.localizedDescription
                 DownloadManager.shared.updateItem(item, state: .failed)
-                NSLog("📥 URLSessionDownloader: Failed to move file - \(error.localizedDescription)")
+                let nsError = error as NSError
+                NSLog("📥 URLSessionDownloader: Failed to move file (%@/%d)", nsError.domain, nsError.code)
             }
         }
 
@@ -263,7 +265,8 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
             Task { @MainActor in
                 item.error = error.localizedDescription
                 DownloadManager.shared.updateItem(item, state: .failed)
-                NSLog("📥 URLSessionDownloader: Download failed - \(item.filename): \(error.localizedDescription)")
+                let nsError = error as NSError
+                NSLog("📥 URLSessionDownloader: Download failed (%@/%d)", nsError.domain, nsError.code)
             }
         }
 
@@ -271,15 +274,16 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
     }
 }
 
-// MARK: - Download Delegate Handler (WKDownload fallback)
+// MARK: - Download Delegate Handler
 
 /// Downloading Proxy Processor - For WKDownload, but automatically switch to URLSession
 class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
     weak var item: DownloadItem?
-    private var hasTriedURLSessionFallback = false
+    private let onTerminalState: (WKDownload) -> Void
 
-    init(item: DownloadItem) {
+    init(item: DownloadItem, onTerminalState: @escaping (WKDownload) -> Void = { _ in }) {
         self.item = item
+        self.onTerminalState = onTerminalState
         super.init()
     }
 
@@ -305,7 +309,7 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
             item?.state = .downloading
         }
 
-        NSLog("📥 DownloadManager: Downloading to \(destinationURL.path)")
+        NSLog("📥 DownloadManager: Downloading")
         completionHandler(destinationURL)
     }
 
@@ -321,14 +325,17 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
     }
 
     func downloadDidFinish(_ download: WKDownload) {
+        onTerminalState(download)
         Task { @MainActor [weak self] in
             guard let item = self?.item else { return }
+            item.download = nil
             DownloadManager.shared.updateItem(item, state: .completed)
-            NSLog("📥 DownloadManager: Download completed - \(item.filename)")
+            NSLog("📥 DownloadManager: Download completed")
         }
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        onTerminalState(download)
         Task { @MainActor [weak self] in
             guard let self = self, let item = self.item else { return }
 
@@ -353,7 +360,8 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
 
             item.error = error.localizedDescription
             DownloadManager.shared.updateItem(item, state: .failed)
-            NSLog("📥 DownloadManager: Download failed - \(item.filename): \(error.localizedDescription)")
+            let nsError = error as NSError
+            NSLog("📥 DownloadManager: Download failed (%@/%d)", nsError.domain, nsError.code)
         }
     }
 }

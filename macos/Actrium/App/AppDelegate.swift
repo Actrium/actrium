@@ -36,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
         setupNotifications()
 
         // Create initial window
-        createNewWindow()
+        createWindow(restoringSession: true)
 
         // Ensure focusedViewModel is set after the run loop settles
         DispatchQueue.main.async { [weak self] in
@@ -184,7 +184,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     // MARK: - Window Management
 
     @objc func createNewWindow() {
-        let viewModel = BrowserViewModel()
+        createWindow(restoringSession: false)
+    }
+
+    private func createWindow(restoringSession: Bool) {
+        let viewModel = BrowserViewModel(restoringSession: restoringSession)
         viewModel.historyVM = historyVM
 
         let windowController = MainWindowController(

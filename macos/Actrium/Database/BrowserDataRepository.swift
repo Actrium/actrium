@@ -280,7 +280,7 @@ final class BrowserDataRepository {
     func recordVisit(title: String, url: URL) {
         guard Self.isBrowserPageURL(url) else { return }
         let item = AppleBrowserHistoryItem(
-            title: normalizedTitle(title, url: url),
+            title: Self.normalizedTitle(title, url: url),
             address: url.absoluteString,
             visitedAtUnixSeconds: Int64(Date().timeIntervalSince1970),
             visitCount: 1
@@ -395,7 +395,7 @@ final class BrowserDataRepository {
             guard let url = tab.url, Self.isSessionRestorableURL(url) else { return nil }
             let item = AppleBrowserSessionTab(
                 id: tab.id.uuidString,
-                title: normalizedTitle(tab.title, url: url),
+                title: Self.normalizedTitle(tab.title, url: url),
                 address: url.absoluteString,
                 createdAtUnixSeconds: now,
                 updatedAtUnixSeconds: now
@@ -427,6 +427,56 @@ final class BrowserDataRepository {
         }
     }
 
+    /// Loads the last ordinary web-browsing session. Browser-owned pages and
+    /// app surfaces are intentionally not restored through this path.
+    func loadSessionTabs() -> (tabs: [Tab], currentTabId: UUID?)? {
+        guard let snapshot = database?.loadSession() else { return nil }
+        return Self.restoreSession(from: snapshot)
+    }
+
+    /// Converts a persisted snapshot into a safe, internally consistent set of
+    /// Tabs. The source index is retained while malformed entries are filtered,
+    /// so the active Tab does not silently shift to a different page.
+    static func restoreSession(
+        from snapshot: AppleBrowserSessionSnapshot
+    ) -> (tabs: [Tab], currentTabId: UUID?)? {
+        let activeSourceIndex = Int(snapshot.activeTabIndex)
+        var usedIDs = Set<UUID>()
+        var restored: [(sourceIndex: Int, tab: Tab)] = []
+
+        for (sourceIndex, item) in snapshot.tabs.enumerated() {
+            guard let url = URL(string: item.address), isBrowserPageURL(url) else { continue }
+
+            let persistedID = UUID(uuidString: item.id)
+            let candidateID = persistedID ?? stableUUID(
+                for: "session:\(sourceIndex):\(item.id):\(item.address)"
+            )
+            let tabID: UUID
+            if usedIDs.insert(candidateID).inserted {
+                tabID = candidateID
+            } else {
+                tabID = stableUUID(
+                    for: "session-duplicate:\(sourceIndex):\(item.id):\(item.address)"
+                )
+                usedIDs.insert(tabID)
+            }
+
+            restored.append((
+                sourceIndex: sourceIndex,
+                tab: Tab(
+                    id: tabID,
+                    title: normalizedTitle(item.title, url: url),
+                    url: url
+                )
+            ))
+        }
+
+        guard !restored.isEmpty else { return nil }
+        let activeTab = restored.first(where: { $0.sourceIndex == activeSourceIndex })?.tab
+            ?? restored.first?.tab
+        return (restored.map(\.tab), activeTab?.id)
+    }
+
     private func scheduleSyncAfterLocalChange() {
         guard let syncScheduler else { return }
         Task {
@@ -446,14 +496,15 @@ final class BrowserDataRepository {
 
     static func isBrowserPageURL(_ url: URL) -> Bool {
         let scheme = url.scheme?.lowercased()
-        return scheme == "http" || scheme == "https"
+        guard scheme == "http" || scheme == "https" else { return false }
+        return !(url.host?.isEmpty ?? true)
     }
 
     private func historyItem(from item: AppleBrowserHistoryItem) -> HistoryItem? {
         guard let url = URL(string: item.address), Self.isBrowserPageURL(url) else { return nil }
         return HistoryItem(
-            id: stableUUID(for: "history:\(item.address)"),
-            title: normalizedTitle(item.title, url: url),
+            id: Self.stableUUID(for: "history:\(item.address)"),
+            title: Self.normalizedTitle(item.title, url: url),
             appURL: url,
             visitTime: Date(timeIntervalSince1970: TimeInterval(item.visitedAtUnixSeconds))
         )
@@ -462,7 +513,7 @@ final class BrowserDataRepository {
     private func browserHistoryItem(from item: HistoryItem) -> AppleBrowserHistoryItem? {
         guard let url = item.appURL, Self.isBrowserPageURL(url) else { return nil }
         return AppleBrowserHistoryItem(
-            title: normalizedTitle(item.title, url: url),
+            title: Self.normalizedTitle(item.title, url: url),
             address: url.absoluteString,
             visitedAtUnixSeconds: Int64(item.visitTime.timeIntervalSince1970),
             visitCount: 1
@@ -475,7 +526,7 @@ final class BrowserDataRepository {
         let updatedAt = Int64((bookmark.lastUsedAt ?? bookmark.createdAt).timeIntervalSince1970)
         return AppleBrowserBookmarkItem(
             id: bookmark.id.uuidString,
-            title: normalizedTitle(bookmark.title, url: url),
+            title: Self.normalizedTitle(bookmark.title, url: url),
             address: url.absoluteString,
             createdAtUnixSeconds: createdAt,
             updatedAtUnixSeconds: updatedAt,
@@ -486,8 +537,8 @@ final class BrowserDataRepository {
     private func bookmark(from item: AppleBrowserBookmarkItem) -> Bookmark? {
         guard let url = URL(string: item.address), Self.isBrowserPageURL(url) else { return nil }
         return Bookmark(
-            id: UUID(uuidString: item.id) ?? stableUUID(for: "bookmark:\(item.address)"),
-            title: normalizedTitle(item.title, url: url),
+            id: UUID(uuidString: item.id) ?? Self.stableUUID(for: "bookmark:\(item.address)"),
+            title: Self.normalizedTitle(item.title, url: url),
             appURL: url,
             createdAt: Date(timeIntervalSince1970: TimeInterval(item.createdAtUnixSeconds)),
             lastUsedAt: Date(timeIntervalSince1970: TimeInterval(item.updatedAtUnixSeconds)),
@@ -495,7 +546,7 @@ final class BrowserDataRepository {
         )
     }
 
-    private func normalizedTitle(_ title: String, url: URL) -> String {
+    private static func normalizedTitle(_ title: String, url: URL) -> String {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty {
             return trimmed
@@ -506,7 +557,7 @@ final class BrowserDataRepository {
         return url.absoluteString
     }
 
-    private func stableUUID(for value: String) -> UUID {
+    private static func stableUUID(for value: String) -> UUID {
         let bytes = stableIdentifierBytes(for: value)
         return UUID(uuid: (
             bytes[0], bytes[1], bytes[2], bytes[3],
@@ -516,7 +567,7 @@ final class BrowserDataRepository {
         ))
     }
 
-    private func stableIdentifierBytes(for value: String) -> [UInt8] {
+    private static func stableIdentifierBytes(for value: String) -> [UInt8] {
         let first = fnv1a64(value.utf8)
         let second = fnv1a64(("actro:" + value).utf8)
         var bytes = [UInt8](repeating: 0, count: 16)
@@ -529,7 +580,7 @@ final class BrowserDataRepository {
         return bytes
     }
 
-    private func fnv1a64<T: Sequence>(_ bytes: T) -> UInt64 where T.Element == UInt8 {
+    private static func fnv1a64<T: Sequence>(_ bytes: T) -> UInt64 where T.Element == UInt8 {
         var hash: UInt64 = 0xcbf29ce484222325
         for byte in bytes {
             hash ^= UInt64(byte)

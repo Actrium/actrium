@@ -82,7 +82,7 @@ enum SystemTabType: String, Codable {
 }
 
 struct Tab: Identifiable {
-    let id = UUID()
+    let id: UUID
     var title: String
     var url: URL?
     var appId: String?
@@ -148,6 +148,7 @@ struct Tab: Identifiable {
     var appIcon: String?
 
     init(
+        id: UUID = UUID(),
         title: String,
         url: URL? = nil,
         appId: String? = nil,
@@ -173,6 +174,7 @@ struct Tab: Identifiable {
         backgroundColor: String? = nil,
         appIcon: String? = nil
     ) {
+        self.id = id
         self.title = title
         self.url = url
         self.appId = appId

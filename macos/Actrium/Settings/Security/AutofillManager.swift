@@ -10,6 +10,25 @@ struct SavePasswordAction {
     let existingItem: VaultItem?
 }
 
+/// Password autofill is origin-bound. Domain suffix matching can leak a parent
+/// site's credentials into an unrelated subdomain (or the reverse), while
+/// ignoring the scheme can leak an HTTPS password onto an HTTP page.
+struct CredentialOrigin: Equatable {
+    let scheme: String
+    let host: String
+    let port: Int
+
+    init?(url: URL) {
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https",
+              let rawHost = url.host?.lowercased(),
+              !rawHost.isEmpty else { return nil }
+        self.scheme = scheme
+        self.host = rawHost.hasSuffix(".") ? String(rawHost.dropLast()) : rawHost
+        self.port = url.port ?? (scheme == "https" ? 443 : 80)
+    }
+}
+
 @MainActor
 final class AutofillManager: ObservableObject {
     static let shared = AutofillManager()
@@ -37,16 +56,11 @@ final class AutofillManager: ObservableObject {
 
     // MARK: - Credential Lookup
 
-    /// Find login credentials matching a domain.
+    /// Find login credentials matching the page's exact origin.
     /// Returns tuples of (VaultItem, username, password) for matching items.
-    func findCredentials(forDomain domain: String) -> [(VaultItem, String, String)] {
+    func findCredentials(for pageURL: URL) -> [(VaultItem, String, String)] {
+        guard let pageOrigin = CredentialOrigin(url: pageURL) else { return [] }
         let vaultItems = VaultManager.shared.items.filter { $0.category == .login }
-        NSLog("🔑 findCredentials: looking for domain=%@, vault has %d login items", domain, vaultItems.count)
-        for item in vaultItems {
-            let url = item.fields.first(where: { $0.label == "URL" })?.value ?? "(none)"
-            let user = item.fields.first(where: { $0.label == "Username" })?.value ?? "(none)"
-            NSLog("🔑 findCredentials:   item='%@' url='%@' user='%@'", item.title, url, user)
-        }
 
         return vaultItems.compactMap { item in
             guard let urlFieldValue = item.fields.first(where: { $0.label == "URL" })?.value,
@@ -56,14 +70,11 @@ final class AutofillManager: ObservableObject {
             // Handle URLs without scheme
             let normalized = urlFieldValue.hasPrefix("http") ? urlFieldValue : "https://\(urlFieldValue)"
             guard let itemURL = URL(string: normalized),
-                  let itemDomain = itemURL.host else {
+                  let itemOrigin = CredentialOrigin(url: itemURL) else {
                 return nil
             }
 
-            // Exact match or subdomain match
-            guard itemDomain == domain || itemDomain.hasSuffix(".\(domain)") || domain.hasSuffix(".\(itemDomain)") else {
-                return nil
-            }
+            guard itemOrigin == pageOrigin else { return nil }
 
             let username = item.fields.first(where: { $0.label == "Username" })?.value ?? ""
             let password = item.fields.first(where: { $0.label == "Password" })?.value ?? ""
@@ -86,7 +97,7 @@ final class AutofillManager: ObservableObject {
         guard !neverSaveDomains.contains(domain) else { return }
 
         // Check existing credentials
-        let existing = findCredentials(forDomain: domain)
+        let existing = findCredentials(for: parsedURL)
 
         // Check if we already have an entry with the same username
         if let match = existing.first(where: { $0.1 == username }) {
