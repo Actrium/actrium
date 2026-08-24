@@ -21,6 +21,7 @@ ACTRIX_HTTP_PORT=${ACTRIX_HTTP_PORT:-8081}
 ACTRIX_ICE_PORT=${ACTRIX_ICE_PORT:-3478}
 ACTRIX_HTTP_URL="http://localhost:${ACTRIX_HTTP_PORT}"
 ACTRIX_WS_URL="ws://localhost:${ACTRIX_HTTP_PORT}"
+ACTRIX_ADMIN_PASSWORD=${ACTRIX_ADMIN_PASSWORD:-testpassword123}
 
 # Colors for output
 RED='\033[0;31m'
@@ -537,8 +538,9 @@ echo "🔑 Setting up realms in actrix..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Poll until the AIS signing key is ready.
-# Strategy: call /ais/rotate-key each iteration until /ais/current-key returns success.
-# The signer gRPC service may take a few seconds to initialize after actrix starts.
+# Strategy: call the admin-only key-rotate endpoint each iteration until
+# /ais/current-key returns success. The signer gRPC service may take a few
+# seconds to initialize after actrix starts.
 NONCE_DB="$WORKSPACE_ROOT/database/nonce.db"
 MAX_KEY_WAIT=60
 KEY_COUNTER=0
@@ -550,6 +552,16 @@ jq_status() {
     echo "$json" | jq -r '.status // "missing"' 2>/dev/null || echo "missing"
 }
 
+admin_login() {
+    # Log into the Admin UI to obtain a JWT for control-plane calls.
+    local resp
+    resp=$(curl -sf -X POST "${ACTRIX_HTTP_URL}/admin/api/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"password\":\"${ACTRIX_ADMIN_PASSWORD}\"}" 2>/dev/null || true)
+    ACTRIX_ADMIN_TOKEN=$(echo "$resp" | jq -r '.token // empty' 2>/dev/null)
+    [ -n "$ACTRIX_ADMIN_TOKEN" ]
+}
+
 while [ $KEY_COUNTER -lt $MAX_KEY_WAIT ]; do
     # Check if /ais/current-key already has a valid key
     CURRENT_KEY_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/ais/current-key" 2>/dev/null || true)
@@ -559,8 +571,11 @@ while [ $KEY_COUNTER -lt $MAX_KEY_WAIT ]; do
     fi
 
     # Nonce storage ready? Trigger rotation to accelerate key initialization.
-    if [ -f "$NONCE_DB" ] && sqlite3 "$NONCE_DB" ".tables" 2>/dev/null | grep -q "nonce_entries"; then
-        ROTATE_RESP=$(curl -sf -X POST "${ACTRIX_HTTP_URL}/ais/rotate-key" 2>/dev/null || true)
+    if [ -f "$NONCE_DB" ] && sqlite3 "$NONCE_DB" ".tables" 2>/dev/null | grep -q "nonce_entries" \
+        && admin_login; then
+        ROTATE_RESP=$(curl -sf -X POST \
+            -H "Authorization: Bearer ${ACTRIX_ADMIN_TOKEN}" \
+            "${ACTRIX_HTTP_URL}/admin/api/services/ais/keys/rotate" 2>/dev/null || true)
         if [ "$(jq_status "$ROTATE_RESP")" = "success" ]; then
             # Re-check immediately after successful rotation
             CURRENT_KEY_JSON=$(curl -sf "${ACTRIX_HTTP_URL}/ais/current-key" 2>/dev/null || true)

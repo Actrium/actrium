@@ -390,14 +390,25 @@ except json.JSONDecodeError:
 PY
 }
 
+admin_login() {
+    # Log into the Admin UI to obtain a JWT for control-plane calls.
+    ACTRIX_ADMIN_TOKEN="$(curl -sf -X POST "http://localhost:8081/admin/api/auth/login" \
+        -H 'Content-Type: application/json' \
+        -d "{\"password\":\"${ACTRIX_ADMIN_PASSWORD:-testpassword123}\"}" 2>/dev/null \
+        | python3 -c 'import json,sys; print(json.load(sys.stdin).get("token",""))' 2>/dev/null || true)"
+    [[ -n "$ACTRIX_ADMIN_TOKEN" ]]
+}
+
 for _ in $(seq 1 60); do
     CURRENT_KEY_JSON="$(curl -sf "http://localhost:8081/ais/current-key" 2>/dev/null || true)"
     if [[ "$(ais_status "$CURRENT_KEY_JSON")" == "success" ]]; then
         break
     fi
 
-    if [[ -f "$WORKSPACE_ROOT/database/nonce.db" ]]; then
-        curl -sf -X POST "http://localhost:8081/ais/rotate-key" >/dev/null 2>&1 || true
+    if [[ -f "$WORKSPACE_ROOT/database/nonce.db" ]] && admin_login; then
+        curl -sf -X POST \
+            -H "Authorization: Bearer ${ACTRIX_ADMIN_TOKEN}" \
+            "http://localhost:8081/admin/api/services/ais/keys/rotate" >/dev/null 2>&1 || true
     fi
     sleep 1
 done

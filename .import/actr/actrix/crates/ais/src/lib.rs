@@ -119,7 +119,22 @@ pub async fn create_ais_router_with_counters(
     cancel: tokio_util::sync::CancellationToken,
     counters: Option<Arc<ServiceCounters>>,
 ) -> Result<Router> {
-    platform::recording::info!("Creating AIS router with config");
+    let state = create_ais_state(config, global_config, cancel, counters).await?;
+    Ok(create_router_from_state(state))
+}
+
+/// Create the AIS service state (issuer + idempotency store).
+///
+/// The returned [`AISState`] owns the issuer inside an `Arc`; the control
+/// plane can grab `state.issuer` to trigger authenticated key rotation on the
+/// same issuer that backs the public `/ais` router built from this state.
+pub async fn create_ais_state(
+    config: &AisConfig,
+    global_config: &platform::config::ActrixConfig,
+    cancel: tokio_util::sync::CancellationToken,
+    counters: Option<Arc<ServiceCounters>>,
+) -> Result<AISState> {
+    platform::recording::info!("Creating AIS state with config");
 
     // Get the Signer client configuration
     let signer_client_config = config
@@ -175,11 +190,13 @@ pub async fn create_ais_router_with_counters(
         AISState::new(issuer)
     };
 
-    // Create the router
-    let router = create_router(state);
+    platform::recording::info!("AIS state created successfully");
+    Ok(state)
+}
 
-    platform::recording::info!("AIS router created successfully");
-    Ok(router)
+/// Build the public `/ais` router from an existing [`AISState`].
+pub fn create_router_from_state(state: AISState) -> Router {
+    create_router(state)
 }
 
 #[cfg(test)]

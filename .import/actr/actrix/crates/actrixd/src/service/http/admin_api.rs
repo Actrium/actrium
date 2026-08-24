@@ -565,6 +565,18 @@ async fn get_ais_keys(State(state): State<Arc<AdminApiState>>) -> impl IntoRespo
     }
 }
 
+/// Rotate the AIS signing key through the shared issuer (JWT-protected).
+async fn rotate_ais_key(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
+    match state.service.rotate_ais_signing_key_direct().await {
+        Ok(new_key_id) => (
+            StatusCode::OK,
+            Json(json!({"status": "success", "new_key_id": new_key_id})),
+        )
+            .into_response(),
+        Err(status) => grpc_status_to_response(status),
+    }
+}
+
 // ── Platform detail endpoint ─────────────────────────────────────
 
 async fn get_platform_detail(State(state): State<Arc<AdminApiState>>) -> impl IntoResponse {
@@ -787,6 +799,7 @@ pub fn build_admin_api_router(state: Arc<AdminApiState>, mfr_router: Option<Rout
             post(cleanup_signer_keys),
         )
         .route("/admin/api/services/ais/keys", get(get_ais_keys))
+        .route("/admin/api/services/ais/keys/rotate", post(rotate_ais_key))
         .route("/admin/api/services/{name}", get(get_service_detail))
         .route("/admin/api/network/probe/{port}", get(probe_port))
         .route("/admin/api/metrics/timeseries", get(get_metrics_timeseries));

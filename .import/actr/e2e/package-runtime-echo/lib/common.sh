@@ -257,6 +257,7 @@ login_admin() {
 
 warmup_ais_key() {
     section "🔑 Warming up AIS signing key"
+    [ -n "${ADMIN_TOKEN:-}" ] || login_admin
     local current_key_file="$RUN_DIR/ais-current-key.json"
     local rotate_file="$RUN_DIR/ais-rotate-key.json"
     local attempt=0
@@ -268,7 +269,10 @@ warmup_ais_key() {
             return 0
         fi
 
-        curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/ais/rotate-key" >"$rotate_file" 2>/dev/null || true
+        curl -fsS -X POST \
+            -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+            "http://127.0.0.1:${HTTP_PORT}/admin/api/services/ais/keys/rotate" \
+            >"$rotate_file" 2>/dev/null || true
         sleep 1
         attempt=$((attempt + 1))
     done

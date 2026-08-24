@@ -19,8 +19,13 @@ use tokio::sync::broadcast;
 /// When `None`, a new random secret is generated.  Pass the same secret on
 /// reload to avoid invalidating active admin sessions.
 ///
+/// `ais_issuer` is the issuer backing the public `/ais` router when AIS is
+/// enabled, so the control plane can trigger authenticated key rotation on
+/// the live issuer.
+///
 /// Returns `(Router, jwt_secret)` — the caller should persist the secret
 /// for subsequent reloads.
+#[allow(clippy::too_many_arguments)]
 pub async fn build_control_router(
     config: &ActrixConfig,
     service_collector: ServiceCollector,
@@ -29,6 +34,7 @@ pub async fn build_control_router(
     jwt_secret: Option<Vec<u8>>,
     config_store: Arc<ConfigOverrideStore>,
     metrics_store: MetricsStore,
+    ais_issuer: Option<Arc<ais::AIdIssuer>>,
 ) -> Result<(Router, Vec<u8>)> {
     let mut router = Router::new();
     let mut jwt = jwt_secret.unwrap_or_default();
@@ -44,6 +50,7 @@ pub async fn build_control_router(
             Some(jwt),
             config_store.clone(),
             metrics_store,
+            ais_issuer.clone(),
         )
         .await?;
         router = router.merge(admin_router);
@@ -57,6 +64,7 @@ pub async fn build_control_router(
             shutdown_tx,
             config_store,
             !admin_ui_enabled,
+            ais_issuer,
         )
         .await?;
         router = router.merge(grpc_router);
@@ -69,6 +77,7 @@ pub async fn build_control_router(
     Ok((router, jwt))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn build_admin_ui_router(
     config: &ActrixConfig,
     service_collector: ServiceCollector,
@@ -77,6 +86,7 @@ async fn build_admin_ui_router(
     jwt_secret: Option<Vec<u8>>,
     config_store: Arc<ConfigOverrideStore>,
     metrics_store: MetricsStore,
+    ais_issuer: Option<Arc<ais::AIdIssuer>>,
 ) -> Result<(Router, Vec<u8>)> {
     // Read raw TOML content for L1 detection
     let toml_content = tokio::fs::read_to_string(&config_path)
@@ -97,6 +107,10 @@ async fn build_admin_ui_router(
         .with_running_config(config.clone())
         .with_toml_content(toml_content)
         .with_config_path(config_path);
+
+    if let Some(issuer) = ais_issuer {
+        service = service.with_ais_issuer(issuer);
+    }
 
     let shutdown_tx_for_handler = shutdown_tx.clone();
     service = service.with_shutdown_handler(move |_graceful, _timeout, reason| {
@@ -168,6 +182,7 @@ async fn build_grpc_api_router(
     shutdown_tx: broadcast::Sender<()>,
     config_store: Arc<ConfigOverrideStore>,
     include_admin_index_and_alias: bool,
+    ais_issuer: Option<Arc<ais::AIdIssuer>>,
 ) -> Result<Router> {
     let grpc_cfg = &config.control.grpc_api;
     let shared_secret = Arc::new(
@@ -192,6 +207,10 @@ async fn build_grpc_api_router(
     service = service
         .with_override_store(config_store)
         .with_running_config(config.clone());
+
+    if let Some(issuer) = ais_issuer {
+        service = service.with_ais_issuer(issuer);
+    }
 
     let shutdown_tx_for_handler = shutdown_tx.clone();
     service = service.with_shutdown_handler(move |_graceful, _timeout, reason| {

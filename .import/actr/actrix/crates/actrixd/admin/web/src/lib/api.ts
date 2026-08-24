@@ -302,6 +302,11 @@ export const api = {
   getAisKeys: () =>
     request<{ keys: KeyEntry[] }>("/services/ais/keys"),
 
+  rotateAisKey: () =>
+    request<{ status: string; new_key_id: number }>("/services/ais/keys/rotate", {
+      method: "POST",
+    }),
+
   getRegistry: () =>
     request<ConfigFieldDef[]>("/registry"),
 

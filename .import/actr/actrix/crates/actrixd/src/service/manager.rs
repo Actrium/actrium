@@ -272,6 +272,39 @@ impl ServiceManager {
             }
         }
 
+        // Create the AIS state (shared issuer) before the control router so
+        // the control plane and the public /ais router hold the same issuer.
+        // On failure the /ais routes are simply not mounted, matching the
+        // previous behavior where AisService::build_router failed.
+        let ais_state = if self.config.is_ais_enabled() {
+            let ais_config = self.config.services.ais.clone();
+            match ais_config {
+                Some(ais_config) => {
+                    let counters = self.service_counters.get(&(resource_type::AIS)).cloned();
+                    match ais::create_ais_state(&ais_config, &self.config, cancel.clone(), counters)
+                        .await
+                    {
+                        Ok(state) => Some(state),
+                        Err(e) => {
+                            platform::recording::error!(
+                                "Failed to build router for service 'AIS Service': {:?}",
+                                e
+                            );
+                            None
+                        }
+                    }
+                }
+                None => {
+                    platform::recording::error!(
+                        "Failed to build router for service 'AIS Service': AIS config not found"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         // Control plane always present.
         // Pass existing JWT secret so admin sessions survive reloads.
         let (control_router, jwt_secret) = build_control_router(
@@ -282,6 +315,7 @@ impl ServiceManager {
             self.jwt_secret.clone(),
             config_store,
             self.metrics_store.clone(),
+            ais_state.as_ref().map(|state| state.issuer.clone()),
         )
         .await?;
         self.jwt_secret = Some(jwt_secret);
@@ -319,26 +353,28 @@ impl ServiceManager {
         }
 
         if self.config.is_ais_enabled() {
-            let mut svc = AisService::new(self.config.clone(), cancel.clone());
-            if let Some(ctr) = self.service_counters.get(&(resource_type::AIS)) {
-                svc.set_counters(ctr.clone());
-            }
-            match svc.build_router().await {
-                Ok(router) => {
-                    let prefix = svc.route_prefix();
-                    platform::recording::info!(
-                        "Adding route '{}' for service '{}'",
-                        prefix,
-                        svc.info().name
-                    );
-                    app = app.nest(prefix, router);
+            if let Some(state) = ais_state.clone() {
+                let mut svc = AisService::with_state(&self.config, state);
+                if let Some(ctr) = self.service_counters.get(&(resource_type::AIS)) {
+                    svc.set_counters(ctr.clone());
                 }
-                Err(e) => {
-                    platform::recording::error!(
-                        "Failed to build router for service '{}': {:?}",
-                        svc.info().name,
-                        e
-                    );
+                match svc.build_router().await {
+                    Ok(router) => {
+                        let prefix = svc.route_prefix();
+                        platform::recording::info!(
+                            "Adding route '{}' for service '{}'",
+                            prefix,
+                            svc.info().name
+                        );
+                        app = app.nest(prefix, router);
+                    }
+                    Err(e) => {
+                        platform::recording::error!(
+                            "Failed to build router for service '{}': {:?}",
+                            svc.info().name,
+                            e
+                        );
+                    }
                 }
             }
         }

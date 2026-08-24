@@ -120,6 +120,8 @@ pub use admin::v1::{
     ListRealmsRequest,
     ListRealmsResponse,
     ManagedRealmState,
+    RotateAisSigningKeyRequest,
+    RotateAisSigningKeyResponse,
     SetConfigOverrideRequest,
     SetConfigOverrideResponse,
     ShutdownRequest,
