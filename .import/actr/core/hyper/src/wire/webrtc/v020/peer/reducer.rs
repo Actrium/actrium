@@ -196,6 +196,13 @@ pub(crate) enum RtcPeerInput {
     StateTick(Box<PeerStateTick>),
     /// A DataChannel pump readiness/liveness report.
     Lane(LaneEvent),
+    /// The readiness DataChannel could not be created for this generation.
+    /// Without the anchor the attempt can never become Sendable, so fail the
+    /// exact negotiation instead of continuing with an unusable SDP offer.
+    LaneCreationFailed {
+        generation: u64,
+        lane: LaneKind,
+    },
     /// A blocking effect's completion, re-validated by identity before applying.
     Completion(EffectCompletion),
     /// O1: the structural-event mailbox overflowed for `generation`; treat the
@@ -682,6 +689,14 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
         RtcPeerInput::DriverEvent(event) => reduce_driver_event(state, event, &mut effects),
         RtcPeerInput::StateTick(tick) => reduce_state_tick(state, &tick, &mut effects),
         RtcPeerInput::Lane(event) => reduce_lane_event(state, event, &mut effects),
+        RtcPeerInput::LaneCreationFailed { generation, lane } => {
+            if lane == LaneKind::READINESS_ANCHOR
+                && state.is_live_generation(generation)
+                && !state.close_requested
+            {
+                negotiation_failed(state, &mut effects);
+            }
+        }
         RtcPeerInput::Completion(completion) => {
             if authenticate_completion(state, &completion) {
                 reduce_completion(state, completion, &mut effects)
@@ -1259,14 +1274,11 @@ fn reduce_command(
             request_id,
             attempt,
         } => {
-            let duplicate = matches!(
-                state.last_remote_restart_request.as_ref(),
-                Some((seen_id, seen_attempt)) if seen_id == &request_id && *seen_attempt >= attempt
-            );
-            if duplicate {
-                return;
-            }
-            state.last_remote_restart_request = Some((request_id, attempt));
+            // Do not consume the remote retry identity until this Controller is
+            // actually able to act on it. A request can overtake role/build
+            // publication; remembering it while ineligible would make the
+            // answerer's retransmission look like a duplicate after the local
+            // Session becomes ready.
             if state.role != Role::Offerer
                 || state.active_generation.is_none()
                 || state.close_requested
@@ -1275,6 +1287,14 @@ fn reduce_command(
             {
                 return;
             }
+            let duplicate = matches!(
+                state.last_remote_restart_request.as_ref(),
+                Some((seen_id, seen_attempt)) if seen_id == &request_id && *seen_attempt >= attempt
+            );
+            if duplicate {
+                return;
+            }
+            state.last_remote_restart_request = Some((request_id, attempt));
 
             // Both endpoints normally receive NetworkAvailable. The offerer
             // may therefore have already started the same soft-recovery round
@@ -1717,7 +1737,6 @@ fn clear_negotiation_for_recovery(state: &mut RtcPeerState) {
     state.pending_local_restart_exchange_id = None;
     state.local_restart_request_id = None;
     state.local_restart_request_attempt = 0;
-    state.last_remote_restart_request = None;
     state.renegotiation_inflight = false;
     state.renegotiation_pending = false;
     state.pending_candidates.clear();
@@ -1949,6 +1968,10 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     // candidates, and renegotiation latches while retaining only Build/Close
     // completions needed for orphan cleanup and the close barrier.
     clear_negotiation_for_recovery(state);
+    // Hard Recovery starts a new physical Session, so request identities from
+    // the retired Session must not suppress wakes for the replacement. Soft
+    // retries deliberately retain this field for duplicate-attempt fencing.
+    state.last_remote_restart_request = None;
 
     // S5-4: make-before-break when there is an active session to retire. The
     // old session stays alive (its events are routed separately) while the
