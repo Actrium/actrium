@@ -60,6 +60,7 @@ UninstallDisplayIcon={app}\Actrium.exe
 Compression=lzma2/fast
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=..\assets\Actro.ico
 
 [Files]
 Source: "{#PublishDir}\*"; DestDir: "{app}"; Flags: recursesubdirs ignoreversion
