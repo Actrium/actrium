@@ -109,6 +109,8 @@ export function AisService() {
   const [data, setData] = useState<ServiceDetail | null>(null);
   const [keys, setKeys] = useState<KeyEntry[]>([]);
   const [error, setError] = useState("");
+  const [rotating, setRotating] = useState(false);
+  const [rotateMsg, setRotateMsg] = useState("");
 
   const fetchData = useCallback(async () => {
     try {
@@ -191,6 +193,35 @@ export function AisService() {
       )}
 
       <CollapsibleCard storageKey="ais_keys" title="Current Key">
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-xs text-gray-500">
+            {keys.length > 0 && `key_id ${keys[0].key_id}${keys[0].is_expired ? " (expired)" : ""}`}
+          </span>
+          <div className="flex items-center gap-2">
+            {rotateMsg && (
+              <span className="text-xs text-green-600">{rotateMsg}</span>
+            )}
+            <button
+              onClick={async () => {
+                setRotating(true);
+                setRotateMsg("");
+                try {
+                  const r = await api.rotateAisKey();
+                  setRotateMsg(`Rotated to key_id ${r.new_key_id}`);
+                  fetchData();
+                } catch {
+                  setRotateMsg("Rotation failed");
+                } finally {
+                  setRotating(false);
+                }
+              }}
+              disabled={rotating || !data.enabled}
+              className="rounded-md border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-50 disabled:opacity-50 transition-colors"
+            >
+              {rotating ? "Rotating..." : "Rotate key"}
+            </button>
+          </div>
+        </div>
         {keys.length === 0 ? (
           <p className="text-sm text-gray-500">No key cached yet</p>
         ) : (

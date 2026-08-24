@@ -50,6 +50,20 @@ impl AISState {
         }
     }
 
+    /// Build state around an issuer that is already shared with another
+    /// consumer (e.g. the control plane holding `Arc<AIdIssuer>` for
+    /// authenticated key rotation).
+    pub fn from_shared_issuer(issuer: Arc<AIdIssuer>) -> Self {
+        let idempotency = Arc::new(ControlAttemptStore::new(
+            &issuer.config.renewal_token_secret,
+        ));
+        Self {
+            issuer,
+            idempotency,
+            counters: None,
+        }
+    }
+
     pub fn with_counters(mut self, counters: Arc<ServiceCounters>) -> Self {
         self.counters = Some(counters);
         self
@@ -66,7 +80,6 @@ pub fn create_router(state: AISState) -> Router {
         .route("/renew", post(renew_credential))
         .route("/reissue", post(reissue_credential))
         .route("/health", axum::routing::get(health_check))
-        .route("/rotate-key", post(rotate_key))
         .route("/current-key", axum::routing::get(get_current_key))
         .route("/signing-pubkey", axum::routing::get(get_signing_pubkey))
         .layer(ip_rate_limiter())
@@ -826,27 +839,6 @@ async fn health_check(State(state): State<AISState>) -> Json<Value> {
     checks["key_cache"] = cache_status;
 
     Json(checks)
-}
-
-/// Manually trigger key rotation
-///
-/// Immediately generates a new key from KS and updates the cache.
-/// Returns the new key_id.
-async fn rotate_key(State(state): State<AISState>) -> Json<Value> {
-    match state.issuer.rotate_key().await {
-        Ok(new_key_id) => Json(json!({
-            "status": "success",
-            "message": "Key rotated successfully",
-            "new_key_id": new_key_id
-        })),
-        Err(e) => {
-            platform::recording::error!("Failed to rotate key: {}", e);
-            Json(json!({
-                "status": "error",
-                "message": format!("Key rotation failed: {}", e)
-            }))
-        }
-    }
 }
 
 /// Get the current key ID

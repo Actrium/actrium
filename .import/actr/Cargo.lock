@@ -526,6 +526,7 @@ dependencies = [
 name = "actrix-admin"
 version = "0.10.0-alpha.1"
 dependencies = [
+ "actrix-ais",
  "actrix-platform",
  "actrix-proto",
  "chrono",

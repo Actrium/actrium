@@ -1121,8 +1121,42 @@ async fn ais_rotate_key_updates_current_key_endpoint() {
         .as_u64()
         .expect("current key id should be u64");
 
-    let rotated: Value = client
+    // The unauthenticated public rotate endpoint must be gone.
+    let public_rotate = client
         .post(format!("{base}/ais/rotate-key"))
+        .send()
+        .await
+        .expect("public rotate-key request");
+    assert_eq!(
+        public_rotate.status(),
+        404,
+        "public /ais/rotate-key should no longer exist"
+    );
+
+    // Unauthenticated calls to the admin rotate route are rejected.
+    let unauth = client
+        .post(format!("{base}/admin/api/services/ais/keys/rotate"))
+        .send()
+        .await
+        .expect("unauthenticated admin rotate request");
+    assert_eq!(unauth.status(), 401, "admin rotate should require JWT");
+
+    let login: Value = client
+        .post(format!("{base}/admin/api/auth/login"))
+        .json(&json!({ "password": "testpassword123" }))
+        .send()
+        .await
+        .expect("admin login request")
+        .json()
+        .await
+        .expect("parse admin login response");
+    let token = login["token"]
+        .as_str()
+        .expect("admin login should return token");
+
+    let rotated: Value = client
+        .post(format!("{base}/admin/api/services/ais/keys/rotate"))
+        .bearer_auth(token)
         .send()
         .await
         .expect("rotate-key request")

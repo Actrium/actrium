@@ -365,8 +365,7 @@ impl ApplicationLauncher {
 
         if config.is_ais_enabled() {
             platform::recording::info!("  - AIS Service (/ais)");
-            let ais_service =
-                AisService::new(config.clone(), tokio_util::sync::CancellationToken::new());
+            let ais_service = AisService::new(&config);
             service_manager.add_service(ServiceContainer::ais(ais_service));
         }
 

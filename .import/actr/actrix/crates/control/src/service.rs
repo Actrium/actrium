@@ -8,8 +8,9 @@ use actrix_proto::{
     DeleteRealmRequest, DeleteRealmResponse, GetConfigRequest, GetConfigResponse,
     GetNodeInfoRequest, GetNodeInfoResponse, GetRealmRequest, GetRealmResponse,
     ListConfigOverridesRequest, ListConfigOverridesResponse, ListRealmsRequest, ListRealmsResponse,
-    RealmInfo, ServiceStatus, SetConfigOverrideRequest, SetConfigOverrideResponse, ShutdownRequest,
-    ShutdownResponse, SystemMetrics, UpdateConfigRequest, UpdateConfigResponse, UpdateRealmRequest,
+    RealmInfo, RotateAisSigningKeyRequest, RotateAisSigningKeyResponse, ServiceStatus,
+    SetConfigOverrideRequest, SetConfigOverrideResponse, ShutdownRequest, ShutdownResponse,
+    SystemMetrics, UpdateConfigRequest, UpdateConfigResponse, UpdateRealmRequest,
     UpdateRealmResponse,
 };
 use chrono::Utc;
@@ -76,6 +77,9 @@ pub struct AdminApiService {
     toml_content: Option<String>,
     /// Path to config.toml on disk.
     config_path: Option<PathBuf>,
+    /// Shared AIS issuer (present when AIS is enabled on this node). The same
+    /// Arc backs the public /ais router, so rotation here affects live traffic.
+    ais_issuer: Option<Arc<ais::AIdIssuer>>,
 }
 
 impl AdminApiService {
@@ -102,6 +106,7 @@ impl AdminApiService {
             running_config: None,
             toml_content: None,
             config_path: None,
+            ais_issuer: None,
         })
     }
 
@@ -165,6 +170,14 @@ impl AdminApiService {
     /// Attach the config file path.
     pub fn with_config_path(mut self, path: PathBuf) -> Self {
         self.config_path = Some(path);
+        self
+    }
+
+    /// Attach the shared AIS issuer so key rotation can be triggered through
+    /// the control plane. Must be the same issuer that backs the public /ais
+    /// router; callers construct it once per router build.
+    pub fn with_ais_issuer(mut self, issuer: Arc<ais::AIdIssuer>) -> Self {
+        self.ais_issuer = Some(issuer);
         self
     }
 
@@ -680,6 +693,28 @@ impl AdminApiService {
             }
             None => Ok(vec![]),
         }
+    }
+
+    /// Rotate the AIS signing key through the shared issuer.
+    ///
+    /// Requires the AIS issuer to be attached via [`AdminApiService::with_ais_issuer`];
+    /// otherwise the node does not run AIS and rotation is meaningless.
+    pub async fn rotate_ais_signing_key_direct(&self) -> GrpcResult<u32> {
+        let issuer = self
+            .ais_issuer
+            .as_ref()
+            .ok_or_else(|| Status::failed_precondition("AIS is not enabled on this node"))?;
+
+        platform::recording::info!("AIS signing key rotation requested via control plane");
+        let new_key_id = issuer
+            .rotate_key()
+            .await
+            .map_err(|e| Status::internal(format!("AIS key rotation failed: {e}")))?;
+        platform::recording::info!(
+            "AIS signing key rotation completed, new key_id: {}",
+            new_key_id
+        );
+        Ok(new_key_id)
     }
 
     /// Get node info including metrics and service statuses.
@@ -1345,5 +1380,43 @@ impl NodeAdminService for AdminApiService {
                 deleted: false,
             })),
         }
+    }
+
+    async fn rotate_ais_signing_key(
+        &self,
+        _request: Request<RotateAisSigningKeyRequest>,
+    ) -> GrpcResult<Response<RotateAisSigningKeyResponse>> {
+        self.rotate_ais_signing_key_direct()
+            .await
+            .map(|new_key_id| {
+                Response::new(RotateAisSigningKeyResponse {
+                    success: true,
+                    error_message: None,
+                    new_key_id: Some(new_key_id),
+                })
+            })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn rotate_ais_signing_key_without_issuer_fails_precondition() {
+        let service = AdminApiService::new(
+            "node-1",
+            "node-1",
+            "local",
+            "0.9.0",
+            ServiceCollector::new(),
+        )
+        .expect("create admin api service");
+
+        let status = service
+            .rotate_ais_signing_key_direct()
+            .await
+            .expect_err("rotation without an attached issuer must fail");
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
     }
 }
