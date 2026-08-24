@@ -17,6 +17,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     /// Currently focused browser view model
     @Published var focusedViewModel: BrowserViewModel?
 
+    /// Utility windows can temporarily become key. Preserve the most recently
+    /// focused browser window so app-menu commands still have a Tab target.
+    private weak var lastFocusedWindowController: MainWindowController?
+
     private var cancellables = Set<AnyCancellable>()
     private var pendingCapabilityPrompts: Set<String> = []
 
@@ -64,6 +68,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     // MARK: - Initialization
 
     private func initializeServices() {
+        // Apply the persisted app-wide appearance before creating any windows.
+        AppearanceManager.shared.apply()
+
         // Setup crash handler
         CrashHandler.setup()
 
@@ -178,7 +185,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     private func refreshFocusedViewModel() {
-        focusedViewModel = windowControllers.first { $0.window?.isKeyWindow == true }?.viewModel
+        if let controller = windowControllers.first(where: { $0.window?.isKeyWindow == true }) {
+            lastFocusedWindowController = controller
+            focusedViewModel = controller.viewModel
+            return
+        }
+
+        if let controller = lastFocusedWindowController,
+           windowControllers.contains(where: { $0 === controller }) {
+            focusedViewModel = controller.viewModel
+        } else {
+            focusedViewModel = nil
+        }
     }
 
     // MARK: - Window Management
@@ -199,7 +217,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
 
         windowControllers.append(windowController)
         windowController.showWindow()
-        refreshFocusedViewModel()
+        lastFocusedWindowController = windowController
+        focusedViewModel = viewModel
 
         // Restart restore (15-B B7): rebuild the persisted session into the
         // first window; actr:// instance addresses rebind with the same ActorId.
@@ -210,8 +229,40 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func removeWindowController(_ controller: MainWindowController) {
+        if lastFocusedWindowController === controller {
+            lastFocusedWindowController = nil
+        }
         windowControllers.removeAll { $0 === controller }
         refreshFocusedViewModel()
+    }
+
+    /// Resolve the target browser window at command execution time. This is
+    /// intentionally owned by AppDelegate rather than captured by SwiftUI's
+    /// scene command builder, whose initial focused value may still be nil.
+    @discardableResult
+    func openBuiltInPage(_ type: SystemTabType) -> Tab? {
+        var controller = windowControllers.first(where: { $0.window?.isKeyWindow == true })
+
+        if controller == nil,
+           let lastFocusedWindowController,
+           windowControllers.contains(where: { $0 === lastFocusedWindowController }) {
+            controller = lastFocusedWindowController
+        }
+
+        if controller == nil {
+            controller = windowControllers.last
+        }
+
+        if controller == nil {
+            createNewWindow()
+            controller = windowControllers.last
+        }
+
+        guard let controller else { return nil }
+        lastFocusedWindowController = controller
+        focusedViewModel = controller.viewModel
+        controller.window?.makeKeyAndOrderFront(nil)
+        return controller.viewModel.openSystemTab(type)
     }
 
     func toggleNativeFullScreenForKeyWindow() {

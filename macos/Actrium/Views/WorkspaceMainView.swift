@@ -211,6 +211,8 @@ struct WorkspaceMainView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                 }
+                .frame(width: safeViewportSize.width, height: safeViewportSize.height)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
                 // Focus Under Mode Web Content Layer (By)actrium Changed)
                 // scaleEffect Yeah. NSViewRepresentable It's not working, so... Web Content needs independent rendering
@@ -1126,10 +1128,8 @@ struct WorkspaceMainView: View {
 
     // Judgement Tab Need any? ViewBridge Rendering Contents
     private func hasRNContentForTab(_ tab: Tab) -> Bool {
-        tab.systemTabType != nil ||
-        tab.unifiedScript != nil ||
-        tab.leftPanelScript != nil ||
-        tab.guestScript != nil
+        if case .reactNative = tab.contentType { return true }
+        return false
     }
 
     // MARK: - Data Conversion for React Native
@@ -1310,9 +1310,11 @@ struct WorkspaceMainView: View {
     /// - Returns: Image after Rendering
     private func createAddButtonImage(width: CGFloat, height: CGFloat) -> NSImage {
         let size = CGSize(width: width, height: height)
+        let appearanceName = NSApplication.shared.effectiveAppearance.name.rawValue
 
         // Check Cache: If size equal, return the cache image directly
         if let cached = Self.cachedAddButtonImage,
+           cached.appearanceName == appearanceName,
            abs(cached.size.width - size.width) < 1 && abs(cached.size.height - size.height) < 1 {
             return cached.image
         }
@@ -1326,7 +1328,7 @@ struct WorkspaceMainView: View {
 
         // Background: Dark grey (Match NSColor(white: 0.15, alpha: 1.0))
         let backgroundPath = NSBezierPath(roundedRect: rect, xRadius: cornerRadius, yRadius: cornerRadius)
-        NSColor(white: 0.15, alpha: 1.0).setFill()
+        AppColors.overviewCardBackground.setFill()
         backgroundPath.fill()
 
         // Border: White 0.15 Transparency
@@ -1887,7 +1889,7 @@ private struct AddressBarLeftIcon: View {
             Circle()
                 .trim(from: 0, to: 0.7)
                 .stroke(
-                    Color.white.opacity(0.7),
+                    Color.secondary,
                     style: StrokeStyle(lineWidth: 1.2, lineCap: .round)
                 )
                 .frame(width: 12, height: 12)
@@ -1901,7 +1903,7 @@ private struct AddressBarLeftIcon: View {
             // Menu button for RN apps
             Button(action: action) {
                 Image(systemName: "list.bullet")
-                    .foregroundColor(.white.opacity(0.7))
+                    .foregroundStyle(.secondary)
             }
             .buttonStyle(.borderless)
             .help("Toggle Left Panel")
@@ -1936,7 +1938,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
                 // Edit Status: Magnifying Mirror + Input Box + Right button
                 HStack(spacing: 10) {
                     Image(systemName: "magnifyingglass")
-                        .foregroundStyle(Color.white.opacity(0.7))
+                        .foregroundStyle(.secondary)
                         .frame(width: 16, height: 16)
 
                     FocusableTextField(
@@ -1951,7 +1953,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
                     // Keep Right button
                     Button(action: { showingBookmarkPopover.toggle() }) {
                         Image(systemName: isBookmarked ? "star.fill" : "star")
-                            .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
+                            .foregroundColor(isBookmarked ? .yellow : .secondary)
                     }
                     .buttonStyle(.borderless)
                     .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
@@ -1961,7 +1963,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
 
                     Button(action: refreshAction) {
                         Image(systemName: "arrow.clockwise")
-                            .foregroundColor(.white.opacity(0.7))
+                            .foregroundStyle(.secondary)
                     }
                     .buttonStyle(.borderless)
                     .help("Refresh")
@@ -1972,7 +1974,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
                     AddressBarLeftIcon(state: leftIconState, action: toggleLeftPanel)
 
                     Text(titleText)
-                        .foregroundColor(.white)
+                        .foregroundStyle(.primary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: .infinity)
                         .contentShape(Rectangle())
@@ -1986,7 +1988,7 @@ private struct AddressBarContainer<BookmarkContent: View>: View {
                     // Star button for bookmarking
                     Button(action: { showingBookmarkPopover.toggle() }) {
                         Image(systemName: isBookmarked ? "star.fill" : "star")
-                            .foregroundColor(isBookmarked ? .yellow : .white.opacity(0.7))
+                            .foregroundColor(isBookmarked ? .yellow : .secondary)
                     }
                     .buttonStyle(.borderless)
                     .help(isBookmarked ? "Edit Bookmark" : "Add Bookmark")
@@ -2171,6 +2173,13 @@ private struct TabPanel: View {
     // Aligning title bar height - Use shared styles
     private var floatingTitleBarHeight: CGFloat { CardStyle.titleBarHeight }
 
+    private var tabBackgroundColor: Color {
+        if case .native = tab.contentType {
+            return AppColors.overviewCardBackgroundColor
+        }
+        return Color(hslString: tab.backgroundColor)
+    }
+
     var body: some View {
         let _ = NSLog("🔄 [TABCARD-BODY] TabPanel.body: tabId=%@, isFocused=%d", tab.id.uuidString, isFocused ? 1 : 0)
 
@@ -2190,7 +2199,7 @@ private struct TabPanel: View {
             .overlay {
                 if !isFocused {
                     RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
-                        .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                        .stroke(AppColors.separatorColor, lineWidth: 1)
                 }
             }
             .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
@@ -2256,16 +2265,16 @@ private struct TabPanel: View {
         ZStack(alignment: .top) {
             // Card Subject
             ZStack {
-                Color(hslString: tab.backgroundColor)
+                tabBackgroundColor
                 Image(systemName: "globe")
                     .font(.system(size: 32))
-                    .foregroundColor(.white.opacity(0.3))
+                    .foregroundColor(.secondary.opacity(0.5))
             }
             .frame(width: cardWidth, height: cardHeight)
             .cornerRadius(CardStyle.cornerRadius)
             .overlay(
                 RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
-                    .stroke(Color.white.opacity(0.3), lineWidth: 1)
+                    .stroke(AppColors.separatorColor, lineWidth: 1)
             )
             .shadow(color: Color.black.opacity(0.5), radius: 10, x: 0, y: 5)
 
@@ -2316,7 +2325,7 @@ private struct TabPanel: View {
                 // Overview Mode: Transparent background, RN Contents Display
                 Color.clear
             } else {
-                Color(hslString: tab.backgroundColor)
+                tabBackgroundColor
             }
 
             // Multi-state rendering: based on contentType Select Rendering Engine
@@ -2369,6 +2378,12 @@ private struct TabPanel: View {
                             }
                         )
                         .frame(width: nativeSize.width, height: nativeSize.height)
+                    case .internalPage(let page):
+                        InternalPageCompactPreview(page: page)
+                            .frame(width: nativeSize.width, height: nativeSize.height)
+                    case .about:
+                        AboutActroView(isCompactMode: true)
+                            .frame(width: nativeSize.width, height: nativeSize.height)
                     }
                 }
 
@@ -2402,7 +2417,7 @@ private struct CloseButtonView: View {
                 .frame(width: iconSize * 1.6, height: iconSize * 1.6)
                 .background(
                     Circle()
-                        .fill(isHovering ? Color.white.opacity(0.15) : Color.clear)
+                        .fill(isHovering ? Color.primary.opacity(0.12) : Color.clear)
                 )
                 .contentShape(Rectangle())
         }
@@ -2424,17 +2439,17 @@ private struct NewTabPanel: View {
     var body: some View {
         ZStack {
             Rectangle()
-                .fill(Color(nsColor: NSColor(white: 0.15, alpha: 1.0)))
+                .fill(AppColors.overviewCardBackgroundColor)
 
             Image(systemName: "plus")
                 .font(.system(size: 48))
-                .foregroundColor(.white.opacity(0.5))
+                .foregroundStyle(.secondary)
         }
         .frame(width: cardWidth, height: cardHeight)
         .cornerRadius(CardStyle.cornerRadius)
         .overlay(
             RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
-                .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                .stroke(AppColors.separatorColor, lineWidth: 1)
         )
         .shadow(color: Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
         .contentShape(Rectangle())

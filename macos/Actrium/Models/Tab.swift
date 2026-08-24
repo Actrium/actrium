@@ -7,6 +7,9 @@ private let logger = AppLogger.app
 /// Native content types rendered by SwiftUI in the main process
 enum NativeContentType: Equatable {
     case startPage
+    case about
+    /// Browser-owned HTML page rendered in-process by WKWebView.
+    case internalPage(SystemTabType)
 }
 
     /// Tab content type, which selects the rendering engine.
@@ -25,13 +28,15 @@ enum TabContentType: Equatable {
     case empty
 }
 
-/// System tab types for built-in pages (like Chrome's chrome://history)
-/// Uses about: URL scheme (e.g., about:history, about:bookmarks)
+/// System tab types for built-in pages (like Chrome's chrome://history).
+/// User-facing built-in pages use canonical actro:// URLs.
 enum SystemTabType: String, Codable {
     case history
     case bookmarks
     case debug
     case startPage
+    case settings
+    case about
 
     var title: String {
         switch self {
@@ -39,6 +44,8 @@ enum SystemTabType: String, Codable {
         case .bookmarks: return "Bookmarks"
         case .debug: return "Debug"
         case .startPage: return "New Tab"
+        case .settings: return "Settings"
+        case .about: return "About Actro"
         }
     }
 
@@ -48,25 +55,53 @@ enum SystemTabType: String, Codable {
         case .bookmarks: return "bookmark"
         case .debug: return "ladybug"
         case .startPage: return "house"
+        case .settings: return "gearshape"
+        case .about: return "info.circle"
         }
     }
 
-    /// The about: URL for this system tab type
-    /// e.g., about:history, about:bookmarks, about:blank
-    var aboutURL: URL {
+    /// Canonical URL for this built-in page.
+    var systemURL: URL {
+        switch self {
+        case .history:
+            return URL(string: "actro://history")!
+        case .bookmarks:
+            return URL(string: "actro://bookmarks")!
+        case .settings:
+            return URL(string: "actro://settings")!
+        case .about:
+            return URL(string: "actro://about/")!
+        default:
+            break
+        }
+
         let path: String
         switch self {
-        case .history: path = "history"
-        case .bookmarks: path = "bookmarks"
         case .debug: path = "debug"
         case .startPage: path = "blank"
+        case .history, .bookmarks, .settings, .about:
+            preconditionFailure("User-facing built-in pages use actro:// URLs")
         }
         return URL(string: "about:\(path)")!
     }
 
-    /// Parse a URL to get the corresponding SystemTabType
-    /// Returns nil if the URL is not a valid about: URL for system apps
+    /// Parse the canonical URL of a built-in page.
     static func from(url: URL) -> SystemTabType? {
+        if url.scheme?.lowercased() == ActroAppURLScheme.primary {
+            let isRootPage = url.path.isEmpty || url.path == "/"
+            switch url.host?.lowercased() {
+            case "settings":
+                return .settings
+            case "history" where isRootPage:
+                return .history
+            case "bookmarks" where isRootPage:
+                return .bookmarks
+            case "about" where url.path.isEmpty || url.path == "/":
+                return .about
+            default: break
+            }
+        }
+
         guard url.scheme == "about" else { return nil }
         // about: URLs have the path in the "path" component (e.g., about:history -> path = "history")
         // Note: URL(string: "about:history")?.path returns "history"
@@ -221,7 +256,11 @@ struct Tab: Identifiable {
             switch systemType {
             case .startPage:
                 result = .native(type: .startPage)
-            case .history, .bookmarks, .debug:
+            case .about:
+                result = .native(type: .about)
+            case .settings, .history, .bookmarks:
+                result = .native(type: .internalPage(systemType))
+            case .debug:
                 result = .reactNative(bundleFingerprint: "system.\(systemType.rawValue)")
             }
         }

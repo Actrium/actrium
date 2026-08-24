@@ -231,5 +231,4 @@ struct DownloadToolbarButton: View {
 
 #Preview {
     DownloadPopoverView()
-        .preferredColorScheme(.dark)
 }

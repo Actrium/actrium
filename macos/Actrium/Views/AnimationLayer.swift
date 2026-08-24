@@ -153,6 +153,16 @@ final class AnimationLayerNSView: NSView {
         layer?.addSublayer(virtualGridLayer)
     }
 
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        backgroundLayer.backgroundColor = AppColors.workspaceBackground.cgColor
+        cachedCloseIcon = CardStyle.renderCloseIconImage()
+        for slot in cardSlots.values {
+            slot.titleLabel.foregroundColor = CardStyle.titleColor
+            slot.closeIcon.contents = cachedCloseIcon.image
+        }
+    }
+
     override func layout() {
         super.layout()
         updateLayerFrames()

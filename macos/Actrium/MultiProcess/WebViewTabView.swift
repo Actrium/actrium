@@ -795,7 +795,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                 self?.dismissAutofillPopover()
             } onManagePasswords: { [weak self] in
                 self?.dismissAutofillPopover()
-                SettingsWindowController.shared.showWindow()
+                Task { @MainActor in
+                    guard let appDelegate = NSApp.delegate as? AppDelegate else { return }
+                    _ = appDelegate.focusedViewModel?.openSystemTab(.settings)
+                }
             }
         )
         showPopover(fieldRect: fieldRect, contentVC: vc)

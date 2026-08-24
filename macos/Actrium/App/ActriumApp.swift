@@ -143,6 +143,28 @@ extension FocusedValues {
     }
 }
 
+/// App-menu entries for built-in pages. Keeping both replacements inside one
+/// command value also avoids coupling the scene's command-builder arity to the
+/// number of native pages.
+private struct BuiltInPageCommands: Commands {
+    let openBuiltInPage: (SystemTabType) -> Void
+
+    var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button("About Actro") {
+                openBuiltInPage(.about)
+            }
+        }
+
+        CommandGroup(replacing: .appSettings) {
+            Button("Settings...") {
+                openBuiltInPage(.settings)
+            }
+            .keyboardShortcut(",", modifiers: .command)
+        }
+    }
+}
+
 // MARK: - Debug Launch Configuration
 
 /// Configuration for debugging launch with specific window/mode settings
@@ -292,7 +314,7 @@ struct ActriumApp: App {
             // History menu
             CommandMenu("History") {
                 Button("Show All History") {
-                    focusedViewModel?.openSystemTab(.history)
+                    appDelegate.openBuiltInPage(.history)
                 }
                 .keyboardShortcut("y", modifiers: .command)
 
@@ -325,7 +347,7 @@ struct ActriumApp: App {
                 .keyboardShortcut("d", modifiers: .command)
 
                 Button("Show All Bookmarks") {
-                    focusedViewModel?.openSystemTab(.bookmarks)
+                    appDelegate.openBuiltInPage(.bookmarks)
                 }
                 .keyboardShortcut("b", modifiers: [.command, .option])
 
@@ -402,12 +424,10 @@ struct ActriumApp: App {
                 .keyboardShortcut("k", modifiers: [.command, .option])
             }
 
-            // Settings (Cmd+,)
-            CommandGroup(replacing: .appSettings) {
-                Button("Settings...") {
-                    SettingsWindowController.shared.showWindow()
-                }
-                .keyboardShortcut(",", modifiers: .command)
+            // Built-in app pages share the normal tab lifecycle. Neither command
+            // creates a utility window or system About panel.
+            BuiltInPageCommands { type in
+                _ = appDelegate.openBuiltInPage(type)
             }
 
             // Help menu
