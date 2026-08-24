@@ -43,6 +43,24 @@ struct BrowserInfrastructureSafetyTests {
         #expect(restored.currentTabId == duplicateID)
     }
 
+    @Test func browserStorageDropsEmbeddedCredentialsAndUnsafeMetadata() throws {
+        let unsafeURL = try #require(URL(string: "https://user:secret@example.com/private#section"))
+        let safeURL = try #require(BrowserDataRepository.safeBrowserURL(unsafeURL))
+        let snapshot = AppleBrowserSessionSnapshot(
+            activeTabIndex: 0,
+            tabs: [Self.sessionTab(
+                id: UUID(),
+                title: ".Secret\u{202E}fdp\nTitle",
+                address: unsafeURL.absoluteString
+            )]
+        )
+        let restored = try #require(BrowserDataRepository.restoreSession(from: snapshot))
+
+        #expect(safeURL.absoluteString == "https://example.com/private#section")
+        #expect(restored.tabs[0].url == safeURL)
+        #expect(restored.tabs[0].title == ".SecretfdpTitle")
+    }
+
     @Test func emptyOrNonWebSessionFallsBackToFreshStartPage() {
         let snapshot = AppleBrowserSessionSnapshot(
             activeTabIndex: 0,
