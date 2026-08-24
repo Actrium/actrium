@@ -37,6 +37,9 @@ mirrors where the defaults are slow — see the Dockerfile header.
 | Rust targets | wasm32-unknown-unknown, wasm32-wasip2 | Android targets NOT included — `kotlin-echo-app-e2e` needs JDK/Android SDK/KVM and stays on GitHub-hosted runners |
 | protoc | 29.3 | matches `vars.PROTOC_VERSION` |
 | wasm-pack / wasm-component-ld / wasm-tools | 0.15.0 / 0.5.26 / 1.253.0 | sha256-pinned; sha values match `ci-gate.yml`, so a tampered upstream release fails the build loudly |
+| hosted toolcache | Python 3.11.16 / 3.13.15, Node 24.19.0, Temurin JDK 17.0.20+8 | `RUNNER_TOOL_CACHE=/opt/hostedtoolcache`; `setup-*` steps resolve locally, zero download |
+| Android SDK | cmdline-tools 12266719 (16.0), platforms;android-34, build-tools;34.0.0/35.0.0, platform-tools | `ANDROID_SDK_ROOT=/usr/local/lib/android/sdk`; cmdline-tools version matches `setup-android`'s default so it does not re-download |
+| Gradle user home | Gradle 9.2.1 distribution + KtLint 1.5.0 / ktlint-gradle 12.1.2 dependencies | `GRADLE_USER_HOME=/home/runner/.gradle`; matches the `bindings/kotlin` wrapper and plugin pins, removes per-job tool downloads |
 
 `rust_msrv` jobs still pin `dtolnay/rust-toolchain@1.95.0` (historical
 toolchain, not preinstalled). Installed apt packages mirror the
