@@ -413,6 +413,52 @@ fn offerer_flow_reaches_sendable_and_connected() {
 }
 
 #[test]
+fn initial_readiness_lane_failure_terminates_before_offer_can_continue() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    reduce(&mut state, RtcPeerInput::Command(RtcPeerCommand::Connect));
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyRoleAssignment { is_offerer: true }),
+    );
+    let generation = state.building_generation.expect("building generation");
+    let operation_id = effects
+        .iter()
+        .find_map(|effect| match effect {
+            RtcPeerEffect::BuildSession { operation_id, .. } => Some(*operation_id),
+            _ => None,
+        })
+        .expect("build operation");
+    let build_effects = reduce(&mut state, build_ok(generation, operation_id));
+    assert!(build_effects.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::CreateLane {
+            generation: candidate,
+            lane: LaneKind::RpcReliable,
+        } if *candidate == generation
+    )));
+
+    let failure_effects = reduce(
+        &mut state,
+        RtcPeerInput::LaneCreationFailed {
+            generation,
+            lane: LaneKind::RpcReliable,
+        },
+    );
+    assert_eq!(state.phase, RtcPeerPhase::Idle);
+    assert_eq!(
+        state.unavailable_reason,
+        Some(RtcUnavailableReason::NegotiationFailed)
+    );
+    assert!(failure_effects.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::CloseSession {
+            generation: candidate,
+            ..
+        } if *candidate == generation
+    )));
+}
+
+#[test]
 fn answerer_flow_reaches_sendable_and_connected() {
     let mut state = RtcPeerState::new(test_actor_id(2));
     let generation = drive_answerer_to_negotiating(&mut state);
@@ -2318,6 +2364,50 @@ fn offerer_deduplicates_restart_request_but_retries_newer_attempt() {
     );
     assert!(has_restart_ice(&retry, generation));
     assert_eq!(state.ice_generation, ice_before + 2);
+
+    let duplicate_retry = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+            request_id: "request-1".to_string(),
+            attempt: 2,
+        }),
+    );
+    assert!(
+        duplicate_retry.is_empty(),
+        "the same retransmission attempt must remain deduplicated after recovery state is reset"
+    );
+    assert_eq!(state.ice_generation, ice_before + 2);
+}
+
+#[test]
+fn ineligible_restart_request_is_not_consumed_before_session_is_ready() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+
+    assert!(
+        reduce(
+            &mut state,
+            RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+                request_id: "early-request".to_string(),
+                attempt: 1,
+            }),
+        )
+        .is_empty()
+    );
+    assert!(state.last_remote_restart_request.is_none());
+
+    let generation = drive_offerer_to_sendable(&mut state);
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::ApplyIceRestartRequest {
+            request_id: "early-request".to_string(),
+            attempt: 1,
+        }),
+    );
+    assert!(has_restart_ice(&effects, generation));
+    assert_eq!(
+        state.last_remote_restart_request.as_ref(),
+        Some(&("early-request".to_string(), 1))
+    );
 }
 
 #[test]

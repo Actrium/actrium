@@ -27,7 +27,7 @@ use crate::wire::webrtc::v020::events::{
     peer_event_mailbox_with_capacity_and_bytes,
 };
 use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
-use crate::wire::webrtc::v020::status::{PeerTransportRetirement, RtcPeerSnapshot};
+use crate::wire::webrtc::v020::status::{LaneKind, PeerTransportRetirement, RtcPeerSnapshot};
 
 use super::effect_port::{
     ResourceRegistration, RtcEffectCompletionSender, RtcPeerEffectPort, TaggedRtcEffectCompletion,
@@ -102,6 +102,11 @@ pub(crate) struct RtcPeerController {
     /// resources stay in the generation-owned runner registry; this list holds
     /// only immutable descriptors/tokens and is retried after completions.
     pending_resources: Vec<PendingDiscoveredResource>,
+    /// Reducer facts produced by inline controller-owned work. They are
+    /// consumed before selecting another external event, avoiding recursive
+    /// async `apply()` while still letting a failed readiness lane stop the
+    /// remaining effects from that reducer turn.
+    internal_inputs: std::collections::VecDeque<RtcPeerInput>,
     /// Critical SDP (offer/answer) retained when the signaling queue was
     /// full, retried on every event-loop turn. The reducer already marked the
     /// attempt announced, so dropping the message would strand negotiation
@@ -345,6 +350,7 @@ impl RtcPeerController {
             completion_tx,
             completion_rx,
             pending_resources: Vec::new(),
+            internal_inputs: std::collections::VecDeque::new(),
             retry_signaling: None,
             pending_configuration_refreshes: std::collections::HashMap::new(),
             snapshot_tx,
@@ -420,6 +426,13 @@ impl RtcPeerController {
             // timer wakeup) is a retry opportunity, and the try_send keeps
             // the loop non-blocking.
             self.flush_retry_signaling();
+
+            if let Some(input) = self.internal_inputs.pop_front() {
+                if self.apply(input).await {
+                    break 'run;
+                }
+                continue;
+            }
 
             // One non-extendable end-to-end budget covers every Soft retry and
             // Hard rebuild in this logical recovery cycle. Only convergence or
@@ -915,7 +928,9 @@ impl RtcPeerController {
             });
         }
         for effect in effects {
-            self.execute(effect).await;
+            if !self.execute(effect).await {
+                break;
+            }
         }
         if let Some((operation_id, result)) = completed_refresh
             && let Some((_, respond)) = self.pending_configuration_refreshes.remove(&operation_id)
@@ -1056,7 +1071,8 @@ impl RtcPeerController {
     /// the channel exists before the subsequent CreateOffer is issued, keeping
     /// it in the offer SDP). `SendSignaling` is fire-and-forget to the router.
     /// All other blocking effects go through the port's submit/completion flow.
-    async fn execute(&mut self, effect: RtcPeerEffect) {
+    /// Returns whether later effects from the same reducer turn may execute.
+    async fn execute(&mut self, effect: RtcPeerEffect) -> bool {
         match effect {
             RtcPeerEffect::CreateLane { generation, lane } => {
                 // Ask the effect port to create and own the lane's data channel.
@@ -1065,8 +1081,26 @@ impl RtcPeerController {
                 // the send-path registry. Dedup: an already-registered lane is
                 // not re-created.
                 if self.lanes.get(generation, lane).is_none() {
-                    if let Some(handle) = self.effect_port.create_lane(generation, lane).await {
-                        self.lanes.insert(handle);
+                    match self.effect_port.create_lane(generation, lane).await {
+                        Ok(Some(handle)) => self.lanes.insert(handle),
+                        Ok(None) => {}
+                        Err(error) => {
+                            tracing::error!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                generation,
+                                ?lane,
+                                %error,
+                                "failed to create RTC data-channel lane"
+                            );
+                            if lane == LaneKind::READINESS_ANCHOR {
+                                self.internal_inputs
+                                    .push_back(RtcPeerInput::LaneCreationFailed {
+                                        generation,
+                                        lane,
+                                    });
+                                return false;
+                            }
+                        }
                     }
                 }
             }
@@ -1097,7 +1131,7 @@ impl RtcPeerController {
                         "no committed signaling generation; dropping RTC signaling effect \
                          (the role-negotiation probe is re-driven when the gate opens)"
                     );
-                    return;
+                    return true;
                 }
                 // N2 backpressure: never block the event loop on a full signaling
                 // queue, or one peer's signaling storm would stall the node's
@@ -1154,6 +1188,7 @@ impl RtcPeerController {
                 self.submit_blocking(blocking);
             }
         }
+        true
     }
 
     fn submit_blocking(&mut self, effect: RtcPeerEffect) {

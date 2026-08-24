@@ -335,7 +335,11 @@ pub(crate) trait RtcPeerEffectPort: Send + Sync {
         completion_tx: RtcEffectCompletionSender,
     ) -> Result<(), RtcEffectPortError>;
 
-    async fn create_lane(&self, generation: u64, lane: LaneKind) -> Option<LaneHandle>;
+    async fn create_lane(
+        &self,
+        generation: u64,
+        lane: LaneKind,
+    ) -> Result<Option<LaneHandle>, webrtc::error::Error>;
 
     fn register_remote_channel(
         &self,
@@ -426,32 +430,50 @@ impl WebRtcEffectRunner {
     /// issued, keeping it in the offer SDP). The session stores the channel
     /// and spawns the pump; the runner returns the `LaneHandle` token for the
     /// controller's send-path registry.
-    pub(crate) async fn create_lane(&self, generation: u64, lane: LaneKind) -> Option<LaneHandle> {
+    pub(crate) async fn create_lane(
+        &self,
+        generation: u64,
+        lane: LaneKind,
+    ) -> Result<Option<LaneHandle>, webrtc::error::Error> {
         // Get the session's ops handle (brief lock, released before .await).
         let ops = {
             let sessions = self.sessions.lock().expect("sessions lock");
             sessions.get(&generation).map(|s| s.ops().clone())
-        }?;
+        }
+        .ok_or_else(|| {
+            webrtc::error::Error::Other(format!(
+                "RTC session generation {generation} is not registered"
+            ))
+        })?;
         // Create the channel (async, no lock held).
         let channel = ops
             .create_data_channel(lane.wire_label(), super::lane::lane_config(lane))
-            .await
-            .ok()?;
+            .await?;
         // Register the channel in the session (brief lock).
-        let mut sessions = self.sessions.lock().expect("sessions lock");
-        let session = sessions.get_mut(&generation)?;
-        Some(session.register_channel(
-            lane,
-            channel,
-            super::session::LanePlumbing {
-                peer_id: self.peer_id.clone(),
-                lane_tx: self.lane_tx.clone(),
-                inbound: self.deps.inbound.clone(),
-                reassembly_limits: crate::transport::ReassemblyLimits::from_buffer_config(
-                    &self.deps.buffer_config,
-                ),
-            },
-        ))
+        let registered = {
+            let mut sessions = self.sessions.lock().expect("sessions lock");
+            sessions.get_mut(&generation).map(|session| {
+                session.register_channel(
+                    lane,
+                    channel.clone(),
+                    super::session::LanePlumbing {
+                        peer_id: self.peer_id.clone(),
+                        lane_tx: self.lane_tx.clone(),
+                        inbound: self.deps.inbound.clone(),
+                        reassembly_limits: crate::transport::ReassemblyLimits::from_buffer_config(
+                            &self.deps.buffer_config,
+                        ),
+                    },
+                )
+            })
+        };
+        let Some(handle) = registered else {
+            let _ = channel.close().await;
+            return Err(webrtc::error::Error::Other(format!(
+                "RTC session generation {generation} retired while creating lane"
+            )));
+        };
+        Ok(Some(handle))
     }
 
     /// Resolve and accept a remote-created DataChannel token. The raw channel
@@ -1013,7 +1035,11 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
         Ok(())
     }
 
-    async fn create_lane(&self, generation: u64, lane: LaneKind) -> Option<LaneHandle> {
+    async fn create_lane(
+        &self,
+        generation: u64,
+        lane: LaneKind,
+    ) -> Result<Option<LaneHandle>, webrtc::error::Error> {
         WebRtcEffectRunner::create_lane(self, generation, lane).await
     }
 
@@ -1086,8 +1112,12 @@ impl RtcPeerEffectPort for TestEffectSink {
         Ok(())
     }
 
-    async fn create_lane(&self, _generation: u64, _lane: LaneKind) -> Option<LaneHandle> {
-        None
+    async fn create_lane(
+        &self,
+        _generation: u64,
+        _lane: LaneKind,
+    ) -> Result<Option<LaneHandle>, webrtc::error::Error> {
+        Ok(None)
     }
 
     fn register_remote_channel(
