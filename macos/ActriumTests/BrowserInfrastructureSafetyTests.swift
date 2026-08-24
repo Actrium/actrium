@@ -104,6 +104,35 @@ struct BrowserInfrastructureSafetyTests {
         #expect(terminated.retryURL == retryURL)
     }
 
+    @Test func downloadFailuresUseSanitizedMessages() {
+        let sensitiveError = NSError(
+            domain: "ExampleDownloadError",
+            code: 7,
+            userInfo: [NSLocalizedDescriptionKey: "Failed at file:///Users/example/private"]
+        )
+        let offlineError = NSError(
+            domain: NSURLErrorDomain,
+            code: NSURLErrorNotConnectedToInternet
+        )
+
+        #expect(DownloadFailureMessage.message(for: sensitiveError) == "The download couldn’t be completed.")
+        #expect(DownloadFailureMessage.message(for: offlineError) == "No internet connection.")
+    }
+
+    @Test @MainActor func webKitDownloadRetryNeverFallsBackToASeparateNetworkSession() {
+        let item = DownloadItem(
+            filename: "private.bin",
+            sourceURL: URL(string: "https://example.com/private.bin")
+        )
+        item.transport = .webKit
+        item.state = .failed
+
+        item.retry()
+
+        #expect(item.state == .failed)
+        #expect(item.error == "The source webpage is no longer available. Start the download again from the webpage.")
+    }
+
     private static func sessionTab(
         id: UUID,
         title: String,

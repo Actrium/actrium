@@ -1036,7 +1036,11 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                 return
             }
             let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: sourceURL)
-            DownloadManager.shared.adoptWebKitDownload(download, item: item)
+            DownloadManager.shared.adoptWebKitDownload(
+                download,
+                item: item,
+                sourceWebView: self.webView
+            )
 
             NSLog("📥 WebViewHolder: Download started")
         }
@@ -1556,10 +1560,18 @@ class DownloadableWebView: WKWebView {
 
         NSLog("📥 DownloadableWebView: Starting download: %@", filename)
 
-        startDownload(using: URLRequest(url: url)) { download in
+        startDownload(using: URLRequest(url: url)) { [weak self] download in
             Task { @MainActor in
+                guard let self else {
+                    _ = await download.cancel()
+                    return
+                }
                 let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: url)
-                DownloadManager.shared.adoptWebKitDownload(download, item: item)
+                DownloadManager.shared.adoptWebKitDownload(
+                    download,
+                    item: item,
+                    sourceWebView: self
+                )
             }
         }
     }

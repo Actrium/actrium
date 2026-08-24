@@ -27,6 +27,9 @@ class DownloadItem: ObservableObject, Identifiable {
     @Published var fileExists: Bool = true
 
     var download: WKDownload?
+    var transport: DownloadTransport = .urlSession
+    weak var sourceWebView: WKWebView?
+    var webKitResumeData: Data?
 
     /// Check if the downloaded file still exists on disk
     func checkFileExists() {
@@ -59,27 +62,97 @@ class DownloadItem: ObservableObject, Identifiable {
     }
 
     func cancel() {
-        download?.cancel()
+        download?.cancel { [weak self] resumeData in
+            Task { @MainActor [weak self] in
+                self?.webKitResumeData = resumeData
+            }
+        }
         URLSessionDownloader.shared.cancelDownload(for: self)
         state = .cancelled
     }
 
     func retry() {
         guard let url = sourceURL else { return }
+
+        if transport == .webKit, sourceWebView == nil {
+            error = "The source webpage is no longer available. Start the download again from the webpage."
+            state = .failed
+            return
+        }
+
         bytesReceived = 0
         totalBytes = 0
         error = nil
         state = .downloading
-        URLSessionDownloader.shared.startDownload(url: url, item: self)
+
+        switch transport {
+        case .urlSession:
+            URLSessionDownloader.shared.startDownload(url: url, item: self)
+
+        case .webKit:
+            guard let sourceWebView else { return }
+            let resumeData = webKitResumeData
+            webKitResumeData = nil
+            let completion: (WKDownload) -> Void = { [weak self, weak sourceWebView] download in
+                Task { @MainActor in
+                    guard let self, let sourceWebView else {
+                        _ = await download.cancel()
+                        return
+                    }
+                    DownloadManager.shared.adoptWebKitDownload(
+                        download,
+                        item: self,
+                        sourceWebView: sourceWebView
+                    )
+                }
+            }
+
+            if let resumeData {
+                sourceWebView.resumeDownload(fromResumeData: resumeData, completionHandler: completion)
+            } else {
+                sourceWebView.startDownload(using: URLRequest(url: url), completionHandler: completion)
+            }
+        }
     }
 }
 
-enum DownloadState: Equatable {
+nonisolated enum DownloadState: Equatable {
     case waiting
     case downloading
     case completed
     case failed
     case cancelled
+}
+
+nonisolated enum DownloadTransport {
+    case urlSession
+    case webKit
+}
+
+nonisolated enum DownloadFailureMessage {
+    static func message(for error: Error) -> String {
+        let nsError = error as NSError
+        guard nsError.domain == NSURLErrorDomain else {
+            return "The download couldn’t be completed."
+        }
+
+        switch nsError.code {
+        case NSURLErrorNotConnectedToInternet:
+            return "No internet connection."
+        case NSURLErrorTimedOut:
+            return "The download timed out."
+        case NSURLErrorCannotFindHost, NSURLErrorCannotConnectToHost,
+             NSURLErrorDNSLookupFailed, NSURLErrorNetworkConnectionLost:
+            return "The download server couldn’t be reached."
+        case NSURLErrorSecureConnectionFailed,
+             NSURLErrorServerCertificateHasBadDate,
+             NSURLErrorServerCertificateUntrusted,
+             NSURLErrorServerCertificateHasUnknownRoot:
+            return "A secure connection couldn’t be established."
+        default:
+            return "The download couldn’t be completed."
+        }
+    }
 }
 
 // MARK: - Download Manager
@@ -233,7 +306,7 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
             }
         } catch {
             Task { @MainActor in
-                item.error = error.localizedDescription
+                item.error = DownloadFailureMessage.message(for: error)
                 DownloadManager.shared.updateItem(item, state: .failed)
                 let nsError = error as NSError
                 NSLog("📥 URLSessionDownloader: Failed to move file (%@/%d)", nsError.domain, nsError.code)
@@ -263,7 +336,7 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
             }
         } else {
             Task { @MainActor in
-                item.error = error.localizedDescription
+                item.error = DownloadFailureMessage.message(for: error)
                 DownloadManager.shared.updateItem(item, state: .failed)
                 let nsError = error as NSError
                 NSLog("📥 URLSessionDownloader: Download failed (%@/%d)", nsError.domain, nsError.code)
@@ -325,17 +398,18 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
     }
 
     func downloadDidFinish(_ download: WKDownload) {
-        onTerminalState(download)
         Task { @MainActor [weak self] in
-            guard let item = self?.item else { return }
+            guard let self else { return }
+            defer { self.onTerminalState(download) }
+            guard let item = self.item else { return }
             item.download = nil
+            item.webKitResumeData = nil
             DownloadManager.shared.updateItem(item, state: .completed)
             NSLog("📥 DownloadManager: Download completed")
         }
     }
 
     func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
-        onTerminalState(download)
         Task { @MainActor [weak self] in
             guard let self = self, let item = self.item else { return }
 
@@ -358,9 +432,14 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
                 }
             }
 
-            item.error = error.localizedDescription
-            DownloadManager.shared.updateItem(item, state: .failed)
             let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain, nsError.code == NSURLErrorCancelled {
+                item.error = nil
+                DownloadManager.shared.updateItem(item, state: .cancelled)
+            } else {
+                item.error = DownloadFailureMessage.message(for: error)
+                DownloadManager.shared.updateItem(item, state: .failed)
+            }
             NSLog("📥 DownloadManager: Download failed (%@/%d)", nsError.domain, nsError.code)
         }
     }

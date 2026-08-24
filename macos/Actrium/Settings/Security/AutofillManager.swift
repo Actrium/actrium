@@ -13,7 +13,7 @@ struct SavePasswordAction {
 /// Password autofill is origin-bound. Domain suffix matching can leak a parent
 /// site's credentials into an unrelated subdomain (or the reverse), while
 /// ignoring the scheme can leak an HTTPS password onto an HTTP page.
-struct CredentialOrigin: Equatable {
+nonisolated struct CredentialOrigin: Equatable {
     let scheme: String
     let host: String
     let port: Int
