@@ -133,6 +133,25 @@ struct BrowserInfrastructureSafetyTests {
         #expect(item.error == "The source webpage is no longer available. Start the download again from the webpage.")
     }
 
+    @Test func downloadFilenamesCannotEscapeOrSpoofTheirDestination() {
+        let traversal = DownloadDestinationPolicy.safeFilename("../../private/authorized_keys")
+        let spoofed = DownloadDestinationPolicy.safeFilename(".report\u{202E}fdp.exe")
+        let oversized = DownloadDestinationPolicy.safeFilename(String(repeating: "界", count: 200) + ".zip")
+
+        #expect(traversal == "authorized_keys")
+        #expect(spoofed == "reportfdp.exe")
+        #expect(oversized.hasSuffix(".zip"))
+        #expect(oversized.utf8.count <= 180)
+    }
+
+    @Test func mediaCaptureRequiresASecureOrLoopbackOrigin() {
+        #expect(WebMediaPermissionPolicy.canRequestCapture(scheme: "https", host: "example.com"))
+        #expect(WebMediaPermissionPolicy.canRequestCapture(scheme: "http", host: "localhost"))
+        #expect(WebMediaPermissionPolicy.canRequestCapture(scheme: "http", host: "127.0.0.1"))
+        #expect(!WebMediaPermissionPolicy.canRequestCapture(scheme: "http", host: "example.com"))
+        #expect(!WebMediaPermissionPolicy.canRequestCapture(scheme: "file", host: ""))
+    }
+
     private static func sessionTab(
         id: UUID,
         title: String,

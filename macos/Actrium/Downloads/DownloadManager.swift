@@ -16,7 +16,7 @@ import SwiftUI
 /// Individual Download Items
 class DownloadItem: ObservableObject, Identifiable {
     let id = UUID()
-    let filename: String
+    @Published var filename: String
     let sourceURL: URL?
     var destinationURL: URL?
 
@@ -57,7 +57,7 @@ class DownloadItem: ObservableObject, Identifiable {
     }
 
     init(filename: String, sourceURL: URL? = nil) {
-        self.filename = filename
+        self.filename = DownloadDestinationPolicy.safeFilename(filename)
         self.sourceURL = sourceURL
     }
 
@@ -152,6 +152,103 @@ nonisolated enum DownloadFailureMessage {
         default:
             return "The download couldn’t be completed."
         }
+    }
+}
+
+/// Keeps server- and page-provided names inside the Downloads directory and
+/// removes characters commonly used for hidden-file or extension spoofing.
+nonisolated enum DownloadDestinationPolicy {
+    private static let maximumFilenameBytes = 180
+    private static let bidirectionalControls: Set<UInt32> = [
+        0x061C, 0x200E, 0x200F,
+        0x202A, 0x202B, 0x202C, 0x202D, 0x202E,
+        0x2066, 0x2067, 0x2068, 0x2069
+    ]
+
+    static func safeFilename(_ rawName: String, fallback: String = "download") -> String {
+        let normalized = rawName.precomposedStringWithCanonicalMapping
+        let leafName = normalized
+            .replacingOccurrences(of: "\\", with: "/")
+            .split(separator: "/", omittingEmptySubsequences: true)
+            .last
+            .map(String.init) ?? ""
+
+        let filteredScalars = leafName.unicodeScalars.filter { scalar in
+            !CharacterSet.controlCharacters.contains(scalar)
+                && !CharacterSet.illegalCharacters.contains(scalar)
+                && scalar != ":"
+                && !bidirectionalControls.contains(scalar.value)
+        }
+        var candidate = String(String.UnicodeScalarView(filteredScalars))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        candidate = candidate.trimmingCharacters(in: CharacterSet(charactersIn: "."))
+
+        guard !candidate.isEmpty, candidate != ".", candidate != ".." else {
+            return fallback
+        }
+        return truncatingFilename(candidate, toUTF8Bytes: maximumFilenameBytes, fallback: fallback)
+    }
+
+    static func availableDestinationURL(for rawName: String, in directory: URL) -> URL {
+        let filename = safeFilename(rawName)
+        let name = (filename as NSString).deletingPathExtension
+        let ext = (filename as NSString).pathExtension
+        let fileManager = FileManager.default
+
+        for counter in 0...10_000 {
+            let candidateName: String
+            if counter == 0 {
+                candidateName = filename
+            } else if ext.isEmpty {
+                candidateName = "\(name) (\(counter))"
+            } else {
+                candidateName = "\(name) (\(counter)).\(ext)"
+            }
+            let candidateURL = directory.appendingPathComponent(candidateName, isDirectory: false)
+            if !fileManager.fileExists(atPath: candidateURL.path) {
+                return candidateURL
+            }
+        }
+
+        let suffix = UUID().uuidString
+        let fallbackName = ext.isEmpty ? "download-\(suffix)" : "download-\(suffix).\(ext)"
+        return directory.appendingPathComponent(fallbackName, isDirectory: false)
+    }
+
+    private static func truncatingFilename(
+        _ filename: String,
+        toUTF8Bytes maximumBytes: Int,
+        fallback: String
+    ) -> String {
+        guard filename.utf8.count > maximumBytes else { return filename }
+
+        let extensionPart = utf8Prefix((filename as NSString).pathExtension, maximumBytes: 32)
+        if !extensionPart.isEmpty {
+            let base = (filename as NSString).deletingPathExtension
+            let baseBudget = maximumBytes - extensionPart.utf8.count - 1
+            let shortenedBase = utf8Prefix(base, maximumBytes: baseBudget)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if !shortenedBase.isEmpty {
+                return "\(shortenedBase).\(extensionPart)"
+            }
+        }
+
+        let shortened = utf8Prefix(filename, maximumBytes: maximumBytes)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return shortened.isEmpty ? fallback : shortened
+    }
+
+    private static func utf8Prefix(_ value: String, maximumBytes: Int) -> String {
+        guard maximumBytes > 0 else { return "" }
+        var result = ""
+        var byteCount = 0
+        for character in value {
+            let characterBytes = String(character).utf8.count
+            guard byteCount + characterBytes <= maximumBytes else { break }
+            result.append(character)
+            byteCount += characterBytes
+        }
+        return result
     }
 }
 
@@ -282,19 +379,11 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
 
         // Generate destination path
         let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-        var destinationURL = downloadsURL.appendingPathComponent(item.filename)
-
-        // Handle duplicate filenames
-        var counter = 1
+        let destinationURL = DownloadDestinationPolicy.availableDestinationURL(
+            for: item.filename,
+            in: downloadsURL
+        )
         let fileManager = FileManager.default
-        let baseName = (item.filename as NSString).deletingPathExtension
-        let ext = (item.filename as NSString).pathExtension
-
-        while fileManager.fileExists(atPath: destinationURL.path) {
-            let newName = ext.isEmpty ? "\(baseName) (\(counter))" : "\(baseName) (\(counter)).\(ext)"
-            destinationURL = downloadsURL.appendingPathComponent(newName)
-            counter += 1
-        }
 
         do {
             try fileManager.moveItem(at: location, to: destinationURL)
@@ -378,6 +467,7 @@ class DownloadDelegateHandler: NSObject, WKDownloadDelegate {
         }
 
         Task { @MainActor in
+            item?.filename = safeFilename
             item?.destinationURL = destinationURL
             item?.state = .downloading
         }

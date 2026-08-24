@@ -26,9 +26,15 @@
 	</dict>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<key>NSAllowsArbitraryLoads</key>
+		<!-- A browser must be able to render user-requested HTTP pages, but the
+		     application networking stack should still retain normal ATS checks. -->
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Actro uses the camera only when you allow a website to access it.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Actro uses the microphone only when you allow a website to access it.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 </dict>

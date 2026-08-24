@@ -1141,6 +1141,7 @@ struct PersistentWebView: NSViewRepresentable {
     // Coordinator Process UIDelegate(target=_blank Link, Download)
     class Coordinator: NSObject, WKUIDelegate, WKDownloadDelegate {
         let holder: WebViewHolder
+        private var isPresentingMediaPermissionPrompt = false
 
         init(holder: WebViewHolder) {
             self.holder = holder
@@ -1169,6 +1170,15 @@ struct PersistentWebView: NSViewRepresentable {
             type: WKMediaCaptureType,
             decisionHandler: @escaping (WKPermissionDecision) -> Void
         ) {
+            guard WebMediaPermissionPolicy.canRequestCapture(
+                scheme: origin.protocol,
+                host: origin.host
+            ), let pageURLAtRequest = webView.url,
+               !isPresentingMediaPermissionPrompt else {
+                decisionHandler(.deny)
+                return
+            }
+
             let domain = origin.host
             let permissionLabel: String
             switch type {
@@ -1182,7 +1192,16 @@ struct PersistentWebView: NSViewRepresentable {
                 permissionLabel = "media device"
             }
 
-            DispatchQueue.main.async {
+            isPresentingMediaPermissionPrompt = true
+            DispatchQueue.main.async { [weak self, weak webView] in
+                guard let self,
+                      let webView,
+                      let window = webView.window else {
+                    self?.isPresentingMediaPermissionPrompt = false
+                    decisionHandler(.deny)
+                    return
+                }
+
                 let alert = NSAlert()
                 alert.messageText = "\"\(domain)\" Would Like to Access Your \(permissionLabel.capitalized)"
                 alert.informativeText = "This website is requesting permission to use your \(permissionLabel)."
@@ -1190,8 +1209,18 @@ struct PersistentWebView: NSViewRepresentable {
                 alert.addButton(withTitle: "Allow")
                 alert.addButton(withTitle: "Deny")
 
-                let response = alert.runModal()
-                decisionHandler(response == .alertFirstButtonReturn ? .grant : .deny)
+                alert.beginSheetModal(for: window) { [weak self, weak webView] response in
+                    self?.isPresentingMediaPermissionPrompt = false
+                    guard let self,
+                          let webView,
+                          webView.window != nil,
+                          webView.url == pageURLAtRequest,
+                          self.holder.webView === webView else {
+                        decisionHandler(.deny)
+                        return
+                    }
+                    decisionHandler(response == .alertFirstButtonReturn ? .grant : .deny)
+                }
             }
         }
 
@@ -1397,7 +1426,8 @@ class DownloadableWebView: WKWebView {
                     NSLog("📥 detectElement: Found link URL")
                 }
             } else if let error = error {
-                NSLog("📥 detectElement JS error: %@", error.localizedDescription)
+                let nsError = error as NSError
+                NSLog("📥 detectElement JS error (%@/%d)", nsError.domain, nsError.code)
             }
             completed = true
         }
@@ -1431,8 +1461,11 @@ class DownloadableWebView: WKWebView {
         let imageURL = contextMenuImageURL
         let linkURL = contextMenuLinkURL
 
-        NSLog("📥 DownloadableWebView: replaceDownloadMenuItems - imageURL=%@, linkURL=%@",
-              imageURL?.absoluteString ?? "nil", linkURL?.absoluteString ?? "nil")
+        NSLog(
+            "📥 DownloadableWebView: preparing context menu (image=%d, link=%d)",
+            imageURL == nil ? 0 : 1,
+            linkURL == nil ? 0 : 1
+        )
 
         // Reset stored copy item
         pendingCopyImageItem = nil
@@ -1558,7 +1591,7 @@ class DownloadableWebView: WKWebView {
             }
         }
 
-        NSLog("📥 DownloadableWebView: Starting download: %@", filename)
+        NSLog("📥 DownloadableWebView: Starting download")
 
         startDownload(using: URLRequest(url: url)) { [weak self] download in
             Task { @MainActor in
@@ -1656,17 +1689,12 @@ class DownloadableWebView: WKWebView {
         }
 
         // Get downloads directory
+        filename = DownloadDestinationPolicy.safeFilename(filename, fallback: "image.png")
         let downloadsURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first!
-        var destinationURL = downloadsURL.appendingPathComponent(filename)
-
-        // Handle duplicate filenames
-        var counter = 1
-        let baseName = (filename as NSString).deletingPathExtension
-        while FileManager.default.fileExists(atPath: destinationURL.path) {
-            let newName = "\(baseName) (\(counter)).png"
-            destinationURL = downloadsURL.appendingPathComponent(newName)
-            counter += 1
-        }
+        let destinationURL = DownloadDestinationPolicy.availableDestinationURL(
+            for: filename,
+            in: downloadsURL
+        )
 
         // Convert to PNG and save
         guard let tiffData = image.tiffRepresentation,
@@ -1680,7 +1708,7 @@ class DownloadableWebView: WKWebView {
         }
 
         do {
-            try pngData.write(to: destinationURL)
+            try pngData.write(to: destinationURL, options: .atomic)
             NSLog("📥 DownloadableWebView: Image saved")
 
             // Add to download manager for UI feedback
@@ -1692,7 +1720,8 @@ class DownloadableWebView: WKWebView {
                 DownloadManager.shared.updateItem(item, state: .completed)
             }
         } catch {
-            NSLog("📥 DownloadableWebView: Failed to save image: %@", error.localizedDescription)
+            let nsError = error as NSError
+            NSLog("📥 DownloadableWebView: Failed to save image (%@/%d)", nsError.domain, nsError.code)
             if let url = originalURL {
                 startDownload(url: url)
             }
