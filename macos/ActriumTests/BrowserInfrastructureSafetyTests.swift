@@ -190,6 +190,13 @@ struct BrowserInfrastructureSafetyTests {
         #expect(!WebNavigationSecurityPolicy.canDownload(localFile))
     }
 
+    @Test func webpageDialogsHaveABoundedPayload() {
+        let oversized = String(repeating: "界", count: 5_000)
+        let bounded = WebDialogTextPolicy.bounded(oversized)
+
+        #expect(bounded.unicodeScalars.count == 4_096)
+    }
+
     private static func sessionTab(
         id: UUID,
         title: String,

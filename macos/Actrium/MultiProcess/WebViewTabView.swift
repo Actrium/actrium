@@ -1136,7 +1136,8 @@ struct PersistentWebView: NSViewRepresentable {
     // Coordinator Process UIDelegate(target=_blank Link, Download)
     class Coordinator: NSObject, WKUIDelegate, WKDownloadDelegate {
         let holder: WebViewHolder
-        private var isPresentingMediaPermissionPrompt = false
+        private var isPresentingPageModal = false
+        private var activeAlert: NSAlert?
 
         init(holder: WebViewHolder) {
             self.holder = holder
@@ -1169,7 +1170,7 @@ struct PersistentWebView: NSViewRepresentable {
                 scheme: origin.protocol,
                 host: origin.host
             ), let pageURLAtRequest = webView.url,
-               !isPresentingMediaPermissionPrompt else {
+               !isPresentingPageModal else {
                 decisionHandler(.deny)
                 return
             }
@@ -1187,12 +1188,12 @@ struct PersistentWebView: NSViewRepresentable {
                 permissionLabel = "media device"
             }
 
-            isPresentingMediaPermissionPrompt = true
+            isPresentingPageModal = true
             DispatchQueue.main.async { [weak self, weak webView] in
                 guard let self,
                       let webView,
                       let window = webView.window else {
-                    self?.isPresentingMediaPermissionPrompt = false
+                    self?.isPresentingPageModal = false
                     decisionHandler(.deny)
                     return
                 }
@@ -1203,9 +1204,11 @@ struct PersistentWebView: NSViewRepresentable {
                 alert.alertStyle = .informational
                 alert.addButton(withTitle: "Allow")
                 alert.addButton(withTitle: "Deny")
+                self.activeAlert = alert
 
                 alert.beginSheetModal(for: window) { [weak self, weak webView] response in
-                    self?.isPresentingMediaPermissionPrompt = false
+                    self?.activeAlert = nil
+                    self?.isPresentingPageModal = false
                     guard let self,
                           let webView,
                           webView.window != nil,
@@ -1227,14 +1230,32 @@ struct PersistentWebView: NSViewRepresentable {
             initiatedByFrame frame: WKFrameInfo,
             completionHandler: @escaping () -> Void
         ) {
-            let domain = frame.securityOrigin.host
-            DispatchQueue.main.async {
+            guard !isPresentingPageModal else {
+                completionHandler()
+                return
+            }
+            isPresentingPageModal = true
+            let rawDomain = frame.securityOrigin.host
+            let domain = rawDomain.isEmpty ? "This webpage" : rawDomain
+            let boundedMessage = WebDialogTextPolicy.bounded(message)
+            DispatchQueue.main.async { [weak self, weak webView] in
+                guard let self,
+                      let webView,
+                      let window = webView.window else {
+                    self?.isPresentingPageModal = false
+                    completionHandler()
+                    return
+                }
                 let alert = NSAlert()
                 alert.messageText = domain
-                alert.informativeText = message
+                alert.informativeText = boundedMessage
                 alert.addButton(withTitle: "OK")
-                alert.runModal()
-                completionHandler()
+                self.activeAlert = alert
+                alert.beginSheetModal(for: window) { [weak self] _ in
+                    self?.activeAlert = nil
+                    self?.isPresentingPageModal = false
+                    completionHandler()
+                }
             }
         }
 
@@ -1244,15 +1265,33 @@ struct PersistentWebView: NSViewRepresentable {
             initiatedByFrame frame: WKFrameInfo,
             completionHandler: @escaping (Bool) -> Void
         ) {
-            let domain = frame.securityOrigin.host
-            DispatchQueue.main.async {
+            guard !isPresentingPageModal else {
+                completionHandler(false)
+                return
+            }
+            isPresentingPageModal = true
+            let rawDomain = frame.securityOrigin.host
+            let domain = rawDomain.isEmpty ? "This webpage" : rawDomain
+            let boundedMessage = WebDialogTextPolicy.bounded(message)
+            DispatchQueue.main.async { [weak self, weak webView] in
+                guard let self,
+                      let webView,
+                      let window = webView.window else {
+                    self?.isPresentingPageModal = false
+                    completionHandler(false)
+                    return
+                }
                 let alert = NSAlert()
                 alert.messageText = domain
-                alert.informativeText = message
+                alert.informativeText = boundedMessage
                 alert.addButton(withTitle: "OK")
                 alert.addButton(withTitle: "Cancel")
-                let response = alert.runModal()
-                completionHandler(response == .alertFirstButtonReturn)
+                self.activeAlert = alert
+                alert.beginSheetModal(for: window) { [weak self] response in
+                    self?.activeAlert = nil
+                    self?.isPresentingPageModal = false
+                    completionHandler(response == .alertFirstButtonReturn)
+                }
             }
         }
 
@@ -1263,20 +1302,39 @@ struct PersistentWebView: NSViewRepresentable {
             initiatedByFrame frame: WKFrameInfo,
             completionHandler: @escaping (String?) -> Void
         ) {
-            let domain = frame.securityOrigin.host
-            DispatchQueue.main.async {
+            guard !isPresentingPageModal else {
+                completionHandler(nil)
+                return
+            }
+            isPresentingPageModal = true
+            let rawDomain = frame.securityOrigin.host
+            let domain = rawDomain.isEmpty ? "This webpage" : rawDomain
+            let boundedPrompt = WebDialogTextPolicy.bounded(prompt)
+            let boundedDefault = defaultText.map { WebDialogTextPolicy.bounded($0) }
+            DispatchQueue.main.async { [weak self, weak webView] in
+                guard let self,
+                      let webView,
+                      let window = webView.window else {
+                    self?.isPresentingPageModal = false
+                    completionHandler(nil)
+                    return
+                }
                 let alert = NSAlert()
                 alert.messageText = domain
-                alert.informativeText = prompt
+                alert.informativeText = boundedPrompt
                 alert.addButton(withTitle: "OK")
                 alert.addButton(withTitle: "Cancel")
 
                 let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-                textField.stringValue = defaultText ?? ""
+                textField.stringValue = boundedDefault ?? ""
                 alert.accessoryView = textField
-
-                let response = alert.runModal()
-                completionHandler(response == .alertFirstButtonReturn ? textField.stringValue : nil)
+                self.activeAlert = alert
+                alert.beginSheetModal(for: window) { [weak self] response in
+                    self?.activeAlert = nil
+                    self?.isPresentingPageModal = false
+                    let value = WebDialogTextPolicy.bounded(textField.stringValue)
+                    completionHandler(response == .alertFirstButtonReturn ? value : nil)
+                }
             }
         }
 
