@@ -527,6 +527,11 @@ class BrowserViewModel: ObservableObject {
             logger.warning(" Cannot find tab slot position")
             return
         }
+        // A missing slot mapping must not prevent resource teardown.
+        let closedPosition = tabSlotPositions[id] ?? closedIndex
+        if tabSlotPositions[id] == nil {
+            logger.warning(" Cannot find tab slot position; using array index")
+        }
 
         // If this is the last tab
         if tabs.count == 1 {

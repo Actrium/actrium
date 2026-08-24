@@ -49,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, ObservableObject {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        WebViewHolderManager.shared.removeAll()
         RendererProcessPool.shared.shutdown()
         VaultManager.shared.lock()
     }

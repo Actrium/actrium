@@ -197,7 +197,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     )
 
     let webView: WKWebView
-    private var loadedURL: URL?
+    private var navigationLoadState = WebNavigationLoadState()
     /// Tracks the last URL seen by KVO (avoids using change.oldValue which can dangle)
     private var lastKnownURL: URL?
 
@@ -552,7 +552,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
                     guard let self = self,
                           let urlString = result as? String,
                           let newURL = URL(string: urlString) else { return }
-                    self.loadedURL = newURL
+                    guard self.navigationLoadState.observeWebViewURL(newURL) else { return }
                     if self.lastKnownURL != newURL {
                         NSLog("🔗 WebViewHolder: URL changed to: %@", urlString)
                         self.lastKnownURL = newURL
@@ -566,7 +566,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Observe estimated progress for loading bar
         progressObservation = webView.observe(\.estimatedProgress) { [weak self] webView, _ in
             DispatchQueue.main.async { [weak self] in
-                self?.onProgressChanged?(webView.estimatedProgress)
+                guard let self, !self.navigationLoadState.isInvalidated else { return }
+                self.onProgressChanged?(webView.estimatedProgress)
             }
         }
     }
@@ -584,6 +585,24 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             let request = URLRequest(url: url)
             webView.load(request)
         }
+        contentController.removeAllUserScripts()
+
+        dismissAutofillPopover()
+    }
+
+    /// Attach the persistent WebView for the first time. Reattaching an
+    /// already-loaded Tab intentionally does nothing.
+    func loadInitialURLIfNeeded(_ url: URL) {
+        guard let requestURL = navigationLoadState.initialRequest(for: url) else { return }
+        webView.load(URLRequest(url: requestURL))
+    }
+
+    /// Navigate only for a model-originated URL change while this Tab is
+    /// mounted. WebKit-originated changes are recorded by the URL observer and
+    /// therefore do not produce a second request here.
+    func navigateIfNeeded(to url: URL) {
+        guard let requestURL = navigationLoadState.navigationRequest(for: url) else { return }
+        webView.load(URLRequest(url: requestURL))
     }
 
     // MARK: - Navigation
@@ -593,10 +612,25 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     var currentURL: URL? { lastKnownURL }
     var currentTitle: String? { webView.title }
 
-    func goBack() { webView.goBack() }
-    func goForward() { webView.goForward() }
-    func reload() { webView.reload() }
-    func stopLoading() { webView.stopLoading() }
+    func goBack() {
+        guard !navigationLoadState.isInvalidated else { return }
+        webView.goBack()
+    }
+
+    func goForward() {
+        guard !navigationLoadState.isInvalidated else { return }
+        webView.goForward()
+    }
+
+    func reload() {
+        guard !navigationLoadState.isInvalidated else { return }
+        webView.reload()
+    }
+
+    func stopLoading() {
+        guard !navigationLoadState.isInvalidated else { return }
+        webView.stopLoading()
+    }
 
     // MARK: - Web Inspector
 
@@ -672,12 +706,13 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     @MainActor
     func takeSnapshot() async {
         // Only take snapshot if webView has content
-        guard lastKnownURL != nil else { return }
+        guard !navigationLoadState.isInvalidated, lastKnownURL != nil else { return }
 
         do {
             let config = WKSnapshotConfiguration()
             // Use the webView's current size for the snapshot
             let image = try await webView.takeSnapshot(configuration: config)
+            guard !navigationLoadState.isInvalidated else { return }
             self.snapshot = image
             NSLog("📸 WebViewHolder: Snapshot captured")
         } catch {
@@ -796,12 +831,14 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     // MARK: - WKNavigationDelegate
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
+        guard !navigationLoadState.isInvalidated else { return }
         isLoading = true
         onLoadingStateChanged?(true)
         dismissAutofillPopover()
     }
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+        guard !navigationLoadState.isInvalidated else { return }
         isLoading = false
         onLoadingStateChanged?(false)
         // Notify with title and URL when navigation completes
@@ -809,7 +846,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Use evaluateJavaScript to safely retrieve the URL string.
         let title = webView.title
         webView.evaluateJavaScript("location.href") { [weak self] result, _ in
-            guard let self = self else { return }
+            guard let self, !self.navigationLoadState.isInvalidated else { return }
             let url: URL?
             if let urlString = result as? String, let parsed = URL(string: urlString) {
                 self.lastKnownURL = parsed
@@ -829,12 +866,14 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        guard !navigationLoadState.isInvalidated else { return }
         isLoading = false
         onLoadingStateChanged?(false)
         NSLog("🌐 WebViewHolder: Navigation failed - \(error.localizedDescription)")
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        guard !navigationLoadState.isInvalidated else { return }
         isLoading = false
         onLoadingStateChanged?(false)
         let nsError = error as NSError
@@ -848,6 +887,11 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Detect downloads by checking response headers
     func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+        guard !navigationLoadState.isInvalidated else {
+            decisionHandler(.cancel)
+            return
+        }
+
         guard let response = navigationResponse.response as? HTTPURLResponse else {
             decisionHandler(.allow)
             return
@@ -887,6 +931,11 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Handle navigation action with download attribute or Option+click
     func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+        guard !navigationLoadState.isInvalidated else {
+            decisionHandler(.cancel)
+            return
+        }
+
         let url = navigationAction.request.url
         NSLog("📥 WebViewHolder: decidePolicyFor action - URL: %@, shouldDownload: %d, navigationType: %ld",
               url?.absoluteString ?? "nil",
@@ -920,21 +969,37 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Handle navigation response becoming a download
     func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+        guard !navigationLoadState.isInvalidated else {
+            download.cancel { _ in }
+            return
+        }
         NSLog("📥 WebViewHolder: navigationResponse didBecome download - %@", navigationResponse.response.url?.absoluteString ?? "nil")
         setupDownload(download, sourceURL: navigationResponse.response.url)
     }
 
     /// Handle navigation action becoming a download (for links with download attribute)
     func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+        guard !navigationLoadState.isInvalidated else {
+            download.cancel { _ in }
+            return
+        }
         NSLog("📥 WebViewHolder: navigationAction didBecome download - %@", navigationAction.request.url?.absoluteString ?? "nil")
         setupDownload(download, sourceURL: navigationAction.request.url)
     }
 
     /// Setup download with DownloadManager
     private func setupDownload(_ download: WKDownload, sourceURL: URL?) {
+        guard !navigationLoadState.isInvalidated else {
+            download.cancel { _ in }
+            return
+        }
         let filename = sourceURL?.lastPathComponent ?? "download"
 
-        Task { @MainActor in
+        Task { @MainActor [weak self] in
+            guard let self, !self.navigationLoadState.isInvalidated else {
+                _ = await download.cancel()
+                return
+            }
             let item = DownloadManager.shared.addDownload(filename: filename, sourceURL: sourceURL)
             item.download = download
 
@@ -978,8 +1043,16 @@ final class WebViewHolderManager {
     }
 
     func remove(tabId: UUID) {
-        holders.removeValue(forKey: tabId)
+        guard let holder = holders.removeValue(forKey: tabId) else { return }
+        holder.invalidate()
         NSLog("🌐 WebViewHolderManager: Removed holder for tab \(tabId.uuidString.prefix(8))")
+    }
+
+    func removeAll() {
+        let retainedHolders = Array(holders.values)
+        holders.removeAll()
+        retainedHolders.forEach { $0.invalidate() }
+        NSLog("🌐 WebViewHolderManager: Removed all holders")
     }
 
     /// Get cached snapshot for a tab
@@ -1731,10 +1804,10 @@ struct FocusedWebOverlay: View {
             .id(tab.id)
             .frame(width: viewportSize.width, height: viewportSize.height)
             .onAppear {
-                holder.loadIfNeeded(url)
+                holder.loadInitialURLIfNeeded(url)
             }
             .onChange(of: url) { _, newURL in
-                holder.loadIfNeeded(newURL)
+                holder.navigateIfNeeded(to: newURL)
             }
     }
 }

@@ -15,7 +15,9 @@ final class RendererLifecycleManager {
     /// Called when a tab is closed.
     ///
     /// This currently performs legacy helper cleanup as a compatibility fallback.
+    @MainActor
     func tabDidClose(_ tabId: UUID) {
+        WebViewHolderManager.shared.remove(tabId: tabId)
         terminateRenderer(for: tabId)
     }
 
