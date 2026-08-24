@@ -282,8 +282,27 @@ ARG NODE_VERSION=24.19.0
 # Adoptium release string; directory name in the toolcache must be a semver
 # that satisfies "17".
 ARG JDK_VERSION=17.0.20+8
-# cmdline-tools build id from dl.google.com (12.0 stable).
-ARG CMDLINE_TOOLS=11076708
+# cmdline-tools build id from dl.google.com. Pinned to 12266719 (16.0) to
+# match android-actions/setup-android's default cmdline-tools-version — with
+# an older build the action reports "Wrong version in preinstalled sdkmanager"
+# and re-downloads the whole toolchain at job time (~11 min, retry included).
+ARG CMDLINE_TOOLS=12266719
+# Gradle distribution + KtLint dependency versions, pinned to what
+# bindings/kotlin resolves at job time (gradle/wrapper/gradle-wrapper.properties
+# and build.gradle.kts). Pre-seeding both into the Gradle user home removes the
+# per-job distribution + KtLint dependency downloads.
+ARG GRADLE_VERSION=9.2.1
+ARG KTLINT_VERSION=1.5.0
+# The default must match bindings/kotlin/gradle/wrapper/gradle-wrapper.properties
+# so the staged distribution is reused by the wrapper.
+ARG GRADLE_DIST_PROXY=https://mirrors.cloud.tencent.com/gradle
+# SHA-256 of the Gradle archive named by the wrapper. Verify the image-build
+# download too; a pre-seeded distribution bypasses the wrapper's download-time
+# checksum check. Update this together with the wrapper property when the
+# Gradle version changes.
+ARG GRADLE_DIST_SHA256=72f44c9f8ebcb1af43838f45ee5c4aa9c5444898b3468ab3f4af7b6076c5bc3f
+# Version of the Gradle KtLint plugin used by bindings/kotlin/build.gradle.kts.
+ARG KTLINT_GRADLE_VERSION=12.1.2
 
 USER root
 
@@ -350,12 +369,49 @@ RUN set -eux; \
     export JAVA_HOME="$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64"; \
     sdkm="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"; \
     yes | "$sdkm" --licenses >/dev/null; \
-    "$sdkm" --install "platforms;android-34" "build-tools;34.0.0"; \
-    "$sdkm" --list_installed | grep -E 'android-34|build-tools;34'
+    "$sdkm" --install "platforms;android-34" "build-tools;34.0.0" "build-tools;35.0.0" "platform-tools"; \
+    "$sdkm" --list_installed | grep -E 'android-34|build-tools;34|build-tools;35'
 
-# Everything above installed as root; hand the toolcache + SDK to the
-# runner user so job-time sdkmanager/package writes also work.
-RUN chown -R runner:runner /opt/hostedtoolcache /usr/local/lib/android
+# Pre-seed Gradle and the KtLint dependencies so the Kotlin Binding Test does
+# not download them at job time. GRADLE_USER_HOME is set explicitly so its
+# location does not drift with HOME handling. GRADLE_DIST_PROXY must resolve
+# to the same base URL as the wrapper's distributionUrl.
+#
+# The Gradle wrapper keys wrapper/dists off MD5(distributionUrl), so a
+# manually placed copy under a different subdir is never reused — the wrapper
+# re-downloads regardless of any gradle on PATH (confirmed: the Kotlin job
+# still pulled the dist for ~10 min). Stage the distribution at the exact
+# wrapper path: wrapper/dists/<distName>/<base36-md5>/<dist>/{<dist>.ok,<dist>.lck}
+# so ./gradlew resolves it with zero download. GRADLE_DIST_MD5 is the
+# base36-encoded MD5(distributionUrl); the build checks it below.
+ENV GRADLE_USER_HOME=/home/runner/.gradle
+ARG GRADLE_DIST_MD5=9fgc9dy84duywbml6zqd0l4mo
+COPY ktlint-preseed.gradle /tmp/ktlint-preseed/build.gradle
+RUN set -eux; \
+    dist_url="https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip"; \
+    if [ -n "${GRADLE_DIST_PROXY}" ]; then dist_url="${GRADLE_DIST_PROXY%/}/gradle-${GRADLE_VERSION}-bin.zip"; fi; \
+    dist_hash="$("$RUNNER_TOOL_CACHE/node/${NODE_VERSION}/x64/bin/node" -e 'const crypto=require("crypto"); const url=process.argv[1]; process.stdout.write(BigInt("0x"+crypto.createHash("md5").update(url).digest("hex")).toString(36));' "$dist_url")"; \
+    test "$dist_hash" = "$GRADLE_DIST_MD5"; \
+    dist_dir="$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}"; \
+    mkdir -p /tmp/gradle-dist "$dist_dir"; \
+    curl -fsSL --retry 3 --retry-all-errors -o /tmp/gradle-dist/gradle.zip "$dist_url"; \
+    echo "${GRADLE_DIST_SHA256}  /tmp/gradle-dist/gradle.zip" | sha256sum --check --status; \
+    unzip -q /tmp/gradle-dist/gradle.zip -d "$dist_dir"; \
+    touch "$dist_dir/gradle-${GRADLE_VERSION}-bin.ok" "$dist_dir/gradle-${GRADLE_VERSION}-bin.lck"; \
+    rm -rf /tmp/gradle-dist; \
+    export JAVA_HOME="$RUNNER_TOOL_CACHE/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64"; \
+    "$dist_dir/gradle-${GRADLE_VERSION}/bin/gradle" --version; \
+    "$dist_dir/gradle-${GRADLE_VERSION}/bin/gradle" \
+      -p /tmp/ktlint-preseed \
+      --no-daemon \
+      -PktlintVersion="${KTLINT_VERSION}" \
+      -PktlintGradleVersion="${KTLINT_GRADLE_VERSION}" \
+      resolveKtlint; \
+    rm -rf /tmp/ktlint-preseed
+
+# Everything above installed as root; hand the toolcache + SDK + Gradle home
+# to the runner user so job-time sdkmanager/Gradle writes also work.
+RUN chown -R runner:runner /opt/hostedtoolcache /usr/local/lib/android "$GRADLE_USER_HOME"
 
 ###############################################################################
 # Stage 4: final image
@@ -370,6 +426,10 @@ ARG PY311=3.11.16
 ARG PY313=3.13.15
 ARG NODE_VERSION=24.19.0
 ARG JDK_VERSION=17.0.20+8
+ARG GRADLE_VERSION=9.2.1
+ARG KTLINT_VERSION=1.5.0
+ARG KTLINT_GRADLE_VERSION=12.1.2
+ARG GRADLE_DIST_MD5=9fgc9dy84duywbml6zqd0l4mo
 
 # Default user: runner (non-root, matches GitHub Actions convention).
 USER runner
@@ -415,7 +475,13 @@ RUN set -eux; \
     test -f "/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64.complete"; \
     JAVA_HOME=/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk/${JDK_VERSION}/x64 \
       "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --list_installed \
-      | grep -qE 'platforms;android-34|build-tools;34.0.0'
+      | grep -qE 'platforms;android-34|build-tools;34.0.0'; \
+    # Gradle distribution and KtLint dependency metadata are pre-seeded;
+    # otherwise the job re-downloads them on every ephemeral pod.
+    test -x "$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}/gradle-${GRADLE_VERSION}/bin/gradle"; \
+    test -f "$GRADLE_USER_HOME/wrapper/dists/gradle-${GRADLE_VERSION}-bin/${GRADLE_DIST_MD5}/gradle-${GRADLE_VERSION}-bin.ok"; \
+    test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/com.pinterest.ktlint/ktlint-cli/${KTLINT_VERSION}"; \
+    test -d "$GRADLE_USER_HOME/caches/modules-2/files-2.1/org.jlleitschuh.gradle/ktlint-gradle/${KTLINT_GRADLE_VERSION}"
 
 # The runner agent is registered at container start (ARC injects the JIT
 # config via env, or config.sh runs manually); no ENTRYPOINT here so both
