@@ -180,11 +180,9 @@ class URLSessionDownloader: NSObject, URLSessionDownloadDelegate {
 
     /// Start a download using URLSession
     func startDownload(url: URL, item: DownloadItem) {
-        var request = URLRequest(url: url)
-        // Use Safari-like user agent to avoid blocks
-        request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15", forHTTPHeaderField: "User-Agent")
-
-        let task = session.downloadTask(with: request)
+        // Let URLSession provide its native networking identity. A direct
+        // downloader must not impersonate an unrelated Safari release.
+        let task = session.downloadTask(with: URLRequest(url: url))
         downloadTasks[task] = item
 
         Task { @MainActor in

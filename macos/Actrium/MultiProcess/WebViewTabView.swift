@@ -30,6 +30,7 @@ struct WebViewTabView: NSViewRepresentable {
 
         // Enable Developer Tool
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+#endif
 
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -161,11 +162,40 @@ struct WebViewMultiProcessTabView: View {
 /// Shared WKProcessPool♪ ♪ ♪ ♪ To ensure that all ♪ WebView Use same WebContent Process
 private let sharedProcessPool = WKProcessPool()
 
+/// Browser identity appended to WebKit's native User-Agent.
+///
+/// Actro intentionally keeps WebKit's platform and engine identity instead of
+/// impersonating a particular Safari release. This keeps HTTP and JavaScript
+/// identity aligned as WebKit evolves with the operating system.
+struct BrowserUserAgentIdentity {
+    private static let productName = "Actro"
+
+    static func applicationName(version: String?) -> String {
+        let rawVersion = version?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let safeVersion = rawVersion.unicodeScalars
+            .filter { $0.value < 128 && (CharacterSet.alphanumerics.contains($0) || "._-".unicodeScalars.contains($0)) }
+            .map(String.init)
+            .joined()
+        return "\(productName)/\(safeVersion.isEmpty ? "0" : safeVersion)"
+    }
+
+    static var currentApplicationName: String {
+        let info = Bundle.main.infoDictionary
+        let version = info?["CFBundleShortVersionString"] as? String
+            ?? info?["CFBundleVersion"] as? String
+        return applicationName(version: version)
+    }
+}
+
 // MARK: - Persistent WebView Holder
 
 /// Enduring WKWebView Examples, avoid SwiftUI Reloading of View Rebuild
 /// Note: Not used @Published I'm gonna follow you. isLoadingAvoid SwiftUI Update Cycle
 final class WebViewHolder: NSObject, WKNavigationDelegate {
+    private static let browserSupportContentWorld = WKContentWorld.world(
+        name: "io.actrium.actro.browser-support"
+    )
+
     let webView: WKWebView
     private var loadedURL: URL?
     /// Tracks the last URL seen by KVO (avoids using change.oldValue which can dangle)
@@ -220,7 +250,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     override init() {
         let config = WKWebViewConfiguration()
         config.processPool = sharedProcessPool
+        config.applicationNameForUserAgent = BrowserUserAgentIdentity.currentApplicationName
+#if DEBUG
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
+#endif
 
         // Add script message handler for theme color
         let userContentController = WKUserContentController()
@@ -329,7 +362,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             observer.observe(document.head, { subtree: true, childList: true, attributes: true });
         })();
         """
-        let userScript = WKUserScript(source: script, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        let userScript = WKUserScript(
+            source: script,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true,
+            in: Self.browserSupportContentWorld
+        )
         userContentController.addUserScript(userScript)
 
         // Password autofill & capture script
@@ -486,13 +524,19 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             });
         })();
         """
-        let autofillUserScript = WKUserScript(source: autofillScript, injectionTime: .atDocumentEnd, forMainFrameOnly: true)
+        let autofillUserScript = WKUserScript(
+            source: autofillScript,
+            injectionTime: .atDocumentEnd,
+            forMainFrameOnly: true,
+            in: Self.browserSupportContentWorld
+        )
         userContentController.addUserScript(autofillUserScript)
 
         webView.allowsBackForwardNavigationGestures = true
         webView.navigationDelegate = self
-        webView.customUserAgent = Self.userAgent
+#if DEBUG
         webView.isInspectable = true  // Enable Web Inspector
+#endif
 
         // Observe URL changes (including History.pushState/replaceState)
         // WORKAROUND: On macOS 26 (Tahoe), webView.url can return an NSURL whose internal
@@ -558,6 +602,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Show WebKit Web Inspector for this webView
     func showInspector() {
+#if DEBUG
         // Use private API to open Web Inspector
         // WKWebView has a private _inspector property that returns WKInspector
         guard let inspector = webView.value(forKey: "_inspector") as? NSObject else {
@@ -566,6 +611,9 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         }
         inspector.perform(Selector(("show")))
         NSLog("🔧 WebViewHolder: Opened Web Inspector")
+#else
+        NSLog("🔧 WebViewHolder: Web Inspector is available only in debug builds")
+#endif
     }
 
     // MARK: - Print
