@@ -542,9 +542,7 @@ struct ActriumApp: App {
         guard let vm = focusedViewModel,
               index >= 0, index < vm.tabs.count else { return }
         let tab = vm.tabs[index]
-        withAnimation {
-            vm.switchToTab(id: tab.id)
-        }
+        vm.switchToTab(id: tab.id)
     }
 
     private func switchToLastTab() {
@@ -552,9 +550,7 @@ struct ActriumApp: App {
               !vm.tabs.isEmpty else { return }
         let lastIndex = vm.tabs.count - 1
         let tab = vm.tabs[lastIndex]
-        withAnimation {
-            vm.switchToTab(id: tab.id)
-        }
+        vm.switchToTab(id: tab.id)
     }
 
     private func openHistoryItem(_ item: HistoryItem) {

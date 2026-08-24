@@ -1109,6 +1109,34 @@ enum ContractGateStatus {
     "Blocked",
 };
 
+enum ToolbarTabInteractionPhase {
+    "Inactive",
+    "Active",
+    "AddressEditing",
+    "DraggingInactive",
+    "DraggingActive",
+};
+
+enum ToolbarTabInteractionInput {
+    "Activate",
+    "Deactivate",
+    "BeginAddressEditing",
+    "EndAddressEditing",
+    "BeginDrag",
+    "FinishDragInactive",
+    "FinishDragActive",
+    "Cancel",
+};
+
+dictionary ToolbarTabInteractionTransitionInfo {
+    ToolbarTabInteractionPhase phase;
+    boolean accepted;
+    boolean accepts_tab_buttons;
+    boolean accepts_address_input;
+    boolean permits_tab_drag;
+    boolean suppresses_window_drag;
+};
+
 dictionary ContractGateInfo {
     ContractGateStatus status;
     string? blocked_reason;

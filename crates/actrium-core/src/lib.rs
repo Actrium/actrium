@@ -19,6 +19,7 @@ pub mod persistence;
 pub mod realm_link;
 pub mod runtime_persistence;
 pub mod speech;
+pub mod toolbar_interaction;
 
 pub use ffi::*;
 

@@ -114,6 +114,7 @@ dependencies = [
  "thiserror 2.0.21",
  "toml 1.2.1+spec-1.1.0",
  "url",
+ "yasm",
 ]
 
 [[package]]
@@ -9484,6 +9485,11 @@ dependencies = [
  "bit-vec 0.9.1",
  "time",
 ]
+
+[[package]]
+name = "yasm"
+version = "0.6.0"
+source = "git+https://github.com/kookyleo/yasm?rev=e4ffe11458be6824e184c70bd79dd561d9948aa5#e4ffe11458be6824e184c70bd79dd561d9948aa5"
 
 [[package]]
 name = "yoke"

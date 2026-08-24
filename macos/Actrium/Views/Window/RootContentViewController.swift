@@ -1,4 +1,5 @@
 import AppKit
+import ActroCore
 import SwiftUI
 import Combine
 
@@ -17,9 +18,39 @@ import Combine
 /// Setting `window.title` is the trigger that causes the system to
 /// re-layout the titlebar; the KVO fires synchronously in the setter,
 /// marks this view for layout, and the layout system does the rest.
-private class TrafficLightAwareRootView: NSView {
-    weak var controller: RootContentViewController?
+private class MainWindowRootView: NSView {
+    weak var controller: MainWindowViewController?
     private var titleObservation: NSKeyValueObservation?
+    private let chromeMaterialView = NSVisualEffectView()
+    private let chromeTintView = WindowChromeTintView()
+
+    func applyWindowChromeStyle(_ style: WindowChromeStyle) {
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+
+        if chromeMaterialView.superview == nil {
+            chromeMaterialView.translatesAutoresizingMaskIntoConstraints = false
+            chromeMaterialView.blendingMode = .behindWindow
+            chromeMaterialView.state = .active
+            addSubview(chromeMaterialView)
+
+            chromeTintView.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(chromeTintView)
+
+            NSLayoutConstraint.activate([
+                chromeMaterialView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                chromeMaterialView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                chromeMaterialView.topAnchor.constraint(equalTo: topAnchor),
+                chromeMaterialView.bottomAnchor.constraint(equalTo: bottomAnchor),
+                chromeTintView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                chromeTintView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                chromeTintView.topAnchor.constraint(equalTo: topAnchor),
+                chromeTintView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            ])
+        }
+        chromeMaterialView.material = style.material
+        chromeTintView.tintColor = style.tintColor
+    }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -36,22 +67,152 @@ private class TrafficLightAwareRootView: NSView {
         super.layout()
         controller?.handleRootViewLayout()
     }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        controller?.applyAppearanceColors()
+    }
+}
+
+/// A dedicated tint layer above the system blur. Applying tint directly to an
+/// NSVisualEffectView's backing layer puts it behind AppKit's material and can
+/// make a successful preference change appear to do nothing.
+private final class WindowChromeTintView: NSView {
+    var tintColor: NSColor = .clear {
+        didSet { needsDisplay = true }
+    }
+
+    override var isOpaque: Bool { false }
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func draw(_ dirtyRect: NSRect) {
+        tintColor.setFill()
+        dirtyRect.fill()
+    }
+}
+
+/// One geometry contract shared by the SwiftUI header and the AppKit drag
+/// mask. Keeping these values together prevents the draggable area from
+/// drifting into the Tabs/Tabs Group container as the layout evolves.
+private enum CompactToolbarLayout {
+    /// Head and tail surfaces own the large outer corners directly. Keeping
+    /// that rule on each logical surface avoids coupling corner treatment to
+    /// the ScrollView's clipping viewport.
+    static let windowCornerRadius: CGFloat = 12
+    static let toolbarHeight: CGFloat = 45
+    static let tabStripHeight: CGFloat = 36
+    static let edgeTabCornerRadius: CGFloat = 8
+    static let tabCornerRadius: CGFloat = 6
+    static let horizontalPadding: CGFloat = 8
+    static let itemSpacing: CGFloat = 8
+    static let buttonSize: CGFloat = 30
+    static let compactTrafficLightReserve: CGFloat = 78
+    static let fullScreenLeadingReserve: CGFloat = 4
+    static let inactiveTabMinWidth: CGFloat = 88
+    static let inactiveTabMaxWidth: CGFloat = 240
+    static let activeTabMinWidth: CGFloat = 300
+    static let activeTabMaxWidth: CGFloat = 520
+    static let activeTabPreferredWidth: CGFloat = 420
+
+    static func leadingReserve(isFullScreen: Bool) -> CGFloat {
+        isFullScreen ? fullScreenLeadingReserve : compactTrafficLightReserve
+    }
+
+    static func maximumTabStripWidth(in toolbarWidth: CGFloat, isFullScreen: Bool) -> CGFloat {
+        max(
+            0,
+            toolbarWidth
+                - horizontalPadding * 2
+                - leadingReserve(isFullScreen: isFullScreen)
+                - itemSpacing * 3
+                - buttonSize * 2
+        )
+    }
+
+    static func tabStripFrame(
+        in bounds: NSRect,
+        isFullScreen: Bool,
+        contentWidth: CGFloat
+    ) -> NSRect {
+        let minX = tabStripMinX(in: bounds, isFullScreen: isFullScreen)
+        let width = min(
+            max(0, contentWidth),
+            maximumTabStripWidth(in: bounds.width, isFullScreen: isFullScreen)
+        )
+        return centeredRect(
+            minX: minX,
+            maxX: minX + width,
+            height: tabStripHeight,
+            in: bounds
+        )
+    }
+
+    static func newTabButtonFrame(in bounds: NSRect) -> NSRect {
+        let maxX = bounds.maxX
+            - horizontalPadding
+            - buttonSize
+            - itemSpacing
+        return centeredRect(
+            minX: maxX - buttonSize,
+            maxX: maxX,
+            height: buttonSize,
+            in: bounds
+        )
+    }
+
+    static func overviewButtonFrame(in bounds: NSRect) -> NSRect {
+        let maxX = bounds.maxX - horizontalPadding
+        return centeredRect(
+            minX: maxX - buttonSize,
+            maxX: maxX,
+            height: buttonSize,
+            in: bounds
+        )
+    }
+
+    private static func tabStripMinX(in bounds: NSRect, isFullScreen: Bool) -> CGFloat {
+        bounds.minX
+            + horizontalPadding
+            + leadingReserve(isFullScreen: isFullScreen)
+            + itemSpacing
+    }
+
+    private static func centeredRect(
+        minX: CGFloat,
+        maxX: CGFloat,
+        height: CGFloat,
+        in bounds: NSRect
+    ) -> NSRect {
+        NSRect(
+            x: minX,
+            y: bounds.midY - height / 2,
+            width: max(0, maxX - minX),
+            height: height
+        )
+    }
 }
 
 /// Root content view controller - manages 4px edge inset and contains toolbar + split view
-final class RootContentViewController: NSViewController {
+/// macOS renderer for the canonical `MainWindow → Tabs + Workspace` tree.
+/// Windowed and full-screen presentations retain the same two child entities.
+final class MainWindowViewController: NSViewController {
 
     // MARK: - Properties
 
     private let viewModel: BrowserViewModel
     private let historyVM: HistoryViewModel
     private let bookmarkVM: BookmarkViewModel
+    private let toolbarInteraction: ToolbarTabInteractionCoordinator
 
     /// Edge inset (transparent border around content)
     private let edgeInset: CGFloat = 4
 
+    /// Chrome-colored breathing room around the independently rounded Body.
+    private let bodyInset: CGFloat = 4
+
     /// Corner radius for content area
-    private let cornerRadius: CGFloat = 12
+    private let cornerRadius = CompactToolbarLayout.windowCornerRadius
 
     /// Toolbar height (further reduced by 1pt for optical centering)
     private let toolbarHeight: CGFloat = 45
@@ -72,22 +233,27 @@ final class RootContentViewController: NSViewController {
     // Child views
     private var roundedContainer: NSView!
     private var toolbarHostingView: NSHostingView<AnyView>!
-    private var splitViewController: MainSplitViewController!
+    private var windowDragRegion: CompactToolbarWindowDragRegion!
+    private var contentViewController: ContentViewController!
     private let sidebarLayoutState = SidebarLayoutState()
+    private var layoutCancellables = Set<AnyCancellable>()
 
-    // DEBUG: dashed border layer for roundedContainer
-    private var debugBorderLayer: CAShapeLayer?
-
-    // Mask layer for content clipping (separate from debug border)
+    // Mask layer for content clipping
     private var contentMaskLayer: CAShapeLayer?
 
 
     // MARK: - Initialization
 
-    init(viewModel: BrowserViewModel, historyVM: HistoryViewModel, bookmarkVM: BookmarkViewModel) {
+    init(
+        viewModel: BrowserViewModel,
+        historyVM: HistoryViewModel,
+        bookmarkVM: BookmarkViewModel,
+        toolbarInteraction: ToolbarTabInteractionCoordinator
+    ) {
         self.viewModel = viewModel
         self.historyVM = historyVM
         self.bookmarkVM = bookmarkVM
+        self.toolbarInteraction = toolbarInteraction
 
         super.init(nibName: nil, bundle: nil)
     }
@@ -99,10 +265,9 @@ final class RootContentViewController: NSViewController {
     // MARK: - Lifecycle
 
     override func loadView() {
-        let rootView = TrafficLightAwareRootView()
+        let rootView = MainWindowRootView()
         rootView.controller = self
-        rootView.wantsLayer = true
-        rootView.layer?.backgroundColor = windowBackgroundColor.cgColor
+        rootView.applyWindowChromeStyle(WindowChromeManager.shared.style)
         self.view = rootView
     }
 
@@ -111,8 +276,28 @@ final class RootContentViewController: NSViewController {
 
         setupRoundedContainer()
         setupToolbar()
-        setupSplitView()
+        setupWindowDragRegion()
+        setupContent()
         setupConstraints()
+        observeWindowChromeStyle()
+        applyAppearanceColors()
+    }
+
+    fileprivate func applyAppearanceColors() {
+        (view as? MainWindowRootView)?.applyWindowChromeStyle(WindowChromeManager.shared.style)
+        toolbarHostingView?.layer?.backgroundColor = NSColor.clear.cgColor
+        contentViewController?.applyAppearanceColors()
+        view.needsDisplay = true
+    }
+
+    private func observeWindowChromeStyle() {
+        WindowChromeManager.shared.$style
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                self?.applyAppearanceColors()
+            }
+            .store(in: &layoutCancellables)
     }
 
     // MARK: - Setup
@@ -120,6 +305,9 @@ final class RootContentViewController: NSViewController {
     private func setupRoundedContainer() {
         // Container that holds all content with rounded corners on all sides
         roundedContainer = NSView()
+        roundedContainer.setAccessibilityIdentifier(
+            MainWindowEntityName.mainWindow.accessibilityIdentifier
+        )
         roundedContainer.wantsLayer = true
         roundedContainer.layer?.backgroundColor = NSColor.clear.cgColor  // Transparent - content views provide their own background
         roundedContainer.translatesAutoresizingMaskIntoConstraints = false
@@ -129,78 +317,60 @@ final class RootContentViewController: NSViewController {
         roundedContainer.layer?.mask = maskLayer
         contentMaskLayer = maskLayer
 
-        // DEBUG: Add dashed border using CAShapeLayer (added to parent so it's not clipped)
-        let borderLayer = CAShapeLayer()
-        borderLayer.strokeColor = NSColor.red.cgColor
-        borderLayer.fillColor = nil
-        borderLayer.lineWidth = 1
-        borderLayer.lineDashPattern = [4, 4]  // 4px dash, 4px gap
-        debugBorderLayer = borderLayer
-
         view.addSubview(roundedContainer)
-
-        // Add debug border to parent view (will be positioned over roundedContainer)
-        view.layer?.addSublayer(borderLayer)
     }
 
     private func setupToolbar() {
         // Create SwiftUI toolbar
-        let toolbarView = SelfDrawnToolbarView(
-            viewModel: viewModel,
-            bookmarkVM: bookmarkVM,
-            layoutState: sidebarLayoutState,
-            onToggleSidebar: { [weak self] in
-                self?.splitViewController?.toggleSidebar(nil)
-            }
-        )
-
-        toolbarHostingView = DraggableToolbarHostingView(rootView: AnyView(toolbarView))
-        toolbarHostingView.translatesAutoresizingMaskIntoConstraints = false
-        toolbarHostingView.wantsLayer = true
-        // Disable titlebar safe area — we manage our own toolbar layout;
-        // the system titlebar is only meaningful in fullscreen.
-        toolbarHostingView.safeAreaRegions = []
-        toolbarHostingView.layer?.borderColor = NSColor.systemGreen.cgColor  // DEBUG
-        toolbarHostingView.layer?.borderWidth = 1  // DEBUG
-        roundedContainer.addSubview(toolbarHostingView)
-
-        // Double-click toolbar to zoom/minimize (respects system preference)
-        let doubleClick = NSClickGestureRecognizer(target: self, action: #selector(toolbarDoubleClicked(_:)))
-        doubleClick.numberOfClicksRequired = 2
-        toolbarHostingView.addGestureRecognizer(doubleClick)
-    }
-
-    @objc private func toolbarDoubleClicked(_ sender: NSClickGestureRecognizer) {
-        guard let window = view.window else { return }
-        let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
-        switch action {
-        case "Minimize":
-            window.miniaturize(nil)
-        case "None":
-            break
-        default:  // "Maximize"
-            window.zoom(nil)
-        }
-    }
-
-    private func setupSplitView() {
-        // Create split view controller
-        splitViewController = MainSplitViewController(
+        let toolbarView = MainWindowTabsView(
             viewModel: viewModel,
             historyVM: historyVM,
             bookmarkVM: bookmarkVM,
-            edgeInset: 0,  // No additional inset needed, container handles it
-            sidebarLayoutState: sidebarLayoutState
+            layoutState: sidebarLayoutState,
+            interaction: toolbarInteraction
         )
 
-        addChild(splitViewController)
+        toolbarHostingView = InteractiveToolbarHostingView(rootView: AnyView(toolbarView))
+        toolbarHostingView.setAccessibilityIdentifier(
+            MainWindowEntityName.tabs.accessibilityIdentifier
+        )
+        toolbarHostingView.translatesAutoresizingMaskIntoConstraints = false
+        toolbarHostingView.wantsLayer = true
+        toolbarHostingView.layer?.backgroundColor = NSColor.clear.cgColor
+        // Disable titlebar safe area — we manage our own toolbar layout;
+        // the system titlebar is only meaningful in fullscreen.
+        toolbarHostingView.safeAreaRegions = []
+        roundedContainer.addSubview(toolbarHostingView)
+    }
 
-        let splitView = splitViewController.view
-        splitView.translatesAutoresizingMaskIntoConstraints = false
-        splitView.wantsLayer = true
-        splitView.layer?.borderColor = NSColor.systemYellow.cgColor  // DEBUG
-        splitView.layer?.borderWidth = 1  // DEBUG
-        roundedContainer.addSubview(splitView)
+    private func setupWindowDragRegion() {
+        windowDragRegion = CompactToolbarWindowDragRegion()
+        windowDragRegion.translatesAutoresizingMaskIntoConstraints = false
+        roundedContainer.addSubview(windowDragRegion)
+
+        sidebarLayoutState.$tabStripWidth
+            .removeDuplicates()
+            .sink { [weak windowDragRegion] width in
+                windowDragRegion?.tabStripWidth = width
+            }
+            .store(in: &layoutCancellables)
+    }
+
+    private func setupContent() {
+        contentViewController = ContentViewController(
+            viewModel: viewModel,
+            historyVM: historyVM,
+            bookmarkVM: bookmarkVM
+        )
+
+        addChild(contentViewController)
+
+        let contentView = contentViewController.view
+        contentView.setAccessibilityIdentifier(
+            MainWindowEntityName.workspace.accessibilityIdentifier
+        )
+        contentView.translatesAutoresizingMaskIntoConstraints = false
+        roundedContainer.addSubview(contentView)
     }
 
     private func setupConstraints() {
@@ -217,17 +387,38 @@ final class RootContentViewController: NSViewController {
             toolbarHostingView.topAnchor.constraint(equalTo: roundedContainer.topAnchor),
             toolbarHostingView.heightAnchor.constraint(equalToConstant: toolbarHeight),
 
-            // Split view: below toolbar, fills remaining space
-            splitViewController.view.leadingAnchor.constraint(equalTo: roundedContainer.leadingAnchor),
-            splitViewController.view.trailingAnchor.constraint(equalTo: roundedContainer.trailingAnchor),
-            splitViewController.view.topAnchor.constraint(equalTo: toolbarHostingView.bottomAnchor),
-            splitViewController.view.bottomAnchor.constraint(equalTo: roundedContainer.bottomAnchor),
+            // One full-header drag mask. Its hit test excludes the complete
+            // Tabs/Tabs Group container and the two toolbar buttons.
+            windowDragRegion.leadingAnchor.constraint(equalTo: roundedContainer.leadingAnchor),
+            windowDragRegion.trailingAnchor.constraint(equalTo: roundedContainer.trailingAnchor),
+            windowDragRegion.topAnchor.constraint(equalTo: roundedContainer.topAnchor),
+            windowDragRegion.heightAnchor.constraint(equalToConstant: toolbarHeight),
+
+            // Body: an independent rounded frame nested inside the window
+            // chrome. The surrounding gutter reveals the same material as the
+            // Header and replaces the former full-width separator line.
+            contentViewController.view.leadingAnchor.constraint(
+                equalTo: roundedContainer.leadingAnchor,
+                constant: bodyInset
+            ),
+            contentViewController.view.trailingAnchor.constraint(
+                equalTo: roundedContainer.trailingAnchor,
+                constant: -bodyInset
+            ),
+            contentViewController.view.topAnchor.constraint(
+                equalTo: toolbarHostingView.bottomAnchor,
+                constant: bodyInset
+            ),
+            contentViewController.view.bottomAnchor.constraint(
+                equalTo: roundedContainer.bottomAnchor,
+                constant: -bodyInset
+            ),
         ])
     }
 
     // MARK: - Layout Updates
 
-    /// Called from `TrafficLightAwareRootView.layout()` — guaranteed to run
+    /// Called from `MainWindowRootView.layout()` — guaranteed to run
     /// after the system's titlebar layout in the same layout pass.
     fileprivate func handleRootViewLayout() {
         // Update content mask to match roundedContainer bounds
@@ -235,13 +426,6 @@ final class RootContentViewController: NSViewController {
             let bounds = roundedContainer.bounds
             let path = CGPath(roundedRect: bounds, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
             maskLayer.path = path
-        }
-
-        // DEBUG: Update dashed border path to match roundedContainer frame (in parent coordinates)
-        if let borderLayer = debugBorderLayer {
-            let frame = roundedContainer.frame
-            let path = CGPath(roundedRect: frame, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
-            borderLayer.path = path
         }
 
         adjustTrafficLights()
@@ -312,67 +496,196 @@ final class RootContentViewController: NSViewController {
 
     func updateWindowFullScreenState(_ isFullScreen: Bool) {
         sidebarLayoutState.updateWindowFullScreen(isFullScreen)
+        windowDragRegion?.isFullScreen = isFullScreen
+        windowDragRegion?.isHidden = isFullScreen
     }
 }
 
-// MARK: - Draggable Toolbar Hosting View
+// MARK: - Interactive Toolbar Hosting View
 
-/// NSHostingView subclass that initiates window drag on `mouseDown` when the
-/// click lands on a non-interactive area (background, empty space).
-/// SwiftUI buttons / text fields handle their own hits normally; everything
-/// else becomes a window-drag handle — matching standard titlebar behaviour.
-private final class DraggableToolbarHostingView: NSHostingView<AnyView> {
+/// SwiftUI content never falls through to implicit titlebar dragging. The
+/// explicit drag mask above it decides which non-Tab header points move the
+/// window.
+private final class InteractiveToolbarHostingView: NSHostingView<AnyView> {
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
+/// Covers the full compact header but only participates in hit testing outside
+/// the Tabs/Tabs Group container and the actual new/overview button bounds.
+/// Everything else—leading chrome, header padding, vertical bands and gaps
+/// around controls—is a deliberate window-drag region.
+private final class CompactToolbarWindowDragRegion: NSView {
+    var isFullScreen = false
+    var tabStripWidth: CGFloat = 300
+
+    override var mouseDownCanMoveWindow: Bool { false }
+
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // AppKit supplies `point` in this view's superview coordinate space.
+        // The exclusion geometry is expressed in local bounds, so comparing
+        // the raw point against `bounds` makes every top-aligned Header point
+        // miss whenever this view's frame origin is non-zero.
+        guard !isHidden, frame.contains(point) else { return nil }
+        let localPoint = convert(point, from: superview)
+        let excludedFrames = [
+            CompactToolbarLayout.tabStripFrame(
+                in: bounds,
+                isFullScreen: isFullScreen,
+                contentWidth: tabStripWidth
+            ),
+            CompactToolbarLayout.newTabButtonFrame(
+                in: bounds
+            ),
+            CompactToolbarLayout.overviewButtonFrame(
+                in: bounds
+            ),
+        ]
+        return excludedFrames.contains(where: { $0.contains(localPoint) }) ? nil : self
+    }
+
     override func mouseDown(with event: NSEvent) {
-        // If the deepest hit-tested view is ourself (no SwiftUI control claimed it),
-        // start a window drag instead of consuming the event.
-        guard let window else { return super.mouseDown(with: event) }
+        guard let window, !window.styleMask.contains(.fullScreen) else { return }
 
-        let locationInSelf = convert(event.locationInWindow, from: nil)
-        let hitView = super.hitTest(locationInSelf)
+        if event.clickCount == 2 {
+            performConfiguredDoubleClickAction(on: window)
+            return
+        }
 
-        // hitView being self or nil means no interactive SwiftUI element is there.
-        if hitView === self || hitView == nil {
-            window.performDrag(with: event)
-        } else {
-            super.mouseDown(with: event)
+        (window as? ActroWindow)?.performExplicitWindowDrag(with: event)
+    }
+
+    private func performConfiguredDoubleClickAction(on window: NSWindow) {
+        let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+        switch action {
+        case "Minimize":
+            window.miniaturize(nil)
+        case "None":
+            break
+        default:
+            window.zoom(nil)
         }
     }
 }
 
 // MARK: - Self-Drawn Toolbar View
 
-struct SelfDrawnToolbarView: View {
+private enum ToolbarTabSectionID: Hashable {
+    case group(UUID)
+    case ungrouped(afterGroupID: UUID?)
+}
+
+private struct ToolbarTabSection: Identifiable {
+    let id: ToolbarTabSectionID
+    let group: TabGroup?
+    let tabs: [Tab]
+
+    init(group: TabGroup?, tabs: [Tab], precedingGroupID: UUID?) {
+        self.group = group
+        self.tabs = tabs
+        self.id = group.map { .group($0.id) }
+            ?? .ungrouped(afterGroupID: precedingGroupID)
+    }
+}
+
+private enum ToolbarTabStripCoordinateSpace {
+    static let name = "actro.main-window.tabs-strip"
+}
+
+private struct ToolbarTabFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+private struct ToolbarTabGroupFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+private struct ToolbarTabGroupHeaderFramePreferenceKey: PreferenceKey {
+    static var defaultValue: [UUID: CGRect] = [:]
+
+    static func reduce(value: inout [UUID: CGRect], nextValue: () -> [UUID: CGRect]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, latest in latest })
+    }
+}
+
+/// Owns address-bar panels whose arrows are anchored to hover-only controls.
+/// The anchor controls must remain visible until AppKit confirms dismissal;
+/// mouse hover alone is not a sufficient presentation state.
+@MainActor
+private final class AddressBarPanelPresentationCoordinator: NSObject, ObservableObject,
+    NSSharingServicePickerDelegate
+{
+    @Published private(set) var presentedTabID: UUID?
+
+    private var sharingServicePicker: NSSharingServicePicker?
+
+    func isPresentingPanel(anchoredTo tabID: UUID) -> Bool {
+        presentedTabID == tabID
+    }
+
+    func showSharePicker(for url: URL, anchoredTo tabID: UUID) {
+        guard let window = NSApp.keyWindow,
+              let contentView = window.contentView else { return }
+
+        let windowPoint = window.convertPoint(fromScreen: NSEvent.mouseLocation)
+        let contentPoint = contentView.convert(windowPoint, from: nil)
+        let anchor = NSRect(origin: contentPoint, size: NSSize(width: 1, height: 1))
+        let picker = NSSharingServicePicker(items: [url])
+
+        picker.delegate = self
+        sharingServicePicker = picker
+        presentedTabID = tabID
+        picker.show(relativeTo: anchor, of: contentView, preferredEdge: .minY)
+    }
+
+    func sharingServicePicker(
+        _ sharingServicePicker: NSSharingServicePicker,
+        didChoose service: NSSharingService?
+    ) {
+        guard self.sharingServicePicker === sharingServicePicker else { return }
+        self.sharingServicePicker = nil
+        presentedTabID = nil
+    }
+}
+
+struct MainWindowTabsView: View {
     @ObservedObject var viewModel: BrowserViewModel
+    @ObservedObject var historyVM: HistoryViewModel
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var layoutState: SidebarLayoutState
-    var onToggleSidebar: () -> Void
+    @ObservedObject var interaction: ToolbarTabInteractionCoordinator
 
-    // Address bar editing state
-    @State private var isAddressFocused: Bool = false
     @State private var addressText: String = ""
     @State private var hasInputActivity: Bool = false
+    @State private var editingGroupID: UUID?
+    @State private var groupNameDraft: String = ""
+    @State private var hoveredTabID: UUID?
+    @State private var isAddressFieldHovered = false
+    @StateObject private var addressPanelPresentation = AddressBarPanelPresentationCoordinator()
 
-    // Layout constants
-    private let iconButtonSize: CGFloat = 30
-    private let iconPointSize: CGFloat = 16
-    private let iconVerticalNudge: CGFloat = -2
+    private let itemSpacing = CompactToolbarLayout.itemSpacing
 
     var body: some View {
         GeometryReader { geo in
-            let metrics = ToolbarLayoutMetrics(state: layoutState)
-            let totalWidth = max(0, geo.size.width)
-            let sidebarWidth = min(totalWidth, max(0, metrics.sidebarSectionWidth))
-            let contentLeading = min(
-                max(0, metrics.contentLeadingX),
-                max(0, totalWidth - 120)
-            )
-            let contentWidth = max(0, totalWidth - contentLeading)
+            let resolvedTabStripWidth = tabStripWidth(in: geo.size.width)
 
-            ZStack(alignment: .topLeading) {
-                // Background in same coordinate space; cancel button
-                // padding so it fills from the hosting view's top edge.
-                toolbarBackground(metrics: metrics)
-                    .padding(.top, -(9 + iconVerticalNudge))
+            HStack(spacing: 0) {
+                Color.clear
+                    .frame(
+                        width: CompactToolbarLayout.leadingReserve(
+                            isFullScreen: layoutState.isWindowFullScreen
+                        ),
+                        height: 1
+                    )
 
                 sidebarToolbarSection(metrics: metrics)
                     .environment(\.colorScheme, .light)
@@ -383,22 +696,14 @@ struct SelfDrawnToolbarView: View {
                     .frame(width: contentWidth, alignment: .leading)
                     .offset(x: contentLeading)
             }
-            // Align button centers with traffic lights (center ≈ 22px):
-            // trafficLightTopInset=15, ~14px tall → center at 22px
-            // iconButtonSize=30 → top at 22-15 = 7px
-            .padding(.top, 9 + iconVerticalNudge)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        }
-        .overlay {
-            // DEBUG: border for SwiftUI toolbar content bounds
-            Rectangle()
-                .stroke(Color.blue.opacity(0.8), lineWidth: 1)
-                .allowsHitTesting(false)
         }
         .onAppear { updateDisplayText() }
         .onChange(of: viewModel.currentTab?.url) { _, _ in updateDisplayText() }
         .onChange(of: viewModel.currentTab?.title) { _, _ in updateDisplayText() }
-        .onChange(of: viewModel.currentTabId) { _, _ in updateDisplayText() }
+        .onChange(of: viewModel.currentTabId) { _, _ in
+            interaction.activeTabChanged(to: viewModel.currentTabId)
+            updateDisplayText()
+        }
         .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, shouldFocus in
             if shouldFocus {
                 enterEditingMode()
@@ -410,121 +715,827 @@ struct SelfDrawnToolbarView: View {
         }
     }
 
-    // MARK: - Sidebar Section
+    // MARK: - Tabs
 
-    private func sidebarToolbarSection(metrics: ToolbarLayoutMetrics) -> some View {
-        HStack(spacing: 0) {
-            // Non-fullscreen: reserve space for native traffic lights region.
-            // Height must be constrained to avoid expanding the HStack to fill
-            // the ZStack's full height, which would vertically center the buttons.
-            Color.clear
-                .frame(width: metrics.trafficLightsReservedWidth, height: 0)
+    private var tabStrip: some View {
+        GeometryReader { geo in
+            let sections = tabSections
 
-            Spacer(minLength: metrics.sidebarMinGap)
+            ZStack(alignment: .topLeading) {
+                ScrollViewReader { proxy in
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 2) {
+                            ForEach(sections) { section in
+                                if let group = section.group {
+                                    groupedTabs(group, tabs: section.tabs)
+                                } else {
+                                    HStack(spacing: 2) {
+                                        ForEach(section.tabs) { tab in
+                                            renderedTab(tab)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        .padding(2)
+                        .animation(ToolbarTabMotion.slide, value: viewModel.currentTabId)
+                    }
+                    .onChange(of: viewModel.currentTabId) { _, tabID in
+                        guard let tabID else { return }
+                        withAnimation(ToolbarTabMotion.slide) {
+                            proxy.scrollTo(tabID, anchor: .center)
+                        }
+                    }
+                }
 
-            HStack(spacing: metrics.sidebarButtonsSpacing) {
-                newTabButton
-                overviewButton
+                movingTabForeground
+                movingGroupForeground
+            }
+            .onAppear { interaction.updateTabStripWidth(geo.size.width) }
+            .onChange(of: geo.size.width) { _, width in
+                interaction.updateTabStripWidth(width)
             }
         }
-        .padding(.trailing, metrics.sidebarButtonsTrailingInset)
+        .coordinateSpace(name: ToolbarTabStripCoordinateSpace.name)
+        .onPreferenceChange(ToolbarTabFramePreferenceKey.self) {
+            interaction.updateTabFrames($0)
+        }
+        .onPreferenceChange(ToolbarTabGroupFramePreferenceKey.self) {
+            interaction.updateGroupFrames($0)
+        }
+        .onPreferenceChange(ToolbarTabGroupHeaderFramePreferenceKey.self) {
+            interaction.updateGroupHeaderFrames($0)
+        }
+        .simultaneousGesture(tabReorderGesture)
+        .frame(height: CompactToolbarLayout.tabStripHeight)
     }
 
-    // MARK: - Content Section
+    private var tabSections: [ToolbarTabSection] {
+        var precedingGroupID: UUID?
+        return viewModel.tabsOrganizedByGroups().map { section in
+            let toolbarSection = ToolbarTabSection(
+                group: section.group,
+                tabs: section.tabs,
+                precedingGroupID: precedingGroupID
+            )
+            if let groupID = section.group?.id {
+                precedingGroupID = groupID
+            }
+            return toolbarSection
+        }
+    }
 
-    private var contentToolbarSection: some View {
-        HStack(spacing: 12) {
-            sidebarToggleButton
+    /// Corners follow the logical order, rather than whatever happens to be
+    /// touching the ScrollView viewport. A surface can own either outer edge,
+    /// both outer edges, or neither.
+    private func toolbarSurfaceShape(
+        isLeadingEdge: Bool,
+        isTrailingEdge: Bool
+    ) -> UnevenRoundedRectangle {
+        let leadingRadius = isLeadingEdge
+            ? CompactToolbarLayout.edgeTabCornerRadius
+            : CompactToolbarLayout.tabCornerRadius
+        let trailingRadius = isTrailingEdge
+            ? CompactToolbarLayout.edgeTabCornerRadius
+            : CompactToolbarLayout.tabCornerRadius
 
-            // Navigation buttons
-            HStack(spacing: 4) {
-                Button(action: { viewModel.goBack() }) {
-                    Image(systemName: "chevron.left")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: iconButtonSize, height: iconButtonSize)
+        return UnevenRoundedRectangle(
+            cornerRadii: .init(
+                topLeading: leadingRadius,
+                bottomLeading: leadingRadius,
+                bottomTrailing: trailingRadius,
+                topTrailing: trailingRadius
+            ),
+            style: .continuous
+        )
+    }
+
+    private func tabShape(for tab: Tab) -> UnevenRoundedRectangle {
+        let sections = tabSections
+        let firstSection = sections.first
+        let lastSection = sections.last
+
+        // A leading group header precedes its member Tabs. An expanded last
+        // group delegates the trailing outer corners to its final member Tab.
+        let isLeadingEdge = firstSection?.group == nil
+            && firstSection?.tabs.first?.id == tab.id
+        let isTrailingEdge = lastSection?.group?.isCollapsed != true
+            && lastSection?.tabs.last?.id == tab.id
+
+        return toolbarSurfaceShape(
+            isLeadingEdge: isLeadingEdge,
+            isTrailingEdge: isTrailingEdge
+        )
+    }
+
+    private func groupShape(for group: TabGroup) -> UnevenRoundedRectangle {
+        let sections = tabSections
+        return toolbarSurfaceShape(
+            isLeadingEdge: sections.first?.group?.id == group.id,
+            isTrailingEdge: sections.last?.group?.id == group.id
+        )
+    }
+
+    private func groupHeaderShape(for group: TabGroup) -> UnevenRoundedRectangle {
+        let sections = tabSections
+        return toolbarSurfaceShape(
+            isLeadingEdge: sections.first?.group?.id == group.id,
+            isTrailingEdge: group.isCollapsed && sections.last?.group?.id == group.id
+        )
+    }
+
+    private func tabStripGapWidth(for sections: [ToolbarTabSection]) -> CGFloat {
+        let outerGaps = CGFloat(max(0, sections.count - 1)) * 2
+        let innerGaps = sections.reduce(CGFloat.zero) { result, section in
+            if let group = section.group {
+                return result + (group.isCollapsed ? 0 : CGFloat(section.tabs.count) * 2)
+            }
+            return result + CGFloat(max(0, section.tabs.count - 1)) * 2
+        }
+        return outerGaps + innerGaps
+    }
+
+    private func groupLabelWidth(_ group: TabGroup) -> CGFloat {
+        let title = group.name.isEmpty ? "Tab Group" : group.name
+        return min(158, max(82, CGFloat(title.count) * 7 + 48))
+    }
+
+    private func tabStripWidth(in toolbarWidth: CGFloat) -> CGFloat {
+        let sections = tabSections
+        let visibleTabs = sections.flatMap { section in
+            section.group?.isCollapsed == true ? [] : section.tabs
+        }
+        let tabsWidth = visibleTabs.reduce(CGFloat.zero) { result, tab in
+            result + tabWidth(for: tab)
+        }
+        let groupHeaderWidth = sections.reduce(CGFloat.zero) { result, section in
+            result + (section.group.map(groupLabelWidth) ?? 0)
+        }
+        let contentWidth = tabsWidth
+            + groupHeaderWidth
+            + tabStripGapWidth(for: sections)
+            + 4
+        return min(
+            contentWidth,
+            CompactToolbarLayout.maximumTabStripWidth(
+                in: toolbarWidth,
+                isFullScreen: layoutState.isWindowFullScreen
+            )
+        )
+    }
+
+    private func tabWidth(for tab: Tab) -> CGFloat {
+        if viewModel.currentTabId == tab.id {
+            return min(
+                CompactToolbarLayout.activeTabMaxWidth,
+                max(CompactToolbarLayout.activeTabMinWidth, CompactToolbarLayout.activeTabPreferredWidth)
+            )
+        }
+
+        let title = tab.title.isEmpty ? "New Tab" : tab.title
+        let titleWidth = ceil(
+            (title as NSString).size(
+                withAttributes: [.font: NSFont.systemFont(ofSize: 12.5)]
+            ).width
+        )
+        return min(
+            CompactToolbarLayout.inactiveTabMaxWidth,
+            max(CompactToolbarLayout.inactiveTabMinWidth, titleWidth + 46)
+        )
+    }
+
+    @ViewBuilder
+    private func renderedTab(_ tab: Tab) -> some View {
+        let width = tabWidth(for: tab)
+        let isMoving = interaction.isMovingTab(tab.id)
+        let tabContainer = ZStack {
+            if isMoving {
+                Color.clear
+            } else {
+                tabLabel(tab)
+                    .frame(width: width)
+            }
+        }
+        // The slot swaps between its label and a transparent placeholder
+        // instantly. Only the slot's geometry participates in reordering.
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+        .frame(width: width, height: 32)
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ToolbarTabFramePreferenceKey.self,
+                    value: [
+                        tab.id: proxy.frame(in: .named(ToolbarTabStripCoordinateSpace.name))
+                    ]
+                )
+            }
+        }
+        .contentShape(tabShape(for: tab))
+        .id(tab.id)
+        // A Tab can migrate between two nested ForEach containers when it
+        // crosses a Tabs Group boundary. Never let SwiftUI turn that logical
+        // move into its default remove/insert opacity transition.
+        .transition(.identity)
+
+        tabContainer
+    }
+
+    /// A single stable foreground instance follows the pointer for the whole
+    /// drag. It lives above every Tabs/Tabs Group subtree, so model reordering
+    /// cannot remove, insert, cross-fade, or clip the moving Tab.
+    @ViewBuilder
+    private var movingTabForeground: some View {
+        if let tabID = interaction.movingTabID,
+           let tab = viewModel.tabs.first(where: { $0.id == tabID }),
+           let frame = interaction.movingTabFrame(for: tabID) {
+            tabLabel(tab)
+                .frame(width: frame.width, height: frame.height)
+                .position(x: frame.midX, y: frame.midY)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .zIndex(1_000)
+                .id(tabID)
+                .transition(.identity)
+                // Pointer tracking must be direct and the foreground surface
+                // must never inherit a sibling-slot animation transaction.
+                .transaction { transaction in
+                    transaction.animation = nil
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .disabled(!viewModel.canGoBack)
+        }
+    }
 
-                Button(action: { viewModel.goForward() }) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: iconButtonSize, height: iconButtonSize)
+    /// Chrome drags a group header and all of its Tabs as one foreground block.
+    /// The original subtree remains as a transparent layout placeholder until
+    /// its new model position has been laid out.
+    @ViewBuilder
+    private var movingGroupForeground: some View {
+        if let groupID = interaction.movingGroupID,
+           let group = viewModel.tabGroups.first(where: { $0.id == groupID }),
+           let frame = interaction.movingGroupFrame(for: groupID) {
+            let tabs = viewModel.tabs.filter { $0.groupId == groupID }
+
+            HStack(spacing: 2) {
+                groupHeader(group, tabCount: tabs.count)
+                    .frame(width: groupLabelWidth(group))
+
+                if !group.isCollapsed {
+                    ForEach(tabs) { tab in
+                        let width = tabWidth(for: tab)
+                        tabLabel(tab)
+                            .frame(width: width, height: 32)
+                    }
                 }
-                .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
-                .disabled(!viewModel.canGoForward)
+            }
+            .frame(width: frame.width, height: frame.height)
+            .background {
+                groupSurface(for: group, isMoving: true)
+            }
+            .overlay {
+                groupShape(for: group)
+                    .strokeBorder(group.color.swiftUIColor.opacity(0.85), lineWidth: 1.5)
+            }
+            .position(x: frame.midX, y: frame.midY)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .zIndex(1_000)
+            .id(groupID)
+            .transition(.identity)
+            .transaction { transaction in
+                transaction.animation = nil
+            }
+        }
+    }
+
+    private func interactionState(for tab: Tab) -> ToolbarTabInteractionPhase {
+        interaction.phase(for: tab.id, activeTabID: viewModel.currentTabId)
+    }
+
+    private var tabReorderGesture: some Gesture {
+        DragGesture(
+            minimumDistance: 6,
+            coordinateSpace: .named(ToolbarTabStripCoordinateSpace.name)
+        )
+        .onChanged { value in
+            interaction.updateInPlaceDrag(
+                startLocationX: value.startLocation.x,
+                locationX: value.location.x,
+                activeTabID: viewModel.currentTabId,
+                viewModel: viewModel
+            )
+        }
+        .onEnded { _ in
+            interaction.finishDrag(activeTabID: viewModel.currentTabId)
+        }
+    }
+
+    @ViewBuilder
+    private func groupedTabs(_ group: TabGroup, tabs: [Tab]) -> some View {
+        let isMoving = interaction.isMovingGroup(group.id)
+        let content = HStack(spacing: 2) {
+            groupHeader(group, tabCount: tabs.count)
+                .frame(width: groupLabelWidth(group))
+                .background {
+                    GeometryReader { proxy in
+                        Color.clear.preference(
+                            key: ToolbarTabGroupHeaderFramePreferenceKey.self,
+                            value: [
+                                group.id: proxy.frame(
+                                    in: .named(ToolbarTabStripCoordinateSpace.name)
+                                )
+                            ]
+                        )
+                    }
+                }
+
+            if !group.isCollapsed {
+                ForEach(tabs) { tab in
+                    renderedTab(tab)
+                }
+            }
+        }
+        .frame(height: 32)
+        .background {
+            groupSurface(for: group, isMoving: false)
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear.preference(
+                    key: ToolbarTabGroupFramePreferenceKey.self,
+                    value: [
+                        group.id: proxy.frame(in: .named(ToolbarTabStripCoordinateSpace.name))
+                    ]
+                )
+            }
+        }
+        .overlay {
+            groupShape(for: group)
+                .strokeBorder(group.color.swiftUIColor.opacity(0.85), lineWidth: 1.5)
+        }
+        .opacity(isMoving ? 0 : 1)
+        .transition(.identity)
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+
+        content
+    }
+
+    /// Static groups keep the toolbar's translucent tint. While the group is
+    /// moving, Chrome treats the header and every member Tab as one foreground
+    /// surface, so the same tint is composited over an opaque toolbar-colored
+    /// plate. Nothing underneath the dragged group can bleed through.
+    private func groupSurface(for group: TabGroup, isMoving: Bool) -> some View {
+        let shape = groupShape(for: group)
+
+        return ZStack {
+            // Keep both layers in one non-animated surface. This matches the
+            // moving Tab plate and prevents a transient opacity interpolation
+            // when the group first leaves its layout slot.
+            shape.fill(isMoving ? AppColors.windowChromeDragPlateColor : Color.clear)
+            shape.fill(group.color.swiftUIColor.opacity(0.08))
+        }
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+    }
+
+    private func groupHeader(_ group: TabGroup, tabCount: Int) -> some View {
+        let title = group.name.isEmpty ? "Tab Group" : group.name
+        let containsCurrentTab = viewModel.currentTab?.groupId == group.id
+
+        return HStack(spacing: 3) {
+            Button {
+                exitEditingMode()
+                withAnimation(ToolbarTabMotion.slide) {
+                    viewModel.toggleGroupCollapsed(groupId: group.id)
+                }
+            } label: {
+                Image(systemName: group.isCollapsed ? "chevron.right" : "chevron.down")
+                    .font(.system(size: 9, weight: .bold))
+                    .frame(width: 16, height: 22)
+            }
+            .buttonStyle(.plain)
+            .help(group.isCollapsed ? "Expand Group" : "Collapse Group")
+
+            Button {
+                exitEditingMode()
+                groupNameDraft = group.name
+                editingGroupID = group.id
+            } label: {
+                HStack(spacing: 5) {
+                    Circle()
+                        .fill(group.color.swiftUIColor)
+                        .frame(width: 9, height: 9)
+
+                    Text(title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .lineLimit(1)
+
+                    Text("\(tabCount)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .help("Edit Tab Group")
+            .popover(isPresented: groupEditorBinding(for: group), arrowEdge: .bottom) {
+                groupEditor(group)
+            }
+        }
+        .padding(.horizontal, 5)
+        .frame(height: 30)
+        .background {
+            groupHeaderShape(for: group)
+                .fill(group.color.swiftUIColor.opacity(containsCurrentTab ? 0.32 : 0.2))
+        }
+        .contextMenu {
+            Button("Edit Group…") {
+                groupNameDraft = group.name
+                editingGroupID = group.id
+            }
+            Button("New Tab in Group") { addNewTab(to: group) }
+            Button(group.isCollapsed ? "Expand Group" : "Collapse Group") {
+                viewModel.toggleGroupCollapsed(groupId: group.id)
+            }
+            Divider()
+            Button("Ungroup") { viewModel.deleteGroup(groupId: group.id) }
+            Button("Close Group", role: .destructive) {
+                viewModel.closeGroup(groupId: group.id, historyVM: historyVM)
+            }
+        }
+        .accessibilityLabel("\(title), \(tabCount) tabs")
+    }
+
+    private func groupEditorBinding(for group: TabGroup) -> Binding<Bool> {
+        Binding(
+            get: { editingGroupID == group.id },
+            set: { isPresented in
+                if !isPresented, editingGroupID == group.id {
+                    commitGroupName(group)
+                    editingGroupID = nil
+                }
+            }
+        )
+    }
+
+    private func groupEditor(_ group: TabGroup) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            TextField("Group name", text: $groupNameDraft)
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 224)
+                .onSubmit {
+                    commitGroupName(group)
+                    editingGroupID = nil
+                }
+
+            HStack(spacing: 7) {
+                ForEach(TabGroupColor.allCases, id: \.self) { color in
+                    Button {
+                        viewModel.updateGroup(groupId: group.id, color: color)
+                    } label: {
+                        Circle()
+                            .fill(color.swiftUIColor)
+                            .frame(width: 18, height: 18)
+                            .overlay {
+                                Circle()
+                                    .strokeBorder(Color.primary, lineWidth: group.color == color ? 2 : 0)
+                                    .padding(-3)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .help(color.displayName)
+                }
             }
 
-            // Address bar
-            addressBar
-                .frame(maxWidth: 400)
+            Divider()
 
-            Spacer()
-
-            // Right side actions
-            rightActions
+            groupEditorButton("plus.rectangle", title: "New Tab in Group") {
+                commitGroupName(group)
+                addNewTab(to: group)
+            }
+            groupEditorButton("rectangle.badge.minus", title: "Ungroup") {
+                editingGroupID = nil
+                viewModel.deleteGroup(groupId: group.id)
+            }
+            groupEditorButton("xmark.rectangle", title: "Close Group", role: .destructive) {
+                editingGroupID = nil
+                viewModel.closeGroup(groupId: group.id, historyVM: historyVM)
+            }
         }
-        .padding(.trailing, 12)
+        .padding(16)
+    }
+
+    private func groupEditorButton(
+        _ symbol: String,
+        title: String,
+        role: ButtonRole? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(role: role, action: action) {
+            Label(title, systemImage: symbol)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func commitGroupName(_ group: TabGroup) {
+        let name = groupNameDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        if name != group.name {
+            viewModel.updateGroup(groupId: group.id, name: name)
+        }
+    }
+
+    private func addNewTab(to group: TabGroup) {
+        let newTab = viewModel.addNewTab()
+        viewModel.addTabToGroup(tabId: newTab.id, groupId: group.id)
+        viewModel.updateGroup(groupId: group.id, isCollapsed: false)
+    }
+
+    @ViewBuilder
+    private func tabLabel(_ tab: Tab) -> some View {
+        switch interactionState(for: tab) {
+        case .inactive:
+            inactiveTab(tab)
+                .transition(.identity)
+        case .active:
+            activeTab(tab)
+                .transition(.identity)
+        case .addressEditing:
+            addressEditingTab(tab)
+                .transition(.identity)
+        case .draggingInactive:
+            inactiveTab(tab)
+                .transition(.identity)
+        case .draggingActive:
+            activeTab(tab)
+                .transition(.identity)
+        }
+    }
+
+    private func inactiveTab(_ tab: Tab) -> some View {
+        HStack(spacing: 7) {
+            tabIdentityIcon(for: tab)
+
+            Text(tab.title.isEmpty ? "New Tab" : tab.title)
+                .font(.system(size: 12.5))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background {
+            tabSurface(for: tab, tintOpacity: 0.035)
+        }
+        .overlay(alignment: .bottom) { groupIndicator(for: tab) }
+        .contentShape(tabShape(for: tab))
+        .onTapGesture {
+            exitEditingMode()
+            viewModel.switchToTab(id: tab.id)
+        }
+        .contextMenu { tabContextMenu(for: tab) }
+        .accessibilityLabel(tab.title.isEmpty ? "New Tab" : tab.title)
+    }
+
+    private func activeTab(_ tab: Tab) -> some View {
+        HStack(spacing: 3) {
+            tabToolbarButton("chevron.left", help: "Back", disabled: !viewModel.canGoBack) {
+                viewModel.goBack()
+            }
+            tabToolbarButton("chevron.right", help: "Forward", disabled: !viewModel.canGoForward) {
+                viewModel.goForward()
+            }
+
+            Rectangle()
+                .fill(Color.primary.opacity(AppColors.usesDarkAppearance ? 0.24 : 0.16))
+                .frame(width: 1, height: 18)
+                // The chevron has more optical whitespace than the favicon.
+                // Shift the divider within the same 5pt allocation so both
+                // visible glyphs, rather than their frames, feel equidistant.
+                .padding(.leading, 0)
+                .padding(.trailing, 4)
+                .allowsHitTesting(false)
+
+            activeAddressRegion(for: tab)
+
+            HoverIconButton(
+                symbol: "xmark",
+                help: "Close Tab"
+            ) {
+                viewModel.closeTab(id: tab.id)
+            }
+        }
+        .padding(.horizontal, 6)
+        .frame(height: 32)
+        .background {
+            tabSurface(for: tab, tintOpacity: 0.11)
+        }
+        .overlay {
+            tabShape(for: tab)
+                .strokeBorder(
+                    Color.primary.opacity(AppColors.usesDarkAppearance ? 0.16 : 0.10),
+                    lineWidth: 0.75
+                )
+        }
+        .overlay(alignment: .bottom) { groupIndicator(for: tab) }
+        .contentShape(tabShape(for: tab))
+        .onHover { isInside in
+            hoveredTabID = isInside ? tab.id : nil
+        }
+        .contextMenu { tabContextMenu(for: tab) }
+        .accessibilityLabel(tab.title.isEmpty ? "New Tab" : tab.title)
+        .accessibilityAddTraits(.isSelected)
+    }
+
+    /// Static Tabs keep their translucent tint. During an in-place drag, the
+    /// same tint is composited over an opaque toolbar-colored surface so the
+    /// moving Tab behaves like Chrome's foreground Tab and occludes siblings.
+    private func tabSurface(for tab: Tab, tintOpacity: Double) -> some View {
+        let shape = tabShape(for: tab)
+        let isMoving = interaction.isMovingTab(tab.id)
+
+        return ZStack {
+            // Keep the opaque drag plate mounted at all times. Inserting or
+            // removing this layer inside a reorder animation would briefly
+            // cross-fade the foreground Tab.
+            shape.fill(isMoving ? AppColors.windowChromeDragPlateColor : Color.clear)
+            shape.fill(Color.primary.opacity(tintOpacity))
+        }
+        // Reordering still animates the Tab's geometry, but never its surface.
+        .transaction { transaction in
+            transaction.animation = nil
+        }
+    }
+
+    private func addressEditingTab(_ tab: Tab) -> some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 15)
+
+            ZStack(alignment: .leading) {
+                if addressText.isEmpty && !hasInputActivity {
+                    Text("Search or enter website name")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
+                }
+
+                SelfDrawnAddressInputField(
+                    text: $addressText,
+                    onSubmit: submitAddress,
+                    onBlur: exitEditingMode,
+                    onInputActivity: { hasInputActivity = true }
+                )
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .padding(.horizontal, 10)
+        .frame(height: 32)
+        .background {
+            tabShape(for: tab)
+                .fill(Color.primary.opacity(0.13))
+        }
+        .overlay {
+            tabShape(for: tab)
+                .strokeBorder(Color.accentColor.opacity(0.85), lineWidth: 2)
+        }
+        .overlay(alignment: .bottom) { groupIndicator(for: tab) }
+        .contentShape(tabShape(for: tab))
+        .accessibilityLabel("Address for \(tab.title.isEmpty ? "New Tab" : tab.title)")
+        .accessibilityAddTraits(.isSelected)
+    }
+
+    @ViewBuilder
+    private func groupIndicator(for tab: Tab) -> some View {
+        if let groupID = tab.groupId,
+           let group = viewModel.tabGroups.first(where: { $0.id == groupID }) {
+            Capsule()
+                .fill(Color(nsColor: group.color.nsColor))
+                .frame(height: 2)
+                .padding(.horizontal, 10)
+        }
+    }
+
+    @ViewBuilder
+    private func tabContextMenu(for tab: Tab) -> some View {
+        if tab.groupId != nil {
+            Button("Remove from Group") {
+                viewModel.removeTabFromGroup(tabId: tab.id)
+            }
+        }
+
+        Button("Add to New Group") {
+            let group = viewModel.createGroup(name: "", color: .blue)
+            viewModel.addTabToGroup(tabId: tab.id, groupId: group.id)
+            DispatchQueue.main.async {
+                groupNameDraft = ""
+                editingGroupID = group.id
+            }
+        }
+
+        if !viewModel.tabGroups.filter({ $0.id != tab.groupId }).isEmpty {
+            Menu(tab.groupId == nil ? "Add to Group" : "Move to Group") {
+                ForEach(viewModel.tabGroups.filter { $0.id != tab.groupId }) { group in
+                    Button(group.name.isEmpty ? "Tab Group" : group.name) {
+                        viewModel.addTabToGroup(tabId: tab.id, groupId: group.id)
+                        viewModel.updateGroup(groupId: group.id, isCollapsed: false)
+                    }
+                }
+            }
+        }
+
+        Divider()
+        Button("Close Tab") { viewModel.closeTab(id: tab.id) }
+        Button("Close Other Tabs") {
+            let otherIDs = viewModel.tabs.map(\.id).filter { $0 != tab.id }
+            viewModel.switchToTab(id: tab.id)
+            otherIDs.forEach { viewModel.closeTab(id: $0) }
+        }
+    }
+
+    private func tabFallbackIcon(for tab: Tab) -> String {
+        if let appIcon = tab.appIcon { return appIcon }
+        if let systemType = tab.systemTabType { return systemType.icon }
+        if case .web = tab.contentType { return "globe" }
+        return "doc.text"
+    }
+
+    private func tabIdentityIcon(for tab: Tab) -> some View {
+        TabIdentityIcon(
+            tab: tab,
+            isLoading: viewModel.isTabLoading(tab.id),
+            fallbackSymbol: tabFallbackIcon(for: tab)
+        )
     }
 
     // MARK: - Address Bar
 
-    private var addressBar: some View {
-        HStack(spacing: 4) {
-            // Left icon
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 12))
-                .foregroundStyle(.tertiary)
-
-            // Address text / input field
-            if isAddressFocused {
-                ZStack(alignment: .leading) {
-                    if addressText.isEmpty && !hasInputActivity {
-                        Text("Search or enter website name")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                            .allowsHitTesting(false)
-                    }
-                    SelfDrawnAddressInputField(
-                        text: $addressText,
-                        onSubmit: submitAddress,
-                        onBlur: exitEditingMode,
-                        onInputActivity: { hasInputActivity = true }
+    private var activeAddressField: some View {
+        Group {
+            if addressText.isEmpty {
+                Text("Search or enter website name")
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(
+                        isAddressFieldHovered
+                            ? AppColors.tabSecondaryInteractiveHoverColor
+                            : Color.secondary
                     )
-                }
-                .frame(maxWidth: .infinity)
             } else {
-                Group {
-                    if addressText.isEmpty {
-                        Text("Search or enter website name")
-                            .font(.system(size: 13))
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text(addressText)
-                            .font(.system(size: 13))
-                            .foregroundStyle(.primary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-                .onTapGesture { enterEditingMode() }
+                Text(addressText)
+                    .font(.system(size: 12.5))
+                    .foregroundStyle(
+                        isAddressFieldHovered
+                            ? AppColors.tabPrimaryInteractiveHoverColor
+                            : Color.primary
+                    )
+                    .lineLimit(1)
+                    .truncationMode(.middle)
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onHover { isInside in
+            isAddressFieldHovered = isInside
+        }
+        .onTapGesture { enterEditingMode() }
+    }
 
-            Spacer(minLength: 0)
+    private func activeAddressRegion(for tab: Tab) -> some View {
+        HStack(spacing: 7) {
+            tabIdentityIcon(for: tab)
+
+            activeAddressField
+                .frame(minWidth: 44, maxWidth: .infinity)
         }
-        .padding(.horizontal, 8)
-        .frame(height: iconButtonSize)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(Color.blue.opacity(0.75), lineWidth: 2)
-                .opacity(isAddressFocused ? 1 : 0)
-                .animation(.easeOut(duration: 0.12), value: isAddressFocused)
+        .frame(maxWidth: .infinity)
+        .overlay(alignment: .trailing) {
+            if showsAddressActions(for: tab) {
+                HStack(spacing: 0) {
+                    tabToolbarButton("arrow.clockwise", help: "Reload") {
+                        viewModel.reloadCurrentTab()
+                    }
+                    tabToolbarButton(
+                        isBookmarked ? "star.fill" : "star",
+                        help: isBookmarked ? "Remove Bookmark" : "Add Bookmark"
+                    ) {
+                        toggleBookmark()
+                    }
+                    activeShareButton(for: tab)
+                }
+                .padding(.leading, 6)
+            }
         }
+        .contentShape(Rectangle())
+    }
+
+    private func showsAddressActions(for tab: Tab) -> Bool {
+        hoveredTabID == tab.id
+            || addressPanelPresentation.isPresentingPanel(anchoredTo: tab.id)
     }
 
     // MARK: - Address Bar Helpers
@@ -532,7 +1543,8 @@ struct SelfDrawnToolbarView: View {
     private func displayText(for tab: Tab?) -> String {
         guard let tab = tab else { return "" }
         if let systemType = tab.systemTabType {
-            return systemType.aboutURL.absoluteString
+            if systemType == .startPage { return "" }
+            return (tab.url ?? systemType.systemURL).absoluteString
         }
         if case .web = tab.contentType, let url = tab.url {
             let host = url.host ?? url.absoluteString
@@ -544,7 +1556,8 @@ struct SelfDrawnToolbarView: View {
     private func editingText(for tab: Tab?) -> String {
         guard let tab = tab else { return "" }
         if let systemType = tab.systemTabType {
-            return systemType.aboutURL.absoluteString
+            if systemType == .startPage { return "" }
+            return (tab.url ?? systemType.systemURL).absoluteString
         }
         if let url = tab.url {
             return url.absoluteString
@@ -553,12 +1566,17 @@ struct SelfDrawnToolbarView: View {
     }
 
     private func enterEditingMode() {
+        guard let currentTabID = viewModel.currentTabId,
+              interaction.beginAddressEditing(
+                  tabID: currentTabID,
+                  activeTabID: viewModel.currentTabId
+              ) else { return }
+        isAddressFieldHovered = false
         addressText = editingText(for: viewModel.currentTab)
-        isAddressFocused = true
     }
 
     private func exitEditingMode() {
-        isAddressFocused = false
+        interaction.endAddressEditing(activeTabID: viewModel.currentTabId)
         hasInputActivity = false
         updateDisplayText()
     }
@@ -571,7 +1589,7 @@ struct SelfDrawnToolbarView: View {
     }
 
     private func updateDisplayText() {
-        guard !isAddressFocused else { return }
+        guard !interaction.isAddressEditing else { return }
         addressText = displayText(for: viewModel.currentTab)
     }
 
@@ -631,10 +1649,6 @@ struct SelfDrawnToolbarView: View {
         return bookmarkVM.bookmarks.contains(where: { $0.appURL == url })
     }
 
-    private func toggleSidebar() {
-        onToggleSidebar()
-    }
-
     private func toggleOverview() {
         NotificationCenter.default.post(name: .toggleFocusOverviewRequested, object: nil)
     }
@@ -655,92 +1669,194 @@ struct SelfDrawnToolbarView: View {
     // MARK: - Buttons
 
     private var newTabButton: some View {
-        Button(action: { _ = viewModel.addNewTab() }) {
-            Image(systemName: "plus")
-                .font(.system(size: iconPointSize, weight: .medium))
-                .frame(width: iconButtonSize, height: iconButtonSize)
+        toolbarButton("plus", help: "New Tab") {
+            exitEditingMode()
+            _ = viewModel.addNewTab()
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
     }
 
     private var overviewButton: some View {
-        Button(action: { toggleOverview() }) {
-            Image(systemName: "square.on.square")
-                .font(.system(size: iconPointSize, weight: .medium))
-                .frame(width: iconButtonSize, height: iconButtonSize)
+        toolbarButton("square.on.square", help: "Tab Overview") {
+            exitEditingMode()
+            toggleOverview()
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
     }
 
-    private var sidebarToggleButton: some View {
-        Button(action: { toggleSidebar() }) {
-            Image(systemName: "sidebar.left")
-                .font(.system(size: iconPointSize, weight: .medium))
-                .frame(width: iconButtonSize, height: iconButtonSize)
+    private func activeShareButton(for tab: Tab) -> some View {
+        Group {
+            if let url = viewModel.currentTab?.url {
+                HoverIconButton(
+                    symbol: "square.and.arrow.up",
+                    help: "Share"
+                ) {
+                    addressPanelPresentation.showSharePicker(
+                        for: url,
+                        anchoredTo: tab.id
+                    )
+                }
+            }
         }
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
     }
 
-    // MARK: - Layout Metrics
+    private func tabToolbarButton(
+        _ symbol: String,
+        help: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        HoverIconButton(
+            symbol: symbol,
+            help: help,
+            disabled: disabled,
+            action: action
+        )
+    }
 
-    private struct ToolbarLayoutMetrics {
-        let sidebarSectionWidth: CGFloat
-        let trafficLightsReservedWidth: CGFloat
-        let sidebarButtonsSpacing: CGFloat
-        let sidebarButtonsTrailingInset: CGFloat
-        let sidebarMinGap: CGFloat
-        let backgroundLeadingX: CGFloat
-        let contentLeadingX: CGFloat
+    private func toolbarButton(
+        _ symbol: String,
+        help: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        HoverIconButton(
+            symbol: symbol,
+            help: help,
+            metrics: .header,
+            disabled: disabled,
+            action: action
+        )
+    }
+}
 
-        init(state: SidebarLayoutState) {
-            let widthRef = max(640, state.windowWidth)
-            let t = Self.normalized(widthRef, min: 780, max: 1680)
-            let splitBoundaryX = max(0, state.splitBoundaryX)
+private enum HoverIconButtonMetrics {
+    case tabEmbedded
+    case header
 
-            trafficLightsReservedWidth = state.isWindowFullScreen
-                ? 0
-                : Self.lerp(64, 76, t)
-            sidebarButtonsSpacing = Self.lerp(8, 14, t)
-            sidebarButtonsTrailingInset = Self.lerp(8, 20, t)
-            sidebarMinGap = Self.lerp(8, 18, t)
-
-            let collapsedWidth = state.collapsedToolbarWidth
-            let sidebarButtonsWidth = (Self.toolbarButtonSize * 2) + sidebarButtonsSpacing
-            let minCollapsedSidebarSectionWidth = trafficLightsReservedWidth
-                + sidebarMinGap
-                + sidebarButtonsWidth
-                + sidebarButtonsTrailingInset
-            sidebarSectionWidth = state.isSidebarCollapsed
-                ? max(collapsedWidth, minCollapsedSidebarSectionWidth)
-                : splitBoundaryX
-
-            backgroundLeadingX = state.isSidebarCollapsed
-                ? 0
-                : splitBoundaryX
-
-            // Keep ToggleSidebar anchored to background-leading + fixed inset,
-            // while avoiding overlap with [+]/[Overview] section.
-            let toggleInsetFromBackground = Self.lerp(10, 16, t)
-            let minSeparationFromSidebarSection = Self.lerp(8, 14, t)
-            contentLeadingX = max(
-                backgroundLeadingX + toggleInsetFromBackground,
-                sidebarSectionWidth + minSeparationFromSidebarSection
-            )
+    var glyphSize: CGFloat {
+        switch self {
+        case .tabEmbedded: return 12
+        case .header: return 16
         }
+    }
 
-        private static func normalized(_ value: CGFloat, min: CGFloat, max: CGFloat) -> CGFloat {
-            guard max > min else { return 0 }
-            return Swift.max(0, Swift.min(1, (value - min) / (max - min)))
+    var controlSize: CGFloat {
+        switch self {
+        case .tabEmbedded: return 24
+        case .header: return CompactToolbarLayout.buttonSize
         }
+    }
+}
 
-        private static func lerp(_ start: CGFloat, _ end: CGFloat, _ t: CGFloat) -> CGFloat {
-            start + (end - start) * t
+/// Shared line-only hover treatment for Header and Tab actions. Metrics are
+/// selected by semantic role so adjacent controls cannot drift in size.
+private struct HoverIconButton: View {
+    let symbol: String
+    let help: String
+    var metrics: HoverIconButtonMetrics = .tabEmbedded
+    var disabled = false
+    let action: () -> Void
+
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: metrics.glyphSize, weight: .medium))
+                .frame(width: metrics.controlSize, height: metrics.controlSize)
+                .foregroundStyle(
+                    isHovered && !disabled
+                        ? AppColors.tabSecondaryInteractiveHoverColor
+                        : Color.secondary
+                )
+                .contentShape(Circle())
         }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.35 : 1)
+        .onHover { isInside in
+            isHovered = isInside && !disabled
+        }
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
 
-        private static let toolbarButtonSize: CGFloat = 30
+/// One visual identity for a Tab across active and inactive Header states.
+/// Web Tabs show their favicon; while loading, Chrome-style progress rotates
+/// around the favicon instead of occupying the Tab's bottom border.
+private struct TabIdentityIcon: View {
+    let tab: Tab
+    let isLoading: Bool
+    let fallbackSymbol: String
+
+    @State private var loadedFavicon: NSImage?
+
+    private var webURL: URL? {
+        guard case .web(let url) = tab.contentType else { return nil }
+        return url
+    }
+
+    private var favicon: NSImage? {
+        if let loadedFavicon { return loadedFavicon }
+        guard let webURL else { return nil }
+        return FaviconCache.shared.getSync(for: webURL)
+    }
+
+    var body: some View {
+        ZStack {
+            if let favicon {
+                Image(nsImage: favicon)
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(
+                        width: isLoading ? 10 : 14,
+                        height: isLoading ? 10 : 14
+                    )
+            } else {
+                Image(systemName: fallbackSymbol)
+                    .font(.system(size: isLoading ? 9 : 12, weight: .medium))
+                    .foregroundStyle(.secondary)
+            }
+
+            if isLoading {
+                ChromeTabLoadingRing()
+            }
+        }
+        .frame(width: 16, height: 16)
+        .task(id: webURL?.host) {
+            guard let webURL else {
+                loadedFavicon = nil
+                return
+            }
+            loadedFavicon = await FaviconCache.shared.image(for: webURL)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+private struct ChromeTabLoadingRing: View {
+    @State private var rotation = 0.0
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(Color.secondary.opacity(0.22), lineWidth: 1.5)
+
+            Circle()
+                .trim(from: 0.08, to: 0.72)
+                .stroke(
+                    Color.accentColor,
+                    style: StrokeStyle(lineWidth: 1.5, lineCap: .round)
+                )
+                .rotationEffect(.degrees(rotation))
+        }
+        .frame(width: 16, height: 16)
+        .onAppear {
+            withAnimation(.linear(duration: 0.72).repeatForever(autoreverses: false)) {
+                rotation = 360
+            }
+        }
+        .allowsHitTesting(false)
     }
 }
 

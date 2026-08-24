@@ -2,41 +2,16 @@ import AppKit
 import SwiftUI
 import Combine
 
-// MARK: - Custom Window (titlebar double-click zoom support)
+// MARK: - Custom Window
 
 /// NSWindow subclass that restores double-click-to-zoom on the titlebar
 /// when a custom toolbar overlay intercepts mouse events.
 final class ActriumWindow: NSWindow {
 
     override func sendEvent(_ event: NSEvent) {
-        guard event.type == .leftMouseUp, event.clickCount == 2,
-              event.locationInWindow.y >= contentLayoutRect.maxY else {
-            super.sendEvent(event)
-            return
-        }
-
-        // Skip interactive controls (address bar, buttons, etc.)
-        if let cv = contentView {
-            let pt = cv.convert(event.locationInWindow, from: nil)
-            if let hit = cv.hitTest(pt), hit is NSControl {
-                super.sendEvent(event)
-                return
-            }
-        }
-
-        // Let the system handle the event first (it may trigger zoom internally)
-        let frameBefore = frame
         super.sendEvent(event)
-
-        // Only zoom ourselves if the system didn't already do it
-        guard frame == frameBefore else { return }
-
-        let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
-        switch action {
-        case "Minimize": miniaturize(nil)
-        case "None":     break
-        default:         zoom(nil)
-        }
+        guard event.type == .leftMouseUp else { return }
+        toolbarInteraction?.pointerSequenceEnded(activeTabID: activeTabIDProvider?())
     }
 }
 
@@ -48,8 +23,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
     let viewModel: BrowserViewModel  // Public for AppDelegate access
     private let historyVM: HistoryViewModel
     private let bookmarkVM: BookmarkViewModel
+    private let toolbarInteraction: ToolbarTabInteractionCoordinator
 
-    private var rootViewController: RootContentViewController!
+    private var mainWindowViewController: MainWindowViewController!
     private var cancellables = Set<AnyCancellable>()
     private var fullScreenTitleLabel: NSTextField?
     private let fullScreenTrafficLightLeftInset: CGFloat = 18
@@ -66,6 +42,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         self.viewModel = viewModel
         self.historyVM = historyVM
         self.bookmarkVM = bookmarkVM
+        self.toolbarInteraction = ToolbarTabInteractionCoordinator()
 
         // Create window with transparent titlebar
         let window = ActriumWindow(
@@ -76,6 +53,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         )
 
         super.init(window: window)
+
+        window.toolbarInteraction = toolbarInteraction
+        window.activeTabIDProvider = { [weak viewModel] in
+            viewModel?.currentTabId
+        }
 
         configureWindow(window)
         setupContentViewController()
@@ -97,6 +79,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.titleVisibility = .hidden
         window.title = resolvedWindowTitle()
         window.backgroundColor = .clear
+        // This is the hard boundary: no titlebar/background hit can ever start
+        // a native window drag. The explicit Header mask tracks and applies
+        // window movement only for points outside Tabs/Tabs Group and controls.
+        window.isMovable = false
+        window.isMovableByWindowBackground = false
 
         // Hide titlebar separator line
         window.titlebarSeparatorStyle = .none
@@ -148,15 +135,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         guard let window = window else { return }
 
         // Create root content view controller with 4px edge inset
-        rootViewController = RootContentViewController(
+        mainWindowViewController = MainWindowViewController(
             viewModel: viewModel,
             historyVM: historyVM,
-            bookmarkVM: bookmarkVM
+            bookmarkVM: bookmarkVM,
+            toolbarInteraction: toolbarInteraction
         )
 
         // Set as window's content view controller
-        window.contentViewController = rootViewController
-        rootViewController?.updateWindowFullScreenState(window.styleMask.contains(.fullScreen))
+        window.contentViewController = mainWindowViewController
+        mainWindowViewController?.updateWindowFullScreenState(window.styleMask.contains(.fullScreen))
     }
 
     // MARK: - Public Methods
@@ -181,30 +169,30 @@ final class MainWindowController: NSWindowController, NSWindowDelegate {
         window.title = resolvedWindowTitle()
         window.titlebarAppearsTransparent = false
         window.titleVisibility = .hidden
-        rootViewController?.updateWindowFullScreenState(true)
-        rootViewController?.view.needsLayout = true
+        mainWindowViewController?.updateWindowFullScreenState(true)
+        mainWindowViewController?.view.needsLayout = true
     }
 
     func windowWillExitFullScreen(_ notification: Notification) {
         removeFullScreenLeftAlignedTitle()
         window?.titleVisibility = .hidden
         window?.titlebarAppearsTransparent = true
-        rootViewController?.updateWindowFullScreenState(false)
-        rootViewController?.view.needsLayout = true
+        mainWindowViewController?.updateWindowFullScreenState(false)
+        mainWindowViewController?.view.needsLayout = true
     }
 
     func windowDidEnterFullScreen(_ notification: Notification) {
-        rootViewController?.view.layoutSubtreeIfNeeded()
-        rootViewController?.updateWindowFullScreenState(true)
+        mainWindowViewController?.view.layoutSubtreeIfNeeded()
+        mainWindowViewController?.updateWindowFullScreenState(true)
         ensureFullScreenLeftAlignedTitle()
         updateFullScreenLeftAlignedTitleFrame()
-        rootViewController?.view.needsLayout = true
+        mainWindowViewController?.view.needsLayout = true
     }
 
     func windowDidExitFullScreen(_ notification: Notification) {
         removeFullScreenLeftAlignedTitle()
-        rootViewController?.updateWindowFullScreenState(false)
-        rootViewController?.view.needsLayout = true
+        mainWindowViewController?.updateWindowFullScreenState(false)
+        mainWindowViewController?.view.needsLayout = true
     }
 
     func windowDidResize(_ notification: Notification) {

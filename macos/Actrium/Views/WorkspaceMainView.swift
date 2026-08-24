@@ -42,7 +42,6 @@ struct WorkspaceMainView: View {
     @State private var cumulativeMagnification: CGFloat = 0
 
     // Web loading state
-    @State private var isWebLoading: Bool = false
 
     // Search Tabs Status
     @State private var searchTabsText: String = ""
@@ -225,6 +224,7 @@ struct WorkspaceMainView: View {
                             url: url,
                             viewportSize: safeViewportSize,
                             onNavigationFinished: { title, newURL in
+                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 // Update tab title and record history
                                 if let title = title, !title.isEmpty {
                                     viewModel.updateTabTitle(for: focusedTabId, title: title)
@@ -243,6 +243,7 @@ struct WorkspaceMainView: View {
                                 }
                             },
                             onURLChanged: { newURL in
+                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 // Update tab URL when page uses History.pushState/replaceState
                                 if let newURL = newURL {
                                     NSLog("🔗 WorkspaceMainView: Updating tab \(focusedTabId) URL to: \(newURL.absoluteString)")
@@ -250,10 +251,11 @@ struct WorkspaceMainView: View {
                                 }
                             },
                             onLoadingStateChanged: { loading in
-                                isWebLoading = loading
-                                viewModel.isCurrentTabLoading = loading
+                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
+                                viewModel.updateLoadingState(for: focusedTabId, isLoading: loading)
                             },
                             onOpenNewWindow: { newURL in
+                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 // Open target="_blank" links in a new tab (don't focus address bar)
                                 let newTab = viewModel.addNewTab(focusAddressBar: false)
                                 viewModel.navigateCurrentTab(to: newURL.absoluteString)
@@ -261,26 +263,15 @@ struct WorkspaceMainView: View {
                                 enterFocus(tabId: newTab.id)
                             },
                             onThemeColorChanged: { color in
+                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 viewModel.updateTabBackgroundColor(for: focusedTabId, color: color)
                             },
                             onProgressChanged: { progress in
-                                viewModel.loadingProgress = progress
+                                guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
+                                viewModel.updateLoadingProgress(for: focusedTabId, progress: progress)
                             }
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-
-                        // Safari-style loading progress bar
-                        if viewModel.isCurrentTabLoading {
-                            GeometryReader { geo in
-                                Rectangle()
-                                    .fill(Color.accentColor)
-                                    .frame(width: geo.size.width * viewModel.loadingProgress, height: 2)
-                                    .animation(.linear(duration: 0.2), value: viewModel.loadingProgress)
-                            }
-                            .frame(height: 2)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .transition(.opacity)
-                        }
 
                         SavePasswordBannerView()
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
@@ -478,7 +469,7 @@ struct WorkspaceMainView: View {
                             guard let tab = viewModel.currentTab else { return .none }
                             switch tab.contentType {
                             case .reactNative: return .menu
-                            case .web: return isWebLoading ? .loading : .none
+                            case .web: return viewModel.isTabLoading(tab.id) ? .loading : .none
                             case .native, .empty: return .none
                             }
                         }()
@@ -672,7 +663,12 @@ struct WorkspaceMainView: View {
                         if let window = event.window ?? NSApp.keyWindow,
                            let contentView = window.contentView {
                             let pointInContent = contentView.convert(event.locationInWindow, from: nil)
+                            // The self-drawn compact toolbar lives inside the
+                            // content view. Keep clicks in its address-editing
+                            // region intact; only clicks below it dismiss input.
+                            let toolbarBottom = contentView.bounds.maxY - 53
                             return contentView.bounds.contains(pointInContent)
+                                && pointInContent.y < toolbarBottom
                         }
                         return false
                     } else {
