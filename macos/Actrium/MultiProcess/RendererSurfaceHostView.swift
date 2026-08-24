@@ -60,9 +60,10 @@ final class RendererSurfaceHostView: NSView {
     private var crashObserver: NSObjectProtocol?
     private var configureTask: Task<Void, Never>?
     private var lastConfig: [String: Any]?
-    private var lastConfigData: Data?
+    private var lastContentConfigData: Data?
     private var lastConfiguredFingerprint: String?
     private var lastSentSize: CGSize?
+    private var lastSentOverviewMode: Bool?
     private var recoveryAttempt = 0
     private var accessibilityObserver: NSObjectProtocol?
     private var caretObserver: NSObjectProtocol?
@@ -179,24 +180,33 @@ final class RendererSurfaceHostView: NSView {
     }
 
     func apply(config: [String: Any]) {
+        var contentConfig = config
+        // Focus/overview switches are viewport operations, not content loads.
+        // These transient fields are handled by apply(size:isOverviewMode:).
+        contentConfig.removeValue(forKey: RuntimeBridgeContract.containerWidth)
+        contentConfig.removeValue(forKey: RuntimeBridgeContract.containerHeight)
+        contentConfig.removeValue(forKey: "isOverviewMode")
+
         guard let tabId,
               !fingerprint.isEmpty,
-              JSONSerialization.isValidJSONObject(config),
-              let data = try? JSONSerialization.data(
-                  withJSONObject: config,
+              JSONSerialization.isValidJSONObject(contentConfig),
+              let contentData = try? JSONSerialization.data(
+                  withJSONObject: contentConfig,
                   options: [.sortedKeys]
               ) else {
             return
         }
 
+        // Keep the latest full configuration for crash recovery even when this
+        // update contains layout-only changes.
+        lastConfig = config
         let requestedFingerprint = fingerprint
-        guard data != lastConfigData
+        guard contentData != lastContentConfigData
                 || requestedFingerprint != lastConfiguredFingerprint else {
             return
         }
 
-        lastConfig = config
-        lastConfigData = data
+        lastContentConfigData = contentData
         lastConfiguredFingerprint = requestedFingerprint
         configureTask?.cancel()
         configureTask = Task { @MainActor [weak self] in
@@ -256,7 +266,7 @@ final class RendererSurfaceHostView: NSView {
                     error.localizedDescription
                 )
                 if self.fingerprint == requestedFingerprint {
-                    self.lastConfigData = nil
+                    self.lastContentConfigData = nil
                     self.lastConfiguredFingerprint = nil
                 }
                 self.coordinator?.xpcServiceReady = false
@@ -268,8 +278,10 @@ final class RendererSurfaceHostView: NSView {
         guard size.width > 0, size.height > 0 else { return }
         setFrameSize(size)
         hostLayer?.frame = bounds
-        guard size != lastSentSize, let tabId else { return }
+        guard size != lastSentSize || isOverviewMode != lastSentOverviewMode,
+              let tabId else { return }
         lastSentSize = size
+        lastSentOverviewMode = isOverviewMode
         RendererProcessPool.shared.updateViewport(
             tabId: tabId,
             size: size,
@@ -361,7 +373,7 @@ final class RendererSurfaceHostView: NSView {
                     fingerprint: self.fingerprint
                 )
                 self.coordinator?.allocatedServiceId = rendererId
-                self.lastConfigData = nil
+                self.lastContentConfigData = nil
                 self.apply(config: config)
                 NSLog(
                     "Renderer recovery scheduled: tab=%@ attempt=%d renderer=%@",
