@@ -75,59 +75,209 @@ func toolbarAdaptiveTabWidths(
     })
 }
 
-/// Keeps the real overflowing Tabs visible as thin, overlapping edge slices.
+enum ToolbarAccordionEdge: Equatable {
+    case leading
+    case trailing
+}
+
+enum ToolbarAccordionTabClickDisposition: Equatable {
+    case activate
+    case unfoldLeading
+    case unfoldTrailing
+}
+
+struct ToolbarAccordionTabPresentation: Equatable {
+    let offsetX: CGFloat
+    let edge: ToolbarAccordionEdge?
+    let collapseProgress: CGFloat
+    let overlapProgress: CGFloat
+
+    static let identity = ToolbarAccordionTabPresentation(
+        offsetX: 0,
+        edge: nil,
+        collapseProgress: 0,
+        overlapProgress: 0
+    )
+
+    var isFolded: Bool { edge != nil }
+
+    /// Titles disappear before their Tab reaches a fully folded edge state.
+    /// The edge Tab itself stays crisp underneath the incoming neighbour.
+    var titleOpacity: Double {
+        Double(max(0, 1 - collapseProgress * 2))
+    }
+
+    /// Only the one incoming Tab drawn above the folded edge becomes
+    /// translucent. The folded Tab underneath and every other Tab stay opaque.
+    var surfaceOpacity: Double {
+        Double(1 - overlapProgress * 0.22)
+    }
+
+    var stackingZIndex: Double {
+        if isFolded { return -10 }
+        if overlapProgress > 0 { return 10 }
+        return 0
+    }
+
+    var clickDisposition: ToolbarAccordionTabClickDisposition {
+        switch edge {
+        case .leading: .unfoldLeading
+        case .trailing: .unfoldTrailing
+        case nil: .activate
+        }
+    }
+}
+
+struct ToolbarAccordionTabLayoutInput: Equatable {
+    let id: UUID
+    let frame: CGRect
+}
+
+/// Turns one overflowing Tab into a pinned, icon-bearing edge surface.
 ///
-/// The ScrollView still owns the logical, non-overlapping slots used by
-/// `scrollTo` and reordering. This function only maps their presentation
-/// position. Tabs therefore compress to their minimum widths first; once a
-/// slot leaves the viewport, the Tab itself remains at the edge and the next
-/// Tabs overlap it. The mapping is continuous, so reversing the scroll peels
-/// every real Tab open without a threshold jump.
-func toolbarAccordionTabOffset(
+/// Folding begins with the first clipped pixel, rather than waiting until only
+/// a narrow trailing slice remains. The real Tab then stays pinned while its
+/// neighbour slides over it. Pinning is continuous, so reversing a
+/// scroll peels the accordion open without a threshold jump.
+func toolbarAccordionTabPresentation(
     tabFrame: CGRect,
     viewportWidth: CGFloat,
-    edgeInset: CGFloat = 2,
-    visibleSlice: CGFloat = 8,
-    layerStride: CGFloat = 6,
-    maximumDepth: Int = 3,
-    itemSpacing: CGFloat = 2
-) -> CGFloat {
-    guard viewportWidth > 0, tabFrame.width > 0, maximumDepth > 0 else { return 0 }
+    edgeInset: CGFloat = 2
+) -> ToolbarAccordionTabPresentation {
+    guard viewportWidth > 0, tabFrame.width > 0 else {
+        return .identity
+    }
 
     let boundedInset = max(0, edgeInset)
     let leadingEdge = boundedInset
     let trailingEdge = max(leadingEdge, viewportWidth - boundedInset)
     let availableWidth = trailingEdge - leadingEdge
-    guard tabFrame.width < availableWidth else { return 0 }
+    guard tabFrame.width < availableWidth else { return .identity }
 
-    let baseSlice = max(1, visibleSlice)
-    let stride = max(0, layerStride)
-    let maximumLayer = CGFloat(maximumDepth - 1)
-    let layerDistance = max(1, tabFrame.width + max(0, itemSpacing))
+    let leadingOverflow = max(0, leadingEdge - tabFrame.minX)
+    let trailingOverflow = max(0, tabFrame.maxX - trailingEdge)
 
-    // Earlier Tabs are painted below later Tabs. At the leading edge the
-    // earlier (farther) Tabs therefore extend progressively farther inward,
-    // leaving every curved trailing edge visible through the Tabs above.
-    let leadingOverflow = max(0, leadingEdge - tabFrame.maxX)
-    let leadingLayer = min(maximumLayer, leadingOverflow / layerDistance)
-    let leadingSlice = baseSlice + leadingLayer * stride
-    let leadingOffset = max(0, leadingEdge + leadingSlice - tabFrame.maxX)
-
-    // At the trailing edge the paint order is reversed relative to the edge:
-    // later (farther) Tabs sit above earlier Tabs. Give the nearest Tab the
-    // widest slice and taper later Tabs back toward the edge.
-    let trailingOverflow = max(0, tabFrame.minX - trailingEdge)
-    let trailingLayer = min(maximumLayer, trailingOverflow / layerDistance)
-    let trailingSlice = baseSlice + (maximumLayer - trailingLayer) * stride
-    let trailingOffset = min(0, trailingEdge - trailingSlice - tabFrame.minX)
-
-    if leadingOffset > 0, trailingOffset < 0 {
-        // This is only reachable for malformed/intermediate geometry. Keeping
-        // the original slot is safer than letting the Tab oscillate between
-        // both edges during a resize.
-        return 0
+    if leadingOverflow > 0, trailingOverflow > 0 {
+        // Only malformed/intermediate resize geometry can cross both edges.
+        // Keeping the logical slot avoids oscillating between accordions.
+        return .identity
     }
-    return leadingOffset > 0 ? leadingOffset : trailingOffset
+
+    if leadingOverflow > 0 {
+        return ToolbarAccordionTabPresentation(
+            offsetX: leadingEdge - tabFrame.minX,
+            edge: .leading,
+            collapseProgress: min(1, leadingOverflow / tabFrame.width),
+            overlapProgress: 0
+        )
+    }
+
+    if trailingOverflow > 0 {
+        return ToolbarAccordionTabPresentation(
+            offsetX: trailingEdge - tabFrame.maxX,
+            edge: .trailing,
+            collapseProgress: min(1, trailingOverflow / tabFrame.width),
+            overlapProgress: 0
+        )
+    }
+
+    return .identity
+}
+
+/// Keeps at most one folded Tab visible at each viewport edge. When several
+/// logical slots have already crossed an edge, the closest one owns the edge;
+/// older slots remain normally clipped. This gives the strip one clean
+/// translucent overlap instead of accumulating icon and surface layers.
+func toolbarAccordionTabPresentations(
+    inputs: [ToolbarAccordionTabLayoutInput],
+    viewportWidth: CGFloat,
+    edgeInset: CGFloat = 2
+) -> [UUID: ToolbarAccordionTabPresentation] {
+    let candidates = inputs.enumerated().map { index, input in
+        (
+            index: index,
+            input: input,
+            presentation: toolbarAccordionTabPresentation(
+                tabFrame: input.frame,
+                viewportWidth: viewportWidth,
+                edgeInset: edgeInset
+            )
+        )
+    }
+
+    let leading = candidates
+        .filter { $0.presentation.edge == .leading }
+        .max { $0.input.frame.minX < $1.input.frame.minX }
+    let trailing = candidates
+        .filter { $0.presentation.edge == .trailing }
+        .min { $0.input.frame.maxX < $1.input.frame.maxX }
+
+    var result = Dictionary(
+        uniqueKeysWithValues: inputs.map { ($0.id, ToolbarAccordionTabPresentation.identity) }
+    )
+    if let leading {
+        result[leading.input.id] = leading.presentation
+    }
+    if let trailing {
+        result[trailing.input.id] = trailing.presentation
+    }
+
+    let boundedInset = max(0, edgeInset)
+
+    // At the leading edge, the Tab immediately to the right is the incoming
+    // cover. It is the sole translucent surface and always draws above the
+    // pinned edge Tab, independent of either Tab's active state.
+    if let leading, leading.index + 1 < inputs.count {
+        let cover = inputs[leading.index + 1]
+        let pinnedMaxX = boundedInset + leading.input.frame.width
+        let overlap = max(0, pinnedMaxX - cover.frame.minX)
+        let overlapProgress = min(
+            1,
+            overlap / max(1, min(leading.input.frame.width, cover.frame.width))
+        )
+        if overlapProgress > 0, result[cover.id]?.isFolded != true {
+            result[cover.id] = ToolbarAccordionTabPresentation(
+                offsetX: 0,
+                edge: nil,
+                collapseProgress: 0,
+                overlapProgress: overlapProgress
+            )
+        }
+    }
+
+    // The trailing edge is symmetric: the Tab immediately to the left is the
+    // incoming cover, so logical order never changes the visual stacking rule.
+    if let trailing, trailing.index > 0 {
+        let cover = inputs[trailing.index - 1]
+        let pinnedMinX = max(boundedInset, viewportWidth - boundedInset)
+            - trailing.input.frame.width
+        let overlap = max(0, cover.frame.maxX - pinnedMinX)
+        let overlapProgress = min(
+            1,
+            overlap / max(1, min(trailing.input.frame.width, cover.frame.width))
+        )
+        if overlapProgress > 0, result[cover.id]?.isFolded != true {
+            result[cover.id] = ToolbarAccordionTabPresentation(
+                offsetX: 0,
+                edge: nil,
+                collapseProgress: 0,
+                overlapProgress: overlapProgress
+            )
+        }
+    }
+    return result
+}
+
+func toolbarAccordionTabOffset(
+    tabFrame: CGRect,
+    viewportWidth: CGFloat,
+    edgeInset: CGFloat = 2
+) -> CGFloat {
+    toolbarAccordionTabPresentation(
+        tabFrame: tabFrame,
+        viewportWidth: viewportWidth,
+        edgeInset: edgeInset
+    ).offsetX
 }
 
 func toolbarTabRevealAlignment(

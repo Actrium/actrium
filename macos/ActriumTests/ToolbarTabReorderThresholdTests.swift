@@ -149,67 +149,111 @@ struct ToolbarTabReorderThresholdTests {
         ) == 0)
     }
 
-    @Test func accordionLayout_layersTheRealLeadingTabFrames() {
-        let nearestOffset = toolbarAccordionTabOffset(
-            tabFrame: CGRect(x: -78, y: 2, width: 68, height: 32),
-            viewportWidth: 300
-        )
-        let middleOffset = toolbarAccordionTabOffset(
-            tabFrame: CGRect(x: -148, y: 2, width: 68, height: 32),
-            viewportWidth: 300
-        )
-        let deepestOffset = toolbarAccordionTabOffset(
-            tabFrame: CGRect(x: -218, y: 2, width: 68, height: 32),
+    @Test func accordionLayout_keepsOnlyTheNearestLeadingTabFolded() {
+        let deepestID = UUID()
+        let nearestID = UUID()
+        let visibleID = UUID()
+        let presentations = toolbarAccordionTabPresentations(
+            inputs: [
+                .init(id: deepestID, frame: CGRect(x: -138, y: 2, width: 68, height: 32)),
+                .init(id: nearestID, frame: CGRect(x: -20, y: 2, width: 68, height: 32)),
+                .init(id: visibleID, frame: CGRect(x: 50, y: 2, width: 68, height: 32)),
+            ],
             viewportWidth: 300
         )
 
-        let nearestMaxX = -78 + nearestOffset + 68
-        let middleMaxX = -148 + middleOffset + 68
-        let deepestMaxX = -218 + deepestOffset + 68
-        #expect(nearestMaxX < middleMaxX)
-        #expect(middleMaxX < deepestMaxX)
-        #expect(deepestMaxX <= 22.1)
+        #expect(presentations[deepestID] == .identity)
+        #expect(presentations[nearestID]?.edge == .leading)
+        #expect(presentations[nearestID]?.surfaceOpacity == 1)
+        #expect(presentations[nearestID]?.stackingZIndex == -10)
+        #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
+        #expect((presentations[visibleID]?.surfaceOpacity ?? 1) < 1)
+        #expect(presentations[visibleID]?.stackingZIndex == 10)
+        #expect(-20 + (presentations[nearestID]?.offsetX ?? 0) == 2)
     }
 
-    @Test func accordionLayout_layersTheRealTrailingTabFrames() {
-        let nearestOffset = toolbarAccordionTabOffset(
-            tabFrame: CGRect(x: 302, y: 2, width: 68, height: 32),
-            viewportWidth: 300
-        )
-        let middleOffset = toolbarAccordionTabOffset(
-            tabFrame: CGRect(x: 372, y: 2, width: 68, height: 32),
-            viewportWidth: 300
-        )
-        let deepestOffset = toolbarAccordionTabOffset(
-            tabFrame: CGRect(x: 442, y: 2, width: 68, height: 32),
+    @Test func accordionLayout_keepsOnlyTheNearestTrailingTabFolded() {
+        let visibleID = UUID()
+        let nearestID = UUID()
+        let deepestID = UUID()
+        let presentations = toolbarAccordionTabPresentations(
+            inputs: [
+                .init(id: visibleID, frame: CGRect(x: 180, y: 2, width: 68, height: 32)),
+                .init(id: nearestID, frame: CGRect(x: 260, y: 2, width: 68, height: 32)),
+                .init(id: deepestID, frame: CGRect(x: 330, y: 2, width: 68, height: 32)),
+            ],
             viewportWidth: 300
         )
 
-        let nearestMinX = 302 + nearestOffset
-        let middleMinX = 372 + middleOffset
-        let deepestMinX = 442 + deepestOffset
-        #expect(nearestMinX < middleMinX)
-        #expect(middleMinX < deepestMinX)
-        #expect(deepestMinX >= 289.9)
+        #expect(presentations[nearestID]?.edge == .trailing)
+        #expect(presentations[nearestID]?.surfaceOpacity == 1)
+        #expect(presentations[nearestID]?.stackingZIndex == -10)
+        #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
+        #expect((presentations[visibleID]?.surfaceOpacity ?? 1) < 1)
+        #expect(presentations[visibleID]?.stackingZIndex == 10)
+        #expect(presentations[deepestID] == .identity)
+        #expect(260 + 68 + (presentations[nearestID]?.offsetX ?? 0) == 298)
     }
 
     @Test func accordionLayout_unfoldsContinuouslyAsATabReenters() {
         let pinnedOffset = toolbarAccordionTabOffset(
-            tabFrame: CGRect(x: -62, y: 2, width: 68, height: 32),
+            tabFrame: CGRect(x: 1, y: 2, width: 68, height: 32),
             viewportWidth: 300
         )
         let nearlyOpenOffset = toolbarAccordionTabOffset(
-            tabFrame: CGRect(x: -58.1, y: 2, width: 68, height: 32),
+            tabFrame: CGRect(x: 1.9, y: 2, width: 68, height: 32),
             viewportWidth: 300
         )
         let openOffset = toolbarAccordionTabOffset(
-            tabFrame: CGRect(x: -58, y: 2, width: 68, height: 32),
+            tabFrame: CGRect(x: 2, y: 2, width: 68, height: 32),
             viewportWidth: 300
         )
 
-        #expect(pinnedOffset == 4)
-        #expect(nearlyOpenOffset < 0.11)
+        #expect(pinnedOffset > nearlyOpenOffset)
+        #expect(nearlyOpenOffset < 0.13)
         #expect(openOffset == 0)
+    }
+
+    @Test func accordionLayout_startsWithTheFirstClippedPixelAndSoftensOneSurface() {
+        let barelyFolded = toolbarAccordionTabPresentation(
+            tabFrame: CGRect(x: 1.9, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let foldedID = UUID()
+        let coverID = UUID()
+        let presentations = toolbarAccordionTabPresentations(
+            inputs: [
+                .init(id: foldedID, frame: CGRect(x: -40, y: 2, width: 68, height: 32)),
+                .init(id: coverID, frame: CGRect(x: 30, y: 2, width: 68, height: 32)),
+            ],
+            viewportWidth: 300
+        )
+
+        #expect(barelyFolded.isFolded)
+        #expect(barelyFolded.collapseProgress > 0)
+        #expect(presentations[foldedID]?.titleOpacity == 0)
+        #expect(presentations[foldedID]?.surfaceOpacity == 1)
+        #expect((presentations[coverID]?.surfaceOpacity ?? 1) > 0.7)
+        #expect((presentations[coverID]?.surfaceOpacity ?? 1) < 1)
+    }
+
+    @Test func accordionLayout_foldedClicksOnlyUnfoldTheirEdge() {
+        let leading = toolbarAccordionTabPresentation(
+            tabFrame: CGRect(x: -10, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let trailing = toolbarAccordionTabPresentation(
+            tabFrame: CGRect(x: 250, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let complete = toolbarAccordionTabPresentation(
+            tabFrame: CGRect(x: 80, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+
+        #expect(leading.clickDisposition == .unfoldLeading)
+        #expect(trailing.clickDisposition == .unfoldTrailing)
+        #expect(complete.clickDisposition == .activate)
     }
 
     @Test func largeTabMovingLeft_beforeSmallTabsMidpoint_doesNotReorder() {

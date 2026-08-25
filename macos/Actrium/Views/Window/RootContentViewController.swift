@@ -689,6 +689,7 @@ struct MainWindowTabsView: View {
     @State private var activeTabRevealTask: Task<Void, Never>?
     @State private var addressPresentationTask: Task<Void, Never>?
     @State private var addressPresentationPhase: AddressEditingPresentationPhase = .backgroundOnly
+    @State private var tabStripContentOffsetX: CGFloat = 0
     @StateObject private var addressPanelPresentation = AddressBarPanelPresentationCoordinator()
 
     private let itemSpacing = CompactToolbarLayout.itemSpacing
@@ -747,6 +748,12 @@ struct MainWindowTabsView: View {
                 for: sections,
                 viewportWidth: geo.size.width
             )
+            let accordionPresentations = accordionTabPresentations(
+                for: sections,
+                tabWidths: tabWidths,
+                viewportWidth: geo.size.width,
+                contentOffsetX: tabStripContentOffsetX
+            )
 
             ZStack(alignment: .topLeading) {
                 ScrollViewReader { proxy in
@@ -758,7 +765,14 @@ struct MainWindowTabsView: View {
                                         group,
                                         tabs: section.tabs,
                                         tabWidths: tabWidths,
-                                        viewportWidth: geo.size.width
+                                        accordionPresentations: accordionPresentations,
+                                        onFoldedTabTap: { tabID, disposition in
+                                            unfoldAccordionTab(
+                                                tabID,
+                                                disposition: disposition,
+                                                in: proxy
+                                            )
+                                        }
                                     )
                                 } else {
                                     HStack(spacing: 2) {
@@ -767,7 +781,15 @@ struct MainWindowTabsView: View {
                                                 tab,
                                                 width: tabWidths[tab.id]
                                                     ?? preferredTabWidth(for: tab),
-                                                viewportWidth: geo.size.width
+                                                accordionPresentation: accordionPresentations[tab.id]
+                                                    ?? .identity,
+                                                onFoldedTabTap: { tabID, disposition in
+                                                    unfoldAccordionTab(
+                                                        tabID,
+                                                        disposition: disposition,
+                                                        in: proxy
+                                                    )
+                                                }
                                             )
                                         }
                                     }
@@ -776,6 +798,11 @@ struct MainWindowTabsView: View {
                         }
                         .padding(2)
                         .animation(ToolbarTabMotion.slide, value: viewModel.currentTabId)
+                    }
+                    .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                        geometry.contentOffset.x
+                    } action: { _, offsetX in
+                        tabStripContentOffsetX = offsetX
                     }
                     .onChange(of: viewModel.currentTabId) { _, tabID in
                         guard let tabID else { return }
@@ -827,6 +854,26 @@ struct MainWindowTabsView: View {
                 proxy.scrollTo(tabID, anchor: .center)
             } else {
                 proxy.scrollTo(tabID)
+            }
+        }
+    }
+
+    /// A folded edge slice is a reveal affordance, not the normal Tab target.
+    /// Its first click only peels that Tab open; a later click on the complete
+    /// Tab performs the ordinary selection/editing action.
+    private func unfoldAccordionTab(
+        _ tabID: UUID,
+        disposition: ToolbarAccordionTabClickDisposition,
+        in proxy: ScrollViewProxy
+    ) {
+        withAnimation(ToolbarTabMotion.slide) {
+            switch disposition {
+            case .unfoldLeading:
+                proxy.scrollTo(tabID, anchor: .leading)
+            case .unfoldTrailing:
+                proxy.scrollTo(tabID, anchor: .trailing)
+            case .activate:
+                break
             }
         }
     }
@@ -1014,19 +1061,76 @@ struct MainWindowTabsView: View {
         )
     }
 
+    /// Resolves logical, pre-effect Tab frames from the same widths and gaps
+    /// used by the HStacks. Scroll geometry supplies the one moving input, so
+    /// presentation, opacity and hit testing cannot feed back from an already
+    /// offset visual frame.
+    private func accordionTabPresentations(
+        for sections: [ToolbarTabSection],
+        tabWidths: [UUID: CGFloat],
+        viewportWidth: CGFloat,
+        contentOffsetX: CGFloat
+    ) -> [UUID: ToolbarAccordionTabPresentation] {
+        var contentX: CGFloat = 2
+        var inputs: [ToolbarAccordionTabLayoutInput] = []
+
+        for (sectionIndex, section) in sections.enumerated() {
+            if let group = section.group {
+                contentX += groupLabelWidth(group)
+                if !group.isCollapsed, !section.tabs.isEmpty {
+                    contentX += 2
+                }
+            }
+
+            if section.group?.isCollapsed != true {
+                for (tabIndex, tab) in section.tabs.enumerated() {
+                    let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
+                    let logicalFrame = CGRect(
+                        x: contentX - contentOffsetX,
+                        y: 2,
+                        width: width,
+                        height: 32
+                    )
+                    inputs.append(
+                        ToolbarAccordionTabLayoutInput(
+                            id: tab.id,
+                            frame: logicalFrame
+                        )
+                    )
+                    contentX += width
+                    if tabIndex < section.tabs.count - 1 {
+                        contentX += 2
+                    }
+                }
+            }
+
+            if sectionIndex < sections.count - 1 {
+                contentX += 2
+            }
+        }
+
+        return toolbarAccordionTabPresentations(
+            inputs: inputs,
+            viewportWidth: viewportWidth
+        )
+    }
+
     @ViewBuilder
     private func renderedTab(
         _ tab: Tab,
         width: CGFloat,
-        viewportWidth: CGFloat
+        accordionPresentation: ToolbarAccordionTabPresentation,
+        onFoldedTabTap: @escaping (UUID, ToolbarAccordionTabClickDisposition) -> Void
     ) -> some View {
         let isMoving = interaction.isMovingTab(tab.id)
         let tabContainer = ZStack {
             if isMoving {
                 Color.clear
             } else {
-                tabLabel(tab)
+                tabLabel(tab, accordionPresentation: accordionPresentation)
                     .frame(width: width)
+                    .opacity(accordionPresentation.surfaceOpacity)
+                    .allowsHitTesting(!accordionPresentation.isFolded)
             }
         }
         // The slot swaps between its label and a transparent placeholder
@@ -1046,21 +1150,32 @@ struct MainWindowTabsView: View {
             }
         }
         .contentShape(tabShape(for: tab))
+        .overlay {
+            if accordionPresentation.isFolded, !isMoving {
+                Color.clear
+                    .contentShape(tabShape(for: tab))
+                    .onTapGesture {
+                        onFoldedTabTap(
+                            tab.id,
+                            accordionPresentation.clickDisposition
+                        )
+                    }
+                    .help("Reveal Tab")
+                    .accessibilityLabel(
+                        "Reveal \(tab.title.isEmpty ? "New Tab" : tab.title)"
+                    )
+                    .accessibilityAddTraits(.isButton)
+            }
+        }
         .id(tab.id)
         // Move the real Tab rather than drawing a decorative proxy above the
         // ScrollView. Its layout slot remains unchanged, preserving native
         // scrolling and scrollTo semantics while rendering, hit testing and
         // accessibility all follow the same accordion presentation.
-        .visualEffect { content, geometry in
-            content.offset(
-                x: toolbarAccordionTabOffset(
-                    tabFrame: geometry.frame(
-                        in: .named(ToolbarTabStripCoordinateSpace.name)
-                    ),
-                    viewportWidth: viewportWidth
-                )
-            )
-        }
+        .offset(x: accordionPresentation.offsetX)
+        // The edge Tab stays underneath; only the incoming neighbour draws
+        // above it and becomes translucent. Active state never changes order.
+        .zIndex(accordionPresentation.stackingZIndex)
         // A Tab can migrate between two nested ForEach containers when it
         // crosses a Tabs Group boundary. Never let SwiftUI turn that logical
         // move into its default remove/insert opacity transition.
@@ -1162,7 +1277,8 @@ struct MainWindowTabsView: View {
         _ group: TabGroup,
         tabs: [Tab],
         tabWidths: [UUID: CGFloat],
-        viewportWidth: CGFloat
+        accordionPresentations: [UUID: ToolbarAccordionTabPresentation],
+        onFoldedTabTap: @escaping (UUID, ToolbarAccordionTabClickDisposition) -> Void
     ) -> some View {
         let isMoving = interaction.isMovingGroup(group.id)
         let content = HStack(spacing: 2) {
@@ -1186,7 +1302,8 @@ struct MainWindowTabsView: View {
                     renderedTab(
                         tab,
                         width: tabWidths[tab.id] ?? preferredTabWidth(for: tab),
-                        viewportWidth: viewportWidth
+                        accordionPresentation: accordionPresentations[tab.id] ?? .identity,
+                        onFoldedTabTap: onFoldedTabTap
                     )
                 }
             }
@@ -1391,27 +1508,41 @@ struct MainWindowTabsView: View {
     }
 
     @ViewBuilder
-    private func tabLabel(_ tab: Tab) -> some View {
-        switch interactionState(for: tab) {
-        case .inactive:
-            inactiveTab(tab)
+    private func tabLabel(
+        _ tab: Tab,
+        accordionPresentation: ToolbarAccordionTabPresentation = .identity
+    ) -> some View {
+        if accordionPresentation.isFolded {
+            // A focused/address-editing Tab uses the same compact edge
+            // identity as every other folded Tab. Selection is preserved;
+            // its full controls return as soon as the first click unfolds it.
+            inactiveTab(tab, accordionPresentation: accordionPresentation)
                 .transition(.identity)
-        case .active:
-            activeTab(tab)
-                .transition(.identity)
-        case .addressEditing:
-            addressEditingTab(tab)
-                .transition(.identity)
-        case .draggingInactive:
-            inactiveTab(tab)
-                .transition(.identity)
-        case .draggingActive:
-            activeTab(tab)
-                .transition(.identity)
+        } else {
+            switch interactionState(for: tab) {
+            case .inactive:
+                inactiveTab(tab, accordionPresentation: accordionPresentation)
+                    .transition(.identity)
+            case .active:
+                activeTab(tab)
+                    .transition(.identity)
+            case .addressEditing:
+                addressEditingTab(tab)
+                    .transition(.identity)
+            case .draggingInactive:
+                inactiveTab(tab, accordionPresentation: accordionPresentation)
+                    .transition(.identity)
+            case .draggingActive:
+                activeTab(tab)
+                    .transition(.identity)
+            }
         }
     }
 
-    private func inactiveTab(_ tab: Tab) -> some View {
+    private func inactiveTab(
+        _ tab: Tab,
+        accordionPresentation: ToolbarAccordionTabPresentation
+    ) -> some View {
         HStack(spacing: 7) {
             tabIdentityIcon(for: tab)
 
@@ -1419,6 +1550,7 @@ struct MainWindowTabsView: View {
                 .font(.system(size: 12.5))
                 .lineLimit(1)
                 .truncationMode(.tail)
+                .opacity(accordionPresentation.titleOpacity)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.horizontal, 10)
