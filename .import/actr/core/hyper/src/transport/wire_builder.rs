@@ -488,22 +488,12 @@ impl WireBuilder for DefaultWireBuilder {
                         v020_manager.clone(),
                         target_id.clone(),
                     );
-                    // Drive the v0.20 controller to connect. An RTC failure
-                    // must not abort the whole build: the WebSocket candidate
-                    // (pushed above) is still a usable wire, so log, skip the
-                    // RTC candidate, and let the pool fall back to WebSocket.
-                    // (Cancellation was checked immediately above and tears
-                    // the pool down separately.)
-                    if let Err(error) = handle.connect().await {
-                        tracing::warn!(
-                            dest = ?dest,
-                            %error,
-                            "[Factory] v0.20 WebRTC connect failed; \
-                             falling back to the WebSocket candidate"
-                        );
-                    } else {
-                        connections.push(Arc::new(handle) as Arc<dyn WireHandle>);
-                    }
+                    // Hand the unconnected candidate to WirePool. The pool is
+                    // the connection retry owner (three attempts by default);
+                    // pre-connecting here consumed only one attempt and then
+                    // discarded the handle before the pool could retry with a
+                    // fresh Controller transport/PC generation.
+                    connections.push(Arc::new(handle) as Arc<dyn WireHandle>);
                 }
                 // When v020 is active, skip the 0.14 coordinator entirely.
                 return Ok(connections);

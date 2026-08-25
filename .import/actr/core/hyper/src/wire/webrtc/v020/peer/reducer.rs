@@ -54,6 +54,9 @@ pub(crate) enum RtcPeerCommand {
     ConnectCommitted {
         respond: tokio::sync::oneshot::Sender<u64>,
     },
+    /// Cancel only the exact initial transport attempt whose caller deadline
+    /// elapsed. A newer retry epoch is never affected by stale cancellation.
+    AbortTransportAttempt { transport_epoch: u64 },
     /// A remote SDP offer or answer arrived (from the signaling router; the
     /// Stage 2 test harness injects it directly). Boxed because
     /// `RTCSessionDescription` is large and this enum is on the hot command path.
@@ -124,6 +127,10 @@ impl std::fmt::Debug for RtcPeerCommand {
         match self {
             Self::Connect => f.write_str("Connect"),
             Self::ConnectCommitted { .. } => f.write_str("ConnectCommitted(..)"),
+            Self::AbortTransportAttempt { transport_epoch } => f
+                .debug_struct("AbortTransportAttempt")
+                .field("transport_epoch", transport_epoch)
+                .finish(),
             Self::ApplyRemoteDescription(_) => f.write_str("ApplyRemoteDescription(..)"),
             Self::ApplyRemoteDescriptionCorrelated { exchange_id, .. } => f
                 .debug_struct("ApplyRemoteDescriptionCorrelated")
@@ -227,6 +234,11 @@ pub(crate) enum RtcPeerInput {
     /// arbitration attempt.
     RoleNegotiationDeadlineElapsed {
         negotiation_epoch: u64,
+    },
+    /// End-to-end deadline for one never-sendable logical transport attempt.
+    /// The transport epoch fences a delayed timer from terminating a retry.
+    InitialConnectionDeadlineElapsed {
+        transport_epoch: u64,
     },
 }
 
@@ -796,6 +808,19 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                 );
             }
         }
+        RtcPeerInput::InitialConnectionDeadlineElapsed { transport_epoch } => {
+            if state.initial_connection_inflight
+                && state.transport_epoch == transport_epoch
+                && state.phase != RtcPeerPhase::Idle
+                && !state.close_requested
+            {
+                terminate_transport_attempt(
+                    state,
+                    RtcUnavailableReason::NegotiationFailed,
+                    &mut effects,
+                );
+            }
+        }
     }
     // S6-3: on *entering* Sendable (initial connect, recovery, or the pending
     // switch), start a bounded stats sample sequence to resolve the selected
@@ -806,6 +831,7 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
         && state.phase == RtcPeerPhase::Sendable
         && let Some(generation) = state.active_generation
     {
+        state.initial_connection_inflight = false;
         state.stats_sample_attempts = 1;
         let operation_id = state.alloc_operation();
         effects.push(RtcPeerEffect::GetStats {
@@ -1143,8 +1169,39 @@ fn reduce_command(
             state.begin_transport_attempt();
             start_role_negotiation(state, effects);
         }
+        RtcPeerCommand::AbortTransportAttempt { transport_epoch } => {
+            if state.initial_connection_inflight
+                && state.transport_epoch == transport_epoch
+                && !state.close_requested
+            {
+                terminate_transport_attempt(
+                    state,
+                    RtcUnavailableReason::NegotiationFailed,
+                    effects,
+                );
+            }
+        }
         RtcPeerCommand::ApplyRoleAssignment { is_offerer } => {
-            if state.role_negotiation_inflight {
+            if is_offerer
+                && state.initial_connection_inflight
+                && !state.close_requested
+                && (state.building_generation.is_some()
+                    || state.active_generation.is_some()
+                    || state.pending_generation.is_some())
+            {
+                // Restore the pre-v0.20 Coordinator contract: a fresh role
+                // negotiation that assigns this side as Offerer supersedes any
+                // never-sendable initial PC immediately. This is especially
+                // important when the dialing side was Answerer and its build
+                // failed — its WirePool retry requests the passive Offerer to send
+                // a new Offer, and reusing the old PC would strand that retry.
+                //
+                // RoleAssignment itself is the authoritative rebuild command.
+                // Repeated assignments deliberately allocate repeated fresh
+                // generations; generation/operation fencing makes every late
+                // callback from an abandoned attempt harmless.
+                restart_initial_as_offerer(state, effects);
+            } else if state.role_negotiation_inflight {
                 // The awaited arbitration: start the assigned role's flow.
                 state.role_negotiation_inflight = false;
                 state.role_probe_undelivered = false;
@@ -1519,6 +1576,43 @@ fn reduce_command(
     }
 }
 
+/// Supersede a never-sendable initial connection after a new Offerer role
+/// assignment. Existing Sessions close asynchronously while the replacement
+/// build starts immediately; waiting for close would let a stalled PC block the
+/// retry that is intended to replace it.
+fn restart_initial_as_offerer(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
+    clear_transport_attempt_cache(state);
+    state.role_probe_undelivered = false;
+    state.building_generation = None;
+    for generation in [
+        state.active_generation.take(),
+        state.pending_generation.take(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if state.sessions_to_close.insert(generation) {
+            schedule_close_session(state, generation, effects);
+        }
+    }
+
+    state.begin_transport_attempt();
+    state.role = Role::Offerer;
+    state.awaiting_offer = false;
+    state.role_negotiation_inflight = false;
+    state.negotiation_epoch = state.negotiation_epoch.wrapping_add(1);
+    state.phase = RtcPeerPhase::Building;
+
+    let generation = state.alloc_generation();
+    state.building_generation = Some(generation);
+    let operation_id = state.alloc_operation();
+    state.bump_revision();
+    effects.push(RtcPeerEffect::BuildSession {
+        generation,
+        operation_id,
+    });
+}
+
 /// S5-2/S5-3/S5-5: the supervisor broadcasts facts; the controller's reducer
 /// decides the recovery action. Network events drive the Soft/Hard decision:
 ///
@@ -1866,6 +1960,7 @@ fn clear_transport_attempt_cache(state: &mut RtcPeerState) {
     state.role = Role::Undetermined;
     state.role_negotiation_inflight = false;
     state.awaiting_offer = false;
+    state.initial_connection_inflight = false;
     state.ice_generation = 0;
     state.recovery_inflight = false;
     state.recovery_negotiated = false;

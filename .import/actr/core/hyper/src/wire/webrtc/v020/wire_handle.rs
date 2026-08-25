@@ -179,6 +179,12 @@ impl WireHandle for V020WireHandle {
         match waited {
             Ok(result) => result?,
             Err(_) => {
+                // The Controller normally publishes its own terminal deadline
+                // 500 ms earlier. Keep the caller boundary authoritative too:
+                // if scheduler delay wins that race, retire only this exact
+                // epoch so WirePool's next retry can leave Idle and allocate a
+                // fresh PeerConnection generation.
+                let _ = handle.abort_transport_attempt(attempt_epoch).await;
                 return Err(NetworkError::ConnectionError(format!(
                     "v0.20 peer {} did not become sendable within the connect window",
                     self.peer_id.to_string_repr()
@@ -307,8 +313,11 @@ mod tests {
     use tokio::sync::mpsc;
     use webrtc::error::Error as RtcError;
 
+    use crate::transport::wire_pool::{RetryConfig, WirePool, WireStatusKind};
+    use crate::transport::{DefaultWireBuilder, DefaultWireBuilderConfig, Dest, WireBuilder};
     use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
     use crate::wire::webrtc::v020::peer::effects::{SessionFactory, SessionOps};
+    use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
 
     use super::*;
 
@@ -320,6 +329,21 @@ mod tests {
             &self,
             _handler: Arc<WebRtcEventHandler>,
         ) -> Result<Arc<dyn SessionOps>, RtcError> {
+            Err(RtcError::Other("intentional build failure".to_string()))
+        }
+    }
+
+    struct RecordingFailingSessionFactory {
+        generations: Arc<std::sync::Mutex<Vec<u64>>>,
+    }
+
+    #[async_trait]
+    impl SessionFactory for RecordingFailingSessionFactory {
+        async fn build(
+            &self,
+            handler: Arc<WebRtcEventHandler>,
+        ) -> Result<Arc<dyn SessionOps>, RtcError> {
+            self.generations.lock().unwrap().push(handler.generation());
             Err(RtcError::Other("intentional build failure".to_string()))
         }
     }
@@ -341,6 +365,107 @@ mod tests {
         // Compile-time check: V020WireHandle implements WireHandle.
         fn assert_wire_handle<T: WireHandle>() {}
         assert_wire_handle::<V020WireHandle>();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn wire_pool_retries_v020_with_a_fresh_pc_generation() {
+        let generations = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (signaling_tx, mut signaling_rx) = mpsc::channel(16);
+        let manager = Arc::new(RtcConnectionManager::new(
+            Arc::new(RecordingFailingSessionFactory {
+                generations: generations.clone(),
+            }),
+            signaling_tx,
+        ));
+        manager.supervisor().set_signaling_generation(Some(0));
+        let peer = test_actor_id(3);
+        let builder = DefaultWireBuilder::new(DefaultWireBuilderConfig {
+            enable_websocket: false,
+            enable_webrtc: true,
+            ..Default::default()
+        })
+        .with_v020_manager(manager.clone());
+
+        // The builder must return an unconnected candidate immediately. If it
+        // pre-connects, the first failure is consumed here and WirePool never
+        // owns the configured retry loop.
+        let mut connections = crate::timer::timeout(
+            crate::timer::ids::WEBRTC_PEER_SENDABLE,
+            Duration::from_millis(200),
+            builder.create_connections(&Dest::peer(peer.clone())),
+        )
+        .await
+        .expect("v0.20 builder pre-connected the candidate")
+        .expect("build v0.20 candidate");
+        assert_eq!(connections.len(), 1);
+        assert_eq!(connections[0].connection_type(), ConnType::WebRTC);
+        assert!(generations.lock().unwrap().is_empty());
+
+        let role_manager = manager.clone();
+        let role_peer = peer.clone();
+        let role_responder = tokio::spawn(async move {
+            while let Some((_target, message)) = signaling_rx.recv().await {
+                if matches!(message, SignalingMessage::RoleNegotiation) {
+                    role_manager
+                        .handle_role_assignment(role_peer.clone(), true)
+                        .await;
+                }
+            }
+        });
+
+        let pool = WirePool::new(RetryConfig {
+            max_attempts: 3,
+            initial_delay_ms: 0,
+            max_delay_ms: 0,
+            multiplier: 1.0,
+        });
+        pool.add_connection(connections.remove(0)).await;
+
+        crate::timer::timeout(
+            crate::timer::ids::WEBRTC_PEER_SENDABLE,
+            Duration::from_secs(3),
+            async {
+                loop {
+                    if generations.lock().unwrap().len() == 3
+                        && manager.get_controller(&peer).await.is_none()
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            },
+        )
+        .await
+        .expect("WirePool did not exhaust all v0.20 retries");
+
+        assert_eq!(*generations.lock().unwrap(), vec![1, 2, 3]);
+        // Retry exhaustion is the single terminal declaration point: the slot
+        // must settle terminally Failed (not Connecting) and the Controller
+        // must already be retired from the manager registry. The pool task
+        // commits the Failed slot after its final close, so poll for it.
+        crate::timer::timeout(
+            crate::timer::ids::WEBRTC_PEER_SENDABLE,
+            Duration::from_secs(3),
+            async {
+                loop {
+                    if pool.connection_status_for_test(ConnType::WebRTC).await
+                        == Some(WireStatusKind::Failed)
+                    {
+                        break;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            },
+        )
+        .await
+        .expect("retry exhaustion must leave the WebRTC slot terminally Failed");
+        assert!(
+            manager.get_controller(&peer).await.is_none(),
+            "retry exhaustion must retire the v0.20 controller"
+        );
+        pool.close_all().await;
+        role_responder.abort();
+        let _ = role_responder.await;
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -424,6 +549,127 @@ mod tests {
 
         connect.abort();
         let _ = connect.await;
+        assert!(manager.close_peer(&peer).await);
+    }
+
+    async fn snapshot_where(
+        controller: &RtcPeerControllerHandle,
+        predicate: impl Fn(&crate::wire::webrtc::v020::status::RtcPeerSnapshot) -> bool,
+    ) -> crate::wire::webrtc::v020::status::RtcPeerSnapshot {
+        let mut snapshots = controller.subscribe();
+        loop {
+            let snapshot = snapshots.borrow().clone();
+            if predicate(&snapshot) {
+                return snapshot;
+            }
+            snapshots
+                .changed()
+                .await
+                .expect("controller closed while waiting for a snapshot");
+        }
+    }
+
+    /// Wait for one exact transport epoch to become terminally unavailable.
+    /// The generous window only bounds a failure; under the paused clock it
+    /// cannot fire before the awaited watch edge.
+    async fn terminal_snapshot_for_epoch(
+        controller: &RtcPeerControllerHandle,
+        transport_epoch: u64,
+    ) -> crate::wire::webrtc::v020::status::RtcPeerSnapshot {
+        crate::timer::timeout(
+            crate::timer::ids::WEBRTC_PEER_SENDABLE,
+            Duration::from_secs(30),
+            snapshot_where(controller, |snapshot| {
+                snapshot.transport_epoch == transport_epoch
+                    && snapshot.status == actr_framework::WebRtcPeerStatus::Idle
+                    && snapshot.unavailable_reason.is_some()
+            }),
+        )
+        .await
+        .unwrap_or_else(|_| panic!("epoch {transport_epoch} never became terminal"))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn caller_sendable_window_fallback_aborts_the_exact_transport_attempt() {
+        let (signaling_tx, _signaling_rx) = mpsc::channel(8);
+        // The controller runs on a frozen policy clock while the caller's
+        // wait uses the (paused) tokio clock: the 10-second caller boundary is
+        // the only deadline that can retire a wedged attempt, so the fallback
+        // and its epoch fencing are exercised deterministically.
+        let manager = Arc::new(
+            RtcConnectionManager::new(Arc::new(FailingSessionFactory), signaling_tx)
+                .with_policy_clock_for_test(Arc::new(
+                    crate::wire::webrtc::v020::peer::policy_clock::ManualPolicyClock::default(),
+                )),
+        );
+        manager.supervisor().set_signaling_generation(Some(0));
+        let peer = test_actor_id(4);
+        let controller = manager.ensure_controller(peer.clone()).await;
+
+        // Flight 1: no role assignment ever arrives, so the epoch-1 attempt
+        // wedges in Building and only the caller window can retire it.
+        let wire = Arc::new(V020WireHandle::new(manager.clone(), peer.clone()));
+        let error = wire
+            .connect()
+            .await
+            .expect_err("frozen attempt must hit the caller deadline");
+        assert!(
+            matches!(
+                &error,
+                NetworkError::ConnectionError(message)
+                    if message.contains("did not become sendable within the connect window")
+            ),
+            "unexpected fallback error: {error:?}"
+        );
+
+        // The fallback retired exactly the waited epoch terminally, and the
+        // Controller stays alive so WirePool's next retry can leave Idle.
+        let terminal = terminal_snapshot_for_epoch(&controller, 1).await;
+        assert_eq!(
+            terminal.unavailable_reason,
+            Some(actr_framework::WebRtcUnavailableReason::NegotiationFailed)
+        );
+        assert!(
+            manager.get_controller(&peer).await.is_some(),
+            "the fallback must abort the attempt, not close the controller"
+        );
+
+        // Flight 2: the watch replays the epoch-1 terminal snapshot to a
+        // fresh flight; that stale replay must be ignored (epoch fencing),
+        // leaving the flight waiting on its own epoch-2 attempt.
+        let wire2 = Arc::new(V020WireHandle::new(manager.clone(), peer.clone()));
+        let connect2 = tokio::spawn({
+            let wire2 = wire2.clone();
+            async move { wire2.connect().await }
+        });
+        snapshot_where(&controller, |snapshot| {
+            snapshot.transport_epoch == 2
+                && snapshot.status != actr_framework::WebRtcPeerStatus::Idle
+        })
+        .await;
+        assert!(
+            !connect2.is_finished(),
+            "the stale epoch-1 terminal snapshot failed the fresh flight"
+        );
+
+        let error2 = connect2
+            .await
+            .expect("fresh connect task panicked")
+            .expect_err("epoch-2 attempt must hit the caller deadline");
+        assert!(
+            matches!(
+                &error2,
+                NetworkError::ConnectionError(message)
+                    if message.contains("did not become sendable within the connect window")
+            ),
+            "unexpected fallback error: {error2:?}"
+        );
+        let terminal2 = terminal_snapshot_for_epoch(&controller, 2).await;
+        assert_eq!(
+            terminal2.unavailable_reason,
+            Some(actr_framework::WebRtcUnavailableReason::NegotiationFailed)
+        );
+
         assert!(manager.close_peer(&peer).await);
     }
 }

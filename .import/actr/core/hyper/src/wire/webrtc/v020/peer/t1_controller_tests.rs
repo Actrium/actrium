@@ -83,6 +83,9 @@ struct ControllerTestHarness {
     facts: FactInjector,
     clock: Arc<ManualPolicyClock>,
     signaling_rx: mpsc::Receiver<(ActrId, SignalingMessage)>,
+    /// Test-owned clone of the controller's signaling sender: pre-fills the
+    /// queue so controller sends meet a full queue (retention backpressure).
+    signaling_fill: mpsc::Sender<(ActrId, SignalingMessage)>,
     supervisor: crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor,
     retirement_rx: tokio::sync::broadcast::Receiver<PeerTransportRetirement>,
     task: tokio::task::JoinHandle<()>,
@@ -90,12 +93,19 @@ struct ControllerTestHarness {
 
 impl ControllerTestHarness {
     fn spawn(serial: u64) -> Self {
+        Self::spawn_with_signaling_capacity(serial, 16)
+    }
+
+    /// Spawn with an explicit signaling queue capacity, keeping a test-owned
+    /// sender clone for pre-filling the queue (see `fill_signaling`).
+    fn spawn_with_signaling_capacity(serial: u64, signaling_capacity: usize) -> Self {
         let peer_id = test_actor_id(serial);
         let effects = TestEffectSink::new(peer_id.clone());
         let effect_port: Arc<dyn super::effect_port::RtcPeerEffectPort> = effects.clone();
         let clock = Arc::new(ManualPolicyClock::default());
         let policy_clock: Arc<dyn PolicyClock> = clock.clone();
-        let (signaling_tx, signaling_rx) = mpsc::channel(16);
+        let (signaling_tx, signaling_rx) = mpsc::channel(signaling_capacity);
+        let signaling_fill = signaling_tx.clone();
         let supervisor = crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor::new();
         supervisor.set_signaling_generation(Some(0));
         let (peer_transport_retired, retirement_rx) = tokio::sync::broadcast::channel(8);
@@ -132,6 +142,7 @@ impl ControllerTestHarness {
             facts: FactInjector { mailbox, lane_tx },
             clock,
             signaling_rx,
+            signaling_fill,
             supervisor,
             retirement_rx,
             task,
@@ -153,6 +164,21 @@ impl ControllerTestHarness {
         assert!(matches!(message, SignalingMessage::RoleNegotiation));
     }
 
+    /// Fill the signaling queue to capacity with an inert ICE candidate so
+    /// the controller's next signaling send meets a full queue.
+    async fn fill_signaling(&self, serial: u64) {
+        self.signaling_fill
+            .send((
+                test_actor_id(serial),
+                SignalingMessage::Candidate(webrtc::peer_connection::RTCIceCandidateInit {
+                    candidate: "filler".to_string(),
+                    ..Default::default()
+                }),
+            ))
+            .await
+            .expect("fill the T1 signaling queue");
+    }
+
     async fn shutdown(self) {
         let Self {
             handle,
@@ -160,6 +186,7 @@ impl ControllerTestHarness {
             facts: _,
             clock: _,
             signaling_rx: _,
+            signaling_fill: _,
             supervisor: _,
             retirement_rx: _,
             mut task,
@@ -624,6 +651,146 @@ async fn manual_policy_clock_drives_exact_role_negotiation_deadline() {
 }
 
 #[tokio::test]
+async fn retained_role_probe_is_dropped_once_its_attempt_is_superseded() {
+    // Capacity 1, pre-filled with an inert candidate: the epoch-1 role probe
+    // meets a full queue and is retained instead of delivered.
+    let mut h = ControllerTestHarness::spawn_with_signaling_capacity(702, 1);
+    h.fill_signaling(702).await;
+
+    let epoch = h.handle.connect().await.expect("connect epoch 1");
+    assert_eq!(epoch, 1);
+    let dropped = await_snapshot(&h.handle, "retained role probe", |snapshot| {
+        snapshot.signaling_dropped >= 1
+    })
+    .await;
+    assert_eq!(dropped.transport_epoch, 1);
+
+    // The caller-deadline fallback aborts the exact epoch; the transport
+    // epoch counter does not advance until the next Connect.
+    h.handle
+        .abort_transport_attempt(1)
+        .await
+        .expect("abort epoch 1");
+    let terminal = await_snapshot(&h.handle, "terminal epoch 1", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Idle
+            && snapshot.unavailable_reason
+                == Some(actr_framework::WebRtcUnavailableReason::NegotiationFailed)
+    })
+    .await;
+    assert_eq!(terminal.transport_epoch, 1);
+
+    // Drain the filler while no attempt is in flight, then wake the loop
+    // with an inert driver event (the reducer does not handle candidate
+    // errors): the retained epoch-1 probe must be discarded on that turn,
+    // never flushed. Its replay would re-run server arbitration and the
+    // repeated Offerer assignment would rebuild the fresh generation a newer
+    // attempt allocated.
+    let (_, filler) = h
+        .signaling_rx
+        .recv()
+        .await
+        .expect("signaling channel closed before the filler was drained");
+    assert!(matches!(filler, SignalingMessage::Candidate(_)));
+
+    h.facts.driver(PeerDriverEvent::IceCandidateError {
+        generation: 1,
+        error_text: "inert T1 wake".to_string(),
+    });
+    tokio::task::yield_now().await;
+
+    let epoch = h.handle.connect().await.expect("connect epoch 2");
+    assert_eq!(epoch, 2);
+    await_snapshot(&h.handle, "epoch 2 leaves Idle", |snapshot| {
+        snapshot.transport_epoch == 2 && snapshot.status != actr_framework::WebRtcPeerStatus::Idle
+    })
+    .await;
+
+    // Exactly one probe reaches the drained queue — epoch 2's own, sent
+    // directly (the drop counter stays at 1). Without the transport-attempt
+    // fence the stale epoch-1 probe would take the slot instead and force
+    // the epoch-2 probe into retention (counter 2).
+    let (_, probe) = timeout(WAIT, h.signaling_rx.recv())
+        .await
+        .expect("epoch-2 probe was not delivered")
+        .expect("signaling channel closed");
+    assert!(matches!(probe, SignalingMessage::RoleNegotiation));
+    assert!(
+        timeout(Duration::from_millis(100), h.signaling_rx.recv())
+            .await
+            .is_err(),
+        "a retained role probe from a superseded transport attempt was replayed"
+    );
+    assert_eq!(
+        h.handle.snapshot().signaling_dropped,
+        1,
+        "the epoch-2 probe must be delivered directly, not retained behind a replayed probe"
+    );
+
+    h.shutdown().await;
+}
+
+#[tokio::test]
+async fn manual_policy_clock_bounds_pc_readiness_after_connected() {
+    let mut h = ControllerTestHarness::spawn(708);
+    h.handle.connect().await.expect("connect T1 controller");
+    h.expect_role_negotiation().await;
+    h.handle
+        .apply_role_assignment(true)
+        .await
+        .expect("assign offerer role");
+
+    let build = h.next_effect().await;
+    h.effects
+        .complete(EffectCompletion::BuildSession {
+            generation: 1,
+            operation_id: build.identity.operation_id,
+            result: Ok(()),
+        })
+        .await
+        .expect("complete initial build");
+    let offer = h.next_effect().await;
+    assert!(matches!(
+        offer.effect,
+        RtcPeerEffect::CreateOffer { generation: 1, .. }
+    ));
+
+    h.facts.driver(PeerDriverEvent::PeerConnectionStateChanged {
+        generation: 1,
+        state: RTCPeerConnectionState::Connected,
+    });
+    await_snapshot(&h.handle, "transport ready", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Connecting
+            && !snapshot.sendable
+            && snapshot.pc_generation == 1
+    })
+    .await;
+
+    h.clock.advance(Duration::from_secs(9));
+    tokio::task::yield_now().await;
+    assert_ne!(
+        h.handle.snapshot().status,
+        actr_framework::WebRtcPeerStatus::Idle,
+        "initial attempt deadline fired early"
+    );
+
+    h.clock.advance(Duration::from_millis(500));
+    await_snapshot(&h.handle, "initial readiness deadline", |snapshot| {
+        snapshot.status == actr_framework::WebRtcPeerStatus::Idle
+            && snapshot.unavailable_reason
+                == Some(actr_framework::WebRtcUnavailableReason::NegotiationFailed)
+    })
+    .await;
+
+    // The timed-out CreateOffer completion is stale and must not resurrect
+    // generation 1. Settle it before the harness drives the close barrier.
+    h.effects
+        .complete(shutdown_completion(&offer))
+        .await
+        .expect("settle stale initial offer");
+    h.shutdown().await;
+}
+
+#[tokio::test]
 async fn fact_injector_drives_semantic_state_without_raw_webrtc_objects() {
     let h = ControllerTestHarness::spawn(702);
     h.facts
@@ -815,7 +982,7 @@ async fn manual_policy_clock_enforces_one_non_extendable_total_recovery_budget()
 }
 
 #[tokio::test]
-async fn fresh_remote_offer_cancels_the_previous_recovery_budget() {
+async fn fresh_remote_offer_replaces_recovery_with_a_bounded_initial_attempt() {
     let mut h = ControllerTestHarness::spawn(707);
     drive_answerer_to_sendable(&mut h).await;
 
@@ -857,19 +1024,30 @@ async fn fresh_remote_offer_cancels_the_previous_recovery_budget() {
     })
     .await;
 
-    h.clock.advance(NETWORK_RECOVERY_TIMEOUT);
+    h.clock.advance(Duration::from_secs(9));
     tokio::task::yield_now().await;
-    let snapshot = h.handle.snapshot();
-    assert_eq!(snapshot.transport_epoch, 2);
+    assert_eq!(h.handle.snapshot().transport_epoch, 2);
     assert_eq!(
-        snapshot.status,
+        h.handle.snapshot().status,
         actr_framework::WebRtcPeerStatus::Connecting,
-        "the old recovery timer must not terminate the fresh Offer flight"
+        "the old recovery timer must not terminate the fresh Offer flight early"
     );
-    assert!(matches!(
-        h.retirement_rx.try_recv(),
-        Err(tokio::sync::broadcast::error::TryRecvError::Empty)
-    ));
+    h.clock.advance(Duration::from_millis(500));
+    await_snapshot(&h.handle, "fresh Offer initial deadline", |snapshot| {
+        snapshot.transport_epoch == 2
+            && snapshot.status == actr_framework::WebRtcPeerStatus::Idle
+            && snapshot.unavailable_reason
+                == Some(actr_framework::WebRtcUnavailableReason::NegotiationFailed)
+    })
+    .await;
+    let retirement = timeout(WAIT, h.retirement_rx.recv())
+        .await
+        .expect("fresh Offer retirement timeout")
+        .expect("fresh Offer retirement channel closed");
+    assert_eq!(
+        retirement.reason,
+        actr_framework::WebRtcUnavailableReason::NegotiationFailed
+    );
 
     h.effects
         .complete(EffectCompletion::CloseSession {

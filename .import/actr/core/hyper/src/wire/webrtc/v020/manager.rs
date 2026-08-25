@@ -195,6 +195,12 @@ pub(crate) struct RtcConnectionManager {
     /// controller starts above its retired generation so stale callbacks and
     /// signaling can never alias the new Session.
     next_pc_generations: std::sync::Mutex<HashMap<ActrId, u64>>,
+    /// Unit-test seam: when set, every spawned controller runs on this policy
+    /// clock instead of the system clock, so controller-side deadlines can be
+    /// frozen while caller-side tokio deadlines still fire.
+    #[cfg(test)]
+    policy_clock_for_test:
+        Option<std::sync::Arc<dyn crate::wire::webrtc::v020::peer::policy_clock::PolicyClock>>,
     /// Public revision floor per logical peer. Controller recreation within
     /// one manager lifetime must not make mobile/business observers see a
     /// revision reset even though the underlying watch channel is replaced.
@@ -302,6 +308,8 @@ impl RtcConnectionManager {
             driver_event_observer: None,
             peer_set_version: watch::channel(0u64).0,
             next_pc_generations: std::sync::Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            policy_clock_for_test: None,
             next_revisions: std::sync::Mutex::new(HashMap::new()),
             inbound_suppressed_peers: std::sync::Mutex::new(HashSet::new()),
             peer_closing,
@@ -325,6 +333,18 @@ impl RtcConnectionManager {
         registry: Arc<crate::inbound::MediaFrameRegistry>,
     ) -> Self {
         self.media_registry = Some(registry);
+        self
+    }
+
+    /// Unit-test seam: spawn controllers on an injected policy clock so
+    /// controller-side deadlines can be frozen while caller-side tokio
+    /// deadlines still fire.
+    #[cfg(test)]
+    pub(crate) fn with_policy_clock_for_test(
+        mut self,
+        clock: std::sync::Arc<dyn crate::wire::webrtc::v020::peer::policy_clock::PolicyClock>,
+    ) -> Self {
+        self.policy_clock_for_test = Some(clock);
         self
     }
 
@@ -533,6 +553,13 @@ impl RtcConnectionManager {
             let controller_lifecycle_id = self
                 .next_controller_lifecycle_id
                 .fetch_add(1, Ordering::Relaxed);
+            #[cfg(test)]
+            let policy_clock = self
+                .policy_clock_for_test
+                .clone()
+                .unwrap_or_else(super::peer::policy_clock::system_policy_clock);
+            #[cfg(not(test))]
+            let policy_clock = super::peer::policy_clock::system_policy_clock();
             let (handle, lane_tx, task) = RtcPeerController::spawn_with_lifecycle_floors(
                 peer.clone(),
                 next_pc_generation,
@@ -555,6 +582,7 @@ impl RtcConnectionManager {
                     peer_snapshot_events: Some(self.peer_snapshot_events.clone()),
                     recovery_obligations: Some(self.recovery_obligations.clone()),
                 },
+                policy_clock,
             );
             peers.insert(
                 peer,

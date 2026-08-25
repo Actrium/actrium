@@ -438,6 +438,12 @@ timer_inventory! {
         success: "matching RoleAssignment arrives", interrupt: "close or controller shutdown",
         expiry: "emit identity-checked role-negotiation deadline", reset: "new negotiation epoch only", external: false
     },
+    RTC_INITIAL_CONNECTION_ATTEMPT => {
+        id: "webrtc.initial_connection_attempt", owner: "rtc_peer_controller", category: FailureDeadline,
+        duration: "INITIAL_CONNECTION_ATTEMPT_TIMEOUT", arm: "a fresh logical transport attempt leaves Idle",
+        success: "the exact attempt becomes Sendable or terminal", interrupt: "attempt replacement or controller shutdown",
+        expiry: "terminalize the exact attempt and retire its Sessions", reset: "new transport epoch only", external: false
+    },
     RTC_CLOSE_ALL_DEADLINE => {
         id: "webrtc.close_all_deadline", owner: "rtc_connection_manager", category: FailureDeadline,
         duration: "CLOSE_ALL_OVERALL_TIMEOUT", arm: "close_all fences and drains the peer registry",

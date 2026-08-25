@@ -454,7 +454,7 @@ enum PacketRule {
 | N05 | 固定丢包/时延 | T3 Runtime | 低损不误重建；高损按预算升级 | 部分 seam，未进主 harness |
 | N06 | jitter/reorder/限速/MTU | T4 netem | 业务 deadline、背压、恢复行为符合契约 | 缺失 |
 | N07 | 仅信令 partition | T3 signaling | 已建数据面不被误杀；需要协商时有界恢复 | 已实现：P11/P12/MP04 |
-| N08 | Offer/Answer/Candidate drop/duplicate/delay | T2/T3 signaling | glare/stale/ufrag 规则；无重复状态机动作 | 定向 seam 已实现；完整组合矩阵进入 nightly |
+| N08 | Offer/Answer/Candidate drop/duplicate/delay | T1/T2/T3 signaling | 单 attempt 覆盖 role/build/SDP/ICE/readiness deadline；失败后 WirePool 重试使用新 transport epoch 和新 PC generation；Answerer 发起重试时，被动 Offerer 根据新的 Offerer assignment 立即替换未就绪 PC 并重发 Offer；glare/stale/ufrag 规则不被破坏 | 已覆盖精确 deadline、发送方分别为 Offerer/Answerer 时前两次 build 失败、双方 generation 1→2→3、第三次真实 PC 成功及消息单次投递；完整组合矩阵进入 nightly |
 | N09 | 短时离线后原连接恢复 | T3 | 优先 Soft；generation 不变；原请求语义明确 | 已覆盖，存在 flaky，需拆分稳定化 |
 | N10 | 长时离线导致重建 | T3 | 恢复预算耗尽后 Hard；generation 增长一次 | 已覆盖，补精确计数 |
 | N11 | 地址变化/Wi-Fi↔蜂窝 | T1 + T4/T5 | 立即失去 sendable；Hard rebuild；新地址生效 | 策略有覆盖，真实系统缺失 |
