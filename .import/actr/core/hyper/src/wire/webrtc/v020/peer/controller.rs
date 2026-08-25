@@ -57,11 +57,25 @@ const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::fr
 /// Server-arbitrated role negotiation keeps the historical short failure
 /// budget, distinct from the longer initial ICE/DataChannel readiness budget.
 const ROLE_NEGOTIATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+/// One complete initial role/build/SDP/ICE/readiness attempt. It expires just
+/// before `V020WireHandle`'s 10-second wait so the caller observes a terminal
+/// attempt and WirePool can start its configured retry with a fresh PC.
+const INITIAL_CONNECTION_ATTEMPT_TIMEOUT: std::time::Duration =
+    std::time::Duration::from_millis(9_500);
 
 #[derive(Clone, Copy)]
 struct ControllerLifecycleFloors {
     next_pc_generation: u64,
     next_revision: u64,
+}
+
+/// One critical signaling message retained under signaling-queue backpressure,
+/// fenced by the transport attempt that produced it (and, for SDP, by the PC
+/// generation that announced it).
+struct RetainedSignaling {
+    transport_epoch: u64,
+    generation: u64,
+    message: SignalingMessage,
 }
 
 #[derive(Clone)]
@@ -107,13 +121,14 @@ pub(crate) struct RtcPeerController {
     /// async `apply()` while still letting a failed readiness lane stop the
     /// remaining effects from that reducer turn.
     internal_inputs: std::collections::VecDeque<RtcPeerInput>,
-    /// Critical SDP (offer/answer) retained when the signaling queue was
-    /// full, retried on every event-loop turn. The reducer already marked the
-    /// attempt announced, so dropping the message would strand negotiation
-    /// (the outer timeout does not reset the attempt and a later `Connect`
-    /// is ignored outside `Idle`). Only the newest SDP is retained: a newer
-    /// offer/answer supersedes any retained one.
-    retry_signaling: Option<SignalingMessage>,
+    /// Critical signaling (role probe / offer / answer) retained when the
+    /// signaling queue was full, retried on every event-loop turn. The
+    /// reducer already marked the attempt announced, so dropping the message
+    /// would strand negotiation. The originating transport attempt fences a
+    /// retained message from leaking into a later WirePool retry. Only the
+    /// newest message is retained: a newer offer/answer supersedes any
+    /// retained one.
+    retry_signaling: Option<RetainedSignaling>,
     /// API acknowledgements keyed by the exact RefreshConfiguration operation.
     /// Enqueueing the command is not success; the caller resolves only after
     /// the generation/operation-authenticated `set_configuration()` result.
@@ -242,6 +257,7 @@ impl RtcPeerController {
             network_rx,
             signaling_generation_rx,
             deps,
+            super::policy_clock::system_policy_clock(),
         )
     }
 
@@ -257,6 +273,7 @@ impl RtcPeerController {
         network_rx: tokio::sync::broadcast::Receiver<RtcNetworkEvent>,
         signaling_generation_rx: watch::Receiver<Option<u64>>,
         deps: SharedNodeDeps,
+        policy_clock: Arc<dyn super::policy_clock::PolicyClock>,
     ) -> (
         RtcPeerControllerHandle,
         mpsc::Sender<LaneEvent>,
@@ -273,7 +290,7 @@ impl RtcPeerController {
             network_rx,
             signaling_generation_rx,
             deps,
-            super::policy_clock::system_policy_clock(),
+            policy_clock,
             move |peer_id, event_mailbox, lane_tx, deps| {
                 Arc::new(WebRtcEffectRunner::new(
                     peer_id,
@@ -425,6 +442,7 @@ impl RtcPeerController {
         let mut recovery_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
         let mut recovery_budget_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
         let mut role_negotiation_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
+        let mut initial_connection_timer: Option<(u64, super::policy_clock::PolicySleep)> = None;
         let mut signaling_generation_watch_open = true;
         'run: loop {
             // Retry critical SDP retained during signaling-queue backpressure
@@ -520,6 +538,33 @@ impl RtcPeerController {
                     ));
                 }
                 (None, _) => role_negotiation_timer = None,
+            }
+
+            // One exact timer covers the full first-connection pipeline,
+            // including the gap after PC Connected while the readiness anchor
+            // is still closed. A WirePool retry advances transport_epoch, so a
+            // delayed timer cannot terminate the new attempt.
+            let initial_transport_epoch = self
+                .state
+                .initial_connection_inflight
+                .then_some(self.state.transport_epoch);
+            match (
+                initial_transport_epoch,
+                initial_connection_timer
+                    .as_ref()
+                    .map(|(transport_epoch, _)| *transport_epoch),
+            ) {
+                (Some(transport_epoch), Some(armed)) if transport_epoch == armed => {}
+                (Some(transport_epoch), _) => {
+                    initial_connection_timer = Some((
+                        transport_epoch,
+                        self.policy_clock.sleep(
+                            crate::timer::ids::RTC_INITIAL_CONNECTION_ATTEMPT,
+                            INITIAL_CONNECTION_ATTEMPT_TIMEOUT,
+                        ),
+                    ));
+                }
+                (None, _) => initial_connection_timer = None,
             }
 
             tokio::select! {
@@ -724,6 +769,25 @@ impl RtcPeerController {
                     if self
                         .apply(RtcPeerInput::RoleNegotiationDeadlineElapsed {
                             negotiation_epoch,
+                        })
+                        .await
+                    {
+                        break;
+                    }
+                }
+                _ = async {
+                    match initial_connection_timer.as_mut() {
+                        Some((_, timer)) => timer.as_mut().await,
+                        None => std::future::pending::<()>().await,
+                    }
+                } => {
+                    let transport_epoch = initial_connection_timer
+                        .take()
+                        .expect("guarded initial-connection timer")
+                        .0;
+                    if self
+                        .apply(RtcPeerInput::InitialConnectionDeadlineElapsed {
+                            transport_epoch,
                         })
                         .await
                     {
@@ -1052,16 +1116,25 @@ impl RtcPeerController {
         }
     }
 
-    /// Try to deliver a retained critical SDP message. Called once per
+    /// Try to deliver a retained critical signaling message. Called once per
     /// event-loop turn; success clears the slot, a still-full queue leaves it
     /// retained for the next turn.
     fn flush_retry_signaling(&mut self) {
-        let Some(message) = self.retry_signaling.take() else {
+        let Some(retained) = self.retry_signaling.take() else {
             return;
         };
+        if !self.retained_signaling_is_live(&retained) {
+            tracing::debug!(
+                peer = %self.state.peer_id.to_string_repr(),
+                transport_epoch = retained.transport_epoch,
+                generation = retained.generation,
+                "discarding retained signaling from a superseded transport attempt"
+            );
+            return;
+        }
         match self
             .signaling_tx
-            .try_send((self.state.peer_id.clone(), message))
+            .try_send((self.state.peer_id.clone(), retained.message))
         {
             Ok(()) => {
                 tracing::info!(
@@ -1069,10 +1142,32 @@ impl RtcPeerController {
                     "retried retained SDP through the signaling queue"
                 );
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Full(message)) => {
-                self.retry_signaling = Some(message.1);
+            Err(tokio::sync::mpsc::error::TrySendError::Full((_peer, message))) => {
+                self.retry_signaling = Some(RetainedSignaling {
+                    transport_epoch: retained.transport_epoch,
+                    generation: retained.generation,
+                    message,
+                });
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
+        }
+    }
+
+    /// Whether a retained signaling message still belongs to the transport
+    /// attempt that produced it. SDP is fenced by its PC generation. A role
+    /// probe carries generation 0, so it is fenced by the transport epoch plus
+    /// the attempt still being in flight: replaying a superseded attempt's
+    /// probe re-runs server arbitration, and the repeated Offerer assignment
+    /// would rebuild the fresh generation that the newer attempt just
+    /// allocated.
+    fn retained_signaling_is_live(&self, retained: &RetainedSignaling) -> bool {
+        if self.state.transport_epoch != retained.transport_epoch {
+            return false;
+        }
+        if retained.generation == 0 {
+            self.state.initial_connection_inflight
+        } else {
+            self.state.is_live_generation(retained.generation)
         }
     }
 
@@ -1128,7 +1223,10 @@ impl RtcPeerController {
                     operation_id,
                 });
             }
-            RtcPeerEffect::SendSignaling { message, .. } => {
+            RtcPeerEffect::SendSignaling {
+                generation,
+                message,
+            } => {
                 // The lifecycle supervisor is the sole signaling connection
                 // owner. Do not let a queued RTC completion publish SDP/ICE
                 // after that supervisor has withdrawn the committed
@@ -1171,15 +1269,20 @@ impl RtcPeerController {
                                 "signaling queue full; dropped ICE candidate"
                             );
                         } else {
-                            // Losing SDP strands the attempt: the reducer
-                            // already marked it announced, the outer timeout
-                            // does not reset it, and a later Connect is
-                            // ignored outside Idle. Retain the newest SDP and
-                            // retry it on every event-loop turn instead of
-                            // dropping it (a newer offer/answer supersedes a
-                            // retained one, which is the correct attempt
-                            // semantics).
-                            self.retry_signaling = Some(message);
+                            // Losing critical signaling strands the attempt:
+                            // the reducer already marked it announced, the
+                            // outer timeout does not reset it, and a later
+                            // Connect is ignored outside Idle. Retain the
+                            // newest message, fenced by the originating
+                            // transport attempt, and retry it on every
+                            // event-loop turn instead of dropping it (a newer
+                            // offer/answer supersedes a retained one, which is
+                            // the correct attempt semantics).
+                            self.retry_signaling = Some(RetainedSignaling {
+                                transport_epoch: self.state.transport_epoch,
+                                generation,
+                                message,
+                            });
                             tracing::warn!(
                                 peer = %self.state.peer_id.to_string_repr(),
                                 signaling_dropped = self.state.signaling_dropped,

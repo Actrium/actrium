@@ -996,10 +996,11 @@ stateDiagram-v2
 
 `Idle` alone is not a cache-retirement signal: a fresh Controller and a terminally unavailable
 Controller both project `Idle`. The terminal decision also requires a terminal reason and no
-active/building/pending Session. In particular, `RecoveryExhausted`, a terminal initial
-build/negotiation failure, an unrecoverable `PeerConnection`/ICE `Closed`, and an unrecoverable
-`DriverExited` MUST retire the current connection flight. `Disconnected`, Soft Recovery, and Hard
-Recovery before its total budget expires MUST retain that flight.
+active/building/pending Session. In particular, `RecoveryExhausted`, an unrecoverable
+`PeerConnection`/ICE `Closed`, and an unrecoverable `DriverExited` MUST retire the current
+connection flight. A terminal result from one initial connection attempt MUST retain a
+`WirePool::Connecting` flight while that pool still owns retries. `Disconnected`, Soft Recovery,
+and Hard Recovery before its total budget expires MUST also retain that flight.
 
 ### Generation and transport retirement
 
@@ -1026,12 +1027,14 @@ TransportRetired(peer, transport_lifecycle_id, reason)
   `DestTransport` connection flight;
 - allow a later send/connect to start a fresh connection flight and PC generation.
 
-`TransportRetired` is required for recovery-budget exhaustion, terminal initial build or
-negotiation failure, unrecoverable PC/ICE close or driver exit, and explicit `close_peer`/`close_all`.
-When a `WirePool` exhausts every candidate before any candidate has ever become ready, the failed
-connection flight MUST also be evicted. The retirement edge MUST be published before discarding the
-identity needed for compare-and-swap cleanup, or carry an immutable connection-flight identity that
-survives the terminal `Idle` snapshot.
+`TransportRetired` is required for recovery-budget exhaustion, unrecoverable PC/ICE close or driver
+exit, and explicit `close_peer`/`close_all`. One initial build/negotiation attempt may publish a
+terminal Controller snapshot, but terminal cleanup MUST NOT detach a matching
+`WirePool::Connecting` slot because the pool still owns its remaining attempts. When a `WirePool`
+exhausts every candidate before any candidate has ever become ready, the failed connection flight
+MUST be evicted. The retirement edge MUST be published before discarding the identity needed for
+compare-and-swap cleanup, or carry an immutable connection-flight identity that survives the
+terminal `Idle` snapshot.
 Moving a WebRTC slot from `Connecting`/`Ready` to `Failed` MUST retain that lifecycle identity until
 the connection flight is evicted; a racing closed-like send error must not erase the only key that a
 subsequent terminal-retirement edge can safely match.
@@ -1046,7 +1049,8 @@ The cleanup matrix is normative:
 | Hard Recovery within the total recovery budget | Close each superseded/failed PC generation and remove only its lanes, permits, and pending correlations | Retain the connection flight and Controller |
 | Pending replacement reports `Failed`/`Closed` | Close and remove only that pending generation, then build a newer generation | Retain the connection flight |
 | Established PC/ICE `Closed` or `DriverExited` while recovery remains possible | Close the affected generation and enter Hard Recovery | Retain the connection flight until recovery converges or exhausts |
-| Terminal initial build/negotiation failure, initial `Closed`, or initial `DriverExited` | Close every created/late-orphan generation; clear attempt-scoped SDP, ICE, lane, and permit state | Fail peer pending requests, clear the matching ready slot, and evict the matching `DestTransport` |
+| One initial build/negotiation deadline or initial `Closed`/`DriverExited` | Close every created/late-orphan generation; clear attempt-scoped SDP, ICE, lane, and permit state | Keep a `Connecting` WirePool flight so its next retry can allocate a fresh PC generation |
+| Initial WirePool retry exhaustion | All attempt generations have been closed or fenced for late-orphan close | Fail peer pending requests, mark the WebRTC slot Failed, and evict the matching `DestTransport` |
 | `RecoveryExhausted` | Close active, pending, and late-orphan generations; clear all attempt-scoped resource state | Fail peer pending requests and evict the matching connection flight |
 | Explicit `close_peer` / `close_all` | Run the full close barrier for all generations | Evict the connection flight and remove the Controller |
 
@@ -1073,6 +1077,17 @@ Active connection process:
 10. PC driver reports Connected.
 11. `RpcReliable` pump reports Open.
 12. The Controller calculates `sendable=true` and issues `Connected`.
+13. One transport epoch has a 9.5-second end-to-end deadline covering role arbitration,
+    `BuildSession`, Offer/Answer, ICE, and `RpcReliable` readiness. On expiry the Controller retires
+    that exact generation and reaches terminal `Idle`.
+14. `DefaultWireBuilder` hands the unconnected WebRTC candidate to `WirePool`; the pool's bounded
+    retry policy (three attempts by default) starts a new transport epoch and fresh PC generation
+    after an attempt fails. A `Connecting` slot cannot be detached by the per-attempt terminal edge.
+15. `RoleAssignment(is_offerer=true)` is an authoritative rebuild command while the assigned peer
+    still owns a never-sendable initial PC. The Controller retires/abandons every old generation,
+    starts the replacement build without waiting for close, and emits a fresh Offer. Repeated
+    assignments deliberately produce repeated fresh generations; generation and operation fencing
+    reject all late work from the superseded PCs.
 Passive connection process:
 1. Router receives an Offer from an unknown Peer.
 2. Manager creates Answerer Controller.
@@ -1422,9 +1437,10 @@ Drop can only be used as an exception cover and cannot replace an explicit close
 
 Recovery exhaustion and other terminal failures use the same physical cleanup barrier, but they do
 not require destruction of the long-lived Controller. The Controller MAY remain as a clean `Idle`
-control-plane object for a later `Connect`; the failed `DestTransport`/`WirePool` flight MUST still be
-retired. A later connection therefore reuses only the Controller identity, never a closed physical PC
-or stale transport-ready cache entry.
+control-plane object for a later `Connect`. During initial connection, that later `Connect` may be the
+next attempt owned by the same `WirePool`; only retry exhaustion retires the failed connection
+flight. Every retry reuses only the Controller identity, never a closed physical PC or stale
+transport-ready cache entry.
 
 ```mermaid
 sequenceDiagram

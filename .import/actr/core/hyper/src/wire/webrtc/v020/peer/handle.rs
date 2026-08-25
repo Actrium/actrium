@@ -139,7 +139,13 @@ impl RtcPeerControllerHandle {
 
     pub(crate) async fn await_secure_state_change(&self, observed_epoch: u64) {
         let mut snapshot_rx = self.subscribe();
-        if snapshot_rx.borrow().revision > observed_epoch {
+        // `subscribe()` clones the handle's long-lived receiver, whose seen
+        // watermark never advances (`snapshot()` uses plain `borrow()`), so
+        // `changed()` on a fresh clone is immediately ready after any publish
+        // and the caller would spin instead of parking. `borrow_and_update()`
+        // marks the current revision seen; `changed()` then waits for the
+        // next publish past it.
+        if snapshot_rx.borrow_and_update().revision > observed_epoch {
             return;
         }
         let cell = self.secure_cell();
@@ -445,6 +451,17 @@ impl RtcPeerControllerHandle {
         self.send_command(RtcPeerCommand::ConnectCommitted { respond })
             .await?;
         committed.await.map_err(|_| ControllerGone::Gone)
+    }
+
+    /// Terminate only the initial attempt observed by a timed-out caller.
+    /// WirePool may already have started a newer retry on the same Controller;
+    /// the transport epoch makes this cancellation safe in that race.
+    pub(crate) async fn abort_transport_attempt(
+        &self,
+        transport_epoch: u64,
+    ) -> Result<(), ControllerGone> {
+        self.send_command(RtcPeerCommand::AbortTransportAttempt { transport_epoch })
+            .await
     }
 
     /// Ask the controller to close the peer (terminal close barrier).

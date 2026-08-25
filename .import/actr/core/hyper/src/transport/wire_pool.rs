@@ -70,6 +70,15 @@ impl RetryConfig {
     }
 }
 
+/// Test-only summary of one connection slot's [`WireStatus`] variant.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WireStatusKind {
+    Connecting,
+    Ready,
+    Failed,
+}
+
 /// WirePool - Wire connection pool manager
 ///
 /// # Responsibilities
@@ -471,6 +480,22 @@ impl WirePool {
         self.ready_rx.clone()
     }
 
+    /// Test-only status summary for one connection slot (see
+    /// [`WireStatusKind`]).
+    #[cfg(test)]
+    pub(crate) async fn connection_status_for_test(
+        &self,
+        conn_type: ConnType,
+    ) -> Option<WireStatusKind> {
+        self.connections.read().await[conn_type.as_index()]
+            .as_ref()
+            .map(|status| match status {
+                WireStatus::Connecting(_) => WireStatusKind::Connecting,
+                WireStatus::Ready(_) => WireStatusKind::Ready,
+                WireStatus::Failed(_) => WireStatusKind::Failed,
+            })
+    }
+
     /// Get connection of specified type
     pub(crate) async fn get_connection(&self, conn_type: ConnType) -> Option<Arc<dyn WireHandle>> {
         let conns = self.connections.read().await;
@@ -539,21 +564,24 @@ impl WirePool {
         }
     }
 
-    /// Check whether the WebRTC slot belongs to the exact logical connection
-    /// flight named by a terminal Controller event. Failed/connecting slots
-    /// retain their handle identity so a send-path race cannot erase the CAS
-    /// key before terminal transport cleanup consumes it.
+    /// Check whether a settled WebRTC slot belongs to the exact logical
+    /// connection flight named by a terminal Controller event. A Connecting
+    /// slot deliberately never matches because WirePool still owns retries;
+    /// Ready/Failed slots retain identity for terminal cleanup CAS.
     pub(crate) async fn connection_matches_webrtc_lifecycle(
         &self,
         expected: &WebRtcTransportLifecycle,
     ) -> bool {
         let conns = self.connections.read().await;
         let current = match &conns[ConnType::WebRTC.as_index()] {
-            Some(
-                WireStatus::Connecting(handle)
-                | WireStatus::Ready(handle)
-                | WireStatus::Failed(handle),
-            ) => handle.webrtc_transport_lifecycle(),
+            // A terminal Controller snapshot is the outcome of one bounded
+            // connect attempt while this slot is Connecting. WirePool still
+            // owns its remaining retries, so terminal cleanup must not detach
+            // the whole DestTransport before the next attempt starts.
+            Some(WireStatus::Connecting(_)) => return false,
+            Some(WireStatus::Ready(handle) | WireStatus::Failed(handle)) => {
+                handle.webrtc_transport_lifecycle()
+            }
             _ => None,
         };
         drop(conns);

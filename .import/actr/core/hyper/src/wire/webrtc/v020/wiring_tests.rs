@@ -10,17 +10,22 @@
 //! `ws_transport.rs` tests. This test proves the transport-layer wiring.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{ActrId, ActrType, PayloadType, Realm};
+use async_trait::async_trait;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
+use webrtc::error::Error as RtcError;
 
 use crate::transport::{DefaultWireBuilder, DefaultWireBuilderConfig, PeerTransport};
 use crate::wire::webrtc::v020::address::DesktopLocalAddressProvider;
+use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::v020::factory::PeerConnectionFactory;
 use crate::wire::webrtc::v020::manager::RtcConnectionManager;
+use crate::wire::webrtc::v020::peer::effects::{SessionFactory, SessionOps};
 use crate::wire::webrtc::v020::runtime::RtcRuntimeConfig;
 use crate::wire::webrtc::v020::signaling::in_memory::{InMemorySignalingHub, InMemoryTransport};
 use crate::wire::webrtc::v020::signaling::router::SignalingRouter;
@@ -60,15 +65,62 @@ type InboundLog = std::sync::Arc<
     >,
 >;
 
-fn spawn_wired_node(hub: &Arc<InMemorySignalingHub>, local_id: ActrId) -> WiredNode {
-    let (signaling_tx, signaling_rx) = mpsc::channel(64);
-    let factory = Arc::new(PeerConnectionFactory::new(
+fn real_session_factory() -> Arc<dyn SessionFactory> {
+    Arc::new(PeerConnectionFactory::new(
         RtcRuntimeConfig::desktop_default(),
         Arc::new(DesktopLocalAddressProvider::with_override(vec![
             std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
         ])),
         Vec::new(),
-    ));
+    ))
+}
+
+struct FailFirstBuildsFactory {
+    delegate: Arc<dyn SessionFactory>,
+    fail_first: usize,
+    attempts: AtomicUsize,
+    generations: std::sync::Mutex<Vec<u64>>,
+}
+
+impl FailFirstBuildsFactory {
+    fn new(fail_first: usize) -> Arc<Self> {
+        Arc::new(Self {
+            delegate: real_session_factory(),
+            fail_first,
+            attempts: AtomicUsize::new(0),
+            generations: std::sync::Mutex::new(Vec::new()),
+        })
+    }
+
+    fn generations(&self) -> Vec<u64> {
+        self.generations.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl SessionFactory for FailFirstBuildsFactory {
+    async fn build(
+        &self,
+        handler: Arc<WebRtcEventHandler>,
+    ) -> Result<Arc<dyn SessionOps>, RtcError> {
+        self.generations.lock().unwrap().push(handler.generation());
+        let attempt = self.attempts.fetch_add(1, Ordering::AcqRel);
+        if attempt < self.fail_first {
+            return Err(RtcError::Other(format!(
+                "injected initial PeerConnection build failure {}",
+                attempt + 1
+            )));
+        }
+        self.delegate.build(handler).await
+    }
+}
+
+fn spawn_wired_node_with_factory(
+    hub: &Arc<InMemorySignalingHub>,
+    local_id: ActrId,
+    factory: Arc<dyn SessionFactory>,
+) -> WiredNode {
+    let (signaling_tx, signaling_rx) = mpsc::channel(64);
 
     // Recording inbound router.
     let log: InboundLog = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -107,6 +159,55 @@ fn spawn_wired_node(hub: &Arc<InMemorySignalingHub>, local_id: ActrId) -> WiredN
         router,
         inbound_log: log,
     }
+}
+
+fn spawn_wired_node(hub: &Arc<InMemorySignalingHub>, local_id: ActrId) -> WiredNode {
+    spawn_wired_node_with_factory(hub, local_id, real_session_factory())
+}
+
+async fn wait_for_exact_delivery(node: &WiredNode, from: &ActrId, payload: &[u8]) {
+    timeout(WAIT, async {
+        loop {
+            let deliveries = node
+                .inbound_log
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|(peer, lane, received)| {
+                    peer == from
+                        && *lane == crate::wire::webrtc::v020::status::LaneKind::RpcReliable
+                        && received.as_ref() == payload
+                })
+                .count();
+            if deliveries == 1 {
+                break;
+            }
+            assert_eq!(
+                deliveries, 0,
+                "retried message was delivered more than once"
+            );
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("retried message was not delivered");
+
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let deliveries = node
+        .inbound_log
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|(peer, lane, received)| {
+            peer == from
+                && *lane == crate::wire::webrtc::v020::status::LaneKind::RpcReliable
+                && received.as_ref() == payload
+        })
+        .count();
+    assert_eq!(
+        deliveries, 1,
+        "retried message must be delivered exactly once"
+    );
 }
 
 /// Wait until a peer's snapshot reports `sendable`.
@@ -181,6 +282,137 @@ async fn production_wiring_rpc_round_trip_through_v020_transport() {
     })
     .await
     .expect("B should receive the RPC payload through the v020 inbound path");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn production_wiring_lazy_connect_is_driven_by_wire_pool() {
+    let hub = InMemorySignalingHub::new();
+    let a = spawn_wired_node(&hub, test_actor_id(11));
+    let b = spawn_wired_node(&hub, test_actor_id(12));
+    let payload = bytes::Bytes::from_static(b"wire-pool-lazy-connect");
+    let dest = crate::transport::Dest::peer(b.local_id.clone());
+
+    // Do not pre-connect either Manager. Creating the DestTransport must hand
+    // an unconnected V020WireHandle to WirePool, whose first attempt drives
+    // role negotiation, a fresh PC, and readiness before this send proceeds.
+    timeout(
+        WAIT,
+        a.peer_transport
+            .send_with_identity(&dest, PayloadType::RpcReliable, &payload, None),
+    )
+    .await
+    .expect("lazy v0.20 connect timed out")
+    .expect("lazy v0.20 send failed");
+
+    let snap_a = await_sendable(&a.manager, &b.local_id).await;
+    let snap_b = await_sendable(&b.manager, &a.local_id).await;
+    assert_eq!(snap_a.pc_generation, 1);
+    assert_eq!(snap_b.pc_generation, 1);
+
+    timeout(WAIT, async {
+        loop {
+            if b.inbound_log
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|(peer, lane, received)| {
+                    *peer == a.local_id
+                        && *lane == crate::wire::webrtc::v020::status::LaneKind::RpcReliable
+                        && received.as_ref() == payload.as_ref()
+                })
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("lazy-connect payload was not delivered");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn sender_as_offerer_retries_failed_pc_builds_then_delivers_message() {
+    let hub = InMemorySignalingHub::new();
+    let sender_factory = FailFirstBuildsFactory::new(2);
+    let receiver_factory = FailFirstBuildsFactory::new(0);
+    // The in-memory signaling rule assigns the lower serial as Offerer.
+    let sender = spawn_wired_node_with_factory(&hub, test_actor_id(21), sender_factory.clone());
+    let receiver = spawn_wired_node_with_factory(&hub, test_actor_id(22), receiver_factory.clone());
+    let payload = bytes::Bytes::from_static(b"offerer-build-retry");
+    let dest = crate::transport::Dest::peer(receiver.local_id.clone());
+
+    timeout(
+        WAIT,
+        sender
+            .peer_transport
+            .send_with_identity(&dest, PayloadType::RpcReliable, &payload, None),
+    )
+    .await
+    .expect("Offerer message-driven retries timed out")
+    .expect("Offerer message-driven retries failed");
+
+    let sender_snapshot = await_sendable(&sender.manager, &receiver.local_id).await;
+    let receiver_snapshot = await_sendable(&receiver.manager, &sender.local_id).await;
+    assert_eq!(
+        sender_snapshot.role,
+        crate::wire::webrtc::v020::peer::state::Role::Offerer
+    );
+    assert_eq!(
+        receiver_snapshot.role,
+        crate::wire::webrtc::v020::peer::state::Role::Answerer
+    );
+    assert_eq!(sender_factory.generations(), vec![1, 2, 3]);
+    assert_eq!(sender_snapshot.pc_generation, 3);
+    assert_eq!(receiver_factory.generations(), vec![1]);
+    assert_eq!(receiver_snapshot.pc_generation, 1);
+    wait_for_exact_delivery(&receiver, &sender.local_id, &payload).await;
+
+    sender.manager.close_all().await;
+    receiver.manager.close_all().await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn sender_as_answerer_retries_failed_pc_builds_then_delivers_message() {
+    let hub = InMemorySignalingHub::new();
+    let sender_factory = FailFirstBuildsFactory::new(2);
+    let passive_offerer_factory = FailFirstBuildsFactory::new(0);
+    // The higher-serial sender loses role arbitration and becomes Answerer;
+    // every retry must force the lower-serial passive Offerer to replace its
+    // never-sendable PC and emit a fresh Offer.
+    let sender = spawn_wired_node_with_factory(&hub, test_actor_id(32), sender_factory.clone());
+    let passive_offerer =
+        spawn_wired_node_with_factory(&hub, test_actor_id(31), passive_offerer_factory.clone());
+    let payload = bytes::Bytes::from_static(b"answerer-build-retry");
+    let dest = crate::transport::Dest::peer(passive_offerer.local_id.clone());
+
+    timeout(
+        WAIT,
+        sender
+            .peer_transport
+            .send_with_identity(&dest, PayloadType::RpcReliable, &payload, None),
+    )
+    .await
+    .expect("Answerer message-driven retries timed out")
+    .expect("Answerer message-driven retries failed");
+
+    let sender_snapshot = await_sendable(&sender.manager, &passive_offerer.local_id).await;
+    let offerer_snapshot = await_sendable(&passive_offerer.manager, &sender.local_id).await;
+    assert_eq!(
+        sender_snapshot.role,
+        crate::wire::webrtc::v020::peer::state::Role::Answerer
+    );
+    assert_eq!(
+        offerer_snapshot.role,
+        crate::wire::webrtc::v020::peer::state::Role::Offerer
+    );
+    assert_eq!(sender_factory.generations(), vec![1, 2, 3]);
+    assert_eq!(sender_snapshot.pc_generation, 3);
+    assert_eq!(passive_offerer_factory.generations(), vec![1, 2, 3]);
+    assert_eq!(offerer_snapshot.pc_generation, 3);
+    wait_for_exact_delivery(&passive_offerer, &sender.local_id, &payload).await;
+
+    sender.manager.close_all().await;
+    passive_offerer.manager.close_all().await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

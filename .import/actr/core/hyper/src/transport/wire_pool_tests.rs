@@ -32,6 +32,44 @@ struct AdvancingLifecycleWire {
     lifecycle: std::sync::Mutex<crate::transport::WebRtcTransportLifecycle>,
 }
 
+#[derive(Debug)]
+struct BlockingLifecycleWire {
+    lifecycle: crate::transport::WebRtcTransportLifecycle,
+    started: tokio::sync::Notify,
+}
+
+#[async_trait::async_trait]
+impl WireHandle for BlockingLifecycleWire {
+    fn connection_type(&self) -> ConnType {
+        ConnType::WebRTC
+    }
+
+    fn priority(&self) -> u8 {
+        1
+    }
+
+    async fn connect(&self) -> NetworkResult<()> {
+        self.started.notify_one();
+        std::future::pending().await
+    }
+
+    fn is_connected(&self) -> bool {
+        false
+    }
+
+    async fn close(&self) -> NetworkResult<()> {
+        Ok(())
+    }
+
+    async fn get_lane(&self, _: PayloadType) -> NetworkResult<Arc<dyn DataLane>> {
+        Err(NetworkError::NotImplemented("mock has no lane".into()))
+    }
+
+    fn webrtc_transport_lifecycle(&self) -> Option<crate::transport::WebRtcTransportLifecycle> {
+        Some(self.lifecycle.clone())
+    }
+}
+
 #[async_trait::async_trait]
 impl WireHandle for AdvancingLifecycleWire {
     fn connection_type(&self) -> ConnType {
@@ -280,6 +318,28 @@ async fn live_webrtc_lifecycle_overrides_stale_commit_snapshot() {
         "old terminal event must not match the advanced live attempt"
     );
     assert!(pool.connection_matches_webrtc_lifecycle(&epoch_2).await);
+}
+
+#[tokio::test]
+async fn terminal_attempt_does_not_match_while_wire_pool_still_owns_retries() {
+    let lifecycle = crate::transport::WebRtcTransportLifecycle {
+        peer_id: actr_protocol::ActrId::default(),
+        controller_lifecycle_id: 9,
+        transport_epoch: 1,
+    };
+    let wire = Arc::new(BlockingLifecycleWire {
+        lifecycle: lifecycle.clone(),
+        started: tokio::sync::Notify::new(),
+    });
+    let pool = WirePool::new(RetryConfig::default());
+    pool.add_connection(wire.clone()).await;
+    wire.started.notified().await;
+
+    assert!(
+        !pool.connection_matches_webrtc_lifecycle(&lifecycle).await,
+        "terminal cleanup must not detach a Connecting slot before retries finish"
+    );
+    pool.close_all().await;
 }
 
 #[tokio::test]

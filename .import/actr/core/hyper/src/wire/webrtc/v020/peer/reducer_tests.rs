@@ -602,6 +602,45 @@ fn exact_role_negotiation_deadline_fails_only_matching_epoch() {
 }
 
 #[test]
+fn initial_connection_deadline_covers_pc_connected_until_readiness_opens() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    reduce(&mut state, RtcPeerInput::Command(RtcPeerCommand::Connect));
+    reduce(&mut state, role_assignment(true));
+    let generation = state.building_generation.expect("initial generation");
+    let build_operation =
+        pending_operation(&state, PendingRtcOperationKind::BuildSession, generation);
+    reduce(&mut state, build_ok(generation, build_operation));
+    reduce(&mut state, connected_tick(generation));
+
+    assert!(state.ever_connected, "the physical PC reported Connected");
+    assert!(state.initial_connection_inflight);
+    assert_eq!(state.phase, RtcPeerPhase::TransportReady);
+    assert!(!state.sendable(), "readiness anchor has not opened");
+
+    let transport_epoch = state.transport_epoch;
+    let stale = reduce(
+        &mut state,
+        RtcPeerInput::InitialConnectionDeadlineElapsed {
+            transport_epoch: transport_epoch.wrapping_add(1),
+        },
+    );
+    assert!(stale.is_empty());
+    assert_eq!(state.active_generation, Some(generation));
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::InitialConnectionDeadlineElapsed { transport_epoch },
+    );
+    assert!(has_close_session(&effects, generation));
+    assert_eq!(state.phase, RtcPeerPhase::Idle);
+    assert!(!state.initial_connection_inflight);
+    assert_eq!(
+        state.unavailable_reason,
+        Some(RtcUnavailableReason::NegotiationFailed)
+    );
+}
+
+#[test]
 fn role_assignment_offerer_starts_offerer_build() {
     let mut state = RtcPeerState::new(test_actor_id(1));
     reduce(&mut state, RtcPeerInput::Command(RtcPeerCommand::Connect));
@@ -631,6 +670,45 @@ fn unsolicited_offerer_assignment_drives_build() {
     let effects = reduce(&mut state, build_ok(1, 1));
     assert_eq!(state.phase, RtcPeerPhase::Negotiating);
     assert!(has_create_offer(&effects, 1));
+}
+
+#[test]
+fn repeated_offerer_assignment_restarts_never_sendable_initial_pc() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    reduce(&mut state, RtcPeerInput::Command(RtcPeerCommand::Connect));
+    reduce(&mut state, role_assignment(true));
+    let generation = state.building_generation.expect("initial generation");
+    let build_operation =
+        pending_operation(&state, PendingRtcOperationKind::BuildSession, generation);
+    let build_effects = reduce(&mut state, build_ok(generation, build_operation));
+    assert!(has_create_offer(&build_effects, generation));
+    let stale_offer_operation =
+        pending_operation(&state, PendingRtcOperationKind::CreateOffer, generation);
+    let transport_epoch = state.transport_epoch;
+
+    let effects = reduce(&mut state, role_assignment(true));
+
+    assert_eq!(state.role, Role::Offerer);
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+    assert!(state.initial_connection_inflight);
+    assert_eq!(state.transport_epoch, transport_epoch + 1);
+    assert_eq!(state.active_generation, None);
+    assert_eq!(state.building_generation, Some(generation + 1));
+    assert!(has_close_session(&effects, generation));
+    assert!(has_build_session(&effects, generation + 1));
+
+    let stale_before = state.stale_completions;
+    let stale_effects = reduce(
+        &mut state,
+        RtcPeerInput::Completion(EffectCompletion::CreateOffer {
+            generation,
+            operation_id: stale_offer_operation,
+            result: Ok(Box::new(offer())),
+        }),
+    );
+    assert!(stale_effects.is_empty());
+    assert_eq!(state.stale_completions, stale_before + 1);
+    assert_eq!(state.building_generation, Some(generation + 1));
 }
 
 #[test]

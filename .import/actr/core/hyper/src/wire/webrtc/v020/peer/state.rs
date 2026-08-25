@@ -97,6 +97,10 @@ pub(crate) struct RtcPeerState {
     /// recovery, increments it. Soft/Hard Recovery deliberately keeps it so
     /// the cached logical transport can replace PC generations in place.
     pub(crate) transport_epoch: u64,
+    /// A fresh logical transport has not reached business sendability yet.
+    /// This remains true after the physical PC reports Connected so the
+    /// attempt deadline still covers the readiness DataChannel.
+    pub(crate) initial_connection_inflight: bool,
 
     /// Next PC generation to assign (monotonic, never reused). Generations
     /// start at 1; `None`/0 means "no session".
@@ -318,6 +322,7 @@ impl RtcPeerState {
             awaiting_offer: false,
             negotiation_epoch: 0,
             transport_epoch: 0,
+            initial_connection_inflight: false,
             next_pc_generation: next_pc_generation.max(1),
             operation_id: 0,
             pending_operations: HashMap::new(),
@@ -440,6 +445,7 @@ impl RtcPeerState {
     /// Start a fresh logical connection flight without reusing epoch zero.
     pub(crate) fn begin_transport_attempt(&mut self) {
         self.transport_epoch = self.transport_epoch.wrapping_add(1).max(1);
+        self.initial_connection_inflight = true;
         self.ever_connected = false;
         self.unavailable_reason = None;
     }

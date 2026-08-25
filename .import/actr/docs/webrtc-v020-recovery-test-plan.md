@@ -40,6 +40,7 @@ TURN, system-network, browser, or Android/iOS environments.
 | 10 | Deterministic policy replay | T1 `ManualPolicyClock` | Stock v0.20 has no `Runtime::now()` seam; high-level and bit-exact protocol replay are not claimed |
 | 11 | Loss/delay/reorder at the *protocol packet* level | Optional Sans-I/O lab | Clock level C remains deferred and is not claimed by `runtime-mock`; high-level loss/blackhole coverage is already present |
 | 12 | Mixed-fleet interop (legacy peer ↔ v0.20 peer) | External release gate only when a deployment actually mixes versions | Actr message framing remains byte-compatible through the shared codec; no legacy RTC implementation remains in production dependencies |
+| 13 | Initial Offer/Answer/PC readiness never converges | T1 manual clock + real-PC transport wiring tests | One 9.5 s transport-epoch deadline closes the exact generation; `DefaultWireBuilder` delegates to WirePool; three retries allocate monotonically fresh PC generations without detaching the Connecting flight; message-driven Offerer and Answerer cases fail builds 1/2, succeed on generation 3, and deliver once |
 
 ## 3. Rules for the follow-up plans
 
