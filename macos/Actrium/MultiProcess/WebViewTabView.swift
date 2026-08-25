@@ -166,19 +166,50 @@ private let sharedProcessPool = WKProcessPool()
 
 /// Browser identity appended to WebKit's native User-Agent.
 ///
-/// Actro intentionally keeps WebKit's platform and engine identity instead of
-/// impersonating a particular Safari release. This keeps HTTP and JavaScript
-/// identity aligned as WebKit evolves with the operating system.
+/// A bare WKWebView User-Agent ends after the WebKit engine token. During the
+/// Baidu failure investigation that identity received a legacy compatibility
+/// path which repeatedly replaced the top-level navigation. Preserve WebKit's
+/// native platform identity, add Safari-compatible browser-surface tokens,
+/// then append Actro's own product. This is compatibility hardening, not an
+/// assertion that site-side routing is the sole cause of every blank load.
 struct BrowserUserAgentIdentity {
     private static let productName = "Actro"
+    private static let safariEngineVersion = "605.1.15"
 
-    static func applicationName(version: String?) -> String {
+    static func applicationName(version: String?, safariVersion: String? = nil) -> String {
+        let safeProductVersion = sanitizedToken(version, fallback: "0")
+        let safeSafariVersion = sanitizedToken(
+            safariVersion ?? installedSafariVersion,
+            fallback: fallbackSafariVersion
+        )
+        return "Version/\(safeSafariVersion) Safari/\(safariEngineVersion) \(productName)/\(safeProductVersion)"
+    }
+
+    private static func sanitizedToken(_ version: String?, fallback: String) -> String {
         let rawVersion = version?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let safeVersion = rawVersion.unicodeScalars
             .filter { $0.value < 128 && (CharacterSet.alphanumerics.contains($0) || "._-".unicodeScalars.contains($0)) }
             .map(String.init)
             .joined()
-        return "\(productName)/\(safeVersion.isEmpty ? "0" : safeVersion)"
+        return safeVersion.isEmpty ? fallback : safeVersion
+    }
+
+    private static var installedSafariVersion: String? {
+        guard let bundle = Bundle(url: URL(fileURLWithPath: "/Applications/Safari.app")) else {
+            return nil
+        }
+        return bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    }
+
+    private static var fallbackSafariVersion: String {
+        let macOSMajor = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+        if macOSMajor >= 26 {
+            return "\(macOSMajor).0"
+        }
+        if macOSMajor >= 11 {
+            return "\(macOSMajor + 3).0"
+        }
+        return "13.1"
     }
 
     static var currentApplicationName: String {
@@ -200,6 +231,13 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     let webView: WKWebView
     private var navigationLoadState = WebNavigationLoadState()
+    private var urlObservationGate = WebNavigationURLObservationGate()
+    private var rapidTopLevelNavigationGuard = RapidTopLevelNavigationGuard()
+    /// Retain the current navigation until its terminal delegate callback.
+    /// WKNavigation does not own the delegate, so this introduces no cycle and
+    /// prevents a weak reference from disappearing before didFinish/didFail.
+    private var activeNavigation: WKNavigation?
+    private var pendingNavigationURL: URL?
     /// Tracks the last URL seen by KVO (avoids using change.oldValue which can dangle)
     private var lastKnownURL: URL?
 
@@ -220,6 +258,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Callback when estimated progress changes
     var onProgressChanged: ((Double) -> Void)?
+    /// Callback when the web document itself receives primary focus.
+    var onContentFocused: (() -> Void)?
 
     /// Current loading state
     private(set) var isLoading: Bool = false
@@ -231,6 +271,7 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     /// Cached snapshot for Overview mode
     private(set) var snapshot: NSImage?
+    private var isTakingSnapshot = false
 
     /// KVO observation for URL changes
     private var urlObservation: NSKeyValueObservation?
@@ -253,7 +294,6 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     override init() {
         let config = WKWebViewConfiguration()
-        config.processPool = sharedProcessPool
         config.applicationNameForUserAgent = BrowserUserAgentIdentity.currentApplicationName
 #if DEBUG
         config.preferences.setValue(true, forKey: "developerExtrasEnabled")
@@ -269,6 +309,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         // Use custom DownloadableWebView for context menu download support
         self.webView = DownloadableWebView(frame: .zero, configuration: config)
         super.init()
+
+        if let webView = webView as? DownloadableWebView {
+            webView.onPrimaryMouseDown = { [weak self] in
+                self?.onContentFocused?()
+            }
+        }
 
         // Register self as message handler
         userContentController.add(self, name: "actriumThemeColor")
@@ -552,18 +598,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             // Defer everything — don't touch WebKit state during KVO notification
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
-                self.webView.evaluateJavaScript("location.href") { [weak self] result, _ in
-                    guard let self = self,
-                          let urlString = result as? String,
-                          let newURL = URL(string: urlString) else { return }
-                    guard self.navigationLoadState.observeWebViewURL(newURL) else { return }
-                    if self.lastKnownURL != newURL {
-                        NSLog("🔗 WebViewHolder: URL changed")
-                        self.lastKnownURL = newURL
-                        self.onURLChanged?(newURL)
-                        self.dismissAutofillPopover()
-                    }
-                }
+                guard let token = self.urlObservationGate.makeToken() else { return }
+                self.readCurrentDocumentURL(using: token)
             }
         }
 
@@ -597,7 +633,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// Attach the persistent WebView for the first time. Reattaching an
     /// already-loaded Tab intentionally does nothing.
     func loadInitialURLIfNeeded(_ url: URL) {
+        guard webView.window != nil,
+              webView.bounds.width > 0,
+              webView.bounds.height > 0 else { return }
         guard let requestURL = navigationLoadState.initialRequest(for: url) else { return }
+        rapidTopLevelNavigationGuard.registerExplicitNavigation()
+        pendingNavigationURL = requestURL
         pageFailure = nil
         webView.load(URLRequest(url: requestURL))
     }
@@ -606,7 +647,12 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     /// mounted. WebKit-originated changes are recorded by the URL observer and
     /// therefore do not produce a second request here.
     func navigateIfNeeded(to url: URL) {
+        guard webView.window != nil,
+              webView.bounds.width > 0,
+              webView.bounds.height > 0 else { return }
         guard let requestURL = navigationLoadState.navigationRequest(for: url) else { return }
+        rapidTopLevelNavigationGuard.registerExplicitNavigation()
+        pendingNavigationURL = requestURL
         pageFailure = nil
         webView.load(URLRequest(url: requestURL))
     }
@@ -724,7 +770,16 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     @MainActor
     func takeSnapshot() async {
         // Only take snapshot if webView has content
-        guard !navigationLoadState.isInvalidated, lastKnownURL != nil else { return }
+        guard !navigationLoadState.isInvalidated,
+              !isLoading,
+              !isTakingSnapshot,
+              lastKnownURL != nil,
+              webView.window != nil,
+              webView.bounds.width > 0,
+              webView.bounds.height > 0 else { return }
+
+        isTakingSnapshot = true
+        defer { isTakingSnapshot = false }
 
         do {
             let config = WKSnapshotConfiguration()
@@ -852,32 +907,31 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
         guard !navigationLoadState.isInvalidated else { return }
+        activeNavigation = navigation
+        urlObservationGate.navigationStarted()
         pageFailure = nil
         isLoading = true
         onLoadingStateChanged?(true)
         dismissAutofillPopover()
     }
 
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        guard !navigationLoadState.isInvalidated,
+              navigation === activeNavigation else { return }
+        publishDelegateURL(pendingNavigationURL)
+    }
+
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        guard !navigationLoadState.isInvalidated else { return }
+        guard !navigationLoadState.isInvalidated,
+              navigation === activeNavigation else { return }
+        activeNavigation = nil
+        urlObservationGate.navigationEnded()
         pageFailure = nil
         isLoading = false
         onLoadingStateChanged?(false)
-        // Notify with title and URL when navigation completes
-        // Avoid accessing webView.url directly — it can return a corrupted NSURL on macOS 26.
-        // Use evaluateJavaScript to safely retrieve the URL string.
         let title = webView.title
-        webView.evaluateJavaScript("location.href") { [weak self] result, _ in
-            guard let self, !self.navigationLoadState.isInvalidated else { return }
-            let url: URL?
-            if let urlString = result as? String, let parsed = URL(string: urlString) {
-                self.lastKnownURL = parsed
-                url = parsed
-            } else {
-                url = self.lastKnownURL
-            }
-            self.onNavigationFinished?(title, url)
-        }
+        publishDelegateURL(pendingNavigationURL)
+        onNavigationFinished?(title, lastKnownURL)
 
         // Safari-style: Take snapshot immediately after page load for Overview mode
         // Use a short delay to allow page rendering to complete
@@ -888,7 +942,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-        guard !navigationLoadState.isInvalidated else { return }
+        guard !navigationLoadState.isInvalidated,
+              navigation === activeNavigation else { return }
+        activeNavigation = nil
+        urlObservationGate.navigationEnded()
         isLoading = false
         onLoadingStateChanged?(false)
         pageFailure = WebPageFailure.navigation(
@@ -900,7 +957,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     }
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-        guard !navigationLoadState.isInvalidated else { return }
+        guard !navigationLoadState.isInvalidated,
+              navigation === activeNavigation else { return }
+        activeNavigation = nil
+        urlObservationGate.navigationEnded()
         isLoading = false
         onLoadingStateChanged?(false)
         let nsError = error as NSError
@@ -915,12 +975,62 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
         guard !navigationLoadState.isInvalidated else { return }
+        activeNavigation = nil
+        urlObservationGate.navigationEnded()
         isLoading = false
         onLoadingStateChanged?(false)
         pageFailure = .processTerminated(
             retryURL: lastKnownURL ?? navigationLoadState.currentURL
         )
         NSLog("🌐 WebViewHolder: Web content process terminated")
+    }
+
+    private func readCurrentDocumentURL(
+        using token: WebNavigationURLObservationToken,
+        completion: ((URL?) -> Void)? = nil
+    ) {
+        // Calling evaluateJavaScript while a newly-created WKWebView is not
+        // attached to a visible window can wedge WebKit's HTTPS document in a
+        // permanently blank state. URL observation is advisory, so wait for a
+        // real mount; delegate milestones will publish the URL after attach.
+        guard webView.window != nil,
+              !isLoading,
+              !urlObservationGate.isNavigationInFlight else {
+            completion?(lastKnownURL)
+            return
+        }
+        webView.evaluateJavaScript("location.href") { [weak self] result, _ in
+            DispatchQueue.main.async { [weak self] in
+                guard let self,
+                      !self.navigationLoadState.isInvalidated,
+                      self.urlObservationGate.accepts(token) else { return }
+
+                let url: URL?
+                if let urlString = result as? String,
+                   let parsed = URL(string: urlString) {
+                    guard self.navigationLoadState.observeWebViewURL(parsed) else { return }
+                    url = parsed
+                    if self.lastKnownURL != parsed {
+                        self.lastKnownURL = parsed
+                        self.onURLChanged?(parsed)
+                        self.dismissAutofillPopover()
+                    }
+                } else {
+                    url = self.lastKnownURL
+                }
+                completion?(url)
+            }
+        }
+    }
+
+    private func publishDelegateURL(_ url: URL?) {
+        guard let url,
+              navigationLoadState.observeWebViewURL(url) else { return }
+        if lastKnownURL != url {
+            lastKnownURL = url
+            onURLChanged?(url)
+            dismissAutofillPopover()
+        }
     }
 
     // MARK: - Download Detection (Navigation Response)
@@ -935,6 +1045,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
         guard let response = navigationResponse.response as? HTTPURLResponse else {
             decisionHandler(.allow)
             return
+        }
+
+        if navigationResponse.isForMainFrame {
+            pendingNavigationURL = response.url
         }
 
         let contentDisposition = response.value(forHTTPHeaderField: "Content-Disposition") ?? ""
@@ -965,6 +1079,20 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
               navigationAction.shouldPerformDownload ? 1 : 0,
               navigationAction.navigationType.rawValue)
 
+        // A sustained stream of script-driven main-frame navigations can keep
+        // replacing the provisional document forever. Preserve normal redirect
+        // chains and every user-driven navigation, but stop pathological loops
+        // before they turn into a flashing, permanently-loading white page.
+        if navigationAction.targetFrame?.isMainFrame == true,
+           navigationAction.navigationType == .other,
+           !rapidTopLevelNavigationGuard.shouldAllowAutomaticNavigation(
+               at: ProcessInfo.processInfo.systemUptime
+           ) {
+            decisionHandler(.cancel)
+            NSLog("WebViewHolder: blocked rapid automatic top-level navigation loop")
+            return
+        }
+
         // Check for download attribute on links
         if navigationAction.shouldPerformDownload {
             guard let url, WebNavigationSecurityPolicy.canDownload(url) else {
@@ -992,6 +1120,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             decisionHandler(.cancel)
             NSLog("🌐 WebViewHolder: Blocked unsupported top-level URL scheme")
             return
+        }
+
+        if navigationAction.targetFrame?.isMainFrame == true {
+            pendingNavigationURL = url
         }
 
         decisionHandler(.allow)
@@ -1094,6 +1226,16 @@ final class WebViewHolderManager {
 
 // MARK: - Persistent WebView Representable
 
+final class WebViewMountContainer: NSView {
+    var onAttachedToWindow: (() -> Void)?
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        guard window != nil else { return }
+        onAttachedToWindow?()
+    }
+}
+
 struct PersistentWebView: NSViewRepresentable {
     let holder: WebViewHolder
     let size: CGSize  // Visible Input Dimensions
@@ -1113,6 +1255,7 @@ struct PersistentWebView: NSViewRepresentable {
         webView.autoresizingMask = [.width, .height]
 
         container.addSubview(webView)
+        configureMountCallback(for: container)
         return container
     }
 
@@ -1128,8 +1271,20 @@ struct PersistentWebView: NSViewRepresentable {
         }
 
         if let webView = container.subviews.first as? WKWebView,
-           webView.frame != targetFrame {
-            webView.frame = targetFrame
+           webView.frame != container.bounds {
+            webView.frame = container.bounds
+        }
+        configureMountCallback(for: container)
+        if container.window != nil {
+            container.onAttachedToWindow?()
+        }
+    }
+
+    private func configureMountCallback(for container: WebViewMountContainer) {
+        container.onAttachedToWindow = { [weak holder, url] in
+            guard let holder else { return }
+            holder.loadInitialURLIfNeeded(url)
+            holder.navigateIfNeeded(to: url)
         }
     }
 
@@ -1366,9 +1521,16 @@ private class ClosureMenuItem: NSMenuItem {
 
 /// Custom WKWebView subclass that adds download options to context menu
 class DownloadableWebView: WKWebView {
+    var onPrimaryMouseDown: (() -> Void)?
+
     /// Store the detected element info for context menu
     private var contextMenuImageURL: URL?
     private var contextMenuLinkURL: URL?
+
+    override func mouseDown(with event: NSEvent) {
+        onPrimaryMouseDown?()
+        super.mouseDown(with: event)
+    }
 
     /// Pre-detect element on right mouse down using synchronous approach
     override func rightMouseDown(with event: NSEvent) {
@@ -1808,6 +1970,8 @@ struct FocusedWebOverlay: View {
     var onThemeColorChanged: ((String) -> Void)?
     /// Callback when estimated progress changes
     var onProgressChanged: ((Double) -> Void)?
+    /// Callback when the web document itself receives primary focus.
+    var onContentFocused: (() -> Void)?
 
     /// From Global Manager Get Lasting WebViewHolder
     private let holder: WebViewHolder
@@ -1818,7 +1982,8 @@ struct FocusedWebOverlay: View {
          onLoadingStateChanged: ((Bool) -> Void)? = nil,
          onOpenNewWindow: ((URL) -> Void)? = nil,
          onThemeColorChanged: ((String) -> Void)? = nil,
-         onProgressChanged: ((Double) -> Void)? = nil) {
+         onProgressChanged: ((Double) -> Void)? = nil,
+         onContentFocused: (() -> Void)? = nil) {
         self.tab = tab
         self.url = url
         self.viewportSize = viewportSize
@@ -1828,6 +1993,7 @@ struct FocusedWebOverlay: View {
         self.onOpenNewWindow = onOpenNewWindow
         self.onThemeColorChanged = onThemeColorChanged
         self.onProgressChanged = onProgressChanged
+        self.onContentFocused = onContentFocused
         let holder = WebViewHolderManager.shared.holder(for: tab.id)
         self._holder = ObservedObject(wrappedValue: holder)
 
@@ -1838,6 +2004,7 @@ struct FocusedWebOverlay: View {
         holder.onOpenNewWindow = onOpenNewWindow
         holder.onThemeColorChanged = onThemeColorChanged
         holder.onProgressChanged = onProgressChanged
+        holder.onContentFocused = onContentFocused
     }
 
     var body: some View {
@@ -1854,12 +2021,6 @@ struct FocusedWebOverlay: View {
             }
         }
         .frame(width: viewportSize.width, height: viewportSize.height)
-        .onAppear {
-            holder.loadInitialURLIfNeeded(url)
-        }
-        .onChange(of: url) { _, newURL in
-            holder.navigateIfNeeded(to: newURL)
-        }
     }
 }
 
