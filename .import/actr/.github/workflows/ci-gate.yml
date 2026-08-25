@@ -39,6 +39,7 @@ jobs:
       web_binding: ${{ steps.targets.outputs.web_binding }}
       c_go_workloads: ${{ steps.targets.outputs.c_go_workloads }}
       e2e_rust: ${{ steps.targets.outputs.e2e_rust }}
+      e2e_package_runtime: ${{ steps.targets.outputs.e2e_package_runtime }}
       release_related: ${{ steps.targets.outputs.release_related }}
     steps:
       - uses: actions/checkout@v5
@@ -115,6 +116,38 @@ jobs:
           PY
       - name: Compile the Rust E2E workspace
         run: cargo check --manifest-path e2e/Cargo.toml --workspace --locked
+
+  e2e_package_runtime:
+    name: E2E Package Runtime
+    needs: determine
+    if: needs.determine.outputs.e2e_package_runtime == 'true'
+    runs-on: ubuntu-latest-m
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - name: Install Linux e2e dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          sudo apt-get update
+          sudo apt-get install -y jq sqlite3 lsof perl
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          version: ${{ vars.PROTOC_VERSION }}
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --version 0.15.0 --locked
+      - uses: Swatinem/rust-cache@v2
+      - name: Generate CLI web runtime assets
+        run: bash bindings/web/scripts/sync-cli-assets.sh --build
+      - name: Run package runtime echo e2e (PR gate, MODE=path1)
+        run: bash e2e/package-runtime-echo/run.sh
 
   audit:
     name: Dependency Audit
@@ -1007,6 +1040,7 @@ jobs:
     needs:
       - determine
       - e2e_rust
+      - e2e_package_runtime
       - audit
       - rust
       - typescript
@@ -1037,6 +1071,7 @@ jobs:
       WEB_RESULT: ${{ needs.web.result }}
       C_GO_WORKLOADS_RESULT: ${{ needs.c_go_workloads.result }}
       E2E_RUST_RESULT: ${{ needs.e2e_rust.result }}
+      E2E_PACKAGE_RUNTIME_RESULT: ${{ needs.e2e_package_runtime.result }}
       TEST_RESULT: ${{ needs.test.result }}
       WEBRTC_V020_RESULT: ${{ needs.webrtc_v020.result }}
       CJK_RESULT: ${{ needs.cjk.result }}
@@ -1061,6 +1096,7 @@ jobs:
               "web": os.environ["WEB_RESULT"],
               "c_go_workloads": os.environ["C_GO_WORKLOADS_RESULT"],
               "e2e_rust": os.environ["E2E_RUST_RESULT"],
+              "e2e_package_runtime": os.environ["E2E_PACKAGE_RUNTIME_RESULT"],
               "test": os.environ["TEST_RESULT"],
               "webrtc_v020": os.environ["WEBRTC_V020_RESULT"],
               "cjk": os.environ["CJK_RESULT"],

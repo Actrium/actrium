@@ -100,7 +100,8 @@ def test_pr_gate_excludes_heavy_root_e2e_jobs() -> None:
 
 def test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile() -> None:
     workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
-    e2e_job = _job(workflow, "e2e_rust", "audit")
+    # The compile job ends where the targeted scenario job begins.
+    e2e_job = _job(workflow, "e2e_rust", "e2e_package_runtime")
 
     assert "needs.determine.outputs.e2e_rust == 'true'" in e2e_job
     normalized = " ".join(e2e_job.split())
@@ -113,7 +114,24 @@ def test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile() -> None:
     assert "libopus-dev" in e2e_job
     assert "cargo check" in e2e_job
     assert "--workspace" in normalized
+    # The compile job must stay a compile job; the scenario lives in the
+    # dedicated targeted job below.
     assert "package-runtime-echo/run.sh" not in e2e_job
+
+
+def test_pr_gate_runs_package_runtime_scenario_when_targeted() -> None:
+    workflow = CI_GATE_WORKFLOW.read_text(encoding="utf-8")
+    package_job = _job(workflow, "e2e_package_runtime", "audit")
+
+    # The scenario runs on PRs only when its directory changed (#618), and
+    # the gate aggregates its result like every other domain.
+    assert "needs.determine.outputs.e2e_package_runtime == 'true'" in package_job
+    assert "bash e2e/package-runtime-echo/run.sh" in package_job
+    assert "sync-cli-assets.sh" in package_job
+
+    gate = workflow[workflow.index("  gate:\n"):]
+    assert "e2e_package_runtime" in gate
+    assert "E2E_PACKAGE_RUNTIME_RESULT" in gate
 
 
 def test_native_workload_gate_builds_c_and_go_with_pinned_tools() -> None:
@@ -844,6 +862,7 @@ if __name__ == "__main__":
     test_msrv_gate_builds_full_workspace_on_pinned_toolchain()
     test_pr_gate_excludes_heavy_root_e2e_jobs()
     test_pr_gate_compiles_rust_e2e_workspace_with_committed_lockfile()
+    test_pr_gate_runs_package_runtime_scenario_when_targeted()
     test_native_workload_gate_builds_c_and_go_with_pinned_tools()
     test_blocked_typescript_component_e2e_jobs_share_disable_gate()
     test_typescript_componentize_only_allows_known_upstream_failure()

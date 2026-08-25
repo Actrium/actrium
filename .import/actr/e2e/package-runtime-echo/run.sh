@@ -68,6 +68,12 @@ for cmd in cargo curl jq sqlite3 python3 perl rustc lsof; do
     require_cmd "$cmd"
 done
 
+# Both embedded manifest parsers read TOML via the stdlib. Require Python
+# 3.11+ (the tomllib floor) instead of shipping a tomli fallback that no CI
+# runner ever exercises.
+python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' ||
+    fail "Python 3.11+ is required for stdlib tomllib (found $(python3 -V 2>&1))"
+
 RUN_ID="$(date +%Y%m%d-%H%M%S)-$RANDOM"
 RUN_DIR="$SCRIPT_DIR/.tmp/run-$RUN_ID"
 STATE_DIR="$RUN_DIR/state"
@@ -234,6 +240,12 @@ ensure_realm() {
 
     [ -n "$REALM_ID" ] || fail "Realm creation returned an empty realm id"
     [ -n "$REALM_SECRET" ] || fail "Realm creation returned an empty realm secret"
+    # The secret is interpolated into TOML string literals below; URL-safe
+    # base64 stays inside that grammar, so reject anything else before it can
+    # make .actr/config.toml unparseable.
+    case "$REALM_SECRET" in
+        *[!A-Za-z0-9_-]*) fail "realm_secret has characters outside URL-safe base64" ;;
+    esac
     success "Realm ${REALM_ID} created"
 }
 
@@ -414,9 +426,27 @@ build_client_guest_package() {
     client_guest_binary="$(client_guest_library_path)"
     [ -f "$client_guest_binary" ] || fail "Client guest library missing: $client_guest_binary"
 
-    local client_guest_manifest
-    client_guest_manifest="$RUN_DIR/client-guest-manifest.toml"
+    local client_guest_dir client_guest_manifest
+    client_guest_dir="$RUN_DIR/client-guest-package"
+    client_guest_manifest="$client_guest_dir/manifest.toml"
+    mkdir -p "$client_guest_dir/.actr"
     cp "$SCRIPT_DIR/client-guest/manifest.toml" "$client_guest_manifest"
+    # Package builds now require a lock that exactly matches every declared
+    # remote dependency. The CLI reads discovery settings from its project-level
+    # .actr/config.toml, independently of the runtime actr.toml schema.
+    cat >"$client_guest_dir/.actr/config.toml" <<EOF
+version = 1
+
+[network]
+signaling_url = "ws://127.0.0.1:${HTTP_PORT}/signaling/ws"
+ais_endpoint = "http://127.0.0.1:${HTTP_PORT}/ais"
+realm_id = $REALM_ID
+realm_secret = "$REALM_SECRET"
+EOF
+    (
+        cd "$client_guest_dir"
+        run_actr deps install
+    )
     cat >>"$client_guest_manifest" <<EOF
 
 [binary]
@@ -446,8 +476,9 @@ import json
 import sqlite3
 import sys
 import time
-import tomllib
 import zipfile
+
+import tomllib
 
 db_path, package_path, public_key_path = sys.argv[1:]
 now = int(time.time())
@@ -762,14 +793,17 @@ mode_path1_full_echo() {
     # and does not depend on the real ~/.actr/config.toml; a published package
     # succeeds via Path 1 without any runner proof.
     publish_service_package
-    build_client_guest_package
-    seed_client_registry_state
     local env
     env="$(mk_isolated_env "p1")"
     local home_dir hyper_dir
     IFS=$'\t' read -r home_dir hyper_dir <<<"$env"
     start_server_isolated "$home_dir" "$hyper_dir" "server.log"
     expect_server_started "server.log"
+    # Dependency installation resolves the service over signaling, so the
+    # published service must also be online before the client guest lockfile is
+    # generated. Reuse this server for the final echo round-trip.
+    build_client_guest_package
+    seed_client_registry_state
     run_client_and_assert
     stop_server
 }

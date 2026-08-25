@@ -12,6 +12,7 @@ from fnmatch import fnmatch
 TARGETS = (
     "rust_core",
     "e2e_rust",
+    "e2e_package_runtime",
     "ts_binding",
     "ts_workload",
     "python_codegen",
@@ -100,6 +101,18 @@ def detect_targets(changed_files: list[str], full_run: bool) -> tuple[dict[str, 
             targets["rust_core"] = True
             targets["csharp_binding"] = True
             reasons.append(f"winui_e2e:{path}")
+            continue
+
+        # Gate the package-runtime scenario shell path on PRs (#618): every
+        # file in this directory feeds the scenario (shell, fixtures, python
+        # heredocs), not just its Rust workspace files. Rust sources keep the
+        # workspace compile check on top of the scenario run.
+        if path.startswith("e2e/package-runtime-echo/"):
+            targets["e2e_package_runtime"] = True
+            reasons.append(f"e2e_package_runtime:{path}")
+            if path.endswith((".rs", "Cargo.toml", "Cargo.lock")):
+                targets["e2e_rust"] = True
+                reasons.append(f"e2e_rust:{path}")
             continue
 
         if path.startswith("e2e/") and path.endswith((".rs", "Cargo.toml", "Cargo.lock")):
