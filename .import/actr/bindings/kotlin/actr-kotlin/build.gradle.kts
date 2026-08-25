@@ -60,6 +60,19 @@ android {
         abortOnError = false
         disable += listOf("NewApi")
     }
+
+    // JVM unit tests substitute the ConnectivityManager boundary
+    // (DefaultNetworkSystem); the monitor paths they drive still call
+    // android.util.Log and construct Context subclasses, which the mockable
+    // android.jar would otherwise throw on. Module-wide default stubs are a
+    // conscious trade-off: a test that must prove a real Android API is
+    // invoked has to assert it through an explicit seam, because unstubbed
+    // calls elsewhere would silently return defaults.
+    testOptions {
+        unitTests {
+            isReturnDefaultValues = true
+        }
+    }
 }
 
 dependencies {

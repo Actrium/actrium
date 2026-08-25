@@ -1296,6 +1296,59 @@ fn signaling_retry_window_cools_down_without_losing_work_and_material_news_wakes
 }
 
 #[test]
+fn gated_mobile_supervisor_caps_signaling_backoff_at_fifteen_seconds() {
+    let mut supervisor = gated();
+    supervisor.accept(
+        tp::Input::SignalingRecoveryConfigChanged {
+            max_attempts: 10,
+            initial_delay: Duration::from_secs(30),
+            max_delay: Duration::from_secs(60),
+            backoff_multiplier_bits: 2.0_f64.to_bits(),
+        },
+        Duration::ZERO,
+    );
+
+    assert_eq!(
+        supervisor.config.backoff.restore.base_delay,
+        super::MOBILE_SIGNALING_MAX_BACKOFF
+    );
+    assert_eq!(
+        supervisor.config.backoff.restore.max_delay,
+        super::MOBILE_SIGNALING_MAX_BACKOFF
+    );
+    assert_eq!(
+        supervisor.config.signaling_retry_window,
+        Some(tp::SignalingRetryWindow {
+            max_attempts: 10,
+            cooldown: Duration::from_secs(30),
+        })
+    );
+}
+
+#[test]
+fn ungated_supervisor_preserves_configured_signaling_backoff() {
+    let mut supervisor = ungated();
+    supervisor.accept(
+        tp::Input::SignalingRecoveryConfigChanged {
+            max_attempts: 10,
+            initial_delay: Duration::from_secs(30),
+            max_delay: Duration::from_secs(60),
+            backoff_multiplier_bits: 2.0_f64.to_bits(),
+        },
+        Duration::ZERO,
+    );
+
+    assert_eq!(
+        supervisor.config.backoff.restore.base_delay,
+        Duration::from_secs(30)
+    );
+    assert_eq!(
+        supervisor.config.backoff.restore.max_delay,
+        Duration::from_secs(60)
+    );
+}
+
+#[test]
 fn signaling_cooldown_deadline_starts_the_next_attempt_window() {
     let mut s = ungated();
     let mut record = tp::PendingRecord::recovery_with_impacts(

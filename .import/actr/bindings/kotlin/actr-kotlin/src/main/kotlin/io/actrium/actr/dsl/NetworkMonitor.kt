@@ -3,20 +3,18 @@ package io.actrium.actr.dsl
 import android.app.ActivityManager
 import android.content.Context
 import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
-import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import io.actrium.actr.ActrException
 import io.actrium.actr.AppLifecycleState
 import io.actrium.actr.CleanupReason
+import io.actrium.actr.NetworkAvailability
 import io.actrium.actr.NetworkSnapshot
 import io.actrium.actr.NetworkTransportFlags
 import io.actrium.actr.ReconnectReason
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -135,7 +133,9 @@ class NetworkMonitor
                         onNetworkStatusLog,
                     )
                 },
-            )
+            ).also { monitor ->
+                monitor.persistentDiagnosticLog = onNetworkStatusLog
+            }
         }
 
         /**
@@ -187,7 +187,9 @@ class NetworkMonitor
                         onNetworkStatusLog,
                     )
                 },
-            )
+            ).also { monitor ->
+                monitor.persistentDiagnosticLog = onNetworkStatusLog
+            }
 
         // ---- Handle-based variants ----
 
@@ -331,15 +333,34 @@ class NetworkMonitor
         }
     }
 
-    private var connectivityManager: ConnectivityManager? = null
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var networkSystem: DefaultNetworkSystem? = null
     private var isMonitoring = false
+    private var persistentDiagnosticLog: ((String) -> Unit)? = null
+
+    /**
+     * Test seam: when set, replaces ConnectivityManager resolution so JVM
+     * tests can drive the real callback wiring through a scripted system.
+     */
+    internal var networkSystemFactory: (() -> DefaultNetworkSystem)? = null
     private val eventAdapter = MobileEventAdapterState()
+
+    /**
+     * Fresh per registration: a stale callback surviving an unregister race
+     * mutates the abandoned tracker instance, never the live one.
+     */
+    @Volatile
+    private var networkPathTracker = DefaultNetworkPathTracker()
     private val lifecycleEvents =
         MobileLifecycleEventSource(
             state = eventAdapter,
             clock = MonotonicClock { SystemClock.elapsedRealtime() },
         )
+    private data class NetworkDelivery(
+        val snapshot: NetworkSnapshot,
+        val diagnostic: String,
+        val gate: MobileEventDeliveryGate,
+    )
+
     private data class LifecycleDelivery(
         val state: AppLifecycleState,
         val reportNetworkSnapshotAfter: Boolean,
@@ -347,13 +368,47 @@ class NetworkMonitor
     )
 
     @Volatile private var deliveryGate = MobileEventDeliveryGate()
+    private val networkDeliveries =
+        SerializedDeliveryQueue<NetworkDelivery>(scope) { delivery ->
+            try {
+                delivery.gate.deliver {
+                    runCatching { persistentDiagnosticLog?.invoke(delivery.diagnostic) }
+                        .onFailure { error ->
+                            Log.w(
+                                TAG,
+                                "Persistent network diagnostic callback failed: ${error.message}",
+                            )
+                        }
+                    onNetworkPathChanged?.invoke(delivery.snapshot)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to handle network path change: ${e.message}", e)
+            }
+        }
     private val lifecycleDeliveries =
         SerializedDeliveryQueue<LifecycleDelivery>(scope) { delivery ->
             try {
                 delivery.gate.deliver {
                     onAppLifecycleChanged?.invoke(delivery.state)
                     if (delivery.reportNetworkSnapshotAfter) {
-                        onNetworkPathChanged?.invoke(buildCurrentNetworkSnapshot())
+                        // Reconcile with the live default network: a
+                        // foreground return after a silent network switch
+                        // must publish the real path, not the stale tracker
+                        // state captured before the backgrounding.
+                        val transitions = refreshDefaultNetworkState()
+                        if (transitions.isEmpty()) {
+                            notifyNetworkPathChanged(
+                                path = networkPathTracker.current(),
+                                reason = "foreground_snapshot",
+                                gate = delivery.gate,
+                            )
+                        } else {
+                            publishNetworkTransitions(
+                                transitions,
+                                reason = "foreground_snapshot",
+                                gate = delivery.gate,
+                            )
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -361,26 +416,30 @@ class NetworkMonitor
             }
         }
 
-    // Current network state
-    private var isNetworkAvailable = false
-    private var isWifiConnected = false
-    private var isCellularConnected = false
-    private var isVpnConnected = false
-    private var isEthernetConnected = false
-    private var isExpensive = false
-    private var isConstrained = false
-
     /** Start network monitoring */
     fun startMonitoring() {
         if (isMonitoring) {
             Log.d(TAG, "Network monitoring already running")
             return
         }
+        // Registration re-announces the current default synchronously; those
+        // facts are only as deliverable as this scope's delivery queue. A
+        // dead scope would leave Android connected and signaling unaware.
+        if (!scope.isActive) {
+            Log.e(TAG, "Monitor scope is no longer active; refusing to start network monitoring")
+            return
+        }
 
         try {
             deliveryGate = deliveryGate.rotated()
-            connectivityManager =
-                context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            networkPathTracker = DefaultNetworkPathTracker()
+            networkSystem =
+                networkSystemFactory?.invoke()
+                    ?: (context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager)
+                        ?.let { ConnectivityManagerDefaultNetworkSystem(it) }
+            if (networkSystem == null) {
+                Log.w(TAG, "ConnectivityManager unavailable; default-network tracking is disabled")
+            }
 
             setupNetworkCallback()
 
@@ -403,17 +462,18 @@ class NetworkMonitor
             return
         }
 
+        isMonitoring = false
         try {
-            networkCallback?.let { callback ->
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    connectivityManager?.unregisterNetworkCallback(callback)
-                }
-            }
-
-            isMonitoring = false
-            Log.i(TAG, "Stopped network monitoring")
+            networkSystem?.unregister()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to stop network monitoring: ${e.message}", e)
+            // Monitor-owned state resets independently of Android
+            // unregistration: the delivery gate is already closed, so a
+            // stale connected reading could never be corrected by callbacks.
+            Log.e(TAG, "Failed to unregister network callback: ${e.message}", e)
+        } finally {
+            networkSystem = null
+            networkPathTracker.reset()
+            Log.i(TAG, "Stopped network monitoring")
         }
     }
 
@@ -503,304 +563,162 @@ class NetworkMonitor
     // ---- NetworkSnapshot Construction ----
 
     /** Build a NetworkSnapshot from the current network state. */
-    private fun buildCurrentNetworkSnapshot(): NetworkSnapshot =
+    private fun buildCurrentNetworkSnapshot(
+        path: DefaultNetworkPath = networkPathTracker.current(),
+    ): NetworkSnapshot =
         eventAdapter.snapshot(
-            isAvailable = isNetworkAvailable,
-            transport =
-                NetworkTransportFlags(
-                    wifi = isWifiConnected,
-                    cellular = isCellularConnected,
-                    ethernet = isEthernetConnected,
-                    vpn = isVpnConnected,
-                    other = false,
-                ),
-            isExpensive = isExpensive,
-            isConstrained = isConstrained,
+            availability = path.availability,
+            transport = path.transport,
+            isExpensive = path.isExpensive,
+            isConstrained = path.isConstrained,
         )
 
-    /** Setup network callback */
+    /** Track only the default network used for new connections. */
     private fun setupNetworkCallback() {
+        val system = networkSystem ?: return
         val callbackGate = deliveryGate
-        val networkRequest =
-            NetworkRequest
-                .Builder()
-                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-                // Remove capability that blocks VPN callbacks
-                .removeCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN)
-                .addTransportType(NetworkCapabilities.TRANSPORT_WIFI)
-                .addTransportType(NetworkCapabilities.TRANSPORT_CELLULAR)
-                .addTransportType(NetworkCapabilities.TRANSPORT_ETHERNET)
-                .addTransportType(NetworkCapabilities.TRANSPORT_VPN)
-                .build()
-
-        networkCallback =
-            object : ConnectivityManager.NetworkCallback() {
-                override fun onAvailable(network: Network) {
-                    super.onAvailable(network)
-                    Log.i(TAG, "Network available: $network")
-
-                    val wasNetworkAvailable = isNetworkAvailable
-                    val wasWifiConnected = isWifiConnected
-                    val wasCellularConnected = isCellularConnected
-                    val wasVpnConnected = isVpnConnected
-                    val wasEthernetConnected = isEthernetConnected
-
-                    updateNetworkState()
-
-                    // Detect network path change
-                    if (wasWifiConnected != isWifiConnected ||
-                        wasCellularConnected != isCellularConnected ||
-                        wasVpnConnected != isVpnConnected ||
-                        wasEthernetConnected != isEthernetConnected ||
-                        !wasNetworkAvailable && isNetworkAvailable
-                    ) {
-                        notifyNetworkPathChanged(
-                            reason = "onAvailable (wasAvail=$wasNetworkAvailable nowAvail=$isNetworkAvailable)",
-                            gate = callbackGate,
-                        )
-                    }
-
-                    // Only notify pure availability transitions already handled above
-                }
-
-                override fun onLost(network: Network) {
-                    super.onLost(network)
-                    Log.w(TAG, "Network lost: $network")
-
-                    val wasNetworkAvailable = isNetworkAvailable
-                    updateNetworkState()
-
-                    if (wasNetworkAvailable && !isNetworkAvailable) {
-                        notifyNetworkPathChanged(reason = "onLost (avail→unavail)", gate = callbackGate)
-                    } else if (wasNetworkAvailable) {
-                        // Still have other networks, but path may have changed
-                        notifyNetworkPathChanged(reason = "onLost partial", gate = callbackGate)
-                    }
-                }
-
-                override fun onCapabilitiesChanged(
-                    network: Network,
-                    networkCapabilities: NetworkCapabilities,
-                ) {
-                    super.onCapabilitiesChanged(network, networkCapabilities)
-
-                    val wasWifiConnected = isWifiConnected
-                    val wasCellularConnected = isCellularConnected
-                    val wasVpnConnected = isVpnConnected
-                    val wasEthernetConnected = isEthernetConnected
-                    val wasExpensive = isExpensive
-                    val wasConstrained = isConstrained
-
-                    readCapabilities(networkCapabilities)
-
-                    Log.d(
-                        TAG,
-                        "Network capability changed - " +
-                            "WiFi: $isWifiConnected, Cellular: $isCellularConnected, " +
-                            "VPN: $isVpnConnected, Ethernet: $isEthernetConnected, " +
-                            "Expensive: $isExpensive, Constrained: $isConstrained",
-                    )
-
-                    if (wasWifiConnected != isWifiConnected ||
-                        wasCellularConnected != isCellularConnected ||
-                        wasVpnConnected != isVpnConnected ||
-                        wasEthernetConnected != isEthernetConnected ||
-                        wasExpensive != isExpensive ||
-                        wasConstrained != isConstrained
-                    ) {
-                        val networkType = getNetworkTypeLabel()
-                        Log.i(
-                            TAG,
-                            "Network type/capability changed: $networkType",
-                        )
-
-                        notifyNetworkPathChanged(
-                            reason = "capabilitiesChanged → $networkType",
-                            gate = callbackGate,
-                        )
-                    }
-                }
-
-                override fun onLinkPropertiesChanged(
-                    network: Network,
-                    linkProperties: android.net.LinkProperties,
-                ) {
-                    super.onLinkPropertiesChanged(network, linkProperties)
-                    Log.d(TAG, "Network link properties changed: $network")
-                }
+        val callbackAdapter =
+            DefaultNetworkCallbackAdapter(networkPathTracker) { transitions, reason ->
+                publishNetworkTransitions(transitions, reason, callbackGate)
             }
 
-        connectivityManager?.registerNetworkCallback(networkRequest, networkCallback!!)
+        system.register(
+            object : DefaultNetworkEvents {
+                override fun onAvailable(networkHandle: Long) {
+                    // API 26+ guarantees an ordered onCapabilitiesChanged next.
+                    // Synchronous ConnectivityManager queries inside callbacks
+                    // can return stale data, so only establish handle identity.
+                    Log.i(TAG, "Default network available: handle=$networkHandle")
+                    callbackAdapter.onAvailable(networkHandle)
+                }
+
+                override fun onCapabilitiesChanged(path: DefaultNetworkPath) {
+                    Log.d(
+                        TAG,
+                        "Default network capabilities changed: handle=${path.networkHandle}, " +
+                            "availability=${path.availability}, capsKnown=${path.capabilitiesKnown}, " +
+                            "wifi=${path.transport.wifi}, cell=${path.transport.cellular}, " +
+                            "vpn=${path.transport.vpn}",
+                    )
+                    callbackAdapter.onCapabilitiesChanged(path)
+                }
+
+                override fun onLost(networkHandle: Long) {
+                    Log.w(TAG, "Default network lost: handle=$networkHandle")
+                    callbackAdapter.onLost(networkHandle)
+                }
+            },
+        )
+    }
+
+    private fun refreshDefaultNetworkState(): List<DefaultNetworkPath> {
+        val system = networkSystem ?: return networkPathTracker.refresh(null)
+        return networkPathTracker.refresh(system.currentPath())
+    }
+
+    private fun publishNetworkTransitions(
+        transitions: List<DefaultNetworkPath>,
+        reason: String,
+        gate: MobileEventDeliveryGate = deliveryGate,
+    ) {
+        transitions.forEachIndexed { index, path ->
+            notifyNetworkPathChanged(
+                path = path,
+                reason = if (transitions.size == 1) reason else "${reason}_step_${index + 1}",
+                gate = gate,
+            )
+        }
     }
 
     /** Notify the upper layer about a network path change via the unified callback. */
     private fun notifyNetworkPathChanged(
+        path: DefaultNetworkPath = networkPathTracker.current(),
         reason: String,
         gate: MobileEventDeliveryGate = deliveryGate,
     ) {
-        val snapshot = buildCurrentNetworkSnapshot()
+        val snapshot = buildCurrentNetworkSnapshot(path)
+        val diagnostic = path.diagnosticLine(snapshot.sequence, reason)
         Log.i(
             TAG,
-            "Network path changed ($reason): seq=${snapshot.sequence}, " +
-                "avail=${snapshot.availability}, " +
-                "wifi=${snapshot.transport.wifi}, cell=${snapshot.transport.cellular}, " +
-                "eth=${snapshot.transport.ethernet}, vpn=${snapshot.transport.vpn}, " +
-                "expensive=${snapshot.isExpensive}, constrained=${snapshot.isConstrained}",
+            diagnostic,
         )
-
-        scope.launch(Dispatchers.IO) {
-            try {
-                gate.deliver { onNetworkPathChanged?.invoke(snapshot) }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to handle network path change: ${e.message}", e)
-            }
+        if (!networkDeliveries.enqueue(NetworkDelivery(snapshot, diagnostic, gate))) {
+            Log.w(TAG, "Network path delivery skipped because its scope is no longer active")
         }
     }
-
-    /** Update network state from current active network */
-    private fun updateNetworkState() {
-        val activeNetwork = connectivityManager?.activeNetwork
-        val capabilities =
-            activeNetwork?.let { connectivityManager?.getNetworkCapabilities(it) }
-
-        val wasNetworkAvailable = isNetworkAvailable
-        isNetworkAvailable = activeNetwork != null && capabilities != null
-
-        if (capabilities != null) {
-            readCapabilities(capabilities)
-        } else {
-            isWifiConnected = false
-            isCellularConnected = false
-            isEthernetConnected = false
-            isVpnConnected = false
-            isExpensive = false
-            isConstrained = false
-        }
-
-        val availabilityChange =
-            if (wasNetworkAvailable != isNetworkAvailable) {
-                if (isNetworkAvailable) "became available" else "became unavailable"
-            } else {
-                ""
-            }
-
-        Log.d(
-            TAG,
-            "Network state updated - Available: $isNetworkAvailable $availabilityChange, " +
-                "WiFi: $isWifiConnected, Cellular: $isCellularConnected, " +
-                "Ethernet: $isEthernetConnected, VPN: $isVpnConnected",
-        )
-    }
-
-    /** Read transport and capability flags from NetworkCapabilities. */
-    private fun readCapabilities(capabilities: NetworkCapabilities) {
-        isWifiConnected = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-        isCellularConnected = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
-        isEthernetConnected = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
-        isVpnConnected = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
-
-        // Metered/expensive: NET_CAPABILITY_NOT_METERED means NOT expensive
-        isExpensive =
-            !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
-
-        // Constrained: NET_CAPABILITY_NOT_CONGESTED means NOT constrained (inverse)
-        isConstrained =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_CONGESTED)
-            } else {
-                false
-            }
-    }
-
-    /** Get a human-readable network type label. */
-    private fun getNetworkTypeLabel(): String =
-        when {
-            isVpnConnected -> "VPN"
-            isWifiConnected -> "WiFi"
-            isCellularConnected -> "Cellular"
-            isEthernetConnected -> "Ethernet"
-            else -> "Unknown"
-        }
 
     /** Log current network state */
     private fun logCurrentNetworkState(context: String = "") {
-        val activeNetwork = connectivityManager?.activeNetwork
-        val capabilities = activeNetwork?.let { connectivityManager?.getNetworkCapabilities(it) }
-
-        val networkInfo =
-            if (capabilities != null) {
-                val transports = mutableListOf<String>()
-                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-                    transports.add("WiFi")
-                }
-                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-                    transports.add("Cellular")
-                }
-                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
-                    transports.add("Ethernet")
-                }
-                if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-                    transports.add("VPN")
-                }
-
-                if (transports.isNotEmpty()) transports.joinToString(", ") else "no transport types"
-            } else {
-                "no network capabilities"
-            }
-
+        val path = networkPathTracker.current()
         val contextStr = if (context.isNotEmpty()) " ($context)" else ""
-        Log.i(TAG, "Current network state$contextStr: $networkInfo")
+        Log.i(
+            TAG,
+            "Current network state$contextStr: handle=${path.networkHandle}, " +
+                "availability=${path.availability}, wifi=${path.transport.wifi}, " +
+                "cell=${path.transport.cellular}, vpn=${path.transport.vpn}",
+        )
     }
 
     /** Get current network status summary */
-    fun getCurrentNetworkStatus(): String =
-        try {
-            val activeNetwork = connectivityManager?.activeNetwork
-            val capabilities =
-                activeNetwork?.let { connectivityManager?.getNetworkCapabilities(it) }
-
-            when {
-                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_VPN) == true -> "VPN"
-                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true -> "WiFi"
-                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) == true -> "Cellular"
-                capabilities?.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) == true -> "Ethernet"
-                activeNetwork != null -> "Network (unknown type)"
-                else -> "No network connection"
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to get network status: ${e.message}", e)
-            "Failed to get status"
+    fun getCurrentNetworkStatus(): String {
+        val path = networkPathTracker.current()
+        if (path.availability == NetworkAvailability.UNAVAILABLE) return "No network connection"
+        if (path.availability == NetworkAvailability.UNKNOWN) {
+            // Distinguish a still-validating default from one whose
+            // capability snapshot is missing outright.
+            return if (path.capabilitiesKnown) "Network validating" else "Network state unknown"
         }
+        return when {
+            path.transport.vpn -> "VPN"
+            path.transport.wifi -> "WiFi"
+            path.transport.cellular -> "Cellular"
+            path.transport.ethernet -> "Ethernet"
+            else -> "Network (unknown type)"
+        }
+    }
 
     /** Manually trigger network state check */
     fun triggerNetworkCheck() {
         Log.i(TAG, "Manually triggering network state check")
-        updateNetworkState()
+        val transitions = refreshDefaultNetworkState()
         logCurrentNetworkState("manual check")
-
-        notifyNetworkPathChanged(reason = "manual check")
+        if (transitions.isEmpty()) {
+            notifyNetworkPathChanged(reason = "manual_check")
+        } else {
+            publishNetworkTransitions(transitions, reason = "manual_check")
+        }
     }
 
-    /** Check if currently have network connection */
-    fun isConnected(): Boolean = isNetworkAvailable
+    /**
+     * Check whether the default network is Internet-capable, validated, and
+     * not suspended.
+     *
+     * Migration note: this previously returned `true` for any active network
+     * with capabilities. A network that is still validating (captive portal,
+     * slow validation) or suspended now reads as `false`; use
+     * [getCurrentNetworkStatus] to distinguish a validating network from no
+     * network at all.
+     */
+    fun isConnected(): Boolean =
+        networkPathTracker.current().availability == NetworkAvailability.AVAILABLE
 
     /** Check if currently connected via WiFi */
-    fun isWifi(): Boolean = isWifiConnected
+    fun isWifi(): Boolean = networkPathTracker.current().transport.wifi
 
     /** Check if currently connected via mobile network */
-    fun isCellular(): Boolean = isCellularConnected
+    fun isCellular(): Boolean = networkPathTracker.current().transport.cellular
 
     /** Check if currently connected via VPN */
-    fun isVpn(): Boolean = isVpnConnected
+    fun isVpn(): Boolean = networkPathTracker.current().transport.vpn
 
     /** Check if currently connected via Ethernet */
-    fun isEthernet(): Boolean = isEthernetConnected
+    fun isEthernet(): Boolean = networkPathTracker.current().transport.ethernet
 
     /** Check if current network is metered/expensive */
-    fun isNetworkExpensive(): Boolean = isExpensive
+    fun isNetworkExpensive(): Boolean = networkPathTracker.current().isExpensive
 
     /** Check if current network is constrained/congested */
-    fun isNetworkConstrained(): Boolean = isConstrained
+    fun isNetworkConstrained(): Boolean = networkPathTracker.current().isConstrained
 }
 
 // ============================================================================
