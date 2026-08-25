@@ -659,6 +659,20 @@ private final class AddressBarPanelPresentationCoordinator: NSObject, Observable
     }
 }
 
+enum AddressEditingPresentationPhase: Equatable {
+    case backgroundOnly
+    case contents
+    case focused
+
+    var showsContents: Bool {
+        self != .backgroundOnly
+    }
+
+    var showsFocusAffordances: Bool {
+        self == .focused
+    }
+}
+
 struct MainWindowTabsView: View {
     @ObservedObject var viewModel: BrowserViewModel
     @ObservedObject var historyVM: HistoryViewModel
@@ -673,8 +687,8 @@ struct MainWindowTabsView: View {
     @State private var hoveredTabID: UUID?
     @State private var isAddressFieldHovered = false
     @State private var activeTabRevealTask: Task<Void, Never>?
-    @State private var focusRingRevealTask: Task<Void, Never>?
-    @State private var showsAddressFocusRing = false
+    @State private var addressPresentationTask: Task<Void, Never>?
+    @State private var addressPresentationPhase: AddressEditingPresentationPhase = .backgroundOnly
     @StateObject private var addressPanelPresentation = AddressBarPanelPresentationCoordinator()
 
     private let itemSpacing = CompactToolbarLayout.itemSpacing
@@ -711,16 +725,16 @@ struct MainWindowTabsView: View {
         }
         .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, shouldFocus in
             if shouldFocus {
-                let presentation = viewModel.addressBarFocusRingPresentation
+                let presentation = viewModel.addressBarFocusPresentation
                 viewModel.shouldAutoFocusAddressBar = false
-                focusAddressBar(focusRingPresentation: presentation)
+                focusAddressBar(presentation: presentation)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.actro.dismissAddressBarFocus"))) { _ in
             exitEditingMode()
         }
         .onDisappear {
-            focusRingRevealTask?.cancel()
+            addressPresentationTask?.cancel()
         }
     }
 
@@ -1493,42 +1507,66 @@ struct MainWindowTabsView: View {
     }
 
     private func addressEditingTab(_ tab: Tab) -> some View {
-        HStack(spacing: 7) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
-                .frame(width: 15)
-
-            ZStack(alignment: .leading) {
-                if addressText.isEmpty && !hasInputActivity {
-                    Text("Search or enter website name")
-                        .font(.system(size: 13))
+        ZStack {
+            if addressPresentationPhase.showsContents {
+                HStack(spacing: 7) {
+                    Image(systemName: "magnifyingglass")
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .allowsHitTesting(false)
-                }
+                        .frame(width: 15)
 
-                SelfDrawnAddressInputField(
-                    text: $addressText,
-                    onSubmit: submitAddress,
-                    onBlur: exitEditingMode,
-                    onInputActivity: { hasInputActivity = true }
-                )
+                    ZStack(alignment: .leading) {
+                        if addressText.isEmpty && !hasInputActivity {
+                            Text("Search or enter website name")
+                                .font(.system(size: 13))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                                .allowsHitTesting(false)
+                        }
+
+                        SelfDrawnAddressInputField(
+                            text: $addressText,
+                            requestsFirstResponder: addressPresentationPhase.showsFocusAffordances,
+                            onSubmit: submitAddress,
+                            onBlur: exitEditingMode,
+                            onInputActivity: { hasInputActivity = true }
+                        )
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+                .padding(.horizontal, 10)
+                .transition(.identity)
             }
-            .frame(maxWidth: .infinity)
         }
-        .padding(.horizontal, 10)
-        .frame(height: 32)
+        .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
         .background {
             tabShape(for: tab)
-                .fill(Color.primary.opacity(0.13))
+                .fill(AppColors.addressEditingSurfaceColor)
         }
         .overlay {
             tabShape(for: tab)
                 .strokeBorder(
-                    Color.accentColor.opacity(showsAddressFocusRing ? 0.85 : 0),
-                    lineWidth: 2
+                    AppColors.softenedAddressFocusAccentColor.opacity(
+                        addressPresentationPhase.showsFocusAffordances ? 0.72 : 0
+                    ),
+                    lineWidth: 1.25
+                )
+                .shadow(
+                    color: AppColors.softenedAddressFocusAccentColor.opacity(
+                        addressPresentationPhase.showsFocusAffordances ? 0.18 : 0
+                    ),
+                    radius: 2.5
+                )
+        }
+        .overlay {
+            tabShape(for: tab)
+                .inset(by: 1.25)
+                .strokeBorder(
+                    AppColors.addressFocusInnerHighlightColor.opacity(
+                        addressPresentationPhase.showsFocusAffordances ? 1 : 0
+                    ),
+                    lineWidth: 0.5
                 )
         }
         .overlay(alignment: .bottom) { groupIndicator(for: tab) }
@@ -1694,12 +1732,14 @@ struct MainWindowTabsView: View {
         return displayText(for: tab)
     }
 
-    private func enterEditingMode(showsFocusRing: Bool = true) {
+    private func enterEditingMode(
+        presentationPhase: AddressEditingPresentationPhase = .focused
+    ) {
         guard let currentTabID = viewModel.currentTabId else { return }
 
         if interaction.isAddressEditing,
            interaction.interactionTabID == currentTabID {
-            showsAddressFocusRing = showsFocusRing
+            addressPresentationPhase = presentationPhase
             isAddressFieldHovered = false
             addressText = editingText(for: viewModel.currentTab)
             return
@@ -1709,43 +1749,55 @@ struct MainWindowTabsView: View {
                   tabID: currentTabID,
                   activeTabID: viewModel.currentTabId
               ) else { return }
-        showsAddressFocusRing = showsFocusRing
+        addressPresentationPhase = presentationPhase
         isAddressFieldHovered = false
         addressText = editingText(for: viewModel.currentTab)
     }
 
     private func focusAddressBar(
-        focusRingPresentation: AddressBarFocusRingPresentation
+        presentation: AddressBarFocusPresentation
     ) {
-        focusRingRevealTask?.cancel()
+        addressPresentationTask?.cancel()
 
-        switch focusRingPresentation {
+        switch presentation {
         case .immediate:
             enterEditingMode()
         case .afterTabStripSettles:
             guard let requestedTabID = viewModel.currentTabId else { return }
 
-            // Keep the editor/first responder on the fast path. Only suppress
-            // the conspicuous ring while the new Tab is being compressed and
-            // scrolled into place, then reveal it on stable geometry.
-            enterEditingMode(showsFocusRing: false)
-            focusRingRevealTask = Task { @MainActor in
+            // Stage 1: reserve the complete active-Tab surface, but allow only
+            // its background to participate in compression and scrolling.
+            enterEditingMode(presentationPhase: .backgroundOnly)
+            addressPresentationTask = Task { @MainActor in
                 try? await Task.sleep(
-                    nanoseconds: ToolbarTabMotion.focusRingSettleDelayNanoseconds
+                    nanoseconds: ToolbarTabMotion.addressContentsDelayNanoseconds
                 )
                 guard !Task.isCancelled,
                       viewModel.currentTabId == requestedTabID,
                       interaction.isAddressEditing else { return }
-                withAnimation(.easeOut(duration: ToolbarTabMotion.focusRingRevealDuration)) {
-                    showsAddressFocusRing = true
-                }
+
+                // Stage 2: mount the complete editor contents without asking
+                // AppKit for first responder, so neither ring nor caret leaks
+                // into the content reveal.
+                addressPresentationPhase = .contents
+
+                try? await Task.sleep(
+                    nanoseconds: ToolbarTabMotion.addressFocusDelayNanoseconds
+                )
+                guard !Task.isCancelled,
+                      viewModel.currentTabId == requestedTabID,
+                      interaction.isAddressEditing else { return }
+
+                // Stage 3: the existing NSTextField takes first responder in
+                // the same update that exposes the complete focus ring.
+                addressPresentationPhase = .focused
             }
         }
     }
 
     private func exitEditingMode() {
-        focusRingRevealTask?.cancel()
-        showsAddressFocusRing = false
+        addressPresentationTask?.cancel()
+        addressPresentationPhase = .backgroundOnly
         interaction.endAddressEditing(activeTabID: viewModel.currentTabId)
         hasInputActivity = false
         updateDisplayText()
@@ -2034,6 +2086,7 @@ private struct ChromeTabLoadingRing: View {
 
 private struct SelfDrawnAddressInputField: NSViewRepresentable {
     @Binding var text: String
+    var requestsFirstResponder: Bool
     var onSubmit: () -> Void
     var onBlur: () -> Void
     var onInputActivity: (() -> Void)?
@@ -2056,6 +2109,7 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
         textField.isAutomaticTextCompletionEnabled = false
         textField.stringValue = text
         context.coordinator.textField = textField
+        context.coordinator.parent = self
 
         // SwiftUI mounts the NSView into the window during layout, which can
         // happen after this runloop tick — a single async focus attempt loses
@@ -2102,6 +2156,7 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
         var parent: SelfDrawnAddressInputField
         weak var textField: NSTextField?
         private var firstResponderObservation: NSKeyValueObservation?
+        private var didRequestFirstResponder = false
 
         init(_ parent: SelfDrawnAddressInputField) {
             self.parent = parent
@@ -2110,6 +2165,26 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
 
         deinit {
             stopObservingFirstResponder()
+        }
+
+        func requestFirstResponder(allowDeferredAttempt: Bool) {
+            guard parent.requestsFirstResponder,
+                  !didRequestFirstResponder,
+                  let textField else { return }
+
+            guard let window = textField.window else {
+                if allowDeferredAttempt {
+                    DispatchQueue.main.async { [weak self] in
+                        self?.requestFirstResponder(allowDeferredAttempt: false)
+                    }
+                }
+                return
+            }
+
+            didRequestFirstResponder = true
+            window.makeFirstResponder(textField)
+            textField.currentEditor()?.selectAll(nil)
+            startObservingFirstResponder()
         }
 
         func startObservingFirstResponder() {
@@ -2145,7 +2220,6 @@ private struct SelfDrawnAddressInputField: NSViewRepresentable {
 
         func controlTextDidBeginEditing(_ obj: Notification) {
             startObservingFirstResponder()
-            parent.onInputActivity?()
         }
 
         func controlTextDidChange(_ obj: Notification) {

@@ -16,8 +16,8 @@ private struct ToolbarInPlaceDragState: Equatable {
 
 enum ToolbarTabMotion {
     static let slideDuration: TimeInterval = 0.16
-    static let focusRingSettleDelayNanoseconds: UInt64 = 175_000_000
-    static let focusRingRevealDuration: TimeInterval = 0.08
+    static let addressContentsDelayNanoseconds: UInt64 = 175_000_000
+    static let addressFocusDelayNanoseconds: UInt64 = 70_000_000
     static let slide = Animation.easeInOut(duration: slideDuration)
 }
 

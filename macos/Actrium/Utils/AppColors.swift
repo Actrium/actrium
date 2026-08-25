@@ -51,6 +51,32 @@ enum AppColors {
         Color(nsColor: windowChromeDragPlate)
     }
 
+    /// Safari-like address editing surface. The focused field is primarily a
+    /// neutral capsule; accent color is reserved for a restrained rim/glow.
+    static var addressEditingSurfaceColor: Color {
+        usesDarkAppearance
+            ? Color.white.opacity(0.10)
+            : Color.white.opacity(0.56)
+    }
+
+    /// Blend the user's accent with the window chrome so the focus treatment
+    /// remains semantic without presenting as a saturated blue marker.
+    static var softenedAddressFocusAccent: NSColor {
+        let chrome = usesDarkAppearance
+            ? NSColor(calibratedWhite: 0.28, alpha: 1)
+            : NSColor(calibratedWhite: 0.92, alpha: 1)
+        return NSColor.controlAccentColor.blended(withFraction: 0.48, of: chrome)
+            ?? NSColor.controlAccentColor
+    }
+
+    static var softenedAddressFocusAccentColor: Color {
+        Color(nsColor: softenedAddressFocusAccent)
+    }
+
+    static var addressFocusInnerHighlightColor: Color {
+        Color.white.opacity(usesDarkAppearance ? 0.12 : 0.48)
+    }
+
     /// Serialized fallback used by native/system tabs before their semantic
     /// SwiftUI surface is mounted. Web tabs keep their page-provided color.
     static var nativeTabBackgroundHex: String {
