@@ -351,6 +351,43 @@ fn observed_effect_outcomes_preserve_every_completion_class() {
 }
 
 #[test]
+fn retry_failure_diagnostic_requires_the_matching_running_signaling_action() {
+    let running = tp::SignalingReconnectState::Running {
+        work_revision: 7,
+        action_id: 42,
+        strength: tp::RecoveryStrength::Restore,
+        attempt: 3,
+    };
+    let matching = tp::Input::EffectCompleted {
+        action_id: 42,
+        kind: EffectKind::Restore,
+        policy_revision: 7,
+        outcome: EffectOutcome::Failed {
+            diagnosis: EffectDiagnosis::PathUnreachable {
+                stage: "signaling".to_string(),
+            },
+        },
+    };
+    let unrelated = tp::Input::EffectCompleted {
+        action_id: 43,
+        kind: EffectKind::Cleanup,
+        policy_revision: 8,
+        outcome: EffectOutcome::Failed {
+            diagnosis: EffectDiagnosis::Timeout {
+                stage: "cleanup".to_string(),
+            },
+        },
+    };
+
+    assert!(matching_running_signaling_failure(&running, &matching).is_some());
+    assert!(matching_running_signaling_failure(&running, &unrelated).is_none());
+    assert!(
+        matching_running_signaling_failure(&tp::SignalingReconnectState::Idle, &matching,)
+            .is_none()
+    );
+}
+
+#[test]
 fn session_notification_without_fact_sink_is_a_safe_noop() {
     let (event_tx, _event_rx) = mpsc::channel(1);
     let handle = NetworkEventHandle::new(event_tx);
@@ -809,6 +846,60 @@ fn fact_sink_is_non_blocking_during_a_burst_or_after_close() {
 
     drop(rx);
     sink.session_activated(3);
+}
+
+#[test]
+fn queued_signaling_config_uses_the_retargeted_mobile_profile() {
+    let (sink, mut channel) =
+        supervisor_internal_channel_with_profile(tp::LifecycleProfile::Ungated);
+    sink.signaling_recovery_configured(10, Duration::from_secs(30), Duration::from_secs(60), 2.0);
+    channel.set_profile(tp::LifecycleProfile::Gated);
+
+    let config_input = channel
+        .rx
+        .try_recv()
+        .expect("signaling config should remain queued until the reconciler starts");
+    let mut supervisor = RecoverySupervisor::new_with_entropy(
+        channel.profile,
+        Box::new(crate::lifecycle::recovery_policy::classification::FixedEntropy::constant(0.5)),
+    );
+    supervisor.accept(config_input, Duration::ZERO);
+    supervisor.accept(
+        tp::Input::AppEnteredForeground {
+            observed_background_duration: Some(Duration::ZERO),
+        },
+        Duration::ZERO,
+    );
+    supervisor.accept(
+        tp::Input::SignalingConnectionRequired {
+            cause: tp::SignalingConnectionRequiredCause::InitialConnectDeferred,
+        },
+        Duration::ZERO,
+    );
+    let started = supervisor
+        .maybe_start_effect(Duration::ZERO)
+        .expect("the retargeted mobile supervisor should start signaling recovery");
+    supervisor.accept(
+        tp::Input::EffectCompleted {
+            action_id: started.action_id,
+            kind: started.kind,
+            policy_revision: started.captured_revision,
+            outcome: EffectOutcome::Failed {
+                diagnosis: EffectDiagnosis::PathUnreachable {
+                    stage: "signaling".to_string(),
+                },
+            },
+        },
+        Duration::ZERO,
+    );
+
+    match supervisor.signaling_reconnect_state() {
+        tp::SignalingReconnectState::BackingOff { deadline, .. } => assert!(
+            deadline <= crate::lifecycle::recovery_supervisor::MOBILE_SIGNALING_MAX_BACKOFF,
+            "jittered mobile backoff exceeded the cap: {deadline:?}"
+        ),
+        other => panic!("expected capped mobile backoff, got {other:?}"),
+    }
 }
 
 #[test]

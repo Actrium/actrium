@@ -27,6 +27,10 @@ use super::recovery_policy::classification::{DefaultEntropy, EntropySource};
 use super::recovery_policy::diagnosis::EffectKind;
 use super::recovery_policy::translate as tp;
 
+/// Mobile lifecycle recovery stays responsive even if the platform misses a
+/// material network edge. Headless nodes preserve the public reconnect policy.
+pub(crate) const MOBILE_SIGNALING_MAX_BACKOFF: Duration = Duration::from_secs(15);
+
 // ---------------------------------------------------------------------------
 // The eight normative YASM machines
 //
@@ -371,10 +375,27 @@ impl RecoverySupervisor {
             backoff_multiplier_bits,
         } = &input
         {
+            let (effective_initial_delay, effective_max_delay) =
+                if self.view.profile == tp::LifecycleProfile::Gated {
+                    let capped_max_delay = (*max_delay).min(MOBILE_SIGNALING_MAX_BACKOFF);
+                    let capped_initial_delay = (*initial_delay).min(capped_max_delay);
+                    if capped_max_delay != *max_delay || capped_initial_delay != *initial_delay {
+                        tracing::info!(
+                            requested_initial_delay_ms = initial_delay.as_millis() as u64,
+                            requested_max_delay_ms = max_delay.as_millis() as u64,
+                            effective_initial_delay_ms = capped_initial_delay.as_millis() as u64,
+                            effective_max_delay_ms = capped_max_delay.as_millis() as u64,
+                            "network_event.signaling.mobile_backoff_capped"
+                        );
+                    }
+                    (capped_initial_delay, capped_max_delay)
+                } else {
+                    (*initial_delay, *max_delay)
+                };
             self.config.configure_signaling_retry_window(
                 *max_attempts,
-                *initial_delay,
-                *max_delay,
+                effective_initial_delay,
+                effective_max_delay,
                 f64::from_bits(*backoff_multiplier_bits),
             );
         }

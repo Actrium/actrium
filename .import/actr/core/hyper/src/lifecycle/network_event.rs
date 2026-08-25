@@ -85,7 +85,7 @@ use actr_framework::WebRtcPeerStatus;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
-use super::recovery_policy::diagnosis::{AbortCause, EffectDiagnosis, EffectOutcome};
+use super::recovery_policy::diagnosis::{AbortCause, EffectDiagnosis, EffectKind, EffectOutcome};
 use super::recovery_policy::translate as tp;
 use super::recovery_supervisor::{
     RecoverySupervisor, StartedEffect, TimerOp, event_to_input, network_action_of,
@@ -1875,6 +1875,14 @@ impl SupervisorInternalChannel {
     /// headless runtimes that never create a public `NetworkEventHandle` —
     /// keeps the same supervisor input queue; `create_network_event_handle`
     /// only retargets the profile.
+    ///
+    /// The retarget always precedes any supervisor translation: handle
+    /// creation borrows the node mutably while `start()` consumes it, and the
+    /// reconciler that snapshots this profile only spawns during `start()`.
+    /// Facts queued earlier — such as the signaling retry config emitted when
+    /// the fact sink is installed at construction — are therefore always
+    /// normalized against the final profile, so the mobile backoff cap cannot
+    /// be skipped by an early `SignalingRecoveryConfigChanged`.
     pub(crate) fn set_profile(&mut self, profile: tp::LifecycleProfile) {
         self.profile = profile;
     }
@@ -2440,13 +2448,30 @@ fn handle_supervisor_input(
     last_outcome: &mut Option<ObservedOutcome>,
     send_projection_tx: &watch::Sender<tp::SendProjection>,
 ) -> bool {
+    let previous_signaling_reconnect_state = supervisor.signaling_reconnect_state();
     if let tp::Input::EffectCompleted { outcome, .. } = &input {
         *last_outcome = Some(observed_outcome(outcome));
+    }
+    if let Some((kind, diagnosis)) =
+        matching_running_signaling_failure(&previous_signaling_reconnect_state, &input)
+    {
+        tracing::warn!(
+            effect_kind = ?kind,
+            connection_error = ?diagnosis.tag(),
+            diagnosis_family = ?diagnosis.family(),
+            "network_event.signaling.retry_failed"
+        );
     }
 
     let outcome = supervisor.accept(input, now);
     let terminate = outcome.terminate;
     let send_projection = supervisor.send_policy();
+    let signaling_reconnect_state = supervisor.signaling_reconnect_state();
+    log_signaling_reconnect_transition(
+        &previous_signaling_reconnect_state,
+        &signaling_reconnect_state,
+        now,
+    );
     send_projection_tx.send_if_modified(|current| {
         if *current == send_projection {
             false
@@ -2461,7 +2486,7 @@ fn handle_supervisor_input(
         revision = supervisor.view().policy_revision,
         send_policy = ?send_projection,
         pending_action = ?supervisor.composite_action(),
-        signaling_reconnect_state = ?supervisor.signaling_reconnect_state(),
+        signaling_reconnect_state = ?signaling_reconnect_state,
         "network_event.supervisor.reconciled"
     );
 
@@ -2557,6 +2582,94 @@ fn handle_supervisor_input(
     });
 
     terminate
+}
+
+fn matching_running_signaling_failure<'a>(
+    state: &tp::SignalingReconnectState,
+    input: &'a tp::Input,
+) -> Option<(EffectKind, &'a EffectDiagnosis)> {
+    let tp::SignalingReconnectState::Running {
+        action_id: running_action_id,
+        ..
+    } = state
+    else {
+        return None;
+    };
+    let tp::Input::EffectCompleted {
+        action_id,
+        kind,
+        outcome: EffectOutcome::Failed { diagnosis },
+        ..
+    } = input
+    else {
+        return None;
+    };
+    (*action_id == *running_action_id).then_some((*kind, diagnosis))
+}
+
+fn log_signaling_reconnect_transition(
+    previous: &tp::SignalingReconnectState,
+    current: &tp::SignalingReconnectState,
+    now: Duration,
+) {
+    if previous == current {
+        return;
+    }
+
+    match current {
+        tp::SignalingReconnectState::BackingOff {
+            attempt,
+            deadline,
+            delay_kind,
+            ..
+        } => tracing::warn!(
+            retry_attempt = *attempt,
+            // A zero delay here can mean the deadline already lapsed; say so
+            // explicitly instead of letting a saturated subtraction imply
+            // "immediately" for an overdue retry.
+            retry_overdue = *deadline <= now,
+            retry_after_ms = deadline.saturating_sub(now).as_millis() as u64,
+            next_retry_at_ms = deadline.as_millis() as u64,
+            clock = "supervisor_monotonic",
+            delay_kind = ?delay_kind,
+            "network_event.signaling.retry_scheduled"
+        ),
+        tp::SignalingReconnectState::Ready {
+            attempt, strength, ..
+        } => tracing::info!(
+            retry_attempt = *attempt,
+            strength = ?strength,
+            "network_event.signaling.retry_ready"
+        ),
+        tp::SignalingReconnectState::Running {
+            attempt,
+            action_id,
+            strength,
+            ..
+        } => tracing::info!(
+            retry_attempt = *attempt,
+            action_id = *action_id,
+            strength = ?strength,
+            "network_event.signaling.retry_running"
+        ),
+        tp::SignalingReconnectState::Idle => {
+            tracing::info!("network_event.signaling.retry_idle")
+        }
+        tp::SignalingReconnectState::Gated {
+            strength, causes, ..
+        } => tracing::info!(
+            strength = ?strength,
+            gate_causes = ?causes,
+            "network_event.signaling.retry_gated"
+        ),
+        tp::SignalingReconnectState::Parked {
+            strength, causes, ..
+        } => tracing::warn!(
+            strength = ?strength,
+            park_causes = ?causes,
+            "network_event.signaling.retry_parked"
+        ),
+    }
 }
 
 fn spawn_effect(
