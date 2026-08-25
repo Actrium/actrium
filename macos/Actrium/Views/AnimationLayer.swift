@@ -160,6 +160,7 @@ final class AnimationLayerNSView: NSView {
         for slot in cardSlots.values {
             slot.titleLabel.foregroundColor = CardStyle.titleColor
             slot.closeIcon.contents = cachedCloseIcon.image
+            slot.container.borderColor = AppColors.separator.cgColor
         }
     }
 
@@ -232,9 +233,12 @@ final class AnimationLayerNSView: NSView {
 
                 // Add Shadow (with TabPanel Unanimously.: radius=5, x=0, y=2, opacity=0.3)
                 container.shadowColor = NSColor.black.cgColor
-                container.shadowOpacity = 0.3
-                container.shadowOffset = CGSize(width: 0, height: 2)
-                container.shadowRadius = 5
+                container.shadowOpacity = CardStyle.shadowOpacity
+                container.shadowOffset = CardStyle.shadowOffset
+                container.shadowRadius = CardStyle.shadowRadius
+                container.borderColor = AppColors.separator.cgColor
+                container.borderWidth = CardStyle.borderWidth
+                container.cornerRadius = CardStyle.cornerRadius
 
                 // Create Focus Layer (Bottom, show big picture)
                 // Focus No rounded angles in mode (with TabPanel cornerRadius(isFocused ? 0 : 10) Unanimously.)
@@ -316,8 +320,9 @@ final class AnimationLayerNSView: NSView {
             // Close button position (Left, centre vertically)
             let iconSize = cachedCloseIcon.size
             let hPadding = CardStyle.titleBarHorizontalPadding
+            let closeButtonSize = CardStyle.closeButtonSize
             slot.closeIcon.frame = CGRect(
-                x: hPadding,
+                x: hPadding + (closeButtonSize - iconSize.width) / 2,
                 y: (titleBarHeight - iconSize.height) / 2,
                 width: iconSize.width,
                 height: iconSize.height
@@ -380,10 +385,21 @@ final class AnimationLayerNSView: NSView {
     /// - Parameter direction: Animation Direction
     func setAnimationDirection(_ direction: AnimationDirection) {
         animationDirection = direction
+        self.transitionTabId = transitionTabId
 
         // Reset crossfade To Start State
         crossfadeProgress = 0.0
-        updateAllCrossfade()
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        for (tabId, slot) in cardSlots {
+            if tabId == transitionTabId {
+                applyCurrentCrossfade(to: slot)
+            } else {
+                applyStableOverviewStyle(to: slot)
+            }
+        }
+        CATransaction.commit()
 
         NSLog("🎬 VirtualGrid: Animation direction set to %@",
               direction == .focusToOverview ? "Focus→Overview" : "Overview→Focus")
@@ -397,7 +413,12 @@ final class AnimationLayerNSView: NSView {
     ///   - offset: Offset
     ///   - crossfade: crossfade Progress (0.0 Present. 1.0)
     func applyTransform(scale: CGFloat, offset: CGPoint, crossfade: CGFloat = 0.0) {
-        applyTransform(scale: scale, offset: offset, opacity: 1.0 - crossfade)
+        applyTransform(
+            scale: scale,
+            offset: offset,
+            opacity: 1.0 - crossfade,
+            transitionProgress: crossfade
+        )
     }
 
     /// Application of change, transparency and roundabouts (new scenario: fade out) + Rounded gradient)
@@ -579,7 +600,14 @@ final class AnimationLayerNSView: NSView {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         virtualGridLayer.transform = CATransform3DIdentity
+        for slot in cardSlots.values {
+            applyStableOverviewStyle(to: slot)
+        }
         CATransaction.commit()
+
+        transitionTabId = nil
+        crossfadeProgress = 0
+        lastTransitionStyleUpdateCount = 0
     }
 
     /// Reset Status (Fade-Insist)
@@ -637,11 +665,8 @@ struct AnimationLayerRepresentable: NSViewRepresentable {
         // 🔑 Do not update configuration during animation to avoid interference ModeTransitionController Set transform
         // Animation by CVDisplayLink Driver, this update may overwrite the animation status
         let isTransitioning = controller.phase.isTransitioning
-        NSLog("🔄 AnimationLayer.updateNSView: isTransitioning=%d, isVisible=%d, virtualGridLayer.opacity=%.1f",
-              isTransitioning ? 1 : 0, isVisible ? 1 : 0, nsView.layer?.sublayers?.last?.opacity ?? -1)
 
         guard !isTransitioning else {
-            NSLog("🔄 AnimationLayer.updateNSView: SKIPPED (transitioning)")
             return
         }
 

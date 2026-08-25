@@ -30,6 +30,16 @@ enum CardStyle {
     /// Spacing between title bar items
     static let titleBarItemSpacing: CGFloat = 8
 
+    /// Close button layout box. The symbol is centered inside this box.
+    /// Keep this shared with AnimationLayer so the title starts at the same x.
+    static let closeButtonSize: CGFloat = 20
+
+    /// Overview card outline and shadow metrics.
+    static let borderWidth: CGFloat = 1
+    static let shadowOpacity: Float = 0.3
+    static let shadowRadius: CGFloat = 5
+    static let shadowOffset = CGSize(width: 0, height: 2)
+
     // MARK: Close Icon Style
 
     /// Close icon SF Symbol name
@@ -87,7 +97,7 @@ extension CardStyle {
         HStack(spacing: titleBarItemSpacing) {
             Button(action: onClose) {
                 closeIcon()
-                    .frame(width: 20, height: 20)
+                    .frame(width: closeButtonSize, height: closeButtonSize)
             }
             .buttonStyle(.plain)
             .contentShape(Rectangle())

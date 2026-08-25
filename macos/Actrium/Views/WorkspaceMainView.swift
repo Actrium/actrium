@@ -9,6 +9,7 @@ import UniformTypeIdentifiers
 
 extension Notification.Name {
     static let toggleFocusOverviewRequested = Notification.Name("toggleFocusOverviewRequested")
+    static let ensureActiveTabVisibleRequested = Notification.Name("ensureActiveTabVisibleRequested")
 }
 
 // MARK: - Main View
@@ -59,6 +60,7 @@ struct WorkspaceMainView: View {
 
     // Mode Switch Transition controller
     @StateObject private var modeTransitionController = ModeTransitionController()
+    @State private var transitionSnapshotWarmupTask: Task<Void, Never>?
 
     // 🔑 Drag State (from) TabGridView Raise, Jean. UnifiedReactNativeLayer I can also visit)
     @State private var draggingTabId: UUID?
@@ -102,8 +104,6 @@ struct WorkspaceMainView: View {
             height: max(viewportSize.height, 100)
         )
 
-        // Toolbar height estimation (for grid layout calculations)
-        let toolbarHeight: CGFloat = 52
         let contentSize = safeViewportSize
             // Titlebar removed, card ratio = Portrait ratio
             let titleBarRatio: CGFloat = 0
@@ -129,8 +129,7 @@ struct WorkspaceMainView: View {
                     return calculateFocusTransform(
                         for: tabId,
                         gridResult: gridResult,
-                        viewportSize: safeViewportSize,
-                        titleBarRatio: titleBarRatio
+                        viewportSize: safeViewportSize
                     )
                 }
             }()
@@ -236,11 +235,6 @@ struct WorkspaceMainView: View {
                                         historyVM.recordVisit(tab: tab)
                                     }
                                 }
-                                // Update snapshot for Overview mode (delayed to allow rendering)
-                                Task {
-                                    try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s delay
-                                    await WebViewHolderManager.shared.takeSnapshot(for: focusedTabId)
-                                }
                             },
                             onURLChanged: { newURL in
                                 guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
@@ -269,6 +263,12 @@ struct WorkspaceMainView: View {
                             onProgressChanged: { progress in
                                 guard viewModel.tabs.contains(where: { $0.id == focusedTabId }) else { return }
                                 viewModel.updateLoadingProgress(for: focusedTabId, progress: progress)
+                            },
+                            onContentFocused: {
+                                NotificationCenter.default.post(
+                                    name: .ensureActiveTabVisibleRequested,
+                                    object: viewModel
+                                )
                             }
                         )
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -584,11 +584,13 @@ struct WorkspaceMainView: View {
 
             // Enter Overview The tags need automatic focus search boxes when mode is ticked
             if case .overview = newValue {
+                transitionSnapshotWarmupTask?.cancel()
                 shouldAutoFocusSearchTabs = true
             } else {
                 // Leave Overview Empty search text while mode
                 searchTabsText = ""
                 isSearchTabsFocused = false
+                scheduleTransitionSnapshotWarmup(for: focusedTabId)
             }
             // Note: isOverviewMode By ViewBridgeCoordinatorManager Subscriptions actriumMode AutoSync
         }
@@ -678,6 +680,10 @@ struct WorkspaceMainView: View {
 
                 if shouldNotifyDismiss {
                     NotificationCenter.default.post(name: NSNotification.Name("com.actro.dismissAddressBarFocus"), object: nil)
+                    NotificationCenter.default.post(
+                        name: .ensureActiveTabVisibleRequested,
+                        object: viewModel
+                    )
                 }
 
                 // Old logic:SwiftUI toolbar Address Bar
@@ -1024,7 +1030,7 @@ struct WorkspaceMainView: View {
             x: sidebarWidth,
             y: viewportY,
             width: viewportSize.width,
-            height: captureHeight
+            height: viewportSize.height
         )
 
         NSLog("📸 captureViewportSnapshot: windowSize=%.0fx%.0f, viewportSize=%.0fx%.0f, toolbarHeight=%.0f, isFlipped=%d, captureRect=(%.0f,%.0f,%.0f,%.0f)",
@@ -1044,12 +1050,7 @@ struct WorkspaceMainView: View {
 
         // Create Full viewportSize , and stretch full when drawing (excluded) 1px Almost invisible)
         let image = NSImage(size: viewportSize)
-        image.lockFocus()
-        if let ctx = NSGraphicsContext.current {
-            ctx.imageInterpolation = .high
-            bitmapRep.draw(in: NSRect(origin: .zero, size: viewportSize))
-        }
-        image.unlockFocus()
+        image.addRepresentation(bitmapRep)
 
         let endTime = CACurrentMediaTime()
         NSLog("📸 captureViewportSnapshot: %.1fms (cache: %.1fms)",
@@ -1196,7 +1197,7 @@ struct WorkspaceMainView: View {
         }
 
         let cardPosition = gridResult.positions[position]
-        let cardFullRect = CGRect(
+        let cardContentRect = CGRect(
             x: cardPosition.x,
             y: cardPosition.y,
             width: gridResult.cardWidth,
@@ -1271,6 +1272,8 @@ struct WorkspaceMainView: View {
             // From TabSnapshotCache Get a double buffer.
             let focusSnapshot = cacheManager.focusSnapshot(for: tab.id)
             let overviewSnapshot = cacheManager.overviewSnapshot(for: tab.id)
+                ?? rendererSnapshot
+                ?? focusSnapshot
 
             return VirtualGridCardInfo(
                 tabId: tab.id,
@@ -1549,9 +1552,6 @@ private struct TabGridView: View {
                         tab: tab,
                         cardWidth: cardWidth,
                         cardHeight: cardHeight,
-                        titleBarRatio: titleBarRatio,
-                        toolbarHeight: toolbarHeight,
-                        currentScale: currentScale,
                         isFocused: {
                             if case .focus(let tabId) = mode {
                                 return tabId == tab.id
@@ -2195,7 +2195,7 @@ private struct TabPanel: View {
             .overlay {
                 if !isFocused {
                     RoundedRectangle(cornerRadius: CardStyle.cornerRadius)
-                        .stroke(AppColors.separatorColor, lineWidth: 1)
+                        .stroke(AppColors.separatorColor, lineWidth: CardStyle.borderWidth)
                 }
             }
             .shadow(color: isFocused ? .clear : Color.black.opacity(0.3), radius: 5, x: 0, y: 2)
@@ -2304,12 +2304,6 @@ private struct TabPanel: View {
         } else {
             renderSize = CGSize(width: max(cardWidth, 1), height: max(cardHeight, 1))
         }
-
-        let _ = NSLog("📐 TabPanel.contentView: type=%@, isFocused=%d, viewportSize=%.0fx%.0f, cardSize=%.0fx%.0f, renderSize=%.0fx%.0f",
-                      String(describing: tab.contentType), isFocused ? 1 : 0,
-                      viewportSize.width, viewportSize.height,
-                      cardWidth, cardHeight,
-                      renderSize.width, renderSize.height)
 
         return ZStack(alignment: .topLeading) {
             // Bottom Background - Use Tab Random background colour
