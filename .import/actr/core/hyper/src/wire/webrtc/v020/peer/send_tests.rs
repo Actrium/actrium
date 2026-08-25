@@ -181,6 +181,7 @@ fn spawn_send_harness(serial: u64) -> SendHarness {
             peer_sendability_changed: None,
             peer_transport_retired: None,
             peer_snapshot_events: None,
+            recovery_obligations: None,
         },
     );
     SendHarness {

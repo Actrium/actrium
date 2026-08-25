@@ -104,6 +104,12 @@ pub(crate) struct RtcPeerSnapshot {
     /// increments it so delayed retirement cannot target the replacement.
     pub(crate) transport_epoch: u64,
     pub(crate) pc_generation: u64,
+    /// Current ICE restart generation within `pc_generation`. Soft recovery
+    /// restarts ICE in place, so this is the third component of the per-peer
+    /// identity tuple (peer, `pc_generation`, `ice_generation`) that
+    /// peer-scoped recovery coverage validates terminal facts against
+    /// (RFC-0400 "Per-peer coverage for peer-scoped recovery").
+    pub(crate) ice_generation: u64,
     pub(crate) revision: u64,
     pub(crate) status: WebRtcPeerStatus,
     pub(crate) sendable: bool,
@@ -128,6 +134,7 @@ impl RtcPeerSnapshot {
             role: super::peer::state::Role::Undetermined,
             transport_epoch: 0,
             pc_generation: 0,
+            ice_generation: 0,
             revision: 0,
             status: WebRtcPeerStatus::Idle,
             sendable: false,

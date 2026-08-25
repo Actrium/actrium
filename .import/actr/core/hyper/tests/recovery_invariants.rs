@@ -19,7 +19,7 @@
 //!
 //! ## Invariant -> test mapping (RFC-0400 "Required invariants")
 //!
-//! Phase 2 (this round's primary scope: invariants 1-11, 25-32; each has at
+//! Phase 2 (this round's primary scope: invariants 1-11, 25-33; each has at
 //! least one deterministic test, several have both a pure-engine test and a
 //! black-box confirmation here):
 //!
@@ -44,6 +44,7 @@
 //! | 30 | Teardown/shutdown terminate within their overall deadline; only unbounded state is `InvariantViolation` park outside `Terminating` | unit: `recovery_supervisor_tests::inv30_app_terminating_enters_terminating_and_blocks_sends`; reducer: `translate_tests::{teardown_deadline_abandons_backing_off_obligation, teardown_deadline_ignored_while_effect_running, shutdown_deadline_aborts_when_terminating_and_matching}`, `classification::teardown_invariant_violation_parks_or_abandons_by_mode` |
 //! | 31 | `SessionActivated` during pending cleanup derives a post-cleanup obligation; cleanup's own completion cannot extinguish it | unit: `recovery_supervisor_tests::inv31_session_activated_during_cleanup_derives_a_post_cleanup_obligation` |
 //! | 32 | A current-effect-origin fact cannot make that effect's own completion stale | reducer (S1, confirmed, not rewritten): `translate_tests::signaling_committed_current_effect_is_covered_output` |
+//! | 33 | Peer-scoped recovery: target set captured at dispatch; dispatch alone never yields a success-class outcome for an uncovered target; every target covered by an identity-validated terminal fact or named in a handoff/out-of-scope residual; handed-off obligations end only through enumerated extinguishment paths | effect boundary (real manager + controllers + the `spawn_effect` trait method): `lifecycle::network_event::tests::inv33_peer_coverage::{restore_dispatch_hands_off_uncovered_target_as_residual, restore_names_departed_target_as_out_of_scope_residual, restore_without_targets_completes_pure}`; ledger: `wire::webrtc::v020::recovery_tests::inv33_obligation_log` (identity-validated success facts, supersession, peer departure, owner-lifetime end, bounded retention); intent discharge: `recovery_policy::translate_tests::effect_completed_with_peer_coverage_residuals_acknowledges_intent` |
 //!
 //! Phase 3 (invariants 12-16, generation/cancellation safety):
 //!

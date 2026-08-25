@@ -174,6 +174,10 @@ pub(crate) struct RtcConnectionManager {
     /// builds/restarts and adds per-peer jitter to prevent thundering herd
     /// on network recovery.
     build_throttle: Arc<crate::wire::webrtc::v020::recovery::BuildThrottle>,
+    /// Ledger of resource-scoped per-peer recovery obligations handed off by
+    /// peer-scoped Restore effects (RFC-0400 per-peer coverage contract,
+    /// invariant 33). This manager is the receiving resource owner.
+    recovery_obligations: Arc<crate::wire::webrtc::v020::recovery::PeerRecoveryObligationLog>,
     /// The node-level media-frame registry (the stable business surface).
     /// Each controller's sessions dispatch received
     /// track RTP into it. `None` (tests) drops media dispatch.
@@ -284,6 +288,9 @@ impl RtcConnectionManager {
             inbound,
             buffer_config: buffer_config.clone(),
             supervisor: Arc::new(RtcRecoverySupervisor::new()),
+            recovery_obligations: Arc::new(
+                crate::wire::webrtc::v020::recovery::PeerRecoveryObligationLog::new(),
+            ),
             build_throttle: Arc::new(crate::wire::webrtc::v020::recovery::BuildThrottle::new(
                 crate::wire::webrtc::v020::recovery::DEFAULT_MAX_CONCURRENT_BUILDS,
                 std::time::Duration::from_millis(
@@ -362,6 +369,24 @@ impl RtcConnectionManager {
     /// controller receives them via its broadcast receiver.
     pub(crate) fn supervisor(&self) -> &Arc<RtcRecoverySupervisor> {
         &self.supervisor
+    }
+
+    /// The manager-owned ledger of handed-off per-peer recovery obligations.
+    pub(crate) fn recovery_obligation_log(
+        &self,
+    ) -> &Arc<crate::wire::webrtc::v020::recovery::PeerRecoveryObligationLog> {
+        &self.recovery_obligations
+    }
+
+    /// Record one resource-scoped recovery obligation handed off by a
+    /// peer-scoped Restore effect and acknowledge the record (RFC-0400
+    /// per-peer coverage contract). The record call is the acknowledgement:
+    /// once it returns, the obligation is durable in this owner.
+    pub(crate) fn record_peer_recovery_obligation(
+        &self,
+        target: crate::wire::webrtc::v020::recovery::PeerRecoveryTarget,
+    ) {
+        self.recovery_obligations.record(target);
     }
 
     /// S6-6b: subscribe to peer-registry changes (a version edge fires on every
@@ -528,6 +553,7 @@ impl RtcConnectionManager {
                     peer_sendability_changed: Some(self.peer_sendability_changed.clone()),
                     peer_transport_retired: Some(self.peer_transport_retired.clone()),
                     peer_snapshot_events: Some(self.peer_snapshot_events.clone()),
+                    recovery_obligations: Some(self.recovery_obligations.clone()),
                 },
             );
             peers.insert(
@@ -1018,6 +1044,9 @@ impl RtcConnectionManager {
                 .or_insert(next_revision);
             self.peer_set_version
                 .send_modify(|v| *v = v.wrapping_add(1));
+            // The peer is conclusively out of scope for every handed-off
+            // recovery obligation (RFC-0400 extinguishment path).
+            self.recovery_obligations.observe_departure(peer);
         }
         marker.done.cancel();
     }
@@ -1035,6 +1064,10 @@ impl RtcConnectionManager {
     /// final bounded explicit Session close. Drop is only the last-resort
     /// cover if the WebRTC close future itself cannot converge.
     pub(crate) async fn close_all(self: &Arc<Self>) {
+        // The owner's peer lifetime ends here: every open handed-off recovery
+        // obligation is extinguished by owner-lifetime-end (RFC-0400
+        // extinguishment path), recorded before the drain begins.
+        self.recovery_obligations.observe_owner_end();
         // Establish the publication fence even when the registry is currently
         // empty: a creator may already have captured the previous epoch and be
         // waiting immediately before its commit boundary.

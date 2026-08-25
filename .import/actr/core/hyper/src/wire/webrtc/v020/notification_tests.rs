@@ -33,6 +33,7 @@ fn snapshot(peer: ActrId, revision: u64, sendable: bool) -> RtcPeerSnapshot {
         role: crate::wire::webrtc::v020::peer::state::Role::Offerer,
         transport_epoch: 1,
         pc_generation: 1,
+        ice_generation: 0,
         revision,
         status: if sendable {
             WebRtcPeerStatus::Connected

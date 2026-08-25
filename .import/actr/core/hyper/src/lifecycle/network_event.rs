@@ -80,6 +80,8 @@ use tokio::time::Instant;
 
 use crate::transport::{NetworkError, PeerTransport};
 use crate::wire::webrtc::SignalingClient;
+#[cfg(feature = "webrtc-v020")]
+use actr_framework::WebRtcPeerStatus;
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio_util::sync::CancellationToken;
 
@@ -554,14 +556,19 @@ pub trait NetworkEventProcessor: Send + Sync {
 
     /// Execute an effect under the supervisor action that owns its commit
     /// rights. Custom processors can ignore the identity; the built-in
-    /// signaling client uses it to tag the committed socket generation.
+    /// signaling client uses it to tag the committed socket generation. The
+    /// returned [`EffectReport`] carries effect-synthesized terminal facts
+    /// (per-peer coverage residuals); custom processors keep the legacy
+    /// success/failure contract.
     #[doc(hidden)]
     async fn process_network_recovery_effect_for_action(
         &self,
         action: NetworkRecoveryAction,
         _action_id: u64,
-    ) -> Result<(), NetworkRecoveryError> {
-        self.process_network_recovery_effect(action).await
+    ) -> Result<EffectReport, NetworkRecoveryError> {
+        self.process_network_recovery_effect(action)
+            .await
+            .map(|()| EffectReport::PURE)
     }
 
     /// Run a bounded teardown effect (cleanup or confirmed offline disconnect).
@@ -1153,9 +1160,9 @@ impl DefaultNetworkEventProcessor {
         &self,
         action: NetworkRecoveryAction,
         supervisor_action_id: Option<u64>,
-    ) -> Result<(), NetworkRecoveryError> {
+    ) -> Result<EffectReport, NetworkRecoveryError> {
         if action == NetworkRecoveryAction::Noop {
-            return Ok(());
+            return Ok(EffectReport::PURE);
         }
 
         let action_id = supervisor_action_id
@@ -1165,6 +1172,18 @@ impl DefaultNetworkEventProcessor {
             action = ?action,
             "network_event.execution.action.start"
         );
+        // A supervisor-driven Restore is a peer-scoped recovery effect
+        // (RFC-0400 per-peer coverage contract): its target set — every peer
+        // holding a session that is not currently covered by a success fact —
+        // is captured at dispatch, before the shared prerequisites run, so
+        // per-peer terminal facts can be validated against the frozen tuples
+        // at synthesis time.
+        let captured_targets =
+            if action == NetworkRecoveryAction::Restore && supervisor_action_id.is_some() {
+                self.capture_peer_recovery_targets().await
+            } else {
+                Vec::new()
+            };
         let result = match action {
             NetworkRecoveryAction::Noop => Ok(()),
             NetworkRecoveryAction::Offline => self
@@ -1187,13 +1206,189 @@ impl DefaultNetworkEventProcessor {
                 self.force_reconnect_typed(supervisor_action_id).await
             }
         };
+        let report = match (&result, captured_targets.is_empty()) {
+            // Shared prerequisites failed: the shared-scope diagnosis is the
+            // effect's failure; per-peer coverage is not synthesized (the
+            // failure verdict applies and the obligation is retained).
+            (Err(_), _) => EffectReport::PURE,
+            // Not a peer-scoped effect dispatch (no captured targets): keep
+            // the legacy success contract.
+            (Ok(()), true) => EffectReport::PURE,
+            // Shared prerequisites completed: synthesize the terminal
+            // outcome from per-peer terminal facts, handoffs, and
+            // out-of-scope records. Dispatch alone never yields a
+            // success-class outcome for an uncovered target (RFC-0400
+            // invariant 33).
+            (Ok(()), false) => EffectReport {
+                residuals: self
+                    .synthesize_peer_coverage(captured_targets, action_id)
+                    .await,
+            },
+        };
         tracing::info!(
             action_id,
             action = ?action,
             success = result.is_ok(),
+            residual_count = report.residuals.len(),
             "network_event.execution.action.completed"
         );
-        result
+        result.map(|()| report)
+    }
+
+    /// Capture the Restore effect's target set at dispatch: one identity
+    /// tuple per peer that holds a PC session (generation > 0) and is not
+    /// currently covered by a valid success fact, excluding peers already
+    /// leaving (`close_peer` in flight). Peers without a session have no
+    /// identity tuple to recover and are not targets.
+    #[cfg(feature = "webrtc-v020")]
+    async fn capture_peer_recovery_targets(
+        &self,
+    ) -> Vec<crate::wire::webrtc::v020::recovery::PeerRecoveryTarget> {
+        let Some(manager) = self.v020_manager.as_ref() else {
+            return Vec::new();
+        };
+        let mut targets = Vec::new();
+        for snapshot in manager.list_snapshots().await {
+            if snapshot.pc_generation == 0
+                || manager.is_closing(&snapshot.peer).await
+                || (snapshot.sendable && snapshot.status == WebRtcPeerStatus::Connected)
+            {
+                continue;
+            }
+            targets.push(
+                crate::wire::webrtc::v020::recovery::PeerRecoveryTarget::new(
+                    snapshot.peer.clone(),
+                    snapshot.pc_generation,
+                    snapshot.ice_generation,
+                ),
+            );
+        }
+        if !targets.is_empty() {
+            tracing::debug!(
+                targets = ?targets
+                    .iter()
+                    .map(|t| {
+                        format!(
+                            "{}#pc{}#ice{}",
+                            t.peer.to_string_repr(),
+                            t.pc_generation,
+                            t.ice_generation
+                        )
+                    })
+                    .collect::<Vec<_>>(),
+                "network_event.recovery.targets_captured"
+            );
+        }
+        targets
+    }
+
+    /// Without the v020 stack there are no peer sessions, so no targets.
+    #[cfg(not(feature = "webrtc-v020"))]
+    async fn capture_peer_recovery_targets(&self) -> Vec<std::convert::Infallible> {
+        Vec::new()
+    }
+
+    /// Synthesize the peer-scoped coverage outcome once the effect's shared
+    /// prerequisites have completed (RFC-0400 per-peer coverage contract).
+    ///
+    /// Every captured target must be covered by an identity-validated
+    /// terminal fact, or named in a recorded residual:
+    /// - a current snapshot that is sendable on the captured session (or a
+    ///   same-or-newer ICE generation within it, or a newer session) covers
+    ///   the target — a fact bearing an older ICE generation covers nothing;
+    /// - a still-unfinished or peer-scoped-retryable target is handed off:
+    ///   the receiving resource owner records a recovery obligation carrying
+    ///   the target's current identity tuple and acknowledges the record, and
+    ///   the completion carries one handoff residual naming the tuple and
+    ///   the owner;
+    /// - a peer that conclusively left (controller gone or closing) is named
+    ///   in one out-of-scope residual.
+    #[cfg(feature = "webrtc-v020")]
+    async fn synthesize_peer_coverage(
+        &self,
+        captured_targets: Vec<crate::wire::webrtc::v020::recovery::PeerRecoveryTarget>,
+        action_id: u64,
+    ) -> Vec<EffectDiagnosis> {
+        use crate::wire::webrtc::v020::recovery::PeerRecoveryTarget;
+
+        let Some(manager) = self.v020_manager.as_ref() else {
+            return Vec::new();
+        };
+        let mut residuals = Vec::new();
+        for target in captured_targets {
+            let snapshot = manager.get_snapshot(&target.peer).await;
+            let out_of_scope = manager.is_closing(&target.peer).await
+                || snapshot.as_ref().is_none_or(|s| s.pc_generation == 0);
+            if out_of_scope {
+                tracing::info!(
+                    action_id,
+                    peer = %target.peer.to_string_repr(),
+                    "network_event.recovery.target_out_of_scope"
+                );
+                residuals.push(EffectDiagnosis::TransportImpaired {
+                    scopes: vec![format!(
+                        "peer={}:out_of_scope:peer_left_session",
+                        target.peer.to_string_repr()
+                    )],
+                });
+                continue;
+            }
+            let snapshot = snapshot.expect("out-of-scope peers excluded above");
+            let success_fact_valid = snapshot.sendable
+                && snapshot.status == WebRtcPeerStatus::Connected
+                && (snapshot.pc_generation > target.pc_generation
+                    || (snapshot.pc_generation == target.pc_generation
+                        && snapshot.ice_generation >= target.ice_generation));
+            if success_fact_valid {
+                tracing::debug!(
+                    action_id,
+                    peer = %target.peer.to_string_repr(),
+                    "network_event.recovery.target_covered_by_success_fact"
+                );
+                continue;
+            }
+            // Stale-fact guard: a snapshot naming an older session
+            // generation than the captured tuple covers nothing; the handoff
+            // records the tuple the receiving owner will actually track.
+            let handoff = PeerRecoveryTarget::new(
+                target.peer.clone(),
+                snapshot.pc_generation.max(target.pc_generation),
+                if snapshot.pc_generation >= target.pc_generation {
+                    snapshot.ice_generation
+                } else {
+                    target.ice_generation
+                },
+            );
+            // The handoff exists only once the receiving owner has recorded
+            // the obligation; the record call is the acknowledgement.
+            manager.record_peer_recovery_obligation(handoff.clone());
+            tracing::info!(
+                action_id,
+                peer = %target.peer.to_string_repr(),
+                pc_generation = handoff.pc_generation,
+                ice_generation = handoff.ice_generation,
+                owner = "RtcConnectionManager",
+                "network_event.recovery.target_handed_off"
+            );
+            residuals.push(EffectDiagnosis::TransportImpaired {
+                scopes: vec![format!(
+                    "peer={}:handoff:session={}:ice={}:owner=RtcConnectionManager",
+                    handoff.peer.to_string_repr(),
+                    handoff.pc_generation,
+                    handoff.ice_generation
+                )],
+            });
+        }
+        residuals
+    }
+
+    #[cfg(not(feature = "webrtc-v020"))]
+    async fn synthesize_peer_coverage(
+        &self,
+        _captured_targets: Vec<std::convert::Infallible>,
+        _action_id: u64,
+    ) -> Vec<EffectDiagnosis> {
+        Vec::new()
     }
 }
 
@@ -1320,14 +1515,14 @@ impl NetworkEventProcessor for DefaultNetworkEventProcessor {
         // future's `complete` never runs — permanently wedging every later
         // recovery action (RFC-0400 "MUST NOT let a cancellation poison
         // single-flight ownership", invariant 8).
-        self.execute_recovery_effect(action, None).await
+        self.execute_recovery_effect(action, None).await.map(|_| ())
     }
 
     async fn process_network_recovery_effect_for_action(
         &self,
         action: NetworkRecoveryAction,
         action_id: u64,
-    ) -> Result<(), NetworkRecoveryError> {
+    ) -> Result<EffectReport, NetworkRecoveryError> {
         self.execute_recovery_effect(action, Some(action_id)).await
     }
 }
@@ -1452,6 +1647,27 @@ impl NetworkEventRequest {
     pub fn into_parts_for_test(self) -> (NetworkEvent, oneshot::Sender<NetworkEventResult>) {
         (self.event, self.result_tx)
     }
+}
+
+/// The terminal facts an effect contributes to its `EffectCompleted`
+/// synthesis, beyond the plain success/failure vocabulary.
+///
+/// A peer-scoped Restore effect (RFC-0400 "Per-peer coverage for
+/// peer-scoped recovery", invariant 33) populates `residuals` when shared
+/// prerequisites completed but not every captured target peer is covered by a
+/// valid terminal fact: one residual per handed-off or out-of-scope target.
+/// The shell folds a non-empty report into `EffectOutcome::CompletedWithResiduals`.
+#[doc(hidden)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EffectReport {
+    pub(crate) residuals: Vec<EffectDiagnosis>,
+}
+
+impl EffectReport {
+    /// A report with no residuals (full coverage).
+    pub(crate) const PURE: EffectReport = EffectReport {
+        residuals: Vec::new(),
+    };
 }
 
 /// A minimal observation of supervisor progress for tests and callers.
@@ -2375,7 +2591,15 @@ fn spawn_effect(
                         net_action,
                         action_id,
                     ) => match res {
-                        Ok(()) => EffectOutcome::Succeeded,
+                        Ok(report) if report.residuals.is_empty() => EffectOutcome::Succeeded,
+                        // A peer-scoped recovery effect that completed its
+                        // shared prerequisites but could not cover every
+                        // captured target: success-class with one residual per
+                        // handed-off or out-of-scope target (RFC-0400
+                        // per-peer coverage contract, invariant 33).
+                        Ok(report) => EffectOutcome::CompletedWithResiduals {
+                            residuals: report.residuals,
+                        },
                         Err(error) => EffectOutcome::Failed {
                             diagnosis: error.into_diagnosis(),
                         },

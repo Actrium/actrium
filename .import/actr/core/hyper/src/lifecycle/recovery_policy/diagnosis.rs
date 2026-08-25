@@ -204,9 +204,13 @@ pub(crate) enum AbortCause {
 
 /// The outcome an effect reports through `EffectCompleted`.
 ///
-/// `CompletedWithResiduals` and `Abandoned` are valid only for teardown kinds
-/// and are success-class: both extinguish the obligation while reporting
-/// residual diagnostics.
+/// `CompletedWithResiduals` and `Abandoned` are success-class: both extinguish
+/// the obligation while reporting residual diagnostics. Teardown kinds use
+/// them for bounded-completion residuals; a peer-scoped recovery effect
+/// (Restore) uses `CompletedWithResiduals` when its shared prerequisites
+/// completed but not every captured target peer is covered by a valid
+/// terminal fact — one residual per committed handoff or out-of-scope target
+/// (RFC-0400 "Per-peer coverage for peer-scoped recovery").
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum EffectOutcome {
     /// The effect met its full contract.

@@ -513,6 +513,7 @@ impl RtcPeerState {
                 .or(self.building_generation)
                 .or(self.active_generation)
                 .unwrap_or(0),
+            ice_generation: self.ice_generation,
             revision: self.revision,
             status: self.public_status(),
             sendable: self.sendable(),
