@@ -12,6 +12,26 @@ extension Notification.Name {
     static let ensureActiveTabVisibleRequested = Notification.Name("ensureActiveTabVisibleRequested")
 }
 
+enum TransitionSnapshotWarmupStrategy: Equatable {
+    case rendererCache
+    case none
+}
+
+/// Renderer processes already expose bounded, content-only snapshots. Native
+/// SwiftUI and empty Tabs do not: redrawing the window to synthesize one also
+/// captures its material/blur hierarchy and can monopolize the main thread for
+/// hundreds of milliseconds. Overview can render those native cards live.
+func transitionSnapshotWarmupStrategy(
+    for contentType: TabContentType
+) -> TransitionSnapshotWarmupStrategy {
+    switch contentType {
+    case .web, .reactNative:
+        return .rendererCache
+    case .native, .empty:
+        return .none
+    }
+}
+
 // MARK: - Main View
 
 /// Large canvas structure - Unified Actrium View
@@ -543,9 +563,7 @@ struct WorkspaceMainView: View {
                     }
 
                     Button(action: {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 1.0, blendDuration: 0)) {
-                            _ = viewModel.addNewTab()
-                        }
+                        _ = viewModel.addNewTab()
                     }) {
                         Image(systemName: "plus")
                     }
