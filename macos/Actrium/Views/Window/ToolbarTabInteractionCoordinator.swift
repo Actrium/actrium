@@ -154,8 +154,12 @@ func toolbarAccordionTabPresentation(
     let availableWidth = trailingEdge - leadingEdge
     guard tabFrame.width < availableWidth else { return .identity }
 
-    let leadingOverflow = max(0, leadingEdge - tabFrame.minX)
-    let trailingOverflow = max(0, tabFrame.maxX - trailingEdge)
+    // Width compression and ScrollGeometry can disagree by a few floating
+    // point ulps when a Tab lands exactly on an edge. Ignore only that numeric
+    // noise; a real tenth-point clip still starts folding continuously.
+    let geometryEpsilon: CGFloat = 0.001
+    let leadingOverflow = max(0, leadingEdge - tabFrame.minX - geometryEpsilon)
+    let trailingOverflow = max(0, tabFrame.maxX - trailingEdge - geometryEpsilon)
 
     if leadingOverflow > 0, trailingOverflow > 0 {
         // Only malformed/intermediate resize geometry can cross both edges.

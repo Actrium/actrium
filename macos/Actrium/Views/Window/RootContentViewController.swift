@@ -1680,20 +1680,20 @@ struct MainWindowTabsView: View {
             tabShape(for: tab)
                 .strokeBorder(
                     AppColors.softenedAddressFocusAccentColor.opacity(
-                        addressPresentationPhase.showsFocusAffordances ? 0.72 : 0
+                        addressPresentationPhase.showsFocusAffordances ? 0.88 : 0
                     ),
-                    lineWidth: 1.25
+                    lineWidth: 2
                 )
                 .shadow(
                     color: AppColors.softenedAddressFocusAccentColor.opacity(
-                        addressPresentationPhase.showsFocusAffordances ? 0.18 : 0
+                        addressPresentationPhase.showsFocusAffordances ? 0.12 : 0
                     ),
-                    radius: 2.5
+                    radius: 2
                 )
         }
         .overlay {
             tabShape(for: tab)
-                .inset(by: 1.25)
+                .inset(by: 2)
                 .strokeBorder(
                     AppColors.addressFocusInnerHighlightColor.opacity(
                         addressPresentationPhase.showsFocusAffordances ? 1 : 0

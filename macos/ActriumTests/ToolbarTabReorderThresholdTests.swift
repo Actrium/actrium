@@ -147,6 +147,11 @@ struct ToolbarTabReorderThresholdTests {
             tabFrame: CGRect(x: 80, y: 2, width: 68, height: 32),
             viewportWidth: 300
         ) == 0)
+
+        #expect(toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: 230.000_000_1, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        ) == 0)
     }
 
     @Test func accordionLayout_keepsOnlyTheNearestLeadingTabFolded() {
