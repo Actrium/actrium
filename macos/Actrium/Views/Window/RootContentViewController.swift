@@ -673,6 +673,8 @@ struct MainWindowTabsView: View {
     @State private var hoveredTabID: UUID?
     @State private var isAddressFieldHovered = false
     @State private var activeTabRevealTask: Task<Void, Never>?
+    @State private var focusRingRevealTask: Task<Void, Never>?
+    @State private var showsAddressFocusRing = false
     @StateObject private var addressPanelPresentation = AddressBarPanelPresentationCoordinator()
 
     private let itemSpacing = CompactToolbarLayout.itemSpacing
@@ -709,12 +711,16 @@ struct MainWindowTabsView: View {
         }
         .onChange(of: viewModel.shouldAutoFocusAddressBar) { _, shouldFocus in
             if shouldFocus {
-                enterEditingMode()
+                let presentation = viewModel.addressBarFocusRingPresentation
                 viewModel.shouldAutoFocusAddressBar = false
+                focusAddressBar(focusRingPresentation: presentation)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSNotification.Name("com.actro.dismissAddressBarFocus"))) { _ in
             exitEditingMode()
+        }
+        .onDisappear {
+            focusRingRevealTask?.cancel()
         }
     }
 
@@ -1520,7 +1526,10 @@ struct MainWindowTabsView: View {
         }
         .overlay {
             tabShape(for: tab)
-                .strokeBorder(Color.accentColor.opacity(0.85), lineWidth: 2)
+                .strokeBorder(
+                    Color.accentColor.opacity(showsAddressFocusRing ? 0.85 : 0),
+                    lineWidth: 2
+                )
         }
         .overlay(alignment: .bottom) { groupIndicator(for: tab) }
         .contentShape(tabShape(for: tab))
@@ -1685,17 +1694,58 @@ struct MainWindowTabsView: View {
         return displayText(for: tab)
     }
 
-    private func enterEditingMode() {
-        guard let currentTabID = viewModel.currentTabId,
-              interaction.beginAddressEditing(
+    private func enterEditingMode(showsFocusRing: Bool = true) {
+        guard let currentTabID = viewModel.currentTabId else { return }
+
+        if interaction.isAddressEditing,
+           interaction.interactionTabID == currentTabID {
+            showsAddressFocusRing = showsFocusRing
+            isAddressFieldHovered = false
+            addressText = editingText(for: viewModel.currentTab)
+            return
+        }
+
+        guard interaction.beginAddressEditing(
                   tabID: currentTabID,
                   activeTabID: viewModel.currentTabId
               ) else { return }
+        showsAddressFocusRing = showsFocusRing
         isAddressFieldHovered = false
         addressText = editingText(for: viewModel.currentTab)
     }
 
+    private func focusAddressBar(
+        focusRingPresentation: AddressBarFocusRingPresentation
+    ) {
+        focusRingRevealTask?.cancel()
+
+        switch focusRingPresentation {
+        case .immediate:
+            enterEditingMode()
+        case .afterTabStripSettles:
+            guard let requestedTabID = viewModel.currentTabId else { return }
+
+            // Keep the editor/first responder on the fast path. Only suppress
+            // the conspicuous ring while the new Tab is being compressed and
+            // scrolled into place, then reveal it on stable geometry.
+            enterEditingMode(showsFocusRing: false)
+            focusRingRevealTask = Task { @MainActor in
+                try? await Task.sleep(
+                    nanoseconds: ToolbarTabMotion.focusRingSettleDelayNanoseconds
+                )
+                guard !Task.isCancelled,
+                      viewModel.currentTabId == requestedTabID,
+                      interaction.isAddressEditing else { return }
+                withAnimation(.easeOut(duration: ToolbarTabMotion.focusRingRevealDuration)) {
+                    showsAddressFocusRing = true
+                }
+            }
+        }
+    }
+
     private func exitEditingMode() {
+        focusRingRevealTask?.cancel()
+        showsAddressFocusRing = false
         interaction.endAddressEditing(activeTabID: viewModel.currentTabId)
         hasInputActivity = false
         updateDisplayText()
