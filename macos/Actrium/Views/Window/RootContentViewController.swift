@@ -110,8 +110,10 @@ private enum CompactToolbarLayout {
     static let compactTrafficLightReserve: CGFloat = 78
     static let fullScreenLeadingReserve: CGFloat = 4
     static let inactiveTabMinWidth: CGFloat = 88
+    static let inactiveTabCompressedMinWidth: CGFloat = 68
     static let inactiveTabMaxWidth: CGFloat = 240
     static let activeTabMinWidth: CGFloat = 300
+    static let activeTabCompressedMinWidth: CGFloat = 220
     static let activeTabMaxWidth: CGFloat = 520
     static let activeTabPreferredWidth: CGFloat = 420
 
@@ -617,6 +619,11 @@ private struct ToolbarTabGroupHeaderFramePreferenceKey: PreferenceKey {
     }
 }
 
+private enum ToolbarTabStackEdge: Equatable {
+    case leading
+    case trailing
+}
+
 /// Owns address-bar panels whose arrows are anchored to hover-only controls.
 /// The anchor controls must remain visible until AppKit confirms dismissal;
 /// mouse hover alone is not a sufficient presentation state.
@@ -670,6 +677,11 @@ struct MainWindowTabsView: View {
     @State private var groupNameDraft: String = ""
     @State private var hoveredTabID: UUID?
     @State private var isAddressFieldHovered = false
+    @State private var activeTabRevealTask: Task<Void, Never>?
+    @State private var tabEdgeStackDepths = ToolbarTabEdgeStackDepths(
+        leading: 0,
+        trailing: 0
+    )
     @StateObject private var addressPanelPresentation = AddressBarPanelPresentationCoordinator()
 
     private let itemSpacing = CompactToolbarLayout.itemSpacing
@@ -720,6 +732,10 @@ struct MainWindowTabsView: View {
     private var tabStrip: some View {
         GeometryReader { geo in
             let sections = tabSections
+            let tabWidths = adaptiveTabWidths(
+                for: sections,
+                viewportWidth: geo.size.width
+            )
 
             ZStack(alignment: .topLeading) {
                 ScrollViewReader { proxy in
@@ -727,11 +743,19 @@ struct MainWindowTabsView: View {
                         HStack(spacing: 2) {
                             ForEach(sections) { section in
                                 if let group = section.group {
-                                    groupedTabs(group, tabs: section.tabs)
+                                    groupedTabs(
+                                        group,
+                                        tabs: section.tabs,
+                                        tabWidths: tabWidths
+                                    )
                                 } else {
                                     HStack(spacing: 2) {
                                         ForEach(section.tabs) { tab in
-                                            renderedTab(tab)
+                                            renderedTab(
+                                                tab,
+                                                width: tabWidths[tab.id]
+                                                    ?? preferredTabWidth(for: tab)
+                                            )
                                         }
                                     }
                                 }
@@ -740,16 +764,38 @@ struct MainWindowTabsView: View {
                         .padding(2)
                         .animation(ToolbarTabMotion.slide, value: viewModel.currentTabId)
                     }
+                    .onScrollGeometryChange(for: ToolbarTabEdgeStackDepths.self) { geometry in
+                        toolbarTabEdgeStackDepths(
+                            hiddenLeadingDistance: geometry.visibleRect.minX,
+                            hiddenTrailingDistance: geometry.contentSize.width
+                                - geometry.visibleRect.maxX
+                        )
+                    } action: { _, depths in
+                        tabEdgeStackDepths = depths
+                    }
                     .onChange(of: viewModel.currentTabId) { _, tabID in
                         guard let tabID else { return }
                         withAnimation(ToolbarTabMotion.slide) {
                             proxy.scrollTo(tabID, anchor: .center)
                         }
                     }
+                    .onReceive(NotificationCenter.default.publisher(for: .ensureActiveTabVisibleRequested)) { notification in
+                        guard let sourceViewModel = notification.object as? BrowserViewModel,
+                              sourceViewModel === viewModel else { return }
+                        scheduleActiveTabReveal(in: proxy)
+                    }
+                }
+
+                if tabEdgeStackDepths.leading > 0 || tabEdgeStackDepths.trailing > 0 {
+                    tabEdgeStackOverlay(
+                        depths: tabEdgeStackDepths,
+                        viewportWidth: geo.size.width
+                    )
+                    .zIndex(900)
                 }
 
                 movingTabForeground
-                movingGroupForeground
+                movingGroupForeground(tabWidths: tabWidths)
             }
             .onAppear { interaction.updateTabStripWidth(geo.size.width) }
             .onChange(of: geo.size.width) { _, width in
@@ -768,6 +814,42 @@ struct MainWindowTabsView: View {
         }
         .simultaneousGesture(tabReorderGesture)
         .frame(height: CompactToolbarLayout.tabStripHeight)
+    }
+
+    private func revealActiveTabIfNeeded(in proxy: ScrollViewProxy) {
+        guard let tabID = viewModel.currentTabId else { return }
+
+        withAnimation(ToolbarTabMotion.slide) {
+            // An anchorless scroll is deliberately idempotent: SwiftUI moves
+            // the smallest distance needed to expose a clipped item and does
+            // nothing when it is already fully visible. Do not depend on the
+            // preference geometry being refreshed by the preceding drag;
+            // stale geometry was the reason body focus could miss the reveal.
+            // A Tab wider than the viewport is the only case that needs an
+            // explicit anchor because it can never be fully visible.
+            if interaction.revealAlignment(for: tabID) == .center {
+                proxy.scrollTo(tabID, anchor: .center)
+            } else {
+                proxy.scrollTo(tabID)
+            }
+        }
+    }
+
+    /// Scroll and drag animations report their final preference geometry on a
+    /// later render pass. Check once on the next main-actor turn, then verify
+    /// again after the toolbar's own slide animation has settled. A fully
+    /// visible Tab remains a no-op on both passes.
+    private func scheduleActiveTabReveal(in proxy: ScrollViewProxy) {
+        activeTabRevealTask?.cancel()
+        activeTabRevealTask = Task { @MainActor in
+            await Task.yield()
+            guard !Task.isCancelled else { return }
+            revealActiveTabIfNeeded(in: proxy)
+
+            try? await Task.sleep(nanoseconds: 210_000_000)
+            guard !Task.isCancelled else { return }
+            revealActiveTabIfNeeded(in: proxy)
+        }
     }
 
     private var tabSections: [ToolbarTabSection] {
@@ -866,7 +948,7 @@ struct MainWindowTabsView: View {
             section.group?.isCollapsed == true ? [] : section.tabs
         }
         let tabsWidth = visibleTabs.reduce(CGFloat.zero) { result, tab in
-            result + tabWidth(for: tab)
+            result + preferredTabWidth(for: tab)
         }
         let groupHeaderWidth = sections.reduce(CGFloat.zero) { result, section in
             result + (section.group.map(groupLabelWidth) ?? 0)
@@ -884,7 +966,7 @@ struct MainWindowTabsView: View {
         )
     }
 
-    private func tabWidth(for tab: Tab) -> CGFloat {
+    private func preferredTabWidth(for tab: Tab) -> CGFloat {
         if viewModel.currentTabId == tab.id {
             return min(
                 CompactToolbarLayout.activeTabMaxWidth,
@@ -904,9 +986,40 @@ struct MainWindowTabsView: View {
         )
     }
 
+    private func adaptiveTabWidths(
+        for sections: [ToolbarTabSection],
+        viewportWidth: CGFloat
+    ) -> [UUID: CGFloat] {
+        let visibleTabs = sections.flatMap { section in
+            section.group?.isCollapsed == true ? [] : section.tabs
+        }
+        let groupHeaderWidth = sections.reduce(CGFloat.zero) { result, section in
+            result + (section.group.map(groupLabelWidth) ?? 0)
+        }
+        let availableTabWidth = max(
+            0,
+            viewportWidth
+                - groupHeaderWidth
+                - tabStripGapWidth(for: sections)
+                - 4
+        )
+        let inputs = visibleTabs.map { tab in
+            ToolbarAdaptiveTabWidthInput(
+                id: tab.id,
+                preferredWidth: preferredTabWidth(for: tab),
+                minimumWidth: viewModel.currentTabId == tab.id
+                    ? CompactToolbarLayout.activeTabCompressedMinWidth
+                    : CompactToolbarLayout.inactiveTabCompressedMinWidth
+            )
+        }
+        return toolbarAdaptiveTabWidths(
+            inputs: inputs,
+            availableWidth: availableTabWidth
+        )
+    }
+
     @ViewBuilder
-    private func renderedTab(_ tab: Tab) -> some View {
-        let width = tabWidth(for: tab)
+    private func renderedTab(_ tab: Tab, width: CGFloat) -> some View {
         let isMoving = interaction.isMovingTab(tab.id)
         let tabContainer = ZStack {
             if isMoving {
@@ -970,7 +1083,7 @@ struct MainWindowTabsView: View {
     /// The original subtree remains as a transparent layout placeholder until
     /// its new model position has been laid out.
     @ViewBuilder
-    private var movingGroupForeground: some View {
+    private func movingGroupForeground(tabWidths: [UUID: CGFloat]) -> some View {
         if let groupID = interaction.movingGroupID,
            let group = viewModel.tabGroups.first(where: { $0.id == groupID }),
            let frame = interaction.movingGroupFrame(for: groupID) {
@@ -982,7 +1095,7 @@ struct MainWindowTabsView: View {
 
                 if !group.isCollapsed {
                     ForEach(tabs) { tab in
-                        let width = tabWidth(for: tab)
+                        let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
                         tabLabel(tab)
                             .frame(width: width, height: 32)
                     }
@@ -1008,6 +1121,78 @@ struct MainWindowTabsView: View {
         }
     }
 
+    private func tabEdgeStackOverlay(
+        depths: ToolbarTabEdgeStackDepths,
+        viewportWidth: CGFloat
+    ) -> some View {
+        return HStack(spacing: 0) {
+            if depths.leading > 0 {
+                tabEdgeStack(edge: .leading, depth: depths.leading)
+            }
+
+            Spacer(minLength: 0)
+
+            if depths.trailing > 0 {
+                tabEdgeStack(edge: .trailing, depth: depths.trailing)
+            }
+        }
+        .frame(width: viewportWidth, height: CompactToolbarLayout.tabStripHeight)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .animation(ToolbarTabMotion.slide, value: depths.leading)
+        .animation(ToolbarTabMotion.slide, value: depths.trailing)
+    }
+
+    private func tabEdgeStack(edge: ToolbarTabStackEdge, depth: Int) -> some View {
+        let alignment: Alignment = edge == .leading ? .leading : .trailing
+        let gradientStart: UnitPoint = edge == .leading ? .leading : .trailing
+        let gradientEnd: UnitPoint = edge == .leading ? .trailing : .leading
+
+        return ZStack(alignment: alignment) {
+            LinearGradient(
+                colors: [
+                    AppColors.windowChromeDragPlateColor,
+                    AppColors.windowChromeDragPlateColor.opacity(0.94),
+                    Color.clear,
+                ],
+                startPoint: gradientStart,
+                endPoint: gradientEnd
+            )
+            .frame(width: 42, height: 32)
+
+            ForEach(0..<depth, id: \.self) { index in
+                let distanceFromEdge = CGFloat(index) * 6
+                let outwardOffset: CGFloat = edge == .leading ? -14 : 14
+                let layerOffset = outwardOffset
+                    + (edge == .leading ? distanceFromEdge : -distanceFromEdge)
+
+                RoundedRectangle(
+                    cornerRadius: CompactToolbarLayout.edgeTabCornerRadius,
+                    style: .continuous
+                )
+                .fill(AppColors.windowChromeDragPlateColor)
+                .overlay {
+                    RoundedRectangle(
+                        cornerRadius: CompactToolbarLayout.edgeTabCornerRadius,
+                        style: .continuous
+                    )
+                    .strokeBorder(
+                        Color.primary.opacity(AppColors.usesDarkAppearance ? 0.22 : 0.13),
+                        lineWidth: 0.75
+                    )
+                }
+                .frame(width: 28, height: 32)
+                .offset(x: layerOffset)
+                // Draw the layer nearest the clipped edge last. Its smaller
+                // visible slice leaves every following curved edge exposed,
+                // instead of the widest plate covering the whole stack.
+                .zIndex(Double(depth - index))
+            }
+        }
+        .frame(width: 42, height: 32, alignment: alignment)
+        .clipped()
+    }
+
     private func interactionState(for tab: Tab) -> ToolbarTabInteractionPhase {
         interaction.phase(for: tab.id, activeTabID: viewModel.currentTabId)
     }
@@ -1031,7 +1216,11 @@ struct MainWindowTabsView: View {
     }
 
     @ViewBuilder
-    private func groupedTabs(_ group: TabGroup, tabs: [Tab]) -> some View {
+    private func groupedTabs(
+        _ group: TabGroup,
+        tabs: [Tab],
+        tabWidths: [UUID: CGFloat]
+    ) -> some View {
         let isMoving = interaction.isMovingGroup(group.id)
         let content = HStack(spacing: 2) {
             groupHeader(group, tabCount: tabs.count)
@@ -1051,7 +1240,10 @@ struct MainWindowTabsView: View {
 
             if !group.isCollapsed {
                 ForEach(tabs) { tab in
-                    renderedTab(tab)
+                    renderedTab(
+                        tab,
+                        width: tabWidths[tab.id] ?? preferredTabWidth(for: tab)
+                    )
                 }
             }
         }

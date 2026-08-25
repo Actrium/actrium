@@ -48,6 +48,127 @@ struct ToolbarTabReorderThresholdTests {
         ) == 1)
     }
 
+    @Test func bodyFocus_keepsAFullyVisibleActiveTabStationary() {
+        #expect(toolbarTabRevealAlignment(
+            tabFrame: CGRect(x: 24, y: 2, width: 180, height: 32),
+            viewportWidth: 300
+        ) == nil)
+    }
+
+    @Test func bodyFocus_revealsTheClippedEdgeOfTheActiveTab() {
+        #expect(toolbarTabRevealAlignment(
+            tabFrame: CGRect(x: -24, y: 2, width: 180, height: 32),
+            viewportWidth: 300
+        ) == .leading)
+        #expect(toolbarTabRevealAlignment(
+            tabFrame: CGRect(x: 180, y: 2, width: 180, height: 32),
+            viewportWidth: 300
+        ) == .trailing)
+    }
+
+    @Test func bodyFocus_centersAnActiveTabWiderThanTheViewport() {
+        #expect(toolbarTabRevealAlignment(
+            tabFrame: CGRect(x: -80, y: 2, width: 420, height: 32),
+            viewportWidth: 300
+        ) == .center)
+    }
+
+    @Test func adaptiveLayout_keepsPreferredWidthsWhileEverythingFits() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let widths = toolbarAdaptiveTabWidths(
+            inputs: [
+                ToolbarAdaptiveTabWidthInput(
+                    id: firstID,
+                    preferredWidth: 200,
+                    minimumWidth: 100
+                ),
+                ToolbarAdaptiveTabWidthInput(
+                    id: secondID,
+                    preferredWidth: 100,
+                    minimumWidth: 50
+                ),
+            ],
+            availableWidth: 320
+        )
+
+        #expect(widths[firstID] == 200)
+        #expect(widths[secondID] == 100)
+    }
+
+    @Test func adaptiveLayout_compressesProportionallyBeforeOverflowing() {
+        let firstID = UUID()
+        let secondID = UUID()
+        let widths = toolbarAdaptiveTabWidths(
+            inputs: [
+                ToolbarAdaptiveTabWidthInput(
+                    id: firstID,
+                    preferredWidth: 200,
+                    minimumWidth: 100
+                ),
+                ToolbarAdaptiveTabWidthInput(
+                    id: secondID,
+                    preferredWidth: 100,
+                    minimumWidth: 50
+                ),
+            ],
+            availableWidth: 240
+        )
+
+        #expect(widths[firstID] == 160)
+        #expect(widths[secondID] == 80)
+    }
+
+    @Test func adaptiveLayout_reachesEveryMinimumBeforeScrolling() {
+        let activeID = UUID()
+        let inactiveID = UUID()
+        let widths = toolbarAdaptiveTabWidths(
+            inputs: [
+                ToolbarAdaptiveTabWidthInput(
+                    id: activeID,
+                    preferredWidth: 420,
+                    minimumWidth: 220
+                ),
+                ToolbarAdaptiveTabWidthInput(
+                    id: inactiveID,
+                    preferredWidth: 120,
+                    minimumWidth: 68
+                ),
+            ],
+            availableWidth: 200
+        )
+
+        #expect(widths[activeID] == 220)
+        #expect(widths[inactiveID] == 68)
+    }
+
+    @Test func edgeStack_peelsLayersAsHiddenDistanceShrinks() {
+        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 0) == 0)
+        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 1) == 1)
+        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 13) == 2)
+        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 25) == 3)
+        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 200) == 3)
+    }
+
+    @Test func edgeStack_tracksHiddenContentAtBothEdges() {
+        let depths = toolbarTabEdgeStackDepths(
+            hiddenLeadingDistance: 18,
+            hiddenTrailingDistance: 18
+        )
+
+        #expect(depths.leading == 2)
+        #expect(depths.trailing == 2)
+    }
+
+    @Test func edgeStack_disappearsWhenContentReturnsInsideViewport() {
+        let depths = toolbarTabEdgeStackDepths(
+            hiddenLeadingDistance: 0,
+            hiddenTrailingDistance: 0
+        )
+
+        #expect(depths == ToolbarTabEdgeStackDepths(leading: 0, trailing: 0))
+    }
+
     @Test func largeTabMovingLeft_beforeSmallTabsMidpoint_doesNotReorder() {
         let (viewModel, coordinator, smallTabID, largeTabID) = makeTwoTabFixture()
 

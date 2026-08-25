@@ -18,6 +18,117 @@ enum ToolbarTabMotion {
     static let slide = Animation.easeInOut(duration: 0.16)
 }
 
+enum ToolbarTabRevealAlignment: Equatable {
+    case leading
+    case trailing
+    case center
+}
+
+struct ToolbarAdaptiveTabWidthInput: Equatable {
+    let id: UUID
+    let preferredWidth: CGFloat
+    let minimumWidth: CGFloat
+}
+
+/// Compress every visible Tab continuously before allowing the strip to
+/// overflow. Each Tab gives up the same proportion of its own compressible
+/// range, which keeps active/inactive Tabs visually balanced while respecting
+/// their different usable minimum widths.
+func toolbarAdaptiveTabWidths(
+    inputs: [ToolbarAdaptiveTabWidthInput],
+    availableWidth: CGFloat
+) -> [UUID: CGFloat] {
+    let normalized = inputs.map { input in
+        let minimum = max(0, input.minimumWidth)
+        return (
+            id: input.id,
+            preferred: max(minimum, input.preferredWidth),
+            minimum: minimum
+        )
+    }
+    let preferredTotal = normalized.reduce(CGFloat.zero) { $0 + $1.preferred }
+    let minimumTotal = normalized.reduce(CGFloat.zero) { $0 + $1.minimum }
+    let boundedAvailableWidth = max(0, availableWidth)
+
+    if boundedAvailableWidth >= preferredTotal {
+        return Dictionary(uniqueKeysWithValues: normalized.map { ($0.id, $0.preferred) })
+    }
+    if boundedAvailableWidth <= minimumTotal {
+        return Dictionary(uniqueKeysWithValues: normalized.map { ($0.id, $0.minimum) })
+    }
+
+    let compressibleTotal = preferredTotal - minimumTotal
+    guard compressibleTotal > 0 else {
+        return Dictionary(uniqueKeysWithValues: normalized.map { ($0.id, $0.minimum) })
+    }
+
+    let compressionFraction = (preferredTotal - boundedAvailableWidth) / compressibleTotal
+    return Dictionary(uniqueKeysWithValues: normalized.map { item in
+        let compressibleWidth = item.preferred - item.minimum
+        return (
+            item.id,
+            item.preferred - compressibleWidth * compressionFraction
+        )
+    })
+}
+
+/// Converts off-screen distance into the small number of visible edge layers
+/// used by iPad Safari. Reversing the scroll direction peels these layers away
+/// one at a time as the hidden content approaches the viewport.
+func toolbarTabEdgeStackDepth(
+    hiddenDistance: CGFloat,
+    layerStride: CGFloat = 12,
+    maximumDepth: Int = 3
+) -> Int {
+    guard maximumDepth > 0, hiddenDistance > 0.5 else { return 0 }
+    let stride = max(1, layerStride)
+    return min(maximumDepth, max(1, Int(ceil(hiddenDistance / stride))))
+}
+
+struct ToolbarTabEdgeStackDepths: Equatable {
+    let leading: Int
+    let trailing: Int
+}
+
+func toolbarTabEdgeStackDepths(
+    hiddenLeadingDistance: CGFloat,
+    hiddenTrailingDistance: CGFloat
+) -> ToolbarTabEdgeStackDepths {
+    return ToolbarTabEdgeStackDepths(
+        leading: toolbarTabEdgeStackDepth(
+            hiddenDistance: max(0, hiddenLeadingDistance)
+        ),
+        trailing: toolbarTabEdgeStackDepth(
+            hiddenDistance: max(0, hiddenTrailingDistance)
+        )
+    )
+}
+
+func toolbarTabRevealAlignment(
+    tabFrame: CGRect,
+    viewportWidth: CGFloat,
+    edgeInset: CGFloat = 2
+) -> ToolbarTabRevealAlignment? {
+    guard viewportWidth > 0 else { return nil }
+
+    let boundedInset = max(0, edgeInset)
+    let visibleMinX = boundedInset
+    let visibleMaxX = max(visibleMinX, viewportWidth - boundedInset)
+    let visibleWidth = visibleMaxX - visibleMinX
+    let tolerance: CGFloat = 0.5
+
+    if tabFrame.width > visibleWidth + tolerance {
+        return .center
+    }
+    if tabFrame.minX < visibleMinX - tolerance {
+        return .leading
+    }
+    if tabFrame.maxX > visibleMaxX + tolerance {
+        return .trailing
+    }
+    return nil
+}
+
 struct ToolbarTabChromeInsertionCandidate: Equatable {
     let preRemovalIndex: Int
     let idealOriginXs: [CGFloat]
@@ -164,6 +275,14 @@ final class ToolbarTabInteractionCoordinator: ObservableObject {
     func updateTabStripWidth(_ width: CGFloat) {
         guard tabStripWidth != width else { return }
         tabStripWidth = width
+    }
+
+    func revealAlignment(for tabID: UUID) -> ToolbarTabRevealAlignment? {
+        guard let frame = tabFrames[tabID] else { return nil }
+        return toolbarTabRevealAlignment(
+            tabFrame: frame,
+            viewportWidth: tabStripWidth
+        )
     }
 
     func phase(for tabID: UUID, activeTabID: UUID?) -> ToolbarTabInteractionPhase {
