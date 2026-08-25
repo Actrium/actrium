@@ -1123,6 +1123,12 @@ struct MainWindowTabsView: View {
         onFoldedTabTap: @escaping (UUID, ToolbarAccordionTabClickDisposition) -> Void
     ) -> some View {
         let isMoving = interaction.isMovingTab(tab.id)
+        let shouldDismissObscuredAddressFocus = toolbarShouldDismissObscuredAddressFocus(
+            presentation: accordionPresentation,
+            isCurrentTab: tab.id == viewModel.currentTabId,
+            isAddressEditing: interaction.isAddressEditing,
+            showsFocusAffordances: addressPresentationPhase.showsFocusAffordances
+        )
         let tabContainer = ZStack {
             if isMoving {
                 Color.clear
@@ -1176,6 +1182,14 @@ struct MainWindowTabsView: View {
         // The edge Tab stays underneath; only the incoming neighbour draws
         // above it and becomes translucent. Active state never changes order.
         .zIndex(accordionPresentation.stackingZIndex)
+        .onChange(of: shouldDismissObscuredAddressFocus) { _, shouldDismiss in
+            guard shouldDismiss else { return }
+
+            // An obscured lower Tab no longer presents itself as an editable
+            // field. End the real first-responder state as well as removing
+            // the ring/caret, so unfolding cannot silently resume text entry.
+            exitEditingMode()
+        }
         // A Tab can migrate between two nested ForEach containers when it
         // crosses a Tabs Group boundary. Never let SwiftUI turn that logical
         // move into its default remove/insert opacity transition.
@@ -1512,10 +1526,9 @@ struct MainWindowTabsView: View {
         _ tab: Tab,
         accordionPresentation: ToolbarAccordionTabPresentation = .identity
     ) -> some View {
-        if accordionPresentation.isFolded {
-            // A focused/address-editing Tab uses the same compact edge
-            // identity as every other folded Tab. Selection is preserved;
-            // its full controls return as soon as the first click unfolds it.
+        if accordionPresentation.isObscured {
+            // Only the lower, actually obscured Tab loses its editing
+            // affordances. The incoming Tab above it remains fully usable.
             inactiveTab(tab, accordionPresentation: accordionPresentation)
                 .transition(.identity)
         } else {

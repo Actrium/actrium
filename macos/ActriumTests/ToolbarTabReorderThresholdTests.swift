@@ -168,10 +168,15 @@ struct ToolbarTabReorderThresholdTests {
         )
 
         #expect(presentations[deepestID] == .identity)
+        #expect(presentations[deepestID]?.isLayered == false)
         #expect(presentations[nearestID]?.edge == .leading)
+        #expect(presentations[nearestID]?.isLayered == true)
+        #expect(presentations[nearestID]?.isObscured == true)
         #expect(presentations[nearestID]?.surfaceOpacity == 1)
         #expect(presentations[nearestID]?.stackingZIndex == -10)
         #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
+        #expect(presentations[visibleID]?.isLayered == true)
+        #expect(presentations[visibleID]?.isObscured == false)
         #expect((presentations[visibleID]?.surfaceOpacity ?? 1) < 1)
         #expect(presentations[visibleID]?.stackingZIndex == 10)
         #expect(-20 + (presentations[nearestID]?.offsetX ?? 0) == 2)
@@ -191,9 +196,13 @@ struct ToolbarTabReorderThresholdTests {
         )
 
         #expect(presentations[nearestID]?.edge == .trailing)
+        #expect(presentations[nearestID]?.isLayered == true)
+        #expect(presentations[nearestID]?.isObscured == true)
         #expect(presentations[nearestID]?.surfaceOpacity == 1)
         #expect(presentations[nearestID]?.stackingZIndex == -10)
         #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
+        #expect(presentations[visibleID]?.isLayered == true)
+        #expect(presentations[visibleID]?.isObscured == false)
         #expect((presentations[visibleID]?.surfaceOpacity ?? 1) < 1)
         #expect(presentations[visibleID]?.stackingZIndex == 10)
         #expect(presentations[deepestID] == .identity)
@@ -259,6 +268,38 @@ struct ToolbarTabReorderThresholdTests {
         #expect(leading.clickDisposition == .unfoldLeading)
         #expect(trailing.clickDisposition == .unfoldTrailing)
         #expect(complete.clickDisposition == .activate)
+    }
+
+    @Test func accordionLayout_onlyDismissesVisibleAddressFocusWhenActuallyObscured() {
+        let obscured = toolbarAccordionTabPresentation(
+            tabFrame: CGRect(x: -10, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let incomingCover = ToolbarAccordionTabPresentation(
+            offsetX: 0,
+            edge: nil,
+            collapseProgress: 0,
+            overlapProgress: 0.5
+        )
+
+        #expect(toolbarShouldDismissObscuredAddressFocus(
+            presentation: obscured,
+            isCurrentTab: true,
+            isAddressEditing: true,
+            showsFocusAffordances: true
+        ))
+        #expect(!toolbarShouldDismissObscuredAddressFocus(
+            presentation: obscured,
+            isCurrentTab: true,
+            isAddressEditing: true,
+            showsFocusAffordances: false
+        ))
+        #expect(!toolbarShouldDismissObscuredAddressFocus(
+            presentation: incomingCover,
+            isCurrentTab: true,
+            isAddressEditing: true,
+            showsFocusAffordances: true
+        ))
     }
 
     @Test func largeTabMovingLeft_beforeSmallTabsMidpoint_doesNotReorder() {

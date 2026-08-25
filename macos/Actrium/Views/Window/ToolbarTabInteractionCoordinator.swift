@@ -100,6 +100,8 @@ struct ToolbarAccordionTabPresentation: Equatable {
     )
 
     var isFolded: Bool { edge != nil }
+    var isLayered: Bool { isFolded || overlapProgress > 0 }
+    var isObscured: Bool { isFolded }
 
     /// Titles disappear before their Tab reaches a fully folded edge state.
     /// The edge Tab itself stays crisp underneath the incoming neighbour.
@@ -131,6 +133,18 @@ struct ToolbarAccordionTabPresentation: Equatable {
 struct ToolbarAccordionTabLayoutInput: Equatable {
     let id: UUID
     let frame: CGRect
+}
+
+func toolbarShouldDismissObscuredAddressFocus(
+    presentation: ToolbarAccordionTabPresentation,
+    isCurrentTab: Bool,
+    isAddressEditing: Bool,
+    showsFocusAffordances: Bool
+) -> Bool {
+    presentation.isObscured
+        && isCurrentTab
+        && isAddressEditing
+        && showsFocusAffordances
 }
 
 /// Turns one overflowing Tab into a pinned, icon-bearing edge surface.
