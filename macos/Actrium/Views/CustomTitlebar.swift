@@ -722,6 +722,8 @@ private struct ToolbarContentView: View {
                         Text("Search or enter website name")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                             .allowsHitTesting(false)
                     }
                     AddressInputField(
@@ -739,6 +741,8 @@ private struct ToolbarContentView: View {
                         Text("Search or enter website name")
                             .font(.system(size: 13))
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                     } else {
                         Text(addressText)
                             .font(.system(size: 13))

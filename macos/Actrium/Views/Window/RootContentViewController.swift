@@ -1498,6 +1498,8 @@ struct MainWindowTabsView: View {
                     Text("Search or enter website name")
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .allowsHitTesting(false)
                 }
 
@@ -1601,6 +1603,8 @@ struct MainWindowTabsView: View {
                             ? AppColors.tabSecondaryInteractiveHoverColor
                             : Color.secondary
                     )
+                    .lineLimit(1)
+                    .truncationMode(.tail)
             } else {
                 Text(addressText)
                     .font(.system(size: 12.5))
