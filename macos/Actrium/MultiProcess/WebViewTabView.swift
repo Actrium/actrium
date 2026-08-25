@@ -293,6 +293,8 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
     }()
 
     override init() {
+        BrowserPasskeyAccess.shared.prepareForWebBrowsing()
+
         let config = WKWebViewConfiguration()
         config.applicationNameForUserAgent = BrowserUserAgentIdentity.currentApplicationName
 #if DEBUG
@@ -428,6 +430,32 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             }
             log('script loaded');
 
+            function hostMatches(host, suffix) {
+                return host === suffix || host.endsWith('.' + suffix);
+            }
+
+            function isSensitiveIdentityHost() {
+                var host = (location.hostname || '').toLowerCase();
+                return hostMatches(host, 'accounts.google.com') ||
+                    hostMatches(host, 'appleid.apple.com') ||
+                    hostMatches(host, 'login.microsoftonline.com') ||
+                    hostMatches(host, 'login.live.com') ||
+                    hostMatches(host, 'github.com');
+            }
+
+            function hasPasskeyAutocomplete() {
+                var inputs = document.querySelectorAll('input[autocomplete]');
+                for (var i = 0; i < inputs.length; i++) {
+                    var tokens = (inputs[i].autocomplete || '').toLowerCase().split(/\\s+/);
+                    if (tokens.indexOf('webauthn') !== -1) return true;
+                }
+                return false;
+            }
+
+            function shouldSuppressActroCredentialUI() {
+                return isSensitiveIdentityHost() || hasPasskeyAutocomplete();
+            }
+
             // --- Autofill injection point ---
             window.__actriumAutofill = function(username, password) {
                 var nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
@@ -472,6 +500,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             }
 
             function captureCredentials() {
+                if (shouldSuppressActroCredentialUI()) {
+                    log('credential capture suppressed for platform passkey context');
+                    return;
+                }
                 var pwFields = document.querySelectorAll('input[type="password"]');
                 for (var i = 0; i < pwFields.length; i++) {
                     var pw = pwFields[i];
@@ -542,6 +574,10 @@ final class WebViewHolder: NSObject, WKNavigationDelegate {
             document.addEventListener('focusin', function(e) {
                 var field = e.target;
                 if (field.tagName !== 'INPUT') return;
+                if (shouldSuppressActroCredentialUI()) {
+                    window.webkit.messageHandlers.actroAutofillDismiss.postMessage(null);
+                    return;
+                }
                 var login = isLoginField(field);
                 log('focusin: type=' + field.type + ' id=' + field.id + ' isLogin=' + login);
                 if (!login) return;
