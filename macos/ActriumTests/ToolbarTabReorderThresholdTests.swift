@@ -234,7 +234,7 @@ struct ToolbarTabReorderThresholdTests {
         #expect(openOffset == 0)
     }
 
-    @Test func accordionLayout_revealsOnlyTheFinalFifthOfTheCoverHead() {
+    @Test func accordionLayout_revealsOnlyTheFinalThirtyPercentOfTheCoverHead() {
         let barelyFolded = toolbarAccordionTabPresentation(
             tabFrame: CGRect(x: 1.9, y: 2, width: 68, height: 32),
             viewportWidth: 300
@@ -259,14 +259,14 @@ struct ToolbarTabReorderThresholdTests {
             offsetX: 0,
             edge: nil,
             collapseProgress: 0,
-            overlapProgress: 0.8,
+            overlapProgress: 0.7,
             coverEdge: .leading
         )
         let shortFade = ToolbarAccordionTabPresentation(
             offsetX: 0,
             edge: nil,
             collapseProgress: 0,
-            overlapProgress: 0.9,
+            overlapProgress: 0.85,
             coverEdge: .leading
         )
         let fullyOverlapped = ToolbarAccordionTabPresentation(
@@ -280,7 +280,7 @@ struct ToolbarTabReorderThresholdTests {
             offsetX: 0,
             edge: nil,
             collapseProgress: 0,
-            overlapProgress: 0.9,
+            overlapProgress: 0.85,
             coverEdge: .trailing
         )
 

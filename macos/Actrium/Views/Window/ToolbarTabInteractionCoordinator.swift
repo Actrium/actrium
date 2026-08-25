@@ -126,11 +126,11 @@ struct ToolbarAccordionTabPresentation: Equatable {
     }
 
     /// Every Tab remains opaque. Only the incoming cover's directional head
-    /// gains a short transparent-to-opaque mask in the final fifth of overlap,
+    /// gains a short transparent-to-opaque mask in the final 30% of overlap,
     /// when the two identity icons begin to converge.
     var coverHeadRevealProgress: CGFloat {
         guard isOverlapCover else { return 0 }
-        return min(1, max(0, (overlapProgress - 0.8) / 0.2))
+        return min(1, max(0, (overlapProgress - 0.7) / 0.3))
     }
 
     var coverHeadEdgeOpacity: Double {

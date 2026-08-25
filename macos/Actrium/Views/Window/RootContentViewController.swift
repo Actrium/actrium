@@ -758,7 +758,7 @@ struct MainWindowTabsView: View {
             ZStack(alignment: .topLeading) {
                 ScrollViewReader { proxy in
                     ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 2) {
+                        HStack(spacing: 0) {
                             ForEach(sections) { section in
                                 if let group = section.group {
                                     groupedTabs(
@@ -775,7 +775,7 @@ struct MainWindowTabsView: View {
                                         }
                                     )
                                 } else {
-                                    HStack(spacing: 2) {
+                                    HStack(spacing: 0) {
                                         ForEach(section.tabs) { tab in
                                             renderedTab(
                                                 tab,
@@ -969,17 +969,6 @@ struct MainWindowTabsView: View {
         )
     }
 
-    private func tabStripGapWidth(for sections: [ToolbarTabSection]) -> CGFloat {
-        let outerGaps = CGFloat(max(0, sections.count - 1)) * 2
-        let innerGaps = sections.reduce(CGFloat.zero) { result, section in
-            if let group = section.group {
-                return result + (group.isCollapsed ? 0 : CGFloat(section.tabs.count) * 2)
-            }
-            return result + CGFloat(max(0, section.tabs.count - 1)) * 2
-        }
-        return outerGaps + innerGaps
-    }
-
     private func groupLabelWidth(_ group: TabGroup) -> CGFloat {
         let title = group.name.isEmpty ? "Tab Group" : group.name
         return min(158, max(82, CGFloat(title.count) * 7 + 48))
@@ -998,7 +987,6 @@ struct MainWindowTabsView: View {
         }
         let contentWidth = tabsWidth
             + groupHeaderWidth
-            + tabStripGapWidth(for: sections)
             + 4
         return min(
             contentWidth,
@@ -1043,7 +1031,6 @@ struct MainWindowTabsView: View {
             0,
             viewportWidth
                 - groupHeaderWidth
-                - tabStripGapWidth(for: sections)
                 - 4
         )
         let inputs = visibleTabs.map { tab in
@@ -1074,16 +1061,13 @@ struct MainWindowTabsView: View {
         var contentX: CGFloat = 2
         var inputs: [ToolbarAccordionTabLayoutInput] = []
 
-        for (sectionIndex, section) in sections.enumerated() {
+        for section in sections {
             if let group = section.group {
                 contentX += groupLabelWidth(group)
-                if !group.isCollapsed, !section.tabs.isEmpty {
-                    contentX += 2
-                }
             }
 
             if section.group?.isCollapsed != true {
-                for (tabIndex, tab) in section.tabs.enumerated() {
+                for tab in section.tabs {
                     let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
                     let logicalFrame = CGRect(
                         x: contentX - contentOffsetX,
@@ -1098,15 +1082,9 @@ struct MainWindowTabsView: View {
                         )
                     )
                     contentX += width
-                    if tabIndex < section.tabs.count - 1 {
-                        contentX += 2
-                    }
                 }
             }
 
-            if sectionIndex < sections.count - 1 {
-                contentX += 2
-            }
         }
 
         return toolbarAccordionTabPresentations(
@@ -1202,7 +1180,7 @@ struct MainWindowTabsView: View {
     }
 
     /// Accordion depth is local to the incoming edge. The complete Tab stays
-    /// opaque until 80% overlap; during the final 20%, only its first fifth
+    /// opaque until 70% overlap; during the final 30%, only its first 30%
     /// transitions from transparent at the pushing edge to opaque inside.
     @ViewBuilder
     private func accordionCoverMask(
@@ -1215,7 +1193,7 @@ struct MainWindowTabsView: View {
             LinearGradient(
                 stops: [
                     .init(color: .white.opacity(edgeOpacity), location: 0),
-                    .init(color: .white, location: 0.2),
+                    .init(color: .white, location: 0.3),
                     .init(color: .white, location: 1),
                 ],
                 startPoint: .leading,
@@ -1225,7 +1203,7 @@ struct MainWindowTabsView: View {
             LinearGradient(
                 stops: [
                     .init(color: .white, location: 0),
-                    .init(color: .white, location: 0.8),
+                    .init(color: .white, location: 0.7),
                     .init(color: .white.opacity(edgeOpacity), location: 1),
                 ],
                 startPoint: .leading,
@@ -1270,15 +1248,17 @@ struct MainWindowTabsView: View {
            let frame = interaction.movingGroupFrame(for: groupID) {
             let tabs = viewModel.tabs.filter { $0.groupId == groupID }
 
-            HStack(spacing: 2) {
+            HStack(spacing: 0) {
                 groupHeader(group, tabCount: tabs.count)
                     .frame(width: groupLabelWidth(group))
 
                 if !group.isCollapsed {
-                    ForEach(tabs) { tab in
-                        let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
-                        tabLabel(tab)
-                            .frame(width: width, height: 32)
+                    HStack(spacing: 0) {
+                        ForEach(tabs) { tab in
+                            let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
+                            tabLabel(tab)
+                                .frame(width: width, height: 32)
+                        }
                     }
                 }
             }
@@ -1333,7 +1313,7 @@ struct MainWindowTabsView: View {
         onFoldedTabTap: @escaping (UUID, ToolbarAccordionTabClickDisposition) -> Void
     ) -> some View {
         let isMoving = interaction.isMovingGroup(group.id)
-        let content = HStack(spacing: 2) {
+        let content = HStack(spacing: 0) {
             groupHeader(group, tabCount: tabs.count)
                 .frame(width: groupLabelWidth(group))
                 .background {
@@ -1350,13 +1330,15 @@ struct MainWindowTabsView: View {
                 }
 
             if !group.isCollapsed {
-                ForEach(tabs) { tab in
-                    renderedTab(
-                        tab,
-                        width: tabWidths[tab.id] ?? preferredTabWidth(for: tab),
-                        accordionPresentation: accordionPresentations[tab.id] ?? .identity,
-                        onFoldedTabTap: onFoldedTabTap
-                    )
+                HStack(spacing: 0) {
+                    ForEach(tabs) { tab in
+                        renderedTab(
+                            tab,
+                            width: tabWidths[tab.id] ?? preferredTabWidth(for: tab),
+                            accordionPresentation: accordionPresentations[tab.id] ?? .identity,
+                            onFoldedTabTap: onFoldedTabTap
+                        )
+                    }
                 }
             }
         }
@@ -1609,6 +1591,7 @@ struct MainWindowTabsView: View {
         .background {
             tabSurface(for: tab, tintOpacity: 0.035)
         }
+        .overlay { tabBoundary(for: tab) }
         .overlay(alignment: .bottom) { groupIndicator(for: tab) }
         .contentShape(tabShape(for: tab))
         .onTapGesture {
@@ -1652,13 +1635,7 @@ struct MainWindowTabsView: View {
         .background {
             tabSurface(for: tab, tintOpacity: 0.11)
         }
-        .overlay {
-            tabShape(for: tab)
-                .strokeBorder(
-                    Color.primary.opacity(AppColors.usesDarkAppearance ? 0.16 : 0.10),
-                    lineWidth: 0.75
-                )
-        }
+        .overlay { tabBoundary(for: tab) }
         .overlay(alignment: .bottom) { groupIndicator(for: tab) }
         .contentShape(tabShape(for: tab))
         .onHover { isInside in
@@ -1683,6 +1660,14 @@ struct MainWindowTabsView: View {
         .transaction { transaction in
             transaction.animation = nil
         }
+    }
+
+    /// A hairline in the toolbar backing color disappears in the ordinary
+    /// strip, but becomes a clean silhouette when two opaque Tabs overlap.
+    private func tabBoundary(for tab: Tab) -> some View {
+        tabShape(for: tab)
+            .strokeBorder(AppColors.windowChromeTabPlateColor, lineWidth: 0.5)
+            .allowsHitTesting(false)
     }
 
     private func addressEditingTab(_ tab: Tab) -> some View {
@@ -1729,6 +1714,7 @@ struct MainWindowTabsView: View {
                 transaction.animation = nil
             }
         }
+        .overlay { tabBoundary(for: tab) }
         .overlay {
             tabShape(for: tab)
                 .strokeBorder(
