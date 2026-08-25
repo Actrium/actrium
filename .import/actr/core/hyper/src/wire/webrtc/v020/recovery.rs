@@ -160,6 +160,200 @@ impl Default for RtcRecoverySupervisor {
     }
 }
 
+/// The per-peer identity tuple a peer-scoped recovery effect captures at
+/// dispatch and validates terminal facts against (RFC-0400 "Per-peer coverage
+/// for peer-scoped recovery"): peer identity, PC-session generation, and ICE
+/// generation within that session.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PeerRecoveryTarget {
+    pub(crate) peer: actr_protocol::ActrId,
+    pub(crate) pc_generation: u64,
+    pub(crate) ice_generation: u64,
+}
+
+impl PeerRecoveryTarget {
+    pub(crate) fn new(
+        peer: actr_protocol::ActrId,
+        pc_generation: u64,
+        ice_generation: u64,
+    ) -> Self {
+        Self {
+            peer,
+            pc_generation,
+            ice_generation,
+        }
+    }
+}
+
+/// The enumerated path through which a handed-off recovery obligation ended
+/// (RFC-0400: an obligation "ends only through that owner's enumerated
+/// extinguishment paths … each recorded with the path taken").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PeerRecoveryExtinguishment {
+    /// The peer reached terminal success on the recorded tuple's session (or a
+    /// same-or-newer ICE generation within it), validated by identity.
+    SuccessAcknowledged,
+    /// The tuple's PC session was superseded by a replacement build.
+    Superseded,
+    /// The peer left (controller removed or closing out from under the
+    /// obligation).
+    PeerDeparted,
+    /// The owning manager's lifetime ended (`close_all`).
+    OwnerLifetimeEnd,
+}
+
+/// One recorded resource-scoped recovery obligation handed off to this owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PeerRecoveryObligation {
+    pub(crate) target: PeerRecoveryTarget,
+    pub(crate) status: PeerRecoveryObligationStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PeerRecoveryObligationStatus {
+    Open,
+    Extinguished(PeerRecoveryExtinguishment),
+}
+
+/// Bound on retained extinguished records. Records exist for audit; unbounded
+/// retention across a long session would grow without limit.
+pub(crate) const MAX_RETAINED_OBLIGATION_RECORDS: usize = 1024;
+
+/// The manager-owned ledger of resource-scoped per-peer recovery obligations
+/// (RFC-0400 "Per-peer coverage for peer-scoped recovery").
+///
+/// A peer-scoped Restore effect hands off each still-unfinished target by
+/// recording one obligation here; the record call itself is the owner's
+/// acknowledgement to the effect ("the handoff exists only when the receiving
+/// owner has recorded the obligation and acknowledged the record to the
+/// effect"). The obligation is durable in the RFC's obligation-model sense —
+/// retained across event batches, offline intervals, and app lifecycle
+/// transitions — and ends only through the enumerated extinguishment paths.
+///
+/// Completion, retry, and backoff for a handed-off target stay peer-scoped:
+/// the controller's own single-flight recovery machinery (already bounded by
+/// the audited ICE-restart backoff inventory) drives them; this ledger never
+/// creates a supervisor retry gate.
+pub(crate) struct PeerRecoveryObligationLog {
+    records: std::sync::Mutex<Vec<PeerRecoveryObligation>>,
+}
+
+impl PeerRecoveryObligationLog {
+    pub(crate) fn new() -> Self {
+        Self {
+            records: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Record one obligation and acknowledge it to the handing-off effect.
+    pub(crate) fn record(&self, target: PeerRecoveryTarget) {
+        let mut records = self.records.lock().expect("obligation log poisoned");
+        records.push(PeerRecoveryObligation {
+            target,
+            status: PeerRecoveryObligationStatus::Open,
+        });
+        Self::retain_bounded(&mut records);
+    }
+
+    /// Apply one authoritative per-peer snapshot as a terminal-fact candidate.
+    ///
+    /// A success fact extinguishes an open obligation only when it is
+    /// identity-validated: the snapshot's session generation must be the
+    /// recorded one (or newer within the same peer), and within the same
+    /// session its ICE generation must not be older than the recorded one —
+    /// a fact bearing a superseded ICE generation is logged and discarded and
+    /// covers nothing. A newer PC generation extinguishes via `Superseded`.
+    pub(crate) fn observe_snapshot(
+        &self,
+        snapshot: &crate::wire::webrtc::v020::status::RtcPeerSnapshot,
+    ) {
+        let mut records = self.records.lock().expect("obligation log poisoned");
+        for record in records.iter_mut() {
+            if record.status != PeerRecoveryObligationStatus::Open
+                || record.target.peer != snapshot.peer
+            {
+                continue;
+            }
+            let path = if snapshot.pc_generation > record.target.pc_generation {
+                PeerRecoveryExtinguishment::Superseded
+            } else if snapshot.pc_generation == record.target.pc_generation
+                && snapshot.ice_generation < record.target.ice_generation
+            {
+                // Stale fact: an ICE generation older than the one recorded
+                // covers nothing (the per-peer analogue of the effect-level
+                // action_id/policy_revision guard).
+                continue;
+            } else if snapshot.sendable
+                && snapshot.status == actr_framework::WebRtcPeerStatus::Connected
+            {
+                PeerRecoveryExtinguishment::SuccessAcknowledged
+            } else {
+                continue;
+            };
+            record.status = PeerRecoveryObligationStatus::Extinguished(path);
+        }
+    }
+
+    /// Record the departure of one peer (controller removed by `close_peer`
+    /// or removed during `close_all` draining).
+    pub(crate) fn observe_departure(&self, peer: &actr_protocol::ActrId) {
+        let mut records = self.records.lock().expect("obligation log poisoned");
+        for record in records.iter_mut() {
+            if record.status == PeerRecoveryObligationStatus::Open && &record.target.peer == peer {
+                record.status = PeerRecoveryObligationStatus::Extinguished(
+                    PeerRecoveryExtinguishment::PeerDeparted,
+                );
+            }
+        }
+    }
+
+    /// Record the end of the owning manager's lifetime (`close_all`).
+    pub(crate) fn observe_owner_end(&self) {
+        let mut records = self.records.lock().expect("obligation log poisoned");
+        for record in records.iter_mut() {
+            if record.status == PeerRecoveryObligationStatus::Open {
+                record.status = PeerRecoveryObligationStatus::Extinguished(
+                    PeerRecoveryExtinguishment::OwnerLifetimeEnd,
+                );
+            }
+        }
+    }
+
+    /// Whether an obligation is currently open for the exact tuple.
+    pub(crate) fn is_open(&self, target: &PeerRecoveryTarget) -> bool {
+        self.records
+            .lock()
+            .expect("obligation log poisoned")
+            .iter()
+            .any(|record| {
+                record.status == PeerRecoveryObligationStatus::Open && &record.target == target
+            })
+    }
+
+    /// A copy of the full audit ledger (bounded; oldest records evicted).
+    pub(crate) fn records(&self) -> Vec<PeerRecoveryObligation> {
+        self.records
+            .lock()
+            .expect("obligation log poisoned")
+            .clone()
+    }
+
+    fn retain_bounded(records: &mut Vec<PeerRecoveryObligation>) {
+        let excess = records
+            .len()
+            .saturating_sub(MAX_RETAINED_OBLIGATION_RECORDS);
+        if excess > 0 {
+            records.drain(..excess);
+        }
+    }
+}
+
+impl Default for PeerRecoveryObligationLog {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl std::fmt::Debug for RtcRecoverySupervisor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RtcRecoverySupervisor")

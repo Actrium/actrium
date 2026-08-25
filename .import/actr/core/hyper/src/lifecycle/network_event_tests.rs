@@ -1747,3 +1747,412 @@ async fn bounded_cleanup_abandons_remaining_steps_at_budget() {
     assert!(!report.reached_goal, "goal not confirmed");
     assert_eq!(report.residuals.len(), 1);
 }
+
+/// RFC-0400 invariant 33 (per-peer coverage for peer-scoped recovery) at the
+/// effect boundary: a supervisor-driven Restore captures its target set at
+/// dispatch, and its completion is synthesized from per-peer terminal facts —
+/// dispatch alone never yields a success-class outcome for an uncovered
+/// target. These tests drive the real manager, real controllers, and the
+/// exact trait method `spawn_effect` calls.
+#[cfg(feature = "webrtc-v020")]
+mod inv33_peer_coverage {
+    use super::super::{
+        DefaultNetworkEventProcessor, EffectDiagnosis, EffectReport, NetworkEventProcessor,
+        NetworkRecoveryAction,
+    };
+    use super::ForceReconnectFakeSignalingClient;
+    use crate::lifecycle::CredentialState;
+    use crate::transport::NetworkResult;
+    use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
+    use crate::wire::webrtc::v020::manager::RtcConnectionManager;
+    use crate::wire::webrtc::v020::peer::effects::test_support::fake_data_channel;
+    use crate::wire::webrtc::v020::peer::effects::{SessionFactory, SessionOps};
+    use crate::wire::webrtc::v020::recovery::PeerRecoveryTarget;
+    use crate::wire::webrtc::{SignalingEvent, SignalingStats};
+    use actr_protocol::{
+        AIdCredential, ActrId, ActrType, Pong, Realm, RegisterRequest, RegisterResponse,
+        RouteCandidatesRequest, RouteCandidatesResponse, ServiceAvailabilityState,
+        SignalingEnvelope, UnregisterResponse,
+    };
+    use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
+    use std::time::Duration;
+    use tokio::sync::{broadcast, mpsc};
+    use tokio::time::timeout;
+    use webrtc::error::Error as RtcError;
+    use webrtc::peer_connection::{RTCConfiguration, RTCIceCandidateInit, RTCSessionDescription};
+
+    const WAIT: Duration = Duration::from_secs(5);
+
+    fn peer_id(serial: u64) -> ActrId {
+        ActrId {
+            realm: Realm { realm_id: 1 },
+            serial_number: serial,
+            r#type: ActrType {
+                manufacturer: "acme".to_string(),
+                name: "node".to_string(),
+                version: "1.0.0".to_string(),
+            },
+        }
+    }
+
+    /// Instantly-built fake PC sessions: negotiation calls succeed, the data
+    /// channel is a fake that opens, and nothing ever reports a PC connection
+    /// state — so the controller holds a session identity (generation > 0)
+    /// without ever being covered by a success fact.
+    struct InstantOps;
+
+    #[async_trait::async_trait]
+    impl SessionOps for InstantOps {
+        async fn create_offer(&self) -> Result<RTCSessionDescription, RtcError> {
+            Ok(RTCSessionDescription::default())
+        }
+        async fn create_answer(&self) -> Result<RTCSessionDescription, RtcError> {
+            Ok(RTCSessionDescription::default())
+        }
+        async fn set_local_description(&self, _d: RTCSessionDescription) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn set_remote_description(&self, _d: RTCSessionDescription) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn add_ice_candidate(&self, _c: RTCIceCandidateInit) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn restart_ice(&self) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn set_configuration(&self, _c: RTCConfiguration) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn create_data_channel(
+            &self,
+            label: &str,
+            _init: webrtc::data_channel::RTCDataChannelInit,
+        ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, RtcError> {
+            Ok(fake_data_channel(label))
+        }
+        async fn add_track(
+            &self,
+            _t: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
+        ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, RtcError> {
+            Err(RtcError::Other("no media in inv33 tests".into()))
+        }
+        async fn remove_track(
+            &self,
+            _s: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+        ) -> Result<(), RtcError> {
+            Ok(())
+        }
+        async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+            Vec::new()
+        }
+        async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
+            Default::default()
+        }
+        async fn close(&self) -> Result<(), RtcError> {
+            Ok(())
+        }
+    }
+
+    struct InstantFactory;
+
+    #[async_trait::async_trait]
+    impl SessionFactory for InstantFactory {
+        async fn build(
+            &self,
+            _handler: Arc<WebRtcEventHandler>,
+        ) -> Result<Arc<dyn SessionOps>, RtcError> {
+            Ok(Arc::new(InstantOps))
+        }
+    }
+
+    fn manager() -> Arc<RtcConnectionManager> {
+        let (signaling_tx, _signaling_rx) = mpsc::channel(16);
+        let manager = Arc::new(RtcConnectionManager::new(
+            Arc::new(InstantFactory),
+            signaling_tx,
+        ));
+        manager.supervisor().set_signaling_generation(Some(0));
+        manager
+    }
+
+    /// A signaling client whose recovery connect closes a manager peer before
+    /// returning success — the deterministic injection point for "the target
+    /// peer conclusively left the session between dispatch and synthesis".
+    struct DepartOnConnectSignaling {
+        inner: Arc<ForceReconnectFakeSignalingClient>,
+        depart: StdMutex<Option<(Arc<RtcConnectionManager>, ActrId)>>,
+    }
+
+    impl DepartOnConnectSignaling {
+        fn new() -> Self {
+            Self {
+                inner: Arc::new(ForceReconnectFakeSignalingClient::new(false)),
+                depart: StdMutex::new(None),
+            }
+        }
+
+        fn close_this_peer_on_connect(&self, manager: Arc<RtcConnectionManager>, peer: ActrId) {
+            *self.depart.lock().unwrap() = Some((manager, peer));
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::wire::webrtc::SignalingClient for DepartOnConnectSignaling {
+        async fn connect_once_for_recovery(&self, action_id: u64) -> NetworkResult<()> {
+            let departure = self.depart.lock().unwrap().take();
+            if let Some((manager, peer)) = departure {
+                manager.close_peer(&peer).await;
+            }
+            self.inner.connect_once_for_recovery(action_id).await
+        }
+        async fn connect(&self) -> NetworkResult<()> {
+            self.inner.connect().await
+        }
+        async fn disconnect(&self) -> NetworkResult<()> {
+            self.inner.disconnect().await
+        }
+        async fn send_register_request(
+            &self,
+            request: RegisterRequest,
+        ) -> NetworkResult<RegisterResponse> {
+            self.inner.send_register_request(request).await
+        }
+        async fn send_unregister_request(
+            &self,
+            actor_id: ActrId,
+            credential: AIdCredential,
+            reason: Option<String>,
+        ) -> NetworkResult<UnregisterResponse> {
+            self.inner
+                .send_unregister_request(actor_id, credential, reason)
+                .await
+        }
+        async fn send_heartbeat(
+            &self,
+            actor_id: ActrId,
+            credential: AIdCredential,
+            availability: ServiceAvailabilityState,
+            power_reserve: f32,
+            mailbox_backlog: f32,
+        ) -> NetworkResult<Pong> {
+            self.inner
+                .send_heartbeat(
+                    actor_id,
+                    credential,
+                    availability,
+                    power_reserve,
+                    mailbox_backlog,
+                )
+                .await
+        }
+        async fn send_route_candidates_request(
+            &self,
+            actor_id: ActrId,
+            credential: AIdCredential,
+            request: RouteCandidatesRequest,
+        ) -> NetworkResult<RouteCandidatesResponse> {
+            self.inner
+                .send_route_candidates_request(actor_id, credential, request)
+                .await
+        }
+        async fn get_signing_key(
+            &self,
+            actor_id: ActrId,
+            credential: AIdCredential,
+            key_id: u32,
+        ) -> NetworkResult<(u32, Vec<u8>)> {
+            self.inner
+                .get_signing_key(actor_id, credential, key_id)
+                .await
+        }
+        async fn send_envelope(&self, envelope: SignalingEnvelope) -> NetworkResult<()> {
+            self.inner.send_envelope(envelope).await
+        }
+        async fn receive_envelope(&self) -> NetworkResult<Option<SignalingEnvelope>> {
+            self.inner.receive_envelope().await
+        }
+        fn is_connected(&self) -> bool {
+            self.inner.is_connected()
+        }
+        fn get_stats(&self) -> SignalingStats {
+            self.inner.get_stats()
+        }
+        fn subscribe_events(&self) -> broadcast::Receiver<SignalingEvent> {
+            self.inner.subscribe_events()
+        }
+        async fn set_actor_id(&self, actor_id: ActrId) {
+            self.inner.set_actor_id(actor_id).await
+        }
+        async fn set_credential_state(&self, credential_state: CredentialState) {
+            self.inner.set_credential_state(credential_state).await
+        }
+        async fn clear_identity(&self) {
+            self.inner.clear_identity().await
+        }
+    }
+
+    /// Build a manager peer that holds a session identity (generation > 0)
+    /// but is not covered by a success fact: an offerer negotiating against
+    /// instant fake sessions that never report a PC connection state.
+    async fn peer_with_uncovered_session(manager: &Arc<RtcConnectionManager>, peer: &ActrId) {
+        let handle = manager.ensure_controller(peer.clone()).await;
+        handle.connect().await.expect("connect command");
+        handle
+            .apply_role_assignment(true)
+            .await
+            .expect("role assignment command");
+        let mut rx = handle.subscribe();
+        timeout(WAIT, async {
+            loop {
+                if rx.borrow().pc_generation > 0 {
+                    return;
+                }
+                rx.changed().await.expect("snapshot watch stays live");
+            }
+        })
+        .await
+        .expect("controller never allocated a session generation");
+    }
+
+    /// Parse `session=` and `ice=` out of a handoff residual scope string.
+    fn parse_handoff_tuple(scope: &str) -> (u64, u64) {
+        let session = scope
+            .split("handoff:session=")
+            .nth(1)
+            .and_then(|rest| rest.split(':').next())
+            .and_then(|v| v.parse::<u64>().ok())
+            .expect("handoff scope carries session=");
+        let ice = scope
+            .split(":ice=")
+            .nth(1)
+            .and_then(|rest| rest.split(':').next())
+            .and_then(|v| v.parse::<u64>().ok())
+            .expect("handoff scope carries ice=");
+        (session, ice)
+    }
+
+    /// Dispatch alone never yields a success-class outcome for an uncovered
+    /// target: the Restore completes its shared prerequisites, yet the peer —
+    /// still uncovered by a success fact — is named in exactly one handoff
+    /// residual whose tuple is recorded as an open obligation with the
+    /// receiving owner (`RtcConnectionManager`).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn restore_dispatch_hands_off_uncovered_target_as_residual() {
+        let manager = manager();
+        let peer = peer_id(701);
+        peer_with_uncovered_session(&manager, &peer).await;
+
+        let processor = DefaultNetworkEventProcessor::new(Arc::new(
+            ForceReconnectFakeSignalingClient::new(false),
+        ))
+        .with_v020_manager(Some(manager.clone()));
+        let report = processor
+            .process_network_recovery_effect_for_action(NetworkRecoveryAction::Restore, 4201)
+            .await
+            .expect("restore completes its shared prerequisites");
+
+        assert_eq!(
+            report.residuals.len(),
+            1,
+            "the uncovered target is named in exactly one residual"
+        );
+        let EffectDiagnosis::TransportImpaired { scopes } = &report.residuals[0] else {
+            panic!(
+                "handoff residual is carried as TransportImpaired: {:?}",
+                report.residuals[0]
+            );
+        };
+        assert_eq!(scopes.len(), 1);
+        let scope = &scopes[0];
+        assert!(
+            scope.starts_with(&format!("peer={}:", peer.to_string_repr())),
+            "residual names the target peer: {scope}"
+        );
+        assert!(
+            scope.contains(":handoff:session="),
+            "residual is a handoff record: {scope}"
+        );
+        assert!(
+            scope.ends_with(":owner=RtcConnectionManager"),
+            "residual names the receiving resource owner: {scope}"
+        );
+
+        // The residual tuple is exactly what the owner's ledger holds open.
+        let (session, ice) = parse_handoff_tuple(scope);
+        let target = PeerRecoveryTarget::new(peer.clone(), session, ice);
+        assert!(
+            manager.recovery_obligation_log().is_open(&target),
+            "the record call is the acknowledgement: the tuple must be open in the owner"
+        );
+
+        // A later peer departure runs through the manager's real close path
+        // and extinguishes the handed-off obligation.
+        assert!(manager.close_peer(&peer).await);
+        assert!(
+            !manager.recovery_obligation_log().is_open(&target),
+            "peer departure through the production close path extinguishes the obligation"
+        );
+    }
+
+    /// A target peer that conclusively leaves the session between dispatch
+    /// and synthesis is named in one out-of-scope residual; no obligation is
+    /// handed off for it.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn restore_names_departed_target_as_out_of_scope_residual() {
+        let manager = manager();
+        let peer = peer_id(702);
+        peer_with_uncovered_session(&manager, &peer).await;
+
+        let signaling = Arc::new(DepartOnConnectSignaling::new());
+        signaling.close_this_peer_on_connect(manager.clone(), peer.clone());
+        let processor =
+            DefaultNetworkEventProcessor::new(signaling).with_v020_manager(Some(manager.clone()));
+        let report = processor
+            .process_network_recovery_effect_for_action(NetworkRecoveryAction::Restore, 4202)
+            .await
+            .expect("restore completes its shared prerequisites");
+
+        assert_eq!(report.residuals.len(), 1);
+        let EffectDiagnosis::TransportImpaired { scopes } = &report.residuals[0] else {
+            panic!(
+                "out-of-scope residual is carried as TransportImpaired: {:?}",
+                report.residuals[0]
+            );
+        };
+        assert_eq!(scopes.len(), 1);
+        assert_eq!(
+            scopes[0],
+            format!(
+                "peer={}:out_of_scope:peer_left_session",
+                peer.to_string_repr()
+            ),
+            "the departed target is named as conclusively out of scope"
+        );
+        assert!(
+            manager.recovery_obligation_log().records().is_empty(),
+            "an out-of-scope target is named, not handed off"
+        );
+    }
+
+    /// With no target set (no peer holds an uncovered session) the Restore
+    /// keeps the pure success contract: no residuals.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn restore_without_targets_completes_pure() {
+        let manager = manager();
+        // A controller without a session identity is not a target: its
+        // generation is still zero.
+        manager.ensure_controller(peer_id(703)).await;
+
+        let processor = DefaultNetworkEventProcessor::new(Arc::new(
+            ForceReconnectFakeSignalingClient::new(false),
+        ))
+        .with_v020_manager(Some(manager));
+        let report = processor
+            .process_network_recovery_effect_for_action(NetworkRecoveryAction::Restore, 4203)
+            .await
+            .expect("restore completes");
+        assert_eq!(report, EffectReport::PURE);
+    }
+}

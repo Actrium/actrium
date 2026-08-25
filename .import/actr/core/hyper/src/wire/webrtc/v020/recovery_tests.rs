@@ -260,3 +260,168 @@ async fn build_throttle_jitter_delays_acquire() {
         "acquire should complete quickly with no contention, took {elapsed:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// RFC-0400 invariant 33: per-peer recovery coverage obligations
+// ---------------------------------------------------------------------------
+
+mod inv33_obligation_log {
+    use super::super::recovery::{
+        PeerRecoveryExtinguishment, PeerRecoveryObligationLog, PeerRecoveryObligationStatus,
+        PeerRecoveryTarget,
+    };
+    use super::super::status::RtcPeerSnapshot;
+    use actr_framework::WebRtcPeerStatus;
+    use actr_protocol::{ActrId, ActrType, Realm};
+
+    fn obligation_peer(serial: u64) -> ActrId {
+        ActrId {
+            realm: Realm { realm_id: 1 },
+            serial_number: serial,
+            r#type: ActrType {
+                manufacturer: "acme".to_string(),
+                name: "node".to_string(),
+                version: "1.0.0".to_string(),
+            },
+        }
+    }
+
+    fn fact_snapshot(peer: &ActrId, pc: u64, ice: u64, sendable: bool) -> RtcPeerSnapshot {
+        let mut snapshot = RtcPeerSnapshot::idle(peer.clone());
+        snapshot.pc_generation = pc;
+        snapshot.ice_generation = ice;
+        snapshot.sendable = sendable;
+        snapshot.status = if sendable {
+            WebRtcPeerStatus::Connected
+        } else {
+            WebRtcPeerStatus::Recovering
+        };
+        snapshot
+    }
+
+    fn extinguished_path(
+        log: &PeerRecoveryObligationLog,
+        target: &PeerRecoveryTarget,
+    ) -> Option<PeerRecoveryExtinguishment> {
+        log.records().into_iter().find_map(|record| {
+            if &record.target == target {
+                match record.status {
+                    PeerRecoveryObligationStatus::Open => None,
+                    PeerRecoveryObligationStatus::Extinguished(path) => Some(path),
+                }
+            } else {
+                None
+            }
+        })
+    }
+
+    /// A success fact extinguishes an open obligation only when it is
+    /// identity-validated: the fact's session is the recorded one (or newer)
+    /// and, within the same session, its ICE generation is not older than the
+    /// recorded one. A stale fact covers nothing.
+    #[test]
+    fn success_fact_extinguishes_only_identity_validated_tuples() {
+        let log = PeerRecoveryObligationLog::new();
+        let peer = obligation_peer(7);
+        let target = PeerRecoveryTarget::new(peer.clone(), 2, 3);
+
+        log.record(target.clone());
+        assert!(log.is_open(&target), "recorded obligation starts open");
+
+        // A success fact bearing an older ICE generation within the same
+        // session is a stale fact: discarded, covers nothing.
+        log.observe_snapshot(&fact_snapshot(&peer, 2, 2, true));
+        assert!(
+            log.is_open(&target),
+            "a superseded ICE generation must not extinguish the obligation"
+        );
+
+        // A not-yet-terminal snapshot is not a success fact.
+        log.observe_snapshot(&fact_snapshot(&peer, 2, 4, false));
+        assert!(log.is_open(&target));
+
+        // The identity-validated success fact extinguishes via acknowledgement.
+        log.observe_snapshot(&fact_snapshot(&peer, 2, 3, true));
+        assert_eq!(
+            extinguished_path(&log, &target),
+            Some(PeerRecoveryExtinguishment::SuccessAcknowledged)
+        );
+
+        // A success fact on another peer's session covers nothing here.
+        let other_target = PeerRecoveryTarget::new(obligation_peer(8), 2, 3);
+        log.record(other_target.clone());
+        log.observe_snapshot(&fact_snapshot(&peer, 2, 9, true));
+        assert!(log.is_open(&other_target));
+    }
+
+    /// Supersession of the peer's session generation ends the obligation
+    /// through the named extinguishment path, even before the replacement
+    /// session is sendable.
+    #[test]
+    fn superseded_session_generation_extinguishes_obligation() {
+        let log = PeerRecoveryObligationLog::new();
+        let peer = obligation_peer(7);
+        let target = PeerRecoveryTarget::new(peer.clone(), 2, 1);
+        log.record(target.clone());
+
+        log.observe_snapshot(&fact_snapshot(&peer, 3, 0, false));
+        assert_eq!(
+            extinguished_path(&log, &target),
+            Some(PeerRecoveryExtinguishment::Superseded)
+        );
+    }
+
+    /// Peer departure and owner-lifetime end are the remaining enumerated
+    /// extinguishment paths, each recorded as taken.
+    #[test]
+    fn peer_departure_and_owner_lifetime_end_extinguish_open_obligations() {
+        let log = PeerRecoveryObligationLog::new();
+        let a = PeerRecoveryTarget::new(obligation_peer(7), 1, 1);
+        let b = PeerRecoveryTarget::new(obligation_peer(8), 1, 1);
+        log.record(a.clone());
+        log.record(b.clone());
+
+        log.observe_departure(&a.peer);
+        assert_eq!(
+            extinguished_path(&log, &a),
+            Some(PeerRecoveryExtinguishment::PeerDeparted)
+        );
+        assert!(log.is_open(&b));
+
+        log.observe_owner_end();
+        assert_eq!(
+            extinguished_path(&log, &b),
+            Some(PeerRecoveryExtinguishment::OwnerLifetimeEnd)
+        );
+    }
+
+    /// Retention is bounded: the oldest records are dropped beyond the cap
+    /// while newer obligations keep full lifecycle tracking.
+    #[test]
+    fn retention_is_bounded_oldest_records_dropped_first() {
+        let log = PeerRecoveryObligationLog::new();
+        for serial in 0..super::super::recovery::MAX_RETAINED_OBLIGATION_RECORDS as u64 {
+            log.record(PeerRecoveryTarget::new(obligation_peer(serial), 1, 1));
+        }
+        assert_eq!(
+            log.records().len(),
+            super::super::recovery::MAX_RETAINED_OBLIGATION_RECORDS
+        );
+
+        let newest = PeerRecoveryTarget::new(obligation_peer(u64::MAX), 1, 1);
+        log.record(newest.clone());
+        assert_eq!(
+            log.records().len(),
+            super::super::recovery::MAX_RETAINED_OBLIGATION_RECORDS
+        );
+        assert!(
+            log.is_open(&newest),
+            "newest record survives retention bound"
+        );
+        let oldest = PeerRecoveryTarget::new(obligation_peer(0), 1, 1);
+        assert!(
+            !log.is_open(&oldest),
+            "dropped record is no longer reported open"
+        );
+    }
+}

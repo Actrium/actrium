@@ -191,6 +191,7 @@ fn spawn_harness_with_signaling_capacity(serial: u64, capacity: usize) -> Harnes
             peer_sendability_changed: None,
             peer_transport_retired: None,
             peer_snapshot_events: None,
+            recovery_obligations: None,
         },
     );
     Harness {

@@ -183,6 +183,12 @@ pub(crate) struct SharedNodeDeps {
     /// latest-value watch remains the query/subscription surface.
     pub(crate) peer_snapshot_events:
         Option<tokio::sync::broadcast::Sender<crate::wire::webrtc::v020::status::RtcPeerSnapshot>>,
+    /// Manager-owned ledger of handed-off per-peer recovery obligations
+    /// (RFC-0400 per-peer coverage contract). The controller reports each
+    /// authoritative snapshot so terminal per-peer facts extinguish open
+    /// obligations at their publication point.
+    pub(crate) recovery_obligations:
+        Option<std::sync::Arc<crate::wire::webrtc::v020::recovery::PeerRecoveryObligationLog>>,
 }
 
 impl RtcPeerController {
@@ -892,6 +898,9 @@ impl RtcPeerController {
             let snapshot = self.state.to_snapshot();
             let _ = self.snapshot_tx.send(snapshot.clone());
             let _ = self.public_snapshot_tx.send(snapshot.to_public());
+            if let Some(recovery_obligations) = &self.deps.recovery_obligations {
+                recovery_obligations.observe_snapshot(&snapshot);
+            }
             if let Some(peer_snapshot_events) = &self.deps.peer_snapshot_events {
                 let _ = peer_snapshot_events.send(snapshot);
             }

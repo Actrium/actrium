@@ -114,6 +114,7 @@ impl ControllerTestHarness {
             peer_sendability_changed: None,
             peer_transport_retired: Some(peer_transport_retired),
             peer_snapshot_events: None,
+            recovery_obligations: None,
         };
         let (handle, lane_tx, mailbox, task) = RtcPeerController::spawn_with_effect_port(
             peer_id,

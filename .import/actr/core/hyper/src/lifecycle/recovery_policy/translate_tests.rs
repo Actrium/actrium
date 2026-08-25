@@ -1627,6 +1627,47 @@ fn effect_completed_success_acknowledges_covered_intent() {
     ));
 }
 
+/// RFC-0400 invariant 33: a peer-scoped Restore that completed its shared
+/// prerequisites but not its per-peer coverage reports
+/// `CompletedWithResiduals` (one residual per committed handoff or
+/// out-of-scope target). The intent is discharged by that residual record —
+/// same acknowledgement as a full success, no retry or escalation ruled from
+/// the residual diagnostics.
+#[test]
+fn effect_completed_with_peer_coverage_residuals_acknowledges_intent() {
+    let view = running_recovery_view(EffectKind::Restore, RecoveryStrength::Restore);
+    let d = tr(
+        &view,
+        Input::EffectCompleted {
+            action_id: 1,
+            kind: EffectKind::Restore,
+            policy_revision: 1,
+            outcome: EffectOutcome::CompletedWithResiduals {
+                residuals: vec![EffectDiagnosis::TransportImpaired {
+                    scopes: vec![
+                        "peer=actr://7:handoff:session=1:ice=0:owner=RtcConnectionManager".into(),
+                    ],
+                }],
+            },
+        },
+    );
+    assert_eq!(d.revision, RevisionDirective::Unchanged);
+    assert!(has(&d, MachineInput::Execution(ExecutionInput::Succeeded)));
+    assert!(has(
+        &d,
+        MachineInput::RecoveryIntent(RecoveryIntentInput::CompleteRestore)
+    ));
+    // The residual record discharges the intent: no failure classification,
+    // no retry gate, no backoff timer.
+    assert!(!d.timers.iter().any(|t| matches!(
+        t,
+        TimerDirective::Arm {
+            id: TimerId::FailureBackoff(_),
+            ..
+        }
+    )));
+}
+
 #[test]
 fn effect_completed_failure_retry_backs_off() {
     let view = running_recovery_view(EffectKind::Reconnect, RecoveryStrength::Reconnect);
