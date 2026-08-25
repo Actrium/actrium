@@ -142,31 +142,74 @@ struct ToolbarTabReorderThresholdTests {
         #expect(widths[inactiveID] == 68)
     }
 
-    @Test func edgeStack_peelsLayersAsHiddenDistanceShrinks() {
-        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 0) == 0)
-        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 1) == 1)
-        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 13) == 2)
-        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 25) == 3)
-        #expect(toolbarTabEdgeStackDepth(hiddenDistance: 200) == 3)
+    @Test func accordionLayout_keepsFullyVisibleTabsAtTheirLogicalPosition() {
+        #expect(toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: 80, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        ) == 0)
     }
 
-    @Test func edgeStack_tracksHiddenContentAtBothEdges() {
-        let depths = toolbarTabEdgeStackDepths(
-            hiddenLeadingDistance: 18,
-            hiddenTrailingDistance: 18
+    @Test func accordionLayout_layersTheRealLeadingTabFrames() {
+        let nearestOffset = toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: -78, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let middleOffset = toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: -148, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let deepestOffset = toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: -218, y: 2, width: 68, height: 32),
+            viewportWidth: 300
         )
 
-        #expect(depths.leading == 2)
-        #expect(depths.trailing == 2)
+        let nearestMaxX = -78 + nearestOffset + 68
+        let middleMaxX = -148 + middleOffset + 68
+        let deepestMaxX = -218 + deepestOffset + 68
+        #expect(nearestMaxX < middleMaxX)
+        #expect(middleMaxX < deepestMaxX)
+        #expect(deepestMaxX <= 22.1)
     }
 
-    @Test func edgeStack_disappearsWhenContentReturnsInsideViewport() {
-        let depths = toolbarTabEdgeStackDepths(
-            hiddenLeadingDistance: 0,
-            hiddenTrailingDistance: 0
+    @Test func accordionLayout_layersTheRealTrailingTabFrames() {
+        let nearestOffset = toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: 302, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let middleOffset = toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: 372, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let deepestOffset = toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: 442, y: 2, width: 68, height: 32),
+            viewportWidth: 300
         )
 
-        #expect(depths == ToolbarTabEdgeStackDepths(leading: 0, trailing: 0))
+        let nearestMinX = 302 + nearestOffset
+        let middleMinX = 372 + middleOffset
+        let deepestMinX = 442 + deepestOffset
+        #expect(nearestMinX < middleMinX)
+        #expect(middleMinX < deepestMinX)
+        #expect(deepestMinX >= 289.9)
+    }
+
+    @Test func accordionLayout_unfoldsContinuouslyAsATabReenters() {
+        let pinnedOffset = toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: -62, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let nearlyOpenOffset = toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: -58.1, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+        let openOffset = toolbarAccordionTabOffset(
+            tabFrame: CGRect(x: -58, y: 2, width: 68, height: 32),
+            viewportWidth: 300
+        )
+
+        #expect(pinnedOffset == 4)
+        #expect(nearlyOpenOffset < 0.11)
+        #expect(openOffset == 0)
     }
 
     @Test func largeTabMovingLeft_beforeSmallTabsMidpoint_doesNotReorder() {

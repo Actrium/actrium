@@ -72,36 +72,59 @@ func toolbarAdaptiveTabWidths(
     })
 }
 
-/// Converts off-screen distance into the small number of visible edge layers
-/// used by iPad Safari. Reversing the scroll direction peels these layers away
-/// one at a time as the hidden content approaches the viewport.
-func toolbarTabEdgeStackDepth(
-    hiddenDistance: CGFloat,
-    layerStride: CGFloat = 12,
-    maximumDepth: Int = 3
-) -> Int {
-    guard maximumDepth > 0, hiddenDistance > 0.5 else { return 0 }
-    let stride = max(1, layerStride)
-    return min(maximumDepth, max(1, Int(ceil(hiddenDistance / stride))))
-}
+/// Keeps the real overflowing Tabs visible as thin, overlapping edge slices.
+///
+/// The ScrollView still owns the logical, non-overlapping slots used by
+/// `scrollTo` and reordering. This function only maps their presentation
+/// position. Tabs therefore compress to their minimum widths first; once a
+/// slot leaves the viewport, the Tab itself remains at the edge and the next
+/// Tabs overlap it. The mapping is continuous, so reversing the scroll peels
+/// every real Tab open without a threshold jump.
+func toolbarAccordionTabOffset(
+    tabFrame: CGRect,
+    viewportWidth: CGFloat,
+    edgeInset: CGFloat = 2,
+    visibleSlice: CGFloat = 8,
+    layerStride: CGFloat = 6,
+    maximumDepth: Int = 3,
+    itemSpacing: CGFloat = 2
+) -> CGFloat {
+    guard viewportWidth > 0, tabFrame.width > 0, maximumDepth > 0 else { return 0 }
 
-struct ToolbarTabEdgeStackDepths: Equatable {
-    let leading: Int
-    let trailing: Int
-}
+    let boundedInset = max(0, edgeInset)
+    let leadingEdge = boundedInset
+    let trailingEdge = max(leadingEdge, viewportWidth - boundedInset)
+    let availableWidth = trailingEdge - leadingEdge
+    guard tabFrame.width < availableWidth else { return 0 }
 
-func toolbarTabEdgeStackDepths(
-    hiddenLeadingDistance: CGFloat,
-    hiddenTrailingDistance: CGFloat
-) -> ToolbarTabEdgeStackDepths {
-    return ToolbarTabEdgeStackDepths(
-        leading: toolbarTabEdgeStackDepth(
-            hiddenDistance: max(0, hiddenLeadingDistance)
-        ),
-        trailing: toolbarTabEdgeStackDepth(
-            hiddenDistance: max(0, hiddenTrailingDistance)
-        )
-    )
+    let baseSlice = max(1, visibleSlice)
+    let stride = max(0, layerStride)
+    let maximumLayer = CGFloat(maximumDepth - 1)
+    let layerDistance = max(1, tabFrame.width + max(0, itemSpacing))
+
+    // Earlier Tabs are painted below later Tabs. At the leading edge the
+    // earlier (farther) Tabs therefore extend progressively farther inward,
+    // leaving every curved trailing edge visible through the Tabs above.
+    let leadingOverflow = max(0, leadingEdge - tabFrame.maxX)
+    let leadingLayer = min(maximumLayer, leadingOverflow / layerDistance)
+    let leadingSlice = baseSlice + leadingLayer * stride
+    let leadingOffset = max(0, leadingEdge + leadingSlice - tabFrame.maxX)
+
+    // At the trailing edge the paint order is reversed relative to the edge:
+    // later (farther) Tabs sit above earlier Tabs. Give the nearest Tab the
+    // widest slice and taper later Tabs back toward the edge.
+    let trailingOverflow = max(0, tabFrame.minX - trailingEdge)
+    let trailingLayer = min(maximumLayer, trailingOverflow / layerDistance)
+    let trailingSlice = baseSlice + (maximumLayer - trailingLayer) * stride
+    let trailingOffset = min(0, trailingEdge - trailingSlice - tabFrame.minX)
+
+    if leadingOffset > 0, trailingOffset < 0 {
+        // This is only reachable for malformed/intermediate geometry. Keeping
+        // the original slot is safer than letting the Tab oscillate between
+        // both edges during a resize.
+        return 0
+    }
+    return leadingOffset > 0 ? leadingOffset : trailingOffset
 }
 
 func toolbarTabRevealAlignment(

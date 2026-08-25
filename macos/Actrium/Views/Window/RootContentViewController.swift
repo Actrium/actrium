@@ -619,11 +619,6 @@ private struct ToolbarTabGroupHeaderFramePreferenceKey: PreferenceKey {
     }
 }
 
-private enum ToolbarTabStackEdge: Equatable {
-    case leading
-    case trailing
-}
-
 /// Owns address-bar panels whose arrows are anchored to hover-only controls.
 /// The anchor controls must remain visible until AppKit confirms dismissal;
 /// mouse hover alone is not a sufficient presentation state.
@@ -678,10 +673,6 @@ struct MainWindowTabsView: View {
     @State private var hoveredTabID: UUID?
     @State private var isAddressFieldHovered = false
     @State private var activeTabRevealTask: Task<Void, Never>?
-    @State private var tabEdgeStackDepths = ToolbarTabEdgeStackDepths(
-        leading: 0,
-        trailing: 0
-    )
     @StateObject private var addressPanelPresentation = AddressBarPanelPresentationCoordinator()
 
     private let itemSpacing = CompactToolbarLayout.itemSpacing
@@ -746,7 +737,8 @@ struct MainWindowTabsView: View {
                                     groupedTabs(
                                         group,
                                         tabs: section.tabs,
-                                        tabWidths: tabWidths
+                                        tabWidths: tabWidths,
+                                        viewportWidth: geo.size.width
                                     )
                                 } else {
                                     HStack(spacing: 2) {
@@ -754,7 +746,8 @@ struct MainWindowTabsView: View {
                                             renderedTab(
                                                 tab,
                                                 width: tabWidths[tab.id]
-                                                    ?? preferredTabWidth(for: tab)
+                                                    ?? preferredTabWidth(for: tab),
+                                                viewportWidth: geo.size.width
                                             )
                                         }
                                     }
@@ -763,15 +756,6 @@ struct MainWindowTabsView: View {
                         }
                         .padding(2)
                         .animation(ToolbarTabMotion.slide, value: viewModel.currentTabId)
-                    }
-                    .onScrollGeometryChange(for: ToolbarTabEdgeStackDepths.self) { geometry in
-                        toolbarTabEdgeStackDepths(
-                            hiddenLeadingDistance: geometry.visibleRect.minX,
-                            hiddenTrailingDistance: geometry.contentSize.width
-                                - geometry.visibleRect.maxX
-                        )
-                    } action: { _, depths in
-                        tabEdgeStackDepths = depths
                     }
                     .onChange(of: viewModel.currentTabId) { _, tabID in
                         guard let tabID else { return }
@@ -784,14 +768,6 @@ struct MainWindowTabsView: View {
                               sourceViewModel === viewModel else { return }
                         scheduleActiveTabReveal(in: proxy)
                     }
-                }
-
-                if tabEdgeStackDepths.leading > 0 || tabEdgeStackDepths.trailing > 0 {
-                    tabEdgeStackOverlay(
-                        depths: tabEdgeStackDepths,
-                        viewportWidth: geo.size.width
-                    )
-                    .zIndex(900)
                 }
 
                 movingTabForeground
@@ -1019,7 +995,11 @@ struct MainWindowTabsView: View {
     }
 
     @ViewBuilder
-    private func renderedTab(_ tab: Tab, width: CGFloat) -> some View {
+    private func renderedTab(
+        _ tab: Tab,
+        width: CGFloat,
+        viewportWidth: CGFloat
+    ) -> some View {
         let isMoving = interaction.isMovingTab(tab.id)
         let tabContainer = ZStack {
             if isMoving {
@@ -1047,6 +1027,20 @@ struct MainWindowTabsView: View {
         }
         .contentShape(tabShape(for: tab))
         .id(tab.id)
+        // Move the real Tab rather than drawing a decorative proxy above the
+        // ScrollView. Its layout slot remains unchanged, preserving native
+        // scrolling and scrollTo semantics while rendering, hit testing and
+        // accessibility all follow the same accordion presentation.
+        .visualEffect { content, geometry in
+            content.offset(
+                x: toolbarAccordionTabOffset(
+                    tabFrame: geometry.frame(
+                        in: .named(ToolbarTabStripCoordinateSpace.name)
+                    ),
+                    viewportWidth: viewportWidth
+                )
+            )
+        }
         // A Tab can migrate between two nested ForEach containers when it
         // crosses a Tabs Group boundary. Never let SwiftUI turn that logical
         // move into its default remove/insert opacity transition.
@@ -1121,78 +1115,6 @@ struct MainWindowTabsView: View {
         }
     }
 
-    private func tabEdgeStackOverlay(
-        depths: ToolbarTabEdgeStackDepths,
-        viewportWidth: CGFloat
-    ) -> some View {
-        return HStack(spacing: 0) {
-            if depths.leading > 0 {
-                tabEdgeStack(edge: .leading, depth: depths.leading)
-            }
-
-            Spacer(minLength: 0)
-
-            if depths.trailing > 0 {
-                tabEdgeStack(edge: .trailing, depth: depths.trailing)
-            }
-        }
-        .frame(width: viewportWidth, height: CompactToolbarLayout.tabStripHeight)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
-        .animation(ToolbarTabMotion.slide, value: depths.leading)
-        .animation(ToolbarTabMotion.slide, value: depths.trailing)
-    }
-
-    private func tabEdgeStack(edge: ToolbarTabStackEdge, depth: Int) -> some View {
-        let alignment: Alignment = edge == .leading ? .leading : .trailing
-        let gradientStart: UnitPoint = edge == .leading ? .leading : .trailing
-        let gradientEnd: UnitPoint = edge == .leading ? .trailing : .leading
-
-        return ZStack(alignment: alignment) {
-            LinearGradient(
-                colors: [
-                    AppColors.windowChromeDragPlateColor,
-                    AppColors.windowChromeDragPlateColor.opacity(0.94),
-                    Color.clear,
-                ],
-                startPoint: gradientStart,
-                endPoint: gradientEnd
-            )
-            .frame(width: 42, height: 32)
-
-            ForEach(0..<depth, id: \.self) { index in
-                let distanceFromEdge = CGFloat(index) * 6
-                let outwardOffset: CGFloat = edge == .leading ? -14 : 14
-                let layerOffset = outwardOffset
-                    + (edge == .leading ? distanceFromEdge : -distanceFromEdge)
-
-                RoundedRectangle(
-                    cornerRadius: CompactToolbarLayout.edgeTabCornerRadius,
-                    style: .continuous
-                )
-                .fill(AppColors.windowChromeDragPlateColor)
-                .overlay {
-                    RoundedRectangle(
-                        cornerRadius: CompactToolbarLayout.edgeTabCornerRadius,
-                        style: .continuous
-                    )
-                    .strokeBorder(
-                        Color.primary.opacity(AppColors.usesDarkAppearance ? 0.22 : 0.13),
-                        lineWidth: 0.75
-                    )
-                }
-                .frame(width: 28, height: 32)
-                .offset(x: layerOffset)
-                // Draw the layer nearest the clipped edge last. Its smaller
-                // visible slice leaves every following curved edge exposed,
-                // instead of the widest plate covering the whole stack.
-                .zIndex(Double(depth - index))
-            }
-        }
-        .frame(width: 42, height: 32, alignment: alignment)
-        .clipped()
-    }
-
     private func interactionState(for tab: Tab) -> ToolbarTabInteractionPhase {
         interaction.phase(for: tab.id, activeTabID: viewModel.currentTabId)
     }
@@ -1219,7 +1141,8 @@ struct MainWindowTabsView: View {
     private func groupedTabs(
         _ group: TabGroup,
         tabs: [Tab],
-        tabWidths: [UUID: CGFloat]
+        tabWidths: [UUID: CGFloat],
+        viewportWidth: CGFloat
     ) -> some View {
         let isMoving = interaction.isMovingGroup(group.id)
         let content = HStack(spacing: 2) {
@@ -1242,7 +1165,8 @@ struct MainWindowTabsView: View {
                 ForEach(tabs) { tab in
                     renderedTab(
                         tab,
-                        width: tabWidths[tab.id] ?? preferredTabWidth(for: tab)
+                        width: tabWidths[tab.id] ?? preferredTabWidth(for: tab),
+                        viewportWidth: viewportWidth
                     )
                 }
             }
