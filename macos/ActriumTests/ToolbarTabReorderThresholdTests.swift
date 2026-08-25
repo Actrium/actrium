@@ -177,7 +177,7 @@ struct ToolbarTabReorderThresholdTests {
         #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
         #expect(presentations[visibleID]?.isLayered == true)
         #expect(presentations[visibleID]?.isObscured == false)
-        #expect((presentations[visibleID]?.surfaceOpacity ?? 1) < 1)
+        #expect(presentations[visibleID]?.surfaceOpacity == 1)
         #expect(presentations[visibleID]?.stackingZIndex == 10)
         #expect(-20 + (presentations[nearestID]?.offsetX ?? 0) == 2)
     }
@@ -203,7 +203,7 @@ struct ToolbarTabReorderThresholdTests {
         #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
         #expect(presentations[visibleID]?.isLayered == true)
         #expect(presentations[visibleID]?.isObscured == false)
-        #expect((presentations[visibleID]?.surfaceOpacity ?? 1) < 1)
+        #expect(presentations[visibleID]?.surfaceOpacity == 1)
         #expect(presentations[visibleID]?.stackingZIndex == 10)
         #expect(presentations[deepestID] == .identity)
         #expect(260 + 68 + (presentations[nearestID]?.offsetX ?? 0) == 298)
@@ -228,7 +228,7 @@ struct ToolbarTabReorderThresholdTests {
         #expect(openOffset == 0)
     }
 
-    @Test func accordionLayout_startsWithTheFirstClippedPixelAndSoftensOneSurface() {
+    @Test func accordionLayout_startsWithTheFirstClippedPixelAndDelaysSurfaceFade() {
         let barelyFolded = toolbarAccordionTabPresentation(
             tabFrame: CGRect(x: 1.9, y: 2, width: 68, height: 32),
             viewportWidth: 300
@@ -247,8 +247,31 @@ struct ToolbarTabReorderThresholdTests {
         #expect(barelyFolded.collapseProgress > 0)
         #expect(presentations[foldedID]?.titleOpacity == 0)
         #expect(presentations[foldedID]?.surfaceOpacity == 1)
-        #expect((presentations[coverID]?.surfaceOpacity ?? 1) > 0.7)
-        #expect((presentations[coverID]?.surfaceOpacity ?? 1) < 1)
+        #expect(presentations[coverID]?.surfaceOpacity == 1)
+
+        let fadeStart = ToolbarAccordionTabPresentation(
+            offsetX: 0,
+            edge: nil,
+            collapseProgress: 0,
+            overlapProgress: 0.8
+        )
+        let shortFade = ToolbarAccordionTabPresentation(
+            offsetX: 0,
+            edge: nil,
+            collapseProgress: 0,
+            overlapProgress: 0.9
+        )
+        let fullyOverlapped = ToolbarAccordionTabPresentation(
+            offsetX: 0,
+            edge: nil,
+            collapseProgress: 0,
+            overlapProgress: 1
+        )
+
+        #expect(fadeStart.surfaceOpacity == 1)
+        #expect(shortFade.surfaceOpacity > fullyOverlapped.surfaceOpacity)
+        #expect(shortFade.surfaceOpacity < 1)
+        #expect(abs(fullyOverlapped.surfaceOpacity - 0.78) < 0.000_1)
     }
 
     @Test func accordionLayout_foldedClicksOnlyUnfoldTheirEdge() {

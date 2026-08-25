@@ -110,9 +110,15 @@ struct ToolbarAccordionTabPresentation: Equatable {
     }
 
     /// Only the one incoming Tab drawn above the folded edge becomes
-    /// translucent. The folded Tab underneath and every other Tab stay opaque.
+    /// translucent. It stays fully opaque through most of the overlap and
+    /// softens only in the final fifth, when the two identity icons begin to
+    /// converge. The folded Tab underneath and every other Tab stay opaque.
+    var surfaceFadeProgress: CGFloat {
+        min(1, max(0, (overlapProgress - 0.8) / 0.2))
+    }
+
     var surfaceOpacity: Double {
-        Double(1 - overlapProgress * 0.22)
+        Double(1 - surfaceFadeProgress * 0.22)
     }
 
     var stackingZIndex: Double {
