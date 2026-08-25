@@ -22,6 +22,26 @@ class CiTargetsTest(unittest.TestCase):
                 self.assertTrue(targets["e2e_rust"])
                 self.assertIn(f"e2e_rust:{path}", reasons)
 
+    def test_package_runtime_shell_changes_gate_the_scenario(self) -> None:
+        targets, reasons = ci_targets.detect_targets(
+            ["e2e/package-runtime-echo/run.sh"],
+            full_run=False,
+        )
+
+        self.assertTrue(targets["e2e_package_runtime"])
+        self.assertFalse(targets["e2e_rust"])
+        self.assertIn("e2e_package_runtime:e2e/package-runtime-echo/run.sh", reasons)
+
+    def test_package_runtime_rust_sources_keep_the_compile_check(self) -> None:
+        targets, reasons = ci_targets.detect_targets(
+            ["e2e/package-runtime-echo/Cargo.toml"],
+            full_run=False,
+        )
+
+        self.assertTrue(targets["e2e_package_runtime"])
+        self.assertTrue(targets["e2e_rust"])
+        self.assertIn("e2e_rust:e2e/package-runtime-echo/Cargo.toml", reasons)
+
     def test_c_and_go_echo_workloads_trigger_component_builds(self) -> None:
         paths = (
             "examples/c/echo-workload/src/main.c",
