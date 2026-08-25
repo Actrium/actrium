@@ -51,6 +51,19 @@ enum AppColors {
         Color(nsColor: windowChromeDragPlate)
     }
 
+    /// Fully opaque backing for the one Tab currently covering an accordion
+    /// edge. Normal Tab materials are intentionally translucent, so an opaque
+    /// plate is required to prevent the lower icon from leaking through before
+    /// the final overlap fade begins.
+    static var windowChromeAccordionPlate: NSColor {
+        usesDarkAppearance
+            ? NSColor(calibratedWhite: 0.16, alpha: 1)
+            : NSColor(calibratedWhite: 0.94, alpha: 1)
+    }
+    static var windowChromeAccordionPlateColor: Color {
+        Color(nsColor: windowChromeAccordionPlate)
+    }
+
     /// Safari-like address editing surface. The focused field is primarily a
     /// neutral capsule; accent color is reserved for a restrained rim/glow.
     static var addressEditingSurfaceColor: Color {

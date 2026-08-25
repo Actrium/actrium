@@ -102,6 +102,7 @@ struct ToolbarAccordionTabPresentation: Equatable {
     var isFolded: Bool { edge != nil }
     var isLayered: Bool { isFolded || overlapProgress > 0 }
     var isObscured: Bool { isFolded }
+    var isOverlapCover: Bool { edge == nil && overlapProgress > 0 }
 
     /// Titles disappear before their Tab reaches a fully folded edge state.
     /// The edge Tab itself stays crisp underneath the incoming neighbour.

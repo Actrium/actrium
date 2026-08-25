@@ -1135,6 +1135,21 @@ struct MainWindowTabsView: View {
             } else {
                 tabLabel(tab, accordionPresentation: accordionPresentation)
                     .frame(width: width)
+                    .background {
+                        // Keep this plate mounted so the first clipped pixel
+                        // cannot trigger a SwiftUI insertion cross-fade. The
+                        // surface switches to opaque immediately; only the
+                        // outer opacity below owns the final-fifth fade.
+                        tabShape(for: tab)
+                            .fill(
+                                accordionPresentation.isOverlapCover
+                                    ? AppColors.windowChromeAccordionPlateColor
+                                    : Color.clear
+                            )
+                            .transaction { transaction in
+                                transaction.animation = nil
+                            }
+                    }
                     .opacity(accordionPresentation.surfaceOpacity)
                     .allowsHitTesting(!accordionPresentation.isFolded)
             }
