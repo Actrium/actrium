@@ -173,13 +173,14 @@ struct ToolbarTabReorderThresholdTests {
         #expect(presentations[nearestID]?.isLayered == true)
         #expect(presentations[nearestID]?.isObscured == true)
         #expect(presentations[nearestID]?.isOverlapCover == false)
-        #expect(presentations[nearestID]?.surfaceOpacity == 1)
+        #expect(presentations[nearestID]?.coverHeadRevealProgress == 0)
         #expect(presentations[nearestID]?.stackingZIndex == -10)
         #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
         #expect(presentations[visibleID]?.isLayered == true)
         #expect(presentations[visibleID]?.isObscured == false)
         #expect(presentations[visibleID]?.isOverlapCover == true)
-        #expect(presentations[visibleID]?.surfaceOpacity == 1)
+        #expect(presentations[visibleID]?.coverEdge == .leading)
+        #expect(presentations[visibleID]?.coverHeadRevealProgress == 0)
         #expect(presentations[visibleID]?.stackingZIndex == 10)
         #expect(-20 + (presentations[nearestID]?.offsetX ?? 0) == 2)
     }
@@ -201,13 +202,14 @@ struct ToolbarTabReorderThresholdTests {
         #expect(presentations[nearestID]?.isLayered == true)
         #expect(presentations[nearestID]?.isObscured == true)
         #expect(presentations[nearestID]?.isOverlapCover == false)
-        #expect(presentations[nearestID]?.surfaceOpacity == 1)
+        #expect(presentations[nearestID]?.coverHeadRevealProgress == 0)
         #expect(presentations[nearestID]?.stackingZIndex == -10)
         #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
         #expect(presentations[visibleID]?.isLayered == true)
         #expect(presentations[visibleID]?.isObscured == false)
         #expect(presentations[visibleID]?.isOverlapCover == true)
-        #expect(presentations[visibleID]?.surfaceOpacity == 1)
+        #expect(presentations[visibleID]?.coverEdge == .trailing)
+        #expect(presentations[visibleID]?.coverHeadRevealProgress == 0)
         #expect(presentations[visibleID]?.stackingZIndex == 10)
         #expect(presentations[deepestID] == .identity)
         #expect(260 + 68 + (presentations[nearestID]?.offsetX ?? 0) == 298)
@@ -232,7 +234,7 @@ struct ToolbarTabReorderThresholdTests {
         #expect(openOffset == 0)
     }
 
-    @Test func accordionLayout_startsWithTheFirstClippedPixelAndDelaysSurfaceFade() {
+    @Test func accordionLayout_revealsOnlyTheFinalFifthOfTheCoverHead() {
         let barelyFolded = toolbarAccordionTabPresentation(
             tabFrame: CGRect(x: 1.9, y: 2, width: 68, height: 32),
             viewportWidth: 300
@@ -250,32 +252,45 @@ struct ToolbarTabReorderThresholdTests {
         #expect(barelyFolded.isFolded)
         #expect(barelyFolded.collapseProgress > 0)
         #expect(presentations[foldedID]?.titleOpacity == 0)
-        #expect(presentations[foldedID]?.surfaceOpacity == 1)
-        #expect(presentations[coverID]?.surfaceOpacity == 1)
+        #expect(presentations[foldedID]?.coverHeadRevealProgress == 0)
+        #expect(presentations[coverID]?.coverHeadRevealProgress == 0)
 
         let fadeStart = ToolbarAccordionTabPresentation(
             offsetX: 0,
             edge: nil,
             collapseProgress: 0,
-            overlapProgress: 0.8
+            overlapProgress: 0.8,
+            coverEdge: .leading
         )
         let shortFade = ToolbarAccordionTabPresentation(
             offsetX: 0,
             edge: nil,
             collapseProgress: 0,
-            overlapProgress: 0.9
+            overlapProgress: 0.9,
+            coverEdge: .leading
         )
         let fullyOverlapped = ToolbarAccordionTabPresentation(
             offsetX: 0,
             edge: nil,
             collapseProgress: 0,
-            overlapProgress: 1
+            overlapProgress: 1,
+            coverEdge: .leading
+        )
+        let trailingShortFade = ToolbarAccordionTabPresentation(
+            offsetX: 0,
+            edge: nil,
+            collapseProgress: 0,
+            overlapProgress: 0.9,
+            coverEdge: .trailing
         )
 
-        #expect(fadeStart.surfaceOpacity == 1)
-        #expect(shortFade.surfaceOpacity > fullyOverlapped.surfaceOpacity)
-        #expect(shortFade.surfaceOpacity < 1)
-        #expect(abs(fullyOverlapped.surfaceOpacity - 0.78) < 0.000_1)
+        #expect(fadeStart.coverHeadRevealProgress == 0)
+        #expect(abs(shortFade.coverHeadRevealProgress - 0.5) < 0.000_1)
+        #expect(abs(shortFade.coverHeadEdgeOpacity - 0.5) < 0.000_1)
+        #expect(abs(fullyOverlapped.coverHeadRevealProgress - 1) < 0.000_1)
+        #expect(abs(fullyOverlapped.coverHeadEdgeOpacity) < 0.000_1)
+        #expect(trailingShortFade.coverEdge == .trailing)
+        #expect(abs(trailingShortFade.coverHeadEdgeOpacity - 0.5) < 0.000_1)
     }
 
     @Test func accordionLayout_foldedClicksOnlyUnfoldTheirEdge() {

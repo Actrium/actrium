@@ -1135,22 +1135,9 @@ struct MainWindowTabsView: View {
             } else {
                 tabLabel(tab, accordionPresentation: accordionPresentation)
                     .frame(width: width)
-                    .background {
-                        // Keep this plate mounted so the first clipped pixel
-                        // cannot trigger a SwiftUI insertion cross-fade. The
-                        // surface switches to opaque immediately; only the
-                        // outer opacity below owns the final-fifth fade.
-                        tabShape(for: tab)
-                            .fill(
-                                accordionPresentation.isOverlapCover
-                                    ? AppColors.windowChromeAccordionPlateColor
-                                    : Color.clear
-                            )
-                            .transaction { transaction in
-                                transaction.animation = nil
-                            }
+                    .mask {
+                        accordionCoverMask(accordionPresentation)
                     }
-                    .opacity(accordionPresentation.surfaceOpacity)
                     .allowsHitTesting(!accordionPresentation.isFolded)
             }
         }
@@ -1195,7 +1182,8 @@ struct MainWindowTabsView: View {
         // accessibility all follow the same accordion presentation.
         .offset(x: accordionPresentation.offsetX)
         // The edge Tab stays underneath; only the incoming neighbour draws
-        // above it and becomes translucent. Active state never changes order.
+        // above it and can reveal its directional head. Active state never
+        // changes order.
         .zIndex(accordionPresentation.stackingZIndex)
         .onChange(of: shouldDismissObscuredAddressFocus) { _, shouldDismiss in
             guard shouldDismiss else { return }
@@ -1211,6 +1199,41 @@ struct MainWindowTabsView: View {
         .transition(.identity)
 
         tabContainer
+    }
+
+    /// Accordion depth is local to the incoming edge. The complete Tab stays
+    /// opaque until 80% overlap; during the final 20%, only its first fifth
+    /// transitions from transparent at the pushing edge to opaque inside.
+    @ViewBuilder
+    private func accordionCoverMask(
+        _ presentation: ToolbarAccordionTabPresentation
+    ) -> some View {
+        let edgeOpacity = presentation.coverHeadEdgeOpacity
+
+        switch presentation.coverEdge {
+        case .leading:
+            LinearGradient(
+                stops: [
+                    .init(color: .white.opacity(edgeOpacity), location: 0),
+                    .init(color: .white, location: 0.2),
+                    .init(color: .white, location: 1),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        case .trailing:
+            LinearGradient(
+                stops: [
+                    .init(color: .white, location: 0),
+                    .init(color: .white, location: 0.8),
+                    .init(color: .white.opacity(edgeOpacity), location: 1),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        case nil:
+            Color.white
+        }
     }
 
     /// A single stable foreground instance follows the pointer for the whole
@@ -1646,18 +1669,14 @@ struct MainWindowTabsView: View {
         .accessibilityAddTraits(.isSelected)
     }
 
-    /// Static Tabs keep their translucent tint. During an in-place drag, the
-    /// same tint is composited over an opaque toolbar-colored surface so the
-    /// moving Tab behaves like Chrome's foreground Tab and occludes siblings.
+    /// Every Tab starts from the same opaque toolbar-colored plate. The subtle
+    /// semantic tint is then composited above it; accordion translucency is
+    /// applied separately and locally by `accordionCoverMask`.
     private func tabSurface(for tab: Tab, tintOpacity: Double) -> some View {
         let shape = tabShape(for: tab)
-        let isMoving = interaction.isMovingTab(tab.id)
 
         return ZStack {
-            // Keep the opaque drag plate mounted at all times. Inserting or
-            // removing this layer inside a reorder animation would briefly
-            // cross-fade the foreground Tab.
-            shape.fill(isMoving ? AppColors.windowChromeDragPlateColor : Color.clear)
+            shape.fill(AppColors.windowChromeTabPlateColor)
             shape.fill(Color.primary.opacity(tintOpacity))
         }
         // Reordering still animates the Tab's geometry, but never its surface.
@@ -1701,8 +1720,14 @@ struct MainWindowTabsView: View {
         }
         .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
         .background {
-            tabShape(for: tab)
-                .fill(AppColors.addressEditingSurfaceColor)
+            let shape = tabShape(for: tab)
+            ZStack {
+                shape.fill(AppColors.windowChromeTabPlateColor)
+                shape.fill(AppColors.addressEditingSurfaceColor)
+            }
+            .transaction { transaction in
+                transaction.animation = nil
+            }
         }
         .overlay {
             tabShape(for: tab)

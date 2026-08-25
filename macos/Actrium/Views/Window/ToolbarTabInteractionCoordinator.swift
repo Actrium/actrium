@@ -91,6 +91,21 @@ struct ToolbarAccordionTabPresentation: Equatable {
     let edge: ToolbarAccordionEdge?
     let collapseProgress: CGFloat
     let overlapProgress: CGFloat
+    let coverEdge: ToolbarAccordionEdge?
+
+    init(
+        offsetX: CGFloat,
+        edge: ToolbarAccordionEdge?,
+        collapseProgress: CGFloat,
+        overlapProgress: CGFloat,
+        coverEdge: ToolbarAccordionEdge? = nil
+    ) {
+        self.offsetX = offsetX
+        self.edge = edge
+        self.collapseProgress = collapseProgress
+        self.overlapProgress = overlapProgress
+        self.coverEdge = coverEdge
+    }
 
     static let identity = ToolbarAccordionTabPresentation(
         offsetX: 0,
@@ -102,7 +117,7 @@ struct ToolbarAccordionTabPresentation: Equatable {
     var isFolded: Bool { edge != nil }
     var isLayered: Bool { isFolded || overlapProgress > 0 }
     var isObscured: Bool { isFolded }
-    var isOverlapCover: Bool { edge == nil && overlapProgress > 0 }
+    var isOverlapCover: Bool { coverEdge != nil && overlapProgress > 0 }
 
     /// Titles disappear before their Tab reaches a fully folded edge state.
     /// The edge Tab itself stays crisp underneath the incoming neighbour.
@@ -110,16 +125,16 @@ struct ToolbarAccordionTabPresentation: Equatable {
         Double(max(0, 1 - collapseProgress * 2))
     }
 
-    /// Only the one incoming Tab drawn above the folded edge becomes
-    /// translucent. It stays fully opaque through most of the overlap and
-    /// softens only in the final fifth, when the two identity icons begin to
-    /// converge. The folded Tab underneath and every other Tab stay opaque.
-    var surfaceFadeProgress: CGFloat {
-        min(1, max(0, (overlapProgress - 0.8) / 0.2))
+    /// Every Tab remains opaque. Only the incoming cover's directional head
+    /// gains a short transparent-to-opaque mask in the final fifth of overlap,
+    /// when the two identity icons begin to converge.
+    var coverHeadRevealProgress: CGFloat {
+        guard isOverlapCover else { return 0 }
+        return min(1, max(0, (overlapProgress - 0.8) / 0.2))
     }
 
-    var surfaceOpacity: Double {
-        Double(1 - surfaceFadeProgress * 0.22)
+    var coverHeadEdgeOpacity: Double {
+        Double(1 - coverHeadRevealProgress)
     }
 
     var stackingZIndex: Double {
@@ -211,8 +226,8 @@ func toolbarAccordionTabPresentation(
 
 /// Keeps at most one folded Tab visible at each viewport edge. When several
 /// logical slots have already crossed an edge, the closest one owns the edge;
-/// older slots remain normally clipped. This gives the strip one clean
-/// translucent overlap instead of accumulating icon and surface layers.
+/// older slots remain normally clipped. This gives the strip one clean head
+/// reveal instead of accumulating icon and surface layers.
 func toolbarAccordionTabPresentations(
     inputs: [ToolbarAccordionTabLayoutInput],
     viewportWidth: CGFloat,
@@ -250,8 +265,8 @@ func toolbarAccordionTabPresentations(
     let boundedInset = max(0, edgeInset)
 
     // At the leading edge, the Tab immediately to the right is the incoming
-    // cover. It is the sole translucent surface and always draws above the
-    // pinned edge Tab, independent of either Tab's active state.
+    // cover. It owns the sole directional head reveal and always draws above
+    // the pinned edge Tab, independent of either Tab's active state.
     if let leading, leading.index + 1 < inputs.count {
         let cover = inputs[leading.index + 1]
         let pinnedMaxX = boundedInset + leading.input.frame.width
@@ -265,13 +280,15 @@ func toolbarAccordionTabPresentations(
                 offsetX: 0,
                 edge: nil,
                 collapseProgress: 0,
-                overlapProgress: overlapProgress
+                overlapProgress: overlapProgress,
+                coverEdge: .leading
             )
         }
     }
 
     // The trailing edge is symmetric: the Tab immediately to the left is the
-    // incoming cover, so logical order never changes the visual stacking rule.
+    // incoming cover, so logical order never changes the visual stacking or
+    // directional head-mask rule.
     if let trailing, trailing.index > 0 {
         let cover = inputs[trailing.index - 1]
         let pinnedMinX = max(boundedInset, viewportWidth - boundedInset)
@@ -286,7 +303,8 @@ func toolbarAccordionTabPresentations(
                 offsetX: 0,
                 edge: nil,
                 collapseProgress: 0,
-                overlapProgress: overlapProgress
+                overlapProgress: overlapProgress,
+                coverEdge: .trailing
             )
         }
     }
