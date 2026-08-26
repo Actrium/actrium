@@ -118,6 +118,11 @@ pub mod wire;
 #[cfg(all(not(target_arch = "wasm32"), feature = "test-utils"))]
 pub mod test_support;
 
+// Per-hop RPC cancellation scopes: cooperative cancel/deadline
+// propagation for linked-guest calls (#390).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod request_scope;
+
 // Context (native-only, depends on transport/wire)
 #[cfg(not(target_arch = "wasm32"))]
 pub mod context;

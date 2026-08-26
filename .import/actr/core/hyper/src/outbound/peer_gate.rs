@@ -7,6 +7,7 @@
 
 use super::ensure_stream_payload_type;
 use crate::lifecycle::SendProjection;
+use crate::transport::correlation::{CompleteOutcome, PendingRequestsMap, RpcCorrelation};
 use crate::transport::{
     Dest, DestTransportRef, NetworkResult, PayloadTypeExt, PeerTransport, SentTransportSlot,
     WireIdentity,
@@ -20,11 +21,7 @@ use actr_protocol::{
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{Mutex, RwLock, oneshot, watch};
-
-/// Pending requests map type: request_id -> (target_actor_id, oneshot response sender)
-pub(crate) type PendingRequestsMap =
-    Arc<RwLock<HashMap<String, (ActrId, oneshot::Sender<actr_protocol::ActorResult<Bytes>>)>>>;
+use tokio::sync::{Mutex, oneshot, watch};
 
 /// Internal upper bound for a single DataChunk send operation.
 ///
@@ -105,8 +102,8 @@ pub struct PeerGate {
     /// PeerTransport instance
     transport_manager: Arc<PeerTransport>,
 
-    /// Pending requests: request_id -> (target_actor_id, oneshot::Sender<Bytes>)
-    /// Stores both the target ActorId and response sender for efficient cleanup by peer
+    /// Pending requests: request_id -> (target_actor_id, response sender).
+    /// RAII registration - a dropped caller future removes its own entry.
     pending_requests: PendingRequestsMap,
 
     /// The v0.20 connection manager: the RTC preflight authority.
@@ -172,21 +169,10 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        let drained = {
-                            let mut requests = pending.write().await;
-                            let request_ids = requests
-                                .iter()
-                                .filter(|(_, (target, _))| target == &peer)
-                                .map(|(request_id, _)| request_id.clone())
-                                .collect::<Vec<_>>();
-                            request_ids
-                                .into_iter()
-                                .filter_map(|request_id| requests.remove(&request_id))
-                                .collect::<Vec<_>>()
-                        };
-                        for (_target, sender) in drained {
-                            let _ = sender.send(Err(Self::send_projection_not_ready_error()));
-                        }
+                        pending.fail_where(
+                            |target| target == &peer,
+                            Self::send_projection_not_ready_error,
+                        );
 
                         if let Some(transports) = transports.upgrade() {
                             let dest = Dest::peer(peer.clone());
@@ -223,13 +209,7 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        let drained = {
-                            let mut requests = pending.write().await;
-                            requests.drain().map(|(_, value)| value).collect::<Vec<_>>()
-                        };
-                        for (_target, sender) in drained {
-                            let _ = sender.send(Err(Self::send_projection_not_ready_error()));
-                        }
+                        pending.fail_where(|_| true, Self::send_projection_not_ready_error);
                         let (Some(manager), Some(transports)) =
                             (manager.upgrade(), transports.upgrade())
                         else {
@@ -274,18 +254,10 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        let mut requests = pending.write().await;
-                        let request_ids = requests
-                            .iter()
-                            .filter(|(_, (target, _))| target == &peer)
-                            .map(|(request_id, _)| request_id.clone())
-                            .collect::<Vec<_>>();
-                        for request_id in request_ids {
-                            if let Some((_target, sender)) = requests.remove(&request_id) {
-                                let _ = sender.send(Err(Self::send_projection_not_ready_error()));
-                            }
-                        }
-                        drop(requests);
+                        pending.fail_where(
+                            |target| target == &peer,
+                            Self::send_projection_not_ready_error,
+                        );
                         if let Some(transports) = transports.upgrade() {
                             let dest = Dest::peer(peer.clone());
                             let close_result = if pc_generation == 0 {
@@ -311,13 +283,7 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        let drained = {
-                            let mut requests = pending.write().await;
-                            requests.drain().map(|(_, value)| value).collect::<Vec<_>>()
-                        };
-                        for (_target, sender) in drained {
-                            let _ = sender.send(Err(Self::send_projection_not_ready_error()));
-                        }
+                        pending.fail_where(|_| true, Self::send_projection_not_ready_error);
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -345,17 +311,10 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        let mut requests = pending.write().await;
-                        let request_ids = requests
-                            .iter()
-                            .filter(|(_, (target, _))| target == &peer)
-                            .map(|(request_id, _)| request_id.clone())
-                            .collect::<Vec<_>>();
-                        for request_id in request_ids {
-                            if let Some((_target, sender)) = requests.remove(&request_id) {
-                                let _ = sender.send(Err(Self::send_projection_not_ready_error()));
-                            }
-                        }
+                        pending.fail_where(
+                            |target| target == &peer,
+                            Self::send_projection_not_ready_error,
+                        );
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
                         tracing::warn!(
@@ -365,13 +324,7 @@ impl PeerGate {
                         let Some(pending) = pending.upgrade() else {
                             break;
                         };
-                        let drained = {
-                            let mut requests = pending.write().await;
-                            requests.drain().map(|(_, value)| value).collect::<Vec<_>>()
-                        };
-                        for (_target, sender) in drained {
-                            let _ = sender.send(Err(Self::send_projection_not_ready_error()));
-                        }
+                        pending.fail_where(|_| true, Self::send_projection_not_ready_error);
                     }
                     Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
@@ -437,18 +390,10 @@ impl PeerGate {
                                     .is_some_and(|snapshot| snapshot.sendable)
                             {
                             } else if let Some(pending) = task_pending.upgrade() {
-                                let mut requests = pending.write().await;
-                                let request_ids = requests
-                                    .iter()
-                                    .filter(|(_, (target, _))| target == &task_peer)
-                                    .map(|(request_id, _)| request_id.clone())
-                                    .collect::<Vec<_>>();
-                                for request_id in request_ids {
-                                    if let Some((_target, sender)) = requests.remove(&request_id) {
-                                        let _ = sender
-                                            .send(Err(Self::send_projection_not_ready_error()));
-                                    }
-                                }
+                                pending.fail_where(
+                                    |target| target == &task_peer,
+                                    Self::send_projection_not_ready_error,
+                                );
                             }
                             // Self-cleanup on every exit path: drop this task's
                             // registration unless a newer grace task for the
@@ -533,7 +478,7 @@ impl PeerGate {
         Self::with_v020_manager(
             transport_manager,
             Self::empty_manager_for_test(),
-            Arc::new(RwLock::new(HashMap::new())),
+            Arc::new(RpcCorrelation::new()),
             None,
         )
     }
@@ -553,23 +498,16 @@ impl PeerGate {
         request_id: &str,
         result: actr_protocol::ActorResult<Bytes>,
     ) -> ActorResult<bool> {
-        let mut pending = self.pending_requests.write().await;
-
-        if let Some((target, tx)) = pending.remove(request_id) {
-            // Wake up waiting request with result (success or error)
-            let _ = tx.send(result);
-            tracing::debug!("Completed request: {} (target: {})", request_id, target);
-            Ok(true)
-        } else {
-            tracing::warn!("No pending request for: {}", request_id);
-            Ok(false)
-        }
+        Ok(matches!(
+            self.pending_requests.complete(request_id, result),
+            CompleteOutcome::Completed
+        ))
     }
 
     /// Get pending requests count (for monitoring)
     #[cfg(feature = "test-utils")]
     pub async fn pending_count(&self) -> usize {
-        self.pending_requests.read().await.len()
+        self.pending_requests.len()
     }
 
     /// Register a pending request without sending on the wire.
@@ -579,16 +517,13 @@ impl PeerGate {
         request_id: &str,
         target: ActrId,
     ) -> oneshot::Receiver<ActorResult<Bytes>> {
-        let (response_tx, response_rx) = oneshot::channel();
         self.pending_requests
-            .write()
-            .await
-            .insert(request_id.to_string(), (target, response_tx));
-        response_rx
+            .register(request_id.to_string(), target)
+            .into_receiver()
     }
 
     /// Get pending_requests reference (for WebRtcGate to share)
-    pub fn get_pending_requests(&self) -> PendingRequestsMap {
+    pub(crate) fn get_pending_requests(&self) -> PendingRequestsMap {
         self.pending_requests.clone()
     }
 
@@ -950,63 +885,53 @@ impl PeerGate {
         let dest = Self::actr_id_to_dest(target);
         let admission = self.preflight_send(target, &dest).await?;
 
-        // 2. Create oneshot channel for receiving response
-        let (response_tx, response_rx) = oneshot::channel();
-
-        // 3. Register pending request with target ActorId
-        {
-            let mut pending = self.pending_requests.write().await;
-            pending.insert(envelope.request_id.clone(), (target.clone(), response_tx));
-        }
+        // 2/3. Register the pending request. The RAII guard removes the entry
+        // on every early exit (send failure, channel closed, deadline expiry,
+        // caller future dropped), so the manual cleanup branches below only
+        // keep the transport-side close.
+        let pending = self
+            .pending_requests
+            .register(envelope.request_id.clone(), target.clone());
 
         // 4. Serialize RpcEnvelope
         let data = Self::serialize_envelope(&envelope);
 
         // 5. Unified timeout: covers both retry + wait-for-response
         //    so the user-perceived latency never exceeds envelope.timeout_ms.
-        let request_id = envelope.request_id.clone();
+        let stale_target = target.clone();
+        let dest_for_timeout = dest.clone();
         let sent_transport = Arc::new(Mutex::new(None));
         let sent_transport_for_send = Arc::clone(&sent_transport);
 
-        let result =
-            crate::timer::timeout(crate::timer::ids::PEER_REQUEST_DEADLINE, timeout, async {
+        let result = crate::timer::timeout(
+            crate::timer::ids::PEER_REQUEST_DEADLINE,
+            timeout,
+            Box::pin(async move {
                 // 5a. Send with per-PayloadType retry on transient failures
                 self.send_with_retry_record_identity(
-                    &dest,
+                    &dest_for_timeout,
                     payload_type,
                     &data,
                     admission,
                     Some(&sent_transport_for_send),
                 )
                 .await?;
-                tracing::debug!("Sent request to {:?}", target);
+                tracing::debug!("Sent request to {:?}", stale_target);
 
-                // 5b. Wait for response
-                match response_rx.await {
-                    Ok(result) => result,
-                    Err(_) => Err(ActrError::Unavailable(
-                        "Response channel closed".to_string(),
-                    )),
-                }
-            })
-            .await;
+                // 5b. Wait for response (guard Drop cleans the entry if the
+                // caller's future is dropped mid-wait).
+                pending.recv().await
+            }),
+        )
+        .await;
 
         match result {
-            Ok(inner) => {
-                if inner.is_err() {
-                    // Send failed or channel closed — clean up pending request
-                    self.pending_requests.write().await.remove(&request_id);
-                } else {
-                    tracing::debug!("Received response for request: {}", request_id);
-                }
-                inner
-            }
+            Ok(inner) => inner,
             Err(_) => {
                 // Deadline expired — return TimedOut (retryable) rather than
                 // Unavailable so callers and language bindings can distinguish
                 // "request never reached the server" from "server did not reply
                 // in time".
-                self.pending_requests.write().await.remove(&request_id);
                 let transport_manager = self.transport_manager.clone();
                 let stale_dest = dest.clone();
                 let stale_target = target.clone();
@@ -1611,7 +1536,7 @@ mod tests {
                 sends: sends.clone(),
             }),
         ));
-        let pending_requests = Arc::new(RwLock::new(HashMap::new()));
+        let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
         let (projection_tx, projection_rx) = watch::channel(projection);
         let gate = PeerGate::with_v020_manager(
             transport.clone(),
@@ -1639,7 +1564,7 @@ mod tests {
             .expect_err("blocked projection must reject new outbound work");
 
         assert!(matches!(error, ActrError::ConnectionNotReady(_)));
-        assert!(gate.get_pending_requests().read().await.is_empty());
+        assert!(gate.get_pending_requests().len() == 0);
         assert_eq!(builds.load(Ordering::SeqCst), 0);
     }
 
@@ -1785,7 +1710,7 @@ mod tests {
             }),
         ));
         let manager = PeerGate::empty_manager_for_test();
-        let pending_requests = Arc::new(RwLock::new(HashMap::new()));
+        let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
         let gate =
             PeerGate::with_v020_manager(transport.clone(), manager.clone(), pending_requests, None);
 
@@ -1987,5 +1912,79 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, ActrError::TimedOut), "got {err:?}");
+    }
+    /// #390: dropping the `send_request` future (Kotlin coroutine cancel =
+    /// Rust future drop) must synchronously remove its pending entry instead
+    /// of leaking it until the timeout deadline.
+    #[tokio::test]
+    async fn dropping_send_request_future_removes_pending_entry() {
+        let target = test_actor_id(2);
+        let transport = Arc::new(PeerTransport::new(
+            test_actor_id(1),
+            Arc::new(CountingSuccessfulWireBuilder {
+                builds: Arc::new(AtomicUsize::new(0)),
+                sends: Arc::new(AtomicUsize::new(0)),
+            }),
+        ));
+        let pending_requests: PendingRequestsMap = Arc::new(RpcCorrelation::new());
+        let (_projection_tx, projection_rx) = watch::channel(SendProjection::Normal);
+        let gate = Arc::new(PeerGate::with_v020_manager(
+            transport,
+            PeerGate::empty_manager_for_test(),
+            pending_requests.clone(),
+            Some(projection_rx),
+        ));
+
+        let envelope = RpcEnvelope {
+            request_id: "dropped-caller".to_string(),
+            timeout_ms: 30_000,
+            ..Default::default()
+        };
+
+        // The wire send succeeds but no response ever arrives; the caller
+        // abandons the wait while the request is pending.
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        let gate_for_task = gate.clone();
+        let task = tokio::spawn(async move {
+            tokio::select! {
+                _ = cancel_rx => {}
+                res = gate_for_task.send_request_with_type(
+                    &target,
+                    PayloadType::RpcReliable,
+                    envelope,
+                ) => {
+                    panic!("no response exists; the request must not complete, got {res:?}")
+                }
+            }
+        });
+
+        let register_deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while pending_requests.len() == 0 {
+            assert!(
+                tokio::time::Instant::now() < register_deadline,
+                "request must register before the caller cancels"
+            );
+            crate::timer::sleep(
+                crate::timer::ids::PEER_REQUEST_DEADLINE,
+                Duration::from_millis(10),
+            )
+            .await;
+        }
+
+        cancel_tx.send(()).expect("task still running");
+        crate::timer::timeout(
+            crate::timer::ids::PEER_REQUEST_DEADLINE,
+            Duration::from_secs(5),
+            task,
+        )
+        .await
+        .expect("select task must finish after cancel")
+        .expect("task must not panic");
+
+        assert_eq!(
+            pending_requests.len(),
+            0,
+            "PendingRpc RAII must drop the entry with the request future"
+        );
     }
 }

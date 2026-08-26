@@ -380,11 +380,8 @@ fn make_rpc_envelope(request_id: &str) -> RpcEnvelope {
     }
 }
 
-type PendingReplies =
-    Arc<RwLock<HashMap<String, (ActrId, oneshot::Sender<actr_protocol::ActorResult<Bytes>>)>>>;
-
-fn empty_pending() -> PendingReplies {
-    Arc::new(RwLock::new(HashMap::new()))
+fn empty_pending() -> crate::transport::correlation::PendingRequestsMap {
+    std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new())
 }
 
 /// Insert an inbound-sink entry for `peer` with a sendable (`LegacyBypass`)
@@ -646,11 +643,9 @@ async fn handle_envelope_unknown_direction_is_dropped_not_enqueued() {
 async fn handle_envelope_tell_direction_is_enqueued() {
     let mailbox = CapturingMailbox::new();
     let pending = empty_pending();
-    let (tx, _rx) = oneshot::channel();
-    pending
-        .write()
-        .await
-        .insert("tell-ws-1".to_string(), (test_actor_id(11), tx));
+    let _rx = pending
+        .register("tell-ws-1".to_string(), test_actor_id(11))
+        .into_receiver();
 
     let mut envelope = make_rpc_envelope("tell-ws-1");
     envelope.direction = Some(actr_protocol::Direction::Tell as i32);
@@ -673,7 +668,10 @@ async fn handle_envelope_tell_direction_is_enqueued() {
         "explicit WS Tell must be enqueued for dispatch"
     );
     assert!(
-        pending.read().await.contains_key("tell-ws-1"),
+        matches!(
+            pending.complete("tell-ws-1", Ok(bytes::Bytes::new())),
+            crate::transport::correlation::CompleteOutcome::Completed
+        ),
         "explicit WS Tell must not consume the pending entry"
     );
 }
@@ -685,11 +683,7 @@ async fn handle_envelope_response_resolves_pending_not_mailbox() {
     let pending = empty_pending();
     let actor = test_actor_id(1);
 
-    let (tx, rx) = oneshot::channel();
-    pending
-        .write()
-        .await
-        .insert("req-2".to_string(), (actor, tx));
+    let rx = pending.register("req-2".to_string(), actor).into_receiver();
 
     let mut envelope = make_rpc_envelope("req-2");
     envelope.payload = Some(bytes::Bytes::from("response-payload"));
@@ -721,11 +715,7 @@ async fn handle_envelope_response_both_payload_and_error_gives_decode_failure() 
     let mailbox = CapturingMailbox::new();
     let pending = empty_pending();
     let actor = test_actor_id(2);
-    let (tx, rx) = oneshot::channel();
-    pending
-        .write()
-        .await
-        .insert("req-3".to_string(), (actor, tx));
+    let rx = pending.register("req-3".to_string(), actor).into_receiver();
 
     let mut envelope = make_rpc_envelope("req-3");
     envelope.payload = Some(bytes::Bytes::from("x"));
@@ -759,11 +749,7 @@ async fn handle_envelope_response_error_only_gives_unavailable() {
     let mailbox = CapturingMailbox::new();
     let pending = empty_pending();
     let actor = test_actor_id(3);
-    let (tx, rx) = oneshot::channel();
-    pending
-        .write()
-        .await
-        .insert("req-4".to_string(), (actor, tx));
+    let rx = pending.register("req-4".to_string(), actor).into_receiver();
 
     let mut envelope = make_rpc_envelope("req-4");
     envelope.payload = None;
@@ -798,11 +784,7 @@ async fn handle_envelope_response_removes_pending_entry() {
     let mailbox = CapturingMailbox::new();
     let pending = empty_pending();
     let actor = test_actor_id(4);
-    let (tx, _rx) = oneshot::channel::<actr_protocol::ActorResult<Bytes>>();
-    pending
-        .write()
-        .await
-        .insert("req-5".to_string(), (actor, tx));
+    let _rx = pending.register("req-5".to_string(), actor).into_receiver();
 
     let mut envelope = make_rpc_envelope("req-5");
     envelope.direction = Some(actr_protocol::Direction::Response as i32);
@@ -819,7 +801,10 @@ async fn handle_envelope_response_removes_pending_entry() {
     .await;
 
     assert!(
-        !pending.read().await.contains_key("req-5"),
+        matches!(
+            pending.complete("req-5", Ok(bytes::Bytes::new())),
+            crate::transport::correlation::CompleteOutcome::Orphan
+        ),
         "pending entry must be removed after response"
     );
 }
@@ -860,11 +845,9 @@ async fn handle_envelope_explicit_request_always_enqueues() {
     let pending = empty_pending();
     // A stale pending entry with the same id must NOT divert an explicit
     // request into the response path, and must not be consumed.
-    let (tx, _rx) = oneshot::channel();
-    pending
-        .write()
-        .await
-        .insert("req-stale".to_string(), (test_actor_id(9), tx));
+    let _rx = pending
+        .register("req-stale".to_string(), test_actor_id(9))
+        .into_receiver();
 
     let mut envelope = make_rpc_envelope("req-stale");
     envelope.direction = Some(actr_protocol::Direction::Request as i32);
@@ -886,7 +869,10 @@ async fn handle_envelope_explicit_request_always_enqueues() {
         "explicit Request must be enqueued"
     );
     assert!(
-        pending.read().await.contains_key("req-stale"),
+        matches!(
+            pending.complete("req-stale", Ok(bytes::Bytes::new())),
+            crate::transport::correlation::CompleteOutcome::Completed
+        ),
         "explicit Request must not consume the pending entry"
     );
 }
@@ -898,11 +884,9 @@ async fn handle_envelope_explicit_response_with_pending_wakes_caller() {
     let mailbox = CapturingMailbox::new();
     let pending = empty_pending();
     let actor = test_actor_id(7);
-    let (tx, rx) = oneshot::channel();
-    pending
-        .write()
-        .await
-        .insert("req-resp".to_string(), (actor, tx));
+    let rx = pending
+        .register("req-resp".to_string(), actor)
+        .into_receiver();
 
     let mut envelope = make_rpc_envelope("req-resp");
     envelope.payload = Some(bytes::Bytes::from("resp"));
@@ -933,7 +917,7 @@ async fn send_response_returns_false_for_unknown_peer() {
     let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
     let gate = WebSocketGate::new(
         rx,
-        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        empty_pending(),
         Arc::new(DataChunkRegistry::new()),
         None,
     );
@@ -951,7 +935,7 @@ async fn send_response_returns_false_when_sink_is_none() {
     let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
     let gate = WebSocketGate::new(
         rx,
-        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        empty_pending(),
         Arc::new(DataChunkRegistry::new()),
         None,
     );
@@ -1283,7 +1267,7 @@ async fn send_response_rejected_while_secure_channel_not_sendable() {
     let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
     let gate = WebSocketGate::new(
         rx,
-        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        empty_pending(),
         Arc::new(DataChunkRegistry::new()),
         None,
     );
@@ -1310,7 +1294,7 @@ async fn send_response_terminal_state_removes_registration() {
     let (_tx, rx) = tokio::sync::mpsc::channel::<InboundWsConn>(1);
     let gate = WebSocketGate::new(
         rx,
-        Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+        empty_pending(),
         Arc::new(DataChunkRegistry::new()),
         None,
     );

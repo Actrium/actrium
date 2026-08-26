@@ -9,7 +9,6 @@ use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{ActrId, ActrType, Realm};
 use actr_runtime_mailbox::{Mailbox, MailboxStats, MessagePriority, MessageRecord, StorageResult};
 use async_trait::async_trait;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Notify, RwLock};
@@ -100,8 +99,8 @@ impl Mailbox for CapturingMailbox {
 
 #[tokio::test]
 async fn bridge_routes_rpc_to_mailbox() {
-    let pending: crate::inbound::dispatcher::PendingRequestsMap =
-        Arc::new(RwLock::new(HashMap::new()));
+    let pending: crate::transport::correlation::PendingRequestsMap =
+        std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
     let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
     let mailbox = CapturingMailbox::new();
@@ -143,8 +142,8 @@ async fn bridge_routes_rpc_to_mailbox() {
 
 #[tokio::test]
 async fn bridge_drops_message_when_mailbox_not_set() {
-    let pending: crate::inbound::dispatcher::PendingRequestsMap =
-        Arc::new(RwLock::new(HashMap::new()));
+    let pending: crate::transport::correlation::PendingRequestsMap =
+        std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
     let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
     let slot: MailboxSlot = Arc::new(RwLock::new(None)); // mailbox not set
@@ -167,8 +166,8 @@ async fn bridge_drops_message_when_mailbox_not_set() {
 
 #[tokio::test]
 async fn bridge_shutdown_cancels_a_blocked_dispatch_and_converges() {
-    let pending: crate::inbound::dispatcher::PendingRequestsMap =
-        Arc::new(RwLock::new(HashMap::new()));
+    let pending: crate::transport::correlation::PendingRequestsMap =
+        std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
     let registry = Arc::new(DataChunkRegistry::new());
     let dispatcher = Arc::new(InboundDispatcher::new(pending, registry));
     let mailbox = Arc::new(BlockingMailbox {

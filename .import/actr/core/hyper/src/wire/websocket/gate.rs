@@ -18,6 +18,7 @@ use crate::inbound::DataChunkRegistry;
 use crate::key_cache::AisKeyCache;
 use crate::lifecycle::CredentialState;
 use crate::transport::WsSink;
+use crate::transport::correlation::PendingRequestsMap;
 use crate::transport::secure_channel::SecureCell;
 use crate::wire::SignalingKeyFetcher;
 use crate::wire::webrtc::SignalingClient;
@@ -34,12 +35,8 @@ use ed25519_dalek::{Signature, Verifier as Ed25519Verifier};
 use futures_util::SinkExt;
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
-use tokio::sync::{RwLock, mpsc, oneshot};
+use tokio::sync::{RwLock, mpsc};
 use tokio_tungstenite::tungstenite::Message as WsMessage;
-
-/// Pending requests map type: request_id → (target_actor_id, oneshot response sender)
-type PendingRequestsMap =
-    Arc<RwLock<HashMap<String, (ActrId, oneshot::Sender<actr_protocol::ActorResult<Bytes>>)>>>;
 
 /// WebSocket authentication context (optional)
 ///
@@ -241,38 +238,10 @@ impl WebSocketGate {
             return;
         }
 
-        let mut pending = pending_requests.write().await;
-        if let Some((target, response_tx)) = pending.remove(&request_id) {
-            drop(pending);
-            tracing::debug!(
-                "📬 WS Received RPC Response: request_id={}, target={}",
-                request_id,
-                target
-            );
-
-            let result = match (envelope.payload, envelope.error) {
-                (Some(payload), None) => Ok(payload),
-                (None, Some(error)) => Err(crate::lifecycle::node::wire_code_to_actr_error(
-                    error.code,
-                    error.message,
-                )),
-                _ => Err(ActrError::DecodeFailure(
-                    "Invalid RpcEnvelope: payload and error fields inconsistent".to_string(),
-                )),
-            };
-            let _ = response_tx.send(result);
-        } else {
-            drop(pending);
-            let peer = Self::peer_for_log(&from_bytes);
-            tracing::warn!(
-                request_id = %request_id,
-                peer = %peer,
-                route_key = %envelope.route_key,
-                "rpc.orphan_response_dropped: envelope marked Response has no pending request; dropping (late reply or peer-mislabeled request)"
-            );
-        }
+        // Direction::Response: complete the waiting caller via the shared
+        // correlation map (orphan late replies warn and drop).
+        pending_requests.complete_from_envelope(envelope, || Self::peer_for_log(&from_bytes));
     }
-
     fn peer_for_log(from_bytes: &[u8]) -> String {
         if from_bytes.is_empty() {
             return "unavailable".to_string();

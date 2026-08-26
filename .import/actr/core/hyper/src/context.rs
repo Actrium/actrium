@@ -86,6 +86,12 @@ pub struct RuntimeContext {
     /// Set per-request by `admit_incoming` alongside `reply_deliver`; read
     /// by the generated EXPLICIT dispatch arm via [`Context::reply_deadline`].
     reply_deadline: Option<actr_framework::ReplyDeadline>,
+
+    /// Per-request cancellation scope (#390). `None` on shell contexts (a
+    /// `call_raw` from them starts a root scope) and on scopes inbound from
+    /// peers; set from a claimed handoff marker for locally dispatched
+    /// guest work, whose nested calls then derive child scopes.
+    pub(crate) scope: Option<Arc<crate::request_scope::RequestScope>>,
 }
 
 impl RuntimeContext {
@@ -191,7 +197,16 @@ impl RuntimeContext {
             reply_deliver: None,
             expects_response: true,
             reply_deadline: None,
+            scope: None,
         }
+    }
+
+    /// Attach a claimed request scope (#390). Called by workload intake
+    /// before dispatch so nested guest calls inherit root cancellation and
+    /// the absolute deadline.
+    pub(crate) fn with_scope(mut self, scope: Arc<crate::request_scope::RequestScope>) -> Self {
+        self.scope = Some(scope);
+        self
     }
 
     /// Set the reply-delivery handle, `expects_response` flag, and caller
@@ -303,6 +318,20 @@ impl RuntimeContext {
         crate::transport::validate_rpc_timeout_ms(timeout_ms)?;
         crate::outbound::ensure_rpc_payload_type(payload_type)?;
 
+        // Per-hop cancellation scope (#390). A context without a scope is a
+        // root call (shell or an inbound remote request); a guest context
+        // inherits its root's token and the earlier absolute deadline. An
+        // already-cancelled or expired inherited scope fails fast instead of
+        // admitting more work.
+        let scope = match &self.scope {
+            Some(parent) => parent.child(timeout_ms),
+            None => crate::request_scope::RequestScope::root(timeout_ms),
+        };
+        if !scope.is_active() {
+            return Err(ActrError::TimedOut);
+        }
+        let guard = scope.guard();
+
         self.ensure_session_ready().await?;
 
         #[cfg(feature = "opentelemetry")]
@@ -318,15 +347,50 @@ impl RuntimeContext {
             tracestate: None,
             request_id: uuid::Uuid::new_v4().to_string(),
             metadata: vec![],
-            timeout_ms,
+            // Every stage receives the remaining absolute budget; no hop
+            // starts a fresh full timeout (#390).
+            timeout_ms: scope.remaining_ms().unwrap_or(1),
         };
         #[cfg(feature = "opentelemetry")]
         inject_span_context_to_rpc(&tracing::Span::current(), &mut envelope);
 
+        // In-process hops carry the handoff marker so workload intake can
+        // claim the scope (or observe an abandoned root and drop before
+        // admission). Only `Dest::Workload` has a request intake that claims
+        // the marker (the Shell→Guest loop only completes RESPONSEs), and
+        // peer transports never see the marker.
+        let _handoff = if matches!(target, Dest::Workload) {
+            self.inproc_gate.inproc_scope_registry().map(|registry| {
+                crate::request_scope::attach_scope_marker(&mut envelope, registry, &scope)
+            })
+        } else {
+            None
+        };
+
         let gate = self.select_gate(target)?;
         let target_id = self.extract_target_id(target);
-        gate.send_request_with_type(target_id, payload_type, envelope)
-            .await
+        let send = gate.send_request_with_type(target_id, payload_type, envelope);
+        // Cooperative cancellation: cancelling the root drops this future
+        // from above, and a scope cancelled while we wait unwinds here with
+        // `TimedOut` instead of running out the caller's full budget.
+        let result = tokio::select! {
+            biased;
+            _ = scope.token().cancelled() => Err(ActrError::TimedOut),
+            response = send => response,
+        };
+        match result {
+            Ok(bytes) => {
+                guard.disarm();
+                Ok(bytes)
+            }
+            Err(error @ ActrError::TimedOut) => {
+                guard.cancel_with(crate::request_scope::CancelReason::DeadlineExpired);
+                Err(error)
+            }
+            // Any other exit (send failure, transport error, future drop)
+            // cancels the scope via the guard's Drop as `CallerDropped`.
+            Err(error) => Err(error),
+        }
     }
 
     /// Execute a non-generic RPC message call (fire-and-forget, useful for language bindings).

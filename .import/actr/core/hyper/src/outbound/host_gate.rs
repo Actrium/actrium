@@ -31,6 +31,12 @@ impl HostGate {
         Self { transport }
     }
 
+    /// Scope handoff registry shared with this transport's intake loop
+    /// (#390).
+    pub(crate) fn scope_registry(&self) -> &crate::request_scope::ScopeHandoffRegistry {
+        self.transport.scope_registry()
+    }
+
     /// Send request and wait for response (with specified PayloadType and identifier)
     ///
     /// # Extension Method

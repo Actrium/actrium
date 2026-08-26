@@ -127,6 +127,10 @@ pub enum ActrError {
 pub type ActrResult<T> = Result<T, ActrError>;
 
 /// Keep stack-heavy Rust futures off foreign-language cooperative executors.
+///
+/// Dropping the returned future (Kotlin coroutine cancellation frees the
+/// UniFFI future) aborts the spawned task instead of detaching it, so guest
+/// RPCs and node shutdown actually stop (#390).
 pub(crate) async fn run_on_tokio_runtime<T, E, F>(
     operation: &'static str,
     future: F,
@@ -136,12 +140,33 @@ where
     E: Into<ActrError> + Send + 'static,
     F: Future<Output = Result<T, E>> + Send + 'static,
 {
-    tokio::spawn(future)
+    AbortOnDrop(tokio::spawn(future))
         .await
         .map_err(|error| ActrError::Internal {
             msg: format!("{operation} task failed: {error}"),
         })?
         .map_err(Into::into)
+}
+
+/// Joins a spawned task, aborting it on drop. Aborting an already-finished
+/// task is a no-op, so no disarm is needed on the success path.
+struct AbortOnDrop<T>(tokio::task::JoinHandle<T>);
+
+impl<T> std::future::Future for AbortOnDrop<T> {
+    type Output = Result<T, tokio::task::JoinError>;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Self::Output> {
+        std::pin::Pin::new(&mut self.0).poll(cx)
+    }
+}
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
 }
 
 impl ActrError {
@@ -280,6 +305,48 @@ impl Classify for ActrError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn dropping_run_on_tokio_runtime_future_aborts_task() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        // The inner task parks forever while holding a drop observer. Freeing
+        // the wrapper future (what Kotlin coroutine cancellation does to the
+        // UniFFI future) must abort the task — proving the observer ran —
+        // instead of detaching it.
+        struct ObserveDrop(std::sync::Arc<AtomicBool>);
+        impl Drop for ObserveDrop {
+            fn drop(&mut self) {
+                self.0.store(true, Ordering::SeqCst);
+            }
+        }
+
+        let dropped = std::sync::Arc::new(AtomicBool::new(false));
+        let observe = ObserveDrop(std::sync::Arc::clone(&dropped));
+        let wrapper = run_on_tokio_runtime("test", async move {
+            let _observe = observe;
+            futures_util::future::pending::<()>().await;
+            #[allow(unreachable_code)]
+            Ok::<(), ActrError>(())
+        });
+        let mut wrapper = Box::pin(wrapper);
+
+        // Drive once so the inner task spawns and parks.
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(10), wrapper.as_mut()).await;
+
+        drop(wrapper);
+
+        for _ in 0..100 {
+            if dropped.load(Ordering::SeqCst) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(2)).await;
+        }
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "inner task must be aborted on wrapper drop, not detached"
+        );
+    }
 
     #[test]
     fn roundtrip_preserves_every_protocol_variant() {

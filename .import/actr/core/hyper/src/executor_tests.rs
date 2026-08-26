@@ -768,3 +768,57 @@ async fn interleaved_lifecycle_panic_terminates_runner() {
         .expect_err("panicked lifecycle actor must reject follow-up commands");
     assert!(matches!(late, ActrError::Unavailable(_)), "got {late:?}");
 }
+
+// ── #390: scoped cancellation must skip the guest without poisoning ─────────
+
+/// A queued dispatch whose request scope already ended replies `TimedOut`
+/// without entering guest code, and the runner keeps serving later commands.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn dispatch_with_cancelled_scope_replies_timeout_without_running_guest() {
+    let (handle, gate, mut entered_rx, _drop_rx) = gated_runner();
+
+    let scope = crate::request_scope::RequestScope::root(30_000);
+    scope.cancel(crate::request_scope::CancelReason::CallerDropped);
+
+    let (reply, rx) = tokio::sync::oneshot::channel();
+    handle
+        .tx
+        .try_send(ActorCmd::Dispatch {
+            envelope: RpcEnvelope::default(),
+            ctx: test_ctx().with_scope(scope),
+            invocation: test_invocation(),
+            host_abi: noop_host_abi(),
+            span: tracing::Span::none(),
+            reply,
+        })
+        .expect("queue has capacity");
+
+    let result = tokio::time::timeout(WATCHDOG, rx)
+        .await
+        .expect("watchdog: cancelled dispatch must still reply")
+        .expect("runner alive");
+    assert!(
+        matches!(result, Err(ActrError::TimedOut)),
+        "scoped cancellation must surface as TimedOut, got {result:?}"
+    );
+    assert!(
+        entered_rx.try_recv().is_err(),
+        "guest body must never enter for a scope-ended dispatch"
+    );
+
+    // The runner is not poisoned: a subsequent command still runs its body.
+    let ok = enqueue_on_start(&handle);
+    tokio::time::timeout(WATCHDOG, entered_rx.recv())
+        .await
+        .expect("watchdog: next body must enter after scoped skip")
+        .expect("entered channel open");
+    gate.release.add_permits(1);
+    assert!(
+        tokio::time::timeout(WATCHDOG, ok)
+            .await
+            .expect("watchdog: reply")
+            .expect("runner alive")
+            .is_ok(),
+        "runner must keep serving commands after scoped cancellation"
+    );
+}
