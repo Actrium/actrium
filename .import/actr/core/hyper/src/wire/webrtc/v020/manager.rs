@@ -478,6 +478,10 @@ impl RtcConnectionManager {
                 }
             };
             if let Some(marker) = closing {
+                tracing::debug!(
+                    peer = %peer.to_string_repr(),
+                    "v0.20 waiting for a closing peer entry to converge before re-creating the controller"
+                );
                 marker.done.cancelled().await;
                 continue;
             }
@@ -560,6 +564,13 @@ impl RtcConnectionManager {
                     recovery_obligations: Some(self.recovery_obligations.clone()),
                 },
                 policy_clock,
+            );
+            tracing::info!(
+                peer = %peer.to_string_repr(),
+                controller_lifecycle_id,
+                pc_generation_floor = next_pc_generation,
+                inbound = admission == ControllerAdmission::Inbound,
+                "v0.20 created peer controller"
             );
             peers.insert(
                 peer,
@@ -647,6 +658,10 @@ impl RtcConnectionManager {
         &self,
         peer: ActrId,
     ) -> Result<Option<(RtcPeerControllerHandle, u64)>, ControllerGone> {
+        tracing::debug!(
+            peer = %peer.to_string_repr(),
+            "v0.20 starting or joining a peer transport attempt"
+        );
         self.reopen_inbound_admission(&peer);
         let epoch = self.lifecycle_epoch.load(Ordering::Acquire);
         #[cfg(feature = "test-utils")]

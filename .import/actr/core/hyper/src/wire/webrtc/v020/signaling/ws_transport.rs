@@ -204,6 +204,7 @@ impl SignalingTransport for V020SignalingTransport {
             message,
             attempt,
         } = dispatch;
+        let target_repr = to.to_string_repr();
         let payload = self.message_to_payload(&to, &message);
         let credential = self.credential_state.credential().await;
         let relay = actr_protocol::ActrRelay {
@@ -232,7 +233,9 @@ impl SignalingTransport for V020SignalingTransport {
         if let Err(e) = self.signaling_client.send_envelope(envelope).await {
             tracing::warn!(
                 target = "v020-signaling",
-                "failed to send v0.20 signaling envelope: {e}"
+                peer = %target_repr,
+                error = %e,
+                "failed to send v0.20 signaling envelope"
             );
         }
     }
@@ -264,6 +267,7 @@ impl SignalingTransport for V020SignalingTransport {
                     // SignalingRouter after every mobile cleanup.
                     tracing::debug!(
                         target = "v020-signaling",
+                        backoff_ms = retry_backoff.as_millis() as u64,
                         "signaling inbound generation ended; backing off before retrying receive"
                     );
                     crate::timer::sleep(

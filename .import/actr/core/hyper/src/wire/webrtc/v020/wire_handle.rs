@@ -95,6 +95,10 @@ impl WireHandle for V020WireHandle {
             .as_ref()
             .is_some_and(|handle| handle.snapshot().sendable)
         {
+            tracing::debug!(
+                peer = %self.peer_id.to_string_repr(),
+                "v0.20 wire connect skipped: controller already sendable"
+            );
             return Ok(());
         }
         let Some((handle, mut attempt_epoch)) = self
@@ -153,6 +157,12 @@ impl WireHandle for V020WireHandle {
                         && snapshot.unavailable_reason.is_some()
                         && snapshot.transport_epoch == attempt_epoch
                     {
+                        tracing::debug!(
+                            peer = %self.peer_id.to_string_repr(),
+                            transport_epoch = attempt_epoch,
+                            reason = ?snapshot.unavailable_reason,
+                            "v0.20 connection attempt became terminal while waiting for sendable"
+                        );
                         return Err(NetworkError::PeerConnectionClosed(format!(
                             "v0.20 peer {} connection attempt became terminal ({:?})",
                             self.peer_id.to_string_repr(),
@@ -162,6 +172,11 @@ impl WireHandle for V020WireHandle {
                     tokio::select! {
                         changed = rx.changed() => {
                             if changed.is_err() {
+                                tracing::debug!(
+                                    peer = %self.peer_id.to_string_repr(),
+                                    transport_epoch = attempt_epoch,
+                                    "v0.20 controller closed while waiting for sendable"
+                                );
                                 return Err(NetworkError::ConnectionClosed(format!(
                                     "v0.20 controller closed while connecting peer {}",
                                     self.peer_id.to_string_repr()
@@ -185,6 +200,11 @@ impl WireHandle for V020WireHandle {
                 // epoch so WirePool's next retry can leave Idle and allocate a
                 // fresh PeerConnection generation.
                 let _ = handle.abort_transport_attempt(attempt_epoch).await;
+                tracing::warn!(
+                    peer = %self.peer_id.to_string_repr(),
+                    transport_epoch = attempt_epoch,
+                    "v0.20 peer did not become sendable within the connect window; aborted the transport attempt"
+                );
                 return Err(NetworkError::ConnectionError(format!(
                     "v0.20 peer {} did not become sendable within the connect window",
                     self.peer_id.to_string_repr()

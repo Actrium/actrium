@@ -329,6 +329,7 @@ impl SignalingRouter {
         // Budget-shed escalations, owned by this loop: at most one per peer
         // (see `escalating`), aborted on shutdown rather than detached.
         let mut escalation_tasks = tokio::task::JoinSet::new();
+        tracing::info!("v0.20 signaling router started");
         loop {
             tokio::select! {
                 outbound = outbound_rx.recv() => {
@@ -523,6 +524,7 @@ impl SignalingRouter {
         inbound_tasks.abort_all();
         while inbound_tasks.join_next().await.is_some() {}
         self.dispatch_chains.clear();
+        tracing::info!("v0.20 signaling router stopped");
     }
 
     /// Dispatch one inbound message to the right controller by remote `ActrId`.

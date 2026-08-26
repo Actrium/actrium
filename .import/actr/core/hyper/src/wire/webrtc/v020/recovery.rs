@@ -105,7 +105,13 @@ impl RtcRecoverySupervisor {
     /// controllers are currently subscribed — e.g. before the first controller
     /// spawns, or after all controllers have been torn down).
     pub(crate) fn publish(&self, event: RtcNetworkEvent) -> usize {
-        self.tx.send(event).unwrap_or(0)
+        let receivers = self.tx.send(event).unwrap_or(0);
+        tracing::debug!(
+            event = ?event,
+            receivers,
+            "v0.20 recovery supervisor published a network event"
+        );
+        receivers
     }
 
     /// Subscribe to network events. Each controller calls this once at spawn
@@ -129,6 +135,14 @@ impl RtcRecoverySupervisor {
             if *current == generation {
                 false
             } else {
+                if generation.is_some() {
+                    tracing::info!(
+                        generation,
+                        "v0.20 recovery gate: signaling generation committed"
+                    );
+                } else {
+                    tracing::debug!("v0.20 recovery gate: signaling generation withdrawn");
+                }
                 *current = generation;
                 true
             }
@@ -247,6 +261,12 @@ impl PeerRecoveryObligationLog {
 
     /// Record one obligation and acknowledge it to the handing-off effect.
     pub(crate) fn record(&self, target: PeerRecoveryTarget) {
+        tracing::debug!(
+            peer = %target.peer.to_string_repr(),
+            pc_generation = target.pc_generation,
+            ice_generation = target.ice_generation,
+            "v0.20 peer recovery obligation recorded"
+        );
         let mut records = self.records.lock().expect("obligation log poisoned");
         records.push(PeerRecoveryObligation {
             target,
@@ -291,6 +311,11 @@ impl PeerRecoveryObligationLog {
                 continue;
             };
             record.status = PeerRecoveryObligationStatus::Extinguished(path);
+            tracing::debug!(
+                peer = %record.target.peer.to_string_repr(),
+                path = ?path,
+                "v0.20 peer recovery obligation extinguished"
+            );
         }
     }
 
@@ -303,6 +328,10 @@ impl PeerRecoveryObligationLog {
                 record.status = PeerRecoveryObligationStatus::Extinguished(
                     PeerRecoveryExtinguishment::PeerDeparted,
                 );
+                tracing::debug!(
+                    peer = %peer.to_string_repr(),
+                    "v0.20 peer recovery obligation extinguished by peer departure"
+                );
             }
         }
     }
@@ -314,6 +343,10 @@ impl PeerRecoveryObligationLog {
             if record.status == PeerRecoveryObligationStatus::Open {
                 record.status = PeerRecoveryObligationStatus::Extinguished(
                     PeerRecoveryExtinguishment::OwnerLifetimeEnd,
+                );
+                tracing::debug!(
+                    peer = %record.target.peer.to_string_repr(),
+                    "v0.20 peer recovery obligation extinguished by owner lifetime end"
                 );
             }
         }

@@ -514,6 +514,12 @@ impl WebRtcEffectRunner {
         ) else {
             return ResourceRegistration::MissingOrMismatched;
         };
+        tracing::debug!(
+            peer = %self.peer_id.to_string_repr(),
+            generation,
+            ?lane,
+            "v0.20 remote data channel accepted"
+        );
         ResourceRegistration::Registered(handle)
     }
 
@@ -654,6 +660,13 @@ impl WebRtcEffectRunner {
         {
             let mut map = self.sessions.lock().expect("sessions lock");
             let mut closing = self.closing_sessions.lock().expect("closing sessions lock");
+            if !map.is_empty() {
+                tracing::debug!(
+                    peer = %self.peer_id.to_string_repr(),
+                    generations = ?map.keys().collect::<Vec<_>>(),
+                    "v0.20 controller teardown: closing all remaining sessions"
+                );
+            }
             for (generation, session) in map.drain() {
                 closing
                     .entry(generation)
@@ -793,6 +806,12 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                         // Register the session on success (RFC: "Register a Session
                         // after a successful build and send completion").
                         if let Ok(ref ops) = result {
+                            tracing::debug!(
+                                peer = %peer_id.to_string_repr(),
+                                generation,
+                                operation_id,
+                                "v0.20 PeerConnection built; session registered"
+                            );
                             sessions.lock().expect("sessions lock").insert(
                                 generation,
                                 PeerConnectionSession::new_with_resources(

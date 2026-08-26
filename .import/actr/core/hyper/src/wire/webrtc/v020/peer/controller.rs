@@ -439,6 +439,11 @@ impl RtcPeerController {
     }
 
     async fn run(mut self) {
+        tracing::debug!(
+            peer = %self.state.peer_id.to_string_repr(),
+            controller_lifecycle_id = self.deps.controller_lifecycle_id,
+            "v0.20 peer controller event loop started"
+        );
         let mut state_rx = self.event_rx.state();
         let mut last_state_seq = 0;
         let mut generation_overflow_counts = std::collections::HashMap::<u64, u64>::new();
@@ -735,6 +740,11 @@ impl RtcPeerController {
                         .take()
                         .expect("guarded recovery timer")
                         .0;
+                    tracing::warn!(
+                        peer = %self.state.peer_id.to_string_repr(),
+                        recovery_epoch,
+                        "v0.20 recovery attempt deadline elapsed; escalating the attempt"
+                    );
                     if self
                         .apply(RtcPeerInput::RecoveryDeadlineElapsed { recovery_epoch })
                         .await
@@ -752,6 +762,11 @@ impl RtcPeerController {
                         .take()
                         .expect("guarded recovery budget timer")
                         .0;
+                    tracing::warn!(
+                        peer = %self.state.peer_id.to_string_repr(),
+                        recovery_cycle,
+                        "v0.20 recovery budget deadline elapsed; resolving the recovery cycle"
+                    );
                     if self
                         .apply(RtcPeerInput::RecoveryBudgetElapsed { recovery_cycle })
                         .await
@@ -769,6 +784,11 @@ impl RtcPeerController {
                         .take()
                         .expect("guarded role-negotiation timer")
                         .0;
+                    tracing::warn!(
+                        peer = %self.state.peer_id.to_string_repr(),
+                        negotiation_epoch,
+                        "v0.20 role negotiation deadline elapsed without an assignment"
+                    );
                     if self
                         .apply(RtcPeerInput::RoleNegotiationDeadlineElapsed {
                             negotiation_epoch,
@@ -788,6 +808,11 @@ impl RtcPeerController {
                         .take()
                         .expect("guarded initial-connection timer")
                         .0;
+                    tracing::warn!(
+                        peer = %self.state.peer_id.to_string_repr(),
+                        transport_epoch,
+                        "v0.20 initial connection deadline elapsed; terminating the attempt"
+                    );
                     if self
                         .apply(RtcPeerInput::InitialConnectionDeadlineElapsed {
                             transport_epoch,
@@ -967,10 +992,21 @@ impl RtcPeerController {
 
         let before = self.state.revision;
         let was_sendable = self.state.sendable();
+        let phase_before = self.state.phase;
         let was_terminally_unavailable = self.state.terminally_unavailable();
         let active_generation_before = self.state.active_generation;
         let effects = reduce(&mut self.state, input);
         let is_sendable = self.state.sendable();
+        if self.state.phase != phase_before {
+            tracing::debug!(
+                peer = %self.state.peer_id.to_string_repr(),
+                phase_before = ?phase_before,
+                phase = ?self.state.phase,
+                transport_epoch = self.state.transport_epoch,
+                active_generation = self.state.active_generation,
+                "v0.20 peer phase transition"
+            );
+        }
         let builds_session = effects
             .iter()
             .any(|effect| matches!(effect, RtcPeerEffect::BuildSession { .. }));
@@ -1009,6 +1045,11 @@ impl RtcPeerController {
             // This acknowledgement is deliberately after snapshot publication:
             // a caller subscribing after it resolves can no longer observe the
             // previous transport attempt as the current Connect result.
+            tracing::debug!(
+                peer = %self.state.peer_id.to_string_repr(),
+                transport_epoch = self.state.transport_epoch,
+                "v0.20 connect committed"
+            );
             let _ = respond.send(self.state.transport_epoch);
         }
         if invalidates_active_generation
@@ -1017,10 +1058,17 @@ impl RtcPeerController {
         {
             let _ = peer_generation_invalidated.send((self.state.peer_id.clone(), generation));
         }
-        if was_sendable != is_sendable
-            && let Some(peer_sendability_changed) = &self.deps.peer_sendability_changed
-        {
-            let _ = peer_sendability_changed.send((self.state.peer_id.clone(), is_sendable));
+        if was_sendable != is_sendable {
+            tracing::info!(
+                peer = %self.state.peer_id.to_string_repr(),
+                sendable = is_sendable,
+                transport_epoch = self.state.transport_epoch,
+                generation = self.state.active_generation,
+                "v0.20 peer sendability changed"
+            );
+            if let Some(peer_sendability_changed) = &self.deps.peer_sendability_changed {
+                let _ = peer_sendability_changed.send((self.state.peer_id.clone(), is_sendable));
+            }
         }
         if !was_terminally_unavailable
             && self.state.terminally_unavailable()
@@ -1263,7 +1311,15 @@ impl RtcPeerController {
                     )
                     .await
                     {
-                        Ok(Ok(Some(handle))) => self.lanes.insert(handle),
+                        Ok(Ok(Some(handle))) => {
+                            tracing::debug!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                generation,
+                                ?lane,
+                                "v0.20 data-channel lane created"
+                            );
+                            self.lanes.insert(handle)
+                        }
                         Ok(Ok(None)) => {}
                         Ok(Err(error)) => {
                             tracing::error!(
@@ -1348,7 +1404,17 @@ impl RtcPeerController {
                     message,
                 );
                 match self.signaling_tx.try_send(dispatch) {
-                    Ok(()) => {}
+                    Ok(()) => {
+                        // Candidates are high-volume trickle traffic; only the
+                        // critical SDP/role messages get a dispatch log.
+                        if !is_candidate {
+                            tracing::debug!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                generation,
+                                "v0.20 SDP/role signaling dispatched to the router queue"
+                            );
+                        }
+                    }
                     Err(tokio::sync::mpsc::error::TrySendError::Full(dispatch)) => {
                         let message = dispatch.message;
                         self.state.signaling_dropped += 1;
