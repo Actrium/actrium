@@ -347,6 +347,12 @@ pub(crate) async fn lane_pump(
     while let Some(event) = channel.poll().await {
         match event {
             E::OnOpen => {
+                tracing::debug!(
+                    peer = %peer_id.to_string_repr(),
+                    generation,
+                    ?lane,
+                    "v0.20 data-channel lane opened"
+                );
                 if lane_tx
                     .send(LaneEvent::Opened { generation, lane })
                     .await
@@ -440,6 +446,12 @@ pub(crate) async fn lane_pump(
                 );
             }
             E::OnClosing | E::OnClose => {
+                tracing::debug!(
+                    peer = %peer_id.to_string_repr(),
+                    generation,
+                    ?lane,
+                    "v0.20 data-channel lane closed"
+                );
                 let _ = lane_tx.send(LaneEvent::Closed { generation, lane }).await;
                 return;
             }

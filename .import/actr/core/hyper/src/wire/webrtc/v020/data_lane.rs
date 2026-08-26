@@ -91,7 +91,23 @@ impl DataLane for V020DataLane {
         } else {
             self.handle.send(self.lane, data).await
         };
-        result.map_err(Self::map_error)
+        match result {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                if matches!(
+                    error,
+                    RtcSendError::DataChannelClosed | RtcSendError::DataChunkDeliveryUncertain
+                ) {
+                    tracing::debug!(
+                        peer = %self.handle.peer_id().to_string_repr(),
+                        lane = ?self.lane,
+                        error = ?error,
+                        "v0.20 lane send hit stale data-plane state"
+                    );
+                }
+                Err(Self::map_error(error))
+            }
+        }
     }
 
     fn lane_type(&self) -> &'static str {

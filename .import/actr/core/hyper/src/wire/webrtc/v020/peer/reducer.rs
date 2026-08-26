@@ -1069,6 +1069,12 @@ fn become_answerer(
     exchange_id: Option<String>,
     effects: &mut Vec<RtcPeerEffect>,
 ) {
+    tracing::debug!(
+        peer = %state.peer_id.to_string_repr(),
+        transport_epoch = state.transport_epoch,
+        exchange_id = ?exchange_id,
+        "v0.20 accepting remote offer as answerer"
+    );
     if state.phase == RtcPeerPhase::Idle
         && state.building_generation.is_none()
         && state.active_generation.is_none()
@@ -1198,6 +1204,12 @@ fn start_role_negotiation(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEff
     state.phase = RtcPeerPhase::Building;
     state.unavailable_reason = None;
     state.bump_revision();
+    tracing::debug!(
+        peer = %state.peer_id.to_string_repr(),
+        transport_epoch = state.transport_epoch,
+        negotiation_epoch = state.negotiation_epoch,
+        "v0.20 sending role negotiation probe"
+    );
     effects.push(RtcPeerEffect::SendSignaling {
         // Role negotiation is not tied to a PC generation (none exists).
         generation: 0,
@@ -1265,6 +1277,13 @@ fn reduce_command(
                     state.building_generation = Some(generation);
                     let operation_id = state.alloc_operation();
                     state.bump_revision();
+                    tracing::info!(
+                        peer = %state.peer_id.to_string_repr(),
+                        role = "offerer",
+                        generation,
+                        negotiation_epoch = state.negotiation_epoch,
+                        "v0.20 role arbitration resolved; building PeerConnection"
+                    );
                     effects.push(RtcPeerEffect::BuildSession {
                         generation,
                         operation_id,
@@ -1273,6 +1292,12 @@ fn reduce_command(
                     state.role = Role::Answerer;
                     state.awaiting_offer = true;
                     state.bump_revision();
+                    tracing::info!(
+                        peer = %state.peer_id.to_string_repr(),
+                        role = "answerer",
+                        negotiation_epoch = state.negotiation_epoch,
+                        "v0.20 role arbitration resolved; awaiting offer"
+                    );
                 }
             } else if state.role == Role::Undetermined {
                 // Unsolicited assignment (the server assigns both ends when the
@@ -1600,6 +1625,12 @@ fn reduce_command(
                             state.pending_local_sdp_exchange_id = None;
                         }
                     }
+                    tracing::debug!(
+                        peer = %state.peer_id.to_string_repr(),
+                        generation,
+                        exchange_id = ?exchange_id,
+                        "v0.20 remote SDP answer accepted; applying"
+                    );
                     schedule_remote_description(state, generation, desc, effects);
                 }
                 _ => {
@@ -1735,6 +1766,11 @@ fn defer_recovery_until_gate(state: &mut RtcPeerState, hard: bool) {
         return;
     }
     if !state.recovery_inflight {
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            hard,
+            "v0.20 recovery deferred until the signaling gate opens"
+        );
         state.recovery_cycle = state.recovery_cycle.wrapping_add(1);
         state.recovery_epoch = state.recovery_epoch.wrapping_add(1);
     }
@@ -1934,6 +1970,15 @@ fn start_soft_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     state.pc_connected = false;
     state.phase = RtcPeerPhase::Recovering;
     state.bump_revision();
+    tracing::info!(
+        peer = %state.peer_id.to_string_repr(),
+        role = ?state.role,
+        recovery_cycle = state.recovery_cycle,
+        recovery_epoch = state.recovery_epoch,
+        ice_generation = state.ice_generation,
+        generation = state.active_generation,
+        "v0.20 soft recovery started"
+    );
     if state.active_generation.is_none() {
         return;
     }
@@ -1977,6 +2022,13 @@ fn send_answerer_restart_request(state: &mut RtcPeerState, effects: &mut Vec<Rtc
         .clone()
         .expect("restart request id initialized");
     state.local_restart_request_attempt = state.local_restart_request_attempt.saturating_add(1);
+    tracing::debug!(
+        peer = %state.peer_id.to_string_repr(),
+        generation,
+        %request_id,
+        attempt = state.local_restart_request_attempt,
+        "v0.20 answerer sending ICE restart request"
+    );
     effects.push(RtcPeerEffect::SendSignaling {
         generation,
         message: SignalingMessage::IceRestartRequest {
@@ -2011,6 +2063,11 @@ fn retire_generation(state: &mut RtcPeerState, generation: u64, effects: &mut Ve
         schedule_close_session(state, generation, effects);
     }
     if changed {
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            generation,
+            "v0.20 session generation retired"
+        );
         state.bump_revision();
     }
 }
@@ -2095,6 +2152,12 @@ fn terminate_transport_attempt(
     // longer live, so `reduce_build_session` schedules its orphan close.
     state.phase = RtcPeerPhase::Idle;
     state.unavailable_reason = Some(reason);
+    tracing::warn!(
+        peer = %state.peer_id.to_string_repr(),
+        reason = ?reason,
+        transport_epoch = state.transport_epoch,
+        "v0.20 transport attempt terminated"
+    );
     state.bump_revision();
 }
 
@@ -2178,6 +2241,15 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     state.pending_pc_connected = false;
     state.pending_rpc_reliable_open = false;
     state.bump_revision();
+    tracing::info!(
+        peer = %state.peer_id.to_string_repr(),
+        role = ?state.role,
+        recovery_cycle = state.recovery_cycle,
+        recovery_epoch = state.recovery_epoch,
+        new_generation,
+        make_before_break,
+        "v0.20 hard recovery started; building replacement PeerConnection"
+    );
 
     // RFC step 4: create the replacement Session (pending if make-before-break).
     let operation_id = state.alloc_operation();
@@ -2194,6 +2266,11 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
     // consumes it. Without this wake, an answerer-only address change or
     // ForceReconnect builds a PC that can never leave Negotiating.
     if state.role == Role::Answerer {
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            new_generation,
+            "v0.20 answerer re-running role negotiation for the hard recovery"
+        );
         effects.push(RtcPeerEffect::SendSignaling {
             generation: new_generation,
             message: SignalingMessage::RoleNegotiation,
@@ -2207,6 +2284,11 @@ fn start_hard_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect
 /// business observers receive terminal Idle + RecoveryExhausted. A later
 /// explicit Connect starts a fresh cycle and generation.
 fn exhaust_recovery(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
+    tracing::warn!(
+        peer = %state.peer_id.to_string_repr(),
+        recovery_cycle = state.recovery_cycle,
+        "v0.20 recovery cycle exhausted; terminating the transport attempt"
+    );
     terminate_transport_attempt(state, RtcUnavailableReason::RecoveryExhausted, effects);
 }
 
@@ -2478,6 +2560,12 @@ fn reduce_driver_event(
     // (see `answerer_applies_same_ufrag_offer_as_renegotiation`).
     if let PeerDriverEvent::NegotiationNeeded { generation } = event {
         if state.role != Role::Offerer || !state.sendable() {
+            tracing::debug!(
+                peer = %state.peer_id.to_string_repr(),
+                generation,
+                role = ?state.role,
+                "v0.20 negotiation-needed ignored: only a sendable offerer renegotiates"
+            );
             return;
         }
         if state.renegotiation_inflight {
@@ -2486,6 +2574,12 @@ fn reduce_driver_event(
         }
         state.renegotiation_inflight = true;
         let operation_id = state.alloc_operation();
+        tracing::debug!(
+            peer = %state.peer_id.to_string_repr(),
+            generation,
+            operation_id,
+            "v0.20 renegotiation started"
+        );
         effects.push(RtcPeerEffect::CreateOffer {
             generation,
             operation_id,
@@ -2633,7 +2727,8 @@ fn reduce_lane_event(state: &mut RtcPeerState, event: LaneEvent, effects: &mut V
 /// the active fields. The peer becomes Sendable.
 fn atomic_switch(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     // RFC step 7: atomic switching of active generation.
-    if let Some(old) = state.active_generation.take() {
+    let retired_generation = state.active_generation.take();
+    if let Some(old) = retired_generation {
         // RFC step 9: mark old for retiring and close explicitly.
         state.sessions_to_close.insert(old);
         schedule_close_session(state, old, effects);
@@ -2657,6 +2752,12 @@ fn atomic_switch(state: &mut RtcPeerState, effects: &mut Vec<RtcPeerEffect>) {
     state.local_restart_request_attempt = 0;
     state.phase = RtcPeerPhase::Sendable;
     state.bump_revision();
+    tracing::info!(
+        peer = %state.peer_id.to_string_repr(),
+        retired_generation = ?retired_generation,
+        generation = new_gen,
+        "v0.20 atomic generation switch: replacement active"
+    );
     // Buffered candidates matching the new active ufrag can now be injected.
     flush_pending_candidates(state, effects);
 }
@@ -2806,6 +2907,25 @@ fn reduce_completion(
                                 exchange_id: state.pending_remote_sdp_exchange_id.take(),
                             },
                         };
+                        let (sdp_kind, announced_exchange_id) = match &message {
+                            SignalingMessage::Offer { exchange_id, .. } => {
+                                ("offer", exchange_id.clone())
+                            }
+                            SignalingMessage::IceRestartOffer { exchange_id, .. } => {
+                                ("ice-restart-offer", Some(exchange_id.clone()))
+                            }
+                            SignalingMessage::Answer { exchange_id, .. } => {
+                                ("answer", exchange_id.clone())
+                            }
+                            _ => ("sdp", None),
+                        };
+                        tracing::debug!(
+                            peer = %state.peer_id.to_string_repr(),
+                            generation,
+                            sdp_kind,
+                            exchange_id = ?announced_exchange_id,
+                            "v0.20 local description announced via signaling"
+                        );
                         effects.push(RtcPeerEffect::SendSignaling {
                             generation,
                             message,

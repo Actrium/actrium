@@ -103,7 +103,7 @@ impl WebRtcEventHandler {
 #[async_trait]
 impl PeerConnectionEventHandler for WebRtcEventHandler {
     async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
-        tracing::trace!(
+        tracing::debug!(
             peer = %self.peer_id.to_string_repr(),
             generation = self.generation,
             ?state,
@@ -116,6 +116,12 @@ impl PeerConnectionEventHandler for WebRtcEventHandler {
     }
 
     async fn on_ice_connection_state_change(&self, state: RTCIceConnectionState) {
+        tracing::debug!(
+            peer = %self.peer_id.to_string_repr(),
+            generation = self.generation,
+            ?state,
+            "v0.20 ICE connection state changed"
+        );
         self.publish(PeerDriverEvent::IceConnectionStateChanged {
             generation: self.generation,
             state,
@@ -123,6 +129,12 @@ impl PeerConnectionEventHandler for WebRtcEventHandler {
     }
 
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
+        tracing::debug!(
+            peer = %self.peer_id.to_string_repr(),
+            generation = self.generation,
+            ?state,
+            "v0.20 ICE gathering state changed"
+        );
         self.publish(PeerDriverEvent::IceGatheringStateChanged {
             generation: self.generation,
             state,
@@ -130,6 +142,12 @@ impl PeerConnectionEventHandler for WebRtcEventHandler {
     }
 
     async fn on_signaling_state_change(&self, state: RTCSignalingState) {
+        tracing::debug!(
+            peer = %self.peer_id.to_string_repr(),
+            generation = self.generation,
+            ?state,
+            "v0.20 signaling state changed"
+        );
         self.publish(PeerDriverEvent::SignalingStateChanged {
             generation: self.generation,
             state,
@@ -144,6 +162,12 @@ impl PeerConnectionEventHandler for WebRtcEventHandler {
     }
 
     async fn on_ice_candidate_error(&self, event: RTCPeerConnectionIceErrorEvent) {
+        tracing::debug!(
+            peer = %self.peer_id.to_string_repr(),
+            generation = self.generation,
+            error_text = %event.error_text,
+            "v0.20 ICE candidate error"
+        );
         self.publish(PeerDriverEvent::IceCandidateError {
             generation: self.generation,
             error_text: event.error_text,

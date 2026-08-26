@@ -309,10 +309,13 @@ impl RtcPeerControllerHandle {
             let total_frags = total_frags as u16;
             let mut sent_any = false;
             tracing::debug!(
-                "v0.20 fragmenting message: msg_id={} total_bytes={} fragments={}",
+                peer = %self.peer_id().to_string_repr(),
+                generation = permit.generation(),
+                lane = ?permit.lane(),
                 msg_id,
-                data_len,
-                total_frags
+                total_bytes = data_len,
+                fragments = total_frags,
+                "v0.20 fragmenting message"
             );
             for (frag_index, chunk) in payload.chunks(DC_MAX_PAYLOAD_SIZE).enumerate() {
                 let generation_current = permit.is_valid(self.snapshot().pc_generation);
@@ -330,6 +333,15 @@ impl RtcPeerControllerHandle {
                     // transport layer invalidates the stale lane instead of
                     // retrying against generic not-ready; an unreadable or
                     // still-connecting channel stays `ConnectionNotReady`.
+                    tracing::debug!(
+                        peer = %self.peer_id().to_string_repr(),
+                        generation = permit.generation(),
+                        lane = ?permit.lane(),
+                        generation_current,
+                        channel_open,
+                        ready_state = ?ready_state,
+                        "v0.20 send preflight failed before any fragment was sent"
+                    );
                     return Err(match ready_state {
                         Ok(webrtc::data_channel::RTCDataChannelState::Closed)
                         | Ok(webrtc::data_channel::RTCDataChannelState::Closing) => {
@@ -388,7 +400,22 @@ impl RtcPeerControllerHandle {
         // (RFC: "Actr SHOULD report DataChunkDeliveryUncertain").
         let outstanding = permit.channel().outstanding_bytes().await.unwrap_or(0);
         if sent_any || outstanding > 0 {
+            tracing::debug!(
+                peer = %self.peer_id().to_string_repr(),
+                generation = permit.generation(),
+                lane = ?permit.lane(),
+                outstanding_bytes = outstanding,
+                "v0.20 send failed with delivery uncertain (buffered or sent frames)"
+            );
             RtcSendError::DataChunkDeliveryUncertain
+        } else if matches!(base, RtcSendError::DataChannelClosed) {
+            tracing::warn!(
+                peer = %self.peer_id().to_string_repr(),
+                generation = permit.generation(),
+                lane = ?permit.lane(),
+                "v0.20 send failed on a closed data channel"
+            );
+            base
         } else {
             base
         }
@@ -401,6 +428,11 @@ impl RtcPeerControllerHandle {
         // Preflight: the peer must be sendable per the authoritative snapshot.
         let snapshot = self.snapshot();
         if !snapshot.sendable {
+            tracing::trace!(
+                peer = %self.peer_id().to_string_repr(),
+                ?lane,
+                "v0.20 send permit denied: peer not sendable"
+            );
             return Err(RtcSendError::ConnectionNotReady);
         }
         let handle = self.lane_or_ensure(lane, snapshot.pc_generation).await?;
@@ -409,6 +441,12 @@ impl RtcPeerControllerHandle {
         // Final race guard: re-read the snapshot; the generation must still be
         // current and the session uncancelled before we touch the channel.
         if !permit.is_valid(self.snapshot().pc_generation) {
+            tracing::debug!(
+                peer = %self.peer_id().to_string_repr(),
+                generation = permit.generation(),
+                ?lane,
+                "v0.20 send permit stale: generation moved or session cancelled"
+            );
             return Err(RtcSendError::ConnectionNotReady);
         }
         Ok(permit)

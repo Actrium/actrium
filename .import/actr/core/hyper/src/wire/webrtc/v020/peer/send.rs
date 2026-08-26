@@ -49,7 +49,10 @@ impl SendPermit {
         &self.channel
     }
 
-    #[cfg(test)]
+    pub(crate) fn generation(&self) -> u64 {
+        self.generation
+    }
+
     pub(crate) fn lane(&self) -> LaneKind {
         self.lane
     }
