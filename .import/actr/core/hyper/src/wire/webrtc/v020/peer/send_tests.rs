@@ -409,7 +409,7 @@ async fn close_with_outstanding_bytes_reports_delivery_uncertain() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn close_with_no_outstanding_is_plain_not_ready() {
+async fn close_with_no_outstanding_is_terminal_channel_closed() {
     let mut h = spawn_send_harness(1);
     drive_to_sendable(&mut h).await;
 
@@ -422,8 +422,8 @@ async fn close_with_no_outstanding_is_plain_not_ready() {
         .handle
         .send(LaneKind::RpcReliable, bytes::Bytes::from_static(b"x"))
         .await
-        .expect_err("close with no outstanding is plain not-ready");
-    assert_eq!(err, RtcSendError::ConnectionNotReady);
+        .expect_err("close with no outstanding must retire the stale transport");
+    assert_eq!(err, RtcSendError::DataChannelClosed);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -56,7 +56,14 @@ const DC_MAX_MESSAGE_SIZE: usize = 65535;
 pub(crate) const FRAGMENT_HEADER_SIZE: usize = 8;
 
 /// Stale fragment entries older than this are evicted from ReassemblyBuffer.
-const REASSEMBLY_TTL: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+///
+/// Loss semantics: the TTL is anchored at the first fragment. A sender that
+/// stalls mid-message for longer than this bound loses its original partial
+/// entry; any trailing fragments then open a fresh, uncompletable "zombie"
+/// entry that consumes budget until its own TTL expires (bounded, self-healing
+/// churn). The previous integration TTL was six hours; 30 s trades rare
+/// very-slow senders for prompt reclamation of reassembly budget.
+const REASSEMBLY_TTL: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// Maximum payload bytes that fit in one DataChannel message after the header.
 pub(crate) const DC_MAX_PAYLOAD_SIZE: usize = DC_MAX_MESSAGE_SIZE - FRAGMENT_HEADER_SIZE;
@@ -138,8 +145,13 @@ pub(crate) async fn notify_webrtc_fragment_sent_for_test(event: WebRtcFragmentSe
 /// Holds the pieces of a multi-fragment message while waiting for all fragments.
 struct FragmentEntry {
     total: u16,
-    /// Timestamp when the first fragment arrived (for TTL eviction).
+    /// Timestamp when the first fragment arrived (TTL eviction is anchored
+    /// here).
     created_at: Instant,
+    /// Timestamp of the last accepted fragment. Pressure eviction ranks by
+    /// this so an actively progressing transfer is not starved by quiet stale
+    /// entries (LRU-style fairness).
+    last_activity: Instant,
     fragments: HashMap<u16, bytes::Bytes>,
     bytes: usize,
 }
@@ -195,8 +207,6 @@ pub(crate) enum ReassemblyError {
         expected: u16,
         actual: u16,
     },
-    #[error("reassembly message-count budget exhausted")]
-    MessageBudgetExhausted,
     #[error("reassembly byte budget exhausted")]
     ByteBudgetExhausted,
     #[error("reassembled message exceeds configured maximum")]
@@ -213,6 +223,8 @@ pub(crate) struct ReassemblyBuffer {
     pending: HashMap<u32, FragmentEntry>,
     pending_bytes: usize,
     limits: ReassemblyLimits,
+    /// Correlation context (peer/generation/lane) for eviction diagnostics.
+    label: String,
 }
 
 impl ReassemblyBuffer {
@@ -221,11 +233,18 @@ impl ReassemblyBuffer {
         Self::with_limits(ReassemblyLimits::default())
     }
 
+    #[cfg(test)]
     pub(crate) fn with_limits(limits: ReassemblyLimits) -> Self {
+        Self::with_limits_and_label(limits, String::new())
+    }
+
+    /// Like [`with_limits`], with correlation context for eviction warnings.
+    pub(crate) fn with_limits_and_label(limits: ReassemblyLimits, label: String) -> Self {
         Self {
             pending: HashMap::new(),
             pending_bytes: 0,
             limits,
+            label,
         }
     }
 
@@ -289,7 +308,10 @@ impl ReassemblyBuffer {
                 return Ok(None);
             }
         } else if self.pending.len() >= self.limits.max_messages {
-            return Err(ReassemblyError::MessageBudgetExhausted);
+            // A bounded buffer must remain live under abandoned fragmented
+            // messages. Prefer dropping the oldest incomplete message over
+            // rejecting every new multi-fragment API call until a long TTL.
+            self.evict_oldest(None, "message_count");
         }
 
         let entry_bytes = self
@@ -304,24 +326,28 @@ impl ReassemblyBuffer {
             self.discard(msg_id);
             return Err(ReassemblyError::MessageTooLarge);
         }
-        if self
+        while self
             .pending_bytes
             .checked_add(payload.len())
             .is_none_or(|bytes| bytes > self.limits.max_bytes)
         {
-            self.discard(msg_id);
-            return Err(ReassemblyError::ByteBudgetExhausted);
+            if !self.evict_oldest(Some(msg_id), "byte_budget") {
+                self.discard(msg_id);
+                return Err(ReassemblyError::ByteBudgetExhausted);
+            }
         }
 
         let entry = self.pending.entry(msg_id).or_insert_with(|| FragmentEntry {
             total: total_frags,
             created_at: Instant::now(),
+            last_activity: Instant::now(),
             fragments: HashMap::new(),
             bytes: 0,
         });
         entry.bytes += payload.len();
         self.pending_bytes += payload.len();
         entry.fragments.insert(frag_index, payload);
+        entry.last_activity = Instant::now();
 
         if entry.fragments.len() == entry.total as usize {
             // All fragments arrived – reassemble in order.
@@ -344,6 +370,33 @@ impl ReassemblyBuffer {
     fn discard(&mut self, msg_id: u32) {
         if let Some(entry) = self.pending.remove(&msg_id) {
             self.pending_bytes = self.pending_bytes.saturating_sub(entry.bytes);
+        }
+    }
+
+    fn evict_oldest(&mut self, exclude: Option<u32>, pressure: &str) -> bool {
+        // Rank by last accepted fragment rather than first arrival: a stalled
+        // partial message loses its slot to genuinely quiet entries, so churn
+        // cannot repeatedly starve an older but actively progressing transfer
+        // just before it completes.
+        let oldest = self
+            .pending
+            .iter()
+            .filter(|(msg_id, _)| Some(**msg_id) != exclude)
+            .min_by_key(|(_, entry)| entry.last_activity)
+            .map(|(msg_id, _)| *msg_id);
+        if let Some(msg_id) = oldest {
+            let evicted_bytes = self.pending.get(&msg_id).map_or(0, |entry| entry.bytes);
+            self.discard(msg_id);
+            tracing::warn!(
+                lane_context = %self.label,
+                msg_id,
+                evicted_bytes,
+                pressure,
+                "evicting least-recently-active incomplete reassembly message to preserve ingress liveness"
+            );
+            true
+        } else {
+            false
         }
     }
 

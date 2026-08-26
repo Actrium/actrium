@@ -67,6 +67,9 @@ impl V020DataLane {
             RtcSendError::ConnectionNotReady => {
                 NetworkError::ConnectionError("v0.20 peer not sendable".into())
             }
+            RtcSendError::DataChannelClosed => {
+                NetworkError::DataChannelClosed("v0.20 data channel closed".into())
+            }
             RtcSendError::DataChannelBufferFull => {
                 NetworkError::ConnectionError("v0.20 data channel buffer full".into())
             }
@@ -166,6 +169,33 @@ mod tests {
         let complete = reassembly.insert(m, f, t, p).expect("should be complete");
 
         assert_eq!(complete.as_ref(), data.as_slice());
+    }
+
+    #[test]
+    fn closed_channel_bridge_keeps_data_channel_closed_identity() {
+        // A regression back to generic ConnectionError here would bypass
+        // stale-transport retirement while the internal mapping tests still
+        // pass, so pin the production bridge directly.
+        assert!(matches!(
+            V020DataLane::map_error(RtcSendError::DataChannelClosed),
+            NetworkError::DataChannelClosed(_)
+        ));
+        assert!(matches!(
+            V020DataLane::map_error(RtcSendError::ConnectionNotReady),
+            NetworkError::ConnectionError(_)
+        ));
+        assert!(matches!(
+            V020DataLane::map_error(RtcSendError::DataChunkDeliveryUncertain),
+            NetworkError::ConnectionError(_)
+        ));
+        assert!(matches!(
+            V020DataLane::map_error(RtcSendError::DataChannelBufferFull),
+            NetworkError::ConnectionError(_)
+        ));
+        assert!(matches!(
+            V020DataLane::map_error(RtcSendError::MessageTooLarge),
+            NetworkError::InvalidArgument(_)
+        ));
     }
 
     #[test]

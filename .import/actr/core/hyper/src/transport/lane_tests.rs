@@ -331,16 +331,18 @@ fn try_insert_rejects_inconsistent_total() {
 }
 
 #[test]
-fn try_insert_rejects_when_message_budget_exhausted() {
+fn try_insert_evicts_oldest_when_message_budget_is_full() {
     let mut buf = ReassemblyBuffer::with_limits(tiny_limits());
     // Two in-flight (incomplete) messages fill the message budget.
     assert!(buf.try_insert(1, 0, 2, frag(8)).unwrap().is_none());
     assert!(buf.try_insert(2, 0, 2, frag(8)).unwrap().is_none());
-    let err = buf.try_insert(3, 0, 2, frag(8)).unwrap_err();
-    assert!(matches!(err, ReassemblyError::MessageBudgetExhausted));
-    // Completing a message frees its slot for a new one.
-    assert!(buf.try_insert(1, 1, 2, frag(8)).unwrap().is_some());
     assert!(buf.try_insert(3, 0, 2, frag(8)).unwrap().is_none());
+    assert!(buf.pending.contains_key(&3));
+    assert_eq!(buf.pending.len(), 2);
+    assert!(
+        !buf.pending.contains_key(&1) || !buf.pending.contains_key(&2),
+        "one pre-existing partial must be evicted"
+    );
 }
 
 #[test]
@@ -357,7 +359,7 @@ fn try_insert_rejects_message_too_large() {
 }
 
 #[test]
-fn try_insert_rejects_when_byte_budget_exhausted() {
+fn try_insert_evicts_other_partial_when_byte_budget_is_full() {
     let mut buf = ReassemblyBuffer::with_limits(tiny_limits());
     // 32 + 32 == max_bytes (64): both fit per-message but the aggregate is
     // now full. The next insert must extend an EXISTING message (a new msg_id
@@ -365,13 +367,12 @@ fn try_insert_rejects_when_byte_budget_exhausted() {
     // per-message cap so only the aggregate guard can fire.
     assert!(buf.try_insert(1, 0, 2, frag(32)).unwrap().is_none());
     assert!(buf.try_insert(2, 0, 2, frag(32)).unwrap().is_none());
-    let err = buf.try_insert(1, 1, 2, frag(8)).unwrap_err();
-    assert!(matches!(err, ReassemblyError::ByteBudgetExhausted));
-    // The rejected extension discards message 1 wholesale: its 32 bytes left
-    // the aggregate (only message 2's 32 remain), and the message restarts
-    // from its first fragment.
-    assert!(buf.try_insert(1, 0, 2, frag(8)).unwrap().is_none());
     assert!(buf.try_insert(1, 1, 2, frag(8)).unwrap().is_some());
+    assert!(
+        !buf.pending.contains_key(&2),
+        "competing oldest partial was evicted"
+    );
+    assert_eq!(buf.pending_bytes, 0);
 }
 
 #[test]

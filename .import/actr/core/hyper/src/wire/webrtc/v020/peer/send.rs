@@ -62,6 +62,8 @@ impl SendPermit {
 pub(crate) enum RtcSendError {
     #[error("connection not ready")]
     ConnectionNotReady,
+    #[error("data channel closed")]
+    DataChannelClosed,
     #[error("data channel buffer full")]
     DataChannelBufferFull,
     #[error("data chunk delivery uncertain")]
@@ -81,8 +83,21 @@ pub(crate) struct RtcSendFailed(pub(crate) String);
 /// Map a v0.20 send error to a stable Actr send error.
 pub(crate) fn map_send_error(error: &RtcError) -> RtcSendError {
     match error {
-        RtcError::ErrDataChannelClosed => RtcSendError::ConnectionNotReady,
+        RtcError::ErrDataChannelClosed => RtcSendError::DataChannelClosed,
         RtcError::ErrSendBufferFull => RtcSendError::DataChannelBufferFull,
         _ => RtcSendError::ConnectionNotReady,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn closed_data_channel_keeps_a_terminal_error_identity() {
+        assert_eq!(
+            map_send_error(&RtcError::ErrDataChannelClosed),
+            RtcSendError::DataChannelClosed
+        );
     }
 }
