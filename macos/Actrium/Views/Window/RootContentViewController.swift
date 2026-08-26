@@ -101,7 +101,8 @@ private enum CompactToolbarLayout {
     /// the ScrollView's clipping viewport.
     static let windowCornerRadius: CGFloat = 12
     static let toolbarHeight: CGFloat = 45
-    static let tabStripHeight: CGFloat = 36
+    static let tabStripContentPadding: CGFloat = 3
+    static let tabStripHeight: CGFloat = 38
     static let edgeTabCornerRadius: CGFloat = 8
     static let tabCornerRadius: CGFloat = 6
     static let horizontalPadding: CGFloat = 8
@@ -679,6 +680,7 @@ struct MainWindowTabsView: View {
     @ObservedObject var bookmarkVM: BookmarkViewModel
     @ObservedObject var layoutState: SidebarLayoutState
     @ObservedObject var interaction: ToolbarTabInteractionCoordinator
+    @ObservedObject private var windowChrome = WindowChromeManager.shared
 
     @State private var addressText: String = ""
     @State private var hasInputActivity: Bool = false
@@ -796,7 +798,7 @@ struct MainWindowTabsView: View {
                                 }
                             }
                         }
-                        .padding(2)
+                        .padding(CompactToolbarLayout.tabStripContentPadding)
                         .animation(ToolbarTabMotion.slide, value: viewModel.currentTabId)
                     }
                     .onScrollGeometryChange(for: CGFloat.self) { geometry in
@@ -987,7 +989,7 @@ struct MainWindowTabsView: View {
         }
         let contentWidth = tabsWidth
             + groupHeaderWidth
-            + 4
+            + CompactToolbarLayout.tabStripContentPadding * 2
         return min(
             contentWidth,
             CompactToolbarLayout.maximumTabStripWidth(
@@ -1031,7 +1033,7 @@ struct MainWindowTabsView: View {
             0,
             viewportWidth
                 - groupHeaderWidth
-                - 4
+                - CompactToolbarLayout.tabStripContentPadding * 2
         )
         let inputs = visibleTabs.map { tab in
             ToolbarAdaptiveTabWidthInput(
@@ -1058,7 +1060,7 @@ struct MainWindowTabsView: View {
         viewportWidth: CGFloat,
         contentOffsetX: CGFloat
     ) -> [UUID: ToolbarAccordionTabPresentation] {
-        var contentX: CGFloat = 2
+        var contentX = CompactToolbarLayout.tabStripContentPadding
         var inputs: [ToolbarAccordionTabLayoutInput] = []
 
         for section in sections {
@@ -1071,7 +1073,7 @@ struct MainWindowTabsView: View {
                     let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
                     let logicalFrame = CGRect(
                         x: contentX - contentOffsetX,
-                        y: 2,
+                        y: CompactToolbarLayout.tabStripContentPadding,
                         width: width,
                         height: 32
                     )
@@ -1116,6 +1118,9 @@ struct MainWindowTabsView: View {
                     .mask {
                         accordionCoverMask(accordionPresentation)
                     }
+                    // The chrome-colored boundary stays outside the content
+                    // mask so it remains opaque above a lower Tab.
+                    .overlay { tabBoundary(for: tab) }
                     .allowsHitTesting(!accordionPresentation.isFolded)
             }
         }
@@ -1224,6 +1229,7 @@ struct MainWindowTabsView: View {
            let frame = interaction.movingTabFrame(for: tabID) {
             tabLabel(tab)
                 .frame(width: frame.width, height: frame.height)
+                .overlay { tabBoundary(for: tab) }
                 .position(x: frame.midX, y: frame.midY)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -1258,6 +1264,7 @@ struct MainWindowTabsView: View {
                             let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
                             tabLabel(tab)
                                 .frame(width: width, height: 32)
+                                .overlay { tabBoundary(for: tab) }
                         }
                     }
                 }
@@ -1591,7 +1598,6 @@ struct MainWindowTabsView: View {
         .background {
             tabSurface(for: tab, tintOpacity: 0.035)
         }
-        .overlay { tabBoundary(for: tab) }
         .overlay(alignment: .bottom) { groupIndicator(for: tab) }
         .contentShape(tabShape(for: tab))
         .onTapGesture {
@@ -1635,7 +1641,6 @@ struct MainWindowTabsView: View {
         .background {
             tabSurface(for: tab, tintOpacity: 0.11)
         }
-        .overlay { tabBoundary(for: tab) }
         .overlay(alignment: .bottom) { groupIndicator(for: tab) }
         .contentShape(tabShape(for: tab))
         .onHover { isInside in
@@ -1662,11 +1667,21 @@ struct MainWindowTabsView: View {
         }
     }
 
-    /// A hairline in the toolbar backing color disappears in the ordinary
-    /// strip, but becomes a clean silhouette when two opaque Tabs overlap.
+    /// Two touching 1.5pt inside strokes form a 3pt visual separation
+    /// without reserving layout space. Because this color is the flattened
+    /// Header chrome rather than the Tab plate, the same contour remains clear
+    /// when an upper Tab overlaps a lower one.
     private func tabBoundary(for tab: Tab) -> some View {
-        tabShape(for: tab)
-            .strokeBorder(AppColors.windowChromeTabPlateColor, lineWidth: 0.5)
+        let isFocusedAddressTab = tab.id == viewModel.currentTabId
+            && interaction.isAddressEditing
+            && addressPresentationPhase.showsFocusAffordances
+
+        return tabShape(for: tab)
+            .strokeBorder(
+                Color(nsColor: windowChrome.style.tabSeparationColor),
+                lineWidth: 1.5
+            )
+            .opacity(isFocusedAddressTab ? 0 : 1)
             .allowsHitTesting(false)
     }
 
@@ -1714,14 +1729,14 @@ struct MainWindowTabsView: View {
                 transaction.animation = nil
             }
         }
-        .overlay { tabBoundary(for: tab) }
         .overlay {
             tabShape(for: tab)
+                .inset(by: -2.5)
                 .strokeBorder(
                     AppColors.softenedAddressFocusAccentColor.opacity(
                         addressPresentationPhase.showsFocusAffordances ? 0.88 : 0
                     ),
-                    lineWidth: 2
+                    lineWidth: 2.5
                 )
                 .shadow(
                     color: AppColors.softenedAddressFocusAccentColor.opacity(
@@ -1732,7 +1747,7 @@ struct MainWindowTabsView: View {
         }
         .overlay {
             tabShape(for: tab)
-                .inset(by: 2)
+                .inset(by: -0.5)
                 .strokeBorder(
                     AppColors.addressFocusInnerHighlightColor.opacity(
                         addressPresentationPhase.showsFocusAffordances ? 1 : 0
