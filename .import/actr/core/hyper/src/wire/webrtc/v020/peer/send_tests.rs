@@ -27,6 +27,7 @@ use crate::wire::webrtc::v020::peer::effects::test_support::{
 use crate::wire::webrtc::v020::peer::effects::{SessionFactory, SessionOps};
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
 use crate::wire::webrtc::v020::peer::send::RtcSendError;
+use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::LaneKind;
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -139,7 +140,7 @@ impl SessionFactory for RecordingFactory {
 struct SendHarness {
     handle: crate::wire::webrtc::v020::peer::handle::RtcPeerControllerHandle,
     channels: Arc<StdMutex<HashMap<String, Arc<RecordingDataChannel>>>>,
-    signaling_rx: mpsc::Receiver<(ActrId, SignalingMessage)>,
+    signaling_rx: mpsc::Receiver<SignalingDispatch>,
     mailbox: Arc<StdMutex<Option<crate::wire::webrtc::v020::events::PeerEventMailbox>>>,
     /// Kept alive so the broadcast sender is not dropped (which would close
     /// the controller's network event receiver and exit its event loop).
@@ -202,11 +203,14 @@ fn channel_of(h: &SendHarness, label: &str) -> Arc<RecordingDataChannel> {
 async fn drive_to_sendable(h: &mut SendHarness) {
     h.handle.connect().await.expect("send connect");
     // Server assigns the offerer role (the RoleNegotiation is on signaling_rx).
-    let (_peer, msg) = timeout(WAIT, h.signaling_rx.recv())
+    let dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("role negotiation")
         .expect("signaling closed");
-    assert!(matches!(msg, SignalingMessage::RoleNegotiation));
+    assert!(matches!(
+        dispatch.message,
+        SignalingMessage::RoleNegotiation
+    ));
     h.handle
         .apply_role_assignment(true)
         .await

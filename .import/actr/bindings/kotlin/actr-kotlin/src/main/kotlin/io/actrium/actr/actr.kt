@@ -6990,7 +6990,8 @@ enum class WebRtcUnavailableReasonBridge {
     UNSUPPORTED_RTC_CAPABILITY,
     RTC_RESOURCE_LIMIT_EXCEEDED,
     RECOVERY_EXHAUSTED,
-    CLOSED;
+    CLOSED,
+    PEER_UNAVAILABLE;
 
     
 
@@ -9070,5 +9071,4 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
     )
     }
     
-
 

@@ -25,6 +25,7 @@ use super::reducer::{
 };
 use crate::wire::webrtc::v020::events::{PeerDriverEvent, PeerEventMailbox};
 use crate::wire::webrtc::v020::recovery::{NETWORK_RECOVERY_TIMEOUT, RtcNetworkEvent};
+use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::{PeerTransportRetirement, RtcPeerSnapshot};
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -82,10 +83,10 @@ struct ControllerTestHarness {
     effects: Arc<TestEffectSink>,
     facts: FactInjector,
     clock: Arc<ManualPolicyClock>,
-    signaling_rx: mpsc::Receiver<(ActrId, SignalingMessage)>,
+    signaling_rx: mpsc::Receiver<SignalingDispatch>,
     /// Test-owned clone of the controller's signaling sender: pre-fills the
     /// queue so controller sends meet a full queue (retention backpressure).
-    signaling_fill: mpsc::Sender<(ActrId, SignalingMessage)>,
+    signaling_fill: mpsc::Sender<SignalingDispatch>,
     supervisor: crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor,
     retirement_rx: tokio::sync::broadcast::Receiver<PeerTransportRetirement>,
     task: tokio::task::JoinHandle<()>,
@@ -153,18 +154,21 @@ impl ControllerTestHarness {
     }
 
     async fn expect_role_negotiation(&mut self) {
-        let (_, message) = timeout(WAIT, self.signaling_rx.recv())
+        let dispatch = timeout(WAIT, self.signaling_rx.recv())
             .await
             .expect("role negotiation timeout")
             .expect("signaling channel closed");
-        assert!(matches!(message, SignalingMessage::RoleNegotiation));
+        assert!(matches!(
+            dispatch.message,
+            SignalingMessage::RoleNegotiation
+        ));
     }
 
     /// Fill the signaling queue to capacity with an inert ICE candidate so
     /// the controller's next signaling send meets a full queue.
     async fn fill_signaling(&self, serial: u64) {
         self.signaling_fill
-            .send((
+            .send(SignalingDispatch::untracked(
                 test_actor_id(serial),
                 SignalingMessage::Candidate(webrtc::peer_connection::RTCIceCandidateInit {
                     candidate: "filler".to_string(),
@@ -262,11 +266,11 @@ async fn drive_offerer_to_sendable(h: &mut ControllerTestHarness) {
         })
         .await
         .expect("complete T1 local description");
-    let (_, signaling) = timeout(WAIT, h.signaling_rx.recv())
+    let dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("T1 offer timeout")
         .expect("T1 signaling channel closed");
-    assert!(matches!(signaling, SignalingMessage::Offer { .. }));
+    assert!(matches!(dispatch.message, SignalingMessage::Offer { .. }));
 
     h.handle
         .apply_remote_description(desc(RTCSdpType::Answer))
@@ -388,11 +392,11 @@ async fn drive_answerer_to_sendable(h: &mut ControllerTestHarness) {
         })
         .await
         .expect("complete T1 answerer local description");
-    let (_, signaling) = timeout(WAIT, h.signaling_rx.recv())
+    let dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("T1 answer timeout")
         .expect("T1 signaling channel closed");
-    assert!(matches!(signaling, SignalingMessage::Answer { .. }));
+    assert!(matches!(dispatch.message, SignalingMessage::Answer { .. }));
 
     h.facts.driver(PeerDriverEvent::PeerConnectionStateChanged {
         generation: 1,
@@ -681,12 +685,12 @@ async fn retained_role_probe_is_dropped_once_its_attempt_is_superseded() {
     // never flushed. Its replay would re-run server arbitration and the
     // repeated Offerer assignment would rebuild the fresh generation a newer
     // attempt allocated.
-    let (_, filler) = h
+    let filler = h
         .signaling_rx
         .recv()
         .await
         .expect("signaling channel closed before the filler was drained");
-    assert!(matches!(filler, SignalingMessage::Candidate(_)));
+    assert!(matches!(filler.message, SignalingMessage::Candidate(_)));
 
     h.facts.driver(PeerDriverEvent::IceCandidateError {
         generation: 1,
@@ -705,11 +709,11 @@ async fn retained_role_probe_is_dropped_once_its_attempt_is_superseded() {
     // directly (the drop counter stays at 1). Without the transport-attempt
     // fence the stale epoch-1 probe would take the slot instead and force
     // the epoch-2 probe into retention (counter 2).
-    let (_, probe) = timeout(WAIT, h.signaling_rx.recv())
+    let probe = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("epoch-2 probe was not delivered")
         .expect("signaling channel closed");
-    assert!(matches!(probe, SignalingMessage::RoleNegotiation));
+    assert!(matches!(probe.message, SignalingMessage::RoleNegotiation));
     assert!(
         timeout(Duration::from_millis(100), h.signaling_rx.recv())
             .await
@@ -991,12 +995,12 @@ async fn fresh_remote_offer_replaces_recovery_with_a_bounded_initial_attempt() {
     // Request-only answerer recovery: the restart request goes straight to
     // signaling; the local restart happens implicitly when the remote restart
     // offer is applied, so no RestartIce effect is dispatched here.
-    let (_, recovery_message) = timeout(WAIT, h.signaling_rx.recv())
+    let recovery_dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("T1 restart request timeout")
         .expect("T1 signaling channel closed");
     assert!(matches!(
-        recovery_message,
+        recovery_dispatch.message,
         SignalingMessage::IceRestartRequest { .. }
     ));
 

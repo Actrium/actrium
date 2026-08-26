@@ -111,6 +111,7 @@ pub enum WebRtcUnavailableReasonBridge {
     RtcResourceLimitExceeded,
     RecoveryExhausted,
     Closed,
+    PeerUnavailable,
 }
 
 impl From<actr_framework::WebRtcUnavailableReason> for WebRtcUnavailableReasonBridge {
@@ -124,6 +125,7 @@ impl From<actr_framework::WebRtcUnavailableReason> for WebRtcUnavailableReasonBr
             R::PeerConnectionRebuildFailed => Self::PeerConnectionRebuildFailed,
             R::UnsupportedRtcCapability => Self::UnsupportedRtcCapability,
             R::RtcResourceLimitExceeded => Self::RtcResourceLimitExceeded,
+            R::PeerUnavailable => Self::PeerUnavailable,
             R::RecoveryExhausted => Self::RecoveryExhausted,
             R::Closed => Self::Closed,
             // The source enum is non_exhaustive; project an unknown reason

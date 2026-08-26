@@ -15,10 +15,10 @@ use std::time::{Duration, Instant};
 
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
-    AIdCredential, ActrId, ActrRelay, RegisterRequest, RegisterResponse, RouteCandidatesResponse,
-    SIGNALING_ENVELOPE_VERSION, SignalingEnvelope, SignalingToActr, TurnCredential, actr_relay,
-    actr_to_signaling, peer_to_signaling, register_response, route_candidates_response,
-    signaling_envelope, signaling_to_actr,
+    AIdCredential, ActrId, ActrRelay, RegisterRequest, RegisterResponse, RelayDeliveryResult,
+    RelayDeliveryStatus, RouteCandidatesResponse, SIGNALING_ENVELOPE_VERSION, SignalingEnvelope,
+    SignalingToActr, TurnCredential, actr_relay, actr_to_signaling, peer_to_signaling,
+    register_response, route_candidates_response, signaling_envelope, signaling_to_actr,
 };
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Query, State};
@@ -660,6 +660,7 @@ async fn handle_actr_relay(
                 source: role_neg.to.clone(),
                 credential: AIdCredential::default(),
                 target: role_neg.from.clone(),
+                delivery_context: None,
                 payload: Some(actr_relay::Payload::RoleAssignment(
                     actr_protocol::RoleAssignment {
                         is_offerer: from_is_offerer,
@@ -679,6 +680,7 @@ async fn handle_actr_relay(
                 source: role_neg.from.clone(),
                 credential: AIdCredential::default(),
                 target: role_neg.to.clone(),
+                delivery_context: None,
                 payload: Some(actr_relay::Payload::RoleAssignment(
                     actr_protocol::RoleAssignment {
                         is_offerer: !from_is_offerer,
@@ -703,21 +705,66 @@ async fn handle_actr_relay(
             "mock-actrix: role negotiation routed pairwise"
         );
 
-        send_to_client(&from_client_id, &envelope_for_from, state).await;
-
         if let Some(target_client_id) = to_client_id.as_deref() {
-            send_to_client(target_client_id, &envelope_for_to, state).await;
+            let _ = send_to_client(&from_client_id, &envelope_for_from, state).await;
+            // Production keys the delivery disposition on the assignment
+            // sent to `to`: the target session exists, so a failed egress
+            // is an ordinary rejection, not unavailability.
+            let target_sent = send_to_client(target_client_id, &envelope_for_to, state).await;
+            send_relay_delivery_result(
+                sender_id,
+                envelope,
+                relay,
+                if target_sent {
+                    RelayDeliveryStatus::RelayDeliveryAccepted
+                } else {
+                    RelayDeliveryStatus::RelayDeliveryRejected
+                },
+                state,
+            )
+            .await;
         } else {
             tracing::warn!(
                 from_actor = %role_neg.from.to_string_repr(),
                 to_actor = %role_neg.to.to_string_repr(),
                 "mock-actrix: role negotiation target has no bound websocket"
             );
+            send_relay_delivery_result(
+                sender_id,
+                envelope,
+                relay,
+                RelayDeliveryStatus::RelayDeliveryTargetUnavailable,
+                state,
+            )
+            .await;
         }
         return;
     }
 
-    forward_relay_to_target(envelope, relay, sender_id, state).await;
+    let egress = forward_relay_to_target(envelope, relay, sender_id, state).await;
+    send_relay_delivery_result(sender_id, envelope, relay, egress.wire_status(), state).await;
+}
+
+/// Egress disposition of one relay in the mock, mirroring production's
+/// queue-rejection vs target-unavailable split so delivery results stay
+/// faithful to Actrix.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MockRelayEgress {
+    Delivered,
+    Rejected,
+    TargetUnavailable,
+}
+
+impl MockRelayEgress {
+    fn wire_status(self) -> RelayDeliveryStatus {
+        match self {
+            MockRelayEgress::Delivered => RelayDeliveryStatus::RelayDeliveryAccepted,
+            MockRelayEgress::Rejected => RelayDeliveryStatus::RelayDeliveryRejected,
+            MockRelayEgress::TargetUnavailable => {
+                RelayDeliveryStatus::RelayDeliveryTargetUnavailable
+            }
+        }
+    }
 }
 
 async fn forward_relay_to_target(
@@ -725,7 +772,7 @@ async fn forward_relay_to_target(
     relay: &ActrRelay,
     sender_id: &str,
     state: &Arc<MockState>,
-) {
+) -> MockRelayEgress {
     // Forward relay to target by ActrId lookup.
     let target_id = &relay.target;
     let client_map = state.client_to_actr_id.read().await;
@@ -750,15 +797,26 @@ async fn forward_relay_to_target(
                 tracestate: envelope.tracestate.clone(),
             };
             let encoded = forwarded.encode_to_vec();
-            let _ = tx.send(Message::Binary(Bytes::from(encoded)));
-        } else {
-            tracing::warn!(
-                source = %relay.source.to_string_repr(),
-                target = %relay.target.to_string_repr(),
-                target_client_id = %target_cid,
-                "mock-actrix: relay target client missing websocket sender"
-            );
+            return match tx.send(Message::Binary(Bytes::from(encoded))) {
+                Ok(()) => MockRelayEgress::Delivered,
+                Err(_) => {
+                    tracing::warn!(
+                        source = %relay.source.to_string_repr(),
+                        target = %relay.target.to_string_repr(),
+                        target_client_id = %target_cid,
+                        "mock-actrix: relay target websocket sender closed"
+                    );
+                    MockRelayEgress::Rejected
+                }
+            };
         }
+        tracing::warn!(
+            source = %relay.source.to_string_repr(),
+            target = %relay.target.to_string_repr(),
+            target_client_id = %target_cid,
+            "mock-actrix: relay target client missing websocket sender"
+        );
+        MockRelayEgress::TargetUnavailable
     } else {
         tracing::warn!(
             source = %relay.source.to_string_repr(),
@@ -766,7 +824,36 @@ async fn forward_relay_to_target(
             sender_id = %sender_id,
             "mock-actrix: dropping relay for unbound target instead of broadcasting"
         );
+        MockRelayEgress::TargetUnavailable
     }
+}
+
+async fn send_relay_delivery_result(
+    sender_id: &str,
+    original_envelope: &SignalingEnvelope,
+    relay: &ActrRelay,
+    status: RelayDeliveryStatus,
+    state: &Arc<MockState>,
+) {
+    let Some(context) = relay.delivery_context else {
+        return;
+    };
+    send_response(
+        sender_id,
+        original_envelope,
+        SignalingToActr {
+            target: relay.source.clone(),
+            payload: Some(signaling_to_actr::Payload::RelayDeliveryResult(
+                RelayDeliveryResult {
+                    target: relay.target.clone(),
+                    context,
+                    status: status as i32,
+                },
+            )),
+        },
+        state,
+    )
+    .await;
 }
 
 // ---------------------------------------------------------------------------
@@ -790,11 +877,20 @@ async fn send_response(
     send_to_client(client_id, &response_envelope, state).await;
 }
 
-async fn send_to_client(client_id: &str, envelope: &SignalingEnvelope, state: &Arc<MockState>) {
+/// Whether one egress send reached its client's WS channel. Production
+/// Actrix reports a full/closed target queue as `Rejected`, distinct from an
+/// exact `ActrId` with no bound session (`TargetUnavailable`); the mock
+/// mirrors that split so e2e recovery tests stay faithful.
+async fn send_to_client(
+    client_id: &str,
+    envelope: &SignalingEnvelope,
+    state: &Arc<MockState>,
+) -> bool {
     let encoded = envelope.encode_to_vec();
     let clients = state.clients.read().await;
-    if let Some(tx) = clients.get(client_id) {
-        let _ = tx.send(Message::Binary(Bytes::from(encoded)));
+    match clients.get(client_id) {
+        Some(tx) => tx.send(Message::Binary(Bytes::from(encoded))).is_ok(),
+        None => false,
     }
 }
 
@@ -867,15 +963,16 @@ fn parse_actor_id(s: &str) -> Option<ActrId> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_register_ok, collect_reachable_route_candidates, forward_relay_to_target,
-        resolve_role_negotiation_targets,
+        MockRelayEgress, build_register_ok, collect_reachable_route_candidates,
+        forward_relay_to_target, resolve_role_negotiation_targets, send_relay_delivery_result,
     };
     use crate::state::{MockState, RegisteredActor};
     use actr_protocol::prost::Message as ProstMessage;
     use actr_protocol::{
-        AIdCredential, ActrId, ActrRelay, ActrType, Realm, RegisterRequest,
-        SIGNALING_ENVELOPE_VERSION, SessionDescription, SignalingEnvelope, actr_relay,
-        session_description::Type as SdpType, signaling_envelope,
+        AIdCredential, ActrId, ActrRelay, ActrType, Realm, RegisterRequest, RelayDeliveryContext,
+        RelayDeliveryStatus, RoleNegotiation, SIGNALING_ENVELOPE_VERSION, SessionDescription,
+        SignalingEnvelope, SignalingToActr, actr_relay, session_description::Type as SdpType,
+        signaling_envelope, signaling_to_actr,
     };
     use axum::extract::ws::Message;
     use ed25519_dalek::SigningKey;
@@ -1029,6 +1126,7 @@ mod tests {
             source: source.clone(),
             credential: AIdCredential::default(),
             target: target.clone(),
+            delivery_context: None,
             payload: Some(actr_relay::Payload::SessionDescription(
                 SessionDescription {
                     r#type: SdpType::Answer as i32,
@@ -1064,5 +1162,171 @@ mod tests {
             panic!("expected forwarded SessionDescription");
         };
         assert_eq!(sd.sdp_exchange_id.as_deref(), Some("exchange-1"));
+    }
+
+    #[tokio::test]
+    async fn delivery_result_echoes_context_and_correlates_to_request() {
+        let state = test_state();
+        let source = actor(1, "client");
+        let target = actor(2, "missing-service");
+        let (sender_tx, mut sender_rx) = mpsc::unbounded_channel();
+        state
+            .client_to_actr_id
+            .write()
+            .await
+            .insert("source-ws".to_string(), source.clone());
+        state
+            .clients
+            .write()
+            .await
+            .insert("source-ws".to_string(), sender_tx);
+
+        let relay = ActrRelay {
+            source: source.clone(),
+            credential: AIdCredential::default(),
+            target: target.clone(),
+            delivery_context: Some(RelayDeliveryContext {
+                controller_lifecycle_id: 7,
+                transport_epoch: 11,
+                pc_generation: 13,
+                negotiation_epoch: Some(29),
+            }),
+            payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
+                realm_id: source.realm.realm_id,
+                from: source.clone(),
+                to: target.clone(),
+            })),
+        };
+        let original = SignalingEnvelope {
+            envelope_version: SIGNALING_ENVELOPE_VERSION,
+            envelope_id: "request-envelope".to_string(),
+            reply_for: None,
+            traceparent: None,
+            tracestate: None,
+            flow: Some(signaling_envelope::Flow::ActrRelay(relay.clone())),
+        };
+
+        send_relay_delivery_result(
+            "source-ws",
+            &original,
+            &relay,
+            RelayDeliveryStatus::RelayDeliveryTargetUnavailable,
+            &state,
+        )
+        .await;
+
+        let msg = sender_rx
+            .recv()
+            .await
+            .expect("delivery result should reach the sender");
+        let Message::Binary(bytes) = msg else {
+            panic!("expected binary signaling envelope");
+        };
+        let result_envelope =
+            SignalingEnvelope::decode(bytes.as_ref()).expect("result envelope should decode");
+        assert_eq!(
+            result_envelope.reply_for.as_deref(),
+            Some("request-envelope"),
+            "the result must correlate to the requesting envelope"
+        );
+        let Some(signaling_envelope::Flow::ServerToActr(SignalingToActr {
+            target: result_target,
+            payload: Some(signaling_to_actr::Payload::RelayDeliveryResult(result)),
+        })) = result_envelope.flow
+        else {
+            panic!("expected relay delivery result");
+        };
+        assert_eq!(result_target, source);
+        assert_eq!(result.target, target);
+        assert_eq!(
+            result.status,
+            RelayDeliveryStatus::RelayDeliveryTargetUnavailable as i32
+        );
+        let context = result.context;
+        assert_eq!(context.controller_lifecycle_id, 7);
+        assert_eq!(context.transport_epoch, 11);
+        assert_eq!(context.pc_generation, 13);
+        assert_eq!(context.negotiation_epoch, Some(29));
+    }
+
+    #[tokio::test]
+    async fn relay_forwarding_classifies_unbound_target_as_unavailable() {
+        let state = test_state();
+        let source = actor(1, "client");
+        let target = actor(2, "missing-service");
+        let relay = ActrRelay {
+            source: source.clone(),
+            credential: AIdCredential::default(),
+            target: target.clone(),
+            delivery_context: None,
+            payload: Some(actr_relay::Payload::SessionDescription(
+                SessionDescription {
+                    r#type: SdpType::Offer as i32,
+                    sdp: "offer-sdp".to_string(),
+                    sdp_exchange_id: None,
+                },
+            )),
+        };
+        let original = SignalingEnvelope {
+            envelope_version: SIGNALING_ENVELOPE_VERSION,
+            envelope_id: "original-envelope".to_string(),
+            reply_for: None,
+            traceparent: None,
+            tracestate: None,
+            flow: Some(signaling_envelope::Flow::ActrRelay(relay.clone())),
+        };
+
+        assert_eq!(
+            forward_relay_to_target(&original, &relay, "source-ws", &state).await,
+            MockRelayEgress::TargetUnavailable
+        );
+    }
+
+    #[tokio::test]
+    async fn relay_forwarding_classifies_send_failure_as_rejection_not_unavailable() {
+        let state = test_state();
+        let source = actor(1, "client");
+        let target = actor(2, "service");
+        // The target session is bound but its channel is closed: the egress
+        // failed, which production reports as an ordinary rejection.
+        let (tx, rx) = mpsc::unbounded_channel();
+        drop(rx);
+        state
+            .client_to_actr_id
+            .write()
+            .await
+            .insert("target-ws".to_string(), target.clone());
+        state
+            .clients
+            .write()
+            .await
+            .insert("target-ws".to_string(), tx);
+
+        let relay = ActrRelay {
+            source: source.clone(),
+            credential: AIdCredential::default(),
+            target: target.clone(),
+            delivery_context: None,
+            payload: Some(actr_relay::Payload::SessionDescription(
+                SessionDescription {
+                    r#type: SdpType::Offer as i32,
+                    sdp: "offer-sdp".to_string(),
+                    sdp_exchange_id: None,
+                },
+            )),
+        };
+        let original = SignalingEnvelope {
+            envelope_version: SIGNALING_ENVELOPE_VERSION,
+            envelope_id: "original-envelope".to_string(),
+            reply_for: None,
+            traceparent: None,
+            tracestate: None,
+            flow: Some(signaling_envelope::Flow::ActrRelay(relay.clone())),
+        };
+
+        assert_eq!(
+            forward_relay_to_target(&original, &relay, "source-ws", &state).await,
+            MockRelayEgress::Rejected
+        );
     }
 }

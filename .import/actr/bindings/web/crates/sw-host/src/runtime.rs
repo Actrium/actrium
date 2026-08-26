@@ -1707,6 +1707,7 @@ impl SwRuntime {
             source: actor_id,
             credential,
             target: target.clone(),
+            delivery_context: None,
             payload: Some(actr_relay::Payload::IceRestartRejected(
                 IceRestartRejected {
                     sdp_exchange_id: sdp_exchange_id.to_string(),
@@ -1744,6 +1745,7 @@ impl SwRuntime {
             source: actor_id,
             credential,
             target: target.clone(),
+            delivery_context: None,
             payload: Some(payload),
         };
         let envelope = SignalingEnvelope {
@@ -2349,6 +2351,7 @@ impl SwRuntime {
                     source: actor_id,
                     credential,
                     target,
+                    delivery_context: None,
                     payload: Some(actr_relay::Payload::SessionDescription(sd)),
                 };
                 let envelope = SignalingEnvelope {
@@ -2377,6 +2380,7 @@ impl SwRuntime {
                     source: actor_id,
                     credential,
                     target,
+                    delivery_context: None,
                     payload: Some(actr_relay::Payload::IceCandidate(ice)),
                 };
                 let envelope = SignalingEnvelope {
@@ -2585,6 +2589,7 @@ impl SwRuntime {
                     source: actor_id,
                     credential,
                     target,
+                    delivery_context: None,
                     payload: Some(actr_relay::Payload::SessionDescription(sd)),
                 };
                 let envelope = SignalingEnvelope {

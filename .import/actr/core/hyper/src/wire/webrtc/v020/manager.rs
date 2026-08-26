@@ -25,6 +25,7 @@ use tokio_util::sync::CancellationToken;
 use webrtc::peer_connection::RTCSessionDescription;
 
 use crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor;
+use crate::wire::webrtc::v020::signaling::{RelayAttemptIdentity, SignalingDispatch};
 use crate::wire::webrtc::v020::status::{PeerTransportRetirement, RtcPeerSnapshot};
 
 use super::peer::controller::RtcPeerController;
@@ -160,7 +161,7 @@ enum ControllerAdmission {
 
 pub(crate) struct RtcConnectionManager {
     factory: Arc<dyn SessionFactory>,
-    signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+    signaling_tx: mpsc::Sender<SignalingDispatch>,
     /// The shared inbound data-plane router handed to every controller (message
     /// payloads bypass all controllers). Business-level, one per node.
     inbound: std::sync::Arc<crate::wire::webrtc::v020::inbound::InboundRouter>,
@@ -253,7 +254,7 @@ pub(crate) struct RtcConnectionManager {
 impl RtcConnectionManager {
     pub(crate) fn new(
         factory: Arc<dyn SessionFactory>,
-        signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+        signaling_tx: mpsc::Sender<SignalingDispatch>,
     ) -> Self {
         Self::with_inbound(
             factory,
@@ -265,7 +266,7 @@ impl RtcConnectionManager {
     /// Create a manager with an explicit inbound router (business/tests).
     pub(crate) fn with_inbound(
         factory: Arc<dyn SessionFactory>,
-        signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+        signaling_tx: mpsc::Sender<SignalingDispatch>,
         inbound: std::sync::Arc<crate::wire::webrtc::v020::inbound::InboundRouter>,
     ) -> Self {
         Self::with_inbound_config(
@@ -278,7 +279,7 @@ impl RtcConnectionManager {
 
     pub(crate) fn with_inbound_config(
         factory: Arc<dyn SessionFactory>,
-        signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+        signaling_tx: mpsc::Sender<SignalingDispatch>,
         inbound: std::sync::Arc<crate::wire::webrtc::v020::inbound::InboundRouter>,
         buffer_config: crate::wire::webrtc::v020::config::RtcBufferConfig,
     ) -> Self {
@@ -735,7 +736,38 @@ impl RtcConnectionManager {
     /// rejects. The router is the single inbound consumer and must not head-of-
     /// line block unrelated peers on a full outbound queue.
     pub(crate) fn try_send_signaling(&self, peer: ActrId, message: SignalingMessage) -> bool {
-        self.signaling_tx.try_send((peer, message)).is_ok()
+        self.signaling_tx
+            .try_send(SignalingDispatch::untracked(peer, message))
+            .is_ok()
+    }
+
+    /// Apply an authoritative Actrix fact that the exact target endpoint has
+    /// no usable signaling session. The echoed identity fences delayed
+    /// results from older Controller lifetimes and transport/PC attempts.
+    pub(crate) async fn handle_target_unavailable(
+        &self,
+        peer: ActrId,
+        attempt: RelayAttemptIdentity,
+    ) {
+        let Some(handle) = self.get_controller(&peer).await else {
+            return;
+        };
+        if handle.controller_lifecycle_id() != attempt.controller_lifecycle_id {
+            tracing::debug!(
+                peer = %peer.to_string_repr(),
+                expected_controller_lifecycle_id = handle.controller_lifecycle_id(),
+                received_controller_lifecycle_id = attempt.controller_lifecycle_id,
+                "ignoring target-unavailable result from a retired RTC Controller"
+            );
+            return;
+        }
+        let _ = handle
+            .target_unavailable(
+                attempt.transport_epoch,
+                attempt.pc_generation,
+                attempt.negotiation_epoch,
+            )
+            .await;
     }
 
     /// The latest snapshot for a peer, if it has a controller.

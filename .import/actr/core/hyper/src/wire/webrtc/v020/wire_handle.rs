@@ -404,8 +404,8 @@ mod tests {
         let role_manager = manager.clone();
         let role_peer = peer.clone();
         let role_responder = tokio::spawn(async move {
-            while let Some((_target, message)) = signaling_rx.recv().await {
-                if matches!(message, SignalingMessage::RoleNegotiation) {
+            while let Some(dispatch) = signaling_rx.recv().await {
+                if matches!(dispatch.message, SignalingMessage::RoleNegotiation) {
                     role_manager
                         .handle_role_assignment(role_peer.clone(), true)
                         .await;

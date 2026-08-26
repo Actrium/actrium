@@ -509,6 +509,9 @@ fn proto_webrtc_unavailable_reason_to_wit(
         WebRtcUnavailableReason::RtcResourceLimitExceeded => {
             WitWebrtcUnavailableReason::RtcResourceLimitExceeded
         }
+        // WIT v2 predates the native PeerUnavailable reason. Project it as a
+        // closed endpoint; discovery/reselection remains business-owned.
+        WebRtcUnavailableReason::PeerUnavailable => WitWebrtcUnavailableReason::Closed,
         WebRtcUnavailableReason::RecoveryExhausted => WitWebrtcUnavailableReason::RecoveryExhausted,
         WebRtcUnavailableReason::Closed => WitWebrtcUnavailableReason::Closed,
         // Non_exhaustive source enum: an unknown reason still needs a WIT

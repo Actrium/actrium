@@ -22,7 +22,7 @@ use tokio::sync::mpsc;
 use crate::wire::webrtc::v020::manager::RtcConnectionManager;
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
 
-use super::SharedLocalId;
+use super::{SharedLocalId, SignalingDispatch, SignalingInbound};
 
 const DEFAULT_INBOUND_DISPATCH_TASKS: usize = 256;
 
@@ -43,9 +43,29 @@ pub(crate) trait SignalingTransport: Send + Sync {
     /// Send a signaling message to a remote peer (via the signaling server).
     async fn send(&self, to: ActrId, message: SignalingMessage);
 
+    /// Send a message with an optional opaque delivery context. Existing test
+    /// transports keep the legacy two-argument surface; production transports
+    /// MUST override this hook to preserve the context end to end.
+    ///
+    /// The default discards `RelayAttemptIdentity`: a transport that only
+    /// overrides `send` quietly regresses to fire-and-forget relays, and the
+    /// delivery-result fence never arms (the target-unavailable recovery path
+    /// silently stops working).
+    async fn send_dispatch(&self, dispatch: SignalingDispatch) {
+        self.send(dispatch.peer, dispatch.message).await;
+    }
+
     /// Receive the next inbound message `(from, message)`. Returns `None` when
     /// the transport is closed.
     async fn recv(&self) -> Option<(ActrId, SignalingMessage)>;
+
+    /// Receive either a peer message or a server-side target disposition.
+    /// Legacy transports get the peer-message-only default implementation.
+    async fn recv_event(&self) -> Option<SignalingInbound> {
+        self.recv()
+            .await
+            .map(|(from, message)| SignalingInbound::PeerMessage { from, message })
+    }
 }
 
 /// Whether losing this inbound message strands negotiation (no router-level
@@ -303,7 +323,7 @@ impl SignalingRouter {
     pub(crate) async fn run<T: SignalingTransport>(
         &self,
         transport: T,
-        mut outbound_rx: mpsc::Receiver<(ActrId, SignalingMessage)>,
+        mut outbound_rx: mpsc::Receiver<SignalingDispatch>,
     ) {
         let mut inbound_tasks = tokio::task::JoinSet::new();
         // Budget-shed escalations, owned by this loop: at most one per peer
@@ -313,14 +333,14 @@ impl SignalingRouter {
             tokio::select! {
                 outbound = outbound_rx.recv() => {
                     match outbound {
-                        Some((to, message)) => transport.send(to, message).await,
+                        Some(dispatch) => transport.send_dispatch(dispatch).await,
                         // All controllers gone: stop routing.
                         None => break,
                     }
                 }
-                inbound = transport.recv() => {
+                inbound = transport.recv_event() => {
                     match inbound {
-                        Some((from, message)) => {
+                        Some(SignalingInbound::PeerMessage { from, message }) => {
                             while inbound_tasks.try_join_next().is_some() {}
                             // Reap finished escalations every iteration so a
                             // sustained multi-identity flood cannot grow the
@@ -484,6 +504,9 @@ impl SignalingRouter {
                                 },
                             );
                         },
+                        Some(SignalingInbound::TargetUnavailable { target, attempt }) => {
+                            self.manager.handle_target_unavailable(target, attempt).await
+                        }
                         // Transport closed: stop routing.
                         None => break,
                     }

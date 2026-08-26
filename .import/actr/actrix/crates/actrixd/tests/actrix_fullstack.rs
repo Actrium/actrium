@@ -1,8 +1,9 @@
 use actr_protocol::acl_rule::{Permission, SourceRealm};
 use actr_protocol::{
     Acl, AclRule, ActrRelay, ActrType, Realm, RegisterAuthMode, RegisterRequest, RegisterResponse,
-    RoleNegotiation, SIGNALING_ENVELOPE_VERSION, acl_rule, actr_relay, peer_to_signaling,
-    register_response, route_candidates_response, signaling_envelope, signaling_to_actr,
+    RelayDeliveryContext, RelayDeliveryStatus, RoleNegotiation, SIGNALING_ENVELOPE_VERSION,
+    acl_rule, actr_relay, peer_to_signaling, register_response, route_candidates_response,
+    signaling_envelope, signaling_to_actr,
 };
 use base64::Engine as _;
 use futures::{SinkExt, StreamExt};
@@ -3120,6 +3121,7 @@ async fn signaling_actr_relay_role_assignment() {
         source: cli_ok.actr_id.clone(),
         credential: cli_ok.credential.clone(),
         target: svc_ok.actr_id.clone(),
+        delivery_context: None,
         payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: cli_ok.actr_id.clone(),
             to: svc_ok.actr_id.clone(),
@@ -3367,6 +3369,7 @@ async fn signaling_relay_cross_realm_is_denied() {
         source: src_ok.actr_id.clone(),
         credential: src_ok.credential.clone(),
         target: dst_ok.actr_id.clone(),
+        delivery_context: None,
         payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: src_ok.actr_id.clone(),
             to: dst_ok.actr_id.clone(),
@@ -3431,6 +3434,7 @@ async fn signaling_relay_rejects_invalid_credential() {
         source: src_ok.actr_id.clone(),
         credential: bad_cred,
         target: dst_ok.actr_id.clone(),
+        delivery_context: None,
         payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: src_ok.actr_id.clone(),
             to: dst_ok.actr_id.clone(),
@@ -3483,6 +3487,7 @@ async fn signaling_relay_acl_denied_in_same_realm() {
         source: src_ok.actr_id.clone(),
         credential: src_ok.credential.clone(),
         target: dst_ok.actr_id.clone(),
+        delivery_context: None,
         payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
             from: src_ok.actr_id.clone(),
             to: dst_ok.actr_id.clone(),
@@ -3536,6 +3541,7 @@ async fn signaling_relay_forwards_ice_candidate_payload() {
         source: src_ok.actr_id.clone(),
         credential: src_ok.credential.clone(),
         target: dst_ok.actr_id.clone(),
+        delivery_context: None,
         payload: Some(actr_relay::Payload::IceCandidate(
             actr_protocol::IceCandidate {
                 candidate: "candidate:1 1 udp 2122252543 127.0.0.1 54400 typ host".into(),
@@ -3578,7 +3584,7 @@ async fn signaling_relay_forwards_ice_candidate_payload() {
 
 #[tokio::test]
 #[serial]
-async fn signaling_relay_to_missing_target_is_ignored_and_source_stays_usable() {
+async fn signaling_relay_to_missing_target_reports_failure_and_source_stays_usable() {
     let harness = ActrixHarness::start(DEFAULT_TOKEN_TTL).await;
     let port = harness.port;
 
@@ -3605,15 +3611,18 @@ async fn signaling_relay_to_missing_target_is_ignored_and_source_stays_usable() 
     let relay = ActrRelay {
         source: src_ok.actr_id.clone(),
         credential: src_ok.credential.clone(),
-        target: missing_target,
-        payload: Some(actr_relay::Payload::IceCandidate(
-            actr_protocol::IceCandidate {
-                candidate: "candidate:2 1 udp 2122252543 127.0.0.1 54401 typ host".into(),
-                sdp_mid: Some("0".into()),
-                sdp_mline_index: Some(0),
-                username_fragment: Some("ufrag-missing".into()),
-            },
-        )),
+        target: missing_target.clone(),
+        delivery_context: Some(RelayDeliveryContext {
+            controller_lifecycle_id: 7,
+            transport_epoch: 11,
+            pc_generation: 13,
+            negotiation_epoch: Some(29),
+        }),
+        payload: Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation {
+            from: src_ok.actr_id.clone(),
+            to: missing_target.clone(),
+            realm_id: src_ok.actr_id.realm.realm_id,
+        })),
     };
     send_envelope(
         &mut src_w,
@@ -3621,12 +3630,22 @@ async fn signaling_relay_to_missing_target_is_ignored_and_source_stays_usable() 
     )
     .await;
 
-    let no_reply = tokio::time::timeout(Duration::from_millis(300), src_r.next()).await;
-    match no_reply {
-        Err(_) => {}
-        Ok(Some(Ok(msg))) => panic!("expected no relay response for missing target, got {msg:?}"),
-        Ok(Some(Err(err))) => panic!("unexpected websocket error: {err:?}"),
-        Ok(None) => panic!("source websocket closed unexpectedly"),
+    let result = recv_envelope(&mut src_r).await;
+    match result.flow {
+        Some(signaling_envelope::Flow::ServerToActr(message)) => match message.payload {
+            Some(signaling_to_actr::Payload::RelayDeliveryResult(result)) => {
+                assert_eq!(
+                    result.status,
+                    RelayDeliveryStatus::RelayDeliveryTargetUnavailable as i32
+                );
+                assert_eq!(result.context.controller_lifecycle_id, 7);
+                assert_eq!(result.context.transport_epoch, 11);
+                assert_eq!(result.context.pc_generation, 13);
+                assert_eq!(result.context.negotiation_epoch, Some(29));
+            }
+            other => panic!("expected relay delivery result, got {other:?}"),
+        },
+        other => panic!("unexpected relay failure flow {other:?}"),
     }
 
     let ping = actr_protocol::ActrToSignaling {

@@ -944,6 +944,10 @@ fn unavailable_reason_to_v1(reason: actr_framework::WebRtcUnavailableReason) -> 
         WebRtcUnavailableReason::PeerConnectionRebuildFailed => rs::PEER_CONNECTION_REBUILD_FAILED,
         WebRtcUnavailableReason::UnsupportedRtcCapability => rs::UNSUPPORTED_RTC_CAPABILITY,
         WebRtcUnavailableReason::RtcResourceLimitExceeded => rs::RTC_RESOURCE_LIMIT_EXCEEDED,
+        // ABI v1 predates PeerUnavailable. Preserve its closed-endpoint
+        // semantics without allocating a new discriminant older guests cannot
+        // understand.
+        WebRtcUnavailableReason::PeerUnavailable => rs::CLOSED,
         WebRtcUnavailableReason::RecoveryExhausted => rs::RECOVERY_EXHAUSTED,
         WebRtcUnavailableReason::Closed => rs::CLOSED,
         // The enum is non_exhaustive so new failure modes stay additive;

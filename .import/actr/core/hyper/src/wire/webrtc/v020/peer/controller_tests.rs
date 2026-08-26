@@ -20,6 +20,7 @@ use webrtc::peer_connection::{
 
 use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::v020::events::PeerDriverEvent;
+use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::RtcPeerSnapshot;
 
 use super::controller::RtcPeerController;
@@ -147,7 +148,7 @@ impl SessionFactory for FakeSessionFactory {
 struct Harness {
     handle: RtcPeerControllerHandle,
     lane_tx: mpsc::Sender<LaneEvent>,
-    signaling_rx: mpsc::Receiver<(ActrId, SignalingMessage)>,
+    signaling_rx: mpsc::Receiver<SignalingDispatch>,
     builds: mpsc::Receiver<BuildRequest>,
     /// Kept alive so the broadcast sender is not dropped (which would close
     /// the controller's network event receiver and exit its event loop).
@@ -244,13 +245,14 @@ async fn await_snapshot(
 /// answer with a `RoleAssignment`. The connect flow is role-negotiated, so a
 /// build only starts after this.
 async fn assign_role(h: &mut Harness, is_offerer: bool) {
-    let (_peer, message) = timeout(WAIT, h.signaling_rx.recv())
+    let dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("timed out waiting for role negotiation")
         .expect("signaling closed");
     assert!(
-        matches!(message, SignalingMessage::RoleNegotiation),
-        "expected RoleNegotiation, got {message:?}"
+        matches!(&dispatch.message, SignalingMessage::RoleNegotiation),
+        "expected RoleNegotiation, got {:?}",
+        dispatch.message
     );
     h.handle
         .apply_role_assignment(is_offerer)
@@ -272,12 +274,12 @@ async fn controller_offerer_flow_reaches_sendable() {
     succeed_build(build);
 
     // The controller sends the local offer to the signaling router.
-    let (peer, message) = timeout(WAIT, h.signaling_rx.recv())
+    let dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("timed out waiting for offer")
         .expect("signaling closed");
-    assert_eq!(peer, test_actor_id(1));
-    assert!(matches!(message, SignalingMessage::Offer { .. }));
+    assert_eq!(dispatch.peer, test_actor_id(1));
+    assert!(matches!(&dispatch.message, SignalingMessage::Offer { .. }));
 
     // Remote answers; controller applies it.
     h.handle
@@ -320,11 +322,11 @@ async fn controller_answerer_flow_reaches_sendable() {
     succeed_build(build);
 
     // The answerer sends its answer to the router.
-    let (_peer, message) = timeout(WAIT, h.signaling_rx.recv())
+    let dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("timed out waiting for answer")
         .expect("signaling closed");
-    assert!(matches!(message, SignalingMessage::Answer { .. }));
+    assert!(matches!(&dispatch.message, SignalingMessage::Answer { .. }));
 
     handler
         .mailbox()
@@ -535,7 +537,7 @@ async fn multiple_controllers_run_in_parallel_isolated() {
     succeed_build(build_b);
 
     // Drive only A to sendable; B stays connecting.
-    let (_p, _offer) = timeout(WAIT, a.signaling_rx.recv()).await.unwrap().unwrap();
+    let _dispatch = timeout(WAIT, a.signaling_rx.recv()).await.unwrap().unwrap();
     a.handle
         .apply_remote_description(desc(RTCSdpType::Answer))
         .await
@@ -680,20 +682,21 @@ async fn full_queue_retains_critical_sdp_and_retries_once_drained() {
     .expect("full queue did not increment signaling_dropped");
 
     // Drain the queued RoleNegotiation to make capacity.
-    let Ok(Some((_peer, first))) = timeout(WAIT, h.signaling_rx.recv()).await else {
+    let Ok(Some(first)) = timeout(WAIT, h.signaling_rx.recv()).await else {
         panic!("expected the queued RoleNegotiation");
     };
-    assert!(matches!(first, SignalingMessage::RoleNegotiation));
+    assert!(matches!(&first.message, SignalingMessage::RoleNegotiation));
 
     // Wake the event loop with any command; the retained offer must be
     // retried through the freed queue.
     h.handle.connect().await.expect("wake the event loop");
-    let Ok(Some((_peer, retried))) = timeout(WAIT, h.signaling_rx.recv()).await else {
+    let Ok(Some(retried)) = timeout(WAIT, h.signaling_rx.recv()).await else {
         panic!("retained SDP was not retried after the queue drained");
     };
     assert!(
-        matches!(retried, SignalingMessage::Offer { .. }),
-        "expected the retained offer, got {retried:?}"
+        matches!(&retried.message, SignalingMessage::Offer { .. }),
+        "expected the retained offer, got {:?}",
+        retried.message
     );
 
     h.handle.close().await.expect("send close");
@@ -944,11 +947,11 @@ async fn drive_to_sendable_with_session(
     complete_build(build, Ok(session));
 
     // Consume the initial offer, answer it, connect transport, open anchor.
-    let (_peer, message) = timeout(WAIT, h.signaling_rx.recv())
+    let dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("initial offer")
         .expect("signaling closed");
-    assert!(matches!(message, SignalingMessage::Offer { .. }));
+    assert!(matches!(&dispatch.message, SignalingMessage::Offer { .. }));
     h.handle
         .apply_remote_description(desc(RTCSdpType::Answer))
         .await
@@ -985,13 +988,14 @@ async fn lagged_network_receiver_expires_sendability_and_recovers_from_retained_
         h._supervisor.publish(RtcNetworkEvent::NetworkAvailable);
     }
 
-    let (_peer, message) = timeout(WAIT, h.signaling_rx.recv())
+    let dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("ICE restart offer after lag recovery")
         .expect("signaling closed");
     assert!(
-        matches!(message, SignalingMessage::IceRestartOffer { .. }),
-        "expected an ICE restart offer, got {message:?}"
+        matches!(&dispatch.message, SignalingMessage::IceRestartOffer { .. }),
+        "expected an ICE restart offer, got {:?}",
+        dispatch.message
     );
     assert_eq!(h.handle.snapshot().pc_generation, 1);
 
@@ -1063,14 +1067,15 @@ async fn negotiation_needed_after_topology_change_produces_one_offer() {
     // The driver fires NegotiationNeeded for the new track; the controller
     // must emit exactly one renegotiation offer.
     mailbox.try_publish(PeerDriverEvent::NegotiationNeeded { generation: 1 });
-    let (peer, message) = timeout(WAIT, h.signaling_rx.recv())
+    let dispatch = timeout(WAIT, h.signaling_rx.recv())
         .await
         .expect("renegotiation offer")
         .expect("signaling closed");
-    assert_eq!(peer, test_actor_id(4));
+    assert_eq!(dispatch.peer, test_actor_id(4));
     assert!(
-        matches!(message, SignalingMessage::Offer { .. }),
-        "expected a renegotiation offer, got {message:?}"
+        matches!(&dispatch.message, SignalingMessage::Offer { .. }),
+        "expected a renegotiation offer, got {:?}",
+        dispatch.message
     );
 }
 

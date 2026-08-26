@@ -32,9 +32,10 @@
 
 use actr_protocol::{
     AIdCredential, ActrId, ActrRelay, ActrToSignaling, ActrType, ErrorResponse, PeerToSignaling,
-    Ping, Pong, Realm, RegisterResponse, RoleAssignment, RoleNegotiation,
-    SIGNALING_ENVELOPE_VERSION, SignalingEnvelope, SignalingToActr, actr_relay, actr_to_signaling,
-    peer_to_signaling, register_response, signaling_envelope, signaling_to_actr,
+    Ping, Pong, Realm, RegisterResponse, RelayDeliveryContext, RelayDeliveryResult,
+    RelayDeliveryStatus, RoleAssignment, RoleNegotiation, SIGNALING_ENVELOPE_VERSION,
+    SignalingEnvelope, SignalingToActr, actr_relay, actr_to_signaling, peer_to_signaling,
+    register_response, signaling_envelope, signaling_to_actr,
 };
 use futures_util::{SinkExt, StreamExt};
 use platform::aid::credential::validator::AIdCredentialValidator;
@@ -1288,6 +1289,31 @@ async fn relay_source_connection_status(
     }
 }
 
+async fn send_relay_delivery_result_if_requested(
+    source_client_id: &str,
+    source: &ActrId,
+    target: &ActrId,
+    context: Option<&RelayDeliveryContext>,
+    disposition: RelayEgressDisposition,
+    request_envelope_id: &str,
+    server: &SignalingServerHandle,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(context) = context else {
+        return Ok(());
+    };
+    let result = RelayDeliveryResult {
+        target: target.clone(),
+        context: *context,
+        status: disposition.wire_status() as i32,
+    };
+    let flow = signaling_envelope::Flow::ServerToActr(SignalingToActr {
+        target: source.clone(),
+        payload: Some(signaling_to_actr::Payload::RelayDeliveryResult(result)),
+    });
+    let envelope = server.create_envelope(flow, Some(request_envelope_id));
+    send_envelope_to_client(source_client_id, envelope, server).await
+}
+
 /// Handle ActrRelay (WebRTC signaling relay)
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = request_envelope_id, actr_id = %relay.source.to_string_repr(), target_id = %relay.target.to_string_repr())))]
 async fn handle_actr_relay(
@@ -1298,7 +1324,8 @@ async fn handle_actr_relay(
     #[cfg(feature = "opentelemetry")] remote_context: opentelemetry::Context,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let source = relay.source.clone();
-    let target = &relay.target;
+    let target = relay.target.clone();
+    let delivery_context = relay.delivery_context;
     // Validate source Actor realm (exists, not expired, and in normal state)
     let realm_id = source.realm.realm_id;
     if let Err(e) = RealmEntity::validate_realm(realm_id).await {
@@ -1418,6 +1445,23 @@ async fn handle_actr_relay(
     if let Some(actr_relay::Payload::RoleNegotiation(RoleNegotiation { from, to, .. })) =
         relay.payload.clone()
     {
+        if resolve_client_id_by_actor_id(&to, server).await.is_err() {
+            platform::recording::warn!(
+                "⚠️ Role negotiation target Actor {} is unavailable",
+                to.to_string_repr()
+            );
+            send_relay_delivery_result_if_requested(
+                client_id,
+                &source,
+                &to,
+                delivery_context.as_ref(),
+                RelayEgressDisposition::TargetUnavailable,
+                request_envelope_id,
+                server,
+            )
+            .await?;
+            return Ok(());
+        }
         let clients_guard = server.clients.read().await;
 
         // Use determine_webrtc_role function to determine role
@@ -1431,6 +1475,7 @@ async fn handle_actr_relay(
             source: from.clone(),
             credential: relay.credential.clone(),
             target: to.clone(),
+            delivery_context: None,
             payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
                 is_offerer,
                 remote_fixed: None,
@@ -1451,18 +1496,30 @@ async fn handle_actr_relay(
             source: from.clone(),
             credential: relay.credential.clone(),
             target: to.clone(),
+            delivery_context: None,
             payload: Some(actr_relay::Payload::RoleAssignment(RoleAssignment {
                 is_offerer: !is_offerer,
                 remote_fixed: None,
             })),
         };
 
-        send_role_assignment(
+        let target_disposition = send_role_assignment(
             &to,
             server,
             new_relay,
             #[cfg(feature = "opentelemetry")]
             remote_context,
+        )
+        .await?;
+
+        send_relay_delivery_result_if_requested(
+            client_id,
+            &source,
+            &to,
+            delivery_context.as_ref(),
+            target_disposition,
+            request_envelope_id,
+            server,
         )
         .await?;
 
@@ -1495,11 +1552,34 @@ async fn handle_actr_relay(
         // Inject the original trace context into the forwarded envelope to ensure end-to-end tracing
         #[cfg(feature = "opentelemetry")]
         inject_trace_context(&remote_context, &mut forward_envelope);
-        send_envelope_to_client(&target_client_id, forward_envelope, server).await?;
+        let disposition =
+            send_envelope_to_client_with_disposition(&target_client_id, forward_envelope, server)
+                .await?;
+
+        send_relay_delivery_result_if_requested(
+            client_id,
+            &source,
+            &target,
+            delivery_context.as_ref(),
+            disposition,
+            request_envelope_id,
+            server,
+        )
+        .await?;
 
         platform::recording::info!("✅ Signaling relay successful");
     } else {
         platform::recording::warn!("⚠️ Target Actor {} not found", target.to_string_repr());
+        send_relay_delivery_result_if_requested(
+            client_id,
+            &source,
+            &target,
+            delivery_context.as_ref(),
+            RelayEgressDisposition::TargetUnavailable,
+            request_envelope_id,
+            server,
+        )
+        .await?;
     }
 
     Ok(())
@@ -1572,7 +1652,7 @@ async fn send_role_assignment(
     server: &SignalingServerHandle,
     relay: ActrRelay,
     #[cfg(feature = "opentelemetry")] remote_context: opentelemetry::Context,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<RelayEgressDisposition, Box<dyn std::error::Error>> {
     let flow = signaling_envelope::Flow::ActrRelay(relay);
     #[allow(unused_mut)]
     let mut envelope = server.create_new_envelope(flow);
@@ -1606,7 +1686,7 @@ async fn send_role_assignment(
             "⚠️ send_role_assignment: target Actor {} not found",
             target_actor.to_string_repr()
         );
-        Ok(())
+        Ok(RelayEgressDisposition::TargetUnavailable)
     }
 }
 
@@ -1618,9 +1698,19 @@ async fn send_role_assignment(
 #[cfg_attr(feature = "opentelemetry", instrument(level = "debug", skip_all, fields(client_id, envelope_id = envelope.envelope_id)))]
 async fn send_envelope_to_client(
     client_id: &str,
-    #[allow(unused_mut)] mut envelope: SignalingEnvelope,
+    envelope: SignalingEnvelope,
     server: &SignalingServerHandle,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    send_envelope_to_client_with_disposition(client_id, envelope, server)
+        .await
+        .map(|_| ())
+}
+
+async fn send_envelope_to_client_with_disposition(
+    client_id: &str,
+    #[allow(unused_mut)] mut envelope: SignalingEnvelope,
+    server: &SignalingServerHandle,
+) -> Result<RelayEgressDisposition, Box<dyn std::error::Error>> {
     #[cfg(feature = "opentelemetry")]
     {
         use tracing_opentelemetry::OpenTelemetrySpanExt;
@@ -1635,6 +1725,23 @@ async fn send_envelope_to_client(
     enqueue_binary_to_client(client_id, buf, server).await
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RelayEgressDisposition {
+    Accepted,
+    TargetUnavailable,
+    Rejected,
+}
+
+impl RelayEgressDisposition {
+    fn wire_status(self) -> RelayDeliveryStatus {
+        match self {
+            Self::Accepted => RelayDeliveryStatus::RelayDeliveryAccepted,
+            Self::TargetUnavailable => RelayDeliveryStatus::RelayDeliveryTargetUnavailable,
+            Self::Rejected => RelayDeliveryStatus::RelayDeliveryRejected,
+        }
+    }
+}
+
 /// Deliver an encoded Binary frame to the target client's bounded egress queue (issue #351).
 ///
 /// - Clone the egress handle under a short read lock, release it immediately, then await capacity (never block while holding the lock).
@@ -1646,7 +1753,7 @@ async fn enqueue_binary_to_client(
     client_id: &str,
     buf: Vec<u8>,
     server: &SignalingServerHandle,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<RelayEgressDisposition, Box<dyn std::error::Error>> {
     let byte_len = buf.len();
 
     // Defense: a single message larger than the whole per-client byte budget can never be enqueued (acquire would block
@@ -1662,7 +1769,7 @@ async fn enqueue_binary_to_client(
             server.egress_config.max_bytes,
             client_id
         );
-        return Ok(());
+        return Ok(RelayEgressDisposition::Rejected);
     }
 
     // Clone the egress handle (short read lock), then release the lock before awaiting capacity
@@ -1672,7 +1779,7 @@ async fn enqueue_binary_to_client(
     };
     let Some(egress) = egress else {
         platform::recording::warn!("⚠️ Client {} not found", client_id);
-        return Ok(());
+        return Ok(RelayEgressDisposition::TargetUnavailable);
     };
 
     // Per-target aggregate rate/byte budget (across all senders, issue #351)
@@ -1690,7 +1797,7 @@ async fn enqueue_binary_to_client(
             client_id,
             e
         );
-        return Ok(());
+        return Ok(RelayEgressDisposition::Rejected);
     }
 
     match egress
@@ -1699,19 +1806,20 @@ async fn enqueue_binary_to_client(
     {
         Ok(()) => {
             platform::recording::debug!("✅ Enqueued {} bytes to client {}", byte_len, client_id);
-            Ok(())
+            Ok(RelayEgressDisposition::Accepted)
         }
         Err(EnqueueError::Saturated) => {
             // Slow consumer: close and remove the target connection (healthy clients unaffected)
             close_slow_client(client_id, server, &egress).await;
-            Ok(())
+            Ok(RelayEgressDisposition::TargetUnavailable)
         }
         Err(EnqueueError::Closed) => {
             platform::recording::debug!(
                 "Client {} egress queue closed, dropping message",
                 client_id
             );
-            Ok(())
+            cleanup_client(client_id, server, CleanupMode::ConnectionClosed).await;
+            Ok(RelayEgressDisposition::TargetUnavailable)
         }
     }
 }
