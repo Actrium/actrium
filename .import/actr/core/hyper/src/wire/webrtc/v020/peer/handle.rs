@@ -315,16 +315,27 @@ impl RtcPeerControllerHandle {
                 total_frags
             );
             for (frag_index, chunk) in payload.chunks(DC_MAX_PAYLOAD_SIZE).enumerate() {
-                if !permit.is_valid(self.snapshot().pc_generation)
-                    || !matches!(
-                        permit.channel().ready_state().await,
-                        Ok(webrtc::data_channel::RTCDataChannelState::Open)
-                    )
-                {
-                    return Err(if sent_any {
-                        RtcSendError::DataChunkDeliveryUncertain
-                    } else {
-                        RtcSendError::ConnectionNotReady
+                let generation_current = permit.is_valid(self.snapshot().pc_generation);
+                let ready_state = permit.channel().ready_state().await;
+                let channel_open = matches!(
+                    ready_state,
+                    Ok(webrtc::data_channel::RTCDataChannelState::Open)
+                );
+                if sent_any && (!generation_current || !channel_open) {
+                    return Err(RtcSendError::DataChunkDeliveryUncertain);
+                }
+                if !generation_current || !channel_open {
+                    // Nothing of this message was sent yet. A definitively
+                    // closed channel keeps `DataChannelClosed` so the
+                    // transport layer invalidates the stale lane instead of
+                    // retrying against generic not-ready; an unreadable or
+                    // still-connecting channel stays `ConnectionNotReady`.
+                    return Err(match ready_state {
+                        Ok(webrtc::data_channel::RTCDataChannelState::Closed)
+                        | Ok(webrtc::data_channel::RTCDataChannelState::Closing) => {
+                            RtcSendError::DataChannelClosed
+                        }
+                        _ => RtcSendError::ConnectionNotReady,
                     });
                 }
                 let mut buf = Vec::with_capacity(FRAGMENT_HEADER_SIZE + chunk.len());
@@ -366,7 +377,10 @@ impl RtcPeerControllerHandle {
         sent_any: bool,
     ) -> RtcSendError {
         let base = super::send::map_send_error(&error);
-        if base != RtcSendError::ConnectionNotReady {
+        if !matches!(
+            base,
+            RtcSendError::ConnectionNotReady | RtcSendError::DataChannelClosed
+        ) {
             return base;
         }
         // The send failed as not-ready. If there were outstanding (unconfirmed)
@@ -376,7 +390,7 @@ impl RtcPeerControllerHandle {
         if sent_any || outstanding > 0 {
             RtcSendError::DataChunkDeliveryUncertain
         } else {
-            RtcSendError::ConnectionNotReady
+            base
         }
     }
 

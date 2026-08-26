@@ -335,7 +335,14 @@ pub(crate) async fn lane_pump(
 
     // Per-lane reassembly state for multi-fragment messages. The pump is the
     // sole consumer of this DataChannel's messages, so local state is safe.
-    let mut reassembly = ReassemblyBuffer::with_limits(reassembly_limits);
+    let mut reassembly = ReassemblyBuffer::with_limits_and_label(
+        reassembly_limits,
+        format!(
+            "peer={} generation={} lane={lane:?}",
+            peer_id.to_string_repr(),
+            generation,
+        ),
+    );
 
     while let Some(event) = channel.poll().await {
         match event {

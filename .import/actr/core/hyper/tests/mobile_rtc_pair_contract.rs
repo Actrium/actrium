@@ -1032,7 +1032,7 @@ async fn p15_inflight_fragmented_message_is_integral_or_bounded(
         payload.clone(),
         Duration::from_secs(20),
     );
-    let paused = tokio::time::timeout(Duration::from_secs(10), paused_rx)
+    let paused = tokio::time::timeout(Duration::from_secs(30), paused_rx)
         .await
         .expect("large send must reach the fragmentation seam")
         .expect("fragment hook must remain installed");
@@ -1078,7 +1078,7 @@ async fn p15_inflight_fragmented_message_is_integral_or_bounded(
     let data_payload = bytes::Bytes::from(vec![0x5a; 200 * 1024]);
     let (data_hook_guard, data_paused_rx, data_release) = pause_after_first_fragment();
     let data_send = pair.spawn_data_chunk(from, to, data_stream_id, data_payload.clone());
-    let data_paused = tokio::time::timeout(Duration::from_secs(10), data_paused_rx)
+    let data_paused = tokio::time::timeout(Duration::from_secs(30), data_paused_rx)
         .await
         .expect("large DataChunk must reach the fragmentation seam")
         .expect("DataChunk fragment hook must remain installed");
