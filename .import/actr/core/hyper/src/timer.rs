@@ -420,6 +420,18 @@ timer_inventory! {
         success: "queue capacity granted within the deadline", interrupt: "inbound channel reset or receiver abort",
         expiry: "fail closed (drop connection and reconnect)", reset: "new enqueue only", external: false
     },
+    RTC_CONTROLLER_INLINE_OPERATION => {
+        id: "webrtc.controller.inline_operation", owner: "rtc_peer_controller", category: FailureDeadline,
+        duration: "CONTROLLER_INLINE_OPERATION_TIMEOUT", arm: "controller starts lane/media/resource work that must precede the next state transition",
+        success: "the driver operation returns", interrupt: "controller shutdown",
+        expiry: "fail the API or exact readiness attempt and resume the controller loop", reset: "each inline operation", external: false
+    },
+    RTC_SIGNALING_DISPATCH => {
+        id: "webrtc.signaling.dispatch", owner: "signaling_router", category: FailureDeadline,
+        duration: "INBOUND_DISPATCH_TIMEOUT", arm: "router delegates one inbound signaling message to its peer controller",
+        success: "manager/controller accepts the message", interrupt: "router shutdown",
+        expiry: "drop the stalled peer dispatch without blocking unrelated peers", reset: "each inbound signaling message", external: false
+    },
     RTC_CONFIGURATION_REFRESH => {
         id: "webrtc.configuration_refresh", owner: "rtc_connection_manager", category: FailureDeadline,
         duration: "CONFIGURATION_REFRESH_TIMEOUT", arm: "TURN/ICE configuration is broadcast to one peer controller",

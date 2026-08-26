@@ -210,6 +210,14 @@ pub(crate) enum RtcPeerInput {
         generation: u64,
         lane: LaneKind,
     },
+    /// An inline track mutation (add/remove) timed out mid-operation. webrtc
+    /// 0.20.3 commits transceiver changes before later await points, so the
+    /// peer connection may already hold a mutation the controller's registry
+    /// does not track; the session state is untrustworthy and the generation
+    /// must fail negotiation instead of serving later offers.
+    TrackMutationTimedOut {
+        generation: u64,
+    },
     /// A blocking effect's completion, re-validated by identity before applying.
     Completion(EffectCompletion),
     /// O1: the structural-event mailbox overflowed for `generation`; treat the
@@ -707,6 +715,31 @@ pub(crate) fn reduce(state: &mut RtcPeerState, input: RtcPeerInput) -> Vec<RtcPe
                 && !state.close_requested
             {
                 negotiation_failed(state, &mut effects);
+            }
+        }
+        RtcPeerInput::TrackMutationTimedOut { generation } => {
+            // The peer connection may hold a half-applied transceiver
+            // mutation the registry cannot account for.
+            if state.is_live_generation(generation) && !state.close_requested {
+                // `ever_connected` alone is not the right lifecycle fact: a
+                // make-before-break hard recovery calls
+                // `begin_transport_attempt()`, which resets it while the old
+                // active generation is still live. Branch on the presence of
+                // a live session instead, so a transient mutation timeout on
+                // that old generation still forces a replacement generation
+                // rather than terminating the whole attempt.
+                if state.active_generation.is_some() || state.ever_connected {
+                    // Soft recovery on the same generation would serve later
+                    // offers from desynchronized transceiver state; force a
+                    // replacement generation, as for an unusable session.
+                    start_hard_recovery(state, &mut effects);
+                } else {
+                    terminate_transport_attempt(
+                        state,
+                        RtcUnavailableReason::NegotiationFailed,
+                        &mut effects,
+                    );
+                }
             }
         }
         RtcPeerInput::Completion(completion) => {

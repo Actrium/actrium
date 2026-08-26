@@ -928,11 +928,20 @@ async fn network_event_broadcast_reaches_controller_and_bumps_revision() {
 /// Drive the harness through the offerer flow to Sendable; returns the build
 /// handler's mailbox for driving further driver events.
 async fn drive_to_sendable(h: &mut Harness) -> crate::wire::webrtc::v020::events::PeerEventMailbox {
+    drive_to_sendable_with_session(h, Arc::new(FakeSessionOps)).await
+}
+
+/// Like [`drive_to_sendable`], completing the build with a caller-chosen
+/// session so inline-operation timeout branches can be driven deterministically.
+async fn drive_to_sendable_with_session(
+    h: &mut Harness,
+    session: Arc<dyn SessionOps>,
+) -> crate::wire::webrtc::v020::events::PeerEventMailbox {
     h.handle.connect().await.expect("send connect");
     assign_role(h, true).await;
     let build = next_build(h).await;
     let handler = build.handler.clone();
-    succeed_build(build);
+    complete_build(build, Ok(session));
 
     // Consume the initial offer, answer it, connect transport, open anchor.
     let (_peer, message) = timeout(WAIT, h.signaling_rx.recv())
@@ -1063,4 +1072,192 @@ async fn negotiation_needed_after_topology_change_produces_one_offer() {
         matches!(message, SignalingMessage::Offer { .. }),
         "expected a renegotiation offer, got {message:?}"
     );
+}
+
+// ── inline-operation timeouts (S6: the controller's sole task must never hang) ──
+
+/// A session whose selected inline operations never complete, so the
+/// controller's inline-operation timeout branches fire deterministically.
+struct HangingOps {
+    hang_track_mutation: bool,
+    hang_remove_track: bool,
+    hang_create_data_channel: bool,
+}
+
+#[async_trait]
+impl SessionOps for HangingOps {
+    async fn create_offer(&self) -> Result<RTCSessionDescription, RtcError> {
+        Ok(desc(RTCSdpType::Offer))
+    }
+    async fn create_answer(&self) -> Result<RTCSessionDescription, RtcError> {
+        Ok(desc(RTCSdpType::Answer))
+    }
+    async fn set_local_description(&self, _d: RTCSessionDescription) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn set_remote_description(&self, _d: RTCSessionDescription) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn add_ice_candidate(&self, _c: RTCIceCandidateInit) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn restart_ice(&self) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn set_configuration(&self, _config: RTCConfiguration) -> Result<(), RtcError> {
+        Ok(())
+    }
+    async fn create_data_channel(
+        &self,
+        label: &str,
+        _init: webrtc::data_channel::RTCDataChannelInit,
+    ) -> Result<Arc<dyn webrtc::data_channel::DataChannel>, RtcError> {
+        if self.hang_create_data_channel {
+            std::future::pending().await
+        } else {
+            Ok(super::effects::test_support::fake_data_channel(label))
+        }
+    }
+    async fn add_track(
+        &self,
+        _track: Arc<dyn webrtc::media_stream::track_local::TrackLocal>,
+    ) -> Result<Arc<dyn webrtc::rtp_transceiver::RtpSender>, RtcError> {
+        if self.hang_track_mutation {
+            std::future::pending().await
+        } else {
+            Ok(Arc::new(
+                crate::wire::webrtc::v020::media::test_support::FakeRtpSender::new(1),
+            ))
+        }
+    }
+    async fn remove_track(
+        &self,
+        _sender: &Arc<dyn webrtc::rtp_transceiver::RtpSender>,
+    ) -> Result<(), RtcError> {
+        if self.hang_remove_track {
+            std::future::pending().await
+        } else {
+            Ok(())
+        }
+    }
+    async fn get_senders(&self) -> Vec<Arc<dyn webrtc::rtp_transceiver::RtpSender>> {
+        Vec::new()
+    }
+    async fn get_stats(&self) -> webrtc::peer_connection::RTCStatsReport {
+        Default::default()
+    }
+    async fn close(&self) -> Result<(), RtcError> {
+        Ok(())
+    }
+}
+
+/// A track mutation that never completes must answer with the timeout error,
+/// retire the possibly half-mutated generation, and leave the controller
+/// responsive to Close.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn add_track_timeout_fails_negotiation_and_keeps_controller_responsive() {
+    let mut h = spawn_harness(300);
+    let _mailbox = drive_to_sendable_with_session(
+        &mut h,
+        Arc::new(HangingOps {
+            hang_track_mutation: true,
+            hang_remove_track: false,
+            hang_create_data_channel: false,
+        }),
+    )
+    .await;
+
+    let track = Arc::new(
+        crate::wire::webrtc::v020::media::test_support::FakeTrackLocal::new("stuck-video"),
+    );
+    let err = timeout(WAIT, h.handle.add_track(track))
+        .await
+        .expect("add_track must answer within the inline budget")
+        .map(|_sender| ())
+        .expect_err("a timed-out add_track must fail");
+    assert!(err.contains("timed out"), "unexpected error: {err}");
+
+    // webrtc 0.20.3 may have committed the transceiver change before the
+    // cancelled await point; the session must be invalidated and a
+    // replacement generation built rather than soft-recovered in place.
+    await_snapshot(&h, "generation retired after mutation timeout", |s| {
+        s.pc_generation > 1
+    })
+    .await;
+    let _replacement_build = timeout(WAIT, h.builds.recv())
+        .await
+        .expect("hard recovery must request a replacement session build");
+
+    timeout(WAIT, h.handle.close())
+        .await
+        .expect("controller must stay responsive to Close")
+        .expect("close must succeed after a mutation timeout");
+}
+
+/// A readiness anchor lane that never opens times out the inline creation,
+/// terminates the never-connected attempt, and leaves the controller
+/// responsive.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn readiness_lane_timeout_fails_attempt_and_controller_stays_responsive() {
+    let mut h = spawn_harness(301);
+    h.handle.connect().await.expect("send connect");
+    assign_role(&mut h, true).await;
+    let build = next_build(&mut h).await;
+    complete_build(
+        build,
+        Ok(Arc::new(HangingOps {
+            hang_track_mutation: false,
+            hang_remove_track: false,
+            hang_create_data_channel: true,
+        })),
+    );
+
+    await_snapshot(&h, "attempt failed after lane-creation timeout", |s| {
+        s.unavailable_reason.is_some()
+    })
+    .await;
+
+    timeout(WAIT, h.handle.close())
+        .await
+        .expect("controller must stay responsive to Close")
+        .expect("close must succeed after a lane-creation timeout");
+}
+
+/// A remove_track that never completes follows the same contract: timeout
+/// error with the generation, hard recovery, and a responsive controller.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn remove_track_timeout_fails_negotiation_and_keeps_controller_responsive() {
+    let mut h = spawn_harness(302);
+    let _mailbox = drive_to_sendable_with_session(
+        &mut h,
+        Arc::new(HangingOps {
+            hang_track_mutation: false,
+            hang_remove_track: true,
+            hang_create_data_channel: false,
+        }),
+    )
+    .await;
+
+    let track = Arc::new(
+        crate::wire::webrtc::v020::media::test_support::FakeTrackLocal::new("stuck-remove"),
+    );
+    let sender = h.handle.add_track(track).await.expect("add still works");
+    let err = timeout(WAIT, h.handle.remove_track(sender))
+        .await
+        .expect("remove_track must answer within the inline budget")
+        .expect_err("a timed-out remove_track must fail");
+    assert!(err.contains("timed out"), "unexpected error: {err}");
+
+    await_snapshot(&h, "generation retired after remove timeout", |s| {
+        s.pc_generation > 1
+    })
+    .await;
+    let _replacement_build = timeout(WAIT, h.builds.recv())
+        .await
+        .expect("hard recovery must request a replacement session build");
+
+    timeout(WAIT, h.handle.close())
+        .await
+        .expect("controller must stay responsive to Close")
+        .expect("close must succeed after a remove timeout");
 }

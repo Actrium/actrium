@@ -170,6 +170,12 @@ pub(crate) struct RtcConnectionManager {
     /// `broadcast::Sender`; each controller subscribes at spawn time and
     /// selects on the receiver in its event loop.
     supervisor: Arc<RtcRecoverySupervisor>,
+    /// Router-side per-peer signaling dispatch locks; installed once right
+    /// after `SignalingRouter::new` at the wiring site. Peer teardown
+    /// releases entries so remote-controlled identities cannot grow the
+    /// router-lifetime map without bound.
+    signaling_dispatch_chains:
+        std::sync::Mutex<Option<crate::wire::webrtc::v020::signaling::router::PeerDispatchChains>>,
     /// Ledger of resource-scoped per-peer recovery obligations handed off by
     /// peer-scoped Restore effects (RFC-0400 per-peer coverage contract,
     /// invariant 33). This manager is the receiving resource owner.
@@ -296,6 +302,7 @@ impl RtcConnectionManager {
             media_registry: None,
             #[cfg(feature = "test-utils")]
             driver_event_observer: None,
+            signaling_dispatch_chains: std::sync::Mutex::new(None),
             peer_set_version: watch::channel(0u64).0,
             next_pc_generations: std::sync::Mutex::new(HashMap::new()),
             #[cfg(test)]
@@ -909,6 +916,33 @@ impl RtcConnectionManager {
     /// lock is released (invariant #9). The command/lane senders are dropped
     /// before joining so the controller's event loop observes the closed channel
     /// and exits — otherwise the join would wait forever.
+    /// Install the router-side per-peer dispatch locks. Called at the node or
+    /// test-harness wiring site immediately after `SignalingRouter::new`.
+    pub(crate) fn set_signaling_dispatch_chains(
+        &self,
+        locks: crate::wire::webrtc::v020::signaling::router::PeerDispatchChains,
+    ) {
+        *self
+            .signaling_dispatch_chains
+            .lock()
+            .expect("RTC dispatch chain registry poisoned") = Some(locks);
+    }
+
+    /// Forget the closed peer's router-side dispatch-chain entry. Unconditional
+    /// by design: the chain's completion watcher only orders dispatches and
+    /// grants no exclusivity, so an in-flight dispatch still completes on its
+    /// own after the entry is gone.
+    fn release_signaling_dispatch_chain(&self, peer: &ActrId) {
+        if let Some(chains) = self
+            .signaling_dispatch_chains
+            .lock()
+            .expect("RTC dispatch chain registry poisoned")
+            .as_ref()
+        {
+            chains.release(peer);
+        }
+    }
+
     pub(crate) async fn close_peer(self: &Arc<Self>, peer: &ActrId) -> bool {
         enum CloseAction {
             Start(Box<PeerEntry>, Arc<CloseMarker>),
@@ -945,6 +979,10 @@ impl RtcConnectionManager {
                 None => CloseAction::Missing,
             }
         };
+        // Router-side dispatch entry for this peer is releasable now that the
+        // controller is leaving the registry; an in-flight dispatch keeps its
+        // lock until a later teardown observes it idle.
+        self.release_signaling_dispatch_chain(peer);
 
         match action {
             CloseAction::Missing => false,
@@ -1102,6 +1140,7 @@ impl RtcConnectionManager {
                             .entry(peer.clone())
                             .and_modify(|floor| *floor = (*floor).max(next))
                             .or_insert(next);
+                        self.release_signaling_dispatch_chain(&peer);
                         let marker = CloseMarker::new();
                         peers.insert(
                             peer.clone(),
