@@ -420,12 +420,6 @@ timer_inventory! {
         success: "queue capacity granted within the deadline", interrupt: "inbound channel reset or receiver abort",
         expiry: "fail closed (drop connection and reconnect)", reset: "new enqueue only", external: false
     },
-    RTC_BUILD_JITTER => {
-        id: "webrtc.build_jitter", owner: "rtc_peer_controller", category: FailureBackoff,
-        duration: "BuildThrottle.max_jitter (random per-peer)", arm: "session build or restart effect is submitted",
-        success: "jitter delay elapses", interrupt: "controller shutdown",
-        expiry: "proceed to the build semaphore", reset: "each build or restart effect", external: false
-    },
     RTC_CONFIGURATION_REFRESH => {
         id: "webrtc.configuration_refresh", owner: "rtc_connection_manager", category: FailureDeadline,
         duration: "CONFIGURATION_REFRESH_TIMEOUT", arm: "TURN/ICE configuration is broadcast to one peer controller",

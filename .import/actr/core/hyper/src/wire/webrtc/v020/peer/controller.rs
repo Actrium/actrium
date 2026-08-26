@@ -169,8 +169,6 @@ pub(crate) struct RtcPeerController {
 pub(crate) struct SharedNodeDeps {
     /// The shared inbound data-plane router (payloads bypass controllers).
     pub(crate) inbound: std::sync::Arc<crate::wire::webrtc::v020::inbound::InboundRouter>,
-    /// The global build/restart throttle (S5-7).
-    pub(crate) build_throttle: Arc<crate::wire::webrtc::v020::recovery::BuildThrottle>,
     /// The node media-frame registry (Stage 6); `None` drops media dispatch.
     pub(crate) media_registry: Option<Arc<crate::inbound::MediaFrameRegistry>>,
     /// Validated receive/reassembly/resource limits shared with every Session.

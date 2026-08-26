@@ -158,11 +158,6 @@ fn spawn_send_harness(serial: u64) -> SendHarness {
     let inbound = std::sync::Arc::new(InboundRouter::discard());
     let supervisor = crate::wire::webrtc::v020::recovery::RtcRecoverySupervisor::new();
     supervisor.set_signaling_generation(Some(0));
-    let build_throttle =
-        std::sync::Arc::new(crate::wire::webrtc::v020::recovery::BuildThrottle::new(
-            crate::wire::webrtc::v020::recovery::DEFAULT_MAX_CONCURRENT_BUILDS,
-            std::time::Duration::ZERO, // no jitter in tests
-        ));
     let (handle, _lane_tx, task) = RtcPeerController::spawn(
         test_actor_id(serial),
         factory,
@@ -171,7 +166,6 @@ fn spawn_send_harness(serial: u64) -> SendHarness {
         supervisor.subscribe_signaling_generation(),
         crate::wire::webrtc::v020::peer::controller::SharedNodeDeps {
             inbound,
-            build_throttle,
             media_registry: None,
             buffer_config: crate::wire::webrtc::v020::config::RtcBufferConfig::default(),
             #[cfg(feature = "test-utils")]

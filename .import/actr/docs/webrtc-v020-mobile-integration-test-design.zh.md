@@ -979,7 +979,7 @@ Controller，但不能向 B/C/D 镜像平台事件：
 - A-B、A-C、A-D 可以因实际链路情况不同分别 Noop、Soft、Hard 或 Exhausted；
 - `LocalAddressChanged` 通常要求 A 的所有 active PC 使用新地址重建；
 - 每条连接的协商、generation、成功/失败和 Hook 必须独立；
-- 同时恢复受 `BuildThrottle` 约束，不能形成 thundering herd；
+- 同时恢复由各 Peer 独立推进，不能因节点级信号量形成跨 Peer 阻塞；
 - 一个 peer 的 slow/partitioned signaling 不能饿死其他 peer。
 
 ### 8.4 多连接核心用例
@@ -988,7 +988,7 @@ Controller，但不能向 B/C/D 镜像平台事件：
 | --- | --- | --- |
 | MP01 | 仅 A-B UDP 单向/双向故障 | A-C/A-D 全程 PairUsable，generation 不变 |
 | MP02 | A 地址变化 | 三条 link 分别 replacement，无状态或 candidate 串线 |
-| MP03 | 三条 link 同时恢复 | BuildThrottle、公平性、总 deadline 和最终收敛 |
+| MP03 | 三条 link 同时恢复 | Peer 独立性、总 deadline 和最终收敛 |
 | MP04 | A-B 信令持续 partition | C/D 恢复和业务不被 B 阻塞 |
 | MP05 | recovery 中 `close_peer(B)` | B 不能复活，C/D 不受影响 |
 | MP06 | `close_all` | 所有端点和本地资源有界收敛；晚到 Offer/RoleAssignment 不得重建；仅显式 Connect 可创建 fresh link |
@@ -1026,7 +1026,7 @@ Controller，但不能向 B/C/D 镜像平台事件：
 | `DirectedSignalingFaultRegistry` | 生产 WebSocket transport 外层按 link、方向、消息类型、Nth 消息或 exchange id 注入 drop/delay/reorder/duplicate；delay/reorder 可取消且 heal 只取消目标 pair，不影响其他 peer |
 | `TestEvidenceTimeline` | 失败时合并输出 platform、reconciler、真实 Handler→mailbox fact、controller snapshot、Hook、signaling、business、fault、teardown，并携带 endpoint/peer/generation/revision/时间 |
 | Manager/Hook milestone | Controller 创建/移除和公开状态使用 watch，Hook 使用有序 snapshot commit stream，请求到达和 fault hit 使用 Notify milestone；不依赖固定 sleep 猜测状态已经变化 |
-| `BuildThrottleObservation` | MP03 将 A 的共享构建并发上限设为 1，并断言三条 Controller replacement 发生真实 contention、峰值不越界且最终 active=0 |
+| 多 Peer generation/snapshot 观测 | MP03 断言 A 的三条 Controller replacement 都在同一总 deadline 内独立推进并最终恢复 sendable |
 | `mobile_rtc_pair_contract.rs` | P00–P20；平台事件只注入受影响端；角色、双端状态/Hook、generation、在途 RPC/大消息/DataChunk 与双向业务 |
 | `mobile_rtc_multi_peer.rs` | MP01–MP06；A 同时管理 B/C/D 时的链路隔离、地址切换、恢复公平性、close_peer/close_all |
 | `.config/nextest.toml` | 新 pair/multi-peer 门禁 `retry=0`，不以重试掩盖竞态 |

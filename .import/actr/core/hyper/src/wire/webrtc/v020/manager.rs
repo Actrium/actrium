@@ -170,10 +170,6 @@ pub(crate) struct RtcConnectionManager {
     /// `broadcast::Sender`; each controller subscribes at spawn time and
     /// selects on the receiver in its event loop.
     supervisor: Arc<RtcRecoverySupervisor>,
-    /// S5-7: global build/restart throttle. Limits concurrent session
-    /// builds/restarts and adds per-peer jitter to prevent thundering herd
-    /// on network recovery.
-    build_throttle: Arc<crate::wire::webrtc::v020::recovery::BuildThrottle>,
     /// Ledger of resource-scoped per-peer recovery obligations handed off by
     /// peer-scoped Restore effects (RFC-0400 per-peer coverage contract,
     /// invariant 33). This manager is the receiving resource owner.
@@ -297,12 +293,6 @@ impl RtcConnectionManager {
             recovery_obligations: Arc::new(
                 crate::wire::webrtc::v020::recovery::PeerRecoveryObligationLog::new(),
             ),
-            build_throttle: Arc::new(crate::wire::webrtc::v020::recovery::BuildThrottle::new(
-                crate::wire::webrtc::v020::recovery::DEFAULT_MAX_CONCURRENT_BUILDS,
-                std::time::Duration::from_millis(
-                    crate::wire::webrtc::v020::recovery::DEFAULT_MAX_JITTER_MS,
-                ),
-            )),
             media_registry: None,
             #[cfg(feature = "test-utils")]
             driver_event_observer: None,
@@ -349,32 +339,12 @@ impl RtcConnectionManager {
     }
 
     #[cfg(feature = "test-utils")]
-    pub(crate) fn with_build_throttle_for_test(
-        mut self,
-        max_concurrent: usize,
-        max_jitter: std::time::Duration,
-    ) -> Self {
-        self.build_throttle = Arc::new(crate::wire::webrtc::v020::recovery::BuildThrottle::new(
-            max_concurrent,
-            max_jitter,
-        ));
-        self
-    }
-
-    #[cfg(feature = "test-utils")]
     pub(crate) fn with_driver_event_observer_for_test(
         mut self,
         observer: crate::wire::webrtc::v020::peer::controller::NodeDriverEventObserver,
     ) -> Self {
         self.driver_event_observer = Some(observer);
         self
-    }
-
-    #[cfg(feature = "test-utils")]
-    pub(crate) fn build_throttle_observation(
-        &self,
-    ) -> crate::wire::webrtc::v020::recovery::BuildThrottleObservation {
-        self.build_throttle.observation()
     }
 
     /// The shared inbound router (for the send path / tests to read inbound).
@@ -570,7 +540,6 @@ impl RtcConnectionManager {
                 self.supervisor.subscribe_signaling_generation(),
                 super::peer::controller::SharedNodeDeps {
                     inbound: self.inbound.clone(),
-                    build_throttle: self.build_throttle.clone(),
                     media_registry: self.media_registry.clone(),
                     buffer_config: self.buffer_config.clone(),
                     #[cfg(feature = "test-utils")]

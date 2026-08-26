@@ -400,7 +400,7 @@ pub(crate) struct WebRtcEffectRunner {
     event_mailbox: PeerEventMailbox,
     lane_tx: mpsc::Sender<LaneEvent>,
     /// Node-level shared dependencies (inbound router,
-    /// build throttle, media registry).
+    /// media registry).
     deps: super::controller::SharedNodeDeps,
 }
 
@@ -774,7 +774,6 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 let factory = self.factory.clone();
                 let sessions = self.sessions.clone();
                 let resources = self.resources.clone();
-                let throttle = self.deps.build_throttle.clone();
                 let peer_id = self.peer_id.clone();
                 self.spawn_effect_with(move || {
                     resources
@@ -782,10 +781,6 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                         .expect("resource registries lock")
                         .insert(generation, resource_registry.clone());
                     async move {
-                        // S5-7: acquire the global build permit + jitter before
-                        // starting the session build. The permit is held for the
-                        // duration of the build and released on drop.
-                        let _permit = throttle.acquire().await;
                         let result = factory.build(handler).await;
                         if let Err(error) = &result {
                             tracing::error!(
@@ -909,23 +904,18 @@ impl RtcPeerEffectPort for WebRtcEffectRunner {
                 generation,
                 operation_id,
                 ice_generation,
-            } => {
-                let throttle = self.deps.build_throttle.clone();
-                self.with_session_ops(identity, completion_tx, move |ops| async move {
-                    // S5-7: throttle concurrent restarts across peers.
-                    let _permit = throttle.acquire().await;
-                    let result = match ops {
-                        Ok(ops) => ops.restart_ice().await,
-                        Err(error) => Err(error),
-                    };
-                    EffectCompletion::RestartIce {
-                        generation,
-                        operation_id,
-                        ice_generation,
-                        result,
-                    }
-                })
-            }
+            } => self.with_session_ops(identity, completion_tx, move |ops| async move {
+                let result = match ops {
+                    Ok(ops) => ops.restart_ice().await,
+                    Err(error) => Err(error),
+                };
+                EffectCompletion::RestartIce {
+                    generation,
+                    operation_id,
+                    ice_generation,
+                    result,
+                }
+            }),
             RtcPeerEffect::RefreshConfiguration {
                 generation,
                 operation_id,

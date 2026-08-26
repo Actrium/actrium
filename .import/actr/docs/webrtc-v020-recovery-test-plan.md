@@ -34,7 +34,7 @@ TURN, system-network, browser, or Android/iOS environments.
 | 4 | TURN credential refresh (`set_configuration`) | System harness with Actrix TURN (real TURN server) | Rejected `set_configuration` → Hard Recovery is reducer-tested (S5-6); live TURN expiry uses Actrix TURN |
 | 5 | NAT rebinding / mapping timeout | System harness (netns + `tc` + NAT device/VM) | Cannot be emulated at the Actr seam (RFC §"Runtime and network-test APIs") |
 | 6 | App background → foreground (mobile) | Platform harness (Android/iOS) | Policy reducer-tested (S5-5); platform drives `AppBackground`/`AppForeground` via supervisor |
-| 7 | Thundering herd on fleet recovery (N peers recover at once) | T2 contract fixture: N controller pairs + supervisor broadcast; BuildThrottle bounds concurrency (S5-7) | Assert bounded concurrent builds (throttle metrics) and per-peer jitter spread |
+| 7 | Fleet recovery isolation (N peers recover at once) | T2 contract fixture: N controller pairs + supervisor broadcast; builds/restarts remain peer-owned | Assert a stalled peer does not block other peers and every controller converges within the shared test deadline |
 | 8 | Mailbox overflow under event storm | Reducer/controller tests plus restored integration event-storm suites | Overflow → Hard Recovery, `mailbox_overflows` observable; queue count/bytes are finite |
 | 9 | close-all under partial network partition | T2 contract fixture: partition one peer's signaling, `close_all()` must still converge within the overall deadline (S5-8) | Assert `observe().peer_count == 0` after deadline |
 | 10 | Deterministic policy replay | T1 `ManualPolicyClock` | Stock v0.20 has no `Runtime::now()` seam; high-level and bit-exact protocol replay are not claimed |

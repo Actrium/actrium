@@ -468,7 +468,7 @@ enum PacketRule {
 | N19 | recovery/build/close 竞态 | T1/T3 | close barrier；late callback 不复活连接 | 单元较全，补全链路 fault 场景 |
 | N20 | mailbox event storm/overflow | T1/T3 | 不阻塞 Handler；overflow 可观测并 Hard Recovery | 单元已有，集成恢复为常规门禁 |
 | N21 | A 同时管理 B/C/D，单链路故障 | T3 | 只有目标 link 状态/generation 变化 | 已实现：MP01–MP06 |
-| N22 | 所有 peer 同时恢复 | T3/T6 | BuildThrottle 有界；无 thundering herd；最终全收敛 | 策略部分已有，规模验证不足 |
+| N22 | 所有 peer 同时恢复 | T3/T6 | 各 Peer 不被进程级信号量串行阻塞；最终全收敛 | 已覆盖三 Peer 同时恢复，仍需更大规模验证 |
 | N23 | App/进程重启后的重连 | T5 | 公开 hook 序列完整；业务重新 sendable | E2E 部分覆盖 |
 | N24 | 移动端通过公开 Hook/订阅控制发送 | T5 FFI | false 时 UI/业务停发；true 后恢复；字段映射一致 | synthetic mapping 已有，设备行为缺失 |
 
@@ -486,7 +486,7 @@ A 管理 B、C、D 三个 `RtcPeerController`。至少验证：
 1. 只切断 A-B，A-C/A-D 持续发送成功；
 2. A-B Hard Recovery 只增加 B 对应的 `pc_generation`；
 3. 关闭 B 不影响 C/D 的 Handler、lane 和状态订阅；
-4. 同时切断三条连接时，build/recovery 并发不超过 `BuildThrottle`；
+4. 同时切断三条连接时，各 Peer 的 build/recovery 独立推进，不因其他 Peer 的底层操作 Pending 而停滞；
 5. 恢复顺序不同不会造成路由串线或旧 generation 回调污染；
 6. `close_all` 在某条信令仍 partition 时也能在总 deadline 内结束。
 

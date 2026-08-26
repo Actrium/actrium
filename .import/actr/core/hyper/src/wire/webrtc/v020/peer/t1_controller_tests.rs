@@ -111,10 +111,6 @@ impl ControllerTestHarness {
         let (peer_transport_retired, retirement_rx) = tokio::sync::broadcast::channel(8);
         let deps = SharedNodeDeps {
             inbound: Arc::new(crate::wire::webrtc::v020::inbound::InboundRouter::discard()),
-            build_throttle: Arc::new(crate::wire::webrtc::v020::recovery::BuildThrottle::new(
-                crate::wire::webrtc::v020::recovery::DEFAULT_MAX_CONCURRENT_BUILDS,
-                Duration::ZERO,
-            )),
             media_registry: None,
             buffer_config: crate::wire::webrtc::v020::config::RtcBufferConfig::default(),
             #[cfg(feature = "test-utils")]
