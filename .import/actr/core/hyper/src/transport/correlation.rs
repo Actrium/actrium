@@ -14,10 +14,17 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use actr_framework::Bytes;
-use actr_protocol::{ActorResult, ActrError, ErrorResponse, RpcEnvelope};
+use actr_protocol::{ActorResult, ActrError, ActrId, ErrorResponse, RpcEnvelope};
 use tokio::sync::oneshot;
 
 type PendingMap<M> = Arc<Mutex<HashMap<String, Entry<M>>>>;
+
+/// The shared peer-RPC pending map: `request_id` → target `ActrId` + response
+/// sender. Replaces the hand-rolled `RwLock<HashMap<...>>` the peer gates used
+/// to pass around: same metadata (the target `ActrId`, swept on peer
+/// disconnect), but registration is RAII so a dropped caller future removes
+/// its own entry (#390).
+pub(crate) type PendingRequestsMap = Arc<RpcCorrelation<ActrId>>;
 
 /// Correlates in-flight request_ids with waiting callers.
 ///
@@ -103,7 +110,6 @@ impl<M> RpcCorrelation<M> {
     /// the crate-standard warn (`rpc.orphan_response_dropped`) with
     /// request_id / peer / route_key; `peer` is only evaluated on that
     /// drop path.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn complete_from_envelope(
         &self,
         envelope: RpcEnvelope,
@@ -131,7 +137,6 @@ impl<M> RpcCorrelation<M> {
 
     /// Remove-and-fail every entry whose metadata matches the predicate
     /// (peer-disconnect sweep). Returns the number of entries removed.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn fail_where(
         &self,
         mut pred: impl FnMut(&M) -> bool,
@@ -152,7 +157,6 @@ impl<M> RpcCorrelation<M> {
     }
 
     /// Number of in-flight entries.
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn len(&self) -> usize {
         lock_ignore_poison(&self.inner).len()
     }
@@ -197,7 +201,6 @@ impl<M> PendingRpc<M> {
     /// that own a combined send+wait budget (e.g. `PeerGate` wraps this in
     /// its own `tokio::time::timeout` so it can close the transport on
     /// expiry).
-    #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) async fn recv(mut self) -> ActorResult<Bytes> {
         let rx = self
             .rx
@@ -212,7 +215,7 @@ impl<M> PendingRpc<M> {
     /// Detach the receiver from the guard: the entry then stays in the map
     /// until completed or swept. Test-only - in production this reintroduces
     /// the leak the guard exists to prevent.
-    #[cfg(feature = "test-utils")]
+    #[cfg(any(test, feature = "test-utils"))]
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) fn into_receiver(mut self) -> oneshot::Receiver<ActorResult<Bytes>> {
         let rx = self

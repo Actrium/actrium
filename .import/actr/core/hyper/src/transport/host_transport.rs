@@ -90,6 +90,11 @@ pub struct HostTransport {
     /// Pending requests (request/response matching); entries are removed on
     /// every send_request exit path via the RAII guard, and by complete_*.
     correlation: RpcCorrelation<()>,
+
+    /// In-process scope handoff (#390): the sender side registers root
+    /// scopes here and workload intake claims them through the shared
+    /// `Arc<HostTransport>`. Never consulted for peer transports.
+    scope_registry: crate::request_scope::ScopeHandoffRegistry,
 }
 
 /// Channel pair (tx + rx)
@@ -132,6 +137,7 @@ impl HostTransport {
             media_track_channels: Arc::new(RwLock::new(HashMap::new())),
             lane_cache: Arc::new(RwLock::new(HashMap::new())),
             correlation: RpcCorrelation::new(),
+            scope_registry: crate::request_scope::ScopeHandoffRegistry::new(),
         }
     }
 
@@ -298,6 +304,11 @@ impl HostTransport {
     }
 
     // ========== High-level APIs ==========
+
+    /// Shared scope handoff registry for this transport direction (#390).
+    pub(crate) fn scope_registry(&self) -> &crate::request_scope::ScopeHandoffRegistry {
+        &self.scope_registry
+    }
 
     /// Send request (with response waiting)
     #[cfg_attr(

@@ -1280,7 +1280,8 @@ impl TestHarness {
             })
         };
 
-        let pending: PendingRequestsMap = Arc::new(tokio::sync::RwLock::new(HashMap::new()));
+        let pending: PendingRequestsMap =
+            std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
         let wire_config = DefaultWireBuilderConfig {
             enable_webrtc: true,
             enable_websocket: false,

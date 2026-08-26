@@ -1384,7 +1384,7 @@ async fn duplicate_inflight_tell_is_dropped_immediately() {
     let inner_a = h.inner.clone();
     let env_a = envelope.clone();
     let original = tokio::spawn(async move {
-        match inner_a.handle_incoming(env_a, None, None).await {
+        match inner_a.handle_incoming(env_a, None, None, None).await {
             IncomingOutcome::Replied(r) => r,
             IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
         }
@@ -1400,7 +1400,11 @@ async fn duplicate_inflight_tell_is_dropped_immediately() {
     // original (the release gate is still closed, so any wait would hang
     // until this test's own 5 s guard fires).
     let duplicate = tokio::time::timeout(Duration::from_secs(5), async {
-        match h.inner.handle_incoming(envelope.clone(), None, None).await {
+        match h
+            .inner
+            .handle_incoming(envelope.clone(), None, None, None)
+            .await
+        {
             IncomingOutcome::Replied(r) => r,
             IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
         }
@@ -1430,7 +1434,7 @@ async fn duplicate_inflight_tell_is_dropped_immediately() {
     // Post-completion duplicate: served from the dedup cache, which stores
     // EMPTY bytes for a successful tell (the response is never sent, so the
     // unsent payload is not retained for the DEDUP_TTL).
-    let cached = match h.inner.handle_incoming(envelope, None, None).await {
+    let cached = match h.inner.handle_incoming(envelope, None, None, None).await {
         IncomingOutcome::Replied(r) => r.unwrap(),
         IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
     };
@@ -1457,7 +1461,7 @@ async fn tell_handler_error_completes_dedup_entry() {
     let inner_a = h.inner.clone();
     let env_a = envelope.clone();
     let original = tokio::spawn(async move {
-        match inner_a.handle_incoming(env_a, None, None).await {
+        match inner_a.handle_incoming(env_a, None, None, None).await {
             IncomingOutcome::Replied(r) => r,
             IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
         }
@@ -1474,7 +1478,7 @@ async fn tell_handler_error_completes_dedup_entry() {
 
     // Retry with the same request_id: served from the dedup cache (the
     // recorded error), handler not re-entered.
-    let retried = match h.inner.handle_incoming(envelope, None, None).await {
+    let retried = match h.inner.handle_incoming(envelope, None, None, None).await {
         IncomingOutcome::Replied(r) => r,
         IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
     };
@@ -1502,7 +1506,7 @@ async fn request_with_zero_timeout_is_still_dispatched() {
     let inner_a = h.inner.clone();
     let env_a = envelope.clone();
     let call = tokio::spawn(async move {
-        match inner_a.handle_incoming(env_a, None, None).await {
+        match inner_a.handle_incoming(env_a, None, None, None).await {
             IncomingOutcome::Replied(r) => r,
             IncomingOutcome::Deferred => unreachable!("no EXPLICIT in dedup tests"),
         }
@@ -1619,7 +1623,12 @@ async fn explicit_deferred_balances_outstanding_counter_on_deliver() {
         span: tracing::Span::none(),
     };
     let outcome = inner
-        .handle_incoming(explicit_envelope("explicit-bal"), None, Some(reply_sink))
+        .handle_incoming(
+            explicit_envelope("explicit-bal"),
+            None,
+            Some(reply_sink),
+            None,
+        )
         .await;
     assert!(matches!(outcome, IncomingOutcome::Deferred));
     assert_eq!(
@@ -1711,7 +1720,12 @@ async fn explicit_handler_err_routes_through_deliver_and_defers() {
         span: tracing::Span::none(),
     };
     let outcome = inner
-        .handle_incoming(explicit_envelope("explicit-err"), None, Some(reply_sink))
+        .handle_incoming(
+            explicit_envelope("explicit-err"),
+            None,
+            Some(reply_sink),
+            None,
+        )
         .await;
     assert!(
         matches!(outcome, IncomingOutcome::Deferred),
@@ -1799,7 +1813,12 @@ async fn explicit_handler_err_wins_against_late_send_first_write_wins() {
         span: tracing::Span::none(),
     };
     let outcome = inner
-        .handle_incoming(explicit_envelope("explicit-race"), None, Some(reply_sink))
+        .handle_incoming(
+            explicit_envelope("explicit-race"),
+            None,
+            Some(reply_sink),
+            None,
+        )
         .await;
     assert!(
         matches!(outcome, IncomingOutcome::Deferred),
@@ -2163,4 +2182,135 @@ async fn call_with_signal_lane_passes_lane_validation() {
     )
     .await;
     assert!(matches!(expect_runtime_error(res), ActrError::Internal(_)));
+}
+
+// ── #390: scoped request cancellation at admission ──────────────────────────
+
+/// Linked handle capturing the RuntimeContext's inherited request scope so
+/// tests can assert scope handoff and deadline propagation into the guest.
+struct ScopeCaptureHandle {
+    captured: std::sync::Mutex<Vec<Arc<crate::request_scope::RequestScope>>>,
+}
+
+#[async_trait::async_trait]
+impl LinkedWorkloadHandle for ScopeCaptureHandle {
+    async fn dispatch(
+        &self,
+        _envelope: RpcEnvelope,
+        ctx: Arc<crate::context::RuntimeContext>,
+    ) -> ActorResult<FrameworkBytes> {
+        if let Some(scope) = ctx.scope.clone() {
+            self.captured.lock().unwrap().push(scope);
+        }
+        Ok(FrameworkBytes::new())
+    }
+}
+
+async fn scope_test_inner(
+    handle: Arc<dyn LinkedWorkloadHandle>,
+) -> std::sync::Arc<crate::lifecycle::node::Inner> {
+    let dir = tempfile::TempDir::new().unwrap();
+    let config = dedup_test_config(&dir);
+    let actor_id = ActrId {
+        realm: config.realm,
+        serial_number: 1,
+        r#type: config.package.actr_type.clone(),
+    };
+    let mut inner = crate::lifecycle::node::Inner::build(
+        config,
+        Workload::Linked(handle),
+        None,
+        None,
+        None,
+        100,
+        Duration::from_secs(60),
+        crate::config::DispatchConcurrency::default(),
+        None,
+        false,
+    )
+    .await
+    .expect("Inner::build must succeed with in-memory mailbox");
+    // handle_incoming requires post-start identity/credential state; set it
+    // directly instead of driving the full registration path.
+    inner.actor_id = Some(actor_id);
+    inner.credential_state = Some(CredentialState::new(AIdCredential::default(), None, None));
+    std::sync::Arc::new(inner)
+}
+
+#[tokio::test]
+async fn cancelled_scope_rejects_request_before_handler_runs() {
+    let handle = Arc::new(ScopeCaptureHandle {
+        captured: std::sync::Mutex::new(Vec::new()),
+    });
+    let inner = scope_test_inner(handle.clone()).await;
+
+    let scope = crate::request_scope::RequestScope::root(30_000);
+    scope.cancel(crate::request_scope::CancelReason::CallerDropped);
+
+    let envelope = RpcEnvelope {
+        route_key: "test/anything".to_string(),
+        payload: Some(FrameworkBytes::new()),
+        direction: Some(actr_protocol::Direction::Request as i32),
+        timeout_ms: 30_000,
+        ..Default::default()
+    };
+    let outcome = inner
+        .handle_incoming(envelope, None, None, Some(scope))
+        .await;
+
+    match outcome {
+        crate::lifecycle::node::IncomingOutcome::Replied(Err(ActrError::TimedOut)) => {}
+        other => panic!("expected Replied(Err(TimedOut)), got {other:?}"),
+    }
+    assert!(
+        handle.captured.lock().unwrap().is_empty(),
+        "handler must not run for a request whose scope already ended"
+    );
+}
+
+#[tokio::test]
+async fn claimed_scope_reaches_guest_and_bounds_child_deadlines() {
+    let handle = Arc::new(ScopeCaptureHandle {
+        captured: std::sync::Mutex::new(Vec::new()),
+    });
+    let inner = scope_test_inner(handle.clone()).await;
+
+    // Root budget of 200 ms: every derived child must fit inside it, even
+    // when the child requests for a much larger per-hop timeout.
+    let scope = crate::request_scope::RequestScope::root(200);
+
+    let envelope = RpcEnvelope {
+        route_key: "test/anything".to_string(),
+        payload: Some(FrameworkBytes::new()),
+        direction: Some(actr_protocol::Direction::Request as i32),
+        timeout_ms: 200,
+        ..Default::default()
+    };
+    let outcome = inner
+        .handle_incoming(envelope, None, None, Some(scope))
+        .await;
+
+    match outcome {
+        crate::lifecycle::node::IncomingOutcome::Replied(Ok(_)) => {}
+        other => panic!("expected Replied(Ok), got {other:?}"),
+    }
+
+    let captured = handle.captured.lock().unwrap().clone();
+    assert_eq!(captured.len(), 1, "handler must run exactly once");
+    let inherited = &captured[0];
+    assert!(
+        inherited.remaining_ms().is_some_and(|ms| ms <= 200),
+        "inherited scope must share the root budget"
+    );
+    let child = inherited.child(60_000);
+    assert!(
+        child.remaining_ms().is_some_and(|ms| ms <= 200),
+        "child scope deadline must be min(parent, now+timeout), not a fresh budget"
+    );
+    // The real #390 property: cancelling the root token cascades to children.
+    inherited.token().cancel();
+    assert!(
+        child.token().is_cancelled(),
+        "child scopes must sit under the root cancellation token"
+    );
 }

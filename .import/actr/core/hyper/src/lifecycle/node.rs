@@ -1587,13 +1587,14 @@ impl Inner {
         envelope: RpcEnvelope,
         caller_id: Option<&ActrId>,
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
+        scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingOutcome {
         // Thin wrapper preserving the original flow: run synchronous
         // admission, then await the continuation to completion inline. This is
         // bit-for-bit the pre-B2 path (ACL → dedup → ctx → dispatch → dedup
         // complete), used directly by the mailbox lane and by the in-proc lane
         // when the dispatch gate is off.
-        self.admit_incoming(envelope, caller_id, reply_sink)
+        self.admit_incoming(envelope, caller_id, reply_sink, scope)
             .await
             .await
     }
@@ -1641,6 +1642,7 @@ impl Inner {
         envelope: RpcEnvelope,
         caller_id: Option<&ActrId>,
         reply_sink: Option<crate::lifecycle::reply_deliver::ReplySink>,
+        scope: Option<std::sync::Arc<crate::request_scope::RequestScope>>,
     ) -> IncomingContinuation {
         // Log received message
         if let Some(caller) = caller_id {
@@ -1750,6 +1752,22 @@ impl Inner {
             }
         }
 
+        // Scoped-cancellation check: if the inherited request scope is already
+        // terminal (caller dropped or root deadline expired), reject before any
+        // handler work. The dedup mark above is left to expire via DEDUP_TTL —
+        // same as the credential-missing path — since the caller is gone and
+        // no response can be delivered anyway.
+        if let Some(scope) = scope.as_ref() {
+            if !scope.is_active() {
+                tracing::debug!(
+                    request_id = %envelope.request_id,
+                    root_request_id = %scope.root_request_id(),
+                    "request scope already cancelled before admission; rejecting"
+                );
+                return ready_continuation(Err(ActrError::TimedOut));
+            }
+        }
+
         // 1. Create Context with caller_id from transport layer
         let credential_state = match self.credential_state.clone() {
             Some(cs) => cs,
@@ -1760,12 +1778,18 @@ impl Inner {
                 )));
             }
         };
-        let mut ctx = self.make_runtime_context(
+        let ctx = self.make_runtime_context(
             actor_id,
             caller_id, // caller_id from transport layer (MessageRecord.from)
             &envelope.request_id,
             &credential_state.credential().await,
         );
+        // Inherit the claimed request scope (if any) so nested `call_raw` from
+        // the guest derives child scopes under the same root deadline/token.
+        let mut ctx = match scope.clone() {
+            Some(s) => ctx.with_scope(s),
+            None => ctx,
+        };
 
         // RFC-0323: query the route's ReplyMode. For `Linked` nodes the linked
         // handle carries the generated `reply_mode_for_route` match; for
@@ -1947,6 +1971,15 @@ impl Inner {
             let executor = call_executor;
             let run: crate::dispatch::scheduler::DispatchFn = Box::new(move || {
                 Box::pin(async move {
+                    if let Some(scope) = ctx_run.scope.as_ref() {
+                        if !scope.is_active() {
+                            tracing::debug!(
+                                request_id = %env.request_id,
+                                "request scope cancelled while queued in dispatch scheduler; skipping"
+                            );
+                            return Err(ActrError::TimedOut);
+                        }
+                    }
                     tracing::debug!(
                         "dispatch scheduler started job: route_key={}, request_id={}",
                         env.route_key,
@@ -1978,6 +2011,15 @@ impl Inner {
         } else {
             let workload = self.workload_dispatch.clone();
             Box::pin(async move {
+                if let Some(scope) = ctx.scope.as_ref() {
+                    if !scope.is_active() {
+                        tracing::debug!(
+                            request_id = %envelope.request_id,
+                            "request scope cancelled before dispatch; rejecting"
+                        );
+                        return wrap_outcome(Err(ActrError::TimedOut)).await;
+                    }
+                }
                 let result = workload
                     .dispatch_envelope(envelope, ctx, dispatch_ctx, &call_executor)
                     .await;
@@ -2765,7 +2807,7 @@ impl Inner {
             // v0.20 inbound dispatcher, and PeerGate (request/response
             // matching).
             let pending_requests: crate::outbound::PendingRequestsMap =
-                Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new()));
+                std::sync::Arc::new(crate::transport::correlation::RpcCorrelation::new());
 
             // W5: v0.20 exclusive backend switch. When the `webrtc-v020`
             // feature is enabled, the v0.20 stack replaces the 0.14
@@ -3568,6 +3610,9 @@ impl Inner {
                 let outstanding_replies = node_ref.outstanding_replies.clone();
                 let max_pending_replies = node_ref.max_pending_replies;
                 let hook_cb = node_hook_callback.clone();
+                // #390: shared with the sending side (`call_raw` attaches the
+                // handoff marker through the same registry).
+                let scope_registry = shell_to_workload.scope_registry().clone();
 
                 let inproc_handle = tokio::spawn(async move {
                     use futures_util::StreamExt as _;
@@ -3641,7 +3686,7 @@ impl Inner {
                                 if inflight.len() < INPROC_INFLIGHT_CAP
                                     && outstanding_replies.len() < max_pending_replies => {
                                 match envelope_result {
-                                    Ok(envelope) => {
+                                    Ok(mut envelope) => {
                                         let request_id = envelope.request_id.clone();
                                         tracing::debug!("📨 Guest received REQUEST from Shell: request_id={}", request_id);
 
@@ -3661,6 +3706,39 @@ impl Inner {
                                                     route_key = %envelope.route_key,
                                                     direction = ?envelope.direction,
                                                     "rpc.invalid_direction_dropped: non-dispatchable RpcEnvelope.direction on Shell → Guest lane; dropping"
+                                                );
+                                                continue;
+                                            }
+                                        };
+
+                                        // #390: strip the in-process scope handoff marker
+                                        // and claim the root scope before ACL, dedup, or
+                                        // dispatch ever see the envelope. An abandoned
+                                        // handoff (caller cancelled between send and
+                                        // intake) or an invalid/duplicate marker is
+                                        // dropped: cancelled work must never enter guest
+                                        // code.
+                                        let scope = match crate::request_scope::strip_and_claim(
+                                            &mut envelope,
+                                            &scope_registry,
+                                        ) {
+                                            crate::request_scope::ScopeClaim::Unmarked => None,
+                                            crate::request_scope::ScopeClaim::Claimed(scope) => {
+                                                Some(scope)
+                                            }
+                                            crate::request_scope::ScopeClaim::Abandoned => {
+                                                tracing::debug!(
+                                                    request_id = %request_id,
+                                                    route_key = %envelope.route_key,
+                                                    "rpc.scope_handoff_abandoned: caller cancelled before intake; dropping"
+                                                );
+                                                continue;
+                                            }
+                                            crate::request_scope::ScopeClaim::Invalid => {
+                                                tracing::warn!(
+                                                    request_id = %request_id,
+                                                    route_key = %envelope.route_key,
+                                                    "rpc.scope_handoff_invalid: malformed or duplicate scope marker; dropping"
                                                 );
                                                 continue;
                                             }
@@ -3690,7 +3768,7 @@ impl Inner {
                                                 response_tx: response_tx.clone(),
                                                 span: span.clone(),
                                             };
-                                            let cont = node.admit_incoming(envelope, None, Some(reply_sink)).await;
+                                            let cont = node.admit_incoming(envelope, None, Some(reply_sink), scope).await;
                                             let response_tx = response_tx.clone();
                                             inflight.push(Box::pin(async move {
                                                 match cont.await {
@@ -3710,7 +3788,7 @@ impl Inner {
                                                 response_tx: response_tx.clone(),
                                                 span: span.clone(),
                                             };
-                                            let handle_incoming_fut = node.handle_incoming(envelope, None, Some(reply_sink));
+                                            let handle_incoming_fut = node.handle_incoming(envelope, None, Some(reply_sink), scope);
                                             #[cfg(feature = "opentelemetry")]
                                             let handle_incoming_fut = handle_incoming_fut.instrument(span.clone());
                                             match handle_incoming_fut.await {
@@ -4231,7 +4309,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let cont = node
-                                                        .admit_incoming(envelope.clone(), caller_id_ref, Some(reply_sink))
+                                                        .admit_incoming(envelope.clone(), caller_id_ref, Some(reply_sink), None)
                                                         .await;
                                                     inflight.push(Box::pin(async move {
                                                         match cont.await {
@@ -4258,7 +4336,7 @@ impl Inner {
                                                         span: span.clone(),
                                                     };
                                                     let handle_incoming_fut =
-                                                        node.handle_incoming(envelope.clone(), caller_id_ref, Some(reply_sink));
+                                                        node.handle_incoming(envelope.clone(), caller_id_ref, Some(reply_sink), None);
                                                     #[cfg(feature = "opentelemetry")]
                                                     let handle_incoming_fut =
                                                         handle_incoming_fut.instrument(span.clone());

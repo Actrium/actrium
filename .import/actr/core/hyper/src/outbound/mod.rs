@@ -11,9 +11,9 @@
 mod host_gate;
 mod peer_gate;
 
+pub(crate) use crate::transport::correlation::PendingRequestsMap;
 pub use host_gate::HostGate;
 pub use peer_gate::PeerGate;
-pub(crate) use peer_gate::PendingRequestsMap;
 
 use actr_framework::{Bytes, MediaSample};
 use actr_protocol::{ActorResult, ActrError, ActrId, PayloadType, RpcEnvelope};
@@ -77,6 +77,17 @@ pub(crate) enum Gate {
 }
 
 impl Gate {
+    /// Scope handoff registry for the in-process lane (#390). Returns
+    /// `None` for the peer gate: scope markers never leave the process.
+    pub(crate) fn inproc_scope_registry(
+        &self,
+    ) -> Option<&crate::request_scope::ScopeHandoffRegistry> {
+        match self {
+            Gate::Host(gate) => Some(gate.scope_registry()),
+            Gate::Peer(_) => None,
+        }
+    }
+
     /// Send a request and wait for the response with an explicit `PayloadType`.
     pub(crate) async fn send_request_with_type(
         &self,

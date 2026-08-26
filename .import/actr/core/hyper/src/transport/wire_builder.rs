@@ -16,7 +16,7 @@ use crate::lifecycle::session_state::SessionState;
 use crate::outbound::PendingRequestsMap;
 use crate::wire::websocket::WebSocketConnection;
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrError, ActrId, Direction, PayloadType, RpcEnvelope};
+use actr_protocol::{ActrId, Direction, PayloadType, RpcEnvelope};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -54,7 +54,7 @@ pub struct DefaultWireBuilderConfig {
     /// When set, outbound WebSocket connections spawn reader tasks that deliver
     /// server responses (and error envelopes) to the waiting `send_request` calls.
     /// Must be the same map as `PeerGate.pending_requests`.
-    pub pending_requests: Option<PendingRequestsMap>,
+    pub(crate) pending_requests: Option<PendingRequestsMap>,
 }
 
 impl Default for DefaultWireBuilderConfig {
@@ -168,7 +168,6 @@ impl DefaultWireBuilder {
 /// the response onto the TCP connection but nobody on the client side would
 /// consume it from the dispatcher lanes and deliver it to the waiting
 /// `send_request_with_type` future.
-#[derive(Debug)]
 struct ClientWebSocketHandle {
     inner: WebSocketConnection,
     pending_requests: PendingRequestsMap,
@@ -177,6 +176,15 @@ struct ClientWebSocketHandle {
     /// Monotonic generation distinguishing this wire session from any prior or
     /// replacement wire to the same peer.
     session_id: u64,
+}
+
+impl std::fmt::Debug for ClientWebSocketHandle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientWebSocketHandle")
+            .field("peer_id", &self.peer_id)
+            .field("session_id", &self.session_id)
+            .finish_non_exhaustive()
+    }
 }
 
 impl ClientWebSocketHandle {
@@ -233,27 +241,11 @@ impl ClientWebSocketHandle {
                                 continue;
                             }
 
-                            let request_id = &envelope.request_id;
-                            let mut guard = pending.write().await;
-                            if let Some((_target, tx)) = guard.remove(request_id.as_str()) {
-                                drop(guard);
-                                let result: actr_protocol::ActorResult<actr_framework::Bytes> =
-                                    match (envelope.payload, envelope.error) {
-                                        (Some(payload), None) => Ok(payload),
-                                        (None, Some(err)) => {
-                                            Err(crate::lifecycle::node::wire_code_to_actr_error(
-                                                err.code,
-                                                err.message,
-                                            ))
-                                        }
-                                        _ => Err(ActrError::DecodeFailure(
-                                            "invalid RpcEnvelope: payload/error inconsistent"
-                                                .to_string(),
-                                        )),
-                                    };
-                                let _ = tx.send(result);
-                            } else {
-                                drop(guard);
+                            let request_id = envelope.request_id.clone();
+                            let outcome = pending.complete_from_envelope(envelope, || {
+                                "outbound-websocket".to_string()
+                            });
+                            if outcome == crate::transport::correlation::CompleteOutcome::Orphan {
                                 tracing::debug!(
                                     request_id = %request_id,
                                     "ClientWebSocketHandle: no pending request for incoming envelope, dropping"

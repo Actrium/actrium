@@ -11,31 +11,17 @@
 //! This is a pure refactor — no behavior change. The 0.14 `WebRtcGate`
 //! delegates here; the v0.20 inbound bridge (W3b) will too.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use actr_framework::Bytes;
 use actr_protocol::prost::Message as ProstMessage;
-use actr_protocol::{ActrError, ActrId, DataChunk, Direction, PayloadType, RpcEnvelope};
+use actr_protocol::{ActrId, DataChunk, Direction, PayloadType, RpcEnvelope};
 use actr_runtime_mailbox::{Mailbox, MessagePriority};
-use tokio::sync::RwLock;
 
+use crate::transport::correlation::PendingRequestsMap;
 use crate::wire::{DirectionError, direction_for_routing};
 
 use super::DataChunkRegistry;
-
-/// Pending requests map type: request_id → (target_actor_id, oneshot response sender).
-pub(crate) type PendingRequestsMap = Arc<
-    RwLock<
-        HashMap<
-            String,
-            (
-                ActrId,
-                tokio::sync::oneshot::Sender<actr_protocol::ActorResult<Bytes>>,
-            ),
-        >,
-    >,
->;
 
 /// Shared inbound dispatcher: routes decoded inbound messages to the Mailbox
 /// (RPC), the pending-requests map (RPC responses), or the `DataChunkRegistry`
@@ -151,37 +137,9 @@ impl InboundDispatcher {
             return;
         }
 
-        // Direction::Response: consult pending map.
-        let mut pending = pending_requests.write().await;
-        if let Some((target, response_tx)) = pending.remove(&request_id) {
-            drop(pending);
-            tracing::debug!(
-                request_id = %request_id,
-                target = %target,
-                "Received RPC Response"
-            );
-
-            let result = match (envelope.payload, envelope.error) {
-                (Some(payload), None) => Ok(payload),
-                (None, Some(error)) => Err(crate::lifecycle::node::wire_code_to_actr_error(
-                    error.code,
-                    error.message,
-                )),
-                _ => Err(ActrError::DecodeFailure(
-                    "Invalid RpcEnvelope: payload and error fields inconsistent".to_string(),
-                )),
-            };
-            let _ = response_tx.send(result);
-        } else {
-            drop(pending);
-            let peer = Self::peer_for_log(&from_bytes);
-            tracing::warn!(
-                request_id = %request_id,
-                peer = %peer,
-                route_key = %envelope.route_key,
-                "rpc.orphan_response_dropped: envelope marked Response has no pending request; dropping (late reply or peer-mislabeled request)"
-            );
-        }
+        // Direction::Response: complete the waiting caller via the shared
+        // correlation map (orphan late replies warn and drop).
+        pending_requests.complete_from_envelope(envelope, || Self::peer_for_log(&from_bytes));
     }
 
     /// Enqueue an explicit inbound RPC request or tell to the Mailbox with

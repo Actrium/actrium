@@ -160,6 +160,20 @@ impl ActorCmd {
             ActorCmd::Shutdown { .. } => false,
         }
     }
+
+    /// Queued dispatch work whose request scope ended (root cancellation or
+    /// deadline) must not enter guest code (#390). Unlike
+    /// [`ActorCmd::reply_is_closed`], the reply stays open — the runner
+    /// answers `TimedOut` so the caller's continuation finishes explicitly.
+    /// Scoped cancellation never poisons the runner.
+    fn dispatch_scope_cancelled(&self) -> bool {
+        match self {
+            ActorCmd::Dispatch { ctx, .. } => {
+                ctx.scope.as_ref().is_some_and(|scope| !scope.is_active())
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Cheap, `&self` handle to the runner task. Held behind an `Arc` on the node.
@@ -491,6 +505,12 @@ async fn run_loop(mut workload: Workload, mut rx: mpsc::Receiver<ActorCmd>) {
         if cmd.reply_is_closed() {
             continue;
         }
+        if cmd.dispatch_scope_cancelled() {
+            if let ActorCmd::Dispatch { reply, .. } = cmd {
+                let _ = reply.send(Err(ActrError::TimedOut));
+            }
+            continue;
+        }
         match cmd {
             ActorCmd::Dispatch {
                 envelope,
@@ -655,6 +675,14 @@ async fn run_loop_interleaved(
                     Some(ActorCmd::Dispatch { envelope, ctx, invocation, host_abi, span, mut reply }) => {
                         if reply.is_closed() {
                             continue;
+                        }
+                        // #390: scope-ended dispatch replies TimedOut without
+                        // touching the linked handle (no guest code, no poison).
+                        if let Some(scope) = ctx.scope.as_ref() {
+                            if !scope.is_active() {
+                                let _ = reply.send(Err(ActrError::TimedOut));
+                                continue;
+                            }
                         }
                         let _ = (&invocation, &host_abi);
                         let handle = handle.clone();

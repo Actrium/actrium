@@ -1714,6 +1714,14 @@ async fn resident_region(
                     None => open = false,
                     Some(command) if command_reply_is_closed(&command) => continue,
                     Some(ActorCmd::Dispatch { envelope, ctx, invocation, host_abi, span, reply }) => {
+                        // #390: scope-ended dispatch replies TimedOut without
+                        // entering the guest (queued-work cancellation).
+                        if let Some(scope) = ctx.scope.as_ref() {
+                            if !scope.is_active() {
+                                let _ = reply.send(Err(ActrError::TimedOut));
+                                continue;
+                            }
+                        }
                         // `ctx` (RuntimeContext) drives only the Linked path.
                         let _ = ctx;
                         let permit = match acquire_invocation(&limits) {
