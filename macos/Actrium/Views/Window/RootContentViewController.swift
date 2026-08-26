@@ -1119,6 +1119,15 @@ struct MainWindowTabsView: View {
                     .mask {
                         accordionCoverMask(accordionPresentation)
                     }
+                    // The Safari-style focus ring deliberately extends past
+                    // the Tab surface, so it must be drawn after the accordion
+                    // content mask instead of being clipped inside the label.
+                    .overlay {
+                        addressFocusRing(
+                            for: tab,
+                            isVisible: !accordionPresentation.isObscured
+                        )
+                    }
                     // Only an incoming cover needs a painted boundary. Flat
                     // Tabs expose the real Header through their inset plate.
                     .overlay {
@@ -1692,6 +1701,40 @@ struct MainWindowTabsView: View {
             .allowsHitTesting(false)
     }
 
+    /// The editing plate keeps the same 29pt visual height as every other Tab.
+    /// Its focus ring is built outward from that plate: no blue pixels consume
+    /// input space, and the complete contour remains visible above the mask.
+    private func addressFocusRing(for tab: Tab, isVisible: Bool) -> some View {
+        let showsFocusRing = isVisible
+            && tab.id == viewModel.currentTabId
+            && interaction.isAddressEditing
+            && addressPresentationPhase.showsFocusAffordances
+        let surfaceShape = tabShape(for: tab)
+            .inset(by: CompactToolbarLayout.tabSeparationWidth)
+
+        return ZStack {
+            surfaceShape
+                .inset(by: -2.5)
+                .strokeBorder(
+                    AppColors.softenedAddressFocusAccentColor.opacity(0.88),
+                    lineWidth: 2.5
+                )
+                .shadow(
+                    color: AppColors.softenedAddressFocusAccentColor.opacity(0.12),
+                    radius: 2
+                )
+
+            surfaceShape
+                .inset(by: -0.5)
+                .strokeBorder(
+                    AppColors.addressFocusInnerHighlightColor,
+                    lineWidth: 0.5
+                )
+        }
+        .opacity(showsFocusRing ? 1 : 0)
+        .allowsHitTesting(false)
+    }
+
     private func addressEditingTab(_ tab: Tab) -> some View {
         ZStack {
             if addressPresentationPhase.showsContents {
@@ -1728,6 +1771,7 @@ struct MainWindowTabsView: View {
         .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
         .background {
             let shape = tabShape(for: tab)
+                .inset(by: CompactToolbarLayout.tabSeparationWidth)
             ZStack {
                 shape.fill(AppColors.windowChromeTabPlateColor)
                 shape.fill(AppColors.addressEditingSurfaceColor)
@@ -1735,32 +1779,6 @@ struct MainWindowTabsView: View {
             .transaction { transaction in
                 transaction.animation = nil
             }
-        }
-        .overlay {
-            tabShape(for: tab)
-                .inset(by: -2.5)
-                .strokeBorder(
-                    AppColors.softenedAddressFocusAccentColor.opacity(
-                        addressPresentationPhase.showsFocusAffordances ? 0.88 : 0
-                    ),
-                    lineWidth: 2.5
-                )
-                .shadow(
-                    color: AppColors.softenedAddressFocusAccentColor.opacity(
-                        addressPresentationPhase.showsFocusAffordances ? 0.12 : 0
-                    ),
-                    radius: 2
-                )
-        }
-        .overlay {
-            tabShape(for: tab)
-                .inset(by: -0.5)
-                .strokeBorder(
-                    AppColors.addressFocusInnerHighlightColor.opacity(
-                        addressPresentationPhase.showsFocusAffordances ? 1 : 0
-                    ),
-                    lineWidth: 0.5
-                )
         }
         .overlay(alignment: .bottom) { groupIndicator(for: tab) }
         .contentShape(tabShape(for: tab))
