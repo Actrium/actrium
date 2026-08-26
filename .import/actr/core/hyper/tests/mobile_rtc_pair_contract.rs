@@ -613,28 +613,51 @@ async fn p09_a_answerer_requests_the_real_offerer_to_restart() {
     let initial = pair.wait_pair_ready(WAIT).await;
     assert_eq!(initial.role_a, TestRtcRole::Answerer);
     let trace_baseline = pair.signaling_trace().len();
+    let request_baseline = pair.signaling_hits(
+        PairEndpoint::A,
+        PairEndpoint::B,
+        SignalingMessageClass::IceRestartRequest,
+    );
+    let offer_baseline = pair.signaling_hits(
+        PairEndpoint::B,
+        PairEndpoint::A,
+        SignalingMessageClass::IceRestartOffer,
+    );
 
     pair.background(PairEndpoint::A).await;
     pair.foreground(PairEndpoint::A, Duration::from_secs(5))
         .await;
+
+    // Synchronize on the restart handshake itself, not on readiness.
+    // `wait_pair_ready` is satisfied by whatever sendable snapshot is already
+    // current, and the projection replays the latest value immediately, so it
+    // returns the pre-background snapshot whenever the lifecycle fact has not
+    // been projected yet — leaving the assertions below to race the recovery
+    // they are meant to observe.
+    pair.harness()
+        .signaling_faults
+        .wait_for_hits_after(
+            &pair.id(PairEndpoint::A),
+            &pair.id(PairEndpoint::B),
+            SignalingMessageClass::IceRestartRequest,
+            request_baseline,
+            WAIT,
+        )
+        .await
+        .expect("answerer A must request its offerer B to restart");
+    pair.harness()
+        .signaling_faults
+        .wait_for_hits_after(
+            &pair.id(PairEndpoint::B),
+            &pair.id(PairEndpoint::A),
+            SignalingMessageClass::IceRestartOffer,
+            offer_baseline,
+            WAIT,
+        )
+        .await
+        .expect("offerer B must produce the correlated restart offer");
     pair.wait_pair_ready(WAIT).await;
 
-    assert!(
-        pair.signaling_hits(
-            PairEndpoint::A,
-            PairEndpoint::B,
-            SignalingMessageClass::IceRestartRequest,
-        ) > 0,
-        "answerer A must request its offerer B to restart"
-    );
-    assert!(
-        pair.signaling_hits(
-            PairEndpoint::B,
-            PairEndpoint::A,
-            SignalingMessageClass::IceRestartOffer,
-        ) > 0,
-        "offerer B must produce the correlated restart offer"
-    );
     let trace = pair.signaling_trace();
     let request_index = trace
         .iter()

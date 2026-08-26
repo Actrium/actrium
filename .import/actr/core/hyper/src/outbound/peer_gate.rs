@@ -558,46 +558,61 @@ impl PeerGate {
             if self.v020_manager.is_closing(target).await {
                 return Err(Self::send_projection_not_ready_error());
             }
-            if let Some(snapshot) = self.v020_manager.get_snapshot(target).await
-                && !snapshot.sendable
-                // `Idle` is a terminal *attempt* state, not a permanent peer
-                // tombstone.  A later business send must be allowed to dial
-                // again after an initial build/role-negotiation failure.  The
-                // manager's closing tombstone above still fences explicit
-                // teardown, while Recovering remains fail-fast as required by
-                // the RFC sendability contract.
-                && snapshot.status != actr_framework::WebRtcPeerStatus::Idle
-                // The request that created the destination flight is allowed
-                // to bootstrap an initially Idle peer. Concurrent requests
-                // can observe the newly-created Controller as Connecting
-                // before the same flight becomes a committed DestTransport;
-                // they must join that bounded flight rather than fail merely
-                // because they lost the creation race. This is transport
-                // admission, not a second RTC state authority: inbound-only
-                // Connecting peers without this exact destination flight are
-                // still rejected.
-                && !(snapshot.status == actr_framework::WebRtcPeerStatus::Connecting
-                    && self.transport_manager.is_connecting(dest).await)
+            if self.v020_send_blocked(target, dest).await
+                // Re-evaluate once before rejecting. The first pass awaits
+                // both the controller snapshot and the transport lock, so a
+                // readiness edge or a concurrent materialization can land in
+                // that window; turning either into a rejection would be a
+                // false negative.
+                && self.v020_send_blocked(target, dest).await
             {
-                // The snapshot may have become sendable while the flight check
-                // awaited its transport lock. Re-read before rejecting so a
-                // readiness edge cannot be turned into a false negative.
-                if self
-                    .v020_manager
-                    .get_snapshot(target)
-                    .await
-                    .is_some_and(|latest| {
-                        !latest.sendable && latest.status != actr_framework::WebRtcPeerStatus::Idle
-                    })
-                {
-                    return Err(Self::send_projection_not_ready_error());
-                }
+                return Err(Self::send_projection_not_ready_error());
             }
         }
 
         // Policy may have tightened during the snapshot await. Keep the
         // strictest projection seen by this operation.
         self.tighten_with_current_projection(admission)
+    }
+
+    /// Whether the v0.20 controller projection currently withholds business
+    /// sends to `target`.
+    #[cfg(feature = "webrtc-v020")]
+    async fn v020_send_blocked(&self, target: &ActrId, dest: &Dest) -> bool {
+        let Some(snapshot) = self.v020_manager.get_snapshot(target).await else {
+            // No controller yet: the transport dials on demand (0.14 parity).
+            return false;
+        };
+        if snapshot.sendable {
+            return false;
+        }
+        // `Idle` is a terminal *attempt* state, not a permanent peer
+        // tombstone. A later business send must be allowed to dial again
+        // after an initial build/role-negotiation failure. The manager's
+        // closing tombstone still fences explicit teardown, while Recovering
+        // remains fail-fast as required by the RFC sendability contract.
+        if snapshot.status == actr_framework::WebRtcPeerStatus::Idle {
+            return false;
+        }
+        // The request that created the destination flight is allowed to
+        // bootstrap an initially Idle peer. Concurrent requests can observe
+        // the newly-created Controller as Connecting while the same flight is
+        // still short of a ready wire — including after it has been committed
+        // as a `DestTransport`, which happens before the wire can carry
+        // traffic. They must join that bounded materialization rather than
+        // fail merely because they lost the creation race. This is transport
+        // admission, not a second RTC state authority: inbound-only
+        // Connecting peers without this exact destination materialization are
+        // still rejected.
+        if snapshot.status == actr_framework::WebRtcPeerStatus::Connecting
+            && self
+                .transport_manager
+                .has_outbound_materialization(dest)
+                .await
+        {
+            return false;
+        }
+        true
     }
 }
 

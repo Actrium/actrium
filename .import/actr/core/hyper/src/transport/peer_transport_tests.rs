@@ -830,6 +830,61 @@ async fn cancelled_creator_at_final_commit_lock_closes_completed_transport() {
     assert!(wire.close_count() >= 1);
 }
 
+/// The outbound gate admits a concurrent first-connect send by asking whether
+/// this manager already holds a materialization for the destination. A
+/// destination leaves `Connecting` the moment its `DestTransport` is
+/// committed, which is strictly before the wire can carry business traffic, so
+/// the predicate has to span both states. Reading `is_connecting` there
+/// rejected every sender that arrived in the commit-to-ready window for merely
+/// having lost the creation race.
+#[tokio::test]
+async fn outbound_materialization_spans_flight_and_committed_transport() {
+    let wire = Arc::new(CountingWire::new(ConnType::WebSocket, None));
+    let factory = Arc::new(SingleWireFactory {
+        wire: wire.clone(),
+        calls: AtomicUsize::new(0),
+    });
+    let manager = Arc::new(PeerTransport::new(ActrId::default(), factory));
+    let final_barrier = Arc::new(tokio::sync::Barrier::new(2));
+    manager.set_final_commit_barrier(final_barrier.clone());
+    let dest = Dest::host();
+
+    assert!(
+        !manager.has_outbound_materialization(&dest).await,
+        "an untouched destination has nothing to join"
+    );
+
+    let creator_manager = manager.clone();
+    let creator_dest = dest.clone();
+    let creator =
+        tokio::spawn(async move { creator_manager.get_or_create_transport(&creator_dest).await });
+
+    // Rendezvous 1: the creator is parked inside the commit hook with a fully
+    // built transport that has not been inserted yet.
+    final_barrier.wait().await;
+    assert!(manager.is_connecting(&dest).await);
+    assert!(
+        manager.has_outbound_materialization(&dest).await,
+        "a sender that lost the creation race must join the in-flight connection"
+    );
+
+    // Rendezvous 2: release the creator so it commits the transport.
+    final_barrier.wait().await;
+    creator
+        .await
+        .expect("creator task")
+        .expect("connection should be established");
+
+    assert!(
+        !manager.is_connecting(&dest).await,
+        "a committed destination has left Connecting"
+    );
+    assert!(
+        manager.has_outbound_materialization(&dest).await,
+        "a committed but not-yet-ready destination is still joinable"
+    );
+}
+
 #[tokio::test]
 async fn flight_waiter_is_event_driven_and_cannot_miss_completion() {
     let first_wire = Arc::new(CountingWire::new(ConnType::WebSocket, None));
