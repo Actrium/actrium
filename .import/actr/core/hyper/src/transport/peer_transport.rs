@@ -334,6 +334,26 @@ impl PeerTransport {
         matches!(transports.get(dest), Some(DestState::Connecting(_)))
     }
 
+    /// Whether this manager already holds an outbound materialization for
+    /// `dest` — either a flight still in progress or a committed transport.
+    ///
+    /// This is an *admission* predicate, not a readiness one. A destination
+    /// flips from `Connecting` to `Connected` the moment a `DestTransport` is
+    /// committed, which happens before the wire is ready to carry business
+    /// traffic. Concurrent senders that arrive inside that window must be
+    /// allowed to join the same materialization and wait on its ready
+    /// watcher; distinguishing the two states here would reject them for
+    /// having lost the creation race. A destination being torn down is
+    /// excluded so explicit teardown keeps failing fast.
+    #[allow(dead_code)]
+    pub async fn has_outbound_materialization(&self, dest: &Dest) -> bool {
+        let closing = self.closing_peers.read().await.contains(dest);
+        if closing {
+            return false;
+        }
+        self.transports.read().await.contains_key(dest)
+    }
+
     /// Get or create DestTransport for specified Dest
     ///
     /// # Arguments
