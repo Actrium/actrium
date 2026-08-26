@@ -41,9 +41,9 @@ pub use mobile_rtc_pair::{
     ConnectionInitiator, MobileEventDriver, MobileRtcPairHarness, PairEndpoint, PairSnapshot,
 };
 pub use rtc_harness::{
-    RtcAwareNetworkEventProcessor, TestBuildThrottleObservation, TestEvidenceEvent,
-    TestEvidenceFailureGuard, TestEvidenceTimeline, TestHarness, TestPeer, TestRtcControl,
-    TestRtcHookRecorder, TestRtcPeerResourceObservation, TestRtcResourceObservation, TestRtcRole,
+    RtcAwareNetworkEventProcessor, TestEvidenceEvent, TestEvidenceFailureGuard,
+    TestEvidenceTimeline, TestHarness, TestPeer, TestRtcControl, TestRtcHookRecorder,
+    TestRtcPeerResourceObservation, TestRtcResourceObservation, TestRtcRole,
 };
 pub use signaling::TestSignalingServer;
 pub use vnet::{VNetPair, create_vnet_pair};

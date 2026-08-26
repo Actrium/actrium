@@ -1387,8 +1387,10 @@ process:
 9. Mark the old Session for retiring and close it explicitly.
 If resource budget or network reasons do not allow make-before-break, the Controller MAY build a new Session before
 The old Session is closed, but the public state remains Recovering, and the generation rules remain unchanged.
-Recovery must use global semaphore and per-peer jitter to avoid all peers building and
-get_stats and send Offer.
+Recovery attempts are peer-owned and must not wait on a process-wide build/restart
+semaphore. A stalled build or ICE restart for one peer must not delay another peer's
+attempt. Deployments that need admission control should apply it outside the
+Controller's connection-liveness path.
 ```mermaid
 flowchart TB
     Failure["Network interruption / ICE failed / Driver exited"] --> Recovering["Release Recovering<br/> revoke old SendPermit"]
@@ -2278,7 +2280,11 @@ Work content:
 4. Implement pending/active/retiring Session handoff;
 5. Implement address changes and App front and back policies;
 6. Implement TURN configuration refresh; a rejected `set_configuration()` change enters Hard Recovery;
-7. Add build/restart semaphore and jitter;
+7. Superseded — do not audit Stage-5 completion against this item: the
+   process-wide build/restart semaphore and jitter was removed by the
+   normative recovery rule above ("recovery attempts are peer-owned and must
+   not wait on a process-wide build/restart semaphore"); deployments needing
+   admission control apply it outside the Controller's connection-liveness path;
 8. Implement close-peer and close-all with `DataChannel::close()`, Track cancellation, and
    `PeerConnection::close()`;
 9. Implement mailbox overflow recovery;

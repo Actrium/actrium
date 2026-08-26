@@ -11,11 +11,17 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 use webrtc::error::Error as RtcError;
-use webrtc::peer_connection::{RTCConfiguration, RTCIceCandidateInit, RTCSessionDescription};
+use webrtc::peer_connection::{
+    RTCConfiguration, RTCIceCandidateInit, RTCPeerConnectionState, RTCSdpType,
+    RTCSessionDescription,
+};
 
 use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
+use crate::wire::webrtc::v020::events::PeerDriverEvent;
 use crate::wire::webrtc::v020::manager::RtcConnectionManager;
 use crate::wire::webrtc::v020::peer::effects::{SessionFactory, SessionOps};
+use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
+use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
 
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -35,15 +41,43 @@ fn test_actor_id(serial_number: u64) -> ActrId {
 struct FakeOps {
     close_calls: Option<Arc<AtomicUsize>>,
     block_first_close: bool,
+    /// When set, every `restart_ice()` call signals `entered` and then waits
+    /// for a `release` permit before returning (see
+    /// `ice_restarts_are_not_serialized_by_a_node_wide_limit`).
+    block_restart: Option<RestartGate>,
+}
+
+/// Shared gate for `FakeOps::restart_ice`: each call signals `entered`, then
+/// waits on `release`, so tests can observe restart starts and hold them.
+#[derive(Clone)]
+struct RestartGate {
+    entered: Arc<tokio::sync::Semaphore>,
+    release: Arc<tokio::sync::Semaphore>,
+}
+
+impl RestartGate {
+    fn new() -> Self {
+        Self {
+            entered: Arc::new(tokio::sync::Semaphore::new(0)),
+            release: Arc::new(tokio::sync::Semaphore::new(0)),
+        }
+    }
 }
 
 #[async_trait]
 impl SessionOps for FakeOps {
     async fn create_offer(&self) -> Result<RTCSessionDescription, RtcError> {
-        Ok(RTCSessionDescription::default())
+        // The signaling router classifies the local description by its SDP
+        // type; report a real Offer so the offerer path emits
+        // `SignalingMessage::Offer`.
+        let mut description = RTCSessionDescription::default();
+        description.sdp_type = RTCSdpType::Offer;
+        Ok(description)
     }
     async fn create_answer(&self) -> Result<RTCSessionDescription, RtcError> {
-        Ok(RTCSessionDescription::default())
+        let mut description = RTCSessionDescription::default();
+        description.sdp_type = RTCSdpType::Answer;
+        Ok(description)
     }
     async fn set_local_description(&self, _d: RTCSessionDescription) -> Result<(), RtcError> {
         Ok(())
@@ -55,6 +89,14 @@ impl SessionOps for FakeOps {
         Ok(())
     }
     async fn restart_ice(&self) -> Result<(), RtcError> {
+        if let Some(gate) = &self.block_restart {
+            gate.entered.add_permits(1);
+            gate.release
+                .acquire()
+                .await
+                .expect("restart release semaphore")
+                .forget();
+        }
         Ok(())
     }
     async fn set_configuration(&self, _config: RTCConfiguration) -> Result<(), RtcError> {
@@ -132,6 +174,33 @@ impl SessionFactory for BlockingBuildFactory {
     }
 }
 
+/// A factory whose sessions succeed immediately except that every
+/// `restart_ice()` blocks on the shared gate, so soft-recovery ICE restarts
+/// can be observed and held per peer.
+struct RestartBlockingFactory {
+    gate: RestartGate,
+    /// Per-generation event handlers, so the test can publish fake driver
+    /// events into the real controllers through the production mailbox.
+    handlers: Arc<std::sync::Mutex<Vec<Arc<WebRtcEventHandler>>>>,
+}
+
+#[async_trait]
+impl SessionFactory for RestartBlockingFactory {
+    async fn build(
+        &self,
+        handler: Arc<WebRtcEventHandler>,
+    ) -> Result<Arc<dyn SessionOps>, RtcError> {
+        self.handlers
+            .lock()
+            .expect("restart factory handler registry")
+            .push(handler);
+        Ok(Arc::new(FakeOps {
+            block_restart: Some(self.gate.clone()),
+            ..FakeOps::default()
+        }))
+    }
+}
+
 struct FirstCloseBlocksFactory {
     build_calls: Arc<AtomicUsize>,
     close_calls: Arc<AtomicUsize>,
@@ -147,6 +216,7 @@ impl SessionFactory for FirstCloseBlocksFactory {
         Ok(Arc::new(FakeOps {
             close_calls: Some(self.close_calls.clone()),
             block_first_close: true,
+            block_restart: None,
         }))
     }
 }
@@ -188,6 +258,161 @@ async fn ensure_controller_is_idempotent_per_peer() {
     );
     let _ = (a, b, c);
     assert_eq!(mgr.peer_count().await, 1);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn peer_connection_builds_are_not_serialized_by_a_node_wide_limit() {
+    const PEERS: usize = 5;
+
+    let entered = Arc::new(tokio::sync::Semaphore::new(0));
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let (signaling_tx, _signaling_rx) = mpsc::channel(32);
+    let mgr = Arc::new(RtcConnectionManager::new(
+        Arc::new(BlockingBuildFactory {
+            entered: entered.clone(),
+            release: release.clone(),
+        }),
+        signaling_tx,
+    ));
+    mgr.supervisor().set_signaling_generation(Some(0));
+
+    for serial in 1..=PEERS as u64 {
+        let peer = test_actor_id(1_000 + serial);
+        mgr.connect(peer.clone()).await;
+        mgr.get_controller(&peer)
+            .await
+            .expect("controller")
+            .apply_role_assignment(true)
+            .await
+            .expect("role assignment command");
+    }
+
+    for _ in 0..PEERS {
+        timeout(WAIT, entered.acquire())
+            .await
+            .expect("all peer builds should start independently")
+            .expect("build-entered semaphore")
+            .forget();
+    }
+
+    release.add_permits(PEERS);
+    mgr.close_all().await;
+}
+
+/// Soft-recovery ICE restarts must also run concurrently per peer: the
+/// removed node-wide build/restart limiter must not sneak back in via the
+/// restart path only. Peers are driven to Sendable through the real
+/// controller effect flow (auto-succeeding `FakeOps`; its data channel
+/// reports Open), then a network outage window starts Soft Recovery. Every
+/// `restart_ice()` blocks on the shared gate until released, mirroring the
+/// `BuildSession` coverage above.
+#[tokio::test(flavor = "multi_thread", worker_threads = 6)]
+async fn ice_restarts_are_not_serialized_by_a_node_wide_limit() {
+    const PEERS: usize = 5;
+
+    let gate = RestartGate::new();
+    let entered = gate.entered.clone();
+    let release = gate.release.clone();
+    let handlers: Arc<std::sync::Mutex<Vec<Arc<WebRtcEventHandler>>>> = Arc::default();
+    let (signaling_tx, mut signaling_rx) = mpsc::channel(32);
+    let mgr = Arc::new(RtcConnectionManager::new(
+        Arc::new(RestartBlockingFactory {
+            gate,
+            handlers: handlers.clone(),
+        }),
+        signaling_tx,
+    ));
+    mgr.supervisor().set_signaling_generation(Some(0));
+
+    let peers: Vec<_> = (1..=PEERS as u64)
+        .map(|serial| test_actor_id(3_000 + serial))
+        .collect();
+    for peer in &peers {
+        mgr.connect(peer.clone()).await;
+        mgr.get_controller(peer)
+            .await
+            .expect("controller")
+            .apply_role_assignment(true)
+            .await
+            .expect("role assignment command");
+    }
+
+    // Wait until every offerer has sent its initial offer: the readiness
+    // anchor data channel then already exists (CreateLane precedes
+    // CreateOffer), so its Open event can complete the Sendable transition.
+    let mut offered: std::collections::HashSet<ActrId> = std::collections::HashSet::new();
+    while offered.len() < PEERS {
+        let (peer, message) = timeout(WAIT, signaling_rx.recv())
+            .await
+            .expect("initial signaling timeout")
+            .expect("signaling channel closed");
+        match message {
+            SignalingMessage::Offer { .. } => {
+                assert!(offered.insert(peer), "duplicate initial offer");
+            }
+            SignalingMessage::RoleNegotiation => {}
+            other => panic!("unexpected initial signaling: {other:?}"),
+        }
+    }
+
+    // Publish one Connected driver tick per peer through the production
+    // handler mailbox: Negotiating -> TransportReady, and together with the
+    // anchor lane's Open event each peer becomes Sendable (ever_connected).
+    for peer in &peers {
+        let handler = handlers
+            .lock()
+            .expect("restart factory handler registry")
+            .iter()
+            .rev()
+            .find(|handler| handler.peer_id() == peer)
+            .expect("build handler for peer")
+            .clone();
+        handler
+            .mailbox()
+            .try_publish(PeerDriverEvent::PeerConnectionStateChanged {
+                generation: handler.generation(),
+                state: RTCPeerConnectionState::Connected,
+            });
+    }
+
+    for peer in &peers {
+        let became_sendable = timeout(WAIT, async {
+            while !mgr
+                .get_snapshot(peer)
+                .await
+                .is_some_and(|snapshot| snapshot.sendable)
+            {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .is_ok();
+        assert!(
+            became_sendable,
+            "peer {} did not reach sendable",
+            peer.to_string_repr()
+        );
+    }
+
+    // A network outage window defers Soft Recovery on every peer;
+    // availability then starts it independently (supervisor broadcast,
+    // never coalesced).
+    mgr.supervisor()
+        .publish(RtcNetworkEvent::NetworkUnavailable);
+    mgr.supervisor().publish(RtcNetworkEvent::NetworkAvailable);
+
+    // All restarts must start independently: one held restart never gates
+    // another peer's restart.
+    for _ in 0..PEERS {
+        timeout(WAIT, entered.acquire())
+            .await
+            .expect("all peer ICE restarts should start independently")
+            .expect("restart-entered semaphore")
+            .forget();
+    }
+
+    release.add_permits(PEERS);
+    mgr.close_all().await;
 }
 
 /// RFC invariant #1: removing a registry entry before its controller has

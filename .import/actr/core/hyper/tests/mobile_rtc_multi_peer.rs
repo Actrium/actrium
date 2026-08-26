@@ -79,17 +79,10 @@ struct MultiPeerTopology {
 
 impl MultiPeerTopology {
     async fn new() -> Self {
-        Self::new_with_build_limit(None).await
-    }
-
-    async fn new_with_build_limit(max_concurrent: Option<usize>) -> Self {
         let services = ActrixTestServices::start()
             .await
             .expect("Actrix services start");
         let mut harness = TestHarness::with_external_signaling(services.signaling_url()).await;
-        if let Some(max_concurrent) = max_concurrent {
-            harness.set_build_throttle_for_new_peers(max_concurrent, Duration::ZERO);
-        }
         for serial in [A, B, C, D] {
             harness
                 .add_peer_with_rtc_configuration_and_credential(
@@ -463,10 +456,9 @@ async fn mp02_a_address_change_replaces_each_link_without_cross_peer_state() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 6)]
-async fn mp03_one_node_event_recovers_three_controllers_fairly_within_one_deadline() {
-    let topology = MultiPeerTopology::new_with_build_limit(Some(1)).await;
+async fn mp03_one_node_event_recovers_three_controllers_independently_within_one_deadline() {
+    let topology = MultiPeerTopology::new().await;
     let initial = topology.generations().await;
-    let throttle_before = topology.harness.peer(A).rtc.build_throttle_observation();
     topology
         .harness
         .set_local_addresses(A, vec![IpAddr::V4(Ipv4Addr::new(127, 0, 0, 5))]);
@@ -500,16 +492,6 @@ async fn mp03_one_node_event_recovers_three_controllers_fairly_within_one_deadli
         assert!(restored[&(A, remote)] > initial[&(A, remote)]);
         assert!(restored[&(remote, A)] > initial[&(remote, A)]);
     }
-    let throttle_after = topology.harness.peer(A).rtc.build_throttle_observation();
-    assert_eq!(throttle_after.max_concurrent, 1);
-    assert_eq!(throttle_after.active, 0);
-    assert_eq!(throttle_after.peak_active, 1);
-    assert!(throttle_after.acquisitions >= throttle_before.acquisitions + REMOTES.len());
-    // `max_concurrent == 1` with `acquisitions >= +3` proves every controller
-    // funneled through the one shared throttle. Contention (overlapping
-    // arrivals) is deliberately NOT asserted: whether the three recovery
-    // pipelines reach `acquire()` within each other's build windows depends on
-    // scheduler timing, which CPU-starved CI runners routinely serialize.
     topology.shutdown().await;
 }
 

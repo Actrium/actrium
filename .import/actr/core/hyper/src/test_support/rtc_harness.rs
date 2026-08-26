@@ -269,15 +269,6 @@ impl Drop for TestEvidenceFailureGuard {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TestBuildThrottleObservation {
-    pub max_concurrent: usize,
-    pub active: usize,
-    pub peak_active: usize,
-    pub acquisitions: usize,
-    pub contended_acquisitions: usize,
-}
-
 /// Ordered evidence emitted by the production snapshot-to-hook projection.
 #[derive(Clone, Default)]
 pub struct TestRtcHookRecorder {
@@ -651,17 +642,6 @@ impl TestRtcControl {
         .unwrap_or(false)
     }
 
-    pub fn build_throttle_observation(&self) -> TestBuildThrottleObservation {
-        let observation = self.manager.build_throttle_observation();
-        TestBuildThrottleObservation {
-            max_concurrent: observation.max_concurrent,
-            active: observation.active,
-            peak_active: observation.peak_active,
-            acquisitions: observation.acquisitions,
-            contended_acquisitions: observation.contended_acquisitions,
-        }
-    }
-
     /// Unified public-state/resource/teardown observation from the production
     /// manager.
     pub async fn observation(&self) -> TestRtcResourceObservation {
@@ -1005,7 +985,6 @@ pub struct TestHarness {
     // address-provider, and scheduling path.
     v020_matrix_instrumentation: bool,
     address_providers: HashMap<u64, Arc<TestLocalAddressProvider>>,
-    build_throttle_override: Option<(usize, Duration)>,
     peers: HashMap<u64, TestPeer>,
     bg_tasks: Vec<tokio::task::JoinHandle<()>>,
 }
@@ -1033,7 +1012,6 @@ impl TestHarness {
             evidence: Default::default(),
             v020_matrix_instrumentation: false,
             address_providers: HashMap::new(),
-            build_throttle_override: None,
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
         }
@@ -1052,7 +1030,6 @@ impl TestHarness {
             evidence: Default::default(),
             v020_matrix_instrumentation: false,
             address_providers: HashMap::new(),
-            build_throttle_override: None,
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
         }
@@ -1072,7 +1049,6 @@ impl TestHarness {
             evidence: Default::default(),
             v020_matrix_instrumentation: true,
             address_providers: HashMap::new(),
-            build_throttle_override: None,
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
         }
@@ -1091,21 +1067,9 @@ impl TestHarness {
             evidence: Default::default(),
             v020_matrix_instrumentation: true,
             address_providers: HashMap::new(),
-            build_throttle_override: None,
             peers: HashMap::new(),
             bg_tasks: Vec::new(),
         }
-    }
-
-    /// Configure the v0.20 node-wide build/restart limiter for peers added
-    /// after this call. Multi-peer tests use a single permit to prove that one
-    /// Actr's controllers actually pass through the shared throttle.
-    pub fn set_build_throttle_for_new_peers(
-        &mut self,
-        max_concurrent: usize,
-        max_jitter: Duration,
-    ) {
-        self.build_throttle_override = Some((max_concurrent, max_jitter));
     }
 
     pub async fn add_peer(&mut self, serial: u64) {
@@ -1221,12 +1185,6 @@ impl TestHarness {
             }))
         } else {
             manager
-        };
-        let manager = match self.build_throttle_override {
-            Some((max_concurrent, max_jitter)) => {
-                manager.with_build_throttle_for_test(max_concurrent, max_jitter)
-            }
-            None => manager,
         };
         let manager = Arc::new(match media_registry {
             Some(registry) => manager.with_media_registry(registry),

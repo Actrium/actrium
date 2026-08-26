@@ -1,5 +1,5 @@
 //! Tests for `RtcRecoverySupervisor` and the `LocalAddressProvider` bridge
-//! (S5-1 / S5-5), plus `BuildThrottle` (S5-7).
+//! (S5-1 / S5-5).
 
 use std::net::IpAddr;
 use std::sync::Mutex as StdMutex;
@@ -8,8 +8,8 @@ use tokio::sync::{broadcast, watch};
 
 use super::address::LocalAddressSnapshot;
 use super::recovery::{
-    BuildThrottle, LocalAddressProvider, NETWORK_EVENT_CAPACITY, RtcNetworkEvent,
-    RtcRecoverySupervisor, same_address_set, spawn_address_monitor,
+    LocalAddressProvider, NETWORK_EVENT_CAPACITY, RtcNetworkEvent, RtcRecoverySupervisor,
+    same_address_set, spawn_address_monitor,
 };
 
 #[tokio::test]
@@ -220,45 +220,6 @@ async fn address_monitor_polling_fallback_detects_native_interface_change() {
         .await
         .expect("address monitor did not converge after cancellation")
         .expect("address monitor panicked");
-}
-
-// --- S5-7: BuildThrottle tests ---
-
-#[tokio::test]
-async fn build_throttle_limits_concurrency() {
-    let throttle = std::sync::Arc::new(BuildThrottle::new(2, std::time::Duration::ZERO));
-
-    // Acquire two permits (the max).
-    let _p1 = throttle.acquire().await;
-    let _p2 = throttle.acquire().await;
-
-    // A third acquire should not complete immediately.
-    let t3 = throttle.clone();
-    let third = tokio::spawn(async move { t3.acquire().await });
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    assert!(!third.is_finished(), "third acquire should be blocked");
-
-    // Release one permit; the third should now complete.
-    drop(_p1);
-    let _p3 = tokio::time::timeout(std::time::Duration::from_secs(2), third)
-        .await
-        .expect("third acquire should complete after release")
-        .expect("spawn panicked");
-}
-
-#[tokio::test]
-async fn build_throttle_jitter_delays_acquire() {
-    let throttle = BuildThrottle::new(1, std::time::Duration::from_millis(100));
-    let start = std::time::Instant::now();
-    let _permit = throttle.acquire().await;
-    let elapsed = start.elapsed();
-    // With a 100ms max jitter, the acquire should take at least 0ms (jitter
-    // can be 0) but at most ~100ms + scheduling overhead. We only verify it
-    // completes — the semaphore is not contended.
-    assert!(
-        elapsed < std::time::Duration::from_secs(2),
-        "acquire should complete quickly with no contention, took {elapsed:?}"
-    );
 }
 
 // ---------------------------------------------------------------------------
