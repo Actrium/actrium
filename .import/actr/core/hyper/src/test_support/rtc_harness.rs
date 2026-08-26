@@ -1217,6 +1217,7 @@ impl TestHarness {
             manager.clone(),
             shared_local_id.clone(),
         ));
+        manager.set_signaling_dispatch_chains(signaling_router.dispatch_chains());
         let ws_transport = V020SignalingTransport::new(
             signaling_client.clone(),
             shared_local_id,

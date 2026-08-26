@@ -61,6 +61,8 @@ fn spawn_node(hub: &Arc<InMemorySignalingHub>, local_id: ActrId) -> RtcNode {
         manager.clone(),
         crate::wire::webrtc::v020::signaling::SharedLocalId::new(local_id.clone()),
     ));
+    // Production wiring: teardown must release the router's per-peer chains.
+    manager.set_signaling_dispatch_chains(router.dispatch_chains());
     let transport: InMemoryTransport = hub.connect(local_id.clone());
     let router_task = router.clone();
     tokio::spawn(async move { router_task.run(transport, signaling_rx).await });
@@ -93,6 +95,8 @@ fn spawn_node_with_media(
         manager.clone(),
         crate::wire::webrtc::v020::signaling::SharedLocalId::new(local_id.clone()),
     ));
+    // Production wiring: teardown must release the router's per-peer chains.
+    manager.set_signaling_dispatch_chains(router.dispatch_chains());
     let transport: InMemoryTransport = hub.connect(local_id.clone());
     let router_task = router.clone();
     tokio::spawn(async move { router_task.run(transport, signaling_rx).await });
@@ -131,6 +135,8 @@ fn spawn_node_with_inbound(
         manager.clone(),
         crate::wire::webrtc::v020::signaling::SharedLocalId::new(local_id.clone()),
     ));
+    // Production wiring: teardown must release the router's per-peer chains.
+    manager.set_signaling_dispatch_chains(router.dispatch_chains());
     let transport: InMemoryTransport = hub.connect(local_id.clone());
     let router_task = router.clone();
     tokio::spawn(async move { router_task.run(transport, signaling_rx).await });

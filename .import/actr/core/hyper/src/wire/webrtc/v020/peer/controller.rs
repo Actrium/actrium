@@ -57,6 +57,7 @@ const ICE_RESTART_ATTEMPT_TIMEOUT: std::time::Duration = std::time::Duration::fr
 /// Server-arbitrated role negotiation keeps the historical short failure
 /// budget, distinct from the longer initial ICE/DataChannel readiness budget.
 const ROLE_NEGOTIATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+const CONTROLLER_INLINE_OPERATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 /// One complete initial role/build/SDP/ICE/readiness attempt. It expires just
 /// before `V020WireHandle`'s 10-second wait so the caller observes a terminal
 /// attempt and WirePool can start its configured retry with a fresh PC.
@@ -899,29 +900,62 @@ impl RtcPeerController {
                 })
             }
             RtcPeerInput::Command(RtcPeerCommand::AddTrack { track, respond }) => {
+                let mut timed_out_generation = None;
                 let result = match self.state.active_generation {
-                    Some(generation) if !self.state.close_requested => {
-                        match self.effect_port.add_track(generation, track).await {
-                            Some(result) => result.map_err(|e| e.to_string()),
-                            None => Err("connection not ready".to_string()),
+                    Some(generation) if !self.state.close_requested => match crate::timer::timeout(
+                        crate::timer::ids::RTC_CONTROLLER_INLINE_OPERATION,
+                        CONTROLLER_INLINE_OPERATION_TIMEOUT,
+                        self.effect_port.add_track(generation, track),
+                    )
+                    .await
+                    {
+                        Ok(Some(result)) => result.map_err(|e| e.to_string()),
+                        Ok(None) => Err("connection not ready".to_string()),
+                        Err(_) => {
+                            timed_out_generation = Some(generation);
+                            Err(format!("add_track timed out (generation {generation})"))
                         }
-                    }
+                    },
                     _ => Err("connection not ready".to_string()),
                 };
                 let _ = respond.send(result);
+                if let Some(generation) = timed_out_generation {
+                    // webrtc 0.20.3 may have committed the transceiver change
+                    // before the cancelled await point, leaving the PC holding
+                    // a track the local registry does not track. The session
+                    // state is untrustworthy: fail the negotiation so the
+                    // generation is retired rather than serving later offers.
+                    self.internal_inputs
+                        .push_back(RtcPeerInput::TrackMutationTimedOut { generation });
+                }
                 return self.state.terminal_close_done;
             }
             RtcPeerInput::Command(RtcPeerCommand::RemoveTrack { sender, respond }) => {
+                let mut timed_out_generation = None;
                 let result = match self.state.active_generation {
-                    Some(generation) if !self.state.close_requested => {
-                        match self.effect_port.remove_track(generation, sender).await {
-                            Some(result) => result.map_err(|e| e.to_string()),
-                            None => Err("connection not ready".to_string()),
+                    Some(generation) if !self.state.close_requested => match crate::timer::timeout(
+                        crate::timer::ids::RTC_CONTROLLER_INLINE_OPERATION,
+                        CONTROLLER_INLINE_OPERATION_TIMEOUT,
+                        self.effect_port.remove_track(generation, sender),
+                    )
+                    .await
+                    {
+                        Ok(Some(result)) => result.map_err(|e| e.to_string()),
+                        Ok(None) => Err("connection not ready".to_string()),
+                        Err(_) => {
+                            timed_out_generation = Some(generation);
+                            Err(format!("remove_track timed out (generation {generation})"))
                         }
-                    }
+                    },
                     _ => Err("connection not ready".to_string()),
                 };
                 let _ = respond.send(result);
+                if let Some(generation) = timed_out_generation {
+                    // Same partial-mutation hazard as AddTrack: the PC may
+                    // already reflect the removal while the registry does not.
+                    self.internal_inputs
+                        .push_back(RtcPeerInput::TrackMutationTimedOut { generation });
+                }
                 return self.state.terminal_close_done;
             }
             other => other,
@@ -1040,8 +1074,7 @@ impl RtcPeerController {
             .or(self.state.building_generation)
             .or(self.state.active_generation);
         if resource_generation != Some(generation) {
-            self.effect_port
-                .discard_remote_resource(generation, resource_id)
+            self.discard_remote_resource_bounded(generation, resource_id)
                 .await;
             return None;
         }
@@ -1058,14 +1091,12 @@ impl RtcPeerController {
                         label = %descriptor.label,
                         "discarding remote channel token with unknown/unmatched metadata"
                     );
-                    self.effect_port
-                        .discard_remote_resource(generation, resource_id)
+                    self.discard_remote_resource_bounded(generation, resource_id)
                         .await;
                     return None;
                 };
                 if self.lanes.get(generation, lane).is_some() {
-                    self.effect_port
-                        .discard_remote_resource(generation, resource_id)
+                    self.discard_remote_resource_bounded(generation, resource_id)
                         .await;
                     return None;
                 }
@@ -1079,29 +1110,61 @@ impl RtcPeerController {
                     }
                     ResourceRegistration::SessionPending => Some(resource),
                     ResourceRegistration::MissingOrMismatched => {
-                        self.effect_port
-                            .discard_remote_resource(generation, resource_id)
+                        self.discard_remote_resource_bounded(generation, resource_id)
                             .await;
                         None
                     }
                 }
             }
             PendingDiscoveredResource::Track { descriptor, .. } => {
-                match self
-                    .effect_port
-                    .register_remote_track(generation, resource_id, descriptor.meta.clone())
-                    .await
+                match crate::timer::timeout(
+                    crate::timer::ids::RTC_CONTROLLER_INLINE_OPERATION,
+                    CONTROLLER_INLINE_OPERATION_TIMEOUT,
+                    self.effect_port.register_remote_track(
+                        generation,
+                        resource_id,
+                        descriptor.meta.clone(),
+                    ),
+                )
+                .await
                 {
-                    ResourceRegistration::Registered(_) => None,
-                    ResourceRegistration::SessionPending => Some(resource),
-                    ResourceRegistration::MissingOrMismatched => {
-                        self.effect_port
-                            .discard_remote_resource(generation, resource_id)
+                    Ok(ResourceRegistration::Registered(_)) => None,
+                    Ok(ResourceRegistration::SessionPending) => Some(resource),
+                    Ok(ResourceRegistration::MissingOrMismatched) | Err(_) => {
+                        tracing::warn!(
+                            peer = %self.state.peer_id.to_string_repr(),
+                            generation,
+                            ?resource_id,
+                            "remote track registration timed out or missed; discarding the resource"
+                        );
+                        self.discard_remote_resource_bounded(generation, resource_id)
                             .await;
                         None
                     }
                 }
             }
+        }
+    }
+
+    async fn discard_remote_resource_bounded(
+        &self,
+        generation: u64,
+        resource_id: SessionResourceId,
+    ) {
+        if crate::timer::timeout(
+            crate::timer::ids::RTC_CONTROLLER_INLINE_OPERATION,
+            CONTROLLER_INLINE_OPERATION_TIMEOUT,
+            self.effect_port
+                .discard_remote_resource(generation, resource_id),
+        )
+        .await
+        .is_err()
+        {
+            tracing::warn!(
+                peer = %self.state.peer_id.to_string_repr(),
+                generation,
+                "discarding remote RTC resource timed out"
+            );
         }
     }
 
@@ -1183,16 +1246,39 @@ impl RtcPeerController {
                 // the send-path registry. Dedup: an already-registered lane is
                 // not re-created.
                 if self.lanes.get(generation, lane).is_none() {
-                    match self.effect_port.create_lane(generation, lane).await {
-                        Ok(Some(handle)) => self.lanes.insert(handle),
-                        Ok(None) => {}
-                        Err(error) => {
+                    match crate::timer::timeout(
+                        crate::timer::ids::RTC_CONTROLLER_INLINE_OPERATION,
+                        CONTROLLER_INLINE_OPERATION_TIMEOUT,
+                        self.effect_port.create_lane(generation, lane),
+                    )
+                    .await
+                    {
+                        Ok(Ok(Some(handle))) => self.lanes.insert(handle),
+                        Ok(Ok(None)) => {}
+                        Ok(Err(error)) => {
                             tracing::error!(
                                 peer = %self.state.peer_id.to_string_repr(),
                                 generation,
                                 ?lane,
                                 %error,
                                 "failed to create RTC data-channel lane"
+                            );
+                            if lane == LaneKind::READINESS_ANCHOR {
+                                self.internal_inputs
+                                    .push_back(RtcPeerInput::LaneCreationFailed {
+                                        generation,
+                                        lane,
+                                    });
+                                return false;
+                            }
+                        }
+                        Err(_) => {
+                            tracing::error!(
+                                peer = %self.state.peer_id.to_string_repr(),
+                                generation,
+                                ?lane,
+                                timeout_ms = CONTROLLER_INLINE_OPERATION_TIMEOUT.as_millis(),
+                                "creating RTC data-channel lane timed out"
                             );
                             if lane == LaneKind::READINESS_ANCHOR {
                                 self.internal_inputs

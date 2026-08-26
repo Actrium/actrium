@@ -3001,6 +3001,9 @@ impl Inner {
                     v020_manager.clone(),
                     v020_local_id.clone(),
                 );
+                // Teardown-time cleanup of the router's per-peer dispatch
+                // locks needs the manager to see the same map instance.
+                v020_manager.set_signaling_dispatch_chains(v020_router.dispatch_chains());
                 let router_shutdown = self.shutdown_token.child_token();
                 let router_handle = tokio::spawn(async move {
                     tokio::select! {
