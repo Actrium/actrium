@@ -104,6 +104,7 @@ private enum CompactToolbarLayout {
     static let tabStripContentPadding: CGFloat = 3
     static let tabStripHeight: CGFloat = 38
     static let tabSeparationWidth: CGFloat = 1.5
+    static let layeredBoundaryCapWidth: CGFloat = 18
     static let edgeTabCornerRadius: CGFloat = 8
     static let tabCornerRadius: CGFloat = 6
     static let horizontalPadding: CGFloat = 8
@@ -1133,6 +1134,7 @@ struct MainWindowTabsView: View {
                     .overlay {
                         layeredTabBoundary(
                             for: tab,
+                            edge: accordionPresentation.coverEdge,
                             isVisible: accordionPresentation.isOverlapCover
                         )
                     }
@@ -1244,7 +1246,7 @@ struct MainWindowTabsView: View {
            let frame = interaction.movingTabFrame(for: tabID) {
             tabLabel(tab)
                 .frame(width: frame.width, height: frame.height)
-                .overlay { layeredTabBoundary(for: tab, isVisible: true) }
+                .overlay { layeredTabBoundary(for: tab, edge: nil, isVisible: true) }
                 .position(x: frame.midX, y: frame.midY)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -1279,7 +1281,9 @@ struct MainWindowTabsView: View {
                             let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
                             tabLabel(tab)
                                 .frame(width: width, height: 32)
-                                .overlay { layeredTabBoundary(for: tab, isVisible: true) }
+                                .overlay {
+                                    layeredTabBoundary(for: tab, edge: nil, isVisible: true)
+                                }
                         }
                     }
                 }
@@ -1687,7 +1691,11 @@ struct MainWindowTabsView: View {
     /// A moving or accordion-cover Tab cannot leave its seam transparent: the
     /// lower Tab would show through. Paint the approximation only for that
     /// short layered state; ordinary seams always expose the real Header.
-    private func layeredTabBoundary(for tab: Tab, isVisible: Bool) -> some View {
+    private func layeredTabBoundary(
+        for tab: Tab,
+        edge: ToolbarAccordionEdge?,
+        isVisible: Bool
+    ) -> some View {
         let isFocusedAddressTab = tab.id == viewModel.currentTabId
             && interaction.isAddressEditing
             && addressPresentationPhase.showsFocusAffordances
@@ -1697,8 +1705,40 @@ struct MainWindowTabsView: View {
                 Color(nsColor: windowChrome.style.layeredTabSeparationColor),
                 lineWidth: CompactToolbarLayout.tabSeparationWidth
             )
+            .mask { layeredTabBoundaryMask(edge: edge) }
             .opacity(isVisible && !isFocusedAddressTab ? 1 : 0)
             .allowsHitTesting(false)
+    }
+
+    /// An accordion cover only needs to occlude the lower surface at the one
+    /// edge that is actually overlapping. Fading the short cap prevents that
+    /// transient protection from reading as a special outline around the Tab.
+    @ViewBuilder
+    private func layeredTabBoundaryMask(edge: ToolbarAccordionEdge?) -> some View {
+        switch edge {
+        case .leading:
+            HStack(spacing: 0) {
+                LinearGradient(
+                    colors: [.black, .black, .clear],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: CompactToolbarLayout.layeredBoundaryCapWidth)
+                Spacer(minLength: 0)
+            }
+        case .trailing:
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                LinearGradient(
+                    colors: [.clear, .black, .black],
+                    startPoint: .leading,
+                    endPoint: .trailing
+                )
+                .frame(width: CompactToolbarLayout.layeredBoundaryCapWidth)
+            }
+        case nil:
+            Color.black
+        }
     }
 
     /// The editing plate keeps the same 29pt visual height as every other Tab.
