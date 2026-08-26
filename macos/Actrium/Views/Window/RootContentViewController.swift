@@ -103,6 +103,7 @@ private enum CompactToolbarLayout {
     static let toolbarHeight: CGFloat = 45
     static let tabStripContentPadding: CGFloat = 3
     static let tabStripHeight: CGFloat = 38
+    static let tabSeparationWidth: CGFloat = 1.5
     static let edgeTabCornerRadius: CGFloat = 8
     static let tabCornerRadius: CGFloat = 6
     static let horizontalPadding: CGFloat = 8
@@ -1118,9 +1119,14 @@ struct MainWindowTabsView: View {
                     .mask {
                         accordionCoverMask(accordionPresentation)
                     }
-                    // The chrome-colored boundary stays outside the content
-                    // mask so it remains opaque above a lower Tab.
-                    .overlay { tabBoundary(for: tab) }
+                    // Only an incoming cover needs a painted boundary. Flat
+                    // Tabs expose the real Header through their inset plate.
+                    .overlay {
+                        layeredTabBoundary(
+                            for: tab,
+                            isVisible: accordionPresentation.isOverlapCover
+                        )
+                    }
                     .allowsHitTesting(!accordionPresentation.isFolded)
             }
         }
@@ -1229,7 +1235,7 @@ struct MainWindowTabsView: View {
            let frame = interaction.movingTabFrame(for: tabID) {
             tabLabel(tab)
                 .frame(width: frame.width, height: frame.height)
-                .overlay { tabBoundary(for: tab) }
+                .overlay { layeredTabBoundary(for: tab, isVisible: true) }
                 .position(x: frame.midX, y: frame.midY)
                 .allowsHitTesting(false)
                 .accessibilityHidden(true)
@@ -1264,7 +1270,7 @@ struct MainWindowTabsView: View {
                             let width = tabWidths[tab.id] ?? preferredTabWidth(for: tab)
                             tabLabel(tab)
                                 .frame(width: width, height: 32)
-                                .overlay { tabBoundary(for: tab) }
+                                .overlay { layeredTabBoundary(for: tab, isVisible: true) }
                         }
                     }
                 }
@@ -1651,11 +1657,13 @@ struct MainWindowTabsView: View {
         .accessibilityAddTraits(.isSelected)
     }
 
-    /// Every Tab starts from the same opaque toolbar-colored plate. The subtle
-    /// semantic tint is then composited above it; accordion translucency is
-    /// applied separately and locally by `accordionCoverMask`.
+    /// The plate is inset inside its zero-spacing layout slot, so the seam is
+    /// the real live Header material—not a sampled or approximated border.
+    /// Two touching 1.5pt insets expose a 3pt visual separation while keeping
+    /// the Tab layout itself gapless.
     private func tabSurface(for tab: Tab, tintOpacity: Double) -> some View {
         let shape = tabShape(for: tab)
+            .inset(by: CompactToolbarLayout.tabSeparationWidth)
 
         return ZStack {
             shape.fill(AppColors.windowChromeTabPlateColor)
@@ -1667,21 +1675,20 @@ struct MainWindowTabsView: View {
         }
     }
 
-    /// Two touching 1.5pt inside strokes form a 3pt visual separation
-    /// without reserving layout space. Because this color is the flattened
-    /// Header chrome rather than the Tab plate, the same contour remains clear
-    /// when an upper Tab overlaps a lower one.
-    private func tabBoundary(for tab: Tab) -> some View {
+    /// A moving or accordion-cover Tab cannot leave its seam transparent: the
+    /// lower Tab would show through. Paint the approximation only for that
+    /// short layered state; ordinary seams always expose the real Header.
+    private func layeredTabBoundary(for tab: Tab, isVisible: Bool) -> some View {
         let isFocusedAddressTab = tab.id == viewModel.currentTabId
             && interaction.isAddressEditing
             && addressPresentationPhase.showsFocusAffordances
 
         return tabShape(for: tab)
             .strokeBorder(
-                Color(nsColor: windowChrome.style.tabSeparationColor),
-                lineWidth: 1.5
+                Color(nsColor: windowChrome.style.layeredTabSeparationColor),
+                lineWidth: CompactToolbarLayout.tabSeparationWidth
             )
-            .opacity(isFocusedAddressTab ? 0 : 1)
+            .opacity(isVisible && !isFocusedAddressTab ? 1 : 0)
             .allowsHitTesting(false)
     }
 

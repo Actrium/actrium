@@ -153,11 +153,10 @@ enum WindowChromeStyle: String, CaseIterable, Identifiable, Codable {
         }
     }
 
-    /// Opaque approximation of the Header's live material plus tint. Tab
-    /// outlines cannot remain transparent while overlapping another Tab—the
-    /// lower surface would show through—so they use this flattened chrome
-    /// color to preserve the same visual gap in both flat and layered states.
-    var tabSeparationColor: NSColor {
+    /// Opaque approximation used only while one Tab is physically layered
+    /// above another. Ordinary Tab seams expose the real Header material;
+    /// a layered boundary must instead occlude the lower Tab surface.
+    var layeredTabSeparationColor: NSColor {
         let baseWhite: CGFloat = AppColors.usesDarkAppearance ? 0.16 : 0.94
         let base = NSColor(calibratedWhite: baseWhite, alpha: 1)
         guard let tint = tintColor.usingColorSpace(.deviceRGB),
