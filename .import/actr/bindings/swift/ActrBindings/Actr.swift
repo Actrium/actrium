@@ -4898,6 +4898,7 @@ public enum WebRtcUnavailableReasonBridge: Equatable, Hashable {
     case rtcResourceLimitExceeded
     case recoveryExhausted
     case closed
+    case peerUnavailable
 
 
 
@@ -4936,6 +4937,8 @@ public struct FfiConverterTypeWebRtcUnavailableReasonBridge: FfiConverterRustBuf
         case 8: return .recoveryExhausted
         
         case 9: return .closed
+
+        case 10: return .peerUnavailable
         
         default: throw UniffiInternalError.unexpectedEnumCase
         }
@@ -4979,6 +4982,9 @@ public struct FfiConverterTypeWebRtcUnavailableReasonBridge: FfiConverterRustBuf
         
         case .closed:
             writeInt(&buf, Int32(9))
+
+        case .peerUnavailable:
+            writeInt(&buf, Int32(10))
         
         }
     }

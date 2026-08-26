@@ -85,6 +85,16 @@ pub(crate) enum RtcPeerCommand {
     /// the `SignalingRouter` from the server's `RoleAssignment` (RFC §"Role and
     /// glare handling").
     ApplyRoleAssignment { is_offerer: bool },
+    /// Actrix confirmed that the exact remote endpoint had no usable
+    /// signaling session for this Controller/transport/PC attempt. For a
+    /// generation-0 role probe, `negotiation_epoch` names the exact probe
+    /// emission so a delayed result for a retired probe cannot terminate a
+    /// newer arbitration attempt.
+    TargetUnavailable {
+        transport_epoch: u64,
+        pc_generation: u64,
+        negotiation_epoch: u64,
+    },
     /// Lazily create a lane on the active session (first send on a lane other
     /// than the pre-created `RpcReliable` anchor). Data-plane request from the
     /// send path; the controller dedups against the lane registry.
@@ -153,6 +163,16 @@ impl std::fmt::Debug for RtcPeerCommand {
             Self::ApplyRoleAssignment { is_offerer } => f
                 .debug_struct("ApplyRoleAssignment")
                 .field("is_offerer", is_offerer)
+                .finish(),
+            Self::TargetUnavailable {
+                transport_epoch,
+                pc_generation,
+                negotiation_epoch,
+            } => f
+                .debug_struct("TargetUnavailable")
+                .field("transport_epoch", transport_epoch)
+                .field("pc_generation", pc_generation)
+                .field("negotiation_epoch", negotiation_epoch)
                 .finish(),
             Self::EnsureLane(lane) => f.debug_tuple("EnsureLane").field(lane).finish(),
             Self::Close => f.write_str("Close"),
@@ -1307,6 +1327,29 @@ fn reduce_command(
             }
             // A role change here would invalidate in-flight SDP ops; that is
             // tracked by negotiation_epoch and generation gating on completions.
+        }
+        RtcPeerCommand::TargetUnavailable {
+            transport_epoch,
+            pc_generation,
+            negotiation_epoch,
+        } => {
+            let exact_attempt = state.transport_epoch == transport_epoch
+                && if pc_generation == 0 {
+                    // Gen-0 results name one exact role probe. The
+                    // gate-opening edge re-drives the probe while one is
+                    // still in flight (each emission bumps
+                    // `negotiation_epoch`), so `role_negotiation_inflight`
+                    // alone cannot tell a delayed result for the retired
+                    // probe apart from the live one's.
+                    state.role_negotiation_inflight && state.negotiation_epoch == negotiation_epoch
+                } else {
+                    state.is_live_generation(pc_generation)
+                };
+            if exact_attempt && !state.close_requested {
+                terminate_transport_attempt(state, RtcUnavailableReason::PeerUnavailable, effects);
+            } else {
+                state.stale_events = state.stale_events.saturating_add(1);
+            }
         }
         RtcPeerCommand::ApplyRemoteIceRestartOffer(desc) => {
             reduce_command(

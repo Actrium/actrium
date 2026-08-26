@@ -19,8 +19,8 @@
 use std::sync::Arc;
 
 use actr_protocol::{
-    ActrId, SIGNALING_ENVELOPE_VERSION, SignalingEnvelope, actr_relay, session_description,
-    signaling_envelope,
+    ActrId, RelayDeliveryContext, RelayDeliveryStatus, SIGNALING_ENVELOPE_VERSION,
+    SignalingEnvelope, actr_relay, session_description, signaling_envelope, signaling_to_actr,
 };
 use async_trait::async_trait;
 
@@ -30,8 +30,8 @@ use crate::lifecycle::CredentialState;
 use crate::wire::webrtc::signaling::SignalingClient;
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
 
-use super::SharedLocalId;
 use super::router::SignalingTransport;
+use super::{RelayAttemptIdentity, SharedLocalId, SignalingDispatch, SignalingInbound};
 
 /// Production [`SignalingTransport`] that sends/receives v0.20 signaling
 /// messages over the 0.14 `WebSocketSignalingClient` WebSocket.
@@ -193,12 +193,32 @@ impl V020SignalingTransport {
 #[async_trait]
 impl SignalingTransport for V020SignalingTransport {
     async fn send(&self, to: ActrId, message: SignalingMessage) {
+        self.send_dispatch(SignalingDispatch::untracked(to, message))
+            .await;
+    }
+
+    async fn send_dispatch(&self, dispatch: SignalingDispatch) {
+        let request_delivery_result = dispatch.requests_delivery_result();
+        let SignalingDispatch {
+            peer: to,
+            message,
+            attempt,
+        } = dispatch;
         let payload = self.message_to_payload(&to, &message);
         let credential = self.credential_state.credential().await;
         let relay = actr_protocol::ActrRelay {
             source: self.local_id.get(),
             credential,
             target: to,
+            delivery_context: request_delivery_result.then(|| {
+                let attempt = attempt.expect("delivery-result request has an RTC attempt identity");
+                RelayDeliveryContext {
+                    controller_lifecycle_id: attempt.controller_lifecycle_id,
+                    transport_epoch: attempt.transport_epoch,
+                    pc_generation: attempt.pc_generation,
+                    negotiation_epoch: Some(attempt.negotiation_epoch),
+                }
+            }),
             payload: Some(payload),
         };
         let envelope = SignalingEnvelope {
@@ -218,6 +238,13 @@ impl SignalingTransport for V020SignalingTransport {
     }
 
     async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {
+        match self.recv_event().await {
+            Some(SignalingInbound::PeerMessage { from, message }) => Some((from, message)),
+            Some(SignalingInbound::TargetUnavailable { .. }) | None => None,
+        }
+    }
+
+    async fn recv_event(&self) -> Option<SignalingInbound> {
         // The inbound queue can close or error while a replacement queue is
         // being installed (`WebSocketSignalingClient::disconnect()` swaps the
         // bounded inbound queue). Yielding alone spun the loop hot on that
@@ -256,11 +283,13 @@ impl SignalingTransport for V020SignalingTransport {
                 );
                 continue;
             };
-            if let signaling_envelope::Flow::ActrRelay(relay) = flow {
-                let source = relay.source.clone();
-                let target = relay.target.clone();
-                if let Some(payload) = relay.payload {
-                    if let Some(message) = Self::payload_to_message(payload) {
+            match flow {
+                signaling_envelope::Flow::ActrRelay(relay) => {
+                    let source = relay.source.clone();
+                    let target = relay.target.clone();
+                    if let Some(payload) = relay.payload
+                        && let Some(message) = Self::payload_to_message(payload)
+                    {
                         let peer = if matches!(&message, SignalingMessage::RoleAssignment { .. })
                             && source == self.local_id.get()
                         {
@@ -268,9 +297,62 @@ impl SignalingTransport for V020SignalingTransport {
                         } else {
                             source
                         };
-                        return Some((peer, message));
+                        return Some(SignalingInbound::PeerMessage {
+                            from: peer,
+                            message,
+                        });
                     }
                 }
+                signaling_envelope::Flow::ServerToActr(server_to_actr) => {
+                    if let Some(signaling_to_actr::Payload::RelayDeliveryResult(result)) =
+                        server_to_actr.payload
+                    {
+                        let status = match RelayDeliveryStatus::try_from(result.status) {
+                            Ok(status) => status,
+                            Err(unknown) => {
+                                // An unknown future status must not read as a
+                                // confirmed target-unavailable fact, and must
+                                // be loud enough to diagnose a protocol skew.
+                                tracing::warn!(
+                                    target = "v020-signaling",
+                                    peer = %result.target.to_string_repr(),
+                                    raw_status = %unknown,
+                                    "unknown relay delivery status from Actrix; treating as rejected"
+                                );
+                                RelayDeliveryStatus::RelayDeliveryRejected
+                            }
+                        };
+                        match status {
+                            RelayDeliveryStatus::RelayDeliveryTargetUnavailable => {
+                                return Some(SignalingInbound::TargetUnavailable {
+                                    target: result.target,
+                                    attempt: RelayAttemptIdentity {
+                                        controller_lifecycle_id: result
+                                            .context
+                                            .controller_lifecycle_id,
+                                        transport_epoch: result.context.transport_epoch,
+                                        pc_generation: result.context.pc_generation,
+                                        // A pre-correlation sender omits the
+                                        // epoch; zero never matches a live
+                                        // gen-0 fence (every probe emission
+                                        // bumps the epoch past zero first).
+                                        negotiation_epoch: result
+                                            .context
+                                            .negotiation_epoch
+                                            .unwrap_or(0),
+                                    },
+                                });
+                            }
+                            RelayDeliveryStatus::RelayDeliveryRejected => tracing::warn!(
+                                target = "v020-signaling",
+                                peer = %result.target.to_string_repr(),
+                                "Actrix rejected RTC signaling relay without declaring the target unavailable"
+                            ),
+                            RelayDeliveryStatus::RelayDeliveryAccepted => {}
+                        }
+                    }
+                }
+                _ => {}
             }
             // Non-ActrRelay envelopes (heartbeat, registration, etc.) are
             // consumed by the 0.14 stack; skip them for the v0.20 router.
@@ -319,6 +401,7 @@ mod tests {
     #[derive(Default)]
     struct ScriptedReceiveClient {
         receives: Mutex<VecDeque<Option<SignalingEnvelope>>>,
+        sent: Mutex<Vec<SignalingEnvelope>>,
     }
 
     #[async_trait]
@@ -369,7 +452,11 @@ mod tests {
         ) -> crate::transport::NetworkResult<(u32, Vec<u8>)> {
             unimplemented!()
         }
-        async fn send_envelope(&self, _: SignalingEnvelope) -> crate::transport::NetworkResult<()> {
+        async fn send_envelope(
+            &self,
+            envelope: SignalingEnvelope,
+        ) -> crate::transport::NetworkResult<()> {
+            self.sent.lock().expect("scripted send lock").push(envelope);
             Ok(())
         }
         async fn receive_envelope(
@@ -423,6 +510,7 @@ mod tests {
                         signature: bytes::Bytes::new(),
                     },
                     target: local.clone(),
+                    delivery_context: None,
                     payload: Some(actr_relay::Payload::SessionDescription(
                         actr_protocol::SessionDescription {
                             r#type: session_description::Type::Offer as i32,
@@ -435,6 +523,7 @@ mod tests {
         };
         let client: Arc<dyn SignalingClient> = Arc::new(ScriptedReceiveClient {
             receives: Mutex::new(VecDeque::from([None, Some(envelope)])),
+            sent: Mutex::new(Vec::new()),
         });
         let transport = V020SignalingTransport::new(
             client,
@@ -461,6 +550,154 @@ mod tests {
 
         assert_eq!(peer, remote);
         assert!(matches!(message, SignalingMessage::Offer { .. }));
+    }
+
+    #[tokio::test]
+    async fn critical_relay_carries_attempt_identity() {
+        let client = Arc::new(ScriptedReceiveClient::default());
+        let transport = V020SignalingTransport::new(
+            client.clone(),
+            SharedLocalId::new(test_id(1)),
+            CredentialState::new(actr_protocol::AIdCredential::default(), None, None),
+        );
+        let dispatch = SignalingDispatch::tracked(
+            test_id(2),
+            7,
+            11,
+            13,
+            29,
+            SignalingMessage::RoleNegotiation,
+        );
+
+        SignalingTransport::send_dispatch(&transport, dispatch).await;
+
+        let sent = client.sent.lock().expect("scripted send lock");
+        let relay = match sent[0].flow.as_ref() {
+            Some(signaling_envelope::Flow::ActrRelay(relay)) => relay,
+            other => panic!("expected ActrRelay, got {other:?}"),
+        };
+        let context = relay
+            .delivery_context
+            .as_ref()
+            .expect("critical relay requests a delivery result");
+        assert_eq!(context.controller_lifecycle_id, 7);
+        assert_eq!(context.transport_epoch, 11);
+        assert_eq!(context.pc_generation, 13);
+        assert_eq!(context.negotiation_epoch, Some(29));
+    }
+
+    #[tokio::test]
+    async fn target_unavailable_result_preserves_attempt_identity() {
+        let local = test_id(1);
+        let target = test_id(2);
+        let envelope = SignalingEnvelope {
+            envelope_version: SIGNALING_ENVELOPE_VERSION,
+            envelope_id: "target-unavailable".to_string(),
+            reply_for: Some("critical-relay".to_string()),
+            traceparent: None,
+            tracestate: None,
+            flow: Some(signaling_envelope::Flow::ServerToActr(
+                actr_protocol::SignalingToActr {
+                    target: local.clone(),
+                    payload: Some(signaling_to_actr::Payload::RelayDeliveryResult(
+                        actr_protocol::RelayDeliveryResult {
+                            target: target.clone(),
+                            context: RelayDeliveryContext {
+                                controller_lifecycle_id: 17,
+                                transport_epoch: 19,
+                                pc_generation: 23,
+                                negotiation_epoch: Some(29),
+                            },
+                            status: RelayDeliveryStatus::RelayDeliveryTargetUnavailable as i32,
+                        },
+                    )),
+                },
+            )),
+        };
+        let client: Arc<dyn SignalingClient> = Arc::new(ScriptedReceiveClient {
+            receives: Mutex::new(VecDeque::from([Some(envelope)])),
+            sent: Mutex::new(Vec::new()),
+        });
+        let transport = V020SignalingTransport::new(
+            client,
+            SharedLocalId::new(local),
+            CredentialState::new(actr_protocol::AIdCredential::default(), None, None),
+        );
+
+        let event = SignalingTransport::recv_event(&transport)
+            .await
+            .expect("target-unavailable event");
+        match event {
+            SignalingInbound::TargetUnavailable {
+                target: actual,
+                attempt,
+            } => {
+                assert_eq!(actual, target);
+                assert_eq!(attempt.controller_lifecycle_id, 17);
+                assert_eq!(attempt.transport_epoch, 19);
+                assert_eq!(attempt.pc_generation, 23);
+                assert_eq!(attempt.negotiation_epoch, 29);
+            }
+            other => panic!("expected target unavailable, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_relay_delivery_status_falls_back_to_rejection_without_stranding_the_loop() {
+        let local = test_id(1);
+        let target = test_id(2);
+        let envelope = |status: i32, envelope_id: &str| SignalingEnvelope {
+            envelope_version: SIGNALING_ENVELOPE_VERSION,
+            envelope_id: envelope_id.to_string(),
+            reply_for: None,
+            traceparent: None,
+            tracestate: None,
+            flow: Some(signaling_envelope::Flow::ServerToActr(
+                actr_protocol::SignalingToActr {
+                    target: local.clone(),
+                    payload: Some(signaling_to_actr::Payload::RelayDeliveryResult(
+                        actr_protocol::RelayDeliveryResult {
+                            target: target.clone(),
+                            context: RelayDeliveryContext {
+                                controller_lifecycle_id: 17,
+                                transport_epoch: 19,
+                                pc_generation: 23,
+                                negotiation_epoch: Some(29),
+                            },
+                            status,
+                        },
+                    )),
+                },
+            )),
+        };
+        // The unknown status must be swallowed as an ordinary rejection
+        // (never a confirmed unavailability), leaving the loop to serve the
+        // next result — here a real target-unavailable fact.
+        let client: Arc<dyn SignalingClient> = Arc::new(ScriptedReceiveClient {
+            receives: Mutex::new(VecDeque::from([
+                Some(envelope(99, "unknown-status")),
+                Some(envelope(
+                    RelayDeliveryStatus::RelayDeliveryTargetUnavailable as i32,
+                    "target-unavailable",
+                )),
+            ])),
+            sent: Mutex::new(Vec::new()),
+        });
+        let transport = V020SignalingTransport::new(
+            client,
+            SharedLocalId::new(local),
+            CredentialState::new(actr_protocol::AIdCredential::default(), None, None),
+        );
+
+        let event = SignalingTransport::recv_event(&transport)
+            .await
+            .expect("subsequent target-unavailable event");
+        match event {
+            SignalingInbound::TargetUnavailable { target: actual, .. } => {
+                assert_eq!(actual, target);
+            }
+            other => panic!("expected target unavailable, got {other:?}"),
+        }
     }
 
     #[test]

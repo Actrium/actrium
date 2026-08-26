@@ -6,8 +6,90 @@
 
 use actr_protocol::ActrId;
 
+use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
+
 pub(crate) mod router;
 pub(crate) mod ws_transport;
+
+/// Exact sender-side RTC identity attached to a recovery/negotiation-critical
+/// relay. Actrix echoes it without interpretation so a delayed negative
+/// delivery result cannot terminate a newer Controller or transport attempt.
+/// `negotiation_epoch` discriminates generation-0 role probes: the signaling
+/// gate-opening edge re-drives a probe while one is still in flight, and each
+/// emission bumps the epoch, so only the exact probe's result may terminate
+/// the attempt it names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RelayAttemptIdentity {
+    pub(crate) controller_lifecycle_id: u64,
+    pub(crate) transport_epoch: u64,
+    pub(crate) pc_generation: u64,
+    pub(crate) negotiation_epoch: u64,
+}
+
+/// One Controller-originated signaling dispatch.
+#[derive(Debug, Clone)]
+pub(crate) struct SignalingDispatch {
+    pub(crate) peer: ActrId,
+    pub(crate) message: SignalingMessage,
+    pub(crate) attempt: Option<RelayAttemptIdentity>,
+}
+
+impl SignalingDispatch {
+    pub(crate) fn tracked(
+        peer: ActrId,
+        controller_lifecycle_id: u64,
+        transport_epoch: u64,
+        pc_generation: u64,
+        negotiation_epoch: u64,
+        message: SignalingMessage,
+    ) -> Self {
+        Self {
+            peer,
+            message,
+            attempt: Some(RelayAttemptIdentity {
+                controller_lifecycle_id,
+                transport_epoch,
+                pc_generation,
+                negotiation_epoch,
+            }),
+        }
+    }
+
+    /// Protocol responses emitted outside a live Controller do not request a
+    /// delivery result and therefore carry no attempt identity.
+    pub(crate) fn untracked(peer: ActrId, message: SignalingMessage) -> Self {
+        Self {
+            peer,
+            message,
+            attempt: None,
+        }
+    }
+
+    pub(crate) fn requests_delivery_result(&self) -> bool {
+        self.attempt.is_some()
+            && matches!(
+                self.message,
+                SignalingMessage::Offer { .. }
+                    | SignalingMessage::Answer { .. }
+                    | SignalingMessage::IceRestartOffer { .. }
+                    | SignalingMessage::IceRestartRequest { .. }
+                    | SignalingMessage::RoleNegotiation
+            )
+    }
+}
+
+/// Items delivered by a signaling transport to the router.
+#[derive(Debug)]
+pub(crate) enum SignalingInbound {
+    PeerMessage {
+        from: ActrId,
+        message: SignalingMessage,
+    },
+    TargetUnavailable {
+        target: ActrId,
+        attempt: RelayAttemptIdentity,
+    },
+}
 
 /// Shared, rebind-updatable local identity for the v0.20 signaling stack
 /// (0.14 parity: `WebRtcCoordinator::set_local_id` on hard rebind).

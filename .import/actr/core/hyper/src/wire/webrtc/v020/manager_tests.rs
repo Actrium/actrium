@@ -22,6 +22,8 @@ use crate::wire::webrtc::v020::manager::RtcConnectionManager;
 use crate::wire::webrtc::v020::peer::effects::{SessionFactory, SessionOps};
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
 use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
+use crate::wire::webrtc::v020::signaling::RelayAttemptIdentity;
+use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 
 const WAIT: Duration = Duration::from_secs(5);
 
@@ -221,13 +223,7 @@ impl SessionFactory for FirstCloseBlocksFactory {
     }
 }
 
-fn manager() -> (
-    Arc<RtcConnectionManager>,
-    mpsc::Receiver<(
-        ActrId,
-        crate::wire::webrtc::v020::peer::reducer::SignalingMessage,
-    )>,
-) {
+fn manager() -> (Arc<RtcConnectionManager>, mpsc::Receiver<SignalingDispatch>) {
     let (signaling_tx, signaling_rx) = mpsc::channel(16);
     let manager = Arc::new(RtcConnectionManager::new(
         Arc::new(AutoFactory),
@@ -342,13 +338,13 @@ async fn ice_restarts_are_not_serialized_by_a_node_wide_limit() {
     // CreateOffer), so its Open event can complete the Sendable transition.
     let mut offered: std::collections::HashSet<ActrId> = std::collections::HashSet::new();
     while offered.len() < PEERS {
-        let (peer, message) = timeout(WAIT, signaling_rx.recv())
+        let dispatch = timeout(WAIT, signaling_rx.recv())
             .await
             .expect("initial signaling timeout")
             .expect("signaling channel closed");
-        match message {
+        match dispatch.message {
             SignalingMessage::Offer { .. } => {
-                assert!(offered.insert(peer), "duplicate initial offer");
+                assert!(offered.insert(dispatch.peer), "duplicate initial offer");
             }
             SignalingMessage::RoleNegotiation => {}
             other => panic!("unexpected initial signaling: {other:?}"),
@@ -558,11 +554,67 @@ async fn connect_creates_controller_and_drives_offer() {
     assert_eq!(mgr.peer_count().await, 1);
 
     // The offerer eventually emits an offer to the signaling channel.
-    let (to, _msg) = timeout(WAIT, signaling_rx.recv())
+    let dispatch = timeout(WAIT, signaling_rx.recv())
         .await
         .expect("timed out waiting for an offer")
         .expect("signaling closed");
-    assert_eq!(to, peer);
+    assert_eq!(dispatch.peer, peer);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn target_unavailable_result_is_fenced_by_controller_and_attempt_identity() {
+    let (mgr, mut signaling_rx) = manager();
+    let peer = test_actor_id(583);
+
+    mgr.connect(peer.clone()).await;
+    let dispatch = timeout(WAIT, signaling_rx.recv())
+        .await
+        .expect("timed out waiting for role negotiation")
+        .expect("signaling closed");
+    let attempt = dispatch.attempt.expect("role negotiation is tracked");
+    assert_eq!(attempt.pc_generation, 0);
+
+    mgr.handle_target_unavailable(peer.clone(), attempt).await;
+    timeout(WAIT, async {
+        loop {
+            let snapshot = mgr
+                .get_snapshot(&peer)
+                .await
+                .expect("controller remains observable at terminal Idle");
+            if snapshot.status == actr_framework::WebRtcPeerStatus::Idle
+                && snapshot.unavailable_reason
+                    == Some(actr_framework::WebRtcUnavailableReason::PeerUnavailable)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("target-unavailable result did not terminate the attempt");
+
+    // A delayed result from a previous Controller lifetime cannot affect the
+    // replacement attempt.
+    mgr.connect(peer.clone()).await;
+    let replacement = timeout(WAIT, signaling_rx.recv())
+        .await
+        .expect("replacement role negotiation timeout")
+        .expect("signaling closed");
+    let replacement_attempt = replacement.attempt.expect("replacement tracked");
+    mgr.handle_target_unavailable(
+        peer.clone(),
+        RelayAttemptIdentity {
+            controller_lifecycle_id: replacement_attempt
+                .controller_lifecycle_id
+                .saturating_sub(1),
+            ..replacement_attempt
+        },
+    )
+    .await;
+    assert_ne!(
+        mgr.get_snapshot(&peer).await.unwrap().unavailable_reason,
+        Some(actr_framework::WebRtcUnavailableReason::PeerUnavailable)
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

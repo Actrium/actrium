@@ -459,6 +459,135 @@ fn initial_readiness_lane_failure_terminates_before_offer_can_continue() {
 }
 
 #[test]
+fn target_unavailable_terminates_the_exact_recovery_attempt() {
+    let mut state = RtcPeerState::new(test_actor_id(583));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+
+    // A silent remote death first enters the normal recovery path.
+    let effects = reduce(&mut state, failed_tick(generation));
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert!(state.recovery_inflight);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::RestartIce { generation: actual, .. } if *actual == generation
+    )));
+
+    let negotiation_epoch = state.negotiation_epoch;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::TargetUnavailable {
+            transport_epoch,
+            pc_generation: generation,
+            negotiation_epoch,
+        }),
+    );
+
+    assert_eq!(state.phase, RtcPeerPhase::Idle);
+    assert_eq!(
+        state.unavailable_reason,
+        Some(RtcUnavailableReason::PeerUnavailable)
+    );
+    assert!(!state.recovery_inflight);
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::CloseSession { generation: actual, .. } if *actual == generation
+    )));
+    assert!(!has_build_session(&effects, generation + 1));
+}
+
+#[test]
+fn stale_target_unavailable_result_cannot_terminate_a_new_attempt() {
+    let mut state = RtcPeerState::new(test_actor_id(584));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+
+    let negotiation_epoch = state.negotiation_epoch;
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::TargetUnavailable {
+            transport_epoch: transport_epoch.saturating_sub(1),
+            pc_generation: generation,
+            negotiation_epoch,
+        }),
+    );
+
+    assert!(effects.is_empty());
+    assert_eq!(state.phase, RtcPeerPhase::Sendable);
+    assert_eq!(state.unavailable_reason, None);
+}
+
+#[test]
+fn stale_gen0_target_unavailable_result_cannot_terminate_a_re_driven_probe() {
+    // The signaling gate flaps None -> Some while a delivered gen-0 role
+    // probe is still in flight: the gate-opening edge re-drives the probe
+    // under a fresh negotiation epoch. Both probes dispatch with the
+    // identical (transport_epoch, pc_generation = 0) identity, so only the
+    // exact probe's epoch may terminate the live arbitration.
+    let mut state = RtcPeerState::new(test_actor_id(585));
+    reduce(&mut state, RtcPeerInput::Command(RtcPeerCommand::Connect));
+    assert!(state.role_negotiation_inflight);
+    let retired_epoch = state.negotiation_epoch;
+    let transport_epoch = state.transport_epoch;
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::SignalingGenerationChanged { generation: None },
+        )),
+    );
+    let after_open = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::NetworkEvent(
+            RtcNetworkEvent::SignalingGenerationChanged {
+                generation: Some(3),
+            },
+        )),
+    );
+    assert!(after_open.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::SendSignaling {
+            message: SignalingMessage::RoleNegotiation,
+            ..
+        }
+    )));
+    assert!(state.role_negotiation_inflight);
+    let live_epoch = state.negotiation_epoch;
+    assert_ne!(live_epoch, retired_epoch, "each probe bumps the epoch");
+
+    // The delayed negative result for the retired probe matches on transport
+    // epoch and generation 0 but names the retired epoch: it must be stale.
+    let stale = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::TargetUnavailable {
+            transport_epoch,
+            pc_generation: 0,
+            negotiation_epoch: retired_epoch,
+        }),
+    );
+    assert!(stale.is_empty());
+    assert!(state.role_negotiation_inflight);
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+    assert_eq!(state.unavailable_reason, None);
+
+    // The live probe's own result terminates the arbitration attempt.
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::TargetUnavailable {
+            transport_epoch,
+            pc_generation: 0,
+            negotiation_epoch: live_epoch,
+        }),
+    );
+    assert!(!state.role_negotiation_inflight);
+    assert_eq!(state.phase, RtcPeerPhase::Idle);
+    assert_eq!(
+        state.unavailable_reason,
+        Some(RtcUnavailableReason::PeerUnavailable)
+    );
+}
+
+#[test]
 fn answerer_flow_reaches_sendable_and_connected() {
     let mut state = RtcPeerState::new(test_actor_id(2));
     let generation = drive_answerer_to_negotiating(&mut state);

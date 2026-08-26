@@ -86,9 +86,42 @@ message SignalingToActr {
     actr.UnsubscribeActrUpResponse unsubscribe_actr_up_response = 21;
     actr.ActrUpEvent actr_up_event = 22;
 
+    // Server-side disposition for an ActrRelay that requested delivery
+    // feedback. This reports routing/egress acceptance only; it is not an
+    // end-to-end acknowledgement from the remote actor.
+    RelayDeliveryResult relay_delivery_result = 23;
+
     // Error notification specific to the request
     actr.ErrorResponse error = 30;
   }
+}
+
+// Opaque RTC attempt identity supplied by the sender and echoed by Actrix.
+// Actrix does not interpret these values; the originating runtime uses them
+// to reject a delayed delivery result from an older Controller/transport/PC
+// (and, for generation-0 role probes, from an earlier probe of the same
+// transport attempt).
+message RelayDeliveryContext {
+  required uint64 controller_lifecycle_id = 1;
+  required uint64 transport_epoch = 2;
+  required uint64 pc_generation = 3;
+  // Correlates generation-0 role-negotiation probes to their emission epoch;
+  // absent from pre-correlation senders.
+  optional uint64 negotiation_epoch = 4;
+}
+
+// Closed delivery-result domain. New failure classes must be mapped into one
+// of these wire-stable dispositions rather than extending behavior implicitly.
+enum RelayDeliveryStatus {
+  RELAY_DELIVERY_ACCEPTED = 0;
+  RELAY_DELIVERY_TARGET_UNAVAILABLE = 1;
+  RELAY_DELIVERY_REJECTED = 2;
+}
+
+message RelayDeliveryResult {
+  required actr.ActrId target = 1;
+  required RelayDeliveryContext context = 2;
+  required RelayDeliveryStatus status = 3;
 }
 
 // Flow: Actr -> SignalingServer -> Actr (explicit relay, e.g., WebRTC signaling)
@@ -96,6 +129,10 @@ message ActrRelay {
   required actr.ActrId source = 1;
   required actr.AIdCredential credential = 2;
   required actr.ActrId target = 3;
+  // Present only for recovery/negotiation-critical relays that require a
+  // server delivery disposition. Legacy senders omit it; legacy servers
+  // safely ignore it.
+  optional RelayDeliveryContext delivery_context = 4;
 
   oneof payload {
     webrtc.IceCandidate ice_candidate = 10;

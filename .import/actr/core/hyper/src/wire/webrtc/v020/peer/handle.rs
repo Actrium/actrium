@@ -671,6 +671,20 @@ impl RtcPeerControllerHandle {
             .await
     }
 
+    pub(crate) async fn target_unavailable(
+        &self,
+        transport_epoch: u64,
+        pc_generation: u64,
+        negotiation_epoch: u64,
+    ) -> Result<(), ControllerGone> {
+        self.send_command(RtcPeerCommand::TargetUnavailable {
+            transport_epoch,
+            pc_generation,
+            negotiation_epoch,
+        })
+        .await
+    }
+
     /// A correlated ICE-restart offer was rejected by the remote because it no
     /// longer owns the old Session. Escalate through the controller's normal
     /// Hard Recovery policy instead of mutating the manager/router state.

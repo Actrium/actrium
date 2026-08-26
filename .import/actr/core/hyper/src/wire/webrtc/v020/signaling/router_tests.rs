@@ -16,6 +16,7 @@ use crate::wire::webrtc::v020::event_handler::WebRtcEventHandler;
 use crate::wire::webrtc::v020::manager::RtcConnectionManager;
 use crate::wire::webrtc::v020::peer::effects::{SessionFactory, SessionOps};
 use crate::wire::webrtc::v020::peer::reducer::SignalingMessage;
+use crate::wire::webrtc::v020::signaling::{SignalingDispatch, SignalingInbound};
 
 use super::router::SignalingRouter;
 
@@ -108,7 +109,7 @@ impl SessionFactory for AutoFactory {
 fn router() -> (
     Arc<RtcConnectionManager>,
     SignalingRouter,
-    mpsc::Receiver<(ActrId, SignalingMessage)>,
+    mpsc::Receiver<SignalingDispatch>,
 ) {
     let (signaling_tx, signaling_rx) = mpsc::channel(16);
     let manager = Arc::new(RtcConnectionManager::new(
@@ -207,13 +208,15 @@ async fn outbound_message_is_forwarded_by_run_loop() {
     // A controller that connects sends a RoleNegotiation on the shared outbound
     // channel the router consumes.
     manager.connect(test_actor_id(4)).await;
-    let (to, message) =
-        tokio::time::timeout(std::time::Duration::from_secs(5), signaling_rx.recv())
-            .await
-            .expect("timed out waiting for outbound role negotiation")
-            .expect("outbound channel closed");
-    assert_eq!(to, test_actor_id(4));
-    assert!(matches!(message, SignalingMessage::RoleNegotiation));
+    let dispatch = tokio::time::timeout(std::time::Duration::from_secs(5), signaling_rx.recv())
+        .await
+        .expect("timed out waiting for outbound role negotiation")
+        .expect("outbound channel closed");
+    assert_eq!(dispatch.peer, test_actor_id(4));
+    assert!(matches!(
+        dispatch.message,
+        SignalingMessage::RoleNegotiation
+    ));
 }
 
 // ── async dispatch path: isolation, ordering, timeout, cap, shutdown ────────
@@ -308,6 +311,99 @@ async fn assert_no_controller_within(
         );
         tokio::time::sleep(std::time::Duration::from_millis(25)).await;
     }
+}
+
+/// A transport whose inbound stream is scripted with full `SignalingInbound`
+/// events; outbound dispatches are captured for assertion.
+struct InboundEventTransport {
+    inbound_rx: tokio::sync::Mutex<mpsc::Receiver<SignalingInbound>>,
+    outbound_tx: mpsc::Sender<SignalingDispatch>,
+}
+
+#[async_trait]
+impl SignalingTransport for InboundEventTransport {
+    async fn send(&self, _to: ActrId, _message: SignalingMessage) {}
+
+    async fn send_dispatch(&self, dispatch: SignalingDispatch) {
+        let _ = self.outbound_tx.send(dispatch).await;
+    }
+
+    async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {
+        loop {
+            match self.inbound_rx.lock().await.recv().await? {
+                SignalingInbound::PeerMessage { from, message } => return Some((from, message)),
+                SignalingInbound::TargetUnavailable { .. } => continue,
+            }
+        }
+    }
+
+    async fn recv_event(&self) -> Option<SignalingInbound> {
+        self.inbound_rx.lock().await.recv().await
+    }
+}
+
+/// The run loop must carry an inbound `TargetUnavailable` to the manager end
+/// to end — outbound dispatch and inbound server disposition on the same
+/// select loop — so a live controller's exact attempt terminates with
+/// `PeerUnavailable`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn run_loop_delivers_target_unavailable_to_the_manager() {
+    let (manager, router, outbound_rx) = router();
+    manager.set_signaling_dispatch_chains(router.dispatch_chains());
+    let (inbound_tx, inbound_rx) = mpsc::channel::<SignalingInbound>(64);
+    let (captured_tx, mut captured_rx) = mpsc::channel::<SignalingDispatch>(64);
+    let transport = InboundEventTransport {
+        inbound_rx: tokio::sync::Mutex::new(inbound_rx),
+        outbound_tx: captured_tx,
+    };
+    let runner = router.clone().with_dispatch_budget(TEST_DISPATCH_BUDGET);
+    let run = tokio::spawn(async move {
+        runner.run(transport, outbound_rx).await;
+    });
+
+    // A connected controller dispatches its tracked role probe through the
+    // loop; the captured identity is exactly what Actrix would echo back.
+    let peer = test_actor_id(42);
+    manager.connect(peer.clone()).await;
+    let dispatch = wait_within(std::time::Duration::from_secs(5), captured_rx.recv())
+        .await
+        .expect("timed out waiting for the loop to forward the probe")
+        .expect("capture channel closed");
+    assert!(matches!(
+        dispatch.message,
+        SignalingMessage::RoleNegotiation
+    ));
+    let attempt = dispatch.attempt.expect("connect probe is tracked");
+
+    inbound_tx
+        .send(SignalingInbound::TargetUnavailable {
+            target: peer.clone(),
+            attempt,
+        })
+        .await
+        .expect("feed target-unavailable result");
+
+    let handle = poll_controller(&manager, &peer, "connect creates a controller").await;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let snapshot = handle.snapshot();
+        if snapshot.unavailable_reason
+            == Some(actr_framework::WebRtcUnavailableReason::PeerUnavailable)
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "target-unavailable fact must terminate the attempt"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    drop(inbound_tx);
+    let _joined = wait_within(std::time::Duration::from_secs(2), run)
+        .await
+        .expect("run must return when the transport closes");
+    drop(manager);
 }
 
 /// A stalled peer (its dispatch gate is closed by the test) must not block an

@@ -434,6 +434,7 @@ public enum WebRTCUnavailableReason: Equatable, Hashable, Sendable {
     case rtcResourceLimitExceeded
     case recoveryExhausted
     case closed
+    case peerUnavailable
 
     init(bridge: ActrBindings.WebRtcUnavailableReasonBridge) {
         switch bridge {
@@ -455,6 +456,8 @@ public enum WebRTCUnavailableReason: Equatable, Hashable, Sendable {
             self = .recoveryExhausted
         case .closed:
             self = .closed
+        case .peerUnavailable:
+            self = .peerUnavailable
         }
     }
 }

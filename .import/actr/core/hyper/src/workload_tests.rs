@@ -462,3 +462,16 @@ fn package_hook_event_request_ids_are_unique_and_namespaced() {
     sorted.dedup();
     assert_eq!(sorted.len(), before, "request ids must be unique: {ids:?}");
 }
+
+/// ABI v1 predates `PeerUnavailable`; older dynclib guests must keep seeing
+/// the stable closed-endpoint projection a newer runtime produces for it.
+#[cfg(feature = "dynclib-engine")]
+#[test]
+fn peer_unavailable_projects_to_legacy_closed_abi() {
+    use actr_framework::guest::dynclib_abi::webrtc_unavailable_reason as rs;
+
+    assert_eq!(
+        unavailable_reason_to_v1(actr_framework::WebRtcUnavailableReason::PeerUnavailable),
+        rs::CLOSED
+    );
+}

@@ -27,6 +27,7 @@ use crate::wire::webrtc::v020::events::{
     peer_event_mailbox_with_capacity_and_bytes,
 };
 use crate::wire::webrtc::v020::recovery::RtcNetworkEvent;
+use crate::wire::webrtc::v020::signaling::SignalingDispatch;
 use crate::wire::webrtc::v020::status::{LaneKind, PeerTransportRetirement, RtcPeerSnapshot};
 
 use super::effect_port::{
@@ -72,10 +73,13 @@ struct ControllerLifecycleFloors {
 
 /// One critical signaling message retained under signaling-queue backpressure,
 /// fenced by the transport attempt that produced it (and, for SDP, by the PC
-/// generation that announced it).
+/// generation that announced it). `negotiation_epoch` preserves the emission
+/// epoch of a retained generation-0 role probe so a delayed delivery result
+/// cannot be mistaken for a newer probe's.
 struct RetainedSignaling {
     transport_epoch: u64,
     generation: u64,
+    negotiation_epoch: u64,
     message: SignalingMessage,
 }
 
@@ -145,7 +149,7 @@ pub(crate) struct RtcPeerController {
     /// internal snapshot, so subscriptions need no per-subscriber tasks and
     /// can never observe a different revision.
     public_snapshot_tx: watch::Sender<actr_framework::WebRtcPeerState>,
-    signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+    signaling_tx: mpsc::Sender<SignalingDispatch>,
     /// Network/App lifecycle events from the `RtcRecoverySupervisor`
     /// (S5-1). The controller selects on this receiver and feeds events to
     /// its reducer as `NetworkEvent` commands; the reducer (not the
@@ -212,7 +216,7 @@ impl RtcPeerController {
     pub(crate) fn spawn(
         peer_id: ActrId,
         factory: Arc<dyn SessionFactory>,
-        signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+        signaling_tx: mpsc::Sender<SignalingDispatch>,
         network_rx: tokio::sync::broadcast::Receiver<RtcNetworkEvent>,
         signaling_generation_rx: watch::Receiver<Option<u64>>,
         deps: SharedNodeDeps,
@@ -238,7 +242,7 @@ impl RtcPeerController {
         peer_id: ActrId,
         next_pc_generation: u64,
         factory: Arc<dyn SessionFactory>,
-        signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+        signaling_tx: mpsc::Sender<SignalingDispatch>,
         network_rx: tokio::sync::broadcast::Receiver<RtcNetworkEvent>,
         signaling_generation_rx: watch::Receiver<Option<u64>>,
         deps: SharedNodeDeps,
@@ -268,7 +272,7 @@ impl RtcPeerController {
         next_pc_generation: u64,
         next_revision: u64,
         factory: Arc<dyn SessionFactory>,
-        signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+        signaling_tx: mpsc::Sender<SignalingDispatch>,
         network_rx: tokio::sync::broadcast::Receiver<RtcNetworkEvent>,
         signaling_generation_rx: watch::Receiver<Option<u64>>,
         deps: SharedNodeDeps,
@@ -307,7 +311,7 @@ impl RtcPeerController {
     fn spawn_with_port_factory(
         peer_id: ActrId,
         floors: ControllerLifecycleFloors,
-        signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+        signaling_tx: mpsc::Sender<SignalingDispatch>,
         network_rx: tokio::sync::broadcast::Receiver<RtcNetworkEvent>,
         signaling_generation_rx: watch::Receiver<Option<u64>>,
         deps: SharedNodeDeps,
@@ -408,7 +412,7 @@ impl RtcPeerController {
         peer_id: ActrId,
         next_pc_generation: u64,
         effect_port: Arc<dyn RtcPeerEffectPort>,
-        signaling_tx: mpsc::Sender<(ActrId, SignalingMessage)>,
+        signaling_tx: mpsc::Sender<SignalingDispatch>,
         network_rx: tokio::sync::broadcast::Receiver<RtcNetworkEvent>,
         signaling_generation_rx: watch::Receiver<Option<u64>>,
         deps: SharedNodeDeps,
@@ -1193,21 +1197,27 @@ impl RtcPeerController {
             );
             return;
         }
-        match self
-            .signaling_tx
-            .try_send((self.state.peer_id.clone(), retained.message))
-        {
+        let dispatch = SignalingDispatch::tracked(
+            self.state.peer_id.clone(),
+            self.deps.controller_lifecycle_id,
+            retained.transport_epoch,
+            retained.generation,
+            retained.negotiation_epoch,
+            retained.message,
+        );
+        match self.signaling_tx.try_send(dispatch) {
             Ok(()) => {
                 tracing::info!(
                     peer = %self.state.peer_id.to_string_repr(),
                     "retried retained SDP through the signaling queue"
                 );
             }
-            Err(tokio::sync::mpsc::error::TrySendError::Full((_peer, message))) => {
+            Err(tokio::sync::mpsc::error::TrySendError::Full(dispatch)) => {
                 self.retry_signaling = Some(RetainedSignaling {
                     transport_epoch: retained.transport_epoch,
                     generation: retained.generation,
-                    message,
+                    negotiation_epoch: retained.negotiation_epoch,
+                    message: dispatch.message,
                 });
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
@@ -1329,12 +1339,18 @@ impl RtcPeerController {
                 // other controllers. Non-blocking try_send; a full queue drops the
                 // message and counts it (observable `signaling_dropped` metric).
                 let is_candidate = matches!(message, SignalingMessage::Candidate(_));
-                match self
-                    .signaling_tx
-                    .try_send((self.state.peer_id.clone(), message))
-                {
+                let dispatch = SignalingDispatch::tracked(
+                    self.state.peer_id.clone(),
+                    self.deps.controller_lifecycle_id,
+                    self.state.transport_epoch,
+                    generation,
+                    self.state.negotiation_epoch,
+                    message,
+                );
+                match self.signaling_tx.try_send(dispatch) {
                     Ok(()) => {}
-                    Err(tokio::sync::mpsc::error::TrySendError::Full((_peer, message))) => {
+                    Err(tokio::sync::mpsc::error::TrySendError::Full(dispatch)) => {
+                        let message = dispatch.message;
                         self.state.signaling_dropped += 1;
                         self.state.bump_revision();
                         // Publish the metric immediately: a dropped offer may be
@@ -1365,6 +1381,7 @@ impl RtcPeerController {
                             self.retry_signaling = Some(RetainedSignaling {
                                 transport_epoch: self.state.transport_epoch,
                                 generation,
+                                negotiation_epoch: self.state.negotiation_epoch,
                                 message,
                             });
                             tracing::warn!(
