@@ -25,9 +25,9 @@ pwrzv = { version = "0.7.0" }
 
 sqlx = { workspace = true }
 
-platform = { path = "../platform", package = "actrix-platform", version = "0.10.0-alpha.1" }
-actrix-proto = { path = "../contracts", version = "0.10.0-alpha.1" }
-actrix-ais = { path = "../ais", version = "0.10.0-alpha.1" }
+platform = { path = "../platform", package = "actrix-platform", version = "0.10.0-alpha.2" }
+actrix-proto = { path = "../contracts", version = "0.10.0-alpha.2" }
+actrix-ais = { path = "../ais", version = "0.10.0-alpha.2" }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.30", features = ["signal"] }
