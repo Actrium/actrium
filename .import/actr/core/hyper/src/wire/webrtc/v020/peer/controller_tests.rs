@@ -687,9 +687,10 @@ async fn full_queue_retains_critical_sdp_and_retries_once_drained() {
     };
     assert!(matches!(&first.message, SignalingMessage::RoleNegotiation));
 
-    // Wake the event loop with any command; the retained offer must be
-    // retried through the freed queue.
-    h.handle.connect().await.expect("wake the event loop");
+    // Releasing queue capacity itself arms the retry wake; no unrelated
+    // command or recovery event is required to re-deliver the retained SDP.
+    // (This must fail if `arm_signaling_retry_wake`, the wake select arm, or
+    // the armed-flag reset regresses.)
     let Ok(Some(retried)) = timeout(WAIT, h.signaling_rx.recv()).await else {
         panic!("retained SDP was not retried after the queue drained");
     };

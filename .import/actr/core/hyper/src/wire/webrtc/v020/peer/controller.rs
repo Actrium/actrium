@@ -134,6 +134,12 @@ pub(crate) struct RtcPeerController {
     /// newest message is retained: a newer offer/answer supersedes any
     /// retained one.
     retry_signaling: Option<RetainedSignaling>,
+    /// Wake channel: a drained signaling queue re-delivers a retained
+    /// critical message without waiting for an unrelated event-loop turn
+    /// (queue capacity release itself arms the wake).
+    signaling_retry_wake_tx: mpsc::UnboundedSender<()>,
+    signaling_retry_wake_rx: mpsc::UnboundedReceiver<()>,
+    signaling_retry_wake_armed: bool,
     /// API acknowledgements keyed by the exact RefreshConfiguration operation.
     /// Enqueueing the command is not success; the caller resolves only after
     /// the generation/operation-authenticated `set_configuration()` result.
@@ -355,6 +361,7 @@ impl RtcPeerController {
             None => event_mailbox,
         };
         let (lane_tx, lane_rx) = mpsc::channel(LANE_CAPACITY);
+        let (signaling_retry_wake_tx, signaling_retry_wake_rx) = mpsc::unbounded_channel();
         let lanes = crate::wire::webrtc::v020::peer::lane_handle::ActiveLaneRegistry::new();
 
         let effect_port = make_effect_port(
@@ -378,6 +385,9 @@ impl RtcPeerController {
             pending_resources: Vec::new(),
             internal_inputs: std::collections::VecDeque::new(),
             retry_signaling: None,
+            signaling_retry_wake_tx,
+            signaling_retry_wake_rx,
+            signaling_retry_wake_armed: false,
             pending_configuration_refreshes: std::collections::HashMap::new(),
             snapshot_tx,
             public_snapshot_tx,
@@ -655,6 +665,12 @@ impl RtcPeerController {
                                 );
                             }
                         }
+                    }
+                }
+                wake = self.signaling_retry_wake_rx.recv() => {
+                    self.signaling_retry_wake_armed = false;
+                    if wake.is_none() {
+                        break;
                     }
                 }
                 network = self.network_rx.recv() => {
@@ -1267,9 +1283,28 @@ impl RtcPeerController {
                     negotiation_epoch: retained.negotiation_epoch,
                     message: dispatch.message,
                 });
+                self.arm_signaling_retry_wake();
             }
             Err(tokio::sync::mpsc::error::TrySendError::Closed(_)) => {}
         }
+    }
+
+    /// Arm a one-shot wake for when the signaling queue regains capacity:
+    /// releasing a queue slot is itself the retry trigger, so a retained
+    /// critical message is not hostage to an unrelated event-loop turn.
+    fn arm_signaling_retry_wake(&mut self) {
+        if self.signaling_retry_wake_armed {
+            return;
+        }
+        self.signaling_retry_wake_armed = true;
+        let signaling_tx = self.signaling_tx.clone();
+        let wake_tx = self.signaling_retry_wake_tx.clone();
+        tokio::spawn(async move {
+            if let Ok(permit) = signaling_tx.reserve_owned().await {
+                drop(permit);
+            }
+            let _ = wake_tx.send(());
+        });
     }
 
     /// Whether a retained signaling message still belongs to the transport
@@ -1450,6 +1485,7 @@ impl RtcPeerController {
                                 negotiation_epoch: self.state.negotiation_epoch,
                                 message,
                             });
+                            self.arm_signaling_retry_wake();
                             tracing::warn!(
                                 peer = %self.state.peer_id.to_string_repr(),
                                 signaling_dropped = self.state.signaling_dropped,

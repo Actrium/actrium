@@ -395,17 +395,17 @@ impl<T> DeterministicNetwork<T> {
 
 #[async_trait::async_trait]
 impl<T: SignalingTransport + 'static> SignalingTransport for DeterministicNetwork<T> {
-    async fn send(&self, to: ActrId, message: SignalingMessage) {
+    async fn send(&self, to: ActrId, message: SignalingMessage) -> Result<(), String> {
         if self.partitioned.load(Ordering::Relaxed) {
             self.metrics
                 .partition_dropped
                 .fetch_add(1, Ordering::Relaxed);
-            return;
+            return Err("deterministic signaling partition".to_string());
         }
         match (self.rule)(&self.local_id, &to, &message) {
             NetworkFault::Deliver => {
                 self.metrics.delivered.fetch_add(1, Ordering::Relaxed);
-                self.inner.send(to, message).await;
+                return self.inner.send(to, message).await;
             }
             NetworkFault::Drop => {
                 self.metrics.dropped.fetch_add(1, Ordering::Relaxed);
@@ -415,15 +415,16 @@ impl<T: SignalingTransport + 'static> SignalingTransport for DeterministicNetwor
                 let inner = self.inner.clone();
                 tokio::spawn(async move {
                     crate::timer::sleep(crate::timer::ids::RTC_TEST_FAULT_DELAY, delay).await;
-                    inner.send(to, message).await;
+                    let _ = inner.send(to, message).await;
                 });
             }
             NetworkFault::Duplicate => {
                 self.metrics.duplicated.fetch_add(1, Ordering::Relaxed);
-                self.inner.send(to.clone(), message.clone()).await;
-                self.inner.send(to, message).await;
+                self.inner.send(to.clone(), message.clone()).await?;
+                return self.inner.send(to, message).await;
             }
         }
+        Ok(())
     }
 
     async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {
@@ -1031,14 +1032,14 @@ impl<T> DirectedSignalingTransport<T> {
 
 #[async_trait::async_trait]
 impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTransport<T> {
-    async fn send(&self, to: ActrId, message: SignalingMessage) {
+    async fn send(&self, to: ActrId, message: SignalingMessage) -> Result<(), String> {
         let decision = self
             .faults
             .decision_and_record(&self.local_id, &to, &message);
         match decision.rule {
             SignalingFaultRule::Deliver => {
                 self.faults.state.delivered.fetch_add(1, Ordering::Relaxed);
-                self.inner.send(to, message).await;
+                return self.inner.send(to, message).await;
             }
             SignalingFaultRule::Drop => {
                 self.faults.state.dropped.fetch_add(1, Ordering::Relaxed);
@@ -1053,7 +1054,7 @@ impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTr
                     tokio::select! {
                         _ = cancel.cancelled() => {}
                         _ = crate::timer::sleep(crate::timer::ids::RTC_TEST_FAULT_DELAY, delay) => {
-                            inner.send(to, message).await;
+                            let _ = inner.send(to, message).await;
                         }
                     }
                     state.deferred_inflight.fetch_sub(1, Ordering::AcqRel);
@@ -1070,7 +1071,7 @@ impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTr
                     tokio::select! {
                         _ = cancel.cancelled() => {}
                         _ = crate::timer::sleep(crate::timer::ids::RTC_TEST_FAULT_DELAY, delay) => {
-                            inner.send(to, message).await;
+                            let _ = inner.send(to, message).await;
                         }
                     }
                     state.deferred_inflight.fetch_sub(1, Ordering::AcqRel);
@@ -1079,10 +1080,11 @@ impl<T: SignalingTransport + 'static> SignalingTransport for DirectedSignalingTr
             }
             SignalingFaultRule::Duplicate => {
                 self.faults.state.duplicated.fetch_add(1, Ordering::Relaxed);
-                self.inner.send(to.clone(), message.clone()).await;
-                self.inner.send(to, message).await;
+                self.inner.send(to.clone(), message.clone()).await?;
+                return self.inner.send(to, message).await;
             }
         }
+        Ok(())
     }
 
     async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {

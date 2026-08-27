@@ -190,7 +190,7 @@ async fn drop_rule_loses_the_message_deterministically() {
     let net_a = network(&hub, a.clone(), |_, _, _| NetworkFault::Drop);
     let transport_b = hub.connect(b.clone());
 
-    net_a
+    let _ = net_a
         .send(b, SignalingMessage::RoleAssignment { is_offerer: true })
         .await;
     let recv = async { transport_b.recv().await };
@@ -207,7 +207,7 @@ async fn duplicate_rule_delivers_twice() {
     let net_a = network(&hub, a.clone(), |_, _, _| NetworkFault::Duplicate);
     let transport_b = hub.connect(b.clone());
 
-    net_a
+    let _ = net_a
         .send(b, SignalingMessage::RoleAssignment { is_offerer: false })
         .await;
     for i in 0..2 {
@@ -231,7 +231,7 @@ async fn delay_rule_delivers_late_via_the_timer_facade() {
     });
     let transport_b = hub.connect(b.clone());
 
-    net_a
+    let _ = net_a
         .send(b, SignalingMessage::RoleAssignment { is_offerer: true })
         .await;
     let got = tokio::time::timeout(WAIT, transport_b.recv())
@@ -249,7 +249,7 @@ async fn partition_drops_until_healed() {
     let transport_b = hub.connect(b.clone());
 
     net_a.partition();
-    net_a
+    let _ = net_a
         .send(
             b.clone(),
             SignalingMessage::RoleAssignment { is_offerer: true },
@@ -262,7 +262,7 @@ async fn partition_drops_until_healed() {
     assert_eq!(net_a.metrics().partition_dropped.load(Ordering::Relaxed), 1);
 
     net_a.heal();
-    net_a
+    let _ = net_a
         .send(b, SignalingMessage::RoleAssignment { is_offerer: false })
         .await;
     let got = tokio::time::timeout(WAIT, transport_b.recv())
@@ -290,7 +290,7 @@ async fn directed_signaling_fault_records_ordered_typed_evidence() {
     );
     let transport_b = hub.connect(b.clone());
 
-    transport_a
+    let _ = transport_a
         .send(
             b.clone(),
             SignalingMessage::RoleAssignment { is_offerer: true },
@@ -333,13 +333,13 @@ async fn directed_signaling_nth_rule_targets_only_the_selected_message() {
     );
     let transport_b = hub.connect(b.clone());
 
-    transport_a
+    let _ = transport_a
         .send(
             b.clone(),
             SignalingMessage::RoleAssignment { is_offerer: true },
         )
         .await;
-    transport_a
+    let _ = transport_a
         .send(
             b.clone(),
             SignalingMessage::RoleAssignment { is_offerer: false },
@@ -383,7 +383,7 @@ async fn directed_signaling_exchange_rule_records_request_identity_and_attempt()
     );
     let transport_b = hub.connect(b.clone());
 
-    transport_a
+    let _ = transport_a
         .send(
             b.clone(),
             SignalingMessage::IceRestartRequest {
@@ -419,13 +419,13 @@ async fn directed_signaling_reorder_allows_the_next_message_to_overtake() {
         DirectedSignalingTransport::new(Arc::new(hub.connect(a.clone())), a, faults.clone());
     let transport_b = hub.connect(b.clone());
 
-    transport_a
+    let _ = transport_a
         .send(
             b.clone(),
             SignalingMessage::RoleAssignment { is_offerer: true },
         )
         .await;
-    transport_a
+    let _ = transport_a
         .send(b, SignalingMessage::RoleAssignment { is_offerer: false })
         .await;
 
@@ -469,13 +469,13 @@ async fn healing_one_signaling_pair_does_not_cancel_another_pairs_deferred_messa
     let transport_b = hub.connect(b.clone());
     let transport_c = hub.connect(c.clone());
 
-    transport_a
+    let _ = transport_a
         .send(
             b.clone(),
             SignalingMessage::RoleAssignment { is_offerer: true },
         )
         .await;
-    transport_a
+    let _ = transport_a
         .send(c, SignalingMessage::RoleAssignment { is_offerer: false })
         .await;
     faults.heal_pair(&a, &b);

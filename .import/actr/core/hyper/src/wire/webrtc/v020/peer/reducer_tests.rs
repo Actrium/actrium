@@ -588,6 +588,66 @@ fn stale_gen0_target_unavailable_result_cannot_terminate_a_re_driven_probe() {
 }
 
 #[test]
+fn failed_initial_sdp_delivery_terminates_the_exact_attempt() {
+    let mut state = RtcPeerState::new(test_actor_id(1));
+    let generation = drive_offerer_to_negotiating(&mut state);
+    let transport_epoch = state.transport_epoch;
+
+    let effects = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::SignalingDeliveryFailed {
+            transport_epoch,
+            pc_generation: generation,
+        }),
+    );
+
+    assert_eq!(state.phase, RtcPeerPhase::Idle);
+    assert_eq!(
+        state.unavailable_reason,
+        Some(RtcUnavailableReason::NegotiationFailed)
+    );
+    assert!(effects.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::CloseSession {
+            generation: candidate,
+            ..
+        } if *candidate == generation
+    )));
+}
+
+#[test]
+fn stale_sdp_delivery_failure_cannot_terminate_a_new_attempt() {
+    let mut state = RtcPeerState::new(test_actor_id(2));
+    let generation = drive_offerer_to_negotiating(&mut state);
+    let transport_epoch = state.transport_epoch;
+
+    // A delayed failure from a retired transport attempt must be discarded:
+    // the epoch fence alone rejects it before the generation check runs.
+    let stale_epoch = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::SignalingDeliveryFailed {
+            transport_epoch: transport_epoch.saturating_sub(1),
+            pc_generation: generation,
+        }),
+    );
+    assert!(stale_epoch.is_empty());
+    assert_eq!(state.phase, RtcPeerPhase::Negotiating);
+    assert_eq!(state.unavailable_reason, None);
+
+    // Same for a superseded PC generation within the live transport attempt.
+    let stale_generation = reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::SignalingDeliveryFailed {
+            transport_epoch,
+            pc_generation: generation.saturating_add(1),
+        }),
+    );
+    assert!(stale_generation.is_empty());
+    assert_eq!(state.phase, RtcPeerPhase::Negotiating);
+    assert_eq!(state.unavailable_reason, None);
+}
+
+#[test]
 fn answerer_flow_reaches_sendable_and_connected() {
     let mut state = RtcPeerState::new(test_actor_id(2));
     let generation = drive_answerer_to_negotiating(&mut state);

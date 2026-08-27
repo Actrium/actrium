@@ -28,12 +28,11 @@ pub(crate) struct InMemoryTransport {
 
 #[async_trait::async_trait]
 impl SignalingTransport for InMemoryTransport {
-    async fn send(&self, to: ActrId, message: SignalingMessage) {
-        // A full hub queue just drops the message (tests keep volumes low).
-        let _ = self
-            .outbound_tx
+    async fn send(&self, to: ActrId, message: SignalingMessage) -> Result<(), String> {
+        self.outbound_tx
             .send((self.local_id.clone(), to, message))
-            .await;
+            .await
+            .map_err(|_| "in-memory signaling hub closed".to_string())
     }
 
     async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {
