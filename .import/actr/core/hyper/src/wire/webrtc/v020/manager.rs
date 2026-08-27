@@ -785,6 +785,37 @@ impl RtcConnectionManager {
             .await;
     }
 
+    /// The transport failed to commit critical SDP for the exact PC
+    /// generation (issue #609). The controller owns the resulting
+    /// retry/terminal policy.
+    /// The transport failed to commit critical SDP for one dispatch (issue
+    /// #609). The echoed attempt identity fences delayed failures from older
+    /// Controller lifetimes and transport/PC attempts exactly like
+    /// `handle_target_unavailable`, so a stale failure cannot fire
+    /// `negotiation_failed` on a live generation.
+    pub(crate) async fn handle_signaling_delivery_failed(
+        &self,
+        peer: ActrId,
+        attempt: RelayAttemptIdentity,
+        message: SignalingMessage,
+    ) {
+        let critical_sdp = matches!(
+            message,
+            SignalingMessage::Offer { .. }
+                | SignalingMessage::Answer { .. }
+                | SignalingMessage::IceRestartOffer { .. }
+        );
+        let Some(handle) = self.get_controller(&peer).await else {
+            return;
+        };
+        if !critical_sdp || handle.controller_lifecycle_id() != attempt.controller_lifecycle_id {
+            return;
+        }
+        let _ = handle
+            .signaling_delivery_failed(attempt.transport_epoch, attempt.pc_generation)
+            .await;
+    }
+
     /// The latest snapshot for a peer, if it has a controller.
     pub(crate) async fn get_snapshot(&self, peer: &ActrId) -> Option<RtcPeerSnapshot> {
         match self.peers.read().await.get(peer) {

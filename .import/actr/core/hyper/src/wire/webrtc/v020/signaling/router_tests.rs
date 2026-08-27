@@ -234,7 +234,9 @@ struct ScriptedTransport {
 
 #[async_trait]
 impl SignalingTransport for ScriptedTransport {
-    async fn send(&self, _to: ActrId, _message: SignalingMessage) {}
+    async fn send(&self, _to: ActrId, _message: SignalingMessage) -> Result<(), String> {
+        Ok(())
+    }
 
     async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {
         self.inbound_rx.lock().await.recv().await
@@ -322,10 +324,13 @@ struct InboundEventTransport {
 
 #[async_trait]
 impl SignalingTransport for InboundEventTransport {
-    async fn send(&self, _to: ActrId, _message: SignalingMessage) {}
+    async fn send(&self, _to: ActrId, _message: SignalingMessage) -> Result<(), String> {
+        Ok(())
+    }
 
-    async fn send_dispatch(&self, dispatch: SignalingDispatch) {
+    async fn send_dispatch(&self, dispatch: SignalingDispatch) -> Result<(), String> {
         let _ = self.outbound_tx.send(dispatch).await;
+        Ok(())
     }
 
     async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {
@@ -400,6 +405,89 @@ async fn run_loop_delivers_target_unavailable_to_the_manager() {
     }
 
     drop(inbound_tx);
+    let _joined = wait_within(std::time::Duration::from_secs(2), run)
+        .await
+        .expect("run must return when the transport closes");
+    drop(manager);
+}
+
+/// A transport that fails every send, for exercising the delivery-failure
+/// feedback path end to end. Its inbound side parks until the test closes
+/// it, so the run loop can be ended deterministically.
+struct FailingTransport {
+    closed: tokio::sync::watch::Receiver<bool>,
+}
+
+#[async_trait]
+impl SignalingTransport for FailingTransport {
+    async fn send(&self, _to: ActrId, _message: SignalingMessage) -> Result<(), String> {
+        Err("simulated transport failure".to_string())
+    }
+
+    async fn recv(&self) -> Option<(ActrId, SignalingMessage)> {
+        let mut closed = self.closed.clone();
+        loop {
+            if *closed.borrow() {
+                return None;
+            }
+            if closed.changed().await.is_err() {
+                return None;
+            }
+        }
+    }
+}
+
+/// A transport send failure on critical SDP must travel the full wiring:
+/// router outbound arm -> manager -> controller command -> reducer
+/// `negotiation_failed`, terminating the exact generation. (Regression pin
+/// for the #609 feedback path: dropping the router callback, the
+/// critical-SDP filter, or the identity fence must fail this test.)
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn run_loop_feeds_transport_failure_back_into_the_exact_generation() {
+    let (manager, router, outbound_rx) = router();
+    manager.set_signaling_dispatch_chains(router.dispatch_chains());
+    let (transport_close_tx, transport_close_rx) = tokio::sync::watch::channel(false);
+    let runner = router.clone().with_dispatch_budget(TEST_DISPATCH_BUDGET);
+    let run = tokio::spawn(async move {
+        runner
+            .run(
+                FailingTransport {
+                    closed: transport_close_rx,
+                },
+                outbound_rx,
+            )
+            .await;
+    });
+
+    // Drive an offerer to the offer stage. The role probe is not critical
+    // SDP (its failed send must be ignored); the offer is, and its failure
+    // must terminate the attempt.
+    let peer = test_actor_id(43);
+    manager.connect(peer.clone()).await;
+    let handle = poll_controller(&manager, &peer, "connect creates a controller").await;
+    handle
+        .apply_role_assignment(true)
+        .await
+        .expect("assign offerer");
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let snapshot = handle.snapshot();
+        if snapshot.unavailable_reason
+            == Some(actr_framework::WebRtcUnavailableReason::NegotiationFailed)
+        {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "transport failure must terminate the attempt, got {:?}",
+            snapshot.unavailable_reason
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+
+    handle.close().await.expect("close the peer");
+    let _ = transport_close_tx.send(true);
     let _joined = wait_within(std::time::Duration::from_secs(2), run)
         .await
         .expect("run must return when the transport closes");

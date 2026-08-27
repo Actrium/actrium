@@ -700,6 +700,18 @@ impl RtcPeerControllerHandle {
             .await
     }
 
+    pub(crate) async fn signaling_delivery_failed(
+        &self,
+        transport_epoch: u64,
+        pc_generation: u64,
+    ) -> Result<(), ControllerGone> {
+        self.send_command(RtcPeerCommand::SignalingDeliveryFailed {
+            transport_epoch,
+            pc_generation,
+        })
+        .await
+    }
+
     /// Deliver the server's role assignment (from the signaling router).
     pub(crate) async fn apply_role_assignment(
         &self,

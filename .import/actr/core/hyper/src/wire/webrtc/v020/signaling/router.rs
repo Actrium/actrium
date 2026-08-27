@@ -41,7 +41,7 @@ const INBOUND_DISPATCH_TIMEOUT: std::time::Duration = std::time::Duration::from_
 #[async_trait]
 pub(crate) trait SignalingTransport: Send + Sync {
     /// Send a signaling message to a remote peer (via the signaling server).
-    async fn send(&self, to: ActrId, message: SignalingMessage);
+    async fn send(&self, to: ActrId, message: SignalingMessage) -> Result<(), String>;
 
     /// Send a message with an optional opaque delivery context. Existing test
     /// transports keep the legacy two-argument surface; production transports
@@ -51,8 +51,8 @@ pub(crate) trait SignalingTransport: Send + Sync {
     /// overrides `send` quietly regresses to fire-and-forget relays, and the
     /// delivery-result fence never arms (the target-unavailable recovery path
     /// silently stops working).
-    async fn send_dispatch(&self, dispatch: SignalingDispatch) {
-        self.send(dispatch.peer, dispatch.message).await;
+    async fn send_dispatch(&self, dispatch: SignalingDispatch) -> Result<(), String> {
+        self.send(dispatch.peer, dispatch.message).await
     }
 
     /// Receive the next inbound message `(from, message)`. Returns `None` when
@@ -334,7 +334,52 @@ impl SignalingRouter {
             tokio::select! {
                 outbound = outbound_rx.recv() => {
                     match outbound {
-                        Some(dispatch) => transport.send_dispatch(dispatch).await,
+                        Some(dispatch) => {
+                            // A failed send must be observable: feed the
+                            // transport failure back into the exact controller
+                            // generation (issue #609) instead of letting
+                            // negotiation stay marked announced without
+                            // delivery. The feedback is best-effort: a
+                            // saturated controller mailbox must not park the
+                            // router-wide outbound loop, so the hop is bounded
+                            // by the same dispatch deadline as inbound work.
+                            let peer = dispatch.peer.clone();
+                            let attempt = dispatch.attempt;
+                            // SDP payloads are the large ones; the manager only
+                            // consumes critical SDP, so skip cloning
+                            // candidates/role traffic on the happy path.
+                            let critical_message = matches!(
+                                dispatch.message,
+                                SignalingMessage::Offer { .. }
+                                    | SignalingMessage::Answer { .. }
+                                    | SignalingMessage::IceRestartOffer { .. }
+                            )
+                            .then(|| dispatch.message.clone());
+                            if let Err(error) = transport.send_dispatch(dispatch).await {
+                                tracing::warn!(
+                                    peer = %peer.to_string_repr(),
+                                    generation = attempt.map(|a| a.pc_generation).unwrap_or(0),
+                                    %error,
+                                    "v0.20 signaling delivery failed"
+                                );
+                                if let (Some(attempt), Some(message)) =
+                                    (attempt, critical_message)
+                                {
+                                    let manager = self.manager.clone();
+                                    let peer = peer.clone();
+                                    let _ = crate::timer::timeout(
+                                        crate::timer::ids::RTC_SIGNALING_DISPATCH,
+                                        INBOUND_DISPATCH_TIMEOUT,
+                                        manager.handle_signaling_delivery_failed(
+                                            peer,
+                                            attempt,
+                                            message,
+                                        ),
+                                    )
+                                    .await;
+                                }
+                            }
+                        }
                         // All controllers gone: stop routing.
                         None => break,
                     }

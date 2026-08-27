@@ -192,12 +192,12 @@ impl V020SignalingTransport {
 
 #[async_trait]
 impl SignalingTransport for V020SignalingTransport {
-    async fn send(&self, to: ActrId, message: SignalingMessage) {
+    async fn send(&self, to: ActrId, message: SignalingMessage) -> Result<(), String> {
         self.send_dispatch(SignalingDispatch::untracked(to, message))
-            .await;
+            .await
     }
 
-    async fn send_dispatch(&self, dispatch: SignalingDispatch) {
+    async fn send_dispatch(&self, dispatch: SignalingDispatch) -> Result<(), String> {
         let request_delivery_result = dispatch.requests_delivery_result();
         let SignalingDispatch {
             peer: to,
@@ -230,13 +230,17 @@ impl SignalingTransport for V020SignalingTransport {
             tracestate: None,
             flow: Some(signaling_envelope::Flow::ActrRelay(relay)),
         };
-        if let Err(e) = self.signaling_client.send_envelope(envelope).await {
-            tracing::warn!(
-                target = "v020-signaling",
-                peer = %target_repr,
-                error = %e,
-                "failed to send v0.20 signaling envelope"
-            );
+        match self.signaling_client.send_envelope(envelope).await {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                tracing::warn!(
+                    target = "v020-signaling",
+                    peer = %target_repr,
+                    error = %error,
+                    "failed to send v0.20 signaling envelope"
+                );
+                Err(error.to_string())
+            }
         }
     }
 
@@ -573,7 +577,7 @@ mod tests {
             SignalingMessage::RoleNegotiation,
         );
 
-        SignalingTransport::send_dispatch(&transport, dispatch).await;
+        let _ = SignalingTransport::send_dispatch(&transport, dispatch).await;
 
         let sent = client.sent.lock().expect("scripted send lock");
         let relay = match sent[0].flow.as_ref() {

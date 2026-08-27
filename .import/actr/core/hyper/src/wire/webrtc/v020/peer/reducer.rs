@@ -81,6 +81,14 @@ pub(crate) enum RtcPeerCommand {
     ApplyIceRestartRequest { request_id: String, attempt: u32 },
     /// A remote ICE candidate arrived.
     ApplyRemoteCandidate(RTCIceCandidateInit),
+    /// The signaling router failed to commit critical SDP for one
+    /// transport/PC attempt. The transport epoch and PC generation fence a
+    /// delayed failure from a retired attempt; the controller owns the
+    /// resulting retry/terminal policy.
+    SignalingDeliveryFailed {
+        transport_epoch: u64,
+        pc_generation: u64,
+    },
     /// The signaling server assigned this pair's role (`is_offerer`). Routed by
     /// the `SignalingRouter` from the server's `RoleAssignment` (RFC §"Role and
     /// glare handling").
@@ -160,6 +168,14 @@ impl std::fmt::Debug for RtcPeerCommand {
                 .field("attempt", attempt)
                 .finish(),
             Self::ApplyRemoteCandidate(_) => f.write_str("ApplyRemoteCandidate(..)"),
+            Self::SignalingDeliveryFailed {
+                transport_epoch,
+                pc_generation,
+            } => f
+                .debug_struct("SignalingDeliveryFailed")
+                .field("transport_epoch", transport_epoch)
+                .field("pc_generation", pc_generation)
+                .finish(),
             Self::ApplyRoleAssignment { is_offerer } => f
                 .debug_struct("ApplyRoleAssignment")
                 .field("is_offerer", is_offerer)
@@ -1644,6 +1660,17 @@ fn reduce_command(
             // or drop-stale the rest (RFC §"ICE generation and candidates",
             // invariant #6).
             inject_or_buffer_candidate(state, candidate, effects);
+        }
+        RtcPeerCommand::SignalingDeliveryFailed {
+            transport_epoch,
+            pc_generation,
+        } => {
+            if state.transport_epoch == transport_epoch
+                && state.is_live_generation(pc_generation)
+                && !state.close_requested
+            {
+                negotiation_failed(state, effects);
+            }
         }
         RtcPeerCommand::EnsureLane(lane) => {
             // S5-4: during make-before-break, target the pending session (it
