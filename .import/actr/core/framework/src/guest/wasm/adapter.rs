@@ -39,9 +39,10 @@ use crate::workload::{
     BackpressureEvent, CredentialEvent, ErrorCategory, ErrorEvent, PeerEvent, WebRtcNetworkPath,
     WebRtcPeerState, WebRtcPeerStatus, WebRtcUnavailableReason,
 };
-use crate::{MessageDispatcher, Workload};
+use crate::{Context, MessageDispatcher, Workload};
 
 use super::context::{WasmContext, proto_actr_error_to_wit, wit_actr_error_to_proto};
+use super::generated::actr::workload::host as wit_host;
 use super::generated::actr::workload::types as wit_types;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -231,6 +232,14 @@ fn rpc_envelope_from_wit(envelope: wit_types::RpcEnvelope) -> RpcEnvelope {
 // Dispatch helpers — called from the generated Guest trait impl
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Route one structured guest-side log through the host `log-message`
+/// import (#251). The host maps it onto `tracing` under the
+/// `wasm-guest` target, so guest boundary events land in the same
+/// server.log as the host's own request-path logs.
+async fn guest_log(ctx_token: u64, level: &str, message: String) {
+    wit_host::log_message(ctx_token, level.to_string(), message).await;
+}
+
 /// Bridge from the generated `dispatch(envelope)` export into the
 /// user's [`MessageDispatcher`].
 ///
@@ -239,16 +248,58 @@ fn rpc_envelope_from_wit(envelope: wit_types::RpcEnvelope) -> RpcEnvelope {
 /// and invokes `<W::Dispatcher as MessageDispatcher>::dispatch`. The
 /// handler's `ActorResult<Bytes>` is translated into the WIT
 /// `result<list<u8>, actr-error>` shape.
+///
+/// Logs guest entry and outcome (info) so a single failed-run artifact
+/// can answer whether a request reached guest code and whether the
+/// guest produced a response (#251).
 pub async fn run_dispatch<W: Workload>(
     workload: &W,
     envelope: wit_types::RpcEnvelope,
     inv: wit_types::InvocationCtx,
 ) -> Result<Vec<u8>, wit_types::ActrError> {
     let ctx = WasmContext::from_invocation(inv);
+    guest_log(
+        ctx.ctx_token,
+        "info",
+        format!(
+            "wasm guest dispatch entered: request_id={} route_key={} payload_len={} self={} caller={}",
+            envelope.request_id,
+            envelope.route_key,
+            envelope.payload.len(),
+            ctx.self_id(),
+            ctx.caller_id()
+                .map(|id| id.to_string())
+                .unwrap_or_else(|| "<none>".to_string()),
+        ),
+    )
+    .await;
     let envelope = rpc_envelope_from_wit(envelope);
+    let request_id = ctx.request_id().to_string();
+    let route_key = envelope.route_key.clone();
     match <W::Dispatcher as MessageDispatcher>::dispatch(workload, envelope, &ctx).await {
-        Ok(bytes) => Ok(bytes.to_vec()),
-        Err(e) => Err(actr_error_to_wit(e)),
+        Ok(bytes) => {
+            guest_log(
+                ctx.ctx_token,
+                "info",
+                format!(
+                    "wasm guest response generated: request_id={request_id} route_key={route_key} response_len={}",
+                    bytes.len(),
+                ),
+            )
+            .await;
+            Ok(bytes.to_vec())
+        }
+        Err(e) => {
+            guest_log(
+                ctx.ctx_token,
+                "error",
+                format!(
+                    "wasm guest dispatch failed: request_id={request_id} route_key={route_key} error={e}",
+                ),
+            )
+            .await;
+            Err(actr_error_to_wit(e))
+        }
     }
 }
 

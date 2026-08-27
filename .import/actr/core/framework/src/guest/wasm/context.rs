@@ -118,7 +118,7 @@ fn proto_connection_not_ready_info_to_wit(
 /// several invocations are in flight on one instance.
 #[derive(Clone)]
 pub(crate) struct WasmContext {
-    ctx_token: u64,
+    pub(crate) ctx_token: u64,
     self_id: ActrId,
     caller_id: Option<ActrId>,
     request_id: String,

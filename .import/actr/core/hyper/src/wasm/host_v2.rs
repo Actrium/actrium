@@ -28,8 +28,8 @@ use actr_framework::{
 };
 use actr_protocol::prost::Message as ProstMessage;
 use actr_protocol::{
-    ActrError, ActrId, ActrType, ConnectionNotReadyInfo, DataChunk, MetadataEntry, PayloadType,
-    Realm, RpcEnvelope,
+    ActrError, ActrId, ActrType, ConnectionNotReadyInfo, DataChunk, Direction, MetadataEntry,
+    PayloadType, Realm, RpcEnvelope,
 };
 use wasmtime::component::{Accessor, Component, HasData, Linker};
 use wasmtime::{AsContextMut, Engine, Store};
@@ -811,6 +811,20 @@ impl WasmWorkloadV2 {
                 "host failed to decode RpcEnvelope before dispatch: {e}"
             ))
         })?;
+        // #251 request-path diagnostics: record that the envelope crossed
+        // from the host into the guest. Info-level so the default
+        // RUST_LOG=info of the polyglot e2e captures it in server.log.
+        tracing::info!(
+            target: "actr_wasm_dispatch",
+            request_id = %envelope.request_id,
+            route_key = %envelope.route_key,
+            payload_type = "RpcReliable",
+            direction = ?envelope.direction.and_then(|raw| Direction::try_from(raw).ok()),
+            payload_len = envelope.payload.as_ref().map_or(0, |p| p.len()),
+            source_actor = ?ctx.caller_id,
+            target_actor = %ctx.self_id,
+            "wasm host dispatch entered: RpcEnvelope delivered into wasm guest (serial path)"
+        );
         let wit_envelope = rpc_envelope_to_wit(&envelope);
         let _invocation_permit = acquire_invocation(&self.limits)?;
         self.reseed_fuel()?;
@@ -857,14 +871,48 @@ impl WasmWorkloadV2 {
 
         match region {
             // Region-level failure (trap surfaced out of run_concurrent).
-            Err(trap) => Err(self.trap_poison("dispatch", trap)),
+            Err(trap) => {
+                tracing::error!(
+                    target: "actr_wasm_dispatch",
+                    request_id = %envelope.request_id,
+                    route_key = %envelope.route_key,
+                    "wasm dispatch failed: guest region trapped before completing"
+                );
+                Err(self.trap_poison("dispatch", trap))
+            }
             Ok(call) => match call {
-                Ok(Ok(bytes)) => Ok(bytes),
-                Ok(Err(wit_err)) => Err(WasmError::ExecutionFailed(format!(
-                    "guest dispatch returned error: {:?}",
-                    wit_actr_error_to_proto(wit_err)
-                ))),
-                Err(trap) => Err(self.trap_poison("dispatch", trap)),
+                Ok(Ok(bytes)) => {
+                    tracing::info!(
+                        target: "actr_wasm_dispatch",
+                        request_id = %envelope.request_id,
+                        route_key = %envelope.route_key,
+                        response_len = bytes.len(),
+                        "wasm dispatch completed: guest response returned to host (serial path)"
+                    );
+                    Ok(bytes)
+                }
+                Ok(Err(wit_err)) => {
+                    let error = wit_actr_error_to_proto(wit_err);
+                    tracing::error!(
+                        target: "actr_wasm_dispatch",
+                        request_id = %envelope.request_id,
+                        route_key = %envelope.route_key,
+                        error = %error,
+                        "wasm dispatch failed: guest dispatch returned error"
+                    );
+                    Err(WasmError::ExecutionFailed(format!(
+                        "guest dispatch returned error: {error:?}",
+                    )))
+                }
+                Err(trap) => {
+                    tracing::error!(
+                        target: "actr_wasm_dispatch",
+                        request_id = %envelope.request_id,
+                        route_key = %envelope.route_key,
+                        "wasm dispatch failed: guest call trapped"
+                    );
+                    Err(self.trap_poison("dispatch", trap))
+                }
             },
         }
     }
@@ -1662,7 +1710,9 @@ async fn resident_region(
     // `call_dispatch` future borrows it, so it must outlive the
     // `FuturesUnordered` (hoisted, exactly as the M0 spike does).
     let wl = bindings.actr_workload_workload();
-    let mut inflight: FuturesUnordered<BoxFuture<'_, (u64, DispatchOutcome)>> =
+    // The in-flight future also carries the dispatch's request_id/route_key
+    // (#251) so the completion log correlates with the entry log by token.
+    let mut inflight: FuturesUnordered<BoxFuture<'_, (u64, String, String, DispatchOutcome)>> =
         FuturesUnordered::new();
     let mut open = true;
     let mut fuel_budget = RegionFuelBudget::default();
@@ -1721,15 +1771,43 @@ async fn resident_region(
                         // entering the guest (queued-work cancellation).
                         if let Some(scope) = ctx.scope.as_ref() {
                             if !scope.is_active() {
+                                tracing::debug!(
+                                    target: "actr_wasm_dispatch",
+                                    request_id = %envelope.request_id,
+                                    route_key = %envelope.route_key,
+                                    "wasm dispatch rejected: request scope ended while queued"
+                                );
                                 let _ = reply.send(Err(ActrError::TimedOut));
                                 continue;
                             }
                         }
                         // `ctx` (RuntimeContext) drives only the Linked path.
                         let _ = ctx;
+                        // #251 request-path diagnostics: the envelope crosses
+                        // from the host into the guest right below. Info-level
+                        // so the polyglot e2e's default RUST_LOG=info captures
+                        // it in server.log.
+                        tracing::info!(
+                            target: "actr_wasm_dispatch",
+                            request_id = %envelope.request_id,
+                            route_key = %envelope.route_key,
+                            payload_type = "RpcReliable",
+                            direction = ?envelope.direction.and_then(|raw| Direction::try_from(raw).ok()),
+                            payload_len = envelope.payload.as_ref().map_or(0, |p| p.len()),
+                            source_actor = ?invocation.caller_id,
+                            target_actor = %invocation.self_id,
+                            "wasm host dispatch entered: RpcEnvelope delivered into wasm guest"
+                        );
                         let permit = match acquire_invocation(&limits) {
                             Ok(permit) => permit,
                             Err(error) => {
+                                tracing::warn!(
+                                    target: "actr_wasm_dispatch",
+                                    request_id = %envelope.request_id,
+                                    route_key = %envelope.route_key,
+                                    error = %error,
+                                    "wasm dispatch rejected: invocation permit unavailable"
+                                );
                                 let _ = reply.send(Err(ActrError::Unavailable(error.to_string())));
                                 continue;
                             }
@@ -1766,6 +1844,10 @@ async fn resident_region(
                             return RegionExit::GuestCallFailed { token, error };
                         }
                         let inv = invocation_ctx_to_wit(&invocation, token);
+                        // #251: carried through the in-flight future so the
+                        // completion log correlates with the entry log.
+                        let dispatch_request_id = envelope.request_id.clone();
+                        let dispatch_route_key = envelope.route_key.clone();
                         let call = wl.call_dispatch(accessor, wit_env, inv);
                         let fut = async move {
                             let outcome = tokio::select! {
@@ -1773,7 +1855,7 @@ async fn resident_region(
                                 _ = reply.closed() => DispatchOutcome::CallerCanceled,
                                 result = call => DispatchOutcome::Completed(result),
                             };
-                            (token, outcome)
+                            (token, dispatch_request_id, dispatch_route_key, outcome)
                         };
                         inflight.push(fut.instrument(span).boxed());
                     }
@@ -1784,7 +1866,7 @@ async fn resident_region(
                     }
                 }
             }
-            Some((token, outcome)) = inflight.next(), if !inflight.is_empty() => {
+            Some((token, request_id, route_key, outcome)) = inflight.next(), if !inflight.is_empty() => {
                 if matches!(outcome, DispatchOutcome::CallerCanceled) {
                     return RegionExit::CallerCanceled(token);
                 }
@@ -1815,7 +1897,28 @@ async fn resident_region(
                     .expect("reply ledger mutex poisoned")
                     .remove(&token);
                 if let Some(PendingReply::Dispatch { reply, .. }) = pending {
-                    reply.send(classify_dispatch(call_result));
+                    // #251: the host received the guest's dispatch outcome;
+                    // log it before handing the bytes back to the reply tail
+                    // so a caller-side timeout can be attributed to the guest
+                    // vs the response send path.
+                    let result = classify_dispatch(call_result);
+                    match &result {
+                        Ok(bytes) => tracing::info!(
+                            target: "actr_wasm_dispatch",
+                            request_id = %request_id,
+                            route_key = %route_key,
+                            response_len = bytes.len(),
+                            "wasm dispatch completed: guest response returned to host"
+                        ),
+                        Err(e) => tracing::error!(
+                            target: "actr_wasm_dispatch",
+                            request_id = %request_id,
+                            route_key = %route_key,
+                            error = %e,
+                            "wasm dispatch failed: guest dispatch returned error"
+                        ),
+                    }
+                    reply.send(result);
                 }
             }
         }

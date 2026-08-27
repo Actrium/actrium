@@ -258,11 +258,36 @@ async fn send_envelope_to_caller(
     caller: &ActrId,
     response_envelope: RpcEnvelope,
     request_id: &str,
+    route_key: &str,
 ) {
+    // #251 response-path diagnostics: the host has the guest's response and
+    // is about to push it to the caller. Info-level so the default
+    // RUST_LOG=info of the polyglot e2e captures the send attempt — without
+    // it, a caller-side timeout cannot be told apart from a lost send.
+    tracing::info!(
+        target: "actr_response_send",
+        request_id = %request_id,
+        route_key = %route_key,
+        payload_type = "RpcReliable",
+        target_actor = %caller,
+        response_len = response_envelope.payload.as_ref().map_or(0, |p| p.len()),
+        error_code = ?response_envelope.error.as_ref().map(|e| e.code),
+        "response send attempted: routing guest response back to caller"
+    );
     // 1. Try inbound WebSocket connection first.
     if let Some(wsg) = ws_gate {
         match wsg.send_response(caller, response_envelope.clone()).await {
-            Ok(true) => return, // sent successfully
+            Ok(true) => {
+                tracing::info!(
+                    target: "actr_response_send",
+                    request_id = %request_id,
+                    route_key = %route_key,
+                    payload_type = "RpcReliable",
+                    target_actor = %caller,
+                    "response send succeeded via inbound WebSocket gate"
+                );
+                return; // sent successfully
+            }
             Ok(false) => {
                 tracing::debug!(
                     request_id = request_id,
@@ -316,12 +341,24 @@ async fn send_envelope_to_caller(
                             )
                             .await
                         {
-                            Ok(()) => return,
+                            Ok(()) => {
+                                tracing::info!(
+                                    target: "actr_response_send",
+                                    request_id = %request_id,
+                                    route_key = %route_key,
+                                    payload_type = "RpcReliable",
+                                    target_actor = %caller,
+                                    "response send succeeded via v0.20 RTC reliable lane"
+                                );
+                                return;
+                            }
                             Err(e) => {
                                 tracing::error!(
                                     severity = 7,
                                     error_category = "transport_error",
                                     request_id = request_id,
+                                    route_key = %route_key,
+                                    target_actor = %caller,
                                     "❌ v0.20 response send failed: {e:?}"
                                 );
                                 return;
@@ -333,6 +370,8 @@ async fn send_envelope_to_caller(
                             severity = 7,
                             error_category = "transport_error",
                             request_id = request_id,
+                            route_key = %route_key,
+                            target_actor = %caller,
                             "❌ v0.20 response encode failed: {e}"
                         );
                         return;
@@ -343,6 +382,8 @@ async fn send_envelope_to_caller(
                 severity = 7,
                 error_category = "transport_error",
                 request_id = request_id,
+                route_key = %route_key,
+                target_actor = %caller,
                 "❌ v0.20 peer not sendable for response within the wait window"
             );
             return;
@@ -351,6 +392,8 @@ async fn send_envelope_to_caller(
             severity = 7,
             error_category = "transport_error",
             request_id = request_id,
+            route_key = %route_key,
+            target_actor = %caller,
             "❌ no v0.20 controller for response caller"
         );
     }
@@ -391,7 +434,7 @@ pub(crate) async fn mailbox_send_reply(
                 #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
                 let mut response_envelope = Inner::build_response_envelope(
                     request_id.clone(),
-                    route_key,
+                    route_key.clone(),
                     Some(response_bytes),
                     None,
                     traceparent,
@@ -407,6 +450,7 @@ pub(crate) async fn mailbox_send_reply(
                     &caller,
                     response_envelope,
                     &request_id,
+                    &route_key,
                 )
                 .instrument(span);
                 #[cfg(not(feature = "opentelemetry"))]
@@ -416,6 +460,7 @@ pub(crate) async fn mailbox_send_reply(
                     &caller,
                     response_envelope,
                     &request_id,
+                    &route_key,
                 );
                 send_fut.await;
             }
@@ -452,7 +497,7 @@ pub(crate) async fn mailbox_send_reply(
                 #[cfg_attr(not(feature = "opentelemetry"), allow(unused_mut))]
                 let mut error_envelope = Inner::build_response_envelope(
                     request_id.clone(),
-                    route_key,
+                    route_key.clone(),
                     None,
                     Some(error_response),
                     traceparent,
@@ -467,6 +512,7 @@ pub(crate) async fn mailbox_send_reply(
                     &caller,
                     error_envelope,
                     &request_id,
+                    &route_key,
                 )
                 .await;
             }

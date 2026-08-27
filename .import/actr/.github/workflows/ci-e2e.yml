@@ -161,6 +161,26 @@ jobs:
           df -h
           echo "── remaining target/e2e-cache/polyglot-echo trees ──"
           du -sh target/e2e-cache/polyglot-echo/* 2>/dev/null || true
+      # #251: a failed scenario preserves its per-run diagnostics under
+      # .tmp/run-*/ (logs, rendered runtime configs, scaffolded service +
+      # manifest lock). Successful runs delete their run dirs, so this only
+      # uploads content when a scenario actually failed. The signed .actr
+      # packages in dist/ (multi-MB binaries) and the per-run signing keys
+      # are excluded. `failure()` (not `always()`) so green runs upload
+      # nothing; it still fires when the failing step exits early because
+      # the remaining steps of the job are skipped, not the job's tail.
+      - name: Upload polyglot-echo diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: polyglot-echo-e2e-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            e2e/polyglot-echo/.tmp/**
+            !e2e/polyglot-echo/.tmp/*/dist/**
+            !e2e/polyglot-echo/.tmp/*/dev-key.json
+            !e2e/polyglot-echo/.tmp/*/service-keychain.json
+          retention-days: 7
+          if-no-files-found: warn
 
   typescript-e2e:
     name: TypeScript E2E
