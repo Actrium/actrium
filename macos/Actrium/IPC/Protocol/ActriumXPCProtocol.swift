@@ -132,7 +132,7 @@ public enum ActriumXPCServiceNames {
     public static let viewService = "io.actrium.actro.ActroViewService"
 
     /// System service variant (bundled apps)
-    public static let systemService = "io.actrium.actro.ActroViewService.system"
+    public static let systemService = "io.github.actrium.actro.ActroViewService.system"
 
     /// ACTR service variant (user apps)
     public static let actrService = "io.actrium.actro.ActroViewService.actr"

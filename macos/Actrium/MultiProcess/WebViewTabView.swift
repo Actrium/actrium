@@ -226,7 +226,7 @@ struct BrowserUserAgentIdentity {
 /// Note: Not used @Published I'm gonna follow you. isLoadingAvoid SwiftUI Update Cycle
 final class WebViewHolder: NSObject, WKNavigationDelegate {
     private static let browserSupportContentWorld = WKContentWorld.world(
-        name: "io.actrium.actro.browser-support"
+        name: "io.github.actrium.actro.browser-support"
     )
 
     let webView: WKWebView

@@ -463,7 +463,7 @@ class MetroManager: ObservableObject {
     }
 
     /// App Group for shared Metro config (XPC Service can read on startup)
-    private static let appGroupId = "group.io.actrium.actro"
+    private static let appGroupId = "group.io.github.actrium.actro"
     private static let metroHostKey = "metro.host"
     private static let metroPortKey = "metro.port"
 

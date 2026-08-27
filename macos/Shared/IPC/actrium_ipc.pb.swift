@@ -898,7 +898,7 @@ public struct Actrium_Ipc_XPCServiceReady: Sendable {
   // `Message` and `Message+*Additions` files in the SwiftProtobuf library for
   // methods supported on all messages.
 
-  /// e.g., "io.actrium.actro.rctviewservice0"
+  /// e.g., "io.github.actrium.actro.rctviewservice0"
   public var serviceBundleID: String = String()
 
   public var unknownFields = SwiftProtobuf.UnknownStorage()
