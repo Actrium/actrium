@@ -1,5 +1,6 @@
 import type { Theme } from 'vitepress';
 import DefaultTheme from 'vitepress/theme';
+import './custom.css';
 import { persistLocaleOnManualSwitch } from './prefer-locale';
 
 const theme: Theme = {
