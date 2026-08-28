@@ -1129,6 +1129,12 @@ struct MainWindowTabsView: View {
                             isVisible: !accordionPresentation.isObscured
                         )
                     }
+                    .overlay {
+                        edgeStackIndicator(
+                            for: tab,
+                            presentation: accordionPresentation
+                        )
+                    }
                     // Only an incoming cover needs a painted boundary. Flat
                     // Tabs expose the real Header through their inset plate.
                     .overlay {
@@ -1670,18 +1676,17 @@ struct MainWindowTabsView: View {
         .accessibilityAddTraits(.isSelected)
     }
 
-    /// The plate is inset inside its zero-spacing layout slot, so the seam is
-    /// the real live Header material—not a sampled or approximated border.
-    /// Two touching 1.5pt insets expose a 3pt visual separation while keeping
-    /// the Tab layout itself gapless.
+    /// The plate is inset only horizontally inside its zero-spacing slot. Two
+    /// touching 1.5pt side insets expose a 3pt live-Header separator, while the
+    /// top and bottom remain visually continuous with the Tab surface.
     private func tabSurface(for tab: Tab, tintOpacity: Double) -> some View {
         let shape = tabShape(for: tab)
-            .inset(by: CompactToolbarLayout.tabSeparationWidth)
 
         return ZStack {
             shape.fill(AppColors.windowChromeTabPlateColor)
             shape.fill(Color.primary.opacity(tintOpacity))
         }
+        .padding(.horizontal, CompactToolbarLayout.tabSeparationWidth)
         // Reordering still animates the Tab's geometry, but never its surface.
         .transaction { transaction in
             transaction.animation = nil
@@ -1741,16 +1746,46 @@ struct MainWindowTabsView: View {
         }
     }
 
-    /// The editing plate keeps the same 29pt visual height as every other Tab.
-    /// Its focus ring is built outward from that plate: no blue pixels consume
-    /// input space, and the complete contour remains visible above the mask.
+    /// Only the nearest folded Tab owns visible content. Tabs accumulated
+    /// behind it contribute one side contour apiece: one-point spacing through
+    /// five layers, then uniform subpixel compression inside the same 5pt span.
+    @ViewBuilder
+    private func edgeStackIndicator(
+        for tab: Tab,
+        presentation: ToolbarAccordionTabPresentation
+    ) -> some View {
+        if let edge = presentation.edge, presentation.stackDepth > 0 {
+            let offsets = toolbarAccordionStackOffsets(
+                stackDepth: presentation.stackDepth
+            )
+            let shape = tabShape(for: tab)
+            let color = Color(nsColor: windowChrome.style.layeredTabSeparationColor)
+
+            Canvas { context, size in
+                for offset in offsets {
+                    var rect = CGRect(origin: .zero, size: size)
+                    rect.origin.x += edge == .leading ? offset : -offset
+                    context.stroke(
+                        shape.path(in: rect),
+                        with: .color(color),
+                        lineWidth: 1
+                    )
+                }
+            }
+            .mask { layeredTabBoundaryMask(edge: edge) }
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// The editing plate follows the same side-only separation as every other
+    /// Tab. Its focus ring is built outward from that plate: no blue pixels
+    /// consume input space, and the complete contour remains visible.
     private func addressFocusRing(for tab: Tab, isVisible: Bool) -> some View {
         let showsFocusRing = isVisible
             && tab.id == viewModel.currentTabId
             && interaction.isAddressEditing
             && addressPresentationPhase.showsFocusAffordances
         let surfaceShape = tabShape(for: tab)
-            .inset(by: CompactToolbarLayout.tabSeparationWidth)
 
         return ZStack {
             surfaceShape
@@ -1771,6 +1806,7 @@ struct MainWindowTabsView: View {
                     lineWidth: 0.5
                 )
         }
+        .padding(.horizontal, CompactToolbarLayout.tabSeparationWidth)
         .opacity(showsFocusRing ? 1 : 0)
         .allowsHitTesting(false)
     }
@@ -1811,11 +1847,11 @@ struct MainWindowTabsView: View {
         .frame(maxWidth: .infinity, minHeight: 32, maxHeight: 32)
         .background {
             let shape = tabShape(for: tab)
-                .inset(by: CompactToolbarLayout.tabSeparationWidth)
             ZStack {
                 shape.fill(AppColors.windowChromeTabPlateColor)
                 shape.fill(AppColors.addressEditingSurfaceColor)
             }
+            .padding(.horizontal, CompactToolbarLayout.tabSeparationWidth)
             .transaction { transaction in
                 transaction.animation = nil
             }

@@ -173,6 +173,7 @@ struct ToolbarTabReorderThresholdTests {
         #expect(presentations[nearestID]?.isLayered == true)
         #expect(presentations[nearestID]?.isObscured == true)
         #expect(presentations[nearestID]?.isOverlapCover == false)
+        #expect(presentations[nearestID]?.stackDepth == 2)
         #expect(presentations[nearestID]?.coverHeadRevealProgress == 0)
         #expect(presentations[nearestID]?.stackingZIndex == -10)
         #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
@@ -202,6 +203,7 @@ struct ToolbarTabReorderThresholdTests {
         #expect(presentations[nearestID]?.isLayered == true)
         #expect(presentations[nearestID]?.isObscured == true)
         #expect(presentations[nearestID]?.isOverlapCover == false)
+        #expect(presentations[nearestID]?.stackDepth == 2)
         #expect(presentations[nearestID]?.coverHeadRevealProgress == 0)
         #expect(presentations[nearestID]?.stackingZIndex == -10)
         #expect((presentations[visibleID]?.overlapProgress ?? 0) > 0)
@@ -232,6 +234,23 @@ struct ToolbarTabReorderThresholdTests {
         #expect(pinnedOffset > nearlyOpenOffset)
         #expect(nearlyOpenOffset < 0.13)
         #expect(openOffset == 0)
+    }
+
+    @Test func accordionLayout_stackOffsetsCompressUniformlyInsideFivePoints() {
+        #expect(toolbarAccordionStackOffsets(stackDepth: 0).isEmpty)
+        #expect(toolbarAccordionStackOffsets(stackDepth: 3) == [1, 2, 3])
+
+        let compressed = toolbarAccordionStackOffsets(stackDepth: 10)
+        #expect(compressed.count == 10)
+        #expect(abs((compressed.first ?? 0) - 0.5) < 0.000_1)
+        #expect(abs((compressed.last ?? 0) - 5) < 0.000_1)
+        for (previous, next) in zip(compressed, compressed.dropFirst()) {
+            #expect(abs((next - previous) - 0.5) < 0.000_1)
+        }
+
+        let saturated = toolbarAccordionStackOffsets(stackDepth: 100)
+        #expect(saturated.count == 32)
+        #expect(abs((saturated.last ?? 0) - 5) < 0.000_1)
     }
 
     @Test func accordionLayout_revealsOnlyTheFinalThirtyPercentOfTheCoverHead() {

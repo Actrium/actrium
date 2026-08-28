@@ -92,19 +92,22 @@ struct ToolbarAccordionTabPresentation: Equatable {
     let collapseProgress: CGFloat
     let overlapProgress: CGFloat
     let coverEdge: ToolbarAccordionEdge?
+    let stackDepth: Int
 
     init(
         offsetX: CGFloat,
         edge: ToolbarAccordionEdge?,
         collapseProgress: CGFloat,
         overlapProgress: CGFloat,
-        coverEdge: ToolbarAccordionEdge? = nil
+        coverEdge: ToolbarAccordionEdge? = nil,
+        stackDepth: Int = 0
     ) {
         self.offsetX = offsetX
         self.edge = edge
         self.collapseProgress = collapseProgress
         self.overlapProgress = overlapProgress
         self.coverEdge = coverEdge
+        self.stackDepth = max(0, stackDepth)
     }
 
     static let identity = ToolbarAccordionTabPresentation(
@@ -113,6 +116,17 @@ struct ToolbarAccordionTabPresentation: Equatable {
         collapseProgress: 0,
         overlapProgress: 0
     )
+
+    func withStackDepth(_ stackDepth: Int) -> Self {
+        Self(
+            offsetX: offsetX,
+            edge: edge,
+            collapseProgress: collapseProgress,
+            overlapProgress: overlapProgress,
+            coverEdge: coverEdge,
+            stackDepth: stackDepth
+        )
+    }
 
     var isFolded: Bool { edge != nil }
     var isLayered: Bool { isFolded || overlapProgress > 0 }
@@ -150,6 +164,25 @@ struct ToolbarAccordionTabPresentation: Equatable {
         case nil: .activate
         }
     }
+}
+
+/// Preserves a one-point offset per accumulated Tab until the stack reaches
+/// five points. Deeper stacks distribute their contour samples evenly inside
+/// that fixed span, so subpixel overlap makes the edge progressively denser
+/// without consuming more toolbar space or creating unbounded drawing work.
+func toolbarAccordionStackOffsets(
+    stackDepth: Int,
+    maximumSpread: CGFloat = 5,
+    maximumRenderedContours: Int = 32
+) -> [CGFloat] {
+    let depth = max(0, stackDepth)
+    let spreadLimit = max(0, maximumSpread)
+    let renderedDepth = min(depth, max(0, maximumRenderedContours))
+    guard renderedDepth > 0, spreadLimit > 0 else { return [] }
+
+    let spread = min(CGFloat(depth), spreadLimit)
+    let step = spread / CGFloat(renderedDepth)
+    return (1...renderedDepth).map { CGFloat($0) * step }
 }
 
 struct ToolbarAccordionTabLayoutInput: Equatable {
@@ -208,7 +241,8 @@ func toolbarAccordionTabPresentation(
             offsetX: leadingEdge - tabFrame.minX,
             edge: .leading,
             collapseProgress: min(1, leadingOverflow / tabFrame.width),
-            overlapProgress: 0
+            overlapProgress: 0,
+            stackDepth: 1
         )
     }
 
@@ -217,7 +251,8 @@ func toolbarAccordionTabPresentation(
             offsetX: trailingEdge - tabFrame.maxX,
             edge: .trailing,
             collapseProgress: min(1, trailingOverflow / tabFrame.width),
-            overlapProgress: 0
+            overlapProgress: 0,
+            stackDepth: 1
         )
     }
 
@@ -245,21 +280,27 @@ func toolbarAccordionTabPresentations(
         )
     }
 
-    let leading = candidates
+    let leadingCandidates = candidates
         .filter { $0.presentation.edge == .leading }
+    let leading = leadingCandidates
         .max { $0.input.frame.minX < $1.input.frame.minX }
-    let trailing = candidates
+    let trailingCandidates = candidates
         .filter { $0.presentation.edge == .trailing }
+    let trailing = trailingCandidates
         .min { $0.input.frame.maxX < $1.input.frame.maxX }
 
     var result = Dictionary(
         uniqueKeysWithValues: inputs.map { ($0.id, ToolbarAccordionTabPresentation.identity) }
     )
     if let leading {
-        result[leading.input.id] = leading.presentation
+        result[leading.input.id] = leading.presentation.withStackDepth(
+            leadingCandidates.count
+        )
     }
     if let trailing {
-        result[trailing.input.id] = trailing.presentation
+        result[trailing.input.id] = trailing.presentation.withStackDepth(
+            trailingCandidates.count
+        )
     }
 
     let boundedInset = max(0, edgeInset)
