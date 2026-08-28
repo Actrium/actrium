@@ -247,11 +247,18 @@ engine.sendEvent('PING', { timestamp: Date.now() });
 
 ## 文档
 
-- [API 参考](./docs/API.zh.md) - 完整 API 文档
-- [用户指南](./docs/GUIDE.zh.md) - 入门教程和最佳实践
-- [架构设计](./docs/ARCHITECTURE.zh.md) - 系统架构详解
-- [生产指南](./docs/PRODUCTION_GUIDE.zh.md) - 生产部署清单
-- [内部文档](./docs/internals/) - 桥接层、序列化细节
+文档站（私有 GitHub Pages，需要有仓库权限）：
+https://glowing-adventure-wnyz3lm.pages.github.io/zh/
+
+GitHub 上的同一批页面：
+
+- [快速开始](./docs/getting-started/README.zh.md)
+- [指南](./docs/guides/cli.zh.md)
+- [API](./docs/api/README.zh.md)
+- [架构](./docs/architecture/README.zh.md)
+- [参考](./docs/reference/sandbox-comparison.zh.md)
+
+中文稿是英文稿旁边的 `*.zh.md`。站点默认英文；中文浏览器会进 `/zh/`，页眉里可以手动改语言。
 
 ## 开发
 

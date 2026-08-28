@@ -27,6 +27,9 @@ bun run typecheck
 
 # 代码检查
 bun run lint
+
+# 文档站（http://localhost:5173/）
+bun run docs:dev
 ```
 
 ## 开发流程

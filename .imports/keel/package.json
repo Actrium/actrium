@@ -20,7 +20,8 @@
     "react": "19.0.0",
     "react-reconciler": "0.31.0",
     "react-test-renderer": "19.0.0",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "vitepress": "^1.6.4"
   },
   "peerDependencies": {
     "react": ">=18.0.0",
@@ -102,6 +103,9 @@
     "check:unknown": "bun scripts/check-unknown.ts",
     "check:cjk": "bun scripts/check-cjk.ts",
     "check:build:apple": "bash scripts/check-apple-build.sh",
+    "docs:dev": "node ./node_modules/vitepress/bin/vitepress.js dev docs",
+    "docs:build": "node ./node_modules/vitepress/bin/vitepress.js build docs",
+    "docs:preview": "node ./node_modules/vitepress/bin/vitepress.js preview docs",
     "preflight": "bun run check:cjk && bun run check:unknown && bun run check:types && bun run check:guest-types && bun run lint && bun run test:scripts && bun run test:unit"
   },
   "types": "./src/index.ts",

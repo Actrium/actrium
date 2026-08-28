@@ -27,6 +27,9 @@ bun run typecheck
 
 # Lint
 bun run lint
+
+# Docs site (http://localhost:5173/)
+bun run docs:dev
 ```
 
 ## Development Workflow
