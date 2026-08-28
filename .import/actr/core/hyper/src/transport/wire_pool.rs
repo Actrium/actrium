@@ -166,6 +166,13 @@ impl WirePool {
             // The first attempt starts immediately. Backoff values belong to
             // the gaps before retries, so the first retry consumes the
             // configured initial delay rather than silently skipping it.
+            // Wire-close ownership: `close_all` is the sole closer of wires it
+            // clears from the pool slots (it closes `Connecting`/`Ready`
+            // handles; `Failed` slots were already closed by the upper layer
+            // that marked them). Because `closed`/`shutdown` are only set by
+            // `close_all`, every exit below that observes them can rely on
+            // `close_all` having already closed — or being about to close —
+            // this task's wire, so no task exit closes on its own.
             for attempt in 0..retry_config.max_attempts {
                 // Check if pool has been closed
                 if closed.load(Ordering::Relaxed) {
@@ -228,13 +235,6 @@ impl WirePool {
                             conn_type
                         );
                         pending.fetch_sub(1, Ordering::Relaxed);
-                        if let Err(error) = connection.close().await {
-                            tracing::warn!(
-                                "Failed to close {:?} connection after pool cancellation: {}",
-                                conn_type,
-                                error
-                            );
-                        }
                         return;
                     }
                     result = crate::timer::timeout(
@@ -280,13 +280,9 @@ impl WirePool {
                             if conn_type == ConnType::WebRTC {
                                 *webrtc_lifecycle.write().await = None;
                             }
-                            if let Err(error) = connection.close().await {
-                                tracing::warn!(
-                                    "Failed to close {:?} connection completed after pool close: {}",
-                                    conn_type,
-                                    error
-                                );
-                            }
+                            // `close_all` owns closing this wire: it cleared
+                            // (or is about to clear) the slot under the same
+                            // lock and closes every handle it removes.
                             return;
                         }
 
@@ -654,10 +650,26 @@ impl WirePool {
         self.closed.store(true, Ordering::Relaxed);
         self.shutdown.cancel();
 
-        // 2. Clear all connection status
+        // 2. Clear all connection status, closing any wire the pool still
+        // owns. A background attempt task that has not been polled yet (or
+        // that commits Ready concurrently with this call) exits without
+        // closing — its slot here is the last other owner, so this is the
+        // final guaranteed close point. `Failed` slots were already closed by
+        // the upper layer that marked them, so they are skipped to keep close
+        // counts exact.
         let mut conns = self.connections.write().await;
-        *conns = [None, None];
+        let cleared = std::mem::take(&mut *conns);
         drop(conns);
+        for status in cleared.into_iter().flatten() {
+            if let WireStatus::Connecting(handle) | WireStatus::Ready(handle) = &status {
+                if let Err(error) = handle.close().await {
+                    tracing::warn!(
+                        "Failed to close connection during pool close_all: {}",
+                        error
+                    );
+                }
+            }
+        }
         *self.webrtc_lifecycle.write().await = None;
 
         // 3. Broadcast empty ready set
