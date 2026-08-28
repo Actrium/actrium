@@ -71,6 +71,10 @@ test-results/
 *.temp
 .cache/
 
+# VitePress
+docs/.vitepress/cache/
+docs/.vitepress/dist/
+
 # Environment
 .env
 .env.local

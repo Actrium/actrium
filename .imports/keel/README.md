@@ -245,11 +245,18 @@ engine.sendEvent('PING', { timestamp: Date.now() });
 
 ## Documentation
 
-- [API Reference](./docs/API.md) - Complete API documentation
-- [User Guide](./docs/GUIDE.md) - Getting started and best practices
-- [Architecture](./docs/ARCHITECTURE.md) - System architecture details
-- [Production Guide](./docs/PRODUCTION_GUIDE.md) - Production deployment checklist
-- [Internal Docs](./docs/internals/) - Bridge layer, serialization details
+Docs site (private GitHub Pages; repository access required):
+https://glowing-adventure-wnyz3lm.pages.github.io/
+
+The same pages on GitHub:
+
+- [Getting Started](./docs/getting-started/)
+- [Guides](./docs/guides/cli.md)
+- [API](./docs/api/)
+- [Architecture](./docs/architecture/)
+- [Reference](./docs/reference/sandbox-comparison.md)
+
+Chinese counterparts sit next to the English files as `*.zh.md`. The site default is English; a Chinese browser is sent to `/zh/` until you pick a language in the header.
 
 ## Development
 
