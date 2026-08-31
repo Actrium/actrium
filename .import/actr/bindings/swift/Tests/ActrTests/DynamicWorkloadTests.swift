@@ -71,11 +71,16 @@ private final class RuntimeObserverProbe: SignalingObserver, WebRTCObserver, @un
     func onDisconnected(ctx _: Context, event _: PeerEvent) async {}
 }
 
+private final class MobileLifecycleObserverProbe: MobileLifecycleObserver, @unchecked Sendable {
+    func onMobileLifecycleEvent(_: MobileLifecycleEvent) {}
+}
+
 @Suite(.serialized)
 private struct DynamicWorkloadTests {
     @Test func packageRuntimeObserversExposeReadinessHooksAndConnectionNotReady() async throws {
         let probe = RuntimeObserverProbe()
         let observers = runtimeObservers(signaling: probe, webrtc: probe)
+        let mobileObserver = MobileLifecycleObserverProbe()
         let error = ActrError.ConnectionNotReady(
             info: ConnectionNotReadyInfo(retryAfterMs: 6_300)
         )
@@ -90,9 +95,29 @@ private struct DynamicWorkloadTests {
             _ = try await ActrNode.from(
                 packageConfig: remoteConfigURL,
                 packageURL: packageURL,
-                observers: observers
+                observers: observers,
+                mobileLifecycleObservers: [mobileObserver]
             )
             Issue.record("package-backed observer API should reject non-file config URLs before starting runtime")
+        } catch ActrError.Config(let msg) {
+            #expect(msg == "packageConfig URL must be a file URL")
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test func packageMobileObserverUrlOverloadRejectsNonFileConfig() async throws {
+        let mobileObserver = MobileLifecycleObserverProbe()
+        let remoteConfigURL = try #require(URL(string: "https://example.com/actr.toml"))
+        let packageURL = URL(fileURLWithPath: "/tmp/example.actr")
+
+        do {
+            _ = try await ActrNode.from(
+                packageConfig: remoteConfigURL,
+                packageURL: packageURL,
+                mobileLifecycleObservers: [mobileObserver]
+            )
+            Issue.record("package mobile observer API should reject non-file config URLs")
         } catch ActrError.Config(let msg) {
             #expect(msg == "packageConfig URL must be a file URL")
         } catch {
@@ -112,9 +137,15 @@ private struct DynamicWorkloadTests {
         )
         let actorType = ActrType(manufacturer: "acme", name: "EchoApp", version: "0.1.0")
         let remoteConfigURL = try #require(URL(string: "https://example.com/actr.toml"))
+        let mobileObserver = MobileLifecycleObserverProbe()
 
         do {
-            _ = try await ActrNode.linked(config: remoteConfigURL, type: actorType, workload: workload)
+            _ = try await ActrNode.linked(
+                config: remoteConfigURL,
+                type: actorType,
+                workload: workload,
+                mobileLifecycleObservers: [mobileObserver]
+            )
             Issue.record("linked(config:type:workload:) should reject non-file config URLs before starting runtime")
         } catch ActrError.Config(let msg) {
             #expect(msg == "config URL must be a file URL")

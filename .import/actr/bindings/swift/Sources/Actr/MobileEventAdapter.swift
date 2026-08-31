@@ -2,9 +2,93 @@ import ActrBindings
 import Foundation
 import Network
 
+enum MobileEventSendOutcome: Sendable, Equatable {
+    case completed
+    case failed(message: String)
+
+    init(result: NetworkEventResult) {
+        if result.success {
+            self = .completed
+        } else {
+            self = .failed(
+                message: result.error ?? "native event processing failed without an error message"
+            )
+        }
+    }
+}
+
 protocol MobileEventSending: Sendable {
-    func sendNetworkPathChanged(snapshot: NetworkSnapshot) async
-    func sendAppLifecycleChanged(state: AppLifecycleState) async
+    func sendNetworkPathChanged(snapshot: NetworkSnapshot) async throws -> MobileEventSendOutcome
+    func sendAppLifecycleChanged(state: AppLifecycleState) async throws -> MobileEventSendOutcome
+}
+
+/// Host-visible mobile lifecycle and network events used for remote logging.
+public enum MobileMonitorKind: Sendable, Equatable {
+    case network
+    case appLifecycle
+}
+
+public enum MobileLifecycleEvent: Sendable, Equatable {
+    case monitorInitialized(MobileMonitorKind)
+    case monitorDeinitialized(MobileMonitorKind)
+    case networkPathObserved(NetworkSnapshot)
+    case networkInitialPathCaptured(NetworkSnapshot, forceNotify: Bool)
+    case networkPathChanged(NetworkSnapshot)
+    case appLifecycleChanged(AppLifecycleState)
+    case networkDeliveryCompleted(NetworkSnapshot)
+    case networkDeliveryFailed(NetworkSnapshot, message: String)
+    case networkDeliveryDiscardedAfterClose(NetworkSnapshot)
+    case lifecycleDeliveryCompleted(AppLifecycleState)
+    case lifecycleDeliveryFailed(AppLifecycleState, message: String)
+    case lifecycleDeliveryDiscardedAfterClose(AppLifecycleState)
+}
+
+/// Receives structured mobile lifecycle events before they are printed locally.
+///
+/// Callbacks may fire on internal monitor queues or detached delivery tasks,
+/// so implementations must be safe to call from any thread (hence `Sendable`).
+/// Observers are held weakly; hosts must retain them for as long as callbacks
+/// are required.
+public protocol MobileLifecycleObserver: AnyObject, Sendable {
+    func onMobileLifecycleEvent(_ event: MobileLifecycleEvent)
+}
+
+private final class WeakMobileLifecycleObserver: @unchecked Sendable {
+    weak var value: (any MobileLifecycleObserver)?
+
+    init(_ value: any MobileLifecycleObserver) {
+        self.value = value
+    }
+}
+
+/// Fan-out observer safe to call from monitor queues and detached delivery tasks.
+///
+/// The emitter is shared by every monitor of one node. Delivery gates retain it
+/// after their monitor is released so stale callbacks can report that they were
+/// discarded after close. It deallocates naturally after those callbacks end.
+final class MobileLifecycleEventEmitter: @unchecked Sendable {
+    private var observerReferences: [WeakMobileLifecycleObserver]
+    private let observersLock = NSLock()
+
+    init(observers: [any MobileLifecycleObserver] = []) {
+        observerReferences = observers.map(WeakMobileLifecycleObserver.init)
+    }
+
+    func emit(_ event: MobileLifecycleEvent) {
+        observersLock.lock()
+        var currentObservers: [any MobileLifecycleObserver] = []
+        observerReferences.removeAll { reference in
+            guard let observer = reference.value else {
+                return true
+            }
+            currentObservers.append(observer)
+            return false
+        }
+        observersLock.unlock()
+        if !currentObservers.isEmpty {
+            currentObservers.forEach { $0.onMobileLifecycleEvent(event) }
+        }
+    }
 }
 
 private final class BindingMobileEventSender: MobileEventSending, @unchecked Sendable {
@@ -14,26 +98,36 @@ private final class BindingMobileEventSender: MobileEventSending, @unchecked Sen
         self.handle = handle
     }
 
-    func sendNetworkPathChanged(snapshot: NetworkSnapshot) async {
-        _ = try? await handle.handleNetworkPathChanged(snapshot: snapshot)
+    func sendNetworkPathChanged(snapshot: NetworkSnapshot) async throws -> MobileEventSendOutcome {
+        let result = try await handle.handleNetworkPathChanged(snapshot: snapshot)
+        return MobileEventSendOutcome(result: result)
     }
 
-    func sendAppLifecycleChanged(state: AppLifecycleState) async {
-        _ = try? await handle.handleAppLifecycleChanged(state: state)
+    func sendAppLifecycleChanged(state: AppLifecycleState) async throws -> MobileEventSendOutcome {
+        let result = try await handle.handleAppLifecycleChanged(state: state)
+        return MobileEventSendOutcome(result: result)
     }
 }
 
+/// Serializes sends through one delivery incarnation and reports every
+/// delivery outcome (completed, failed, or discarded after close) through the
+/// shared emitter.
 final class MobileEventDeliveryGate: @unchecked Sendable {
     private let sender: any MobileEventSending
+    private let emitter: MobileLifecycleEventEmitter?
     private let stateLock = NSLock()
     private var closed = false
 
-    convenience init(handle: NetworkEventHandleWrapper) {
-        self.init(sender: BindingMobileEventSender(handle: handle))
+    convenience init(
+        handle: NetworkEventHandleWrapper,
+        emitter: MobileLifecycleEventEmitter
+    ) {
+        self.init(sender: BindingMobileEventSender(handle: handle), emitter: emitter)
     }
 
-    init(sender: any MobileEventSending) {
+    init(sender: any MobileEventSending, emitter: MobileLifecycleEventEmitter? = nil) {
         self.sender = sender
+        self.emitter = emitter
     }
 
     func close() {
@@ -47,13 +141,37 @@ final class MobileEventDeliveryGate: @unchecked Sendable {
         after predecessor: Task<Void, Never>? = nil
     ) async {
         await predecessor?.value
-        guard isOpen() else { return }
-        await sender.sendNetworkPathChanged(snapshot: snapshot)
+        guard isOpen() else {
+            emitter?.emit(.networkDeliveryDiscardedAfterClose(snapshot))
+            return
+        }
+        do {
+            switch try await sender.sendNetworkPathChanged(snapshot: snapshot) {
+            case .completed:
+                emitter?.emit(.networkDeliveryCompleted(snapshot))
+            case let .failed(message):
+                emitter?.emit(.networkDeliveryFailed(snapshot, message: message))
+            }
+        } catch {
+            emitter?.emit(.networkDeliveryFailed(snapshot, message: String(describing: error)))
+        }
     }
 
     func sendAppLifecycleChanged(state: AppLifecycleState) async {
-        guard isOpen() else { return }
-        await sender.sendAppLifecycleChanged(state: state)
+        guard isOpen() else {
+            emitter?.emit(.lifecycleDeliveryDiscardedAfterClose(state))
+            return
+        }
+        do {
+            switch try await sender.sendAppLifecycleChanged(state: state) {
+            case .completed:
+                emitter?.emit(.lifecycleDeliveryCompleted(state))
+            case let .failed(message):
+                emitter?.emit(.lifecycleDeliveryFailed(state, message: message))
+            }
+        } catch {
+            emitter?.emit(.lifecycleDeliveryFailed(state, message: String(describing: error)))
+        }
     }
 
     private func isOpen() -> Bool {
@@ -69,8 +187,11 @@ final class MobileEventDeliveryGate: @unchecked Sendable {
 final class MobileEventDeliverySession {
     let gate: MobileEventDeliveryGate
 
-    convenience init(handle: NetworkEventHandleWrapper) {
-        self.init(gate: MobileEventDeliveryGate(handle: handle))
+    convenience init(
+        handle: NetworkEventHandleWrapper,
+        emitter: MobileLifecycleEventEmitter
+    ) {
+        self.init(gate: MobileEventDeliveryGate(handle: handle, emitter: emitter))
     }
 
     init(gate: MobileEventDeliveryGate) {
