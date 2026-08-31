@@ -49,8 +49,8 @@ pub(crate) trait SignalingTransport: Send + Sync {
     ///
     /// The default discards `RelayAttemptIdentity`: a transport that only
     /// overrides `send` quietly regresses to fire-and-forget relays, and the
-    /// delivery-result fence never arms (the target-unavailable recovery path
-    /// silently stops working).
+    /// delivery-result fence never arms (target-unavailable observations and
+    /// exact-attempt diagnostics silently stop working).
     async fn send_dispatch(&self, dispatch: SignalingDispatch) -> Result<(), String> {
         self.send(dispatch.peer, dispatch.message).await
     }

@@ -94,10 +94,12 @@ pub(crate) enum RtcPeerCommand {
     /// glare handling").
     ApplyRoleAssignment { is_offerer: bool },
     /// Actrix confirmed that the exact remote endpoint had no usable
-    /// signaling session for this Controller/transport/PC attempt. For a
-    /// generation-0 role probe, `negotiation_epoch` names the exact probe
-    /// emission so a delayed result for a retired probe cannot terminate a
-    /// newer arbitration attempt.
+    /// signaling session when this Controller/transport/PC attempt was relayed.
+    /// This is a point-in-time routing fact, not proof that the ActrId is
+    /// permanently gone: a mobile runtime can reconnect with the same identity
+    /// after a background suspension. For a generation-0 role probe,
+    /// `negotiation_epoch` names the exact probe emission so delayed results are
+    /// still observable as stale.
     TargetUnavailable {
         transport_epoch: u64,
         pc_generation: u64,
@@ -1387,7 +1389,26 @@ fn reduce_command(
                     state.is_live_generation(pc_generation)
                 };
             if exact_attempt && !state.close_requested {
-                terminate_transport_attempt(state, RtcUnavailableReason::PeerUnavailable, effects);
+                // `TargetUnavailable` only says that Actrix had no live
+                // signaling egress for the target at one instant. Mobile
+                // backgrounding routinely creates that window while retaining
+                // the same ActrId and recoverable PeerConnection. Treating the
+                // result as terminal destroys the remote Session and makes the
+                // subsequent ICE restart impossible.
+                //
+                // Keep the exact attempt alive and let its existing initial or
+                // recovery deadline own the terminal decision. A permanently
+                // stale ActrId still converges through that bounded deadline;
+                // a temporarily suspended peer can reconnect and complete the
+                // current recovery attempt.
+                tracing::warn!(
+                    peer = %state.peer_id.to_string_repr(),
+                    transport_epoch,
+                    pc_generation,
+                    negotiation_epoch,
+                    recovery_inflight = state.recovery_inflight,
+                    "target currently unavailable; preserving bounded RTC connection attempt"
+                );
             } else {
                 state.stale_events = state.stale_events.saturating_add(1);
             }

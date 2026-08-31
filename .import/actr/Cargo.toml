@@ -203,10 +203,11 @@ rand = "0.8"
 rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 
 # === WASM Runtime ===
-# Pinned to 46.0.2 for Component Model host execution. 46 requires rustc >=
+# Pinned to 46.0.3 for Component Model host execution. 46 requires rustc >=
 # 1.94 (workspace MSRV is 1.95, so satisfied) and carries the fix for
-# GHSA-4ch3-9j33-3pmj, so do NOT drop back to 46.0.0. 46.0.2 additionally
-# carries the fixes for RUSTSEC-2026-0190 and RUSTSEC-2026-0223.
+# GHSA-4ch3-9j33-3pmj, so do NOT drop back to 46.0.0. 46.0.3 additionally
+# carries the fixes for RUSTSEC-2026-0190, RUSTSEC-2026-0223,
+# RUSTSEC-2026-0268, and RUSTSEC-2026-0269.
 #
 # The `async` feature powers the host-side wasmtime fibers we rely on
 # (`instantiate_async` / `call_async`); `component-model-async` stays enabled
@@ -221,14 +222,14 @@ rusqlite = { version = "0.32", features = ["bundled", "serde_json"] }
 #
 # `default-features = false` keeps the feature set minimal: 46's new default
 # `gc-copying` / `wit-parser` features are not pulled in and are not needed.
-wasmtime = { version = "=46.0.2", default-features = false, features = [
+wasmtime = { version = "=46.0.3", default-features = false, features = [
     "runtime",
     "cranelift",
     "component-model",
     "component-model-async",
     "async",
 ] }
-wasmtime-wasi = "=46.0.2"
+wasmtime-wasi = "=46.0.3"
 
 # === Networking ===
 tokio-tungstenite = { version = "0.28.0", features = [

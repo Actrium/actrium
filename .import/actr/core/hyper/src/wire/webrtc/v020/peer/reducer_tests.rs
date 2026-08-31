@@ -459,7 +459,7 @@ fn initial_readiness_lane_failure_terminates_before_offer_can_continue() {
 }
 
 #[test]
-fn target_unavailable_terminates_the_exact_recovery_attempt() {
+fn target_unavailable_preserves_the_exact_recovery_attempt() {
     let mut state = RtcPeerState::new(test_actor_id(583));
     let generation = drive_offerer_to_sendable(&mut state);
     let transport_epoch = state.transport_epoch;
@@ -483,17 +483,58 @@ fn target_unavailable_terminates_the_exact_recovery_attempt() {
         }),
     );
 
-    assert_eq!(state.phase, RtcPeerPhase::Idle);
-    assert_eq!(
-        state.unavailable_reason,
-        Some(RtcUnavailableReason::PeerUnavailable)
-    );
-    assert!(!state.recovery_inflight);
-    assert!(effects.iter().any(|effect| matches!(
+    assert_eq!(state.phase, RtcPeerPhase::Recovering);
+    assert_eq!(state.active_generation, Some(generation));
+    assert_eq!(state.unavailable_reason, None);
+    assert!(state.recovery_inflight);
+    assert!(!effects.iter().any(|effect| matches!(
         effect,
         RtcPeerEffect::CloseSession { generation: actual, .. } if *actual == generation
     )));
     assert!(!has_build_session(&effects, generation + 1));
+
+    // Once the exact ICE restart exchange converges, the retained Session can
+    // become sendable again. This is the mobile background/foreground path
+    // that immediate PeerUnavailable retirement used to destroy.
+    state.recovery_negotiated = true;
+    reduce(&mut state, connected_tick(generation));
+    assert_eq!(state.phase, RtcPeerPhase::Sendable);
+    assert!(!state.recovery_inflight);
+}
+
+#[test]
+fn target_unavailable_still_converges_at_existing_recovery_budget() {
+    let mut state = RtcPeerState::new(test_actor_id(584));
+    let generation = drive_offerer_to_sendable(&mut state);
+    let transport_epoch = state.transport_epoch;
+    reduce(&mut state, failed_tick(generation));
+    let negotiation_epoch = state.negotiation_epoch;
+
+    reduce(
+        &mut state,
+        RtcPeerInput::Command(RtcPeerCommand::TargetUnavailable {
+            transport_epoch,
+            pc_generation: generation,
+            negotiation_epoch,
+        }),
+    );
+
+    // Permanent absence is still bounded by the existing recovery budget; the
+    // point-in-time server result does not create an unbounded retry loop.
+    let recovery_cycle = state.recovery_cycle;
+    let exhausted = reduce(
+        &mut state,
+        RtcPeerInput::RecoveryBudgetElapsed { recovery_cycle },
+    );
+    assert_eq!(state.phase, RtcPeerPhase::Idle);
+    assert_eq!(
+        state.unavailable_reason,
+        Some(RtcUnavailableReason::RecoveryExhausted)
+    );
+    assert!(exhausted.iter().any(|effect| matches!(
+        effect,
+        RtcPeerEffect::CloseSession { generation: actual, .. } if *actual == generation
+    )));
 }
 
 #[test]
@@ -518,7 +559,7 @@ fn stale_target_unavailable_result_cannot_terminate_a_new_attempt() {
 }
 
 #[test]
-fn stale_gen0_target_unavailable_result_cannot_terminate_a_re_driven_probe() {
+fn target_unavailable_preserves_live_gen0_probe_and_fences_stale_result() {
     // The signaling gate flaps None -> Some while a delivered gen-0 role
     // probe is still in flight: the gate-opening edge re-drives the probe
     // under a fresh negotiation epoch. Both probes dispatch with the
@@ -570,8 +611,10 @@ fn stale_gen0_target_unavailable_result_cannot_terminate_a_re_driven_probe() {
     assert_eq!(state.phase, RtcPeerPhase::Building);
     assert_eq!(state.unavailable_reason, None);
 
-    // The live probe's own result terminates the arbitration attempt.
-    reduce(
+    // The live probe's own point-in-time result is non-terminal too. The
+    // existing attempt deadline remains responsible for bounded failure, while
+    // a temporarily suspended mobile peer can reconnect with the same ActrId.
+    let live = reduce(
         &mut state,
         RtcPeerInput::Command(RtcPeerCommand::TargetUnavailable {
             transport_epoch,
@@ -579,11 +622,25 @@ fn stale_gen0_target_unavailable_result_cannot_terminate_a_re_driven_probe() {
             negotiation_epoch: live_epoch,
         }),
     );
+    assert!(live.is_empty());
+    assert!(state.role_negotiation_inflight);
+    assert_eq!(state.phase, RtcPeerPhase::Building);
+    assert_eq!(state.unavailable_reason, None);
+
+    // The initial role-negotiation deadline still owns the terminal decision:
+    // a permanently absent target converges to `NegotiationFailed` on the
+    // exact probe epoch instead of an unbounded retry loop.
+    reduce(
+        &mut state,
+        RtcPeerInput::RoleNegotiationDeadlineElapsed {
+            negotiation_epoch: live_epoch,
+        },
+    );
     assert!(!state.role_negotiation_inflight);
     assert_eq!(state.phase, RtcPeerPhase::Idle);
     assert_eq!(
         state.unavailable_reason,
-        Some(RtcUnavailableReason::PeerUnavailable)
+        Some(RtcUnavailableReason::NegotiationFailed)
     );
 }
 
