@@ -8,6 +8,7 @@ from .constants import (
     DEFAULT_WORLD,
     DEFAULT_WORLD_MODULE,
     ENV_WIT_PATH,
+    ENV_WORLD_MODULE,
     REPO_WIT_PATH,
 )
 from .context import ActrContext, Reply, RpcRequest, Workload
@@ -31,6 +32,7 @@ __all__ = [
     "DEFAULT_WORLD",
     "DEFAULT_WORLD_MODULE",
     "ENV_WIT_PATH",
+    "ENV_WORLD_MODULE",
     "REPO_WIT_PATH",
     "ActrContext",
     "Reply",
