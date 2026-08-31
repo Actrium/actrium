@@ -3,13 +3,17 @@ from __future__ import annotations
 import functools
 import importlib
 import os
+import sys
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any, ClassVar, Generic, Protocol, TypeVar
 
-from .constants import DEFAULT_WORLD_MODULE
+from .constants import DEFAULT_WORLD_MODULE, ENV_WORLD_MODULE
 
 ResponseT = TypeVar("ResponseT", covariant=True)
 ReplyT = TypeVar("ReplyT")
+
+_discovered_world_module: str | None = None
 
 
 class RpcRequest(Protocol[ResponseT]):
@@ -21,6 +25,85 @@ class RpcRequest(Protocol[ResponseT]):
     def encode_request(self) -> bytes: ...
 
     def decode_response(self, data: bytes) -> ResponseT: ...
+
+
+def _componentize_py_preinit() -> bool:
+    """Detect componentize-py's pre-init sandbox.
+
+    The sandbox environment is closed: it only receives PYTHONHOME,
+    PYTHONPATH and PYTHONUNBUFFERED, so ``ENV_WORLD_MODULE`` never reaches
+    the guest during the snapshot run. ``PYTHONHOME=/python`` is the
+    embedded-stdlib mount componentize-py 0.25 uses and is not set by
+    normal interpreters.
+    """
+
+    return os.environ.get("PYTHONHOME", "") == "/python"
+
+
+def _scan_python_path_for_world_package() -> str | None:
+    """Find a generated world package on ``sys.path`` by layout.
+
+    componentize-py mounts the runtime world bindings at ``/world``, ahead
+    of every caller-supplied path, so the first package shaped like
+    ``<name>/imports/host.py`` + ``<name>/exports/`` is the bindings the
+    component will run against. Used only inside the pre-init sandbox,
+    where the configured module name is otherwise unknowable.
+    """
+
+    for entry in sys.path:
+        try:
+            root = Path(entry) if entry else Path.cwd()
+            if not root.is_dir():
+                continue
+            children = sorted(root.iterdir())
+        except OSError:
+            continue
+        for child in children:
+            if not (child / "__init__.py").is_file():
+                continue
+            if not (child / "imports" / "host.py").is_file():
+                continue
+            if not (child / "exports").is_dir():
+                continue
+            return child.name
+    return None
+
+
+def _prime_world_bindings() -> None:
+    """Import the world host/types bindings eagerly (issue #638).
+
+    componentize-py bundles a guest by snapshotting the interpreter after
+    running the workload module's top level (pre-init). Resolving the host
+    bindings lazily at dispatch time left them out of the snapshot, so the
+    first ``ctx.call`` / ``ctx.tell`` / ``ctx.log`` trapped with
+    ``ModuleNotFoundError``. Importing here runs during pre-init, keeping
+    the modules in the snapshot, and records the world module name — the
+    only channel that survives into the component, since the sandbox
+    environment cannot convey it.
+
+    Failures are tolerated so authoring environments without generated
+    bindings (tests, type checks) keep importing this package.
+    """
+
+    global _discovered_world_module
+
+    candidates = [os.environ.get(ENV_WORLD_MODULE, DEFAULT_WORLD_MODULE)]
+    if _componentize_py_preinit():
+        scanned = _scan_python_path_for_world_package()
+        if scanned is not None and scanned not in candidates:
+            candidates.append(scanned)
+
+    for name in candidates:
+        try:
+            importlib.import_module(f"{name}.imports.host")
+            importlib.import_module(f"{name}.imports.types")
+        except ImportError:
+            continue
+        _discovered_world_module = name
+        return
+
+
+_prime_world_bindings()
 
 
 class Reply(Generic[ReplyT]):
@@ -57,10 +140,14 @@ def _world_module() -> str:
     ``DEFAULT_WORLD_MODULE`` is the normal package name.  The environment
     override is used by the build helper when callers choose a custom
     ``world_module``; componentize-py imports the workload in a subprocess so
-    this is the only configuration that needs to cross that boundary.
+    this is the only configuration that needs to cross that boundary.  Inside
+    a component the name recorded by ``_prime_world_bindings`` during pre-init
+    wins, because the sandbox environment does not propagate the override.
     """
 
-    return os.environ.get("ACTR_WORKLOAD_WORLD_MODULE", DEFAULT_WORLD_MODULE)
+    if _discovered_world_module is not None:
+        return _discovered_world_module
+    return os.environ.get(ENV_WORLD_MODULE, DEFAULT_WORLD_MODULE)
 
 
 def _bindings() -> tuple[Any, Any]:
@@ -243,7 +330,7 @@ def _generated_workload_base() -> type[Any]:
         exports = importlib.import_module(f"{_world_module()}.exports")
         base = getattr(exports, "Workload")
     except (ImportError, AttributeError) as error:
-        if "ACTR_WORKLOAD_WORLD_MODULE" in os.environ:
+        if ENV_WORLD_MODULE in os.environ:
             raise RuntimeError(
                 "componentize-py runtime exports are unavailable; regenerate bindings "
                 f"for world module `{_world_module()}`"

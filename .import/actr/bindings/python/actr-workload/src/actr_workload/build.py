@@ -7,7 +7,7 @@ import sys
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
-from .constants import DEFAULT_WORLD, DEFAULT_WORLD_MODULE
+from .constants import DEFAULT_WORLD, DEFAULT_WORLD_MODULE, ENV_WORLD_MODULE
 from .paths import resolved_wit_path
 
 
@@ -28,7 +28,7 @@ def _run_componentize_py(
     env = None
     if world_module is not None:
         env = os.environ.copy()
-        env["ACTR_WORKLOAD_WORLD_MODULE"] = world_module
+        env[ENV_WORLD_MODULE] = world_module
     return subprocess.run(command, check=True, text=True, env=env)
 
 

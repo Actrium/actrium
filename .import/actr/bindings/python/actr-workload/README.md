@@ -91,6 +91,12 @@ bindings are not present, so source modules remain importable before a build.
 Lifecycle and dispatch methods are still wrapped so their raw invocation
 context arrives as `ActrContext`.
 
+Host imports (`ctx.call` / `ctx.call_raw` / `ctx.tell` / `ctx.log` / …) work
+without any per-workload setup: importing `actr_workload` eagerly imports
+the generated `imports.host` / `imports.types` bindings, so componentize-py's
+pre-init snapshot retains them (issue #638). Workloads must not add static
+`import actr_workload_bindings.imports.host` statements themselves.
+
 The package intentionally does not implement runtime hosting. Host
 execution belongs to the actr runtime; this package only supports Python
 workload authoring and build-time componentization.
