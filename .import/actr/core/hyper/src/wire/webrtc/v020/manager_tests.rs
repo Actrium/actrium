@@ -562,7 +562,7 @@ async fn connect_creates_controller_and_drives_offer() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn target_unavailable_result_is_fenced_by_controller_and_attempt_identity() {
+async fn target_unavailable_result_preserves_the_matching_bounded_attempt() {
     let (mgr, mut signaling_rx) = manager();
     let peer = test_actor_id(583);
 
@@ -574,47 +574,41 @@ async fn target_unavailable_result_is_fenced_by_controller_and_attempt_identity(
     let attempt = dispatch.attempt.expect("role negotiation is tracked");
     assert_eq!(attempt.pc_generation, 0);
 
-    mgr.handle_target_unavailable(peer.clone(), attempt).await;
-    timeout(WAIT, async {
-        loop {
-            let snapshot = mgr
-                .get_snapshot(&peer)
-                .await
-                .expect("controller remains observable at terminal Idle");
-            if snapshot.status == actr_framework::WebRtcPeerStatus::Idle
-                && snapshot.unavailable_reason
-                    == Some(actr_framework::WebRtcUnavailableReason::PeerUnavailable)
-            {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("target-unavailable result did not terminate the attempt");
-
-    // A delayed result from a previous Controller lifetime cannot affect the
-    // replacement attempt.
-    mgr.connect(peer.clone()).await;
-    let replacement = timeout(WAIT, signaling_rx.recv())
+    let handle = mgr
+        .get_controller(&peer)
         .await
-        .expect("replacement role negotiation timeout")
-        .expect("signaling closed");
-    let replacement_attempt = replacement.attempt.expect("replacement tracked");
+        .expect("connect creates a controller");
+    mgr.handle_target_unavailable(peer.clone(), attempt).await;
+    // `connect()` is an acknowledged command on the same FIFO mailbox. Its
+    // unchanged epoch proves the preceding target-unavailable command was
+    // reduced without terminating and starting a replacement attempt.
+    let committed_epoch = timeout(WAIT, handle.connect())
+        .await
+        .expect("connect barrier timed out")
+        .expect("controller stopped before the connect barrier");
+    assert_eq!(committed_epoch, attempt.transport_epoch);
+    let preserved = handle.snapshot();
+    assert_eq!(
+        preserved.status,
+        actr_framework::WebRtcPeerStatus::Connecting
+    );
+    assert_eq!(preserved.unavailable_reason, None);
+
+    // A delayed result from a previous Controller lifetime remains fenced.
     mgr.handle_target_unavailable(
         peer.clone(),
         RelayAttemptIdentity {
-            controller_lifecycle_id: replacement_attempt
-                .controller_lifecycle_id
-                .saturating_sub(1),
-            ..replacement_attempt
+            controller_lifecycle_id: attempt.controller_lifecycle_id.saturating_sub(1),
+            ..attempt
         },
     )
     .await;
-    assert_ne!(
-        mgr.get_snapshot(&peer).await.unwrap().unavailable_reason,
-        Some(actr_framework::WebRtcUnavailableReason::PeerUnavailable)
-    );
+    let fenced_epoch = timeout(WAIT, handle.connect())
+        .await
+        .expect("fence barrier timed out")
+        .expect("controller stopped before the fence barrier");
+    assert_eq!(fenced_epoch, attempt.transport_epoch);
+    assert_eq!(handle.snapshot().unavailable_reason, None);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

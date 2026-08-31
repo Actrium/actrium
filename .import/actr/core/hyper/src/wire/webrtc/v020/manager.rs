@@ -756,9 +756,12 @@ impl RtcConnectionManager {
             .is_ok()
     }
 
-    /// Apply an authoritative Actrix fact that the exact target endpoint has
-    /// no usable signaling session. The echoed identity fences delayed
-    /// results from older Controller lifetimes and transport/PC attempts.
+    /// Apply an Actrix point-in-time fact that the exact target endpoint had no
+    /// usable signaling session. The echoed identity fences delayed results
+    /// from older Controller lifetimes and transport/PC attempts; the
+    /// Controller keeps a matching attempt under its existing bounded deadline
+    /// because temporary mobile suspension is indistinguishable from permanent
+    /// identity loss at this layer.
     pub(crate) async fn handle_target_unavailable(
         &self,
         peer: ActrId,
@@ -785,9 +788,6 @@ impl RtcConnectionManager {
             .await;
     }
 
-    /// The transport failed to commit critical SDP for the exact PC
-    /// generation (issue #609). The controller owns the resulting
-    /// retry/terminal policy.
     /// The transport failed to commit critical SDP for one dispatch (issue
     /// #609). The echoed attempt identity fences delayed failures from older
     /// Controller lifetimes and transport/PC attempts exactly like

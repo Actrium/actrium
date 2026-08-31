@@ -13,11 +13,11 @@ pub(crate) mod ws_transport;
 
 /// Exact sender-side RTC identity attached to a recovery/negotiation-critical
 /// relay. Actrix echoes it without interpretation so a delayed negative
-/// delivery result cannot terminate a newer Controller or transport attempt.
+/// delivery result cannot affect a newer Controller or transport attempt.
 /// `negotiation_epoch` discriminates generation-0 role probes: the signaling
 /// gate-opening edge re-drives a probe while one is still in flight, and each
-/// emission bumps the epoch, so only the exact probe's result may terminate
-/// the attempt it names.
+/// emission bumps the epoch, so only the exact probe observes its point-in-time
+/// delivery disposition.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RelayAttemptIdentity {
     pub(crate) controller_lifecycle_id: u64,

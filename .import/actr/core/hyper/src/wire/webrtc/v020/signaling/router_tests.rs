@@ -348,11 +348,11 @@ impl SignalingTransport for InboundEventTransport {
 }
 
 /// The run loop must carry an inbound `TargetUnavailable` to the manager end
-/// to end — outbound dispatch and inbound server disposition on the same
-/// select loop — so a live controller's exact attempt terminates with
-/// `PeerUnavailable`.
+/// to end without retiring the live attempt. The server disposition is only a
+/// point-in-time absence signal; the controller's bounded deadline remains the
+/// terminal owner so a mobile peer can reconnect with the same ActrId.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn run_loop_delivers_target_unavailable_to_the_manager() {
+async fn run_loop_preserves_attempt_after_target_unavailable() {
     let (manager, router, outbound_rx) = router();
     manager.set_signaling_dispatch_chains(router.dispatch_chains());
     let (inbound_tx, inbound_rx) = mpsc::channel::<SignalingInbound>(64);
@@ -380,6 +380,7 @@ async fn run_loop_delivers_target_unavailable_to_the_manager() {
     ));
     let attempt = dispatch.attempt.expect("connect probe is tracked");
 
+    let handle = poll_controller(&manager, &peer, "connect creates a controller").await;
     inbound_tx
         .send(SignalingInbound::TargetUnavailable {
             target: peer.clone(),
@@ -388,26 +389,25 @@ async fn run_loop_delivers_target_unavailable_to_the_manager() {
         .await
         .expect("feed target-unavailable result");
 
-    let handle = poll_controller(&manager, &peer, "connect creates a controller").await;
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop {
-        let snapshot = handle.snapshot();
-        if snapshot.unavailable_reason
-            == Some(actr_framework::WebRtcUnavailableReason::PeerUnavailable)
-        {
-            break;
-        }
-        assert!(
-            std::time::Instant::now() < deadline,
-            "target-unavailable fact must terminate the attempt"
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-    }
-
+    // Closing the transport drains the queued event through the router. The
+    // acknowledged connect command then acts as a FIFO controller barrier: if
+    // TargetUnavailable had retired the attempt, Connect would allocate a new
+    // transport epoch.
     drop(inbound_tx);
     let _joined = wait_within(std::time::Duration::from_secs(2), run)
         .await
         .expect("run must return when the transport closes");
+    let committed_epoch = wait_within(std::time::Duration::from_secs(2), handle.connect())
+        .await
+        .expect("connect barrier timed out")
+        .expect("controller stopped before the connect barrier");
+    assert_eq!(committed_epoch, attempt.transport_epoch);
+    let preserved = handle.snapshot();
+    assert_eq!(
+        preserved.status,
+        actr_framework::WebRtcPeerStatus::Connecting
+    );
+    assert_eq!(preserved.unavailable_reason, None);
     drop(manager);
 }
 

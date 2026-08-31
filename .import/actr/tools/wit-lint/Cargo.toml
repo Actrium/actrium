@@ -33,7 +33,7 @@ path = "src/lib.rs"
 
 [dependencies]
 # Pinned to wit-parser 0.253.0 to match wit-bindgen 0.59.0's view of the WIT
-# (wasmtime 46.0.1 still resolves wit-parser 0.251.0 for its own runtime
+# (wasmtime 46.0.3 still resolves wit-parser 0.251.0 for its own runtime
 # parsing, so the two versions coexist). Keeps the lint view aligned with the
 # bindgen view to avoid ABI skew between the lint and the generated bindings.
 wit-parser = "=0.253.0"

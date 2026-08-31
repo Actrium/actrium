@@ -54,9 +54,9 @@ geoip = [
 # wit-bindgen is only needed when compiling the guest for wasm32-wasip2.
 # The generated code is gated by `#[cfg(target_arch = "wasm32")]`, so hosts
 # never pull it in. wit-bindgen 0.59 resolves wit-parser 0.253, while
-# wasmtime 46.0.1 embeds 0.251 (the two versions coexist in Cargo.lock);
+# wasmtime 46.0.3 embeds 0.251 (the two versions coexist in Cargo.lock);
 # verified compatible — the 0.59-generated sync-lift component loads and
-# dispatches in wasmtime 46.0.1. The guest is lifted synchronously (no
+# dispatches in wasmtime 46.0.3. The guest is lifted synchronously (no
 # `async: true` in generated.rs) so wasmtime 46's async-canonical-option
 # validation accepts the component.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
