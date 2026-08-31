@@ -22,11 +22,11 @@
 //!
 //! The §2 spawn pattern creates a double-reply race: the handle has been moved
 //! into a spawned task (not yet `send`) *and* the handler returns `Err`, so the
-//! framework's error path also tries to deliver. The race is resolved by a shared
-//! `Once`-style completion state: the first writer wins (sends the RESPONSE and
-//! completes dedup), late writers degrade to logged no-ops. This mirrors the
-//! production pump's dedup completer; here it is parameterised over an injectable
-//! [`Deliver`] trait so the type is unit-testable without the live transport.
+//! framework's error path also tries to deliver. Generated dispatchers retain a
+//! hidden [`ReplyDispatchGuard`] while awaiting the handler. This prevents the
+//! handler argument's `Drop` from replacing a real handler error with the generic
+//! drop fallback; the guard submits that error first. The shared `Once`-style
+//! completion state then makes all later writers logged no-ops.
 //!
 //! ## Pump contract (hyper side)
 //!
@@ -35,7 +35,7 @@
 //! | moment | what happens | dedup | mailbox ACK |
 //! |---|---|---|---|
 //! | admission | `admit_incoming` builds the `ReplyDeliver`, registers it on the ctx, and registers an `outstanding_replies` gauge slot | `InFlight` marker set | — |
-//! | dispatch-completion (handler return) | the continuation runs: on `Ok` (or `Err` after the `Reply` was constructed and `Drop` fired) it returns `Deferred` and **ACKs the durable mailbox now** | unchanged | **ACK** (§4: ack-at-return) |
+//! | dispatch-completion (handler return) | the dispatcher guard submits a real handler `Err` before the generic Drop fallback; on `Ok` the continuation returns `Deferred` and **ACKs the durable mailbox now** | unchanged unless an error completed it | **ACK** (§4: ack-at-return) |
 //! | reply (`reply.send` / `Drop`) | `Deliver::deliver` spawns a task that sends the RESPONSE and completes dedup, then releases the gauge slot | `Done` | — |
 //!
 //! **Ack-at-return trade (§4):** the durable ACK fires at dispatch-completion,
@@ -61,6 +61,7 @@
 //! `Reply` aside and return the slot first.
 
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -109,6 +110,7 @@ pub struct ReplyOutcome {
 struct Completer {
     outcome: Mutex<Option<ReplyOutcome>>,
     deliver: Arc<dyn Deliver>,
+    owners: AtomicUsize,
 }
 
 impl Completer {
@@ -116,7 +118,19 @@ impl Completer {
         Self {
             outcome: Mutex::new(None),
             deliver,
+            owners: AtomicUsize::new(1),
         }
+    }
+
+    fn add_owner(&self) {
+        self.owners.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Release one Reply/guard owner. Exactly one concurrent drop observes
+    /// `true`, avoiding the racy last-owner check that `Arc::strong_count`
+    /// would provide.
+    fn release_owner(&self) -> bool {
+        self.owners.fetch_sub(1, Ordering::AcqRel) == 1
     }
 
     /// Attempt to deliver `outcome`. Returns `true` if this call won (i.e. it was
@@ -168,6 +182,19 @@ pub struct Reply<T> {
     // same soundness — a function-pointer `PhantomData` is always `Send +
     // Sync`, so no `unsafe` is needed.
     _marker: PhantomData<fn() -> T>,
+}
+
+/// Generated-dispatch companion for a [`Reply<T>`].
+///
+/// The dispatcher keeps this alive while the handler owns the public Reply.
+/// Only the final owner runs the Drop fallback, so a handler's returned error
+/// can be delivered before the generic "dropped without response" outcome.
+/// This type is public solely because generated code lives downstream.
+#[doc(hidden)]
+pub struct ReplyDispatchGuard {
+    request_id: String,
+    completer: Arc<Completer>,
+    emit_response: bool,
 }
 
 impl<T: prost::Message> Reply<T> {
@@ -232,6 +259,18 @@ impl<T: prost::Message> Reply<T> {
     pub fn is_completed(&self) -> bool {
         self.completer.is_completed()
     }
+
+    /// Retain the completion state while a generated dispatcher awaits the
+    /// handler. Business code should not call this directly.
+    #[doc(hidden)]
+    pub fn dispatch_guard(&self) -> ReplyDispatchGuard {
+        self.completer.add_owner();
+        ReplyDispatchGuard {
+            request_id: self.request_id.clone(),
+            completer: Arc::clone(&self.completer),
+            emit_response: self.emit_response,
+        }
+    }
 }
 
 impl<T> Drop for Reply<T> {
@@ -243,7 +282,7 @@ impl<T> Drop for Reply<T> {
         //
         // First-write-wins: if `send` or the framework error path already
         // completed, this is a no-op.
-        if self.completer.is_completed() {
+        if !self.completer.release_owner() || self.completer.is_completed() {
             return;
         }
         let outcome = if self.emit_response {
@@ -256,6 +295,43 @@ impl<T> Drop for Reply<T> {
             }
         } else {
             // TELL empty-variant: complete dedup with empty bytes, send nothing.
+            ReplyOutcome {
+                request_id: self.request_id.clone(),
+                result: Ok(Bytes::new()),
+                emit_response: false,
+            }
+        };
+        let _ = self.completer.try_complete(outcome);
+    }
+}
+
+impl ReplyDispatchGuard {
+    /// Complete the reply with the handler's actual error. Consumes the guard
+    /// so its Drop observes the completed state and remains a no-op.
+    #[doc(hidden)]
+    pub fn complete_error(self, error: ActrError) {
+        self.completer.try_complete(ReplyOutcome {
+            request_id: self.request_id.clone(),
+            result: Err(error),
+            emit_response: self.emit_response,
+        });
+    }
+}
+
+impl Drop for ReplyDispatchGuard {
+    fn drop(&mut self) {
+        if !self.completer.release_owner() || self.completer.is_completed() {
+            return;
+        }
+        let outcome = if self.emit_response {
+            ReplyOutcome {
+                request_id: self.request_id.clone(),
+                result: Err(ActrError::Internal(
+                    "reply dropped without response".to_string(),
+                )),
+                emit_response: true,
+            }
+        } else {
             ReplyOutcome {
                 request_id: self.request_id.clone(),
                 result: Ok(Bytes::new()),

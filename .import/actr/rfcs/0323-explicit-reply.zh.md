@@ -2,11 +2,11 @@
 
 - 状态（Status）：已接受（Accepted）
 - 日期（Date）：2026-07-08
-- 修订（Revised）：2026-07-24（按 #289 review 重写，对齐 #337/#381 之后的 main）
+- 修订（Revised）：2026-08-24（#603 补齐跨语言 Reply、WIT 0.6 与统一 TTL 兜底）
 - RFC PR：[Actrium/actr#289](https://github.com/Actrium/actr/pull/289)
 - 跟踪议题（Tracking issue）：[Actrium/actr#323](https://github.com/Actrium/actr/issues/323)
 - 替代 RFC（Superseded by）：无
-- 关联（Related）：[Actrium/actr#257](https://github.com/Actrium/actr/issues/257)、[Actrium/actr#263](https://github.com/Actrium/actr/pull/263)、[Actrium/actr#268](https://github.com/Actrium/actr/pull/268)、[Actrium/actr#280](https://github.com/Actrium/actr/pull/280)、[Actrium/actr#336](https://github.com/Actrium/actr/pull/336)、[Actrium/actr#337](https://github.com/Actrium/actr/pull/337)
+- 关联（Related）：[Actrium/actr#257](https://github.com/Actrium/actr/issues/257)、[Actrium/actr#263](https://github.com/Actrium/actr/pull/263)、[Actrium/actr#268](https://github.com/Actrium/actr/pull/268)、[Actrium/actr#280](https://github.com/Actrium/actr/pull/280)、[Actrium/actr#336](https://github.com/Actrium/actr/pull/336)、[Actrium/actr#337](https://github.com/Actrium/actr/pull/337)、[Actrium/actr#603](https://github.com/Actrium/actr/pull/603)
 
 ## 摘要（Summary）
 
@@ -102,7 +102,7 @@ impl<T: prost::Message> Reply<T> {
 - `Reply<T>: Send + 'static` → 可 move 进 `tokio::spawn`、可存入状态 map（长轮询/订阅式应答的自然表达）；
 - **`Drop` 兜底**：句柄未经 `send` 被析构（包括 spawn 任务 panic 展开）时，自动发送 `ActrError::Internal("reply dropped without response")` 并记 warn——调用方永远不会因为被调方忘记回复而白等到超时。`send` 必须是同步入队正是为此：`Drop` 不能 await。TELL 注入的空回程变体例外（见 §6）：其 Drop 以空字节完成 dedup 而非发送 Err。
 
-**幂等 completer（first-write-wins，消解双回复竞态）**：`Reply` 内部持有一个共享完成状态（`Arc` 包裹的 `Once`/`watch`），框架在将 `Reply` 交给 handler 前保留该 completer 的 `Arc` 引用（含回程路由），故 Reply 已 move 进 spawned task 后，handler 返回 `Err` 的 error 路径仍可经同一 completer 完成并发送错误回复。handler 返回 `Err` 的框架 error 路径、`send`、`Drop` 三者都经同一 completer：**首条写入者胜出**——它发出 RESPONSE 并 complete dedup；迟到写入者降级为 logged no-op；**dedup 的 Done 值锁定为实际发出的首条 RESPONSE**（TELL 变体不发 RESPONSE，完成值固定为空字节，见 §6）。这覆盖了 §2 的竞态：reply 已 move 进 spawned task（尚未 send）、handler 又因别的原因返回 `Err` 时，框架 error reply 与 task 的 `send` 只有一个真正落地，另一个成 no-op。wire 层 #268/#263 的孤儿丢弃仍作为第二道防线。
+**幂等 completer（first-write-wins，消解双回复竞态）**：`Reply` 内部持有一个共享完成状态（`Arc` 包裹的 `Once`/`watch`），框架在将 `Reply` 交给 handler 前保留该 completer 的 dispatcher guard（含回程路由），故 Reply 已 move 进 spawned task 后，handler 返回 `Err` 的 error 路径仍可经同一 completer 完成并发送错误回复。guard 也确保 handler 参数的析构不会抢先把真实业务错误替换成通用的 `reply dropped` 错误。handler 返回 `Err` 的框架 error 路径、`send`、最终 `Drop` 三者都经同一 completer：**首条写入者胜出**——它发出 RESPONSE 并 complete dedup；迟到写入者降级为 logged no-op；**dedup 的 Done 值锁定为实际发出的首条 RESPONSE**（TELL 变体不发 RESPONSE，完成值固定为空字节，见 §6）。这覆盖了 §2 的竞态：reply 已 move 进 spawned task（尚未 send）、handler 又因别的原因返回 `Err` 时，框架 error reply 与 task 的 `send` 只有一个真正落地，另一个成 no-op。wire 层 #268/#263 的孤儿丢弃仍作为第二道防线。
 
 **句柄携带的上下文**：`request_id`、回程路由（inproc lane 或 peer gate）、`traceparent/tracestate`（延迟回复仍接续原调用链）、deadline、dedup 完成器。
 
@@ -141,7 +141,14 @@ dedup 条目的完成时刻从“handler 返回”移到“**reply 发出**”�
 
 - `outstanding_replies` gauge；
 - 可执行的 `max_pending_replies` 上限（超出暂停泵 pop，背压）；
-- parked handle 的 TTL/sweep：为 InFlight dedup 条目与 parked Reply 增加独立于完成缓存 TTL 的清扫，超时未完成者以 `ActrError::Timeout` 完成，释放 dedup 条目与 waiter 槽位。
+- parked handle 的 TTL/sweep：为 InFlight dedup 条目与 parked Reply 增加独立于完成缓存 TTL 的清扫，超时未完成者以 `ActrError::TimedOut` 完成，释放 dedup 条目与 waiter 槽位。
+
+**跨语言生命周期**：Rust 的所有权模型可在最后一个未发送的 `Reply<T>` 被
+`Drop` 时立即投递错误；TypeScript、Python、Kotlin 与 Swift 没有一致且可靠的
+等价析构时机。dispatcher 不能在 handler 返回时直接判定“忘记回复”，因为把
+Reply 移入后台任务或 waiter map 后立即返回正是 EXPLICIT 的核心用法。非 Rust
+绑定因此依赖同一套宿主 TTL：到期时由宿主持有的 reply sink 以 `TimedOut` 完成
+call（TELL 只完成 dedup、不发 RESPONSE），并同时回收 Component invocation token。
 
 **双回复竞态（已在 §3 定义，此处重申）**：§2 的 spawn 模式——reply 被 move 进 spawned task（尚未 send），handler 因别的原因返回 Err，框架发 error reply，随后 task 的 send 落地。由 §3 的幂等 first-write-wins completer 消解：首条写入者发 RESPONSE 并 complete dedup，迟到者降级为 logged no-op，dedup Done 值锁定为首条实际发出的 RESPONSE。
 
@@ -153,7 +160,7 @@ dedup 条目的完成时刻从“handler 返回”移到“**reply 发出**”�
 
 - 未决回复计数 gauge（`outstanding_replies`）与受理→回复延迟 histogram；
 - `max_pending_replies: usize`（默认值宽松，benchmark 后定）：未决显式回复超过阈值时暂停泵的 pop，形成天然背压，与 `on_mailbox_backpressure` hook 联动；
-- parked handle TTL/sweep（见 §5）：清扫超时未完成的 InFlight dedup 条目与 parked Reply，以 `ActrError::Timeout` 完成。
+- parked handle TTL/sweep（见 §5）：清扫超时未完成的 InFlight dedup 条目与 parked Reply，以 `ActrError::TimedOut` 完成。
 
 ### 8. 典型场景
 
@@ -206,17 +213,26 @@ C（本案：按方法双签名 + 显式句柄）在“简单场景零成本”�
 ## 兼容性与分期（Compatibility and phasing）
 
 - **wire 零改动**；与 Direction+TELL=3 正交（迟到回复作为孤儿响应被方向路由丢弃的行为，两者共同保证）。
-- **additive**：默认签名与行为完全不变，proto option 是新增项——不占 0.5 破坏窗口，随时可落。
+- protobuf option 本身是 additive，默认 RETURN 行为不变；但 #603 统一生成器入口并
+  扩展 Component guest ABI，属于源码/ABI 迁移。WIT 因 `invocation-ctx` record shape
+  与 required host imports 变化从 0.5.0 升到 0.6.0；宿主在加载阶段拒绝旧 world，
+  并提示使用当前 SDK 重建。
+- 升级 #603 时必须重新运行 `actr gen`，并删除已不再生成的每服务 dispatcher /
+  workload 文件。TypeScript 与 Python 生成会清理当前 local proto 对应的旧
+  `*_workload.ts` / `*_workload.py` 文件；已删除的服务及其手写引用仍需由应用
+  一并移除。无 package 的 Rust proto 在旧生成器中曾使用 `.Service.Method` 路由键，
+  新的统一生成器使用规范的 `Service.Method`；这类调用方和服务端必须一起重新生成，
+  不支持与旧生成产物混合滚动升级。
 - 分期：
   - Phase 1（本 RFC 主体）：options.proto 扩展（tag 50002）、`actr-framework::Reply`（含幂等 completer）、hyper 泵 / dedup 调整（conflict-key 释放、`outstanding_replies` 上限、TTL/sweep）、Rust codegen 双签名、泵契约文档与测试（含 conflict-key 边界、双回复竞态、TELL 完成约定）；
-  - Phase 2：FFI（uniffi 暴露 Reply 对象，Kotlin/Swift 得到同等能力）+ **dynclib 引擎**：`Workload::DynClib` 的 `actr_handle` C ABI 为 sync-world 串行 dispatch，Phase 1 期间 codegen 对 dynclib 目标遇 EXPLICIT 选项**报错而非降级**（与 wasm 同策），Phase 2 落地同等能力；
-  - Phase 3：WIT guest ABI 扩展。运行时现仅支持单一 world——wit-v2 0.2.0（`dispatch` 已是 `async func`、可多调用并发 in-flight，但**仍返回 bytes**）；退役的 wit-v1（sync, @0.1.0）在加载时即被 `probe_world` 拒绝，仅作为浏览器 web-abi 的生成源保留（#381）。需新增 `send-reply` host import，让 `dispatch` 返回 `replied(bytes) | deferred` 变体。在此之前 WASM guest 仅支持 RETURN 模式，codegen 对 wasm 目标遇 EXPLICIT 选项报错而非静默降级（reject-don't-degrade 策略不变）。
+  - Phase 2（#603）：FFI Context 暴露显式 reply boundary；Kotlin/Swift 生成器注入可移动 `Reply<T>`。新 dispatcher 先 `claimReply`，旧 dispatcher 的返回 bytes 则走迁移兜底；显式标记避免把合法的零字节 protobuf 响应误认成 deferred marker；
+  - Phase 3（#603）：WIT guest ABI 升到 `actr:workload@0.6.0`，增加 `reply` / `reply-sync` / `reply-error-sync` host imports，并在 `invocation-ctx` 携带 reply flags。Rust/TypeScript/Python workload 均使用同一显式回复边界；`probe_world` 对 0.1.0–0.5.0 给出可诊断的重建提示。
 
 ## 未决问题（Unresolved questions）
 
 1. ~~`reply_mode` 的 proto extension tag 号~~ → 已定 50002（`payload_type` 持有 50001）；
 2. `max_pending_replies` 默认值与 parked handle TTL 的具体取值（benchmark 后定）；
-3. FFI 侧 `Reply` 对象的生命周期约定（uniffi 对象跨语言 Drop 语义需验证）。
+3. ~~FFI 侧 `Reply` 对象的生命周期约定~~ → 不依赖跨语言 Drop；保留句柄合法，遗漏发送由宿主 TTL 统一以 `TimedOut` 收口。
 
 ## 未来可能性（Future possibilities）
 

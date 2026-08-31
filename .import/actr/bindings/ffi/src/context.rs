@@ -1,9 +1,12 @@
-use actr_framework::{Bytes, Context, DataChunk, Dest, MediaSample as FrameworkMediaSample};
+use actr_framework::{
+    Bytes, Context, DataChunk, Dest, MediaSample as FrameworkMediaSample, ReplyOutcome,
+};
 use actr_hyper::context::RuntimeContext;
 use actr_protocol::{ActrId, PayloadType};
 use async_trait::async_trait;
 use std::any::TypeId;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::error::run_on_tokio_runtime;
 use crate::{ActrError, ActrResult};
@@ -36,6 +39,7 @@ pub trait MediaTrackCallback: Send + Sync + 'static {
 #[derive(uniffi::Object, Clone)]
 pub struct ContextBridge {
     pub(crate) inner: RuntimeContext,
+    reply_claimed: Arc<AtomicBool>,
 }
 
 impl ContextBridge {
@@ -56,7 +60,12 @@ impl ContextBridge {
         let runtime_ctx = unsafe { &*(ctx as *const C as *const RuntimeContext) };
         Ok(Arc::new(Self {
             inner: runtime_ctx.clone(),
+            reply_claimed: Arc::new(AtomicBool::new(false)),
         }))
+    }
+
+    pub(crate) fn reply_was_claimed(&self) -> bool {
+        self.reply_claimed.load(Ordering::Acquire)
     }
 }
 
@@ -117,6 +126,61 @@ impl ContextBridge {
         })
         .await?;
         Ok(resp.to_vec())
+    }
+
+    /// Deliver a response through the current inbound RPC reply boundary.
+    pub async fn reply_raw(&self, payload: Vec<u8>) -> crate::error::ActrResult<()> {
+        let deliver = self
+            .inner
+            .reply_deliver()
+            .ok_or_else(|| ActrError::Internal {
+                msg: "reply_raw requires an EXPLICIT inbound RPC context".to_string(),
+            })?;
+        self.reply_claimed.store(true, Ordering::Release);
+        deliver.deliver(ReplyOutcome {
+            request_id: self.inner.request_id().to_string(),
+            result: Ok(Bytes::from(payload)),
+            emit_response: self.inner.expects_response(),
+        });
+        Ok(())
+    }
+
+    /// Deliver an error response through the current inbound RPC reply boundary.
+    pub async fn reply_error(&self, error: ActrError) -> crate::error::ActrResult<()> {
+        let deliver = self
+            .inner
+            .reply_deliver()
+            .ok_or_else(|| ActrError::Internal {
+                msg: "reply_error requires an EXPLICIT inbound RPC context".to_string(),
+            })?;
+        self.reply_claimed.store(true, Ordering::Release);
+        deliver.deliver(ReplyOutcome {
+            request_id: self.inner.request_id().to_string(),
+            result: Err(error.into()),
+            emit_response: self.inner.expects_response(),
+        });
+        Ok(())
+    }
+
+    /// Claim responsibility for delivering this invocation's response later.
+    ///
+    /// Generated EXPLICIT handlers call this before handing the movable reply
+    /// handle to user code. It distinguishes a deliberately deferred reply
+    /// from the return value of an older generated dispatcher, whose payload
+    /// may legitimately encode to zero bytes.
+    pub async fn claim_reply(&self) -> crate::error::ActrResult<()> {
+        self.inner
+            .reply_deliver()
+            .ok_or_else(|| ActrError::Internal {
+                msg: "claim_reply requires an EXPLICIT inbound RPC context".to_string(),
+            })?;
+        if !self.inner.claim_reply() {
+            return Err(ActrError::Internal {
+                msg: "claim_reply requires an EXPLICIT inbound RPC context".to_string(),
+            });
+        }
+        self.reply_claimed.store(true, Ordering::Release);
+        Ok(())
     }
 
     /// Send a one-way message to an actor (fire-and-forget)

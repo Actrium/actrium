@@ -8,6 +8,16 @@ public final class {{SERVICE_NAME}}HandlerImpl: ActrDispatchHandler {
     public init() {}
 
 {{#each METHODS}}
+{{#if is_explicit}}
+    public func {{swift_name}}(
+        req: {{input_type}},
+        ctx: any ActrContext,
+        reply: Reply<{{output_type}}>
+    ) async throws(ActrError) {
+        try await reply.send({{output_type}}())
+    }
+
+{{else}}
     public func {{swift_name}}(
         req: {{input_type}},
         ctx: any ActrContext
@@ -15,5 +25,6 @@ public final class {{SERVICE_NAME}}HandlerImpl: ActrDispatchHandler {
         throw ActrError.NotImplemented(msg: "{{name}} is not implemented")
     }
 
+{{/if}}
 {{/each}}
 }

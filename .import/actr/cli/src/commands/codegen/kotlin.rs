@@ -1,4 +1,5 @@
 use crate::commands::SupportedLanguage;
+use crate::commands::codegen::dispatch_spec::ReplyMode;
 use crate::commands::codegen::scaffold::{ScaffoldCatalog, ScaffoldService};
 use crate::commands::codegen::traits::{GenContext, LanguageGenerator};
 use crate::error::{ActrCliError, Result};
@@ -42,6 +43,7 @@ struct MethodInfo {
     request_import: String,
     /// Kotlin import path for the response type's declaring proto file.
     response_import: String,
+    reply_mode: ReplyMode,
 }
 
 impl KotlinGenerator {
@@ -687,7 +689,7 @@ impl LanguageGenerator for KotlinGenerator {
         println!("5. 🏗️  Build project: ./gradlew build");
         println!("6. 🧪 Run tests: ./gradlew connectedAndroidTest");
         println!(
-            "\n💡 Tip: The UnifiedDispatcher routes local requests to your handler and remote requests via RPC"
+            "\n💡 Tip: actrDispatch routes local requests to your handler and remote requests via RPC"
         );
     }
 }
@@ -715,6 +717,7 @@ fn kotlin_service_info(service: ScaffoldService, is_local: bool) -> Result<Servi
                 response_type,
                 request_import: String::new(),
                 response_import: String::new(),
+                reply_mode: method.reply_mode,
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -944,7 +947,7 @@ fn generate_unified_handler_scaffold(services: &[ServiceInfo], kotlin_package: &
             r#"/**
  * No local services - this file is a placeholder
  *
- * All services are remote and will be handled by the UnifiedDispatcher.
+ * All services are remote and will be handled by the shared actrDispatch entry point.
  */
 package {base_package}
 
@@ -964,12 +967,36 @@ package {base_package}
         imports.push_str(&type_imports);
         imports.push('\n');
     }
+    if local_services
+        .iter()
+        .flat_map(|service| service.methods.iter())
+        .any(|method| method.reply_mode == ReplyMode::Explicit)
+    {
+        imports.push_str("import io.actrium.actr.dsl.Reply\n");
+    }
 
     for service in &local_services {
         // Generate method implementations for each RPC method
         for method in &service.methods {
-            method_impls.push_str(&format!(
-                r#"
+            if method.reply_mode == ReplyMode::Explicit {
+                method_impls.push_str(&format!(
+                    r#"
+    /**
+     * Handle {} request for {} service using an explicit reply handle.
+     */
+    override suspend fun {}(request: {}, ctx: ActrContext, reply: Reply<{}>): Unit {{
+        TODO("Not yet implemented")
+    }}
+"#,
+                    method.name,
+                    service.service_name,
+                    method.name,
+                    method.request_type,
+                    method.response_type,
+                ));
+            } else {
+                method_impls.push_str(&format!(
+                    r#"
     /**
      * Handle {} request for {} service
      *
@@ -981,14 +1008,15 @@ package {base_package}
         TODO("Not yet implemented")
     }}
 "#,
-                method.name,
-                service.service_name,
-                method.request_type,
-                method.response_type,
-                method.name,
-                method.request_type,
-                method.response_type
-            ));
+                    method.name,
+                    service.service_name,
+                    method.request_type,
+                    method.response_type,
+                    method.name,
+                    method.request_type,
+                    method.response_type
+                ));
+            }
         }
 
         // Add a separator comment between services

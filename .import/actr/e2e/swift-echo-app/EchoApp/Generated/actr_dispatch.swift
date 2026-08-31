@@ -25,23 +25,28 @@ public func actrDispatch(
             )
         }
         let resp = try await handler.send(req: req, ctx: ctx)
+        let encoded: Data
         do {
-            return try resp.serializedData()
+            encoded = try resp.serializedData()
         } catch {
             throw ActrError.DecodeFailure(
                 msg: "Failed to encode Echoapp_LocalEchoResponse for route \(routeKey): \(error)"
             )
         }
+        try await ctx.replyRaw(payload: encoded)
+        return Data()
     case "echo.EchoService.Echo":
         let actrType = try await ctx.resolveDependency(alias: "echo")
         let target = try await ctx.discover(targetType: actrType)
-        return try await ctx.callRaw(
+        let response = try await ctx.callRaw(
             target: target,
             routeKey: routeKey,
             payloadType: .rpcReliable,
             payload: payload,
             timeoutMs: timeoutMs
         )
+        try await ctx.replyRaw(payload: response)
+        return Data()
     default:
         throw ActrError.UnknownRoute(msg: "Unknown route: \(routeKey)")
     }

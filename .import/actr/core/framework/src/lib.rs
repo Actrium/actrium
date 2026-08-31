@@ -147,7 +147,7 @@ pub mod test_support;
 pub use context::{Context, LogLevel, MaybeSendBoxFuture, MaybeSendSync, MediaSample, MediaType};
 pub use dest::Dest;
 pub use dispatcher::MessageDispatcher;
-pub use reply::{Deliver, Reply, ReplyDeadline, ReplyOutcome};
+pub use reply::{Deliver, Reply, ReplyDeadline, ReplyDispatchGuard, ReplyOutcome};
 pub use workload::{
     BackpressureEvent, CredentialEvent, ErrorCategory, ErrorEvent, PeerEvent, WebRtcNetworkPath,
     WebRtcPeerState, WebRtcPeerStatus, WebRtcUnavailableReason, Workload,

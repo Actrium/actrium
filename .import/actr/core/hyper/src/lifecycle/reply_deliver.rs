@@ -14,16 +14,21 @@
 //! §4 the pump ACKs at dispatch-completion (handler return), before the reply.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Weak;
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 
 use actr_framework::{Deliver, ReplyOutcome};
-use actr_protocol::ActrId;
+use actr_protocol::{ActrError, ActrId};
 use bytes::Bytes;
 use tokio::sync::Mutex;
 
 use crate::lifecycle::dedup::DedupState;
-use crate::lifecycle::outstanding_replies::OutstandingReplies;
+use crate::lifecycle::outstanding_replies::{OutstandingReplies, ReplyAttemptId};
 use crate::transport::HostTransport;
+
+const DELIVER_PENDING: u8 = 0;
+const DELIVERED: u8 = 1;
+const DELIVER_TIMED_OUT: u8 = 2;
 
 /// Path-specific reply routing state, captured by the receive loop and passed
 /// to [`Inner::admit_incoming`](crate::lifecycle::Inner::admit_incoming) so the
@@ -49,11 +54,16 @@ struct ReplyShared {
     ws_gate: Option<Arc<crate::wire::websocket::WebSocketGate>>,
     v020_route: crate::lifecycle::node::V020ResponseRoute,
     dedup_state: Arc<Mutex<DedupState>>,
-    outstanding_replies: Arc<OutstandingReplies>,
+    outstanding_replies: Weak<OutstandingReplies>,
+    attempt_id: ReplyAttemptId,
     request_id: String,
     route_key: String,
     traceparent: Option<String>,
     tracestate: Option<String>,
+    emit_response: bool,
+    /// Runtime captured at admission so a movable Reply can be completed
+    /// from a non-Tokio callback thread without losing its outcome.
+    runtime_handle: Option<tokio::runtime::Handle>,
 }
 
 /// The `Deliver` impl for EXPLICIT dispatch. Cloned into a spawned task on
@@ -63,13 +73,12 @@ struct ReplyShared {
 pub(crate) struct ReplyDeliver {
     shared: ReplyShared,
     sink: ReplySinkClone,
-    /// First-write-wins gate for `deliver` (RFC-0323 §5). CAS'd from `false`
-    /// to `true` inside [`Deliver::deliver`]; the losing caller degrades to a
-    /// logged no-op. This coordinates the three callers that can reach
-    /// `deliver` — the pump's EXPLICIT-Err path, a spawned `Reply::send`, and
-    /// the `Reply::Drop` fallback — so only one emits a RESPONSE and completes
-    /// the dedup entry, preventing both wire double-send and the dedup
-    /// `Done(Err)`→`Done(Ok)` cache flip.
+    /// First-write-wins gate for `deliver` (RFC-0323 §5). The pending state is
+    /// atomically claimed by either a normal delivery or the TTL timeout; the
+    /// losing caller degrades to a logged no-op. This coordinates the three
+    /// normal callers — the pump's EXPLICIT-Err path, a spawned `Reply::send`,
+    /// and the `Reply::Drop` fallback — with the TTL sweep.
+    state: Arc<AtomicU8>,
     delivered: Arc<AtomicBool>,
 }
 
@@ -92,13 +101,17 @@ impl ReplyDeliver {
         v020_route: crate::lifecycle::node::V020ResponseRoute,
         dedup_state: Arc<Mutex<DedupState>>,
         outstanding_replies: Arc<OutstandingReplies>,
+        attempt_id: ReplyAttemptId,
         request_id: String,
         route_key: String,
         traceparent: Option<String>,
         tracestate: Option<String>,
         sink: ReplySink,
+        emit_response: bool,
     ) -> (Self, Arc<AtomicBool>) {
+        let state = Arc::new(AtomicU8::new(DELIVER_PENDING));
         let delivered = Arc::new(AtomicBool::new(false));
+        let runtime_handle = tokio::runtime::Handle::try_current().ok();
         let sink_clone = match sink {
             ReplySink::Mailbox {
                 caller,
@@ -123,42 +136,139 @@ impl ReplyDeliver {
                     ws_gate,
                     v020_route,
                     dedup_state,
-                    outstanding_replies,
+                    outstanding_replies: Arc::downgrade(&outstanding_replies),
+                    attempt_id,
                     request_id,
                     route_key,
                     traceparent,
                     tracestate,
+                    emit_response,
+                    runtime_handle,
                 },
                 sink: sink_clone,
+                state,
                 delivered: delivered.clone(),
             },
             delivered,
         )
     }
 
-    async fn deliver_async(self, outcome: ReplyOutcome) {
+    /// Complete this reply with the TTL timeout through the same
+    /// first-write-wins state used by `Reply::send` and `Reply::Drop`.
+    ///
+    /// The timeout path deliberately leaves dedup completion to the node's
+    /// scoped InFlight sweep. That sweep must remove the old request entry so a
+    /// same-ID retry can start; skipping a second `dedup.complete(request_id)`
+    /// here prevents this old task from completing the retried entry.
+    pub(crate) fn deliver_timeout(&self) -> bool {
+        self.try_deliver(
+            ReplyOutcome {
+                request_id: self.shared.request_id.clone(),
+                result: Err(ActrError::TimedOut),
+                emit_response: self.shared.emit_response,
+            },
+            false,
+        )
+    }
+
+    /// Whether no delivery task owns this reply. A TTL sweep uses this to
+    /// reclaim a reply whose synchronous delivery was rolled back because no
+    /// Tokio runtime was available.
+    pub(crate) fn is_pending(&self) -> bool {
+        self.state.load(Ordering::Acquire) == DELIVER_PENDING
+    }
+
+    fn try_deliver(&self, outcome: ReplyOutcome, complete_dedup: bool) -> bool {
+        let winning_state = if complete_dedup {
+            DELIVERED
+        } else {
+            DELIVER_TIMED_OUT
+        };
+        if self
+            .state
+            .compare_exchange(
+                DELIVER_PENDING,
+                winning_state,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            )
+            .is_err()
+        {
+            tracing::debug!(
+                request_id = %self.shared.request_id,
+                "explicit reply: late deliver degraded to no-op (RFC §5 first-write-wins)"
+            );
+            return false;
+        }
+        self.delivered.store(true, Ordering::Release);
+
+        // Spawn off the current task so the sync `Deliver` call (fired inside
+        // the `Completer` mutex or the pump continuation) never blocks. Prefer
+        // the current runtime, but fall back to the runtime captured at
+        // admission so a movable Reply can be completed off-runtime.
+        let handle = tokio::runtime::Handle::try_current()
+            .ok()
+            .or_else(|| self.shared.runtime_handle.clone());
+        match handle {
+            Some(handle) => {
+                let me = self.clone();
+                handle.spawn(async move {
+                    me.deliver_async(outcome, complete_dedup).await;
+                });
+                true
+            }
+            None => {
+                self.state
+                    .compare_exchange(
+                        winning_state,
+                        DELIVER_PENDING,
+                        Ordering::AcqRel,
+                        Ordering::Acquire,
+                    )
+                    .ok();
+                self.delivered.store(false, Ordering::Release);
+                tracing::warn!(
+                    request_id = %self.shared.request_id,
+                    "Deliver::deliver has no Tokio runtime; reply remains pending \
+                     for the next TTL sweep"
+                );
+                false
+            }
+        }
+    }
+
+    async fn deliver_async(self, outcome: ReplyOutcome, complete_dedup: bool) {
         let ReplyOutcome {
-            request_id,
+            request_id: _,
             result,
             emit_response,
         } = outcome;
 
-        // Dedup completion: for a TELL (emit_response=false) + Ok, cache empty
-        // bytes (the response payload was never sent); otherwise cache the
-        // real result so a retry observes the recorded outcome.
-        let cached = match (&result, emit_response) {
-            (Ok(_), false) => Ok(Bytes::new()),
-            _ => result.clone(),
-        };
-        self.shared
-            .dedup_state
-            .lock()
-            .await
-            .complete(&request_id, cached);
+        if complete_dedup {
+            // Dedup completion: for a TELL (emit_response=false) + Ok, cache
+            // empty bytes (the response payload was never sent); otherwise
+            // cache the real result so a retry observes the recorded outcome.
+            // Always use the request ID captured when this deliver was
+            // admitted, not a mutable/retried request's ID.
+            let cached = match (&result, emit_response) {
+                (Ok(_), false) => Ok(Bytes::new()),
+                _ => result.clone(),
+            };
+            self.shared
+                .dedup_state
+                .lock()
+                .await
+                .complete(&self.shared.request_id, cached);
+        }
 
         // Release the outstanding-reply registry slot (RFC-0323 §5/§7 gauge).
-        // Idempotent: if a sweep already evicted it, this is a no-op.
-        self.shared.outstanding_replies.complete(&request_id).await;
+        // Idempotent: if a sweep already evicted this attempt, this is a no-op.
+        // The attempt ID is essential when the same request ID is retried.
+        if let Some(outstanding_replies) = self.shared.outstanding_replies.upgrade() {
+            outstanding_replies
+                .complete_attempt(self.shared.attempt_id)
+                .await;
+        }
 
         // Send the RESPONSE envelope (if emit_response). The mailbox ACK is
         // NOT done here: per RFC-0323 §4 the EXPLICIT pump ACKs at
@@ -209,37 +319,6 @@ impl Deliver for ReplyDeliver {
         // logged no-op. This prevents the double-RESPONSE / dedup cache-flip
         // race where a late `reply.send(Ok)` would overwrite the pump's
         // `Done(Err)` and emit a second wire reply.
-        if self
-            .delivered
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            tracing::debug!(
-                request_id = %self.shared.request_id,
-                "explicit reply: late deliver degraded to no-op (RFC §5 first-write-wins)"
-            );
-            return;
-        }
-        // Spawn off the current task so the sync `Deliver` call (fired inside
-        // the `Completer` mutex or the pump continuation) never blocks. Use
-        // `Handle::try_current` instead of bare `tokio::spawn` so a `deliver`
-        // fired off-runtime (e.g. a drop on a foreign thread) degrades to a
-        // logged miss instead of panicking and poisoning the Completer mutex.
-        match tokio::runtime::Handle::try_current() {
-            Ok(handle) => {
-                let me = self.clone();
-                handle.spawn(async move {
-                    me.deliver_async(outcome).await;
-                });
-            }
-            Err(err) => {
-                tracing::warn!(
-                    request_id = %self.shared.request_id,
-                    error = %err,
-                    "Deliver::deliver off-runtime: reply dropped; \
-                     InFlight TTL sweep will free the dedup slot + outstanding gauge"
-                );
-            }
-        }
+        self.try_deliver(outcome, true);
     }
 }

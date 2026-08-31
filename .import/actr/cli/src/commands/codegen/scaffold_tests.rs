@@ -15,8 +15,6 @@ fn from_metadata_maps_local_and_remote_to_scaffold_services() {
             package: "echo".into(),
             proto_file: "echo.proto".into(),
             handler_interface: "EchoServiceHandler".into(),
-            workload_type: "EchoServiceWorkload".into(),
-            dispatcher_type: "EchoServiceDispatcher".into(),
             methods: vec![crate::commands::codegen::metadata::MethodMetadata {
                 name: "Echo".into(),
                 snake_name: "echo".into(),

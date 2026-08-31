@@ -16,7 +16,6 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
-import com.example.generated.EchoServiceDispatcher
 import com.example.generated.EchoServiceHandler
 import echo.Echo.EchoRequest
 import echo.Echo.EchoResponse
@@ -311,7 +310,17 @@ class ServerActivity : AppCompatActivity() {
         override suspend fun dispatch(
             ctx: ActrContext,
             envelope: RpcEnvelope,
-        ): ByteArray = EchoServiceDispatcher.dispatch(this, ctx, envelope)
+        ): ByteArray {
+            if (envelope.routeKey != "echo.EchoService.Echo") {
+                throw io.actrium.actr.ActrException.UnknownRoute(
+                    "Unknown route key: ${envelope.routeKey}",
+                )
+            }
+            val request = EchoRequest.parseFrom(envelope.payload)
+            val response = echo(request, ctx)
+            ctx.replyRaw(response.toByteArray())
+            return ByteArray(0)
+        }
 
         // -- Handler method --
         override suspend fun echo(

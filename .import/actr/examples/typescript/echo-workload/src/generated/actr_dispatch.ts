@@ -51,17 +51,20 @@ export async function actrDispatch(
     case "echo.EchoService.Echo": {
       const req = fromBinary(EchoRequestSchema, payload);
       const resp = await handler.echoServiceEcho(req, ctx);
-      return toBinary(EchoResponseSchema, resp);
+      await ctx.replyRaw(toBinary(EchoResponseSchema, resp));
+      return new Uint8Array();
     }
     case "echo.EchoService.PrepareStream": {
       const req = fromBinary(StreamPrepareRequestSchema, payload);
       const resp = await handler.echoServicePrepareStream(req, ctx);
-      return toBinary(StreamPrepareResponseSchema, resp);
+      await ctx.replyRaw(toBinary(StreamPrepareResponseSchema, resp));
+      return new Uint8Array();
     }
     case "echo.EchoService.ReleaseStream": {
       const req = fromBinary(StreamReleaseRequestSchema, payload);
       const resp = await handler.echoServiceReleaseStream(req, ctx);
-      return toBinary(StreamReleaseResponseSchema, resp);
+      await ctx.replyRaw(toBinary(StreamReleaseResponseSchema, resp));
+      return new Uint8Array();
     }
     default:
       throw new Error(`UnknownRoute: ${routeKey}`);

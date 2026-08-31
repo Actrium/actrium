@@ -1,30 +1,28 @@
 use super::*;
-use crate::commands::codegen::ProtoSide;
 use tempfile::TempDir;
 
 #[test]
-fn parses_proto_content_from_real_service_definitions() {
-    let generator = TypeScriptGenerator;
-    let (package, services) = generator.parse_proto_content(
-        r#"
-            syntax = "proto3";
+fn stale_workload_cleanup_requires_the_typescript_generator_banner() {
+    let tmp = TempDir::new().unwrap();
+    let output = tmp.path().join("generated");
+    let workload = output.join("echo_workload.ts");
+    let legacy_modules = std::collections::BTreeSet::from(["echo_workload".to_string()]);
 
-            package demo.echo;
+    std::fs::create_dir_all(&output).unwrap();
+    std::fs::write(&workload, "// user-owned module\n").unwrap();
+    super::remove_stale_legacy_workloads(&output, &legacy_modules).unwrap();
+    assert!(workload.exists(), "same-named user module must be retained");
 
-            service EchoService {
-              rpc Echo(EchoRequest) returns (EchoResponse);
-              rpc Ping(demo.echo.PingRequest) returns (demo.echo.PingResponse);
-            }
-            "#,
+    std::fs::write(
+        &workload,
+        format!("// DO NOT EDIT.\n{LEGACY_TYPESCRIPT_WORKLOAD_HEADER}\n"),
+    )
+    .unwrap();
+    super::remove_stale_legacy_workloads(&output, &legacy_modules).unwrap();
+    assert!(
+        !workload.exists(),
+        "legacy generated module must be removed"
     );
-
-    assert_eq!(package, "demo.echo");
-    assert_eq!(services.len(), 1);
-    assert_eq!(services[0].name, "EchoService");
-    assert_eq!(services[0].methods.len(), 2);
-    assert_eq!(services[0].methods[0].name, "Echo");
-    assert_eq!(services[0].methods[0].input_type_short, "EchoRequest");
-    assert_eq!(services[0].methods[1].output_type_short, "PingResponse");
 }
 
 #[test]
@@ -123,12 +121,8 @@ fn generates_scaffold_with_local_and_remote_sections() {
     let scaffold = generator.generate_scaffold_content(&[
         BoundMethodInfo {
             generated_client_import: "./generated/echo_client".to_string(),
-            generated_workload_import: "./generated/echo_workload.js".to_string(),
             service_name: "EchoService".to_string(),
-            handler_interface: "EchoServiceHandler".to_string(),
-            dispatcher_type: "EchoServiceDispatcher".to_string(),
             method_name: "Echo".to_string(),
-            handler_method_name: "echo".to_string(),
             input_type: "EchoRequest".to_string(),
             output_type: "EchoResponse".to_string(),
             input_type_short: "EchoRequest".to_string(),
@@ -137,15 +131,12 @@ fn generates_scaffold_with_local_and_remote_sections() {
             output_pb_import: "./generated/echo_pb.js".to_string(),
             request_companion: Some("EchoRequest".to_string()),
             is_local: true,
+            reply_mode: ReplyMode::Return,
         },
         BoundMethodInfo {
             generated_client_import: "./generated/demo/remote_client".to_string(),
-            generated_workload_import: String::new(),
             service_name: "RemoteService".to_string(),
-            handler_interface: String::new(),
-            dispatcher_type: String::new(),
             method_name: "Ping".to_string(),
-            handler_method_name: "ping".to_string(),
             input_type: "PingRequest".to_string(),
             output_type: "PingResponse".to_string(),
             input_type_short: "PingRequest".to_string(),
@@ -154,6 +145,7 @@ fn generates_scaffold_with_local_and_remote_sections() {
             output_pb_import: "./generated/demo/remote_pb.js".to_string(),
             request_companion: Some("PingRequest".to_string()),
             is_local: false,
+            reply_mode: ReplyMode::Return,
         },
     ]);
 
@@ -178,45 +170,27 @@ fn generates_scaffold_with_local_and_remote_sections() {
 }
 
 #[test]
-fn local_workload_imports_imported_types_from_their_owner_module() {
-    // A local `data_stream_app` service references `ask.*` message types
-    // declared in `remote/ask-service/ask.proto`. The workload dispatcher must
-    // import those types from the owner module (`./ask-service/ask_pb.js`),
-    // not from the local service's proto stem.
-    let module = LocalWorkloadModule {
-        name: "data_stream_app_workload".to_string(),
-        services: vec![LocalWorkloadService {
-            name: "DataStreamAppService".to_string(),
-            handler_interface: "DataStreamAppServiceHandler".to_string(),
-            dispatcher_type: "DataStreamAppServiceDispatcher".to_string(),
-            methods: vec![LocalWorkloadMethod {
-                name: "ContinuePromptResultStreams".to_string(),
-                handler_method_name: "continuePromptResultStreams".to_string(),
-                input_type_short: "ContinuePromptResultStreamsRequest".to_string(),
-                output_type_short: "ContinuePromptResultStreamsResponse".to_string(),
-                route_key: "data_stream_app.DataStreamAppService.ContinuePromptResultStreams"
-                    .to_string(),
-                input_pb_import: "./ask-service/ask_pb.js".to_string(),
-                output_pb_import: "./ask-service/ask_pb.js".to_string(),
-            }],
-        }],
-    };
-
-    let content = generate_local_workload_content(&module);
+fn explicit_scaffold_handler_is_async() {
+    let generator = TypeScriptGenerator;
+    let scaffold = generator.generate_scaffold_content(&[BoundMethodInfo {
+        generated_client_import: "./generated/echo_client".to_string(),
+        service_name: "EchoService".to_string(),
+        method_name: "Echo".to_string(),
+        input_type: "EchoRequest".to_string(),
+        output_type: "EchoResponse".to_string(),
+        input_type_short: "EchoRequest".to_string(),
+        output_type_short: "EchoResponse".to_string(),
+        input_pb_import: "./generated/echo_pb.js".to_string(),
+        output_pb_import: "./generated/echo_pb.js".to_string(),
+        request_companion: Some("EchoRequest".to_string()),
+        is_local: true,
+        reply_mode: ReplyMode::Explicit,
+    }]);
 
     assert!(
-        content.contains("from './ask-service/ask_pb.js'"),
-        "expected owner module import, got:\n{content}"
+        scaffold.contains("async echoServiceEcho(_req: EchoRequest, _ctx: ActrContext, reply: Reply<EchoResponse>): Promise<void> {")
     );
-    assert!(
-        !content.contains("from './data_stream_app_pb.js'"),
-        "must not pin imported types to the local service proto stem:\n{content}"
-    );
-    assert!(content.contains("ContinuePromptResultStreamsRequest"));
-    assert!(content.contains("ContinuePromptResultStreamsResponseSchema"));
-    assert!(content.contains("InvocationCtx, RpcEnvelope"));
-    assert!(content.contains("ctx?: InvocationCtx"));
-    assert!(content.contains("continuePromptResultStreams(request, ctx)"));
+    assert!(scaffold.contains("await reply.send(create(EchoResponseSchema, {}));"));
 }
 
 #[test]
@@ -227,12 +201,8 @@ fn user_scaffold_imports_imported_types_from_owner_module() {
     let generator = TypeScriptGenerator;
     let scaffold = generator.generate_scaffold_content(&[BoundMethodInfo {
         generated_client_import: String::new(),
-        generated_workload_import: "./generated/data_stream_app_workload.js".to_string(),
         service_name: "DataStreamAppService".to_string(),
-        handler_interface: "DataStreamAppServiceHandler".to_string(),
-        dispatcher_type: "DataStreamAppServiceDispatcher".to_string(),
         method_name: "ContinuePromptResultStreams".to_string(),
-        handler_method_name: "continuePromptResultStreams".to_string(),
         input_type: "ContinuePromptResultStreamsRequest".to_string(),
         output_type: "ContinuePromptResultStreamsResponse".to_string(),
         input_type_short: "ContinuePromptResultStreamsRequest".to_string(),
@@ -241,6 +211,7 @@ fn user_scaffold_imports_imported_types_from_owner_module() {
         output_pb_import: "./generated/ask-service/ask_pb.js".to_string(),
         request_companion: None,
         is_local: true,
+        reply_mode: ReplyMode::Return,
     }]);
 
     assert!(
@@ -267,12 +238,8 @@ fn user_scaffold_imports_nested_local_types_from_owner_module() {
     let generator = TypeScriptGenerator;
     let scaffold = generator.generate_scaffold_content(&[BoundMethodInfo {
         generated_client_import: String::new(),
-        generated_workload_import: "./generated/app_workload.js".to_string(),
         service_name: "AppService".to_string(),
-        handler_interface: "AppServiceHandler".to_string(),
-        dispatcher_type: "AppServiceDispatcher".to_string(),
         method_name: "UsePayload".to_string(),
-        handler_method_name: "usePayload".to_string(),
         input_type: "PayloadRequest".to_string(),
         output_type: "PayloadResponse".to_string(),
         input_type_short: "PayloadRequest".to_string(),
@@ -281,6 +248,7 @@ fn user_scaffold_imports_nested_local_types_from_owner_module() {
         output_pb_import: scaffold_proto_import_for("local/foo/bar/payload.proto"),
         request_companion: None,
         is_local: true,
+        reply_mode: ReplyMode::Return,
     }]);
 
     assert!(
@@ -294,49 +262,10 @@ fn user_scaffold_imports_nested_local_types_from_owner_module() {
 }
 
 #[test]
-fn workload_import_path_only_strips_exact_source_marker() {
-    assert_eq!(workload_pb_import_path("local/foo.proto"), "./foo_pb.js");
-    assert_eq!(
-        workload_pb_import_path("remote/ask-service/ask.proto"),
-        "./ask-service/ask_pb.js"
-    );
-    assert_eq!(
-        workload_pb_import_path("localization/foo.proto"),
-        "./localization/foo_pb.js"
-    );
-    assert_eq!(
-        workload_pb_import_path("remote-control/foo.proto"),
-        "./remote-control/foo_pb.js"
-    );
-}
-
-#[test]
 fn unified_handler_name_preserves_acronym_boundaries() {
     assert_eq!(
         typescript_dispatch_handler_method_name("HTTPService", "ParseURL"),
         "httpServiceParseUrl"
-    );
-}
-
-#[test]
-fn workload_import_errors_on_unresolved_qualified_type() {
-    let current_file = ProtoFileModel {
-        proto_file: "local/client.proto".into(),
-        relative_path: "local/client.proto".into(),
-        package: "client".to_string(),
-        side: ProtoSide::Local,
-        declared_type_names: vec!["Request".to_string()],
-        services: vec![],
-    };
-    let owner_index = TypeOwnerIndex::from_files(std::slice::from_ref(&current_file));
-
-    let err = resolve_workload_pb_import("google.protobuf.Empty", &current_file, &owner_index)
-        .expect_err("unresolved qualified type should not fall back to current pb module");
-
-    assert!(
-        err.to_string()
-            .contains("Cannot resolve RPC type `google.protobuf.Empty`"),
-        "unexpected error message: {err}"
     );
 }
 

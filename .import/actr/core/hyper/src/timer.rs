@@ -265,10 +265,10 @@ timer_inventory! {
         reset: "new dequeue failure", external: false
     },
     INFLIGHT_TTL_SWEEP => {
-        id: "lifecycle.dedup.inflight_ttl_sweep", owner: "node.dedup", category: CompatibilityPolling,
+        id: "lifecycle.dedup.inflight_ttl_sweep", owner: "node.dedup + wasm resident region", category: CompatibilityPolling,
         duration: "fixed 5s", arm: "EXPLICIT Reply may be parked indefinitely (RFC-0323 §7)",
         success: "sweep tick", interrupt: "node shutdown",
-        expiry: "evict aged InFlight + outstanding-reply entries", reset: "each sweep tick",
+        expiry: "evict aged InFlight + outstanding-reply entries and Component invocation tokens", reset: "each sweep tick",
         external: false
     },
     PEER_SEND_BACKOFF => {

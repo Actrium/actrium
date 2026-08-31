@@ -22,9 +22,10 @@
 #![cfg(all(feature = "wasm-engine", actr_wasm_fixture_available))]
 
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use actr_framework::{Deliver, ReplyOutcome};
 use actr_hyper::config::WasmRuntimeLimits;
 use actr_hyper::test_support::instantiate_wasm_workload;
 use actr_hyper::wasm::{WasmError, WasmHost};
@@ -179,6 +180,20 @@ fn captured_context_chunk() -> DataChunk {
     }
 }
 
+#[derive(Default)]
+struct CapturingDeliver {
+    outcomes: Mutex<Vec<ReplyOutcome>>,
+}
+
+impl Deliver for CapturingDeliver {
+    fn deliver(&self, outcome: ReplyOutcome) {
+        self.outcomes
+            .lock()
+            .expect("capturing deliver mutex poisoned")
+            .push(outcome);
+    }
+}
+
 // ─── Test 1 — basic async dispatch round-trip ───────────────────────────────
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -198,6 +213,40 @@ async fn component_model_basic_echo_round_trip() {
         .await
         .expect("echo dispatch should succeed");
     assert_eq!(reply, payload, "test/echo must round-trip the payload");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn component_model_explicit_reply_uses_sync_host_bridge() {
+    let host = fixture_host();
+    let mut workload = instantiate_wasm_workload(host).await.expect("instantiate");
+    let deliver = Arc::new(CapturingDeliver::default());
+
+    let result = workload
+        .handle_with_reply(
+            &make_envelope("test/explicit", 21i32.to_le_bytes().to_vec()),
+            test_ctx(),
+            &unreachable_bridge(),
+            Some(deliver.clone()),
+            true,
+        )
+        .await
+        .expect("explicit dispatch should succeed");
+
+    assert!(result.is_empty(), "explicit dispatch must return no bytes");
+    let outcomes = deliver
+        .outcomes
+        .lock()
+        .expect("capturing deliver mutex poisoned");
+    assert_eq!(outcomes.len(), 1);
+    assert_eq!(outcomes[0].request_id, "test-req");
+    assert!(outcomes[0].emit_response);
+    let payload = outcomes[0]
+        .result
+        .as_ref()
+        .expect("explicit reply payload")
+        .as_ref();
+    let response = TypedDoubleResponse::decode(payload).expect("decode explicit response");
+    assert_eq!(response.value, 42);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

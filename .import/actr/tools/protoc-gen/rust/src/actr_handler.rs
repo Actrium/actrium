@@ -381,6 +381,7 @@ mod tests {
             input_type: input_type.to_string(),
             output_type: output_type.to_string(),
             payload_type: "rpcReliable".to_string(),
+            reply_mode: "return".to_string(),
             dependency_alias: None,
         }
     }

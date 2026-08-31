@@ -46,7 +46,7 @@ fn write_service_cli(project_dir: &std::path::Path) {
 import Foundation
 import SwiftProtobuf
 
-public final class EchoServiceHandlerImpl: EchoServiceHandler {
+public final class EchoServiceHandlerImpl: ActrDispatchHandler {
     public init() {}
 
     public func echo(req: Echo_EchoRequest, ctx _: any ActrContext) async throws(ActrError) -> Echo_EchoResponse {
@@ -58,7 +58,7 @@ public final class EchoServiceHandlerImpl: EchoServiceHandler {
 }
 
 private final class EchoServiceLifecycleAdapter: Workload, @unchecked Sendable {
-    private let workload = EchoServiceWorkload(handler: EchoServiceHandlerImpl())
+    private let handler = EchoServiceHandlerImpl()
 
     func onStart(ctx _: Context) async throws {}
 
@@ -69,7 +69,13 @@ private final class EchoServiceLifecycleAdapter: Workload, @unchecked Sendable {
     func onError(ctx _: Context, event _: ErrorEvent) async throws {}
 
     func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
-        return try await workload.__dispatch(ctx: ctx, envelope: envelope)
+        return try await actrDispatch(
+            ctx: ctx,
+            handler: handler,
+            routeKey: envelope.routeKey,
+            payload: envelope.payload,
+            timeoutMs: envelope.timeoutMs
+        )
     }
 }
 
@@ -112,7 +118,7 @@ import Foundation
 import SwiftProtobuf
 
 private final class EchoAppLifecycleAdapter: Workload, @unchecked Sendable {
-    private let workload = EchoAppWorkload()
+    private let handler = EmptyActrDispatchHandler()
 
     func onStart(ctx _: Context) async throws {}
 
@@ -125,7 +131,13 @@ private final class EchoAppLifecycleAdapter: Workload, @unchecked Sendable {
     }
 
     func dispatch(ctx: Context, envelope: RpcEnvelope) async throws -> Data {
-        return try await workload.__dispatch(ctx: ctx, envelope: envelope)
+        return try await actrDispatch(
+            ctx: ctx,
+            handler: handler,
+            routeKey: envelope.routeKey,
+            payload: envelope.payload,
+            timeoutMs: envelope.timeoutMs
+        )
     }
 }
 

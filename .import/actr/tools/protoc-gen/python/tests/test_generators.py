@@ -3,7 +3,6 @@ import unittest
 from framework_codegen_python.__main__ import normalize_proto_path
 from framework_codegen_python.generators import (
     generate_metadata,
-    generate_service_module,
     generate_unified_dispatch,
     validate_spec_hash,
 )
@@ -29,6 +28,7 @@ class GeneratorTests(unittest.TestCase):
                     "input_type": "echo.EchoRequest",
                     "output_type": "echo.EchoResponse",
                     "payload_type": "rpcReliable",
+                    "reply_mode": "return",
                 }
             ],
         }
@@ -36,6 +36,33 @@ class GeneratorTests(unittest.TestCase):
         expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
         # Should not raise.
         validate_spec_hash({**spec, "spec_hash": expected}, expected)
+
+    def test_validate_spec_hash_accepts_v1_without_reply_mode(self) -> None:
+        import hashlib
+        import json
+
+        spec = {
+            "schema_version": "v1",
+            "routes": [
+                {
+                    "route_key": "EchoService.Echo",
+                    "proto_file": "echo.proto",
+                    "proto_service": "EchoService",
+                    "method": "Echo",
+                    "input_type": "EchoRequest",
+                    "output_type": "EchoResponse",
+                    "payload_type": "rpcReliable",
+                }
+            ],
+        }
+        expected = hashlib.sha256(
+            json.dumps(spec, sort_keys=True, separators=(",", ":")).encode("utf-8")
+        ).hexdigest()
+        legacy_spec = {**spec, "spec_hash": expected}
+
+        validate_spec_hash(legacy_spec, expected)
+
+        self.assertEqual(legacy_spec["routes"][0]["reply_mode"], "return")
 
     def test_validate_spec_hash_mismatch(self) -> None:
         with self.assertRaises(ValueError):
@@ -50,46 +77,12 @@ class GeneratorTests(unittest.TestCase):
             "input_type": "echo.EchoRequest",
             "output_type": "echo.EchoResponse",
             "payload_type": "rpcReliable",
+            "reply_mode": "return",
         }
         with self.assertRaisesRegex(ValueError, "duplicate route_key"):
             validate_spec_hash(
                 {"schema_version": "v1", "routes": [route, route]}, "deadbeef"
             )
-
-    def test_generate_service_module_emits_rpc_class_and_handler(self) -> None:
-        route = {
-            "route_key": "echo.EchoService.Echo",
-            "proto_file": "local/echo.proto",
-            "proto_service": "echo.EchoService",
-            "method": "Echo",
-            "input_type": "echo.EchoRequest",
-            "output_type": "echo.EchoResponse",
-            "payload_type": "rpcReliable",
-        }
-        type_to_owner = {
-            "echo.EchoRequest": ("echo", "local/echo.proto", ("EchoRequest",)),
-            "echo.EchoResponse": ("echo", "local/echo.proto", ("EchoResponse",)),
-        }
-        generated = generate_service_module("echo.EchoService", [route], type_to_owner)
-        self.assertEqual(generated["name"], "echo_workload.py")
-
-        content = generated["content"]
-        # Per-RPC class implementing RpcRequest Protocol.
-        self.assertIn("class EchoEchoServiceEchoRpc:", content)
-        self.assertIn("Response = local_echo_pb2.EchoResponse", content)
-        self.assertIn('return "echo.EchoService.Echo"', content)
-        self.assertIn("def encode_request(self) -> bytes:", content)
-        self.assertIn("def decode_response(self, data: bytes)", content)
-
-        # Handler Protocol.
-        self.assertIn("class EchoServiceHandler(Protocol):", content)
-        self.assertIn("def echo(self, req: local_echo_pb2.EchoRequest)", content)
-
-        # ServiceDispatcher.
-        self.assertIn("class EchoServiceDispatcher:", content)
-        self.assertIn(
-            "def dispatch(self, route_key: str, payload: bytes) -> bytes:", content
-        )
 
     def test_generate_unified_dispatch_local_only(self) -> None:
         route = {
@@ -100,6 +93,7 @@ class GeneratorTests(unittest.TestCase):
             "input_type": "echo.EchoRequest",
             "output_type": "echo.EchoResponse",
             "payload_type": "rpcReliable",
+            "reply_mode": "return",
         }
         type_to_owner = {
             "echo.EchoRequest": ("echo", "local/echo.proto", ("EchoRequest",)),
@@ -112,6 +106,7 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("async def echo_service_echo(", content)
         self.assertIn("if TYPE_CHECKING:", content)
         self.assertIn("    from actr_workload import ActrContext", content)
+        self.assertNotIn("from actr_workload import Reply", content)
 
         # UnknownRoute exception.
         self.assertIn("class UnknownRoute(Exception):", content)
@@ -120,7 +115,10 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("async def actr_dispatch(", content)
         self.assertIn('if route_key == "echo.EchoService.Echo":', content)
         self.assertIn("resp = await handler.echo_service_echo(req, ctx)", content)
-        self.assertIn("return resp.SerializeToString()", content)
+        self.assertIn("response = resp.SerializeToString()", content)
+        self.assertIn("if ctx.reply_enabled:", content)
+        self.assertIn("await ctx.reply_raw(response)", content)
+        self.assertIn('return b""', content)
         self.assertIn("raise UnknownRoute(route_key)", content)
 
         # Must NOT contain forbidden symbols.
@@ -138,6 +136,7 @@ class GeneratorTests(unittest.TestCase):
             "input_type": "echo.EchoRequest",
             "output_type": "echo.EchoResponse",
             "payload_type": "rpcReliable",
+            "reply_mode": "return",
         }
         remote_route = {
             "route_key": "ask.AskService.Prompt",
@@ -147,6 +146,7 @@ class GeneratorTests(unittest.TestCase):
             "input_type": "ask.PromptRequest",
             "output_type": "ask.PromptResponse",
             "payload_type": "rpcReliable",
+            "reply_mode": "return",
             "dependency_alias": "ask-service",
         }
         type_to_owner = {
@@ -166,7 +166,14 @@ class GeneratorTests(unittest.TestCase):
         )
         self.assertIn("target = await ctx.discover(actr_type)", content)
         self.assertIn(
-            'return await ctx.call_raw(target, route_key, payload, timeout_ms, "rpcReliable")',
+            'response = await ctx.call_raw(target, route_key, payload, timeout_ms, "rpcReliable")',
+            content,
+        )
+        self.assertIn(
+            "if ctx.reply_enabled:\n"
+            "            await ctx.reply_raw(response)\n"
+            "            return b\"\"\n"
+            "        return response",
             content,
         )
 
@@ -179,6 +186,7 @@ class GeneratorTests(unittest.TestCase):
             "input_type": "ask.PromptRequest",
             "output_type": "ask.PromptResponse",
             "payload_type": "rpcSignal",
+            "reply_mode": "return",
             "dependency_alias": "ask-service",
         }
 
@@ -198,6 +206,7 @@ class GeneratorTests(unittest.TestCase):
             "input_type": "ask.PromptRequest",
             "output_type": "ask.PromptResponse",
             "payload_type": "rpcReliable",
+            "reply_mode": "return",
             "dependency_alias": "ask-service",
         }
         type_to_owner = {
@@ -243,6 +252,31 @@ class GeneratorTests(unittest.TestCase):
         self.assertIn("class UnknownRoute(Exception):", content)
         self.assertIn("async def actr_dispatch(", content)
         self.assertIn("raise UnknownRoute(route_key)", content)
+
+    def test_generate_unified_dispatch_explicit_route_uses_reply_handle(self) -> None:
+        route = {
+            "route_key": "echo.EchoService.Echo",
+            "proto_file": "local/echo.proto",
+            "proto_service": "echo.EchoService",
+            "method": "Echo",
+            "input_type": "echo.EchoRequest",
+            "output_type": "echo.EchoResponse",
+            "payload_type": "rpcReliable",
+            "reply_mode": "explicit",
+        }
+        type_to_owner = {
+            "echo.EchoRequest": ("echo", "local/echo.proto", ("EchoRequest",)),
+            "echo.EchoResponse": ("echo", "local/echo.proto", ("EchoResponse",)),
+        }
+        content = generate_unified_dispatch([route], [], type_to_owner)
+
+        self.assertIn(
+            "reply: Reply[local_echo_pb2.EchoResponse]", content
+        )
+        self.assertIn("from actr_workload import Reply", content)
+        self.assertIn("reply = Reply(ctx,", content)
+        self.assertIn("await handler.echo_service_echo(req, ctx, reply)", content)
+        self.assertIn('return b""', content)
 
 
 if __name__ == "__main__":

@@ -389,14 +389,28 @@ pub trait ActrDispatchHandler: private::Sealed + actr_framework::MaybeSendSync +
                         let deliver = ctx.reply_deliver().ok_or_else(|| ActrError::Internal(
                             "EXPLICIT dispatch requires a reply deliver on the runtime context".to_string()
                         ))?;
+                        if !ctx.claim_reply() {
+                            return Err(ActrError::Internal(
+                                "EXPLICIT dispatch requires a claimable reply context".to_string()
+                            ));
+                        }
                         let reply = Reply::new(
                             request_id.to_string(),
                             ctx.reply_deadline(),
                             deliver,
                             ctx.expects_response(),
                         );
-                        handler.#method_ident(req, ctx, reply).await?;
-                        Ok(Bytes::new())
+                        let reply_guard = reply.dispatch_guard();
+                        match handler.#method_ident(req, ctx, reply).await {
+                            Ok(()) => {
+                                drop(reply_guard);
+                                Ok(Bytes::new())
+                            }
+                            Err(error) => {
+                                reply_guard.complete_error(error.clone());
+                                Err(error)
+                            }
+                        }
                     }
                 };
                 arms.push(arm.to_string());
@@ -679,6 +693,7 @@ mod tests {
             input_type: input_type.to_string(),
             output_type: output_type.to_string(),
             payload_type: "rpcReliable".to_string(),
+            reply_mode: "return".to_string(),
             dependency_alias: dependency_alias.map(|s| s.to_string()),
         }
     }
@@ -881,6 +896,10 @@ mod tests {
             "EXPLICIT arm should pull the deliver from the context:\n{code}"
         );
         assert!(
+            code.contains("ctx . claim_reply ()"),
+            "EXPLICIT arm should claim a deferred reply before handing it to the handler:\n{code}"
+        );
+        assert!(
             code.contains("request_id . to_string ()"),
             "EXPLICIT arm should correlate the Reply with the envelope request_id:\n{code}"
         );
@@ -891,6 +910,14 @@ mod tests {
         assert!(
             code.contains("ctx . expects_response ()"),
             "EXPLICIT arm should honor expects-response:\n{code}"
+        );
+        assert!(
+            code.contains("reply . dispatch_guard ()"),
+            "EXPLICIT arm should retain a dispatcher completion guard:\n{code}"
+        );
+        assert!(
+            code.contains("reply_guard . complete_error (error . clone ())"),
+            "EXPLICIT handler errors should beat the generic Drop fallback:\n{code}"
         );
         assert!(
             code.contains("Ok (Bytes :: new ())"),

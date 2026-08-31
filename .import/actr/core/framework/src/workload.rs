@@ -272,12 +272,12 @@ pub struct BackpressureEvent {
 ///     }
 /// }
 ///
-/// // Code-generated Workload wrapper — inherits all 16 defaults.
-/// pub struct EchoServiceWorkload<T: EchoServiceHandler>(pub T);
+/// // Code-generated adapter and workload wrapper — the dispatcher is shared
+/// // by every service in the DispatchSpec.
+/// use generated::actr_dispatch::ActrWorkload;
+/// use generated::actr_handler::ActrHandler;
 ///
-/// impl<T: EchoServiceHandler> Workload for EchoServiceWorkload<T> {
-///     type Dispatcher = EchoServiceRouter<T>;
-/// }
+/// let workload = ActrWorkload::new(ActrHandler::new(MyEchoService));
 /// ```
 // Workload trait is `?Send` on `wasm32` (browser single-threaded) and keeps
 // the native default `Send` auto trait elsewhere so tokio-multi-thread-backed

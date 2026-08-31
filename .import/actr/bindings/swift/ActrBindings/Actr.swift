@@ -1238,6 +1238,16 @@ public protocol ContextBridgeProtocol: AnyObject, Sendable {
     func callerId()  -> ActrId?
     
     /**
+     * Claim responsibility for delivering this invocation's response later.
+     *
+     * Generated EXPLICIT handlers call this before handing the movable reply
+     * handle to user code. It distinguishes a deliberately deferred reply
+     * from the return value of an older generated dispatcher, whose payload
+     * may legitimately encode to zero bytes.
+     */
+    func claimReply() async throws
+
+    /**
      * Discover an actor of the specified type
      *
      * # Arguments
@@ -1267,7 +1277,17 @@ public protocol ContextBridgeProtocol: AnyObject, Sendable {
      * Remove a media track from the WebRTC connection with the target.
      */
     func removeMediaTrack(target: ActrId, trackId: String) async throws 
-    
+
+    /**
+     * Deliver an error response through the current inbound RPC reply boundary.
+     */
+    func replyError(error: ActrError) async throws
+
+    /**
+     * Deliver a response through the current inbound RPC reply boundary.
+     */
+    func replyRaw(payload: Data) async throws
+
     /**
      * Request ID associated with the current dispatch or lifecycle context.
      */
@@ -1395,7 +1415,7 @@ open func addMediaTrack(target: ActrId, trackId: String, codec: String, mediaTyp
             errorHandler: FfiConverterTypeActrError_lift
         )
 }
-    
+
     /**
      * Call a remote actor via RPC (simplified for FFI)
      *
@@ -1437,6 +1457,29 @@ open func callerId() -> ActrId?  {
 })
 }
     
+    /**
+     * Claim responsibility for delivering this invocation's response later.
+     *
+     * Generated EXPLICIT handlers call this before handing the movable reply
+     * handle to user code. It distinguishes a deliberately deferred reply
+     * from the return value of an older generated dispatcher, whose payload
+     * may legitimately encode to zero bytes.
+     */
+open func claimReply() async throws {
+    return try await uniffiRustCallAsync(
+        rustFutureFunc: {
+            uniffi_actr_fn_method_contextbridge_claim_reply(
+                self.uniffiCloneHandle()
+            )
+        },
+        pollFunc: ffi_actr_rust_future_poll_void,
+        completeFunc: ffi_actr_rust_future_complete_void,
+        freeFunc: ffi_actr_rust_future_free_void,
+        liftFunc: { $0 },
+        errorHandler: FfiConverterTypeActrError_lift
+    )
+}
+
     /**
      * Discover an actor of the specified type
      *
@@ -1534,7 +1577,47 @@ open func removeMediaTrack(target: ActrId, trackId: String)async throws   {
             errorHandler: FfiConverterTypeActrError_lift
         )
 }
-    
+
+    /**
+     * Deliver an error response through the current inbound RPC reply boundary.
+     */
+open func replyError(error: ActrError)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_actr_fn_method_contextbridge_reply_error(
+                    self.uniffiCloneHandle(),
+                    FfiConverterTypeActrError_lower(error)
+                )
+            },
+            pollFunc: ffi_actr_rust_future_poll_void,
+            completeFunc: ffi_actr_rust_future_complete_void,
+            freeFunc: ffi_actr_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeActrError_lift
+        )
+}
+
+    /**
+     * Deliver a response through the current inbound RPC reply boundary.
+     */
+open func replyRaw(payload: Data)async throws   {
+    return
+        try  await uniffiRustCallAsync(
+            rustFutureFunc: {
+                uniffi_actr_fn_method_contextbridge_reply_raw(
+                    self.uniffiCloneHandle(),
+                    FfiConverterData.lower(payload)
+                )
+            },
+            pollFunc: ffi_actr_rust_future_poll_void,
+            completeFunc: ffi_actr_rust_future_complete_void,
+            freeFunc: ffi_actr_rust_future_free_void,
+            liftFunc: { $0 },
+            errorHandler: FfiConverterTypeActrError_lift
+        )
+}
+
     /**
      * Request ID associated with the current dispatch or lifecycle context.
      */
@@ -7659,14 +7742,6 @@ private func uniffiTraitInterfaceCallAsync<T>(
     let handleErrorSendable = UniffiUnsafeSendable(handleError)
 
     let task = Task {
-        // Note: it's important we call either `handleSuccess` or `handleError` exactly once.  Each
-        // call consumes an Arc reference, which means there should be no possibility of a double
-        // call.  The following code is structured so that will will never call both `handleSuccess`
-        // and `handleError`, even in the face of weird errors.
-        //
-        // On platforms that need extra machinery to make C-ABI calls, like JNA or ctypes, it's
-        // possible that we fail to make either call.  However, it doesn't seem like this is
-        // possible on Swift since swift can just make the C call directly.
         var callResult: T
         do {
             callResult = try await makeCallSendable.value()
@@ -7696,8 +7771,6 @@ private func uniffiTraitInterfaceCallAsyncWithError<T, E>(
     let lowerErrorSendable = UniffiUnsafeSendable(lowerError)
 
     let task = Task {
-        // See the note in uniffiTraitInterfaceCallAsync for details on `handleSuccess` and
-        // `handleError`.
         var callResult: T
         do {
             callResult = try await makeCallSendable.value()
@@ -7882,6 +7955,9 @@ private let initializationResult: InitializationResult = {
     if (uniffi_actr_checksum_method_contextbridge_caller_id() != 7075) {
         return InitializationResult.apiChecksumMismatch
     }
+    if (uniffi_actr_checksum_method_contextbridge_claim_reply() != 7617) {
+        return InitializationResult.apiChecksumMismatch
+    }
     if (uniffi_actr_checksum_method_contextbridge_discover() != 38410) {
         return InitializationResult.apiChecksumMismatch
     }
@@ -7895,6 +7971,12 @@ private let initializationResult: InitializationResult = {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actr_checksum_method_contextbridge_remove_media_track() != 43937) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actr_checksum_method_contextbridge_reply_error() != 49446) {
+        return InitializationResult.apiChecksumMismatch
+    }
+    if (uniffi_actr_checksum_method_contextbridge_reply_raw() != 62978) {
         return InitializationResult.apiChecksumMismatch
     }
     if (uniffi_actr_checksum_method_contextbridge_request_id() != 61345) {

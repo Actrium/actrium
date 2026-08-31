@@ -11,7 +11,7 @@ A Kotlin protoc plugin for generating ACTR framework code from Protocol Buffer s
 This project implements a protoc plugin (`protoc-gen-actrframework-kotlin`) that generates Kotlin code for the ACTR (Actrium) framework. It generates:
 
 - **Handler Interfaces**: User-implemented business logic interfaces
-- **Dispatcher Objects**: Zero-overhead message routing objects
+- **Unified dispatcher**: One `actr_dispatch.kt` module for exact route-key routing
 
 The plugin is designed to work alongside the protobuf Gradle plugin, which handles message class generation.
 
@@ -24,8 +24,8 @@ This project mirrors the Rust implementation (`framework-protoc-codegen`) but ge
 │   actr-cli      │────│ protoc-gen-actrframe │────│   Generated     │
 │                 │    │ work-kotlin          │    │   Kotlin Code   │
 │ - Command line  │    │                      │    │                 │
-│ - Language      │    │ - Handler interfaces │    │ - Handlers      │
-│   selection     │    │ - Dispatcher objects │    │ - Dispatchers   │
+│ - Language      │    │ - Handler interfaces │    │ - Handler       │
+│   selection     │    │ - Unified dispatcher │    │ - actr_dispatch │
 └─────────────────┘    └──────────────────────┘    └─────────────────┘
                               │
                               ▼
@@ -57,22 +57,23 @@ interface LocalFileServiceHandler {
     suspend fun send_file(request: SendFileRequest, ctx: ActrContext): SendFileResponse
 }
 
-// Dispatcher object (zero-overhead routing)
-object LocalFileServiceDispatcher {
-    suspend fun dispatch(
-        handler: LocalFileServiceHandler,
-        ctx: ActrContext,
-        envelope: RpcEnvelope
-    ): ByteArray {
-        return when (envelope.routeKey) {
-            "local_file.LocalFileService.SendFile" -> {
-                val request = SendFileRequest.parseFrom(envelope.payload)
-                val response = handler.send_file(request, ctx)
-                response.toByteArray()
-            }
-            else -> throw IllegalArgumentException("Unknown route key: ${envelope.routeKey}")
-        }
+// actr_dispatch.kt (generated once per workload)
+interface ActrDispatchHandler : LocalFileServiceHandler
+
+suspend fun actrDispatch(
+    ctx: ActrContext,
+    handler: ActrDispatchHandler,
+    routeKey: String,
+    payload: ByteArray,
+    timeoutMs: Long,
+): ByteArray = when (routeKey) {
+    "local_file.LocalFileService.SendFile" -> {
+        val request = SendFileRequest.parseFrom(payload)
+        val response = handler.send_file(request, ctx)
+        ctx.replyRaw(response.toByteArray())
+        ByteArray(0)
     }
+    else -> throw IllegalArgumentException("Unknown route key: $routeKey")
 }
 ```
 
@@ -190,7 +191,7 @@ Licensed under the Apache License, Version 2.0. See LICENSE file for details.
 
 - **0.1.0**: Initial release
   - Basic Handler interface generation
-  - Dispatcher object generation
+  - Unified dispatcher generation
   - Protoc plugin integration
   - actr-cli integration
 

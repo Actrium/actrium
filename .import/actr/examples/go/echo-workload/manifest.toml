@@ -17,7 +17,7 @@ edition = 1
 name = "EchoWorkloadGo"
 manufacturer = "acme"
 version = "0.1.0"
-description = "Go echo workload for the async actr:workload@0.5.0 Component Model ABI"
+description = "Go echo workload for the async actr:workload@0.6.0 Component Model ABI"
 license = "Apache-2.0"
 
 # ── Binary artifact ──────────────────────────────────────────────────────────

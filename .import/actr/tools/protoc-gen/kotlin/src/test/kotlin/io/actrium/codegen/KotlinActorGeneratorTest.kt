@@ -14,6 +14,7 @@ import kotlin.test.Test
 import kotlin.test.assertContains
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 /** Helper: write a DispatchSpec JSON to a temp file and return the path. */
 private fun writeDispatchSpec(routes: List<String>): String {
@@ -38,8 +39,9 @@ private fun localRoute(
         method: String,
         inputType: String,
         outputType: String,
+        replyMode: String = "return",
 ): String =
-        """{"route_key":"$routeKey","proto_file":"$protoFile","proto_service":"$protoService","method":"$method","input_type":"$inputType","output_type":"$outputType","payload_type":"rpcReliable"}"""
+        """{"route_key":"$routeKey","proto_file":"$protoFile","proto_service":"$protoService","method":"$method","input_type":"$inputType","output_type":"$outputType","payload_type":"rpcReliable","reply_mode":"$replyMode"}"""
 
 private fun remoteRoute(
         routeKey: String,
@@ -51,7 +53,7 @@ private fun remoteRoute(
         dependencyAlias: String,
         payloadType: String = "rpcReliable",
 ): String =
-        """{"route_key":"$routeKey","proto_file":"$protoFile","proto_service":"$protoService","method":"$method","input_type":"$inputType","output_type":"$outputType","payload_type":"$payloadType","dependency_alias":"$dependencyAlias"}"""
+        """{"route_key":"$routeKey","proto_file":"$protoFile","proto_service":"$protoService","method":"$method","input_type":"$inputType","output_type":"$outputType","payload_type":"$payloadType","reply_mode":"return","dependency_alias":"$dependencyAlias"}"""
 
 class KotlinActorGeneratorTest {
     @Test
@@ -129,7 +131,10 @@ class KotlinActorGeneratorTest {
                 generated,
                 "suspend fun call(request: ask.Ask.Request, ctx: ActrContext): reply.Reply.Response",
         )
-        assertContains(generated, "val request = ask.Ask.Request.parseFrom(envelope.payload)")
+        assertFalse(
+                generated.contains("ServiceDispatcher"),
+                "per-service dispatchers must not be generated:\n$generated",
+        )
     }
 
     @Test
@@ -189,6 +194,92 @@ class KotlinActorGeneratorTest {
                 "object EchoSignalRpc : RpcRequest<echo.Echo.SignalRequest, echo.Echo.SignalResponse>",
         )
         assertContains(generated, "override val payloadType: PayloadType = PayloadType.RPC_SIGNAL")
+    }
+
+    @Test
+    fun explicitRpcContractsReceiveReplyHandle() {
+        val methods =
+                listOf(
+                        MethodDescriptorProto.newBuilder()
+                                .setName("Transcode")
+                                .setInputType(".echo.Request")
+                                .setOutputType(".echo.Response")
+                                .setOptions(replyModeOption(1))
+                                .build()
+                )
+        val typeOwner =
+                mapOf(
+                        "echo.Request" to TypeOwner("echo", "echo.proto"),
+                        "echo.Response" to TypeOwner("echo", "echo.proto"),
+                )
+
+        val generated =
+                KotlinActorGenerator(
+                                packageName = "echo",
+                                serviceName = "EchoService",
+                                methods = methods,
+                                params = mapOf("kotlin_package" to "echo.generated"),
+                                protoFileName = "echo.proto",
+                                typeOwner = typeOwner,
+                        )
+                        .generate()
+                        .content
+
+        assertContains(generated, "import io.actrium.actr.dsl.Reply")
+        assertContains(
+                generated,
+                "suspend fun transcode(request: echo.Echo.Request, ctx: ActrContext, reply: Reply<echo.Echo.Response>): Unit",
+        )
+    }
+
+    @Test
+    fun explicitDispatcherClaimsReplyBoundaryBeforeInvokingHandler() {
+        val specPath =
+                writeDispatchSpec(
+                        listOf(
+                                localRoute(
+                                        "echo.EchoService.Transcode",
+                                        "echo.proto",
+                                        "echo.EchoService",
+                                        "Transcode",
+                                        "echo.Request",
+                                        "echo.Response",
+                                        replyMode = "explicit",
+                                )
+                        )
+                )
+        val request =
+                CodeGeneratorRequest.newBuilder()
+                        .addFileToGenerate("echo.proto")
+                        .setParameter("dispatch_spec=$specPath")
+                        .addProtoFile(
+                                FileDescriptorProto.newBuilder()
+                                        .setName("echo.proto")
+                                        .setPackage("echo")
+                                        .addMessageType(DescriptorProto.newBuilder().setName("Request"))
+                                        .addMessageType(DescriptorProto.newBuilder().setName("Response"))
+                                        .addService(
+                                                ServiceDescriptorProto.newBuilder()
+                                                        .setName("EchoService")
+                                                        .addMethod(
+                                                                MethodDescriptorProto.newBuilder()
+                                                                        .setName("Transcode")
+                                                                        .setInputType(".echo.Request")
+                                                                        .setOutputType(".echo.Response")
+                                                        )
+                                        )
+                        )
+                        .build()
+
+        val dispatcher =
+                generateCode(request).fileList.single { it.name == "actr_dispatch.kt" }.content
+        val claim = dispatcher.indexOf("ctx.claimReply()")
+        val invoke = dispatcher.indexOf("handler.transcode(request, ctx, reply)")
+
+        assertTrue(
+                claim >= 0 && invoke > claim,
+                "explicit dispatcher must claim reply ownership before invoking user code:\n$dispatcher",
+        )
     }
 
     @Test
@@ -316,15 +407,17 @@ class KotlinActorGeneratorTest {
                         )
                         .build()
 
-        val generated = actorContent(generateCode(request))
+        val response = generateCode(request)
+        val generated = actorContent(response)
+        val dispatcher = response.fileList.single { it.name == "actr_dispatch.kt" }.content
 
         assertContains(
                 generated,
                 "suspend fun continue_prompt_result_streams(request: ask.Ask.ContinuePromptResultStreamsRequest, ctx: ActrContext): ask.Ask.ContinuePromptResultStreamsResponse",
         )
         assertContains(
-                generated,
-                "val request = ask.Ask.ContinuePromptResultStreamsRequest.parseFrom(envelope.payload)",
+                dispatcher,
+                "val request = ask.Ask.ContinuePromptResultStreamsRequest.parseFrom(payload)",
         )
         assertFalse(
                 generated.contains("request: ContinuePromptResultStreamsRequest"),
@@ -388,13 +481,14 @@ class KotlinActorGeneratorTest {
 
         val response = generateCode(request)
         val generated = actorContent(response)
+        val dispatcher = response.fileList.single { it.name == "actr_dispatch.kt" }.content
         val metadata = response.fileList.single { it.name == "actr-gen-meta.json" }.content
 
         assertContains(generated, "request: com.example.user.v1.UserTypesProto.Request")
         assertContains(generated, "): com.example.response.v1.Response")
         assertContains(
-                generated,
-                "val request = com.example.user.v1.UserTypesProto.Request.parseFrom(envelope.payload)",
+                dispatcher,
+                "val request = com.example.user.v1.UserTypesProto.Request.parseFrom(payload)",
         )
         assertContains(metadata, "\"schema_version\": \"v1\"")
         assertContains(metadata, "\"generated_local_routes\"")
@@ -593,7 +687,7 @@ class KotlinActorGeneratorTest {
         assertContains(dispatcher, "val target = ctx.discover(actrType)")
         assertContains(dispatcher, "import io.actrium.actr.PayloadType")
         assertContains(dispatcher, "require(timeoutMs > 0) { \"timeoutMs must be > 0, got \$timeoutMs\" }")
-        assertContains(dispatcher, "ctx.callRaw(target, routeKey, PayloadType.RPC_SIGNAL, payload, timeoutMs)")
+        assertContains(dispatcher, "ctx.callRaw(target, routeKey, PayloadType.RPC_RELIABLE, payload, timeoutMs)")
         assertFalse(dispatcher.contains("remoteTargets"))
         assertFalse(dispatcher.contains("ActrType("))
     }
@@ -688,6 +782,18 @@ private fun payloadTypeOption(value: Long): MethodOptions {
     val unknownFields =
             UnknownFieldSet.newBuilder()
                     .addField(50001, field)
+                    .build()
+    return MethodOptions.newBuilder().setUnknownFields(unknownFields).build()
+}
+
+private fun replyModeOption(value: Long): MethodOptions {
+    val field =
+            UnknownFieldSet.Field.newBuilder()
+                    .addVarint(value)
+                    .build()
+    val unknownFields =
+            UnknownFieldSet.newBuilder()
+                    .addField(50002, field)
                     .build()
     return MethodOptions.newBuilder().setUnknownFields(unknownFields).build()
 }

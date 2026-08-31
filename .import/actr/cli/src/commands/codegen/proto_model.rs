@@ -1,3 +1,4 @@
+use crate::commands::codegen::dispatch_spec::ReplyMode;
 use crate::error::{ActrCliError, Result};
 use crate::utils::to_snake_case;
 use actr_config::ManifestConfig;
@@ -6,7 +7,7 @@ use prost_types::{
     DescriptorProto, FileDescriptorProto, FileDescriptorSet, MethodDescriptorProto,
     ServiceDescriptorProto,
 };
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,7 +52,30 @@ pub struct MethodModel {
     pub output_type: String,
     /// Lower-camel `actr.payload_type` value for this RPC method.
     pub payload_type: String,
+    /// Response delivery mode from `actr.reply_mode`.
+    pub reply_mode: ReplyMode,
     pub route_key: String,
+}
+
+/// Names of the per-service modules emitted by pre-unified Python and
+/// TypeScript generators. These are the only legacy workload artifacts that
+/// `actr gen` may remove from an existing output directory.
+pub fn legacy_workload_module_names(model: &ProtoModel) -> BTreeSet<String> {
+    model
+        .local_services
+        .iter()
+        .map(|service| {
+            let base = if service.package.is_empty() {
+                to_snake_case(&service.name)
+            } else {
+                service
+                    .package
+                    .replace(['.', '-'], "_")
+                    .to_ascii_lowercase()
+            };
+            format!("{base}_workload")
+        })
+        .collect()
 }
 
 /// Declaring owner of a proto message/enum type.
@@ -236,17 +260,17 @@ impl ProtoModel {
         // `(actr.payload_type)` while decoding `MethodOptions`. Scan the raw
         // descriptor bytes before decoding and retain the value by descriptor
         // position (file -> service -> method).
-        let raw_payload_types = extract_payload_types_from_descriptor_set(&descriptor_bytes)?;
+        let raw_method_options = extract_method_options_from_descriptor_set(&descriptor_bytes)?;
 
         let descriptor_set =
             FileDescriptorSet::decode(descriptor_bytes.as_slice()).map_err(|e| {
                 ActrCliError::config_error(format!("Failed to decode FileDescriptorSet: {e}"))
             })?;
 
-        if raw_payload_types.len() != descriptor_set.file.len() {
+        if raw_method_options.len() != descriptor_set.file.len() {
             return Err(ActrCliError::config_error(format!(
                 "raw descriptor scan found {} file(s), but prost decoded {}",
-                raw_payload_types.len(),
+                raw_method_options.len(),
                 descriptor_set.file.len()
             )));
         }
@@ -294,11 +318,11 @@ impl ProtoModel {
                     files_by_name.keys().collect::<Vec<_>>()
                 ))
             })?;
-            let file_payload_types = &raw_payload_types[file_index];
-            if file_payload_types.len() != file_proto.service.len() {
+            let file_method_options = &raw_method_options[file_index];
+            if file_method_options.len() != file_proto.service.len() {
                 return Err(ActrCliError::config_error(format!(
                     "raw descriptor scan found {} service(s) in `{relative_str}`, but prost decoded {}",
-                    file_payload_types.len(),
+                    file_method_options.len(),
                     file_proto.service.len()
                 )));
             }
@@ -337,7 +361,7 @@ impl ProtoModel {
                         &relative_path,
                         side,
                         remote_actr_type.clone(),
-                        &file_payload_types[service_index],
+                        &file_method_options[service_index],
                     )?;
 
                     if side == ProtoSide::Local {
@@ -525,6 +549,7 @@ fn parse_rpc_method(rest: &str, package: &str, service_name: &str) -> Option<Met
         input_type,
         output_type,
         payload_type: "rpcReliable".to_string(),
+        reply_mode: ReplyMode::Return,
         route_key,
     })
 }
@@ -665,14 +690,14 @@ fn build_service_model(
     relative_path: &Path,
     side: ProtoSide,
     actr_type: Option<String>,
-    method_payload_types: &[Option<PayloadTypeValue>],
+    method_options: &[RawMethodOptions],
 ) -> Result<ServiceModel> {
     let name = service_desc.name.clone().unwrap_or_default();
 
-    if method_payload_types.len() != service_desc.method.len() {
+    if method_options.len() != service_desc.method.len() {
         return Err(ActrCliError::config_error(format!(
             "raw descriptor scan found {} method(s) for service `{name}`, but prost decoded {}",
-            method_payload_types.len(),
+            method_options.len(),
             service_desc.method.len()
         )));
     }
@@ -680,10 +705,8 @@ fn build_service_model(
     let methods: Vec<MethodModel> = service_desc
         .method
         .iter()
-        .zip(method_payload_types.iter().copied())
-        .map(|(method_desc, payload_type)| {
-            build_method_model(method_desc, package, &name, payload_type)
-        })
+        .zip(method_options.iter())
+        .map(|(method_desc, options)| build_method_model(method_desc, package, &name, options))
         .collect::<Result<Vec<_>>>()?;
 
     Ok(ServiceModel {
@@ -705,7 +728,7 @@ fn build_method_model(
     method_desc: &MethodDescriptorProto,
     package: &str,
     service_name: &str,
-    payload_type: Option<PayloadTypeValue>,
+    options: &RawMethodOptions,
 ) -> Result<MethodModel> {
     let method_name = method_desc.name.clone().unwrap_or_default();
     if method_name.is_empty() {
@@ -748,10 +771,12 @@ fn build_method_model(
         name: method_name,
         input_type,
         output_type,
-        payload_type: payload_type
+        payload_type: options
+            .payload_type
             .unwrap_or(PayloadTypeValue::RpcReliable)
             .as_lower_camel()
             .to_string(),
+        reply_mode: options.reply_mode.unwrap_or_default(),
         route_key,
     })
 }
@@ -806,7 +831,15 @@ fn collect_message_types(message: &DescriptorProto, prefix: &str, declared: &mut
     }
 }
 
-/// Wire-format scanner for the `(actr.payload_type)` extension (field 50001).
+/// Raw method options needed by the language-independent dispatch spec.
+#[derive(Debug, Clone, Copy, Default)]
+struct RawMethodOptions {
+    payload_type: Option<PayloadTypeValue>,
+    reply_mode: Option<ReplyMode>,
+}
+
+/// Wire-format scanner for the `(actr.payload_type)` extension (field 50001)
+/// and `(actr.reply_mode)` extension (field 50002).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PayloadTypeValue {
     RpcReliable,
@@ -814,6 +847,29 @@ enum PayloadTypeValue {
     StreamReliable,
     StreamLatencyFirst,
     MediaRtp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReplyModeValue {
+    Return,
+    Explicit,
+}
+
+impl ReplyModeValue {
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Return),
+            1 => Some(Self::Explicit),
+            _ => None,
+        }
+    }
+
+    fn into_public(self) -> ReplyMode {
+        match self {
+            Self::Return => ReplyMode::Return,
+            Self::Explicit => ReplyMode::Explicit,
+        }
+    }
 }
 
 impl PayloadTypeValue {
@@ -976,10 +1032,10 @@ fn length_delimited_fields(buf: &[u8], target: u64) -> WireResult<Vec<&[u8]>> {
 }
 
 /// Scan `FileDescriptorSet.file[*].service[*].method[*].options` directly in
-/// the raw wire format so custom extension field 50001 survives prost decode.
-fn extract_payload_types_from_descriptor_set(
+/// the raw wire format so custom extensions survive prost decode.
+fn extract_method_options_from_descriptor_set(
     descriptor_bytes: &[u8],
-) -> Result<Vec<Vec<Vec<Option<PayloadTypeValue>>>>> {
+) -> Result<Vec<Vec<Vec<RawMethodOptions>>>> {
     let raw_files = length_delimited_fields(descriptor_bytes, 1).map_err(|error| {
         ActrCliError::config_error(format!("failed to scan raw FileDescriptorSet: {error}"))
     })?;
@@ -1001,7 +1057,7 @@ fn extract_payload_types_from_descriptor_set(
                     })?;
                     raw_methods
                         .into_iter()
-                        .map(extract_payload_type_from_raw_method)
+                        .map(extract_method_options_from_raw_method)
                         .collect::<Result<Vec<_>>>()
                 })
                 .collect::<Result<Vec<_>>>()
@@ -1009,43 +1065,85 @@ fn extract_payload_types_from_descriptor_set(
         .collect()
 }
 
-fn extract_payload_type_from_raw_method(raw_method: &[u8]) -> Result<Option<PayloadTypeValue>> {
+#[cfg(test)]
+fn extract_payload_types_from_descriptor_set(
+    descriptor_bytes: &[u8],
+) -> Result<Vec<Vec<Vec<Option<PayloadTypeValue>>>>> {
+    extract_method_options_from_descriptor_set(descriptor_bytes).map(|files| {
+        files
+            .into_iter()
+            .map(|services| {
+                services
+                    .into_iter()
+                    .map(|methods| {
+                        methods
+                            .into_iter()
+                            .map(|method| method.payload_type)
+                            .collect()
+                    })
+                    .collect()
+            })
+            .collect()
+    })
+}
+
+fn extract_method_options_from_raw_method(raw_method: &[u8]) -> Result<RawMethodOptions> {
     const METHOD_OPTIONS_FIELD_NUMBER: u64 = 4;
     const PAYLOAD_TYPE_EXTENSION_FIELD_NUMBER: u64 = 50001;
+    const REPLY_MODE_EXTENSION_FIELD_NUMBER: u64 = 50002;
 
-    let options =
+    let raw_options =
         length_delimited_fields(raw_method, METHOD_OPTIONS_FIELD_NUMBER).map_err(|error| {
             ActrCliError::config_error(format!(
                 "failed to scan raw MethodDescriptorProto options: {error}"
             ))
         })?;
-    let mut payload_type = None;
-    for raw_options in options {
+    let mut parsed = RawMethodOptions::default();
+    for raw_options in raw_options {
         let mut pos = 0;
         while let Some(field) = next_wire_field(raw_options, &mut pos).map_err(|error| {
             ActrCliError::config_error(format!("failed to scan raw MethodOptions: {error}"))
         })? {
-            if field.number != PAYLOAD_TYPE_EXTENSION_FIELD_NUMBER {
-                continue;
-            }
-            let WireValue::Varint(value) = field.value else {
-                return Err(ActrCliError::config_error(
-                    "(actr.payload_type) field 50001 must use protobuf varint encoding",
-                ));
-            };
-            let value = PayloadTypeValue::from_u64(value).ok_or_else(|| {
-                ActrCliError::config_error(format!(
-                    "(actr.payload_type) field 50001 has unknown enum value {value}"
-                ))
-            })?;
-            if payload_type.replace(value).is_some() {
-                return Err(ActrCliError::config_error(
-                    "(actr.payload_type) field 50001 is encoded more than once",
-                ));
+            match field.number {
+                PAYLOAD_TYPE_EXTENSION_FIELD_NUMBER => {
+                    let WireValue::Varint(value) = field.value else {
+                        return Err(ActrCliError::config_error(
+                            "(actr.payload_type) field 50001 must use protobuf varint encoding",
+                        ));
+                    };
+                    let value = PayloadTypeValue::from_u64(value).ok_or_else(|| {
+                        ActrCliError::config_error(format!(
+                            "(actr.payload_type) field 50001 has unknown enum value {value}"
+                        ))
+                    })?;
+                    if parsed.payload_type.replace(value).is_some() {
+                        return Err(ActrCliError::config_error(
+                            "(actr.payload_type) field 50001 is encoded more than once",
+                        ));
+                    }
+                }
+                REPLY_MODE_EXTENSION_FIELD_NUMBER => {
+                    let WireValue::Varint(value) = field.value else {
+                        return Err(ActrCliError::config_error(
+                            "(actr.reply_mode) field 50002 must use protobuf varint encoding",
+                        ));
+                    };
+                    let value = ReplyModeValue::from_u64(value).ok_or_else(|| {
+                        ActrCliError::config_error(format!(
+                            "(actr.reply_mode) field 50002 has unknown enum value {value}"
+                        ))
+                    })?;
+                    if parsed.reply_mode.replace(value.into_public()).is_some() {
+                        return Err(ActrCliError::config_error(
+                            "(actr.reply_mode) field 50002 is encoded more than once",
+                        ));
+                    }
+                }
+                _ => {}
             }
         }
     }
-    Ok(payload_type)
+    Ok(parsed)
 }
 
 #[cfg(test)]

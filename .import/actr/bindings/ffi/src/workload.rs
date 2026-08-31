@@ -20,9 +20,9 @@ use crate::ActrResult;
 use crate::context::ContextBridge;
 use actr_framework::{
     BackpressureEvent, Bytes, Context, CredentialEvent, ErrorCategory, ErrorEvent,
-    MessageDispatcher, PeerEvent, WebRtcPeerState, WebRtcPeerStatus, Workload,
+    MessageDispatcher, PeerEvent, ReplyOutcome, WebRtcPeerState, WebRtcPeerStatus, Workload,
 };
-use actr_protocol::{ActorResult, ActrError, RpcEnvelope};
+use actr_protocol::{ActorResult, ActrError, ReplyMode, RpcEnvelope};
 use async_trait::async_trait;
 use std::sync::Arc;
 
@@ -806,6 +806,14 @@ pub struct DynamicDispatcher;
 impl MessageDispatcher for DynamicDispatcher {
     type Workload = DynamicWorkload;
 
+    /// Foreign linked workloads use the same explicit delivery boundary as
+    /// generated WASM workloads. Generated RETURN routes call `reply_raw`
+    /// after obtaining their response; the unclaimed fallback below keeps
+    /// older generated dispatchers usable while they are regenerated.
+    fn reply_mode_for_route(_route_key: &str) -> ReplyMode {
+        ReplyMode::Explicit
+    }
+
     async fn dispatch<C: Context>(
         workload: &Self::Workload,
         envelope: RpcEnvelope,
@@ -816,9 +824,25 @@ impl MessageDispatcher for DynamicDispatcher {
         let envelope_bridge: RpcEnvelopeBridge = envelope.into();
         let response = workload
             .lifecycle
-            .dispatch(ctx_bridge, envelope_bridge)
+            .dispatch(Arc::clone(&ctx_bridge), envelope_bridge)
             .await
             .map_err(actr_protocol::ActrError::from)?;
+        if let Some(deliver) = ctx.reply_deliver() {
+            // New generated RETURN routes deliver through ContextBridge so
+            // the bridge records the reply as claimed. Generated EXPLICIT
+            // routes claim it before invoking user code, allowing them to
+            // defer an empty response. If neither happened, this is an older
+            // generated dispatcher returning its response through the legacy
+            // path; deliver it even when protobuf encoded it as zero bytes.
+            if !ctx_bridge.reply_was_claimed() {
+                deliver.deliver(ReplyOutcome {
+                    request_id: ctx.request_id().to_string(),
+                    result: Ok(Bytes::from(response)),
+                    emit_response: ctx.expects_response(),
+                });
+            }
+            return Ok(Bytes::new());
+        }
         Ok(Bytes::from(response))
     }
 }
@@ -1046,13 +1070,31 @@ mod tests {
             .expect("local call should dispatch through the foreign bridge");
 
         assert_eq!(response, b"swift-local:hello");
+
+        // Stale generated dispatchers return their protobuf bytes instead of
+        // claiming the ContextBridge reply boundary. An Empty/default message
+        // legitimately encodes to zero bytes and must still be delivered.
+        *lifecycle.dispatch_response.lock() = Ok(Vec::new());
+        let empty_response = actr_ref
+            .call(
+                "echoapp.LocalEchoService.Send".to_string(),
+                crate::types::PayloadType::RpcReliable,
+                b"empty".to_vec(),
+                5_000,
+            )
+            .await
+            .expect("zero-byte foreign response should use the migration fallback");
+        assert!(empty_response.is_empty());
+
         {
             let dispatches = lifecycle.dispatches.lock();
-            assert_eq!(dispatches.len(), 1);
+            assert_eq!(dispatches.len(), 2);
             assert_eq!(dispatches[0].route_key, "echoapp.LocalEchoService.Send");
             assert_eq!(dispatches[0].payload, b"hello");
             assert!(!dispatches[0].request_id.is_empty());
             assert_eq!(dispatches[0].timeout_ms, 30_000);
+            assert_eq!(dispatches[1].payload, b"empty");
+            assert_eq!(dispatches[1].timeout_ms, 5_000);
         }
 
         actr_ref.shutdown();

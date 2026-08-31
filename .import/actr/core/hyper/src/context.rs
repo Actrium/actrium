@@ -20,6 +20,7 @@ use async_trait::async_trait;
 use futures_util::future::BoxFuture;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::RwLock;
 
 /// RuntimeContext - Runtime's implementation of Context trait
@@ -86,6 +87,11 @@ pub struct RuntimeContext {
     /// Set per-request by `admit_incoming` alongside `reply_deliver`; read
     /// by the generated EXPLICIT dispatch arm via [`Context::reply_deadline`].
     reply_deadline: Option<actr_framework::ReplyDeadline>,
+
+    /// Set only by a generated EXPLICIT dispatch arm before it hands a reply
+    /// handle to user code. The host uses this to distinguish a deferred reply
+    /// from a valid zero-byte dispatch return.
+    reply_claimed: Option<Arc<AtomicBool>>,
 
     /// Per-request cancellation scope (#390). `None` on shell contexts (a
     /// `call_raw` from them starts a root scope) and on scopes inbound from
@@ -197,6 +203,7 @@ impl RuntimeContext {
             reply_deliver: None,
             expects_response: true,
             reply_deadline: None,
+            reply_claimed: None,
             scope: None,
         }
     }
@@ -218,10 +225,28 @@ impl RuntimeContext {
         deliver: Arc<dyn actr_framework::Deliver>,
         expects_response: bool,
         reply_deadline: Option<actr_framework::ReplyDeadline>,
+        reply_claimed: Arc<AtomicBool>,
     ) {
         self.reply_deliver = Some(deliver);
         self.expects_response = expects_response;
         self.reply_deadline = reply_deadline;
+        self.reply_claimed = Some(reply_claimed);
+    }
+
+    /// Mark this inbound invocation as intentionally deferred. This is used
+    /// by foreign generated EXPLICIT dispatchers before user code receives a
+    /// movable reply handle.
+    pub fn claim_reply(&self) -> bool {
+        let Some(claimed) = &self.reply_claimed else {
+            return false;
+        };
+        claimed.store(true, Ordering::Release);
+        true
+    }
+
+    #[cfg(feature = "wasm-engine")]
+    pub(crate) fn reply_claimed_marker(&self) -> Option<Arc<AtomicBool>> {
+        self.reply_claimed.clone()
     }
 
     #[cfg(test)]
@@ -729,6 +754,10 @@ impl Context for RuntimeContext {
 
     fn request_id(&self) -> &str {
         &self.request_id
+    }
+
+    fn claim_reply(&self) -> bool {
+        RuntimeContext::claim_reply(self)
     }
 
     fn expects_response(&self) -> bool {

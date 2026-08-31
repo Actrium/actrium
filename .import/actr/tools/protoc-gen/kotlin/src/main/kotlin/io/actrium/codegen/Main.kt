@@ -4,7 +4,7 @@
  * This is a protoc plugin that generates Actor framework code from proto service definitions. It
  * generates:
  * - Handler interface for service implementations
- * - Dispatcher object for request routing
+ * - RPC contracts for generated service types
  * - Unified `actr_dispatch.kt` with exact route-key matching sourced from DispatchSpec v1
  *
  * Usage as protoc plugin: protoc --plugin=protoc-gen-actrframework-kotlin=PATH \
@@ -90,7 +90,7 @@ fun generateCode(request: CodeGeneratorRequest): CodeGeneratorResponse {
 
     // Track generated files, local routes, and remote routes for metadata.
     val generatedFiles = mutableListOf<String>()
-    // Process each file to generate per-service handler/dispatcher/contract files.
+    // Process each file to generate per-service handler/contract files.
     for (fileName in request.fileToGenerateList) {
         val fileDescriptor = request.protoFileList.find { it.name == fileName } ?: continue
         val protoFileName = fileName.substringAfterLast("/")
@@ -192,8 +192,19 @@ private fun generateActrDispatch(
 
         cases.appendLine("    ${kotlinStringLiteral(route.routeKey)} -> {")
         cases.appendLine("        val request = $inputType.parseFrom(payload)")
-        cases.appendLine("        val response = handler.${handlerMethod}(request, ctx)")
-        cases.appendLine("        response.toByteArray()")
+        if (route.replyMode == "explicit") {
+            val outputType = resolveKotlinType(route.outputType, typeOwner)
+            cases.appendLine("        ctx.claimReply()")
+            cases.appendLine(
+                    "        val reply = Reply(ctx) { response: $outputType -> response.toByteArray() }"
+            )
+            cases.appendLine("        handler.${handlerMethod}(request, ctx, reply)")
+            cases.appendLine("        ByteArray(0)")
+        } else {
+            cases.appendLine("        val response = handler.${handlerMethod}(request, ctx)")
+            cases.appendLine("        ctx.replyRaw(response.toByteArray())")
+            cases.appendLine("        ByteArray(0)")
+        }
         cases.appendLine("    }")
     }
     for (route in remoteRoutes) {
@@ -203,7 +214,9 @@ private fun generateActrDispatch(
         cases.appendLine("        require(timeoutMs > 0) { \"timeoutMs must be > 0, got \$timeoutMs\" }")
         cases.appendLine("        val actrType = ctx.resolveDependency(${kotlinStringLiteral(alias)})")
         cases.appendLine("        val target = ctx.discover(actrType)")
-        cases.appendLine("        ctx.callRaw(target, routeKey, $payloadType, payload, timeoutMs)")
+        cases.appendLine("        val response = ctx.callRaw(target, routeKey, $payloadType, payload, timeoutMs)")
+        cases.appendLine("        ctx.replyRaw(response)")
+        cases.appendLine("        ByteArray(0)")
         cases.appendLine("    }")
     }
 
@@ -242,6 +255,9 @@ private fun generateActrDispatch(
         appendLine("package $kotlinPackage")
         appendLine()
         appendLine("import io.actrium.actr.dsl.ActrContext")
+        if (localRoutes.any { it.replyMode == "explicit" }) {
+            appendLine("import io.actrium.actr.dsl.Reply")
+        }
         if (remoteRoutes.isNotEmpty()) {
             appendLine("import io.actrium.actr.PayloadType")
         }
@@ -250,7 +266,7 @@ private fun generateActrDispatch(
         }
         if (hasLocal) {
             appendLine()
-            appendLine("// Import individual service handlers and dispatchers.")
+            appendLine("// Import individual service handler contracts.")
             for (name in localServiceNames) {
                 val svc = extractServiceName(name)
                 appendLine("import $kotlinPackage.${svc}Handler")
@@ -381,10 +397,7 @@ private fun serviceMetadata(
                     .put("dependency_alias", serviceRoutes.first().dependencyAlias)
                     .put("client_type", "${serviceName}Client")
         } else {
-            service
-                    .put("handler_interface", "${serviceName}Handler")
-                    .put("workload_type", "${serviceName}Workload")
-                    .put("dispatcher_type", "${serviceName}Dispatcher")
+            service.put("handler_interface", "${serviceName}Handler")
         }
         val methods = JSONArray()
         for (route in serviceRoutes.sortedBy { it.routeKey }) {
@@ -401,6 +414,7 @@ private fun serviceMetadata(
                                     "output_ref",
                                     metadataTypeRef(route.outputType, route.protoFile, typeOwner),
                             )
+                            .put("reply_mode", route.replyMode)
             )
         }
         service.put("methods", methods)

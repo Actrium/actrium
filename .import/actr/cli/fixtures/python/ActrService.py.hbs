@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from actr_workload import ActrContext, Workload as WorkloadProtocol
+from actr_workload import ActrContext, Reply, Workload as WorkloadProtocol
 
 from generated.actr_dispatch import actr_dispatch
 {{#each PB2_IMPORTS}}{{this}}
@@ -13,9 +13,15 @@ class {{SERVICE_NAME}}Handler:
 {{#if HAS_SERVICES}}
 {{#each SERVICES}}
 {{#each methods}}
+{{#if is_explicit}}
+    async def {{dispatch_method}}(self, req: {{input_alias}}.{{input_type}}, ctx: ActrContext, reply: Reply[{{output_alias}}.{{output_type}}]) -> None:
+        await reply.send({{output_alias}}.{{output_type}}())
+
+{{else}}
     async def {{dispatch_method}}(self, req: {{input_alias}}.{{input_type}}, ctx: ActrContext) -> {{output_alias}}.{{output_type}}:
         return {{output_alias}}.{{output_type}}()
 
+{{/if}}
 {{/each}}
 {{/each}}
 {{else}}
@@ -82,4 +88,4 @@ class {{WORKLOAD_NAME}}(WorkloadProtocol):
         return None
 
 
-__all__ = ["Workload"]
+__all__ = ["{{SERVICE_NAME}}Handler", "{{WORKLOAD_NAME}}"]

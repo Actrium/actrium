@@ -14,6 +14,7 @@ fn remote_echo_service() -> ServiceInfo {
             response_type: "EchoResponse".to_string(),
             request_import: "echo.Echo".to_string(),
             response_import: "echo.Echo".to_string(),
+            reply_mode: ReplyMode::Return,
         }],
     }
 }
@@ -29,6 +30,7 @@ fn local_client_service() -> ServiceInfo {
             response_type: "SendResponse".to_string(),
             request_import: "client.Client".to_string(),
             response_import: "client.Client".to_string(),
+            reply_mode: ReplyMode::Return,
         }],
     }
 }
@@ -176,6 +178,7 @@ realm_id = 1001
                 input_type: "ask.Outer.InnerRequest".to_string(),
                 output_type: "ask.Outer.InnerResponse".to_string(),
                 payload_type: "rpcReliable".to_string(),
+                reply_mode: ReplyMode::Return,
                 route_key: "client.Client.Foo".to_string(),
             }],
             actr_type: None,
@@ -224,8 +227,6 @@ realm_id = 1001
     "package": "client",
     "proto_file": "local/client.proto",
     "handler_interface": "ClientHandler",
-    "workload_type": "ClientWorkload",
-    "dispatcher_type": "ClientDispatcher",
     "methods": [{
       "name": "Foo",
       "snake_name": "foo",
@@ -299,8 +300,6 @@ realm_id = 1001
     "package": "client",
     "proto_file": "local/client.proto",
     "handler_interface": "ClientHandler",
-    "workload_type": "ClientWorkload",
-    "dispatcher_type": "ClientDispatcher",
     "methods": [{
       "name": "Call",
       "snake_name": "call",
@@ -344,6 +343,7 @@ realm_id = 1001
                 input_type: "client.WrongRequest".to_string(),
                 output_type: "client.WrongResponse".to_string(),
                 payload_type: "rpcReliable".to_string(),
+                reply_mode: ReplyMode::Return,
                 route_key: "client.Client.Call".to_string(),
             }],
             actr_type: None,
@@ -470,6 +470,7 @@ fn unified_handler_scaffold_imports_and_resolves_imported_rpc_types() {
             response_type: "ContinuePromptResultStreamsResponse".to_string(),
             request_import: "ask.Ask".to_string(),
             response_import: "ask.Ask".to_string(),
+            reply_mode: ReplyMode::Return,
         }],
     };
 

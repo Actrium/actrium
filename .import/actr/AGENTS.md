@@ -9,8 +9,26 @@
 ## Build, Test, and Development Commands
 - `cargo build` — standard local build; run from the workspace root to compile every crate.
 - `cargo check` — fast type/lint verification; run after editing any crate to ensure shared interfaces still compile.
-- `cargo test` — executes the full test suite, including per-crate tests in `crates/*`.
+- `cargo test` — CI-only; do not run it locally unless the user explicitly authorizes local tests in the current task.
 - `actr gen --input=../echo-service/proto --output=../echo-service/src/generated --clean` — regenerates protobuf + actor scaffolding for the `echo-service` sample (run from workspace root).
+
+### Local test prohibition (mandatory)
+
+- Agents MUST NOT run tests locally. All test execution belongs to remote CI.
+- This prohibition includes unit, integration, end-to-end, smoke, generated-code,
+  fixture, and language-binding tests, whether invoked directly or through a
+  wrapper. Examples include `cargo test`, `cargo nextest`, `pytest`, `npm test`,
+  `pnpm test`, `yarn test`, `gradle test`, `swift test`, test shell scripts, and
+  commands that build or execute test targets such as `cargo test --no-run`.
+- Local static inspection, formatting, linting, `cargo check`, and ordinary
+  non-test builds are allowed. Do not turn an allowed command into an indirect
+  test runner.
+- A request to fix, review, verify, or commit code does NOT authorize local test
+  execution. Only an explicit instruction from the user in the current task may
+  override this rule.
+- If a local test is started accidentally, stop it immediately, tell the user,
+  and do not restart it. Report tests as "not run locally (repository policy)"
+  and rely on remote CI for validation.
 
 ### WASM Component Model toolchain (Phase 1+)
 
@@ -41,7 +59,8 @@ match exactly.
 ## Testing Guidelines
 - Unit tests live beside implementation files; integration tests belong in `tests/` when present.
 - Use `#[cfg(test)] mod tests` patterns and meaningful test names (`test_actor_registration_flow`).
-- Execute targeted tests with `cargo test -p crate_name` when iterating on a specific component; finish with a workspace-wide `cargo test` before merging.
+- Do not execute tests locally. Add or update appropriate tests, then let remote
+  CI run both targeted and workspace-wide suites.
 
 ## API Compatibility Policy
 
@@ -104,7 +123,8 @@ deciding the `X.Y.Z` core; labels only decide the suffix channel:
 
 - Each PR should describe the change scope, mention affected crates or directories, and link to any relevant issues or design docs.
 - Include reproduction or validation steps (commands, screenshots, or log excerpts) so reviewers can verify behavior quickly.
-- Ensure generated files are up to date (`actr gen …`) and that formatters/tests have been run prior to opening a PR.
+- Ensure generated files are up to date (`actr gen …`) and formatters have
+  been run prior to opening a PR; confirm tests through remote CI only.
 
 ## Additional Tips
 - Regenerating code may fail if `src/generated` files are read-only; run `chmod -R u+w src/generated` beforehand.

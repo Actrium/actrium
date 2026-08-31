@@ -460,7 +460,7 @@ pub(crate) fn spawn_runner(workload: Workload) -> ActorHandle {
 ///   sibling and queued commands fail rather than touching partially-mutated
 ///   actor state. A caught guest panic follows the same fail-closed path after
 ///   replying `Internal`.
-/// * `Workload::Wasm` — the sole supported 0.4.0 async world drives a **resident**
+/// * `Workload::Wasm` — the sole supported 0.6.0 async world drives a **resident**
 ///   `Store::run_concurrent` region ([`crate::wasm::WasmWorkloadV2::run_interleaved`]),
 ///   interleaving distinct-key dispatches at their host-import `.await` points
 ///   (M5). External per-dispatch deadlines supervise that region and discard

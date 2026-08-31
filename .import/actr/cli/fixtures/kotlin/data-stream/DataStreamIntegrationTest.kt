@@ -27,8 +27,8 @@ import org.junit.runner.RunWith
  *   ├── UnifiedHandler (implements StreamClientHandler)
  *   │     ├── start_stream() - locally trigger stream transfer
  *   │     └── prepare_client_stream() - server callback to register data stream receiver
- *   └── UnifiedDispatcher
- *         ├── local routes -> StreamClientDispatcher -> handler methods
+ *   └── actrDispatch
+ *         ├── local routes -> handler methods
  *         └── remote routes -> ctx.callRaw() -> remote actors
  * ```
  */
@@ -98,7 +98,7 @@ class DataStreamIntegrationTest {
             Log.i(TAG, "")
             Log.i(TAG, "==================== DataStream Transfer ====================")
 
-            Log.i(TAG, "📞 Calling StartStream via UnifiedDispatcher (local service)...")
+            Log.i(TAG, "📞 Calling StartStream via actrDispatch (local service)...")
             val startStreamRequest = ClientStartStreamRequest.newBuilder()
                 .setClientId("android-test-client")
                 .setStreamId("test-stream-${System.currentTimeMillis()}")

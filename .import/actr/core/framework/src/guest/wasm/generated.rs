@@ -9,15 +9,17 @@
 //! is `#[cfg(target_arch = "wasm32")]`-gated, so hosts never see this code
 //! or the underlying `wit-bindgen` crate.
 //!
-//! # Async world (`actr:workload@0.4.0`)
+//! # Async world (`actr:workload@0.6.0`)
 //!
-//! The WIT world (`actr:workload@0.4.0`) declares every host import and
-//! workload export as a real `async func`. wit-bindgen 0.58 auto-generates
-//! async Rust bindings from that — the `Guest` trait methods and the host
-//! imports are all `async fn`, with NO `async: true` flag (the async-ness
-//! comes from the WIT itself). This is the guest half of the run_concurrent
-//! substrate: the host drives these async exports through
-//! `Store::run_concurrent`, and the guest just `.await`s its host imports.
+//! The WIT world (`actr:workload@0.6.0`) declares transport host imports and
+//! workload exports as real `async func`s. wit-bindgen 0.58 auto-generates
+//! async Rust bindings from that — the `Guest` trait methods and transport
+//! imports are `async fn`, with NO `async: true` flag (the async-ness comes
+//! from the WIT itself). The two synchronous `reply-sync` imports are only
+//! used by the Rust `Reply<T>` bridge to enqueue a response. This is the guest
+//! half of the run_concurrent substrate: the host drives these async exports
+//! through `Store::run_concurrent`, and the guest just `.await`s its async
+//! host imports.
 //!
 //! This replaces the M3 synchronous lift. Per-call identity is no longer
 //! read back through `get-self-id` / `get-caller-id` / `get-request-id`

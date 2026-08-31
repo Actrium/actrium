@@ -772,6 +772,27 @@ impl TestWasmWorkload {
         self.inner.handle(request_bytes, ctx, host_abi).await
     }
 
+    pub async fn handle_with_reply(
+        &mut self,
+        request_bytes: &[u8],
+        ctx: InvocationContext,
+        host_abi: &HostAbiFn,
+        reply_deliver: Option<Arc<dyn actr_framework::Deliver>>,
+        expects_response: bool,
+    ) -> Result<Vec<u8>, crate::wasm::WasmError> {
+        self.inner
+            .handle_with_reply(
+                request_bytes,
+                ctx,
+                host_abi,
+                reply_deliver,
+                expects_response,
+                None,
+                None,
+            )
+            .await
+    }
+
     pub async fn handle_data_chunk(
         &mut self,
         chunk: actr_protocol::DataChunk,

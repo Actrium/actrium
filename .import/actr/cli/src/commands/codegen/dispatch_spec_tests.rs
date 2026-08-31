@@ -6,7 +6,9 @@
 //! `proto_model_tests.rs`.
 
 use crate::commands::codegen::dispatch_spec::{DISPATCH_SPEC_SCHEMA_VERSION, DispatchRoute};
-use crate::commands::codegen::{DispatchSpec, MethodModel, ProtoModel, ProtoSide, ServiceModel};
+use crate::commands::codegen::{
+    DispatchSpec, MethodModel, ProtoModel, ProtoSide, ReplyMode, ServiceModel,
+};
 use actr_config::ConfigParser;
 use std::path::PathBuf;
 use tempfile::TempDir;
@@ -156,6 +158,7 @@ fn dispatch_spec_remote_routes_preserve_declared_payload_type() {
                 input_type: "Request".to_string(),
                 output_type: "Response".to_string(),
                 payload_type: "rpcSignal".to_string(),
+                reply_mode: ReplyMode::Return,
                 route_key: "signal.SignalService.Notify".to_string(),
             }],
             actr_type: Some("acme:SignalService:1.0.0".to_string()),
@@ -183,6 +186,7 @@ fn dispatch_spec_rejects_non_rpc_payload_type_for_remote_route() {
                 input_type: "Request".to_string(),
                 output_type: "Response".to_string(),
                 payload_type: "dataStream".to_string(),
+                reply_mode: ReplyMode::Return,
                 route_key: "stream.StreamService.Send".to_string(),
             }],
             actr_type: Some("acme:StreamService:1.0.0".to_string()),
@@ -272,6 +276,7 @@ fn make_local_service(
             input_type: "Req".to_string(),
             output_type: "Resp".to_string(),
             payload_type: "rpcReliable".to_string(),
+            reply_mode: ReplyMode::Return,
             route_key: route_key.to_string(),
         })
         .collect();
@@ -471,6 +476,7 @@ fn dispatch_spec_allows_colliding_method_names_for_remote_routes() {
             input_type: "Req".to_string(),
             output_type: "Resp".to_string(),
             payload_type: "rpcReliable".to_string(),
+            reply_mode: ReplyMode::Return,
             route_key: "svc.remote.RemoteService.Echo".to_string(),
         }],
         actr_type: Some("acme:Echo:1.0.0".to_string()),

@@ -31,6 +31,23 @@ protoc \
 protoc \
   --plugin=protoc-gen-actrframework-typescript=./scripts/protoc-gen-actrframework-typescript \
   --actrframework-typescript_out=generated \
-  --actrframework-typescript_opt=target=ts,RemoteFiles=remote/echo.proto,RemoteFileMapping=remote/echo.proto=acme:EchoService \
+  --actrframework-typescript_opt=target=ts,import_extension=js,dispatch_spec=dispatch_spec.json,dispatch_spec_hash=<sha256> \
   remote/echo.proto
 ```
+
+## Command Line Parameters
+
+Parameters are passed via `--actrframework-typescript_opt`:
+
+| Parameter           | Default | Description                                                        |
+| ------------------- | ------- | ------------------------------------------------------------------ |
+| `target`            |         | Code generation target (e.g. `ts`).                                |
+| `import_extension`  |         | Import path extension for generated imports (e.g. `js`).           |
+| `dispatch_spec`     | (required) | Path to the DispatchSpec v1 JSON file.                          |
+| `dispatch_spec_hash` | (required) | SHA-256 of the canonical spec JSON, for integrity validation. |
+
+Local/remote routing comes exclusively from the DispatchSpec. The legacy
+`LocalFiles`/`RemoteFiles`/`RemoteFileMapping` parameters are no longer accepted.
+`actr gen -l typescript` builds the DispatchSpec and computes its hash
+automatically; when invoking `protoc` directly, hash the canonical JSON of the
+spec (without `spec_hash`) and pass it as `dispatch_spec_hash`.

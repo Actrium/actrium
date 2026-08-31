@@ -129,6 +129,18 @@ pub trait Context: Clone + MaybeSendSync + 'static {
         None
     }
 
+    /// Mark an EXPLICIT invocation as deferred before its `Reply<T>` handle
+    /// can outlive dispatch.  The default rejects this because ordinary
+    /// contexts have no host-side outstanding-reply entry to retain.
+    ///
+    /// Generated Rust dispatchers call this immediately before constructing
+    /// `Reply<T>`. Component guest contexts override it when their WIT host
+    /// boundary is enabled; the runtime uses the marker to include a moved
+    /// reply in TTL cleanup.
+    fn claim_reply(&self) -> bool {
+        false
+    }
+
     // ========== Communication Methods ==========
 
     /// Send a type-safe RPC request and wait for response

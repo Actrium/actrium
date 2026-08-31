@@ -31,6 +31,7 @@ final class MetadataTests: XCTestCase {
       input_type: "echo.EchoRequest",
       output_type: "echo.EchoResponse",
       payload_type: "rpcReliable",
+      reply_mode: "return",
       dependency_alias: "echo"
     )
 
@@ -51,6 +52,7 @@ final class MetadataTests: XCTestCase {
       input_type: baseRoute.input_type,
       output_type: baseRoute.output_type,
       payload_type: baseRoute.payload_type,
+      reply_mode: baseRoute.reply_mode,
       dependency_alias: " "
     )
     XCTAssertThrowsError(
@@ -159,6 +161,7 @@ final class MetadataTests: XCTestCase {
       input_type: "echo.EchoRequest",
       output_type: "echo.EchoResponse",
       payload_type: "rpcSignal",
+      reply_mode: "return",
       dependency_alias: "echo"
     )
 
@@ -172,6 +175,7 @@ final class MetadataTests: XCTestCase {
     XCTAssertTrue(source.contains("ctx.resolveDependency(alias: \"echo\")"))
     XCTAssertTrue(source.contains("ctx.discover(targetType: actrType)"))
     XCTAssertTrue(source.contains("ctx.callRaw("))
+    XCTAssertTrue(source.contains("ctx.replyRaw(payload: response)"))
     XCTAssertTrue(source.contains("payloadType: .rpcSignal"))
     XCTAssertTrue(source.contains("timeoutMs: timeoutMs"))
     XCTAssertFalse(source.contains("remoteTargets"))
@@ -187,6 +191,7 @@ final class MetadataTests: XCTestCase {
       input_type: "echo.EchoRequest",
       output_type: "echo.EchoResponse",
       payload_type: "rpcReliable",
+      reply_mode: "return",
       dependency_alias: nil
     )
 
@@ -201,6 +206,36 @@ final class MetadataTests: XCTestCase {
     XCTAssertTrue(source.contains("handler: any ActrDispatchHandler"))
   }
 
+  func testExplicitDispatcherUsesReplyHandle() throws {
+    let route = ActrFrameworkGenerator.DispatchRoute(
+      route_key: "echo.EchoService.Transcode",
+      proto_file: "local/echo.proto",
+      proto_service: "echo.EchoService",
+      method: "Transcode",
+      input_type: "echo.EchoRequest",
+      output_type: "echo.EchoResponse",
+      payload_type: "rpcReliable",
+      reply_mode: "explicit",
+      dependency_alias: nil
+    )
+
+    let source = try ActrFrameworkGenerator.generateUnifiedDispatcher(
+      localRoutes: [route],
+      remoteRoutes: [],
+      localServiceNames: ["echo.EchoService"],
+      typeToSwiftName: [
+        "echo.EchoRequest": "Echo_EchoRequest",
+        "echo.EchoResponse": "Echo_EchoResponse",
+      ]
+    )
+
+    XCTAssertTrue(source.contains("let reply = Reply<Echo_EchoResponse>"))
+    XCTAssertTrue(source.contains("try await ctx.claimReply()"))
+    XCTAssertTrue(source.contains("try await handler.transcode(req: req, ctx: ctx, reply: reply)"))
+    XCTAssertTrue(source.contains("return Data()"))
+    XCTAssertFalse(source.contains("let resp = try await handler.transcode"))
+  }
+
   func testMetadataMatchesCliSchemaAndCarriesAlias() throws {
     let remoteRoute = ActrFrameworkGenerator.DispatchRoute(
       route_key: "echo.EchoService.Echo",
@@ -210,6 +245,7 @@ final class MetadataTests: XCTestCase {
       input_type: "echo.EchoRequest",
       output_type: "echo.EchoResponse",
       payload_type: "rpcReliable",
+      reply_mode: "return",
       dependency_alias: "echo"
     )
     let localRoute = ActrFrameworkGenerator.DispatchRoute(
@@ -220,6 +256,7 @@ final class MetadataTests: XCTestCase {
       input_type: "local.StartRequest",
       output_type: "local.StartResponse",
       payload_type: "rpcReliable",
+      reply_mode: "return",
       dependency_alias: nil
     )
     let typeRefs: [String: ActrFrameworkGenerator.TypeRef] = [
@@ -262,11 +299,12 @@ final class MetadataTests: XCTestCase {
       ["actr_dispatch.swift", "actr-gen-meta.json"])
     let localServices = try XCTUnwrap(object["local_services"] as? [[String: Any]])
     XCTAssertEqual(localServices.first?["handler_interface"] as? String, "ProbeServiceHandler")
-    XCTAssertEqual(localServices.first?["dispatcher_type"] as? String, "ProbeServiceDispatcher")
-    XCTAssertEqual(localServices.first?["workload_type"] as? String, "")
+    XCTAssertNil(localServices.first?["dispatcher_type"])
+    XCTAssertNil(localServices.first?["workload_type"])
     let localMethods = try XCTUnwrap(localServices.first?["methods"] as? [[String: Any]])
     let inputRef = try XCTUnwrap(localMethods.first?["input_ref"] as? [String: Any])
     XCTAssertEqual(inputRef["proto_file"] as? String, "local/probe.proto")
+    XCTAssertEqual(localMethods.first?["reply_mode"] as? String, "return")
     let remoteServices = try XCTUnwrap(object["remote_services"] as? [[String: Any]])
     XCTAssertEqual(remoteServices.first?["dependency_alias"] as? String, "echo")
     XCTAssertNil(remoteServices.first?["actr_type"])

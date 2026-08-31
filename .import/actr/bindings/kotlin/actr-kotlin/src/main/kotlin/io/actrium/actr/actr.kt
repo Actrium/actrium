@@ -955,6 +955,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_caller_id(
     ): Short
+    external fun uniffi_actr_checksum_method_contextbridge_claim_reply(
+    ): Short
     external fun uniffi_actr_checksum_method_contextbridge_discover(
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_log(
@@ -964,6 +966,10 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_actr_checksum_method_contextbridge_register_stream(
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_remove_media_track(
+    ): Short
+    external fun uniffi_actr_checksum_method_contextbridge_reply_error(
+    ): Short
+    external fun uniffi_actr_checksum_method_contextbridge_reply_raw(
     ): Short
     external fun uniffi_actr_checksum_method_contextbridge_request_id(
     ): Short
@@ -1113,6 +1119,8 @@ external fun uniffi_actr_fn_method_contextbridge_call_raw(`ptr`: Long,`target`: 
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_caller_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_actr_fn_method_contextbridge_claim_reply(`ptr`: Long,
+): Long
 external fun uniffi_actr_fn_method_contextbridge_discover(`ptr`: Long,`targetType`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_log(`ptr`: Long,`level`: RustBuffer.ByValue,`msg`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1122,6 +1130,10 @@ external fun uniffi_actr_fn_method_contextbridge_register_media_track(`ptr`: Lon
 external fun uniffi_actr_fn_method_contextbridge_register_stream(`ptr`: Long,`streamId`: RustBuffer.ByValue,`callback`: Long,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_remove_media_track(`ptr`: Long,`target`: RustBuffer.ByValue,`trackId`: RustBuffer.ByValue,
+): Long
+external fun uniffi_actr_fn_method_contextbridge_reply_error(`ptr`: Long,`error`: RustBuffer.ByValue,
+): Long
+external fun uniffi_actr_fn_method_contextbridge_reply_raw(`ptr`: Long,`payload`: RustBuffer.ByValue,
 ): Long
 external fun uniffi_actr_fn_method_contextbridge_request_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1400,6 +1412,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_actr_checksum_method_contextbridge_caller_id() != 7075.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_actr_checksum_method_contextbridge_claim_reply() != 7617.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_actr_checksum_method_contextbridge_discover() != 38410.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1413,6 +1428,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_remove_media_track() != 43937.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_contextbridge_reply_error() != 49446.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_actr_checksum_method_contextbridge_reply_raw() != 62978.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_actr_checksum_method_contextbridge_request_id() != 61345.toShort()) {
@@ -2976,13 +2997,12 @@ open class ActrRefWrapper: Disposable, AutoCloseable, ActrRefWrapperInterface
         { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
         // lift function
         { Unit },
-        
+
         // Error FFI converter
         ActrException.ErrorHandler,
     )
     }
 
-    
     /**
      * Wait for shutdown to complete.
      */
@@ -3171,6 +3191,16 @@ public interface ContextBridgeInterface {
     fun `callerId`(): ActrId?
     
     /**
+     * Claim responsibility for delivering this invocation's response later.
+     *
+     * Generated EXPLICIT handlers call this before handing the movable reply
+     * handle to user code. It distinguishes a deliberately deferred reply
+     * from the return value of an older generated dispatcher, whose payload
+     * may legitimately encode to zero bytes.
+     */
+    suspend fun `claimReply`()
+
+    /**
      * Discover an actor of the specified type
      *
      * # Arguments
@@ -3201,6 +3231,16 @@ public interface ContextBridgeInterface {
      */
     suspend fun `removeMediaTrack`(`target`: ActrId, `trackId`: kotlin.String)
     
+    /**
+     * Deliver an error response through the current inbound RPC reply boundary.
+     */
+    suspend fun `replyError`(`error`: ActrException)
+
+    /**
+     * Deliver a response through the current inbound RPC reply boundary.
+     */
+    suspend fun `replyRaw`(`payload`: kotlin.ByteArray)
+
     /**
      * Request ID associated with the current dispatch or lifecycle context.
      */
@@ -3354,7 +3394,6 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
         }
     }
 
-    
     /**
      * Add a media track to the WebRTC connection with the target
      */
@@ -3430,6 +3469,34 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     
 
     
+    /**
+     * Claim responsibility for delivering this invocation's response later.
+     *
+     * Generated EXPLICIT handlers call this before handing the movable reply
+     * handle to user code. It distinguishes a deliberately deferred reply
+     * from the return value of an older generated dispatcher, whose payload
+     * may legitimately encode to zero bytes.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `claimReply`() {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_contextbridge_claim_reply(
+                uniffiHandle,
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
+    }
+
+
     /**
      * Discover an actor of the specified type
      *
@@ -3550,6 +3617,55 @@ open class ContextBridge: Disposable, AutoCloseable, ContextBridgeInterface
     }
 
     
+    /**
+     * Deliver an error response through the current inbound RPC reply boundary.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `replyError`(`error`: ActrException) {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_contextbridge_reply_error(
+                uniffiHandle,
+                FfiConverterTypeActrError.lower(`error`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
+    }
+
+    /**
+     * Deliver a response through the current inbound RPC reply boundary.
+     */
+    @Throws(ActrException::class)
+    @Suppress("ASSIGNED_BUT_NEVER_ACCESSED_VARIABLE")
+    override suspend fun `replyRaw`(`payload`: kotlin.ByteArray) {
+        return uniffiRustCallAsync(
+        callWithHandle { uniffiHandle ->
+            UniffiLib.uniffi_actr_fn_method_contextbridge_reply_raw(
+                uniffiHandle,
+                FfiConverterByteArray.lower(`payload`),
+            )
+        },
+        { future, callback, continuation -> UniffiLib.ffi_actr_rust_future_poll_void(future, callback, continuation) },
+        { future, continuation -> UniffiLib.ffi_actr_rust_future_complete_void(future, continuation) },
+        { future -> UniffiLib.ffi_actr_rust_future_free_void(future) },
+        // lift function
+        { Unit },
+
+        // Error FFI converter
+        ActrException.ErrorHandler,
+    )
+    }
+
+
     /**
      * Request ID associated with the current dispatch or lifecycle context.
      */override fun `requestId`(): kotlin.String {
@@ -9071,4 +9187,3 @@ public object FfiConverterSequenceTypeWebRtcPeerStateBridge: FfiConverterRustBuf
     )
     }
     
-

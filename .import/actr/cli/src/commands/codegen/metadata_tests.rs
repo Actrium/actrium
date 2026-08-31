@@ -14,6 +14,7 @@ fn svc_model(name: &str, side: super::super::ProtoSide) -> ServiceModel {
             input_type: "EchoRequest".into(),
             output_type: "EchoResponse".into(),
             payload_type: "rpcReliable".into(),
+            reply_mode: ReplyMode::Return,
             route_key: "echo.EchoService.Echo".into(),
         }],
         actr_type: Some("acme:Echo:1.0.0".into()),
@@ -30,14 +31,12 @@ fn from_proto_model_populates_local_and_remote() {
     let meta = ActrGenMetadata::from_proto_model(SupportedLanguage::Rust, &model).unwrap();
     assert_eq!(meta.local_services.len(), 1);
     assert_eq!(meta.local_services[0].name, "EchoService");
-    assert!(meta.local_services[0].workload_type.is_empty());
-    assert!(meta.local_services[0].dispatcher_type.is_empty());
     assert_eq!(meta.language, "rust");
     assert!(meta.remote_services.is_empty());
 }
 
 #[test]
-fn rust_local_metadata_serialization_omits_removed_per_service_runtime_types() {
+fn local_metadata_serialization_omits_removed_per_service_runtime_types() {
     let model = ProtoModel {
         files: vec![],
         local_services: vec![svc_model("EchoService", super::super::ProtoSide::Local)],
@@ -48,11 +47,11 @@ fn rust_local_metadata_serialization_omits_removed_per_service_runtime_types() {
     let service = &value["local_services"][0];
     assert!(
         service.get("workload_type").is_none(),
-        "Rust metadata must not claim a removed per-service workload type: {service}"
+        "metadata must not claim a removed per-service workload type: {service}"
     );
     assert!(
         service.get("dispatcher_type").is_none(),
-        "Rust metadata must not claim a removed per-service dispatcher type: {service}"
+        "metadata must not claim a removed per-service dispatcher type: {service}"
     );
 }
 
@@ -292,6 +291,7 @@ fn from_proto_model_errors_on_ambiguous_unqualified_type() {
                     input_type: "SharedRequest".to_string(),
                     output_type: "SharedResponse".to_string(),
                     payload_type: "rpcReliable".to_string(),
+                    reply_mode: ReplyMode::Return,
                     route_key: "client.Client.Foo".to_string(),
                 }],
                 actr_type: None,
@@ -328,6 +328,7 @@ fn from_proto_model_errors_on_ambiguous_unqualified_type() {
                 input_type: "SharedRequest".to_string(),
                 output_type: "SharedResponse".to_string(),
                 payload_type: "rpcReliable".to_string(),
+                reply_mode: ReplyMode::Return,
                 route_key: "client.Client.Foo".to_string(),
             }],
             actr_type: None,
@@ -413,8 +414,6 @@ fn load_metadata_rejects_missing_type_refs() {
             "package": "echo",
             "proto_file": "local/echo.proto",
             "handler_interface": "EchoServiceHandler",
-            "workload_type": "EchoServiceWorkload",
-            "dispatcher_type": "EchoServiceDispatcher",
             "methods": [{
                 "name": "Echo",
                 "snake_name": "echo",
@@ -453,6 +452,4 @@ fn load_metadata_accepts_rust_local_service_without_removed_runtime_types() {
     std::fs::write(dir.path().join("actr-gen-meta.json"), json).unwrap();
     let meta = load_metadata(dir.path()).unwrap().unwrap();
     assert_eq!(meta.local_services.len(), 1);
-    assert!(meta.local_services[0].workload_type.is_empty());
-    assert!(meta.local_services[0].dispatcher_type.is_empty());
 }

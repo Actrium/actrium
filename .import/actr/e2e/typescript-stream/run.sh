@@ -187,12 +187,9 @@ write_ts_echo_impl() {
 // ActrService is Implemented: This file contains a complete implementation.
 import { create } from '@bufbuild/protobuf';
 import {
+  ActrContext,
   PayloadType,
   defineWorkload,
-  registerStream,
-  sendDataChunk,
-  unregisterStream,
-  type InvocationCtx,
 } from '@actrium/actr-workload';
 
 import type {
@@ -208,8 +205,10 @@ import {
   StreamPrepareResponseSchema,
   StreamReleaseResponseSchema,
 } from './generated/echo_pb.js';
-import type { EchoServiceHandler } from './generated/echo_workload.js';
-import { EchoServiceDispatcher } from './generated/echo_workload.js';
+import {
+  actrDispatch,
+  type ActrDispatchHandler,
+} from './generated/actr_dispatch.js';
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -224,8 +223,8 @@ function toUint8Array(payload: ArrayBuffer | ArrayLike<number>): Uint8Array {
   return Uint8Array.from(payload);
 }
 
-class EchoServiceHandlerImpl implements EchoServiceHandler {
-  echo(request: EchoRequest): EchoResponse {
+class EchoServiceHandlerImpl implements ActrDispatchHandler {
+  echoServiceEcho(request: EchoRequest, _ctx: ActrContext): EchoResponse {
     console.log(`typescript echo: echo ${request.message}`);
     return create(EchoResponseSchema, {
       reply: `echo: ${request.message}`,
@@ -233,9 +232,9 @@ class EchoServiceHandlerImpl implements EchoServiceHandler {
     });
   }
 
-  async prepareStream(
+  async echoServicePrepareStream(
     request: StreamPrepareRequest,
-    ctx?: InvocationCtx,
+    ctx: ActrContext,
   ): Promise<StreamPrepareResponse> {
     const inboundStreamId = request.inboundStreamId;
     const replyStreamId = request.replyStreamId;
@@ -244,12 +243,12 @@ class EchoServiceHandlerImpl implements EchoServiceHandler {
       `typescript echo: prepare ${inboundStreamId} -> ${replyStreamId}`,
     );
 
-    await registerStream(
+    await ctx.registerStream(
       inboundStreamId,
-      async (chunk, sender) => {
+      async (chunk, sender, streamCtx) => {
         const incoming = textDecoder.decode(toUint8Array(chunk.payload));
         console.log(`typescript echo: stream ${inboundStreamId} ${incoming}`);
-        await sendDataChunk(
+        await streamCtx.sendDataChunk(
           { peer: sender },
           {
             streamId: replyStreamId,
@@ -259,11 +258,9 @@ class EchoServiceHandlerImpl implements EchoServiceHandler {
             timestampMs: BigInt(Date.now()),
           },
           PayloadType.StreamReliable,
-          ctx,
         );
-        await unregisterStream(inboundStreamId, ctx);
+        await streamCtx.unregisterStream(inboundStreamId);
       },
-      ctx,
     );
 
     return create(StreamPrepareResponseSchema, {
@@ -271,19 +268,19 @@ class EchoServiceHandlerImpl implements EchoServiceHandler {
     });
   }
 
-  async releaseStream(
+  async echoServiceReleaseStream(
     request: StreamReleaseRequest,
-    ctx?: InvocationCtx,
+    ctx: ActrContext,
   ): Promise<StreamReleaseResponse> {
     console.log(`typescript echo: release ${request.streamId}`);
-    await unregisterStream(request.streamId, ctx);
+    await ctx.unregisterStream(request.streamId);
     return create(StreamReleaseResponseSchema, {
       status: `unregistered:${request.streamId}`,
     });
   }
 }
 
-const dispatcher = new EchoServiceDispatcher(new EchoServiceHandlerImpl());
+const handler = new EchoServiceHandlerImpl();
 
 export default defineWorkload({
   async onStart(): Promise<void> {
@@ -291,7 +288,13 @@ export default defineWorkload({
   },
 
   async dispatch(envelope, ctx): Promise<Uint8Array> {
-    return dispatcher.dispatch(envelope, ctx);
+    return actrDispatch(
+      new ActrContext(ctx!),
+      handler,
+      envelope.routeKey,
+      envelope.payload ?? new Uint8Array(),
+      envelope.timeoutMs,
+    );
   },
 });
 EOF_TS

@@ -85,7 +85,7 @@ impl MessageDispatcher for EchoDispatcher {
         _ctx: &C,
     ) -> ActorResult<Bytes> {
         match envelope.route_key.as_str() {
-            "echo" => {
+            "echo" | "EchoService.Echo" => {
                 let payload = envelope
                     .payload
                     .as_ref()
@@ -404,10 +404,10 @@ async fn linked_dispatch_envelope_forwards_to_handle() {
     let ctx = test_runtime_context(2);
     let abi = dummy_host_abi();
 
-    // EchoWorkload dispatch succeeds for route_key "echo" — exercises the
-    // Linked forwarding arm of dispatch_envelope.
+    // A canonical package-less route exercises the Linked forwarding arm of
+    // dispatch_envelope without changing newly generated keys.
     let envelope = RpcEnvelope {
-        route_key: "echo".to_string(),
+        route_key: "EchoService.Echo".to_string(),
         payload: Some(Bytes::from_static(b"hi")),
         ..Default::default()
     };
@@ -416,6 +416,37 @@ async fn linked_dispatch_envelope_forwards_to_handle() {
         .await
         .unwrap();
     assert_eq!(result, Bytes::from_static(b"hi-ok"));
+}
+
+#[tokio::test]
+async fn linked_dispatch_envelope_accepts_single_leading_dot_route_alias() {
+    let mut wl = linked_echo();
+    let abi = dummy_host_abi();
+
+    // Package-less proto routes used to be emitted as `.Service.Method`.
+    // The shared dispatch boundary must canonicalize one prefix before the
+    // generated dispatcher sees it, but must not broadly trim malformed keys.
+    let accepted = RpcEnvelope {
+        route_key: ".EchoService.Echo".to_string(),
+        payload: Some(Bytes::from_static(b"legacy")),
+        ..Default::default()
+    };
+    let result = wl
+        .dispatch_envelope(accepted, test_runtime_context(2), invocation(2), &abi)
+        .await
+        .expect("single leading-dot alias must dispatch");
+    assert_eq!(result, Bytes::from_static(b"legacy-ok"));
+
+    let rejected = RpcEnvelope {
+        route_key: "..EchoService.Echo".to_string(),
+        payload: Some(Bytes::from_static(b"malformed")),
+        ..Default::default()
+    };
+    let err = wl
+        .dispatch_envelope(rejected, test_runtime_context(2), invocation(2), &abi)
+        .await
+        .expect_err("only one leading-dot alias is accepted");
+    assert!(matches!(err, ActrError::InvalidArgument(_)));
 }
 
 #[test]

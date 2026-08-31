@@ -1,9 +1,11 @@
-//! Component Model bindings for the `actr:workload@0.5.0` async WIT world.
+//! Component Model bindings for the `actr:workload@0.6.0` async WIT world.
 //!
 //! These are the sole runtime bindings after retirement of the 0.1.0
-//! synchronous world. The 0.5.0 world declares every host import and workload
-//! export as a real WIT `async func`, so wasmtime 46 emits the following
-//! binding shape:
+//! synchronous world. The 0.6.0 world declares transport host imports and
+//! workload exports as real WIT `async func`s. The two synchronous
+//! `reply-sync` imports are the deliberate Rust `Reply<T>` bridge; they only
+//! enqueue reply outcomes. For the async portion, wasmtime 46 emits the
+//! following binding shape:
 //!
 //! - **Imports** become an *Accessor-based* host trait: the methods are
 //!   `async` **associated functions** taking `&Accessor<HostState, Self>`

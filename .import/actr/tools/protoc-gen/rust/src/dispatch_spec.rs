@@ -22,8 +22,14 @@ pub struct DispatchRoute {
     pub input_type: String,
     pub output_type: String,
     pub payload_type: String,
+    #[serde(default = "default_reply_mode")]
+    pub reply_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dependency_alias: Option<String>,
+}
+
+fn default_reply_mode() -> String {
+    "return".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -64,10 +70,18 @@ impl DispatchSpec {
                 ("input_type", route.input_type.as_str()),
                 ("output_type", route.output_type.as_str()),
                 ("payload_type", route.payload_type.as_str()),
+                ("reply_mode", route.reply_mode.as_str()),
             ] {
                 if value.is_empty() {
                     bail!("dispatch spec route field `{field}` must be non-empty");
                 }
+            }
+            if !matches!(route.reply_mode.as_str(), "return" | "explicit") {
+                bail!(
+                    "dispatch spec route `{}` has unsupported reply_mode `{}`",
+                    route.route_key,
+                    route.reply_mode
+                );
             }
             if !route_keys.insert(route.route_key.as_str()) {
                 bail!(
@@ -105,9 +119,16 @@ impl DispatchSpec {
     /// value. Returns an error on any mismatch.
     pub fn verify_hash(&self, expected_hash: &str) -> Result<()> {
         let recomputed = self.recompute_hash();
+        let legacy_recomputed = self.recompute_legacy_hash();
+        let matches_hash = |hash: &str| {
+            hash == recomputed
+                || legacy_recomputed
+                    .as_deref()
+                    .is_some_and(|legacy| hash == legacy)
+        };
 
         if let Some(embedded) = &self.spec_hash
-            && embedded != &recomputed
+            && !matches_hash(embedded)
         {
             bail!(
                 "dispatch spec hash mismatch: embedded `{embedded}` but recomputed \
@@ -115,7 +136,7 @@ impl DispatchSpec {
             );
         }
 
-        if !expected_hash.is_empty() && expected_hash != recomputed {
+        if !expected_hash.is_empty() && !matches_hash(expected_hash) {
             bail!(
                 "dispatch spec hash mismatch: CLI passed `{expected_hash}` but the spec \
                  on disk hashes to `{recomputed}`; rerun `actr gen` to refresh the spec"
@@ -136,6 +157,27 @@ impl DispatchSpec {
         let canonical = canonicalize_json(&serde_json::to_value(&spec_without_hash).unwrap());
         let canonical_bytes = serde_json::to_vec(&canonical).unwrap();
         compute_sha256_hex(&canonical_bytes)
+    }
+
+    /// Pre-RFC-0323 DispatchSpec v1 did not serialize `reply_mode`.  Its
+    /// semantic default is RETURN, so accept its original digest as well as
+    /// the current spelling without weakening explicit-route validation.
+    fn recompute_legacy_hash(&self) -> Option<String> {
+        if self.routes.iter().any(|route| route.reply_mode != "return") {
+            return None;
+        }
+        let mut value = serde_json::to_value(DispatchSpec {
+            schema_version: self.schema_version.clone(),
+            routes: self.routes.clone(),
+            spec_hash: None,
+        })
+        .ok()?;
+        let routes = value.get_mut("routes")?.as_array_mut()?;
+        for route in routes {
+            route.as_object_mut()?.remove("reply_mode");
+        }
+        let canonical = canonicalize_json(&value);
+        Some(compute_sha256_hex(&serde_json::to_vec(&canonical).ok()?))
     }
 
     /// All routes whose `dependency_alias` is `None` — these are local routes
@@ -233,6 +275,7 @@ mod tests {
             input_type: input_type.to_string(),
             output_type: output_type.to_string(),
             payload_type: "rpcReliable".to_string(),
+            reply_mode: "return".to_string(),
             dependency_alias: dependency_alias.map(|s| s.to_string()),
         }
     }
@@ -359,6 +402,28 @@ mod tests {
         };
         let recomputed = spec.recompute_hash();
         assert!(spec.verify_hash(&recomputed).is_ok());
+    }
+
+    #[test]
+    fn verify_hash_accepts_v1_digest_without_reply_mode() {
+        let routes = vec![make_route(
+            "EchoService.Echo",
+            "echo.proto",
+            "EchoService",
+            "Echo",
+            "EchoRequest",
+            "EchoResponse",
+            None,
+        )];
+        let mut spec = DispatchSpec {
+            schema_version: "v1".to_string(),
+            routes,
+            spec_hash: None,
+        };
+        let legacy_hash = spec.recompute_legacy_hash().unwrap();
+        spec.spec_hash = Some(legacy_hash.clone());
+
+        assert!(spec.verify_hash(&legacy_hash).is_ok());
     }
 
     #[test]

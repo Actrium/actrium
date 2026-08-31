@@ -43,6 +43,7 @@ export const hostCalls = {
   payloadTypes: [] as PayloadType[],
   registerStream: [] as string[],
   unregisterStream: [] as string[],
+  replyPayloads: [] as Uint8Array[],
   sendDataChunk: [] as SendDataChunkCall[],
 };
 
@@ -53,6 +54,7 @@ export function resetHostCalls(): void {
   hostCalls.payloadTypes.length = 0;
   hostCalls.registerStream.length = 0;
   hostCalls.unregisterStream.length = 0;
+  hostCalls.replyPayloads.length = 0;
   hostCalls.sendDataChunk.length = 0;
 }
 
@@ -102,6 +104,14 @@ export async function callRaw(
   hostCalls.timeouts.push(timeoutMs);
   hostCalls.payloadTypes.push(payloadType);
   return payload;
+}
+
+export async function reply(
+  ctxToken: bigint,
+  payload: Uint8Array,
+): Promise<void> {
+  record(ctxToken, 'reply');
+  hostCalls.replyPayloads.push(payload);
 }
 
 export async function discover(

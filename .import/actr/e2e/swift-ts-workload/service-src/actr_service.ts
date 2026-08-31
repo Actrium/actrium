@@ -1,13 +1,10 @@
 import { create } from '@bufbuild/protobuf';
 import {
+  ActrContext,
   PayloadType,
   defineWorkload,
-  registerStream,
-  sendDataChunk,
-  unregisterStream,
   type ActrId,
   type DataChunk,
-  type InvocationCtx,
   type MetadataEntry,
 } from '@actrium/actr-workload';
 
@@ -25,8 +22,10 @@ import {
   StartDuplexStreamResponseSchema,
   StreamPayloadMode,
 } from './generated/duplex_echo_pb.js';
-import type { DuplexEchoServiceHandler } from './generated/local_workload.js';
-import { DuplexEchoServiceDispatcher } from './generated/local_workload.js';
+import {
+  actrDispatch,
+  type ActrDispatchHandler,
+} from './generated/actr_dispatch.js';
 
 const textDecoder = new TextDecoder();
 const textEncoder = new TextEncoder();
@@ -60,15 +59,18 @@ function payloadText(payload: Uint8Array | ArrayBuffer | ArrayLike<number>): str
   return textDecoder.decode(bytes);
 }
 
-class DuplexEchoServiceHandlerImpl implements DuplexEchoServiceHandler {
-  async echo(request: EchoRequest): Promise<EchoResponse> {
+class DuplexEchoServiceHandlerImpl implements ActrDispatchHandler {
+  async duplexEchoServiceEcho(
+    request: EchoRequest,
+    _ctx: ActrContext,
+  ): Promise<EchoResponse> {
     console.log(`[DuplexEchoService] recv Echo message="${request.message}"`);
     return create(EchoResponseSchema, { message: `echo:${request.message}` });
   }
 
-  async startDuplexStream(
+  async duplexEchoServiceStartDuplexStream(
     request: StartDuplexStreamRequest,
-    ctx?: InvocationCtx,
+    ctx: ActrContext,
   ): Promise<StartDuplexStreamResponse> {
     const payloadType = payloadTypeFor(request.payloadMode);
     const serviceToClientStreamId = `s2c-${request.sessionId}`;
@@ -82,12 +84,11 @@ class DuplexEchoServiceHandlerImpl implements DuplexEchoServiceHandler {
       serviceChunksSent: 0,
     };
 
-    await registerStream(
+    await ctx.registerStream(
       request.clientToServiceStreamId,
       async (chunk, sender, streamCtx) => {
         await this.onClientChunk(chunk, sender, streamCtx);
       },
-      ctx,
     );
 
     sessionsById.set(request.sessionId, state);
@@ -101,12 +102,12 @@ class DuplexEchoServiceHandlerImpl implements DuplexEchoServiceHandler {
     });
   }
 
-  async finishDuplexStream(
+  async duplexEchoServiceFinishDuplexStream(
     request: FinishDuplexStreamRequest,
-    ctx?: InvocationCtx,
+    ctx: ActrContext,
   ): Promise<FinishDuplexStreamResponse> {
     const state = sessionsById.get(request.sessionId);
-    await unregisterStream(request.clientToServiceStreamId, ctx);
+    await ctx.unregisterStream(request.clientToServiceStreamId);
     sessionIdByClientStreamId.delete(request.clientToServiceStreamId);
     if (state) {
       sessionsById.delete(request.sessionId);
@@ -122,7 +123,7 @@ class DuplexEchoServiceHandlerImpl implements DuplexEchoServiceHandler {
   private async onClientChunk(
     chunk: DataChunk,
     sender: ActrId,
-    ctx: InvocationCtx,
+    ctx: ActrContext,
   ): Promise<void> {
     const sessionId = sessionIdByClientStreamId.get(chunk.streamId);
     const state = sessionId ? sessionsById.get(sessionId) : undefined;
@@ -144,7 +145,7 @@ class DuplexEchoServiceHandlerImpl implements DuplexEchoServiceHandler {
       { key: 'source_stream_id', value: chunk.streamId },
     ];
 
-    await sendDataChunk(
+    await ctx.sendDataChunk(
       { peer: sender },
       {
         streamId: state.serviceToClientStreamId,
@@ -154,12 +155,11 @@ class DuplexEchoServiceHandlerImpl implements DuplexEchoServiceHandler {
         timestampMs: BigInt(Date.now()),
       },
       state.payloadType,
-      ctx,
     );
   }
 }
 
-const dispatcher = new DuplexEchoServiceDispatcher(new DuplexEchoServiceHandlerImpl());
+const handler = new DuplexEchoServiceHandlerImpl();
 
 export default defineWorkload({
   async onStart(): Promise<void> {
@@ -169,6 +169,12 @@ export default defineWorkload({
     console.log('[DuplexEchoService] workload stopped');
   },
   async dispatch(envelope, ctx): Promise<Uint8Array> {
-    return dispatcher.dispatch(envelope, ctx);
+    return actrDispatch(
+      new ActrContext(ctx!),
+      handler,
+      envelope.routeKey,
+      envelope.payload ?? new Uint8Array(),
+      envelope.timeoutMs,
+    );
   },
 });

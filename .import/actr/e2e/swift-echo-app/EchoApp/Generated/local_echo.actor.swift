@@ -26,34 +26,3 @@ public protocol LocalEchoServiceHandler: Sendable {
         ctx: any ActrContext
     ) async throws(ActrError) -> Echoapp_LocalEchoResponse
 }
-
-public enum LocalEchoServiceDispatcher {
-    public static func dispatch(
-        handler: any LocalEchoServiceHandler,
-        ctx: any ActrContext,
-        routeKey: String,
-        payload: Data
-    ) async throws(ActrError) -> Data {
-        switch routeKey {
-        case "echoapp.LocalEchoService.Send":
-            let req: Echoapp_LocalEchoRequest
-            do {
-                req = try Echoapp_LocalEchoRequest(serializedBytes: payload)
-            } catch {
-                throw ActrError.DecodeFailure(
-                    msg: "Failed to decode Echoapp_LocalEchoRequest for route \(routeKey): \(error)"
-                )
-            }
-            let resp = try await handler.send(req: req, ctx: ctx)
-            do {
-                return try resp.serializedData()
-            } catch {
-                throw ActrError.DecodeFailure(
-                    msg: "Failed to encode Echoapp_LocalEchoResponse for route \(routeKey): \(error)"
-                )
-            }
-        default:
-            throw ActrError.UnknownRoute(msg: "Unknown route: \(routeKey)")
-        }
-    }
-}

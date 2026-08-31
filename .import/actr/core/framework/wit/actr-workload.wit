@@ -2,7 +2,7 @@
 //
 // `actr:workload@0.2.0` is the timeout-aware browser ABI revision. It is a
 // code-generation source for the browser bindings; the native Component Model
-// runtime uses the async `actr:workload@0.4.0` contract in `wit-v2/`.
+// runtime uses the async `actr:workload@0.6.0` contract in `wit-v2/`.
 //
 // Phase 1 migration target: replaces the handwritten ptr/len ABI
 // (core/hyper/src/wasm/abi.rs, core/framework/src/guest/dynclib_abi.rs,

@@ -3,13 +3,18 @@ import Foundation
 import SwiftProtobuf
 import SwiftProtobufPluginLibrary
 
+private enum DispatchRouteCodingKeys: String, CodingKey {
+    case route_key, proto_file, proto_service, method, input_type, output_type
+    case payload_type, reply_mode, dependency_alias
+}
+
 @main
 struct ActrFrameworkGenerator {
     static let version = "0.10.0-alpha.3"
 
     // MARK: - DispatchSpec model
 
-    struct DispatchRoute: Codable {
+    struct DispatchRoute: Decodable {
         let route_key: String
         let proto_file: String
         let proto_service: String
@@ -17,12 +22,50 @@ struct ActrFrameworkGenerator {
         let input_type: String
         let output_type: String
         let payload_type: String
+        let reply_mode: String
         let dependency_alias: String?
 
         var isRemote: Bool { dependency_alias != nil }
+
+        init(
+            route_key: String,
+            proto_file: String,
+            proto_service: String,
+            method: String,
+            input_type: String,
+            output_type: String,
+            payload_type: String,
+            reply_mode: String = "return",
+            dependency_alias: String? = nil
+        ) {
+            self.route_key = route_key
+            self.proto_file = proto_file
+            self.proto_service = proto_service
+            self.method = method
+            self.input_type = input_type
+            self.output_type = output_type
+            self.payload_type = payload_type
+            self.reply_mode = reply_mode
+            self.dependency_alias = dependency_alias
+        }
+
+        init(from decoder: Swift.Decoder) throws {
+            let values = try decoder.container(keyedBy: DispatchRouteCodingKeys.self)
+            route_key = try values.decode(String.self, forKey: .route_key)
+            proto_file = try values.decode(String.self, forKey: .proto_file)
+            proto_service = try values.decode(String.self, forKey: .proto_service)
+            method = try values.decode(String.self, forKey: .method)
+            input_type = try values.decode(String.self, forKey: .input_type)
+            output_type = try values.decode(String.self, forKey: .output_type)
+            payload_type = try values.decode(String.self, forKey: .payload_type)
+            // reply_mode was added as an optional field to DispatchSpec v1.
+            // Keep pre-RFC-0323 specs on the original return-byte contract.
+            reply_mode = try values.decodeIfPresent(String.self, forKey: .reply_mode) ?? "return"
+            dependency_alias = try values.decodeIfPresent(String.self, forKey: .dependency_alias)
+        }
     }
 
-    struct DispatchSpecModel: Codable {
+    struct DispatchSpecModel: Decodable {
         let schema_version: String
         let routes: [DispatchRoute]
         let spec_hash: String?
@@ -36,6 +79,7 @@ struct ActrFrameworkGenerator {
         let route_key: String
         let input_ref: TypeRef
         let output_ref: TypeRef
+        let reply_mode: String
     }
 
     struct LocalServiceMetadata: Encodable {
@@ -43,8 +87,6 @@ struct ActrFrameworkGenerator {
         let package: String
         let proto_file: String
         let handler_interface: String
-        let workload_type: String
-        let dispatcher_type: String
         let methods: [MethodMetadata]
     }
 
@@ -148,6 +190,11 @@ struct ActrFrameworkGenerator {
         // Group routes by proto_file for per-file generation.
         var routesByFile: [String: [DispatchRoute]] = [:]
         for route in spec.routes {
+            guard route.reply_mode == "return" || route.reply_mode == "explicit" else {
+                throw PluginError.invalidDispatchSpec(
+                    "route `\(route.route_key)` has unsupported reply_mode `\(route.reply_mode)`"
+                )
+            }
             let normalizedFile = normalizeProtoPath(route.proto_file)
             routesByFile[normalizedFile, default: []].append(route)
         }
@@ -231,60 +278,26 @@ struct ActrFrameworkGenerator {
                         let inputSwift = resolveSwiftTypeName(route.input_type, typeToSwiftName: typeToSwiftName)
                         let outputSwift = resolveSwiftTypeName(route.output_type, typeToSwiftName: typeToSwiftName)
 
-                        content += """
+                        if route.reply_mode == "explicit" {
+                            content += """
 
-                          func \(methodName)(
-                              req: \(inputSwift),
-                              ctx: any ActrContext
-                          ) async throws(ActrError) -> \(outputSwift)
-                        """
-                    }
-                    content += "\n}\n"
+                              func \(methodName)(
+                                  req: \(inputSwift),
+                                  ctx: any ActrContext,
+                                  reply: Reply<\(outputSwift)>
+                              ) async throws(ActrError)
+                            """
+                        } else {
+                            content += """
 
-                    // 3. ServiceDispatcher (local only).
-                    let dispatcherType = "\(serviceName)Dispatcher"
-                    content += """
-
-                    public enum \(dispatcherType) {
-                        public static func dispatch(
-                            handler: any \(handlerProtocol),
-                            ctx: any ActrContext,
-                            routeKey: String,
-                            payload: Data
-                        ) async throws(ActrError) -> Data {
-                            switch routeKey {
-                    """
-                    for route in serviceRoutes.sorted(by: { $0.route_key < $1.route_key }) {
-                        let methodName = lowerCamelCase(route.method)
-                        let inputSwift = resolveSwiftTypeName(route.input_type, typeToSwiftName: typeToSwiftName)
-                        let outputSwift = resolveSwiftTypeName(route.output_type, typeToSwiftName: typeToSwiftName)
-
-                        content += """
-
-                              case "\(route.route_key)":
-                                  let req: \(inputSwift)
-                                  do {
-                                      req = try \(inputSwift)(serializedBytes: payload)
-                                  } catch {
-                                      throw ActrError.DecodeFailure(msg: "Failed to decode \(inputSwift) for route \\(routeKey): \\(error)")
-                                  }
-                                  let resp = try await handler.\(methodName)(req: req, ctx: ctx)
-                                  do {
-                                      return try resp.serializedData()
-                                  } catch {
-                                      throw ActrError.DecodeFailure(msg: "Failed to encode \(outputSwift) for route \\(routeKey): \\(error)")
-                                  }
-                        """
-                    }
-                    content += """
-
-                            default:
-                                throw ActrError.UnknownRoute(msg: "Unknown route: \\(routeKey)")
-                            }
+                              func \(methodName)(
+                                  req: \(inputSwift),
+                                  ctx: any ActrContext
+                              ) async throws(ActrError) -> \(outputSwift)
+                            """
                         }
                     }
-
-                    """
+                    content += "\n}\n"
                 }
             }
 
@@ -349,10 +362,6 @@ struct ActrFrameworkGenerator {
                     package: packageName,
                     proto_file: serviceRoutes[0].proto_file,
                     handler_interface: "\(serviceName)Handler",
-                    // Unified Swift generation dispatches through the global
-                    // actrDispatch function rather than a generated Workload type.
-                    workload_type: "",
-                    dispatcher_type: "\(serviceName)Dispatcher",
                     methods: serviceRoutes
                         .sorted { $0.route_key < $1.route_key }
                         .map { methodMetadata($0, typeRefs: typeRefs) }
@@ -398,7 +407,8 @@ struct ActrFrameworkGenerator {
                 route.output_type,
                 fallbackProtoFile: route.proto_file,
                 typeRefs: typeRefs
-            )
+            ),
+            reply_mode: route.reply_mode
         )
     }
 
@@ -501,13 +511,34 @@ struct ActrFrameworkGenerator {
                   } catch {
                       throw ActrError.DecodeFailure(msg: "Failed to decode \(inputSwift) for route \\(routeKey): \\(error)")
                   }
+            """
+            content += "\n"
+            if route.reply_mode == "explicit" {
+                content += """
+                  try await ctx.claimReply()
+                  let reply = Reply<\(outputSwift)>(ctx: ctx) { response in
+                      do {
+                          return try response.serializedData()
+                      } catch {
+                          throw ActrError.DecodeFailure(msg: "Failed to encode \(outputSwift) for route \\(routeKey): \\(error)")
+                      }
+                  }
+                  try await handler.\(methodName)(req: req, ctx: ctx, reply: reply)
+                  return Data()
+                """
+            } else {
+                content += """
                   let resp = try await handler.\(methodName)(req: req, ctx: ctx)
+                  let encoded: Data
                   do {
-                      return try resp.serializedData()
+                      encoded = try resp.serializedData()
                   } catch {
                       throw ActrError.DecodeFailure(msg: "Failed to encode \(outputSwift) for route \\(routeKey): \\(error)")
                   }
-            """
+                  try await ctx.replyRaw(payload: encoded)
+                  return Data()
+                """
+            }
         }
 
         // Remote routes: resolve dependency → discover → call.
@@ -519,13 +550,15 @@ struct ActrFrameworkGenerator {
               case \(swiftStringLiteral(route.route_key)):
                   let actrType = try await ctx.resolveDependency(alias: \(swiftStringLiteral(alias)))
                   let target = try await ctx.discover(targetType: actrType)
-                  return try await ctx.callRaw(
+                  let response = try await ctx.callRaw(
                       target: target,
                       routeKey: routeKey,
                       payloadType: \(try payloadTypeSwift(route.payload_type)),
                       payload: payload,
                       timeoutMs: timeoutMs
                   )
+                  try await ctx.replyRaw(payload: response)
+                  return Data()
             """
         }
 
@@ -606,7 +639,7 @@ struct ActrFrameworkGenerator {
             "route_key", "proto_file", "proto_service", "method",
             "input_type", "output_type", "payload_type",
         ]
-        let allowedRouteFields = requiredRouteFields.union(["dependency_alias"])
+        let allowedRouteFields = requiredRouteFields.union(["dependency_alias", "reply_mode"])
         for (index, value) in routes.enumerated() {
             guard let route = value as? [String: Any] else {
                 throw PluginError.invalidDispatchSpec("route #\(index) must be a JSON object")
@@ -630,6 +663,12 @@ struct ActrFrameworkGenerator {
                         "route #\(index) field `\(field)` must be a non-empty string"
                     )
                 }
+            }
+            let replyMode = (route["reply_mode"] as? String) ?? "return"
+            guard replyMode == "return" || replyMode == "explicit" else {
+                throw PluginError.invalidDispatchSpec(
+                    "route #\(index) has unsupported reply_mode"
+                )
             }
             if let alias = route["dependency_alias"], !(alias is String), !(alias is NSNull) {
                 throw PluginError.invalidDispatchSpec(

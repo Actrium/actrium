@@ -10,7 +10,7 @@ from .constants import (
     ENV_WIT_PATH,
     REPO_WIT_PATH,
 )
-from .context import ActrContext, RpcRequest, Workload
+from .context import ActrContext, Reply, RpcRequest, Workload
 
 
 def __getattr__(name: str) -> Any:
@@ -33,6 +33,7 @@ __all__ = [
     "ENV_WIT_PATH",
     "REPO_WIT_PATH",
     "ActrContext",
+    "Reply",
     "RpcRequest",
     "Workload",
     "componentize",

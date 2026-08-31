@@ -1,4 +1,4 @@
-declare module 'actr:workload/host@0.4.0' {
+declare module 'actr:workload/host@0.6.0' {
   // V2 host imports are real WIT `async func`. Every import takes a
   // `ctx-token: u64` first parameter (surfaced to JS as a `bigint`) that keys
   // the host's per-invocation table so it can recover the correct bridge even
@@ -35,6 +35,14 @@ declare module 'actr:workload/host@0.4.0' {
     timeoutMs: bigint,
     payloadType: PayloadType,
   ): Promise<Uint8Array>;
+
+  export function reply(ctxToken: bigint, payload: Uint8Array): Promise<void>;
+
+  export function replyError(ctxToken: bigint, error: ActrError): Promise<void>;
+
+  export function replySync(ctxToken: bigint, payload: Uint8Array): void;
+
+  export function replyErrorSync(ctxToken: bigint, error: ActrError): void;
 
   export function discover(
     ctxToken: bigint,

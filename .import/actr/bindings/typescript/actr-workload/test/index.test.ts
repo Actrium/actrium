@@ -44,6 +44,8 @@ function testInvocationCtx(ctxToken: bigint): InvocationCtx {
     ctxToken,
     selfId: testActorId(),
     requestId: 'request-1',
+    expectsResponse: true,
+    replyEnabled: true,
   };
 }
 
@@ -206,6 +208,18 @@ describe('@actrium/actr-workload', () => {
       { tag: 'rpc-signal' },
       { tag: 'rpc-signal' },
     ]);
+  });
+
+  it('delivers raw replies through the explicit host boundary', async () => {
+    const { host, runtime } = await loadRuntime();
+    const ctx = new runtime.ActrContext(testInvocationCtx(94n));
+    const payload = new Uint8Array([8, 9]);
+
+    await ctx.replyRaw(payload);
+
+    expect(host.hostCalls.ctxTokens).toEqual([94n]);
+    expect(host.hostCalls.operations).toEqual(['reply']);
+    expect(host.hostCalls.replyPayloads).toEqual([payload]);
   });
 
   it('rejects host imports when no invocation context is active', async () => {

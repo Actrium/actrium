@@ -1,10 +1,10 @@
 """
 Code generation functions for the unified-dispatch Python protoc plugin.
 
-All dispatch glue (per-RPC classes, per-service handlers, the unified
-``actr_dispatch`` function, and ``actr-gen-meta.json``) is driven solely by
-the DispatchSpec JSON written by the CLI.  The plugin never reads the manifest
-lock, never classifies files by path, and never embeds ActrType strings.
+All dispatch glue (the unified ``actr_dispatch`` function and
+``actr-gen-meta.json``) is driven solely by the DispatchSpec JSON written by
+the CLI. The plugin never reads the manifest lock, never classifies files by
+path, and never embeds ActrType strings.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ def validate_spec_hash(spec: dict, expected_hash: str) -> None:
         "output_type",
         "payload_type",
     }
-    allowed_route_fields = required_route_fields | {"dependency_alias"}
+    allowed_route_fields = required_route_fields | {"dependency_alias", "reply_mode"}
     for route in routes:
         if not isinstance(route, dict):
             raise ValueError("DispatchSpec routes must contain JSON objects")
@@ -76,11 +76,17 @@ def validate_spec_hash(spec: dict, expected_hash: str) -> None:
             raise ValueError(
                 f"DispatchSpec route {route_key} has no proto_service"
             )
+        reply_mode = route.get("reply_mode", "return")
         for field in required_route_fields - {"route_key", "proto_service"}:
             if not isinstance(route[field], str) or not route[field]:
                 raise ValueError(
                     f"DispatchSpec route {route_key} field {field} must be a non-empty string"
                 )
+        if reply_mode not in {"return", "explicit"}:
+            raise ValueError(
+                f"DispatchSpec route {route_key} has unsupported reply_mode "
+                f"{reply_mode!r}"
+            )
         alias = route.get("dependency_alias")
         if alias is not None and (not isinstance(alias, str) or not alias.strip()):
             raise ValueError(
@@ -115,208 +121,11 @@ def validate_spec_hash(spec: dict, expected_hash: str) -> None:
             f"DispatchSpec hash mismatch: expected {expected_hash}, got {actual}"
         )
 
-
-# ---------------------------------------------------------------------------
-# Per-service module generation
-# ---------------------------------------------------------------------------
-
-
-def generate_service_module(
-    service_key: str,
-    routes: list[dict],
-    type_to_owner: dict[str, tuple[str, str, tuple[str, ...]]],
-) -> dict:
-    """Generate a Python module for one local service.
-
-    Emits per-RPC ``<Package><Service><Method>Rpc`` classes, the service
-    ``Handler`` Protocol, and the ``ServiceDispatcher`` class.
-    """
-    proto_file = routes[0]["proto_file"]
-    proto_module = proto_module_name(proto_file)
-    proto_alias = pb2_alias(proto_file)
-
-    imports: dict[str, str] = {}
-    imports[proto_alias] = import_line_for(proto_file, proto_module, proto_alias)
-    type_refs: dict[str, tuple[str, str]] = {}
-
+    # Normalize only after hashing.  `reply_mode` was added as an optional
+    # v1 field, so injecting its default before the hash check would reject
+    # correctly-signed v1 artifacts produced before that addition.
     for route in routes:
-        for type_key in (route["input_type"], route["output_type"]):
-            cleaned = type_key.lstrip(".")
-            if cleaned in type_refs:
-                continue
-            owner = type_to_owner.get(cleaned)
-            if owner is None:
-                type_refs[cleaned] = (proto_alias, extract_message_type(cleaned))
-                continue
-            _owner_package, owner_proto_name, owner_type_path = owner
-            alias = pb2_alias(owner_proto_name)
-            if alias not in imports:
-                imports[alias] = import_line_for(
-                    owner_proto_name, proto_module_name(owner_proto_name), alias
-                )
-            type_refs[cleaned] = (alias, ".".join(owner_type_path))
-
-    if "." in service_key:
-        package_name, service_name = service_key.rsplit(".", 1)
-    else:
-        package_name, service_name = "", service_key
-
-    sections: list[str] = [generate_preamble(list(imports.values()))]
-
-    for route in routes:
-        sections.append(generate_rpc_class(route, type_refs, proto_alias, package_name))
-
-    sections.append(
-        generate_handler_protocol(service_name, routes, type_refs, proto_alias)
-    )
-    sections.append(
-        generate_service_dispatcher(
-            service_name, package_name, routes, type_refs, proto_alias
-        )
-    )
-
-    content = "\n\n".join(section for section in sections if section)
-    file_name = workload_module_name(package_name, service_name)
-    return {"name": file_name, "content": content}
-
-
-def generate_preamble(import_lines: list[str]) -> str:
-    """Generate module preamble with imports."""
-    return "\n".join(
-        [
-            "# DO NOT EDIT.",
-            "# Generated by protoc-gen-actrframework-python",
-            "from __future__ import annotations",
-            "",
-            "from typing import Any, Protocol",
-            "",
-            *import_lines,
-        ]
-    )
-
-
-def generate_rpc_class(
-    route: dict,
-    type_refs: dict[str, tuple[str, str]],
-    default_alias: str,
-    package_name: str,
-) -> str:
-    """Generate a per-RPC class implementing the ``RpcRequest`` Protocol."""
-    method_name = route["method"]
-    service_name = route["proto_service"].rsplit(".", 1)[-1]
-    input_cleaned = route["input_type"].lstrip(".")
-    output_cleaned = route["output_type"].lstrip(".")
-
-    input_alias, input_type = type_refs.get(
-        input_cleaned, (default_alias, extract_message_type(input_cleaned))
-    )
-    output_alias, output_type = type_refs.get(
-        output_cleaned, (default_alias, extract_message_type(output_cleaned))
-    )
-
-    class_name = f"{to_pascal_case(package_name)}{service_name}{method_name}Rpc"
-    route_key = route["route_key"]
-    payload_type = route.get("payload_type", "rpcReliable")
-
-    lines: list[str] = [
-        f"class {class_name}:",
-        f'    """RPC request class for {route_key}."""',
-        "",
-        f"    Response = {output_alias}.{output_type}",
-        "",
-        f"    def __init__(self, request: {input_alias}.{input_type}) -> None:",
-        "        self._request = request",
-        "",
-        "    @property",
-        "    def route_key(self) -> str:",
-        f'        return "{route_key}"',
-        "",
-        "    @property",
-        "    def payload_type(self) -> Any:",
-        f'        return "{payload_type}"',
-        "",
-        "    def encode_request(self) -> bytes:",
-        "        return self._request.SerializeToString()",
-        "",
-        f"    def decode_response(self, data: bytes) -> {output_alias}.{output_type}:",
-        f"        return {output_alias}.{output_type}.FromString(data)",
-    ]
-    return "\n".join(lines)
-
-
-def generate_handler_protocol(
-    service_name: str,
-    routes: list[dict],
-    type_refs: dict[str, tuple[str, str]],
-    default_alias: str,
-) -> str:
-    """Generate a typed Handler Protocol for a local service."""
-    lines: list[str] = [f"class {service_name}Handler(Protocol):"]
-
-    if not routes:
-        lines.append("    pass")
-        return "\n".join(lines)
-
-    for route in routes:
-        method_name = to_snake_case(route["method"])
-        input_cleaned = route["input_type"].lstrip(".")
-        output_cleaned = route["output_type"].lstrip(".")
-        input_alias, input_type = type_refs.get(
-            input_cleaned, (default_alias, extract_message_type(input_cleaned))
-        )
-        output_alias, output_type = type_refs.get(
-            output_cleaned, (default_alias, extract_message_type(output_cleaned))
-        )
-        lines.append(
-            f"    def {method_name}(self, req: {input_alias}.{input_type}) -> "
-            f"{output_alias}.{output_type}: ..."
-        )
-
-    return "\n".join(lines)
-
-
-def generate_service_dispatcher(
-    service_name: str,
-    package_name: str,
-    routes: list[dict],
-    type_refs: dict[str, tuple[str, str]],
-    default_alias: str,
-) -> str:
-    """Generate a typed route-key dispatcher for a local service."""
-    lines: list[str] = [
-        f"class {service_name}Dispatcher:",
-        f"    def __init__(self, handler: {service_name}Handler) -> None:",
-        "        self._handler = handler",
-        "",
-        "    def dispatch(self, route_key: str, payload: bytes) -> bytes:",
-        "",
-    ]
-
-    for route in routes:
-        route_key = route["route_key"]
-        method_name = to_snake_case(route["method"])
-        input_cleaned = route["input_type"].lstrip(".")
-        output_cleaned = route["output_type"].lstrip(".")
-        input_alias, input_type = type_refs.get(
-            input_cleaned, (default_alias, extract_message_type(input_cleaned))
-        )
-        output_alias, output_type = type_refs.get(
-            output_cleaned, (default_alias, extract_message_type(output_cleaned))
-        )
-        lines.extend(
-            [
-                f'        if route_key == "{route_key}":',
-                f"            req = {input_alias}.{input_type}.FromString(payload)",
-                f"            resp = self._handler.{method_name}(req)",
-                f"            if not isinstance(resp, {output_alias}.{output_type}):",
-                f'                raise TypeError("{method_name} must return {output_type}")',
-                "            return resp.SerializeToString()",
-                "",
-            ]
-        )
-
-    lines.append('        raise ValueError(f"Unknown route_key: {route_key}")')
-    return "\n".join(lines)
+        route.setdefault("reply_mode", "return")
 
 
 # ---------------------------------------------------------------------------
@@ -386,12 +195,21 @@ def generate_unified_dispatch(
     sections: list[str] = []
 
     # Preamble
+    reply_imports = (
+        [
+            "from actr_workload import Reply",
+            "from actr_workload.context import _bindings",
+        ]
+        if any(route["reply_mode"] == "explicit" for route in local_routes)
+        else []
+    )
     preamble_lines = [
         "# DO NOT EDIT.",
         "# Generated by protoc-gen-actrframework-python",
         "from __future__ import annotations",
         "",
         "from typing import TYPE_CHECKING, Any, Protocol",
+        *reply_imports,
         "",
         "if TYPE_CHECKING:",
         "    from actr_workload import ActrContext",
@@ -408,6 +226,9 @@ def generate_unified_dispatch(
     sections.append(
         'class UnknownRoute(Exception):\n    def __init__(self, route_key: str) -> None:\n        super().__init__(f"Unknown route key: {route_key}")\n        self.route_key = route_key'
     )
+
+    if any(route["reply_mode"] == "explicit" for route in local_routes):
+        sections.append(generate_explicit_reply_helpers())
 
     # actr_dispatch function
     sections.append(
@@ -441,13 +262,55 @@ def generate_actr_dispatch_handler(
         output_alias, output_type = type_refs.get(
             output_cleaned, (default_alias, extract_message_type(output_cleaned))
         )
-        lines.append(
-            f"    async def {handler_method}("
-            f"self, req: {input_alias}.{input_type}, ctx: ActrContext"
-            f") -> {output_alias}.{output_type}: ..."
-        )
+        if route["reply_mode"] == "explicit":
+            lines.append(
+                f"    async def {handler_method}("
+                f"self, req: {input_alias}.{input_type}, ctx: ActrContext, "
+                f"reply: Reply[{output_alias}.{output_type}]"
+                ") -> None: ..."
+            )
+        else:
+            lines.append(
+                f"    async def {handler_method}("
+                f"self, req: {input_alias}.{input_type}, ctx: ActrContext"
+                f") -> {output_alias}.{output_type}: ..."
+            )
 
     return "\n".join(lines)
+
+
+def generate_explicit_reply_helpers() -> str:
+    """Generate helpers shared by EXPLICIT local dispatch branches."""
+    return "\n".join(
+        [
+            "def _actr_error_from_exception(error: Exception) -> Any:",
+            "    _host, types = _bindings()",
+            "    if _is_actr_error(error, types):",
+            "        return error",
+            "    message = str(error) or error.__class__.__name__",
+            "    return types.ActrError_Internal(message)",
+            "",
+            "",
+            "def _is_actr_error(error: object, types: Any) -> bool:",
+            "    for variant in (",
+            '        "ActrError_Unavailable",',
+            '        "ActrError_TimedOut",',
+            '        "ActrError_NotFound",',
+            '        "ActrError_PermissionDenied",',
+            '        "ActrError_InvalidArgument",',
+            '        "ActrError_UnknownRoute",',
+            '        "ActrError_DependencyNotFound",',
+            '        "ActrError_ConnectionNotReady",',
+            '        "ActrError_DecodeFailure",',
+            '        "ActrError_NotImplemented",',
+            '        "ActrError_Internal",',
+            "    ):",
+            "        variant_type = getattr(types, variant, None)",
+            "        if variant_type is not None and isinstance(error, variant_type):",
+            "            return True",
+            "    return False",
+        ]
+    )
 
 
 def generate_actr_dispatch_function(
@@ -489,10 +352,55 @@ def generate_actr_dispatch_function(
             [
                 f"    if route_key == {route_key}:",
                 f"        req = {input_alias}.{input_type}.FromString(payload)",
-                f"        resp = await handler.{handler_method}(req, ctx)",
-                "        return resp.SerializeToString()",
             ]
         )
+        if route["reply_mode"] == "explicit":
+            lines.extend(
+                [
+                    "        reply = Reply(ctx, lambda response: response.SerializeToString())",
+                    "        reply_sent = False",
+                    "        original_reply_send = reply.send",
+                    "        original_reply_send_error = reply.send_error",
+                    "        async def send_once(response: Any) -> None:",
+                    "            nonlocal reply_sent",
+                    "            if reply_sent:",
+                    "                return",
+                    "            reply_sent = True",
+                    "            try:",
+                    "                await original_reply_send(response)",
+                    "            except Exception:",
+                    "                reply_sent = False",
+                    "                raise",
+                    "        async def send_error_once(error: Any) -> None:",
+                    "            nonlocal reply_sent",
+                    "            if reply_sent:",
+                    "                return",
+                    "            reply_sent = True",
+                    "            try:",
+                    "                await original_reply_send_error(error)",
+                    "            except Exception:",
+                    "                reply_sent = False",
+                    "                raise",
+                    "        reply.send = send_once  # type: ignore[method-assign]",
+                    "        reply.send_error = send_error_once  # type: ignore[method-assign]",
+                    "        try:",
+                    f"            await handler.{handler_method}(req, ctx, reply)",
+                    "        except Exception as exc:",
+                    "            await reply.send_error(_actr_error_from_exception(exc))",
+                    "        return b\"\"",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    f"        resp = await handler.{handler_method}(req, ctx)",
+                    "        response = resp.SerializeToString()",
+                    "        if ctx.reply_enabled:",
+                    "            await ctx.reply_raw(response)",
+                    "            return b\"\"",
+                    "        return response",
+                ]
+            )
 
     # Remote routes
     for route in remote_routes:
@@ -504,7 +412,11 @@ def generate_actr_dispatch_function(
                 f"    if route_key == {route_key}:",
                 f"        actr_type = await ctx.resolve_dependency({alias})",
                 "        target = await ctx.discover(actr_type)",
-                f"        return await ctx.call_raw(target, route_key, payload, timeout_ms, {payload_type})",
+                f"        response = await ctx.call_raw(target, route_key, payload, timeout_ms, {payload_type})",
+                "        if ctx.reply_enabled:",
+                "            await ctx.reply_raw(response)",
+                "            return b\"\"",
+                "        return response",
             ]
         )
 
@@ -567,9 +479,7 @@ def _build_local_service_metadata(
                 "name": name,
                 "package": package,
                 "proto_file": service_routes[0]["proto_file"],
-                "handler_interface": f"{name}Handler",
-                "workload_type": f"{name}Workload",
-                "dispatcher_type": f"{name}Dispatcher",
+                "handler_interface": "ActrDispatchHandler",
                 "methods": [
                     _build_method_metadata(route, type_to_owner)
                     for route in service_routes
@@ -629,6 +539,7 @@ def _build_method_metadata(
         "name": route["method"],
         "snake_name": to_snake_case(route["method"]),
         "route_key": route["route_key"],
+        "reply_mode": route["reply_mode"],
         "input_ref": _build_type_ref(route["input_type"], type_to_owner),
         "output_ref": _build_type_ref(route["output_type"], type_to_owner),
     }
@@ -691,12 +602,6 @@ def import_line_for(proto_name: str, proto_module: str, proto_alias: str) -> str
     return f"from generated import {proto_module} as {proto_alias}"
 
 
-def workload_module_name(package_name: str, service_name: str) -> str:
-    """Return the generated workload dispatcher module path."""
-    base = to_snake_case(package_name) if package_name else to_snake_case(service_name)
-    return f"{base}_workload.py"
-
-
 def extract_message_type(full_type: str) -> str:
     """Extract message type name from full type path."""
     return full_type.split(".")[-1]
@@ -705,16 +610,6 @@ def extract_message_type(full_type: str) -> str:
 def python_string_literal(value: str) -> str:
     """Return an escaped UTF-8 Python string literal."""
     return json.dumps(value, ensure_ascii=False)
-
-
-def to_pascal_case(name: str) -> str:
-    """Convert snake_case or dotted name to PascalCase, preserving caps."""
-    parts = name.replace(".", "_").replace("-", "_").split("_")
-    result = ""
-    for part in parts:
-        if part:
-            result += part[0].upper() + part[1:]
-    return result
 
 
 def to_snake_case(name: str) -> str:

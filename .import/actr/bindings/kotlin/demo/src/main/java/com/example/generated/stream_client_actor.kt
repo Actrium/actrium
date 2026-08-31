@@ -11,7 +11,6 @@ package com.example.generated
 import io.actrium.actr.PayloadType
 import io.actrium.actr.dsl.ActrContext
 import io.actrium.actr.dsl.RpcRequest
-import io.actrium.actr.dsl.RpcEnvelope
 import local.StreamClientOuterClass.ClientStartStreamRequest
 import local.StreamClientOuterClass.ClientStartStreamResponse
 
@@ -41,33 +40,4 @@ object StreamClientStartStreamRpc : RpcRequest<ClientStartStreamRequest, ClientS
 
     override fun deserializeResponse(bytes: ByteArray): ClientStartStreamResponse =
         ClientStartStreamResponse.parseFrom(bytes)
-}
-
-/**
- * Message dispatcher for StreamClient
- *
- * Routes incoming messages to the appropriate handler method.
- */
-object StreamClientDispatcher {
-    /**
-     * Dispatch an RPC envelope to the appropriate handler method
-     *
-     * @param handler The handler implementation
-     * @param ctx The context for making RPC calls
-     * @param envelope The RPC envelope containing the request
-     * @return The serialized response bytes
-     */
-    suspend fun dispatch(
-        handler: StreamClientHandler,
-        ctx: ActrContext,
-        envelope: RpcEnvelope,
-    ): ByteArray =
-        when (envelope.routeKey) {
-            "data_stream_peer.StreamClient.StartStream" -> {
-                val request = ClientStartStreamRequest.parseFrom(envelope.payload)
-                val response = handler.start_stream(request, ctx)
-                response.toByteArray()
-            }
-            else -> throw io.actrium.actr.ActrException.UnknownRoute("Unknown route key: ${envelope.routeKey}")
-        }
 }

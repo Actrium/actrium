@@ -17,6 +17,12 @@ public protocol ActrContext: Sendable {
         timeoutMs: Int64
     ) async throws(ActrError) -> Data
 
+    func replyRaw(payload: Data) async throws(ActrError)
+
+    func replyError(_ error: ActrError) async throws(ActrError)
+
+    func claimReply() async throws(ActrError)
+
     func discover(targetType: ActrType) async throws(ActrError) -> ActrId
 
     func tellRaw(
@@ -81,6 +87,18 @@ func decodeProtobufMessage<M: Message>(_ type: M.Type, from data: Data, context:
 }
 
 public extension ActrContext {
+    func claimReply() async throws(ActrError) {
+        throw ActrError.NotImplemented(msg: "claimReply is not implemented by this ActrContext")
+    }
+
+    func replyRaw(payload _: Data) async throws(ActrError) {
+        throw ActrError.NotImplemented(msg: "replyRaw is not implemented by this ActrContext")
+    }
+
+    func replyError(_: ActrError) async throws(ActrError) {
+        throw ActrError.NotImplemented(msg: "replyError is not implemented by this ActrContext")
+    }
+
     func resolveDependency(alias _: String) async throws(ActrError) -> ActrType {
         throw ActrError.NotImplemented(msg: "resolveDependency is not implemented by this ActrContext")
     }
@@ -247,6 +265,30 @@ public final class Context: ActrContext, @unchecked Sendable {
                 payload: payload,
                 timeoutMs: timeoutMs
             )
+        } catch {
+            throw ActrError(error: error)
+        }
+    }
+
+    public func replyRaw(payload: Data) async throws(ActrError) {
+        do {
+            try await bridge.replyRaw(payload: payload)
+        } catch {
+            throw ActrError(error: error)
+        }
+    }
+
+    public func replyError(_ error: ActrError) async throws(ActrError) {
+        do {
+            try await bridge.replyError(error: error.bridge)
+        } catch {
+            throw ActrError(error: error)
+        }
+    }
+
+    public func claimReply() async throws(ActrError) {
+        do {
+            try await bridge.claimReply()
         } catch {
             throw ActrError(error: error)
         }

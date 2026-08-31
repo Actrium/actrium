@@ -4,11 +4,13 @@ import {
   discover as hostDiscover,
   logMessage as hostLogMessage,
   registerStream as hostRegisterStream,
+  reply as hostReply,
+  replyError as hostReplyError,
   resolveDependency as hostResolveDependency,
   sendDataChunk as hostSendDataChunk,
   tell as hostTell,
   unregisterStream as hostUnregisterStream,
-} from 'actr:workload/host@0.4.0';
+} from 'actr:workload/host@0.6.0';
 
 export type PayloadBytes = Uint8Array | ArrayBuffer | ArrayLike<number>;
 
@@ -68,6 +70,8 @@ export interface InvocationCtx {
   selfId: ActrId;
   callerId?: ActrId;
   requestId: string;
+  expectsResponse: boolean;
+  replyEnabled: boolean;
 }
 
 export type ErrorCategory =
@@ -361,6 +365,20 @@ export async function callRaw(
   );
 }
 
+export async function replyRaw(
+  payload: PayloadBytes,
+  ctx?: InvocationCtx,
+): Promise<void> {
+  await hostReply(resolveCtxToken(ctx), toUint8Array(payload));
+}
+
+export async function replyError(
+  error: ActrError,
+  ctx?: InvocationCtx,
+): Promise<void> {
+  await hostReplyError(resolveCtxToken(ctx), error);
+}
+
 export async function discover(
   targetType: ActrType,
   ctx?: InvocationCtx,
@@ -443,6 +461,10 @@ function validateTimeout(timeoutMs: bigint | number): bigint {
 export class ActrContext {
   constructor(private readonly ctx: InvocationCtx) {}
 
+  get replyEnabled(): boolean {
+    return this.ctx.replyEnabled;
+  }
+
   get selfId(): ActrId {
     return this.ctx.selfId;
   }
@@ -453,6 +475,10 @@ export class ActrContext {
 
   get requestId(): string {
     return this.ctx.requestId;
+  }
+
+  get expectsResponse(): boolean {
+    return this.ctx.expectsResponse;
   }
 
   async resolveDependency(alias: string): Promise<ActrType> {
@@ -487,6 +513,14 @@ export class ActrContext {
     payloadType: PayloadType = PayloadType.RpcReliable,
   ): Promise<Uint8Array> {
     return callRaw(target, routeKey, payload, timeoutMs, this.ctx, payloadType);
+  }
+
+  async replyRaw(payload: PayloadBytes): Promise<void> {
+    return replyRaw(payload, this.ctx);
+  }
+
+  async replyError(error: ActrError): Promise<void> {
+    return replyError(error, this.ctx);
   }
 
   async tell(target: Dest, message: RpcRequest<unknown>): Promise<void> {
@@ -525,5 +559,41 @@ export class ActrContext {
     payloadType: PayloadType,
   ): Promise<void> {
     return sendDataChunk(target, chunk, payloadType, this.ctx);
+  }
+}
+
+export class Reply<Response> {
+  /**
+   * The handle may be retained after its handler returns. If it is never sent,
+   * the host expires the pending reply at the RFC-0323 in-flight TTL.
+   */
+  constructor(
+    private readonly ctx: InvocationCtx | ActrContext,
+    private readonly encode: (response: Response) => PayloadBytes,
+  ) {}
+
+  async send(response: Response): Promise<void> {
+    // A RETURN-only v0.6 guest has no reply import/context. Generated
+    // dispatchers may still construct a Reply while sharing code across
+    // targets, so do not manufacture a host call with an invalid token.
+    if (!this.ctx.replyEnabled) {
+      return;
+    }
+    if (this.ctx instanceof ActrContext) {
+      await this.ctx.replyRaw(this.encode(response));
+      return;
+    }
+    await replyRaw(this.encode(response), this.ctx);
+  }
+
+  async sendError(error: ActrError): Promise<void> {
+    if (!this.ctx.replyEnabled) {
+      return;
+    }
+    if (this.ctx instanceof ActrContext) {
+      await this.ctx.replyError(error);
+      return;
+    }
+    await replyError(error, this.ctx);
   }
 }

@@ -50,6 +50,7 @@ service Client {
                 "input_type": "google.protobuf.Empty",
                 "output_type": "google.protobuf.Empty",
                 "payload_type": "rpcReliable",
+                "reply_mode": "return",
                 "dependency_alias": null
             }
         ]
