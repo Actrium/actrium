@@ -2,72 +2,89 @@
 
 Status: proposed structural baseline.
 
-The monorepo is organized by architectural ownership first, not by programming
-language. Rust, TypeScript, Kotlin, Swift, and native platform code stay near
-the subsystem they implement.
+The monorepo is organized around visible components first. `crates/` and
+`packages/` then provide one consistent home for reusable implementation units,
+rather than making each component invent its own package topology.
 
 ## Proposed tree
 
-    engine/
-    ├── core/             Actr protocol, runtime, framework, and platform traits
-    ├── gateway/          Actrix services, deployment, and administration
-    ├── bindings/         C ABI, FFI, Kotlin, Python, Swift, TypeScript, and Web
-    ├── cli/              Actr command-line interface
-    └── tooling/          Engine-specific generators and build tools
+    actr/
+    └── README.md          Public Actr boundary and component-level guidance
 
-    browser/
-    ├── apps/             Android, iOS, macOS, and Windows entry points
-    ├── core/             Browser orchestration and native browser services
-    ├── packages/         Reusable browser packages during the first migration
-    ├── platform/         Platform adapters shared by the applications
-    ├── system-apps/      Built-in Actrium applications
-    ├── sync/             Browser synchronization service and client
-    └── vault/            Browser storage and secrets boundary
+    keel/
+    └── README.md          Public Keel boundary and component-level guidance
 
-    ui/keel/
-    ├── runtime/          Keel orchestration and shared runtime model
-    ├── host/             Trusted host API and render integration
-    ├── guest/            Sandboxed application API
-    ├── native/           React Native and native platform integration
-    ├── backends/         Hermes, JSC, QuickJS, VM, and WASM backends
-    ├── sdk/              Application-facing Keel SDK
-    ├── devtools/         Inspection and development experience
-    └── tooling/          Keel CLI, code generation, and build support
+    loran/
+    ├── config/            Service composition and local/development configuration
+    ├── deploy/            Container and production deployment entry points
+    └── docs/              Loran operations and administration documentation
+
+    android/               Android project root
+    ios/                   iOS project root
+    macos/                 macOS project root
+    windows/               Windows project root
+
+    crates/
+    ├── actr-*/            Actr runtime, protocol, CLI, and Rust bindings
+    ├── actrium-*/         Browser core, sync, vault, and native services
+    ├── keel-*/            Keel Rust host/guest support where applicable
+    └── loran-*/           Loran daemon, signaling, STUN/TURN, signing, and control
+
+    packages/
+    ├── actr-*/            Language bindings and package-facing runtime APIs
+    ├── actrium-*/         Browser model, app SDK, system apps, and platform glue
+    └── keel-*/            Runtime, host, guest, SDK, devtools, and backends
+
+    tools/
+    ├── actr/              Actr-only generation and developer tooling
+    └── keel/              Keel-only generation and developer tooling
 
     contracts/
-    ├── actr/             Actor and engine wire contracts
-    ├── browser/          Browser model and service contracts
-    ├── ipc/              Cross-process application and platform contracts
-    └── sandbox/          Keel host/guest capability contracts
+    ├── actr/              Actor and engine wire contracts
+    ├── actrium/           Browser model and service contracts
+    ├── ipc/               Cross-process application and platform contracts
+    ├── loran/             Service control, discovery, and signaling contracts
+    └── sandbox/           Keel host/guest capability contracts
+
+The component roots own public composition, integration configuration, and
+component documentation. A buildable library, service, executable, or SDK
+belongs in `crates/` or `packages/` according to its toolchain. Root-level
+platform projects follow their native ecosystem's conventional layouts.
 
 ## Mapping from the current repositories
 
-- **actr/core, actr/crates, actr/src → engine/core/**: keep crate boundaries
-  during import; rationalize only afterward.
-- **actr/actrix → engine/gateway/**: Actrix remains a named engine service, not
-  a top-level product.
-- **actr/bindings → engine/bindings/**: preserve language-specific release
-  boundaries.
-- **actr/cli → engine/cli/** and **actr/tools → engine/tooling/**.
-- **actro/apps → browser/apps/**: product entry points become Actrium apps.
-- **actro/crates → browser/core, browser/sync, browser/vault/**: split by
-  existing responsibility, not language.
-- **actro/packages → browser/packages/** and later **ui/keel/**: keep a staging
-  area first; move packages only when ownership is clear.
-- **actro/platform → browser/platform/**.
-- **actro/schemas → contracts/browser/** and **contracts/ipc/**.
-- **keel/src → ui/keel/runtime, host, guest, sdk, devtools/**: preserve the
-  host/guest trust boundary.
-- **keel/native → ui/keel/native/** and **ui/keel/backends/**: separate platform
-  glue from execution backends.
+- **actr/core, actr/crates, actr/src → crates/actr-***: retain existing crate
+  boundaries during import; rationalize only afterward.
+- **actr/bindings → packages/actr-*** (and `crates/actr-*` for Rust-facing
+  bindings). **actr/cli → crates/actr-cli**; generators and developer-only
+  tools move under **tools/actr/**.
+- **actr/actrix → loran/** plus **crates/loran-***: `loran/` owns the deployable
+  service suite; its daemon and reusable signaling, STUN/TURN, signer, control,
+  discovery, and SDK units remain normal crates.
+- **actro/apps/{android,ios,macos,windows} → android/, ios/, macos/, windows/**:
+  each keeps its ecosystem's expected project root rather than living under a
+  generic `browser/` directory.
+- **actro/crates → crates/actrium-*** and **actro/packages →
+  packages/actrium-***. **actro/platform → packages/actrium-platform**.
+- **actro/schemas → contracts/actrium/** and **contracts/ipc/**.
+- **keel/src → packages/keel-***, preserving the runtime, trusted host,
+  untrusted guest, SDK, devtools, and backend boundaries. Rust guest support
+  belongs in **crates/keel-***.
+- **keel/native → packages/keel-platform/**. There is intentionally no generic
+  `native/` root; native code stays with the package or platform that owns it.
 - **keel/contracts → contracts/sandbox/**.
 
 ## Boundary rules
 
-1. **engine/** must remain usable without the browser or Keel.
-2. **ui/keel/** may depend on engine contracts, but not browser product state.
-3. **browser/** composes the engine and Keel and owns platform applications.
-4. **contracts/** contains schemas and generated-boundary definitions, not
-   business logic.
-5. Cross-layer tests live at the repository root; subsystem-local tests stay
-   beside their implementation.
+1. **Actr** remains usable without Actrium applications, Keel, or Loran.
+2. **Keel** may depend on Actr contracts, but not on Actrium product state.
+3. **Loran** may use Actr protocol packages, but must not depend on a client
+   platform application.
+4. **Android, iOS, macOS, and Windows** own native lifecycle, packaging,
+   permissions, and presentation; shared behavior belongs in a package or
+   crate instead.
+5. **crates/** and **packages/** contain reusable buildable units only; they do
+   not contain deployment composition or platform application roots.
+6. **contracts/** contains schemas and generated-boundary definitions, not
+   business logic. Cross-component tests live at the repository root;
+   component-local tests stay beside the unit they exercise.

@@ -1,46 +1,57 @@
 # Actrium
 
-Actrium is the private monorepo for the Actrium browser, its embedded Actr
-engine, and the Keel sandbox UI framework.
+Actrium is the private monorepo for the Actrium browser applications, the Actr
+foundation, the Keel sandbox UI framework, and Loran—the default shore-side
+service suite.
 
-This first revision is deliberately a **layout prototype**. It contains no
-migrated implementation code yet; its purpose is to make the combined project
-shape concrete before repository histories, build systems, and packages move.
+This is deliberately a **layout prototype**. It contains no migrated
+implementation code yet; its purpose is to make the combined project shape
+concrete before repository histories, build systems, and packages move.
 
 ## Project shape
 
     actrium/
-    ├── engine/          Actr runtime, gateway, SDK bindings, and CLI
-    ├── browser/         Actrium product, platform applications, and browser model
-    ├── ui/keel/         Sandboxed dynamic UI framework embedded by the browser
-    ├── contracts/       Cross-language and cross-layer protocol boundaries
-    ├── examples/        Focused examples for each major layer
-    ├── tests/           Cross-layer conformance, integration, and end-to-end tests
+    ├── actr/            Actr's public boundary and integration metadata
+    ├── keel/            Keel's public boundary and integration metadata
+    ├── loran/           Default/reference shore-side service composition
+    ├── android/         Actrium Android application
+    ├── ios/             Actrium iOS application
+    ├── macos/           Actrium macOS application
+    ├── windows/         Actrium Windows application
+    ├── crates/          Reusable Rust crates for all components
+    ├── packages/        Reusable packages in other ecosystems
+    ├── contracts/       Cross-language and cross-process protocol boundaries
+    ├── examples/        Focused examples for each component
+    ├── tests/           Cross-component conformance, integration, and e2e tests
     ├── docs/            Architecture, decisions, migration notes, and product docs
     ├── rfcs/            Design proposals spanning the combined project
     ├── scripts/         Repository workflows
     └── tools/           Repository-local developer tools
 
+The named roots are the visible components. `crates/` and `packages/` are the
+single, typed entrances for their implementation units; they are not another
+layer in the product hierarchy.
+
 The intended dependency direction is:
 
-    browser ───────► ui/keel
-       │                │
-       └────────┬───────┘
-                ▼
-              engine
+    android / ios / macos / windows ──► keel ──► actr
+                 │                       │         ▲
+                 └──────► packages + crates ───────┘
+    loran ───────────────────────────────► actr
 
-The **contracts/** directory defines the boundaries between those layers. It is
-not a general dumping ground for shared utilities.
+`contracts/` defines the boundaries between those components. It is not a
+general dumping ground for shared utilities.
 
 See [the repository layout](docs/architecture/repository-layout.md) for the
 proposed source mapping and the reasoning behind it.
 
 ## Scope
 
-- Actr becomes the built-in engine rather than a sibling product.
-- Actro evolves into the Actrium browser layer.
-- Keel becomes the browser's sandbox UI framework while retaining a clear
-  internal boundary.
+- Actr is the built-in foundation rather than a sibling product.
+- Actro evolves into the Actrium applications and their shared packages.
+- Keel remains a distinct sandbox UI component, while shipping with Actrium.
+- Loran is the default and reference shore-side service suite; it includes the
+  operational composition rather than becoming part of Actr itself.
 - Supramark remains an independent project; Actrium may integrate it through a
   narrow adapter later, but its implementation is not part of this monorepo.
 
