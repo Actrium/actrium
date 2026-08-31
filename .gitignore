@@ -1,0 +1,23 @@
+# Editors and operating systems
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Build outputs and dependencies
+target/
+node_modules/
+dist/
+build/
+.turbo/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs and test artifacts
+*.log
+coverage/
+test-results/
